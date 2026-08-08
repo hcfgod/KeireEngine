@@ -1,6 +1,6 @@
-#include "SodiumVerifier.h"
+#include <KeireHubRuntimeInternal/SodiumVerifier.h>
 
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <array>
 #include <cstring>
@@ -56,7 +56,7 @@ namespace KeireHub::Detail
 #elif defined(__APPLE__)
             std::uint32_t required = 0;
             _NSGetExecutablePath(nullptr, &required);
-            if (required == 0U || required > 1024U * 1024U)
+            if (required == 0U || required > std::size_t{1024U} * 1024U)
                 return HubResult<std::filesystem::path>::Failure(LoadError("The executable path is unavailable."));
             std::vector<char> buffer(required);
             if (_NSGetExecutablePath(buffer.data(), &required) != 0)
@@ -68,7 +68,7 @@ namespace KeireHub::Detail
             return HubResult<std::filesystem::path>::Success(path.parent_path());
 #else
             std::vector<char> buffer(1024);
-            while (buffer.size() <= 1024U * 1024U)
+            while (buffer.size() <= std::size_t{1024U} * 1024U)
             {
                 const auto length = readlink("/proc/self/exe", buffer.data(), buffer.size());
                 if (length < 0)

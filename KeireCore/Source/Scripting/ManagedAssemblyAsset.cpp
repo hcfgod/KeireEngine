@@ -15,15 +15,16 @@ namespace Keire
     namespace
     {
         using Json = nlohmann::json;
-        constexpr std::size_t MaximumDocumentBytes = 1024U * 1024U;
+        constexpr std::size_t MaximumDocumentBytes = std::size_t{1024} * 1024U;
 
         [[nodiscard]] bool IsIdentifier(const std::string_view value, const bool allowDots)
         {
             if (value.empty())
                 return false;
             bool segmentStart = true;
-            for (const unsigned char character : value)
+            for (const char input : value)
             {
+                const auto character = static_cast<unsigned char>(input);
                 if (allowDots && character == '.')
                 {
                     if (segmentStart)

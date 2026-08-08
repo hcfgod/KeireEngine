@@ -1,7 +1,7 @@
 #include "KeireHubRuntime/TemplateManager.h"
 
-#include "Persistence.h"
-#include "Sha256.h"
+#include <KeireHubRuntimeInternal/Persistence.h>
+#include <KeireHubRuntimeInternal/Sha256.h>
 
 #include <algorithm>
 #include <array>
@@ -22,8 +22,8 @@ namespace KeireHub
 {
     namespace
     {
-        constexpr std::size_t MaximumCatalogBytes = 16 * 1024 * 1024;
-        constexpr std::uint64_t ProjectMetadataReserveBytes = 64 * 1024;
+        constexpr std::size_t MaximumCatalogBytes = std::size_t{16} * 1024 * 1024;
+        constexpr std::uint64_t ProjectMetadataReserveBytes = 64ULL * 1024ULL;
         constexpr std::uint64_t MaximumTemplatePayloadBytes = 16ULL * 1024ULL * 1024ULL * 1024ULL;
 
         class StagingGuard final
@@ -323,7 +323,7 @@ namespace KeireHub
                                                         Detail::PathToUtf8(declaration.Path)));
 
             Detail::Sha256Builder digest;
-            std::array<std::byte, 64U * 1024U> buffer{};
+            std::array<std::byte, std::size_t{64U} * 1024U> buffer{};
             std::uint64_t copied = 0;
             while (input)
             {

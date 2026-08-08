@@ -1,4 +1,4 @@
-#include "TestSupport.h"
+#include <KeireHubTests/TestSupport.h>
 
 #include "KeireHubRuntime/DownloadManager.h"
 #include "KeireHubRuntime/HubTaskManager.h"

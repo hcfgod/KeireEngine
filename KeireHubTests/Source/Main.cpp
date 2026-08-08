@@ -1,7 +1,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT
 #include <doctest/doctest.h>
 
-#include "TestSupport.h"
+#include <KeireHubTests/TestSupport.h>
 
 #include "KeireHub/HubInstance.h"
 

@@ -531,7 +531,7 @@ TEST_CASE("Structured diagnostics validate IDs and retain bounded records")
                     std::logic_error);
     CHECK_THROWS_AS(Keire::DiagnosticId("JOBS-1"), std::invalid_argument);
 
-    auto sink = Keire::CreateRef<Keire::DiagnosticSink>(2);
+    auto sink = Keire::CreateRef<Keire::DiagnosticSink>(std::size_t{2});
     sink->Report({.Id = Keire::DiagnosticId("KEIRE-JOBS-0001"), .Message = "one"});
     sink->Report({.Id = Keire::DiagnosticId("KEIRE-JOBS-0001"), .Message = "two"});
     sink->Report({.Id = Keire::DiagnosticId("KEIRE-JOBS-0001"), .Message = "three"});

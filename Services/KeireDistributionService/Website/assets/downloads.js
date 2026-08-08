@@ -135,7 +135,8 @@ function validatePreviewMetadata(metadata) {
             packageRecord.fileName.includes("..") || !expectedSuffix ||
             !packageRecord.fileName.toLowerCase().endsWith(expectedSuffix) || packageRecord.url !== expectedUrl ||
             !Number.isSafeInteger(packageRecord.sizeBytes) || packageRecord.sizeBytes < 1 ||
-            typeof packageRecord.sha256 !== "string" || !sha256Pattern.test(packageRecord.sha256)) {
+            typeof packageRecord.sha256 !== "string" || !sha256Pattern.test(packageRecord.sha256) ||
+            !packageRecord.fileName.includes(packageRecord.sha256.slice(0, 8))) {
             continue;
         }
         candidates.push({ packageRecord, version });

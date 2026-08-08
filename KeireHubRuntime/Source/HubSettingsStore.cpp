@@ -1,6 +1,6 @@
 #include "KeireHubRuntime/HubSettingsStore.h"
 
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <array>
 #include <limits>
@@ -10,8 +10,8 @@ namespace KeireHub
 {
     namespace
     {
-        constexpr std::size_t MaximumSettingsBytes = 256 * 1024;
-        constexpr std::size_t MaximumLegacySettingsBytes = 16 * 1024;
+        constexpr std::size_t MaximumSettingsBytes = std::size_t{256} * 1024;
+        constexpr std::size_t MaximumLegacySettingsBytes = std::size_t{16} * 1024;
         constexpr std::size_t MaximumPathBytes = 4096;
         constexpr std::size_t MaximumDiscoveryRoots = 32;
         constexpr std::uint64_t MaximumBandwidthBytesPerSecond = 16ULL * 1024ULL * 1024ULL * 1024ULL;

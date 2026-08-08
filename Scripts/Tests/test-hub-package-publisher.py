@@ -90,10 +90,20 @@ class HubPackagePublisherTests(unittest.TestCase):
         self.assertEqual(published["platform"], "windows")
         self.assertEqual(published["architecture"], "x86_64")
         self.assertEqual(published["signatureKeyId"], KEY_ID)
-        self.assertEqual(published["artifact"], {"sha256": digest, "sizeBytes": self.installer.stat().st_size})
+        self.assertEqual(
+            published["artifact"],
+            {"sha256": digest, "sizeBytes": self.installer.stat().st_size},
+        )
         self.assertEqual(
             published["files"],
-            [{"mode": 420, "path": self.installer.name, "sha256": digest, "sizeBytes": self.installer.stat().st_size}],
+            [
+                {
+                    "mode": 420,
+                    "path": self.installer.name,
+                    "sha256": digest,
+                    "sizeBytes": self.installer.stat().st_size,
+                }
+            ],
         )
 
     def test_rejects_dirty_malformed_mismatched_and_existing_outputs(self) -> None:
@@ -112,7 +122,9 @@ class HubPackagePublisherTests(unittest.TestCase):
         self.write_manifest()
         mismatched = self.root / "KeireHub.dmg"
         mismatched.write_bytes(self.installer.read_bytes())
-        self.assertNotEqual(self.run_publisher("mismatched.json", mismatched).returncode, 0)
+        self.assertNotEqual(
+            self.run_publisher("mismatched.json", mismatched).returncode, 0
+        )
         self.assertFalse((self.root / "mismatched.json").exists())
 
         existing = self.root / "existing.json"

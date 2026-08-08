@@ -1,4 +1,4 @@
-#include "TestSupport.h"
+#include <KeireHubTests/TestSupport.h>
 
 #include "KeireHubRuntime/EditorInstallationManager.h"
 #include "KeireHubRuntime/EditorInstallationRegistry.h"
@@ -9,7 +9,7 @@
 #include "KeireHubRuntime/PackagePublish.h"
 #include "KeireHubRuntime/PackageReceipt.h"
 
-#include "DistributionEncoding.h"
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
 
 #include <doctest/doctest.h>
 #include <nlohmann/json.hpp>

@@ -1,7 +1,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT
 #include <doctest/doctest.h>
 
-#include "EditorTestSupport.h"
+#include <KeireEditorTests/EditorTestSupport.h>
 
 #include <chrono>
 #include <cstdlib>

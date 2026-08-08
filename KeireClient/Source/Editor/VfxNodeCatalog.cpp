@@ -21,8 +21,9 @@ namespace KeireEditor
             std::string result;
             result.reserve(value.size());
             bool separated = true;
-            for (const unsigned char character : value)
+            for (const char input : value)
             {
+                const auto character = static_cast<unsigned char>(input);
                 if (IsSearchCharacter(character))
                 {
                     result.push_back(character >= 'A' && character <= 'Z' ? static_cast<char>(character - 'A' + 'a')

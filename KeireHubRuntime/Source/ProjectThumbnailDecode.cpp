@@ -1,4 +1,4 @@
-#include "ProjectThumbnailDecode.h"
+#include <KeireHubRuntimeInternal/ProjectThumbnailDecode.h>
 
 #include <algorithm>
 #include <cstddef>

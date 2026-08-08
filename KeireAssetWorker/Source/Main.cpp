@@ -14,8 +14,8 @@
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
 
-#include "FfmpegAudioImportBackend.h"
 #include "KeireProjectModules/SourceModulePack.h"
+#include <KeireAssetWorkerInternal/FfmpegAudioImportBackend.h>
 
 #include <algorithm>
 #include <array>
@@ -112,7 +112,7 @@ namespace
             const auto journal = iterator->path() / "create-auxiliary.journal";
             if (!std::filesystem::is_regular_file(journal))
                 continue;
-            std::istringstream stream(Keire::Detail::ReadTextFile(journal, 1024U * 1024U));
+            std::istringstream stream(Keire::Detail::ReadTextFile(journal, std::size_t{1024} * 1024U));
             std::string encoded;
             if (!std::getline(stream, encoded))
                 throw std::runtime_error("Asset-worker auxiliary publication journal is empty.");
@@ -219,13 +219,15 @@ namespace
                             throw std::runtime_error("Asset creation auxiliary destination already exists: " +
                                                      Keire::Detail::PathToUtf8(auxiliary.RelativePath));
                         Keire::Detail::WriteTextFileAtomically(
-                            destination, Keire::Detail::ReadTextFile(auxiliary.PayloadPath, 64U * 1024U * 1024U));
+                            destination,
+                            Keire::Detail::ReadTextFile(auxiliary.PayloadPath, std::size_t{64} * 1024U * 1024U));
                         publishedAuxiliary.push_back(destination);
                     }
                     const auto importer = database->FindImporterForPath(request.CreateRelativePath);
                     if (request.CreateAuxiliarySources.empty() && importer)
                     {
-                        const auto source = Keire::Detail::ReadTextFile(request.CreatePayloadPath, 64U * 1024U * 1024U);
+                        const auto source =
+                            Keire::Detail::ReadTextFile(request.CreatePayloadPath, std::size_t{64} * 1024U * 1024U);
                         result.CreatedAsset = database->CreateAsset(
                             request.CreateRelativePath, *importer,
                             std::as_bytes(std::span(source.data(), source.size())), request.CreateSettings);
@@ -331,7 +333,7 @@ namespace
                     throw std::invalid_argument(
                         "Asset-worker lighting bake scene is unavailable or has the wrong type.");
                 const auto sourcePath = request.ProjectRoot / "Assets" / sceneRecord->RelativePath;
-                const auto originalSource = Keire::Detail::ReadTextFile(sourcePath, 64U * 1024U * 1024U);
+                const auto originalSource = Keire::Detail::ReadTextFile(sourcePath, std::size_t{64} * 1024U * 1024U);
                 const auto scene = Keire::SceneAsset::Decode(std::as_bytes(std::span(originalSource)));
                 Keire::LightingBakeRequest bake;
                 bake.Scene = request.BakeScene;

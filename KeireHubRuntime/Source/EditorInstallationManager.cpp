@@ -1,9 +1,9 @@
 #include "KeireHubRuntime/EditorInstallationManager.h"
 
-#include "EditorInstallationManifest.h"
-#include "ExecutableProcessProbe.h"
-#include "Persistence.h"
-#include "Sha256.h"
+#include <KeireHubRuntimeInternal/EditorInstallationManifest.h>
+#include <KeireHubRuntimeInternal/ExecutableProcessProbe.h>
+#include <KeireHubRuntimeInternal/Persistence.h>
+#include <KeireHubRuntimeInternal/Sha256.h>
 
 #include <algorithm>
 #include <cctype>

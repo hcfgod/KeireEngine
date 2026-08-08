@@ -984,7 +984,7 @@ namespace Keire
     class KEIRE_API VfxEffectAsset final : public Asset
     {
       public:
-        explicit VfxEffectAsset(VfxEffectDefinition definition);
+        explicit VfxEffectAsset(const VfxEffectDefinition& definition);
 
         [[nodiscard]] static constexpr AssetTypeId StaticType() noexcept
         {

@@ -136,7 +136,7 @@ a protected Windows ACL limited to the current user, Local System, and Administr
 reject symlinks, inherited Windows ACLs, access granted to other identities, and Unix group/other access.
 
 ```powershell
-& $dotnet run --project Services\KeireDistributionService\src\KeireDistributionPublisher -c Release -- `
+& $dotnet run --project Services\KeireDistributionService\Source\KeireDistributionPublisher -c Release -- `
     generate-key --private-key C:\offline-keys\release.pem `
     --public-key C:\release\trusted-release-key.json
 ```
@@ -145,10 +145,10 @@ Each exact catalog/content document must name the generated key ID and contain a
 `sequence` plus a UTC `expiresAt`. Sign only after all document bytes are final, then verify before transfer:
 
 ```powershell
-& $dotnet run --project Services\KeireDistributionService\src\KeireDistributionPublisher -c Release -- `
+& $dotnet run --project Services\KeireDistributionService\Source\KeireDistributionPublisher -c Release -- `
     sign --source C:\release\prepared --output C:\release\prepared\signatures.json `
     --private-key C:\offline-keys\release.pem --minimum-sequence 42
-& $dotnet run --project Services\KeireDistributionService\src\KeireDistributionPublisher -c Release -- `
+& $dotnet run --project Services\KeireDistributionService\Source\KeireDistributionPublisher -c Release -- `
     verify --source C:\release\prepared --signatures C:\release\prepared\signatures.json `
     --public-key C:\release\trusted-release-key.json --minimum-sequence 42
 ```
@@ -172,14 +172,14 @@ approved .NET 10 executable.
 $dotnet = 'C:\path\to\dotnet.exe'
 & $dotnet build Services\KeireDistributionService\tests\KeireDistributionService.Tests\KeireDistributionService.Tests.csproj -c Release
 & $dotnet run --project Services\KeireDistributionService\tests\KeireDistributionService.Tests -c Release
-& $dotnet run --project Services\KeireDistributionService\src\KeireDistributionService -c Release -- `
+& $dotnet run --project Services\KeireDistributionService\Source\KeireDistributionService -c Release -- `
     --Distribution:StorageRoot=C:\srv\keire-distribution
 ```
 
 ```bash
 dotnet build Services/KeireDistributionService/tests/KeireDistributionService.Tests/KeireDistributionService.Tests.csproj -c Release
 dotnet run --project Services/KeireDistributionService/tests/KeireDistributionService.Tests -c Release
-dotnet run --project Services/KeireDistributionService/src/KeireDistributionService -c Release -- \
+dotnet run --project Services/KeireDistributionService/Source/KeireDistributionService -c Release -- \
   --Distribution:StorageRoot=/srv/keire-distribution
 ```
 
@@ -202,10 +202,34 @@ KEIRE_DOTNET=dotnet ./scripts/publish-snapshot.sh \
 `package-service.ps1` produces self-contained `win-x64` and `linux-x64` service/publisher packages by default. The shell
 variant defaults to the current Linux architecture. Both refuse to overwrite an existing package directory and include
 the publisher dependency licenses and notices, package-local publish and health-check wrappers, the Caddy and production
-settings examples, the complete `Website/` tree, and the sample systemd service unit. The PowerShell packager requires
-Python 3 when producing a Linux
-target. Linux archives created on Windows use deterministic tar metadata: directories, service/publisher entrypoints,
+settings examples, the complete `Website/` tree, the generated Starlight documentation site, and the sample systemd
+service unit. Packaging requires Node.js 22.12 or newer and npm 10.8.2 or newer; the PowerShell packager also requires
+Python 3 when producing a Linux target. Linux archives created on Windows use deterministic tar metadata: directories,
+service/publisher entrypoints,
 and shell wrappers use mode `0755`, while every other regular file uses mode `0644`.
+
+### Documentation site
+
+`DocumentationSite/` is the source for the public `/docs/` experience. Its source audit requires the navigation
+inventory to cover every `Docs/**/*.md` file exactly once, maps every guide to a current implementation/configuration
+authority, resolves local files and heading fragments, and checks key content-schema statements against code. The sync
+step adds website metadata without modifying the canonical files, rewrites repository-document links to stable native
+routes, and converts GitHub-compatible Mermaid fences to responsive accessible SVG at build time. Starlight then
+produces static pages, a Pagefind search index, a sitemap, and a branded docs 404. The finalizer externalizes
+Starlight's generated inline code and style values so the deployed site preserves the self-hosted CSP. Generated
+content, dependencies, and `dist/` output are ignored.
+
+```powershell
+cd DocumentationSite
+npm ci
+npm test
+npm run build
+```
+
+The service packagers run the locked restore and production build once, copy the marketing site, and overlay `dist/`
+at `Website/docs/`. Do not hand-edit generated pages or commit `node_modules`, `.astro`, `dist`, or synchronized content.
+The deployed Pagefind WebAssembly requires the narrowly scoped CSP token `'wasm-unsafe-eval'` plus the self/blob worker
+policy; external scripts, external fonts, and inline script/style execution remain disallowed.
 
 ## Deployment
 
@@ -219,14 +243,25 @@ and shell wrappers use mode `0755`, while every other regular file uses mode `06
    Caddyfile, or set `KEIRE_WEBSITE_ROOT` to its absolute path. Development-preview installers are intentionally not
    repository or service-package payloads. Stage them beneath a separate read-only `PreviewDownloads/` directory, or
    set `KEIRE_PREVIEW_DOWNLOAD_ROOT`, and keep their exact size and SHA-256 synchronized with
-   `Website/assets/preview-downloads.json`. They never belong in a signed stable catalog.
-5. Run `scripts/health-check.sh https://distribution.example` or the PowerShell equivalent after deployment.
+   `Website/assets/preview-downloads.json`. Use a digest-suffixed filename for every rebuild so immutable browser and
+   proxy caches cannot alias different bytes. Preview builds never belong in a signed stable catalog.
+5. Confirm `/docs/`, a deep guide route, `/docs/pagefind/pagefind.js`, and a missing `/docs/` route before running
+   `scripts/health-check.sh https://distribution.example` or the PowerShell equivalent after deployment.
 
 The public Contact form submits directly to the project-owned Supabase `website-contact` Edge Function. Its database
 migrations and function source live under `supabase/`. Deploy those before enabling the CSP origin in Caddy. The
 function is public by design for a website form, but accepts only exact production/local origins, bounds JSON input,
 uses a honeypot and keyed-IP-hash throttle, and writes through server-only credentials into tables unavailable to
-browser roles.
+browser roles. It streams at most 16 KiB before strict UTF-8/object JSON parsing and ignores caller-controlled
+`Forwarded`/`X-Forwarded-For` values; the platform-provided `CF-Connecting-IP` value is the only client address used for
+the rate key. Set a dedicated `CONTACT_RATE_LIMIT_SECRET` with `supabase secrets set` so rate-limit pseudonyms do not
+reuse the database credential. Deploy and validate with the committed dependency graph:
+
+```sh
+supabase secrets set CONTACT_RATE_LIMIT_SECRET='<random deployment secret>'
+cd supabase/functions/website-contact
+deno check --frozen --lock=deno.lock index.ts
+```
 
 On Windows, an extracted self-contained package can be supervised at user sign-in without an administrator-owned
 service. Copy Caddy beside the service, copy `Deployment/Caddyfile.example` to `Caddyfile`, and create

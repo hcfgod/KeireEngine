@@ -1,6 +1,6 @@
 #include "KeireHubRuntime/HubTaskStore.h"
 
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <algorithm>
 #include <array>
@@ -10,7 +10,7 @@ namespace KeireHub
 {
     namespace
     {
-        constexpr std::size_t MaximumTaskStoreBytes = 4 * 1024 * 1024;
+        constexpr std::size_t MaximumTaskStoreBytes = std::size_t{4} * 1024 * 1024;
         constexpr std::size_t MaximumTasks = 512;
         constexpr std::size_t MaximumPackagesPerTask = 128;
 

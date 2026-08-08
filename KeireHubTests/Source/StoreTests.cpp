@@ -1,10 +1,10 @@
-#include "TestSupport.h"
+#include <KeireHubTests/TestSupport.h>
 
 #include "KeireHubRuntime/EditorInstallationRegistry.h"
 #include "KeireHubRuntime/HubTaskStore.h"
 #include "KeireHubRuntime/NotificationStore.h"
 
-#include "DistributionEncoding.h"
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
 
 #include <doctest/doctest.h>
 
@@ -134,7 +134,10 @@ TEST_CASE("Managed installation mutation requires exact registry root and marker
     KeireHubTests::TemporaryDirectory temporary;
     const auto root = temporary.Path() / "Managed";
     std::filesystem::create_directories(root);
-    const ManagedInstallMarker marker{"editor-managed", KeireHubTests::Digest('b'), std::string(32, 'c')};
+    const ManagedInstallMarker marker{.InstallationId = "editor-managed",
+                                      .ManifestFingerprint = KeireHubTests::Digest('b'),
+                                      .Nonce = std::string(32, 'c'),
+                                      .ReceiptSha256 = {}};
     REQUIRE(EditorInstallationRegistry::WriteManagedMarker(root, marker));
 
     EditorInstallation installation{.Id = marker.InstallationId,

@@ -83,6 +83,7 @@ namespace KeireHub
         std::shared_ptr<const std::vector<std::byte>> RgbaPixels;
 
         [[nodiscard]] bool IsValid() const noexcept;
+        [[nodiscard]] bool operator==(const ProjectThumbnailImage&) const noexcept = default;
     };
 
     // Decodes a confined PNG into the Hub's fixed 16:9 artwork surface. Callers must bound and validate the source

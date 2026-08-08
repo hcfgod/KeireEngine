@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string] $Dotnet = 'dotnet',
+    [string] $Npm = 'npm',
     [ValidateSet('Debug', 'Release')]
     [string] $Configuration = 'Release',
     [string] $OutputDirectory = '',
@@ -17,8 +18,20 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
 $outputRoot = [IO.Path]::GetFullPath($OutputDirectory)
 [IO.Directory]::CreateDirectory($outputRoot) | Out-Null
 
-$serviceProject = Join-Path $serviceRoot 'src\KeireDistributionService\KeireDistributionService.csproj'
-$publisherProject = Join-Path $serviceRoot 'src\KeireDistributionPublisher\KeireDistributionPublisher.csproj'
+$serviceProject = Join-Path $serviceRoot 'Source\KeireDistributionService\KeireDistributionService.csproj'
+$publisherProject = Join-Path $serviceRoot 'Source\KeireDistributionPublisher\KeireDistributionPublisher.csproj'
+$documentationSite = Join-Path $serviceRoot 'DocumentationSite'
+$documentationOutput = Join-Path $documentationSite 'dist'
+
+$env:ASTRO_TELEMETRY_DISABLED = '1'
+& $Npm --prefix $documentationSite ci
+if ($LASTEXITCODE -ne 0) {
+    throw 'Documentation dependency restore failed.'
+}
+& $Npm --prefix $documentationSite run build
+if ($LASTEXITCODE -ne 0) {
+    throw 'Documentation production build failed.'
+}
 
 foreach ($runtimeIdentifier in $RuntimeIdentifiers) {
     if ($runtimeIdentifier -notmatch '^(win|linux)-(x64|arm64)$') {
@@ -49,7 +62,20 @@ foreach ($runtimeIdentifier in $RuntimeIdentifiers) {
     Copy-Item -LiteralPath (Join-Path $serviceRoot 'README.md') -Destination $packageDirectory
     Copy-Item -LiteralPath (Join-Path $serviceRoot 'THIRD_PARTY_NOTICES.md') -Destination $packageDirectory
     Copy-Item -LiteralPath (Join-Path $serviceRoot 'Licenses') -Destination $packageDirectory -Recurse
+    $packagedLicenses = Join-Path $packageDirectory 'Licenses'
+    $documentationLicenses = @{
+        'Astro.txt' = Join-Path $documentationSite 'node_modules\astro\LICENSE'
+        'Starlight.txt' = Join-Path $documentationSite 'node_modules\@astrojs\starlight\LICENSE'
+        'ExpressiveCode.txt' = Join-Path $documentationSite 'node_modules\expressive-code\LICENSE'
+        'BeautifulMermaid.txt' = Join-Path $documentationSite 'node_modules\beautiful-mermaid\LICENSE'
+    }
+    foreach ($license in $documentationLicenses.GetEnumerator()) {
+        Copy-Item -LiteralPath $license.Value -Destination (Join-Path $packagedLicenses $license.Key)
+    }
     Copy-Item -LiteralPath (Join-Path $serviceRoot 'Website') -Destination $packageDirectory -Recurse
+    $packagedDocumentation = Join-Path $packageDirectory 'Website\docs'
+    [IO.Directory]::CreateDirectory($packagedDocumentation) | Out-Null
+    Get-ChildItem -LiteralPath $documentationOutput | Copy-Item -Destination $packagedDocumentation -Recurse -Force
     $deploymentDirectory = Join-Path $packageDirectory 'Deployment'
     $scriptsDirectory = Join-Path $packageDirectory 'scripts'
     [IO.Directory]::CreateDirectory($deploymentDirectory) | Out-Null

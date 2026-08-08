@@ -49,7 +49,7 @@ namespace Keire
                 throw std::invalid_argument("ScenePresentationRuntime requires asset services.");
         }
 
-        [[nodiscard]] RuntimeUiElementId EnsureUiNode(const Entity entity, const RuntimeUiElementId parent)
+        [[nodiscard]] RuntimeUiElementId EnsureUiNode(const Entity& entity, const RuntimeUiElementId parent)
         {
             auto type = RuntimeUiElementType::Panel;
             if (entity.GetComponent<CanvasComponent>())
@@ -88,7 +88,7 @@ namespace Keire
             return node;
         }
 
-        void ApplyUiState(const Entity entity, const RuntimeUiElementId node)
+        void ApplyUiState(const Entity& entity, const RuntimeUiElementId node)
         {
             RuntimeUiStyle style;
             if (const auto rect = entity.GetComponent<RectTransformComponent>())
@@ -178,12 +178,12 @@ namespace Keire
             (void)UiTree->SetInteractable(node, button && button->Interactable());
         }
 
-        void TraverseUi(const Entity entity, const RuntimeUiElementId parent)
+        void TraverseUi(const Entity& entity, const RuntimeUiElementId parent)
         {
             RuntimeUiElementId effectiveParent = parent;
             if (entity.GetComponent<CanvasComponent>() || entity.GetComponent<RectTransformComponent>())
                 effectiveParent = EnsureUiNode(entity, parent);
-            for (const auto child : entity.Children())
+            for (const auto& child : entity.Children())
                 TraverseUi(child, effectiveParent);
         }
 
@@ -193,7 +193,7 @@ namespace Keire
             SeenUi.clear();
             RuntimeUiCanvasSettings settings;
             bool settingsFound = false;
-            for (const auto entity : scene->Query<CanvasComponent>())
+            for (const auto& entity : scene->Query<CanvasComponent>())
             {
                 if (!entity)
                     continue;
@@ -236,7 +236,7 @@ namespace Keire
             UiTree->Layout(viewportWidth, viewportHeight, safeArea, settings);
         }
 
-        [[nodiscard]] AudioPlaybackRequest PlaybackRequest(const Entity entity, const AudioSourceComponent& source,
+        [[nodiscard]] AudioPlaybackRequest PlaybackRequest(const Entity& entity, const AudioSourceComponent& source,
                                                            std::shared_ptr<const AudioClipData> clip,
                                                            const AudioMixerRoutingId mixerRouting) const
         {
@@ -442,7 +442,7 @@ namespace Keire
             SeenAudio.clear();
             SeenMixers.clear();
             std::size_t pending = 0;
-            for (const auto entity : scene->Query<AudioSourceComponent>())
+            for (const auto& entity : scene->Query<AudioSourceComponent>())
             {
                 if (!entity)
                     continue;
@@ -522,7 +522,7 @@ namespace Keire
                     ++iterator;
             }
 
-            for (const auto entity : scene->Query<AudioListenerComponent>())
+            for (const auto& entity : scene->Query<AudioListenerComponent>())
             {
                 const auto listener = entity.GetComponent<AudioListenerComponent>();
                 if (!entity.ActiveInHierarchy() || !listener->Enabled() || !listener->Primary())
@@ -678,7 +678,8 @@ namespace Keire
         if (found == m_Impl->AudioSources.end() || !found->second.Voice || !found->second.LoadedClip)
             return false;
         const auto& clip = *found->second.LoadedClip;
-        const auto duration = clip.SampleRate == 0 ? 0.0F : static_cast<float>(clip.Frames) / clip.SampleRate;
+        const auto duration =
+            clip.SampleRate == 0 ? 0.0F : static_cast<float>(clip.Frames) / static_cast<float>(clip.SampleRate);
         if (positionSeconds > duration)
             throw std::out_of_range("Audio source seek position exceeds the clip duration.");
         const auto frame = static_cast<std::uint64_t>(std::min(
@@ -694,15 +695,16 @@ namespace Keire
             return result;
         if (found->second.LoadedClip && found->second.LoadedClip->SampleRate != 0)
         {
-            result.DurationSeconds =
-                static_cast<float>(found->second.LoadedClip->Frames) / found->second.LoadedClip->SampleRate;
+            result.DurationSeconds = static_cast<float>(found->second.LoadedClip->Frames) /
+                                     static_cast<float>(found->second.LoadedClip->SampleRate);
         }
         const auto voice = m_Impl->Audio && found->second.Voice ? m_Impl->Audio->Voice(found->second.Voice)
                                                                 : std::optional<AudioVoiceInfo>{};
         if (!voice)
             return result;
         if (found->second.LoadedClip && found->second.LoadedClip->SampleRate != 0)
-            result.PositionSeconds = static_cast<float>(voice->Frame) / found->second.LoadedClip->SampleRate;
+            result.PositionSeconds =
+                static_cast<float>(voice->Frame) / static_cast<float>(found->second.LoadedClip->SampleRate);
         result.State = voice->Paused ? AudioSourcePlaybackState::Paused : AudioSourcePlaybackState::Playing;
         return result;
     }
@@ -754,7 +756,7 @@ namespace Keire
     {
         if (!m_Impl->DeferredUiEvents.empty())
         {
-            event = std::move(m_Impl->DeferredUiEvents.front());
+            event = m_Impl->DeferredUiEvents.front();
             m_Impl->DeferredUiEvents.pop_front();
             return true;
         }
@@ -797,8 +799,8 @@ namespace Keire
             result.Audio = m_Impl->Audio->Statistics();
         result.TrackedUiEntities = m_Impl->UiNodes.size();
         result.TrackedAudioSources = m_Impl->AudioSources.size();
-        result.ActiveAudioSources =
-            std::ranges::count_if(m_Impl->AudioSources, [](const auto& item) { return bool(item.second.Voice); });
+        result.ActiveAudioSources = static_cast<std::size_t>(
+            std::ranges::count_if(m_Impl->AudioSources, [](const auto& item) { return bool(item.second.Voice); }));
         result.PendingAudioAssets = m_Impl->PendingAudio;
         result.SynchronizationCount = m_Impl->SynchronizationCount;
         result.UiSynchronizationMilliseconds = m_Impl->UiSynchronizationMilliseconds;

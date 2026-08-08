@@ -6,6 +6,7 @@ project(ProjectConfig.PROJECT_NAMESPACE .. "EditorTests")
 
     files
     {
+        "Include/**.h",
         "Source/**.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/AssetOperationService.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/AssetPicker.cpp",
@@ -41,6 +42,7 @@ project(ProjectConfig.PROJECT_NAMESPACE .. "EditorTests")
 
     includedirs
     {
+        "Include",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Include",
         "../" .. ProjectConfig.CORE_DIRECTORY .. "/Include"
     }

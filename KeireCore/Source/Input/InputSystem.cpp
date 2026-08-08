@@ -66,19 +66,16 @@ namespace Keire
         {
             return {InputValueType::Boolean, value ? 1.0F : 0.0F, 0.0F};
         }
-
         [[nodiscard]] InputValue AxisValue(const float value) noexcept { return {InputValueType::Axis1D, value, 0.0F}; }
 
         [[nodiscard]] InputValue VectorValue(const float x, const float y) noexcept
         {
             return {InputValueType::Axis2D, x, y};
         }
-
         [[nodiscard]] float NormalizeAxis(const std::int16_t value) noexcept
         {
             return value < 0 ? static_cast<float>(value) / 32768.0F : static_cast<float>(value) / 32767.0F;
         }
-
         [[nodiscard]] float NormalizeTrigger(const std::int16_t value) noexcept
         {
             return std::clamp((NormalizeAxis(value) + 1.0F) * 0.5F, 0.0F, 1.0F);
@@ -118,8 +115,9 @@ namespace Keire
             std::string path = "<Keyboard>/";
             if (!name || !*name)
                 return {};
-            for (const unsigned char value : std::string_view(name))
+            for (const char character : std::string_view(name))
             {
+                const auto value = static_cast<unsigned char>(character);
                 if (std::isalnum(value))
                     path.push_back(static_cast<char>(std::tolower(value)));
             }
@@ -1003,7 +1001,9 @@ namespace Keire
                         const bool active = value.Magnitude() >= 0.5F;
                         const auto& interactions =
                             winning && !winning->Interactions.empty() ? winning->Interactions : action.Interactions;
-                        const std::string_view interaction = interactions.empty() ? "" : interactions.front().Name;
+                        std::string_view interaction;
+                        if (!interactions.empty())
+                            interaction = interactions.front().Name;
                         if (action.Type == InputActionType::PassThrough)
                         {
                             if (!runtime.Value.NearlyEquals(value))
@@ -1684,8 +1684,8 @@ namespace Keire
             m_Impl->State->Status = RebindStatus::Cancelled;
     }
 
-    InputSystem::InputSystem(InputSystemSpecification specification, Ref<WindowSystem> windows, Ref<AssetSystem> assets,
-                             Ref<EventBus> events)
+    InputSystem::InputSystem(InputSystemSpecification specification, const Ref<WindowSystem>& windows,
+                             Ref<AssetSystem> assets, Ref<EventBus> events)
         : m_Impl(std::make_unique<Impl>(CreateRef<Detail::InputRuntimeState>(std::move(specification), windows,
                                                                              std::move(assets), std::move(events))))
     {

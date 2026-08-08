@@ -3,8 +3,8 @@
 #include "KeireHubRuntime/HubTaskManager.h"
 #include "KeireHubRuntime/HubWorkerProtocol.h"
 
-#include "HubWorkerCoordinatorOperations.h"
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/HubWorkerCoordinatorOperations.h>
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <algorithm>
 #include <array>
@@ -25,6 +25,15 @@ namespace KeireHub
 {
     namespace
     {
+        using Detail::Exists;
+        using Detail::OperationPaths;
+        using Detail::PathsFor;
+        using Detail::PrepareManagedEditorRoot;
+        using Detail::PrepareOperationDirectory;
+        using Detail::PrepareOperationRoot;
+        using Detail::ProtocolFailure;
+        using Detail::RemoveKnownFile;
+
         constexpr auto MaximumPollInterval = std::chrono::seconds(5);
         constexpr auto MaximumStartupTimeout = std::chrono::minutes(2);
         constexpr std::size_t MaximumCommandQueue = 1024;
@@ -66,15 +75,6 @@ namespace KeireHub
         };
 
         using CoordinatorCommand = std::variant<QueueCommand, ControlCommand>;
-
-        struct OperationPaths final
-        {
-            std::filesystem::path Directory;
-            std::filesystem::path Request;
-            std::filesystem::path Status;
-            std::filesystem::path Result;
-            std::filesystem::path Control;
-        };
 
         [[nodiscard]] std::uint64_t DefaultUnixSeconds() noexcept
         {
@@ -145,32 +145,6 @@ namespace KeireHub
             return static_cast<std::size_t>(std::distance(WorkerPhases.begin(), found));
         }
 
-        [[nodiscard]] OperationPaths PathsFor(const std::filesystem::path& root, const std::string& taskId)
-        {
-            const auto directory = root / taskId;
-            return {.Directory = directory,
-                    .Request = directory / "request.json",
-                    .Status = directory / "status.json",
-                    .Result = directory / "result.json",
-                    .Control = directory / "control.json"};
-        }
-
-        [[nodiscard]] bool Exists(const std::filesystem::path& path) noexcept
-        {
-            std::error_code error;
-            const bool exists = std::filesystem::exists(path, error);
-            return exists && !error;
-        }
-
-        void RemoveKnownFile(const std::filesystem::path& path) noexcept
-        {
-            std::error_code ignored;
-            std::filesystem::remove(path, ignored);
-            auto temporary = path;
-            temporary += ".tmp";
-            std::filesystem::remove(temporary, ignored);
-        }
-
         [[nodiscard]] std::uint64_t StoreTimestamp(const HubTaskStore& store, const std::uint64_t candidate)
         {
             std::uint64_t result = candidate;
@@ -179,167 +153,6 @@ namespace KeireHub
             return result;
         }
 
-        [[nodiscard]] HubStatus PrepareOperationRoot(const std::filesystem::path& root)
-        {
-            try
-            {
-                std::filesystem::create_directories(root);
-                std::error_code error;
-                const auto status = std::filesystem::symlink_status(root, error);
-                if (error || !std::filesystem::is_directory(status) || std::filesystem::is_symlink(status))
-                {
-                    return HubStatus::Failure({.Code = HubErrorCode::WorkerProtocolInvalid,
-                                               .Message = "The Hub worker operation directory is unsafe.",
-                                               .AffectedItem = Detail::PathToUtf8(root.filename())});
-                }
-                return HubStatus::Success();
-            }
-            catch (const std::exception& error)
-            {
-                return HubStatus::Failure({.Code = HubErrorCode::IoWrite,
-                                           .Message = "The Hub could not prepare its package task directory.",
-                                           .Retryable = true,
-                                           .AffectedItem = Detail::PathToUtf8(root.filename()),
-                                           .TechnicalDetails = error.what()});
-            }
-        }
-
-        [[nodiscard]] HubStatus PrepareManagedEditorRoot(const std::filesystem::path& root, const std::string& taskId)
-        {
-            std::error_code error;
-            auto status = std::filesystem::symlink_status(root, error);
-            if (error && error.default_error_condition() != std::errc::no_such_file_or_directory)
-            {
-                return HubStatus::Failure({.Code = HubErrorCode::IoRead,
-                                           .Message = "The editor installation root could not be inspected.",
-                                           .Retryable = true,
-                                           .AffectedItem = taskId,
-                                           .TechnicalDetails = error.message()});
-            }
-            if (!error && status.type() != std::filesystem::file_type::not_found)
-            {
-                if (std::filesystem::is_directory(status) && !std::filesystem::is_symlink(status))
-                    return HubStatus::Success();
-                return HubStatus::Failure({.Code = HubErrorCode::UnsafeInstallRoot,
-                                           .Message = "The editor installation root is occupied by an unsafe object.",
-                                           .AffectedItem = taskId});
-            }
-
-            error.clear();
-            const auto parentStatus = std::filesystem::symlink_status(root.parent_path(), error);
-            if (error || !std::filesystem::is_directory(parentStatus) || std::filesystem::is_symlink(parentStatus))
-            {
-                return HubStatus::Failure({.Code = HubErrorCode::UnsafeInstallRoot,
-                                           .Message = "The editor installation root parent is unavailable or unsafe.",
-                                           .AffectedItem = taskId,
-                                           .TechnicalDetails = error ? error.message() : std::string{}});
-            }
-            if (!std::filesystem::create_directory(root, error) && error)
-            {
-                return HubStatus::Failure({.Code = HubErrorCode::IoWrite,
-                                           .Message = "The editor installation root could not be created.",
-                                           .Retryable = true,
-                                           .AffectedItem = taskId,
-                                           .TechnicalDetails = error.message()});
-            }
-            status = std::filesystem::symlink_status(root, error);
-            if (error || !std::filesystem::is_directory(status) || std::filesystem::is_symlink(status))
-            {
-                return HubStatus::Failure({.Code = HubErrorCode::UnsafeInstallRoot,
-                                           .Message = "The created editor installation root is unsafe.",
-                                           .AffectedItem = taskId,
-                                           .TechnicalDetails = error ? error.message() : std::string{}});
-            }
-            return HubStatus::Success();
-        }
-
-        [[nodiscard]] HubStatus PrepareOperationDirectory(const std::filesystem::path& root,
-                                                          const OperationPaths& paths)
-        {
-            try
-            {
-                std::error_code error;
-                if (std::filesystem::exists(paths.Directory, error))
-                {
-                    const auto status = std::filesystem::symlink_status(paths.Directory, error);
-                    if (error || !std::filesystem::is_directory(status) || std::filesystem::is_symlink(status))
-                    {
-                        return HubStatus::Failure({.Code = HubErrorCode::WorkerProtocolInvalid,
-                                                   .Message = "The package task directory is unsafe.",
-                                                   .AffectedItem = Detail::PathToUtf8(paths.Directory.filename())});
-                    }
-                }
-                else
-                {
-                    if (error || !std::filesystem::create_directory(paths.Directory))
-                    {
-                        return HubStatus::Failure({.Code = HubErrorCode::IoWrite,
-                                                   .Message = "The Hub could not create the package task directory.",
-                                                   .Retryable = true,
-                                                   .AffectedItem = Detail::PathToUtf8(paths.Directory.filename()),
-                                                   .TechnicalDetails = error.message()});
-                    }
-                }
-
-                const auto canonicalRoot = std::filesystem::weakly_canonical(root, error);
-                if (error)
-                    throw std::filesystem::filesystem_error("Could not resolve operation root.", root, error);
-                const auto canonicalDirectory = std::filesystem::weakly_canonical(paths.Directory, error);
-                if (error || canonicalDirectory.parent_path() != canonicalRoot)
-                {
-                    return HubStatus::Failure({.Code = HubErrorCode::WorkerProtocolInvalid,
-                                               .Message = "The package task directory escaped its allowed root.",
-                                               .AffectedItem = Detail::PathToUtf8(paths.Directory.filename())});
-                }
-
-                for (const auto& file : {paths.Request, paths.Status, paths.Result, paths.Control})
-                {
-                    auto temporary = file;
-                    temporary += ".tmp";
-                    for (const auto& candidate : {file, temporary})
-                    {
-                        error.clear();
-                        const auto status = std::filesystem::symlink_status(candidate, error);
-                        if (error)
-                        {
-                            if (error == std::errc::no_such_file_or_directory)
-                            {
-                                error.clear();
-                                continue;
-                            }
-                            throw std::filesystem::filesystem_error("Could not inspect operation file.", candidate,
-                                                                    error);
-                        }
-                        if (status.type() == std::filesystem::file_type::not_found)
-                            continue;
-                        if (error || !std::filesystem::is_regular_file(status) || std::filesystem::is_symlink(status))
-                        {
-                            return HubStatus::Failure({.Code = HubErrorCode::WorkerProtocolInvalid,
-                                                       .Message = "A package task journal is unsafe.",
-                                                       .AffectedItem = Detail::PathToUtf8(candidate.filename())});
-                        }
-                    }
-                }
-                return HubStatus::Success();
-            }
-            catch (const std::exception& error)
-            {
-                return HubStatus::Failure({.Code = HubErrorCode::IoWrite,
-                                           .Message = "The Hub could not prepare a package task.",
-                                           .Retryable = true,
-                                           .AffectedItem = Detail::PathToUtf8(paths.Directory.filename()),
-                                           .TechnicalDetails = error.what()});
-            }
-        }
-
-        [[nodiscard]] HubError ProtocolFailure(const std::string& taskId, const std::string_view details)
-        {
-            return {.Code = HubErrorCode::WorkerProtocolInvalid,
-                    .Message = "The package worker returned invalid operation data.",
-                    .Retryable = true,
-                    .AffectedItem = taskId,
-                    .TechnicalDetails = std::string(details)};
-        }
     } // namespace
 
     class HubWorkerCoordinator::Impl final
@@ -440,7 +253,7 @@ namespace KeireHub
             return QueueEditorPackage(std::move(request.Install), std::move(workerRequest), HubTaskKind::Repair);
         }
 
-        HubStatus QueueEditorRemoval(CatalogEditorRemovalRequest request)
+        HubStatus QueueEditorRemoval(const CatalogEditorRemovalRequest& request)
         {
             auto workerRequest = Detail::CreateEditorRemovalWorkerRequest(request);
             if (const auto status = ValidateHubWorkerRequest(workerRequest); !status)
@@ -918,7 +731,7 @@ namespace KeireHub
                                     ProtocolFailure(task->Id, "Worker started in an unexpected task phase."),
                                     PathsFor(m_Specification.OperationRoot, task->Id));
                 }
-                const HubTaskDispatch dispatch = *expected;
+                const HubTaskDispatch& dispatch = *expected;
                 if (auto claim = manager.Claim(dispatch, status.WorkerProcessId, Timestamp(store, task->Id)); !claim)
                     return HubStatus::Success();
                 m_Launching.erase(task->Id);
@@ -1044,7 +857,7 @@ namespace KeireHub
                                     ProtocolFailure(task->Id, "Worker result started in an unexpected task phase."),
                                     paths);
                 }
-                const HubTaskDispatch dispatch = *expected;
+                const HubTaskDispatch& dispatch = *expected;
                 if (auto claim = manager.Claim(dispatch, workerStatus->WorkerProcessId, Timestamp(store, task->Id));
                     !claim)
                 {
@@ -1513,9 +1326,9 @@ namespace KeireHub
         return m_Impl->QueueEditorRepair(std::move(request));
     }
 
-    HubStatus HubWorkerCoordinator::QueueEditorRemoval(CatalogEditorRemovalRequest request)
+    HubStatus HubWorkerCoordinator::QueueEditorRemoval(const CatalogEditorRemovalRequest& request)
     {
-        return m_Impl->QueueEditorRemoval(std::move(request));
+        return m_Impl->QueueEditorRemoval(request);
     }
 
     HubStatus HubWorkerCoordinator::Pause(const std::string& taskId)

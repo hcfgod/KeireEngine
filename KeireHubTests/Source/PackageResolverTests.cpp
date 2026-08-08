@@ -1,4 +1,4 @@
-#include "TestSupport.h"
+#include <KeireHubTests/TestSupport.h>
 
 #include "KeireHubRuntime/PackageResolver.h"
 
@@ -40,7 +40,7 @@ namespace
                 .ArtifactSizeBytes = 1,
                 .ArtifactSha256 = KeireHubTests::Digest(),
                 .InstalledSizeBytes = 1,
-                .Files = {{std::move(fileName), 1, KeireHubTests::Digest('b')}},
+                .Files = {{fileName, 1, KeireHubTests::Digest('b')}},
                 .LicenseReferences = {"Licenses/LICENSE.txt"},
                 .SignatureKeyId = "release-key"};
     }

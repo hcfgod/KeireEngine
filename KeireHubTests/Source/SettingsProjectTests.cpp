@@ -1,4 +1,4 @@
-#include "TestSupport.h"
+#include <KeireHubTests/TestSupport.h>
 
 #include "KeireHubRuntime/HubProjectCatalog.h"
 #include "KeireHubRuntime/HubSettingsStore.h"

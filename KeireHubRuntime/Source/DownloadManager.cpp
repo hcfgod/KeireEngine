@@ -1,8 +1,8 @@
 #include "KeireHubRuntime/DownloadManager.h"
 
-#include "NativeHttpTransportPolicy.h"
-#include "Persistence.h"
-#include "Sha256.h"
+#include <KeireHubRuntimeInternal/NativeHttpTransportPolicy.h>
+#include <KeireHubRuntimeInternal/Persistence.h>
+#include <KeireHubRuntimeInternal/Sha256.h>
 
 #include <algorithm>
 #include <array>
@@ -16,8 +16,8 @@ namespace KeireHub
 {
     namespace
     {
-        constexpr std::size_t MaximumResumeMetadataBytes = 64U * 1024U;
-        constexpr std::size_t TransferBufferBytes = 256U * 1024U;
+        constexpr std::size_t MaximumResumeMetadataBytes = std::size_t{64U} * 1024U;
+        constexpr std::size_t TransferBufferBytes = std::size_t{256U} * 1024U;
         constexpr auto MaximumThrottleWaitSlice = std::chrono::milliseconds(100);
 
         struct ResumeState final

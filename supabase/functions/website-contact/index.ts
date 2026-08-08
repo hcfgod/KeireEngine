@@ -1,5 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.95.0";
 
+import { ContactRequestError, readBoundedJson, requestAddress } from "./request.mjs";
+
 const allowedOrigins = new Set([
     "https://keireengine.duckdns.org",
     "http://localhost:5098",
@@ -8,7 +10,6 @@ const allowedOrigins = new Set([
 const categories = new Set(["general", "support", "partnership", "press", "feedback"]);
 const encoder = new TextEncoder();
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
-const maximumRequestBytes = 16 * 1024;
 
 function responseHeaders(origin: string): HeadersInit {
     return {
@@ -38,12 +39,6 @@ function text(value: unknown, maximum: number): string | null {
         return null;
     }
     return normalized;
-}
-
-function requestAddress(request: Request): string {
-    const forwarded = request.headers.get("x-forwarded-for")?.split(",", 1)[0]?.trim();
-    return (forwarded || request.headers.get("cf-connecting-ip") || request.headers.get("x-real-ip") || "unknown")
-        .slice(0, 128);
 }
 
 async function hmacSha256(value: string, secret: string): Promise<string> {
@@ -85,15 +80,17 @@ Deno.serve(async (request: Request) => {
         return json(origin, 405, { ok: false, message: "Method not allowed." }, { Allow: "POST, OPTIONS" });
     }
     const contentType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
-    const contentLength = Number(request.headers.get("content-length") ?? "0");
-    if (contentType !== "application/json" || !Number.isFinite(contentLength) || contentLength > maximumRequestBytes) {
-        return json(origin, 415, { ok: false, message: "A bounded JSON request is required." });
+    if (contentType !== "application/json") {
+        return json(origin, 415, { ok: false, message: "A JSON request is required." });
     }
 
     let body: Record<string, unknown>;
     try {
-        body = await request.json() as Record<string, unknown>;
-    } catch {
+        body = await readBoundedJson(request);
+    } catch (error) {
+        if (error instanceof ContactRequestError) {
+            return json(origin, error.status, { ok: false, message: error.message });
+        }
         return json(origin, 400, { ok: false, message: "The request could not be read." });
     }
 
@@ -125,7 +122,8 @@ Deno.serve(async (request: Request) => {
         auth: { autoRefreshToken: false, persistSession: false },
         global: { headers: { "X-Client-Info": "keire-website-contact/1.0" } },
     });
-    const ipHash = await hmacSha256(requestAddress(request), adminKey);
+    const rateLimitSecret = Deno.env.get("CONTACT_RATE_LIMIT_SECRET") ?? adminKey;
+    const ipHash = await hmacSha256(requestAddress(request), rateLimitSecret);
     const { data: reserved, error: throttleError } = await admin.rpc("reserve_website_contact_submission", {
         p_ip_hash: ipHash,
     });

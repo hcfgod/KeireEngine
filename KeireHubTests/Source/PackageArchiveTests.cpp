@@ -1,9 +1,9 @@
-#include "TestSodium.h"
-#include "TestSupport.h"
+#include <KeireHubTests/TestSodium.h>
+#include <KeireHubTests/TestSupport.h>
 
 #include "KeireHubRuntime/PackageArchive.h"
 
-#include "DistributionEncoding.h"
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
 
 #include <doctest/doctest.h>
 #include <nlohmann/json.hpp>
@@ -104,7 +104,7 @@ namespace
         for (std::size_t index = 0; index < sizeof(Integer); ++index)
         {
             bytes.push_back(static_cast<std::byte>(value & 0xffU));
-            value >>= 8U;
+            value = static_cast<Integer>(static_cast<std::uint64_t>(value) >> 8U);
         }
     }
 
@@ -683,7 +683,8 @@ TEST_CASE("Package readers reject unsafe embedded inventories before creating st
 TEST_CASE("Package extraction cancellation leaves no partial staging tree")
 {
     KeireHubTests::TemporaryDirectory temporary;
-    const std::vector<std::pair<std::string, std::string>> files{{"large.bin", std::string(512U * 1024U, 'x')}};
+    const std::vector<std::pair<std::string, std::string>> files{
+        {"large.bin", std::string(std::size_t{512U} * 1024U, 'x')}};
     const auto payload = temporary.Path() / "payload";
     WritePayload(payload, files);
     const auto archive = temporary.Path() / "cancel.keirepackage";

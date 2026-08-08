@@ -3,5 +3,5 @@ project(ManagedCoreSdkConsumer LANGUAGES CXX)
 
 find_package(Keire CONFIG REQUIRED)
 
-add_executable(ManagedSdkConsumer ClientApplication.cpp)
+add_executable(ManagedSdkConsumer Source/ClientApplication.cpp)
 target_link_libraries(ManagedSdkConsumer PRIVATE Keire::Core)

@@ -1,6 +1,6 @@
-#include "DistributionEncoding.h"
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
 
-#include "Sha256.h"
+#include <KeireHubRuntimeInternal/Sha256.h>
 
 #include <algorithm>
 #include <array>

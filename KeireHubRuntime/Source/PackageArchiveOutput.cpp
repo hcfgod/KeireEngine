@@ -1,4 +1,4 @@
-#include "PackageArchiveOutput.h"
+#include <KeireHubRuntimeInternal/PackageArchiveOutput.h>
 
 #include <algorithm>
 #include <cstddef>

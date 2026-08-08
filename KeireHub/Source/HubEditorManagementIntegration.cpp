@@ -128,7 +128,7 @@ namespace KeireHub
         }
         else if (completion->Operation == HubEditorManagementOperation::AuthorizeRemoval)
         {
-            queued = ExecuteHubManagedEditorRemovalPlan(std::move(*completion->Authorization), *tasks);
+            queued = ExecuteHubManagedEditorRemovalPlan(*completion->Authorization, *tasks);
         }
         if (!queued)
         {

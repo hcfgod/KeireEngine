@@ -1,8 +1,8 @@
-#include "TestSupport.h"
+#include <KeireHubTests/TestSupport.h>
 
 #include "KeireHubRuntime/HubWorkerProtocol.h"
 #include "KeireHubRuntime/NativeHttpTransport.h"
-#include "NativeHttpTransportPolicy.h"
+#include <KeireHubRuntimeInternal/NativeHttpTransportPolicy.h>
 
 #include <doctest/doctest.h>
 

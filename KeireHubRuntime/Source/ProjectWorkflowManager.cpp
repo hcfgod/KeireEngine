@@ -2,7 +2,7 @@
 
 #include "KeireHubRuntime/ProjectStatusProbe.h"
 
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <algorithm>
 #include <array>
@@ -22,7 +22,7 @@ namespace KeireHub
 {
     namespace
     {
-        constexpr std::size_t MaximumDescriptorBytes = 1024 * 1024;
+        constexpr std::size_t MaximumDescriptorBytes = std::size_t{1024} * 1024;
         constexpr std::size_t HardMaximumCopiedEntries = 1'000'000;
         constexpr std::uint64_t HardMaximumCopiedBytes = 1024ULL * 1024ULL * 1024ULL * 1024ULL;
         constexpr std::array GeneratedDirectories{".git", ".vs", "Build", "Library", "Logs", "Temp"};
@@ -370,7 +370,7 @@ namespace KeireHub
                                                         "A project file could not be copied into staging.", projectId,
                                                         Detail::PathToUtf8(source.filename()), true));
             }
-            std::array<char, 64 * 1024> buffer{};
+            std::array<char, std::size_t{64} * 1024> buffer{};
             std::uint64_t copied = 0;
             while (input)
             {
@@ -1111,7 +1111,7 @@ namespace KeireHub
         recent.Root = document.Root;
         recent.Name = displayName;
         PopulateMetadata(recent, verification.Value(), recent.CachedMetadata.SizeBytes);
-        if (const auto commit = m_Catalog.Upsert(std::move(recent)); !commit)
+        if (auto commit = m_Catalog.Upsert(std::move(recent)); !commit)
         {
             const auto rollback = Detail::WriteTextFileAtomically(document.DescriptorPath, document.OriginalText);
             if (!rollback)

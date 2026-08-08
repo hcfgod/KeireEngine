@@ -2,9 +2,16 @@
 .vs/
 .vscode/
 .idea/
+.codex-remote-attachments/
 
 # Build outputs
 Build/
+Services/KeireDistributionService/DocumentationSite/.astro/
+Services/KeireDistributionService/DocumentationSite/dist/
+Services/KeireDistributionService/DocumentationSite/node_modules/
+Services/KeireDistributionService/DocumentationSite/public/assets/
+Services/KeireDistributionService/DocumentationSite/public/doc-inventory.json
+Services/KeireDistributionService/DocumentationSite/Source/content/docs/reference/
 !KeireCore/Include/Keire/Build/
 !KeireCore/Include/Keire/Build/**
 !KeireCore/Include/KeireInternal/Build/

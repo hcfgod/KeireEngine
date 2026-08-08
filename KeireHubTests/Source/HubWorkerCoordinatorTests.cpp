@@ -1,10 +1,10 @@
-#include "TestSupport.h"
+#include <KeireHubTests/TestSupport.h>
 
 #include "KeireHubRuntime/HubTaskManager.h"
 #include "KeireHubRuntime/HubWorkerCoordinator.h"
 #include "KeireHubRuntime/HubWorkerProtocol.h"
 
-#include "HubWorkerCoordinatorOperations.h"
+#include <KeireHubRuntimeInternal/HubWorkerCoordinatorOperations.h>
 
 #include <doctest/doctest.h>
 

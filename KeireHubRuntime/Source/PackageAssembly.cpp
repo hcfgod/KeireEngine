@@ -1,9 +1,9 @@
 #include "KeireHubRuntime/PackageAssembly.h"
 
-#include "DistributionEncoding.h"
-#include "PackageArchiveOutput.h"
-#include "Persistence.h"
-#include "Sha256.h"
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
+#include <KeireHubRuntimeInternal/PackageArchiveOutput.h>
+#include <KeireHubRuntimeInternal/Persistence.h>
+#include <KeireHubRuntimeInternal/Sha256.h>
 
 #include <algorithm>
 #include <array>
@@ -36,7 +36,7 @@ namespace KeireHub
 {
     namespace
     {
-        constexpr std::size_t BufferBytes = 256U * 1024U;
+        constexpr std::size_t BufferBytes = std::size_t{256U} * 1024U;
         constexpr std::size_t MaximumPackages = 256U;
         constexpr std::size_t MaximumSourceFiles = PackageArchiveLimits::MaximumFiles - 2U;
         constexpr std::string_view InstallationMarkerPath = ".keirehub-install.json";

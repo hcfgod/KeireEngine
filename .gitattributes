@@ -10,6 +10,16 @@
 *.yaml text eol=lf
 *.json text eol=lf
 *.md text eol=lf
+*.py text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.ts text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.cs text eol=lf
+*.toml text eol=lf
+*.conf text eol=lf
+*.example text eol=lf
 *.cpp text eol=lf
 *.h text eol=lf
 *.hpp text eol=lf
@@ -18,6 +28,8 @@ KeireHubContent/Templates/** text eol=lf
 
 *.exe binary
 *.ico binary
+*.jpg binary
+*.jpeg binary
 *.res binary
 *.ttf binary
 *.zip binary

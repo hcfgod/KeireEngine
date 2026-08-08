@@ -39,12 +39,28 @@ class SupabaseConfigurationTests(unittest.TestCase):
             "publishableKey": "sb_publishable_0123456789abcdef",
         }
         self.assertEqual(self.validate(valid).returncode, 0)
-        self.assertEqual(self.validate({"schemaVersion": 1, "enabled": False}).returncode, 0)
+        self.assertEqual(
+            self.validate({"schemaVersion": 1, "enabled": False}).returncode, 0
+        )
 
-        self.assertNotEqual(self.validate(dict(valid, publishableKey="sb_secret_0123456789abcdef")).returncode, 0)
-        self.assertNotEqual(self.validate(dict(valid, projectUrl="http://fixture.supabase.co")).returncode, 0)
-        self.assertNotEqual(self.validate(dict(valid, projectUrl="https://example.com")).returncode, 0)
-        self.assertNotEqual(self.validate(dict(valid, serviceRoleKey="never")).returncode, 0)
+        self.assertNotEqual(
+            self.validate(
+                dict(valid, publishableKey="sb_secret_0123456789abcdef")
+            ).returncode,
+            0,
+        )
+        self.assertNotEqual(
+            self.validate(
+                dict(valid, projectUrl="http://fixture.supabase.co")
+            ).returncode,
+            0,
+        )
+        self.assertNotEqual(
+            self.validate(dict(valid, projectUrl="https://example.com")).returncode, 0
+        )
+        self.assertNotEqual(
+            self.validate(dict(valid, serviceRoleKey="never")).returncode, 0
+        )
 
 
 if __name__ == "__main__":

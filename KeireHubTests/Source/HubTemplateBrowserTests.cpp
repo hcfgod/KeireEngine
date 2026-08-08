@@ -1,7 +1,7 @@
 #include "KeireHub/HubProjectCreationUi.h"
 #include "KeireHub/HubTemplateBrowser.h"
 
-#include "TestSupport.h"
+#include <KeireHubTests/TestSupport.h>
 
 #include <doctest/doctest.h>
 

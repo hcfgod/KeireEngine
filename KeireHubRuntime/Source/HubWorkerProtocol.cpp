@@ -1,6 +1,6 @@
 #include "KeireHubRuntime/HubWorkerProtocol.h"
 
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <array>
 #include <cctype>
@@ -15,7 +15,7 @@ namespace KeireHub
 {
     namespace
     {
-        constexpr std::size_t MaximumProtocolBytes = 32U * 1024U * 1024U;
+        constexpr std::size_t MaximumProtocolBytes = std::size_t{32U} * 1024U * 1024U;
 
         [[nodiscard]] std::filesystem::path DecodeHubOwnedPath(const std::string_view value)
         {

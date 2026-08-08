@@ -1,8 +1,8 @@
-#include "TestSupport.h"
+#include <KeireHubTests/TestSupport.h>
 
 #include "KeireHubRuntime/PackagePublish.h"
 
-#include "DistributionEncoding.h"
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
 
 #include <doctest/doctest.h>
 #include <nlohmann/json.hpp>
@@ -345,7 +345,7 @@ TEST_CASE("Package publication revalidates the signed staging inventory immediat
     const auto manifest = Manifest("state.txt", "new");
     auto prepared = PreparePackagePublish(paths.Value(), manifest, "mutated-stage");
     REQUIRE(prepared);
-    const auto journal = prepared.Value();
+    const auto& journal = prepared.Value();
     KeireHubTests::WriteText(paths.Value().StagingRoot / "state.txt", "bad");
 
     const auto committed = ContinuePackagePublish(journal, manifest);

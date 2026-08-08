@@ -2,9 +2,9 @@
 
 #include "KeireHubRuntime/PackageArchive.h"
 
-#include "DistributionEncoding.h"
-#include "PackageArchiveOutput.h"
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
+#include <KeireHubRuntimeInternal/PackageArchiveOutput.h>
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <algorithm>
 #include <array>
@@ -38,7 +38,7 @@ namespace KeireHub
 {
     namespace
     {
-        constexpr std::size_t MaximumJournalBytes = 64U * 1024U;
+        constexpr std::size_t MaximumJournalBytes = std::size_t{64U} * 1024U;
         constexpr std::size_t MaximumJsonDepth = 16;
 
         [[nodiscard]] HubError PublishError(const HubErrorCode code, std::string message, std::string item = {},
@@ -511,7 +511,7 @@ namespace KeireHub
                                                        "The published package filesystem state is inconsistent.",
                                                        journal.OperationId));
             }
-            if (const auto status = ValidatePackageTree(journal.Paths.Destination, manifest); !status)
+            if (auto status = ValidatePackageTree(journal.Paths.Destination, manifest); !status)
             {
                 if (!journal.ReplacesExisting || !IsDirectoryWithoutLinks(journal.Paths.BackupRoot) ||
                     !IsMissing(journal.Paths.StagingRoot))
@@ -1083,18 +1083,15 @@ namespace KeireHub
         switch (journal.Phase)
         {
         case PackagePublishPhase::Prepared:
-            if (staging && journal.ReplacesExisting && destination && backupMissing)
+            if ((staging && journal.ReplacesExisting && destination && backupMissing) ||
+                (staging && !journal.ReplacesExisting && destinationMissing && backupMissing))
             {
-                // No filesystem mutation has occurred; continue from the persisted phase.
+                // The prepared state is internally consistent; continue from the persisted phase.
             }
             else if (staging && journal.ReplacesExisting && destinationMissing && backup)
             {
                 journal.Phase = PackagePublishPhase::BackupMoved;
                 phaseChanged = true;
-            }
-            else if (staging && !journal.ReplacesExisting && destinationMissing && backupMissing)
-            {
-                // A new install remains ready to publish.
             }
             else if (stagingMissing && journal.ReplacesExisting && destination && backupMissing)
             {

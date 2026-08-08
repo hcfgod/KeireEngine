@@ -60,13 +60,6 @@ namespace
         return bytes;
     }
 
-    void WriteBytesAtomically(const std::filesystem::path& path, const std::span<const std::byte> bytes)
-    {
-        const std::string text =
-            bytes.empty() ? std::string{} : std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-        Keire::Detail::WriteTextFileAtomically(path, text);
-    }
-
     [[nodiscard]] Keire::Ref<Keire::Scene> RenderedScene(const Keire::Ref<Keire::Scene>& editing,
                                                          const Keire::Ref<Keire::SceneRuntimeSession>& play)
     {

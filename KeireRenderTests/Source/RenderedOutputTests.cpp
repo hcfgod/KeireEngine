@@ -88,7 +88,7 @@ namespace
         {
             for (std::uint32_t x = minimum; x < maximum; ++x)
             {
-                const auto offset = static_cast<std::size_t>((y * SurfaceSize + x) * 4);
+                const auto offset = (static_cast<std::size_t>(y) * static_cast<std::size_t>(SurfaceSize) + x) * 4U;
                 result.Red += static_cast<float>(pixels[offset]) / 255.0F;
                 result.Green += static_cast<float>(pixels[offset + 1]) / 255.0F;
                 result.Blue += static_cast<float>(pixels[offset + 2]) / 255.0F;
@@ -112,7 +112,7 @@ namespace
         {
             for (std::uint32_t x = 0; x < extent; ++x)
             {
-                const auto offset = static_cast<std::size_t>((y * SurfaceSize + x) * 4);
+                const auto offset = (static_cast<std::size_t>(y) * static_cast<std::size_t>(SurfaceSize) + x) * 4U;
                 result.Red += static_cast<float>(pixels[offset]) / 255.0F;
                 result.Green += static_cast<float>(pixels[offset + 1]) / 255.0F;
                 result.Blue += static_cast<float>(pixels[offset + 2]) / 255.0F;
@@ -137,14 +137,14 @@ namespace
         {
             for (std::uint32_t x = minimumX; x < maximumX; ++x)
             {
-                const auto offset = static_cast<std::size_t>((y * SurfaceSize + x) * 4);
+                const auto offset = (static_cast<std::size_t>(y) * static_cast<std::size_t>(SurfaceSize) + x) * 4U;
                 const auto red = static_cast<float>(pixels[offset]) / 255.0F;
                 const auto green = static_cast<float>(pixels[offset + 1]) / 255.0F;
                 const auto blue = static_cast<float>(pixels[offset + 2]) / 255.0F;
                 result += std::max(green - std::max(red, blue), 0.0F);
             }
         }
-        return result / static_cast<float>(SurfaceSize * SurfaceSize / 2U);
+        return result / (static_cast<float>(SurfaceSize) * static_cast<float>(SurfaceSize) / 2.0F);
     }
 
     [[nodiscard]] float MaximumDarkening(const std::vector<std::uint8_t>& unshadowed,
@@ -156,7 +156,11 @@ namespace
         for (std::size_t offset = 0; offset + 3 < unshadowed.size(); offset += 4)
         {
             const auto luminance = [offset](const std::vector<std::uint8_t>& frame)
-            { return (0.2126F * frame[offset] + 0.7152F * frame[offset + 1] + 0.0722F * frame[offset + 2]) / 255.0F; };
+            {
+                return (0.2126F * static_cast<float>(frame[offset]) + 0.7152F * static_cast<float>(frame[offset + 1]) +
+                        0.0722F * static_cast<float>(frame[offset + 2])) /
+                       255.0F;
+            };
             maximum = std::max(maximum, luminance(unshadowed) - luminance(shadowed));
         }
         return maximum;
@@ -209,7 +213,7 @@ namespace
         {
             for (std::uint32_t x = 0; x < SurfaceSize; ++x)
             {
-                const auto offset = static_cast<std::size_t>((y * SurfaceSize + x) * 4);
+                const auto offset = (static_cast<std::size_t>(y) * static_cast<std::size_t>(SurfaceSize) + x) * 4U;
                 const auto firstOther = (channel + 1) % 3;
                 const auto secondOther = (channel + 2) % 3;
                 const auto value = static_cast<float>(pixels[offset + channel]);
@@ -326,13 +330,13 @@ namespace
         definition.Modules = {
             {RenderVfxId(301), true,
              Keire::VfxBurstModule{0.0F, rendererType == Keire::VfxRendererType::Ribbon ? 4U : 1U, 1, 0.1F}},
-            {RenderVfxId(302), true, std::move(shape)},
+            {RenderVfxId(302), true, shape},
             {RenderVfxId(303), true,
              Keire::VfxInitializeModule{animatedOutput ? 4.0F : 1.0F, animatedOutput ? 4.0F : 1.0F, {}, {}, {}, {}}},
             {RenderVfxId(304), true, Keire::VfxSizeOverLifetimeModule{Keire::Curve1D::Constant(1.4F)}},
             {RenderVfxId(305), true,
              Keire::VfxColorOverLifetimeModule{Keire::ColorGradient::Constant({1.0F, 1.0F, 1.0F, 1.0F})}},
-            {RenderVfxId(306), true, std::move(renderer)},
+            {RenderVfxId(306), true, renderer},
         };
         definition = Keire::ConvertVfxEffectToGraph(definition);
         if (rendererType == Keire::VfxRendererType::Ribbon)
@@ -361,7 +365,7 @@ namespace
         definition.Capacity = 64;
         definition.Modules = {
             {RenderVfxId(501), true, Keire::VfxBurstModule{0.0F, 32, 1, 0.1F}},
-            {RenderVfxId(502), true, std::move(shapeModule)},
+            {RenderVfxId(502), true, shapeModule},
             {RenderVfxId(503), true, Keire::VfxInitializeModule{1.0F, 1.0F, {}, {}, {}, {}}},
             {RenderVfxId(504), true, Keire::VfxSizeOverLifetimeModule{Keire::Curve1D::Constant(0.12F)}},
             {RenderVfxId(505), true,
@@ -1512,6 +1516,7 @@ namespace
 
         void OnUpdate(const Keire::Time&) override
         {
+            // NOLINTBEGIN(bugprone-branch-clone) -- distinct shadow states require identical capture transitions.
             if (m_Frame == 120)
             {
                 Capture();
@@ -1544,6 +1549,7 @@ namespace
                 Owner().RequestExit();
                 return;
             }
+            // NOLINTEND(bugprone-branch-clone)
             Keire::RenderEnvironmentSettings environment;
             environment.AmbientColor = {0.05F, 0.05F, 0.05F, 1.0F};
             environment.AmbientIntensity = 0.2F;
@@ -1760,7 +1766,6 @@ namespace
                         Keire::RenderSystemInternalAccess::MaterialBindingBuildCount(*Owner().Renderer());
                 }
             }
-
             if (++m_FrameCount > 120)
             {
                 Owner().RequestExit();
@@ -1784,13 +1789,11 @@ namespace
         int m_Stage = 0;
         bool m_Submitted = false;
     };
-
     struct MaterialSemanticResults final
     {
         std::array<std::vector<std::uint8_t>, 15> Frames;
         bool ReloadsSucceeded = true;
     };
-
     class MaterialSemanticCaptureLayer final : public Keire::Layer
     {
       public:
@@ -1810,13 +1813,12 @@ namespace
             const auto renderer = object.AddComponent<Keire::MeshRendererComponent>();
             renderer->SetMesh(m_Fixture.Mesh);
             renderer->SetMaterial(m_Fixture.Material);
-
+            m_Material = Owner().Assets()->Load<Keire::MaterialAsset>(m_Fixture.Material);
             auto lightEntity = m_Scene->CreateEntity("Directional light");
             m_LightTransform = lightEntity.GetComponent<Keire::TransformComponent>();
             m_LightTransform->SetLocalEulerAngles({30.0F, 180.0F, 0.0F});
             m_Light = lightEntity.AddComponent<Keire::DirectionalLightComponent>();
             m_Light->SetIntensity(4.0F);
-
             auto pointEntity = m_Scene->CreateEntity("Point light");
             m_PointTransform = pointEntity.GetComponent<Keire::TransformComponent>();
             m_PointTransform->SetLocalPosition({0.0F, 0.0F, 1.5F});
@@ -1824,7 +1826,6 @@ namespace
             m_PointLight->SetIntensity(8.0F);
             m_PointLight->SetRange(4.0F);
             m_PointLight->SetEnabled(false);
-
             auto spotEntity = m_Scene->CreateEntity("Spot light");
             m_SpotTransform = spotEntity.GetComponent<Keire::TransformComponent>();
             m_SpotTransform->SetLocalPosition({0.0F, 0.0F, 1.5F});
@@ -1834,7 +1835,6 @@ namespace
             m_SpotLight->SetRange(4.0F);
             m_SpotLight->SetConeAngles(20.0F, 35.0F);
             m_SpotLight->SetEnabled(false);
-
             Keire::RenderSurfaceSpecification surface;
             surface.Name = "Material semantic tests";
             surface.Width = SurfaceSize;
@@ -1850,7 +1850,6 @@ namespace
             m_Environment.AmbientColor = {1.0F, 1.0F, 1.0F, 1.0F};
             m_Environment.AmbientIntensity = 0.05F;
         }
-
         void OnDetach() noexcept override
         {
             if (m_Scene)
@@ -1862,14 +1861,25 @@ namespace
             m_SpotLight.Reset();
             m_SpotTransform.Reset();
             m_ObjectTransform.Reset();
+            m_Material = {};
             m_View.Reset();
             m_Scene.Reset();
         }
-
         void OnUpdate(const Keire::Time&) override
         {
-            if (m_Submitted && ++m_SettledFrames >= 8)
+            if (m_Submitted && m_Material.Revision() < m_ExpectedMaterialRevision)
             {
+                m_SettledFrames = 0;
+                if (++m_ReloadWaitFrames > 120)
+                {
+                    m_Results->ReloadsSucceeded = false;
+                    Owner().RequestExit();
+                    return;
+                }
+            }
+            else if (m_Submitted && ++m_SettledFrames >= 8)
+            {
+                m_ReloadWaitFrames = 0;
                 auto pixels = Keire::RenderSystemInternalAccess::ReadbackRGBA8(*Owner().Renderer(), *m_View->Surface());
                 const auto statistics = MeasureCenter(pixels);
                 if (m_Stage == 0 && statistics.Green <= statistics.Red + MinimumBehaviorDelta)
@@ -1890,10 +1900,12 @@ namespace
                     return;
                 }
                 ++m_Stage;
-                m_Results->ReloadsSucceeded = ConfigureStage(m_Stage) && m_Results->ReloadsSucceeded;
+                const auto previousRevision = m_Material.Revision();
+                const bool reloadQueued = ConfigureStage(m_Stage);
+                m_Results->ReloadsSucceeded = reloadQueued && m_Results->ReloadsSucceeded;
+                m_ExpectedMaterialRevision = previousRevision + (reloadQueued ? 1U : 0U);
                 m_SettledFrames = 0;
             }
-
             Owner().Renderer()->Submit({m_Scene, m_View, false, m_Environment});
             m_Submitted = true;
         }
@@ -1906,7 +1918,6 @@ namespace
                    "\",\"MetallicFactor\":0,\"RoughnessFactor\":1,\"NormalScale\":1,"
                    "\"OcclusionStrength\":1,\"EmissiveFactor\":[1,1,1,1]";
         }
-
         [[nodiscard]] bool ConfigureStage(const std::size_t stage)
         {
             auto properties = CommonProperties();
@@ -1986,7 +1997,6 @@ namespace
                 m_SpotTransform->SetLocalEulerAngles({});
             return m_Fixture.ReplaceMaterialProperties(Owner(), properties);
         }
-
         RenderAssetFixture& m_Fixture;
         std::shared_ptr<MaterialSemanticResults> m_Results;
         Keire::Ref<Keire::Scene> m_Scene;
@@ -1998,19 +2008,20 @@ namespace
         Keire::Ref<Keire::DirectionalLightComponent> m_Light;
         Keire::Ref<Keire::PointLightComponent> m_PointLight;
         Keire::Ref<Keire::SpotLightComponent> m_SpotLight;
+        Keire::AssetHandle<Keire::MaterialAsset> m_Material;
         Keire::RenderEnvironmentSettings m_Environment;
+        std::uint64_t m_ExpectedMaterialRevision = 0;
         std::size_t m_Stage = 0;
         std::size_t m_SettledFrames = 0;
         std::size_t m_StartupWaits = 0;
+        std::size_t m_ReloadWaitFrames = 0;
         bool m_Submitted = false;
     };
-
     [[nodiscard]] Keire::ApplicationSpecification RenderTestSpecification()
     {
         const char* backend = SDL_GetEnvironmentVariable(SDL_GetEnvironment(), "KEIRE_GPU_TEST_BACKEND");
         if (backend && *backend && !SDL_SetHintWithPriority(SDL_HINT_GPU_DRIVER, backend, SDL_HINT_OVERRIDE))
             throw std::runtime_error("Could not restore the requested GPU backend after SDL shutdown.");
-
         Keire::ApplicationSpecification specification;
         specification.MainWindow.Title = "Kéire rendered output tests";
         specification.MainWindow.Width = SurfaceSize;
@@ -2029,7 +2040,6 @@ namespace
         return specification;
     }
 } // namespace
-
 namespace KeireRenderTests
 {
     bool ProbeRenderedOutput(std::string& diagnostic) noexcept
@@ -2058,7 +2068,6 @@ namespace KeireRenderTests
         }
     }
 } // namespace KeireRenderTests
-
 TEST_CASE("rendered lighting output preserves observable color contracts")
 {
     const auto results = std::make_shared<CaptureResults>();
@@ -2067,7 +2076,6 @@ TEST_CASE("rendered lighting output preserves observable color contracts")
         (void)application.PushLayer(std::make_unique<RenderCaptureLayer>(results));
         REQUIRE(application.Run() == 0);
     }
-
     REQUIRE(results->Frames.size() == CaptureSequence.size());
     const auto defaultSky = MeasureSkyCorner(results->Frames.front());
     CHECK(defaultSky.Luminance() > MinimumBehaviorDelta);
@@ -2076,14 +2084,12 @@ TEST_CASE("rendered lighting output preserves observable color contracts")
     captures.reserve(results->Frames.size());
     for (const auto& pixels : results->Frames)
         captures.push_back(MeasureCenter(pixels));
-
     const auto at = [&captures](const CaptureKind kind) -> const PixelStatistics&
     {
         const auto found = std::ranges::find(CaptureSequence, kind);
         REQUIRE(found != CaptureSequence.end());
         return captures[static_cast<std::size_t>(std::distance(CaptureSequence.begin(), found))];
     };
-
     CHECK(at(CaptureKind::AmbientWhite).Luminance() > at(CaptureKind::AmbientZero).Luminance() + MinimumBehaviorDelta);
     CHECK(std::abs(at(CaptureKind::AmbientZero).Luminance() - at(CaptureKind::DirectionalDisabled).Luminance()) <=
           ColorTolerance);

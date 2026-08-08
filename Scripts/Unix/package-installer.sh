@@ -39,7 +39,8 @@ temporary_root="$(mktemp -d)"
 trap 'rm -rf "$temporary_root"' EXIT
 
 sha256_artifact() {
-    local artifact="$1" checksum="$artifact.sha256" digest
+    local artifact="$1" digest
+    local checksum="$artifact.sha256"
     if command -v sha256sum >/dev/null 2>&1; then
         digest="$(sha256sum "$artifact" | awk '{print $1}')"
     else

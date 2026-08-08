@@ -69,13 +69,15 @@ function Get-ProjectGenerationFingerprint {
     $premakeSearchRoots = Get-ChildItem -LiteralPath $Root -Directory | Where-Object {
         $_.Name -notin @(".git", "Build", "Vendor", "Tools")
     }
+    $premakeSupportInputs = Get-ChildItem -LiteralPath (Join-Path $Root "Scripts\Premake") `
+        -Recurse -Filter "*.lua" -File | ForEach-Object FullName
     $premakeInputs = @(
         (Join-Path $Root "premake5.lua"),
         (Join-Path $Root "Config\Project.conf"),
         (Join-Path $Root "Config\Dependencies.lock")
     ) + @($premakeSearchRoots | ForEach-Object {
         Get-ChildItem -LiteralPath $_.FullName -Recurse -Filter "premake5.lua" -File | ForEach-Object FullName
-    })
+    }) + @($premakeSupportInputs)
 
     $lines = @($inventory | Sort-Object -Unique)
     foreach ($path in $premakeInputs | Sort-Object -Unique) {
@@ -283,10 +285,10 @@ function Get-WindowsRequiredPackagePaths {
         "third-party\SDL3\include\SDL3\SDL.h",
         "third-party\SDL3\lib\SDL3-static.lib", "third-party\SDL3\cmake\SDL3Config.cmake",
         "third-party\SDL3\licenses\SDL3\LICENSE.txt",
-        "examples\consumer\Main.cpp", "examples\consumer\Client.json", "examples\consumer\CMakeLists.txt", "examples\consumer\README.md",
-        "examples\managed-consumer\ClientApplication.cpp", "examples\managed-consumer\CMakeLists.txt", "examples\managed-consumer\README.md",
-        "examples\source-module\ClientApplication.cpp", "examples\source-module\GameplayModule.cpp", "examples\source-module\GameplayModule.h", "examples\source-module\CMakeLists.txt", "examples\source-module\README.md",
-        "Config\SourceModules.premake.lua", "docs\PlayerBuilds.md", "docs\Diagnostics\KEIRE-AUDIO-0001.md", "docs\Diagnostics\KEIRE-REPLAY-0001.md", "docs\Diagnostics\KEIRE-REPLAY-0002.md",
+        "examples\consumer\Source\Main.cpp", "examples\consumer\Client.json", "examples\consumer\CMakeLists.txt", "examples\consumer\README.md",
+        "examples\managed-consumer\Source\ClientApplication.cpp", "examples\managed-consumer\CMakeLists.txt", "examples\managed-consumer\README.md",
+        "examples\source-module\Source\ClientApplication.cpp", "examples\source-module\Source\GameplayModule.cpp", "examples\source-module\Include\GameplayModule.h", "examples\source-module\CMakeLists.txt", "examples\source-module\README.md",
+        "Config\SourceModules.premake.lua", "Docs\PlayerBuilds.md", "Docs\Diagnostics\KEIRE-AUDIO-0001.md", "Docs\Diagnostics\KEIRE-REPLAY-0001.md", "Docs\Diagnostics\KEIRE-REPLAY-0002.md",
         "README.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json"
     )
 }
@@ -408,7 +410,7 @@ function Get-WindowsRequiredEditorPackagePaths {
         "bin\Managed\Keire.Managed.dll", "bin\Managed\Dotnet\dotnet.exe", "Config\Client.json",
         "Config\Branding\Keire.png",
         "samples\KeireSandbox\ProjectSettings\Project.keireproject",
-        "samples\KeireSandbox\Assets\Scenes\SampleScene.keirescene", "docs\PlayerBuilds.md", "README.md",
+        "samples\KeireSandbox\Assets\Scenes\SampleScene.keirescene", "Docs\PlayerBuilds.md", "README.md",
         "CHANGELOG.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json",
         "Config\SourceModules.premake.lua", "editor-package.json", "Launch-KeireEditor.cmd"
     ) + @($licenses)
@@ -428,7 +430,7 @@ function Assert-WindowsEditorPackageStage {
     }
     foreach ($hubPath in @(
             "bin\$HubTarget.exe", "bin\$($Namespace)HubWorker.exe", "content", "Launch-KeireHub.cmd",
-            "hub-package.json", "Config\Distribution.json", "Config\Supabase.json", "docs\ProjectHub.md")) {
+            "hub-package.json", "Config\Distribution.json", "Config\Supabase.json", "Docs\ProjectHub.md")) {
         if (Test-Path -LiteralPath (Join-Path $Stage $hubPath)) {
             throw "Editor package contains Hub-only content: $hubPath"
         }
@@ -482,7 +484,7 @@ function Get-WindowsRequiredHubPackagePaths {
     @(
         "bin\$HubTarget.exe", "bin\$($Namespace)HubWorker.exe", "Config\Branding\Keire.png",
         "Config\SourceModules.premake.lua", "Config\Distribution.json", "Config\Supabase.json",
-        "docs\ProjectHub.md", "Samples\KeireSandbox\ProjectSettings\Project.keireproject", "README.md",
+        "Docs\ProjectHub.md", "Samples\KeireSandbox\ProjectSettings\Project.keireproject", "README.md",
         "CHANGELOG.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "hub-package.json", "Launch-KeireHub.cmd",
         "bin\libsodium.dll", "third-party\licenses\libsodium-LICENSE.txt",
         "third-party\licenses\spdlog-LICENSE.txt", "third-party\licenses\fmt-LICENSE.rst",

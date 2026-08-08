@@ -2,9 +2,9 @@
 
 #include "KeireHubRuntime/PackageResolver.h"
 
-#include "DistributionEncoding.h"
-#include "Persistence.h"
-#include "Sha256.h"
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
+#include <KeireHubRuntimeInternal/Persistence.h>
+#include <KeireHubRuntimeInternal/Sha256.h>
 
 #include <stdexcept>
 #include <system_error>
@@ -15,7 +15,7 @@ namespace KeireHub
     namespace
     {
         constexpr std::uint64_t MaximumInstallerBytes = 8ULL * 1024ULL * 1024ULL * 1024ULL;
-        constexpr std::size_t MaximumResumeTokenBytes = 64 * 1024;
+        constexpr std::size_t MaximumResumeTokenBytes = std::size_t{64} * 1024;
 
         [[nodiscard]] bool IsUpgrade(const std::string_view current, const std::string_view target) noexcept
         {

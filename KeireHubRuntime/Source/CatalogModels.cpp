@@ -1,6 +1,6 @@
 #include "KeireHubRuntime/CatalogModels.h"
 
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <algorithm>
 #include <array>
@@ -14,7 +14,7 @@ namespace KeireHub
 {
     namespace
     {
-        constexpr std::size_t MaximumCatalogBytes = 16 * 1024 * 1024;
+        constexpr std::size_t MaximumCatalogBytes = std::size_t{16} * 1024 * 1024;
         constexpr std::size_t MaximumCatalogItems = 1024;
         constexpr std::size_t MaximumTags = 32;
         constexpr std::size_t MaximumPackages = 64;
@@ -478,7 +478,7 @@ namespace KeireHub
                     !Detail::IsSafeRelativePath(entry.SourcePath) ||
                     (entry.PackageId && !Detail::IsBoundedIdentifier(*entry.PackageId)) ||
                     (entry.Version && !IsText(*entry.Version, 128)) ||
-                    (entry.EmbeddedText && !IsText(*entry.EmbeddedText, 1024 * 1024, true)) ||
+                    (entry.EmbeddedText && !IsText(*entry.EmbeddedText, std::size_t{1024} * 1024, true)) ||
                     !identities.insert(entry.Id).second)
                 {
                     throw std::invalid_argument("Invalid or duplicate license entry.");

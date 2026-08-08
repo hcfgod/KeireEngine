@@ -305,7 +305,7 @@ PRODUCTION_SLICES = [
             "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp",
         ],
         "samples": ["Samples/KeireSandbox/Assets/Vfx/VfxEffect.keirevfx"],
-        "documentation": ["docs/Vfx.md"],
+        "documentation": ["Docs/Vfx.md"],
     },
     {
         "id": "context-output-pipeline",
@@ -325,7 +325,7 @@ PRODUCTION_SLICES = [
             "Samples/KeireSandbox/Assets/Vfx/EmberShardCyclone.keirevfx",
             "Samples/KeireSandbox/Assets/Vfx/VfxEffect.keirevfx",
         ],
-        "documentation": ["docs/Vfx.md"],
+        "documentation": ["Docs/Vfx.md"],
     },
 ]
 
@@ -488,7 +488,7 @@ def arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         "--output",
-        default=Path("docs/VfxParityManifest.json"),
+        default=Path("Docs/VfxParityManifest.json"),
         type=Path,
         help="Manifest destination.",
     )
@@ -854,7 +854,7 @@ def make_entries(package_root: Path, documents: list[Path]) -> list[dict[str, An
                         "tests": KEIRE_TESTS.get(implementation, [])
                         if implementation
                         else [],
-                        "documentation": ["docs/Vfx.md"] if implementation else [],
+                        "documentation": ["Docs/Vfx.md"] if implementation else [],
                         "disabledReason": None
                         if support != "Disabled"
                         else disabled_reason(kind, implementation, backend),

@@ -112,7 +112,7 @@ TEST_CASE("Hub activation protocol rejects malformed and hostile frames")
     auto encoded =
         EncodeHubActivation({.Action = HubActivationAction::InstallVersion, .VersionId = "keire.editor.stable@1.2.3"});
     REQUIRE(encoded);
-    const auto valid = encoded.Value();
+    const auto& valid = encoded.Value();
 
     CHECK_FALSE(DecodeHubActivation("show"));
     const auto oversizedFrame = std::string(MaximumHubActivationFrameBytes + 1, 'x');

@@ -306,7 +306,7 @@ namespace KeireEditor
         return m_Host.Edit(undoName, std::move(candidate));
     }
 
-    AssetDocumentReloadResult ManagedDataDocument::Reload(Keire::ManagedDataDefinition definition,
+    AssetDocumentReloadResult ManagedDataDocument::Reload(const Keire::ManagedDataDefinition& definition,
                                                           const std::uint64_t revision)
     {
         if (definition == m_Host.Draft())
@@ -317,7 +317,7 @@ namespace KeireEditor
         m_SuppressPreview = true;
         try
         {
-            const auto result = m_Host.Reload(std::move(definition), revision);
+            const auto result = m_Host.Reload(definition, revision);
             m_SuppressPreview = false;
             return result;
         }
@@ -356,7 +356,7 @@ namespace KeireEditor
         if (!property.ExpectedManagedType)
             return true;
         if (!managedDefinition ||
-            managedDefinition->ManagedType != *property.ExpectedManagedType && !property.IncludeDerivedAssetTypes)
+            (managedDefinition->ManagedType != *property.ExpectedManagedType && !property.IncludeDerivedAssetTypes))
         {
             return false;
         }
@@ -397,7 +397,7 @@ namespace KeireEditor
         for (auto& [asset, dependency] : dependencies)
         {
             (void)asset;
-            definition.Dependencies.push_back(std::move(dependency));
+            definition.Dependencies.push_back(dependency);
         }
     }
 } // namespace KeireEditor

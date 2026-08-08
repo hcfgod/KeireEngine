@@ -30,7 +30,7 @@ Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
 if (-not $StageOnly) {
     Remove-Item $archive, "$archive.sha256", $symbols, "$symbols.sha256" -Force -ErrorAction SilentlyContinue
 }
-New-Item -ItemType Directory -Force "$stage\bin", "$stage\lib", "$stage\include", "$stage\Config", "$stage\samples", "$stage\content", "$stage\docs\Diagnostics", "$stage\third-party\licenses", "$stage\third-party\SDL3", "$stage\examples\consumer", "$stage\examples\managed-consumer", "$stage\examples\source-module", "$stage\lib\cmake\$($Project.PROJECT_IDENTIFIER)" | Out-Null
+New-Item -ItemType Directory -Force "$stage\bin", "$stage\lib", "$stage\include", "$stage\Config", "$stage\samples", "$stage\content", "$stage\Docs\Diagnostics", "$stage\third-party\licenses", "$stage\third-party\SDL3", "$stage\examples\consumer", "$stage\examples\managed-consumer", "$stage\examples\source-module", "$stage\lib\cmake\$($Project.PROJECT_IDENTIFIER)" | Out-Null
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CLIENT_TARGET)\$($Project.CLIENT_TARGET).exe" "$stage\bin\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.HUB_TARGET)\$($Project.HUB_TARGET).exe" "$stage\bin\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$assetToolName\$assetToolName.exe" "$stage\bin\"
@@ -90,8 +90,8 @@ Copy-Item "$sdlInstall\lib\SDL3-static.lib" "$stage\third-party\SDL3\lib\"
 Copy-Item "$sdlInstall\cmake\*" "$stage\third-party\SDL3\cmake\" -Recurse
 Copy-Item "$sdlInstall\licenses\SDL3" "$stage\third-party\SDL3\licenses\" -Recurse
 Copy-Item "$Root\README.md", "$Root\LICENSE.txt", "$Root\THIRD_PARTY_NOTICES.md" $stage
-Copy-Item "$Root\docs\Diagnostics\*" "$stage\docs\Diagnostics\" -Recurse
-Copy-Item "$Root\docs\PlayerBuilds.md" "$stage\docs\"
+Copy-Item "$Root\Docs\Diagnostics\*" "$stage\Docs\Diagnostics\" -Recurse
+Copy-Item "$Root\Docs\PlayerBuilds.md" "$stage\Docs\"
 Copy-Item "$Root\Config\SourceModules.premake.lua" "$stage\Config\"
 Copy-Item "$Root\Examples\Consumer\*" "$stage\examples\consumer\" -Recurse
 Copy-Item "$Root\Examples\ManagedConsumer\*" "$stage\examples\managed-consumer\" -Recurse
@@ -228,7 +228,7 @@ try {
     Expand-Archive $archive $sdkRoot -Force
     Assert-WindowsPackageGeneratedDataFree $sdkRoot
     $env:PATH = "$(Join-Path $sdkRoot 'bin');$previousValidationPath"
-    $consumerSource = Join-Path $sdkRoot "examples\consumer\Main.cpp"
+    $consumerSource = Join-Path $sdkRoot "examples\consumer\Source\Main.cpp"
     $consumerExe = Join-Path $validationRoot "consumer.exe"
     $consumerObject = Join-Path $validationRoot "consumer.obj"
     Copy-Item (Join-Path $sdkRoot "bin\nethost.dll") $validationRoot
@@ -264,7 +264,7 @@ try {
     try { & $consumerExe (Join-Path $sdkRoot "examples\consumer\Client.json"); if ($LASTEXITCODE -ne 0) { throw "Extracted SDK consumer failed with exit code $LASTEXITCODE." } }
     finally { Pop-Location }
 
-    $managedSource = Join-Path $sdkRoot "examples\managed-consumer\ClientApplication.cpp"
+    $managedSource = Join-Path $sdkRoot "examples\managed-consumer\Source\ClientApplication.cpp"
     $managedExe = Join-Path $validationRoot "managed-consumer.exe"
     $managedObject = Join-Path $validationRoot "managed-consumer.obj"
     if ($Toolset -eq "msc") {

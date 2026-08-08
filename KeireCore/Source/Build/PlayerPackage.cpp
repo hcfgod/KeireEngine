@@ -34,9 +34,9 @@ namespace Keire::Detail
 
         constexpr std::uintmax_t MaximumPlayerBytes = 16ULL * 1024ULL * 1024ULL * 1024ULL;
         constexpr std::size_t MaximumPlayerFiles = 32768;
-        constexpr std::size_t MaximumDescriptorBytes = 64U * 1024U;
-        constexpr std::size_t MaximumIconSourceBytes = 64U * 1024U * 1024U;
-        constexpr std::size_t MaximumEncodedIconBytes = 32U * 1024U * 1024U;
+        constexpr std::size_t MaximumDescriptorBytes = std::size_t{64} * 1024U;
+        constexpr std::size_t MaximumIconSourceBytes = std::size_t{64} * 1024U * 1024U;
+        constexpr std::size_t MaximumEncodedIconBytes = std::size_t{32} * 1024U * 1024U;
 
         void ValidatePlayerBuildStatusDocument(const PlayerBuildStatusDocument& document)
         {
@@ -85,7 +85,8 @@ namespace Keire::Detail
         [[nodiscard]] BrandingImage BuiltinPlayerIcon()
         {
             constexpr std::uint32_t size = 512;
-            BrandingImage result{.Width = size, .Height = size, .Pixels = std::vector<std::uint8_t>(size * size * 4U)};
+            BrandingImage result{
+                .Width = size, .Height = size, .Pixels = std::vector<std::uint8_t>(std::size_t{size} * size * 4U)};
             for (std::uint32_t y = 0; y < size; ++y)
             {
                 for (std::uint32_t x = 0; x < size; ++x)
@@ -129,16 +130,18 @@ namespace Keire::Detail
                 stbi_image_free(decoded);
                 throw std::runtime_error("Player icon could not be decoded: " + diagnostic);
             }
+            const auto byteCount = static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4U;
             BrandingImage result{.Width = static_cast<std::uint32_t>(width),
                                  .Height = static_cast<std::uint32_t>(height),
-                                 .Pixels = std::vector<std::uint8_t>(decoded, decoded + width * height * 4)};
+                                 .Pixels = std::vector<std::uint8_t>(decoded, decoded + byteCount)};
             stbi_image_free(decoded);
             return result;
         }
 
         [[nodiscard]] BrandingImage ResizePlayerIcon(const BrandingImage& source, const std::uint32_t size)
         {
-            BrandingImage result{.Width = size, .Height = size, .Pixels = std::vector<std::uint8_t>(size * size * 4U)};
+            BrandingImage result{
+                .Width = size, .Height = size, .Pixels = std::vector<std::uint8_t>(std::size_t{size} * size * 4U)};
             const auto scale =
                 std::min(static_cast<double>(size) / source.Width, static_cast<double>(size) / source.Height);
             const auto width = std::max(1U, static_cast<std::uint32_t>(source.Width * scale));
@@ -217,8 +220,9 @@ namespace Keire::Detail
 #if defined(_WIN32)
         [[nodiscard]] std::uint16_t ReadLittleEndian16(const std::span<const std::byte> bytes, const std::size_t offset)
         {
-            return static_cast<std::uint16_t>(std::to_integer<std::uint8_t>(bytes[offset])) |
-                   static_cast<std::uint16_t>(std::to_integer<std::uint8_t>(bytes[offset + 1])) << 8U;
+            return static_cast<std::uint16_t>(
+                static_cast<std::uint16_t>(std::to_integer<std::uint8_t>(bytes[offset])) |
+                static_cast<std::uint16_t>(std::to_integer<std::uint8_t>(bytes[offset + 1])) << 8U);
         }
 
         [[nodiscard]] std::uint32_t ReadLittleEndian32(const std::span<const std::byte> bytes, const std::size_t offset)

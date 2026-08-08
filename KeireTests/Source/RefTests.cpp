@@ -87,13 +87,14 @@ TEST_CASE("Ref supports null, copy, move, reset, and self-assignment")
     auto copy = reference;
     CHECK(copy == reference);
     CHECK(reference.UseCount() == 2);
-    copy = copy;
+    auto* const self = &copy;
+    copy = *self;
     CHECK(copy.UseCount() == 2);
-    copy = std::move(copy);
+    copy = std::move(*self);
     CHECK(copy.UseCount() == 2);
 
     auto moved = std::move(copy);
-    CHECK_FALSE(copy);
+    CHECK_FALSE(copy); // NOLINT(bugprone-use-after-move): moved-from emptiness is the contract under test.
     CHECK(moved.UseCount() == 2);
     moved.Reset();
     CHECK(reference.UseCount() == 1);
@@ -120,7 +121,7 @@ TEST_CASE("Ref polymorphic conversion retains the original deleter")
     CHECK(weakBase.Lock()->GetValue() == 2);
 
     Keire::Ref<RefBase> movedBase = std::move(derived);
-    CHECK_FALSE(derived);
+    CHECK_FALSE(derived); // NOLINT(bugprone-use-after-move): moved-from emptiness is the contract under test.
     movedBase.Reset();
     CHECK(base.UseCount() == 1);
     base.Reset();
@@ -180,7 +181,7 @@ TEST_CASE("Ref atomic ownership supports concurrent copying")
             {
                 for (int iteration = 0; iteration < 2000; ++iteration)
                 {
-                    auto copy = root;
+                    const auto& copy = root;
                     CHECK(copy->Value == 42);
                 }
             });

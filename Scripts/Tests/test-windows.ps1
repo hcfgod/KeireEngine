@@ -1,4 +1,4 @@
-param([ValidateSet("All", "Fast", "Integration")][string]$Suite = "All")
+﻿param([ValidateSet("All", "Fast", "Integration")][string]$Suite = "All")
 
 $ErrorActionPreference = "Stop"
 $started = [Diagnostics.Stopwatch]::StartNew()
@@ -21,6 +21,8 @@ function Assert-True([bool]$Condition, [string]$Message) {
 $project = Get-ProjectConfig
 $python = (Get-Command python -ErrorAction Stop).Source
 if ($runFast) {
+& $python (Join-Path $PSScriptRoot "check-repository-layout.py")
+if ($LASTEXITCODE -ne 0) { throw "Repository layout checks failed." }
 & (Join-Path $PSScriptRoot "test-clean-windows.ps1")
 & (Join-Path $PSScriptRoot "test-managed-host-staging-windows.ps1")
 & (Join-Path $PSScriptRoot "test-editor-package-windows.ps1")
@@ -35,9 +37,15 @@ if ($node) {
     if ($LASTEXITCODE -ne 0) { throw "Website download catalog checks failed." }
     & $node.Source (Join-Path $PSScriptRoot "test-website-contact.mjs")
     if ($LASTEXITCODE -ne 0) { throw "Website contact form checks failed." }
+    & $node.Source (Join-Path $PSScriptRoot "test-website-contact-function.mjs")
+    if ($LASTEXITCODE -ne 0) { throw "Website contact Edge Function checks failed." }
+    & $node.Source (Join-Path $PSScriptRoot "test-website-docs.mjs")
+    if ($LASTEXITCODE -ne 0) { throw "Website documentation source checks failed." }
 }
 & $python (Join-Path $PSScriptRoot "test-supabase-config.py")
 if ($LASTEXITCODE -ne 0) { throw "Supabase desktop configuration checks failed." }
+& $python (Join-Path $PSScriptRoot "test-patch-ninja-depfiles.py")
+if ($LASTEXITCODE -ne 0) { throw "Ninja dependency-file rule checks failed." }
 & (Join-Path $PSScriptRoot "test-installer-windows.ps1")
 & (Join-Path $PSScriptRoot "test-hub-installer-windows.ps1")
 & (Join-Path $PSScriptRoot "test-distribution-service-package-windows.ps1")
@@ -47,8 +55,20 @@ Assert-True ($generateScript.Contains('Get-ProjectGenerationFingerprint')) "Sour
 $windowsCommon = Get-Content (Join-Path $Windows "common.ps1") -Raw
 Assert-True ($windowsCommon.Contains('"KeireHubRuntime"') -and $windowsCommon.Contains('"KeireHubTests"') -and
              $windowsCommon.Contains('"KeireHubWorker"')) "Hub target source-inventory project regeneration"
+Assert-True ($windowsCommon.Contains('Get-ChildItem -LiteralPath (Join-Path $Root "Scripts\Premake")') -and
+             $windowsCommon.Contains('-Filter "*.lua"')) "Premake policy content project regeneration"
 $bootstrapScript = Get-Content (Join-Path $Windows "bootstrap.ps1") -Raw
 Assert-True ($bootstrapScript.Contains('GetTempPath') -and $bootstrapScript.Contains('$PremakeExe --version')) "Unicode-safe Premake version validation"
+$dependencyScript = Get-Content (Join-Path $Windows "dependencies.ps1") -Raw
+Assert-True ($dependencyScript.Contains('$Toolset -eq "msc"') -and
+             $dependencyScript.Contains('AssimpZlibDebugLibrary = "$debugInstall/lib/$zlibDebugName"') -and
+             $dependencyScript.Contains('$sodiumToolsetVersion')) `
+    "Toolset-aware Assimp zlib and deterministic libsodium caches"
+$shaderCompilerScript = Get-Content (Join-Path $Windows "shader-compiler.ps1") -Raw
+Assert-True ($shaderCompilerScript.Contains('$hostToolset = "msc"') -and
+             $shaderCompilerScript.Contains('"-DCMAKE_C_COMPILER=cl.exe"') -and
+             $shaderCompilerScript.Contains('-not $configuredKey')) `
+    "Windows host shader compiler uses the supported MSVC toolchain and replaces incomplete configuration"
 $processSource = Get-Content (Join-Path (Get-RepositoryRoot) "KeireCore\Source\Process.cpp") -Raw
 Assert-True ($processSource.Contains('CommandLineToArgvW(GetCommandLineW()') -and $processSource.Contains('WideCharToMultiByte(CP_UTF8')) "Shared UTF-8 Windows process command line"
 $menuScript = Get-Content (Join-Path $Windows "..\project.ps1") -Raw
@@ -56,9 +76,16 @@ Assert-True ($menuScript.Contains('$script:Target = $Project.CLIENT_TARGET')) "P
 Assert-True ($menuScript.Contains('"package-editor"') -and $menuScript.Contains('"package-hub"') -and
              $menuScript.Contains('$Configuration = "Dist"')) "Dist product package launcher commands"
 $testScript = Get-Content (Join-Path $Windows "test.ps1") -Raw
+$coverageScript = Get-Content (Join-Path $Windows "coverage.ps1") -Raw
 Assert-True ($testScript.Contains('-Target $Project.CLIENT_TARGET')) "Complete client compile test gate"
 Assert-True ($testScript.Contains('$hubTestsTarget = "$($Project.PROJECT_NAMESPACE)HubTests"') -and
              $testScript.Contains('& $hubTestsExe')) "Private Hub test suite execution"
+Assert-True ($coverageScript.Contains('$target -eq $Project.CLIENT_TARGET') -and
+             $coverageScript.Contains('"--smoke-project"') -and
+             $coverageScript.Contains('Remove-Item -Force')) "Coverage client smoke and fresh profile execution"
+Assert-True ($coverageScript.Contains('$minimumCoreLineCoverage = 74.5') -and
+             $coverageScript.Contains('$minimumAggregateLineCoverage = 63.0') -and
+             $coverageScript.Contains('llvm-cov core summary')) "Core and aggregate coverage gates"
 $editorTestsPremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireEditorTests\premake5.lua") -Raw
 $hubTestsPremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireHubTests\premake5.lua") -Raw
 $editorTestsMain = Get-Content (Join-Path (Get-RepositoryRoot) "KeireEditorTests\Source\Main.cpp") -Raw
@@ -243,6 +270,23 @@ Assert-True ($hubPremake.Contains('links { HubRuntimeTarget }') -and
              -not $hubPremake.Contains('dependson { ProjectConfig.CLIENT_TARGET }')) `
     "Standalone Hub links its private runtime without depending on an editor build"
 Assert-True ($assetToolPremake.Contains('dependson { AssetWorkerTarget }')) "AssetTool builds its private importer worker"
+Assert-True ($premakePolicy.Contains('function ApplyLargeWindowsStack()') -and
+             $premakePolicy.Contains('linkoptions { "-Xlinker", "/STACK:8388608" }') -and
+             $premakePolicy.Contains('linkoptions { "-Wl,--stack,8388608" }') -and
+             $testsPremake.Contains('ApplyLargeWindowsStack()') -and
+             $hubPremake.Contains('ApplyLargeWindowsStack()') -and
+             $assetToolPremake.Contains('ApplyLargeWindowsStack()')) "Portable Windows stack linker options"
+Assert-True ($premakePolicy.Contains('buildoptions { "-fms-runtime-lib=dll_dbg" }') -and
+             $premakePolicy.Contains('linkoptions { "-fms-runtime-lib=dll_dbg" }') -and
+             $premakePolicy.Contains('buildoptions { "-fms-runtime-lib=dll" }')) `
+    "Clang uses the dependency-compatible Windows C++ runtime"
+Assert-True ($premakePolicy.Contains('function GeneratorRootPath(path)') -and
+             $premakePolicy.Contains('SelectedToolset ~= "msc"') -and
+             $premakePolicy.Contains('path:gsub("^%.%./", "")') -and
+             $premakePolicy.Contains('links(DependencyLinks(DependencyManifest.RecastDebugLibraries))') -and
+             $premakePolicy.Contains('GeneratorRootPath(DependencyManifest.SDL3DebugLibrary)') -and
+             $assetWorkerPremake.Contains('libdirs { GeneratorRootPath(ffmpegDebug .. "/lib") }')) `
+    "Toolset-aware root-relative Ninja and GNU Make dependency links"
 Assert-True ($assetToolSource.Contains("--worker-timeout-seconds") -and
              $assetToolSource.Contains("commandLine.WorkerTimeout")) "Configurable asset-worker CLI timeout"
 Assert-True ($assetWorkerPremake.Contains('filter { "system:linux"') -and
@@ -329,7 +373,6 @@ Assert-True ($renderFacadeLines -lt 700) "RenderSystem facade remains below 700 
 $renderSettingsSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Rendering\RenderSettings.cpp') -Raw
 Assert-True ($renderSettingsSource.Contains('Rendering.keiresettings') -and (Test-Path (Join-Path (Get-RepositoryRoot) 'Samples\KeireSandbox\ProjectSettings\Rendering.keiresettings'))) "Persistent project rendering settings"
 $renderingAssetsSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Assets\RenderingAssets.cpp') -Raw
-$assetPipelineSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Assets\AssetPipeline.cpp') -Raw
 Assert-True (@(Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Assets\AssetPipeline.cpp')).Count -lt 600) "AssetPipeline facade remains below 600 lines"
 Assert-True (-not ((Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Include\KeireInternal\Assets\AssetDatabaseImplementation.h') -Raw).Contains('recursive_mutex'))) "Asset operations use explicit locked and unlocked entry points"
 $uiSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Ui.cpp') -Raw
@@ -613,7 +656,7 @@ try {
     $hubDirectory = $project.HUB_DIRECTORY
     $testsDirectory = $project.TESTS_DIRECTORY
     $projectNamespace = $project.PROJECT_NAMESPACE
-    foreach ($directory in @("Scripts\Windows", "Config", "Examples\Consumer", "Examples\ManagedConsumer", "$coreDirectory\Include\$projectNamespace", "$coreDirectory\Source", "$clientDirectory\Source", "$hubDirectory\Source", "$testsDirectory\Source", "Vendor", "Build\Bin")) {
+    foreach ($directory in @("Scripts\Windows", "Config", "Examples\Consumer\Source", "Examples\ManagedConsumer\Source", "$coreDirectory\Include\$projectNamespace", "$coreDirectory\Source", "$clientDirectory\Source", "$hubDirectory\Source", "$testsDirectory\Source", "Vendor", "Build\Bin")) {
         New-Item -ItemType Directory -Force (Join-Path $fixture $directory) | Out-Null
     }
     Copy-Item (Join-Path $Windows "common.ps1"), (Join-Path $Windows "rename.ps1"), (Join-Path $Windows "clean.ps1"), (Join-Path $Windows "doctor.ps1") (Join-Path $fixture "Scripts\Windows")
@@ -621,8 +664,10 @@ try {
     Copy-Item (Join-Path (Get-RepositoryRoot) "Config\Client.json") (Join-Path $fixture "Config\Client.json")
     Copy-Item (Join-Path (Get-RepositoryRoot) "Config\PackageConfig.cmake.in") (Join-Path $fixture "Config\PackageConfig.cmake.in")
     Copy-Item (Join-Path (Get-RepositoryRoot) "premake5.lua") (Join-Path $fixture "premake5.lua")
-    Copy-Item (Join-Path (Get-RepositoryRoot) "Examples\Consumer\CMakeLists.txt"), (Join-Path (Get-RepositoryRoot) "Examples\Consumer\Main.cpp") (Join-Path $fixture "Examples\Consumer")
-    Copy-Item (Join-Path (Get-RepositoryRoot) "Examples\ManagedConsumer\CMakeLists.txt"), (Join-Path (Get-RepositoryRoot) "Examples\ManagedConsumer\ClientApplication.cpp") (Join-Path $fixture "Examples\ManagedConsumer")
+    Copy-Item (Join-Path (Get-RepositoryRoot) "Examples\Consumer\CMakeLists.txt") (Join-Path $fixture "Examples\Consumer")
+    Copy-Item (Join-Path (Get-RepositoryRoot) "Examples\Consumer\Source\Main.cpp") (Join-Path $fixture "Examples\Consumer\Source")
+    Copy-Item (Join-Path (Get-RepositoryRoot) "Examples\ManagedConsumer\CMakeLists.txt") (Join-Path $fixture "Examples\ManagedConsumer")
+    Copy-Item (Join-Path (Get-RepositoryRoot) "Examples\ManagedConsumer\Source\ClientApplication.cpp") (Join-Path $fixture "Examples\ManagedConsumer\Source")
     Set-Content (Join-Path $fixture "$coreDirectory\Include\$projectNamespace\Core.h") @"
 #ifndef $($project.PROJECT_MACRO_PREFIX)_CORE_CORE_H
 #define $($project.PROJECT_MACRO_PREFIX)_CORE_CORE_H

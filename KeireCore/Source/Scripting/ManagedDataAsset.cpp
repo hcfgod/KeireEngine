@@ -23,22 +23,23 @@ namespace Keire
     {
         using Json = nlohmann::json;
 
-        constexpr std::size_t MaximumDocumentBytes = 16U * 1024U * 1024U;
-        constexpr std::size_t MaximumFieldCount = 16U * 1024U;
-        constexpr std::size_t MaximumDependencyCount = 16U * 1024U;
+        constexpr std::size_t MaximumDocumentBytes = std::size_t{16} * 1024U * 1024U;
+        constexpr std::size_t MaximumFieldCount = std::size_t{16} * 1024U;
+        constexpr std::size_t MaximumDependencyCount = std::size_t{16} * 1024U;
         constexpr std::size_t MaximumAliasesPerField = 128;
         constexpr std::size_t MaximumTextBytes = 2048;
-        constexpr std::size_t MaximumValueNodes = 128U * 1024U;
+        constexpr std::size_t MaximumValueNodes = std::size_t{128} * 1024U;
         constexpr std::size_t MaximumValueDepth = 32;
-        constexpr std::size_t MaximumTypeCatalogBytes = 16U * 1024U * 1024U;
+        constexpr std::size_t MaximumTypeCatalogBytes = std::size_t{16} * 1024U * 1024U;
 
         [[nodiscard]] bool HasVisibleText(const std::string_view value) noexcept
         {
             if (value.empty() || value.size() > MaximumTextBytes)
                 return false;
             bool visible = false;
-            for (const unsigned char character : value)
+            for (const char input : value)
             {
+                const auto character = static_cast<unsigned char>(input);
                 if (character < 0x20U)
                     return false;
                 visible = visible || character > 0x20U;
@@ -619,7 +620,7 @@ namespace Keire
                 dependency.AssetType = AssetTypeId::Parse(encoded.at("assetTypeId").get<std::string>());
                 if (const auto found = encoded.find("managedTypeId"); found != encoded.end())
                     dependency.ManagedType = ManagedTypeId::Parse(found->get<std::string>());
-                definition.Dependencies.push_back(std::move(dependency));
+                definition.Dependencies.push_back(dependency);
             }
 
             Validate(definition);
@@ -918,7 +919,7 @@ namespace Keire
     {
         return {ManagedDataAsset::StaticType(), CreateRef<ManagedDataAsset>(),
                 [](const std::span<const std::byte> bytes) -> Ref<Asset> { return ManagedDataAsset::Decode(bytes); },
-                [](Ref<Asset> current, Ref<Asset> replacement) -> Ref<Asset>
+                [](const Ref<Asset>& current, const Ref<Asset>& replacement) -> Ref<Asset>
                 {
                     auto active = DynamicRefCast<ManagedDataAsset>(current);
                     const auto candidate = DynamicRefCast<const ManagedDataAsset>(replacement);

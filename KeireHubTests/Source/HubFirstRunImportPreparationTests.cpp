@@ -1,4 +1,4 @@
-#include "TestSupport.h"
+#include <KeireHubTests/TestSupport.h>
 
 #include "KeireHub/HubFirstRunIntegration.h"
 #include "KeireHub/HubFirstRunWorkflow.h"

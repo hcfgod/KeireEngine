@@ -1,6 +1,7 @@
 #include "KeireHub/HubPathMigration.h"
 
 #include <array>
+#include <string_view>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -9,8 +10,8 @@ namespace KeireHub
 {
     namespace
     {
-        const std::filesystem::path CanonicalComponent(std::u8string(u8"Kéire"));
-        const std::filesystem::path LegacyComponent(std::u8string(u8"KÃ©ire"));
+        constexpr std::u8string_view CanonicalComponent = u8"Kéire";
+        constexpr std::u8string_view LegacyComponent = u8"KÃ©ire";
 
         [[nodiscard]] HubError MigrationError(const std::filesystem::path& path, const std::error_code& error)
         {

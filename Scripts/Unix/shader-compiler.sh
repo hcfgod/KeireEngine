@@ -10,7 +10,11 @@ toolset="${3:?toolset is required}"
 force="${4:-0}"
 system=linux; [[ "$platform" == Mac ]] && system=macosx
 output_arch="$(architecture_output_name "$architecture")"
-[[ "$toolset" == clang ]] && export CC=clang CXX=clang++ || export CC=gcc CXX=g++
+if [[ "$toolset" == clang ]]; then
+  export CC=clang CXX=clang++
+else
+  export CC=gcc CXX=g++
+fi
 
 sdl_install="$ROOT/Build/Dependencies/$system-$output_arch-$toolset/Release/install"
 [[ -f "$sdl_install/cmake/SDL3Config.cmake" ]] || { printf 'Release SDL must be built before KeireShaderCompiler.\n' >&2; exit 1; }

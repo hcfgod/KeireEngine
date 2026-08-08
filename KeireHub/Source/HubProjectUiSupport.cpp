@@ -9,6 +9,7 @@
 #include <cctype>
 #include <ctime>
 #include <iomanip>
+#include <limits>
 #include <ranges>
 #include <sstream>
 
@@ -84,10 +85,12 @@ namespace KeireHub
                status == Keire::ProjectStatus::RecoveryRequired;
     }
 
-    std::string FormatLastOpened(const std::int64_t seconds)
+    std::string FormatLastOpened(const std::uint64_t seconds)
     {
-        if (seconds <= 0)
+        if (seconds == 0)
             return "Never";
+        if (seconds > static_cast<std::uint64_t>(std::numeric_limits<std::time_t>::max()))
+            return "Unknown";
         const std::time_t time = static_cast<std::time_t>(seconds);
         std::tm local{};
 #if defined(_WIN32)

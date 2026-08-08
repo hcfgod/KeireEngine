@@ -20,10 +20,15 @@ mkdir -p "$ROOT/Build/Generated"
 printf '==> Generating %s files for %s with toolset %s\n' "$GENERATOR" "$ARCHITECTURE" "$TOOLSET"
 if [[ "$GENERATOR" == compilecommands ]]; then
     (cd "$ROOT" && "$ROOT/Tools/Linux/premake5" "${args[@]}" ninja)
+else
+    (cd "$ROOT" && "$ROOT/Tools/Linux/premake5" "${args[@]}" "$GENERATOR")
+fi
+if [[ "$GENERATOR" == ninja || "$GENERATOR" == compilecommands ]]; then
+    python3 "$ROOT/Scripts/patch-ninja-depfiles.py" "$ROOT"
+fi
+if [[ "$GENERATOR" == compilecommands ]]; then
     rule_toolset="$TOOLSET"
     ninja -C "$ROOT" -f build.ninja -t compdb "cxx_$rule_toolset" > "$ROOT/Build/Generated/compile_commands.all.json"
     python3 "$ROOT/Scripts/Unix/filter-compdb.py" "$ROOT/Build/Generated/compile_commands.all.json" "$ROOT/compile_commands.json"
-else
-    (cd "$ROOT" && "$ROOT/Tools/Linux/premake5" "${args[@]}" "$GENERATOR")
 fi
 printf '%s|%s|%s|%s|%s\n' "$GENERATOR" "$ARCHITECTURE" "$TOOLSET" "$CI" "$(project_generation_fingerprint "$ROOT")" > "$ROOT/Build/Generated/$GENERATOR.stamp"

@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -14,6 +15,19 @@ namespace KeireTests
 {
     inline std::filesystem::path TestExecutable;
     inline std::atomic<unsigned int> TestDirectoryCounter = 0;
+
+    [[nodiscard]] inline bool RunningInCi()
+    {
+#if defined(_WIN32)
+        char* value = nullptr;
+        std::size_t length = 0;
+        const int result = ::_dupenv_s(&value, &length, "CI");
+        std::free(value);
+        return result == 0 && length != 0;
+#else
+        return std::getenv("CI") != nullptr;
+#endif
+    }
 
     inline std::filesystem::path MakeTestDirectory(const std::string& name)
     {

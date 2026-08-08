@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <future>
+#include <memory>
 #include <string>
 #include <thread>
 
@@ -52,6 +53,36 @@ TEST_CASE("Child process captures output and preserves a nonzero exit code")
     CHECK(*process.ExitCode() == 23);
     CHECK(process.TakeOutput().find("child-process-output") != std::string::npos);
 }
+
+#if defined(_WIN32)
+TEST_CASE("captured child processes inherit only their declared standard handles")
+{
+    SECURITY_ATTRIBUTES security{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
+    const auto closeHandle = [](void* handle)
+    {
+        if (handle)
+            CloseHandle(handle);
+    };
+    const std::unique_ptr<void, decltype(closeHandle)> inheritedEvent(CreateEventW(&security, TRUE, FALSE, nullptr),
+                                                                      closeHandle);
+    REQUIRE(inheritedEvent);
+    const auto eventValue = std::to_string(reinterpret_cast<std::uintptr_t>(inheritedEvent.get()));
+    const std::array arguments{std::string("--child-inherited-event-probe"), eventValue};
+
+    auto child = Keire::Detail::ChildProcess::Start(KeireTests::TestExecutable, arguments,
+                                                    KeireTests::TestExecutable.parent_path());
+    REQUIRE(child.WaitFor(std::chrono::seconds(5)));
+    REQUIRE(child.ExitCode());
+    CHECK(*child.ExitCode() == 0);
+    CHECK(WaitForSingleObject(inheritedEvent.get(), 0) == WAIT_TIMEOUT);
+
+    const auto result = Keire::Detail::RunProcess(KeireTests::TestExecutable, arguments,
+                                                  KeireTests::TestExecutable.parent_path(), std::chrono::seconds(5));
+    CHECK_FALSE(result.TimedOut);
+    CHECK(result.ExitCode == 0);
+    CHECK(WaitForSingleObject(inheritedEvent.get(), 0) == WAIT_TIMEOUT);
+}
+#endif
 
 TEST_CASE("companion executable resolution supports build, package, and Unicode layouts")
 {

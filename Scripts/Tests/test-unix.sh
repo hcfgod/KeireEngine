@@ -27,6 +27,7 @@ sha256_file() {
 
 load_project_config "$ROOT"
 if [[ $run_fast -eq 1 ]]; then
+python3 "$ROOT/Scripts/Tests/check-repository-layout.py"
 bash "$ROOT/Scripts/Tests/test-clean-unix.sh"
 bash "$ROOT/Scripts/Tests/test-editor-package-unix.sh"
 bash "$ROOT/Scripts/Tests/test-hub-package-unix.sh"
@@ -35,12 +36,21 @@ python3 "$ROOT/Scripts/Tests/test-website.py"
 if command -v node >/dev/null 2>&1; then
   node "$ROOT/Scripts/Tests/test-website-downloads.mjs"
   node "$ROOT/Scripts/Tests/test-website-contact.mjs"
+  node "$ROOT/Scripts/Tests/test-website-contact-function.mjs"
+  node "$ROOT/Scripts/Tests/test-website-docs.mjs"
 fi
 assert_true grep -Fq 'cp -R -- "$service_root/Website"' \
+  "$ROOT/Services/KeireDistributionService/scripts/package-service.sh"
+assert_true grep -Fq '"$npm_command" --prefix "$documentation_site" run build' \
+  "$ROOT/Services/KeireDistributionService/scripts/package-service.sh"
+assert_true grep -Fq 'cp -R -- "$documentation_output/." "$package_directory/Website/docs/"' \
+  "$ROOT/Services/KeireDistributionService/scripts/package-service.sh"
+assert_true grep -Fq 'node_modules/beautiful-mermaid/LICENSE' \
   "$ROOT/Services/KeireDistributionService/scripts/package-service.sh"
 assert_true grep -Fq '@distribution_api path /v1 /v1/* /health /health/*' \
   "$ROOT/Services/KeireDistributionService/Deployment/Caddyfile.example"
 python3 "$ROOT/Scripts/Tests/test-supabase-config.py"
+python3 "$ROOT/Scripts/Tests/test-patch-ninja-depfiles.py"
 bash "$ROOT/Scripts/Tests/test-installer-unix.sh"
 bash "$ROOT/Scripts/Tests/test-hub-installer-unix.sh"
 bash "$ROOT/Scripts/Tests/test-macos-packaging-unix.sh"
@@ -96,6 +106,7 @@ mkdir -p "$launcher_fixture/Scripts/Unix" "$launcher_fixture/Scripts/Linux"
 cp "$ROOT/Scripts/project.sh" "$launcher_fixture/Scripts/project.sh"
 cat > "$launcher_fixture/Scripts/Unix/common.sh" <<'EOF'
 native_architecture() { printf '%s' x86_64; }
+normalize_architecture() { printf '%s' "$1"; }
 load_project_config() { PROJECT_IDENTIFIER=ExitFixture; CLIENT_TARGET=Client; }
 resolve_unix_toolset() { printf '%s' "$2"; }
 validate_unix_combination() { :; }
@@ -206,6 +217,10 @@ assert_true grep -q 'SDL3DebugLibrary' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -q 'SDL3ReleaseLibrary' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -q 'project_generation_fingerprint' "$ROOT/Scripts/Linux/generate.sh"
 assert_true grep -q 'KeireHubRuntime KeireHubTests KeireHubWorker' "$ROOT/Scripts/Unix/common.sh"
+assert_true grep -q 'find "$root/Scripts/Premake" -type f -name '\''\*.lua'\''' "$ROOT/Scripts/Unix/common.sh"
+assert_true grep -q 'run_args=(--project "$ROOT/Samples/KeireSandbox" --smoke-project)' "$ROOT/Scripts/Unix/coverage.sh"
+assert_true grep -q 'minimum_core_line_coverage=74.5' "$ROOT/Scripts/Unix/coverage.sh"
+assert_true grep -q 'minimum_aggregate_line_coverage=63.0' "$ROOT/Scripts/Unix/coverage.sh"
 assert_true grep -q 'project(DearImGuiProject)' "$ROOT/Scripts/Premake/DearImGui.lua"
 assert_true grep -q 'kind "StaticLib"' "$ROOT/Scripts/Premake/DearImGui.lua"
 assert_true grep -q 'targetname(DearImGuiLibrary)' "$ROOT/Scripts/Premake/DearImGui.lua"
@@ -235,7 +250,8 @@ assert_true grep -R -q 'BuiltinUnlitShaders.h' "$ROOT/KeireCore/Source/Rendering
 assert_true grep -R -q 'renderer->Tint()' "$ROOT/KeireCore/Source/Rendering"
 assert_true grep -R -q 'ResolveLighting' "$ROOT/KeireCore/Source/Rendering"
 assert_true grep -R -q 'DirectionalLightComponent' "$ROOT/KeireCore/Source/Rendering"
-assert_true grep -R -q 'AmbientAndExposure' "$ROOT/KeireCore/Source/Rendering"
+assert_true grep -R -q 'AmbientAndExposure' "$ROOT/KeireCore/Source/Rendering" \
+  "$ROOT/KeireCore/Include/KeireInternal/Rendering/RenderBackendInternal.h"
 assert_true grep -q 'LightDirection' "$ROOT/KeireCore/Shaders/BuiltinUnlit.hlsl"
 assert_true grep -q 'worldNormal' "$ROOT/KeireCore/Shaders/BuiltinUnlit.hlsl"
 assert_true grep -R -q 'ReadbackRGBA8' "$ROOT/KeireCore/Source/Rendering"
@@ -282,11 +298,12 @@ assert_true grep -F -q -- '-newer "$assembly"' "$ROOT/Scripts/Unix/build-managed
 assert_true test -f "$ROOT/Scripts/Premake/ManagedBuildAnchor.cpp"
 assert_true grep -q 'Scripts/Unix/build-managed.sh' "$ROOT/Scripts/Linux/build.sh"
 assert_true grep -q 'Scripts/Unix/build-managed.sh' "$ROOT/Scripts/Mac/build.sh"
-assert_true grep -q 'KeireManaged Scripts/Premake' "$ROOT/Scripts/Unix/common.sh"
+assert_true grep -q 'KeireManaged KeireManaged.Tests SourceModules Scripts/Premake' "$ROOT/Scripts/Unix/common.sh"
 assert_true grep -F -q -- "-name '*.csproj'" "$ROOT/Scripts/Unix/common.sh"
 assert_true grep -F -q 'dependson { AssetWorkerTarget }' "$ROOT/AssetTool/premake5.lua"
 assert_true grep -F -q 'filter { "system:linux"' "$ROOT/KeireAssetWorker/premake5.lua"
 assert_true grep -F -q '"-Wl,-rpath,$ORIGIN"' "$ROOT/KeireAssetWorker/premake5.lua"
+assert_true grep -q 'SelectedToolset ~= "msc"' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'filter { "system:macosx"' "$ROOT/KeireAssetWorker/premake5.lua"
 assert_true grep -F -q '"-Wl,-rpath,@loader_path"' "$ROOT/KeireAssetWorker/premake5.lua"
 assert_false grep -F -q '"system:linux or macosx"' "$ROOT/KeireAssetWorker/premake5.lua"
@@ -343,7 +360,9 @@ assert_true grep -q 'AddKeireApplicationIcon' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -q "windows-resource-update" "$ROOT/Scripts/Windows/player-support.ps1"
 assert_true test -f "$ROOT/Config/Branding/Keire.ico"
 assert_true test -f "$ROOT/Config/Branding/Keire.res"
-assert_true grep -q '"schemaVersion": 2' "$ROOT/Samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene"
+assert_true python3 -c \
+  'import json, sys; assert int(json.load(open(sys.argv[1], encoding="utf-8"))["schemaVersion"]) >= 2' \
+  "$ROOT/Samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene"
 assert_true grep -q '"components"' "$ROOT/Samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene"
 assert_true test -z "$(find "$ROOT/Samples/KeireSandbox/Assets" -type f \
   \( -name '*.tmp.*.keiremeta' -o -name '*~.keiremeta' \) -print -quit)"
@@ -352,8 +371,11 @@ assert_true test -f "$sample_audio/InterfaceConfirm.wav"
 assert_true test -f "$sample_audio/SpatialEmitter.wav"
 assert_equal "$(find "$sample_audio" -maxdepth 1 -type f -name '*.wav' | wc -l | tr -d ' ')" 2 \
   'repository-owned sample audio sources'
-assert_true grep -a -q '^RIFF....WAVE' "$sample_audio/InterfaceConfirm.wav"
-assert_true grep -a -q '^RIFF....WAVE' "$sample_audio/SpatialEmitter.wav"
+for wave_file in "$sample_audio/InterfaceConfirm.wav" "$sample_audio/SpatialEmitter.wav"; do
+  assert_true python3 -c \
+    'import pathlib, sys; header = pathlib.Path(sys.argv[1]).read_bytes()[:12]; assert header[:4] == b"RIFF" and header[8:] == b"WAVE"' \
+    "$wave_file"
+done
 assert_true grep -q 'f42ee69b-dc11-4212-ae66-17bff0be7945' "$sample_audio/InterfaceConfirm.wav.keiremeta"
 assert_true grep -q 'd09e3f28-06e6-49eb-a714-0261348f5eee' "$sample_audio/SpatialEmitter.wav.keiremeta"
 assert_true test -z "$(find "$ROOT/Samples/KeireSandbox/Assets" -type f \
@@ -411,7 +433,7 @@ for exported_type in \
   assert_true grep -R -E -q "class[[:space:]]+KEIRE_API[[:space:]]+$exported_type([^[:alnum:]_]|$)" "$ROOT/KeireCore/Include/Keire"
 done
 for exported_function in AssertionFailure GetName GetBuildInfo GetVersionString LoadWindowSpecification; do
-  assert_true grep -R -E -q "KEIRE_API[^;{}]*$exported_function[[:space:]]*\\(" "$ROOT/KeireCore/Include/Keire"
+  assert_true grep -R -E -q "KEIRE_API[^;{}]*${exported_function}[[:space:]]*\\(" "$ROOT/KeireCore/Include/Keire"
 done
 assert_false grep -R -E -q 'KEIRE_API[^;{}]*(GetApplicationCommandLineDescription|CreateApplication)[[:space:]]*\(' "$ROOT/KeireCore/Include/Keire"
 assert_true grep -q 'dear-imgui-LICENSE.txt' "$ROOT/Scripts/Unix/package.sh"
@@ -430,7 +452,7 @@ assert_true grep -q 'SDL_SHADERCROSS_COMMIT' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q 'asset_worker' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q 'developmentArtifact' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q 'manifest commit does not match' "$ROOT/Scripts/Unix/package.sh"
-assert_true grep -q -- '--allow-dirty' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -F -q 'package_worktree_policy "$ROOT" "$ALLOW_DIRTY" "$CI"' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q 'package-editor' "$ROOT/Scripts/project.sh"
 assert_true grep -q -- '-Configuration Dist' "$ROOT/Scripts/Windows/package-editor.ps1"
 assert_true grep -q -- '--configuration Dist' "$ROOT/Scripts/Unix/package-editor.sh"
@@ -465,7 +487,7 @@ package_stage="$(mktemp -d)"
 ! grep -Fq 'include;${_core_sdk_prefix}/third-party' "$ROOT/Config/PackageConfig.cmake.in" || fail 'SDK package must not export a general third-party include path'
 ! grep -Eq 'spdlog/|fmt::' "$ROOT/KeireCore/Include/Keire/Log.h" || fail 'Public logging header must not expose spdlog or fmt'
 grep -Fq KEIRE_COMPILED_LOG_LEVEL "$ROOT/KeireCore/Include/Keire/Log.h" || fail 'Public logging header must use the Kéire compile level'
-for path in bin/Client bin/Hub lib/libCore.a lib/libCoreImGui.a Config/Client.json include/Core/Core.h include/Core/Log.h include/Core/Api.h include/Core/Application.h include/Core/Assert.h include/Core/BuildInfo.h include/Core/EntryPoint.h include/Core/Event.h include/Core/Layer.h include/Core/Ref.h include/Core/Time.h include/Core/Project/Project.h include/Core/Scenes/Scene.h include/Core/Scenes/SceneAsset.h include/Core/Scenes/SceneSystem.h include/Core/Window.h include/Core/WindowConfig.h samples/KeireSandbox/ProjectSettings/Project.keireproject samples/KeireSandbox/ProjectSettings/Rendering.keiresettings samples/KeireSandbox/Assets/Input/DefaultInput.keireinput samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene examples/consumer/Main.cpp examples/consumer/Client.json examples/consumer/CMakeLists.txt examples/consumer/README.md examples/managed-consumer/ClientApplication.cpp examples/managed-consumer/CMakeLists.txt examples/managed-consumer/README.md lib/cmake/CrossPlatformCoreClientTemplate/CrossPlatformCoreClientTemplateConfig.cmake third-party/spdlog/spdlog.h third-party/SDL3/include/SDL3/SDL.h third-party/SDL3/lib/libSDL3.a third-party/SDL3/cmake/SDL3Config.cmake third-party/SDL3/licenses/SDL3/LICENSE.txt third-party/licenses/spdlog-LICENSE.txt third-party/licenses/fmt-LICENSE.rst third-party/licenses/doctest-LICENSE.txt third-party/licenses/nlohmann-json-LICENSE.MIT.txt third-party/licenses/dear-imgui-LICENSE.txt README.md LICENSE.txt THIRD_PARTY_NOTICES.md build-manifest.json; do
+for path in bin/Client bin/Hub lib/libCore.a lib/libCoreImGui.a Config/Client.json include/Core/Core.h include/Core/Log.h include/Core/Api.h include/Core/Application.h include/Core/Assert.h include/Core/BuildInfo.h include/Core/EntryPoint.h include/Core/Event.h include/Core/Layer.h include/Core/Ref.h include/Core/Time.h include/Core/Project/Project.h include/Core/Scenes/Scene.h include/Core/Scenes/SceneAsset.h include/Core/Scenes/SceneSystem.h include/Core/Window.h include/Core/WindowConfig.h samples/KeireSandbox/ProjectSettings/Project.keireproject samples/KeireSandbox/ProjectSettings/Rendering.keiresettings samples/KeireSandbox/Assets/Input/DefaultInput.keireinput samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene examples/consumer/Source/Main.cpp examples/consumer/Client.json examples/consumer/CMakeLists.txt examples/consumer/README.md examples/managed-consumer/Source/ClientApplication.cpp examples/managed-consumer/CMakeLists.txt examples/managed-consumer/README.md lib/cmake/CrossPlatformCoreClientTemplate/CrossPlatformCoreClientTemplateConfig.cmake third-party/spdlog/spdlog.h third-party/SDL3/include/SDL3/SDL.h third-party/SDL3/lib/libSDL3.a third-party/SDL3/cmake/SDL3Config.cmake third-party/SDL3/licenses/SDL3/LICENSE.txt third-party/licenses/spdlog-LICENSE.txt third-party/licenses/fmt-LICENSE.rst third-party/licenses/doctest-LICENSE.txt third-party/licenses/nlohmann-json-LICENSE.MIT.txt third-party/licenses/dear-imgui-LICENSE.txt README.md LICENSE.txt THIRD_PARTY_NOTICES.md build-manifest.json; do
   mkdir -p "$package_stage/$(dirname "$path")"; : > "$package_stage/$path"
 done
 for path in bin/CoreAssetTool bin/CoreAssetWorker lib/libCoreZstd.a include/Core/Math/Math.h include/Core/ECS/Component.h include/Core/ECS/Entity.h include/Core/ECS/Components/TransformComponent.h include/Core/ECS/Components/DirectionalLightComponent.h include/Core/ECS/Components/AudioComponents.h include/Core/ECS/Components/RuntimeUiComponents.h include/Core/Assets/Asset.h include/Core/Assets/AssetSystem.h include/Core/Assets/AssetPipeline.h include/Core/Assets/InputActionAsset.h include/Core/Input/Input.h samples/KeireSandbox/Assets/Input/DefaultInput.keireinput.keiremeta third-party/licenses/zstandard-LICENSE.txt third-party/licenses/entt-LICENSE.txt third-party/licenses/glm-COPYING.txt; do
@@ -473,6 +495,18 @@ for path in bin/CoreAssetTool bin/CoreAssetWorker lib/libCoreZstd.a include/Core
 done
 rm -rf "$package_stage/third-party/spdlog"
 for path in bin/KeireShaderCompiler lib/libassimp.a lib/libzlibstatic.a include/Core/Undo.h include/Core/ECS/Components/CameraComponent.h include/Core/ECS/Components/MeshRendererComponent.h include/Core/Rendering/RenderSystem.h include/Core/Assets/RenderingAssets.h samples/KeireSandbox/Assets/Shaders/DefaultUnlit.keireshader samples/KeireSandbox/Assets/Shaders/DefaultUnlit.hlsl samples/KeireSandbox/Assets/Materials/DefaultUnlit.keirematerial third-party/licenses/SDL-shadercross-LICENSE.txt third-party/licenses/DirectXShaderCompiler-LICENSE.txt third-party/licenses/DirectXShaderCompiler-ThirdPartyNotices.txt third-party/licenses/SPIRV-Cross-LICENSE.txt third-party/licenses/SPIRV-Headers-LICENSE.txt third-party/licenses/SPIRV-Tools-LICENSE.txt third-party/licenses/assimp-LICENSE.txt third-party/licenses/assimp-zlib-LICENSE.txt third-party/licenses/stb-LICENSE.txt; do
+  mkdir -p "$package_stage/$(dirname "$path")"; : > "$package_stage/$path"
+done
+for path in bin/Managed/Coral.Managed.dll bin/Managed/Keire.Managed.dll Config/SourceModules.premake.lua \
+  examples/source-module/Source/ClientApplication.cpp examples/source-module/Source/GameplayModule.cpp \
+  examples/source-module/Include/GameplayModule.h examples/source-module/CMakeLists.txt \
+  examples/source-module/README.md Docs/PlayerBuilds.md Docs/Diagnostics/KEIRE-AUDIO-0001.md \
+  Docs/Diagnostics/KEIRE-REPLAY-0001.md Docs/Diagnostics/KEIRE-REPLAY-0002.md \
+  third-party/licenses/Coral-LICENSE.txt third-party/licenses/dotnet-LICENSE.txt \
+  third-party/licenses/dotnet-ThirdPartyNotices.txt third-party/licenses/Jolt-LICENSE.txt \
+  third-party/licenses/Recast-LICENSE.txt third-party/licenses/miniaudio-LICENSE.txt lib/libJolt.a \
+  lib/libRecast.a lib/libDetour.a lib/libDetourCrowd.a lib/libDetourTileCache.a lib/libminiaudio.a \
+  lib/libCoral.Native.a lib/libnethost.a; do
   mkdir -p "$package_stage/$(dirname "$path")"; : > "$package_stage/$path"
 done
 : > "$package_stage/include/Core/Ui.h"
@@ -577,14 +611,16 @@ mkdir -p "$fixture/archive"
 printf '%s\n' premake > "$fixture/archive/premake5"
 chmod 0644 "$fixture/archive/premake5"
 assert_equal "$(find_premake_binary "$fixture/archive")" "$fixture/archive/premake5" 'non-executable Premake discovery'
-mkdir -p "$fixture/Scripts/Unix" "$fixture/Config" "$fixture/Examples/Consumer" "$fixture/Examples/ManagedConsumer" "$fixture/$CORE_DIRECTORY/Include/$PROJECT_NAMESPACE" "$fixture/$CORE_DIRECTORY/Source" "$fixture/$CLIENT_DIRECTORY/Source" "$fixture/$HUB_DIRECTORY/Source" "$fixture/$TESTS_DIRECTORY/Source" "$fixture/Vendor" "$fixture/Build/Bin"
+mkdir -p "$fixture/Scripts/Unix" "$fixture/Config" "$fixture/Examples/Consumer/Source" "$fixture/Examples/ManagedConsumer/Source" "$fixture/$CORE_DIRECTORY/Include/$PROJECT_NAMESPACE" "$fixture/$CORE_DIRECTORY/Source" "$fixture/$CLIENT_DIRECTORY/Source" "$fixture/$HUB_DIRECTORY/Source" "$fixture/$TESTS_DIRECTORY/Source" "$fixture/Vendor" "$fixture/Build/Bin"
 cp "$ROOT/Scripts/Unix/common.sh" "$ROOT/Scripts/Unix/rename.sh" "$ROOT/Scripts/Unix/clean.sh" "$fixture/Scripts/Unix/"
 cp "$ROOT/Config/Project.conf" "$fixture/Config/Project.conf"
 cp "$ROOT/Config/Client.json" "$fixture/Config/Client.json"
 cp "$ROOT/Config/PackageConfig.cmake.in" "$fixture/Config/PackageConfig.cmake.in"
 cp "$ROOT/premake5.lua" "$fixture/premake5.lua"
-cp "$ROOT/Examples/Consumer/CMakeLists.txt" "$ROOT/Examples/Consumer/Main.cpp" "$fixture/Examples/Consumer/"
-cp "$ROOT/Examples/ManagedConsumer/CMakeLists.txt" "$ROOT/Examples/ManagedConsumer/ClientApplication.cpp" "$fixture/Examples/ManagedConsumer/"
+cp "$ROOT/Examples/Consumer/CMakeLists.txt" "$fixture/Examples/Consumer/"
+cp "$ROOT/Examples/Consumer/Source/Main.cpp" "$fixture/Examples/Consumer/Source/"
+cp "$ROOT/Examples/ManagedConsumer/CMakeLists.txt" "$fixture/Examples/ManagedConsumer/"
+cp "$ROOT/Examples/ManagedConsumer/Source/ClientApplication.cpp" "$fixture/Examples/ManagedConsumer/Source/"
 printf '%s\n' "#ifndef ${PROJECT_MACRO_PREFIX}_CORE_CORE_H" "#define ${PROJECT_MACRO_PREFIX}_CORE_CORE_H" "namespace $PROJECT_NAMESPACE { const char* GetName(); }" '#endif' > "$fixture/$CORE_DIRECTORY/Include/$PROJECT_NAMESPACE/Core.h"
 printf '%s\n' "#ifndef ${PROJECT_MACRO_PREFIX}_CORE_LOG_H" "#define ${PROJECT_MACRO_PREFIX}_CORE_LOG_H" "namespace $PROJECT_NAMESPACE { class Log; }" '#endif' > "$fixture/$CORE_DIRECTORY/Include/$PROJECT_NAMESPACE/Log.h"
 for source in "$fixture/$CORE_DIRECTORY/Source/Library.cpp" "$fixture/$CLIENT_DIRECTORY/Source/Main.cpp" "$fixture/$HUB_DIRECTORY/Source/Main.cpp" "$fixture/$TESTS_DIRECTORY/Source/Main.cpp"; do

@@ -1,6 +1,6 @@
 #include "KeireHubRuntime/DownloadManager.h"
 
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <algorithm>
 #include <fstream>

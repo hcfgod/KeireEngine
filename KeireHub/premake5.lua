@@ -44,10 +44,10 @@ project(ProjectConfig.HUB_TARGET)
     LinkKeireCore()
 
     LinkSDL3()
+    ApplyLargeWindowsStack()
 
     filter "system:windows"
         links { "Bcrypt", "Wintrust" }
-        linkoptions { "/STACK:8388608" }
 
     filter { "system:windows", "configurations:Dist" }
         kind "WindowedApp"

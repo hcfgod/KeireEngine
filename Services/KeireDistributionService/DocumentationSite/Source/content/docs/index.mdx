@@ -1,0 +1,71 @@
+---
+title: Kéire Engine Documentation
+description: Learn Kéire Engine through complete, searchable guides for setup, projects, authoring, runtime systems, C# scripting, rendering, diagnostics, builds, and release engineering.
+template: splash
+pagefind: false
+hero:
+  title: Build with clarity.
+  tagline: Complete, searchable documentation for Kéire Engine—from the first Hub project to a validated player build.
+  actions:
+    - text: Start building
+      link: /docs/reference/getting-started/
+      icon: right-arrow
+    - text: Explore C# scripting
+      link: /docs/reference/scripting/
+      icon: seti:c-sharp
+      variant: secondary
+    - text: View source
+      link: https://github.com/hcfgod/KeireEngine
+      icon: github
+      variant: minimal
+---
+
+import { Aside, Card, CardGrid, LinkButton } from '@astrojs/starlight/components';
+
+<div class="keire-doc-status" aria-label="Documentation status">
+  <span>52 maintained guides</span>
+  <span>Local full-text search</span>
+  <span>Pre-1.0 documentation</span>
+</div>
+
+## Choose your path
+
+<CardGrid stagger>
+  <Card title="Set up Kéire" icon="rocket">
+    Bootstrap a workstation, generate projects, build, test, and launch through the supported scripts.
+
+    [Open Getting Started →](/docs/reference/getting-started/)
+  </Card>
+  <Card title="Work in Hub and Editor" icon="puzzle">
+    Create projects, manage editor installations, and move from project discovery into focused authoring.
+
+    [Open the Hub guide →](/docs/reference/project-hub/)
+  </Card>
+  <Card title="Write gameplay in C#" icon="seti:c-sharp">
+    Build managed assemblies, create Behaviours, expose Inspector data, and use gameplay services safely.
+
+    [Start C# scripting →](/docs/reference/scripting/)
+  </Card>
+  <Card title="Build and validate players" icon="approve-check">
+    Cook deterministic content, assemble desktop players, apply signing hooks, and verify release output.
+
+    [Open Player Builds →](/docs/reference/player-builds/)
+  </Card>
+</CardGrid>
+
+## One technical library
+
+The website renders the maintained Markdown under `Docs/` directly into native documentation pages. Search, sidebars,
+page outlines, code copy controls, and previous/next navigation work locally on this site; GitHub remains the source and
+contribution workflow, not the reading experience.
+
+<Aside type="caution" title="Kéire is pre-1.0">
+  The documentation describes implemented repository behavior and calls out incomplete production-readiness work without
+  invented dates or guarantees. Start with the [Production Readiness Review](/docs/reference/production-readiness-review/)
+  when evaluating Kéire for a release.
+</Aside>
+
+<div class="keire-doc-actions">
+  <LinkButton href="/docs/reference/overview/">Browse the complete library</LinkButton>
+  <LinkButton href="/downloads/" variant="secondary">Download Kéire Hub</LinkButton>
+</div>

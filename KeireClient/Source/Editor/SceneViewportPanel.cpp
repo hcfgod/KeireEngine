@@ -76,14 +76,6 @@ namespace
                                  {bounds.Maximum[0], bounds.Maximum[1], bounds.Maximum[2]}};
     }
 
-    void DrawEmptyState(Keire::UiFrame& ui, const std::string_view heading, const std::string_view primary,
-                        const std::string_view detail)
-    {
-        ui.TextColored({0.20F, 0.55F, 1.0F, 1.0F}, heading);
-        ui.Separator();
-        ui.Text(primary);
-        ui.Text(detail);
-    }
 } // namespace
 
 KeireEditor::SceneViewportPanel::SceneViewportPanel(ISceneViewportController& controller)

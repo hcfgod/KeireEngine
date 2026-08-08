@@ -65,7 +65,7 @@ Get-ChildItem -LiteralPath $source -Force | Copy-Item -Destination (Join-Path $s
 Copy-Item -LiteralPath $hubWorkerSource -Destination (Join-Path $stage "bin")
 Get-ChildItem -LiteralPath (Join-Path $Root "KeireHubContent") -Force |
     Copy-Item -Destination (Join-Path $stage "content") -Recurse
-Copy-WindowsTrackedTree $Root "docs" (Join-Path $stage "docs")
+Copy-WindowsTrackedTree $Root "Docs" (Join-Path $stage "Docs")
 Copy-WindowsTrackedTree $Root "Samples/KeireSandbox" (Join-Path $stage "Samples\KeireSandbox")
 Copy-Item -LiteralPath (Join-Path $Root "Config\Branding\Keire.png") `
     -Destination (Join-Path $stage "Config\Branding")

@@ -17,7 +17,10 @@ foreach ($contract in @(
         "--executable 'scripts/health-check.sh'",
         "--executable 'scripts/publish-snapshot.sh'",
         "scripts\start-windows-host.ps1",
-        "Website"
+        "Website",
+        "DocumentationSite",
+        "BeautifulMermaid.txt",
+        "Documentation production build failed"
     )) {
     if (-not $packager.Contains($contract)) {
         throw "The Windows service packager is missing '$contract'."
@@ -33,6 +36,8 @@ foreach ($contract in @(
         'root * "{$KEIRE_WEBSITE_ROOT:Website}"',
         'try_files {path} {path}/index.html',
         'Content-Security-Policy',
+        '@docs_immutable path /docs/_astro/*',
+        "script-src 'self' 'wasm-unsafe-eval'",
         'handle_errors'
     )) {
     if (-not $caddyTemplate.Contains($contract)) {
@@ -85,12 +90,17 @@ $archiveB = Join-Path $fixture "package-b.tar.gz"
 try {
     New-Item -ItemType Directory -Force (Join-Path $source "Deployment"), `
         (Join-Path $source "scripts"), (Join-Path $source "tools\publisher"), `
-        (Join-Path $source "Website\assets") | Out-Null
+        (Join-Path $source "Website\assets"), (Join-Path $source "Website\docs\_astro"), `
+        (Join-Path $source "Website\docs\assets"), (Join-Path $source "Website\docs\pagefind") | Out-Null
     foreach ($relative in @(
             "Deployment\Caddyfile.example",
             "KeireDistributionService",
             "README.md",
             "Website\assets\site.css",
+            "Website\docs\_astro\docs.css",
+            "Website\docs\assets\inter-variable.ttf",
+            "Website\docs\index.html",
+            "Website\docs\pagefind\pagefind.js",
             "Website\index.html",
             "scripts\health-check.sh",
             "scripts\publish-snapshot.sh",
@@ -133,6 +143,14 @@ try {
         "keire-distribution-linux-x64/Website/",
         "keire-distribution-linux-x64/Website/assets/",
         "keire-distribution-linux-x64/Website/assets/site.css",
+        "keire-distribution-linux-x64/Website/docs/",
+        "keire-distribution-linux-x64/Website/docs/_astro/",
+        "keire-distribution-linux-x64/Website/docs/_astro/docs.css",
+        "keire-distribution-linux-x64/Website/docs/assets/",
+        "keire-distribution-linux-x64/Website/docs/assets/inter-variable.ttf",
+        "keire-distribution-linux-x64/Website/docs/index.html",
+        "keire-distribution-linux-x64/Website/docs/pagefind/",
+        "keire-distribution-linux-x64/Website/docs/pagefind/pagefind.js",
         "keire-distribution-linux-x64/Website/index.html",
         "keire-distribution-linux-x64/scripts/",
         "keire-distribution-linux-x64/scripts/health-check.sh",
@@ -162,6 +180,14 @@ try {
         "keire-distribution-linux-x64/Website/" = "drwxr-xr-x"
         "keire-distribution-linux-x64/Website/assets/" = "drwxr-xr-x"
         "keire-distribution-linux-x64/Website/assets/site.css" = "-rw-r--r--"
+        "keire-distribution-linux-x64/Website/docs/" = "drwxr-xr-x"
+        "keire-distribution-linux-x64/Website/docs/_astro/" = "drwxr-xr-x"
+        "keire-distribution-linux-x64/Website/docs/_astro/docs.css" = "-rw-r--r--"
+        "keire-distribution-linux-x64/Website/docs/assets/" = "drwxr-xr-x"
+        "keire-distribution-linux-x64/Website/docs/assets/inter-variable.ttf" = "-rw-r--r--"
+        "keire-distribution-linux-x64/Website/docs/index.html" = "-rw-r--r--"
+        "keire-distribution-linux-x64/Website/docs/pagefind/" = "drwxr-xr-x"
+        "keire-distribution-linux-x64/Website/docs/pagefind/pagefind.js" = "-rw-r--r--"
         "keire-distribution-linux-x64/Website/index.html" = "-rw-r--r--"
         "keire-distribution-linux-x64/scripts/" = "drwxr-xr-x"
         "keire-distribution-linux-x64/scripts/health-check.sh" = "-rwxr-xr-x"

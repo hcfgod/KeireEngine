@@ -1,0 +1,338 @@
+@font-face {
+    font-family: "Inter";
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url("/docs/assets/inter-variable.ttf") format("truetype");
+}
+
+:root {
+    --sl-font: "Inter", system-ui, sans-serif;
+    --sl-color-accent-low: #0a2851;
+    --sl-color-accent: #55a8ff;
+    --sl-color-accent-high: #dcecff;
+    --sl-color-white: #f7f9ff;
+    --sl-color-gray-1: #dce4f5;
+    --sl-color-gray-2: #aebbd3;
+    --sl-color-gray-3: #71809e;
+    --sl-color-gray-4: #40506e;
+    --sl-color-gray-5: #202c44;
+    --sl-color-gray-6: #10192c;
+    --sl-color-black: #050915;
+    --sl-color-bg-nav: rgba(5, 9, 21, 0.86);
+    --sl-color-bg-sidebar: #070c19;
+    --sl-content-width: 54rem;
+    --sl-text-5xl: clamp(3.4rem, 8vw, 6.7rem);
+}
+
+:root[data-theme="light"] {
+    --sl-color-accent-low: #dbeaff;
+    --sl-color-accent: #075fc7;
+    --sl-color-accent-high: #082a56;
+    --sl-color-white: #071124;
+    --sl-color-gray-1: #15233d;
+    --sl-color-gray-2: #344765;
+    --sl-color-gray-3: #61718b;
+    --sl-color-gray-4: #94a1b5;
+    --sl-color-gray-5: #d4dbe7;
+    --sl-color-gray-6: #eaf0f8;
+    --sl-color-gray-7: #f5f8fc;
+    --sl-color-black: #ffffff;
+    --sl-color-bg-nav: rgba(255, 255, 255, 0.88);
+    --sl-color-bg-sidebar: #f7f9fd;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    background-image:
+        radial-gradient(circle at 72% -12%, rgba(34, 111, 255, 0.16), transparent 34rem),
+        radial-gradient(circle at 12% 34%, rgba(0, 174, 255, 0.055), transparent 27rem);
+    background-attachment: fixed;
+    letter-spacing: -0.011em;
+}
+
+header.header {
+    border-bottom-color: color-mix(in srgb, var(--sl-color-gray-5) 78%, transparent);
+    background: var(--sl-color-bg-nav);
+    backdrop-filter: blur(22px) saturate(145%);
+}
+
+.site-title {
+    gap: 0.7rem;
+    font-weight: 760;
+    letter-spacing: -0.025em;
+}
+
+.site-title img {
+    width: 2rem;
+    height: 2rem;
+    filter: drop-shadow(0 0 0.8rem rgba(48, 127, 255, 0.42));
+}
+
+.sidebar-pane {
+    border-inline-end-color: color-mix(in srgb, var(--sl-color-gray-5) 76%, transparent);
+}
+
+.sidebar-content summary,
+.sidebar-content a {
+    border-radius: 0.55rem;
+}
+
+.sidebar-content a[aria-current="page"] {
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sl-color-accent) 34%, transparent);
+}
+
+.right-sidebar-panel h2 {
+    color: var(--sl-color-gray-2);
+    font-size: 0.72rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
+.sl-markdown-content h1,
+.sl-markdown-content h2,
+.sl-markdown-content h3 {
+    letter-spacing: -0.035em;
+}
+
+.sl-markdown-content h1 {
+    font-weight: 790;
+}
+
+.sl-markdown-content a:not([class]) {
+    text-underline-offset: 0.18em;
+}
+
+.sl-markdown-content table {
+    display: table;
+    width: 100%;
+    overflow: hidden;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.72rem;
+}
+
+.sl-markdown-content th {
+    background: color-mix(in srgb, var(--sl-color-gray-6) 86%, var(--sl-color-accent-low));
+}
+
+.sl-markdown-content :not(pre) > code {
+    border: 1px solid color-mix(in srgb, var(--sl-color-accent) 20%, var(--sl-color-gray-5));
+    border-radius: 0.38rem;
+    background: color-mix(in srgb, var(--sl-color-gray-6) 84%, var(--sl-color-accent-low));
+}
+
+.expressive-code {
+    filter: drop-shadow(0 1rem 2.5rem rgba(0, 10, 36, 0.16));
+}
+
+.keire-mermaid {
+    margin-block: 1.75rem;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--sl-color-gray-5) 78%, var(--sl-color-accent));
+    border-radius: 1rem;
+    background:
+        radial-gradient(circle at 50% -28%, color-mix(in srgb, var(--sl-color-accent) 13%, transparent), transparent 52%),
+        color-mix(in srgb, var(--sl-color-gray-6) 86%, var(--sl-color-black));
+    box-shadow: inset 0 1px rgba(255, 255, 255, 0.035), 0 1.25rem 4rem rgba(0, 11, 40, 0.14);
+}
+
+.keire-mermaid__caption {
+    display: flex;
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid var(--sl-color-gray-5);
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    color: var(--sl-color-gray-2);
+    font-size: 0.7rem;
+    font-weight: 720;
+    letter-spacing: 0.075em;
+    text-transform: uppercase;
+}
+
+.keire-mermaid__pan-hint {
+    display: none;
+    color: var(--sl-color-gray-3);
+    font-size: 0.62rem;
+    letter-spacing: 0.04em;
+}
+
+.keire-mermaid__viewport {
+    display: grid;
+    min-height: 12rem;
+    padding: clamp(1rem, 3vw, 2rem);
+    place-items: center;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-color: color-mix(in srgb, var(--sl-color-accent) 48%, transparent) transparent;
+}
+
+.keire-mermaid__svg {
+    width: 100%;
+    min-width: 34rem;
+    max-width: 72rem;
+    height: auto;
+
+    /* beautiful-mermaid emits these two embedded rules; keep them scoped here for strict-CSP output. */
+    --_text: var(--fg);
+    --_text-sec: var(--muted, color-mix(in srgb, var(--fg) 60%, var(--bg)));
+    --_text-muted: var(--muted, color-mix(in srgb, var(--fg) 40%, var(--bg)));
+    --_text-faint: color-mix(in srgb, var(--fg) 25%, var(--bg));
+    --_line: var(--line, color-mix(in srgb, var(--fg) 50%, var(--bg)));
+    --_arrow: var(--accent, color-mix(in srgb, var(--fg) 85%, var(--bg)));
+    --_node-fill: var(--surface, color-mix(in srgb, var(--fg) 3%, var(--bg)));
+    --_node-stroke: var(--border, color-mix(in srgb, var(--fg) 20%, var(--bg)));
+    --_group-fill: var(--bg);
+    --_group-hdr: color-mix(in srgb, var(--fg) 5%, var(--bg));
+    --_inner-stroke: color-mix(in srgb, var(--fg) 12%, var(--bg));
+    --_key-badge: color-mix(in srgb, var(--fg) 10%, var(--bg));
+}
+
+.keire-mermaid__svg text {
+    font-family: Inter, system-ui, sans-serif;
+}
+
+.keire-mermaid__source {
+    border-top: 1px solid var(--sl-color-gray-5);
+}
+
+.keire-mermaid__source summary {
+    padding: 0.8rem 1rem;
+    color: var(--sl-color-gray-2);
+    cursor: pointer;
+    font-size: 0.78rem;
+    font-weight: 650;
+}
+
+.keire-mermaid__source pre {
+    max-height: 20rem;
+    margin: 0;
+    padding: 1rem;
+    border: 0;
+    border-top: 1px solid var(--sl-color-gray-5);
+    border-radius: 0;
+    overflow: auto;
+    background: color-mix(in srgb, var(--sl-color-black) 74%, var(--sl-color-gray-6));
+    font-size: 0.76rem;
+}
+
+.hero {
+    position: relative;
+    padding-block: clamp(5rem, 11vw, 9rem) clamp(4rem, 8vw, 7rem);
+    isolation: isolate;
+}
+
+.hero::before {
+    position: absolute;
+    z-index: -1;
+    inset: 9% 3% 5%;
+    border: 1px solid color-mix(in srgb, var(--sl-color-accent) 18%, transparent);
+    border-radius: 2rem;
+    background:
+        linear-gradient(135deg, color-mix(in srgb, var(--sl-color-accent-low) 52%, transparent), transparent 48%),
+        repeating-linear-gradient(90deg, transparent 0 5.8rem, color-mix(in srgb, var(--sl-color-gray-5) 28%, transparent) 5.8rem 5.86rem);
+    box-shadow: inset 0 1px rgba(255, 255, 255, 0.025), 0 2rem 7rem rgba(0, 25, 82, 0.16);
+    content: "";
+    mask-image: linear-gradient(to bottom, black 62%, transparent);
+}
+
+.hero h1 {
+    max-width: 10ch;
+    font-weight: 820;
+    letter-spacing: -0.075em;
+    line-height: 0.91;
+}
+
+.hero .tagline {
+    max-width: 48rem;
+    color: var(--sl-color-gray-2);
+    font-size: clamp(1.04rem, 2vw, 1.28rem);
+    line-height: 1.7;
+}
+
+.hero .actions a {
+    min-height: 3rem;
+    border-radius: 0.7rem;
+    font-weight: 720;
+}
+
+.keire-doc-status {
+    display: grid;
+    margin: -1.5rem 0 5rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.9rem;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    background: color-mix(in srgb, var(--sl-color-gray-6) 82%, transparent);
+    box-shadow: inset 0 1px rgba(255, 255, 255, 0.025);
+}
+
+.keire-doc-status span {
+    padding: 1rem 1.2rem;
+    color: var(--sl-color-gray-2);
+    font-size: 0.76rem;
+    font-weight: 670;
+    letter-spacing: 0.055em;
+    text-align: center;
+    text-transform: uppercase;
+}
+
+.keire-doc-status span + span {
+    border-inline-start: 1px solid var(--sl-color-gray-5);
+}
+
+.card-grid > article {
+    border-color: color-mix(in srgb, var(--sl-color-gray-5) 82%, var(--sl-color-accent));
+    border-radius: 1rem;
+    background: linear-gradient(145deg, color-mix(in srgb, var(--sl-color-gray-6) 90%, var(--sl-color-accent-low)), var(--sl-color-black));
+    box-shadow: inset 0 1px rgba(255, 255, 255, 0.035), 0 1.2rem 3.5rem rgba(0, 11, 40, 0.1);
+    transition: border-color 160ms ease, transform 160ms ease;
+}
+
+.card-grid > article:hover {
+    transform: translateY(-2px);
+    border-color: color-mix(in srgb, var(--sl-color-accent) 48%, var(--sl-color-gray-5));
+}
+
+.keire-doc-actions {
+    display: flex;
+    margin-top: 2rem;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+@media (max-width: 50rem) {
+    .hero::before {
+        inset-inline: 0;
+    }
+
+    .keire-doc-status {
+        grid-template-columns: 1fr;
+    }
+
+    .keire-doc-status span + span {
+        border-block-start: 1px solid var(--sl-color-gray-5);
+        border-inline-start: 0;
+    }
+
+    .keire-mermaid__viewport {
+        min-height: 9rem;
+        padding: 0.8rem;
+    }
+
+    .keire-mermaid__pan-hint {
+        display: inline;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    html {
+        scroll-behavior: auto;
+    }
+
+    .card-grid > article {
+        transition: none;
+    }
+}

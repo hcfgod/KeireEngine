@@ -1,5 +1,5 @@
-#include "TestSodium.h"
-#include "TestSupport.h"
+#include <KeireHubTests/TestSodium.h>
+#include <KeireHubTests/TestSupport.h>
 
 #include "KeireHubRuntime/CatalogClient.h"
 

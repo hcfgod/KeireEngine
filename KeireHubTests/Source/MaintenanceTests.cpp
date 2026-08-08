@@ -1,6 +1,6 @@
 #include "KeireHubRuntime/HubMaintenance.h"
 
-#include "TestSupport.h"
+#include <KeireHubTests/TestSupport.h>
 
 #include <doctest/doctest.h>
 

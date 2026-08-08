@@ -46,8 +46,8 @@ namespace Keire
             [[nodiscard]] bool operator==(const FileSignature&) const noexcept = default;
         };
 
-        [[nodiscard]] std::filesystem::path ConfinedPath(const std::filesystem::path& root,
-                                                         const std::filesystem::path& relative)
+        [[maybe_unused, nodiscard]] std::filesystem::path ConfinedPath(const std::filesystem::path& root,
+                                                                       const std::filesystem::path& relative)
         {
             const auto normalized = relative.lexically_normal();
             if (relative.empty() || relative.is_absolute() || normalized.empty() ||
@@ -56,7 +56,8 @@ namespace Keire
             return (root / normalized).lexically_normal();
         }
 
-        [[nodiscard]] std::vector<std::byte> ReadSource(const std::filesystem::path& path, const std::size_t maximum)
+        [[maybe_unused, nodiscard]] std::vector<std::byte> ReadSource(const std::filesystem::path& path,
+                                                                      const std::size_t maximum)
         {
             std::error_code error;
             const auto size = std::filesystem::file_size(path, error);
@@ -73,8 +74,9 @@ namespace Keire
             return bytes;
         }
 
-        void WriteFileAtomically(const std::filesystem::path& path, const std::span<const std::byte> bytes,
-                                 const std::string_view temporarySuffix = ".asset-operation.tmp")
+        [[maybe_unused]] void WriteFileAtomically(const std::filesystem::path& path,
+                                                  const std::span<const std::byte> bytes,
+                                                  const std::string_view temporarySuffix = ".asset-operation.tmp")
         {
             std::filesystem::create_directories(path.parent_path());
             const auto temporary = Detail::PathWithSuffix(path, temporarySuffix);
@@ -88,21 +90,21 @@ namespace Keire
             Detail::AtomicReplace(temporary, path);
         }
 
-        void WriteJsonAtomically(const std::filesystem::path& path, const Json& value)
+        [[maybe_unused]] void WriteJsonAtomically(const std::filesystem::path& path, const Json& value)
         {
             const auto serialized = value.dump(2) + '\n';
             WriteFileAtomically(path, std::as_bytes(std::span(serialized.data(), serialized.size())),
                                 ".json-write.tmp");
         }
 
-        [[nodiscard]] Json ReadJsonFile(const std::filesystem::path& path, const std::size_t maximum)
+        [[maybe_unused, nodiscard]] Json ReadJsonFile(const std::filesystem::path& path, const std::size_t maximum)
         {
             const auto bytes = ReadSource(path, maximum);
             return Json::parse(reinterpret_cast<const char*>(bytes.data()),
                                reinterpret_cast<const char*>(bytes.data() + bytes.size()));
         }
 
-        [[nodiscard]] std::string LowerExtension(const std::filesystem::path& path)
+        [[maybe_unused, nodiscard]] std::string LowerExtension(const std::filesystem::path& path)
         {
             auto extension = Detail::PathToUtf8(path.extension());
             std::ranges::transform(extension, extension.begin(),
@@ -110,7 +112,7 @@ namespace Keire
             return extension;
         }
 
-        [[nodiscard]] AssetId DeriveSubAssetId(const AssetId parent, const std::string_view key)
+        [[maybe_unused, nodiscard]] AssetId DeriveSubAssetId(const AssetId parent, const std::string_view key)
         {
             if (!parent || key.empty())
                 throw std::invalid_argument("Generated subassets require a valid parent and non-empty key.");
@@ -131,7 +133,7 @@ namespace Keire
             return AssetId(high, low);
         }
 
-        [[nodiscard]] AssetTypeId InferType(const std::filesystem::path& path)
+        [[maybe_unused, nodiscard]] AssetTypeId InferType(const std::filesystem::path& path)
         {
             static const std::unordered_set<std::string> TextExtensions{
                 ".txt",  ".md",  ".json", ".xml",  ".yaml", ".yml",  ".csv",  ".ini",
@@ -139,12 +141,13 @@ namespace Keire
             return TextExtensions.contains(LowerExtension(path)) ? TextAsset::StaticType() : BinaryAsset::StaticType();
         }
 
-        [[nodiscard]] std::string ImporterName(const AssetTypeId type)
+        [[maybe_unused, nodiscard]] std::string ImporterName(const AssetTypeId type)
         {
             return type == TextAsset::StaticType() ? "Keire.Text" : "Keire.Binary";
         }
 
-        void LogImportDiagnostic(const AssetSourceRecord& record, const AssetImportDiagnostic& diagnostic) noexcept
+        [[maybe_unused]] void LogImportDiagnostic(const AssetSourceRecord& record,
+                                                  const AssetImportDiagnostic& diagnostic) noexcept
         {
             try
             {
@@ -182,14 +185,16 @@ namespace Keire
             }
         }
 
-        [[nodiscard]] bool IsWithin(const std::filesystem::path& parent, const std::filesystem::path& candidate)
+        [[maybe_unused, nodiscard]] bool IsWithin(const std::filesystem::path& parent,
+                                                  const std::filesystem::path& candidate)
         {
             const auto relative = candidate.lexically_normal().lexically_relative(parent.lexically_normal());
             return !relative.empty() && !relative.is_absolute() &&
                    !relative.native().starts_with(std::filesystem::path("..").native());
         }
 
-        [[nodiscard]] bool IsSameOrWithin(const std::filesystem::path& parent, const std::filesystem::path& candidate)
+        [[maybe_unused, nodiscard]] bool IsSameOrWithin(const std::filesystem::path& parent,
+                                                        const std::filesystem::path& candidate)
         {
             return parent.lexically_normal() == candidate.lexically_normal() || IsWithin(parent, candidate);
         }
@@ -202,9 +207,9 @@ namespace Keire
             bool Folder = false;
         };
 
-        void WriteTrashManifest(const std::filesystem::path& root, const AssetId id,
-                                const std::filesystem::path& originalPath, const std::span<const AssetId> assets,
-                                const bool folder)
+        [[maybe_unused]] void WriteTrashManifest(const std::filesystem::path& root, const AssetId id,
+                                                 const std::filesystem::path& originalPath,
+                                                 const std::span<const AssetId> assets, const bool folder)
         {
             Json assetIds = Json::array();
             for (const auto asset : assets)
@@ -226,7 +231,7 @@ namespace Keire
             Detail::AtomicReplace(temporary, destination);
         }
 
-        [[nodiscard]] ParsedTrashRecord ReadTrashManifest(const std::filesystem::path& root)
+        [[maybe_unused, nodiscard]] ParsedTrashRecord ReadTrashManifest(const std::filesystem::path& root)
         {
             const auto path = root / "trash.json";
             std::error_code error;
@@ -256,7 +261,7 @@ namespace Keire
             return result;
         }
 
-        [[nodiscard]] Json EncodeImportSettings(const AssetImportSettings& settings)
+        [[maybe_unused, nodiscard]] Json EncodeImportSettings(const AssetImportSettings& settings)
         {
             Json result = Json::object();
             for (const auto& [key, value] : settings)
@@ -264,7 +269,7 @@ namespace Keire
             return result;
         }
 
-        [[nodiscard]] AssetImportSettings DecodeImportSettings(const Json& values)
+        [[maybe_unused, nodiscard]] AssetImportSettings DecodeImportSettings(const Json& values)
         {
             if (!values.is_object())
                 throw std::runtime_error("Asset importSettings metadata must be an object.");
@@ -285,9 +290,9 @@ namespace Keire
             return result;
         }
 
-        void WriteMetadata(const std::filesystem::path& path, const AssetId id, const AssetTypeId type,
-                           const std::string_view importer, const std::uint32_t importerVersion,
-                           const AssetImportSettings& settings = {})
+        [[maybe_unused]] void WriteMetadata(const std::filesystem::path& path, const AssetId id, const AssetTypeId type,
+                                            const std::string_view importer, const std::uint32_t importerVersion,
+                                            const AssetImportSettings& settings = {})
         {
             Json metadata{{"schemaVersion", 1},
                           {"id", id.ToString()},
@@ -310,9 +315,9 @@ namespace Keire
             Detail::AtomicReplace(temporary, path);
         }
 
-        [[nodiscard]] bool UpgradeMetadataImporterVersion(const std::filesystem::path& path,
-                                                          const std::string_view importer,
-                                                          const std::uint32_t importerVersion)
+        [[maybe_unused, nodiscard]] bool UpgradeMetadataImporterVersion(const std::filesystem::path& path,
+                                                                        const std::string_view importer,
+                                                                        const std::uint32_t importerVersion)
         {
             auto metadata = ReadJsonFile(path, 1024U * 1024U);
             if (!metadata.is_object() || metadata.value("schemaVersion", 0) != 1 ||
@@ -327,8 +332,8 @@ namespace Keire
             return true;
         }
 
-        void UpdateMetadataSubAssets(const std::filesystem::path& path,
-                                     const std::span<const AssetGeneratedSubAsset> generated)
+        [[maybe_unused]] void UpdateMetadataSubAssets(const std::filesystem::path& path,
+                                                      const std::span<const AssetGeneratedSubAsset> generated)
         {
             auto metadata = ReadJsonFile(path, 1024U * 1024U);
             Json subAssets = Json::array();
@@ -341,8 +346,8 @@ namespace Keire
             }
         }
 
-        void UpdateMetadataImportOutput(const std::filesystem::path& path, const AssetTypeId type,
-                                        const std::span<const AssetGeneratedSubAsset> generated)
+        [[maybe_unused]] void UpdateMetadataImportOutput(const std::filesystem::path& path, const AssetTypeId type,
+                                                         const std::span<const AssetGeneratedSubAsset> generated)
         {
             auto metadata = ReadJsonFile(path, 1024U * 1024U);
             Json subAssets = Json::array();
@@ -358,7 +363,8 @@ namespace Keire
             }
         }
 
-        void UpdateMetadataImportSettings(const std::filesystem::path& path, const AssetImportSettings& settings)
+        [[maybe_unused]] void UpdateMetadataImportSettings(const std::filesystem::path& path,
+                                                           const AssetImportSettings& settings)
         {
             auto metadata = ReadJsonFile(path, 1024U * 1024U);
             const auto encoded = EncodeImportSettings(settings);
@@ -369,7 +375,7 @@ namespace Keire
             }
         }
 
-        void IncrementMetadataImportRevision(const std::filesystem::path& path)
+        [[maybe_unused]] void IncrementMetadataImportRevision(const std::filesystem::path& path)
         {
             auto metadata = ReadJsonFile(path, 1024U * 1024U);
             const auto current = metadata.value("importRevision", std::uint64_t{0});
@@ -378,10 +384,11 @@ namespace Keire
             WriteJsonAtomically(path, metadata);
         }
 
-        [[nodiscard]] AssetSourceRecord ReadMetadata(const std::filesystem::path& sourceRoot,
-                                                     const std::filesystem::path& source,
-                                                     const std::size_t maximumSourceBytes, const bool digestSource,
-                                                     const AssetImporterRegistration* inferredImporter)
+        [[maybe_unused, nodiscard]] AssetSourceRecord ReadMetadata(const std::filesystem::path& sourceRoot,
+                                                                   const std::filesystem::path& source,
+                                                                   const std::size_t maximumSourceBytes,
+                                                                   const bool digestSource,
+                                                                   const AssetImporterRegistration* inferredImporter)
         {
             AssetSourceRecord record;
             record.RelativePath = std::filesystem::relative(source, sourceRoot).lexically_normal();
@@ -434,7 +441,8 @@ namespace Keire
             return record;
         }
 
-        [[nodiscard]] std::vector<std::byte> Compress(const std::span<const std::byte> bytes, const int level)
+        [[maybe_unused, nodiscard]] std::vector<std::byte> Compress(const std::span<const std::byte> bytes,
+                                                                    const int level)
         {
             std::vector<std::byte> result(ZSTD_compressBound(bytes.size()));
             const auto size = ZSTD_compress(result.data(), result.size(), bytes.data(), bytes.size(), level);
@@ -444,12 +452,13 @@ namespace Keire
             return result;
         }
 
-        [[nodiscard]] std::filesystem::path DirectoryPublicationJournal(const std::filesystem::path& destination)
+        [[maybe_unused, nodiscard]] std::filesystem::path
+        DirectoryPublicationJournal(const std::filesystem::path& destination)
         {
             return Detail::PathWithSuffix(destination, ".publish.json");
         }
 
-        void RecoverDirectoryPublication(const std::filesystem::path& requestedDestination)
+        [[maybe_unused]] void RecoverDirectoryPublication(const std::filesystem::path& requestedDestination)
         {
             const auto destination = std::filesystem::absolute(requestedDestination).lexically_normal();
             const auto backup = Detail::PathWithSuffix(destination, ".bak");
@@ -527,8 +536,8 @@ namespace Keire
                 throw std::runtime_error("Could not finish asset catalog publication recovery: " + error.message());
         }
 
-        void ReplaceDirectory(const std::filesystem::path& requestedTemporary,
-                              const std::filesystem::path& requestedDestination)
+        [[maybe_unused]] void ReplaceDirectory(const std::filesystem::path& requestedTemporary,
+                                               const std::filesystem::path& requestedDestination)
         {
             const auto temporary = std::filesystem::absolute(requestedTemporary).lexically_normal();
             const auto destination = std::filesystem::absolute(requestedDestination).lexically_normal();
@@ -647,7 +656,7 @@ namespace Keire
             std::filesystem::remove_all(temporary, error);
         }
 
-        void ValidateDependencies(const std::span<const Detail::CatalogEntry> entries)
+        [[maybe_unused]] void ValidateDependencies(const std::span<const Detail::CatalogEntry> entries)
         {
             std::unordered_map<AssetId, std::size_t> indices;
             for (std::size_t index = 0; index < entries.size(); ++index)
@@ -674,21 +683,21 @@ namespace Keire
                 visit(index);
         }
 
-        void ThrowIfOperationCancelled(const std::stop_token cancellation)
+        [[maybe_unused]] void ThrowIfOperationCancelled(const std::stop_token cancellation)
         {
             if (cancellation.stop_requested())
                 throw AssetOperationCancelled();
         }
 
-        void ReportOperationProgress(const AssetOperationProgressCallback& callback, const AssetOperationPhase phase,
-                                     const std::size_t completed, const std::size_t total,
-                                     std::filesystem::path currentPath = {})
+        [[maybe_unused]] void ReportOperationProgress(const AssetOperationProgressCallback& callback,
+                                                      const AssetOperationPhase phase, const std::size_t completed,
+                                                      const std::size_t total, std::filesystem::path currentPath = {})
         {
             if (callback)
                 callback({phase, completed, total, std::move(currentPath)});
         }
 
-        void RemovePathNoThrow(const std::filesystem::path& path) noexcept
+        [[maybe_unused]] void RemovePathNoThrow(const std::filesystem::path& path) noexcept
         {
             std::error_code ignored;
             std::filesystem::remove_all(path, ignored);

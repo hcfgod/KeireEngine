@@ -16,7 +16,6 @@ namespace Keire::Internal
 {
     namespace
     {
-        constexpr auto InvalidIndex = ~std::uint32_t{0};
         constexpr std::uint32_t MaximumValueRegisters = 4096;
 
         enum class WaveOperatorKind : std::uint8_t

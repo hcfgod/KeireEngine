@@ -1,6 +1,6 @@
-#include "NativeHttpTransportPolicy.h"
+#include <KeireHubRuntimeInternal/NativeHttpTransportPolicy.h>
 
-#include "DistributionEncoding.h"
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
 
 #include <algorithm>
 #include <cctype>

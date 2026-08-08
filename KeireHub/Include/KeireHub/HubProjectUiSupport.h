@@ -15,7 +15,7 @@ namespace KeireHub
     [[nodiscard]] const char* StatusLabel(Keire::ProjectStatus status) noexcept;
     [[nodiscard]] Keire::UiColor StatusColor(Keire::ProjectStatus status) noexcept;
     [[nodiscard]] bool CanOpenOrUpgrade(Keire::ProjectStatus status) noexcept;
-    [[nodiscard]] std::string FormatLastOpened(std::int64_t seconds);
+    [[nodiscard]] std::string FormatLastOpened(std::uint64_t seconds);
     [[nodiscard]] std::filesystem::path ResolveEditorExecutable(const std::filesystem::path& hubExecutable);
     [[nodiscard]] std::filesystem::path ResolveAssetToolExecutable(const std::filesystem::path& hubExecutable);
     void ReloadProjectRegistry(Keire::Ref<Keire::ProjectRegistry>& registry);

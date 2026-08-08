@@ -28,7 +28,7 @@ zstd_library="${PROJECT_NAMESPACE}Zstd"
 archive="$ROOT/Artifacts/$name.tar.gz"; symbols="$ROOT/Artifacts/$name-symbols.tar.gz"; symbol_stage="$ROOT/Artifacts/$name-symbols"
 rm -rf "$stage" "$symbol_stage"
 [[ $stage_only -eq 1 ]] || rm -f "$archive" "$archive.sha256" "$symbols" "$symbols.sha256"
-mkdir -p "$stage/bin" "$stage/lib" "$stage/include" "$stage/Config" "$stage/samples" "$stage/content" "$stage/docs/Diagnostics" "$stage/third-party/licenses" "$stage/third-party/SDL3" "$stage/examples/consumer" "$stage/examples/managed-consumer" "$stage/examples/source-module" "$stage/lib/cmake/$PROJECT_IDENTIFIER"
+mkdir -p "$stage/bin" "$stage/lib" "$stage/include" "$stage/Config" "$stage/samples" "$stage/content" "$stage/Docs/Diagnostics" "$stage/third-party/licenses" "$stage/third-party/SDL3" "$stage/examples/consumer" "$stage/examples/managed-consumer" "$stage/examples/source-module" "$stage/lib/cmake/$PROJECT_IDENTIFIER"
 client_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$CLIENT_TARGET/$CLIENT_TARGET"
 hub_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$HUB_TARGET/$HUB_TARGET"
 core_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$CORE_TARGET/lib$CORE_TARGET.a"
@@ -76,8 +76,8 @@ cp "$sdl_install/lib/libSDL3.a" "$stage/third-party/SDL3/lib/"
 cp -R "$sdl_install/cmake/"* "$stage/third-party/SDL3/cmake/"
 cp -R "$sdl_install/licenses/SDL3" "$stage/third-party/SDL3/licenses/"
 cp "$ROOT/README.md" "$ROOT/LICENSE.txt" "$ROOT/THIRD_PARTY_NOTICES.md" "$stage/"
-cp -R "$ROOT/docs/Diagnostics/"* "$stage/docs/Diagnostics/"
-cp "$ROOT/docs/PlayerBuilds.md" "$stage/docs/"
+cp -R "$ROOT/Docs/Diagnostics/"* "$stage/Docs/Diagnostics/"
+cp "$ROOT/Docs/PlayerBuilds.md" "$stage/Docs/"
 cp "$ROOT/Config/SourceModules.premake.lua" "$stage/Config/"
 cp -R "$ROOT/Examples/Consumer/"* "$stage/examples/consumer/"
 cp -R "$ROOT/Examples/ManagedConsumer/"* "$stage/examples/managed-consumer/"
@@ -173,18 +173,18 @@ if [[ "$PLATFORM" == Mac ]]; then
 fi
 cxx=g++; [[ "$TOOLSET" == clang ]] && cxx=clang++
 gameplay_libraries=("$validation_root/sdk/lib/libJolt.a" "$validation_root/sdk/lib/libRecast.a" "$validation_root/sdk/lib/libDetour.a" "$validation_root/sdk/lib/libDetourCrowd.a" "$validation_root/sdk/lib/libDetourTileCache.a" "$validation_root/sdk/lib/libminiaudio.a" "$validation_root/sdk/lib/libCoral.Native.a" "$validation_root/sdk/lib/libnethost.a")
-consumer_compile=("$cxx" -std=c++20 -Wall -Wextra -Werror -DKEIRE_STATIC "-I$validation_root/sdk/include" "$validation_root/sdk/examples/consumer/Main.cpp" "$validation_root/sdk/lib/lib$CORE_TARGET.a" "$validation_root/sdk/lib/lib$imgui_library.a" "$validation_root/sdk/lib/lib$zstd_library.a" "$validation_root/sdk/lib/libassimp.a" "$validation_root/sdk/lib/libzlibstatic.a" "${gameplay_libraries[@]}" "$validation_root/sdk/third-party/SDL3/lib/libSDL3.a" -o "$validation_root/consumer")
+consumer_compile=("$cxx" -std=c++20 -Wall -Wextra -Werror -DKEIRE_STATIC "-I$validation_root/sdk/include" "$validation_root/sdk/examples/consumer/Source/Main.cpp" "$validation_root/sdk/lib/lib$CORE_TARGET.a" "$validation_root/sdk/lib/lib$imgui_library.a" "$validation_root/sdk/lib/lib$zstd_library.a" "$validation_root/sdk/lib/libassimp.a" "$validation_root/sdk/lib/libzlibstatic.a" "${gameplay_libraries[@]}" "$validation_root/sdk/third-party/SDL3/lib/libSDL3.a" -o "$validation_root/consumer")
 [[ "$CONFIGURATION" == Dist ]] && consumer_compile+=(-flto)
 [[ "$PLATFORM" == Linux ]] && consumer_compile+=(-pthread -ldl -lm)
 [[ "$PLATFORM" == Mac ]] && consumer_compile+=("-mmacosx-version-min=$macos_deployment_target" -framework Cocoa -framework CoreVideo -framework IOKit -framework CoreFoundation -framework CoreAudio -framework AudioToolbox -framework ForceFeedback -framework Carbon -framework Metal -framework QuartzCore -framework UniformTypeIdentifiers)
 "${consumer_compile[@]}"
 (cd "$validation_root" && ./consumer "$validation_root/sdk/examples/consumer/Client.json")
-managed_compile=("$cxx" -std=c++20 -Wall -Wextra -Werror -DKEIRE_STATIC "-I$validation_root/sdk/include" "$validation_root/sdk/examples/managed-consumer/ClientApplication.cpp" "$validation_root/sdk/lib/lib$CORE_TARGET.a" "$validation_root/sdk/lib/lib$imgui_library.a" "$validation_root/sdk/lib/lib$zstd_library.a" "$validation_root/sdk/lib/libassimp.a" "$validation_root/sdk/lib/libzlibstatic.a" "${gameplay_libraries[@]}" "$validation_root/sdk/third-party/SDL3/lib/libSDL3.a" -o "$validation_root/managed-consumer")
+managed_compile=("$cxx" -std=c++20 -Wall -Wextra -Werror -DKEIRE_STATIC "-I$validation_root/sdk/include" "$validation_root/sdk/examples/managed-consumer/Source/ClientApplication.cpp" "$validation_root/sdk/lib/lib$CORE_TARGET.a" "$validation_root/sdk/lib/lib$imgui_library.a" "$validation_root/sdk/lib/lib$zstd_library.a" "$validation_root/sdk/lib/libassimp.a" "$validation_root/sdk/lib/libzlibstatic.a" "${gameplay_libraries[@]}" "$validation_root/sdk/third-party/SDL3/lib/libSDL3.a" -o "$validation_root/managed-consumer")
 [[ "$CONFIGURATION" == Dist ]] && managed_compile+=(-flto)
 [[ "$PLATFORM" == Linux ]] && managed_compile+=(-pthread -ldl -lm)
 [[ "$PLATFORM" == Mac ]] && managed_compile+=("-mmacosx-version-min=$macos_deployment_target" -framework Cocoa -framework CoreVideo -framework IOKit -framework CoreFoundation -framework CoreAudio -framework AudioToolbox -framework ForceFeedback -framework Carbon -framework Metal -framework QuartzCore -framework UniformTypeIdentifiers)
 "${managed_compile[@]}"
-managed_help="$($validation_root/managed-consumer --help)"
+managed_help="$("$validation_root/managed-consumer" --help)"
 [[ "$managed_help" == *--managed-smoke* ]] || { printf 'Managed SDK consumer help validation failed.\n' >&2; exit 1; }
 (cd "$validation_root" && ./managed-consumer --managed-smoke)
 cmake_platform_options=()

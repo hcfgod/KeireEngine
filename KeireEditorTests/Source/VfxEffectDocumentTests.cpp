@@ -1608,12 +1608,13 @@ TEST_CASE("VFX effect document preserves curve and gradient edits through undo a
     CHECK(std::get<float>(*findModulePin(size->Id, "size").DefaultValue) == doctest::Approx(0.5F));
     CHECK(std::get<Keire::Color>(*findModulePin(color->Id, "color").DefaultValue) ==
           (Keire::Color{1.0F, 0.5F, 0.0F, 1.0F}));
-    CHECK(document.Definition().Modules[size - authored.Modules.begin()].Id == size->Id);
-    CHECK(document.Definition().Modules[color - authored.Modules.begin()].Id == color->Id);
+    const auto sizeIndex = static_cast<std::size_t>(size - authored.Modules.begin());
+    const auto colorIndex = static_cast<std::size_t>(color - authored.Modules.begin());
+    CHECK(document.Definition().Modules[sizeIndex].Id == size->Id);
+    CHECK(document.Definition().Modules[colorIndex].Id == color->Id);
     CHECK(document.Undo());
-    CHECK(std::get<Keire::VfxColorOverLifetimeModule>(
-              document.Definition().Modules[color - authored.Modules.begin()].Payload)
-              .Color == std::get<Keire::VfxColorOverLifetimeModule>(color->Payload).Color);
+    CHECK(std::get<Keire::VfxColorOverLifetimeModule>(document.Definition().Modules[colorIndex].Payload).Color ==
+          std::get<Keire::VfxColorOverLifetimeModule>(color->Payload).Color);
     CHECK(document.Redo());
 
     document.Save();

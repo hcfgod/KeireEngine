@@ -57,7 +57,9 @@ def parse_expiry(value: str) -> str:
 def write_atomic(path: Path, value: dict[str, object]) -> None:
     data = (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
     path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
     try:
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(data)
@@ -100,9 +102,13 @@ def validate_package(manifest_path: Path, package: Path, key_id: str) -> Package
         or isinstance(manifest["installedSizeBytes"], bool)
         or manifest["installedSizeBytes"] < 1
     ):
-        raise ValueError(f"Package manifest is not a complete supported schema-1 manifest: {manifest_path}")
+        raise ValueError(
+            f"Package manifest is not a complete supported schema-1 manifest: {manifest_path}"
+        )
     if manifest["signatureKeyId"] != key_id:
-        raise ValueError("Catalog key ID does not match a package manifest signing key ID.")
+        raise ValueError(
+            "Catalog key ID does not match a package manifest signing key ID."
+        )
     channel = manifest["channel"]
     platform = manifest["platform"]
     architecture = manifest["architecture"]
@@ -117,7 +123,9 @@ def validate_package(manifest_path: Path, package: Path, key_id: str) -> Package
         or platform not in {"windows", "macos", "linux"}
         or architecture not in {"x86_64", "arm64"}
     ):
-        raise ValueError("Package identity, channel, platform, or architecture is invalid.")
+        raise ValueError(
+            "Package identity, channel, platform, or architecture is invalid."
+        )
     if (
         not package.is_file()
         or package.is_symlink()
@@ -127,7 +135,9 @@ def validate_package(manifest_path: Path, package: Path, key_id: str) -> Package
         or not SHA256.fullmatch(str(artifact["sha256"]))
         or sha256_file(package) != artifact["sha256"]
     ):
-        raise ValueError("Package bytes do not match the package manifest artifact identity.")
+        raise ValueError(
+            "Package bytes do not match the package manifest artifact identity."
+        )
     return PackageInput(manifest, package, channel, platform, architecture)
 
 
@@ -163,20 +173,30 @@ def main() -> int:
             str(item.manifest["version"]),
         )
         if identity in identities:
-            raise ValueError("The prepared snapshot contains a duplicate package identity.")
+            raise ValueError(
+                "The prepared snapshot contains a duplicate package identity."
+            )
         identities.add(identity)
-        catalogs.setdefault((item.channel, item.platform, item.architecture), []).append(item.manifest)
+        catalogs.setdefault(
+            (item.channel, item.platform, item.architecture), []
+        ).append(item.manifest)
 
     output = args.output.resolve()
     if output.exists():
         raise ValueError(f"Prepared snapshot output already exists: {output}")
     parent = output.parent
     parent.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix=f".{output.name}.", suffix=".tmp", dir=parent))
+    staging = Path(
+        tempfile.mkdtemp(prefix=f".{output.name}.", suffix=".tmp", dir=parent)
+    )
     try:
         for (channel, platform, architecture), manifests in sorted(catalogs.items()):
-            catalog_path = staging / "catalogs" / channel / platform / f"{architecture}.json"
-            manifests.sort(key=lambda value: (str(value["packageId"]), str(value["version"])))
+            catalog_path = (
+                staging / "catalogs" / channel / platform / f"{architecture}.json"
+            )
+            manifests.sort(
+                key=lambda value: (str(value["packageId"]), str(value["version"]))
+            )
             write_atomic(
                 catalog_path,
                 {

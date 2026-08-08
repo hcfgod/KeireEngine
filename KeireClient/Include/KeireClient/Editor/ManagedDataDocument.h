@@ -63,7 +63,8 @@ namespace KeireEditor
         void Discard() { m_Host.Discard(); }
         [[nodiscard]] bool Undo() { return m_Host.Undo(); }
         [[nodiscard]] bool Redo() { return m_Host.Redo(); }
-        [[nodiscard]] AssetDocumentReloadResult Reload(Keire::ManagedDataDefinition definition, std::uint64_t revision);
+        [[nodiscard]] AssetDocumentReloadResult Reload(const Keire::ManagedDataDefinition& definition,
+                                                       std::uint64_t revision);
 
         [[nodiscard]] static Keire::ManagedAssetValueNode
         DefaultValue(const Keire::ManagedAssetPropertyDescriptor& property);

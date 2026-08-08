@@ -2,8 +2,8 @@
 
 #include "KeireHubRuntime/NativeHttpTransport.h"
 
-#include "DistributionEncoding.h"
-#include "NativeHttpTransportPolicy.h"
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
+#include <KeireHubRuntimeInternal/NativeHttpTransportPolicy.h>
 
 #include <algorithm>
 #include <array>
@@ -16,7 +16,7 @@ namespace KeireHub
 {
     namespace
     {
-        constexpr std::size_t MaximumCatalogBytes = 32 * 1024 * 1024;
+        constexpr std::size_t MaximumCatalogBytes = std::size_t{32} * 1024 * 1024;
 
         [[nodiscard]] HubError ClientError(const HubErrorCode code, std::string message, std::string item,
                                            std::string details = {}, const bool retryable = false)

@@ -2,9 +2,9 @@
 
 #include "KeireHubRuntime/ProjectStatusProbe.h"
 
-#include "DistributionEncoding.h"
-#include "Persistence.h"
-#include "ProjectThumbnailDecode.h"
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
+#include <KeireHubRuntimeInternal/Persistence.h>
+#include <KeireHubRuntimeInternal/ProjectThumbnailDecode.h>
 
 #include <algorithm>
 #include <array>
@@ -17,6 +17,7 @@
 #include <map>
 #include <ranges>
 #include <stdexcept>
+#include <string_view>
 #include <system_error>
 #include <utility>
 
@@ -24,7 +25,7 @@ namespace KeireHub
 {
     namespace
     {
-        constexpr std::size_t MaximumDescriptorBytes = 1024U * 1024U;
+        constexpr std::size_t MaximumDescriptorBytes = std::size_t{1024U} * 1024U;
         constexpr std::size_t MaximumDescriptorDepth = 32;
         constexpr std::size_t HardMaximumCandidates = 4096;
         constexpr std::size_t HardMaximumDepth = 64;
@@ -32,8 +33,8 @@ namespace KeireHub
         constexpr std::uint64_t HardMaximumBytes = 4ULL * 1024ULL * 1024ULL * 1024ULL * 1024ULL;
         constexpr std::uint64_t HardMaximumThumbnailBytes = 64ULL * 1024ULL * 1024ULL;
         constexpr std::size_t ProgressEntryInterval = 64;
-        const std::filesystem::path DescriptorRelativePath = "ProjectSettings/Project.keireproject";
-        const std::filesystem::path ThumbnailRelativePath = "ProjectSettings/HubThumbnail.png";
+        constexpr std::string_view DescriptorRelativePath = "ProjectSettings/Project.keireproject";
+        constexpr std::string_view ThumbnailRelativePath = "ProjectSettings/HubThumbnail.png";
         constexpr std::array<unsigned char, 8> PngSignature{0x89U, 0x50U, 0x4eU, 0x47U, 0x0dU, 0x0aU, 0x1aU, 0x0aU};
 
         struct PreparedCandidate final
@@ -759,7 +760,7 @@ namespace KeireHub
                                 return {.State = TraversalState::LimitReached,
                                         .Details = "The project directory depth limit was reached."};
                             }
-                            pending.push_back({std::move(canonical), directory.Depth + 1});
+                            pending.push_back({canonical, directory.Depth + 1});
                         }
                         else if (std::filesystem::is_regular_file(status))
                         {

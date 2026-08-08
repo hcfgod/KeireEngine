@@ -14,8 +14,8 @@
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
-    <ProjectReference Include="../../src/KeireDistribution.Contracts/KeireDistribution.Contracts.csproj" />
-    <ProjectReference Include="../../src/KeireDistributionPublisher/KeireDistributionPublisher.csproj" />
-    <ProjectReference Include="../../src/KeireDistributionService/KeireDistributionService.csproj" />
+    <ProjectReference Include="../../Source/KeireDistribution.Contracts/KeireDistribution.Contracts.csproj" />
+    <ProjectReference Include="../../Source/KeireDistributionPublisher/KeireDistributionPublisher.csproj" />
+    <ProjectReference Include="../../Source/KeireDistributionService/KeireDistributionService.csproj" />
   </ItemGroup>
 </Project>

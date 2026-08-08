@@ -26,30 +26,50 @@ def load_public_key(path: Path) -> dict[str, object]:
     try:
         key = base64.b64decode(str(value["publicKey"]), validate=True)
     except (binascii.Error, ValueError, TypeError) as exception:
-        raise ValueError(f"Trusted public key is not canonical base64: {path}") from exception
+        raise ValueError(
+            f"Trusted public key is not canonical base64: {path}"
+        ) from exception
     if len(key) != 32 or base64.b64encode(key).decode("ascii") != value["publicKey"]:
         raise ValueError(f"Trusted Ed25519 public key is not exactly 32 bytes: {path}")
     digest = hashlib.sha256(key).hexdigest()
-    if value["keyId"] != f"ed25519-{digest[:32]}" or value["fingerprint"] != f"sha256:{digest}":
-        raise ValueError(f"Trusted public-key identity does not match its bytes: {path}")
+    if (
+        value["keyId"] != f"ed25519-{digest[:32]}"
+        or value["fingerprint"] != f"sha256:{digest}"
+    ):
+        raise ValueError(
+            f"Trusted public-key identity does not match its bytes: {path}"
+        )
     return value
 
 
 def canonical_service_url(value: str) -> str:
     if len(value) > 2048 or value.endswith("/"):
-        raise ValueError("Distribution service URL must be canonical and have no trailing slash.")
+        raise ValueError(
+            "Distribution service URL must be canonical and have no trailing slash."
+        )
     parsed = urlsplit(value)
-    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
-        raise ValueError("Distribution service URL must use HTTPS without embedded credentials.")
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+    ):
+        raise ValueError(
+            "Distribution service URL must use HTTPS without embedded credentials."
+        )
     if parsed.query or parsed.fragment or parsed.path not in ("", "/"):
-        raise ValueError("Distribution service URL must not include a path, query, or fragment.")
+        raise ValueError(
+            "Distribution service URL must not include a path, query, or fragment."
+        )
     return value
 
 
 def write_atomic(path: Path, value: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     encoded = (json.dumps(value, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
-    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
     try:
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(encoded)
@@ -73,7 +93,9 @@ def main() -> int:
     args = parser.parse_args()
 
     if bool(args.service_url) != bool(args.trusted_key):
-        raise ValueError("Distribution service URL and trusted public key must be supplied together.")
+        raise ValueError(
+            "Distribution service URL and trusted public key must be supplied together."
+        )
     if args.minimum_sequence < 1 or args.minimum_sequence > (2**63 - 1):
         raise ValueError("Distribution minimum sequence must be between 1 and 2^63-1.")
     if not args.service_url:

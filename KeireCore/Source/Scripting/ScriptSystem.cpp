@@ -73,13 +73,11 @@ namespace Keire
             std::uint8_t Spatial = 0;
             std::uint8_t PlaybackState = 0;
         };
-
         [[nodiscard]] std::string PathText(const std::filesystem::path& path)
         {
             const auto value = path.generic_u8string();
             return {reinterpret_cast<const char*>(value.data()), value.size()};
         }
-
         [[nodiscard]] std::string XmlEscape(const std::string_view value)
         {
             std::string result;
@@ -107,7 +105,6 @@ namespace Keire
             }
             return result;
         }
-
         void WriteText(const std::filesystem::path& path, const std::string_view value)
         {
             std::filesystem::create_directories(path.parent_path());
@@ -115,7 +112,6 @@ namespace Keire
             if (!stream || !stream.write(value.data(), static_cast<std::streamsize>(value.size())))
                 throw std::runtime_error("Managed build could not write '" + PathText(path) + "'.");
         }
-
         [[nodiscard]] std::vector<ManagedBuildDiagnostic> ParseDiagnostics(const std::string& output,
                                                                            const std::size_t maximum)
         {
@@ -141,7 +137,6 @@ namespace Keire
             }
             return result;
         }
-
         [[nodiscard]] std::string ManagedApiSourceFingerprint(const std::filesystem::path& project)
         {
             const auto sourceRoot = project.parent_path();
@@ -190,7 +185,6 @@ namespace Keire
             }
             return fingerprint;
         }
-
         [[nodiscard]] std::string
         GenerateProject(const ManagedAssemblyGraphEntry& assembly, const std::map<AssetId, std::string>& names,
                         const std::filesystem::path& projectRoot, const std::filesystem::path& projectDirectory,
@@ -1144,8 +1138,8 @@ namespace Keire
         };
 
         explicit Impl(ScriptSystemSpecification value, Ref<JobSystem> jobs)
-            : Specification(std::move(value)), Owner(std::this_thread::get_id()), Scheduler(std::move(jobs)),
-              Lifetime(std::make_shared<Impl*>(this))
+            : Specification(std::move(value)), Owner(std::this_thread::get_id()),
+              Lifetime(std::make_shared<Impl*>(this)), Scheduler(std::move(jobs))
         {
             if (!Scheduler)
             {
@@ -2111,7 +2105,7 @@ namespace Keire
                     return 0;
                 const auto name = animator->CurrentState();
                 if (destination && capacity > 0)
-                    std::copy_n(name.begin(), std::min<std::size_t>(name.size(), capacity), destination);
+                    std::copy_n(name.begin(), std::min(name.size(), static_cast<std::size_t>(capacity)), destination);
                 return static_cast<std::int32_t>(
                     std::min<std::size_t>(name.size(), std::numeric_limits<std::int32_t>::max()));
             }
@@ -2373,7 +2367,7 @@ namespace Keire
                     return 0;
                 const auto name = entity.Name();
                 if (destination && capacity > 0)
-                    std::copy_n(name.begin(), std::min<std::size_t>(name.size(), capacity), destination);
+                    std::copy_n(name.begin(), std::min(name.size(), static_cast<std::size_t>(capacity)), destination);
                 return static_cast<std::int32_t>(
                     std::min<std::size_t>(name.size(), std::numeric_limits<std::int32_t>::max()));
             }
@@ -4531,9 +4525,15 @@ namespace Keire
                     m_Impl->Invoke(instance.Object, "RuntimeBeforeReload");
                     instance.State = m_Impl->CaptureState(instance.Object, false);
                 }
-                Impl::BehaviourInstance replacement{
-                    instance.TypeName, instance.ComponentType, instance.World, instance.Entity, {},
-                    instance.State,    instance.Enabled,       false};
+                Impl::BehaviourInstance replacement{instance.TypeName,
+                                                    instance.ComponentType,
+                                                    instance.World,
+                                                    instance.Entity,
+                                                    {},
+                                                    instance.State,
+                                                    {},
+                                                    instance.Enabled,
+                                                    false};
                 replacement.NativeEntity = instance.NativeEntity;
                 auto* type = m_Impl->FindType(m_Impl->CandidateTypes, instance.ComponentType);
                 if (!type)

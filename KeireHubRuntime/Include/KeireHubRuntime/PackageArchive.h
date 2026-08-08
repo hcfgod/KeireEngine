@@ -21,8 +21,8 @@ namespace KeireHub
         static constexpr std::uint64_t MaximumArchiveBytes = 64ULL * 1024ULL * 1024ULL * 1024ULL;
         static constexpr std::uint64_t MaximumPayloadBytes = 64ULL * 1024ULL * 1024ULL * 1024ULL;
         static constexpr std::uint64_t MaximumFileBytes = 32ULL * 1024ULL * 1024ULL * 1024ULL;
-        static constexpr std::size_t MaximumManifestBytes = 8U * 1024U * 1024U;
-        static constexpr std::size_t MaximumSignatureBytes = 16U * 1024U;
+        static constexpr std::size_t MaximumManifestBytes = std::size_t{8U} * 1024U * 1024U;
+        static constexpr std::size_t MaximumSignatureBytes = std::size_t{16U} * 1024U;
         static constexpr std::size_t MaximumFiles = 32768U;
         static constexpr std::size_t MaximumPathBytes = 1024U;
     };

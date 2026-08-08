@@ -1,6 +1,6 @@
-#include "TestSupport.h"
+#include <KeireHubTests/TestSupport.h>
 
-#include "PackageArchiveOutput.h"
+#include <KeireHubRuntimeInternal/PackageArchiveOutput.h>
 
 #include <doctest/doctest.h>
 

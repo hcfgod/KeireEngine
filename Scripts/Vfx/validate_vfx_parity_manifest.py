@@ -39,7 +39,7 @@ def arguments() -> argparse.Namespace:
     parser.add_argument(
         "--manifest",
         type=Path,
-        default=Path("docs/VfxParityManifest.json"),
+        default=Path("Docs/VfxParityManifest.json"),
         help="Manifest to validate.",
     )
     parser.add_argument(

@@ -1,9 +1,9 @@
-#include "TestSupport.h"
+#include <KeireHubTests/TestSupport.h>
 
 #include "KeireHubRuntime/ContentCatalog.h"
 #include "KeireHubRuntime/LicenseCatalog.h"
 
-#include "DistributionEncoding.h"
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
 
 #include <doctest/doctest.h>
 
@@ -43,13 +43,13 @@ TEST_CASE("Local content catalogs resolve real files and hide unsafe or unsuppor
       "locale":"en-US",
       "learn":[
         {"id":"valid-guide","title":"Guide","summary":"Local guide","difficulty":"beginner",
-         "category":"Fundamentals","type":"guide","localPath":"docs/Guide.md","tags":["local"]},
+         "category":"Fundamentals","type":"guide","localPath":"Docs/Guide.md","tags":["local"]},
         {"id":"traversal","title":"Traversal","summary":"Unsafe","difficulty":"beginner",
          "category":"Invalid","type":"guide","localPath":"../outside.md"},
         {"id":"missing","title":"Missing","summary":"Missing","difficulty":"beginner",
-         "category":"Invalid","type":"guide","localPath":"docs/Missing.md"},
+         "category":"Invalid","type":"guide","localPath":"Docs/Missing.md"},
         {"id":"unknown","title":"Unknown","summary":"Unsupported","difficulty":"beginner",
-         "category":"Invalid","type":"video","localPath":"docs/Guide.md"}
+         "category":"Invalid","type":"video","localPath":"Docs/Guide.md"}
       ],
       "resources":[
         {"id":"repository","title":"Repository","summary":"Source","difficulty":"reference",
@@ -74,12 +74,12 @@ TEST_CASE("Content catalog failures are typed and do not replace an immutable pr
 {
     KeireHubTests::TemporaryDirectory temporary;
     const auto root = temporary.Path() / "root";
-    KeireHubTests::WriteText(root / "docs" / "Guide.md", "guide\n");
+    KeireHubTests::WriteText(root / "Docs" / "Guide.md", "guide\n");
     const auto catalog = temporary.Path() / "content.json";
     KeireHubTests::WriteText(catalog, R"({
       "schemaVersion":1,"locale":"en-US",
       "learn":[{"id":"guide","title":"Guide","summary":"Summary","difficulty":"beginner",
-                "category":"Core","type":"guide","localPath":"docs/Guide.md"}],
+                "category":"Core","type":"guide","localPath":"Docs/Guide.md"}],
       "resources":[]
     })");
 

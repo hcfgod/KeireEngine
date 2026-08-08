@@ -1,4 +1,4 @@
-#include "TestSupport.h"
+#include <KeireHubTests/TestSupport.h>
 
 #include "KeireHubRuntime/EditorInstallationManager.h"
 #include "KeireHubRuntime/HubFirstRunDiscovery.h"
@@ -179,6 +179,8 @@ TEST_CASE("First-run discovery never follows symbolic links outside an explicit 
     if (linkError)
     {
         MESSAGE("Directory symlinks are unavailable in this test environment: " << linkError.message());
+        if (KeireHubTests::RunningInCi())
+            FAIL_CHECK("CI must provide symbolic-link capability for first-run discovery confinement tests.");
         return;
     }
     const auto before = discovery.Snapshot();

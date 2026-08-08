@@ -219,10 +219,10 @@ namespace KeireEditor
             changed = true;
         }
         commit |= ui.LastItemState().DeactivatedAfterEdit;
-        auto resolutionPower = static_cast<std::int32_t>(std::bit_width(settings.DirectionalShadowResolution) - 1U);
+        auto resolutionPower = static_cast<std::int32_t>(std::bit_width(settings.DirectionalShadowResolution)) - 1;
         if (ui.SliderInt("Resolution (2^n)", resolutionPower, 8, 13))
         {
-            settings.DirectionalShadowResolution = 1U << resolutionPower;
+            settings.DirectionalShadowResolution = 1U << static_cast<std::uint32_t>(resolutionPower);
             changed = true;
         }
         commit |= ui.LastItemState().DeactivatedAfterEdit;

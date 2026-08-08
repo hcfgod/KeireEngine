@@ -1,6 +1,6 @@
 #include "KeireHubRuntime/AccountSessionStore.h"
 
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <array>
 #include <cstddef>
@@ -28,7 +28,7 @@ namespace KeireHub
     namespace
     {
         constexpr std::array<std::byte, 4> Header{std::byte{'K'}, std::byte{'H'}, std::byte{'S'}, std::byte{'1'}};
-        constexpr std::size_t MaximumStoredBytes = 64U * 1024U;
+        constexpr std::size_t MaximumStoredBytes = std::size_t{64U} * 1024U;
 
         [[nodiscard]] HubError StorageError(const HubErrorCode code, const std::filesystem::path& path,
                                             const std::string_view message, const std::string_view details = {})

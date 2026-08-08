@@ -564,7 +564,7 @@ namespace Keire
         }
         if (!graph)
             throw std::logic_error("AudioSystem has no submitted graph.");
-        if (frameCount > 16U * 1024U * 1024U ||
+        if (frameCount > std::uint64_t{16} * 1024U * 1024U ||
             frameCount * graph->Channels != static_cast<std::uint64_t>(interleavedInput.size()) ||
             !std::ranges::all_of(interleavedInput, [](const float sample) { return std::isfinite(sample); }))
             throw std::invalid_argument("Offline audio input dimensions or samples are invalid.");
@@ -1077,7 +1077,7 @@ namespace Keire
         m_Impl->RequireOwner("RenderVoicesOffline");
         if (m_Impl->Mode != AudioMode::Headless)
             throw std::logic_error("Offline voice rendering requires a headless AudioSystem.");
-        if (frameCount > 16U * 1024U * 1024U)
+        if (frameCount > std::uint64_t{16} * 1024U * 1024U)
             throw std::invalid_argument("Offline voice render frame count is excessive.");
         std::scoped_lock lock(m_Impl->Mutex);
         m_Impl->UpdateVirtualization();
@@ -1252,10 +1252,10 @@ namespace Keire
         std::scoped_lock lock(m_Impl->Mutex);
         AudioSystemStatistics result;
         result.Voices = m_Impl->Voices.size();
-        result.VirtualVoices =
-            std::ranges::count_if(m_Impl->Voices, [](const auto& item) { return item.second.Virtualized; });
-        result.AudibleVoices = std::ranges::count_if(m_Impl->Voices, [](const auto& item)
-                                                     { return !item.second.Virtualized && !item.second.Paused; });
+        result.VirtualVoices = static_cast<std::size_t>(
+            std::ranges::count_if(m_Impl->Voices, [](const auto& item) { return item.second.Virtualized; }));
+        result.AudibleVoices = static_cast<std::size_t>(std::ranges::count_if(
+            m_Impl->Voices, [](const auto& item) { return !item.second.Virtualized && !item.second.Paused; }));
         result.RenderedFrames = m_Impl->RenderedFrames;
         result.Underruns = m_Impl->Underruns;
         return result;

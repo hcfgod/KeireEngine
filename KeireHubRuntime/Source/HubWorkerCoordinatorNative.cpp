@@ -25,7 +25,7 @@ namespace KeireHub
     namespace
     {
         constexpr std::size_t MaximumWorkerArguments = 32;
-        constexpr std::size_t MaximumWorkerArgumentBytes = 32 * 1024;
+        constexpr std::size_t MaximumWorkerArgumentBytes = std::size_t{32} * 1024;
 
         [[nodiscard]] HubError LaunchError(const std::string_view details)
         {

@@ -9,7 +9,7 @@
       "difficulty": "beginner",
       "category": "Fundamentals",
       "type": "guide",
-      "localPath": "docs/GettingStarted.md",
+      "localPath": "Docs/GettingStarted.md",
       "tags": ["setup", "projects"],
       "featured": true
     },
@@ -20,7 +20,7 @@
       "difficulty": "beginner",
       "category": "Fundamentals",
       "type": "guide",
-      "localPath": "docs/ProjectSystem.md",
+      "localPath": "Docs/ProjectSystem.md",
       "tags": ["projects", "editor"]
     },
     {
@@ -30,7 +30,7 @@
       "difficulty": "beginner",
       "category": "Authoring",
       "type": "guide",
-      "localPath": "docs/AssetPipeline.md",
+      "localPath": "Docs/AssetPipeline.md",
       "tags": ["assets", "scenes"]
     },
     {
@@ -40,7 +40,7 @@
       "difficulty": "intermediate",
       "category": "Graphics",
       "type": "guide",
-      "localPath": "docs/Rendering.md",
+      "localPath": "Docs/Rendering.md",
       "tags": ["graphics", "shaders", "lighting"]
     },
     {
@@ -50,7 +50,7 @@
       "difficulty": "intermediate",
       "category": "Gameplay",
       "type": "guide",
-      "localPath": "docs/GameplayFoundations.md",
+      "localPath": "Docs/GameplayFoundations.md",
       "tags": ["physics", "gameplay"]
     },
     {
@@ -60,7 +60,7 @@
       "difficulty": "intermediate",
       "category": "Authoring",
       "type": "guide",
-      "localPath": "docs/GameplayFoundations.md",
+      "localPath": "Docs/GameplayFoundations.md",
       "tags": ["audio", "gameplay"]
     },
     {
@@ -70,7 +70,7 @@
       "difficulty": "intermediate",
       "category": "Scripting",
       "type": "guide",
-      "localPath": "docs/ManagedScripting.md",
+      "localPath": "Docs/ManagedScripting.md",
       "tags": ["scripting", "dotnet"]
     },
     {
@@ -80,7 +80,7 @@
       "difficulty": "intermediate",
       "category": "Authoring",
       "type": "guide",
-      "localPath": "docs/UiWorkspace.md",
+      "localPath": "Docs/UiWorkspace.md",
       "tags": ["ui", "authoring"]
     },
     {
@@ -90,7 +90,7 @@
       "difficulty": "advanced",
       "category": "Graphics",
       "type": "guide",
-      "localPath": "docs/Vfx.md",
+      "localPath": "Docs/Vfx.md",
       "tags": ["vfx", "graphics"]
     },
     {
@@ -100,7 +100,7 @@
       "difficulty": "intermediate",
       "category": "Build",
       "type": "guide",
-      "localPath": "docs/PlayerBuilds.md",
+      "localPath": "Docs/PlayerBuilds.md",
       "tags": ["build", "desktop"]
     },
     {
@@ -122,7 +122,7 @@
       "difficulty": "reference",
       "category": "Documentation",
       "type": "documentation",
-      "localPath": "docs/README.md",
+      "localPath": "Docs/README.md",
       "tags": ["documentation", "reference"]
     },
     {
@@ -132,7 +132,7 @@
       "difficulty": "reference",
       "category": "Reference",
       "type": "documentation",
-      "localPath": "docs/Scripting/ApiIndex.md",
+      "localPath": "Docs/Scripting/ApiIndex.md",
       "tags": ["api", "scripting"]
     },
     {

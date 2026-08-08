@@ -1,4 +1,4 @@
-#include "TestSupport.h"
+#include <KeireHubTests/TestSupport.h>
 
 #include "KeireHubRuntime/ProjectWorkflowManager.h"
 
@@ -108,7 +108,7 @@ TEST_CASE("Project duplicate cancellation removes staging and leaves catalog and
     const auto source = temporary.Path() / "Source";
     const auto destination = temporary.Path() / "Cancelled";
     WriteProject(source);
-    KeireHubTests::WriteText(source / "Assets" / "large.bin", std::string(2 * 1024 * 1024, 'x'));
+    KeireHubTests::WriteText(source / "Assets" / "large.bin", std::string(std::size_t{2} * 1024 * 1024, 'x'));
     HubProjectCatalog catalog(temporary.Path() / "projects.json");
     REQUIRE(catalog.Upsert(RecentProject(source)));
     bool locked = false;
@@ -123,7 +123,7 @@ TEST_CASE("Project duplicate cancellation removes staging and leaves catalog and
                                            .ReportProgress =
                                                [&cancel](const std::uint64_t bytes, const std::size_t)
                                            {
-                                               if (bytes >= 64 * 1024)
+                                               if (bytes >= 64ULL * 1024ULL)
                                                    cancel.store(true, std::memory_order_release);
                                            }});
     REQUIRE(staged);

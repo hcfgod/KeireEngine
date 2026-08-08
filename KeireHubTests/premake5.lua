@@ -8,6 +8,7 @@ project(HubTestsTarget)
 
     files
     {
+        "Include/**.h",
         "Source/**.cpp",
         "../KeireHub/Source/HubBuildSupportInventoryWorkflow.cpp",
         "../KeireHub/Source/HubChromeLayout.cpp",
@@ -32,9 +33,9 @@ project(HubTestsTarget)
 
     includedirs
     {
+        "Include",
         "../KeireHub/Include",
         "../KeireHubRuntime/Include",
-        "../KeireHubRuntime/Source",
         "../" .. ProjectConfig.CORE_DIRECTORY .. "/Include"
     }
 

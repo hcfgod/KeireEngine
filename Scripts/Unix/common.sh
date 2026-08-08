@@ -55,6 +55,9 @@ project_generation_fingerprint() {
         find "$root" -type f -name 'premake5.lua' -not -path "$root/Build/*" -not -path "$root/Vendor/*" -not -path "$root/Tools/*" -print | LC_ALL=C sort | while IFS= read -r source_root; do
             cksum "$source_root"
         done
+        find "$root/Scripts/Premake" -type f -name '*.lua' -print | LC_ALL=C sort | while IFS= read -r source_root; do
+            cksum "$source_root"
+        done
         cksum "$root/Config/Project.conf" "$root/Config/Dependencies.lock"
     } | cksum | awk '{ print $1 "-" $2 }'
 }
@@ -143,7 +146,7 @@ assert_package_archive_generated_data_free() {
 
 validate_package_stage() {
     local stage="$1" client="$2" hub="$3" core="$4" namespace="$5" path
-    local required=("bin/$client" "bin/$hub" "bin/Managed/Coral.Managed.dll" "bin/Managed/Keire.Managed.dll" "lib/lib$core.a" "lib/lib${namespace}ImGui.a" "Config/Client.json" "Config/SourceModules.premake.lua" "include/$namespace/Core.h" "include/$namespace/Log.h" "include/$namespace/Api.h" "include/$namespace/Application.h" "include/$namespace/Assert.h" "include/$namespace/BuildInfo.h" "include/$namespace/EntryPoint.h" "include/$namespace/Event.h" "include/$namespace/Layer.h" "include/$namespace/Ref.h" "include/$namespace/Time.h" "include/$namespace/Undo.h" "include/$namespace/Project/Project.h" "include/$namespace/Scenes/Scene.h" "include/$namespace/Scenes/SceneAsset.h" "include/$namespace/Scenes/SceneSystem.h" "include/$namespace/Ui.h" "include/$namespace/UiWorkspace.h" "include/$namespace/Window.h" "include/$namespace/WindowConfig.h" "samples/KeireSandbox/ProjectSettings/Project.keireproject" "samples/KeireSandbox/ProjectSettings/Rendering.keiresettings" "samples/KeireSandbox/Assets/Input/DefaultInput.keireinput" "samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene" "examples/consumer/Main.cpp" "examples/consumer/Client.json" "examples/consumer/CMakeLists.txt" "examples/consumer/README.md" "examples/managed-consumer/ClientApplication.cpp" "examples/managed-consumer/CMakeLists.txt" "examples/managed-consumer/README.md" "examples/source-module/ClientApplication.cpp" "examples/source-module/GameplayModule.cpp" "examples/source-module/GameplayModule.h" "examples/source-module/CMakeLists.txt" "examples/source-module/README.md" "docs/PlayerBuilds.md" "docs/Diagnostics/KEIRE-AUDIO-0001.md" "docs/Diagnostics/KEIRE-REPLAY-0001.md" "docs/Diagnostics/KEIRE-REPLAY-0002.md" "third-party/licenses/spdlog-LICENSE.txt" "third-party/licenses/fmt-LICENSE.rst" "third-party/licenses/doctest-LICENSE.txt" "third-party/licenses/nlohmann-json-LICENSE.MIT.txt" "third-party/licenses/dear-imgui-LICENSE.txt" "third-party/licenses/Coral-LICENSE.txt" "third-party/licenses/dotnet-LICENSE.txt" "third-party/licenses/dotnet-ThirdPartyNotices.txt" "third-party/SDL3/include/SDL3/SDL.h" "third-party/SDL3/lib/libSDL3.a" "third-party/SDL3/cmake/SDL3Config.cmake" "third-party/SDL3/licenses/SDL3/LICENSE.txt" README.md LICENSE.txt THIRD_PARTY_NOTICES.md build-manifest.json)
+    local required=("bin/$client" "bin/$hub" "bin/Managed/Coral.Managed.dll" "bin/Managed/Keire.Managed.dll" "lib/lib$core.a" "lib/lib${namespace}ImGui.a" "Config/Client.json" "Config/SourceModules.premake.lua" "include/$namespace/Core.h" "include/$namespace/Log.h" "include/$namespace/Api.h" "include/$namespace/Application.h" "include/$namespace/Assert.h" "include/$namespace/BuildInfo.h" "include/$namespace/EntryPoint.h" "include/$namespace/Event.h" "include/$namespace/Layer.h" "include/$namespace/Ref.h" "include/$namespace/Time.h" "include/$namespace/Undo.h" "include/$namespace/Project/Project.h" "include/$namespace/Scenes/Scene.h" "include/$namespace/Scenes/SceneAsset.h" "include/$namespace/Scenes/SceneSystem.h" "include/$namespace/Ui.h" "include/$namespace/UiWorkspace.h" "include/$namespace/Window.h" "include/$namespace/WindowConfig.h" "samples/KeireSandbox/ProjectSettings/Project.keireproject" "samples/KeireSandbox/ProjectSettings/Rendering.keiresettings" "samples/KeireSandbox/Assets/Input/DefaultInput.keireinput" "samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene" "examples/consumer/Source/Main.cpp" "examples/consumer/Client.json" "examples/consumer/CMakeLists.txt" "examples/consumer/README.md" "examples/managed-consumer/Source/ClientApplication.cpp" "examples/managed-consumer/CMakeLists.txt" "examples/managed-consumer/README.md" "examples/source-module/Source/ClientApplication.cpp" "examples/source-module/Source/GameplayModule.cpp" "examples/source-module/Include/GameplayModule.h" "examples/source-module/CMakeLists.txt" "examples/source-module/README.md" "Docs/PlayerBuilds.md" "Docs/Diagnostics/KEIRE-AUDIO-0001.md" "Docs/Diagnostics/KEIRE-REPLAY-0001.md" "Docs/Diagnostics/KEIRE-REPLAY-0002.md" "third-party/licenses/spdlog-LICENSE.txt" "third-party/licenses/fmt-LICENSE.rst" "third-party/licenses/doctest-LICENSE.txt" "third-party/licenses/nlohmann-json-LICENSE.MIT.txt" "third-party/licenses/dear-imgui-LICENSE.txt" "third-party/licenses/Coral-LICENSE.txt" "third-party/licenses/dotnet-LICENSE.txt" "third-party/licenses/dotnet-ThirdPartyNotices.txt" "third-party/SDL3/include/SDL3/SDL.h" "third-party/SDL3/lib/libSDL3.a" "third-party/SDL3/cmake/SDL3Config.cmake" "third-party/SDL3/licenses/SDL3/LICENSE.txt" README.md LICENSE.txt THIRD_PARTY_NOTICES.md build-manifest.json)
     required+=("bin/KeireShaderCompiler")
     for path in "${required[@]}"; do
         [[ -f "$stage/$path" ]] || { printf 'Package is missing required content: %s\n' "$path" >&2; return 1; }
@@ -190,7 +193,7 @@ editor_package_required_paths() {
       "bin/Managed/Keire.Managed.dll" "bin/Managed/Dotnet/dotnet" "Config/Client.json"
       "Config/Branding/Keire.png"
       "samples/KeireSandbox/ProjectSettings/Project.keireproject"
-      "samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene" "docs/PlayerBuilds.md" "README.md"
+      "samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene" "Docs/PlayerBuilds.md" "README.md"
       "CHANGELOG.md" "LICENSE.txt" "THIRD_PARTY_NOTICES.md" "build-manifest.json"
       "Config/SourceModules.premake.lua" "editor-package.json" "launch-editor.sh"
       "third-party/licenses/spdlog-LICENSE.txt" "third-party/licenses/fmt-LICENSE.rst"
@@ -261,7 +264,7 @@ hub_package_required_paths() {
     local hub="$1" namespace="$2"
     local required=(
       "bin/$hub" "bin/${namespace}HubWorker" "Config/Branding/Keire.png"
-      "Config/SourceModules.premake.lua" "Config/Distribution.json" "Config/Supabase.json" "docs/ProjectHub.md"
+      "Config/SourceModules.premake.lua" "Config/Distribution.json" "Config/Supabase.json" "Docs/ProjectHub.md"
       "Samples/KeireSandbox/ProjectSettings/Project.keireproject" "README.md" "CHANGELOG.md" "LICENSE.txt"
       "THIRD_PARTY_NOTICES.md" "hub-package.json" "launch-hub.sh"
       "third-party/licenses/spdlog-LICENSE.txt" "third-party/licenses/fmt-LICENSE.rst"
@@ -397,7 +400,7 @@ write_sha256_tree_manifest() {
         return 1
     }
     (
-        cd "$root"
+        cd "$root" || exit 1
         find . -type f -exec shasum -a 256 {} + | LC_ALL=C sort > "$output"
     )
 }

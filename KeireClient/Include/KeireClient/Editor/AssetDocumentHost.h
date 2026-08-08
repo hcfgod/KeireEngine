@@ -169,7 +169,7 @@ namespace KeireEditor
             m_Diagnostic.clear();
         }
 
-        [[nodiscard]] AssetDocumentReloadResult Reload(Definition definition, const std::uint64_t revision)
+        [[nodiscard]] AssetDocumentReloadResult Reload(const Definition& definition, const std::uint64_t revision)
         {
             RequireOpen();
             if (revision == 0)

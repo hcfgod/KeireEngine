@@ -63,11 +63,6 @@ namespace Keire
             return length > Epsilon ? Multiply(value, 1.0F / length) : fallback;
         }
 
-        [[nodiscard]] Vector3 Lerp(const Vector3 left, const Vector3 right, const float amount) noexcept
-        {
-            return Add(left, Multiply(Subtract(right, left), std::clamp(amount, 0.0F, 1.0F)));
-        }
-
         [[nodiscard]] Quaternion Multiply(const Quaternion left, const Quaternion right) noexcept
         {
             return {left.W * right.X + left.X * right.W + left.Y * right.Z - left.Z * right.Y,
@@ -862,7 +857,8 @@ namespace Keire
             }
             SkinVertexInfluence8 influence;
             const auto influenceCount = std::min<std::size_t>(request.MaximumInfluences, scores.size());
-            std::partial_sort(scores.begin(), scores.begin() + influenceCount, scores.end(), scoreOrder);
+            const auto influenceEnd = scores.begin() + static_cast<decltype(scores)::difference_type>(influenceCount);
+            std::partial_sort(scores.begin(), influenceEnd, scores.end(), scoreOrder);
             influence.Count = static_cast<std::uint8_t>(influenceCount);
             float total = 0.0F;
             for (std::size_t index = 0; index < influence.Count; ++index)

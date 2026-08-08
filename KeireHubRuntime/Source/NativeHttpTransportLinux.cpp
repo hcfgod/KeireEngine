@@ -1,7 +1,7 @@
-#include "NativeHttpTransportPlatform.h"
+#include <KeireHubRuntimeInternal/NativeHttpTransportPlatform.h>
 
 #if defined(__linux__)
-#include "NativeHttpTransportPolicy.h"
+#include <KeireHubRuntimeInternal/NativeHttpTransportPolicy.h>
 
 #include <curl/curl.h>
 
@@ -24,9 +24,9 @@ namespace KeireHub::Detail
 {
     namespace
     {
-        constexpr std::size_t MaximumCatalogBytes = 32U * 1024U * 1024U;
-        constexpr std::size_t MaximumRequestBodyBytes = 1024U * 1024U;
-        constexpr std::size_t MaximumResponseBodyBytes = 4U * 1024U * 1024U;
+        constexpr std::size_t MaximumCatalogBytes = std::size_t{32U} * 1024U * 1024U;
+        constexpr std::size_t MaximumRequestBodyBytes = std::size_t{1024U} * 1024U;
+        constexpr std::size_t MaximumResponseBodyBytes = std::size_t{4U} * 1024U * 1024U;
 
         struct CurlHandleCloser final
         {

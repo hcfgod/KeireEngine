@@ -6,6 +6,7 @@
 #include <array>
 #include <cctype>
 #include <chrono>
+#include <cstddef>
 #include <limits>
 #include <stdexcept>
 #include <system_error>
@@ -98,6 +99,167 @@ namespace Keire::Detail
             result.push_back(L'\"');
             return result;
         }
+
+        class UniqueHandle final
+        {
+          public:
+            UniqueHandle() = default;
+            explicit UniqueHandle(HANDLE handle) noexcept : m_Handle(handle) {}
+            ~UniqueHandle() { Reset(); }
+
+            UniqueHandle(const UniqueHandle&) = delete;
+            UniqueHandle& operator=(const UniqueHandle&) = delete;
+            UniqueHandle(UniqueHandle&& other) noexcept : m_Handle(other.Release()) {}
+            UniqueHandle& operator=(UniqueHandle&& other) noexcept
+            {
+                if (this != &other)
+                    Reset(other.Release());
+                return *this;
+            }
+
+            [[nodiscard]] HANDLE Get() const noexcept { return m_Handle; }
+            [[nodiscard]] HANDLE Release() noexcept { return std::exchange(m_Handle, nullptr); }
+            void Reset(HANDLE handle = nullptr) noexcept
+            {
+                if (m_Handle && m_Handle != INVALID_HANDLE_VALUE)
+                    CloseHandle(m_Handle);
+                m_Handle = handle;
+            }
+
+          private:
+            HANDLE m_Handle = nullptr;
+        };
+
+        class ProcessThreadAttributeList final
+        {
+          public:
+            ProcessThreadAttributeList()
+            {
+                SIZE_T size = 0;
+                (void)InitializeProcThreadAttributeList(nullptr, 1, 0, &size);
+                if (size == 0)
+                    throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
+                                            "Process attribute sizing failed");
+                m_Storage.resize(size);
+                m_List = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(m_Storage.data());
+                if (!InitializeProcThreadAttributeList(m_List, 1, 0, &size))
+                    throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
+                                            "Process attribute initialization failed");
+            }
+
+            ~ProcessThreadAttributeList()
+            {
+                if (m_List)
+                    DeleteProcThreadAttributeList(m_List);
+            }
+
+            ProcessThreadAttributeList(const ProcessThreadAttributeList&) = delete;
+            ProcessThreadAttributeList& operator=(const ProcessThreadAttributeList&) = delete;
+
+            void SetInheritedHandles(const std::span<HANDLE> handles)
+            {
+                if (!UpdateProcThreadAttribute(m_List, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                                               static_cast<void*>(handles.data()), handles.size_bytes(), nullptr,
+                                               nullptr))
+                    throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
+                                            "Process handle-list initialization failed");
+            }
+
+            [[nodiscard]] LPPROC_THREAD_ATTRIBUTE_LIST Get() const noexcept { return m_List; }
+
+          private:
+            std::vector<std::byte> m_Storage;
+            LPPROC_THREAD_ATTRIBUTE_LIST m_List = nullptr;
+        };
+
+        struct CapturedWindowsProcess
+        {
+            HANDLE Process = nullptr;
+            HANDLE Thread = nullptr;
+            HANDLE ReadPipe = nullptr;
+            std::uint64_t ProcessId = 0;
+        };
+
+        [[nodiscard]] std::wstring BuildWindowsCommand(const std::filesystem::path& executable,
+                                                       const std::span<const std::string> arguments)
+        {
+            auto command = QuoteWindowsArgument(executable.wstring());
+            for (const auto& argument : arguments)
+            {
+                command.push_back(L' ');
+                command += QuoteWindowsArgument(Utf8ToWide(argument));
+            }
+            return command;
+        }
+
+        [[nodiscard]] CapturedWindowsProcess StartCapturedWindowsProcess(const std::filesystem::path& executable,
+                                                                         const std::span<const std::string> arguments,
+                                                                         const std::filesystem::path& workingDirectory)
+        {
+            SECURITY_ATTRIBUTES security{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
+            HANDLE readPipeValue = nullptr;
+            HANDLE writePipeValue = nullptr;
+            if (!CreatePipe(&readPipeValue, &writePipeValue, &security, 0))
+                throw std::system_error(static_cast<int>(GetLastError()), std::system_category(), "CreatePipe failed");
+            UniqueHandle readPipe(readPipeValue);
+            UniqueHandle writePipe(writePipeValue);
+            if (!SetHandleInformation(readPipe.Get(), HANDLE_FLAG_INHERIT, 0))
+                throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
+                                        "Pipe inheritance configuration failed");
+
+            UniqueHandle standardInput(CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &security,
+                                                   OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
+            if (standardInput.Get() == INVALID_HANDLE_VALUE)
+            {
+                const auto error = GetLastError();
+                (void)standardInput.Release();
+                throw std::system_error(static_cast<int>(error), std::system_category(),
+                                        "Process standard input initialization failed");
+            }
+
+            std::array inheritedHandles{writePipe.Get(), standardInput.Get()};
+            ProcessThreadAttributeList attributes;
+            attributes.SetInheritedHandles(inheritedHandles);
+
+            auto command = BuildWindowsCommand(executable, arguments);
+            const auto executableValue = executable.wstring();
+            const auto workingDirectoryValue = workingDirectory.wstring();
+            STARTUPINFOEXW startup{};
+            startup.StartupInfo.cb = sizeof(startup);
+            startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+            startup.StartupInfo.hStdOutput = writePipe.Get();
+            startup.StartupInfo.hStdError = writePipe.Get();
+            startup.StartupInfo.hStdInput = standardInput.Get();
+            startup.lpAttributeList = attributes.Get();
+            PROCESS_INFORMATION process{};
+            if (!CreateProcessW(executableValue.c_str(), command.data(), nullptr, nullptr, TRUE,
+                                CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT, nullptr, workingDirectoryValue.c_str(),
+                                reinterpret_cast<LPSTARTUPINFOW>(&startup), &process))
+                throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
+                                        "CreateProcess failed");
+
+            UniqueHandle processHandle(process.hProcess);
+            UniqueHandle threadHandle(process.hThread);
+            return {processHandle.Release(), threadHandle.Release(), readPipe.Release(),
+                    static_cast<std::uint64_t>(process.dwProcessId)};
+        }
+#else
+        struct PosixProcessArguments
+        {
+            PosixProcessArguments(const std::filesystem::path& executable, const std::span<const std::string> arguments)
+            {
+                Storage.reserve(arguments.size() + 1);
+                Storage.push_back(executable.string());
+                Storage.insert(Storage.end(), arguments.begin(), arguments.end());
+                Values.reserve(Storage.size() + 1);
+                for (auto& value : Storage)
+                    Values.push_back(value.data());
+                Values.push_back(nullptr);
+            }
+
+            std::vector<std::string> Storage;
+            std::vector<char*> Values;
+        };
 #endif
     } // namespace
 
@@ -114,7 +276,7 @@ namespace Keire::Detail
         const auto release = [](wchar_t** arguments)
         {
             if (arguments)
-                LocalFree(arguments);
+                LocalFree(reinterpret_cast<HLOCAL>(arguments));
         };
         const std::unique_ptr<wchar_t*, decltype(release)> owner(wideValues, release);
         m_Arguments.reserve(wideCount > 0 ? static_cast<std::size_t>(wideCount) : 0);
@@ -138,7 +300,7 @@ namespace Keire::Detail
 
         void DrainOutput()
         {
-            constexpr std::size_t maximumOutputBytes = 4U * 1024U * 1024U;
+            constexpr std::size_t maximumOutputBytes = std::size_t{4} * 1024U * 1024U;
             std::array<char, 4096> buffer{};
 #if defined(_WIN32)
             if (!m_ReadPipe)
@@ -287,45 +449,16 @@ namespace Keire::Detail
             throw std::invalid_argument("Process executable or working directory does not exist.");
         auto implementation = std::make_unique<Impl>();
 #if defined(_WIN32)
-        SECURITY_ATTRIBUTES security{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
-        HANDLE writePipe = nullptr;
-        if (!CreatePipe(&implementation->m_ReadPipe, &writePipe, &security, 0))
-            throw std::system_error(static_cast<int>(GetLastError()), std::system_category(), "CreatePipe failed");
-        if (!SetHandleInformation(implementation->m_ReadPipe, HANDLE_FLAG_INHERIT, 0))
-        {
-            const auto error = GetLastError();
-            CloseHandle(writePipe);
-            CloseHandle(implementation->m_ReadPipe);
-            implementation->m_ReadPipe = nullptr;
-            throw std::system_error(static_cast<int>(error), std::system_category(), "CreatePipe failed");
-        }
-        auto command = QuoteWindowsArgument(executable.wstring());
-        for (const auto& argument : arguments)
-        {
-            command.push_back(L' ');
-            command += QuoteWindowsArgument(Utf8ToWide(argument));
-        }
-        STARTUPINFOW startup{};
-        startup.cb = sizeof(startup);
-        startup.dwFlags = STARTF_USESTDHANDLES;
-        startup.hStdOutput = writePipe;
-        startup.hStdError = writePipe;
-        startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-        PROCESS_INFORMATION process{};
-        if (!CreateProcessW(executable.wstring().c_str(), command.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW,
-                            nullptr, workingDirectory.wstring().c_str(), &startup, &process))
-        {
-            const auto error = GetLastError();
-            CloseHandle(writePipe);
-            CloseHandle(implementation->m_ReadPipe);
-            implementation->m_ReadPipe = nullptr;
-            throw std::system_error(static_cast<int>(error), std::system_category(), "CreateProcess failed");
-        }
-        CloseHandle(writePipe);
-        implementation->m_Process = process.hProcess;
-        implementation->m_Thread = process.hThread;
-        implementation->m_ProcessId = static_cast<std::uint64_t>(process.dwProcessId);
+        const auto process = StartCapturedWindowsProcess(executable, arguments, workingDirectory);
+        implementation->m_Process = process.Process;
+        implementation->m_Thread = process.Thread;
+        implementation->m_ReadPipe = process.ReadPipe;
+        implementation->m_ProcessId = process.ProcessId;
 #else
+        PosixProcessArguments processArguments(executable, arguments);
+        char* const* processValues = processArguments.Values.data();
+        const auto* executableValue = processValues[0];
+        const auto* workingDirectoryValue = workingDirectory.c_str();
         int descriptors[2]{};
         if (pipe(descriptors) != 0)
             throw std::system_error(errno, std::generic_category(), "pipe failed");
@@ -343,18 +476,9 @@ namespace Keire::Detail
             (void)dup2(descriptors[1], STDOUT_FILENO);
             (void)dup2(descriptors[1], STDERR_FILENO);
             close(descriptors[1]);
-            if (chdir(workingDirectory.c_str()) != 0)
+            if (chdir(workingDirectoryValue) != 0)
                 _exit(126);
-            std::vector<std::string> storage;
-            storage.reserve(arguments.size() + 1);
-            storage.push_back(executable.string());
-            storage.insert(storage.end(), arguments.begin(), arguments.end());
-            std::vector<char*> values;
-            values.reserve(storage.size() + 1);
-            for (auto& value : storage)
-                values.push_back(value.data());
-            values.push_back(nullptr);
-            execv(executable.c_str(), values.data());
+            execv(executableValue, processValues);
             _exit(127);
         }
         close(descriptors[1]);
@@ -398,38 +522,13 @@ namespace Keire::Detail
         if (timeout.count() <= 0)
             throw std::invalid_argument("Process timeout must be positive.");
 
-        constexpr std::size_t maximumOutputBytes = 4U * 1024U * 1024U;
+        constexpr std::size_t maximumOutputBytes = std::size_t{4} * 1024U * 1024U;
         ProcessResult result;
 #if defined(_WIN32)
-        SECURITY_ATTRIBUTES security{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
-        HANDLE readPipe = nullptr;
-        HANDLE writePipe = nullptr;
-        if (!CreatePipe(&readPipe, &writePipe, &security, 0) || !SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0))
-            throw std::system_error(static_cast<int>(GetLastError()), std::system_category(), "CreatePipe failed");
-
-        auto command = QuoteWindowsArgument(executable.wstring());
-        for (const auto& argument : arguments)
-        {
-            command.push_back(L' ');
-            command += QuoteWindowsArgument(Utf8ToWide(argument));
-        }
-        STARTUPINFOW startup{};
-        startup.cb = sizeof(startup);
-        startup.dwFlags = STARTF_USESTDHANDLES;
-        startup.hStdOutput = writePipe;
-        startup.hStdError = writePipe;
-        startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-        PROCESS_INFORMATION process{};
-        if (!CreateProcessW(executable.wstring().c_str(), command.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW,
-                            nullptr, workingDirectory.wstring().c_str(), &startup, &process))
-        {
-            const auto error = GetLastError();
-            CloseHandle(writePipe);
-            CloseHandle(readPipe);
-            throw std::system_error(static_cast<int>(error), std::system_category(), "CreateProcess failed");
-        }
-        CloseHandle(writePipe);
-        writePipe = nullptr;
+        const auto processValue = StartCapturedWindowsProcess(executable, arguments, workingDirectory);
+        UniqueHandle process(processValue.Process);
+        UniqueHandle thread(processValue.Thread);
+        UniqueHandle readPipe(processValue.ReadPipe);
 
         const auto deadline = std::chrono::steady_clock::now() + timeout;
         std::array<char, 4096> buffer{};
@@ -437,10 +536,10 @@ namespace Keire::Detail
         while (running)
         {
             DWORD available = 0;
-            while (PeekNamedPipe(readPipe, nullptr, 0, nullptr, &available, nullptr) && available > 0)
+            while (PeekNamedPipe(readPipe.Get(), nullptr, 0, nullptr, &available, nullptr) && available > 0)
             {
                 DWORD read = 0;
-                if (!ReadFile(readPipe, buffer.data(),
+                if (!ReadFile(readPipe.Get(), buffer.data(),
                               static_cast<DWORD>(std::min<std::size_t>(buffer.size(), available)), &read, nullptr))
                     break;
                 if (result.Output.size() < maximumOutputBytes)
@@ -449,42 +548,40 @@ namespace Keire::Detail
                 available -= read;
             }
 
-            const auto status = WaitForSingleObject(process.hProcess, 5);
+            const auto status = WaitForSingleObject(process.Get(), 5);
             if (status == WAIT_OBJECT_0)
                 running = false;
             else if (status != WAIT_TIMEOUT)
             {
                 const auto error = GetLastError();
-                TerminateProcess(process.hProcess, 127);
-                WaitForSingleObject(process.hProcess, INFINITE);
-                CloseHandle(process.hThread);
-                CloseHandle(process.hProcess);
-                CloseHandle(readPipe);
+                TerminateProcess(process.Get(), 127);
+                WaitForSingleObject(process.Get(), INFINITE);
                 throw std::system_error(static_cast<int>(error), std::system_category(), "Process wait failed");
             }
             else if (std::chrono::steady_clock::now() >= deadline)
             {
                 result.TimedOut = true;
-                TerminateProcess(process.hProcess, 124);
-                WaitForSingleObject(process.hProcess, INFINITE);
+                TerminateProcess(process.Get(), 124);
+                WaitForSingleObject(process.Get(), INFINITE);
                 running = false;
             }
         }
 
         DWORD read = 0;
-        while (ReadFile(readPipe, buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr) && read > 0)
+        while (ReadFile(readPipe.Get(), buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr) && read > 0)
         {
             if (result.Output.size() < maximumOutputBytes)
                 result.Output.append(buffer.data(),
                                      std::min<std::size_t>(read, maximumOutputBytes - result.Output.size()));
         }
         DWORD exitCode = 127;
-        (void)GetExitCodeProcess(process.hProcess, &exitCode);
+        (void)GetExitCodeProcess(process.Get(), &exitCode);
         result.ExitCode = static_cast<int>(exitCode);
-        CloseHandle(process.hThread);
-        CloseHandle(process.hProcess);
-        CloseHandle(readPipe);
 #else
+        PosixProcessArguments processArguments(executable, arguments);
+        char* const* processValues = processArguments.Values.data();
+        const auto* executableValue = processValues[0];
+        const auto* workingDirectoryValue = workingDirectory.c_str();
         int descriptors[2]{};
         if (pipe(descriptors) != 0)
             throw std::system_error(errno, std::generic_category(), "pipe failed");
@@ -502,18 +599,9 @@ namespace Keire::Detail
             (void)dup2(descriptors[1], STDOUT_FILENO);
             (void)dup2(descriptors[1], STDERR_FILENO);
             close(descriptors[1]);
-            if (chdir(workingDirectory.c_str()) != 0)
+            if (chdir(workingDirectoryValue) != 0)
                 _exit(126);
-            std::vector<std::string> storage;
-            storage.reserve(arguments.size() + 1);
-            storage.push_back(executable.string());
-            storage.insert(storage.end(), arguments.begin(), arguments.end());
-            std::vector<char*> values;
-            values.reserve(storage.size() + 1);
-            for (auto& value : storage)
-                values.push_back(value.data());
-            values.push_back(nullptr);
-            execv(executable.c_str(), values.data());
+            execv(executableValue, processValues);
             _exit(127);
         }
 
@@ -604,6 +692,10 @@ namespace Keire::Detail
             CloseHandle(process.hProcess);
             return true;
 #else
+            PosixProcessArguments processArguments(executable, arguments);
+            char* const* processValues = processArguments.Values.data();
+            const auto* executableValue = processValues[0];
+            const auto* workingDirectoryValue = workingDirectory.c_str();
             int processPipe[2]{};
             if (pipe(processPipe) != 0)
             {
@@ -633,18 +725,9 @@ namespace Keire::Detail
                 }
                 close(processPipe[1]);
                 (void)setsid();
-                if (chdir(workingDirectory.c_str()) != 0)
+                if (chdir(workingDirectoryValue) != 0)
                     _exit(126);
-                std::vector<std::string> storage;
-                storage.reserve(arguments.size() + 1);
-                storage.push_back(executable.string());
-                storage.insert(storage.end(), arguments.begin(), arguments.end());
-                std::vector<char*> values;
-                values.reserve(storage.size() + 1);
-                for (auto& value : storage)
-                    values.push_back(value.data());
-                values.push_back(nullptr);
-                execv(executable.c_str(), values.data());
+                execv(executableValue, processValues);
                 _exit(127);
             }
             close(processPipe[1]);

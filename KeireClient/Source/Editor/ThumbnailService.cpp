@@ -74,12 +74,22 @@ namespace KeireEditor
 
         [[nodiscard]] std::string Lower(std::string value)
         {
-            std::ranges::transform(value, value.begin(), [](const unsigned char character)
-                                   { return static_cast<char>(std::tolower(character)); });
+            std::ranges::transform(value, value.begin(), [](const char input)
+                                   { return static_cast<char>(std::tolower(static_cast<unsigned char>(input))); });
             return value;
         }
 
         [[nodiscard]] std::uint8_t Byte(const std::byte value) noexcept { return std::to_integer<std::uint8_t>(value); }
+
+        template <typename Value> [[nodiscard]] constexpr float AsFloat(const Value value) noexcept
+        {
+            return static_cast<float>(value);
+        }
+
+        template <typename Value> [[nodiscard]] constexpr double AsDouble(const Value value) noexcept
+        {
+            return static_cast<double>(value);
+        }
 
         void FillPreviewBackground(std::vector<std::byte>& pixels, const std::uint32_t width,
                                    const std::uint32_t height)
@@ -103,8 +113,8 @@ namespace KeireEditor
                 return {255, 255, 255, 255};
             u -= std::floor(u);
             v -= std::floor(v);
-            const auto x = std::min(static_cast<std::uint32_t>(u * mip.Width), mip.Width - 1);
-            const auto y = std::min(static_cast<std::uint32_t>(v * mip.Height), mip.Height - 1);
+            const auto x = std::min(static_cast<std::uint32_t>(u * AsFloat(mip.Width)), mip.Width - 1);
+            const auto y = std::min(static_cast<std::uint32_t>(v * AsFloat(mip.Height)), mip.Height - 1);
             const auto offset = (static_cast<std::size_t>(y) * mip.Width + x) * 4;
             return {Byte(mip.Pixels[offset]), Byte(mip.Pixels[offset + 1]), Byte(mip.Pixels[offset + 2]),
                     Byte(mip.Pixels[offset + 3])};
@@ -124,24 +134,27 @@ namespace KeireEditor
                     const auto checker = static_cast<std::uint8_t>(light ? 96 : 58);
                     PutPixel(result, width, x, y, checker, checker, checker);
                 }
-            const float sourceAspect = static_cast<float>(texture->Width()) / std::max(texture->Height(), 1U);
-            const float targetAspect = static_cast<float>(width) / std::max(height, 1U);
+            const float sourceAspect = AsFloat(texture->Width()) / AsFloat(std::max(texture->Height(), 1U));
+            const float targetAspect = AsFloat(width) / AsFloat(std::max(height, 1U));
             const std::uint32_t drawWidth =
-                sourceAspect > targetAspect ? width : std::max(1U, static_cast<std::uint32_t>(height * sourceAspect));
+                sourceAspect > targetAspect ? width
+                                            : std::max(1U, static_cast<std::uint32_t>(AsFloat(height) * sourceAspect));
             const std::uint32_t drawHeight =
-                sourceAspect > targetAspect ? std::max(1U, static_cast<std::uint32_t>(width / sourceAspect)) : height;
+                sourceAspect > targetAspect ? std::max(1U, static_cast<std::uint32_t>(AsFloat(width) / sourceAspect))
+                                            : height;
             const std::uint32_t left = (width - drawWidth) / 2;
             const std::uint32_t top = (height - drawHeight) / 2;
             for (std::uint32_t y = 0; y < drawHeight; ++y)
                 for (std::uint32_t x = 0; x < drawWidth; ++x)
                 {
-                    auto sample = SampleTexture(*texture, (x + 0.5F) / drawWidth, (y + 0.5F) / drawHeight);
+                    auto sample = SampleTexture(*texture, (AsFloat(x) + 0.5F) / AsFloat(drawWidth),
+                                                (AsFloat(y) + 0.5F) / AsFloat(drawHeight));
                     if (texture->Settings().HighDynamicRange)
                     {
                         const float exponent = std::ldexp(1.0F, static_cast<int>(sample[3]) - 136);
                         for (std::size_t channel = 0; channel < 3; ++channel)
                         {
-                            const float radiance = sample[channel] * exponent;
+                            const float radiance = static_cast<float>(sample[channel]) * exponent;
                             const float mapped = std::clamp(radiance * (2.51F * radiance + 0.03F) /
                                                                 (radiance * (2.43F * radiance + 0.59F) + 0.14F),
                                                             0.0F, 1.0F);
@@ -149,13 +162,14 @@ namespace KeireEditor
                         }
                         sample[3] = 255;
                     }
-                    const float alpha = sample[3] / 255.0F;
+                    const float alpha = static_cast<float>(sample[3]) / 255.0F;
                     const bool light = (((left + x) / 8) + ((top + y) / 8)) % 2 == 0;
                     const float checker = light ? 96.0F : 58.0F;
-                    PutPixel(result, width, left + x, top + y,
-                             static_cast<std::uint8_t>(sample[0] * alpha + checker * (1.0F - alpha)),
-                             static_cast<std::uint8_t>(sample[1] * alpha + checker * (1.0F - alpha)),
-                             static_cast<std::uint8_t>(sample[2] * alpha + checker * (1.0F - alpha)));
+                    PutPixel(
+                        result, width, left + x, top + y,
+                        static_cast<std::uint8_t>(static_cast<float>(sample[0]) * alpha + checker * (1.0F - alpha)),
+                        static_cast<std::uint8_t>(static_cast<float>(sample[1]) * alpha + checker * (1.0F - alpha)),
+                        static_cast<std::uint8_t>(static_cast<float>(sample[2]) * alpha + checker * (1.0F - alpha)));
                 }
             return result;
         }
@@ -194,15 +208,17 @@ namespace KeireEditor
             const auto texture = baseTexture ? request.PreviewTexture : Keire::Ref<const Keire::Texture2DAsset>{};
             std::vector<std::byte> result(static_cast<std::size_t>(width) * height * 4);
             FillPreviewBackground(result, width, height);
-            const float centerX = width * 0.5F;
-            const float centerY = height * 0.48F;
-            const float radius = std::min(width, height) * 0.39F;
+            const float widthFloat = AsFloat(width);
+            const float heightFloat = AsFloat(height);
+            const float centerX = widthFloat * 0.5F;
+            const float centerY = heightFloat * 0.48F;
+            const float radius = AsFloat(std::min(width, height)) * 0.39F;
             constexpr float pi = 3.14159265358979323846F;
             for (std::uint32_t y = 0; y < height; ++y)
                 for (std::uint32_t x = 0; x < width; ++x)
                 {
-                    const float nx = (x + 0.5F - centerX) / radius;
-                    const float ny = (centerY - y - 0.5F) / radius;
+                    const float nx = (AsFloat(x) + 0.5F - centerX) / radius;
+                    const float ny = (centerY - AsFloat(y) - 0.5F) / radius;
                     const float radiusSquared = nx * nx + ny * ny;
                     if (radiusSquared > 1.0F)
                         continue;
@@ -218,7 +234,7 @@ namespace KeireEditor
                     const auto channel = [&](const std::uint8_t value, const float factor)
                     {
                         return static_cast<std::uint8_t>(
-                            std::clamp(value * factor * light + specular * 70.0F, 0.0F, 255.0F));
+                            std::clamp(static_cast<float>(value) * factor * light + specular * 70.0F, 0.0F, 255.0F));
                     };
                     PutPixel(result, width, x, y, channel(sample[0], tint.Red), channel(sample[1], tint.Green),
                              channel(sample[2], tint.Blue));
@@ -300,11 +316,13 @@ namespace KeireEditor
             }
             const float projectedWidth = std::max(maximumX - minimumX, 0.0001F);
             const float projectedHeight = std::max(maximumY - minimumY, 0.0001F);
-            const float scale = std::min(width * 0.82F / projectedWidth, height * 0.82F / projectedHeight);
+            const float widthFloat = AsFloat(width);
+            const float heightFloat = AsFloat(height);
+            const float scale = std::min(widthFloat * 0.82F / projectedWidth, heightFloat * 0.82F / projectedHeight);
             for (auto& vertex : projected)
             {
-                vertex.X = width * 0.5F + (vertex.X - (minimumX + maximumX) * 0.5F) * scale;
-                vertex.Y = height * 0.52F - (vertex.Y - (minimumY + maximumY) * 0.5F) * scale;
+                vertex.X = widthFloat * 0.5F + (vertex.X - (minimumX + maximumX) * 0.5F) * scale;
+                vertex.Y = heightFloat * 0.52F - (vertex.Y - (minimumY + maximumY) * 0.5F) * scale;
             }
 
             std::vector<float> depthBuffer(static_cast<std::size_t>(width) * height,
@@ -334,8 +352,8 @@ namespace KeireEditor
                 for (int y = top; y <= bottom; ++y)
                     for (int x = left; x <= right; ++x)
                     {
-                        const float sampleX = x + 0.5F;
-                        const float sampleY = y + 0.5F;
+                        const float sampleX = AsFloat(x) + 0.5F;
+                        const float sampleY = AsFloat(y) + 0.5F;
                         const float firstWeight =
                             ((second.X - sampleX) * (third.Y - sampleY) - (second.Y - sampleY) * (third.X - sampleX)) /
                             area;
@@ -447,11 +465,13 @@ namespace KeireEditor
             }
             const float projectedWidth = std::max(maximumX - minimumX, 0.0001F);
             const float projectedHeight = std::max(maximumY - minimumY, 0.0001F);
-            const float scale = std::min(width * 0.82F / projectedWidth, height * 0.82F / projectedHeight);
+            const float widthFloat = AsFloat(width);
+            const float heightFloat = AsFloat(height);
+            const float scale = std::min(widthFloat * 0.82F / projectedWidth, heightFloat * 0.82F / projectedHeight);
             for (auto& vertex : projected)
             {
-                vertex.X = width * 0.5F + (vertex.X - (minimumX + maximumX) * 0.5F) * scale;
-                vertex.Y = height * 0.52F - (vertex.Y - (minimumY + maximumY) * 0.5F) * scale;
+                vertex.X = widthFloat * 0.5F + (vertex.X - (minimumX + maximumX) * 0.5F) * scale;
+                vertex.Y = heightFloat * 0.52F - (vertex.Y - (minimumY + maximumY) * 0.5F) * scale;
             }
 
             std::vector<std::byte> result(static_cast<std::size_t>(width) * height * 4);
@@ -482,8 +502,8 @@ namespace KeireEditor
                 for (int y = top; y <= bottom; ++y)
                     for (int x = left; x <= right; ++x)
                     {
-                        const float sampleX = x + 0.5F;
-                        const float sampleY = y + 0.5F;
+                        const float sampleX = AsFloat(x) + 0.5F;
+                        const float sampleY = AsFloat(y) + 0.5F;
                         const float firstWeight =
                             ((second.X - sampleX) * (third.Y - sampleY) - (second.Y - sampleY) * (third.X - sampleX)) /
                             area;
@@ -515,15 +535,17 @@ namespace KeireEditor
                                                               const std::uint32_t width, const std::uint32_t height)
         {
             auto result = MakeIcon(width, height, {25, 35, 52}, {69, 142, 238}, ' ', request.Missing);
-            const auto horizon = static_cast<int>(height * 0.64F);
+            const float widthFloat = AsFloat(width);
+            const float heightFloat = AsFloat(height);
+            const auto horizon = static_cast<int>(heightFloat * 0.64F);
             DrawLine(result, width, height, 12, horizon, static_cast<int>(width) - 12, horizon, {75, 132, 203});
-            DrawLine(result, width, height, 14, horizon, static_cast<int>(width * 0.38F),
-                     static_cast<int>(height * 0.38F), {112, 183, 245});
-            DrawLine(result, width, height, static_cast<int>(width * 0.38F), static_cast<int>(height * 0.38F),
-                     static_cast<int>(width * 0.58F), horizon, {112, 183, 245});
-            DrawLine(result, width, height, static_cast<int>(width * 0.48F), horizon, static_cast<int>(width * 0.70F),
-                     static_cast<int>(height * 0.29F), {84, 158, 229});
-            DrawLine(result, width, height, static_cast<int>(width * 0.70F), static_cast<int>(height * 0.29F),
+            DrawLine(result, width, height, 14, horizon, static_cast<int>(widthFloat * 0.38F),
+                     static_cast<int>(heightFloat * 0.38F), {112, 183, 245});
+            DrawLine(result, width, height, static_cast<int>(widthFloat * 0.38F), static_cast<int>(heightFloat * 0.38F),
+                     static_cast<int>(widthFloat * 0.58F), horizon, {112, 183, 245});
+            DrawLine(result, width, height, static_cast<int>(widthFloat * 0.48F), horizon,
+                     static_cast<int>(widthFloat * 0.70F), static_cast<int>(heightFloat * 0.29F), {84, 158, 229});
+            DrawLine(result, width, height, static_cast<int>(widthFloat * 0.70F), static_cast<int>(heightFloat * 0.29F),
                      static_cast<int>(width) - 13, horizon, {84, 158, 229});
             return result;
         }
@@ -552,11 +574,13 @@ namespace KeireEditor
                                                               const std::uint32_t width, const std::uint32_t height)
         {
             auto result = MakeIcon(width, height, {38, 29, 53}, {157, 100, 237}, ' ', request.Missing);
+            const float widthFloat = AsFloat(width);
+            const float heightFloat = AsFloat(height);
             for (std::uint32_t y = height / 3; y < height * 2 / 3; ++y)
                 for (std::uint32_t x = width / 5; x < width * 4 / 5; ++x)
                 {
-                    const float nx = (static_cast<float>(x) - width * 0.5F) / (width * 0.32F);
-                    const float ny = (static_cast<float>(y) - height * 0.52F) / (height * 0.22F);
+                    const float nx = (AsFloat(x) - widthFloat * 0.5F) / (widthFloat * 0.32F);
+                    const float ny = (AsFloat(y) - heightFloat * 0.52F) / (heightFloat * 0.22F);
                     if (nx * nx + ny * ny < 1.0F)
                         PutPixel(result, width, x, y, 104, 70, 164);
                 }
@@ -586,39 +610,41 @@ namespace KeireEditor
             const auto center = static_cast<int>(height / 2);
             DrawLine(result, width, height, 8, center, static_cast<int>(width) - 9, center, {47, 103, 105});
             const auto columns = width > 16 ? width - 16 : 1;
+            const auto columnsDouble = AsDouble(columns);
             for (std::uint32_t column = 0; column < columns; ++column)
             {
                 float amplitude = 0.0F;
                 if (!clip.Samples.empty())
                 {
                     const auto first =
-                        static_cast<std::size_t>(static_cast<double>(column) / columns * clip.Samples.size());
-                    const auto last = std::min(
-                        clip.Samples.size(),
-                        static_cast<std::size_t>(static_cast<double>(column + 1) / columns * clip.Samples.size()) + 1);
+                        static_cast<std::size_t>(AsDouble(column) / columnsDouble * AsDouble(clip.Samples.size()));
+                    const auto last =
+                        std::min(clip.Samples.size(), static_cast<std::size_t>(AsDouble(column + 1U) / columnsDouble *
+                                                                               AsDouble(clip.Samples.size())) +
+                                                          1U);
                     for (std::size_t sample = first; sample < last; ++sample)
                         amplitude = std::max(amplitude, std::abs(clip.Samples[sample]));
                 }
                 else if (!clip.EncodedSource.empty())
                 {
-                    const auto first =
-                        static_cast<std::size_t>(static_cast<double>(column) / columns * clip.EncodedSource.size());
+                    const auto first = static_cast<std::size_t>(AsDouble(column) / columnsDouble *
+                                                                AsDouble(clip.EncodedSource.size()));
                     const auto last = std::min(clip.EncodedSource.size(),
-                                               static_cast<std::size_t>(static_cast<double>(column + 1) / columns *
-                                                                        clip.EncodedSource.size()) +
-                                                   1);
+                                               static_cast<std::size_t>(AsDouble(column + 1U) / columnsDouble *
+                                                                        AsDouble(clip.EncodedSource.size())) +
+                                                   1U);
                     for (std::size_t sample = first; sample < last; ++sample)
                     {
                         const auto normalized =
-                            std::abs(static_cast<int>(std::to_integer<std::uint8_t>(clip.EncodedSource[sample])) -
-                                     128) /
+                            AsFloat(std::abs(
+                                static_cast<int>(std::to_integer<std::uint8_t>(clip.EncodedSource[sample])) - 128)) /
                             128.0F;
                         amplitude = std::max(amplitude, normalized);
                     }
                     amplitude *= 0.72F;
                 }
                 const auto halfHeight =
-                    std::max(1, static_cast<int>(std::clamp(amplitude, 0.0F, 1.0F) * (height * 0.34F)));
+                    std::max(1, static_cast<int>(std::clamp(amplitude, 0.0F, 1.0F) * (AsFloat(height) * 0.34F)));
                 const auto x = static_cast<int>(column + 8);
                 DrawLine(result, width, height, x, center - halfHeight, x, center + halfHeight, {72, 231, 190});
             }
@@ -688,8 +714,12 @@ namespace KeireEditor
             auto extension = Lower(request.RelativePath.extension().string());
             if (!extension.empty() && extension.front() == '.')
                 extension.erase(extension.begin());
-            std::ranges::transform(extension, extension.begin(), [](const unsigned char character)
-                                   { return std::isalnum(character) ? static_cast<char>(character) : '_'; });
+            std::ranges::transform(extension, extension.begin(),
+                                   [](const char input)
+                                   {
+                                       const auto character = static_cast<unsigned char>(input);
+                                       return std::isalnum(character) ? static_cast<char>(character) : '_';
+                                   });
             return request.Digest + "-" + std::to_string(provider.Version) + "-" + extension;
         }
 
@@ -722,7 +752,7 @@ namespace KeireEditor
             }
         }
 
-        void Run(Job job, const ProviderRecord& provider, Keire::JobContext& context)
+        void Run(const Job& job, const ProviderRecord& provider, Keire::JobContext& context)
         {
             if (context.StopRequested())
                 return;
@@ -833,7 +863,7 @@ namespace KeireEditor
                  .Class = Keire::JobClass::Blocking,
                  .Domain = Keire::JobDomain::Tooling},
                 [implementation = m_Impl.get(), job = std::move(job), provider](Keire::JobContext& context) mutable
-                { implementation->Run(std::move(job), provider, context); });
+                { implementation->Run(job, provider, context); });
         }
         catch (...)
         {

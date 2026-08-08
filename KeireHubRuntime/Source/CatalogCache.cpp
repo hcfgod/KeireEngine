@@ -1,7 +1,7 @@
 #include "KeireHubRuntime/CatalogClient.h"
 
-#include "DistributionEncoding.h"
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <system_error>
 
@@ -9,8 +9,8 @@ namespace KeireHub
 {
     namespace
     {
-        constexpr std::size_t MaximumCatalogBytes = 32 * 1024 * 1024;
-        constexpr std::size_t MaximumCacheBytes = 48 * 1024 * 1024;
+        constexpr std::size_t MaximumCatalogBytes = std::size_t{32} * 1024 * 1024;
+        constexpr std::size_t MaximumCacheBytes = std::size_t{48} * 1024 * 1024;
         constexpr std::size_t MaximumCacheDepth = 16;
 
         [[nodiscard]] HubError CacheError(std::string message, const std::filesystem::path& path,

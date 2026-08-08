@@ -295,8 +295,9 @@ namespace Keire
             {
                 value ^= static_cast<std::uint8_t>(direction);
                 value *= 1099511628211ULL;
-                for (const unsigned char character : name)
+                for (const char input : name)
                 {
+                    const auto character = static_cast<unsigned char>(input);
                     value ^= character;
                     value *= 1099511628211ULL;
                 }
@@ -921,29 +922,6 @@ namespace Keire
             return {};
         }
 
-        [[nodiscard]] std::string HlslType(const MaterialGraphValueType type)
-        {
-            switch (type)
-            {
-            case MaterialGraphValueType::Scalar:
-                return "float";
-            case MaterialGraphValueType::Vector2:
-                return "float2";
-            case MaterialGraphValueType::Vector3:
-                return "float3";
-            case MaterialGraphValueType::Vector4:
-            case MaterialGraphValueType::Color:
-                return "float4";
-            case MaterialGraphValueType::Texture2D:
-                return "Texture2D";
-            case MaterialGraphValueType::MaterialAttributes:
-                return "MaterialGraphSurface";
-            case MaterialGraphValueType::Bsdf:
-                return "MaterialGraphBsdf";
-            }
-            return "float";
-        }
-
         [[nodiscard]] std::string PropertySymbol(const std::string_view name)
         {
             return "_KeireMaterial_" + std::string(name);
@@ -1006,8 +984,9 @@ namespace Keire
             std::uint64_t hash = 1469598103934665603ULL;
             for (const auto& keyword : keywords)
             {
-                for (const unsigned char character : keyword)
+                for (const char input : keyword)
                 {
+                    const auto character = static_cast<unsigned char>(input);
                     hash ^= character;
                     hash *= 1099511628211ULL;
                 }
@@ -1187,7 +1166,7 @@ namespace Keire
                     : hasMaterialAttributes ? attribute("SheenRoughness")
                                             : optionalInput("SheenRoughness", MaterialGraphValueType::Scalar, "0.5F");
                 const auto normal = unlit || (!hasMaterialAttributes && !inputConnected("Normal")) ? "input.Normal"
-                                    : hasMaterialAttributes                                        ? attribute("Normal")
+                                    : hasMaterialAttributes ? attribute("Normal")
                                                             : input("Normal", MaterialGraphValueType::Vector3);
                 const bool hasDetailNormal = !unlit && !hasMaterialAttributes && inputConnected("DetailNormal");
                 const auto detailNormal = hasDetailNormal ? input("DetailNormal", MaterialGraphValueType::Vector3)

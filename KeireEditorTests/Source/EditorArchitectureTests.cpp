@@ -24,7 +24,7 @@
 
 #include <doctest/doctest.h>
 
-#include "EditorTestSupport.h"
+#include <KeireEditorTests/EditorTestSupport.h>
 
 #include "KeireInternal/FileSystem.h"
 

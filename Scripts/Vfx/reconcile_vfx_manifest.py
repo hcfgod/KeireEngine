@@ -29,7 +29,7 @@ def arguments() -> argparse.Namespace:
     parser.add_argument(
         "--manifest",
         type=Path,
-        default=Path("docs/VfxParityManifest.json"),
+        default=Path("Docs/VfxParityManifest.json"),
         help="Checked-in manifest to reconcile.",
     )
     parser.add_argument(
@@ -72,7 +72,7 @@ def reconcile(manifest: dict[str, object]) -> dict[str, object]:
             "tests": generator.KEIRE_TESTS.get(implementation, [])
             if implementation
             else [],
-            "documentation": ["docs/Vfx.md"] if implementation else [],
+            "documentation": ["Docs/Vfx.md"] if implementation else [],
             "disabledReason": (
                 None
                 if enabled

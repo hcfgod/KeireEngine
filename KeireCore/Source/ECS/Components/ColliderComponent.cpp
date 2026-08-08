@@ -80,7 +80,7 @@ namespace Keire
             throw std::invalid_argument("Collider layer must select exactly one of the 32 collision layers.");
         if (IsAttached())
         {
-            Owner().SetLayer(std::countr_zero(value));
+            Owner().SetLayer(static_cast<std::uint32_t>(std::countr_zero(value)));
             return;
         }
         m_Layer = value;

@@ -46,9 +46,9 @@ try {
     New-Item -ItemType Directory -Force (Join-Path $stage "content") | Out-Null
     Get-ChildItem -LiteralPath (Join-Path (Get-RepositoryRoot) "KeireHubContent") -Force |
         Copy-Item -Destination (Join-Path $stage "content") -Recurse
-    Remove-Item -LiteralPath (Join-Path $stage "docs"), (Join-Path $stage "Samples") `
+    Remove-Item -LiteralPath (Join-Path $stage "Docs"), (Join-Path $stage "Samples") `
         -Recurse -Force -ErrorAction SilentlyContinue
-    Copy-WindowsTrackedTree (Get-RepositoryRoot) "docs" (Join-Path $stage "docs")
+    Copy-WindowsTrackedTree (Get-RepositoryRoot) "Docs" (Join-Path $stage "Docs")
     Copy-WindowsTrackedTree (Get-RepositoryRoot) "Samples/KeireSandbox" `
         (Join-Path $stage "Samples\KeireSandbox")
     $contentCatalog = Get-Content -LiteralPath (Join-Path $stage "content\Content\en-US.json") -Raw

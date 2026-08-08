@@ -119,7 +119,7 @@ namespace KeireHub
       public:
         EditorInstallCatalog(EditorInstallationRegistry& registry, EditorInstallCatalogSpecification specification);
 
-        [[nodiscard]] HubStatus Refresh(std::shared_ptr<const DistributionCatalogSnapshot> distribution);
+        [[nodiscard]] HubStatus Refresh(const std::shared_ptr<const DistributionCatalogSnapshot>& distribution);
         [[nodiscard]] HubResult<EditorInstallPlan> PreviewInstall(const EditorInstallPreviewRequest& request) const;
         [[nodiscard]] HubResult<EditorRepairPlan> PreviewRepair(const EditorRepairPreviewRequest& request) const;
         [[nodiscard]] std::shared_ptr<const EditorInstallCatalogSnapshot> Snapshot() const noexcept;

@@ -1,8 +1,8 @@
 #include "KeireHubRuntime/HubFirstRunDiscovery.h"
 
-#include "DistributionEncoding.h"
-#include "EditorInstallationManifest.h"
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
+#include <KeireHubRuntimeInternal/EditorInstallationManifest.h>
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <algorithm>
 #include <cctype>
@@ -17,7 +17,7 @@ namespace KeireHub
 {
     namespace
     {
-        constexpr std::size_t MaximumDescriptorBytes = 1024U * 1024U;
+        constexpr std::size_t MaximumDescriptorBytes = std::size_t{1024U} * 1024U;
         constexpr std::size_t MaximumDescriptorDepth = 32;
         constexpr std::size_t HardMaximumRoots = 32;
         constexpr std::size_t HardMaximumDepth = 16;
@@ -447,7 +447,7 @@ namespace KeireHub
                 return HubStatus::Success();
             }
 
-            [[nodiscard]] HubStatus AddEditor(HubFirstRunEditorCandidate candidate)
+            [[nodiscard]] HubStatus AddEditor(HubFirstRunEditorCandidate&& candidate)
             {
                 const auto key = PortablePathKey(candidate.Root);
                 if (!m_Editors.contains(key) &&

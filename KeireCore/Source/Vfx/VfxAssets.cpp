@@ -27,7 +27,7 @@ namespace Keire
     {
         using Json = nlohmann::json;
 
-        constexpr std::size_t MaximumDocumentBytes = 4U * 1024U * 1024U;
+        constexpr std::size_t MaximumDocumentBytes = std::size_t{4} * 1024U * 1024U;
         constexpr std::size_t MaximumModules = 128;
         constexpr std::size_t MaximumSystems = 64;
         constexpr std::size_t MaximumGraphNodes = 4096;
@@ -1179,7 +1179,7 @@ namespace Keire
                         connection.OutputBlock = ParseId(encodedConnection, "outputBlock");
                         connection.InputBlock = ParseId(encodedConnection, "inputBlock");
                     }
-                    system.Connections.push_back(std::move(connection));
+                    system.Connections.push_back(connection);
                 }
                 systems.push_back(std::move(system));
             }
@@ -1778,8 +1778,8 @@ namespace Keire
         class VfxNodeCompileError final : public std::invalid_argument
         {
           public:
-            VfxNodeCompileError(const AssetId node, std::string message)
-                : std::invalid_argument(std::move(message)), m_Node(node)
+            VfxNodeCompileError(const AssetId node, const std::string& message)
+                : std::invalid_argument(message), m_Node(node)
             {
             }
 
@@ -1952,10 +1952,10 @@ namespace Keire
 
         [[nodiscard]] std::size_t CountFlowPins(const VfxGraphNode& node, const bool input) noexcept
         {
-            return std::ranges::count_if(node.Pins, [input](const VfxGraphPin& pin)
-                                         { return pin.Input == input && pin.Type == VfxValueType::ParticleStream; });
+            return static_cast<std::size_t>(
+                std::ranges::count_if(node.Pins, [input](const VfxGraphPin& pin)
+                                      { return pin.Input == input && pin.Type == VfxValueType::ParticleStream; }));
         }
-
         void ValidateContextNode(const VfxGraphNode& node)
         {
             const auto expectedInputs =
@@ -2747,13 +2747,13 @@ namespace Keire
                             connection.InputNode = inputContext->second;
                             connection.InputBlock = inputContext->first;
                         }
-                        migratedConnections.push_back(std::move(connection));
+                        migratedConnections.push_back(connection);
                         continue;
                     }
 
                     if (outputContext == migratedContexts.end() && inputContext == migratedContexts.end())
                     {
-                        migratedConnections.push_back(std::move(connection));
+                        migratedConnections.push_back(connection);
                         continue;
                     }
                     if (outputContext != migratedContexts.end() && inputContext == migratedContexts.end() &&
@@ -2771,7 +2771,7 @@ namespace Keire
                         connection.OutputNode = context.Id;
                         connection.OutputBlock = {};
                         connection.OutputPin = contextOutput->Id;
-                        migratedConnections.push_back(std::move(connection));
+                        migratedConnections.push_back(connection);
                     }
                 }
                 system.Connections = std::move(migratedConnections);
@@ -4419,7 +4419,8 @@ namespace Keire
         }
     } // namespace
 
-    VfxEffectAsset::VfxEffectAsset(VfxEffectDefinition definition) : m_Definition(MigrateVfxEffectToSchema4(definition))
+    VfxEffectAsset::VfxEffectAsset(const VfxEffectDefinition& definition)
+        : m_Definition(MigrateVfxEffectToSchema4(definition))
     {
         ValidateVfxEffect(m_Definition);
     }

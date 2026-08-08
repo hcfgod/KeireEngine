@@ -97,8 +97,8 @@ namespace KeireHub
         [[nodiscard]] HubEditorManagementServices DefaultServices()
         {
             HubEditorManagementServices services;
-            services.Refresh = [](std::vector<HubEditorManagementWorkItem> items, const std::string hostPlatform,
-                                  const std::string hostArchitecture)
+            services.Refresh = [](const std::vector<HubEditorManagementWorkItem>& items,
+                                  const std::string& hostPlatform, const std::string& hostArchitecture)
             {
                 std::vector<EditorInstallationHealthSnapshot> result;
                 result.reserve(items.size());
@@ -113,12 +113,12 @@ namespace KeireHub
                 return HubResult<std::vector<EditorInstallationHealthSnapshot>>::Success(std::move(result));
             };
             services.Verify =
-                [](HubEditorManagementWorkItem item, std::string hostPlatform, std::string hostArchitecture)
+                [](const HubEditorManagementWorkItem& item, std::string hostPlatform, std::string hostArchitecture)
             {
                 return VerifyEditorInstallationSnapshot(
                     item.Installation, WorkerSpecification(item, std::move(hostPlatform), std::move(hostArchitecture)));
             };
-            services.Authorize = [](HubEditorManagementWorkItem item, std::filesystem::path expectedRoot,
+            services.Authorize = [](const HubEditorManagementWorkItem& item, std::filesystem::path expectedRoot,
                                     const EditorManagedOperation operation, std::string hostPlatform,
                                     std::string hostArchitecture)
             {
@@ -592,7 +592,7 @@ namespace KeireHub
             }
             if (const auto inactive = GuardInactive(*found, Activity(*found)); !inactive)
                 return inactive;
-            const auto removed =
+            auto removed =
                 removeMissingManaged
                     ? m_Controller.Installations().RemoveMissingManagedRegistration(command.ItemId, command.Path)
                     : m_Controller.Installations().RemoveExternal(command.ItemId);

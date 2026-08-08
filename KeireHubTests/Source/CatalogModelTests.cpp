@@ -55,7 +55,7 @@ TEST_CASE("Content catalogs require one confined local path or credential-free H
       "learn":[{
         "id":"getting-started","title":"Getting Started","summary":"Create and open your first project.",
         "difficulty":"beginner","category":"Fundamentals","type":"guide",
-        "localPath":"docs/GettingStarted.md","tags":["Projects"],"requiredEditorVersion":"^1.0.0",
+        "localPath":"Docs/GettingStarted.md","tags":["Projects"],"requiredEditorVersion":"^1.0.0",
         "featured":true
       }],
       "resources":[{
@@ -66,7 +66,7 @@ TEST_CASE("Content catalogs require one confined local path or credential-free H
     })";
     auto result = ParseContentCatalog(document);
     REQUIRE(result);
-    CHECK(result.Value().Learn.front().LocalPath == std::filesystem::path("docs/GettingStarted.md"));
+    CHECK(result.Value().Learn.front().LocalPath == std::filesystem::path("Docs/GettingStarted.md"));
     CHECK(result.Value().Resources.front().HttpsUrl == "https://github.com/hcfgod/KeireEngine");
 
     constexpr auto insecure = R"({
@@ -78,7 +78,7 @@ TEST_CASE("Content catalogs require one confined local path or credential-free H
 
     constexpr auto ambiguous = R"({
       "schemaVersion":1,"locale":"en-US","learn":[{"id":"bad","title":"Bad","summary":"Two targets",
-      "difficulty":"beginner","category":"Docs","type":"guide","localPath":"docs/a.md",
+      "difficulty":"beginner","category":"Docs","type":"guide","localPath":"Docs/a.md",
       "url":"https://example.com","tags":[]}],"resources":[]
     })";
     CHECK_FALSE(ParseContentCatalog(ambiguous));
@@ -113,9 +113,9 @@ TEST_CASE("Catalogs reject duplicate identities")
     constexpr auto duplicates = R"({
       "schemaVersion":1,"locale":"en-US",
       "learn":[{"id":"same","title":"One","summary":"One","difficulty":"beginner","category":"Docs",
-      "type":"guide","localPath":"docs/one.md","tags":[]}],
+      "type":"guide","localPath":"Docs/one.md","tags":[]}],
       "resources":[{"id":"same","title":"Two","summary":"Two","difficulty":"reference","category":"Docs",
-      "type":"documentation","localPath":"docs/two.md","tags":[]}]
+      "type":"documentation","localPath":"Docs/two.md","tags":[]}]
     })";
     const auto result = ParseContentCatalog(duplicates);
     REQUIRE_FALSE(result);

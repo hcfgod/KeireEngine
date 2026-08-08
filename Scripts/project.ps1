@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [ValidateSet("menu", "bootstrap", "generate", "build", "test", "run", "clean", "coverage", "package", "package-editor", "package-hub", "package-installer", "package-hub-installer", "doctor", "rename", "vendor-update", "help")]
     [string]$Command = "menu",

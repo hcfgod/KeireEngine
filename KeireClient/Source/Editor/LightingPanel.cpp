@@ -179,8 +179,9 @@ namespace KeireEditor
         {
             if (const auto progress = m_Controller.LightingBakeProgress())
             {
-                const auto fraction =
-                    progress->Total == 0U ? 0.0F : static_cast<float>(progress->Completed) / progress->Total;
+                const auto fraction = progress->Total == 0U ? 0.0F
+                                                            : static_cast<float>(progress->Completed) /
+                                                                  static_cast<float>(progress->Total);
                 ui.ProgressBar(fraction, {0.0F, 18.0F}, progress->CurrentPath.string());
             }
             else

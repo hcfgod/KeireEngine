@@ -43,9 +43,9 @@ else {
 $cmakeCacheRoot = Join-Path $asciiRoot "Build\Tools\ShaderCompiler\Cache\windows-$OutputArchitecture-$Toolset"
 $cmakeInstallRoot = Join-Path $cmakeCacheRoot "install"
 $cmakeSdlInstall = Join-Path $asciiRoot "Build\Dependencies\windows-$OutputArchitecture-$Toolset\Release\install"
-$compilerIdentity = if ($Toolset -eq "clang") { (& clang --version | Select-Object -First 1) }
-elseif ($Toolset -eq "gcc") { (& g++ --version | Select-Object -First 1) }
-else { "MSVC $env:VCToolsVersion WindowsSDK $env:WindowsSDKVersion" }
+$hostToolset = "msc"
+Enter-WindowsToolEnvironment "ninja" $hostToolset $Architecture | Out-Null
+$compilerIdentity = "MSVC $env:VCToolsVersion WindowsSDK $env:WindowsSDKVersion"
 $key = @($Lock.SDL_SHADERCROSS_COMMIT, $Lock.SDL_SHADERCROSS_DXC_COMMIT,
     $Lock.SDL_SHADERCROSS_SPIRV_CROSS_COMMIT, $Lock.SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT,
     $Lock.SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT, $Lock.SDL_COMMIT, $Architecture, $Toolset,
@@ -67,7 +67,7 @@ if (Test-Path -LiteralPath $cacheRoot) {
     }
     $configuredKey = if (Test-Path $configureStamp) { (Get-Content $configureStamp -Raw).Trim() } else { "" }
     $mustReplace = $Force -or -not (Test-Path (Join-Path $cacheRoot "CMakeCache.txt")) -or
-        ($configuredKey -and $configuredKey -ne $key)
+        -not $configuredKey -or $configuredKey -ne $key
     if ($mustReplace) { Remove-Item -LiteralPath $cacheRoot -Recurse -Force }
 }
 New-Item -ItemType Directory -Force -Path $cacheRoot | Out-Null
@@ -76,6 +76,8 @@ $options = @(
     "-DCMAKE_BUILD_TYPE=Release",
     "-DCMAKE_INSTALL_PREFIX=$cmakeInstallRoot",
     "-DCMAKE_PREFIX_PATH=$cmakeSdlInstall",
+    "-DCMAKE_C_COMPILER=cl.exe",
+    "-DCMAKE_CXX_COMPILER=cl.exe",
     "-DSDLSHADERCROSS_VENDORED=ON",
     "-DSDLSHADERCROSS_DXC=ON",
     "-DSDLSHADERCROSS_SHARED=OFF",

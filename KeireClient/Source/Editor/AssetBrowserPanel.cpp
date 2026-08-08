@@ -311,9 +311,15 @@ namespace KeireEditor
         {
             const auto stem = source.RelativePath.stem().string();
             const auto extension = source.RelativePath.extension().string();
-            auto destination = folder / (stem + " Copy" + extension);
+            auto copyName = stem;
+            copyName.append(" Copy").append(extension);
+            auto destination = folder / copyName;
             for (std::size_t copy = 2; editor.AssetBrowserDatabase()->Find(destination); ++copy)
-                destination = folder / (stem + " Copy " + std::to_string(copy) + extension);
+            {
+                copyName = stem;
+                copyName.append(" Copy ").append(std::to_string(copy)).append(extension);
+                destination = folder / copyName;
+            }
             return destination;
         }
 
@@ -1575,9 +1581,9 @@ namespace KeireEditor
                     }
                     else if (assets && record.Type == Keire::PrefabAsset::StaticType())
                     {
-                        const auto source =
-                            Keire::Detail::ReadTextFile(AssetRoot / record.RelativePath, 64U * 1024U * 1024U);
-                        const Keire::Ref<const Keire::PrefabAsset> prefab =
+                        const auto source = Keire::Detail::ReadTextFile(AssetRoot / record.RelativePath,
+                                                                        std::size_t{64} * 1024U * 1024U);
+                        Keire::Ref<const Keire::PrefabAsset> prefab =
                             Keire::PrefabAsset::Decode(std::as_bytes(std::span(source)));
                         request.PreviewAsset = prefab;
                         ready = static_cast<bool>(request.PreviewAsset);
@@ -1594,8 +1600,9 @@ namespace KeireEditor
                                     Keire::Ref<const Keire::PrefabAsset> loaded;
                                     if (dependencyRecord)
                                     {
-                                        const auto source = Keire::Detail::ReadTextFile(
-                                            AssetRoot / dependencyRecord->RelativePath, 64U * 1024U * 1024U);
+                                        const auto source =
+                                            Keire::Detail::ReadTextFile(AssetRoot / dependencyRecord->RelativePath,
+                                                                        std::size_t{64} * 1024U * 1024U);
                                         loaded = Keire::PrefabAsset::Decode(std::as_bytes(std::span(source)));
                                     }
                                     else
@@ -1613,7 +1620,7 @@ namespace KeireEditor
                             if (dependenciesReady)
                             {
                                 auto previewScene = Keire::CreateRef<Keire::Scene>(record.Id, composed);
-                                for (const auto entity : previewScene->Query<Keire::MeshRendererComponent>())
+                                for (const auto& entity : previewScene->Query<Keire::MeshRendererComponent>())
                                 {
                                     const auto renderer = entity.GetComponent<Keire::MeshRendererComponent>();
                                     const auto transform = entity.GetComponent<Keire::TransformComponent>();

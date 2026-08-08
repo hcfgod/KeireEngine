@@ -1,9 +1,9 @@
 #include "KeireHubRuntime/PackageArchive.h"
 
-#include "DistributionEncoding.h"
-#include "PackageArchiveOutput.h"
-#include "Persistence.h"
-#include "Sha256.h"
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
+#include <KeireHubRuntimeInternal/PackageArchiveOutput.h>
+#include <KeireHubRuntimeInternal/Persistence.h>
+#include <KeireHubRuntimeInternal/Sha256.h>
 
 #include <zstd.h>
 
@@ -34,7 +34,7 @@ namespace KeireHub
         constexpr std::uint32_t ArchiveSchemaVersion = 1;
         constexpr std::uint8_t EndRecord = 0;
         constexpr std::uint8_t FileRecord = 1;
-        constexpr std::size_t BufferBytes = 256U * 1024U;
+        constexpr std::size_t BufferBytes = std::size_t{256U} * 1024U;
         constexpr std::size_t MaximumJsonDepth = 64;
         constexpr std::string_view EmptySha256 = "0000000000000000000000000000000000000000000000000000000000000000";
 
@@ -408,7 +408,8 @@ namespace KeireHub
             for (std::size_t index = 0; index < result.size(); ++index)
             {
                 result[index] = static_cast<std::byte>(value & 0xffU);
-                value >>= 8U;
+                if (index + 1U < result.size())
+                    value = static_cast<Integer>(static_cast<std::uint64_t>(value) >> 8U);
             }
             return result;
         }

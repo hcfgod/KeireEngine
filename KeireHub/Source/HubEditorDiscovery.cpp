@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <ranges>
@@ -57,7 +58,7 @@ namespace KeireHub
                 throw std::runtime_error(resolvedRoot.Error().TechnicalDetails);
             auto root = std::move(resolvedRoot).Value();
             const auto manifestPath = root / "editor-package.json";
-            const auto manifestBytes = Keire::Detail::ReadTextFile(manifestPath, 4U * 1024U * 1024U);
+            const auto manifestBytes = Keire::Detail::ReadTextFile(manifestPath, std::size_t{4U} * 1024U * 1024U);
             const auto manifest = nlohmann::json::parse(manifestBytes);
             const auto schema = manifest.at("schemaVersion").get<std::uint32_t>();
             if (schema != 1 && schema != 2)

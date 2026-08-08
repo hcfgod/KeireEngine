@@ -72,7 +72,8 @@ TEST_CASE("BRDF integration LUT baking is deterministic and bounded")
     CHECK(first->Height() == 16U);
     CHECK(first->Mips().front().Pixels == second->Mips().front().Pixels);
     bool hasIntegratedEnergy = false;
-    const auto& pixels = first->Mips().front().Pixels;
+    const auto mips = first->Mips();
+    const auto& pixels = mips.front().Pixels;
     for (std::size_t index = 0; index < pixels.size(); index += 4U)
     {
         hasIntegratedEnergy |= std::to_integer<std::uint8_t>(pixels[index]) != 0U ||

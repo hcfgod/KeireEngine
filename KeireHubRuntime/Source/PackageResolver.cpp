@@ -1,6 +1,6 @@
 #include "KeireHubRuntime/PackageResolver.h"
 
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <algorithm>
 #include <array>
@@ -723,7 +723,7 @@ namespace KeireHub
 
     HubResult<PackageManifest> ParsePackageManifest(const std::string_view document)
     {
-        if (document.size() > 8 * 1024 * 1024)
+        if (document.size() > std::size_t{8} * 1024 * 1024)
             return HubResult<PackageManifest>::Failure(
                 {.Code = HubErrorCode::PackageManifestInvalid, .Message = "The package manifest is too large."});
         try
@@ -853,6 +853,7 @@ namespace KeireHub
             marks[id] = 1;
             const auto* package = solved.Value().Selected.at(id);
             std::vector<std::string> dependencies;
+            dependencies.reserve(package->Dependencies.size());
             for (const auto& dependency : package->Dependencies)
                 dependencies.push_back(dependency.PackageId);
             std::ranges::sort(dependencies);

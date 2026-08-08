@@ -1,7 +1,7 @@
 #include "KeireHubRuntime/EditorInstallCatalog.h"
 
-#include "DistributionEncoding.h"
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <algorithm>
 #include <cctype>
@@ -232,7 +232,7 @@ namespace KeireHub
     {
     }
 
-    HubStatus EditorInstallCatalog::Refresh(std::shared_ptr<const DistributionCatalogSnapshot> distribution)
+    HubStatus EditorInstallCatalog::Refresh(const std::shared_ptr<const DistributionCatalogSnapshot>& distribution)
     {
         if (!distribution || !IsHostPlatform(m_Specification.HostPlatform) ||
             !IsHostArchitecture(m_Specification.HostArchitecture) ||

@@ -19,6 +19,27 @@ version tags.
 
 ## Unreleased
 
+- Applied the public security-header policy to both ordinary Caddy responses and branded site/docs error routes, with
+  regression coverage for the shared policy. The rebuilt 52-guide documentation site was deployed transactionally
+  without changing signed catalog bytes, trust headers, ETags, conditional requests, or package range behavior.
+- Restored the Unix fast regression suite on case-sensitive Linux hosts by keeping project configuration on LF line
+  endings and updating stale launcher, rendering, scene-schema, WAV-header, dirty-package, and package-inventory
+  fixtures to their current production contracts.
+- Normalized first-party repository structure across case-sensitive platforms: canonical documentation now lives in
+  `Docs/`, C++ headers live under each project’s `Include/` tree, implementation units live under `Source/`, and the
+  distribution service no longer uses lowercase `src/`. SDK and Hub packages now publish `Docs/` while Hub root
+  discovery remains compatible with older packages. Added a platform regression check that prevents layout drift.
+- Hardened cross-platform child-process launch: Windows now restricts inherited handles to the intended standard I/O
+  pipe endpoints, while POSIX launch paths finish all allocating argument preparation before `fork`. Added regression
+  coverage for unrelated inheritable handles and made confinement tests fail explicitly when CI lacks symlink support.
+- Made the reusable format/static-analysis gate a release preflight, expanded its first-party coverage to every Hub
+  executable and test tree, aggregated native core/editor/Hub/client coverage, and added Debug/Release managed and
+  distribution-service tests to the platform test launchers. Coverage now protects separately measured 74.5% core and
+  63.0% whole-product non-regression floors instead of an unattainable legacy 80% gate. NuGet and Deno restore inputs
+  are now frozen by lockfiles. Ninja dependency paths now remain toolset-aware, generation fingerprints include Premake
+  inputs, and the Unix launcher/package scripts pass the release workflow's ShellCheck policy.
+- Hardened the public contact function with a streamed 16 KiB body limit, strict UTF-8/object JSON parsing, and a
+  platform-provided client-address rate key that ignores caller-controlled forwarding headers.
 - Fixed transient startup or host-network failures leaving distribution discovery permanently unavailable. The Hub now
   preserves verified catalogs while running interruptible bounded retries, periodically revalidates healthy endpoints,
   distinguishes Reconnecting from explicit Offline mode, and restarts discovery only for relevant network settings.
@@ -32,6 +53,17 @@ version tags.
 - Centered the public home-page presentation, added a private Supabase-backed contact form with bounded validation and
   abuse throttling, and made the current Windows Hub build downloadable as a clearly labeled unsigned development
   preview without weakening or modifying the signed stable catalog path.
+- Versioned mutable website assets and disabled fresh caching for CSS, JavaScript, and download metadata so layout,
+  form styling, and release controls activate together. Development Hub builds now use digest-suffixed immutable URLs
+  to prevent one preview from reusing another preview's cached identity.
+- Replaced the public Docs index with a branded Astro Starlight documentation site generated from all 52 maintained
+  repository guides. It adds native guide pages, Pagefind full-text search, structured sidebars and page outlines,
+  accessible mobile navigation, SEO/sitemaps, code controls, a docs-specific 404, deterministic packaging, and strict
+  CSP-compatible static output while keeping repository Markdown authoritative.
+- Reworked the root README and complete documentation index around the current Hub, editor, cook, runtime, scripting,
+  packaging, and release workflows. Corrected project, scene, mesh, material, and runtime-manifest schema guidance;
+  added exact guide-to-code authority, local-link, and schema-drift checks; and render GitHub-compatible Mermaid fences
+  as responsive accessible SVG in the public static documentation build.
 - Fixed manually deleted managed editors appearing as both Missing and Installed. Background health scans now persist
   atomically, missing registrations no longer suppress the matching catalog install action, Verify reports the actual
   result, and Installs offers a guarded registration-only recovery that proves the exact editor root is absent before

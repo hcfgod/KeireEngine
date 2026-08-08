@@ -1002,10 +1002,10 @@ namespace KeireHub
                 return;
             try
             {
-                const auto record = *active;
+                auto record = *active;
                 m_RecoveryProbe = std::async(
                     std::launch::async,
-                    [record]
+                    [record = std::move(record)]
                     {
                         BuildSupportRecoveryProbeResult result{.OperationId = record.Id};
                         result.EntrypointActivity = ProbeEditorEntrypointProcessActivity(record.AssetToolEntrypoint);

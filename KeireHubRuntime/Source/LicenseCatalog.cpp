@@ -1,8 +1,8 @@
 #include "KeireHubRuntime/LicenseCatalog.h"
 
-#include "DistributionEncoding.h"
-#include "LocalCatalogSupport.h"
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
+#include <KeireHubRuntimeInternal/LocalCatalogSupport.h>
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <algorithm>
 #include <set>
@@ -14,9 +14,9 @@ namespace KeireHub
 {
     namespace
     {
-        constexpr std::size_t MaximumLicenseCatalogBytes = 4 * 1024 * 1024;
-        constexpr std::size_t MaximumLicenseBytes = 2 * 1024 * 1024;
-        constexpr std::size_t MaximumLicenseTextBytes = 32 * 1024 * 1024;
+        constexpr std::size_t MaximumLicenseCatalogBytes = std::size_t{4} * 1024 * 1024;
+        constexpr std::size_t MaximumLicenseBytes = std::size_t{2} * 1024 * 1024;
+        constexpr std::size_t MaximumLicenseTextBytes = std::size_t{32} * 1024 * 1024;
         constexpr std::size_t MaximumLicenses = 512;
 
         [[nodiscard]] HubError LicenseError(const HubErrorCode code, std::string message,

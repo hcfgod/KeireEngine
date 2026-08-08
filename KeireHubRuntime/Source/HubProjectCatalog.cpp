@@ -1,6 +1,6 @@
 #include "KeireHubRuntime/HubProjectCatalog.h"
 
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <algorithm>
 #include <array>
@@ -14,7 +14,7 @@ namespace KeireHub
 {
     namespace
     {
-        constexpr std::size_t MaximumRegistryBytes = 2 * 1024 * 1024;
+        constexpr std::size_t MaximumRegistryBytes = std::size_t{2} * 1024 * 1024;
         constexpr std::size_t MaximumProjects = 256;
         constexpr std::size_t MaximumUnpinnedProjects = 50;
         constexpr std::size_t MaximumNameBytes = 512;

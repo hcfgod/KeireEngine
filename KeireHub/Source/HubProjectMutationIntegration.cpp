@@ -11,7 +11,7 @@ namespace KeireHub
         return {.PrepareDuplicate = [&workflow](const std::string& projectId, const std::filesystem::path& destination,
                                                 std::string displayName)
                 { return workflow.PrepareDuplicate(projectId, destination, std::move(displayName)); },
-                .StageDuplicate = [&workflow](ProjectDuplicatePlan plan, ProjectDuplicateCallbacks callbacks)
+                .StageDuplicate = [&workflow](ProjectDuplicatePlan plan, const ProjectDuplicateCallbacks& callbacks)
                 { return workflow.StageDuplicate(std::move(plan), callbacks); },
                 .CommitDuplicate = [&workflow](ProjectDuplicateStagedResult staged)
                 { return workflow.CommitDuplicate(std::move(staged)); },

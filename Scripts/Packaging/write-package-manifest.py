@@ -35,7 +35,11 @@ def parse_bool(value: str) -> bool:
 def normalize_relative(value: str) -> str:
     normalized = value.replace("\\", "/")
     path = PurePosixPath(normalized)
-    if not normalized or path.is_absolute() or any(part in ("", ".", "..") for part in path.parts):
+    if (
+        not normalized
+        or path.is_absolute()
+        or any(part in ("", ".", "..") for part in path.parts)
+    ):
         raise ManifestError(f"package path is not confined: {value}")
     if ":" in path.parts[0]:
         raise ManifestError(f"package path contains a drive prefix: {value}")
@@ -57,7 +61,9 @@ def enumerate_files(stage: Path, exclusions: set[str]) -> list[dict[str, object]
         for directory in directories:
             candidate = root_path / directory
             if candidate.is_symlink():
-                raise ManifestError(f"package contains a symbolic-link directory: {candidate}")
+                raise ManifestError(
+                    f"package contains a symbolic-link directory: {candidate}"
+                )
         for name in names:
             candidate = root_path / name
             if candidate.is_symlink() or not candidate.is_file():
@@ -119,7 +125,9 @@ def parse_template_catalog(stage: Path, catalog_relative: str) -> list[dict[str,
     try:
         catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as error:
-        raise ManifestError(f"template catalog is not valid UTF-8 JSON: {error}") from error
+        raise ManifestError(
+            f"template catalog is not valid UTF-8 JSON: {error}"
+        ) from error
     if not isinstance(catalog, dict) or catalog.get("schemaVersion") != 1:
         raise ManifestError("template catalog schemaVersion must be 1")
     catalog_templates = catalog.get("templates")
@@ -129,46 +137,65 @@ def parse_template_catalog(stage: Path, catalog_relative: str) -> list[dict[str,
     catalog_root = PurePosixPath(catalog_relative).parent
     packaged_templates: list[dict[str, str]] = []
     for template in catalog_templates:
-        if not isinstance(template, dict) or not template.get("id") or not SEMANTIC_VERSION.fullmatch(
-            str(template.get("version", ""))
+        if (
+            not isinstance(template, dict)
+            or not template.get("id")
+            or not SEMANTIC_VERSION.fullmatch(str(template.get("version", "")))
         ):
             raise ManifestError("template catalog entry is invalid")
         payload_root = normalize_relative(str(template.get("payloadRoot", "")))
         package_payload_root = (catalog_root / payload_root).as_posix()
         payload_path = require_stage_path(
-            stage, package_payload_root, f"template '{template['id']}' payload", directory_allowed=True
+            stage,
+            package_payload_root,
+            f"template '{template['id']}' payload",
+            directory_allowed=True,
         )
         payload_files = template.get("payloadFiles")
         if not isinstance(payload_files, list) or not payload_files:
-            raise ManifestError(f"template '{template['id']}' has no declared payload files")
+            raise ManifestError(
+                f"template '{template['id']}' has no declared payload files"
+            )
         declared_files: set[str] = set()
         declared_size = 0
         for payload_file in payload_files:
             if not isinstance(payload_file, dict):
-                raise ManifestError(f"template '{template['id']}' payload entry is invalid")
+                raise ManifestError(
+                    f"template '{template['id']}' payload entry is invalid"
+                )
             payload_relative = normalize_relative(str(payload_file.get("path", "")))
             if payload_relative in declared_files:
-                raise ManifestError(f"template '{template['id']}' declares a duplicate payload file")
+                raise ManifestError(
+                    f"template '{template['id']}' declares a duplicate payload file"
+                )
             declared_files.add(payload_relative)
             payload = require_stage_path(
                 stage,
                 (PurePosixPath(package_payload_root) / payload_relative).as_posix(),
                 f"template '{template['id']}' payload file",
             )
-            if payload_file.get("sizeBytes") != payload.stat().st_size or payload_file.get("sha256") != sha256_file(
+            if payload_file.get(
+                "sizeBytes"
+            ) != payload.stat().st_size or payload_file.get("sha256") != sha256_file(
                 payload
             ):
-                raise ManifestError(f"template '{template['id']}' payload digest does not match: {payload_relative}")
+                raise ManifestError(
+                    f"template '{template['id']}' payload digest does not match: {payload_relative}"
+                )
             declared_size += payload.stat().st_size
         if template.get("estimatedSizeBytes") != declared_size:
-            raise ManifestError(f"template '{template['id']}' estimated size does not match its payload")
+            raise ManifestError(
+                f"template '{template['id']}' estimated size does not match its payload"
+            )
         actual_files = {
             path.relative_to(payload_path).as_posix()
             for path in payload_path.rglob("*")
             if path.is_file() and not path.is_symlink()
         }
         if actual_files != declared_files:
-            raise ManifestError(f"template '{template['id']}' payload contains undeclared or missing files")
+            raise ManifestError(
+                f"template '{template['id']}' payload contains undeclared or missing files"
+            )
         thumbnail = template.get("thumbnail")
         if thumbnail:
             require_stage_path(
@@ -177,7 +204,11 @@ def parse_template_catalog(stage: Path, catalog_relative: str) -> list[dict[str,
                 f"template '{template['id']}' thumbnail",
             )
         packaged_templates.append(
-            {"id": str(template["id"]), "version": str(template["version"]), "path": package_payload_root}
+            {
+                "id": str(template["id"]),
+                "version": str(template["version"]),
+                "path": package_payload_root,
+            }
         )
     return sorted(packaged_templates, key=lambda item: item["id"])
 
@@ -187,7 +218,9 @@ def validate_content_catalog(stage: Path, catalog_relative: str) -> None:
     try:
         catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as error:
-        raise ManifestError(f"content catalog is not valid UTF-8 JSON: {error}") from error
+        raise ManifestError(
+            f"content catalog is not valid UTF-8 JSON: {error}"
+        ) from error
     if not isinstance(catalog, dict) or catalog.get("schemaVersion") != 1:
         raise ManifestError("content catalog schemaVersion must be 1")
     if not isinstance(catalog.get("locale"), str) or not catalog["locale"]:
@@ -199,17 +232,29 @@ def validate_content_catalog(stage: Path, catalog_relative: str) -> None:
         if not isinstance(collection, list):
             raise ManifestError(f"content catalog {collection_name} must be an array")
         for item in collection:
-            if not isinstance(item, dict) or not isinstance(item.get("id"), str) or not item["id"]:
-                raise ManifestError(f"content catalog {collection_name} entry is invalid")
+            if (
+                not isinstance(item, dict)
+                or not isinstance(item.get("id"), str)
+                or not item["id"]
+            ):
+                raise ManifestError(
+                    f"content catalog {collection_name} entry is invalid"
+                )
             if item["id"] in identities:
-                raise ManifestError(f"content catalog contains duplicate ID: {item['id']}")
+                raise ManifestError(
+                    f"content catalog contains duplicate ID: {item['id']}"
+                )
             identities.add(item["id"])
             local_path = item.get("localPath")
             url = item.get("url")
             if bool(local_path) == bool(url):
-                raise ManifestError(f"content '{item['id']}' must declare exactly one localPath or URL")
+                raise ManifestError(
+                    f"content '{item['id']}' must declare exactly one localPath or URL"
+                )
             if local_path:
-                require_stage_path(stage, str(local_path), f"content '{item['id']}' target")
+                require_stage_path(
+                    stage, str(local_path), f"content '{item['id']}' target"
+                )
             elif not isinstance(url, str) or not url.startswith("https://"):
                 raise ManifestError(f"content '{item['id']}' URL must use HTTPS")
 
@@ -219,7 +264,9 @@ def validate_license_catalog(stage: Path, catalog_relative: str) -> None:
     try:
         catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as error:
-        raise ManifestError(f"license catalog is not valid UTF-8 JSON: {error}") from error
+        raise ManifestError(
+            f"license catalog is not valid UTF-8 JSON: {error}"
+        ) from error
     if not isinstance(catalog, dict) or catalog.get("schemaVersion") != 1:
         raise ManifestError("license catalog schemaVersion must be 1")
     licenses = catalog.get("licenses")
@@ -234,9 +281,15 @@ def validate_license_catalog(stage: Path, catalog_relative: str) -> None:
         ):
             raise ManifestError("license catalog entry is invalid")
         if license_entry["id"] in identities:
-            raise ManifestError(f"license catalog contains duplicate ID: {license_entry['id']}")
+            raise ManifestError(
+                f"license catalog contains duplicate ID: {license_entry['id']}"
+            )
         identities.add(license_entry["id"])
-        require_stage_path(stage, str(license_entry.get("sourcePath", "")), f"license '{license_entry['id']}'")
+        require_stage_path(
+            stage,
+            str(license_entry.get("sourcePath", "")),
+            f"license '{license_entry['id']}'",
+        )
 
 
 def parse_toolchain(value: str) -> dict[str, object]:
@@ -258,7 +311,9 @@ def serialized_manifest(manifest: dict[str, object]) -> bytes:
 
 def manifest_fingerprint(manifest: dict[str, object]) -> str:
     fingerprint_payload = {
-        key: value for key, value in manifest.items() if key not in ("manifestFingerprint", "installedSizeBytes")
+        key: value
+        for key, value in manifest.items()
+        if key not in ("manifestFingerprint", "installedSizeBytes")
     }
     canonical = json.dumps(
         fingerprint_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
@@ -266,18 +321,28 @@ def manifest_fingerprint(manifest: dict[str, object]) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
-def require_stage_path(stage: Path, relative: str, description: str, directory_allowed: bool = False) -> Path:
+def require_stage_path(
+    stage: Path, relative: str, description: str, directory_allowed: bool = False
+) -> Path:
     normalized = normalize_relative(relative)
     path = stage
     for component in PurePosixPath(normalized).parts:
         try:
-            exact = next((entry for entry in path.iterdir() if entry.name == component), None)
+            exact = next(
+                (entry for entry in path.iterdir() if entry.name == component), None
+            )
         except OSError as error:
-            raise ManifestError(f"{description} could not be inspected in the package: {relative}") from error
+            raise ManifestError(
+                f"{description} could not be inspected in the package: {relative}"
+            ) from error
         if exact is None:
-            raise ManifestError(f"{description} does not exist with exact path casing in the package: {relative}")
+            raise ManifestError(
+                f"{description} does not exist with exact path casing in the package: {relative}"
+            )
         if exact.is_symlink():
-            raise ManifestError(f"{description} traverses a symbolic link in the package: {relative}")
+            raise ManifestError(
+                f"{description} traverses a symbolic link in the package: {relative}"
+            )
         path = exact
     valid = path.is_dir() if directory_allowed else path.is_file()
     if not valid:
@@ -294,27 +359,42 @@ def write_manifest(arguments: argparse.Namespace) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     output.unlink(missing_ok=True)
 
-    entrypoints = dict(sorted(parse_entrypoint(value) for value in arguments.entrypoint))
+    entrypoints = dict(
+        sorted(parse_entrypoint(value) for value in arguments.entrypoint)
+    )
     if not entrypoints:
         raise ManifestError("at least one package entrypoint is required")
     for role, relative in entrypoints.items():
         require_stage_path(stage, relative, f"entrypoint '{role}'")
 
     templates = [parse_template(value) for value in arguments.template]
-    template_catalog = normalize_relative(arguments.template_catalog) if arguments.template_catalog else None
+    template_catalog = (
+        normalize_relative(arguments.template_catalog)
+        if arguments.template_catalog
+        else None
+    )
     if template_catalog:
         templates.extend(parse_template_catalog(stage, template_catalog))
     templates.sort(key=lambda item: item["id"])
     for template in templates:
         if "path" in template:
-            require_stage_path(stage, template["path"], f"template '{template['id']}'", True)
+            require_stage_path(
+                stage, template["path"], f"template '{template['id']}'", True
+            )
 
-    toolchains = sorted((parse_toolchain(value) for value in arguments.toolchain), key=lambda item: item["id"])
+    toolchains = sorted(
+        (parse_toolchain(value) for value in arguments.toolchain),
+        key=lambda item: item["id"],
+    )
     for toolchain in toolchains:
-        require_stage_path(stage, str(toolchain["path"]), f"toolchain '{toolchain['id']}'", True)
+        require_stage_path(
+            stage, str(toolchain["path"]), f"toolchain '{toolchain['id']}'", True
+        )
 
     module_definition = normalize_relative(arguments.module_definition)
-    module_path = require_stage_path(stage, module_definition, "source-module definition")
+    module_path = require_stage_path(
+        stage, module_definition, "source-module definition"
+    )
     release_notes = normalize_relative(arguments.release_notes)
     require_stage_path(stage, release_notes, "release notes")
     if arguments.build_manifest:
@@ -394,13 +474,17 @@ def write_manifest(arguments: argparse.Namespace) -> None:
     validate_manifest(stage, output_relative, arguments.artifact)
 
 
-def validate_manifest(stage: Path, manifest_relative: str, expected_artifact: str | None) -> None:
+def validate_manifest(
+    stage: Path, manifest_relative: str, expected_artifact: str | None
+) -> None:
     manifest_relative = normalize_relative(manifest_relative)
     manifest_path = require_stage_path(stage, manifest_relative, "package manifest")
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as error:
-        raise ManifestError(f"package manifest is not valid UTF-8 JSON: {error}") from error
+        raise ManifestError(
+            f"package manifest is not valid UTF-8 JSON: {error}"
+        ) from error
 
     required = (
         "schemaVersion",
@@ -439,22 +523,36 @@ def validate_manifest(stage: Path, manifest_relative: str, expected_artifact: st
         raise ManifestError(f"package artifact must be '{expected_artifact}'")
     if not SEMANTIC_VERSION.fullmatch(str(manifest["version"])):
         raise ManifestError("package version is not semantic")
-    if not isinstance(manifest["dirty"], bool) or not isinstance(manifest["developmentArtifact"], bool):
+    if not isinstance(manifest["dirty"], bool) or not isinstance(
+        manifest["developmentArtifact"], bool
+    ):
         raise ManifestError("package worktree flags must be booleans")
 
     compatibility = manifest["compatibility"]
-    if not isinstance(compatibility, dict) or compatibility.get("legacySchemaVersion") != 1:
+    if (
+        not isinstance(compatibility, dict)
+        or compatibility.get("legacySchemaVersion") != 1
+    ):
         raise ManifestError("package manifest does not declare schema-1 compatibility")
     legacy_fields = compatibility.get("legacyTopLevelFields")
-    if not isinstance(legacy_fields, list) or any(field not in manifest for field in legacy_fields):
-        raise ManifestError("package manifest legacy top-level field contract is invalid")
+    if not isinstance(legacy_fields, list) or any(
+        field not in manifest for field in legacy_fields
+    ):
+        raise ManifestError(
+            "package manifest legacy top-level field contract is invalid"
+        )
 
     schema_range = manifest["projectSchema"]
     if not isinstance(schema_range, dict):
         raise ManifestError("projectSchemaRange must be an object")
     minimum = schema_range.get("minimum")
     maximum = schema_range.get("maximum")
-    if not isinstance(minimum, int) or not isinstance(maximum, int) or minimum < 1 or minimum > maximum:
+    if (
+        not isinstance(minimum, int)
+        or not isinstance(maximum, int)
+        or minimum < 1
+        or minimum > maximum
+    ):
         raise ManifestError("project schema range is invalid")
 
     entrypoints = manifest["entrypoints"]
@@ -465,38 +563,58 @@ def validate_manifest(stage: Path, manifest_relative: str, expected_artifact: st
     require_stage_path(stage, str(manifest["launcher"]), "legacy launcher")
 
     module_definition = str(manifest["moduleDefinition"])
-    module_path = require_stage_path(stage, module_definition, "source-module definition")
+    module_path = require_stage_path(
+        stage, module_definition, "source-module definition"
+    )
     module_fingerprint = str(manifest["moduleFingerprint"])
-    if not SHA256.fullmatch(module_fingerprint) or module_fingerprint != sha256_file(module_path):
-        raise ManifestError("source-module fingerprint does not match the packaged definition")
-    stored_manifest_fingerprint = str(manifest["manifestFingerprint"])
-    if not SHA256.fullmatch(stored_manifest_fingerprint) or stored_manifest_fingerprint != manifest_fingerprint(
-        manifest
+    if not SHA256.fullmatch(module_fingerprint) or module_fingerprint != sha256_file(
+        module_path
     ):
-        raise ManifestError("package manifest fingerprint does not match its canonical metadata")
+        raise ManifestError(
+            "source-module fingerprint does not match the packaged definition"
+        )
+    stored_manifest_fingerprint = str(manifest["manifestFingerprint"])
+    if not SHA256.fullmatch(
+        stored_manifest_fingerprint
+    ) or stored_manifest_fingerprint != manifest_fingerprint(manifest):
+        raise ManifestError(
+            "package manifest fingerprint does not match its canonical metadata"
+        )
 
     templates = manifest["packagedTemplates"]
     if not isinstance(templates, list):
         raise ManifestError("templates must be an array")
     template_ids: set[str] = set()
     for template in templates:
-        if not isinstance(template, dict) or not template.get("id") or not SEMANTIC_VERSION.fullmatch(
-            str(template.get("version", ""))
+        if (
+            not isinstance(template, dict)
+            or not template.get("id")
+            or not SEMANTIC_VERSION.fullmatch(str(template.get("version", "")))
         ):
             raise ManifestError("package template entry is invalid")
         if str(template["id"]) in template_ids:
             raise ManifestError(f"duplicate template ID: {template['id']}")
         template_ids.add(str(template["id"]))
         if "path" in template:
-            require_stage_path(stage, str(template["path"]), f"template '{template['id']}'", True)
+            require_stage_path(
+                stage, str(template["path"]), f"template '{template['id']}'", True
+            )
     if "templateCatalog" in manifest:
-        catalog_templates = parse_template_catalog(stage, str(manifest["templateCatalog"]))
-        catalog_identity = {(template["id"], template["version"], template["path"]) for template in catalog_templates}
+        catalog_templates = parse_template_catalog(
+            stage, str(manifest["templateCatalog"])
+        )
+        catalog_identity = {
+            (template["id"], template["version"], template["path"])
+            for template in catalog_templates
+        }
         packaged_identity = {
-            (template.get("id"), template.get("version"), template.get("path")) for template in templates
+            (template.get("id"), template.get("version"), template.get("path"))
+            for template in templates
         }
         if not catalog_identity.issubset(packaged_identity):
-            raise ManifestError("packaged template inventory does not match the template catalog")
+            raise ManifestError(
+                "packaged template inventory does not match the template catalog"
+            )
     if manifest["artifact"] == "hub":
         validate_content_catalog(stage, "content/Content/en-US.json")
         validate_license_catalog(stage, "content/Licenses/catalog.json")
@@ -505,15 +623,26 @@ def validate_manifest(stage: Path, manifest_relative: str, expected_artifact: st
     if not isinstance(toolchains, list):
         raise ManifestError("toolchains must be an array")
     for toolchain in toolchains:
-        if not isinstance(toolchain, dict) or not toolchain.get("id") or not toolchain.get("version"):
+        if (
+            not isinstance(toolchain, dict)
+            or not toolchain.get("id")
+            or not toolchain.get("version")
+        ):
             raise ManifestError("package toolchain entry is invalid")
-        require_stage_path(stage, str(toolchain.get("path", "")), f"toolchain '{toolchain['id']}'", True)
+        require_stage_path(
+            stage,
+            str(toolchain.get("path", "")),
+            f"toolchain '{toolchain['id']}'",
+            True,
+        )
 
     release_notes = str(manifest["releaseNotes"])
     require_stage_path(stage, release_notes, "release notes")
     expected_licenses = discover_licenses(stage)
     if manifest["licenseReferences"] != expected_licenses:
-        raise ManifestError("package license inventory does not match packaged license files")
+        raise ManifestError(
+            "package license inventory does not match packaged license files"
+        )
 
     exclusions = manifest["inventoryExcludes"]
     if exclusions != [manifest_relative]:
@@ -540,7 +669,9 @@ def create_parser() -> argparse.ArgumentParser:
     write.add_argument("--commit", required=True)
     write.add_argument("--dirty", type=parse_bool, required=True)
     write.add_argument("--development-artifact", type=parse_bool, required=True)
-    write.add_argument("--platform", choices=("Windows", "Linux", "macOS"), required=True)
+    write.add_argument(
+        "--platform", choices=("Windows", "Linux", "macOS"), required=True
+    )
     write.add_argument("--architecture", choices=("x86_64", "ARM64"), required=True)
     write.add_argument("--configuration", default="Dist")
     write.add_argument("--launcher", required=True)
@@ -555,7 +686,9 @@ def create_parser() -> argparse.ArgumentParser:
     write.add_argument("--toolchain", action="append", default=[])
     write.add_argument("--release-notes", default="CHANGELOG.md")
 
-    validate = subparsers.add_parser("validate", help="validate staged package bytes against a manifest")
+    validate = subparsers.add_parser(
+        "validate", help="validate staged package bytes against a manifest"
+    )
     validate.add_argument("--stage", required=True)
     validate.add_argument("--manifest", required=True)
     validate.add_argument("--artifact", choices=("editor", "hub"))
@@ -569,7 +702,11 @@ def main() -> int:
         if arguments.command == "write":
             write_manifest(arguments)
         else:
-            validate_manifest(Path(arguments.stage).resolve(strict=True), arguments.manifest, arguments.artifact)
+            validate_manifest(
+                Path(arguments.stage).resolve(strict=True),
+                arguments.manifest,
+                arguments.artifact,
+            )
     except (ManifestError, OSError) as error:
         print(f"package manifest error: {error}", file=sys.stderr)
         return 1

@@ -22,6 +22,6 @@ if [[ -x "$publisher" ]]; then
   "$publisher" "${arguments[@]}"
 else
   "$dotnet_command" run --project \
-    "$service_root/src/KeireDistributionPublisher/KeireDistributionPublisher.csproj" \
+    "$service_root/Source/KeireDistributionPublisher/KeireDistributionPublisher.csproj" \
     --configuration Release -- "${arguments[@]}"
 fi

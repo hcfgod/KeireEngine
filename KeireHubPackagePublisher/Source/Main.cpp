@@ -1,12 +1,13 @@
 #include "KeireHubRuntime/PackageArchive.h"
 
-#include "DistributionEncoding.h"
-#include "Persistence.h"
-#include "Sha256.h"
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
+#include <KeireHubRuntimeInternal/Persistence.h>
+#include <KeireHubRuntimeInternal/Sha256.h>
 
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
@@ -148,7 +149,7 @@ namespace
     [[nodiscard]] KeireHub::PackageManifest ReadEditorManifest(const Arguments& arguments)
     {
         const auto productManifestPath = arguments.PayloadRoot / "editor-package.json";
-        auto document = KeireHub::Detail::ReadJsonFile(productManifestPath, 8U * 1024U * 1024U);
+        auto document = KeireHub::Detail::ReadJsonFile(productManifestPath, std::size_t{8U} * 1024U * 1024U);
         if (!document)
             throw std::runtime_error(document.Error().Message + " " + document.Error().TechnicalDetails);
         const auto& value = document.Value();
@@ -212,7 +213,7 @@ namespace
         if (error || !std::filesystem::is_regular_file(installerStatus) || std::filesystem::is_symlink(installerStatus))
             throw std::invalid_argument("The native Hub installer is missing or unsafe.");
 
-        auto document = KeireHub::Detail::ReadJsonFile(arguments.HubManifest, 8U * 1024U * 1024U);
+        auto document = KeireHub::Detail::ReadJsonFile(arguments.HubManifest, std::size_t{8U} * 1024U * 1024U);
         if (!document)
             throw std::runtime_error(document.Error().Message + " " + document.Error().TechnicalDetails);
         const auto& value = document.Value();

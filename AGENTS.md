@@ -116,7 +116,7 @@ changed. Treat them as requirements for every coding task, review, and generated
 
 ## Documentation And Completion
 
-- Update `README.md` for user-facing workflows and `docs/Architecture.md` for ownership or boundary changes.
+- Update `README.md` for user-facing workflows and `Docs/Architecture.md` for ownership or boundary changes.
 - Add a concise `CHANGELOG.md` entry for behavior or API changes relevant to engine or SDK users.
 - Keep examples compilable. Documentation snippets must follow the same formatting and namespace-indentation rules as
   production code.

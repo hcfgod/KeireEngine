@@ -127,14 +127,12 @@ namespace KeireEditor
             EnumEntry{Keire::VfxValueType::Vector4, std::string_view("Vector 4")},
             EnumEntry{Keire::VfxValueType::Color, std::string_view("Color")},
         };
-
         template <typename Value, std::size_t Size>
         [[nodiscard]] std::string_view EnumName(const Value value, const std::array<EnumEntry<Value>, Size>& entries)
         {
             const auto found = std::ranges::find(entries, value, &EnumEntry<Value>::Type);
             return found == entries.end() ? std::string_view("Unsupported") : found->Name;
         }
-
         template <typename Value, std::size_t Size>
         [[nodiscard]] bool DrawEnum(Keire::UiFrame& ui, const std::string_view label, Value& value,
                                     const std::array<EnumEntry<Value>, Size>& entries)
@@ -153,7 +151,6 @@ namespace KeireEditor
             }
             return changed;
         }
-
         [[nodiscard]] std::string_view ModuleName(const Keire::VfxModulePayload& payload)
         {
             return std::visit(
@@ -170,7 +167,6 @@ namespace KeireEditor
                 },
                 payload);
         }
-
         template <typename Module> [[nodiscard]] bool ContainsModule(const Keire::VfxEffectDefinition& definition)
         {
             return std::ranges::any_of(definition.Modules, [](const Keire::VfxModuleDefinition& module)
@@ -253,6 +249,8 @@ namespace KeireEditor
                 return {0.45F, 0.58F, 0.86F, 1.0F};
             case Keire::VfxValueType::ParticleStream:
                 return {0.28F, 0.72F, 1.0F, 1.0F};
+            default:
+                break;
             }
             return {0.56F, 0.62F, 0.72F, 1.0F};
         }
@@ -877,7 +875,7 @@ namespace KeireEditor
 
         VfxNodeSearchIndex catalog;
         std::vector<PaletteAction> actions;
-        const auto addEntry = [&](VfxNodeCatalogEntry entry, const PaletteAction action)
+        const auto addEntry = [&](VfxNodeCatalogEntry entry, const PaletteAction& action)
         {
             const auto index = catalog.Add(std::move(entry));
             if (index != actions.size())
@@ -1527,8 +1525,8 @@ namespace KeireEditor
                     connection.InputBlock = target->Block;
                     const auto connectionId = connection.Id;
                     if (ApplyAction(check.ReplacesInput ? "Rewired VFX graph input" : "Connected VFX graph pins",
-                                    [&document, graph = system->Id, connection = std::move(connection)]() mutable
-                                    { return document.AddConnection(graph, std::move(connection)); }))
+                                    [&document, graph = system->Id, connection = connection]() mutable
+                                    { return document.AddConnection(graph, connection); }))
                     {
                         m_SelectedNode = {};
                         m_SelectedBlock = {};
@@ -2037,8 +2035,8 @@ namespace KeireEditor
             auto& range = std::get<Keire::VfxScalarRange>(value);
             double minimum = range.Minimum;
             double maximum = range.Maximum;
-            const bool changed = ui.DragScalar(std::string(label) + " Min", minimum, 0.01) |
-                                 ui.DragScalar(std::string(label) + " Max", maximum, 0.01);
+            const bool changed = static_cast<int>(ui.DragScalar(std::string(label) + " Min", minimum, 0.01)) |
+                                 static_cast<int>(ui.DragScalar(std::string(label) + " Max", maximum, 0.01));
             if (!changed)
                 return false;
             range.Minimum = static_cast<float>(std::min(minimum, maximum));
@@ -2048,8 +2046,8 @@ namespace KeireEditor
         case Keire::VfxValueType::IntegerRange:
         {
             auto& range = std::get<Keire::VfxIntegerRange>(value);
-            const bool changed = ui.DragInteger(std::string(label) + " Min", range.Minimum) |
-                                 ui.DragInteger(std::string(label) + " Max", range.Maximum);
+            const bool changed = static_cast<int>(ui.DragInteger(std::string(label) + " Min", range.Minimum)) |
+                                 static_cast<int>(ui.DragInteger(std::string(label) + " Max", range.Maximum));
             if (changed && range.Maximum < range.Minimum)
                 std::swap(range.Minimum, range.Maximum);
             return changed;
@@ -2057,8 +2055,8 @@ namespace KeireEditor
         case Keire::VfxValueType::UnsignedIntegerRange:
         {
             auto& range = std::get<Keire::VfxUnsignedIntegerRange>(value);
-            const bool changed = unsignedInteger(std::string(label) + " Min", range.Minimum) |
-                                 unsignedInteger(std::string(label) + " Max", range.Maximum);
+            const bool changed = static_cast<int>(unsignedInteger(std::string(label) + " Min", range.Minimum)) |
+                                 static_cast<int>(unsignedInteger(std::string(label) + " Max", range.Maximum));
             if (changed && range.Maximum < range.Minimum)
                 std::swap(range.Minimum, range.Maximum);
             return changed;
@@ -2066,8 +2064,8 @@ namespace KeireEditor
         case Keire::VfxValueType::Vector2Range:
         {
             auto& range = std::get<Keire::VfxVector2Range>(value);
-            const bool changed = ui.DragVector2(std::string(label) + " Min", range.Minimum, 0.01F) |
-                                 ui.DragVector2(std::string(label) + " Max", range.Maximum, 0.01F);
+            const bool changed = static_cast<int>(ui.DragVector2(std::string(label) + " Min", range.Minimum, 0.01F)) |
+                                 static_cast<int>(ui.DragVector2(std::string(label) + " Max", range.Maximum, 0.01F));
             if (!changed)
                 return false;
             const auto minimum = range.Minimum;
@@ -2079,8 +2077,8 @@ namespace KeireEditor
         case Keire::VfxValueType::Vector3Range:
         {
             auto& range = std::get<Keire::VfxVector3Range>(value);
-            const bool changed = ui.DragVector3(std::string(label) + " Min", range.Minimum, 0.01F) |
-                                 ui.DragVector3(std::string(label) + " Max", range.Maximum, 0.01F);
+            const bool changed = static_cast<int>(ui.DragVector3(std::string(label) + " Min", range.Minimum, 0.01F)) |
+                                 static_cast<int>(ui.DragVector3(std::string(label) + " Max", range.Maximum, 0.01F));
             if (!changed)
                 return false;
             const auto minimum = range.Minimum;
@@ -2094,8 +2092,8 @@ namespace KeireEditor
         case Keire::VfxValueType::Vector4Range:
         {
             auto& range = std::get<Keire::VfxVector4Range>(value);
-            const bool changed = ui.DragVector4(std::string(label) + " Min", range.Minimum, 0.01F) |
-                                 ui.DragVector4(std::string(label) + " Max", range.Maximum, 0.01F);
+            const bool changed = static_cast<int>(ui.DragVector4(std::string(label) + " Min", range.Minimum, 0.01F)) |
+                                 static_cast<int>(ui.DragVector4(std::string(label) + " Max", range.Maximum, 0.01F));
             if (!changed)
                 return false;
             const auto minimum = range.Minimum;
@@ -2109,8 +2107,8 @@ namespace KeireEditor
         case Keire::VfxValueType::ColorRange:
         {
             auto& range = std::get<Keire::VfxColorRange>(value);
-            const bool changed = editColor(std::string(label) + " Min", range.Minimum) |
-                                 editColor(std::string(label) + " Max", range.Maximum);
+            const bool changed = static_cast<int>(editColor(std::string(label) + " Min", range.Minimum)) |
+                                 static_cast<int>(editColor(std::string(label) + " Max", range.Maximum));
             if (!changed)
                 return false;
             const auto minimum = range.Minimum;
@@ -2138,11 +2136,11 @@ namespace KeireEditor
             else if (type == Keire::VfxValueType::Mesh)
                 expected = Keire::MeshAsset::StaticType();
             AssetPickerOptions options{
-                .Label = std::string(label),
+                .Label = label,
                 .ExpectedType = expected,
                 .Reveal = [this](const Keire::AssetId selected) { m_Controller.RevealVfxEffectAsset(selected); },
             };
-            return m_AssetPicker.Draw(ui, m_Controller.VfxEffectAssetRecords(), asset, std::move(options));
+            return m_AssetPicker.Draw(ui, m_Controller.VfxEffectAssetRecords(), asset, options);
         }
         case Keire::VfxValueType::ParticleStream:
             return false;
@@ -2271,7 +2269,7 @@ namespace KeireEditor
                         .Reveal = [this](const Keire::AssetId selected)
                         { m_Controller.RevealVfxEffectAsset(selected); },
                     };
-                    return m_AssetPicker.Draw(ui, m_Controller.VfxEffectAssetRecords(), candidate, std::move(options));
+                    return m_AssetPicker.Draw(ui, m_Controller.VfxEffectAssetRecords(), candidate, options);
                 },
             },
             property.Value);
@@ -2296,7 +2294,7 @@ namespace KeireEditor
                               [&document, graph = system->Id, rename = std::move(rename)]
                               {
                                   return document.EditSystem(graph, [&rename](Keire::VfxGraphSystem& candidate)
-                                                             { candidate.Name = std::move(rename); });
+                                                             { candidate.Name = rename; });
                               });
             return;
         }
@@ -2732,11 +2730,12 @@ namespace KeireEditor
         }
         if (changed)
         {
+            const auto nodeId = node.Id;
             (void)ApplyAction("Edited VFX graph node",
-                              [&document, graph = system->Id, node = std::move(node)]() mutable
+                              [&document, graph = system->Id, nodeId, node = std::move(node)]() mutable
                               {
                                   return document.EditNode(
-                                      graph, node.Id, [node = std::move(node)](Keire::VfxGraphNode& candidate) mutable
+                                      graph, nodeId, [node = std::move(node)](Keire::VfxGraphNode& candidate) mutable
                                       { candidate = std::move(node); });
                               });
             return;
@@ -3053,19 +3052,22 @@ namespace KeireEditor
                     .ExpectedType = expected,
                     .Reveal = [this](const Keire::AssetId asset) { m_Controller.RevealVfxEffectAsset(asset); },
                 };
-                changed |= m_AssetPicker.Draw(ui, m_Controller.VfxEffectAssetRecords(), value, std::move(options));
+                changed |= m_AssetPicker.Draw(ui, m_Controller.VfxEffectAssetRecords(), value, options);
                 break;
             }
+            default:
+                break;
             }
 
             if (changed)
             {
+                const auto parameterId = parameter.Id;
                 (void)ApplyAction("Edited VFX blackboard parameter",
-                                  [&document, parameter = std::move(parameter)]() mutable
+                                  [&document, parameterId, parameter = std::move(parameter)]() mutable
                                   {
                                       return document.EditBlackboardParameter(
-                                          parameter.Id, [parameter = std::move(parameter)](
-                                                            Keire::VfxBlackboardParameter& candidate) mutable
+                                          parameterId, [parameter = std::move(parameter)](
+                                                           Keire::VfxBlackboardParameter& candidate) mutable
                                           { candidate = std::move(parameter); });
                                   });
                 return;
@@ -3327,14 +3329,17 @@ namespace KeireEditor
         if (!m_AssetPicker.Diagnostic().empty())
             ui.TextColored(m_Controller.VfxEffectTheme().Warning, m_AssetPicker.Diagnostic());
         if (changed)
+        {
+            const auto moduleId = module.Id;
             (void)ApplyAction("Edited VFX module",
-                              [&document, module = std::move(module)]() mutable
+                              [&document, moduleId, module = std::move(module)]() mutable
                               {
                                   return document.EditModule(
-                                      module.Id,
+                                      moduleId,
                                       [module = std::move(module)](Keire::VfxModuleDefinition& candidate) mutable
                                       { candidate = std::move(module); });
                               });
+        }
     }
 
     void VfxEffectPanel::ResetTransientState() noexcept

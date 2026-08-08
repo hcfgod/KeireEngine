@@ -275,7 +275,7 @@ namespace Keire
             if (cancellation.stop_requested())
                 return {.State = NavigationPathState::Cancelled, .MeshRevision = mesh.Revision};
 
-            std::array<float, 256 * 3> straightPath{};
+            std::array<float, std::size_t{256} * 3U> straightPath{};
             int straightCount = 0;
             if (dtStatusFailed(navigationQuery->findStraightPath(nearestStart, nearestEnd, polygonPath.data(),
                                                                  polygonCount, straightPath.data(), nullptr, nullptr,
@@ -285,8 +285,11 @@ namespace Keire
             result.Points.reserve(static_cast<std::size_t>(straightCount) + 2U);
             result.Points.push_back(query.Start);
             for (int point = 1; point + 1 < straightCount; ++point)
+            {
+                const auto pointOffset = static_cast<std::size_t>(point) * 3U;
                 result.Points.push_back(
-                    {straightPath[point * 3], straightPath[point * 3 + 1], straightPath[point * 3 + 2]});
+                    {straightPath[pointOffset], straightPath[pointOffset + 1U], straightPath[pointOffset + 2U]});
+            }
             result.Points.push_back(query.End);
             result.State = NavigationPathState::Succeeded;
             return result;
@@ -295,8 +298,9 @@ namespace Keire
 
     NavigationBakeResult BakeNavigationMesh(const NavigationBakeInput& input)
     {
-        if (input.Revision == 0 || input.Vertices.size() < 3 || input.Vertices.size() > 16U * 1024U * 1024U ||
-            input.Indices.empty() || input.Indices.size() > 48U * 1024U * 1024U || input.Indices.size() % 3U != 0 ||
+        if (input.Revision == 0 || input.Vertices.size() < 3 ||
+            input.Vertices.size() > std::size_t{16} * 1024U * 1024U || input.Indices.empty() ||
+            input.Indices.size() > std::size_t{48} * 1024U * 1024U || input.Indices.size() % 3U != 0 ||
             !ValidBakeSettings(input.Settings))
             throw std::invalid_argument("Navigation bake input header or settings are invalid.");
 
@@ -405,15 +409,17 @@ namespace Keire
         result.Mesh.Nodes.reserve(static_cast<std::size_t>(polyMesh->npolys));
         for (int polygon = 0; polygon < polyMesh->npolys; ++polygon)
         {
-            const auto* polygonData = &polyMesh->polys[polygon * polyMesh->nvp * 2];
+            const auto polygonOffset = static_cast<std::size_t>(polygon) * static_cast<std::size_t>(polyMesh->nvp) * 2U;
+            const auto* polygonData = &polyMesh->polys[polygonOffset];
             Vector3 center{};
             std::uint32_t count = 0;
             for (int corner = 0; corner < polyMesh->nvp && polygonData[corner] != RC_MESH_NULL_IDX; ++corner)
             {
                 const auto vertex = polygonData[corner];
-                center.X += polyMesh->bmin[0] + static_cast<float>(polyMesh->verts[vertex * 3]) * polyMesh->cs;
-                center.Y += polyMesh->bmin[1] + static_cast<float>(polyMesh->verts[vertex * 3 + 1]) * polyMesh->ch;
-                center.Z += polyMesh->bmin[2] + static_cast<float>(polyMesh->verts[vertex * 3 + 2]) * polyMesh->cs;
+                const auto vertexOffset = static_cast<std::size_t>(vertex) * 3U;
+                center.X += polyMesh->bmin[0] + static_cast<float>(polyMesh->verts[vertexOffset]) * polyMesh->cs;
+                center.Y += polyMesh->bmin[1] + static_cast<float>(polyMesh->verts[vertexOffset + 1U]) * polyMesh->ch;
+                center.Z += polyMesh->bmin[2] + static_cast<float>(polyMesh->verts[vertexOffset + 2U]) * polyMesh->cs;
                 ++count;
             }
             if (count == 0)
@@ -481,8 +487,8 @@ namespace Keire
 
     void ValidateNavigationMesh(const NavigationMeshSnapshot& mesh)
     {
-        if (mesh.Revision == 0 || mesh.Nodes.empty() || mesh.Nodes.size() > 4U * 1024U * 1024U ||
-            mesh.Edges.size() > 16U * 1024U * 1024U)
+        if (mesh.Revision == 0 || mesh.Nodes.empty() || mesh.Nodes.size() > std::size_t{4} * 1024U * 1024U ||
+            mesh.Edges.size() > std::size_t{16} * 1024U * 1024U)
             throw std::invalid_argument("Navigation mesh header is invalid.");
         std::set<NavigationNodeId> nodes;
         for (const auto& node : mesh.Nodes)
@@ -503,7 +509,7 @@ namespace Keire
             throw std::invalid_argument("Navigation mesh contains too many streamed tiles.");
         std::set<std::tuple<std::int32_t, std::int32_t, std::int32_t>> tiles;
         for (const auto& tile : mesh.Tiles)
-            if (tile.Bytes.empty() || tile.Bytes.size() > 64U * 1024U * 1024U ||
+            if (tile.Bytes.empty() || tile.Bytes.size() > std::size_t{64} * 1024U * 1024U ||
                 !tiles.emplace(tile.X, tile.Y, tile.Layer).second)
                 throw std::invalid_argument("Navigation mesh contains invalid or duplicate tile data.");
     }

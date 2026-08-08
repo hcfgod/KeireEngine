@@ -1,7 +1,7 @@
 #include "KeireHubRuntime/PackageReceipt.h"
 
-#include "DistributionEncoding.h"
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <algorithm>
 #include <array>
@@ -26,7 +26,7 @@ namespace KeireHub
 {
     namespace
     {
-        constexpr std::size_t MaximumReceiptBytes = 8U * 1024U * 1024U;
+        constexpr std::size_t MaximumReceiptBytes = std::size_t{8U} * 1024U * 1024U;
         constexpr std::size_t MaximumReceiptDepth = 32U;
         constexpr std::size_t MaximumPackages = 256U;
         constexpr std::size_t MaximumPackageFiles = 32766U;

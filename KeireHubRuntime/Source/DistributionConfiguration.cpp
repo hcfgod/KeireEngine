@@ -1,7 +1,7 @@
 #include "KeireHubRuntime/DistributionConfiguration.h"
 
-#include "DistributionEncoding.h"
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <set>
 #include <stdexcept>
@@ -12,7 +12,7 @@ namespace KeireHub
 {
     namespace
     {
-        constexpr std::size_t MaximumConfigurationBytes = 64 * 1024;
+        constexpr std::size_t MaximumConfigurationBytes = std::size_t{64} * 1024;
         constexpr std::size_t MaximumConfigurationDepth = 8;
         constexpr std::size_t MaximumTrustedKeys = 8;
 

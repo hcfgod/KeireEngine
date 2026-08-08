@@ -15,4 +15,6 @@ if (-not (Test-Path -LiteralPath $dotnet)) {
     --project (Join-Path $root "KeireManaged.Tests\Keire.Managed.Production.Tests.csproj") `
     --configuration $Configuration `
     --nologo
-exit $LASTEXITCODE
+if ($LASTEXITCODE -ne 0) {
+    throw "Managed production tests failed with exit code $LASTEXITCODE."
+}

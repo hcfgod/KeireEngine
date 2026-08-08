@@ -1,6 +1,6 @@
 #include "KeireHubRuntime/HubMaintenance.h"
 
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <ranges>
 #include <system_error>

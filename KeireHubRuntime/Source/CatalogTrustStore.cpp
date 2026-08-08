@@ -1,7 +1,7 @@
 #include "KeireHubRuntime/CatalogClient.h"
 
-#include "DistributionEncoding.h"
-#include "SodiumVerifier.h"
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
+#include <KeireHubRuntimeInternal/SodiumVerifier.h>
 
 #include <algorithm>
 #include <array>
@@ -14,8 +14,8 @@ namespace KeireHub
     namespace
     {
         constexpr std::size_t MaximumTrustedKeys = 16;
-        constexpr std::size_t MaximumPublicKeyDocumentBytes = 16 * 1024;
-        constexpr std::size_t MaximumCatalogBytes = 32 * 1024 * 1024;
+        constexpr std::size_t MaximumPublicKeyDocumentBytes = std::size_t{16} * 1024;
+        constexpr std::size_t MaximumCatalogBytes = std::size_t{32} * 1024 * 1024;
         constexpr std::size_t MaximumJsonDepth = 128;
 
         struct TrustedKey final

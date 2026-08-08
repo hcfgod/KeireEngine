@@ -111,6 +111,13 @@ if ($exitCode -eq 0) {
 }
 
 if ($exitCode -eq 0 -and $Configuration -in @("Debug", "Release")) {
+    Write-Host "==> Running managed production API tests"
+    & (Join-Path $Root "Scripts\Tests\test-managed-weapons.ps1") -Configuration $Configuration
+    Write-Host "==> Running distribution service tests"
+    & (Join-Path $Root "Scripts\Tests\test-distribution-service.ps1") -Configuration $Configuration
+}
+
+if ($exitCode -eq 0 -and $Configuration -in @("Debug", "Release")) {
     $renderTestsTarget = "$($Project.PROJECT_NAMESPACE)RenderTests"
     $renderTestsExe = Join-Path $Root "Build\Bin\$Configuration-windows-$outputArchitecture\$renderTestsTarget\$renderTestsTarget.exe"
     & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration `

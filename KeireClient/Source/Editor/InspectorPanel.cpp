@@ -46,7 +46,6 @@ namespace
         }
         return result;
     }
-
     [[nodiscard]] bool ContainsCaseInsensitive(const std::string_view value, const std::string_view query)
     {
         if (query.empty())
@@ -59,7 +58,6 @@ namespace
                                                });
         return !found.empty();
     }
-
     [[nodiscard]] std::vector<std::byte> ReadBytes(const std::filesystem::path& path)
     {
         std::ifstream input(path, std::ios::binary);
@@ -70,7 +68,6 @@ namespace
         std::ranges::transform(characters, bytes.begin(), [](const char value) { return std::byte(value); });
         return bytes;
     }
-
     [[nodiscard]] std::string FormatAssetDiagnostic(const Keire::AssetImportDiagnostic& diagnostic)
     {
         auto result = diagnostic.RelativePath.generic_string();
@@ -1114,8 +1111,9 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                         ? std::min(720.0F, 26.0F + static_cast<float>(std::max<std::size_t>(vfxEntries, 1U)) * 48.0F)
                         : 0.0F;
                 const float cardHeight =
-                    expanded ? std::max(115.0F, 80.0F + anchorPickerHeight + registration->Properties.size() * 34.0F +
-                                                    groupRows * 22.0F + vfxInspectorHeight)
+                    expanded ? std::max(115.0F, 80.0F + anchorPickerHeight +
+                                                    static_cast<float>(registration->Properties.size()) * 34.0F +
+                                                    static_cast<float>(groupRows) * 22.0F + vfxInspectorHeight)
                              : 38.0F;
                 if (auto card = ui.BeginChild(cardId, {0.0F, cardHeight}, true); card)
                 {
@@ -1262,7 +1260,9 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                 if (!current || *current < 0 || *current > 2)
                                     throw std::invalid_argument("The local-light shadow mode is invalid.");
                                 constexpr std::array<std::string_view, 3> labels{"Disabled", "Hard", "Soft"};
-                                if (auto shadowMode = ui.BeginCombo(property.DisplayName, labels[*current]); shadowMode)
+                                if (auto shadowMode =
+                                        ui.BeginCombo(property.DisplayName, labels[static_cast<std::size_t>(*current)]);
+                                    shadowMode)
                                 {
                                     for (std::int64_t index = 0; index < static_cast<std::int64_t>(labels.size());
                                          ++index)
@@ -1604,9 +1604,15 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
         {
             const auto stem = record->RelativePath.stem().string();
             const auto extension = record->RelativePath.extension().string();
-            auto destination = record->RelativePath.parent_path() / (stem + " Copy" + extension);
+            auto copyName = stem;
+            copyName.append(" Copy").append(extension);
+            auto destination = record->RelativePath.parent_path() / copyName;
             for (std::size_t copy = 2; database->Find(destination); ++copy)
-                destination = record->RelativePath.parent_path() / (stem + " Copy " + std::to_string(copy) + extension);
+            {
+                copyName = stem;
+                copyName.append(" Copy ").append(std::to_string(copy)).append(extension);
+                destination = record->RelativePath.parent_path() / copyName;
+            }
             m_Controller.DuplicateInspectorAsset(record->Id, destination);
             m_Controller.SetInspectorAssetStatus("Duplicating asset in the isolated asset worker.");
         }

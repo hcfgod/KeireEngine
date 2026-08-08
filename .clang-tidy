@@ -14,7 +14,7 @@ Checks: >
   modernize-use-override,
   readability-redundant-*
 WarningsAsErrors: '*'
-HeaderFilterRegex: '^(AssetTool|KeireAssetWorker|KeireClient|KeireCore|KeireEditorTests|KeireHub|KeireRenderTests|KeireRuntime|KeireTests|Scripts/Premake|SourceModules)/'
+HeaderFilterRegex: '^(AssetTool|KeireAssetWorker|KeireClient|KeireCore|KeireEditorTests|KeireHub|KeireHubPackagePublisher|KeireHubRuntime|KeireHubTests|KeireHubWorker|KeireRenderTests|KeireRuntime|KeireTests|Scripts/Premake|SourceModules)/'
 FormatStyle: file
 CheckOptions:
   performance-unnecessary-value-param.AllowedTypes: 'std::stop_token;ScriptSystemSpecification;ReplayPlaybackRequest;std::filesystem::path'

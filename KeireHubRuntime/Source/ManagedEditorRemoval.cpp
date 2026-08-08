@@ -3,11 +3,11 @@
 #include "KeireHubRuntime/PackageArchive.h"
 #include "KeireHubRuntime/PackageReceipt.h"
 
-#include "DistributionEncoding.h"
-#include "EditorInstallationManifest.h"
-#include "PackageArchiveOutput.h"
-#include "Persistence.h"
-#include "Sha256.h"
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
+#include <KeireHubRuntimeInternal/EditorInstallationManifest.h>
+#include <KeireHubRuntimeInternal/PackageArchiveOutput.h>
+#include <KeireHubRuntimeInternal/Persistence.h>
+#include <KeireHubRuntimeInternal/Sha256.h>
 
 #include <algorithm>
 #include <array>
@@ -42,7 +42,7 @@ namespace KeireHub
 {
     namespace
     {
-        constexpr std::size_t MaximumJournalBytes = 64U * 1024U;
+        constexpr std::size_t MaximumJournalBytes = std::size_t{64U} * 1024U;
         constexpr std::uint32_t JournalSchemaVersion = 1;
 
         struct RemovalPaths final

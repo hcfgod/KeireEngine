@@ -73,6 +73,12 @@ if [[ "$MODE" == test ]]; then
     bash "$ROOT/Scripts/$PLATFORM/build.sh" "${client_build_args[@]}"
 fi
 if [[ "$MODE" == test && "$CONFIGURATION" =~ ^(Debug|Release)$ ]]; then
+    printf '==> Running managed production API tests\n'
+    bash "$ROOT/Scripts/Tests/test-managed-weapons.sh" "$CONFIGURATION"
+    printf '==> Running distribution service tests\n'
+    bash "$ROOT/Scripts/Tests/test-distribution-service.sh" "$CONFIGURATION"
+fi
+if [[ "$MODE" == test && "$CONFIGURATION" =~ ^(Debug|Release)$ ]]; then
     render_tests_target="${PROJECT_NAMESPACE}RenderTests"
     render_args=(--generator "$GENERATOR" --configuration "$CONFIGURATION" --architecture "$ARCHITECTURE" --toolset "$TOOLSET" --target "$render_tests_target")
     [[ $CI -eq 1 ]] && render_args+=(--ci)
@@ -91,8 +97,9 @@ if [[ "$MODE" == test && "$CONFIGURATION" =~ ^(Debug|Release)$ ]]; then
         set -e
         if [[ $gpu_probe_status -eq 77 ]]; then
             printf '==> GPU render tests skipped: %s is unavailable\n' "$backend"
-            required=",${KEIRE_REQUIRE_GPU_TESTS:-},"
-            [[ "$required" != ",1," && "$required" != ",all," && "$required" != *",$backend,"* ]] || {
+            required_backends=",${KEIRE_REQUIRE_GPU_TESTS:-},"
+            [[ "$required_backends" != ",1," && "$required_backends" != ",all," &&
+               "$required_backends" != *",$backend,"* ]] || {
                 printf 'Required GPU test backend is unavailable: %s\n' "$backend" >&2
                 exit 1
             }

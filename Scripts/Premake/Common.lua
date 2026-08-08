@@ -19,6 +19,22 @@ VendorIncludeDirs = {
     stb = "../Vendor/stb"
 }
 
+function GeneratorRootPath(path)
+    if (_ACTION == "ninja" or _ACTION == "gmake") and SelectedToolset ~= "msc" then
+        local rootRelativePath = path:gsub("^%.%./", "")
+        return rootRelativePath
+    end
+    return path
+end
+
+local function DependencyLinks(paths)
+    local result = {}
+    for _, path in ipairs(paths) do
+        table.insert(result, GeneratorRootPath(path))
+    end
+    return result
+end
+
 function LinkKeireCore()
     links
     {
@@ -30,27 +46,27 @@ function LinkKeireCore()
     filter { "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
         links
         {
-            DependencyManifest.AssimpDebugLibrary,
-            DependencyManifest.AssimpZlibDebugLibrary,
-            DependencyManifest.JoltDebugLibrary,
-            DependencyManifest.MiniaudioDebugLibrary,
-            DependencyManifest.CoralDebugLibrary
+            GeneratorRootPath(DependencyManifest.AssimpDebugLibrary),
+            GeneratorRootPath(DependencyManifest.AssimpZlibDebugLibrary),
+            GeneratorRootPath(DependencyManifest.JoltDebugLibrary),
+            GeneratorRootPath(DependencyManifest.MiniaudioDebugLibrary),
+            GeneratorRootPath(DependencyManifest.CoralDebugLibrary)
         }
-        links(DependencyManifest.RecastDebugLibraries)
+        links(DependencyLinks(DependencyManifest.RecastDebugLibraries))
 
     filter { "configurations:Release or Dist" }
         links
         {
-            DependencyManifest.AssimpReleaseLibrary,
-            DependencyManifest.AssimpZlibReleaseLibrary,
-            DependencyManifest.JoltReleaseLibrary,
-            DependencyManifest.MiniaudioReleaseLibrary,
-            DependencyManifest.CoralReleaseLibrary
+            GeneratorRootPath(DependencyManifest.AssimpReleaseLibrary),
+            GeneratorRootPath(DependencyManifest.AssimpZlibReleaseLibrary),
+            GeneratorRootPath(DependencyManifest.JoltReleaseLibrary),
+            GeneratorRootPath(DependencyManifest.MiniaudioReleaseLibrary),
+            GeneratorRootPath(DependencyManifest.CoralReleaseLibrary)
         }
-        links(DependencyManifest.RecastReleaseLibraries)
+        links(DependencyLinks(DependencyManifest.RecastReleaseLibraries))
 
     filter {}
-        links { DependencyManifest.CoralNetHostLibrary }
+        links { GeneratorRootPath(DependencyManifest.CoralNetHostLibrary) }
 
     filter "system:windows"
         links { "crypt32", "winhttp" }
@@ -111,10 +127,10 @@ function LinkSDL3()
     links { DependencyManifest.SDL3PlatformLinks }
 
     filter { "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
-        links { DependencyManifest.SDL3DebugLibrary }
+        links { GeneratorRootPath(DependencyManifest.SDL3DebugLibrary) }
 
     filter { "configurations:Release or Dist" }
-        links { DependencyManifest.SDL3ReleaseLibrary }
+        links { GeneratorRootPath(DependencyManifest.SDL3ReleaseLibrary) }
 
     filter {}
 end
@@ -123,6 +139,19 @@ function AddKeireApplicationIcon()
     local iconResource = _ACTION == "ninja" and "Config/Branding/Keire.res" or "../Config/Branding/Keire.res"
     filter "system:windows"
         linkoptions { '"' .. iconResource .. '"' }
+
+    filter {}
+end
+
+function ApplyLargeWindowsStack()
+    filter { "system:windows", "toolset:msc" }
+        linkoptions { "/STACK:8388608" }
+
+    filter { "system:windows", "toolset:clang" }
+        linkoptions { "-Xlinker", "/STACK:8388608" }
+
+    filter { "system:windows", "toolset:gcc" }
+        linkoptions { "-Wl,--stack,8388608" }
 
     filter {}
 end
@@ -162,6 +191,18 @@ function ApplyCommonProjectSettings(repositoryRoot)
 
     filter { "toolset:gcc or clang" }
         buildoptions { "-Wpedantic", "-Wconversion", "-Wshadow" }
+
+    -- Partial C++20 aggregate initialization intentionally value-initializes fields that retain their defaults.
+    filter "toolset:clang"
+        buildoptions { "-Wno-missing-field-initializers" }
+
+    filter { "system:windows", "toolset:clang", "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
+        buildoptions { "-fms-runtime-lib=dll_dbg" }
+        linkoptions { "-fms-runtime-lib=dll_dbg" }
+
+    filter { "system:windows", "toolset:clang", "configurations:Release or Dist" }
+        buildoptions { "-fms-runtime-lib=dll" }
+        linkoptions { "-fms-runtime-lib=dll" }
 
     filter { "configurations:Debug or DebugASan or DebugUBSan or DebugTSan" }
         runtime "Debug"

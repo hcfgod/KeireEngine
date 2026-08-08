@@ -1,6 +1,6 @@
-#include "Sha256.h"
+#include <KeireHubRuntimeInternal/Sha256.h>
 
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <algorithm>
 #include <array>
@@ -163,7 +163,7 @@ namespace KeireHub::Detail
                                                     .Message = "A template payload file could not be opened.",
                                                     .AffectedItem = PathToUtf8(path.filename())});
         Sha256Builder builder;
-        std::array<std::byte, 64U * 1024U> buffer{};
+        std::array<std::byte, std::size_t{64U} * 1024U> buffer{};
         while (stream)
         {
             stream.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(buffer.size()));

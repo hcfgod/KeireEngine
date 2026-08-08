@@ -2,8 +2,8 @@
 
 #include "KeireHubRuntime/PackageResolver.h"
 
-#include "DistributionEncoding.h"
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <algorithm>
 #include <array>
@@ -17,8 +17,8 @@ namespace KeireHub
 {
     namespace
     {
-        constexpr std::size_t MaximumRegistryBytes = 64 * 1024 * 1024;
-        constexpr std::size_t MaximumMarkerBytes = 16 * 1024;
+        constexpr std::size_t MaximumRegistryBytes = std::size_t{64} * 1024 * 1024;
+        constexpr std::size_t MaximumMarkerBytes = std::size_t{16} * 1024;
         constexpr std::size_t MaximumInstallations = 128;
         constexpr std::size_t MaximumEntrypoints = 16;
 

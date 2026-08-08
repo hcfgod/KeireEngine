@@ -333,7 +333,7 @@ namespace Keire
     class KEIRE_API InputSystem final : public RefCounted
     {
       public:
-        InputSystem(InputSystemSpecification specification, Ref<WindowSystem> windows, Ref<AssetSystem> assets,
+        InputSystem(InputSystemSpecification specification, const Ref<WindowSystem>& windows, Ref<AssetSystem> assets,
                     Ref<EventBus> events = {});
         ~InputSystem() override;
 

@@ -1,6 +1,6 @@
 #include "KeireHub/HubEditorManagementWorkflow.h"
 
-#include "TestSupport.h"
+#include <KeireHubTests/TestSupport.h>
 
 #include <doctest/doctest.h>
 
@@ -90,7 +90,8 @@ TEST_CASE("Editor management refresh runs on a value-only worker and projects it
     std::filesystem::path receivedRoot;
     std::size_t receivedCount = 0;
     HubEditorManagementServices services;
-    services.Refresh = [&](std::vector<HubEditorManagementWorkItem> items, std::string, std::string)
+    services.Refresh =
+        [&](const std::vector<HubEditorManagementWorkItem>& items, const std::string&, const std::string&)
     {
         workerThread = std::this_thread::get_id();
         receivedCount = items.size();
@@ -156,12 +157,12 @@ TEST_CASE("Editor verification rejects a result when current tracked activity ch
     std::latch entered(1);
     std::latch release(1);
     HubEditorManagementServices services;
-    services.Verify = [&](HubEditorManagementWorkItem item, std::string, std::string)
+    services.Verify = [&](const HubEditorManagementWorkItem& item, const std::string&, const std::string&)
     {
         entered.count_down();
         release.wait();
         return HubResult<EditorInstallationHealthSnapshot>::Success(
-            {.Installation = std::move(item.Installation), .Health = InstallationHealth::Healthy});
+            {.Installation = item.Installation, .Health = InstallationHealth::Healthy});
     };
     HubEditorManagementWorkflow workflow(
         controller,
@@ -202,12 +203,12 @@ TEST_CASE("Editor verification rejects a result when a targeted package task sta
     std::latch entered(1);
     std::latch release(1);
     HubEditorManagementServices services;
-    services.Verify = [&](HubEditorManagementWorkItem item, std::string, std::string)
+    services.Verify = [&](const HubEditorManagementWorkItem& item, const std::string&, const std::string&)
     {
         entered.count_down();
         release.wait();
         return HubResult<EditorInstallationHealthSnapshot>::Success(
-            {.Installation = std::move(item.Installation), .Health = InstallationHealth::Healthy});
+            {.Installation = item.Installation, .Health = InstallationHealth::Healthy});
     };
     HubEditorManagementWorkflow workflow(controller,
                                          {.HostPlatform = "windows",
@@ -246,12 +247,12 @@ TEST_CASE("Editor verification rejects a result after exact registration identit
     std::latch entered(1);
     std::latch release(1);
     HubEditorManagementServices services;
-    services.Verify = [&](HubEditorManagementWorkItem item, std::string, std::string)
+    services.Verify = [&](const HubEditorManagementWorkItem& item, const std::string&, const std::string&)
     {
         entered.count_down();
         release.wait();
         return HubResult<EditorInstallationHealthSnapshot>::Success(
-            {.Installation = std::move(item.Installation), .Health = InstallationHealth::Healthy});
+            {.Installation = item.Installation, .Health = InstallationHealth::Healthy});
     };
     HubEditorManagementWorkflow workflow(controller,
                                          {.HostPlatform = "windows",
@@ -284,7 +285,7 @@ TEST_CASE("Editor verification rejects a worker result with changed registration
         TestInstallation(temporary.Path() / "Editor", "editor-a", InstallationOwnership::External);
     REQUIRE(controller.Installations().Upsert(installation));
     HubEditorManagementServices services;
-    services.Verify = [](HubEditorManagementWorkItem item, std::string, std::string)
+    services.Verify = [](HubEditorManagementWorkItem item, const std::string&, const std::string&)
     {
         item.Installation.Channel = "preview";
         return HubResult<EditorInstallationHealthSnapshot>::Success(
@@ -319,8 +320,8 @@ TEST_CASE("Managed editor authorization is single-flight and publishes a value r
     std::latch release(1);
     std::atomic_int calls = 0;
     HubEditorManagementServices services;
-    services.Authorize = [&](HubEditorManagementWorkItem item, std::filesystem::path,
-                             const EditorManagedOperation operation, std::string, std::string)
+    services.Authorize = [&](const HubEditorManagementWorkItem& item, std::filesystem::path,
+                             const EditorManagedOperation operation, const std::string&, const std::string&)
     {
         calls.fetch_add(1, std::memory_order_relaxed);
         entered.count_down();
@@ -366,7 +367,7 @@ TEST_CASE("External editor removal stays owner-thread local and does not start a
     REQUIRE(controller.Installations().Upsert(installation));
     std::atomic_int refreshCalls = 0;
     HubEditorManagementServices services;
-    services.Refresh = [&](std::vector<HubEditorManagementWorkItem>, std::string, std::string)
+    services.Refresh = [&](const std::vector<HubEditorManagementWorkItem>&, const std::string&, const std::string&)
     {
         refreshCalls.fetch_add(1, std::memory_order_relaxed);
         return HubResult<std::vector<EditorInstallationHealthSnapshot>>::Success(
@@ -415,10 +416,10 @@ TEST_CASE("Editor verification publishes and persists a missing health result")
         TestInstallation(temporary.Path() / "Editor", "editor-missing", InstallationOwnership::Managed);
     REQUIRE(controller.Installations().Upsert(installation));
     HubEditorManagementServices services;
-    services.Verify = [](HubEditorManagementWorkItem item, std::string, std::string)
+    services.Verify = [](const HubEditorManagementWorkItem& item, const std::string&, const std::string&)
     {
         return HubResult<EditorInstallationHealthSnapshot>::Success(
-            {.Installation = std::move(item.Installation), .Health = InstallationHealth::Missing});
+            {.Installation = item.Installation, .Health = InstallationHealth::Missing});
     };
     HubEditorManagementWorkflow workflow(controller,
                                          {.HostPlatform = "windows",

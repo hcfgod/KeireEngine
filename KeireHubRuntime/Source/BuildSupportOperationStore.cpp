@@ -2,7 +2,7 @@
 
 #include "KeireHubRuntime/PackageResolver.h"
 
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <algorithm>
 #include <array>
@@ -15,11 +15,11 @@ namespace KeireHub
 {
     namespace
     {
-        constexpr std::size_t MaximumStoreBytes = 2U * 1024U * 1024U;
-        constexpr std::size_t MaximumPathBytes = 32U * 1024U;
+        constexpr std::size_t MaximumStoreBytes = std::size_t{2U} * 1024U * 1024U;
+        constexpr std::size_t MaximumPathBytes = std::size_t{32U} * 1024U;
         constexpr std::size_t MaximumMessageBytes = 4096U;
         constexpr std::size_t MaximumShortTextBytes = 512U;
-        constexpr std::size_t MaximumRemovalJournalBytes = 64U * 1024U;
+        constexpr std::size_t MaximumRemovalJournalBytes = std::size_t{64U} * 1024U;
         constexpr std::size_t MaximumRemovalDirectoryEntries = 512U;
         constexpr std::size_t MaximumRemovalJournals = 128U;
 

@@ -1,7 +1,7 @@
-#include "NativeHttpTransportPlatform.h"
+#include <KeireHubRuntimeInternal/NativeHttpTransportPlatform.h>
 
 #if defined(_WIN32)
-#include "NativeHttpTransportPolicy.h"
+#include <KeireHubRuntimeInternal/NativeHttpTransportPolicy.h>
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -25,9 +25,9 @@ namespace KeireHub::Detail
 {
     namespace
     {
-        constexpr std::size_t MaximumCatalogBytes = 32U * 1024U * 1024U;
-        constexpr std::size_t MaximumRequestBodyBytes = 1024U * 1024U;
-        constexpr std::size_t MaximumResponseBodyBytes = 4U * 1024U * 1024U;
+        constexpr std::size_t MaximumCatalogBytes = std::size_t{32U} * 1024U * 1024U;
+        constexpr std::size_t MaximumRequestBodyBytes = std::size_t{1024U} * 1024U;
+        constexpr std::size_t MaximumResponseBodyBytes = std::size_t{4U} * 1024U * 1024U;
 
         struct HttpHandleCloser final
         {
@@ -194,7 +194,7 @@ namespace KeireHub::Detail
 
         [[nodiscard]] bool ValidOutboundHeader(const std::string_view value) noexcept
         {
-            return value.size() <= 8U * 1024U &&
+            return value.size() <= std::size_t{8U} * 1024U &&
                    std::ranges::all_of(value, [](const unsigned char character)
                                        { return character >= 0x20U && character <= 0x7eU; });
         }
@@ -328,7 +328,7 @@ namespace KeireHub::Detail
         [[nodiscard]] HubResult<std::vector<std::byte>> ReadBoundedBody(void* request, const std::size_t maximumBytes)
         {
             std::vector<std::byte> result;
-            std::array<std::byte, 64U * 1024U> buffer{};
+            std::array<std::byte, std::size_t{64U} * 1024U> buffer{};
             for (;;)
             {
                 DWORD count = 0;

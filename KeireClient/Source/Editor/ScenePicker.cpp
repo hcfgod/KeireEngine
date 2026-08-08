@@ -125,7 +125,7 @@ namespace KeireEditor
                     IncludePoint(bounds, Keire::Math::TransformPoint(world, point));
                 }
             }
-            for (const auto child : entity.Children())
+            for (const auto& child : entity.Children())
                 IncludeEntity(bounds, child, resolveMeshBounds);
         }
     } // namespace

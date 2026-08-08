@@ -1,6 +1,6 @@
 #include "KeireHubRuntime/ProjectStatusProbe.h"
 
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <optional>
 #include <string>

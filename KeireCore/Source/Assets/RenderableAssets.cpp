@@ -40,13 +40,13 @@ namespace Keire
         constexpr std::array<char, 8> TextureMagic{'K', 'E', 'I', 'R', 'E', 'T', 'E', 'X'};
         constexpr std::uint32_t MeshVersion = 4;
         constexpr std::uint32_t TextureVersion = 3;
-        constexpr std::size_t MaximumMeshVertices = 16U * 1024U * 1024U;
-        constexpr std::size_t MaximumMeshIndices = 48U * 1024U * 1024U;
-        constexpr std::size_t MaximumMeshSubmeshes = 1024U * 1024U;
-        constexpr std::size_t MaximumMeshMaterialSlots = 16U * 1024U;
+        constexpr std::size_t MaximumMeshVertices = std::size_t{16} * 1024U * 1024U;
+        constexpr std::size_t MaximumMeshIndices = std::size_t{48} * 1024U * 1024U;
+        constexpr std::size_t MaximumMeshSubmeshes = std::size_t{1024} * 1024U;
+        constexpr std::size_t MaximumMeshMaterialSlots = std::size_t{16} * 1024U;
         constexpr std::size_t MaximumMeshLods = 16U;
-        constexpr std::size_t MaximumTextureDimension = 16U * 1024U;
-        constexpr std::size_t MaximumTextureBytes = 1024U * 1024U * 1024U;
+        constexpr std::size_t MaximumTextureDimension = std::size_t{16} * 1024U;
+        constexpr std::size_t MaximumTextureBytes = std::size_t{1024} * 1024U * 1024U;
 
         [[nodiscard]] std::string Lowercase(std::string value)
         {
@@ -414,7 +414,7 @@ namespace Keire
         [[nodiscard]] TextureImportSettings ApplyTextureImportSettings(TextureImportSettings settings,
                                                                        const AssetImportSettings& values)
         {
-            const auto choice = [&](const std::string_view key, const std::string fallback)
+            const auto choice = [&](const std::string_view key, const std::string& fallback)
             {
                 const auto found = values.find(key);
                 return found == values.end() ? fallback : std::get<std::string>(found->second);
@@ -593,7 +593,6 @@ namespace Keire
                     if (normalMap)
                     {
                         Vector3 normal;
-                        std::uint32_t samples = 0;
                         for (std::uint32_t oy = 0; oy < 2; ++oy)
                         {
                             const auto sourceY = std::min(y * 2U + oy, source.Height - 1U);
@@ -602,12 +601,18 @@ namespace Keire
                                 const auto sourceX = std::min(x * 2U + ox, source.Width - 1U);
                                 const auto sourceIndex =
                                     (static_cast<std::size_t>(sourceY) * source.Width + sourceX) * 4U;
-                                normal.X += std::to_integer<std::uint8_t>(source.Pixels[sourceIndex]) / 127.5F - 1.0F;
+                                normal.X +=
+                                    static_cast<float>(std::to_integer<std::uint8_t>(source.Pixels[sourceIndex])) /
+                                        127.5F -
+                                    1.0F;
                                 normal.Y +=
-                                    std::to_integer<std::uint8_t>(source.Pixels[sourceIndex + 1]) / 127.5F - 1.0F;
+                                    static_cast<float>(std::to_integer<std::uint8_t>(source.Pixels[sourceIndex + 1])) /
+                                        127.5F -
+                                    1.0F;
                                 normal.Z +=
-                                    std::to_integer<std::uint8_t>(source.Pixels[sourceIndex + 2]) / 127.5F - 1.0F;
-                                ++samples;
+                                    static_cast<float>(std::to_integer<std::uint8_t>(source.Pixels[sourceIndex + 2])) /
+                                        127.5F -
+                                    1.0F;
                             }
                         }
                         normal = Normalize(normal, {0.0F, 0.0F, 1.0F});
@@ -659,9 +664,9 @@ namespace Keire
                 if (exponent == 0)
                     return Vector3{};
                 const float scale = std::ldexp(1.0F, static_cast<int>(exponent) - 136);
-                return Vector3{std::to_integer<std::uint8_t>(source.Pixels[index]) * scale,
-                               std::to_integer<std::uint8_t>(source.Pixels[index + 1U]) * scale,
-                               std::to_integer<std::uint8_t>(source.Pixels[index + 2U]) * scale};
+                return Vector3{static_cast<float>(std::to_integer<std::uint8_t>(source.Pixels[index])) * scale,
+                               static_cast<float>(std::to_integer<std::uint8_t>(source.Pixels[index + 1U])) * scale,
+                               static_cast<float>(std::to_integer<std::uint8_t>(source.Pixels[index + 2U])) * scale};
             };
             for (std::uint32_t y = 0; y < result.Height; ++y)
                 for (std::uint32_t x = 0; x < result.Width; ++x)
@@ -1050,6 +1055,7 @@ namespace Keire
         const auto settings = NormalizeTextureSettings(requested);
         Texture2DAsset validation(settings, {mips.begin(), mips.end()});
         std::vector<std::byte> result;
+        result.reserve(TextureMagic.size());
         for (const char value : TextureMagic)
             result.push_back(std::byte(value));
         AppendUnsigned(result, TextureVersion);
@@ -1219,7 +1225,7 @@ namespace Keire
                 if (scene->mMaterials[materialIndex]->Get(AI_MATKEY_NAME, materialName) != aiReturn_SUCCESS ||
                     materialName.length == 0)
                 {
-                    materialName = aiString(("Material " + std::to_string(materialIndex + 1U)).c_str());
+                    materialName = aiString("Material " + std::to_string(materialIndex + 1U));
                     if (extension == "fbx" || extension == "obj")
                         output.Diagnostics.push_back(
                             {AssetDiagnosticSeverity::Warning, context.RelativePath, 0, 0,
@@ -1785,7 +1791,7 @@ namespace Keire
                 {
                     const auto meshIndex = orderedMeshes[orderedOffset++].Index;
                     const auto* mesh = scene->mMeshes[meshIndex];
-                    if (!mesh || (mesh->mPrimitiveTypes & ~aiPrimitiveType_TRIANGLE) != 0)
+                    if (!mesh || (mesh->mPrimitiveTypes & ~static_cast<unsigned int>(aiPrimitiveType_TRIANGLE)) != 0U)
                         throw std::invalid_argument("Mesh import rejects non-triangle primitives.");
                     if (vertices.size() > std::numeric_limits<std::uint32_t>::max() - mesh->mNumVertices)
                         throw std::overflow_error("Merged mesh vertex count exceeds 32-bit indices.");

@@ -43,9 +43,7 @@
 #include <cstddef>
 #include <exception>
 #include <filesystem>
-#include <fstream>
 #include <functional>
-#include <iterator>
 #include <limits>
 #include <optional>
 #include <span>
@@ -57,105 +55,6 @@
 #include <vector>
 namespace
 {
-    const Keire::UiLayoutInfo* ActiveLayout(const std::vector<Keire::UiLayoutInfo>& layouts)
-    {
-        const auto found = std::ranges::find(layouts, true, &Keire::UiLayoutInfo::Active);
-        return found == layouts.end() ? nullptr : &*found;
-    }
-
-    const Keire::UiThemeInfo* ActiveTheme(const std::vector<Keire::UiThemeInfo>& themes)
-    {
-        const auto found = std::ranges::find(themes, true, &Keire::UiThemeInfo::Active);
-        return found == themes.end() ? nullptr : &*found;
-    }
-
-    [[nodiscard]] std::vector<std::byte> ReadBytes(const std::filesystem::path& path)
-    {
-        std::ifstream input(path, std::ios::binary);
-        if (!input)
-            throw std::runtime_error("Cannot open input action asset: " + path.string());
-        const std::vector<char> characters{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
-        std::vector<std::byte> bytes(characters.size());
-        std::ranges::transform(characters, bytes.begin(), [](const char value) { return std::byte(value); });
-        return bytes;
-    }
-
-    [[nodiscard]] std::string FormatAssetDiagnostic(const Keire::AssetImportDiagnostic& diagnostic)
-    {
-        auto result = diagnostic.RelativePath.generic_string();
-        if (diagnostic.Line != 0)
-        {
-            result += ':' + std::to_string(diagnostic.Line);
-            if (diagnostic.Column != 0)
-                result += ':' + std::to_string(diagnostic.Column);
-        }
-        if (!result.empty())
-            result += ": ";
-        result += diagnostic.Message;
-        return result;
-    }
-
-    void WriteBytesAtomically(const std::filesystem::path& path, const std::span<const std::byte> bytes)
-    {
-        const std::string text =
-            bytes.empty() ? std::string{} : std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-        Keire::Detail::WriteTextFileAtomically(path, text);
-    }
-
-    [[nodiscard]] Keire::Ref<Keire::Scene> RenderedScene(const Keire::Ref<Keire::Scene>& editing,
-                                                         const Keire::Ref<Keire::SceneRuntimeSession>& play)
-    {
-        if (play && play->State() != Keire::ScenePlayState::Stopped)
-            return play->RuntimeScene();
-        return editing;
-    }
-
-    struct SceneCamera final
-    {
-        Keire::Entity Entity;
-        Keire::Ref<Keire::CameraComponent> Camera;
-        Keire::Ref<Keire::TransformComponent> Transform;
-    };
-
-    [[nodiscard]] std::optional<SceneCamera> SelectGameCamera(const Keire::Ref<Keire::Scene>& scene)
-    {
-        if (!scene)
-            return std::nullopt;
-        std::optional<SceneCamera> selected;
-        bool selectedPrimary = false;
-        for (const auto& entity : scene->Query<Keire::CameraComponent>())
-        {
-            const auto camera = entity.GetComponent<Keire::CameraComponent>();
-            const auto transform = entity.GetComponent<Keire::TransformComponent>();
-            if (!camera || !transform || !camera->Enabled() || !entity.ActiveInHierarchy())
-                continue;
-            if (!selected || (camera->Primary() && !selectedPrimary) ||
-                (camera->Primary() == selectedPrimary && (camera->Priority() > selected->Camera->Priority() ||
-                                                          (camera->Priority() == selected->Camera->Priority() &&
-                                                           entity.Id().Value() < selected->Entity.Id().Value()))))
-            {
-                selected = SceneCamera{entity, camera, transform};
-                selectedPrimary = camera->Primary();
-            }
-        }
-        return selected;
-    }
-
-    [[nodiscard]] Keire::UiSize PrepareRenderSurface(const Keire::Ref<Keire::RenderView>& view,
-                                                     const Keire::UiSize logicalSize, const float displayScale)
-    {
-        if (!view || !view->Surface())
-            return {};
-        const float width = std::max(logicalSize.Width, 1.0F);
-        const float height = std::max(logicalSize.Height, 1.0F);
-        const auto pixelWidth =
-            static_cast<std::uint32_t>(std::round(std::clamp(width * std::max(displayScale, 1.0F), 1.0F, 16384.0F)));
-        const auto pixelHeight =
-            static_cast<std::uint32_t>(std::round(std::clamp(height * std::max(displayScale, 1.0F), 1.0F, 16384.0F)));
-        view->Surface()->RequestSize(pixelWidth, pixelHeight);
-        return {width, height};
-    }
-
     class ContinuousUndoCommand final : public Keire::UndoCommand
     {
       public:
@@ -364,6 +263,17 @@ namespace
                 }
             }
             return changed;
+        }
+
+        bool EditEvent(const std::string_view label, Keire::ComponentEventValue& value,
+                       const std::size_t argumentCount) override
+        {
+            (void)argumentCount;
+            m_Ui.Text(label);
+            m_Ui.TextColored({0.48F, 0.55F, 0.64F, 1.0F},
+                             std::to_string(value.Listeners.size()) +
+                                 (value.Listeners.size() == 1 ? " persistent listener" : " persistent listeners"));
+            return false;
         }
 
       private:

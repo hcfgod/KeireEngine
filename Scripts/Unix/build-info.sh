@@ -14,12 +14,13 @@ done
 is_semantic_version "$PROJECT_VERSION" || { printf 'PROJECT_VERSION must be a valid Semantic Version 2.0.0 value.\n' >&2; exit 1; }
 
 c_string_escape() {
-  local value="$1" output= character code escaped
+  local value="$1"
+  local output="" character code escaped
   while [[ -n "$value" ]]; do
     character="${value:0:1}"
     value="${value:1}"
     case "$character" in
-      \\) output+='\\' ;;
+      \\) output="${output}\\\\" ;;
       \") output+='\"' ;;
       $'\t') output+='\t' ;;
       *)

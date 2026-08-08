@@ -18,9 +18,11 @@
 #include "KeireHub/HubPackageTaskWorkflow.h"
 #include "KeireHub/HubPathMigration.h"
 #include "KeireHub/HubProductUi.h"
+#include "KeireHub/HubProjectCreationIntegration.h"
 #include "KeireHub/HubProjectCreationUi.h"
 #include "KeireHub/HubProjectMetadataWorkflow.h"
 #include "KeireHub/HubProjectMutationIntegration.h"
+#include "KeireHub/HubProjectOpenUi.h"
 #include "KeireHub/HubProjectUiSupport.h"
 #include "KeireHub/HubProjectUpgradeUi.h"
 #include "KeireHub/HubProjectWorkflow.h"
@@ -579,7 +581,8 @@ namespace
                     project.Status = Keire::ProjectStatus::InUse;
             }
             m_ProductSnapshot.RecentProjects = projectEntries.size();
-            m_ProductSnapshot.PinnedProjects = std::ranges::count_if(projectEntries, &Keire::RecentProject::Pinned);
+            m_ProductSnapshot.PinnedProjects =
+                static_cast<std::size_t>(std::ranges::count_if(projectEntries, &Keire::RecentProject::Pinned));
             if (m_BuildSupport)
                 m_BuildSupport->SynchronizeEditors(m_ProductSnapshot);
             if (m_EditorManagement)
@@ -1145,7 +1148,7 @@ namespace
             m_PackageTaskConcurrentDownloads = m_ProductSnapshot.Settings.ConcurrentDownloads;
         }
 
-        void SetError(std::string message) noexcept
+        void SetError(const std::string& message) noexcept
         {
             try
             {
@@ -1404,28 +1407,7 @@ namespace
             {
                 if (!m_Templates)
                     throw std::runtime_error("The verified template catalog is unavailable.");
-                const auto editor =
-                    std::ranges::find(m_ProductSnapshot.Editors, request.EditorId, &KeireHub::HubEditorUiRecord::Id);
-                if (editor == m_ProductSnapshot.Editors.end())
-                    throw std::runtime_error("The selected editor is no longer installed.");
-                std::error_code directoryError;
-                std::filesystem::create_directories(request.ParentDirectory, directoryError);
-                if (directoryError || !std::filesystem::is_directory(request.ParentDirectory, directoryError) ||
-                    directoryError)
-                {
-                    throw std::runtime_error("The selected project location could not be created or opened.");
-                }
-                const auto status = m_Templates->StartCreate({.TemplateId = request.TemplateId,
-                                                              .ProjectName = request.Name,
-                                                              .ParentDirectory = request.ParentDirectory,
-                                                              .EditorId = editor->Id,
-                                                              .EditorVersion = editor->Version,
-                                                              .EditorAssetToolEntrypoint = editor->AssetToolEntrypoint,
-                                                              .HostPlatform = editor->Platform,
-                                                              .HostArchitecture = editor->Architecture,
-                                                              .MinimumProjectSchema = editor->MinimumProjectSchema,
-                                                              .MaximumProjectSchema = editor->MaximumProjectSchema});
-                RequireWorkflowSuccess(status);
+                RequireWorkflowSuccess(KeireHub::StartHubProjectCreation(*m_Templates, m_ProductSnapshot, request));
                 m_ActiveCreationOpenAfter = request.OpenAfterCreation;
             }
             catch (const std::exception& error)
@@ -1436,35 +1418,12 @@ namespace
 
         void DrawOpenDialog(Keire::UiFrame& ui)
         {
-            const auto tokens =
-                KeireHub::HubDesignTokens::For(m_ProductSnapshot.Settings.Appearance, KeireHub::HubSystemPrefersDark());
-            KeireHub::PrepareHubModal(ui, {620.0F, 300.0F});
-            KeireHub::HubModalStyleScope modalStyle(ui, tokens);
-            if (auto dialog = ui.BeginPopupModal("Open Project", nullptr, KeireHub::HubModalWindowOptions(), false);
-                dialog)
-            {
-                KeireHub::DrawHubModalHeader(ui, tokens, "Open an existing project",
-                                             "Select a Kéire project folder to validate and add to the Hub.",
-                                             "PROJECTS");
-                ui.TextColored(tokens.SecondaryText, "Project folder");
-                ui.SetNextItemWidth(std::max(1.0F, ui.ContentAvailable().Width - 104.0F));
-                (void)ui.InputText("##OpenProjectFolder", m_OpenPath);
-                ui.SameLine();
-                if (auto disabled = ui.BeginDisabled(static_cast<bool>(m_FolderDialog)); disabled)
-                {
-                    if (KeireHub::HubSecondaryButton(ui, tokens, "Browse...", {96.0F, 38.0F}))
-                        BrowseForFolder(FolderTarget::OpenProject, Keire::Detail::PathFromUtf8(m_OpenPath));
-                }
-                ui.Spacing();
-                if (KeireHub::HubPrimaryButton(ui, tokens, "Open project", {124.0F, 38.0F}))
-                {
-                    ui.CloseCurrentPopup();
-                    Open(Keire::Detail::PathFromUtf8(m_OpenPath));
-                }
-                ui.SameLine();
-                if (KeireHub::HubSecondaryButton(ui, tokens, "Cancel", {88.0F, 38.0F}))
-                    ui.CloseCurrentPopup();
-            }
+            const auto action = KeireHub::DrawHubOpenProjectDialog(ui, m_ProductSnapshot, m_OpenPath,
+                                                                   static_cast<bool>(m_FolderDialog));
+            if (action == KeireHub::HubOpenProjectAction::Browse)
+                BrowseForFolder(FolderTarget::OpenProject, Keire::Detail::PathFromUtf8(m_OpenPath));
+            else if (action == KeireHub::HubOpenProjectAction::Open)
+                Open(Keire::Detail::PathFromUtf8(m_OpenPath));
         }
 
         std::filesystem::path m_Executable;

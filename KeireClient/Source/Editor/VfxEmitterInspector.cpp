@@ -95,9 +95,7 @@ namespace KeireEditor
                     using T = std::decay_t<decltype(item)>;
                     if constexpr (std::same_as<T, bool>)
                         return std::string(item ? "On" : "Off");
-                    else if constexpr (std::same_as<T, std::int64_t>)
-                        return std::to_string(item);
-                    else if constexpr (std::same_as<T, std::uint64_t>)
+                    else if constexpr (std::same_as<T, std::int64_t> || std::same_as<T, std::uint64_t>)
                         return std::to_string(item);
                     else if constexpr (std::same_as<T, Keire::AssetId>)
                         return item ? item.ToString() : std::string("None");
@@ -211,50 +209,55 @@ namespace KeireEditor
                 auto& range = std::get<Keire::VfxScalarRange>(value);
                 double minimum = range.Minimum;
                 double maximum = range.Maximum;
-                const bool changed = editor.EditScalar(label + " Min", minimum, 0.05, {}, {}) |
-                                     editor.EditScalar(label + " Max", maximum, 0.05, {}, {});
+                const bool minimumChanged = editor.EditScalar(label + " Min", minimum, 0.05, {}, {});
+                const bool maximumChanged = editor.EditScalar(label + " Max", maximum, 0.05, {}, {});
                 range = {static_cast<float>(minimum), static_cast<float>(maximum)};
-                return changed;
+                return minimumChanged || maximumChanged;
             }
             case Keire::VfxValueType::IntegerRange:
             {
                 auto& range = std::get<Keire::VfxIntegerRange>(value);
-                return editor.EditInteger(label + " Min", range.Minimum, 1.0, {}, {}) |
-                       editor.EditInteger(label + " Max", range.Maximum, 1.0, {}, {});
+                const bool minimumChanged = editor.EditInteger(label + " Min", range.Minimum, 1.0, {}, {});
+                const bool maximumChanged = editor.EditInteger(label + " Max", range.Maximum, 1.0, {}, {});
+                return minimumChanged || maximumChanged;
             }
             case Keire::VfxValueType::UnsignedIntegerRange:
             {
                 auto& range = std::get<Keire::VfxUnsignedIntegerRange>(value);
                 double minimum = static_cast<double>(range.Minimum);
                 double maximum = static_cast<double>(range.Maximum);
-                const bool changed = editor.EditScalar(label + " Min", minimum, 1.0, 0.0, {}) |
-                                     editor.EditScalar(label + " Max", maximum, 1.0, 0.0, {});
+                const bool minimumChanged = editor.EditScalar(label + " Min", minimum, 1.0, 0.0, {});
+                const bool maximumChanged = editor.EditScalar(label + " Max", maximum, 1.0, 0.0, {});
                 range = {static_cast<std::uint64_t>(minimum), static_cast<std::uint64_t>(maximum)};
-                return changed;
+                return minimumChanged || maximumChanged;
             }
             case Keire::VfxValueType::Vector2Range:
             {
                 auto& range = std::get<Keire::VfxVector2Range>(value);
-                return editor.EditVector2(label + " Min", range.Minimum, 0.05) |
-                       editor.EditVector2(label + " Max", range.Maximum, 0.05);
+                const bool minimumChanged = editor.EditVector2(label + " Min", range.Minimum, 0.05);
+                const bool maximumChanged = editor.EditVector2(label + " Max", range.Maximum, 0.05);
+                return minimumChanged || maximumChanged;
             }
             case Keire::VfxValueType::Vector3Range:
             {
                 auto& range = std::get<Keire::VfxVector3Range>(value);
-                return editor.EditVector3(label + " Min", range.Minimum, 0.05) |
-                       editor.EditVector3(label + " Max", range.Maximum, 0.05);
+                const bool minimumChanged = editor.EditVector3(label + " Min", range.Minimum, 0.05);
+                const bool maximumChanged = editor.EditVector3(label + " Max", range.Maximum, 0.05);
+                return minimumChanged || maximumChanged;
             }
             case Keire::VfxValueType::Vector4Range:
             {
                 auto& range = std::get<Keire::VfxVector4Range>(value);
-                return editor.EditVector4(label + " Min", range.Minimum, 0.05) |
-                       editor.EditVector4(label + " Max", range.Maximum, 0.05);
+                const bool minimumChanged = editor.EditVector4(label + " Min", range.Minimum, 0.05);
+                const bool maximumChanged = editor.EditVector4(label + " Max", range.Maximum, 0.05);
+                return minimumChanged || maximumChanged;
             }
             case Keire::VfxValueType::ColorRange:
             {
                 auto& range = std::get<Keire::VfxColorRange>(value);
-                return editor.EditColor(label + " Min", range.Minimum) |
-                       editor.EditColor(label + " Max", range.Maximum);
+                const bool minimumChanged = editor.EditColor(label + " Min", range.Minimum);
+                const bool maximumChanged = editor.EditColor(label + " Max", range.Maximum);
+                return minimumChanged || maximumChanged;
             }
             case Keire::VfxValueType::Texture2DArray:
             case Keire::VfxValueType::Texture3D:

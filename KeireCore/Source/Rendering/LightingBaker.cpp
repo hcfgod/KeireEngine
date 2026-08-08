@@ -130,8 +130,13 @@ namespace Keire
         {
             std::string result;
             result.reserve(value.size());
-            for (const unsigned char character : value)
-                result.push_back(std::isalnum(character) || character == '-' || character == '_' ? character : '_');
+            for (const char input : value)
+            {
+                const auto character = static_cast<unsigned char>(input);
+                result.push_back(static_cast<char>(std::isalnum(character) || character == '-' || character == '_'
+                                                       ? character
+                                                       : static_cast<unsigned char>('_')));
+            }
             while (!result.empty() && result.back() == '_')
                 result.pop_back();
             return result.empty() ? "Scene" : result.substr(0, 96);
@@ -702,10 +707,10 @@ namespace Keire
             return LightingBakeBackend::CPU;
         }
 
-        [[nodiscard]] Artifact MakeArtifact(const LightingBakeAssetOutput output, std::string importer,
+        [[nodiscard]] Artifact MakeArtifact(const LightingBakeAssetOutput& output, std::string importer,
                                             std::vector<std::byte> bytes)
         {
-            return {std::move(output), std::move(importer), std::move(bytes)};
+            return {output, std::move(importer), std::move(bytes)};
         }
     } // namespace
 
@@ -770,7 +775,7 @@ namespace Keire
         {
             for (const auto& entity : scene->Query<T>())
             {
-                const auto light = entity.GetComponent<T>();
+                const auto light = entity.template GetComponent<T>();
                 if (light && light->Enabled() && entity.ActiveInHierarchy() &&
                     light->BakeMode() == LightBakeMode::Mixed)
                     mixedLights.push_back(entity);
@@ -925,8 +930,9 @@ namespace Keire
             artifacts.push_back(MakeArtifact(addOutput(lightingSet.ShadowMasks, LightingTextureArrayAsset::StaticType(),
                                                        "ShadowMasks0.keirelightingtexture"),
                                              "Keire.LightingTextureArray", LightingTextureArrayAsset::Encode(masks)));
-            for (std::uint8_t channel = 0; channel < mixedLights.size(); ++channel)
-                lightingSet.MixedLights.push_back({mixedLights[channel].Id().Value(), channel});
+            for (std::size_t channel = 0; channel < mixedLights.size(); ++channel)
+                lightingSet.MixedLights.push_back(
+                    {mixedLights[channel].Id().Value(), static_cast<std::uint8_t>(channel)});
         }
 
         Report(request, LightingBakePhase::BakingReflectionProbes, 0, reflectionEntities.size(),

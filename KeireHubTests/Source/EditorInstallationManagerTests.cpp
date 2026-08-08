@@ -1,4 +1,4 @@
-#include "TestSupport.h"
+#include <KeireHubTests/TestSupport.h>
 
 #include "KeireHub/HubEditorDiscovery.h"
 
@@ -6,8 +6,8 @@
 
 #include "Keire/BuildInfo.h"
 
-#include "DistributionEncoding.h"
-#include "Sha256.h"
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
+#include <KeireHubRuntimeInternal/Sha256.h>
 
 #include <doctest/doctest.h>
 #include <nlohmann/json.hpp>

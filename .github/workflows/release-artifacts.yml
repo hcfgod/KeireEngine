@@ -13,7 +13,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  preflight:
+    uses: ./.github/workflows/quality.yml
+
   package:
+    needs: preflight
     name: ${{ matrix.os }} ${{ matrix.architecture }} ${{ matrix.configuration }}
     runs-on: ${{ matrix.runner }}
     strategy:

@@ -28,7 +28,7 @@ namespace KeireHub
         std::string Url;
         std::vector<CatalogHttpHeader> Headers;
         std::vector<std::byte> Body;
-        std::size_t MaximumResponseBytes = 1024U * 1024U;
+        std::size_t MaximumResponseBytes = std::size_t{1024} * 1024U;
     };
 
     struct NativeHttpResponse final
@@ -43,8 +43,8 @@ namespace KeireHub
     {
         std::optional<std::string> CustomProxyUrl;
         bool AllowInsecureLoopbackDevelopment = false;
-        std::size_t MaximumHeaderBytes = 64U * 1024U;
-        std::size_t DownloadBufferBytes = 256U * 1024U;
+        std::size_t MaximumHeaderBytes = std::size_t{64} * 1024U;
+        std::size_t DownloadBufferBytes = std::size_t{256} * 1024U;
         std::uint32_t MaximumRedirects = 5;
         std::chrono::milliseconds ConnectTimeout{15'000};
         std::chrono::milliseconds IdleTimeout{30'000};

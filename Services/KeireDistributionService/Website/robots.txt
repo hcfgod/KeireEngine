@@ -2,3 +2,4 @@ User-agent: *
 Allow: /
 
 Sitemap: https://keireengine.duckdns.org/sitemap.xml
+Sitemap: https://keireengine.duckdns.org/docs/sitemap-index.xml

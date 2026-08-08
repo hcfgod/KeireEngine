@@ -188,7 +188,7 @@ namespace Keire
         [[nodiscard]] std::uint32_t EffectiveMask(const std::uint32_t layer, const std::uint32_t authoredMask,
                                                   const std::array<std::uint32_t, 32>& matrix) noexcept
         {
-            return authoredMask & matrix[std::countr_zero(layer)];
+            return authoredMask & matrix[static_cast<std::size_t>(std::countr_zero(layer))];
         }
 
         [[nodiscard]] Vector3 Add(const Vector3 left, const Vector3 right) noexcept
@@ -251,8 +251,7 @@ namespace Keire
 
         [[nodiscard]] Vector3 FromJoltPosition(const JPH::RVec3Arg value) noexcept
         {
-            return {static_cast<float>(value.GetX()), static_cast<float>(value.GetY()),
-                    static_cast<float>(value.GetZ())};
+            return {value.GetX(), value.GetY(), value.GetZ()};
         }
 
         [[nodiscard]] Vector3 FromJoltVector(const JPH::Vec3Arg value) noexcept
@@ -370,7 +369,7 @@ namespace Keire
                 auto result = settings.Create();
                 if (result.HasError())
                 {
-                    const auto error = result.GetError();
+                    const auto& error = result.GetError();
                     throw std::invalid_argument("Jolt rejected cooked convex collision: " +
                                                 std::string(error.data(), error.size()));
                 }
@@ -390,7 +389,7 @@ namespace Keire
             auto result = settings.Create();
             if (result.HasError())
             {
-                const auto error = result.GetError();
+                const auto& error = result.GetError();
                 throw std::invalid_argument("Jolt rejected cooked triangle collision: " +
                                             std::string(error.data(), error.size()));
             }
@@ -401,8 +400,8 @@ namespace Keire
     std::shared_ptr<const CookedCollisionMesh> CookCollisionMesh(CollisionCookInput input,
                                                                  const std::stop_token cancellation)
     {
-        if (input.Vertices.size() < 3U || input.Vertices.size() > 16U * 1024U * 1024U ||
-            input.Indices.size() > 48U * 1024U * 1024U)
+        if (input.Vertices.size() < 3U || input.Vertices.size() > std::size_t{16} * 1024U * 1024U ||
+            input.Indices.size() > std::size_t{48} * 1024U * 1024U)
             throw std::invalid_argument("Collision cook vertex or index count is invalid.");
         for (const auto vertex : input.Vertices)
         {
@@ -776,7 +775,7 @@ namespace Keire
         ObjectBroadPhaseFilter BroadPhaseFilter;
         ObjectLayerFilter LayerFilter;
         JPH::PhysicsSystem Native;
-        JPH::TempAllocatorImpl Temporary{16U * 1024U * 1024U};
+        JPH::TempAllocatorImpl Temporary{std::size_t{16} * 1024U * 1024U};
     };
 
     PhysicsWorld::PhysicsWorld(std::unique_ptr<Impl> implementation) : m_Impl(std::move(implementation)) {}
@@ -1232,7 +1231,7 @@ namespace Keire
             : Owner(std::this_thread::get_id())
         {
             Service->MaximumWorlds = maximumWorlds;
-            Service->CollisionMatrix = std::move(collisionMatrix);
+            Service->CollisionMatrix = collisionMatrix;
             if (!jobs)
             {
                 JobSystemSpecification specification;
@@ -1294,7 +1293,7 @@ namespace Keire
         if (m_Impl->Service->Worlds.load(std::memory_order_acquire) != 0)
             throw std::logic_error("Physics collision matrix cannot change while a physics world is active.");
         ValidateCollisionMatrix(matrix);
-        m_Impl->Service->CollisionMatrix = std::move(matrix);
+        m_Impl->Service->CollisionMatrix = matrix;
     }
 
     std::array<std::uint32_t, 32> PhysicsSystem::CollisionMatrix() const

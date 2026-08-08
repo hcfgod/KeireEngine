@@ -52,12 +52,14 @@ namespace Keire::RenderBackend
             const auto green = std::to_integer<std::uint8_t>(mip.Pixels[index + 1U]);
             const auto blue = std::to_integer<std::uint8_t>(mip.Pixels[index + 2U]);
             if (!rgbe)
-                return {red / 255.0F, green / 255.0F, blue / 255.0F};
+                return {static_cast<float>(red) / 255.0F, static_cast<float>(green) / 255.0F,
+                        static_cast<float>(blue) / 255.0F};
             const auto exponent = std::to_integer<std::uint8_t>(mip.Pixels[index + 3U]);
             if (exponent == 0U)
                 return {};
             const float scale = std::ldexp(1.0F, static_cast<int>(exponent) - 136);
-            return {red * scale, green * scale, blue * scale};
+            return {static_cast<float>(red) * scale, static_cast<float>(green) * scale,
+                    static_cast<float>(blue) * scale};
         }
 
         template <typename Callback> void VisitEquirectangular(const TextureMipLevel& mip, Callback&& callback)
@@ -180,12 +182,13 @@ namespace Keire::RenderBackend
                                                             const std::uint32_t sampleCount) noexcept
         {
             const Vector3 view{std::sqrt(std::max(1.0F - normalView * normalView, 0.0F)), 0.0F, normalView};
+            const auto sampleCountFloat = static_cast<float>(sampleCount);
             float scale = 0.0F;
             float bias = 0.0F;
             for (std::uint32_t sample = 0; sample < sampleCount; ++sample)
             {
-                const Vector3 halfway =
-                    ImportanceSampleGgx(static_cast<float>(sample) / sampleCount, RadicalInverse(sample), roughness);
+                const Vector3 halfway = ImportanceSampleGgx(static_cast<float>(sample) / sampleCountFloat,
+                                                            RadicalInverse(sample), roughness);
                 const float viewHalfway = std::max(view.X * halfway.X + view.Z * halfway.Z, 0.0F);
                 const Vector3 light{2.0F * viewHalfway * halfway.X - view.X, 2.0F * viewHalfway * halfway.Y,
                                     2.0F * viewHalfway * halfway.Z - view.Z};
@@ -200,7 +203,7 @@ namespace Keire::RenderBackend
                 scale += (1.0F - fresnel) * visibility;
                 bias += fresnel * visibility;
             }
-            return {scale / sampleCount, bias / sampleCount};
+            return {scale / sampleCountFloat, bias / sampleCountFloat};
         }
     } // namespace
 
@@ -277,7 +280,7 @@ namespace Keire::RenderBackend
                 const float roughness = (static_cast<float>(y) + 0.5F) / static_cast<float>(resolution);
                 const auto [scale, bias] = IntegrateBrdf(normalView, roughness, sampleCount);
                 const auto channel = [](const float value)
-                { return std::byte(static_cast<std::uint8_t>(std::clamp(value, 0.0F, 1.0F) * 255.0F + 0.5F)); };
+                { return std::byte(static_cast<std::uint8_t>(std::lround(std::clamp(value, 0.0F, 1.0F) * 255.0F))); };
                 const auto index = (static_cast<std::size_t>(y) * resolution + x) * 4U;
                 mip.Pixels[index] = channel(scale);
                 mip.Pixels[index + 1U] = channel(bias);

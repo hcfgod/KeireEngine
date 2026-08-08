@@ -78,11 +78,11 @@ TEST_CASE("Project mutation runs one staging worker and commits through owner-th
     std::atomic_int commitCalls = 0;
     std::atomic_int discardCalls = 0;
     HubProjectMutationWorkflow workflow(
-        {.PrepareDuplicate = [destination](const std::string&, const std::filesystem::path&, std::string)
+        {.PrepareDuplicate = [destination](const std::string&, const std::filesystem::path&, const std::string&)
          { return HubResult<ProjectDuplicatePlan>::Success(Plan(destination)); },
          .StageDuplicate =
              [&stageEntered, &releaseStage, &stageThread](ProjectDuplicatePlan plan,
-                                                          ProjectDuplicateCallbacks callbacks)
+                                                          const ProjectDuplicateCallbacks& callbacks)
          {
              stageThread = std::this_thread::get_id();
              callbacks.ReportProgress(128, 2);
@@ -100,7 +100,7 @@ TEST_CASE("Project mutation runs one staging worker and commits through owner-th
                  {.Plan = std::move(plan), .CopiedBytes = 256, .CopiedEntries = 3});
          },
          .CommitDuplicate =
-             [&commitThread, &commitCalls](ProjectDuplicateStagedResult staged)
+             [&commitThread, &commitCalls](const ProjectDuplicateStagedResult& staged)
          {
              commitThread = std::this_thread::get_id();
              commitCalls.fetch_add(1, std::memory_order_relaxed);
@@ -151,10 +151,10 @@ TEST_CASE("Project mutation cancellation preserves progress and discards staged 
     std::atomic_bool discardCalled = false;
     std::atomic_bool commitCalled = false;
     HubProjectMutationWorkflow workflow(
-        {.PrepareDuplicate = [](const std::string&, const std::filesystem::path& destination, std::string)
+        {.PrepareDuplicate = [](const std::string&, const std::filesystem::path& destination, const std::string&)
          { return HubResult<ProjectDuplicatePlan>::Success(Plan(destination)); },
          .StageDuplicate =
-             [&stageEntered](ProjectDuplicatePlan plan, ProjectDuplicateCallbacks callbacks)
+             [&stageEntered](ProjectDuplicatePlan plan, const ProjectDuplicateCallbacks& callbacks)
          {
              callbacks.ReportProgress(512, 4);
              stageEntered.store(true, std::memory_order_release);
@@ -164,7 +164,7 @@ TEST_CASE("Project mutation cancellation preserves progress and discards staged 
                  {.Plan = std::move(plan), .State = ProjectDuplicateStageState::Cancelled});
          },
          .CommitDuplicate =
-             [&commitCalled](ProjectDuplicateStagedResult staged)
+             [&commitCalled](const ProjectDuplicateStagedResult& staged)
          {
              commitCalled.store(true, std::memory_order_release);
              return HubResult<ProjectDuplicateResult>::Success(Result(staged));
@@ -205,7 +205,7 @@ TEST_CASE("Project mutation translates preparation and commit exceptions into te
     std::atomic_int discardCalls = 0;
     HubProjectMutationWorkflow workflow(
         {.PrepareDuplicate =
-             [&prepareCalls](const std::string&, const std::filesystem::path& destination, std::string)
+             [&prepareCalls](const std::string&, const std::filesystem::path& destination, const std::string&)
          {
              if (prepareCalls.fetch_add(1, std::memory_order_relaxed) == 0)
              {
@@ -215,12 +215,12 @@ TEST_CASE("Project mutation translates preparation and commit exceptions into te
              return HubResult<ProjectDuplicatePlan>::Success(Plan(destination));
          },
          .StageDuplicate =
-             [](ProjectDuplicatePlan plan, ProjectDuplicateCallbacks)
+             [](ProjectDuplicatePlan plan, const ProjectDuplicateCallbacks&)
          {
              return HubResult<ProjectDuplicateStagedResult>::Success(
                  {.Plan = std::move(plan), .CopiedBytes = 64, .CopiedEntries = 1});
          },
-         .CommitDuplicate = [](ProjectDuplicateStagedResult) -> HubResult<ProjectDuplicateResult>
+         .CommitDuplicate = [](const ProjectDuplicateStagedResult&) -> HubResult<ProjectDuplicateResult>
          { throw std::runtime_error("fixture commit failure"); },
          .DiscardDuplicate =
              [&discardCalls](const ProjectDuplicateStagedResult&)
@@ -257,10 +257,11 @@ TEST_CASE("Project mutation destructor requests cancellation, joins the worker, 
     std::atomic_bool discardCalled = false;
     {
         HubProjectMutationWorkflow workflow(
-            {.PrepareDuplicate = [](const std::string&, const std::filesystem::path& destination, std::string)
+            {.PrepareDuplicate = [](const std::string&, const std::filesystem::path& destination, const std::string&)
              { return HubResult<ProjectDuplicatePlan>::Success(Plan(destination)); },
              .StageDuplicate =
-                 [&stageEntered, &cancellationObserved](ProjectDuplicatePlan plan, ProjectDuplicateCallbacks callbacks)
+                 [&stageEntered, &cancellationObserved](ProjectDuplicatePlan plan,
+                                                        const ProjectDuplicateCallbacks& callbacks)
              {
                  stageEntered.store(true, std::memory_order_release);
                  while (!callbacks.IsCancelled())
@@ -269,7 +270,7 @@ TEST_CASE("Project mutation destructor requests cancellation, joins the worker, 
                  return HubResult<ProjectDuplicateStagedResult>::Success(
                      {.Plan = std::move(plan), .State = ProjectDuplicateStageState::Cancelled});
              },
-             .CommitDuplicate = [](ProjectDuplicateStagedResult staged)
+             .CommitDuplicate = [](const ProjectDuplicateStagedResult& staged)
              { return HubResult<ProjectDuplicateResult>::Success(Result(staged)); },
              .DiscardDuplicate =
                  [&discardCalled](const ProjectDuplicateStagedResult&)
@@ -289,17 +290,17 @@ TEST_CASE("Project mutation owner-thread operations reject worker callers withou
     std::atomic_bool stageEntered = false;
     std::atomic_bool releaseStage = false;
     HubProjectMutationWorkflow workflow(
-        {.PrepareDuplicate = [](const std::string&, const std::filesystem::path& destination, std::string)
+        {.PrepareDuplicate = [](const std::string&, const std::filesystem::path& destination, const std::string&)
          { return HubResult<ProjectDuplicatePlan>::Success(Plan(destination)); },
          .StageDuplicate =
-             [&stageEntered, &releaseStage](ProjectDuplicatePlan plan, ProjectDuplicateCallbacks callbacks)
+             [&stageEntered, &releaseStage](ProjectDuplicatePlan plan, const ProjectDuplicateCallbacks& callbacks)
          {
              stageEntered.store(true, std::memory_order_release);
              while (!releaseStage.load(std::memory_order_acquire) && !callbacks.IsCancelled())
                  std::this_thread::yield();
              return HubResult<ProjectDuplicateStagedResult>::Success({.Plan = std::move(plan)});
          },
-         .CommitDuplicate = [](ProjectDuplicateStagedResult staged)
+         .CommitDuplicate = [](const ProjectDuplicateStagedResult& staged)
          { return HubResult<ProjectDuplicateResult>::Success(Result(staged)); },
          .DiscardDuplicate = [](const ProjectDuplicateStagedResult&) { return HubStatus::Success(); }});
     const auto started = workflow.StartDuplicate(SourceId, "Owner", "Owner");

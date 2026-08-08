@@ -8,6 +8,6 @@ namespace KeireHub
 {
     class HubPackageTaskWorkflow;
 
-    [[nodiscard]] HubResult<std::string> ExecuteHubManagedEditorRemovalPlan(EditorManagedOperationPlan plan,
+    [[nodiscard]] HubResult<std::string> ExecuteHubManagedEditorRemovalPlan(const EditorManagedOperationPlan& plan,
                                                                             HubPackageTaskWorkflow& tasks);
 } // namespace KeireHub

@@ -50,7 +50,7 @@ Var KeireHubUpdateToVersion
     RMDir /r "$INSTDIR\bin"
     RMDir /r "$INSTDIR\Config"
     RMDir /r "$INSTDIR\content"
-    RMDir /r "$INSTDIR\docs"
+    RMDir /r "$INSTDIR\Docs"
     RMDir /r "$INSTDIR\samples"
     RMDir /r "$INSTDIR\third-party"
     Delete "$INSTDIR\CHANGELOG.md"

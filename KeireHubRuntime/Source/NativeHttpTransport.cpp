@@ -1,7 +1,7 @@
 #include "KeireHubRuntime/NativeHttpTransport.h"
 
-#include "NativeHttpTransportPlatform.h"
-#include "NativeHttpTransportPolicy.h"
+#include <KeireHubRuntimeInternal/NativeHttpTransportPlatform.h>
+#include <KeireHubRuntimeInternal/NativeHttpTransportPolicy.h>
 
 #include <exception>
 #include <utility>
@@ -33,11 +33,12 @@ namespace KeireHub
     {
         constexpr auto minimumTimeout = std::chrono::milliseconds(100);
         constexpr auto maximumTimeout = std::chrono::minutes(10);
-        if (options.MaximumHeaderBytes < 4U * 1024U || options.MaximumHeaderBytes > 256U * 1024U ||
-            options.DownloadBufferBytes < 16U * 1024U || options.DownloadBufferBytes > 4U * 1024U * 1024U ||
-            options.MaximumRedirects > 10U || options.ConnectTimeout < minimumTimeout ||
-            options.ConnectTimeout > maximumTimeout || options.IdleTimeout < minimumTimeout ||
-            options.IdleTimeout > maximumTimeout)
+        if (options.MaximumHeaderBytes < std::size_t{4U} * 1024U ||
+            options.MaximumHeaderBytes > std::size_t{256U} * 1024U ||
+            options.DownloadBufferBytes < std::size_t{16U} * 1024U ||
+            options.DownloadBufferBytes > std::size_t{4U} * 1024U * 1024U || options.MaximumRedirects > 10U ||
+            options.ConnectTimeout < minimumTimeout || options.ConnectTimeout > maximumTimeout ||
+            options.IdleTimeout < minimumTimeout || options.IdleTimeout > maximumTimeout)
         {
             return HubStatus::Failure({.Code = HubErrorCode::DistributionConfigurationInvalid,
                                        .Message = "The native HTTP transport configuration is invalid.",

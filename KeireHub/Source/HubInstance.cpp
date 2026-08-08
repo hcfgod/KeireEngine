@@ -1,6 +1,7 @@
 #include "KeireHub/HubInstance.h"
 
 #include <array>
+#include <bit>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -387,7 +388,7 @@ namespace KeireHub
 
         BOOL CALLBACK FindExistingHubWindow(HWND window, LPARAM contextValue)
         {
-            auto& context = *reinterpret_cast<ExistingHubWindow*>(contextValue);
+            auto& context = *std::bit_cast<ExistingHubWindow*>(contextValue);
             DWORD processId = 0;
             (void)GetWindowThreadProcessId(window, &processId);
             if (processId == 0)
@@ -413,7 +414,7 @@ namespace KeireHub
             try
             {
                 ExistingHubWindow context{std::filesystem::weakly_canonical(executable).native()};
-                (void)EnumWindows(&FindExistingHubWindow, reinterpret_cast<LPARAM>(&context));
+                (void)EnumWindows(&FindExistingHubWindow, std::bit_cast<LPARAM>(&context));
                 if (!context.Window)
                     return;
                 (void)AllowSetForegroundWindow(context.Process);

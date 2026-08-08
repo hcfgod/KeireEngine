@@ -28,10 +28,10 @@ BACKEND_LABEL = {
 def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--manifest", type=Path, default=Path("docs/VfxParityManifest.json")
+        "--manifest", type=Path, default=Path("Docs/VfxParityManifest.json")
     )
     parser.add_argument(
-        "--output", type=Path, default=Path("docs/generated/VfxCapabilities.md")
+        "--output", type=Path, default=Path("Docs/generated/VfxCapabilities.md")
     )
     parser.add_argument(
         "--check", action="store_true", help="Fail if the generated document is stale."

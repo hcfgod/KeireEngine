@@ -1,7 +1,7 @@
-#include "NativeHttpTransportPlatform.h"
+#include <KeireHubRuntimeInternal/NativeHttpTransportPlatform.h>
 
 #if defined(__APPLE__)
-#include "NativeHttpTransportPolicy.h"
+#include <KeireHubRuntimeInternal/NativeHttpTransportPolicy.h>
 
 #import <CFNetwork/CFNetwork.h>
 #import <Foundation/Foundation.h>

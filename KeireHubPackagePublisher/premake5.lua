@@ -13,8 +13,7 @@ project(HubPackagePublisherTarget)
 
     includedirs
     {
-        "../KeireHubRuntime/Include",
-        "../KeireHubRuntime/Source"
+        "../KeireHubRuntime/Include"
     }
 
     externalincludedirs

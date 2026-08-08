@@ -1,8 +1,8 @@
-#include "TestSupport.h"
+#include <KeireHubTests/TestSupport.h>
 
 #include "KeireHubRuntime/EditorInstallCatalog.h"
 
-#include "DistributionEncoding.h"
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
 
 #include <doctest/doctest.h>
 
@@ -54,7 +54,7 @@ namespace
                 .ArtifactSizeBytes = size,
                 .ArtifactSha256 = KeireHubTests::Digest('a'),
                 .InstalledSizeBytes = size,
-                .Files = {{std::move(file), size, KeireHubTests::Digest('b')}},
+                .Files = {{file, size, KeireHubTests::Digest('b')}},
                 .SignatureKeyId = "release-key"};
     }
 
@@ -70,7 +70,7 @@ namespace
                              .Architecture = "x86_64"};
         catalog->Packages = std::move(packages);
         return {.Channel = std::move(channel),
-                .Catalog = std::shared_ptr<const DistributionPackageCatalog>(std::move(catalog)),
+                .Catalog = std::shared_ptr<const DistributionPackageCatalog>(catalog),
                 .Status = {.State = DistributionCatalogSourceState::Online,
                            .Sequence = sequence,
                            .KeyId = std::string(CatalogKeyId),
@@ -116,6 +116,7 @@ namespace
     [[nodiscard]] std::vector<std::string> StepIds(const EditorInstallPlan& plan)
     {
         std::vector<std::string> result;
+        result.reserve(plan.Steps.size());
         for (const auto& step : plan.Steps)
             result.push_back(step.Manifest.Id);
         return result;

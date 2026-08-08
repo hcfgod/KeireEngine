@@ -40,7 +40,7 @@ Remove-Item -LiteralPath $archive, "$archive.sha256" -Force -ErrorAction Silentl
 New-Item -ItemType Directory -Force $distributionRoot | Out-Null
 New-Item -ItemType Directory -Force $stage | Out-Null
 
-foreach ($directory in @("bin", "samples", "docs")) {
+foreach ($directory in @("bin", "samples", "Docs")) {
     Copy-Item -LiteralPath (Join-Path $sdkStage $directory) -Destination $stage -Recurse
 }
 Remove-Item -LiteralPath (Join-Path $stage "bin\$($Project.HUB_TARGET).exe"), `

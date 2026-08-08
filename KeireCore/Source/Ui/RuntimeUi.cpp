@@ -144,7 +144,7 @@ namespace Keire
                 ++DroppedEvents;
                 return;
             }
-            Events.push_back(std::move(event));
+            Events.push_back(event);
         }
 
         void LayoutNode(const std::size_t index, RuntimeUiRect available, const RuntimeUiRect inheritedClip,
@@ -510,7 +510,7 @@ namespace Keire
         const auto index = m_Impl->Index(element);
         if (!index)
             return false;
-        m_Impl->Nodes[*index].State.Style = std::move(style);
+        m_Impl->Nodes[*index].State.Style = style;
         return true;
     }
 
@@ -751,7 +751,7 @@ namespace Keire
     {
         if (m_Impl->Events.empty())
             return false;
-        event = std::move(m_Impl->Events.front());
+        event = m_Impl->Events.front();
         m_Impl->Events.pop_front();
         return true;
     }
@@ -781,7 +781,8 @@ namespace Keire
     {
         RuntimeUiStatistics result;
         result.Generation = m_Impl->TreeGeneration;
-        result.Elements = std::ranges::count_if(m_Impl->Nodes, [](const Impl::Node& node) { return node.Alive; });
+        result.Elements = static_cast<std::size_t>(
+            std::ranges::count_if(m_Impl->Nodes, [](const Impl::Node& node) { return node.Alive; }));
         result.VisibleElements = m_Impl->VisibleElements;
         result.InteractableElements = m_Impl->InteractableElements;
         result.DrawCommands = m_Impl->Draws.size();

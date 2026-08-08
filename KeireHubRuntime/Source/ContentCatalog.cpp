@@ -1,7 +1,7 @@
 #include "KeireHubRuntime/ContentCatalog.h"
 
-#include "LocalCatalogSupport.h"
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/LocalCatalogSupport.h>
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <set>
 #include <utility>
@@ -10,7 +10,7 @@ namespace KeireHub
 {
     namespace
     {
-        constexpr std::size_t MaximumContentCatalogBytes = 4 * 1024 * 1024;
+        constexpr std::size_t MaximumContentCatalogBytes = std::size_t{4} * 1024 * 1024;
         constexpr std::size_t MaximumContentItems = 1024;
 
         [[nodiscard]] HubError ContentError(const HubErrorCode code, std::string message,

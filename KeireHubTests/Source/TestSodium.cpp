@@ -1,4 +1,4 @@
-#include "TestSodium.h"
+#include <KeireHubTests/TestSodium.h>
 
 #include <array>
 #include <cstdlib>

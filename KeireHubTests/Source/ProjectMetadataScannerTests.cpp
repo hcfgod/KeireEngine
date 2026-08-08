@@ -1,4 +1,4 @@
-#include "TestSupport.h"
+#include <KeireHubTests/TestSupport.h>
 
 #include "KeireHubRuntime/HubProjectCatalog.h"
 #include "KeireHubRuntime/ProjectMetadataScanner.h"
@@ -116,7 +116,7 @@ TEST_CASE("Project metadata scanning publishes bounded decoded thumbnail pixels 
         Request(ProjectA, root), {.ReportProgress = [&](const auto& progress) { phases.push_back(progress.Phase); }});
     auto scanned = future.get();
     REQUIRE(scanned);
-    const auto snapshot = scanned.Value();
+    const auto& snapshot = scanned.Value();
     REQUIRE(snapshot->State == ProjectMetadataScanState::Completed);
     REQUIRE(snapshot->CandidatesCompleted == 1);
     REQUIRE(snapshot->Results.size() == 1);
@@ -291,6 +291,8 @@ TEST_CASE("Project metadata scanning rejects broad traversal duplicate and symbo
     if (linkError)
     {
         MESSAGE("Directory symlinks are unavailable in this test environment: " << linkError.message());
+        if (KeireHubTests::RunningInCi())
+            FAIL_CHECK("CI must provide symbolic-link capability for metadata scanner confinement tests.");
         return;
     }
     auto linked = scanner.ScanAsync(Request(ProjectA, link)).get();

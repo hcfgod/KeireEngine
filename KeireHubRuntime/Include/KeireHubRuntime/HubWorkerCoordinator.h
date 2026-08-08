@@ -169,7 +169,7 @@ namespace KeireHub
         [[nodiscard]] HubStatus QueueHubUpdate(CatalogPackageDownloadRequest request);
         [[nodiscard]] HubStatus QueueEditorInstall(CatalogEditorInstallRequest request);
         [[nodiscard]] HubStatus QueueEditorRepair(CatalogEditorRepairRequest request);
-        [[nodiscard]] HubStatus QueueEditorRemoval(CatalogEditorRemovalRequest request);
+        [[nodiscard]] HubStatus QueueEditorRemoval(const CatalogEditorRemovalRequest& request);
         [[nodiscard]] HubStatus Pause(const std::string& taskId);
         [[nodiscard]] HubStatus Resume(const std::string& taskId);
         [[nodiscard]] HubStatus Cancel(const std::string& taskId);

@@ -1,6 +1,6 @@
 #include "KeireHubRuntime/DistributionCatalog.h"
 
-#include "DistributionEncoding.h"
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
 
 #include <algorithm>
 #include <array>
@@ -15,7 +15,7 @@ namespace KeireHub
 {
     namespace
     {
-        constexpr std::size_t MaximumCatalogBytes = 32U * 1024U * 1024U;
+        constexpr std::size_t MaximumCatalogBytes = std::size_t{32U} * 1024U * 1024U;
         constexpr std::size_t MaximumCatalogDepth = 32;
         constexpr std::size_t MaximumPackageCount = 4096;
         constexpr std::size_t MaximumAggregateCollectionItems = 250'000;

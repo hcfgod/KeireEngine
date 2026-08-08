@@ -15,7 +15,7 @@ from runtime_vfx_catalog import load_runtime_catalog
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-MANIFEST = REPOSITORY_ROOT / "docs/VfxParityManifest.json"
+MANIFEST = REPOSITORY_ROOT / "Docs/VfxParityManifest.json"
 VALIDATOR = REPOSITORY_ROOT / "Scripts/Vfx/validate_vfx_parity_manifest.py"
 RECONCILER = REPOSITORY_ROOT / "Scripts/Vfx/reconcile_vfx_manifest.py"
 CAPABILITY_GENERATOR = REPOSITORY_ROOT / "Scripts/Vfx/generate_vfx_capabilities.py"

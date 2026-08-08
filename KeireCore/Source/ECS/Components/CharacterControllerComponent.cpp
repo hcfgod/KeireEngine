@@ -99,7 +99,7 @@ namespace Keire
             throw std::invalid_argument("Character Controller layer must select exactly one collision layer.");
         if (IsAttached())
         {
-            Owner().SetLayer(std::countr_zero(value));
+            Owner().SetLayer(static_cast<std::uint32_t>(std::countr_zero(value)));
             return;
         }
         m_Layer = value;

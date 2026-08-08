@@ -48,7 +48,7 @@ rm -rf "$stage" "$legacy_stage" "$validation_root"
 rm -f "$archive" "$archive.sha256"
 mkdir -p "$distribution_root"
 mkdir -p "$stage/Config/Branding" "$stage/content" "$stage/third-party"
-cp -R "$sdk_stage/bin" "$sdk_stage/samples" "$sdk_stage/docs" "$stage/"
+cp -R "$sdk_stage/bin" "$sdk_stage/samples" "$sdk_stage/Docs" "$stage/"
 # The standalone Hub package owns the Hub executable and every native Hub launcher.
 rm -f "$stage/bin/$HUB_TARGET"
 system=linux

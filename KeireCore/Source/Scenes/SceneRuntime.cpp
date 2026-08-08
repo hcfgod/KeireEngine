@@ -217,7 +217,7 @@ namespace Keire
             auto [iterator, inserted] = state.Clips.try_emplace(id);
             if (inserted)
                 iterator->second = Assets->Load<AnimationClipAsset>(id, AssetPriority::High);
-            const auto clip = iterator->second.TryGetLoaded();
+            auto clip = iterator->second.TryGetLoaded();
             if (!clip || clip->Skeleton() == state.Skeleton)
                 return clip;
 
@@ -588,7 +588,7 @@ namespace Keire
             if (!Assets || !Runtime)
                 return;
             std::set<EntityId> seen;
-            for (const auto entity : Runtime->Query<AnimatorComponent>())
+            for (const auto& entity : Runtime->Query<AnimatorComponent>())
             {
                 const auto animator = entity.GetComponent<AnimatorComponent>();
                 if (!animator)
@@ -865,7 +865,7 @@ namespace Keire
             std::set<EntityId> seen;
             bool fallbackToCpu = false;
             std::string fallbackDiagnostic;
-            for (const auto entity : Runtime->Query<VfxEmitterComponent>())
+            for (const auto& entity : Runtime->Query<VfxEmitterComponent>())
             {
                 const auto emitter = entity.GetComponent<VfxEmitterComponent>();
                 const auto transform = entity.GetComponent<TransformComponent>();
@@ -1204,9 +1204,9 @@ namespace Keire
             if (!PhysicsWorldService || !Runtime)
                 return;
             std::set<EntityId> candidates;
-            for (const auto entity : Runtime->Query<ColliderComponent>())
+            for (const auto& entity : Runtime->Query<ColliderComponent>())
                 candidates.emplace(entity.Id());
-            for (const auto entity : Runtime->Query<CharacterControllerComponent>())
+            for (const auto& entity : Runtime->Query<CharacterControllerComponent>())
                 candidates.emplace(entity.Id());
             std::set<EntityId> seen;
             for (const auto entityId : candidates)
@@ -1282,7 +1282,7 @@ namespace Keire
 
         void ApplyCharacterMovement(const float deltaSeconds)
         {
-            for (const auto entity : Runtime->Query<CharacterControllerComponent>())
+            for (const auto& entity : Runtime->Query<CharacterControllerComponent>())
             {
                 const auto character = entity.GetComponent<CharacterControllerComponent>();
                 const auto transform = entity.GetComponent<TransformComponent>();
@@ -1408,7 +1408,7 @@ namespace Keire
         void UpdateCharacterGrounding()
         {
             constexpr float Pi = 3.14159265358979323846F;
-            for (const auto entity : Runtime->Query<CharacterControllerComponent>())
+            for (const auto& entity : Runtime->Query<CharacterControllerComponent>())
             {
                 const auto character = entity.GetComponent<CharacterControllerComponent>();
                 const auto transform = entity.GetComponent<TransformComponent>();

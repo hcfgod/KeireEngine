@@ -37,7 +37,7 @@ if ($publisher) {
     & $publisher @arguments
 }
 else {
-    $project = Join-Path $serviceRoot 'src\KeireDistributionPublisher\KeireDistributionPublisher.csproj'
+    $project = Join-Path $serviceRoot 'Source\KeireDistributionPublisher\KeireDistributionPublisher.csproj'
     & $Dotnet run --project $project --configuration Release -- @arguments
 }
 if ($LASTEXITCODE -ne 0) {

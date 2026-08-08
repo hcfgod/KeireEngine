@@ -112,11 +112,17 @@ $key = @($Lock.SDL_COMMIT, $Lock.ASSIMP_COMMIT, $Lock.JOLT_COMMIT, $Lock.RECAST_
     $Lock.MINIAUDIO_COMMIT, $Lock.LIBSODIUM_COMMIT, $Architecture, $Toolset, $compiler, $bridgeHash,
     ($options -join ";")) -join "|"
 $base = Join-Path $Root "Build\Dependencies\windows-$OutputArchitecture-$Toolset"
+$zlibDebugName = if ($Toolset -eq "msc") { "zlibstaticd.lib" } else { "zlibstatic.lib" }
 
 $sodiumBuild = Join-Path $base "libsodium"
 $sodiumOutput = Join-Path $sodiumBuild "out\libsodium.dll"
 $sodiumStamp = Join-Path $sodiumBuild "keire-libsodium.stamp"
-$sodiumKey = "$($Lock.LIBSODIUM_COMMIT)|$Architecture|$env:VCToolsVersion"
+$sodiumVisualStudio = if ($Generator -in @("vs2019", "vs2022", "vs2026")) { $Generator } else { "vs2022" }
+$sodiumVisualStudioMajor = Get-VisualStudioMajorVersion $sodiumVisualStudio
+$sodiumEnvironment = Get-VSBuildEnvironment $sodiumVisualStudioMajor
+$sodiumToolsetVersion = Get-ChildItem (Join-Path $sodiumEnvironment.InstallationPath "VC\Tools\MSVC") -Directory |
+    Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1 -ExpandProperty Name
+$sodiumKey = "$($Lock.LIBSODIUM_COMMIT)|$Architecture|$sodiumToolsetVersion"
 $sodiumCurrent = -not $Force -and (Test-Path -LiteralPath $sodiumOutput -PathType Leaf) -and
     (Test-Path -LiteralPath $sodiumStamp -PathType Leaf) -and
     ((Get-Content -LiteralPath $sodiumStamp -Raw).Trim() -eq $sodiumKey)
@@ -132,9 +138,6 @@ if (-not $sodiumCurrent) {
     $sodiumOutputDirectory = Split-Path $sodiumOutput
     $sodiumIntermediate = Join-Path $sodiumBuild "obj"
     New-Item -ItemType Directory -Force -Path $sodiumOutputDirectory, $sodiumIntermediate | Out-Null
-    $sodiumVisualStudio = if ($Generator -in @("vs2019", "vs2022", "vs2026")) { $Generator } else { "vs2022" }
-    $sodiumVisualStudioMajor = Get-VisualStudioMajorVersion $sodiumVisualStudio
-    $sodiumEnvironment = Get-VSBuildEnvironment $sodiumVisualStudioMajor
     $sodiumProject = Join-Path $sodiumSource "builds\msvc\$sodiumVisualStudio\libsodium\libsodium.vcxproj"
     $sodiumPlatform = Get-MSBuildPlatform $Architecture
     Write-Host "==> Building pinned libsodium 1.0.22 runtime"
@@ -170,7 +173,7 @@ foreach ($configuration in @("Debug", "Release")) {
     $detourCrowdLibrary = Join-Path $install "lib\DetourCrowd$recastSuffix.lib"
     $detourTileCacheLibrary = Join-Path $install "lib\DetourTileCache$recastSuffix.lib"
     $miniaudioLibrary = Join-Path $install "lib\miniaudio.lib"
-    $zlibName = if ($configuration -eq "Debug") { "lib\zlibstaticd.lib" } else { "lib\zlibstatic.lib" }
+    $zlibName = if ($configuration -eq "Debug") { "lib\$zlibDebugName" } else { "lib\zlibstatic.lib" }
     $zlibLibrary = Join-Path $install $zlibName
     $sodiumRuntime = Join-Path $install "bin\libsodium.dll"
     $sodiumLicense = Join-Path $install "share\licenses\libsodium\LICENSE"
@@ -224,7 +227,7 @@ foreach ($configuration in @("Debug", "Release")) {
 & (Join-Path $PSScriptRoot "shader-compiler.ps1") -Generator $Generator -Architecture $Architecture -Toolset $Toolset -Force:$Force
 
 $coralDebug = & (Join-Path $PSScriptRoot "coral.ps1") -Configuration Debug -Build -Force:$Force
-$coralRelease = & (Join-Path $PSScriptRoot "coral.ps1") -Configuration Release -Build -Force:$Force
+& (Join-Path $PSScriptRoot "coral.ps1") -Configuration Release -Build -Force:$Force | Out-Null
 
 function Set-DependencyJunction {
     param([string]$Path, [string]$Target)
@@ -294,7 +297,7 @@ DependencyManifest = {
     AssimpInclude = "$debugInstall/include",
     AssimpDebugLibrary = "$debugInstall/lib/assimp.lib",
     AssimpReleaseLibrary = "$releaseInstall/lib/assimp.lib",
-    AssimpZlibDebugLibrary = "$debugInstall/lib/zlibstaticd.lib",
+    AssimpZlibDebugLibrary = "$debugInstall/lib/$zlibDebugName",
     AssimpZlibReleaseLibrary = "$releaseInstall/lib/zlibstatic.lib",
     JoltInclude = "$debugInstall/include",
     JoltDebugLibrary = "$debugInstall/lib/Jolt.lib",

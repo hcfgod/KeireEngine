@@ -1,7 +1,8 @@
-#include "HubWorkerCoordinatorOperations.h"
+#include <KeireHubRuntimeInternal/HubWorkerCoordinatorOperations.h>
 
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/Persistence.h>
 
+#include <exception>
 #include <ranges>
 #include <system_error>
 #include <utility>
@@ -23,6 +24,189 @@ namespace KeireHub::Detail
                     .BandwidthLimitBytesPerSecond = request.BandwidthLimitBytesPerSecond};
         }
     } // namespace
+
+    OperationPaths PathsFor(const std::filesystem::path& root, const std::string& taskId)
+    {
+        const auto directory = root / taskId;
+        return {.Directory = directory,
+                .Request = directory / "request.json",
+                .Status = directory / "status.json",
+                .Result = directory / "result.json",
+                .Control = directory / "control.json"};
+    }
+
+    bool Exists(const std::filesystem::path& path) noexcept
+    {
+        std::error_code error;
+        const bool exists = std::filesystem::exists(path, error);
+        return exists && !error;
+    }
+
+    void RemoveKnownFile(const std::filesystem::path& path) noexcept
+    {
+        std::error_code ignored;
+        std::filesystem::remove(path, ignored);
+        auto temporary = path;
+        temporary += ".tmp";
+        std::filesystem::remove(temporary, ignored);
+    }
+
+    HubStatus PrepareOperationRoot(const std::filesystem::path& root)
+    {
+        try
+        {
+            std::filesystem::create_directories(root);
+            std::error_code error;
+            const auto status = std::filesystem::symlink_status(root, error);
+            if (error || !std::filesystem::is_directory(status) || std::filesystem::is_symlink(status))
+            {
+                return HubStatus::Failure({.Code = HubErrorCode::WorkerProtocolInvalid,
+                                           .Message = "The Hub worker operation directory is unsafe.",
+                                           .AffectedItem = PathToUtf8(root.filename())});
+            }
+            return HubStatus::Success();
+        }
+        catch (const std::exception& error)
+        {
+            return HubStatus::Failure({.Code = HubErrorCode::IoWrite,
+                                       .Message = "The Hub could not prepare its package task directory.",
+                                       .Retryable = true,
+                                       .AffectedItem = PathToUtf8(root.filename()),
+                                       .TechnicalDetails = error.what()});
+        }
+    }
+
+    HubStatus PrepareManagedEditorRoot(const std::filesystem::path& root, const std::string& taskId)
+    {
+        std::error_code error;
+        auto status = std::filesystem::symlink_status(root, error);
+        if (error && error.default_error_condition() != std::errc::no_such_file_or_directory)
+        {
+            return HubStatus::Failure({.Code = HubErrorCode::IoRead,
+                                       .Message = "The editor installation root could not be inspected.",
+                                       .Retryable = true,
+                                       .AffectedItem = taskId,
+                                       .TechnicalDetails = error.message()});
+        }
+        if (!error && status.type() != std::filesystem::file_type::not_found)
+        {
+            if (std::filesystem::is_directory(status) && !std::filesystem::is_symlink(status))
+                return HubStatus::Success();
+            return HubStatus::Failure({.Code = HubErrorCode::UnsafeInstallRoot,
+                                       .Message = "The editor installation root is occupied by an unsafe object.",
+                                       .AffectedItem = taskId});
+        }
+
+        error.clear();
+        const auto parentStatus = std::filesystem::symlink_status(root.parent_path(), error);
+        if (error || !std::filesystem::is_directory(parentStatus) || std::filesystem::is_symlink(parentStatus))
+        {
+            return HubStatus::Failure({.Code = HubErrorCode::UnsafeInstallRoot,
+                                       .Message = "The editor installation root parent is unavailable or unsafe.",
+                                       .AffectedItem = taskId,
+                                       .TechnicalDetails = error ? error.message() : std::string{}});
+        }
+        if (!std::filesystem::create_directory(root, error) && error)
+        {
+            return HubStatus::Failure({.Code = HubErrorCode::IoWrite,
+                                       .Message = "The editor installation root could not be created.",
+                                       .Retryable = true,
+                                       .AffectedItem = taskId,
+                                       .TechnicalDetails = error.message()});
+        }
+        status = std::filesystem::symlink_status(root, error);
+        if (error || !std::filesystem::is_directory(status) || std::filesystem::is_symlink(status))
+        {
+            return HubStatus::Failure({.Code = HubErrorCode::UnsafeInstallRoot,
+                                       .Message = "The created editor installation root is unsafe.",
+                                       .AffectedItem = taskId,
+                                       .TechnicalDetails = error ? error.message() : std::string{}});
+        }
+        return HubStatus::Success();
+    }
+
+    HubStatus PrepareOperationDirectory(const std::filesystem::path& root, const OperationPaths& paths)
+    {
+        try
+        {
+            std::error_code error;
+            if (std::filesystem::exists(paths.Directory, error))
+            {
+                const auto status = std::filesystem::symlink_status(paths.Directory, error);
+                if (error || !std::filesystem::is_directory(status) || std::filesystem::is_symlink(status))
+                {
+                    return HubStatus::Failure({.Code = HubErrorCode::WorkerProtocolInvalid,
+                                               .Message = "The package task directory is unsafe.",
+                                               .AffectedItem = PathToUtf8(paths.Directory.filename())});
+                }
+            }
+            else if (error || !std::filesystem::create_directory(paths.Directory))
+            {
+                return HubStatus::Failure({.Code = HubErrorCode::IoWrite,
+                                           .Message = "The Hub could not create the package task directory.",
+                                           .Retryable = true,
+                                           .AffectedItem = PathToUtf8(paths.Directory.filename()),
+                                           .TechnicalDetails = error.message()});
+            }
+
+            const auto canonicalRoot = std::filesystem::weakly_canonical(root, error);
+            if (error)
+                throw std::filesystem::filesystem_error("Could not resolve operation root.", root, error);
+            const auto canonicalDirectory = std::filesystem::weakly_canonical(paths.Directory, error);
+            if (error || canonicalDirectory.parent_path() != canonicalRoot)
+            {
+                return HubStatus::Failure({.Code = HubErrorCode::WorkerProtocolInvalid,
+                                           .Message = "The package task directory escaped its allowed root.",
+                                           .AffectedItem = PathToUtf8(paths.Directory.filename())});
+            }
+
+            for (const auto& file : {paths.Request, paths.Status, paths.Result, paths.Control})
+            {
+                auto temporary = file;
+                temporary += ".tmp";
+                for (const auto& candidate : {file, temporary})
+                {
+                    error.clear();
+                    const auto status = std::filesystem::symlink_status(candidate, error);
+                    if (error)
+                    {
+                        if (error == std::errc::no_such_file_or_directory)
+                        {
+                            error.clear();
+                            continue;
+                        }
+                        throw std::filesystem::filesystem_error("Could not inspect operation file.", candidate, error);
+                    }
+                    if (status.type() == std::filesystem::file_type::not_found)
+                        continue;
+                    if (error || !std::filesystem::is_regular_file(status) || std::filesystem::is_symlink(status))
+                    {
+                        return HubStatus::Failure({.Code = HubErrorCode::WorkerProtocolInvalid,
+                                                   .Message = "A package task journal is unsafe.",
+                                                   .AffectedItem = PathToUtf8(candidate.filename())});
+                    }
+                }
+            }
+            return HubStatus::Success();
+        }
+        catch (const std::exception& error)
+        {
+            return HubStatus::Failure({.Code = HubErrorCode::IoWrite,
+                                       .Message = "The Hub could not prepare a package task.",
+                                       .Retryable = true,
+                                       .AffectedItem = PathToUtf8(paths.Directory.filename()),
+                                       .TechnicalDetails = error.what()});
+        }
+    }
+
+    HubError ProtocolFailure(const std::string& taskId, const std::string_view details)
+    {
+        return {.Code = HubErrorCode::WorkerProtocolInvalid,
+                .Message = "The package worker returned invalid operation data.",
+                .Retryable = true,
+                .AffectedItem = taskId,
+                .TechnicalDetails = std::string(details)};
+    }
 
     DownloadRequest CreateWorkerDownloadRequest(const CatalogPackageDownloadRequest& request)
     {

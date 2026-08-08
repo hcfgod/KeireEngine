@@ -48,7 +48,7 @@ namespace
     }
 
     template <typename Projection>
-    [[nodiscard]] std::string UniqueProfileValue(const Keire::PlayerBuildProfiles& profiles, std::string base,
+    [[nodiscard]] std::string UniqueProfileValue(const Keire::PlayerBuildProfiles& profiles, const std::string& base,
                                                  Projection projection)
     {
         for (std::uint32_t suffix = 1;; ++suffix)
@@ -845,8 +845,8 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
             presentation.OnePercentLow =
                 presentation.P99FrameMicroseconds > 0.0 ? 1'000'000.0 / presentation.P99FrameMicroseconds : 0.0;
             const double stutterThreshold = std::max(33'333.0, presentation.AverageFrameMicroseconds * 1.5);
-            presentation.StutterCount =
-                std::ranges::count_if(frameTimes, [&](const double value) { return value > stutterThreshold; });
+            presentation.StutterCount = static_cast<std::size_t>(
+                std::ranges::count_if(frameTimes, [&](const double value) { return value > stutterThreshold; }));
             presentation.FrameLine =
                 "Frame " + std::to_string(frame.Sequence) + "  |  " +
                 std::to_string(static_cast<std::uint32_t>(std::lround(presentation.FramesPerSecond))) + " FPS  |  " +

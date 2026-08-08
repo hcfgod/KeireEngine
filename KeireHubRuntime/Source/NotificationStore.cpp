@@ -1,6 +1,6 @@
 #include "KeireHubRuntime/NotificationStore.h"
 
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <algorithm>
 #include <array>
@@ -10,7 +10,7 @@ namespace KeireHub
 {
     namespace
     {
-        constexpr std::size_t MaximumStoreBytes = 2 * 1024 * 1024;
+        constexpr std::size_t MaximumStoreBytes = std::size_t{2} * 1024 * 1024;
         constexpr std::size_t AbsoluteMaximumNotifications = 1024;
 
         [[nodiscard]] std::string_view ToString(const NotificationSeverity value) noexcept

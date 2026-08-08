@@ -4,6 +4,7 @@
 #include "KeireInternal/RenderInternal.h"
 #include "KeireInternal/UiFontInternal.h"
 #include "KeireInternal/UiInternal.h"
+#include "KeireInternal/UiThemeInternal.h"
 #include "KeireInternal/WindowInternal.h"
 
 #include "Keire/Log.h"
@@ -18,6 +19,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -33,13 +35,16 @@
 #ifndef IMGUI_HAS_DOCK
 #error "The Kéire UI runtime requires the Dear ImGui docking branch."
 #endif
-
 static_assert(IMGUI_VERSION_NUM == 19280, "The Kéire UI runtime must use the dependency-lock ImGui version.");
-
 namespace Keire
 {
     namespace
     {
+        [[nodiscard]] SDL_GPUTexture* TextureFromId(const ImTextureID texture) noexcept
+        {
+            return std::bit_cast<SDL_GPUTexture*>(texture);
+        }
+
         class UiImageOwner final
         {
           public:
@@ -84,8 +89,7 @@ namespace Keire
                         continue;
                     ImGui::UnregisterUserTexture(texture);
                     if (Device && texture->GetTexID() != ImTextureID_Invalid)
-                        SDL_ReleaseGPUTexture(
-                            Device, reinterpret_cast<SDL_GPUTexture*>(static_cast<intptr_t>(texture->GetTexID())));
+                        SDL_ReleaseGPUTexture(Device, TextureFromId(texture->GetTexID()));
                     delete texture;
                 }
             }
@@ -105,8 +109,7 @@ namespace Keire
                     {
                         ImGui::UnregisterUserTexture(texture);
                         if (Device && texture->GetTexID() != ImTextureID_Invalid)
-                            SDL_ReleaseGPUTexture(
-                                Device, reinterpret_cast<SDL_GPUTexture*>(static_cast<intptr_t>(texture->GetTexID())));
+                            SDL_ReleaseGPUTexture(Device, TextureFromId(texture->GetTexID()));
                         delete texture;
                     }
                 }
@@ -131,9 +134,9 @@ namespace Keire
     class UiImage::Impl final
     {
       public:
-        Impl(std::shared_ptr<UiImageOwner> owner, ImTextureData* texture, const std::uint32_t width,
+        Impl(const std::shared_ptr<UiImageOwner>& owner, ImTextureData* texture, const std::uint32_t width,
              const std::uint32_t height)
-            : Owner(std::move(owner)), Texture(texture), Width(width), Height(height)
+            : Owner(owner), Texture(texture), Width(width), Height(height)
         {
         }
 
@@ -156,7 +159,7 @@ namespace Keire
 
     namespace
     {
-        constexpr std::uintmax_t MaximumLayoutBytes = 1024U * 1024U;
+        constexpr std::uintmax_t MaximumLayoutBytes = std::uintmax_t{1024} * 1024U;
 
         [[nodiscard]] std::string LastSdlError()
         {
@@ -199,53 +202,6 @@ namespace Keire
                 flags |= ImGuiWindowFlags_NoSavedSettings;
             return flags;
         }
-        void ApplyTheme(const UiTheme theme)
-        {
-            switch (theme)
-            {
-            case UiTheme::Light:
-                ImGui::StyleColorsLight();
-                break;
-            case UiTheme::Classic:
-                ImGui::StyleColorsClassic();
-                break;
-            case UiTheme::Dark:
-            default:
-                ImGui::StyleColorsDark();
-                break;
-            }
-            auto& style = ImGui::GetStyle();
-            style.WindowPadding = {7.0F, 6.0F};
-            style.FramePadding = {7.0F, 4.0F};
-            style.ItemSpacing = {6.0F, 4.0F};
-            style.WindowRounding = 3.0F;
-            style.ChildRounding = 3.0F;
-            style.FrameRounding = 3.0F;
-            style.PopupRounding = 3.0F;
-            style.TabRounding = 2.0F;
-            style.ScrollbarRounding = 3.0F;
-            style.GrabRounding = 3.0F;
-            style.WindowBorderSize = 1.0F;
-            if (theme == UiTheme::Dark)
-            {
-                auto& colors = style.Colors;
-                colors[ImGuiCol_WindowBg] = {0.075F, 0.078F, 0.086F, 1.0F};
-                colors[ImGuiCol_ChildBg] = {0.105F, 0.11F, 0.12F, 1.0F};
-                colors[ImGuiCol_PopupBg] = {0.125F, 0.13F, 0.145F, 1.0F};
-                colors[ImGuiCol_FrameBg] = {0.145F, 0.15F, 0.165F, 1.0F};
-                colors[ImGuiCol_FrameBgHovered] = {0.18F, 0.20F, 0.23F, 1.0F};
-                colors[ImGuiCol_Button] = {0.16F, 0.17F, 0.19F, 1.0F};
-                colors[ImGuiCol_ButtonHovered] = {0.20F, 0.40F, 0.70F, 1.0F};
-                colors[ImGuiCol_ButtonActive] = {0.16F, 0.34F, 0.64F, 1.0F};
-                colors[ImGuiCol_Header] = {0.16F, 0.34F, 0.60F, 0.65F};
-                colors[ImGuiCol_HeaderHovered] = {0.20F, 0.42F, 0.74F, 0.86F};
-                colors[ImGuiCol_HeaderActive] = {0.16F, 0.34F, 0.64F, 1.0F};
-                colors[ImGuiCol_Border] = {0.225F, 0.23F, 0.25F, 1.0F};
-                colors[ImGuiCol_CheckMark] = {0.30F, 0.58F, 1.0F, 1.0F};
-                colors[ImGuiCol_SliderGrab] = {0.30F, 0.58F, 1.0F, 1.0F};
-            }
-        }
-
         void LoadLayout(const std::filesystem::path& path)
         {
             if (path.empty() || !std::filesystem::exists(path))
@@ -1508,7 +1464,7 @@ namespace Keire
             io.ConfigFlags &= ~ImGuiConfigFlags_ViewportsEnable;
             io.ConfigDpiScaleFonts = true;
             Detail::ConfigureUiFonts(Specification);
-            ApplyTheme(Specification.Theme);
+            Detail::ApplyUiTheme(Specification.Theme);
             if (Specification.Mode == UiMode::Headless)
             {
                 unsigned char* pixels = nullptr;
@@ -1525,7 +1481,7 @@ namespace Keire
             if (std::this_thread::get_id() != OwnerThread)
                 throw std::logic_error("UI theme changes must run on the application owner thread.");
             ImGui::SetCurrentContext(Context);
-            ApplyTheme(theme);
+            Detail::ApplyUiTheme(theme);
             Specification.Theme = theme;
         }
 
@@ -1708,7 +1664,6 @@ namespace Keire
             Images.reset();
             ImGui::SetCurrentContext(PreviousContext);
         }
-
         UiSpecification Specification;
         std::thread::id OwnerThread;
         std::unique_ptr<UiFrame> Frame;
@@ -1729,7 +1684,6 @@ namespace Keire
         bool ShutdownComplete = false;
         std::shared_ptr<UiImageOwner> Images;
     };
-
     UiSystem::UiSystem(const UiSpecification& specification, WindowSystem& windows, Window& window,
                        RenderSystem& renderer)
         : m_Impl(std::make_unique<Impl>(specification, windows, window, renderer))

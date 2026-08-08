@@ -1,6 +1,6 @@
-#include "ExecutableProcessProbe.h"
+#include <KeireHubRuntimeInternal/ExecutableProcessProbe.h>
 
-#include "TestSupport.h"
+#include <KeireHubTests/TestSupport.h>
 
 #include <doctest/doctest.h>
 

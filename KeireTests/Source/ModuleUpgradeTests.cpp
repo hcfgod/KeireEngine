@@ -295,6 +295,8 @@ TEST_CASE("Project upgrades reject affected paths through symbolic links")
     if (linkError)
     {
         MESSAGE("Symbolic-link creation is unavailable in this environment: " << linkError.message());
+        if (KeireTests::RunningInCi())
+            FAIL_CHECK("CI must provide symbolic-link capability for project-upgrade confinement tests.");
         return;
     }
 
@@ -321,6 +323,8 @@ TEST_CASE("Project upgrades reject linked transaction storage outside the projec
     if (linkError)
     {
         MESSAGE("Symbolic-link creation is unavailable in this environment: " << linkError.message());
+        if (KeireTests::RunningInCi())
+            FAIL_CHECK("CI must provide symbolic-link capability for project-upgrade storage confinement tests.");
         return;
     }
 

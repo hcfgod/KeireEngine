@@ -4,8 +4,11 @@ set -euo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 service_root="$(cd -- "$script_dir/.." && pwd)"
 dotnet_command="${KEIRE_DOTNET:-dotnet}"
+npm_command="${KEIRE_NPM:-npm}"
 configuration="${KEIRE_CONFIGURATION:-Release}"
 output_root="${1:-$service_root/../../Build/Distributions/KeireDistributionService}"
+documentation_site="$service_root/DocumentationSite"
+documentation_output="$documentation_site/dist"
 if [[ $# -gt 0 ]]; then
   shift
 fi
@@ -19,6 +22,9 @@ if [[ $# -eq 0 ]]; then
 else
   runtime_identifiers=("$@")
 fi
+
+ASTRO_TELEMETRY_DISABLED=1 "$npm_command" --prefix "$documentation_site" ci
+ASTRO_TELEMETRY_DISABLED=1 "$npm_command" --prefix "$documentation_site" run build
 
 mkdir -p -- "$output_root"
 for runtime_identifier in "${runtime_identifiers[@]}"; do
@@ -34,10 +40,10 @@ for runtime_identifier in "${runtime_identifiers[@]}"; do
   fi
 
   mkdir -p -- "$package_directory"
-  "$dotnet_command" publish "$service_root/src/KeireDistributionService/KeireDistributionService.csproj" \
+  "$dotnet_command" publish "$service_root/Source/KeireDistributionService/KeireDistributionService.csproj" \
     --configuration "$configuration" --runtime "$runtime_identifier" --self-contained true \
     --output "$package_directory" -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
-  "$dotnet_command" publish "$service_root/src/KeireDistributionPublisher/KeireDistributionPublisher.csproj" \
+  "$dotnet_command" publish "$service_root/Source/KeireDistributionPublisher/KeireDistributionPublisher.csproj" \
     --configuration "$configuration" --runtime "$runtime_identifier" --self-contained true \
     --output "$package_directory/tools/publisher" -p:PublishSingleFile=true \
     -p:IncludeNativeLibrariesForSelfExtract=true
@@ -45,7 +51,13 @@ for runtime_identifier in "${runtime_identifiers[@]}"; do
   cp -- "$service_root/README.md" "$package_directory/"
   cp -- "$service_root/THIRD_PARTY_NOTICES.md" "$package_directory/"
   cp -R -- "$service_root/Licenses" "$package_directory/"
+  cp -- "$documentation_site/node_modules/astro/LICENSE" "$package_directory/Licenses/Astro.txt"
+  cp -- "$documentation_site/node_modules/@astrojs/starlight/LICENSE" "$package_directory/Licenses/Starlight.txt"
+  cp -- "$documentation_site/node_modules/expressive-code/LICENSE" "$package_directory/Licenses/ExpressiveCode.txt"
+  cp -- "$documentation_site/node_modules/beautiful-mermaid/LICENSE" "$package_directory/Licenses/BeautifulMermaid.txt"
   cp -R -- "$service_root/Website" "$package_directory/"
+  mkdir -p -- "$package_directory/Website/docs"
+  cp -R -- "$documentation_output/." "$package_directory/Website/docs/"
   mkdir -p -- "$package_directory/Deployment" "$package_directory/scripts"
   cp -- "$service_root/Deployment/Caddyfile.example" "$package_directory/Deployment/"
   cp -- "$service_root/Deployment/appsettings.Production.example.json" "$package_directory/Deployment/"

@@ -1,7 +1,7 @@
 #include "KeireHub/HubMaintenanceWorkflow.h"
 #include "KeireHub/HubProductUi.h"
 
-#include "TestSupport.h"
+#include <KeireHubTests/TestSupport.h>
 
 #include <doctest/doctest.h>
 

@@ -2,14 +2,12 @@
 
 #include "KeireHub/HubPackageTaskWorkflow.h"
 
-#include <utility>
-
 namespace KeireHub
 {
-    HubResult<std::string> ExecuteHubManagedEditorRemovalPlan(EditorManagedOperationPlan plan,
+    HubResult<std::string> ExecuteHubManagedEditorRemovalPlan(const EditorManagedOperationPlan& plan,
                                                               HubPackageTaskWorkflow& tasks)
     {
-        if (const auto status = tasks.QueueEditorRemoval(std::move(plan)); !status)
+        if (const auto status = tasks.QueueEditorRemoval(plan); !status)
             return HubResult<std::string>::Failure(status.Error());
         return HubResult<std::string>::Success(
             "Managed editor uninstall queued. The task center will report its progress.");

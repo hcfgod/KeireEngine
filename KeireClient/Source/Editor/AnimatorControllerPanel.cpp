@@ -32,7 +32,7 @@ namespace KeireEditor
         constexpr std::array<std::string_view, 4> ComparisonNames{"Greater", "Less", "Equal", "Not Equal"};
 
         template <typename Range, typename Projection>
-        [[nodiscard]] std::string UniqueName(const Range& values, std::string base, Projection projection)
+        [[nodiscard]] std::string UniqueName(const Range& values, const std::string& base, Projection projection)
         {
             std::string candidate = base;
             for (std::size_t copy = 2; std::ranges::any_of(values, [&](const auto& value)
@@ -156,7 +156,8 @@ namespace KeireEditor
         {
             if (std::abs(state.EditorPosition.X) > 0.001F || std::abs(state.EditorPosition.Y) > 0.001F || index == 0)
                 return state.EditorPosition;
-            return {static_cast<float>(index % 3) * 190.0F, static_cast<float>(index / 3) * 104.0F};
+            const auto row = index / 3U;
+            return {static_cast<float>(index % 3U) * 190.0F, static_cast<float>(row) * 104.0F};
         }
 
         void RemoveParameterReferences(Keire::AnimationGraphDefinition& graph, const std::string_view parameter)
@@ -363,7 +364,7 @@ namespace KeireEditor
             auto [iterator, inserted] = Clips.try_emplace(id);
             if (inserted)
                 iterator->second = assets->Load<Keire::AnimationClipAsset>(id, Keire::AssetPriority::High);
-            const auto clip = iterator->second.TryGetLoaded();
+            auto clip = iterator->second.TryGetLoaded();
             if (!clip || clip->Skeleton() == Skeleton)
                 return clip;
 
@@ -1113,8 +1114,9 @@ namespace KeireEditor
                 {
                     for (std::size_t index = 0; index < visibleStates.size(); ++index)
                     {
-                        visibleStates[index]->EditorPosition = {static_cast<float>(index % 3) * 190.0F,
-                                                                static_cast<float>(index / 3) * 104.0F};
+                        const auto row = index / 3U;
+                        visibleStates[index]->EditorPosition = {static_cast<float>(index % 3U) * 190.0F,
+                                                                static_cast<float>(row) * 104.0F};
                     }
                     m_FocusGraph = true;
                     markChanged("Auto Layout Animator States");
@@ -1711,9 +1713,9 @@ namespace KeireEditor
                         {
                             const auto selected = std::ranges::find(graph.ParameterDefinitions, parameterId,
                                                                     &Keire::AnimationParameterDefinition::Id);
-                            const std::string_view preview = selected == graph.ParameterDefinitions.end()
-                                                                 ? "Select Float Parameter"
-                                                                 : selected->Name;
+                            std::string_view preview = "Select Float Parameter";
+                            if (selected != graph.ParameterDefinitions.end())
+                                preview = selected->Name;
                             bool parameterChanged = false;
                             if (auto combo = ui.BeginCombo(label, preview); combo)
                             {
@@ -1856,9 +1858,9 @@ namespace KeireEditor
                             auto conditionParameter =
                                 std::ranges::find(graph.ParameterDefinitions, condition.ParameterId,
                                                   &Keire::AnimationParameterDefinition::Id);
-                            const std::string_view preview = conditionParameter == graph.ParameterDefinitions.end()
-                                                                 ? "Missing Parameter"
-                                                                 : conditionParameter->Name;
+                            std::string_view preview = "Missing Parameter";
+                            if (conditionParameter != graph.ParameterDefinitions.end())
+                                preview = conditionParameter->Name;
                             if (auto parameterCombo = ui.BeginCombo("Parameter", preview); parameterCombo)
                             {
                                 for (const auto& candidate : graph.ParameterDefinitions)

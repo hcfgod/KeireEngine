@@ -1,6 +1,6 @@
-#include "LocalCatalogSupport.h"
+#include <KeireHubRuntimeInternal/LocalCatalogSupport.h>
 
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <algorithm>
 #include <cctype>
@@ -28,7 +28,7 @@ namespace KeireHub::Detail
                                                                             const std::filesystem::path& component)
         {
             std::error_code error;
-            const auto exact = parent / component;
+            auto exact = parent / component;
             const auto exactStatus = std::filesystem::symlink_status(exact, error);
             if (!error && exactStatus.type() != std::filesystem::file_type::not_found)
                 return exact;
@@ -77,7 +77,7 @@ namespace KeireHub::Detail
 
         if (!std::filesystem::is_regular_file(current, error) || error)
             return std::nullopt;
-        const auto canonical = std::filesystem::weakly_canonical(current, error);
+        auto canonical = std::filesystem::weakly_canonical(current, error);
         if (error || !IsSafeRelativePath(canonical.lexically_relative(canonicalRoot)))
             return std::nullopt;
         return canonical;

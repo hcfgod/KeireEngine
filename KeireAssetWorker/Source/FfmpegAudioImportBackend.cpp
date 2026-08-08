@@ -1,4 +1,4 @@
-#include "FfmpegAudioImportBackend.h"
+#include <KeireAssetWorkerInternal/FfmpegAudioImportBackend.h>
 
 #if defined(KEIRE_HAS_FFMPEG)
 extern "C"
@@ -29,9 +29,9 @@ namespace Keire::Detail
 #if defined(KEIRE_HAS_FFMPEG)
     namespace
     {
-        constexpr std::size_t AvioBufferBytes = 64U * 1024U;
-        constexpr std::size_t MaximumEncodedBytes = 768U * 1024U * 1024U;
-        constexpr std::size_t MaximumFastPcmBytes = 256U * 1024U * 1024U;
+        constexpr std::size_t AvioBufferBytes = std::size_t{64} * 1024U;
+        constexpr std::size_t MaximumEncodedBytes = std::size_t{768} * 1024U * 1024U;
+        constexpr std::size_t MaximumFastPcmBytes = std::size_t{256} * 1024U * 1024U;
         constexpr std::uint64_t MaximumFrames = 384000ULL * 60ULL * 60ULL * 4ULL;
 
         [[nodiscard]] std::string AvError(const int code)
@@ -177,7 +177,7 @@ namespace Keire::Detail
             {
                 if (m_Context != nullptr)
                 {
-                    av_freep(&m_Context->buffer);
+                    av_freep(static_cast<void*>(&m_Context->buffer));
                     avio_context_free(&m_Context);
                 }
             }
@@ -475,7 +475,7 @@ namespace Keire::Detail
                 outputStream->time_base = encoder->time_base;
                 RequireAv(avcodec_parameters_from_context(outputStream->codecpar, encoder.get()),
                           "Could not describe the FLAC stream");
-                outputState.Bytes.reserve(std::min<std::size_t>(source.size(), 16U * 1024U * 1024U));
+                outputState.Bytes.reserve(std::min(source.size(), std::size_t{16} * 1024U * 1024U));
                 outputIo = std::make_unique<AvioOwner>(&outputState, true, nullptr, WriteOutput, nullptr);
                 output->pb = outputIo->Get();
                 output->flags |= AVFMT_FLAG_CUSTOM_IO;
@@ -501,8 +501,8 @@ namespace Keire::Detail
             std::int64_t timestamp = 0;
             std::vector<std::byte> pcm;
             if (fastPcm && estimatedFrames > 0)
-                pcm.reserve(static_cast<std::size_t>(estimatedFrames) * encoder->ch_layout.nb_channels *
-                            sizeof(std::int16_t));
+                pcm.reserve(static_cast<std::size_t>(estimatedFrames) *
+                            static_cast<std::size_t>(encoder->ch_layout.nb_channels) * sizeof(std::int16_t));
             const auto drainDecoder = [&]
             {
                 while (true)

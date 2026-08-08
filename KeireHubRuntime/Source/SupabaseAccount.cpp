@@ -1,7 +1,7 @@
 #include "KeireHubRuntime/SupabaseAccount.h"
 
-#include "NativeHttpTransportPolicy.h"
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/NativeHttpTransportPolicy.h>
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <algorithm>
 #include <cctype>
@@ -15,8 +15,8 @@ namespace KeireHub
 {
     namespace
     {
-        constexpr std::size_t MaximumConfigurationBytes = 16U * 1024U;
-        constexpr std::size_t MaximumResponseBytes = 1024U * 1024U;
+        constexpr std::size_t MaximumConfigurationBytes = std::size_t{16U} * 1024U;
+        constexpr std::size_t MaximumResponseBytes = std::size_t{1024U} * 1024U;
 
         void ClearSecret(std::string& value) noexcept
         {
@@ -212,8 +212,8 @@ namespace KeireHub
                 const auto accessToken = value.at("access_token").get<std::string>();
                 const auto refreshToken = value.at("refresh_token").get<std::string>();
                 const auto expiresIn = value.at("expires_in").get<std::uint64_t>();
-                if (!IsBoundedAscii(accessToken, 16U * 1024U) || !IsBoundedAscii(refreshToken, 4096U) ||
-                    expiresIn == 0U || expiresIn > 7U * 24U * 60U * 60U)
+                if (!IsBoundedAscii(accessToken, std::size_t{16U} * 1024U) || !IsBoundedAscii(refreshToken, 4096U) ||
+                    expiresIn == 0U || expiresIn > 7ULL * 24ULL * 60ULL * 60ULL)
                 {
                     throw std::invalid_argument("invalid account session fields");
                 }
@@ -421,7 +421,7 @@ namespace KeireHub
 
     HubStatus SupabaseAccountClient::SignOut(const std::string_view accessToken) const
     {
-        if (!IsBoundedAscii(accessToken, 16U * 1024U))
+        if (!IsBoundedAscii(accessToken, std::size_t{16U} * 1024U))
             return HubStatus::Failure(AccountError(HubErrorCode::InvalidArgument, "The account session is invalid."));
         auto response = Send(
             m_Transport, Request(m_Configuration, NativeHttpMethod::Post, "/auth/v1/logout?scope=local", accessToken));

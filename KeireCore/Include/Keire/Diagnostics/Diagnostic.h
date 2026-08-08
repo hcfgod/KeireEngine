@@ -67,8 +67,8 @@ namespace Keire
     struct DiagnosticSystemSpecification
     {
         std::size_t MaximumRetainedDiagnostics = 4096;
-        std::filesystem::path PackagedDocumentationRoot = "docs/Diagnostics";
-        std::string OnlineDocumentationRoot = "https://github.com/hcfgod/KeireEngine/blob/main/docs/Diagnostics";
+        std::filesystem::path PackagedDocumentationRoot = "Docs/Diagnostics";
+        std::string OnlineDocumentationRoot = "https://github.com/hcfgod/KeireEngine/blob/main/Docs/Diagnostics";
     };
 
     class KEIRE_API DiagnosticCatalog final : public RefCounted

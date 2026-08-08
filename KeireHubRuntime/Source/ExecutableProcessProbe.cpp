@@ -1,4 +1,4 @@
-#include "ExecutableProcessProbe.h"
+#include <KeireHubRuntimeInternal/ExecutableProcessProbe.h>
 
 #include <algorithm>
 #include <array>
@@ -31,7 +31,7 @@ namespace KeireHub::Detail
 {
     namespace
     {
-        constexpr std::size_t MaximumExecutablePathBytes = 32U * 1024U;
+        constexpr std::size_t MaximumExecutablePathBytes = std::size_t{32U} * 1024U;
         constexpr std::size_t MaximumProcessRecords = 65536U;
 
         [[nodiscard]] std::filesystem::path NormalizeExecutablePath(const std::filesystem::path& executable)

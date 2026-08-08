@@ -1,7 +1,7 @@
-#include "EditorInstallationManifest.h"
+#include <KeireHubRuntimeInternal/EditorInstallationManifest.h>
 
-#include "DistributionEncoding.h"
-#include "Persistence.h"
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include "KeireHubRuntime/PackageResolver.h"
 
@@ -18,7 +18,7 @@ namespace KeireHub
 {
     namespace
     {
-        constexpr std::size_t MaximumManifestBytes = 8U * 1024U * 1024U;
+        constexpr std::size_t MaximumManifestBytes = std::size_t{8U} * 1024U * 1024U;
         constexpr std::size_t MaximumManifestDepth = 32;
         constexpr std::size_t MaximumInventoryFiles = 100000;
         constexpr std::size_t MaximumEntrypoints = 16;

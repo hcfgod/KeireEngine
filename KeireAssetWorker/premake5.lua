@@ -6,11 +6,13 @@ project(AssetWorkerTarget)
 
     files
     {
+        "Include/**.h",
         "Source/**.cpp"
     }
 
     includedirs
     {
+        "Include",
         "../" .. ProjectConfig.CORE_DIRECTORY .. "/Include"
     }
 
@@ -40,11 +42,11 @@ project(AssetWorkerTarget)
         filter { "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
             defines { "KEIRE_HAS_FFMPEG=1" }
             externalincludedirs { ffmpegDebug .. "/include" }
-            libdirs { ffmpegDebug .. "/lib" }
+            libdirs { GeneratorRootPath(ffmpegDebug .. "/lib") }
             links { "avformat", "avcodec", "swresample", "avutil" }
 
         filter { "system:windows", "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
-            libdirs { ffmpegDebug .. "/bin" }
+            libdirs { GeneratorRootPath(ffmpegDebug .. "/bin") }
             prelinkcommands
             {
                 CopyWindowsRuntime(commandRepositoryRoot .. "/Build/Dependencies/ffmpeg/Debug/install/bin")
@@ -71,11 +73,11 @@ project(AssetWorkerTarget)
         filter { "configurations:Release or Dist" }
             defines { "KEIRE_HAS_FFMPEG=1" }
             externalincludedirs { ffmpegRelease .. "/include" }
-            libdirs { ffmpegRelease .. "/lib" }
+            libdirs { GeneratorRootPath(ffmpegRelease .. "/lib") }
             links { "avformat", "avcodec", "swresample", "avutil" }
 
         filter { "system:windows", "configurations:Release or Dist" }
-            libdirs { ffmpegRelease .. "/bin" }
+            libdirs { GeneratorRootPath(ffmpegRelease .. "/bin") }
             prelinkcommands
             {
                 CopyWindowsRuntime(commandRepositoryRoot .. "/Build/Dependencies/ffmpeg/Release/install/bin")

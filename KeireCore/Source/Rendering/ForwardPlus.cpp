@@ -33,6 +33,8 @@ namespace Keire::RenderBackend
         projectedLights.reserve(lights.size());
         const float projectionX = std::abs(projection.Elements[0]);
         const float projectionY = std::abs(projection.Elements[5]);
+        const float gridWidth = static_cast<float>(width);
+        const float gridHeight = static_cast<float>(height);
 
         for (std::uint32_t lightIndex = 0; lightIndex < lights.size(); ++lightIndex)
         {
@@ -42,10 +44,10 @@ namespace Keire::RenderBackend
             if (light.ViewPosition.Z + light.Range <= 0.0F)
                 continue;
             const float depth = std::max(light.ViewPosition.Z, 0.0001F);
-            const float centerX = (light.ViewPosition.X * projectionX / depth * 0.5F + 0.5F) * width;
-            const float centerY = (-light.ViewPosition.Y * projectionY / depth * 0.5F + 0.5F) * height;
-            const float radiusX = light.Range * projectionX / depth * width * 0.5F;
-            const float radiusY = light.Range * projectionY / depth * height * 0.5F;
+            const float centerX = (light.ViewPosition.X * projectionX / depth * 0.5F + 0.5F) * gridWidth;
+            const float centerY = (-light.ViewPosition.Y * projectionY / depth * 0.5F + 0.5F) * gridHeight;
+            const float radiusX = light.Range * projectionX / depth * gridWidth * 0.5F;
+            const float radiusY = light.Range * projectionY / depth * gridHeight * 0.5F;
             const auto clampTile = [](const float value, const std::uint32_t maximum)
             { return static_cast<std::uint32_t>(std::clamp(value, 0.0F, static_cast<float>(maximum - 1U))); };
             const auto minimumX =
@@ -56,8 +58,8 @@ namespace Keire::RenderBackend
                 clampTile(std::floor((centerY - radiusY) / ForwardPlusTileGrid::TileSize), result.Rows);
             const auto maximumY =
                 clampTile(std::floor((centerY + radiusY) / ForwardPlusTileGrid::TileSize), result.Rows);
-            if (centerX + radiusX < 0.0F || centerY + radiusY < 0.0F || centerX - radiusX >= width ||
-                centerY - radiusY >= height)
+            if (centerX + radiusX < 0.0F || centerY + radiusY < 0.0F || centerX - radiusX >= gridWidth ||
+                centerY - radiusY >= gridHeight)
                 continue;
             projectedLights.push_back({lightIndex, minimumX, maximumX, minimumY, maximumY});
         }
@@ -71,8 +73,10 @@ namespace Keire::RenderBackend
         if (projectedLights.size() == 1)
         {
             const auto& light = projectedLights.front();
-            const auto coveredColumns = static_cast<std::size_t>(light.MaximumX - light.MinimumX + 1U);
-            const auto coveredRows = static_cast<std::size_t>(light.MaximumY - light.MinimumY + 1U);
+            const auto coveredColumns =
+                static_cast<std::size_t>(light.MaximumX) - static_cast<std::size_t>(light.MinimumX) + 1U;
+            const auto coveredRows =
+                static_cast<std::size_t>(light.MaximumY) - static_cast<std::size_t>(light.MinimumY) + 1U;
             result.Offsets.resize(tileCount);
             result.Counts.assign(tileCount, 0);
             result.LightIndices.assign(coveredColumns * coveredRows, light.Index);

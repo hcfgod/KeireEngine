@@ -66,8 +66,8 @@ namespace KeireHub
                                  [](const auto& candidate)
                                  {
                                      return std::filesystem::is_regular_file(candidate / "LICENSE.txt") &&
-                                            (std::filesystem::is_directory(candidate / "docs") ||
-                                             std::filesystem::is_directory(candidate / "Docs"));
+                                            (std::filesystem::is_directory(candidate / "Docs") ||
+                                             std::filesystem::is_directory(candidate / "docs"));
                                  });
         return found == candidates.end() ? executable.parent_path().parent_path() : *found;
     }

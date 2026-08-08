@@ -1,4 +1,4 @@
-#include "TestSupport.h"
+#include <KeireHubTests/TestSupport.h>
 
 #include "KeireHubRuntime/AccountSessionStore.h"
 #include "KeireHubRuntime/SupabaseAccount.h"

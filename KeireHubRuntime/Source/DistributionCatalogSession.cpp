@@ -1,6 +1,6 @@
 #include "KeireHubRuntime/DistributionCatalog.h"
 
-#include "DistributionEncoding.h"
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
 
 #include <string_view>
 #include <utility>

@@ -72,7 +72,7 @@ hub_worker_source="$ROOT/Build/Bin/Dist-$system-$output_arch/$hub_worker/$hub_wo
 }
 cp "$hub_worker_source" "$stage/bin/"
 cp -R "$ROOT/KeireHubContent/." "$stage/content/"
-copy_tracked_tree "$ROOT" docs "$stage/docs"
+copy_tracked_tree "$ROOT" Docs "$stage/Docs"
 copy_tracked_tree "$ROOT" Samples/KeireSandbox "$stage/Samples/KeireSandbox"
 cp "$ROOT/Config/Branding/Keire.png" "$stage/Config/Branding/"
 cp "$ROOT/Config/SourceModules.premake.lua" "$stage/Config/"
