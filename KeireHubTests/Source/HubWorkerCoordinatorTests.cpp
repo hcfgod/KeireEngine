@@ -719,6 +719,58 @@ TEST_CASE("Worker coordinator preserves exact managed-editor removal proof throu
           removal.PackageTreeIdentity);
 }
 
+TEST_CASE("Worker coordinator resumes the removal task that owns a retryable editor journal")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    auto host = std::make_unique<FakeProcessHost>();
+    auto* fake = host.get();
+    fake->SetBehavior(
+        [fake](const HubWorkerLaunch& launch, const std::uint64_t processId, const std::size_t index)
+        {
+            auto status = HubStatus::Success();
+            if (index == 0)
+            {
+                status = PublishStatus(launch, processId, HubTaskState::Installing,
+                                       {.CurrentPackage = "editor-1", .Phase = "Removal authorized"});
+                if (status)
+                {
+                    status = PublishResult(
+                        launch, DownloadOutcome::Failed,
+                        HubError{.Code = HubErrorCode::IoWrite,
+                                 .Message = "The managed editor could not be moved into its removal tombstone.",
+                                 .Retryable = true,
+                                 .AffectedItem = "editor-1",
+                                 .TechnicalDetails = "Access is denied."});
+                }
+            }
+            else
+            {
+                status = PublishRemovalCompleted(launch, processId);
+            }
+            fake->SetAlive(processId, false);
+            return status;
+        });
+
+    auto created = HubWorkerCoordinator::Create(Specification(temporary.Path()), std::move(host));
+    REQUIRE(created);
+    auto coordinator = std::move(created).Value();
+    const auto original = EditorRemoval(temporary.Path(), "remove-editor-original");
+    REQUIRE(coordinator->QueueEditorRemoval(original));
+    REQUIRE(WaitUntil([&] { return HasState(*coordinator, original.TaskId, HubTaskState::Failed); },
+                      std::chrono::seconds(10)));
+
+    const auto repeated = EditorRemoval(temporary.Path(), "remove-editor-repeated");
+    REQUIRE(coordinator->QueueEditorRemoval(repeated));
+    REQUIRE(WaitUntil([&] { return HasState(*coordinator, original.TaskId, HubTaskState::Completed); }));
+    CHECK_FALSE(FindTask(*coordinator, repeated.TaskId));
+
+    const auto launches = fake->Launches();
+    REQUIRE(launches.size() == 2);
+    const auto retried = ReadHubWorkerRequest(ArgumentPath(launches.back().Launch, "--request"));
+    REQUIRE(retried);
+    CHECK(retried.Value().TaskId == original.TaskId);
+}
+
 TEST_CASE("Worker coordinator pause resume and cancellation control the detached worker journal")
 {
     KeireHubTests::TemporaryDirectory temporary;
@@ -777,6 +829,8 @@ TEST_CASE("Worker coordinator pause resume and cancellation control the detached
     REQUIRE(PublishResult(launches.back().Launch, DownloadOutcome::Cancelled));
     fake->SetAlive(launches.back().ProcessId, false);
     REQUIRE(WaitUntil([&] { return HasState(*coordinator, "controlled-download", HubTaskState::Cancelled); }));
+    REQUIRE(coordinator->Dismiss("controlled-download"));
+    REQUIRE(WaitUntil([&] { return !FindTask(*coordinator, "controlled-download"); }));
 }
 
 TEST_CASE("Worker coordinator exposes retryable launch failures and retries from preserved requests")

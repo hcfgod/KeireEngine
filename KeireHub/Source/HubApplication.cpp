@@ -286,8 +286,12 @@ namespace
                 else
                     Owner().RequestExit();
             }
-            if (m_EditorProcesses.Refresh() && m_EditorManagement)
-                m_EditorManagement->ReloadRegistrations();
+            if (m_EditorProcesses.Refresh())
+            {
+                if (m_EditorManagement)
+                    m_EditorManagement->ReloadRegistrations();
+                m_ProjectMetadataRefreshPending = true;
+            }
             if (m_EditorManagement)
                 KeireHub::PollHubEditorManagement(*m_EditorManagement, m_EditorInstalls.get(), m_PackageTasks.get(),
                                                   m_Notice, m_NoticeError);
@@ -421,6 +425,8 @@ namespace
                     KeireHub::ReloadProjectRegistry(m_Registry);
                 }
             }
+            if (const auto status = StartPendingProjectMetadataRefresh(); !status)
+                SetError(status.Error().Message);
             if (m_SettingsDiscoveryPending && m_FirstRun)
             {
                 const auto discovery = m_FirstRun->Snapshot();
@@ -572,6 +578,7 @@ namespace
             const bool systemPrefersDark = KeireHub::HubSystemPrefersDark();
             m_ProductUi.SetAppearance(m_ProductSnapshot.Settings.Appearance, systemPrefersDark);
             m_ProjectsUi.SetAppearance(m_ProductSnapshot.Settings.Appearance, systemPrefersDark);
+            m_ProjectUpgradeUi.SetAppearance(m_ProductSnapshot.Settings.Appearance, systemPrefersDark);
             const auto size = Owner().MainWindow()->LogicalSize();
             KeireHub::UpdateHubChromeLayout(*Owner().MainWindow(), size);
             auto projectEntries = m_Registry ? m_Registry->Entries() : std::vector<Keire::RecentProject>{};
@@ -694,9 +701,10 @@ namespace
                     SetError(upgrade.Failure->Message);
                 else if (upgrade.Action != KeireHub::HubProjectUpgradeAction::None)
                 {
-                    Refresh();
                     if (upgrade.Action == KeireHub::HubProjectUpgradeAction::Reopen)
                         Open(upgrade.Root);
+                    else
+                        Refresh();
                 }
             }
         }
@@ -1096,18 +1104,32 @@ namespace
                 case KeireHub::HubUiCommandType::ResumeTask:
                 case KeireHub::HubUiCommandType::CancelTask:
                 case KeireHub::HubUiCommandType::RetryTask:
+                case KeireHub::HubUiCommandType::DismissTask:
+                case KeireHub::HubUiCommandType::ClearFinishedTasks:
                     if (m_BuildSupport && m_BuildSupport->OwnsTask(command.ItemId))
                     {
                         RequireWorkflowSuccess(m_BuildSupport->ExecuteTaskCommand(command));
                     }
                     else
                     {
-                        if (!m_PackageTasks)
+                        if (m_PackageTasks)
+                        {
+                            RequireWorkflowSuccess(m_PackageTasks->Execute(command));
+                        }
+                        else if (m_Controller && (command.Type == KeireHub::HubUiCommandType::DismissTask ||
+                                                  command.Type == KeireHub::HubUiCommandType::ClearFinishedTasks))
+                        {
+                            RequireWorkflowSuccess(KeireHub::ExecuteRuntimeUiCommand(*m_Controller, command,
+                                                                                     KeireHub::HubNowUnixSeconds()));
+                        }
+                        else
+                        {
                             throw std::logic_error("The package task center is unavailable.");
-                        RequireWorkflowSuccess(m_PackageTasks->Execute(command));
+                        }
                     }
                     break;
                 case KeireHub::HubUiCommandType::MarkNotificationRead:
+                case KeireHub::HubUiCommandType::DismissNotification:
                 case KeireHub::HubUiCommandType::ClearNotifications:
                     if (!m_Controller)
                         throw std::logic_error("The Hub runtime is unavailable.");
@@ -1210,6 +1232,7 @@ namespace
                 try
                 {
                     KeireHub::ReloadProjectRegistry(m_Registry);
+                    m_ProjectMetadataRefreshPending = true;
                 }
                 catch (const std::exception& error)
                 {
@@ -1245,8 +1268,8 @@ namespace
             try
             {
                 KeireHub::ReloadProjectRegistry(m_Registry);
-                if (m_ProjectMetadata && m_Controller)
-                    RequireWorkflowSuccess(m_ProjectMetadata->Start(*m_Controller));
+                m_ProjectMetadataRefreshPending = true;
+                RequireWorkflowSuccess(StartPendingProjectMetadataRefresh());
                 m_Notice = "Project metadata is refreshing in the background.";
                 m_NoticeError = false;
             }
@@ -1254,6 +1277,16 @@ namespace
             {
                 ReportUnexpected("Project metadata refresh could not start.", error);
             }
+        }
+
+        [[nodiscard]] KeireHub::HubStatus StartPendingProjectMetadataRefresh()
+        {
+            if (!m_ProjectMetadataRefreshPending || !m_ProjectMetadata || !m_Controller)
+                return KeireHub::HubStatus::Success();
+            if (m_ProjectMetadata->Snapshot()->Running)
+                return KeireHub::HubStatus::Success();
+            m_ProjectMetadataRefreshPending = false;
+            return m_ProjectMetadata->Start(*m_Controller);
         }
 
         void LocateEditor(const std::filesystem::path& selected)
@@ -1455,6 +1488,7 @@ namespace
         std::shared_ptr<KeireHub::HubInstanceCoordinator> m_Instance;
         bool m_DistributionRefreshPending = false;
         bool m_PackageTaskRefreshPending = false;
+        bool m_ProjectMetadataRefreshPending = false;
         FolderTarget m_FolderTarget = FolderTarget::None;
         KeireHub::HubPage m_Page = KeireHub::HubPage::Home;
         std::string m_CreateName = "NewProject";

@@ -1,5 +1,6 @@
 #include "KeireHub/HubProjectsUi.h"
 
+#include "KeireHub/HubModalUi.h"
 #include "KeireHub/HubProjectUiSupport.h"
 
 #include "KeireHubRuntime/EditorSelection.h"
@@ -453,159 +454,182 @@ namespace KeireHub
     {
         if (std::exchange(m_RequestOpenWithPopup, false))
             ui.OpenPopup("Open with Editor");
-        if (auto dialog = ui.BeginPopupModal("Open with Editor"); dialog)
         {
-            ui.TextColored(m_Tokens.PrimaryText, "Choose an installed editor for this project.");
-            ui.TextColoredWrapped(
-                m_Tokens.SecondaryText,
-                "Only healthy editors that satisfy the project schema, minimum version, and last-saved version are "
-                "shown. Opening in a newer version can migrate project data.");
-            bool found = false;
-            if (m_Pending)
+            PrepareHubModal(ui, {680.0F, 460.0F});
+            HubModalStyleScope openWithStyle(ui, m_Tokens);
+            if (auto dialog = ui.BeginPopupModal("Open with Editor", nullptr, HubModalWindowOptions(), false); dialog)
             {
-                const auto pending = *m_Pending;
-                const auto installations = SelectionInstallations(editors);
-                const auto recommended = SelectCompatibleEditor(
-                    installations,
-                    SelectionRequest(pending.SchemaVersion, pending.LastSavedVersion, pending.MinimumVersion));
-                for (const auto& editor : editors)
+                DrawHubModalHeader(ui, m_Tokens, "Open with editor",
+                                   "Choose a healthy installation that can safely open this project.", "PROJECTS");
+                ui.TextColoredWrapped(
+                    m_Tokens.SecondaryText,
+                    "Compatibility includes the project schema, minimum version, and last-saved editor. Opening "
+                    "with a newer version can migrate project data.");
+                bool found = false;
+                if (m_Pending)
                 {
-                    const auto installation = SelectionInstallation(editor);
-                    const std::array candidate{installation};
-                    if (!SelectCompatibleEditor(candidate,
-                                                SelectionRequest(pending.SchemaVersion, pending.LastSavedVersion,
-                                                                 pending.MinimumVersion, editor.Id)))
-                        continue;
-                    found = true;
-                    auto id = ui.PushId(editor.Id);
-                    if (ui.Button(editor.Version + "  (" + editor.Channel + ")", {280.0F, 34.0F}))
+                    const auto pending = *m_Pending;
+                    const auto installations = SelectionInstallations(editors);
+                    const auto recommended = SelectCompatibleEditor(
+                        installations,
+                        SelectionRequest(pending.SchemaVersion, pending.LastSavedVersion, pending.MinimumVersion));
+                    for (const auto& editor : editors)
                     {
-                        command = TakeOpenWithEditorCommand(m_Pending, editor.Id);
+                        const auto installation = SelectionInstallation(editor);
+                        const std::array candidate{installation};
+                        if (!SelectCompatibleEditor(candidate,
+                                                    SelectionRequest(pending.SchemaVersion, pending.LastSavedVersion,
+                                                                     pending.MinimumVersion, editor.Id)))
+                            continue;
+                        found = true;
+                        auto id = ui.PushId(editor.Id);
+                        if (HubSecondaryButton(ui, m_Tokens, editor.Version + "  (" + editor.Channel + ")",
+                                               {280.0F, 36.0F}))
+                        {
+                            command = TakeOpenWithEditorCommand(m_Pending, editor.Id);
+                            ui.CloseCurrentPopup();
+                        }
+                        ui.SameLine();
+                        std::string label = editor.Managed ? "Managed" : "External";
+                        if (recommended && recommended.Value().Id == editor.Id)
+                            label += "  |  Recommended";
+                        if (!pending.LastSavedVersion.empty())
+                        {
+                            label += editor.Version == pending.LastSavedVersion ? "  |  Exact last-saved version"
+                                                                                : "  |  Newer - migration risk";
+                        }
+                        ui.TextColored(m_Tokens.MutedText, label);
+                    }
+                }
+                if (!found)
+                {
+                    ui.TextColored(m_Tokens.Warning, "No installed editor can safely open this project.");
+                    if (m_Pending && HubPrimaryButton(ui, m_Tokens, "Find compatible editor", {172.0F, 36.0F}))
+                    {
+                        command = {.Type = HubProjectUiCommandType::FindCompatibleEditor,
+                                   .ProjectId = m_Pending->Id,
+                                   .EditorVersion = m_Pending->LastSavedVersion.empty() ? m_Pending->MinimumVersion
+                                                                                        : m_Pending->LastSavedVersion,
+                                   .Path = m_Pending->Root};
+                        m_Pending.reset();
                         ui.CloseCurrentPopup();
                     }
-                    ui.SameLine();
-                    std::string label = editor.Managed ? "Managed" : "External";
-                    if (recommended && recommended.Value().Id == editor.Id)
-                        label += "  |  Recommended";
-                    if (!pending.LastSavedVersion.empty())
-                    {
-                        label += editor.Version == pending.LastSavedVersion ? "  |  Exact last-saved version"
-                                                                            : "  |  Newer - migration risk";
-                    }
-                    ui.TextColored(m_Tokens.MutedText, label);
                 }
-            }
-            if (!found)
-            {
-                ui.TextColored(m_Tokens.Warning, "No installed editor can safely open this project.");
-                if (m_Pending && ui.Button("Find compatible editor", {164.0F, 32.0F}))
+                if (HubSecondaryButton(ui, m_Tokens, "Cancel", {88.0F, 36.0F}))
                 {
-                    command = {.Type = HubProjectUiCommandType::FindCompatibleEditor,
-                               .ProjectId = m_Pending->Id,
-                               .EditorVersion = m_Pending->LastSavedVersion.empty() ? m_Pending->MinimumVersion
-                                                                                    : m_Pending->LastSavedVersion,
-                               .Path = m_Pending->Root};
                     m_Pending.reset();
                     ui.CloseCurrentPopup();
                 }
-            }
-            if (ui.Button("Cancel", {76.0F, 32.0F}))
-            {
-                m_Pending.reset();
-                ui.CloseCurrentPopup();
             }
         }
 
         if (std::exchange(m_RequestDuplicatePopup, false))
             ui.OpenPopup("Duplicate Project");
-        if (auto dialog = ui.BeginPopupModal("Duplicate Project"); dialog)
         {
-            ui.TextColored(m_Tokens.PrimaryText, "Create a clean copy with a new project identity.");
-            ui.TextColoredWrapped(m_Tokens.SecondaryText,
-                                  "Generated Library, Build, logs, and repository metadata are not copied. The source "
-                                  "project is never modified.");
-            (void)ui.InputText("Project name", m_DuplicateName);
-            (void)ui.InputText("Parent folder", m_DuplicateParent);
-            ui.SameLine();
-            if (auto disabled = ui.BeginDisabled(folderDialogActive); disabled)
+            PrepareHubModal(ui, {620.0F, 390.0F});
+            HubModalStyleScope duplicateStyle(ui, m_Tokens);
+            if (auto dialog = ui.BeginPopupModal("Duplicate Project", nullptr, HubModalWindowOptions(), false); dialog)
             {
-                if (ui.Button("Browse..."))
-                    command = {.Type = HubProjectUiCommandType::BrowseDuplicateLocation,
-                               .Path = PathFromUtf8(m_DuplicateParent)};
-            }
-            const bool invalid =
-                !m_Pending || m_DuplicateName.empty() || m_DuplicateParent.empty() || folderDialogActive;
-            if (auto disabled = ui.BeginDisabled(invalid); disabled)
-            {
-                if (ui.Button("Duplicate", {96.0F, 32.0F}))
+                DrawHubModalHeader(ui, m_Tokens, "Duplicate project",
+                                   "Create a clean copy with a new project identity.", "PROJECTS");
+                ui.TextColoredWrapped(
+                    m_Tokens.SecondaryText,
+                    "Generated Library, Build, logs, and repository metadata are not copied. The source project is "
+                    "never modified.");
+                (void)ui.InputText("Project name", m_DuplicateName);
+                (void)ui.InputText("Parent folder", m_DuplicateParent);
+                ui.SameLine();
+                if (auto disabled = ui.BeginDisabled(folderDialogActive); disabled)
                 {
-                    command = {.Type = HubProjectUiCommandType::Duplicate,
-                               .ProjectId = m_Pending->Id,
-                               .Path = PathFromUtf8(m_DuplicateParent) / PathFromUtf8(m_DuplicateName),
-                               .DisplayName = m_DuplicateName};
+                    if (HubSecondaryButton(ui, m_Tokens, "Browse...", {96.0F, 36.0F}))
+                        command = {.Type = HubProjectUiCommandType::BrowseDuplicateLocation,
+                                   .Path = PathFromUtf8(m_DuplicateParent)};
+                }
+                const bool invalid =
+                    !m_Pending || m_DuplicateName.empty() || m_DuplicateParent.empty() || folderDialogActive;
+                if (auto disabled = ui.BeginDisabled(invalid); disabled)
+                {
+                    if (HubPrimaryButton(ui, m_Tokens, "Duplicate", {104.0F, 36.0F}))
+                    {
+                        command = {.Type = HubProjectUiCommandType::Duplicate,
+                                   .ProjectId = m_Pending->Id,
+                                   .Path = PathFromUtf8(m_DuplicateParent) / PathFromUtf8(m_DuplicateName),
+                                   .DisplayName = m_DuplicateName};
+                        m_Pending.reset();
+                        ui.CloseCurrentPopup();
+                    }
+                }
+                ui.SameLine();
+                if (HubSecondaryButton(ui, m_Tokens, "Cancel", {88.0F, 36.0F}))
+                {
                     m_Pending.reset();
                     ui.CloseCurrentPopup();
                 }
-            }
-            ui.SameLine();
-            if (ui.Button("Cancel", {76.0F, 32.0F}))
-            {
-                m_Pending.reset();
-                ui.CloseCurrentPopup();
             }
         }
 
         if (std::exchange(m_RequestRenamePopup, false))
             ui.OpenPopup("Rename Project");
-        if (auto dialog = ui.BeginPopupModal("Rename Project"); dialog)
         {
-            ui.TextColoredWrapped(m_Tokens.SecondaryText,
-                                  "This changes the project display name only. The project folder is not renamed.");
-            (void)ui.InputText("Display name", m_RenameName);
-            if (auto disabled = ui.BeginDisabled(!m_Pending || m_RenameName.empty()); disabled)
+            PrepareHubModal(ui, {540.0F, 300.0F});
+            HubModalStyleScope renameStyle(ui, m_Tokens);
+            if (auto dialog = ui.BeginPopupModal("Rename Project", nullptr, HubModalWindowOptions(), false); dialog)
             {
-                if (ui.Button("Rename", {88.0F, 32.0F}))
+                DrawHubModalHeader(ui, m_Tokens, "Rename project",
+                                   "Change the display name without moving the project folder.", "PROJECTS");
+                ui.TextColoredWrapped(m_Tokens.SecondaryText, "The project folder name and location remain unchanged.");
+                (void)ui.InputText("Display name", m_RenameName);
+                if (auto disabled = ui.BeginDisabled(!m_Pending || m_RenameName.empty()); disabled)
                 {
-                    command = {.Type = HubProjectUiCommandType::Rename,
-                               .ProjectId = m_Pending->Id,
-                               .DisplayName = m_RenameName};
+                    if (HubPrimaryButton(ui, m_Tokens, "Rename", {88.0F, 36.0F}))
+                    {
+                        command = {.Type = HubProjectUiCommandType::Rename,
+                                   .ProjectId = m_Pending->Id,
+                                   .DisplayName = m_RenameName};
+                        m_Pending.reset();
+                        ui.CloseCurrentPopup();
+                    }
+                }
+                ui.SameLine();
+                if (HubSecondaryButton(ui, m_Tokens, "Cancel", {88.0F, 36.0F}))
+                {
                     m_Pending.reset();
                     ui.CloseCurrentPopup();
                 }
-            }
-            ui.SameLine();
-            if (ui.Button("Cancel", {76.0F, 32.0F}))
-            {
-                m_Pending.reset();
-                ui.CloseCurrentPopup();
             }
         }
 
         if (std::exchange(m_RequestRemovePopup, false))
             ui.OpenPopup("Remove Project from Hub?");
-        if (auto dialog = ui.BeginPopupModal("Remove Project from Hub?"); dialog)
         {
-            const auto name = m_Pending ? m_Pending->Name : std::string("this project");
-            ui.TextColored(m_Tokens.PrimaryText, "Remove " + name + " from the Hub?");
-            ui.TextColoredWrapped(m_Tokens.SecondaryText,
-                                  "Only the recent-project entry is removed. Project files remain untouched on disk.");
-            if (auto disabled = ui.BeginDisabled(!m_Pending); disabled)
+            PrepareHubModal(ui, {560.0F, 310.0F});
+            HubModalStyleScope removalStyle(ui, m_Tokens);
+            if (auto dialog = ui.BeginPopupModal("Remove Project from Hub?", nullptr, HubModalWindowOptions(), false);
+                dialog)
             {
-                if (ui.Button("Remove from Hub", {132.0F, 32.0F}))
+                const auto name = m_Pending ? m_Pending->Name : std::string("this project");
+                DrawHubModalHeader(ui, m_Tokens, "Remove " + name + " from the Hub?",
+                                   "Remove the recent-project entry without deleting project files.", "PROJECTS");
+                ui.TextColoredWrapped(m_Tokens.SecondaryText,
+                                      "The project folder and every file inside it remain untouched on disk.");
+                if (auto disabled = ui.BeginDisabled(!m_Pending); disabled)
                 {
-                    command = {.Type = HubProjectUiCommandType::RemoveFromHub,
-                               .ProjectId = m_Pending->Id,
-                               .Path = m_Pending->Root,
-                               .DisplayName = m_Pending->Name};
+                    if (HubDangerButton(ui, m_Tokens, "Remove from Hub", {140.0F, 36.0F}))
+                    {
+                        command = {.Type = HubProjectUiCommandType::RemoveFromHub,
+                                   .ProjectId = m_Pending->Id,
+                                   .Path = m_Pending->Root,
+                                   .DisplayName = m_Pending->Name};
+                        m_Pending.reset();
+                        ui.CloseCurrentPopup();
+                    }
+                }
+                ui.SameLine();
+                if (HubSecondaryButton(ui, m_Tokens, "Cancel", {88.0F, 36.0F}))
+                {
                     m_Pending.reset();
                     ui.CloseCurrentPopup();
                 }
-            }
-            ui.SameLine();
-            if (ui.Button("Cancel", {76.0F, 32.0F}))
-            {
-                m_Pending.reset();
-                ui.CloseCurrentPopup();
             }
         }
     }

@@ -465,6 +465,10 @@ namespace KeireHub
             return m_Coordinator->Cancel(command.ItemId);
         case HubUiCommandType::RetryTask:
             return m_Coordinator->Retry(command.ItemId);
+        case HubUiCommandType::DismissTask:
+            return m_Coordinator->Dismiss(command.ItemId);
+        case HubUiCommandType::ClearFinishedTasks:
+            return m_Coordinator->ClearFinished();
         default:
             return HubStatus::Failure({.Code = HubErrorCode::InvalidArgument,
                                        .Message = "The command is not a package task action.",

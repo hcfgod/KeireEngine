@@ -6,11 +6,13 @@ namespace KeireHub
 {
     namespace
     {
-        [[nodiscard]] Keire::UiColor Brighter(Keire::UiColor color, const float amount) noexcept
+        [[nodiscard]] Keire::UiColor InteractiveSurface(Keire::UiColor color, const float amount) noexcept
         {
-            color.Red = std::min(1.0F, color.Red + amount);
-            color.Green = std::min(1.0F, color.Green + amount);
-            color.Blue = std::min(1.0F, color.Blue + amount);
+            const bool light = color.Red + color.Green + color.Blue > 1.5F;
+            const float adjustment = light ? -amount : amount;
+            color.Red = std::clamp(color.Red + adjustment, 0.0F, 1.0F);
+            color.Green = std::clamp(color.Green + adjustment, 0.0F, 1.0F);
+            color.Blue = std::clamp(color.Blue + adjustment, 0.0F, 1.0F);
             return color;
         }
 
@@ -19,16 +21,32 @@ namespace KeireHub
         {
             [[maybe_unused]] const auto background = ui.PushStyleColor(Keire::UiStyleColorRole::Button, color);
             [[maybe_unused]] const auto hovered =
-                ui.PushStyleColor(Keire::UiStyleColorRole::ButtonHovered, Brighter(color, 0.06F));
+                ui.PushStyleColor(Keire::UiStyleColorRole::ButtonHovered, InteractiveSurface(color, 0.06F));
             [[maybe_unused]] const auto active =
-                ui.PushStyleColor(Keire::UiStyleColorRole::ButtonActive, Brighter(color, 0.02F));
+                ui.PushStyleColor(Keire::UiStyleColorRole::ButtonActive, InteractiveSurface(color, 0.02F));
             return ui.Button(label, size);
         }
     } // namespace
 
     HubModalStyleScope::HubModalStyleScope(Keire::UiFrame& ui, const HubDesignTokens& tokens)
         : m_Background(ui.PushStyleColor(Keire::UiStyleColorRole::PopupBackground, tokens.Surface)),
+          m_Text(ui.PushStyleColor(Keire::UiStyleColorRole::Text, tokens.PrimaryText)),
           m_BorderColor(ui.PushStyleColor(Keire::UiStyleColorRole::Border, tokens.Border)),
+          m_FrameBackground(ui.PushStyleColor(Keire::UiStyleColorRole::FrameBackground, tokens.Elevated)),
+          m_FrameBackgroundHovered(ui.PushStyleColor(Keire::UiStyleColorRole::FrameBackgroundHovered,
+                                                     InteractiveSurface(tokens.Elevated, 0.04F))),
+          m_FrameBackgroundActive(ui.PushStyleColor(Keire::UiStyleColorRole::FrameBackgroundActive,
+                                                    InteractiveSurface(tokens.Elevated, 0.07F))),
+          m_Button(ui.PushStyleColor(Keire::UiStyleColorRole::Button, tokens.Elevated)),
+          m_ButtonHovered(
+              ui.PushStyleColor(Keire::UiStyleColorRole::ButtonHovered, InteractiveSurface(tokens.Elevated, 0.06F))),
+          m_ButtonActive(
+              ui.PushStyleColor(Keire::UiStyleColorRole::ButtonActive, InteractiveSurface(tokens.Elevated, 0.02F))),
+          m_Header(ui.PushStyleColor(Keire::UiStyleColorRole::Header, tokens.Elevated)),
+          m_HeaderHovered(
+              ui.PushStyleColor(Keire::UiStyleColorRole::HeaderHovered, InteractiveSurface(tokens.Elevated, 0.04F))),
+          m_HeaderActive(
+              ui.PushStyleColor(Keire::UiStyleColorRole::HeaderActive, InteractiveSurface(tokens.Elevated, 0.07F))),
           m_Padding(ui.PushStyleVariable(Keire::UiStyleVariable::WindowPadding, {24.0F, 22.0F})),
           m_Rounding(ui.PushStyleVariable(Keire::UiStyleVariable::WindowRounding, HubDesignTokens::RadiusLarge)),
           m_Border(ui.PushStyleVariable(Keire::UiStyleVariable::WindowBorderSize, HubDesignTokens::BorderWidth)),

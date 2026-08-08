@@ -32,6 +32,8 @@ capabilities and remaining production-readiness work directly rather than presen
 | **Keire.Managed** | Exposes the supported .NET 10 / C# 14 gameplay surface through stable value handles rather than native pointers. |
 
 The Hub is the normal entry point. Direct editor launch remains available for automation and focused development.
+Its task and notification centers retain useful history across restarts; finished tasks and read notifications can be
+dismissed individually, and the task center can clear all finished work at once.
 
 ## What Is Implemented
 

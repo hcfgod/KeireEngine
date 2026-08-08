@@ -93,6 +93,10 @@ selector rejects unhealthy or entrypoint-less installations, out-of-range projec
 below the project minimum, and versions older than the last save; preferred-installation metadata is only a preference
 inside that compatible set. Launch uses version-neutral descriptor inspection so the Hub can safely dispatch a newer
 project to a validated newer editor without attempting to open it through the Hub build itself.
+Upgrade-and-reopen dispatch skips a pre-launch metadata scan that could race the new editor's lock. A tracked process
+exit requests a coalesced follow-up scan, ensuring the persisted lock state is refreshed without performing filesystem
+work on the UI thread. Hub modal styling is centralized around semantic appearance tokens, including frame, button,
+header, border, text, and status colors, so every project and recovery dialog follows the selected Hub appearance.
 
 Package transfer runs in `KeireHubWorker`, not in UI components. The Hub creates one confined operation directory with
 atomic request, status, result, and control documents; the worker rejects aliased or escaping protocol paths. The
@@ -110,6 +114,8 @@ produced by older builds, moving Hub-owned preference, cache, temporary, and tas
 unrelated non-empty roots. The task-to-notification tracker observes state transitions on the owner thread: first
 observation is silent, new/retried work emits one start event, and successful or cancelled terminal transitions emit
 durable activity history while progress remains an immutable task snapshot.
+Terminal package tasks are removed only by the coordinator's serialized control queue; bulk removal atomically erases
+terminal records while preserving active work. Read notifications use the notification store's atomic removal path.
 
 The general process boundary prepares owned POSIX argument storage before `fork`; the child performs only descriptor
 redirection, directory change, `execv`, and `_exit`. Windows capture launches use an explicit process-thread handle

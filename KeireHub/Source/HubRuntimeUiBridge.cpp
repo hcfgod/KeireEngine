@@ -163,7 +163,10 @@ namespace KeireHub
                  .Pausable = task.State == HubTaskState::Downloading || task.State == HubTaskState::Paused,
                  .Paused = task.State == HubTaskState::Paused,
                  .Cancellable = !IsTerminal(task.State) && task.State != HubTaskState::Cancelling,
-                 .Retryable = task.State == HubTaskState::Failed && task.Failure && task.Failure->Retryable});
+                 .Retryable = task.State == HubTaskState::Failed && task.Failure && task.Failure->Retryable,
+                 .Dismissible = IsTerminal(task.State) &&
+                                !(task.Kind == HubTaskKind::Remove && task.State == HubTaskState::Failed &&
+                                  task.Failure && task.Failure->Retryable)});
         }
     }
 
@@ -182,8 +185,14 @@ namespace KeireHub
             return tasks.Retry(command.ItemId, nowUnixSeconds);
         case HubUiCommandType::CancelTask:
             return tasks.RequestCancel(command.ItemId, nowUnixSeconds);
+        case HubUiCommandType::DismissTask:
+            return controller.Tasks().RemoveTerminal(command.ItemId);
+        case HubUiCommandType::ClearFinishedTasks:
+            return controller.Tasks().ClearTerminal();
         case HubUiCommandType::MarkNotificationRead:
             return controller.Notifications().MarkRead(command.ItemId);
+        case HubUiCommandType::DismissNotification:
+            return controller.Notifications().Remove(command.ItemId);
         case HubUiCommandType::ClearNotifications:
             return controller.Notifications().Clear();
         default:

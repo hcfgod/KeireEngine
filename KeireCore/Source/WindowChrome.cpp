@@ -170,6 +170,29 @@ namespace Keire::Detail
         return result;
     }
 
+    bool WindowChromeHitTestCache::BeginCaptionPress(const WindowChromeRole role) noexcept
+    {
+        if (role < WindowChromeRole::Minimize || role > WindowChromeRole::Close)
+            return false;
+        m_PressedCaptionRole.store(role, std::memory_order_release);
+        return true;
+    }
+
+    bool WindowChromeHitTestCache::CompleteCaptionPress(const WindowPosition position,
+                                                        WindowChromeRole& activatedRole) noexcept
+    {
+        const auto pressed = m_PressedCaptionRole.exchange(WindowChromeRole::Client, std::memory_order_acq_rel);
+        activatedRole =
+            pressed != WindowChromeRole::Client && RoleAt(position) == pressed ? pressed : WindowChromeRole::Client;
+        return pressed != WindowChromeRole::Client;
+    }
+
+    bool WindowChromeHitTestCache::CancelCaptionPress() noexcept
+    {
+        return m_PressedCaptionRole.exchange(WindowChromeRole::Client, std::memory_order_acq_rel) !=
+               WindowChromeRole::Client;
+    }
+
     bool WindowChromeHitTestCache::Attach(SDL_Window* window) noexcept
     {
         if (!window || m_Window)
@@ -195,6 +218,7 @@ namespace Keire::Detail
     {
         if (!m_Window)
             return;
+        (void)CancelCaptionPress();
         ReleasePlatformCustomChrome(m_Window, *this);
         (void)SDL_SetWindowHitTest(m_Window, nullptr, nullptr);
         m_Window = nullptr;

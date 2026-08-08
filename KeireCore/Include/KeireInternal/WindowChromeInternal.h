@@ -20,6 +20,9 @@ namespace Keire::Detail
 
         void Store(const WindowChromeLayout& layout) noexcept;
         [[nodiscard]] WindowChromeRole RoleAt(WindowPosition position) const noexcept;
+        [[nodiscard]] bool BeginCaptionPress(WindowChromeRole role) noexcept;
+        [[nodiscard]] bool CompleteCaptionPress(WindowPosition position, WindowChromeRole& activatedRole) noexcept;
+        bool CancelCaptionPress() noexcept;
         [[nodiscard]] bool Resizable() const noexcept { return m_Resizable; }
         [[nodiscard]] bool Attach(SDL_Window* window) noexcept;
         void Detach() noexcept;
@@ -36,6 +39,7 @@ namespace Keire::Detail
         const bool m_Resizable;
         SDL_Window* m_Window = nullptr;
         std::atomic<std::uintptr_t> m_PlatformProcedure{0};
+        std::atomic<WindowChromeRole> m_PressedCaptionRole{WindowChromeRole::Client};
     };
 
     void ValidateWindowSpecification(const WindowSpecification& specification);

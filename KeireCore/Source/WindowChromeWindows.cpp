@@ -37,6 +37,39 @@ namespace Keire::Detail
             }
         }
 
+        [[nodiscard]] WindowChromeRole CaptionRole(const WPARAM hitResult) noexcept
+        {
+            switch (hitResult)
+            {
+            case HTMINBUTTON:
+                return WindowChromeRole::Minimize;
+            case HTMAXBUTTON:
+                return WindowChromeRole::MaximizeRestore;
+            case HTCLOSE:
+                return WindowChromeRole::Close;
+            default:
+                return WindowChromeRole::Client;
+            }
+        }
+
+        void PerformCaptionAction(HWND window, const WindowChromeRole role) noexcept
+        {
+            switch (role)
+            {
+            case WindowChromeRole::Minimize:
+                (void)PostMessageW(window, WM_SYSCOMMAND, SC_MINIMIZE, 0);
+                break;
+            case WindowChromeRole::MaximizeRestore:
+                (void)PostMessageW(window, WM_SYSCOMMAND, IsZoomed(window) ? SC_RESTORE : SC_MAXIMIZE, 0);
+                break;
+            case WindowChromeRole::Close:
+                (void)PostMessageW(window, WM_SYSCOMMAND, SC_CLOSE, 0);
+                break;
+            default:
+                break;
+            }
+        }
+
         LRESULT CALLBACK ChromeWindowProcedure(HWND window, const UINT message, const WPARAM wParam,
                                                const LPARAM lParam)
         {
@@ -59,6 +92,38 @@ namespace Keire::Detail
                     if (role >= WindowChromeRole::SystemMenu || (IsResizeRole(role) && !cache->Resizable()))
                         return CaptionHitResult(role);
                 }
+            }
+            else if (message == WM_NCLBUTTONDOWN || message == WM_NCLBUTTONDBLCLK)
+            {
+                // Native caption hit results keep Windows 11 Snap Layouts available, but they also remove the press
+                // from SDL's client input stream. Own the complete transaction so the rendered button cannot miss it.
+                if (cache->BeginCaptionPress(CaptionRole(wParam)))
+                {
+                    (void)SetCapture(window);
+                    return 0;
+                }
+            }
+            else if (message == WM_LBUTTONUP || message == WM_NCLBUTTONUP)
+            {
+                POINT point{};
+                WindowChromeRole role = WindowChromeRole::Client;
+                bool completedCaptionPress = false;
+                if (GetCursorPos(&point) && ScreenToClient(window, &point))
+                    completedCaptionPress = cache->CompleteCaptionPress({point.x, point.y}, role);
+                else
+                    completedCaptionPress = cache->CancelCaptionPress();
+
+                if (GetCapture() == window)
+                    (void)ReleaseCapture();
+                if (completedCaptionPress)
+                {
+                    PerformCaptionAction(window, role);
+                    return 0;
+                }
+            }
+            else if (message == WM_CANCELMODE || message == WM_CAPTURECHANGED)
+            {
+                (void)cache->CancelCaptionPress();
             }
             else if (message == WM_GETMINMAXINFO && lParam != 0)
             {

@@ -124,6 +124,9 @@ The editor watches `.cs` and `.keireasm` files. After the newest change settles,
 5. publishes a new immutable generation only when all steps succeed;
 6. reloads active Play Mode instances transactionally.
 
+Runtime script compilation disables persistent .NET build and shared compiler servers. Closing the editor therefore
+does not leave a compiler process running from the bundled SDK or keep the editor installation locked.
+
 Attach a successfully compiled script with any of these editor workflows:
 
 - choose **Add Component > Scripts** in the Inspector;

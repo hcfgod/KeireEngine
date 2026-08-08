@@ -85,6 +85,7 @@ namespace KeireHub
         [[nodiscard]] HubStatus SetWorkerProcess(const std::string& taskId, std::optional<std::uint64_t> processId,
                                                  std::uint64_t updatedUnixSeconds);
         [[nodiscard]] HubStatus RemoveTerminal(const std::string& taskId);
+        [[nodiscard]] HubStatus ClearTerminal();
 
         [[nodiscard]] std::shared_ptr<const std::vector<HubTask>> Snapshot() const noexcept;
         [[nodiscard]] const std::filesystem::path& Path() const noexcept;

@@ -174,6 +174,8 @@ namespace KeireHub
         [[nodiscard]] HubStatus Resume(const std::string& taskId);
         [[nodiscard]] HubStatus Cancel(const std::string& taskId);
         [[nodiscard]] HubStatus Retry(const std::string& taskId);
+        [[nodiscard]] HubStatus Dismiss(const std::string& taskId);
+        [[nodiscard]] HubStatus ClearFinished();
 
         [[nodiscard]] std::shared_ptr<const HubWorkerCoordinatorSnapshot> Snapshot() const noexcept;
         // Detached workers are intentionally left running; their journals and PIDs are reconciled at the next start.

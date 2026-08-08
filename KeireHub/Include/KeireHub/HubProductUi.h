@@ -148,6 +148,7 @@ namespace KeireHub
         bool Paused = false;
         bool Cancellable = false;
         bool Retryable = false;
+        bool Dismissible = false;
     };
 
     struct HubNotificationUiRecord final
@@ -269,6 +270,8 @@ namespace KeireHub
         ResumeTask,
         CancelTask,
         RetryTask,
+        DismissTask,
+        ClearFinishedTasks,
         DownloadHubUpdate,
         InstallHubUpdate,
         AccountSignIn,
@@ -276,6 +279,7 @@ namespace KeireHub
         AccountSignOut,
         SaveAccountProfile,
         MarkNotificationRead,
+        DismissNotification,
         ClearNotifications
     };
 

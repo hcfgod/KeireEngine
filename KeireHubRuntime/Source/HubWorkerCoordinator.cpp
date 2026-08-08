@@ -52,12 +52,25 @@ namespace KeireHub
                    (request.Mode == HubWorkerEditorInstallMode::Repair && kind == HubTaskKind::Repair);
         }
 
+        [[nodiscard]] bool SameEditorRemoval(const HubWorkerEditorRemovalRequest& left,
+                                             const HubWorkerEditorRemovalRequest& right) noexcept
+        {
+            return left.AllowedInstallRoot.lexically_normal() == right.AllowedInstallRoot.lexically_normal() &&
+                   left.Root.lexically_normal() == right.Root.lexically_normal() &&
+                   left.InstallationId == right.InstallationId &&
+                   left.ManifestFingerprint == right.ManifestFingerprint &&
+                   left.PackageTreeIdentity == right.PackageTreeIdentity &&
+                   left.PackageReceiptSha256 == right.PackageReceiptSha256 && left.MarkerNonce == right.MarkerNonce;
+        }
+
         enum class ControlAction
         {
             Pause,
             Resume,
             Cancel,
-            Retry
+            Retry,
+            Dismiss,
+            ClearFinished
         };
 
         struct QueueCommand final
@@ -281,6 +294,35 @@ namespace KeireHub
                                            .Message = "A task with this identity already exists.",
                                            .AffectedItem = taskId});
             }
+            if (command.EditorRemoval && m_Snapshot->Tasks)
+            {
+                for (const auto& task : *m_Snapshot->Tasks)
+                {
+                    if (task.Kind != HubTaskKind::Remove || task.State != HubTaskState::Failed || !task.Failure ||
+                        !task.Failure->Retryable || task.TargetInstallationId != command.EditorRemoval->InstallationId)
+                    {
+                        continue;
+                    }
+                    const auto previous =
+                        ReadHubWorkerRequest(PathsFor(m_Specification.OperationRoot, task.Id).Request);
+                    if (!previous || !previous.Value().EditorRemoval ||
+                        !SameEditorRemoval(*previous.Value().EditorRemoval, *command.EditorRemoval))
+                    {
+                        continue;
+                    }
+                    const bool retryPending = std::ranges::any_of(
+                        m_Commands,
+                        [&](const CoordinatorCommand& pending)
+                        {
+                            const auto* control = std::get_if<ControlCommand>(&pending);
+                            return control && control->Action == ControlAction::Retry && control->TaskId == task.Id;
+                        });
+                    if (!retryPending)
+                        m_Commands.emplace_back(ControlCommand{.Action = ControlAction::Retry, .TaskId = task.Id});
+                    m_Wake.notify_one();
+                    return HubStatus::Success();
+                }
+            }
             const auto targetInstallation = command.EditorInstall ? std::optional(command.EditorInstall->InstallationId)
                                             : command.EditorRemoval
                                                 ? std::optional(command.EditorRemoval->InstallationId)
@@ -317,7 +359,7 @@ namespace KeireHub
 
         HubStatus SubmitControl(const ControlAction action, const std::string& taskId)
         {
-            if (!Detail::IsBoundedIdentifier(taskId))
+            if (action != ControlAction::ClearFinished && !Detail::IsBoundedIdentifier(taskId))
             {
                 return HubStatus::Failure({.Code = HubErrorCode::InvalidArgument,
                                            .Message = "The package task identity is invalid.",
@@ -328,7 +370,8 @@ namespace KeireHub
                 return StoppedError(taskId);
             if (m_Commands.size() >= m_Specification.MaximumPendingCommands)
                 return QueueFullError(taskId);
-            if (m_Snapshot->State == HubWorkerCoordinatorState::Ready && m_Snapshot->Tasks &&
+            if (action != ControlAction::ClearFinished && m_Snapshot->State == HubWorkerCoordinatorState::Ready &&
+                m_Snapshot->Tasks &&
                 std::ranges::find(*m_Snapshot->Tasks, taskId, &HubTask::Id) == m_Snapshot->Tasks->end() &&
                 !m_PendingTaskIds.contains(taskId))
             {
@@ -583,11 +626,15 @@ namespace KeireHub
 
         [[nodiscard]] HubStatus Control(HubTaskStore& store, HubTaskManager& manager, const ControlCommand& command)
         {
+            if (command.Action == ControlAction::ClearFinished)
+                return store.ClearTerminal();
             const auto task = FindTask(store, command.TaskId);
             if (!task)
                 return HubStatus::Failure({.Code = HubErrorCode::NotFound,
                                            .Message = "The task is no longer available.",
                                            .AffectedItem = command.TaskId});
+            if (command.Action == ControlAction::Dismiss)
+                return store.RemoveTerminal(command.TaskId);
             const auto paths = PathsFor(m_Specification.OperationRoot, command.TaskId);
             if (auto status = PrepareOperationDirectory(m_Specification.OperationRoot, paths); !status)
                 return status;
@@ -638,6 +685,9 @@ namespace KeireHub
                 if (auto status = ResetForDispatch(paths); !status)
                     return status;
                 return manager.Retry(command.TaskId, now);
+            case ControlAction::Dismiss:
+            case ControlAction::ClearFinished:
+                break;
             }
             return HubStatus::Failure({.Code = HubErrorCode::InvalidArgument,
                                        .Message = "The package task command is invalid.",
@@ -1350,6 +1400,13 @@ namespace KeireHub
     {
         return m_Impl->SubmitControl(ControlAction::Retry, taskId);
     }
+
+    HubStatus HubWorkerCoordinator::Dismiss(const std::string& taskId)
+    {
+        return m_Impl->SubmitControl(ControlAction::Dismiss, taskId);
+    }
+
+    HubStatus HubWorkerCoordinator::ClearFinished() { return m_Impl->SubmitControl(ControlAction::ClearFinished, {}); }
 
     std::shared_ptr<const HubWorkerCoordinatorSnapshot> HubWorkerCoordinator::Snapshot() const noexcept
     {

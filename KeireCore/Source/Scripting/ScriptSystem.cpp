@@ -3437,6 +3437,7 @@ namespace Keire
                           "$(MSBuildProjectName)\\</BaseIntermediateOutputPath>\n"
                           "    <MSBuildProjectExtensionsPath>$(BaseIntermediateOutputPath)</"
                           "MSBuildProjectExtensionsPath>\n"
+                          "    <UseSharedCompilation>false</UseSharedCompilation>\n"
                           "  </PropertyGroup>\n</Project>\n");
 
                 const auto managedApiOutput = staging / "ManagedApi";
@@ -3469,8 +3470,11 @@ namespace Keire
                             "--configuration",
                             "Release",
                             "--nologo",
+                            "--disable-build-servers",
+                            "/nodeReuse:false",
                             "--output",
                             PathText(managedApiOutput),
+                            "--property:UseSharedCompilation=false",
                             "--property:BaseIntermediateOutputPath=" + PathText(managedApiIntermediate) + "/"};
                         auto managedApiProcess = Detail::ChildProcess::Start(Dotnet, managedApiArguments, staging);
                         while (!managedApiProcess.Poll())
@@ -3527,9 +3531,16 @@ namespace Keire
                     throw ManagedBuildState::Cancelled;
 
                 SetState(ManagedBuildState::Compiling);
-                const std::vector<std::string> arguments{
-                    "build",    PathText(aggregatorPath),        "--configuration", request.Configuration, "--nologo",
-                    "--output", PathText(staging / "Assemblies")};
+                const std::vector<std::string> arguments{"build",
+                                                         PathText(aggregatorPath),
+                                                         "--configuration",
+                                                         request.Configuration,
+                                                         "--nologo",
+                                                         "--disable-build-servers",
+                                                         "/nodeReuse:false",
+                                                         "--output",
+                                                         PathText(staging / "Assemblies"),
+                                                         "--property:UseSharedCompilation=false"};
                 auto process = Detail::ChildProcess::Start(Dotnet, arguments, staging);
                 while (!process.Poll())
                 {

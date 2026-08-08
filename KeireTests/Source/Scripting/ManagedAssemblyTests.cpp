@@ -261,6 +261,11 @@ TEST_CASE("Managed builds publish only successful replacements")
     REQUIRE(scripts->BuildStatus().State == Keire::ManagedBuildState::Succeeded);
     const auto active = scripts->BuildStatus().ActiveAssemblyDirectory / "Gameplay.dll";
     REQUIRE(std::filesystem::is_regular_file(active));
+    const auto buildProperties =
+        ReadBytes(root / "Library/ScriptAssemblies/Intermediate/Projects/Directory.Build.props");
+    const std::string buildPropertiesText(reinterpret_cast<const char*>(buildProperties.data()),
+                                          buildProperties.size());
+    CHECK(buildPropertiesText.find("<UseSharedCompilation>false</UseSharedCompilation>") != std::string::npos);
     const auto successfulWrite = std::filesystem::last_write_time(active);
 
     {

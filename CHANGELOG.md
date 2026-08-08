@@ -1,5 +1,14 @@
 # Changelog
 
+- Added durable task and notification cleanup in the Hub, including per-item dismissal and bulk clearing of finished
+  tasks. All project dialogs now follow the selected Hub appearance, recovery presents transaction-specific guidance,
+  and upgraded projects refresh lock metadata after the launched editor exits instead of remaining falsely in use.
+- Fixed managed script builds leaving the bundled .NET compiler server alive after editor shutdown, which locked the
+  editor installation on Windows. Repeating a retryable managed-editor removal now resumes its journal-owning task
+  instead of creating a conflicting removal operation.
+- Fixed Windows custom-caption clicks being consumed after hover without completing the minimize, maximize/restore, or
+  close action. Caption buttons now use one native press/release transaction, cancel when released outside their
+  original region, and retain Windows 11 Snap Layout discovery on the maximize button.
 - Fixed editor-install, project-creation, and project-upgrade dialogs ending their popup scope before drawing their
   contents, which left the Hub dimmed while rendering the dialog controls as ordinary page content.
 - Added a packaged Windows distribution-host supervisor for limited-user Task Scheduler deployments. It validates a

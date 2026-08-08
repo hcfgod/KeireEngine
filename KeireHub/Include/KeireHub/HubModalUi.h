@@ -16,7 +16,17 @@ namespace KeireHub
 
       private:
         Keire::UiStyleColorScope m_Background;
+        Keire::UiStyleColorScope m_Text;
         Keire::UiStyleColorScope m_BorderColor;
+        Keire::UiStyleColorScope m_FrameBackground;
+        Keire::UiStyleColorScope m_FrameBackgroundHovered;
+        Keire::UiStyleColorScope m_FrameBackgroundActive;
+        Keire::UiStyleColorScope m_Button;
+        Keire::UiStyleColorScope m_ButtonHovered;
+        Keire::UiStyleColorScope m_ButtonActive;
+        Keire::UiStyleColorScope m_Header;
+        Keire::UiStyleColorScope m_HeaderHovered;
+        Keire::UiStyleColorScope m_HeaderActive;
         Keire::UiStyleVariableScope m_Padding;
         Keire::UiStyleVariableScope m_Rounding;
         Keire::UiStyleVariableScope m_Border;

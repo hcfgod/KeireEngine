@@ -69,7 +69,7 @@ namespace KeireHub
         void DrawTaskActivityCard(Keire::UiFrame& ui, const HubDesignTokens& tokens, const HubTaskUiRecord& task,
                                   HubUiCommand& command)
         {
-            const float height = task.Active || task.Retryable ? 146.0F : 112.0F;
+            const float height = task.Active || task.Retryable || task.Dismissible ? 146.0F : 112.0F;
             [[maybe_unused]] const auto cardBackground =
                 ui.PushStyleColor(Keire::UiStyleColorRole::ChildBackground, tokens.Elevated);
             if (auto card = ui.BeginChild("TaskActivityCard", {0.0F, height}, true); card)
@@ -122,6 +122,12 @@ namespace KeireHub
                     ui.SameLine();
                     if (HubPrimaryButton(ui, tokens, "Retry", {82.0F, 30.0F}))
                         command = {.Type = HubUiCommandType::RetryTask, .ItemId = task.Id};
+                }
+                if (task.Dismissible)
+                {
+                    ui.SameLine();
+                    if (HubSecondaryButton(ui, tokens, "Dismiss", {82.0F, 30.0F}))
+                        command = {.Type = HubUiCommandType::DismissTask, .ItemId = task.Id};
                 }
             }
         }
@@ -1376,6 +1382,12 @@ namespace KeireHub
             }
             ui.TextColored(m_Tokens.SecondaryText, "Downloads, verification, installation, and recent results.");
             ui.SameLine();
+            if (std::ranges::any_of(snapshot.Tasks, &HubTaskUiRecord::Dismissible) &&
+                ui.Button("Clear finished##TaskCenter", {104.0F, 26.0F}))
+            {
+                command.Type = HubUiCommandType::ClearFinishedTasks;
+            }
+            ui.SameLine();
             if (ui.Button("Close##TaskCenter", {64.0F, 26.0F}))
                 m_TaskCenterOpen = false;
             if (snapshot.Tasks.empty())
@@ -1450,6 +1462,8 @@ namespace KeireHub
                     ui.TextColoredWrapped(m_Tokens.SecondaryText, notification.Message);
                     if (!notification.Read && HubSecondaryButton(ui, m_Tokens, "Mark read", {92.0F, 28.0F}))
                         command = {.Type = HubUiCommandType::MarkNotificationRead, .ItemId = notification.Id};
+                    if (notification.Read && HubSecondaryButton(ui, m_Tokens, "Dismiss", {92.0F, 28.0F}))
+                        command = {.Type = HubUiCommandType::DismissNotification, .ItemId = notification.Id};
                 }
                 ui.Spacing();
             }

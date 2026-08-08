@@ -18,9 +18,10 @@ Typed font, color, spacing, wrapping, table, focus, positioning, and bounded-ima
 facade; Hub code does not own Dear ImGui style or texture state. Sidebar navigation, documentation, appearance,
 project-view, and caption controls use the packaged licensed icon subset through that facade, with selected/hover
 states, compact-rail tooltips, and a fallback for clients that do not configure the icon font.
-Windows additionally maps the maximize region to `HTMAXBUTTON` for Snap Layouts; macOS retains native traffic lights;
-Linux uses SDL client-side hit testing and falls back to native decorations when the compositor cannot support it. The
-default logical size is 1280x800, the minimum is 960x640, and the 224-pixel navigation rail collapses below 1080 pixels.
+Windows maps the caption regions to native non-client roles, retains `HTMAXBUTTON` for Snap Layouts, and completes each
+button action only when the pointer is released over the same region; macOS retains native traffic lights. Linux uses
+SDL client-side hit testing and falls back to native decorations when the compositor cannot support it. The default
+logical size is 1280x800, the minimum is 960x640, and the 224-pixel navigation rail collapses below 1080 pixels.
 
 ## Product areas
 
@@ -65,11 +66,14 @@ Installs/Locate flow rather than a placeholder action.
 Project metadata and thumbnails are scanned asynchronously with bounded filesystem work. Once a scan is ready, all
 cached project metadata is validated together and persisted in one atomic registry write. If any project disappeared or
 any result is invalid or duplicated, no project receives a partial metadata refresh and the prior thumbnail snapshot is
-retained.
+retained. Opening a project after an upgrade does not publish an intermediate pre-launch scan, and every tracked editor
+exit requests a coalesced metadata refresh so a closed project cannot retain a stale **Open in another editor** state.
 
 Schema upgrades and interrupted-upgrade recovery use a confirmation modal backed by an asynchronous coordinator.
 Planning, apply, recovery, rollback, staged validation, and backup work stay off the UI owner thread; the modal exposes
-only immutable progress/result state and never performs filesystem mutation inside an ImGui frame.
+only immutable progress/result state and never performs filesystem mutation inside an ImGui frame. Upgrade and recovery
+copy, semantic colors, and actions reflect the actual transaction state. This modal and every project action dialog use
+the selected Hub appearance instead of inheriting a conflicting operating-system theme.
 
 Installs lists managed and externally located editor installations with version, channel, platform/architecture, path,
 installed size, bundled .NET SDK, project/component counts, activity, and verified health. Locating an editor validates
@@ -81,9 +85,11 @@ Hub process tracker and the native executable-path probe to report the editor in
 fail closed. This covers editors launched outside the Hub or left running across a Hub restart. The worker revalidates
 the exact marker, receipt, manifest, declared bytes, and absence of undeclared files immediately before atomically
 renaming the root to a same-parent tombstone. A durable journal resumes an interrupted purge, and the Hub removes the
-registry entry only after the root is absent and every persisted identity field still matches. Damaged receipt-bound
-managed installations expose **Repair** when no editor or installation task is active. Repair resolves the exact signed
-editor and component versions recorded by the registry, downloads and verifies that complete dependency closure, and
+registry entry only after the root is absent and every persisted identity field still matches. Repeating Remove after
+a retryable failure resumes the task identity that owns that journal instead of creating a conflicting removal owner.
+The recovery task stays in the task center until it succeeds or is no longer retryable. Damaged receipt-bound managed
+installations expose **Repair** when no editor or installation task is active. Repair resolves the exact signed editor
+and component versions recorded by the registry, downloads and verifies that complete dependency closure, and
 atomically replaces the damaged tree while preserving its installation ID and ownership nonce. An ordinary install
 cannot use this replacement path. Legacy registrations without a receipt-bound package set retain recovery guidance
 instead of an unsafe repair action.
@@ -122,6 +128,10 @@ active and recent terminal tasks remain visible in the task center, and recovere
 confined cancellation action. A successful import or repair always requests a post-completion inventory refresh; if an
 older scan is still running, refresh requests coalesce into exactly one follow-up scan instead of publishing stale
 pre-install component state as final.
+
+Terminal package tasks can be dismissed individually, or cleared together with **Clear finished**; active tasks remain
+untouched. Notifications preserve unread state, then expose **Dismiss** after they have been read. These actions update
+the durable stores, so cleared history does not return on the next Hub launch.
 
 Installed component discovery and inventory validation run on a background workflow. Home, first run, and the component
 modal consume immutable snapshots and show a deliberate checking state while that scan is active; package enumeration,

@@ -14,6 +14,12 @@ namespace KeireHub
         constexpr std::size_t MaximumTasks = 512;
         constexpr std::size_t MaximumPackagesPerTask = 128;
 
+        [[nodiscard]] bool OwnsRetryableRemovalRecovery(const HubTask& task) noexcept
+        {
+            return task.Kind == HubTaskKind::Remove && task.State == HubTaskState::Failed && task.Failure &&
+                   task.Failure->Retryable;
+        }
+
         [[nodiscard]] std::string_view ToString(const HubTaskKind value) noexcept
         {
             constexpr std::array names{"download", "install", "verify",    "repair",
@@ -426,7 +432,22 @@ namespace KeireHub
             return HubStatus::Failure({.Code = HubErrorCode::InvalidTransition,
                                        .Message = "An active task cannot be removed from history.",
                                        .AffectedItem = taskId});
+        if (OwnsRetryableRemovalRecovery(*found))
+            return HubStatus::Failure({.Code = HubErrorCode::InvalidTransition,
+                                       .Message = "Retry or resolve this editor removal before dismissing it.",
+                                       .AffectedItem = taskId});
         tasks.erase(found);
+        return Commit(std::move(tasks));
+    }
+
+    HubStatus HubTaskStore::ClearTerminal()
+    {
+        auto tasks = *m_Snapshot;
+        const auto previousSize = tasks.size();
+        std::erase_if(tasks, [](const HubTask& task)
+                      { return IsTerminal(task.State) && !OwnsRetryableRemovalRecovery(task); });
+        if (tasks.size() == previousSize)
+            return HubStatus::Success();
         return Commit(std::move(tasks));
     }
 

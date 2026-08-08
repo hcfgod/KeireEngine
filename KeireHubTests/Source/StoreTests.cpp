@@ -319,6 +319,43 @@ TEST_CASE("Active tasks cannot be removed from history")
     CHECK(store.Snapshot()->empty());
 }
 
+TEST_CASE("Clearing finished task history preserves active work")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    HubTaskStore store(temporary.Path() / "tasks.json");
+    auto finished = QueuedTask();
+    auto active = QueuedTask();
+    active.Id = "task-b";
+    REQUIRE(store.Add(std::move(finished)));
+    REQUIRE(store.Add(std::move(active)));
+    REQUIRE(store.Transition("task-a", HubTaskState::Cancelled, 11));
+
+    REQUIRE(store.ClearTerminal());
+    REQUIRE(store.Snapshot()->size() == 1);
+    CHECK(store.Snapshot()->front().Id == "task-b");
+    CHECK(store.Snapshot()->front().State == HubTaskState::Queued);
+}
+
+TEST_CASE("Retryable editor removals retain their recovery task")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    HubTaskStore store(temporary.Path() / "tasks.json");
+    auto removal = QueuedTask();
+    removal.Kind = HubTaskKind::Remove;
+    removal.TargetInstallationId = "editor-1";
+    REQUIRE(store.Add(std::move(removal)));
+    REQUIRE(store.Transition("task-a", HubTaskState::Failed, 11,
+                             HubError{.Code = HubErrorCode::IoWrite,
+                                      .Message = "The editor is still locked.",
+                                      .Retryable = true,
+                                      .AffectedItem = "editor-1"}));
+
+    CHECK_FALSE(store.RemoveTerminal("task-a"));
+    REQUIRE(store.ClearTerminal());
+    REQUIRE(store.Snapshot()->size() == 1);
+    CHECK(store.Snapshot()->front().Id == "task-a");
+}
+
 TEST_CASE("Notification history is bounded newest-first and tracks unread count")
 {
     KeireHubTests::TemporaryDirectory temporary;
@@ -344,4 +381,7 @@ TEST_CASE("Notification history is bounded newest-first and tracks unread count"
     CHECK(store.UnreadCount() == 2);
     REQUIRE(store.MarkRead("three"));
     CHECK(store.UnreadCount() == 1);
+    REQUIRE(store.Remove("three"));
+    REQUIRE(store.Snapshot()->size() == 1);
+    CHECK(store.Snapshot()->front().Id == "two");
 }

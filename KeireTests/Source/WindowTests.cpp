@@ -1,6 +1,7 @@
 #include "Keire/Window.h"
 
 #include "KeireInternal/TrayIconInternal.h"
+#include "KeireInternal/WindowChromeInternal.h"
 #include "KeireInternal/WindowInternal.h"
 
 #include <SDL3/SDL.h>
@@ -101,6 +102,35 @@ TEST_CASE("Window chrome layouts are bounded and later regions override earlier 
     for (std::size_t index = 0; index < Keire::WindowChromeLayout::MaximumRegions; ++index)
         REQUIRE(full.Add({Keire::WindowChromeRole::Client, {static_cast<std::int32_t>(index), 0, 1, 1}}));
     CHECK_FALSE(full.Add({Keire::WindowChromeRole::Client, {0, 0, 1, 1}}));
+}
+
+TEST_CASE("Window chrome caption presses activate only on a matching release")
+{
+    Keire::WindowChromeLayout layout;
+    REQUIRE(layout.Add({Keire::WindowChromeRole::Minimize, {656, 0, 48, 40}}));
+    REQUIRE(layout.Add({Keire::WindowChromeRole::MaximizeRestore, {704, 0, 48, 40}}));
+    REQUIRE(layout.Add({Keire::WindowChromeRole::Close, {752, 0, 48, 40}}));
+    Keire::Detail::WindowChromeHitTestCache cache(true);
+    cache.Store(layout);
+
+    CHECK_FALSE(cache.BeginCaptionPress(Keire::WindowChromeRole::Drag));
+    auto activated = Keire::WindowChromeRole::Close;
+    CHECK_FALSE(cache.CompleteCaptionPress({720, 20}, activated));
+    CHECK(activated == Keire::WindowChromeRole::Client);
+
+    REQUIRE(cache.BeginCaptionPress(Keire::WindowChromeRole::MaximizeRestore));
+    CHECK(cache.CompleteCaptionPress({720, 20}, activated));
+    CHECK(activated == Keire::WindowChromeRole::MaximizeRestore);
+
+    REQUIRE(cache.BeginCaptionPress(Keire::WindowChromeRole::Minimize));
+    CHECK(cache.CompleteCaptionPress({780, 20}, activated));
+    CHECK(activated == Keire::WindowChromeRole::Client);
+
+    REQUIRE(cache.BeginCaptionPress(Keire::WindowChromeRole::Close));
+    CHECK(cache.CancelCaptionPress());
+    CHECK_FALSE(cache.CancelCaptionPress());
+    CHECK_FALSE(cache.CompleteCaptionPress({780, 20}, activated));
+    CHECK(activated == Keire::WindowChromeRole::Client);
 }
 
 TEST_CASE("WindowSystem initialization failures retain SDL diagnostics")
