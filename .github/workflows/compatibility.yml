@@ -30,7 +30,7 @@ jobs:
           - {name: Windows Clang Coverage, runner: windows-2022, generator: ninja, architecture: x86_64, toolset: clang, configuration: Coverage, mode: coverage}
           - {name: VS2022 ARM64, runner: windows-11-arm, generator: vs2022, architecture: ARM64, toolset: msc, configuration: Debug, mode: test}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: recursive
       - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
@@ -92,7 +92,7 @@ jobs:
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
       TSAN_OPTIONS: halt_on_error=1
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: recursive
       - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
