@@ -231,7 +231,7 @@ assert_equal "$(package_worktree_policy "$package_policy_fixture" 0 0)" 'false f
 assert_true grep -Fq 'git_worktree_status "$ROOT"' "$ROOT/Scripts/Unix/build-info.sh"
 windows_git_failure_is_not_native_fallback() (
   uname() { printf '%s\n' 'Linux microsoft-standard-WSL2'; }
-  wslpath() { printf '%s\n' 'C:\fixture'; }
+  wslpath() { [[ "$1" == -m ]] && printf '%s\n' 'C:/fixture'; }
   git.exe() { return 1; }
   git() { return 0; }
   ! git_worktree_status /mnt/c/fixture
