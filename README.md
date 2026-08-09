@@ -17,6 +17,7 @@ capabilities and remaining production-readiness work directly rather than presen
 [Website](https://keireengine.duckdns.org/) ·
 [Documentation](https://keireengine.duckdns.org/docs/) ·
 [Download Hub](https://keireengine.duckdns.org/downloads/) ·
+[Previous versions](https://keireengine.duckdns.org/downloads/previous/) ·
 [Roadmap](https://keireengine.duckdns.org/roadmap/) ·
 [Report an issue](https://github.com/hcfgod/KeireEngine/issues/new/choose)
 
@@ -96,6 +97,12 @@ than under `/mnt/c` for correct case-sensitive behavior and substantially better
 
 Large dependency builds default to at most four compiler jobs to remain reliable on ordinary workstations and WSL2.
 Set `KEIRE_BUILD_JOBS` to a positive integer when the machine can safely support a different limit.
+
+Windows and Linux x86-64 are the currently tested public-preview platforms. Download records show the Hub version and
+the corresponding editor version separately, retain complete artifact identity, and link to an append-only previous
+versions page. Linux preview installers are DEB packages for Debian/Ubuntu; Fedora, Arch, openSUSE, and Rocky are
+validated source-build targets. Linux ARM64, Alpine/musl, native macOS, and Metal are not yet claimed as tested
+download targets.
 
 macOS with Ninja and Clang:
 

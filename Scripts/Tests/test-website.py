@@ -18,6 +18,7 @@ PUBLIC_ROUTES = {
     "/features/",
     "/docs/",
     "/downloads/",
+    "/downloads/previous/",
     "/roadmap/",
     "/contact/",
     "/privacy/",
@@ -137,9 +138,9 @@ def validate_page(page: Path) -> None:
 
 def main() -> int:
     pages = sorted(WEBSITE.rglob("*.html"))
-    if len(pages) != 8:
+    if len(pages) != 9:
         raise ValueError(
-            "Website must contain seven public pages and one branded 404 page."
+            "Website must contain eight public pages and one branded 404 page."
         )
     for page in pages:
         validate_page(page)
@@ -171,6 +172,9 @@ def main() -> int:
         "linux",
         "x86_64",
         "arm64",
+        "editorVersion",
+        "publishedAt",
+        "data-download-history",
     ):
         if contract not in downloads:
             raise ValueError(f"Downloads implementation is missing '{contract}'.")
@@ -181,24 +185,31 @@ def main() -> int:
         (WEBSITE / "assets" / "preview-downloads.json").read_text(encoding="utf-8")
     )
     packages = previews.get("packages", [])
-    if previews.get("schemaVersion") != 1 or len(packages) != 1:
+    if previews.get("schemaVersion") != 2 or len(packages) < 1:
         raise ValueError(
-            "Preview download metadata must contain one explicit Windows preview."
+            "Preview download metadata must retain at least one explicit preview."
         )
-    preview = packages[0]
-    if (
-        preview.get("type") != "hubInstallerPreview"
-        or preview.get("platform") != "windows"
-        or preview.get("signed") is not False
-        or preview.get("developmentArtifact") is not True
-        or not str(preview.get("url", "")).startswith("/preview-downloads/")
-        or str(preview.get("sha256", ""))[:8] not in str(preview.get("fileName", ""))
-        or len(str(preview.get("sha256", ""))) != 64
-        or int(preview.get("sizeBytes", 0)) < 1
-    ):
-        raise ValueError(
-            "Preview download metadata does not preserve its unsigned development identity."
-        )
+    release_ids = set()
+    for preview in packages:
+        release_id = str(preview.get("releaseId", ""))
+        if (
+            preview.get("type") != "hubInstallerPreview"
+            or preview.get("platform") not in {"windows", "macos", "linux"}
+            or preview.get("signed") is not False
+            or preview.get("developmentArtifact") is not True
+            or not str(preview.get("editorVersion", ""))
+            or not str(preview.get("publishedAt", "")).endswith("Z")
+            or not release_id
+            or release_id in release_ids
+            or not str(preview.get("url", "")).startswith("/preview-downloads/")
+            or str(preview.get("sha256", ""))[:8] not in str(preview.get("fileName", ""))
+            or len(str(preview.get("sha256", ""))) != 64
+            or int(preview.get("sizeBytes", 0)) < 1
+        ):
+            raise ValueError(
+                "Preview download metadata does not preserve its versioned unsigned development identity."
+            )
+        release_ids.add(release_id)
 
     contact = (WEBSITE / "assets" / "contact.js").read_text(encoding="utf-8")
     if (

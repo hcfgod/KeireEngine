@@ -32,6 +32,9 @@ version tags.
 
 ## Unreleased
 
+- Added versioned Windows and Linux website previews with separate Hub/editor identities, tested-platform disclosures,
+  immutable digest-bound downloads, and an append-only previous-versions page. macOS, Metal, Linux ARM64, and
+  Alpine/musl remain explicitly unclaimed until native validation exists.
 - Added a repeatable Podman matrix for Ubuntu 22.04/24.04, Debian 12, Fedora, Arch, openSUSE Tumbleweed, and Rocky
   Linux 9. Linux bootstrap now handles all four package-manager families, installs a pinned .NET 10 SDK, bounds native
   compilation by default, and installs verified Premake, CMake, Ninja, NASM, or patchelf fallbacks when distro

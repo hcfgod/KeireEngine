@@ -98,6 +98,9 @@ intended Linux release baseline; a binary built against a newer glibc is not rel
 installers target Debian/Ubuntu; RPM/repository publication remains a separate release artifact rather than being
 simulated by the matrix.
 
+The current public-download support claim is Windows x86-64 and mainstream glibc Linux x86-64. Linux ARM64,
+Alpine/musl, native macOS, and Metal remain unobserved and must not be presented as tested download targets.
+
 ## Risk-Based Matrix
 
 | Change type | Required additional validation |
@@ -389,6 +392,15 @@ explicit install action only where a transactional native handoff exists. The Wi
 Hub-generated install root, resume token, and process-wait arguments, waits for that process to close, and verifies the
 registered root and ownership marker before changing files. Run `Scripts/Tests/test-hub-installer-windows.ps1` after
 modifying this contract.
+
+### Development preview retention
+
+Unsigned website previews remain separate from stable catalogs. Publishing a preview copies the validated installer
+under an immutable digest-suffixed filename and appends a schema-2 entry to
+`Website/assets/preview-downloads.json`; it never reuses a filename or silently replaces an earlier record. Each entry
+binds a unique release ID, Hub version, editor version, UTC publication time, platform, architecture, byte size, and
+SHA-256. The current Downloads page selects the newest available preview per platform, while
+`/downloads/previous/` lists every retained artifact that still passes a same-origin availability and size check.
 
 ## Native Editor Installers
 

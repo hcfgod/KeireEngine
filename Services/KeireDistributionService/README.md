@@ -244,7 +244,10 @@ policy; external scripts, external fonts, and inline script/style execution rema
    repository or service-package payloads. Stage them beneath a separate read-only `PreviewDownloads/` directory, or
    set `KEIRE_PREVIEW_DOWNLOAD_ROOT`, and keep their exact size and SHA-256 synchronized with
    `Website/assets/preview-downloads.json`. Use a digest-suffixed filename for every rebuild so immutable browser and
-   proxy caches cannot alias different bytes. Preview builds never belong in a signed stable catalog.
+   proxy caches cannot alias different bytes. Append a new schema-2 record containing a unique release ID, Hub version,
+   editor version, UTC publication time, platform, architecture, exact size, and digest; never replace or remove an
+   earlier record while its artifact is retained. `/downloads/previous/` renders that append-only history and hides
+   any record whose file is missing or has the wrong size. Preview builds never belong in a signed stable catalog.
 5. Confirm `/docs/`, a deep guide route, `/docs/pagefind/pagefind.js`, and a missing `/docs/` route before running
    `scripts/health-check.sh https://distribution.example` or the PowerShell equivalent after deployment.
 

@@ -21,6 +21,20 @@ git submodule update --init --recursive
 Normal bootstrap restores and verifies the commits in `Config/Dependencies.lock`. It does not advance dependency
 pointers or stage Git changes.
 
+## Platform Support Status
+
+| Platform | Current evidence | Public preview |
+| --- | --- | --- |
+| Windows x86-64 | Debug, Release, AddressSanitizer, complete Core/editor/Hub suites, SDK/package consumers, Direct3D 12, and Vulkan | Unsigned native Hub installer |
+| Linux x86-64 (glibc) | Ubuntu 22.04/24.04, Debian 12, Fedora, Arch, openSUSE Tumbleweed, and Rocky Linux 9; GCC warnings-as-errors, Debug/Release, sanitizers, packages, and WSLg Vulkan | Unsigned Hub DEB for Debian/Ubuntu; source builds on the other validated families |
+| Linux ARM64 or Alpine/musl | Build contracts retained but not validated in this audit | Not published |
+| macOS x86-64/ARM64 | Build and packaging contracts retained; native macOS and Metal evidence remains outstanding | Not published |
+
+The [Downloads page](https://keireengine.duckdns.org/downloads/) shows the exact Hub and editor version, architecture,
+signing state, byte size, publication date, and SHA-256 for every preview. Its
+[previous-versions archive](https://keireengine.duckdns.org/downloads/previous/) retains immutable earlier uploads.
+Unsigned development previews are not stable releases and remain outside the signed catalog trust path.
+
 ## First Windows Build
 
 Open PowerShell at the repository root:

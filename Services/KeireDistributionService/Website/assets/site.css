@@ -1136,6 +1136,19 @@ code {
     grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.history-grid {
+    display: grid;
+    gap: 18px;
+}
+
+.history-card {
+    min-width: 0;
+}
+
+.history-card .download-variants {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 310px), 1fr));
+}
+
 .download-card {
     display: flex;
     min-height: 410px;
@@ -1226,6 +1239,12 @@ code {
 .variant-row span {
     color: var(--ink-muted);
     font-size: 0.75rem;
+}
+
+.version-detail {
+    margin: 9px 0 0 !important;
+    color: var(--ink-soft) !important;
+    font-size: 0.76rem !important;
 }
 
 .download-variant .button {

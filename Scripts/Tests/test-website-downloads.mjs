@@ -97,10 +97,13 @@ function validatePreview(document) {
 }
 
 const preview = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     packages: [{
         type: "hubInstallerPreview",
+        releaseId: "windows-x86_64-0.1.0-20260808.1",
         version: "0.1.0",
+        editorVersion: "0.1.0",
+        publishedAt: "2026-08-08T01:06:57Z",
         platform: "windows",
         architecture: "x86_64",
         fileName: "keire-hub-windows-x86_64-0.1.0-preview-aaaaaaaa.exe",
@@ -113,6 +116,8 @@ const preview = {
 };
 assert.equal(validatePreview(preview).length, 1);
 assert.equal(validatePreview({ ...preview, packages: [{ ...preview.packages[0], signed: true }] }).length, 0);
+assert.equal(validatePreview({ ...preview, packages: [{ ...preview.packages[0], editorVersion: "latest" }] }).length, 0);
+assert.equal(validatePreview({ ...preview, packages: [{ ...preview.packages[0], releaseId: "../preview" }] }).length, 0);
 assert.equal(validatePreview({ ...preview, packages: [{ ...preview.packages[0], url: "https://example.com/setup.exe" }] }).length, 0);
 assert.equal(validatePreview({ ...preview, packages: [{ ...preview.packages[0], fileName: "../setup.exe" }] }).length, 0);
 
@@ -182,10 +187,61 @@ for (let index = 0; index < 10 && cards.get("windows").variants.children.length 
 const renderedVariant = cards.get("windows").variants.children[0];
 assert.ok(renderedVariant);
 assert.equal(renderedVariant.className, "download-variant preview-variant");
-assert.equal(renderedVariant.children[2].name, "a");
-assert.equal(renderedVariant.children[2].href, preview.packages[0].url);
-assert.equal(renderedVariant.children[2].download, preview.packages[0].fileName);
+assert.match(renderedVariant.children[2].textContent, /Editor v0\.1\.0/);
+assert.equal(renderedVariant.children[3].name, "a");
+assert.equal(renderedVariant.children[3].href, preview.packages[0].url);
+assert.equal(renderedVariant.children[3].download, preview.packages[0].fileName);
 assert.equal(cards.get("windows").addedClass, "recommended");
 assert.match(cards.get("windows").state.textContent, /Development preview available/);
+
+const historyTargets = new Map();
+const historyStates = new Map();
+for (const platform of ["windows", "macos", "linux"]) {
+    historyTargets.set(platform, new RenderElement("div"));
+    historyStates.set(platform, new RenderElement("span"));
+}
+const historyContext = vm.createContext({
+    console,
+    Date,
+    Intl,
+    HTMLElement: RenderElement,
+    navigator: { platform: "Win32", userAgent: "website-download-history-test", clipboard: { writeText: async () => {} } },
+    document: {
+        createElement(name) {
+            return new RenderElement(name);
+        },
+        querySelector(selector) {
+            if (selector === "[data-download-history]") {
+                return new RenderElement("main");
+            }
+            const platform = /data-history-platform="([a-z]+)"/.exec(selector);
+            if (platform) {
+                return historyTargets.get(platform[1]);
+            }
+            const state = /data-history-state="([a-z]+)"/.exec(selector);
+            return state ? historyStates.get(state[1]) : null;
+        },
+        querySelectorAll() {
+            return [];
+        },
+    },
+    fetch: async (url, options = {}) => {
+        if (url === "/assets/preview-downloads.json") {
+            return { ok: true, status: 200, json: async () => preview };
+        }
+        if (url === preview.packages[0].url && options.method === "HEAD") {
+            return { ok: true, status: 200, headers: { get: () => "4096" } };
+        }
+        return { ok: false, status: 404 };
+    },
+    window: { setTimeout },
+});
+vm.runInContext(source, historyContext, { filename: "downloads-history.js" });
+for (let index = 0; index < 10 && historyTargets.get("windows").children.length === 0; ++index) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+}
+assert.equal(historyTargets.get("windows").children.length, 1);
+assert.match(historyStates.get("windows").textContent, /1 retained release/);
+assert.match(historyStates.get("linux").textContent, /No retained releases/);
 
 console.log("Website download catalog validation passed.");

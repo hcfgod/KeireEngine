@@ -74,6 +74,14 @@ function compareVersions(left, right) {
     return 0;
 }
 
+function comparePreviewCandidates(left, right) {
+    const versionOrder = compareVersions(right.version, left.version);
+    if (versionOrder !== 0) {
+        return versionOrder;
+    }
+    return Date.parse(right.packageRecord.publishedAt) - Date.parse(left.packageRecord.publishedAt);
+}
+
 function safeInstallerName(packageRecord, platform, artifact) {
     if (!Array.isArray(packageRecord.files) || packageRecord.files.length !== 1) {
         return null;
@@ -120,15 +128,19 @@ function validateCatalog(catalog, platform, architecture) {
 }
 
 function validatePreviewMetadata(metadata) {
-    if (!metadata || metadata.schemaVersion !== 1 || !Array.isArray(metadata.packages)) {
+    if (!metadata || metadata.schemaVersion !== 2 || !Array.isArray(metadata.packages)) {
         return [];
     }
     const candidates = [];
     for (const packageRecord of metadata.packages) {
         const version = semanticVersion(packageRecord?.version);
+        const editorVersion = semanticVersion(packageRecord?.editorVersion);
         const expectedSuffix = fileNames[packageRecord?.platform];
         const expectedUrl = `/preview-downloads/${packageRecord?.fileName}`;
-        if (packageRecord?.type !== "hubInstallerPreview" || !version || packageRecord.signed !== false ||
+        if (packageRecord?.type !== "hubInstallerPreview" || !version || !editorVersion ||
+            typeof packageRecord.releaseId !== "string" || !identityPattern.test(packageRecord.releaseId) ||
+            typeof packageRecord.publishedAt !== "string" || !utcTimestampPattern.test(packageRecord.publishedAt) ||
+            !Number.isFinite(Date.parse(packageRecord.publishedAt)) || packageRecord.signed !== false ||
             packageRecord.developmentArtifact !== true || !hosts.some(([platform, architecture]) =>
                 platform === packageRecord.platform && architecture === packageRecord.architecture) ||
             typeof packageRecord.fileName !== "string" || !installerNamePattern.test(packageRecord.fileName) ||
@@ -139,9 +151,9 @@ function validatePreviewMetadata(metadata) {
             !packageRecord.fileName.includes(packageRecord.sha256.slice(0, 8))) {
             continue;
         }
-        candidates.push({ packageRecord, version });
+        candidates.push({ packageRecord, version, editorVersion });
     }
-    candidates.sort((left, right) => compareVersions(right.version, left.version));
+    candidates.sort(comparePreviewCandidates);
     return candidates;
 }
 
@@ -160,6 +172,14 @@ function architectureLabel(value) {
     return value === "x86_64" ? "x86-64" : "ARM64";
 }
 
+function platformLabel(value) {
+    return { windows: "Windows", macos: "macOS", linux: "Linux" }[value] ?? value;
+}
+
+function publishedDate(value) {
+    return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" }).format(new Date(value));
+}
+
 function element(name, className, text) {
     const result = document.createElement(name);
     if (className) {
@@ -175,8 +195,9 @@ function renderVariant(target, platform, architecture, candidate) {
     const variant = element("section", "download-variant");
     const header = element("div", "variant-row");
     header.append(element("strong", "", architectureLabel(architecture)));
-    header.append(element("span", "", `v${candidate.version.raw} · ${bytes(candidate.packageRecord.artifact.sizeBytes)}`));
+    header.append(element("span", "", `${bytes(candidate.packageRecord.artifact.sizeBytes)}`));
     variant.append(header);
+    variant.append(element("p", "version-detail", `Hub v${candidate.version.raw} · Editor versions from signed catalog`));
 
     const download = element("a", "button button-primary", `Download ${architectureLabel(architecture)}`);
     download.href = `/v1/packages/${candidate.packageRecord.artifact.sha256}`;
@@ -209,15 +230,23 @@ function renderPreviewVariant(target, candidate) {
     variant.append(element("span", "preview-label", "Unsigned development preview"));
     const header = element("div", "variant-row");
     header.append(element("strong", "", architectureLabel(record.architecture)));
-    header.append(element("span", "", `v${candidate.version.raw} · ${bytes(record.sizeBytes)}`));
+    header.append(element("span", "", bytes(record.sizeBytes)));
     variant.append(header);
+    variant.append(element(
+        "p",
+        "version-detail",
+        `Hub v${candidate.version.raw} · Editor v${candidate.editorVersion.raw} · ${publishedDate(record.publishedAt)}`,
+    ));
 
     const download = element("a", "button button-primary", `Download ${architectureLabel(record.architecture)} preview`);
     download.href = record.url;
     download.download = record.fileName;
-    download.setAttribute("aria-label", `Download unsigned Kéire Hub ${candidate.version.raw} development preview for Windows ${architectureLabel(record.architecture)}`);
+    download.setAttribute("aria-label", `Download unsigned Kéire Hub ${candidate.version.raw} development preview for ${platformLabel(record.platform)} ${architectureLabel(record.architecture)} with editor ${candidate.editorVersion.raw}`);
     variant.append(download);
-    variant.append(element("p", "preview-warning", "Unsigned preview: verify the SHA-256 below and expect a Windows publisher warning."));
+    const warning = record.platform === "windows" ?
+        "Unsigned preview: verify the SHA-256 below and expect a Windows publisher warning." :
+        "Unsigned preview: verify the SHA-256 below before installing this package.";
+    variant.append(element("p", "preview-warning", warning));
 
     const checksumRow = element("div", "checksum-row");
     const checksum = element("code", "checksum", record.sha256);
@@ -276,13 +305,24 @@ async function loadPreviewDownloads() {
     }
     const candidates = validatePreviewMetadata(await response.json());
     const available = [];
-    for (const candidate of candidates) {
-        const response = await fetch(candidate.packageRecord.url, { method: "HEAD", cache: "no-cache" });
-        const contentLength = Number(response.headers.get("content-length"));
-        if (response.ok && Number.isSafeInteger(contentLength) && contentLength === candidate.packageRecord.sizeBytes) {
-            available.push(candidate);
+    let next = 0;
+    async function validateNext() {
+        while (next < candidates.length) {
+            const candidate = candidates[next++];
+            try {
+                const artifactResponse = await fetch(candidate.packageRecord.url, { method: "HEAD", cache: "no-cache" });
+                const contentLength = Number(artifactResponse.headers.get("content-length"));
+                if (artifactResponse.ok && Number.isSafeInteger(contentLength) &&
+                    contentLength === candidate.packageRecord.sizeBytes) {
+                    available.push(candidate);
+                }
+            } catch {
+                // A missing preview is omitted without hiding other retained releases.
+            }
         }
     }
+    await Promise.all(Array.from({ length: Math.min(6, candidates.length) }, validateNext));
+    available.sort(comparePreviewCandidates);
     return available;
 }
 
@@ -330,8 +370,49 @@ async function loadDownloads() {
     }
 }
 
-loadDownloads().catch(() => {
+async function loadHistory() {
+    const history = document.querySelector("[data-download-history]");
+    if (!(history instanceof HTMLElement)) {
+        return;
+    }
+    const results = await Promise.allSettled(hosts.map(async ([platform, architecture]) => ({
+        platform,
+        architecture,
+        candidates: await loadCatalog(platform, architecture),
+    })));
+    const previews = await loadPreviewDownloads().catch(() => []);
+    for (const platform of ["windows", "linux", "macos"]) {
+        const target = document.querySelector(`[data-history-platform="${platform}"]`);
+        const state = document.querySelector(`[data-history-state="${platform}"]`);
+        if (!(target instanceof HTMLElement) || !(state instanceof HTMLElement)) {
+            continue;
+        }
+        let count = 0;
+        for (const result of results) {
+            if (result.status !== "fulfilled" || result.value.platform !== platform) {
+                continue;
+            }
+            for (const candidate of result.value.candidates) {
+                renderVariant(target, platform, result.value.architecture, candidate);
+                ++count;
+            }
+        }
+        for (const candidate of previews.filter((item) => item.packageRecord.platform === platform)) {
+            renderPreviewVariant(target, candidate);
+            ++count;
+        }
+        state.textContent = count === 0 ?
+            "No retained releases are available for this platform yet." :
+            `${count} retained ${count === 1 ? "release" : "releases"}`;
+    }
+}
+
+const pageLoader = document.querySelector("[data-download-history]") ? loadHistory : loadDownloads;
+pageLoader().catch(() => {
     for (const state of document.querySelectorAll("[data-download-state]")) {
         state.textContent = "Catalog service is temporarily unavailable. No download link is being shown.";
+    }
+    for (const state of document.querySelectorAll("[data-history-state]")) {
+        state.textContent = "Release history is temporarily unavailable.";
     }
 });
