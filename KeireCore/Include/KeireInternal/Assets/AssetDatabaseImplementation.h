@@ -1095,8 +1095,7 @@ namespace Keire
         [[nodiscard]] ScanResult Scan(const bool digestSources = true) const
         {
             ScanResult result;
-            std::unordered_set<AssetId> identities;
-            std::unordered_set<std::string> paths;
+            std::vector<std::filesystem::path> sources;
             std::error_code error;
             for (std::filesystem::recursive_directory_iterator
                      iterator(SourceRoot, std::filesystem::directory_options::skip_permission_denied, error),
@@ -1108,8 +1107,18 @@ namespace Keire
                 if (!iterator->is_regular_file() || iterator->path().extension() == ".keiremeta" ||
                     Detail::IsTransientFile(iterator->path()))
                     continue;
-                auto record = ReadMetadata(SourceRoot, iterator->path(), Specification.MaximumSourceBytes,
-                                           digestSources, InferImporter(iterator->path()));
+                sources.push_back(iterator->path());
+            }
+            std::ranges::sort(sources, [](const auto& left, const auto& right)
+                              { return Detail::PathToUtf8(left) < Detail::PathToUtf8(right); });
+            sources.erase(std::unique(sources.begin(), sources.end()), sources.end());
+
+            std::unordered_set<AssetId> identities;
+            std::unordered_set<std::string> paths;
+            for (const auto& source : sources)
+            {
+                auto record = ReadMetadata(SourceRoot, source, Specification.MaximumSourceBytes, digestSources,
+                                           InferImporter(source));
                 if (!identities.insert(record.Id).second)
                     throw std::runtime_error("Duplicate asset identity detected: " + record.Id.ToString());
                 for (const auto subAsset : record.SubAssets)
@@ -1125,7 +1134,8 @@ namespace Keire
                 if (!paths.insert(comparable).second)
                     throw std::runtime_error("Case-colliding asset paths are not portable: " + comparable);
                 result.Signatures.emplace(record.Id,
-                                          FileSignature{iterator->last_write_time(), iterator->file_size(),
+                                          FileSignature{std::filesystem::last_write_time(source),
+                                                        std::filesystem::file_size(source),
                                                         std::filesystem::last_write_time(record.MetadataPath),
                                                         std::filesystem::file_size(record.MetadataPath)});
                 result.Records.push_back(std::move(record));

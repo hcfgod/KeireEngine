@@ -1,5 +1,7 @@
 # Changelog
 
+- Fixed asset scans on mounted Linux filesystems reporting duplicate identities when creating metadata changed the
+  directory during iteration. Scans now snapshot and sort source paths before writing any missing metadata.
 - Fixed development Hubs silently starting without their distribution, account configuration, and pinned catalog
   verifier runtime, and kept Hubs
   visible and responsive after launching an editor on desktops without a system tray. The recent-project search,
