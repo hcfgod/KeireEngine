@@ -32,6 +32,8 @@ version tags.
 
 ## Unreleased
 
+- Fixed the public downloads grid allowing long preview controls and SHA-256 rows to exceed their platform cards at
+  desktop and intermediate viewport widths.
 - Added versioned Windows and Linux website previews with separate Hub/editor identities, tested-platform disclosures,
   immutable digest-bound downloads, and an append-only previous-versions page. macOS, Metal, Linux ARM64, and
   Alpine/musl remain explicitly unclaimed until native validation exists.

@@ -1151,6 +1151,7 @@ code {
 
 .download-card {
     display: flex;
+    min-width: 0;
     min-height: 410px;
     flex-direction: column;
 }
@@ -1162,9 +1163,14 @@ code {
 
 .platform-mark {
     display: flex;
+    min-width: 0;
     align-items: center;
     gap: 14px;
     margin-bottom: 22px;
+}
+
+.platform-mark > div {
+    min-width: 0;
 }
 
 .platform-mark .icon-box {
@@ -1189,10 +1195,14 @@ code {
 
 .download-variants {
     display: grid;
+    min-width: 0;
     gap: 12px;
 }
 
 .download-variant {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
     padding: 14px;
     border: 1px solid var(--line);
     border-radius: 12px;
@@ -1227,6 +1237,7 @@ code {
 .variant-row,
 .checksum-row {
     display: flex;
+    min-width: 0;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
@@ -1249,7 +1260,11 @@ code {
 
 .download-variant .button {
     width: 100%;
+    min-width: 0;
     margin-top: 12px;
+    padding-inline: 12px;
+    text-align: center;
+    white-space: normal;
 }
 
 .checksum-row {
@@ -1257,6 +1272,9 @@ code {
 }
 
 .checksum {
+    display: block;
+    flex: 1 1 0;
+    width: 0;
     min-width: 0;
     overflow: hidden;
     color: var(--ink-muted);
@@ -1266,6 +1284,7 @@ code {
 }
 
 .copy-button {
+    flex: 0 0 auto;
     padding: 4px 8px;
     border: 1px solid var(--line);
     border-radius: 7px;

@@ -181,6 +181,19 @@ def main() -> int:
     if "http://" in downloads or "https://" in downloads:
         raise ValueError("Downloads must not use a separate or untrusted origin.")
 
+    styles = (WEBSITE / "assets" / "site.css").read_text(encoding="utf-8")
+    for contract in (
+        ".download-card {\n    display: flex;\n    min-width: 0;",
+        ".download-variants {\n    display: grid;\n    min-width: 0;",
+        ".download-variant {\n    width: 100%;\n    min-width: 0;\n    max-width: 100%;",
+        "flex: 1 1 0;\n    width: 0;\n    min-width: 0;",
+        "white-space: normal;",
+    ):
+        if contract not in styles:
+            raise ValueError(
+                "Download cards must constrain long controls and checksums without clipping."
+            )
+
     previews = json.loads(
         (WEBSITE / "assets" / "preview-downloads.json").read_text(encoding="utf-8")
     )
