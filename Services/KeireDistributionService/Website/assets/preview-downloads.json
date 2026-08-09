@@ -3,6 +3,36 @@
   "packages": [
     {
       "type": "hubInstallerPreview",
+      "releaseId": "windows-x86_64-0.1.0-20260809.3",
+      "version": "0.1.0",
+      "editorVersion": "0.1.0",
+      "publishedAt": "2026-08-09T16:20:04Z",
+      "platform": "windows",
+      "architecture": "x86_64",
+      "fileName": "keire-hub-windows-x86_64-0.1.0-preview-d7d22e1e.exe",
+      "url": "/preview-downloads/keire-hub-windows-x86_64-0.1.0-preview-d7d22e1e.exe",
+      "sizeBytes": 55633860,
+      "sha256": "d7d22e1e5dec47a2707e2eb2d89d93c17352b65c8c92a5a4973155c6873c6a76",
+      "signed": false,
+      "developmentArtifact": true
+    },
+    {
+      "type": "hubInstallerPreview",
+      "releaseId": "linux-x86_64-0.1.0-20260809.4",
+      "version": "0.1.0",
+      "editorVersion": "0.1.0",
+      "publishedAt": "2026-08-09T16:20:04Z",
+      "platform": "linux",
+      "architecture": "x86_64",
+      "fileName": "keire-hub-linux-x86_64-0.1.0-preview-483fdf97.deb",
+      "url": "/preview-downloads/keire-hub-linux-x86_64-0.1.0-preview-483fdf97.deb",
+      "sizeBytes": 64607816,
+      "sha256": "483fdf973585c5ce75495f5e189583f13f68c40216ce1cd778125bf195ca9ab0",
+      "signed": false,
+      "developmentArtifact": true
+    },
+    {
+      "type": "hubInstallerPreview",
       "releaseId": "windows-x86_64-0.1.0-20260809.2",
       "version": "0.1.0",
       "editorVersion": "0.1.0",
