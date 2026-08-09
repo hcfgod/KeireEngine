@@ -350,6 +350,9 @@ done < <(find "$ROOT/AssetTool" "$ROOT/KeireAssetWorker" "$ROOT/KeireClient" "$R
   "$ROOT/KeireHubWorker" "$ROOT/KeireRuntime" "$ROOT/KeireTests" -type f \( -name '*.cpp' -o -name '*.h' \))
 assert_true grep -q 'libsodium.*configure' "$ROOT/Scripts/Unix/dependencies.sh"
 assert_true grep -q 'LIBSODIUM_COMMIT' "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -F -q 'cp -f "$sodium_runtime" "$hub_directory/libsodium.so"' "$ROOT/Scripts/Linux/build.sh"
+assert_true grep -F -q 'cp -f "$sodium_runtime" "$hub_directory/libsodium.dylib"' "$ROOT/Scripts/Mac/build.sh"
+assert_true grep -q 'DependencyManifest.SodiumDebugRuntime' "$ROOT/KeireHub/premake5.lua"
 coral_bootstrap_patch="$ROOT/Patches/Coral/0004-keire-apply-host-settings-before-discovery.patch"
 settings_line="$(grep -n 'm_Settings = std::move(InSettings);' "$coral_bootstrap_patch" | head -n 1 | cut -d: -f1)"
 discovery_line="$(grep -n 'if (!LoadHostFXR())' "$coral_bootstrap_patch" | head -n 1 | cut -d: -f1)"

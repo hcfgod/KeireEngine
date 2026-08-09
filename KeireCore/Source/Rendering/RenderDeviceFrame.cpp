@@ -525,6 +525,39 @@ namespace Keire::RenderBackend
         return shader;
     }
 
+    SDL_GPUShader* RenderSharedState::CreateGridShader(const bool vertex) const
+    {
+        SDL_GPUShaderCreateInfo information{};
+        information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
+        information.num_uniform_buffers = vertex ? 0U : 1U;
+        const auto formats = SDL_GetGPUShaderFormats(Device);
+        if (formats & SDL_GPU_SHADERFORMAT_DXIL)
+        {
+            information.format = SDL_GPU_SHADERFORMAT_DXIL;
+            information.code = vertex ? Detail::BuiltinGridVertexDxil : Detail::BuiltinGridFragmentDxil;
+            information.code_size = vertex ? Detail::BuiltinGridVertexDxilSize : Detail::BuiltinGridFragmentDxilSize;
+        }
+        else if (formats & SDL_GPU_SHADERFORMAT_MSL)
+        {
+            information.format = SDL_GPU_SHADERFORMAT_MSL;
+            information.code = vertex ? Detail::BuiltinGridVertexMsl : Detail::BuiltinGridFragmentMsl;
+            information.code_size = vertex ? Detail::BuiltinGridVertexMslSize : Detail::BuiltinGridFragmentMslSize;
+        }
+        else if (formats & SDL_GPU_SHADERFORMAT_SPIRV)
+        {
+            information.format = SDL_GPU_SHADERFORMAT_SPIRV;
+            information.entrypoint = vertex ? "VSMain" : "PSMain";
+            information.code = vertex ? Detail::BuiltinGridVertexSpirV : Detail::BuiltinGridFragmentSpirV;
+            information.code_size = vertex ? Detail::BuiltinGridVertexSpirVSize : Detail::BuiltinGridFragmentSpirVSize;
+        }
+        else
+            throw std::runtime_error("The active SDL_GPU backend exposes no supported grid shader format.");
+        SDL_GPUShader* shader = SDL_CreateGPUShader(Device, &information);
+        if (!shader)
+            throw std::runtime_error("SDL_CreateGPUShader(grid) failed: " + LastSdlError());
+        return shader;
+    }
+
     SDL_GPUShader* RenderSharedState::CreateShadowShader(const bool vertex) const
     {
         SDL_GPUShaderCreateInfo information{};

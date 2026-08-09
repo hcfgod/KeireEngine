@@ -69,6 +69,13 @@ Assert-True ($dependencyScript.Contains('$Toolset -eq "msc"') -and
              $dependencyScript.Contains('AssimpZlibDebugLibrary = "$debugInstall/lib/$zlibDebugName"') -and
              $dependencyScript.Contains('$sodiumToolsetVersion')) `
     "Toolset-aware Assimp zlib and deterministic libsodium caches"
+$windowsBuildScript = Get-Content (Join-Path $Windows "build.ps1") -Raw
+$hubPremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireHub\premake5.lua") -Raw
+Assert-True ($windowsBuildScript.Contains('$Project.HUB_TARGET') -and
+             $windowsBuildScript.Contains('libsodium.dll') -and
+             $hubPremake.Contains('DependencyManifest.SodiumDebugRuntime') -and
+             $hubPremake.Contains('DependencyManifest.SodiumReleaseRuntime')) `
+    "Development Hub builds stage their pinned catalog verifier"
 $shaderCompilerScript = Get-Content (Join-Path $Windows "shader-compiler.ps1") -Raw
 Assert-True ($shaderCompilerScript.Contains('$hostToolset = "msc"') -and
              $shaderCompilerScript.Contains('"-DCMAKE_C_COMPILER=cl.exe"') -and

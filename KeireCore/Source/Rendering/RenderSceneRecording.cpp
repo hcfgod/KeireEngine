@@ -2688,24 +2688,15 @@ namespace Keire::RenderBackend
             }
         }
 
-        if (phase == SceneDrawPhase::Opaque && packet.DrawGrid && GridBuffer && GridVertexCount > 0)
+        if (phase == SceneDrawPhase::Opaque && packet.DrawGrid)
         {
-            const ObjectUniforms object =
-                MakeObjectUniforms(Math::Multiply(camera.Projection, camera.View), {}, {}, {1.0F, 1.0F, 1.0F, 1.0F},
-                                   lighting, packet.Environment, false);
-            const AssetShadowUniforms noShadows{};
-            const AssetLocalLightUniforms noLocalLights{};
-            const std::array shadowBindings{SDL_GPUTextureSamplerBinding{EmptyShadowTexture, ShadowSampler},
-                                            SDL_GPUTextureSamplerBinding{EmptyShadowTexture, ShadowSampler}};
-            SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
-            SDL_PushGPUFragmentUniformData(commands, 0, &noShadows, sizeof(noShadows));
-            SDL_PushGPUFragmentUniformData(commands, 1, &noLocalLights, sizeof(noLocalLights));
-            const SDL_GPUBufferBinding binding{GridBuffer, 0};
+            const GridUniforms grid{Math::Inverse(camera.Projection),
+                                    Math::Inverse(camera.View),
+                                    Math::Multiply(camera.Projection, camera.View),
+                                    {1.0F, 10.0F, 0.45F, 0.7F}};
+            SDL_PushGPUFragmentUniformData(commands, 0, &grid, sizeof(grid));
             SDL_BindGPUGraphicsPipeline(pass, pipelines.Grid);
-            SDL_BindGPUFragmentSamplers(pass, 0, shadowBindings.data(),
-                                        static_cast<std::uint32_t>(shadowBindings.size()));
-            SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
-            SDL_DrawGPUPrimitives(pass, GridVertexCount, 1, 0, 0);
+            SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
             ++Statistics.DrawCalls;
         }
 
@@ -4443,10 +4434,6 @@ namespace Keire::RenderBackend
             SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
         ReleaseMeshResources(ErrorMesh);
         ReleaseMeshResources(DefaultMesh);
-        if (GridBuffer)
-            SDL_ReleaseGPUBuffer(Device, GridBuffer);
-        GridBuffer = nullptr;
-        GridVertexCount = 0;
         if (WindowClaimed && Device && NativeWindow)
             SDL_ReleaseWindowFromGPUDevice(Device, NativeWindow);
         WindowClaimed = false;

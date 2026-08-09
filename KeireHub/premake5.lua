@@ -53,4 +53,24 @@ project(ProjectConfig.HUB_TARGET)
         kind "WindowedApp"
         entrypoint "mainCRTStartup"
 
+    if _ACTION ~= "ninja" then
+        local postBuildPathPrefix = _ACTION == "gmake" and "KeireHub/" or ""
+
+        filter { "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
+            postbuildcommands
+            {
+                '{COPYFILE} "' .. postBuildPathPrefix .. DependencyManifest.SodiumDebugRuntime .. '" "' ..
+                    postBuildPathPrefix .. '%{cfg.targetdir}/' ..
+                    path.getname(DependencyManifest.SodiumDebugRuntime) .. '"'
+            }
+
+        filter { "configurations:Release or Dist" }
+            postbuildcommands
+            {
+                '{COPYFILE} "' .. postBuildPathPrefix .. DependencyManifest.SodiumReleaseRuntime .. '" "' ..
+                    postBuildPathPrefix .. '%{cfg.targetdir}/' ..
+                    path.getname(DependencyManifest.SodiumReleaseRuntime) .. '"'
+            }
+    end
+
     filter {}

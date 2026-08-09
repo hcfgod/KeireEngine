@@ -2,7 +2,9 @@
 
 #include "KeireHub/HubAccountIntegration.h"
 #include "KeireHub/HubActivationWorkflow.h"
+#include "KeireHub/HubApplicationFactory.h"
 #include "KeireHub/HubBuildSupportIntegration.h"
+#include "KeireHub/HubConfiguration.h"
 #include "KeireHub/HubDiagnostics.h"
 #include "KeireHub/HubDistributionWorkflow.h"
 #include "KeireHub/HubEditorDiscovery.h"
@@ -104,7 +106,7 @@ namespace
                     if (!m_Tray->IsAvailable())
                     {
                         KEIRE_CLIENT_WARN("[Project Hub] System tray unavailable: {}", m_Tray->Diagnostic());
-                        m_Notice = "System tray unavailable; the Hub will remain recoverable from the taskbar.";
+                        m_Notice = "System tray unavailable; the Hub will stay open while editors run.";
                     }
                 }
                 catch (const std::exception& error)
@@ -223,10 +225,10 @@ namespace
                         SetError("Package task center unavailable: " + packageTasks.Error().Message);
                     m_Distribution = std::make_unique<KeireHub::HubDistributionWorkflow>();
                     RequireWorkflowSuccess(
-                        m_Distribution->Start(m_Executable.parent_path().parent_path() / "Config" / "Distribution.json",
+                        m_Distribution->Start(KeireHub::ResolveHubConfigurationPath(m_Executable, "Distribution.json"),
                                               m_ProductSnapshot.Settings, m_Executable));
                     RequireWorkflowSuccess(
-                        m_Account.Start(m_Executable.parent_path().parent_path() / "Config" / "Supabase.json",
+                        m_Account.Start(KeireHub::ResolveHubConfigurationPath(m_Executable, "Supabase.json"),
                                         preferenceRoot / "Account" / "session.dat", m_ProductSnapshot.Settings));
                     if (const auto status = KeireHub::PrepareHubStartupRuntime(
                             *m_Controller, Keire::GetBuildInfo().Version, m_ProductSnapshot.Settings.LogLevel,
@@ -464,7 +466,7 @@ namespace
             if (m_DistributionRefreshPending && m_Distribution && !m_Distribution->Snapshot()->Refreshing)
             {
                 const auto status =
-                    m_Distribution->Start(m_Executable.parent_path().parent_path() / "Config" / "Distribution.json",
+                    m_Distribution->Start(KeireHub::ResolveHubConfigurationPath(m_Executable, "Distribution.json"),
                                           m_ProductSnapshot.Settings, m_Executable);
                 m_DistributionRefreshPending = false;
                 if (!status)
@@ -1320,9 +1322,10 @@ namespace
                                           error.what());
                     }
                 }
-                if (m_ProductSnapshot.Settings.KeepRunningAfterEditorLaunch)
+                if (KeireHub::ShouldHideHubAfterEditorLaunch(m_ProductSnapshot.Settings.KeepRunningAfterEditorLaunch,
+                                                             TrayAvailable()))
                     HideHub();
-                else
+                else if (!m_ProductSnapshot.Settings.KeepRunningAfterEditorLaunch)
                     Owner().RequestExit();
             }
             catch (const std::exception& error)

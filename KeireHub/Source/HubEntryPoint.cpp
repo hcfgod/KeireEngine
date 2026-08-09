@@ -1,6 +1,7 @@
 #include "Keire/Core.h"
 
 #include "KeireHub/HubApplicationFactory.h"
+#include "KeireHub/HubConfiguration.h"
 #include "KeireHub/HubPathMigration.h"
 
 #include "KeireInternal/FileSystem.h"
@@ -41,7 +42,7 @@ namespace Keire
 
     std::unique_ptr<Application> CreateApplication(const ApplicationCommandLineArguments& arguments)
     {
-        const auto executable = Detail::PathFromUtf8(arguments.Executable());
+        const auto executable = KeireHub::ResolveHubExecutablePath(Detail::PathFromUtf8(arguments.Executable()));
         const auto preferenceRoot = GetPreferenceDirectory();
         if (const auto status = KeireHub::MigrateLegacyHubPreferenceRoot(preferenceRoot); !status)
             throw std::runtime_error(status.Error().Message + " " + status.Error().TechnicalDetails);

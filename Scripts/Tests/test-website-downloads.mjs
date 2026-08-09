@@ -196,7 +196,24 @@ for (let index = 0; index < 10 && cards.get("windows").variants.children.length 
 const renderedVariant = cards.get("windows").variants.children[0];
 assert.ok(renderedVariant);
 assert.equal(renderedVariant.className, "download-variant preview-variant");
-assert.match(renderedVariant.children[2].textContent, /Editor v0\.1\.0/);
+assert.equal(renderedVariant.children[2].children[0], "Hub v0.1.0 · Editor v0.1.0 · Published ");
+const renderedTimestamp = renderedVariant.children[2].children[1];
+assert.equal(renderedTimestamp.name, "time");
+const canonicalPublishedAt = new Date(preview.packages[0].publishedAt).toISOString();
+assert.equal(renderedTimestamp.dateTime, canonicalPublishedAt);
+assert.equal(renderedTimestamp.title, `Published at ${canonicalPublishedAt} (UTC)`);
+assert.equal(
+    renderedTimestamp.textContent,
+    new Intl.DateTimeFormat(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        timeZoneName: "short",
+    }).format(new Date(preview.packages[0].publishedAt)),
+);
+assert.doesNotMatch(renderedTimestamp.textContent, /^Aug 8, 2026$/);
 assert.equal(renderedVariant.children[3].name, "a");
 assert.equal(renderedVariant.children[3].href, preview.packages[0].url);
 assert.equal(renderedVariant.children[3].download, preview.packages[0].fileName);

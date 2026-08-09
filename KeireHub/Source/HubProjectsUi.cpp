@@ -652,35 +652,52 @@ namespace KeireHub
         if (ui.Button("Refresh", {88.0F, 40.0F}))
             command.Type = HubProjectUiCommandType::Refresh;
         ui.Spacing();
-        (void)ui.InputTextWithHint("##HubProjectSearch", "Search projects", m_Search);
-        ui.SameLine();
-        if (ui.IconButton("HubListView", Keire::UiIcon::List, m_View == HubProjectsView::List, {32.0F, 28.0F}))
-        {
-            m_View = HubProjectsView::List;
-            command.Type = HubProjectUiCommandType::PreferencesChanged;
-        }
-        ui.SameLine();
-        if (ui.IconButton("HubCardView", Keire::UiIcon::Grid, m_View == HubProjectsView::Cards, {32.0F, 28.0F}))
-        {
-            m_View = HubProjectsView::Cards;
-            command.Type = HubProjectUiCommandType::PreferencesChanged;
-        }
-        ui.SameLine();
         constexpr std::array sortLabels{std::string_view("Last Opened"), std::string_view("Name"),
                                         std::string_view("Created"),     std::string_view("Modified"),
                                         std::string_view("Version"),     std::string_view("Status"),
                                         std::string_view("Size")};
-        if (auto sort = ui.BeginCombo("Sort", sortLabels[static_cast<std::size_t>(m_Sort)]); sort)
+        Keire::UiTableOptions toolbarOptions;
+        toolbarOptions.Borders = false;
+        toolbarOptions.Resizable = false;
+        toolbarOptions.RowBackground = false;
+        toolbarOptions.PersistSettings = false;
+        if (auto toolbar = ui.BeginTable("HubProjectToolbar", 4, toolbarOptions); toolbar)
         {
-            for (std::size_t index = 0; index < sortLabels.size(); ++index)
+            ui.TableSetupColumn("Search", Keire::UiTableColumnSizing::Stretch, 1.0F);
+            ui.TableSetupColumn("List view", Keire::UiTableColumnSizing::Fixed, 38.0F);
+            ui.TableSetupColumn("Card view", Keire::UiTableColumnSizing::Fixed, 38.0F);
+            ui.TableSetupColumn("Sort", Keire::UiTableColumnSizing::Fixed, 180.0F);
+            ui.TableNextRow();
+            (void)ui.TableNextColumn();
+            ui.SetNextItemWidth(std::max(ui.ContentAvailable().Width, 1.0F));
+            (void)ui.InputTextWithHint("##HubProjectSearch", "Search projects", m_Search);
+            (void)ui.TableNextColumn();
+            if (ui.IconButton("HubListView", Keire::UiIcon::List, m_View == HubProjectsView::List, {32.0F, 28.0F}))
             {
-                if (ui.Selectable(sortLabels[index], static_cast<std::size_t>(m_Sort) == index))
+                m_View = HubProjectsView::List;
+                command.Type = HubProjectUiCommandType::PreferencesChanged;
+            }
+            (void)ui.TableNextColumn();
+            if (ui.IconButton("HubCardView", Keire::UiIcon::Grid, m_View == HubProjectsView::Cards, {32.0F, 28.0F}))
+            {
+                m_View = HubProjectsView::Cards;
+                command.Type = HubProjectUiCommandType::PreferencesChanged;
+            }
+            (void)ui.TableNextColumn();
+            ui.SetNextItemWidth(std::max(ui.ContentAvailable().Width, 1.0F));
+            if (auto sort = ui.BeginCombo("##HubProjectSort", sortLabels[static_cast<std::size_t>(m_Sort)]); sort)
+            {
+                for (std::size_t index = 0; index < sortLabels.size(); ++index)
                 {
-                    m_Sort = static_cast<HubProjectsSort>(index);
-                    command.Type = HubProjectUiCommandType::PreferencesChanged;
+                    if (ui.Selectable(sortLabels[index], static_cast<std::size_t>(m_Sort) == index))
+                    {
+                        m_Sort = static_cast<HubProjectsSort>(index);
+                        command.Type = HubProjectUiCommandType::PreferencesChanged;
+                    }
                 }
             }
         }
+
         constexpr std::array statusLabels{std::string_view("All statuses"),
                                           std::string_view("Ready"),
                                           std::string_view("Upgrade available"),
@@ -690,37 +707,50 @@ namespace KeireHub
                                           std::string_view("Requires newer editor"),
                                           std::string_view("Open elsewhere"),
                                           std::string_view("Newer schema")};
-        if (auto status = ui.BeginCombo("Status", statusLabels[m_StatusFilter]); status)
-        {
-            for (std::size_t index = 0; index < statusLabels.size(); ++index)
-                if (ui.Selectable(statusLabels[index], m_StatusFilter == index))
-                    m_StatusFilter = static_cast<std::uint8_t>(index);
-        }
-        ui.SameLine();
         constexpr std::array editorLabels{std::string_view("Any editor"), std::string_view("Editor installed"),
                                           std::string_view("Editor missing")};
-        if (auto editor = ui.BeginCombo("Editor", editorLabels[m_EditorFilter]); editor)
-        {
-            for (std::size_t index = 0; index < editorLabels.size(); ++index)
-                if (ui.Selectable(editorLabels[index], m_EditorFilter == index))
-                    m_EditorFilter = static_cast<std::uint8_t>(index);
-        }
-        ui.SameLine();
         std::set<std::string, std::less<>> versions;
         for (const auto& entry : entries)
             if (!entry.LastSavedWithEngineVersion.empty())
                 versions.insert(entry.LastSavedWithEngineVersion);
-        if (auto version = ui.BeginCombo("Version", m_VersionFilter.empty() ? "All versions" : m_VersionFilter);
-            version)
+        if (auto filters = ui.BeginTable("HubProjectFilters", 4, toolbarOptions); filters)
         {
-            if (ui.Selectable("All versions", m_VersionFilter.empty()))
-                m_VersionFilter.clear();
-            for (const auto& candidate : versions)
-                if (ui.Selectable(candidate, m_VersionFilter == candidate))
-                    m_VersionFilter = candidate;
+            ui.TableSetupColumn("Status", Keire::UiTableColumnSizing::Stretch, 1.0F);
+            ui.TableSetupColumn("Editor", Keire::UiTableColumnSizing::Stretch, 1.0F);
+            ui.TableSetupColumn("Version", Keire::UiTableColumnSizing::Stretch, 1.0F);
+            ui.TableSetupColumn("Favorites", Keire::UiTableColumnSizing::Fixed, 132.0F);
+            ui.TableNextRow();
+            (void)ui.TableNextColumn();
+            ui.SetNextItemWidth(std::max(ui.ContentAvailable().Width, 1.0F));
+            if (auto status = ui.BeginCombo("##HubProjectStatus", statusLabels[m_StatusFilter]); status)
+            {
+                for (std::size_t index = 0; index < statusLabels.size(); ++index)
+                    if (ui.Selectable(statusLabels[index], m_StatusFilter == index))
+                        m_StatusFilter = static_cast<std::uint8_t>(index);
+            }
+            (void)ui.TableNextColumn();
+            ui.SetNextItemWidth(std::max(ui.ContentAvailable().Width, 1.0F));
+            if (auto editor = ui.BeginCombo("##HubProjectEditor", editorLabels[m_EditorFilter]); editor)
+            {
+                for (std::size_t index = 0; index < editorLabels.size(); ++index)
+                    if (ui.Selectable(editorLabels[index], m_EditorFilter == index))
+                        m_EditorFilter = static_cast<std::uint8_t>(index);
+            }
+            (void)ui.TableNextColumn();
+            ui.SetNextItemWidth(std::max(ui.ContentAvailable().Width, 1.0F));
+            if (auto version =
+                    ui.BeginCombo("##HubProjectVersion", m_VersionFilter.empty() ? "All versions" : m_VersionFilter);
+                version)
+            {
+                if (ui.Selectable("All versions", m_VersionFilter.empty()))
+                    m_VersionFilter.clear();
+                for (const auto& candidate : versions)
+                    if (ui.Selectable(candidate, m_VersionFilter == candidate))
+                        m_VersionFilter = candidate;
+            }
+            (void)ui.TableNextColumn();
+            (void)ui.Checkbox("Favorites only", m_FavoritesOnly);
         }
-        ui.SameLine();
-        (void)ui.Checkbox("Favorites only", m_FavoritesOnly);
         if (!notice.empty())
         {
             ui.Spacing();

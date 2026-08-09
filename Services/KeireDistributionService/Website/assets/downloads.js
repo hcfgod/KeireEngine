@@ -191,8 +191,19 @@ function platformLabel(value) {
     return { windows: "Windows", macos: "macOS", linux: "Linux" }[value] ?? value;
 }
 
-function publishedDate(value) {
-    return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" }).format(new Date(value));
+function publishedTimestamp(value) {
+    const instant = new Date(value);
+    const timestamp = element("time", "published-time", new Intl.DateTimeFormat(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        timeZoneName: "short",
+    }).format(instant));
+    timestamp.dateTime = instant.toISOString();
+    timestamp.title = `Published at ${instant.toISOString()} (UTC)`;
+    return timestamp;
 }
 
 function element(name, className, text) {
@@ -247,11 +258,10 @@ function renderPreviewVariant(target, candidate) {
     header.append(element("strong", "", architectureLabel(record.architecture)));
     header.append(element("span", "", bytes(record.sizeBytes)));
     variant.append(header);
-    variant.append(element(
-        "p",
-        "version-detail",
-        `Hub v${candidate.version.raw} · Editor v${candidate.editorVersion.raw} · ${publishedDate(record.publishedAt)}`,
-    ));
+    const versionDetail = element("p", "version-detail");
+    versionDetail.append(`Hub v${candidate.version.raw} · Editor v${candidate.editorVersion.raw} · Published `);
+    versionDetail.append(publishedTimestamp(record.publishedAt));
+    variant.append(versionDetail);
 
     const download = element("a", "button button-primary", `Download ${architectureLabel(record.architecture)} preview`);
     download.href = record.url;

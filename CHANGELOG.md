@@ -1,5 +1,11 @@
 # Changelog
 
+- Fixed development Hubs silently starting without their distribution, account configuration, and pinned catalog
+  verifier runtime, and kept Hubs
+  visible and responsive after launching an editor on desktops without a system tray. The recent-project search,
+  filters, view controls, and sort control now stay within the Linux Hub window.
+- Replaced the editor's small fixed line grid with a depth-correct analytic grid that extends to the horizon on every
+  platform, eliminating the large gray near-plane wedges that could appear at particular Linux Vulkan camera angles.
 - Fixed Linux Hub folder browsing by retrying failed desktop portals through the installed Zenity backend and declaring
   that backend in both source bootstrap and Debian runtime dependencies. The new-project dialog now keeps its visible
   Cancel action beside Create project instead of clipping it against the modal edge.
@@ -38,6 +44,8 @@ version tags.
 
 ## Unreleased
 
+- Download and previous-release cards now show each artifact's publication date, time, and timezone in the viewer's
+  browser locale while retaining the exact UTC timestamp as semantic metadata.
 - Added compact signed package discovery without breaking previously downloaded Hubs. Current clients and the website
   use `/v2/catalog` records that bind a separately fetched content-addressed package manifest, while `/v1/catalog`
   continues serving the complete schema-1 inventory. Install and repair hydrate and verify the exact manifest only

@@ -194,9 +194,6 @@ namespace Keire::RenderBackend
             LightingTextureTarget::Texture2DArray, {std::byte{255}, std::byte{255}, std::byte{255}, std::byte{255}}));
         DefaultReflectionCubeArray = CreateLightingTextureResources(*lightingTexture(
             LightingTextureTarget::CubeArray, {std::byte{0}, std::byte{0}, std::byte{0}, std::byte{0}}));
-        const auto grid = CreateGridVertices();
-        GridVertexCount = static_cast<std::uint32_t>(grid.size());
-        GridBuffer = UploadVertexBuffer(grid);
     }
 
     void RenderSharedState::ReleaseMeshResources(GpuMeshResources& resources) noexcept
@@ -648,6 +645,55 @@ namespace Keire::RenderBackend
         }
     }
 
+    SDL_GPUGraphicsPipeline* RenderSharedState::CreateGridPipeline(const SDL_GPUSampleCount samples)
+    {
+        SDL_GPUShader* vertex = CreateGridShader(true);
+        SDL_GPUShader* fragment = nullptr;
+        try
+        {
+            fragment = CreateGridShader(false);
+            SDL_GPUColorTargetDescription color{};
+            color.format = SceneColorFormat;
+            color.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+            color.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+            color.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+            color.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+            color.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+            color.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+            color.blend_state.enable_blend = true;
+
+            SDL_GPUGraphicsPipelineCreateInfo information{};
+            information.vertex_shader = vertex;
+            information.fragment_shader = fragment;
+            information.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+            information.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+            information.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+            information.rasterizer_state.front_face = SDL_GPU_FRONTFACE_CLOCKWISE;
+            information.rasterizer_state.enable_depth_clip = true;
+            information.multisample_state.sample_count = samples;
+            information.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
+            information.depth_stencil_state.enable_depth_test = true;
+            information.depth_stencil_state.enable_depth_write = false;
+            information.target_info.color_target_descriptions = &color;
+            information.target_info.num_color_targets = 1;
+            information.target_info.depth_stencil_format = DepthFormat;
+            information.target_info.has_depth_stencil_target = true;
+            SDL_GPUGraphicsPipeline* result = SDL_CreateGPUGraphicsPipeline(Device, &information);
+            if (!result)
+                throw std::runtime_error("SDL_CreateGPUGraphicsPipeline(grid) failed: " + LastSdlError());
+            SDL_ReleaseGPUShader(Device, fragment);
+            SDL_ReleaseGPUShader(Device, vertex);
+            return result;
+        }
+        catch (...)
+        {
+            if (fragment)
+                SDL_ReleaseGPUShader(Device, fragment);
+            SDL_ReleaseGPUShader(Device, vertex);
+            throw;
+        }
+    }
+
     SDL_GPUGraphicsPipeline* RenderSharedState::CreateDepthPipeline(const bool depthBias)
     {
         SDL_GPUShader* vertex = CreateShadowShader(true);
@@ -749,7 +795,7 @@ namespace Keire::RenderBackend
         try
         {
             result.Cube = CreatePipeline(samples, SDL_GPU_PRIMITIVETYPE_TRIANGLELIST, true);
-            result.Grid = CreatePipeline(samples, SDL_GPU_PRIMITIVETYPE_LINELIST, false);
+            result.Grid = CreateGridPipeline(samples);
             result.Sky = CreateSkyPipeline(samples);
             result.Vfx = CreateCpuVfxPipeline(samples);
             result.GpuVfx = CreateGpuVfxPipeline(samples);

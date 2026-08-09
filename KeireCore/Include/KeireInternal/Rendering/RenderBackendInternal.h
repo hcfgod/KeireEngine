@@ -602,6 +602,16 @@ namespace Keire::RenderBackend
         Vector4 Parameters;
     };
 
+    struct GridUniforms final
+    {
+        Matrix4 InverseProjection;
+        Matrix4 InverseView;
+        Matrix4 ViewProjection;
+        Vector4 Parameters;
+    };
+
+    static_assert(sizeof(GridUniforms) == sizeof(float) * 52);
+
     struct SceneLighting final
     {
         EntityId Entity;
@@ -872,23 +882,6 @@ namespace Keire::RenderBackend
                 view};
     }
 
-    [[nodiscard]] inline std::vector<RenderVertex> CreateGridVertices()
-    {
-        constexpr int extent = 20;
-        std::vector<RenderVertex> vertices;
-        vertices.reserve(static_cast<std::size_t>((extent * 2 + 1) * 4));
-        for (int coordinate = -extent; coordinate <= extent; ++coordinate)
-        {
-            const float value = static_cast<float>(coordinate);
-            const Vector3 color = coordinate == 0 ? Vector3{0.30F, 0.50F, 0.78F} : Vector3{0.24F, 0.27F, 0.32F};
-            vertices.push_back({{-static_cast<float>(extent), 0.0F, value}, color, {}});
-            vertices.push_back({{static_cast<float>(extent), 0.0F, value}, color, {}});
-            vertices.push_back({{value, 0.0F, -static_cast<float>(extent)}, color, {}});
-            vertices.push_back({{value, 0.0F, static_cast<float>(extent)}, color, {}});
-        }
-        return vertices;
-    }
-
     struct RenderPipelineSet final
     {
         SDL_GPUSampleCount Samples = SDL_GPU_SAMPLECOUNT_1;
@@ -1148,6 +1141,7 @@ namespace Keire::RenderBackend
         void ReleaseResources(SurfaceResources& resources) noexcept;
         [[nodiscard]] SDL_GPUShader* CreateShader(bool vertex) const;
         [[nodiscard]] SDL_GPUShader* CreateSkyShader(bool vertex) const;
+        [[nodiscard]] SDL_GPUShader* CreateGridShader(bool vertex) const;
         [[nodiscard]] SDL_GPUShader* CreateShadowShader(bool vertex) const;
         [[nodiscard]] SDL_GPUShader* CreateToneMapShader(bool vertex) const;
         [[nodiscard]] SDL_GPUShader* CreateRuntimeUiShader(bool vertex) const;
@@ -1232,6 +1226,7 @@ namespace Keire::RenderBackend
         [[nodiscard]] SDL_GPUGraphicsPipeline*
         CreatePipeline(SDL_GPUSampleCount samples, SDL_GPUPrimitiveType primitive, bool depthWrite, bool blend = false);
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateSkyPipeline(SDL_GPUSampleCount samples);
+        [[nodiscard]] SDL_GPUGraphicsPipeline* CreateGridPipeline(SDL_GPUSampleCount samples);
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateCpuVfxPipeline(SDL_GPUSampleCount samples);
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateGpuVfxPipeline(SDL_GPUSampleCount samples, bool ribbon = false);
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateGpuVfxMeshPipeline(SDL_GPUSampleCount samples);
@@ -1258,7 +1253,6 @@ namespace Keire::RenderBackend
         SDL_GPUTextureFormat SceneColorFormat = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
         SDL_GPUTextureFormat DepthFormat = SDL_GPU_TEXTUREFORMAT_INVALID;
         SDL_GPUTextureFormat ShadowDepthFormat = SDL_GPU_TEXTUREFORMAT_INVALID;
-        SDL_GPUBuffer* GridBuffer = nullptr;
         SDL_GPUGraphicsPipeline* ShadowPipeline = nullptr;
         SDL_GPUGraphicsPipeline* SceneDepthPipeline = nullptr;
         SDL_GPUGraphicsPipeline* ToneMapPipeline = nullptr;
@@ -1266,7 +1260,6 @@ namespace Keire::RenderBackend
         SDL_GPUSampler* ShadowSampler = nullptr;
         SDL_GPUSampler* ToneMapSampler = nullptr;
         SDL_GPUTexture* EmptyShadowTexture = nullptr;
-        std::uint32_t GridVertexCount = 0;
         GpuMeshResources DefaultMesh;
         GpuMeshResources ErrorMesh;
         GpuTextureResources CheckerboardTexture;

@@ -174,12 +174,16 @@ def main() -> int:
         "arm64",
         "editorVersion",
         "publishedAt",
+        "publishedTimestamp",
+        "timeZoneName: \"short\"",
         "data-download-history",
     ):
         if contract not in downloads:
             raise ValueError(f"Downloads implementation is missing '{contract}'.")
     if "http://" in downloads or "https://" in downloads:
         raise ValueError("Downloads must not use a separate or untrusted origin.")
+    if 'timeZone: "UTC"' in downloads:
+        raise ValueError("Download publication times must use the viewer's local timezone.")
 
     styles = (WEBSITE / "assets" / "site.css").read_text(encoding="utf-8")
     for contract in (

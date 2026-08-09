@@ -35,6 +35,18 @@ TEST_CASE("GPU skinning vertex storage uses explicit 16-byte lanes")
     CHECK(offsetof(GpuRenderVertex, Normal) == 32);
 }
 
+TEST_CASE("Editor grid shader reconstructs an infinite plane and writes scene depth")
+{
+    CHECK(sizeof(Keire::RenderBackend::GridUniforms) == sizeof(float) * 52);
+
+    std::ifstream stream("KeireCore/Shaders/BuiltinGrid.hlsl", std::ios::binary);
+    REQUIRE(stream.good());
+    const std::string shader{std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+    CHECK(shader.find("SV_Depth") != std::string::npos);
+    CHECK(shader.find("cameraWorld.xyz + rayDirection * rayDistance") != std::string::npos);
+    CHECK(shader.find("GridLine(worldPosition.xz") != std::string::npos);
+}
+
 TEST_CASE("GPU skinning shader storage matches the mesh vertex lane layout")
 {
     std::ifstream stream("KeireCore/Shaders/BuiltinSkinning.hlsl", std::ios::binary);

@@ -10,6 +10,12 @@
 
 namespace KeireHub
 {
+    [[nodiscard]] constexpr bool ShouldHideHubAfterEditorLaunch(const bool keepRunning,
+                                                                const bool trayAvailable) noexcept
+    {
+        return keepRunning && trayAvailable;
+    }
+
     [[nodiscard]] std::unique_ptr<Keire::Application>
     CreateHubApplication(Keire::ApplicationSpecification specification, std::filesystem::path executable, bool smoke,
                          std::optional<HubActivationRequest> pendingStartupActivation,
