@@ -107,8 +107,7 @@ namespace KeireHub
                 for (const auto& dependency : parent.Dependencies)
                 {
                     const auto child = std::ranges::find_if(packages,
-                                                            [&](const PackageManifest& candidate)
-                                                            {
+                                                            [&](const PackageManifest& candidate) {
                                                                 return candidate.Id == dependency.PackageId &&
                                                                        dependency.Versions.Matches(candidate.Version);
                                                             });
@@ -214,12 +213,12 @@ namespace KeireHub
 
         [[nodiscard]] bool SamePublishedPackage(const PackageManifest& package, const InstalledPackageRecord& installed)
         {
+            const bool sameInventory = !package.ManifestSha256.empty() || SameFiles(package.Files, installed.Files);
             return package.Id == installed.Id && package.Version == installed.Version &&
                    package.Kind == installed.Kind && package.ArtifactSizeBytes == installed.ArtifactSizeBytes &&
                    package.ArtifactSha256 == installed.ArtifactSha256 &&
                    package.InstalledSizeBytes == installed.InstalledSizeBytes &&
-                   SameDependencies(package.Dependencies, installed.Dependencies) &&
-                   SameFiles(package.Files, installed.Files) &&
+                   SameDependencies(package.Dependencies, installed.Dependencies) && sameInventory &&
                    package.LicenseReferences == installed.LicenseReferences;
         }
     } // namespace
@@ -268,7 +267,7 @@ namespace KeireHub
                 const auto& catalog = *source.Catalog;
                 const auto catalogExpiry = Detail::ParseUtcInstant(catalog.Identity.ExpiresAt);
                 const auto sourceExpiry = Detail::ParseUtcInstant(source.Status.ExpiresAt);
-                if (catalog.SchemaVersion != DistributionPackageCatalog::CurrentSchemaVersion ||
+                if (!DistributionPackageCatalog::IsSupportedSchema(catalog.SchemaVersion) ||
                     !IsPublishedSource(source.Status.State) || catalog.Identity.Channel != source.Channel ||
                     catalog.Identity.Platform != m_Specification.HostPlatform ||
                     catalog.Identity.Architecture != m_Specification.HostArchitecture ||
@@ -512,8 +511,7 @@ namespace KeireHub
             if (!version)
                 return HubResult<EditorInstallPlan>::Failure(version.Error());
             const auto component = std::ranges::find_if(m_Packages,
-                                                        [&](const IndexedPackage& candidate)
-                                                        {
+                                                        [&](const IndexedPackage& candidate) {
                                                             return candidate.Manifest.Id == selection.PackageId &&
                                                                    candidate.Manifest.Version == version.Value();
                                                         });

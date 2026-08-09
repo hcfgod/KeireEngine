@@ -39,7 +39,7 @@ namespace KeireHub
         {
             if (endpoint.Kind == CatalogDocumentKind::ContentCatalog)
                 return endpoint.ServiceBaseUrl + "/v1/content/" + endpoint.Locale;
-            return endpoint.ServiceBaseUrl + "/v1/catalog/" + endpoint.Channel + '/' + endpoint.Platform + '/' +
+            return endpoint.ServiceBaseUrl + "/v2/catalog/" + endpoint.Channel + '/' + endpoint.Platform + '/' +
                    endpoint.Architecture;
         }
 
@@ -292,6 +292,11 @@ namespace KeireHub
         {
             if (cachedIsUsable())
                 return MakeCachedResult(endpoint, *cached);
+            if (response.StatusCode == 404U)
+            {
+                return HubResult<VerifiedCatalogDocument>::Failure(
+                    ClientError(HubErrorCode::NotFound, "No catalog has been published for this endpoint.", item));
+            }
             return HubResult<VerifiedCatalogDocument>::Failure(ClientError(
                 HubErrorCode::CatalogTransportFailed, "The distribution service did not return a usable catalog.", item,
                 "HTTP status " + std::to_string(response.StatusCode),

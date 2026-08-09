@@ -13,11 +13,16 @@ The embedded document intentionally omits the artifact byte size and digest. Emb
 that same archive would create a self-hash cycle. WritePackageArchive returns a complete PackageManifest with those two
 catalog transport fields populated after the archive is atomically published.
 
-Online installation requires the signed catalog PackageManifest. Extraction canonicalizes it and requires exact
-equality with the embedded manifest, then checks the archive byte size and SHA-256 against the catalog fields. Offline
+Current Hubs use a compact schema-2 signed catalog record from `/v2/catalog`. It carries the complete package identity and a
+content-addressed reference to the separately served full PackageManifest. The Hub downloads that manifest only when
+an install or repair is queued, verifies its exact size and SHA-256 against the signed record, and requires every
+summary field to match. Extraction then canonicalizes the hydrated manifest and requires exact equality with the
+embedded manifest before checking the archive byte size and SHA-256 against the catalog fields. Offline
 installation requires an embedded Ed25519 signature over the exact canonical embedded-manifest bytes.
 CatalogTrustStore::VerifyDetached verifies that signature with the same pinned public keys used by catalog
 verification.
+The service retains complete schema-1 catalogs on `/v1/catalog` for previously downloaded Hubs; publishing the compact
+representation never removes their online discovery path.
 
 ## Publishing an editor archive
 
@@ -38,7 +43,9 @@ removes it if the final catalog-manifest publication fails. The returned archive
 artifact identity.
 
 `Scripts/Packaging/prepare-distribution-snapshot.py` accepts that manifest and archive, verifies the artifact identity
-again, and creates `catalogs/<channel>/<platform>/<architecture>.json` plus `packages/<sha256>` in a new staging root.
+again, and creates a compatibility `catalogs/<channel>/<platform>/<architecture>.json`, compact
+`catalogs-v2/<channel>/<platform>/<architecture>.json`, exact `manifests/<sha256>.json`, and
+`packages/<sha256>` in a new staging root.
 The catalog is then signed, verified, and immutably published with `KeireDistributionPublisher`; the private Ed25519 key
 must remain outside the repository, staging root, and online service.
 

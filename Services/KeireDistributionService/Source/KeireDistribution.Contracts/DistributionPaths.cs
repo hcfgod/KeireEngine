@@ -53,12 +53,22 @@ public static partial class DistributionPaths
 
     public static string CatalogPath(string channel, string platform, string architecture)
     {
+        return CatalogPath("catalogs", channel, platform, architecture);
+    }
+
+    public static string CompactCatalogPath(string channel, string platform, string architecture)
+    {
+        return CatalogPath("catalogs-v2", channel, platform, architecture);
+    }
+
+    private static string CatalogPath(string root, string channel, string platform, string architecture)
+    {
         if (!IsRouteToken(channel) || !IsRouteToken(platform) || !IsRouteToken(architecture))
         {
             throw new InvalidDataException("Catalog route tokens are invalid.");
         }
 
-        return $"catalogs/{channel}/{platform}/{architecture}.json";
+        return $"{root}/{channel}/{platform}/{architecture}.json";
     }
 
     public static string ContentPath(string locale)
@@ -81,12 +91,22 @@ public static partial class DistributionPaths
         return $"packages/{sha256}";
     }
 
+    public static string ManifestPath(string sha256)
+    {
+        if (!IsSha256(sha256))
+        {
+            throw new InvalidDataException("Package manifest digest is invalid.");
+        }
+
+        return $"manifests/{sha256}.json";
+    }
+
     public static string ClassifyPath(string relativePath)
     {
         string path = NormalizeRelativePath(relativePath);
         string[] segments = path.Split('/');
 
-        if (segments.Length == 4 && segments[0] == "catalogs" && IsRouteToken(segments[1]) &&
+        if (segments.Length == 4 && segments[0] is "catalogs" or "catalogs-v2" && IsRouteToken(segments[1]) &&
             IsRouteToken(segments[2]) && segments[3].EndsWith(".json", StringComparison.Ordinal))
         {
             string architecture = segments[3][..^5];
@@ -109,6 +129,13 @@ public static partial class DistributionPaths
         if (segments.Length == 2 && segments[0] == "packages" && IsSha256(segments[1]))
         {
             return DistributionFileKinds.Package;
+        }
+
+        if (segments.Length == 2 && segments[0] == "manifests" &&
+            segments[1].EndsWith(".json", StringComparison.Ordinal) &&
+            IsSha256(segments[1][..^5]))
+        {
+            return DistributionFileKinds.Manifest;
         }
 
         throw new InvalidDataException($"Unsupported distribution file path '{relativePath}'.");

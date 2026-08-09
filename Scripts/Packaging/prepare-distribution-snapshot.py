@@ -22,6 +22,9 @@ IDENTITY = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
 class PackageInput(NamedTuple):
     manifest: dict[str, object]
+    manifest_path: Path
+    manifest_size: int
+    manifest_sha256: str
     package: Path
     channel: str
     platform: str
@@ -138,7 +141,16 @@ def validate_package(manifest_path: Path, package: Path, key_id: str) -> Package
         raise ValueError(
             "Package bytes do not match the package manifest artifact identity."
         )
-    return PackageInput(manifest, package, channel, platform, architecture)
+    return PackageInput(
+        manifest,
+        manifest_path,
+        manifest_path.stat().st_size,
+        sha256_file(manifest_path),
+        package,
+        channel,
+        platform,
+        architecture,
+    )
 
 
 def main() -> int:
@@ -162,7 +174,8 @@ def main() -> int:
         for manifest, package in zip(args.package_manifest, args.package, strict=True)
     ]
 
-    catalogs: dict[tuple[str, str, str], list[dict[str, object]]] = {}
+    legacy_catalogs: dict[tuple[str, str, str], list[dict[str, object]]] = {}
+    compact_catalogs: dict[tuple[str, str, str], list[dict[str, object]]] = {}
     identities: set[tuple[str, str, str, str, str]] = set()
     for item in packages:
         identity = (
@@ -177,9 +190,15 @@ def main() -> int:
                 "The prepared snapshot contains a duplicate package identity."
             )
         identities.add(identity)
-        catalogs.setdefault(
-            (item.channel, item.platform, item.architecture), []
-        ).append(item.manifest)
+        catalog_key = (item.channel, item.platform, item.architecture)
+        legacy_catalogs.setdefault(catalog_key, []).append(dict(item.manifest))
+        compact_descriptor = dict(item.manifest)
+        compact_descriptor.pop("files")
+        compact_descriptor["manifest"] = {
+            "sizeBytes": item.manifest_size,
+            "sha256": item.manifest_sha256,
+        }
+        compact_catalogs.setdefault(catalog_key, []).append(compact_descriptor)
 
     output = args.output.resolve()
     if output.exists():
@@ -190,26 +209,54 @@ def main() -> int:
         tempfile.mkdtemp(prefix=f".{output.name}.", suffix=".tmp", dir=parent)
     )
     try:
-        for (channel, platform, architecture), manifests in sorted(catalogs.items()):
-            catalog_path = (
-                staging / "catalogs" / channel / platform / f"{architecture}.json"
-            )
-            manifests.sort(
-                key=lambda value: (str(value["packageId"]), str(value["version"]))
-            )
-            write_atomic(
-                catalog_path,
-                {
-                    "schemaVersion": 1,
-                    "keyId": args.key_id,
-                    "sequence": args.sequence,
-                    "expiresAt": args.expires_at,
-                    "channel": channel,
-                    "platform": platform,
-                    "architecture": architecture,
-                    "packages": manifests,
-                },
-            )
+        for catalog_root, schema_version, catalogs in (
+            ("catalogs", 1, legacy_catalogs),
+            ("catalogs-v2", 2, compact_catalogs),
+        ):
+            for (channel, platform, architecture), manifests in sorted(
+                catalogs.items()
+            ):
+                catalog_path = (
+                    staging
+                    / catalog_root
+                    / channel
+                    / platform
+                    / f"{architecture}.json"
+                )
+                manifests.sort(
+                    key=lambda value: (
+                        str(value["packageId"]),
+                        str(value["version"]),
+                    )
+                )
+                write_atomic(
+                    catalog_path,
+                    {
+                        "schemaVersion": schema_version,
+                        "keyId": args.key_id,
+                        "sequence": args.sequence,
+                        "expiresAt": args.expires_at,
+                        "channel": channel,
+                        "platform": platform,
+                        "architecture": architecture,
+                        "packages": manifests,
+                    },
+                )
+        manifest_root = staging / "manifests"
+        manifest_root.mkdir(parents=True, exist_ok=True)
+        for item in packages:
+            manifest_path = manifest_root / f"{item.manifest_sha256}.json"
+            if manifest_path.exists():
+                if sha256_file(manifest_path) != item.manifest_sha256:
+                    raise ValueError("Prepared manifest digest collision was detected.")
+                continue
+            shutil.copyfile(item.manifest_path, manifest_path)
+            if (
+                manifest_path.stat().st_size != item.manifest_size
+                or sha256_file(manifest_path) != item.manifest_sha256
+            ):
+                raise ValueError("Prepared package manifest copy failed verification.")
+
         package_root = staging / "packages"
         package_root.mkdir(parents=True, exist_ok=True)
         for item in packages:

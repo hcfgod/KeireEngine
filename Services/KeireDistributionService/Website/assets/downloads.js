@@ -18,6 +18,11 @@ const fileNames = {
     macos: ".dmg",
     linux: ".deb",
 };
+const compactInstallerNames = {
+    windows: "KeireHubSetup.exe",
+    macos: "KeireHub.dmg",
+    linux: "keire-hub.deb",
+};
 
 function semanticVersion(value) {
     const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(value);
@@ -82,7 +87,16 @@ function comparePreviewCandidates(left, right) {
     return Date.parse(right.packageRecord.publishedAt) - Date.parse(left.packageRecord.publishedAt);
 }
 
-function safeInstallerName(packageRecord, platform, artifact) {
+function safeInstallerName(packageRecord, platform, artifact, catalogSchema) {
+    if (catalogSchema === 2) {
+        const manifest = packageRecord.manifest;
+        if (!manifest || !Number.isSafeInteger(manifest.sizeBytes) || manifest.sizeBytes < 1 ||
+            typeof manifest.sha256 !== "string" || !sha256Pattern.test(manifest.sha256) ||
+            Object.hasOwn(packageRecord, "files")) {
+            return null;
+        }
+        return compactInstallerNames[platform] ?? null;
+    }
     if (!Array.isArray(packageRecord.files) || packageRecord.files.length !== 1) {
         return null;
     }
@@ -99,7 +113,8 @@ function safeInstallerName(packageRecord, platform, artifact) {
 }
 
 function validateCatalog(catalog, platform, architecture) {
-    if (!catalog || catalog.schemaVersion !== 1 || catalog.channel !== channel || catalog.platform !== platform ||
+    if (!catalog || ![1, 2].includes(catalog.schemaVersion) || catalog.channel !== channel ||
+        catalog.platform !== platform ||
         catalog.architecture !== architecture || typeof catalog.keyId !== "string" || !keyIdPattern.test(catalog.keyId) ||
         !Number.isSafeInteger(catalog.sequence) || catalog.sequence < 1 ||
         typeof catalog.expiresAt !== "string" || !utcTimestampPattern.test(catalog.expiresAt) ||
@@ -111,7 +126,7 @@ function validateCatalog(catalog, platform, architecture) {
     for (const packageRecord of catalog.packages) {
         const version = semanticVersion(packageRecord?.version);
         const artifact = packageRecord?.artifact;
-        const installerName = safeInstallerName(packageRecord, platform, artifact);
+        const installerName = safeInstallerName(packageRecord, platform, artifact, catalog.schemaVersion);
         if (packageRecord?.schemaVersion !== 1 || packageRecord?.type !== "hubInstaller" || !version ||
             packageRecord.channel !== channel || packageRecord.platform !== platform ||
             packageRecord.architecture !== architecture || packageRecord.signatureKeyId !== catalog.keyId ||
@@ -282,7 +297,7 @@ function detectedPlatform() {
 }
 
 async function loadCatalog(platform, architecture) {
-    const response = await fetch(`/v1/catalog/${channel}/${platform}/${architecture}`, {
+    const response = await fetch(`/v2/catalog/${channel}/${platform}/${architecture}`, {
         headers: { Accept: "application/json" },
         cache: "no-cache",
     });

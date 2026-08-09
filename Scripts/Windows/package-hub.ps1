@@ -136,6 +136,7 @@ $distributionWriter = Join-Path $Root "Scripts\Packaging\write-distribution-conf
 $distributionArguments = @(
     $distributionWriter, "--output", (Join-Path $stage "Config\Distribution.json")
 )
+$distributionSource = Join-Path $Root "Config\Distribution.json"
 $distributionServiceUrl = [string]$env:KEIRE_DISTRIBUTION_SERVICE_URL
 $distributionTrustedKey = [string]$env:KEIRE_DISTRIBUTION_TRUSTED_KEY
 $distributionMinimumSequence = [string]$env:KEIRE_DISTRIBUTION_MINIMUM_SEQUENCE
@@ -143,7 +144,10 @@ if ($distributionServiceUrl -or $distributionTrustedKey) {
     $distributionArguments += @("--service-url", $distributionServiceUrl,
         "--trusted-key", $distributionTrustedKey)
 }
-if ($distributionMinimumSequence) {
+else {
+    $distributionArguments += @("--source-config", $distributionSource)
+}
+if ($distributionMinimumSequence -and ($distributionServiceUrl -or $distributionTrustedKey)) {
     $distributionArguments += @("--minimum-sequence", $distributionMinimumSequence)
 }
 Invoke-CheckedWindowsCommand { & $python @distributionArguments } "Hub distribution configuration generation"

@@ -106,6 +106,15 @@ namespace KeireHub
             status.Error = std::move(error);
         }
 
+        void MarkOnlineWithoutCatalog(DistributionCatalogSourceStatus& status)
+        {
+            status.State = DistributionCatalogSourceState::Online;
+            status.Sequence = 0;
+            status.KeyId.clear();
+            status.ExpiresAt.clear();
+            status.Error.reset();
+        }
+
         [[nodiscard]] DistributionPackageCatalogIdentity ExpectedIdentity(const VerifiedCatalogDocument& document)
         {
             return {.KeyId = document.Signature.KeyId,
@@ -244,6 +253,11 @@ namespace KeireHub
             auto fetched = m_Client->FetchPackageCatalog(packageSnapshot.Channel);
             if (!fetched)
             {
+                if (!m_Offline && fetched.Error().Code == HubErrorCode::NotFound && !packageSnapshot.Catalog)
+                {
+                    MarkOnlineWithoutCatalog(packageSnapshot.Status);
+                    continue;
+                }
                 rememberFailure(fetched.Error());
                 MarkFailure(packageSnapshot.Status, static_cast<bool>(packageSnapshot.Catalog), fetched.Error(),
                             m_Offline);
@@ -273,9 +287,14 @@ namespace KeireHub
         auto fetchedContent = m_Client->FetchContentCatalog(next->Content.Locale);
         if (!fetchedContent)
         {
-            rememberFailure(fetchedContent.Error());
-            MarkFailure(next->Content.Status, static_cast<bool>(next->Content.Catalog), fetchedContent.Error(),
-                        m_Offline);
+            if (!m_Offline && fetchedContent.Error().Code == HubErrorCode::NotFound && !next->Content.Catalog)
+                MarkOnlineWithoutCatalog(next->Content.Status);
+            else
+            {
+                rememberFailure(fetchedContent.Error());
+                MarkFailure(next->Content.Status, static_cast<bool>(next->Content.Catalog), fetchedContent.Error(),
+                            m_Offline);
+            }
         }
         else if (!fetchedContent.Value().ExactBytes)
         {

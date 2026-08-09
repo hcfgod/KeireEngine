@@ -119,11 +119,25 @@ is_semantic_version() {
     [[ "$1" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(\+([0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?$ ]]
 }
 
+git_worktree_status() {
+    local root="$1" kernel windows_root windows_status
+    kernel="$(uname -r 2>/dev/null || true)"
+    if [[ "$kernel" == *[Mm]icrosoft* && "$root" == /mnt/[A-Za-z]/* ]] &&
+        command -v git.exe >/dev/null 2>&1 && command -v wslpath >/dev/null 2>&1; then
+        windows_root="$(wslpath -w "$root")" || return 1
+        if windows_status="$(git.exe -C "$windows_root" status --porcelain --untracked-files=normal 2>/dev/null)"; then
+            [[ -z "$windows_status" ]] || printf '%s\n' "${windows_status//$'\r'/}"
+            return
+        fi
+    fi
+    git -C "$root" status --porcelain --untracked-files=normal
+}
+
 package_worktree_policy() {
     local root="$1" allow_dirty="${2:-0}" ci="${3:-0}" status dirty=false
     [[ "$ci" == 0 || "$allow_dirty" == 0 ]] || { printf '%s\n' '--allow-dirty cannot be used in CI.' >&2; return 1; }
     git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { printf '%s\n' 'Release packaging requires a Git working tree.' >&2; return 1; }
-    status="$(git -C "$root" status --porcelain --untracked-files=normal)" || { printf 'Unable to inspect the package worktree at %s.\n' "$root" >&2; return 1; }
+    status="$(git_worktree_status "$root")" || { printf 'Unable to inspect the package worktree at %s.\n' "$root" >&2; return 1; }
     [[ -z "$status" ]] || dirty=true
     [[ "$dirty" == false || "$allow_dirty" == 1 ]] || { printf '%s\n' 'Release packaging requires a clean worktree. Use --allow-dirty only for a local development artifact.' >&2; return 1; }
     printf '%s %s\n' "$dirty" "$([[ "$dirty" == true && "$allow_dirty" == 1 ]] && printf true || printf false)"
@@ -738,6 +752,7 @@ package_name() {
         dnf:sdl-video) printf 'libX11-devel libXext-devel libXrandr-devel libXcursor-devel libXfixes-devel libXi-devel libXScrnSaver-devel libXtst-devel wayland-devel libxkbcommon-devel libdrm-devel mesa-libgbm-devel' ;;
         pacman:sdl-video) printf 'libx11 libxext libxrandr libxcursor libxfixes libxi libxss libxtst wayland libxkbcommon libdrm mesa' ;;
         zypper:sdl-video) printf 'libX11-devel libXext-devel libXrandr-devel libXcursor-devel libXfixes-devel libXi-devel libXss-devel libXtst-devel wayland-devel libxkbcommon-devel libdrm-devel libgbm-devel' ;;
+        *:native-dialog) printf 'zenity' ;;
         *:llvm) printf 'llvm' ;;
         *:*) printf '%s' "$logical" ;;
     esac

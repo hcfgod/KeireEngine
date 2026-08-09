@@ -98,6 +98,10 @@ intended Linux release baseline; a binary built against a newer glibc is not rel
 installers target Debian/Ubuntu; RPM/repository publication remains a separate release artifact rather than being
 simulated by the matrix.
 
+Stable Linux editor catalog packages are produced from a clean detached release commit inside the Rocky Linux 9
+baseline container (glibc 2.34 and GCC Toolset 12). Headless release validation uses Xvfb with Mesa Vulkan for the
+packaged runtime GPU smoke. Do not relabel an artifact built against a newer glibc as a general Linux release.
+
 The current public-download support claim is Windows x86-64 and mainstream glibc Linux x86-64. Linux ARM64,
 Alpine/musl, native macOS, and Metal remain unobserved and must not be presented as tested download targets.
 

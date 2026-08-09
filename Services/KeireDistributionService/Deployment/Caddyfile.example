@@ -26,7 +26,7 @@
 	@unsupported_method not method GET HEAD
 	respond @unsupported_method 405
 
-	@distribution_api path /v1 /v1/* /health /health/*
+	@distribution_api path /v1 /v1/* /v2 /v2/* /health /health/*
 	handle @distribution_api {
 		reverse_proxy 127.0.0.1:5088
 	}

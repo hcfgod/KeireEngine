@@ -1,5 +1,6 @@
 #include "KeireHubRuntime/PackageResolver.h"
 
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
 #include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <algorithm>
@@ -564,6 +565,8 @@ namespace KeireHub
 
     HubStatus ValidatePackageManifest(const PackageManifest& manifest)
     {
+        constexpr std::uint64_t maximumExternalManifestBytes = std::uint64_t{8U} * 1024U * 1024U;
+        const bool externalManifest = manifest.ManifestSizeBytes != 0U || !manifest.ManifestSha256.empty();
         if (manifest.SchemaVersion != PackageManifest::CurrentSchemaVersion ||
             manifest.Kind < PackageKind::HubInstaller || manifest.Kind > PackageKind::Toolchain ||
             !Detail::IsBoundedIdentifier(manifest.Id) || manifest.DisplayName.empty() ||
@@ -572,12 +575,28 @@ namespace KeireHub
              manifest.Platform != "macos") ||
             (manifest.Architecture != "any" && manifest.Architecture != "x86_64" && manifest.Architecture != "arm64") ||
             manifest.ArtifactSizeBytes == 0 || !Detail::IsSha256(manifest.ArtifactSha256) ||
-            manifest.InstalledSizeBytes == 0 || manifest.Files.empty() || manifest.Files.size() > 100000 ||
+            manifest.InstalledSizeBytes == 0 || manifest.Files.size() > 100000 ||
             !Detail::IsBoundedIdentifier(manifest.SignatureKeyId) || manifest.Dependencies.size() > 128 ||
             manifest.Conflicts.size() > 128 || manifest.LicenseReferences.size() > 128)
         {
             return HubStatus::Failure({.Code = HubErrorCode::PackageManifestInvalid,
                                        .Message = "The package manifest is invalid.",
+                                       .AffectedItem = manifest.Id});
+        }
+        if (externalManifest)
+        {
+            if (manifest.ManifestSizeBytes == 0U || manifest.ManifestSizeBytes > maximumExternalManifestBytes ||
+                !Detail::IsSha256(manifest.ManifestSha256) || !manifest.Files.empty())
+            {
+                return HubStatus::Failure({.Code = HubErrorCode::PackageManifestInvalid,
+                                           .Message = "The external package manifest reference is invalid.",
+                                           .AffectedItem = manifest.Id});
+            }
+        }
+        else if (manifest.Files.empty())
+        {
+            return HubStatus::Failure({.Code = HubErrorCode::PackageManifestInvalid,
+                                       .Message = "The package manifest file inventory is empty.",
                                        .AffectedItem = manifest.Id});
         }
         std::uint64_t declaredSize = 0;
@@ -630,7 +649,7 @@ namespace KeireHub
                                            .Message = "The package contains colliding file paths.",
                                            .AffectedItem = manifest.Id});
         }
-        if (declaredSize != manifest.InstalledSizeBytes)
+        if (!externalManifest && declaredSize != manifest.InstalledSizeBytes)
             return HubStatus::Failure({.Code = HubErrorCode::PackageManifestInvalid,
                                        .Message = "The package installed size does not match its file inventory.",
                                        .AffectedItem = manifest.Id});
@@ -679,7 +698,6 @@ namespace KeireHub
                 {"architecture", manifest.Architecture},
                 {"artifact", {{"sizeBytes", manifest.ArtifactSizeBytes}, {"sha256", manifest.ArtifactSha256}}},
                 {"installedSizeBytes", manifest.InstalledSizeBytes},
-                {"files", Detail::Json::array()},
                 {"signatureKeyId", manifest.SignatureKeyId}};
             if (manifest.EngineCompatibility)
                 document["engineCompatibility"] = manifest.EngineCompatibility->ToString();
@@ -701,12 +719,20 @@ namespace KeireHub
                         {{"packageId", conflict.PackageId}, {"version", conflict.Versions.ToString()}});
                 }
             }
-            for (const auto& file : manifest.Files)
+            if (!manifest.ManifestSha256.empty())
             {
-                document["files"].push_back({{"path", Detail::PathToUtf8(file.Path)},
-                                             {"sizeBytes", file.SizeBytes},
-                                             {"sha256", file.Sha256},
-                                             {"mode", file.Mode}});
+                document["manifest"] = {{"sizeBytes", manifest.ManifestSizeBytes}, {"sha256", manifest.ManifestSha256}};
+            }
+            else
+            {
+                document["files"] = Detail::Json::array();
+                for (const auto& file : manifest.Files)
+                {
+                    document["files"].push_back({{"path", Detail::PathToUtf8(file.Path)},
+                                                 {"sizeBytes", file.SizeBytes},
+                                                 {"sha256", file.Sha256},
+                                                 {"mode", file.Mode}});
+                }
             }
             if (!manifest.LicenseReferences.empty())
                 document["licenses"] = manifest.LicenseReferences;
@@ -781,11 +807,24 @@ namespace KeireHub
             result.ArtifactSizeBytes = artifact.at("sizeBytes").get<std::uint64_t>();
             result.ArtifactSha256 = artifact.at("sha256").get<std::string>();
             result.InstalledSizeBytes = json.at("installedSizeBytes").get<std::uint64_t>();
-            for (const auto& value : json.at("files"))
-                result.Files.push_back({.Path = Detail::PathFromUtf8(value.at("path").get<std::string>()),
-                                        .SizeBytes = value.at("sizeBytes").get<std::uint64_t>(),
-                                        .Sha256 = value.at("sha256").get<std::string>(),
-                                        .Mode = value.value("mode", 0644U)});
+            const bool hasFiles = json.contains("files");
+            const bool hasExternalManifest = json.contains("manifest");
+            if (hasFiles == hasExternalManifest)
+                throw std::invalid_argument("A package requires exactly one file inventory representation.");
+            if (hasExternalManifest)
+            {
+                const auto& manifest = json.at("manifest");
+                result.ManifestSizeBytes = manifest.at("sizeBytes").get<std::uint64_t>();
+                result.ManifestSha256 = manifest.at("sha256").get<std::string>();
+            }
+            else
+            {
+                for (const auto& value : json.at("files"))
+                    result.Files.push_back({.Path = Detail::PathFromUtf8(value.at("path").get<std::string>()),
+                                            .SizeBytes = value.at("sizeBytes").get<std::uint64_t>(),
+                                            .Sha256 = value.at("sha256").get<std::string>(),
+                                            .Mode = value.value("mode", 0644U)});
+            }
             result.LicenseReferences = json.value("licenses", std::vector<std::string>{});
             result.SignatureKeyId = json.at("signatureKeyId").get<std::string>();
             if (const auto status = ValidatePackageManifest(result); !status)
@@ -798,6 +837,53 @@ namespace KeireHub
                                                         .Message = "The package manifest is malformed.",
                                                         .TechnicalDetails = error.what()});
         }
+    }
+
+    HubResult<PackageManifest> HydratePackageManifest(const PackageManifest& reference,
+                                                      const std::span<const std::byte> exactBytes)
+    {
+        if (const auto status = ValidatePackageManifest(reference); !status || reference.ManifestSha256.empty())
+        {
+            return HubResult<PackageManifest>::Failure(
+                status ? HubError{.Code = HubErrorCode::InvalidArgument,
+                                  .Message = "The package does not reference an external manifest.",
+                                  .AffectedItem = reference.Id}
+                       : status.Error());
+        }
+        if (exactBytes.size() != reference.ManifestSizeBytes ||
+            Detail::Sha256Hex(exactBytes) != reference.ManifestSha256)
+        {
+            return HubResult<PackageManifest>::Failure(
+                {.Code = HubErrorCode::DownloadChecksumMismatch,
+                 .Message = "The package manifest bytes do not match the signed catalog reference.",
+                 .AffectedItem = reference.Id});
+        }
+        const auto document = std::string_view(reinterpret_cast<const char*>(exactBytes.data()), exactBytes.size());
+        auto hydrated = ParsePackageManifest(document);
+        if (!hydrated)
+            return hydrated;
+        if (!hydrated.Value().ManifestSha256.empty())
+        {
+            return HubResult<PackageManifest>::Failure(
+                {.Code = HubErrorCode::PackageManifestInvalid,
+                 .Message = "An external package manifest cannot reference another manifest.",
+                 .AffectedItem = reference.Id});
+        }
+
+        auto rebound = hydrated.Value();
+        rebound.Files.clear();
+        rebound.ManifestSizeBytes = reference.ManifestSizeBytes;
+        rebound.ManifestSha256 = reference.ManifestSha256;
+        auto expected = EncodePackageManifest(reference);
+        auto actual = EncodePackageManifest(rebound);
+        if (!expected || !actual || expected.Value() != actual.Value())
+        {
+            return HubResult<PackageManifest>::Failure(
+                {.Code = HubErrorCode::CatalogIdentityMismatch,
+                 .Message = "The package manifest does not match its signed catalog metadata.",
+                 .AffectedItem = reference.Id});
+        }
+        return hydrated;
     }
 
     HubResult<PackageResolution> PackageResolver::Resolve(const std::vector<PackageManifest>& available,

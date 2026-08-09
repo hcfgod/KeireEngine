@@ -52,3 +52,19 @@ TEST_CASE("Hub distribution retries a cached catalog until the network validates
     snapshot.PackageCatalogs.front().Status.State = DistributionCatalogSourceState::OfflineLastKnownGood;
     CHECK_FALSE(HubDistributionNeedsNetworkRetry(snapshot));
 }
+
+TEST_CASE("Hub distribution reports a reachable service as online before platform catalogs are published")
+{
+    DistributionCatalogSnapshot catalogs;
+    catalogs.OnlineDiscoveryEnabled = true;
+    catalogs.PackageCatalogs.push_back(
+        {.Channel = "stable", .Status = {.State = DistributionCatalogSourceState::Online}});
+    catalogs.Content.Status.State = DistributionCatalogSourceState::Online;
+
+    HubProductSnapshot product;
+    ApplyHubDistributionSnapshot({.Catalogs = std::make_shared<const DistributionCatalogSnapshot>(catalogs)}, product);
+
+    CHECK(product.Online);
+    CHECK_FALSE(product.Reconnecting);
+    CHECK_FALSE(product.CatalogAvailable);
+}

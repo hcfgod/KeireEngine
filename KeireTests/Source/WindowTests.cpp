@@ -209,6 +209,27 @@ TEST_CASE("WindowSystem creates and routes multiple opaque window identities")
     system->Shutdown();
 }
 
+TEST_CASE("WindowSystem reports explicit Linux folder dialog backend failures")
+{
+#if defined(__linux__)
+    UseDummyVideoDriver();
+    auto system = Keire::CreateRef<Keire::WindowSystem>();
+    auto window = system->CreateWindow(HiddenSpecification("folder dialog failure"));
+    REQUIRE(SDL_SetHintWithPriority(SDL_HINT_FILE_DIALOG_DRIVER, "keire-invalid-driver", SDL_HINT_OVERRIDE));
+
+    const auto operation = system->ShowFolderDialog(window->Id(), std::filesystem::current_path());
+    CHECK(operation->Status() == Keire::FolderDialogStatus::Failed);
+    CHECK_FALSE(operation->Diagnostic().empty());
+
+    SDL_ResetHint(SDL_HINT_FILE_DIALOG_DRIVER);
+    window->Close();
+    window.Reset();
+    system->Shutdown();
+#else
+    CHECK(true);
+#endif
+}
+
 TEST_CASE("WindowSystem enforces logical minimums and safely falls back from unsupported custom chrome")
 {
     UseDummyVideoDriver();

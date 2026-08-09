@@ -8,10 +8,14 @@ internal sealed record PublishedFixture(
     string StorageRoot,
     string SourceRoot,
     byte[] CatalogBytes,
+    byte[] CompactCatalogBytes,
     byte[] ContentBytes,
+    byte[] ManifestBytes,
+    string ManifestSha256,
     byte[] PackageBytes,
     string PackageSha256,
-    string Signature,
+    string CatalogSignature,
+    string CompactCatalogSignature,
     string PublicKeyPath);
 
 internal static class TestDistribution
@@ -21,7 +25,9 @@ internal static class TestDistribution
         string source = Path.Combine(root, $"source-{snapshotId}");
         string storage = Path.Combine(root, "distribution");
         Directory.CreateDirectory(Path.Combine(source, "catalogs", "stable", "windows"));
+        Directory.CreateDirectory(Path.Combine(source, "catalogs-v2", "stable", "windows"));
         Directory.CreateDirectory(Path.Combine(source, "content"));
+        Directory.CreateDirectory(Path.Combine(source, "manifests"));
         Directory.CreateDirectory(Path.Combine(source, "packages"));
 
         string privateKeyPath = Path.Combine(root, $"{snapshotId}-private.pem");
@@ -30,13 +36,22 @@ internal static class TestDistribution
         byte[] catalog = Encoding.UTF8.GetBytes(
             $"{{  \"schemaVersion\" : 1, \"keyId\" : \"{publicKey.KeyId}\", \"sequence\" : 7, " +
             $"\"expiresAt\" : \"2035-01-01T00:00:00Z\", \"marker\" : \"{marker}\" }}\n");
+        byte[] compactCatalog = Encoding.UTF8.GetBytes(
+            $"{{  \"schemaVersion\" : 2, \"keyId\" : \"{publicKey.KeyId}\", \"sequence\" : 7, " +
+            $"\"expiresAt\" : \"2035-01-01T00:00:00Z\", \"marker\" : \"{marker}\" }}\n");
         byte[] content = Encoding.UTF8.GetBytes(
             $"{{\n  \"schemaVersion\": 1,\n  \"keyId\": \"{publicKey.KeyId}\",\n  \"sequence\": 8,\n" +
             $"  \"expiresAt\": \"2035-01-01T00:00:00Z\",\n  \"marker\": \"{marker}\"\n}}\n");
         byte[] package = Encoding.ASCII.GetBytes("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+        byte[] manifest = Encoding.UTF8.GetBytes($"{{\"schemaVersion\":1,\"marker\":\"{marker}\"}}\n");
+        string manifestHash = Convert.ToHexStringLower(SHA256.HashData(manifest));
         string packageHash = Convert.ToHexStringLower(SHA256.HashData(package));
         File.WriteAllBytes(Path.Combine(source, "catalogs", "stable", "windows", "x86_64.json"), catalog);
+        File.WriteAllBytes(
+            Path.Combine(source, "catalogs-v2", "stable", "windows", "x86_64.json"),
+            compactCatalog);
         File.WriteAllBytes(Path.Combine(source, "content", "en-US.json"), content);
+        File.WriteAllBytes(Path.Combine(source, "manifests", $"{manifestHash}.json"), manifest);
         File.WriteAllBytes(Path.Combine(source, "packages", packageHash), package);
 
         string signaturesPath = Path.Combine(source, DistributionContract.SignaturesFileName);
@@ -59,10 +74,14 @@ internal static class TestDistribution
             storage,
             source,
             catalog,
+            compactCatalog,
             content,
+            manifest,
+            manifestHash,
             package,
             packageHash,
-            signatures.Documents[0].Signature,
+            signatures.Documents.Single(document => document.Path == "catalogs/stable/windows/x86_64.json").Signature,
+            signatures.Documents.Single(document => document.Path == "catalogs-v2/stable/windows/x86_64.json").Signature,
             publicKeyPath);
     }
 

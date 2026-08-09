@@ -11,16 +11,16 @@ $ErrorActionPreference = "Stop"
 $Root = Get-RepositoryRoot
 $Lock = Get-DependencyLock
 Enter-WindowsToolEnvironment "vs2022" "msc" "x86_64" | Out-Null
-$Source = Join-Path $Root "Vendor\ffmpeg"
+$VendorSource = Join-Path $Root "Vendor\ffmpeg"
 $Output = Join-Path $Root "Build\Dependencies\ffmpeg\$Configuration"
 $Install = Join-Path $Output "install"
 $Stamp = Join-Path $Output "keire-ffmpeg.stamp"
-$Expected = "$($Lock.FFMPEG_COMMIT)|$Configuration|shared-lgpl-avformat-avcodec-swresample-avutil-v1"
+$Expected = "$($Lock.FFMPEG_COMMIT)|$Configuration|shared-lgpl-avformat-avcodec-swresample-avutil-v2"
 
-if (-not (Test-Path -LiteralPath (Join-Path $Source "configure"))) {
+if (-not (Test-Path -LiteralPath (Join-Path $VendorSource "configure"))) {
     throw "Vendor/ffmpeg is unavailable. Initialize the locked FFmpeg submodule first."
 }
-$Actual = ([string](& git -C $Source rev-parse HEAD)).Trim()
+$Actual = ([string](& git -C $VendorSource rev-parse HEAD)).Trim()
 if ($LASTEXITCODE -ne 0 -or $Actual -ne $Lock.FFMPEG_COMMIT) {
     throw "Vendor/ffmpeg is not at the locked commit $($Lock.FFMPEG_COMMIT)."
 }
@@ -33,7 +33,7 @@ if (-not $Force -and (Test-Path -LiteralPath (Join-Path $Install "include\libavf
 if ($Configuration -eq "Release" -and -not $Force) {
     $DebugInstall = Join-Path $Root "Build\Dependencies\ffmpeg\Debug\install"
     $DebugStamp = Join-Path $Root "Build\Dependencies\ffmpeg\Debug\keire-ffmpeg.stamp"
-    $DebugExpected = "$($Lock.FFMPEG_COMMIT)|Debug|shared-lgpl-avformat-avcodec-swresample-avutil-v1"
+    $DebugExpected = "$($Lock.FFMPEG_COMMIT)|Debug|shared-lgpl-avformat-avcodec-swresample-avutil-v2"
     if ((Test-Path -LiteralPath (Join-Path $DebugInstall "bin\avformat.lib")) -and
         (Test-Path -LiteralPath $DebugStamp) -and
         ((Get-Content -LiteralPath $DebugStamp -Raw).Trim() -eq $DebugExpected)) {
@@ -63,6 +63,19 @@ if (Test-Path -LiteralPath $Output) {
     Remove-Item -LiteralPath $Output -Recurse -Force
 }
 New-Item -ItemType Directory -Force -Path $Output | Out-Null
+$Source = Join-Path $Output "source"
+$SourceArchive = Join-Path $Output "ffmpeg-source.tar"
+New-Item -ItemType Directory -Force -Path $Source | Out-Null
+# Git's locked object bytes are authoritative. A Windows checkout may translate FFmpeg's Makefiles and shell files to
+# CRLF, which changes continuation semantics under MSYS Make even though the C/C++ sources remain valid.
+& git -C $VendorSource archive --format=tar --output=$SourceArchive $Lock.FFMPEG_COMMIT
+if ($LASTEXITCODE -ne 0) { throw "Could not materialize the locked FFmpeg source archive." }
+& tar -xf $SourceArchive -C $Source
+if ($LASTEXITCODE -ne 0) { throw "Could not extract the locked FFmpeg source archive." }
+Remove-Item -LiteralPath $SourceArchive -Force
+if (-not (Test-Path -LiteralPath (Join-Path $Source "configure"))) {
+    throw "The canonical FFmpeg archive is missing its configure script."
+}
 
 function Convert-ToBashPath([string]$Path) {
     $Escaped = $Path.Replace("'", "'\''")

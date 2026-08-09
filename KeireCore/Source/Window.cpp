@@ -2,6 +2,7 @@
 
 #include "Keire/BuildInfo.h"
 
+#include "KeireInternal/FolderDialogInternal.h"
 #include "KeireInternal/TrayIconInternal.h"
 #include "KeireInternal/WindowChromeInternal.h"
 #include "KeireInternal/WindowInternal.h"
@@ -22,15 +23,6 @@ namespace Keire
 {
     namespace Detail
     {
-        class FolderDialogState final : public RefCounted
-        {
-          public:
-            mutable std::mutex Mutex;
-            FolderDialogStatus Status = FolderDialogStatus::Pending;
-            std::filesystem::path Path;
-            std::string Error;
-        };
-
         class OpenFileDialogState final : public RefCounted
         {
           public:
@@ -131,11 +123,6 @@ namespace Keire
             return "Window operation '" + operation + "' failed: " + diagnostic;
         }
 
-        struct FolderDialogRequest final
-        {
-            WeakRef<Detail::FolderDialogState> State;
-        };
-
         struct OpenFileDialogRequest final
         {
             WeakRef<Detail::OpenFileDialogState> State;
@@ -145,27 +132,6 @@ namespace Keire
         {
             WeakRef<Detail::SaveFileDialogState> State;
         };
-
-        void SDLCALL FolderDialogCompleted(void* userData, const char* const* files, int)
-        {
-            std::unique_ptr<FolderDialogRequest> request(static_cast<FolderDialogRequest*>(userData));
-            const auto state = request->State.Lock();
-            if (!state)
-                return;
-            std::scoped_lock lock(state->Mutex);
-            if (!files)
-            {
-                state->Status = FolderDialogStatus::Failed;
-                state->Error = LastSdlError();
-            }
-            else if (!files[0])
-                state->Status = FolderDialogStatus::Cancelled;
-            else
-            {
-                state->Path = std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(files[0])));
-                state->Status = FolderDialogStatus::Selected;
-            }
-        }
 
         void SDLCALL OpenFileDialogCompleted(void* userData, const char* const* files, int)
         {
@@ -958,7 +924,7 @@ namespace Keire
             return {};
         }
 
-        [[nodiscard]] bool GetFlag(const WindowId id, const bool CachedWindow::* member) const
+        [[nodiscard]] bool GetFlag(const WindowId id, const bool CachedWindow::*member) const
         {
             std::scoped_lock lock(m_StateMutex);
             if (const auto iterator = m_Windows.find(id.Value()); iterator != m_Windows.end())
@@ -1378,11 +1344,7 @@ namespace Keire
     {
         auto state = CreateRef<Detail::FolderDialogState>();
         auto operation = CreateRef<FolderDialogOperation>(state);
-        auto request = std::make_unique<FolderDialogRequest>();
-        request->State = WeakRef<Detail::FolderDialogState>(state);
-        const auto location = defaultLocation.empty() ? std::string{} : Utf8PathString(defaultLocation);
-        SDL_ShowOpenFolderDialog(FolderDialogCompleted, request.release(), m_Impl->NativeHandle(parent),
-                                 location.empty() ? nullptr : location.c_str(), false);
+        Detail::ShowNativeFolderDialog(state, m_Impl->NativeHandle(parent), defaultLocation);
         return operation;
     }
 

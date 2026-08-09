@@ -64,9 +64,25 @@ for runtime_identifier in "${runtime_identifiers[@]}"; do
   cp -- "$service_root/Deployment/keire-distribution.service.example" "$package_directory/Deployment/"
   cp -- "$service_root/scripts/health-check.ps1" "$package_directory/scripts/"
   cp -- "$service_root/scripts/health-check.sh" "$package_directory/scripts/"
+  cp -- "$service_root/scripts/monitor-distribution.ps1" "$package_directory/scripts/"
+  cp -- "$service_root/scripts/monitor-distribution.sh" "$package_directory/scripts/"
+  cp -- "$service_root/scripts/backup-distribution.ps1" "$package_directory/scripts/"
+  cp -- "$service_root/scripts/backup-distribution.sh" "$package_directory/scripts/"
+  cp -- "$service_root/scripts/backup-distribution-rclone.ps1" "$package_directory/scripts/"
+  cp -- "$service_root/scripts/backup-distribution-rclone.sh" "$package_directory/scripts/"
+  cp -- "$service_root/scripts/restore-distribution.ps1" "$package_directory/scripts/"
+  cp -- "$service_root/scripts/restore-distribution.sh" "$package_directory/scripts/"
+  cp -- "$service_root/scripts/restore-distribution-rclone.ps1" "$package_directory/scripts/"
+  cp -- "$service_root/scripts/restore-distribution-rclone.sh" "$package_directory/scripts/"
   cp -- "$service_root/scripts/publish-snapshot.ps1" "$package_directory/scripts/"
   cp -- "$service_root/scripts/publish-snapshot.sh" "$package_directory/scripts/"
-  chmod +x -- "$package_directory/scripts/health-check.sh" "$package_directory/scripts/publish-snapshot.sh"
+  cp -- "$service_root/scripts/start-wsl2-host-bridge.sh" "$package_directory/scripts/"
+  cp -- "$service_root/scripts/install-wsl2-host-bridge.sh" "$package_directory/scripts/"
+  chmod +x -- "$package_directory/scripts/health-check.sh" "$package_directory/scripts/monitor-distribution.sh" \
+    "$package_directory/scripts/backup-distribution.sh" "$package_directory/scripts/backup-distribution-rclone.sh" \
+    "$package_directory/scripts/restore-distribution.sh" "$package_directory/scripts/restore-distribution-rclone.sh" \
+    "$package_directory/scripts/publish-snapshot.sh" "$package_directory/scripts/start-wsl2-host-bridge.sh" \
+    "$package_directory/scripts/install-wsl2-host-bridge.sh"
 
   archive="$package_directory.tar.gz"
   tar -czf "$archive" -C "$output_root" "$(basename -- "$package_directory")"

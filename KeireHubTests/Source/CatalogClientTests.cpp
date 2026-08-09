@@ -153,9 +153,23 @@ TEST_CASE("Catalog client verifies and preserves the exact signed bytes")
     CHECK_FALSE(result.Value().FromCache);
     CHECK(result.Value().NetworkValidated);
     REQUIRE(observed);
-    CHECK(observed->Url == "https://distribution.keire.test/v1/catalog/stable/windows/x86_64");
+    CHECK(observed->Url == "https://distribution.keire.test/v2/catalog/stable/windows/x86_64");
     CHECK_FALSE(observed->IfNoneMatch);
     CHECK(observed->MaximumResponseBytes == 32U * 1024U * 1024U);
+}
+
+TEST_CASE("Catalog client distinguishes an unpublished endpoint from a transport failure")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    KeireHubTests::TestSodiumSigner signer;
+    auto client =
+        Client(signer, Options(temporary.Path()), [](const CatalogHttpRequest& request)
+               { return HubResult<CatalogHttpResponse>::Success({.StatusCode = 404, .EffectiveUrl = request.Url}); });
+
+    const auto result = client.FetchPackageCatalog("stable");
+    REQUIRE_FALSE(result);
+    CHECK(result.Error().Code == HubErrorCode::NotFound);
+    CHECK_FALSE(result.Error().Retryable);
 }
 
 TEST_CASE("Catalog client rejects exact-byte tampering and untrusted signing keys")
@@ -176,8 +190,7 @@ TEST_CASE("Catalog client rejects exact-byte tampering and untrusted signing key
 
     const auto untrustedBody = PackageCatalog(otherSigner, 3);
     auto untrustedClient = Client(trustedSigner, Options(temporary.Path() / "untrusted"),
-                                  [&](const CatalogHttpRequest& request)
-                                  {
+                                  [&](const CatalogHttpRequest& request) {
                                       return HubResult<CatalogHttpResponse>::Success(
                                           Response(otherSigner, untrustedBody, 3, ValidExpiry, request.Url));
                                   });

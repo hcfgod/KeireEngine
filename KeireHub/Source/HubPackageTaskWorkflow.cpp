@@ -6,6 +6,7 @@
 #include "KeireHubRuntime/EditorInstallationManager.h"
 #include "KeireHubRuntime/HubUpdateWorkflow.h"
 #include "KeireHubRuntime/HubWorkerProtocol.h"
+#include "KeireHubRuntime/NativeHttpTransport.h"
 
 #include <algorithm>
 #include <array>
@@ -69,6 +70,58 @@ namespace KeireHub
                     .Message = std::move(message),
                     .Retryable = true,
                     .AffectedItem = affected.empty() ? std::string{} : affected.filename().string()};
+        }
+
+        [[nodiscard]] HubResult<std::vector<PackageManifest>>
+        HydrateInstallPackages(const std::vector<EditorInstallPackageStep>& steps,
+                               const std::string_view serviceBaseUrl, const HubEditorInstallEndpointContext& endpoint,
+                               const HubSettings& settings)
+        {
+            const bool requiresManifest = std::ranges::any_of(steps, [](const EditorInstallPackageStep& step)
+                                                              { return !step.Manifest.ManifestSha256.empty(); });
+            std::optional<NativeHttpTransport> transport;
+            if (requiresManifest)
+            {
+                auto created = NativeHttpTransport::Create(
+                    {.CustomProxyUrl = settings.NetworkProxyMode == ProxyMode::Custom
+                                           ? std::optional(settings.CustomProxyUrl)
+                                           : std::nullopt,
+                     .AllowInsecureLoopbackDevelopment = endpoint.AllowInsecureLoopbackDevelopment});
+                if (!created)
+                    return HubResult<std::vector<PackageManifest>>::Failure(created.Error());
+                transport.emplace(std::move(created).Value());
+            }
+
+            std::vector<PackageManifest> result;
+            result.reserve(steps.size());
+            for (const auto& step : steps)
+            {
+                if (step.Manifest.ManifestSha256.empty())
+                {
+                    result.push_back(step.Manifest);
+                    continue;
+                }
+                auto response = transport->Send(
+                    {.Url = std::string(serviceBaseUrl) + "/v1/manifests/" + step.Manifest.ManifestSha256,
+                     .MaximumResponseBytes = static_cast<std::size_t>(step.Manifest.ManifestSizeBytes)});
+                if (!response)
+                    return HubResult<std::vector<PackageManifest>>::Failure(response.Error());
+                if (response.Value().StatusCode != 200U)
+                {
+                    return HubResult<std::vector<PackageManifest>>::Failure(
+                        {.Code = response.Value().StatusCode == 404U ? HubErrorCode::NotFound
+                                                                     : HubErrorCode::CatalogTransportFailed,
+                         .Message = "The package manifest could not be downloaded.",
+                         .Retryable = response.Value().StatusCode >= 500U,
+                         .AffectedItem = step.Manifest.Id,
+                         .TechnicalDetails = "HTTP " + std::to_string(response.Value().StatusCode)});
+                }
+                auto hydrated = HydratePackageManifest(step.Manifest, response.Value().Body);
+                if (!hydrated)
+                    return HubResult<std::vector<PackageManifest>>::Failure(hydrated.Error());
+                result.push_back(std::move(hydrated).Value());
+            }
+            return HubResult<std::vector<PackageManifest>>::Success(std::move(result));
         }
 
         [[nodiscard]] HubResult<std::string> SecureRandomHex(const std::size_t byteCount)
@@ -278,6 +331,16 @@ namespace KeireHub
                                        .Retryable = true,
                                        .AffectedItem = plan.EditorPackageId});
         }
+        auto packages = HydrateInstallPackages(plan.Steps, serviceBaseUrl, endpoint, *settings);
+        if (!packages)
+            return HubStatus::Failure(packages.Error());
+        const auto hydratedEditor = std::ranges::find(packages.Value(), plan.EditorPackageId, &PackageManifest::Id);
+        if (hydratedEditor == packages.Value().end())
+        {
+            return HubStatus::Failure({.Code = HubErrorCode::PackageManifestInvalid,
+                                       .Message = "The hydrated editor package is missing.",
+                                       .AffectedItem = plan.EditorPackageId});
+        }
         auto taskSuffix = SecureRandomHex(16);
         if (!taskSuffix)
             return HubStatus::Failure(taskSuffix.Error());
@@ -303,8 +366,8 @@ namespace KeireHub
                                       : std::nullopt,
                 .BandwidthLimitBytesPerSecond = settings->BandwidthLimitBytesPerSecond};
         };
-        CatalogEditorInstallRequest request{.Download = makeDownload(plan.Steps.front().Manifest),
-                                            .EditorPackage = editorStep->Manifest,
+        CatalogEditorInstallRequest request{.Download = makeDownload(packages.Value().front()),
+                                            .EditorPackage = *hydratedEditor,
                                             .RequestedPackageIds = std::move(requestedPackageIds),
                                             .AllowedInstallRoot = plan.Destination.parent_path(),
                                             .Destination = plan.Destination,
@@ -313,9 +376,9 @@ namespace KeireHub
                                             .HostPlatform = std::string(HostPlatform()),
                                             .HostArchitecture = std::string(HostArchitecture()),
                                             .VerifiedUnixSeconds = NowUnixSeconds()};
-        request.AdditionalDownloads.reserve(plan.Steps.size() - 1);
-        for (auto step = std::next(plan.Steps.begin()); step != plan.Steps.end(); ++step)
-            request.AdditionalDownloads.push_back(makeDownload(step->Manifest));
+        request.AdditionalDownloads.reserve(packages.Value().size() - 1);
+        for (auto package = std::next(packages.Value().begin()); package != packages.Value().end(); ++package)
+            request.AdditionalDownloads.push_back(makeDownload(*package));
         return m_Coordinator->QueueEditorInstall(std::move(request));
     }
 
@@ -347,6 +410,16 @@ namespace KeireHub
                                        .Retryable = true,
                                        .AffectedItem = install.InstallationId});
         }
+        auto packages = HydrateInstallPackages(install.Steps, serviceBaseUrl, endpoint, *settings);
+        if (!packages)
+            return HubStatus::Failure(packages.Error());
+        const auto hydratedEditor = std::ranges::find(packages.Value(), install.EditorPackageId, &PackageManifest::Id);
+        if (hydratedEditor == packages.Value().end())
+        {
+            return HubStatus::Failure({.Code = HubErrorCode::PackageManifestInvalid,
+                                       .Message = "The hydrated editor package is missing.",
+                                       .AffectedItem = install.EditorPackageId});
+        }
         auto taskSuffix = SecureRandomHex(16);
         if (!taskSuffix)
             return HubStatus::Failure(taskSuffix.Error());
@@ -369,8 +442,8 @@ namespace KeireHub
                                       : std::nullopt,
                 .BandwidthLimitBytesPerSecond = settings->BandwidthLimitBytesPerSecond};
         };
-        CatalogEditorRepairRequest request{.Install = {.Download = makeDownload(install.Steps.front().Manifest),
-                                                       .EditorPackage = editorStep->Manifest,
+        CatalogEditorRepairRequest request{.Install = {.Download = makeDownload(packages.Value().front()),
+                                                       .EditorPackage = *hydratedEditor,
                                                        .RequestedPackageIds = std::move(requestedPackageIds),
                                                        .AllowedInstallRoot = install.Destination.parent_path(),
                                                        .Destination = install.Destination,
@@ -383,9 +456,9 @@ namespace KeireHub
                                            .PackageTreeIdentity = plan.PackageTreeIdentity,
                                            .PackageReceiptSha256 = plan.PackageReceiptSha256,
                                            .EditorEntrypoint = plan.EditorEntrypoint};
-        request.Install.AdditionalDownloads.reserve(install.Steps.size() - 1);
-        for (auto step = std::next(install.Steps.begin()); step != install.Steps.end(); ++step)
-            request.Install.AdditionalDownloads.push_back(makeDownload(step->Manifest));
+        request.Install.AdditionalDownloads.reserve(packages.Value().size() - 1);
+        for (auto package = std::next(packages.Value().begin()); package != packages.Value().end(); ++package)
+            request.Install.AdditionalDownloads.push_back(makeDownload(*package));
         return m_Coordinator->QueueEditorRepair(std::move(request));
     }
 
@@ -486,8 +559,7 @@ namespace KeireHub
         for (auto& editor : product.Editors)
         {
             editor.HasActiveTask = std::ranges::any_of(*snapshot->Tasks,
-                                                       [&](const HubTask& task)
-                                                       {
+                                                       [&](const HubTask& task) {
                                                            return !IsTerminal(task.State) &&
                                                                   task.TargetInstallationId &&
                                                                   *task.TargetInstallationId == editor.Id;

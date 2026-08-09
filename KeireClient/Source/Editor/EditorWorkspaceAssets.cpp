@@ -11,6 +11,7 @@
 #include "KeireClient/Editor/ConsolePanel.h"
 #include "KeireClient/Editor/DiagnosticsPanel.h"
 #include "KeireClient/Editor/EditModeVfxPreview.h"
+#include "KeireClient/Editor/EditorAssetFileService.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
 #include "KeireClient/Editor/ExternalAssetImportController.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
@@ -44,9 +45,7 @@
 #include <cstdio>
 #include <exception>
 #include <filesystem>
-#include <fstream>
 #include <functional>
-#include <iterator>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -61,72 +60,13 @@
 #include <vector>
 namespace
 {
-    void RequireCompiledVfxSystems(const Keire::VfxEffectDefinition& definition, const Keire::VfxBackend backend)
-    {
-        const auto programs = Keire::CompileVfxEffectSystems(definition, backend);
-        if (programs.empty())
-            throw std::runtime_error("VFX preview compilation produced no systems.");
-        for (const auto& program : programs)
-        {
-            if (!program.Valid)
-            {
-                throw std::runtime_error(program.Diagnostics.empty() ? "VFX preview compilation failed."
-                                                                     : program.Diagnostics.front().Message);
-            }
-        }
-    }
-
-    [[nodiscard]] std::vector<std::byte> ReadBytes(const std::filesystem::path& path)
-    {
-        std::ifstream input(path, std::ios::binary);
-        if (!input)
-            throw std::runtime_error("Cannot open input action asset: " + path.string());
-        const std::vector<char> characters{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
-        std::vector<std::byte> bytes(characters.size());
-        std::ranges::transform(characters, bytes.begin(), [](const char value) { return std::byte(value); });
-        return bytes;
-    }
-
-    [[nodiscard]] std::string FormatAssetDiagnostic(const Keire::AssetImportDiagnostic& diagnostic)
-    {
-        auto result = diagnostic.RelativePath.generic_string();
-        if (diagnostic.Line != 0)
-        {
-            result += ':' + std::to_string(diagnostic.Line);
-            if (diagnostic.Column != 0)
-                result += ':' + std::to_string(diagnostic.Column);
-        }
-        if (!result.empty())
-            result += ": ";
-        result += diagnostic.Message;
-        return result;
-    }
-
-    void WriteBytesAtomically(const std::filesystem::path& path, const std::span<const std::byte> bytes)
-    {
-        const std::string text =
-            bytes.empty() ? std::string{} : std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-        Keire::Detail::WriteTextFileAtomically(path, text);
-    }
-
-    [[nodiscard]] bool IsCSharpIdentifier(const std::string_view value)
-    {
-        return !value.empty() && (std::isalpha(static_cast<unsigned char>(value.front())) || value.front() == '_') &&
-               std::ranges::all_of(value.substr(1), [](const unsigned char character)
-                                   { return std::isalnum(character) || character == '_'; });
-    }
-
-    [[nodiscard]] std::vector<std::byte> TextBytes(const std::string_view text)
-    {
-        const auto bytes = std::as_bytes(std::span(text));
-        return {bytes.begin(), bytes.end()};
-    }
-
-    [[nodiscard]] bool SameOrChild(const std::filesystem::path& parent, const std::filesystem::path& candidate)
-    {
-        const auto relative = candidate.lexically_normal().lexically_relative(parent.lexically_normal());
-        return relative.empty() || (!relative.is_absolute() && !relative.generic_string().starts_with(".."));
-    }
+    using KeireEditor::Detail::FormatAssetDiagnostic;
+    using KeireEditor::Detail::IsCSharpIdentifier;
+    using KeireEditor::Detail::ReadBytes;
+    using KeireEditor::Detail::RequireCompiledVfxSystems;
+    using KeireEditor::Detail::SameOrChild;
+    using KeireEditor::Detail::TextBytes;
+    using KeireEditor::Detail::WriteBytesAtomically;
 
     [[nodiscard]] bool IsImmediateAssetMutation(const Keire::Detail::AssetWorkerMutationKind kind) noexcept
     {

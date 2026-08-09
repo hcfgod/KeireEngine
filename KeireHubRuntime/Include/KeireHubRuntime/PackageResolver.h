@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -106,6 +107,8 @@ namespace KeireHub
         std::string ArtifactSha256;
         std::uint64_t InstalledSizeBytes = 0;
         std::vector<PackageFile> Files;
+        std::uint64_t ManifestSizeBytes = 0;
+        std::string ManifestSha256;
         std::vector<std::string> LicenseReferences;
         std::string SignatureKeyId;
     };
@@ -133,6 +136,8 @@ namespace KeireHub
     [[nodiscard]] HubStatus ValidatePackageManifest(const PackageManifest& manifest);
     [[nodiscard]] HubResult<std::string> EncodePackageManifest(const PackageManifest& manifest);
     [[nodiscard]] HubResult<PackageManifest> ParsePackageManifest(std::string_view document);
+    [[nodiscard]] HubResult<PackageManifest> HydratePackageManifest(const PackageManifest& reference,
+                                                                    std::span<const std::byte> exactBytes);
 
     class PackageResolver final
     {

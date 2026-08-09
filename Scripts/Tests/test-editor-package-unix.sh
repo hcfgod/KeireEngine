@@ -16,6 +16,7 @@ grep -q 'Build/Distributions' "$ROOT/Scripts/Unix/package-editor.sh"
 grep -q 'validate_editor_package_stage' "$ROOT/Scripts/Unix/package-editor.sh"
 grep -Fq 'validate_macos_macho_minimum "$stage" "$macos_deployment_target"' \
   "$ROOT/Scripts/Unix/package-editor.sh"
+grep -Fq 'xvfb-run -a "$stage/bin/$runtime"' "$ROOT/Scripts/Unix/package.sh"
 grep -Fq '<key>LSMinimumSystemVersion</key>' "$ROOT/Scripts/Unix/package-editor.sh"
 grep -q 'write-package-manifest.py' "$ROOT/Scripts/Unix/package-editor.sh"
 grep -Fq 'exec \"\$script_dir/bin/$CLIENT_TARGET\"' "$ROOT/Scripts/Unix/package-editor.sh"

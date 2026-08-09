@@ -159,13 +159,17 @@ distribution_arguments=(
   "$ROOT/Scripts/Packaging/write-distribution-config.py"
   --output "$stage/Config/Distribution.json"
 )
+distribution_source="$ROOT/Config/Distribution.json"
 distribution_service_url="${KEIRE_DISTRIBUTION_SERVICE_URL:-}"
 distribution_trusted_key="${KEIRE_DISTRIBUTION_TRUSTED_KEY:-}"
 distribution_minimum_sequence="${KEIRE_DISTRIBUTION_MINIMUM_SEQUENCE:-}"
 if [[ -n "$distribution_service_url" || -n "$distribution_trusted_key" ]]; then
   distribution_arguments+=(--service-url "$distribution_service_url" --trusted-key "$distribution_trusted_key")
+else
+  distribution_arguments+=(--source-config "$distribution_source")
 fi
-if [[ -n "$distribution_minimum_sequence" ]]; then
+if [[ -n "$distribution_minimum_sequence" && \
+      ( -n "$distribution_service_url" || -n "$distribution_trusted_key" ) ]]; then
   distribution_arguments+=(--minimum-sequence "$distribution_minimum_sequence")
 fi
 python3 "${distribution_arguments[@]}"

@@ -1,5 +1,11 @@
 # Changelog
 
+- Fixed Linux Hub folder browsing by retrying failed desktop portals through the installed Zenity backend and declaring
+  that backend in both source bootstrap and Debian runtime dependencies. The new-project dialog now keeps its visible
+  Cancel action beside Create project instead of clipping it against the modal edge.
+- Made Linux package validation deterministic on headless builders by running the packaged runtime GPU smoke through Xvfb, while retaining the normal display path for interactive hosts.
+- Added a hardened, restartable WSL2 loopback bridge for Windows-hosted development origins, preserving the Hub's real HTTPS hostname, signatures, and certificate validation when Windows 10 and WSL2 do not share loopback.
+
 - Added durable task and notification cleanup in the Hub, including per-item dismissal and bulk clearing of finished
   tasks. Retryable editor removals now retain their recovery identity out of sight after dismissal instead of becoming
   permanent task cards, and transient editor checks disappear when they finish. All project dialogs now follow the
@@ -32,6 +38,27 @@ version tags.
 
 ## Unreleased
 
+- Added compact signed package discovery without breaking previously downloaded Hubs. Current clients and the website
+  use `/v2/catalog` records that bind a separately fetched content-addressed package manifest, while `/v1/catalog`
+  continues serving the complete schema-1 inventory. Install and repair hydrate and verify the exact manifest only
+  when needed, reducing ordinary catalog discovery from the full editor file inventory to a small release summary.
+- Reconciled the production Supabase migration ledger with the repository and made contact quota reservation plus
+  message insertion one database transaction. Hourly scheduled maintenance now removes expired quota rows instead of
+  deleting them during every contact attempt, and the obsolete split reservation function has been removed.
+- Added distribution-host operations for boot-time Local System startup, restartable transactional migration from a
+  user-profile host into a protected machine root, off-origin readiness monitoring with transition alerts, immutable
+  off-machine backups, and timed restore drills. Google Drive backups now use a dedicated OAuth client plus an
+  append-only rclone layout that uploads each immutable snapshot only once, verifies it before advancing a small latest
+  record, rejects changed remote objects, and restores the selected snapshot on Windows or Linux. A daily Local System
+  task records durable success or failure status without depending on interactive sign-in. Protected-host ACLs now
+  propagate from the root so packaged scripts retain executable access. The Windows service release lock covers every
+  supported self-contained runtime so a locked package build is reproducible.
+- Fixed Linux Hub installers starting with online discovery disabled because WSL and native Linux packaging did not
+  inherit the Windows-only release environment. Windows, Linux, and future macOS Hub packages now consume one checked-in
+  public distribution trust configuration, while explicit release environment variables remain available as an
+  intentional deployment override. Windows and Unix FFmpeg dependency builds now materialize the locked submodule's
+  canonical Git bytes in the private build cache, preventing CRLF checkout policy from breaking `configure` in WSL or
+  continuation-based FFmpeg Makefile object lists under MSYS Make.
 - Fixed the public downloads grid allowing long preview controls and SHA-256 rows to exceed their platform cards at
   desktop and intermediate viewport widths.
 - Added versioned Windows and Linux website previews with separate Hub/editor identities, tested-platform disclosures,
@@ -88,7 +115,12 @@ version tags.
   are now frozen by lockfiles. Ninja dependency paths now remain toolset-aware, generation fingerprints include Premake
   inputs, and the Unix launcher/package scripts pass the release workflow's ShellCheck policy.
 - Hardened the public contact function with a streamed 16 KiB body limit, strict UTF-8/object JSON parsing, and a
-  platform-provided client-address rate key that ignores caller-controlled forwarding headers.
+  platform-provided client-address rate key that ignores caller-controlled forwarding headers. Rate-limit identities
+  now require a dedicated `CONTACT_RATE_LIMIT_SECRET`; a missing secret fails closed instead of reusing an
+  administrative Supabase credential.
+- Extracted five cohesive maintainability boundaries without changing their public behavior: managed build workspace
+  generation, material-node catalog metadata, VFX JSON value codecs, VFX panel model rules, and editor asset-file
+  services. Source-size ceilings were ratcheted to the smaller implementations.
 - Fixed transient startup or host-network failures leaving distribution discovery permanently unavailable. The Hub now
   preserves verified catalogs while running interruptible bounded retries, periodically revalidates healthy endpoints,
   distinguishes Reconnecting from explicit Offline mode, and restarts discovery only for relevant network settings.

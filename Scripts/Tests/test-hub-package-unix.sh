@@ -46,7 +46,20 @@ cp "$ROOT/Config/Supabase.json" "$stage/Config/Supabase.json"
 
 manifest_writer="$ROOT/Scripts/Packaging/write-package-manifest.py"
 python3 "$ROOT/Scripts/Packaging/write-distribution-config.py" \
-  --output "$stage/Config/Distribution.json"
+  --output "$stage/Config/Distribution.json" --source-config "$ROOT/Config/Distribution.json"
+python3 - "$stage/Config/Distribution.json" "$ROOT/Config/Distribution.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    distribution = json.load(stream)
+with open(sys.argv[2], encoding="utf-8") as stream:
+    authority = json.load(stream)
+assert distribution["onlineDiscoveryEnabled"] is True
+assert distribution["serviceBaseUrl"] == authority["serviceBaseUrl"]
+assert distribution["trustedKeys"]
+assert distribution["trustedKeys"][0]["keyId"] == authority["trustedKeys"][0]["keyId"]
+PY
 manifest_arguments=(
   "$manifest_writer" write --stage "$stage" --output hub-package.json --artifact hub
   --package-prefix fixture --project Fixture --version 1.2.3 --channel Stable --commit fixture

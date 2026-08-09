@@ -3,7 +3,7 @@
 `KeireDistributionService` is the stateless, read-only origin for Kéire Hub catalogs, learning/resource catalogs, and
 content-addressed packages. It targets the repository's pinned .NET 10 toolchain, binds to `127.0.0.1:5088` by default,
 and runs behind Caddy on public HTTPS port 443. The same package includes the static Kéire website; Caddy serves human
-routes locally and reserves `/v1`, `/v1/*`, `/health`, and `/health/*` for the unchanged origin.
+routes locally and reserves `/v1`, `/v1/*`, `/v2`, `/v2/*`, `/health`, and `/health/*` for the unchanged origin.
 
 The service has no upload, publishing, account, entitlement, administration, or directory-listing API. Publishing is
 an offline filesystem operation performed by `KeireDistributionPublisher`; the online process never receives a
@@ -13,8 +13,10 @@ private signing key.
 
 | Route | Behavior |
 |---|---|
-| `GET/HEAD /v1/catalog/{channel}/{platform}/{architecture}` | Streams the exact signed catalog bytes selected by the active snapshot |
+| `GET/HEAD /v1/catalog/{channel}/{platform}/{architecture}` | Streams the complete schema-1 signed catalog for previously released Hubs |
+| `GET/HEAD /v2/catalog/{channel}/{platform}/{architecture}` | Streams the compact schema-2 signed catalog used by current Hubs and the website |
 | `GET/HEAD /v1/content/{locale}` | Streams the exact signed Learn/Resources catalog bytes |
+| `GET/HEAD /v1/manifests/{sha256}` | Streams an immutable package manifest whose digest is bound by the signed catalog |
 | `GET/HEAD /v1/packages/{sha256}` | Streams an immutable SHA-256-addressed package; supports one RFC 7233 byte range |
 | `GET /health/live` | Process liveness; does not imply that content is ready |
 | `GET /health/ready` | `200` when a validated current or last-known-good snapshot is available; otherwise `503` |
@@ -22,8 +24,8 @@ private signing key.
 Catalog and content responses carry `ETag`, `X-Keire-Signature-Algorithm`, `X-Keire-Signature-Key-Id`,
 `X-Keire-Signature`, `X-Keire-Sequence`, and `X-Keire-Expires`. `If-None-Match` returns `304`. Package responses add
 `Accept-Ranges: bytes`; valid single ranges return `206`, unsatisfiable or multiple ranges return `416`, and a changed
-`If-Range` validator restarts a complete `200` response. Packages use a one-year immutable cache policy; moving catalog
-routes revalidate after 60 seconds.
+`If-Range` validator restarts a complete `200` response. Package manifests and packages use a one-year immutable cache
+policy; moving catalog routes revalidate after 60 seconds.
 
 The detached Ed25519 signature covers the exact raw catalog/content file bytes. Each signed JSON document must include
 top-level `schemaVersion`, `keyId`, `sequence`, and UTC `expiresAt` fields that exactly match its detached metadata. The
@@ -31,6 +33,15 @@ offline publisher signs and cryptographically verifies this binding before an im
 online service performs structural validation and serves the already verified bytes; it never receives a private key.
 Package catalogs may additionally declare `minimumSupportedHubVersion` as a semantic version. Because that policy is
 inside the signed bytes, changing it requires a new catalog sequence and signature.
+
+Schema-2 package catalogs on `/v2/catalog` contain the package identity, dependency, compatibility, size, and artifact fields needed
+for discovery plus a `manifest` byte length and SHA-256. The complete file inventory is stored separately at
+`/v1/manifests/{sha256}`. The signed catalog therefore cryptographically binds the exact immutable manifest without
+transferring thousands of file records during ordinary discovery. The Hub fetches and hashes that manifest only when
+an install or repair is queued, then requires every catalog summary field to match before downloading the package.
+The existing `/v1/catalog` route continues serving complete schema-1 inline catalogs so updating the release service
+does not disable discovery in an already-downloaded Hub. Both representations are separately signed with the same
+release identity and sequence.
 
 The public Downloads page fetches the stable Windows, macOS, and Linux x86_64/ARM64 catalog matrix. It validates catalog
 identity and exact `hubInstaller` records before exposing `/v1/packages/{sha256}`. This browser validation improves
@@ -51,7 +62,9 @@ distribution-root/
     |-- 2026.08.0/
     |   |-- snapshot.json
     |   |-- catalogs/stable/windows/x86_64.json
+    |   |-- catalogs-v2/stable/windows/x86_64.json
     |   |-- content/en-US.json
+    |   |-- manifests/<64-character-lowercase-sha256>.json
     |   `-- packages/<64-character-lowercase-sha256>
     `-- 2026.08.1/...
 ```
@@ -63,7 +76,7 @@ digest or size mismatches, unsupported path layouts, malformed JSON, and invalid
 a candidate fully before swapping its in-memory index. If a newly selected snapshot is invalid, requests continue using
 the last validated snapshot and readiness reports `ready-degraded`.
 
-Publisher input uses the same `catalogs/`, `content/`, and `packages/` layout plus an offline-generated
+Publisher input uses the same `catalogs/`, `catalogs-v2/`, `content/`, `manifests/`, and `packages/` layout plus an offline-generated
 `signatures.json`:
 
 ```json
@@ -82,8 +95,9 @@ Publisher input uses the same `catalogs/`, `content/`, and `packages/` layout pl
 }
 ```
 
-Every catalog/content file needs exactly one signature entry; packages must be named by their computed SHA-256 and do
-not appear in `signatures.json`. The publisher preserves document and package bytes without normalization.
+Every catalog/content file needs exactly one signature entry. Package manifests and packages must be named by their
+computed SHA-256 and do not appear in `signatures.json`; their exact identities are already bound by the signed catalog.
+The publisher preserves every document, manifest, and package byte without normalization.
 
 ## Offline signing workflow
 
@@ -93,7 +107,7 @@ these steps.
 
 ```powershell
 $futureUtcExpiry = (Get-Date).ToUniversalTime().AddDays(30).ToString("o")
-./Scripts/project.ps1 package-editor -Generator ninja -Toolset msc -AllowDirty
+./Scripts/project.ps1 package-editor -Generator ninja -Toolset msc
 ./Scripts/project.ps1 build -Generator ninja -Configuration Release -Toolset msc `
     -Target KeireHubPackagePublisher
 ./Build/Bin/Release-windows-x86_64/KeireHubPackagePublisher/KeireHubPackagePublisher.exe create-editor `
@@ -121,7 +135,7 @@ python Scripts/Packaging/prepare-distribution-snapshot.py `
     --sequence 42 --expires-at $futureUtcExpiry
 ```
 
-The Hub-installer command rejects dirty or development Hub manifests, symlinks/reparse points, existing outputs,
+Both release-package commands reject dirty or development manifests, symlinks/reparse points, existing outputs,
 mismatched host extensions, unsafe identities, invalid sizes/digests, and a manifest that does not round-trip through
 the catalog parser. Do not publish an unsigned Windows executable, an unnotarized macOS DMG, or a non-native Linux DEB.
 
@@ -257,8 +271,8 @@ function is public by design for a website form, but accepts only exact producti
 uses a honeypot and keyed-IP-hash throttle, and writes through server-only credentials into tables unavailable to
 browser roles. It streams at most 16 KiB before strict UTF-8/object JSON parsing and ignores caller-controlled
 `Forwarded`/`X-Forwarded-For` values; the platform-provided `CF-Connecting-IP` value is the only client address used for
-the rate key. Set a dedicated `CONTACT_RATE_LIMIT_SECRET` with `supabase secrets set` so rate-limit pseudonyms do not
-reuse the database credential. Deploy and validate with the committed dependency graph:
+the rate key. A dedicated `CONTACT_RATE_LIMIT_SECRET` is required; the function fails closed when it is absent so
+rate-limit pseudonyms can never reuse the database credential. Deploy and validate with the committed dependency graph:
 
 ```sh
 supabase secrets set CONTACT_RATE_LIMIT_SECRET='<random deployment secret>'
@@ -284,11 +298,76 @@ service. Copy Caddy beside the service, copy `Deployment/Caddyfile.example` to `
 }
 ```
 
-Validate it with `./scripts/start-windows-host.ps1 -ValidateOnly`, then register PowerShell running
-`./scripts/start-windows-host.ps1 -KeepAlive` as a limited current-user Task Scheduler action triggered at sign-in.
-The supervisor is single-instance, launches both processes without visible windows, waits for their readiness
-endpoints, and restarts a process whose listening port disappears. A sign-in task starts only after that user signs in;
-unattended pre-login hosting requires an administrator-managed Windows service instead.
+Validate it with `./scripts/start-windows-host.ps1 -ValidateOnly`. For an unattended host, open an elevated PowerShell
+session and install the repository-owned startup task:
+
+```powershell
+./scripts/install-windows-startup-task.ps1 -SettingsPath ./scripts/host-settings.json
+```
+
+To move an already-running interactive-user deployment into a protected machine location, use the transactional
+migration helper from an elevated PowerShell session. It copies only the active host payload and immutable distribution
+root, validates the staged copy, replaces the existing task with the Local System startup task, verifies public
+readiness, and restores the previous task definition if activation fails:
+
+```powershell
+./scripts/migrate-windows-host.ps1 `
+    -SourceHostRoot 'C:\Users\operator\AppData\Local\Programs\Keire Distribution Host' `
+    -SourceDistributionRoot 'C:\Users\operator\AppData\Local\Keire Hub\Distribution\ServiceRoot' `
+    -DestinationRoot 'D:\ProgramData\Keire Distribution Host'
+```
+
+If activation fails after the protected destination has been created, correct the reported cause and rerun the same
+command with `-Resume`. Resume mode repairs and reapplies the protected ACL, revalidates the existing staged payload,
+and retries only activation; it never merges new source content into that destination.
+
+The task runs the supervisor as Local System 30 seconds after boot, before interactive sign-in, restarts it after
+failures, and can be removed with `-Uninstall`. Keep the package, settings, Caddy data, logs, website, preview downloads,
+and distribution root in administrator-protected machine paths that Local System can access; do not install this task
+against a disposable user-profile extraction. The supervisor is single-instance, launches both processes without
+visible windows, waits for their readiness endpoints, and restarts a process whose listening port disappears.
+
+### WSL2 access to a Windows-loopback development host
+
+Windows 10 WSL2 uses a separate network namespace. If the distribution hostname is mapped to `127.0.0.1` in the
+Windows hosts file while Caddy uses a router-facing high port, Ubuntu inherits the loopback DNS answer but cannot
+reach the Windows loopback port proxy. Keep the Hub's production HTTPS URL and certificate validation unchanged. In
+WSL2, install `socat`, then install the repository-owned systemd bridge using the Caddy `httpsPort` from
+`host-settings.json`:
+
+```sh
+sudo apt-get install socat
+sudo ./scripts/install-wsl2-host-bridge.sh \
+  --host keireengine.duckdns.org --upstream-port 50255
+curl --fail https://keireengine.duckdns.org/health/ready
+```
+
+The service resolves the current WSL2 Windows-host gateway on every start, verifies the upstream HTTPS readiness
+endpoint with the real hostname, binds only WSL's `127.0.0.1:443`, and then forwards TLS bytes without terminating or
+bypassing certificate validation. Remove it with `sudo ./scripts/install-wsl2-host-bridge.sh --uninstall`. This bridge
+is only for a Hub running inside WSL2 on the same Windows machine as the self-hosted origin; normal Linux users connect
+to public HTTPS directly and must not install it.
+
+Run the availability monitor on a separate network and machine so it covers power, router, DNS, TLS, and origin
+failures rather than only process health. Both variants notify a generic JSON webhook only when availability changes:
+
+```powershell
+./scripts/monitor-distribution.ps1 -BaseUrl https://distribution.example `
+    -NotificationWebhook $env:KEIRE_UPTIME_WEBHOOK -Once
+```
+
+```sh
+./scripts/monitor-distribution.sh https://distribution.example /var/lib/keire-monitor/state \
+  "$KEIRE_UPTIME_WEBHOOK" --once
+```
+
+Schedule the one-shot command every minute on the external monitor. A continuous mode is also available by omitting
+`-Once`/`--once`. Alert delivery itself must be tested quarterly by stopping the origin or monitoring a deliberate
+failure URL and confirming both the down and recovery notifications.
+
+A hosted uptime service also satisfies the separate-network requirement; a second computer is not required. Configure
+an HTTPS monitor for the exact `/health/ready` URL, enable email plus mobile push notifications, and retain the same
+quarterly down/recovery drill. A monitor running only on the origin does not cover power, router, DNS, or TLS failures.
 
 The metadata rate limiter is fixed-window and deliberately conservative; package streams use a bounded global
 concurrency limiter and queue. Kestrel request headers and timeouts are bounded. Application logs use the JSON console
@@ -296,10 +375,88 @@ formatter, and the Caddy example writes structured access logs with rotation.
 
 ## Backup, restore, and migration
 
-Snapshots are immutable, so a backup copies `snapshots/` first and `current` last. Verify the backup with
-`KeireDistributionPublisher validate --root <backup-root>`. To restore, copy snapshot directories into a new root,
-validate the desired snapshot, then use `activate`; do not edit `snapshot.json` or signed documents in place. Keep at
-least the current and previous known-good snapshots until all supported Hubs have advanced.
+Snapshots are immutable, so a backup copies `snapshots/` first and `current` last. The backup destination must be an
+off-machine UNC path, network mount, or independently replicated volume. The scripts validate both the source and the
+completed immutable backup and refuse nested source/destination paths:
+
+```powershell
+./scripts/backup-distribution.ps1 -DistributionRoot C:\srv\keire-distribution `
+    -DestinationRoot \\backup-host\keire-distribution
+./scripts/restore-distribution.ps1 -BackupRoot \\backup-host\keire-distribution\<backup-id> -ValidateOnly
+```
+
+```sh
+./scripts/backup-distribution.sh /srv/keire-distribution /mnt/off-machine/keire-distribution
+./scripts/restore-distribution.sh /mnt/off-machine/keire-distribution/<backup-id> --validate-only
+```
+
+Google Drive is a suitable off-machine destination when it is accessed by a dedicated backup tool rather than a
+login-dependent desktop sync client. Create a dedicated Google OAuth **Desktop app**, leave its publishing status **In
+production** so personal-use refresh tokens do not expire after seven days, and configure the `rclone` remote with the
+least-privilege `drive.file` scope. Use an application-owned client ID and secret; rclone's shared Google Drive client
+is being retired during 2026. Keep the OAuth configuration below the protected host root so only Local System and
+administrators can read its refresh token.
+
+The remote workflow does not upload another complete backup tree each day. Immutable snapshots are copied once to
+`snapshots/<snapshot-id>`, each successful run adds a small immutable record under `records/<backup-id>`, and `latest`
+is updated only after checksum verification. Runs never use `sync`, delete a remote object, or overwrite a changed
+snapshot. This layout preserves recovery history without consuming another complete snapshot's storage on every
+schedule:
+
+```powershell
+./scripts/install-windows-backup-task.ps1 `
+    -HostRoot 'D:\ProgramData\Keire Distribution Host' `
+    -RemoteRoot 'keire-drive:KeireEngine/DistributionBackups' `
+    -StartNow
+```
+
+The installer validates the protected config and named remote, installs the runtime scripts below the host root, and
+creates `Keire Distribution Backup` as Local System. It runs daily at 03:15 local time, starts when a missed run becomes
+possible, requires a network connection, rejects concurrent runs, and can start the first backup immediately. Human
+and machine-readable results are written to `Logs/distribution-backup.log` and
+`Logs/distribution-backup-status.json`. Run the backup script directly after an important snapshot activation when a
+24-hour recovery-point window is too large.
+
+Linux uses the same remote format and checksum/immutability rules. Protect the config for the service identity and run
+the following from a systemd timer or equivalent distro-native scheduler:
+
+```sh
+./scripts/backup-distribution-rclone.sh /srv/keire-distribution \
+  keire-drive:KeireEngine/DistributionBackups /etc/keire-distribution/rclone.conf
+```
+
+Treat the Drive backup as operational only after restoring it into a new empty directory and validating the downloaded
+snapshot. On Windows, run this from an elevated PowerShell session after the initial scheduled task succeeds:
+
+```powershell
+./scripts/restore-distribution-rclone.ps1 `
+    -DestinationRoot 'D:\ProgramData\Keire Distribution Host\RestoreDrills\initial' `
+    -RclonePath 'D:\ProgramData\Keire Distribution Host\tools\rclone\rclone.exe' `
+    -RcloneConfigPath 'D:\ProgramData\Keire Distribution Host\Secrets\rclone.conf' `
+    -RemoteRoot 'keire-drive:KeireEngine/DistributionBackups' `
+    -PublisherPath 'D:\ProgramData\Keire Distribution Host\tools\publisher\KeireDistributionPublisher.exe'
+```
+
+The Linux equivalent is:
+
+```sh
+./scripts/restore-distribution-rclone.sh /var/tmp/keire-restore-drill \
+  keire-drive:KeireEngine/DistributionBackups /etc/keire-distribution/rclone.conf
+```
+
+Recorded restore drills:
+
+| UTC date | Backup | Recovery time | Verification |
+| --- | --- | ---: | --- |
+| 2026-08-09 | `backup-20260809T130616Z-d4c9ee59eb484dcd-ae175c6a` | 33.253 seconds | rclone reported 9 matching files and 0 differences; the packaged publisher validated `local-20260809-sequence-3`; an independent SHA-256 comparison matched all 9 files (564,953,618 bytes); an isolated service using the restored root became ready in 0.990 seconds; the public origin remained ready. |
+
+For the quarterly restore drill, restore into a new empty root, validate it, launch a second service instance against
+that root, and run `health-check` before recording the printed recovery time. The campaign-readiness objective is a
+verified restore in under 60 minutes (RTO) with no loss of any activated snapshot (RPO bounded by the backup schedule).
+Run backups after every snapshot activation and at least daily while the service is active. Keep at least the current
+and previous known-good snapshots until all supported Hubs have advanced; do not edit `snapshot.json` or signed
+documents in place. Monitor Drive capacity before publishing large releases. Remote cleanup is deliberately manual so
+a compromised origin or faulty schedule cannot propagate deletions into the recovery copy.
 
 The layout is intentionally object-storage friendly: each package key is immutable and content-addressed, each snapshot
 manifest is immutable, and `current` is the only moving pointer. A future CDN migration can upload snapshot objects

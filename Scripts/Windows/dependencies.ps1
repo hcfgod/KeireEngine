@@ -232,10 +232,14 @@ $coralDebug = & (Join-Path $PSScriptRoot "coral.ps1") -Configuration Debug -Buil
 
 function Set-DependencyJunction {
     param([string]$Path, [string]$Target)
+    if ([string]::IsNullOrWhiteSpace($Target) -or -not (Test-Path -LiteralPath $Target -PathType Container)) {
+        throw "Dependency junction target is not an existing directory: $Target"
+    }
     if (Test-Path -LiteralPath $Path) {
         $Item = Get-Item -LiteralPath $Path -Force
         $LinkTarget = [string]($Item.Target | Select-Object -First 1)
         if (($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -and
+            -not [string]::IsNullOrWhiteSpace($LinkTarget) -and
             [IO.Path]::GetFullPath($LinkTarget) -eq [IO.Path]::GetFullPath($Target)) {
             return
         }
@@ -245,7 +249,7 @@ function Set-DependencyJunction {
             -not [IO.Path]::GetFullPath($Path).StartsWith($AllowedRoot, [StringComparison]::OrdinalIgnoreCase)) {
             throw "Dependency junction points somewhere unexpected: $Path"
         }
-        [IO.Directory]::Delete([IO.Path]::GetFullPath($Path))
+        Remove-Item -LiteralPath $Path -Force
     }
     New-Item -ItemType Directory -Force (Split-Path $Path) | Out-Null
     New-Item -ItemType Junction -Path $Path -Target $Target | Out-Null

@@ -196,7 +196,7 @@ Section: devel
 Priority: optional
 Architecture: $deb_architecture
 Installed-Size: $installed_size
-Depends: libc6, libstdc++6, libgcc-s1, libcurl4t64 | libcurl4
+Depends: libc6, libstdc++6, libgcc-s1, libcurl4t64 | libcurl4, zenity
 Maintainer: $PROJECT_DISPLAY_NAME Engine
 Description: $PROJECT_DISPLAY_NAME standalone project and editor Hub
  Manages projects, independently installed editors, Build Support, templates,
@@ -210,7 +210,7 @@ rm -f "$artifact" "$artifact.sha256"
 dpkg-deb --build --root-owner-group "$package_root" "$artifact"
 dpkg-deb --info "$artifact" >/dev/null
 [[ "$(dpkg-deb --field "$artifact" Depends)" == \
-   'libc6, libstdc++6, libgcc-s1, libcurl4t64 | libcurl4' ]] || {
+   'libc6, libstdc++6, libgcc-s1, libcurl4t64 | libcurl4, zenity' ]] || {
   printf 'Linux Hub installer runtime dependencies are incomplete.\n' >&2
   exit 1
 }

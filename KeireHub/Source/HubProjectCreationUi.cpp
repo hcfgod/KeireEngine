@@ -172,10 +172,10 @@ namespace KeireHub
                                .OpenAfterCreation = openAfterCreation};
                     ui.CloseCurrentPopup();
                 }
+            ui.SameLine();
+            if (HubSecondaryButton(ui, tokens, "Cancel", {88.0F, 38.0F}))
+                ui.CloseCurrentPopup();
         }
-        ui.SameLine();
-        if (HubSecondaryButton(ui, tokens, "Cancel", {88.0F, 38.0F}))
-            ui.CloseCurrentPopup();
         return request;
     }
 } // namespace KeireHub

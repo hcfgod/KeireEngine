@@ -15,8 +15,18 @@ foreach ($contract in @(
         "--executable 'KeireDistributionService'",
         "--executable 'tools/publisher/KeireDistributionPublisher'",
         "--executable 'scripts/health-check.sh'",
+        "--executable 'scripts/monitor-distribution.sh'",
+        "--executable 'scripts/backup-distribution.sh'",
+        "--executable 'scripts/backup-distribution-rclone.sh'",
+        "--executable 'scripts/restore-distribution.sh'",
+        "--executable 'scripts/restore-distribution-rclone.sh'",
         "--executable 'scripts/publish-snapshot.sh'",
-        "scripts\start-windows-host.ps1",
+        "--executable 'scripts/start-wsl2-host-bridge.sh'",
+        "--executable 'scripts/install-wsl2-host-bridge.sh'",
+        "start-windows-host.ps1",
+        "install-windows-startup-task.ps1",
+        "install-windows-backup-task.ps1",
+        "migrate-windows-host.ps1",
         "Website",
         "DocumentationSite",
         "BeautifulMermaid.txt",
@@ -32,7 +42,7 @@ if ($packager.Contains('& tar -czf')) {
 $caddyTemplate = Get-Content -LiteralPath `
     (Join-Path $Root "Services\KeireDistributionService\Deployment\Caddyfile.example") -Raw
 foreach ($contract in @(
-        '@distribution_api path /v1 /v1/* /health /health/*',
+        '@distribution_api path /v1 /v1/* /v2 /v2/* /health /health/*',
         'root * "{$KEIRE_WEBSITE_ROOT:Website}"',
         'try_files {path} {path}/index.html',
         'Content-Security-Policy',
@@ -50,11 +60,15 @@ $windowsHost = Join-Path $Root `
 $hostFixture = Join-Path ([IO.Path]::GetTempPath()) `
     ("keire-distribution-windows-host-test-" + [guid]::NewGuid().ToString("N"))
 try {
-    New-Item -ItemType Directory -Force (Join-Path $hostFixture "distribution"), `
-        (Join-Path $hostFixture "logs") | Out-Null
+    New-Item -ItemType Directory -Force (Join-Path $hostFixture "distribution\snapshots"), `
+        (Join-Path $hostFixture "logs"), (Join-Path $hostFixture "Website"), `
+        (Join-Path $hostFixture "scripts"), (Join-Path $hostFixture "tools") | Out-Null
     foreach ($fileName in @("KeireDistributionService.exe", "caddy.exe", "Caddyfile")) {
         [IO.File]::WriteAllText((Join-Path $hostFixture $fileName), "fixture", [Text.UTF8Encoding]::new($false))
     }
+    [IO.File]::WriteAllText((Join-Path $hostFixture "distribution\current"), "fixture`n",
+        [Text.UTF8Encoding]::new($false))
+    Copy-Item -LiteralPath $windowsHost -Destination (Join-Path $hostFixture "scripts\start-windows-host.ps1")
     $settingsPath = Join-Path $hostFixture "host-settings.json"
     @{
         schemaVersion = 1
@@ -70,6 +84,19 @@ try {
     Invoke-CheckedWindowsCommand {
         & $windowsHost -SettingsPath $settingsPath -ValidateOnly
     } "Windows distribution host settings validation"
+    $startupTask = Join-Path $Root `
+        "Services\KeireDistributionService\scripts\install-windows-startup-task.ps1"
+    Invoke-CheckedWindowsCommand {
+        & $startupTask -SettingsPath $settingsPath -TaskName "Keire Distribution Host Test" -ValidateOnly
+    } "Windows pre-login startup task validation"
+    Copy-Item -LiteralPath $startupTask `
+        -Destination (Join-Path $hostFixture "scripts\install-windows-startup-task.ps1")
+    $migration = Join-Path $Root `
+        "Services\KeireDistributionService\scripts\migrate-windows-host.ps1"
+    Invoke-CheckedWindowsCommand {
+        & $migration -SourceHostRoot $hostFixture -SourceDistributionRoot (Join-Path $hostFixture "distribution") `
+            -DestinationRoot (Join-Path $env:ProgramData "Keire Distribution Host Test") -ValidateOnly
+    } "Windows protected host migration validation"
 
     $invalidSettings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
     $invalidSettings.host = "https://not-a-host.example"
@@ -80,6 +107,16 @@ try {
 }
 finally {
     Remove-Item -LiteralPath $hostFixture -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+foreach ($scriptName in @('monitor-distribution.ps1', 'monitor-distribution.sh', 'backup-distribution.ps1',
+        'backup-distribution.sh', 'backup-distribution-rclone.ps1', 'backup-distribution-rclone.sh',
+        'restore-distribution.ps1', 'restore-distribution.sh', 'restore-distribution-rclone.ps1',
+        'restore-distribution-rclone.sh', 'install-windows-backup-task.ps1')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $Root "Services\KeireDistributionService\scripts\$scriptName") `
+            -PathType Leaf)) {
+        throw "The distribution operations script is missing: '$scriptName'."
+    }
 }
 
 $fixture = Join-Path ([IO.Path]::GetTempPath()) `
@@ -102,8 +139,13 @@ try {
             "Website\docs\index.html",
             "Website\docs\pagefind\pagefind.js",
             "Website\index.html",
+            "scripts\backup-distribution.sh",
+            "scripts\backup-distribution-rclone.sh",
             "scripts\health-check.sh",
+            "scripts\monitor-distribution.sh",
             "scripts\publish-snapshot.sh",
+            "scripts\restore-distribution.sh",
+            "scripts\restore-distribution-rclone.sh",
             "tools\publisher\KeireDistributionPublisher",
             "tools\publisher\regular.dat"
         )) {
@@ -117,8 +159,13 @@ try {
         "--source", $source,
         "--executable", "KeireDistributionService",
         "--executable", "tools/publisher/KeireDistributionPublisher",
+        "--executable", "scripts/backup-distribution.sh",
+        "--executable", "scripts/backup-distribution-rclone.sh",
         "--executable", "scripts/health-check.sh",
-        "--executable", "scripts/publish-snapshot.sh"
+        "--executable", "scripts/monitor-distribution.sh",
+        "--executable", "scripts/publish-snapshot.sh",
+        "--executable", "scripts/restore-distribution.sh"
+        "--executable", "scripts/restore-distribution-rclone.sh"
     )
     Invoke-CheckedWindowsCommand { & $python @arguments --output $archiveA } `
         "First deterministic service archive"
@@ -153,8 +200,13 @@ try {
         "keire-distribution-linux-x64/Website/docs/pagefind/pagefind.js",
         "keire-distribution-linux-x64/Website/index.html",
         "keire-distribution-linux-x64/scripts/",
+        "keire-distribution-linux-x64/scripts/backup-distribution-rclone.sh",
+        "keire-distribution-linux-x64/scripts/backup-distribution.sh",
         "keire-distribution-linux-x64/scripts/health-check.sh",
+        "keire-distribution-linux-x64/scripts/monitor-distribution.sh",
         "keire-distribution-linux-x64/scripts/publish-snapshot.sh",
+        "keire-distribution-linux-x64/scripts/restore-distribution-rclone.sh",
+        "keire-distribution-linux-x64/scripts/restore-distribution.sh",
         "keire-distribution-linux-x64/tools/",
         "keire-distribution-linux-x64/tools/publisher/",
         "keire-distribution-linux-x64/tools/publisher/KeireDistributionPublisher",
@@ -190,8 +242,13 @@ try {
         "keire-distribution-linux-x64/Website/docs/pagefind/pagefind.js" = "-rw-r--r--"
         "keire-distribution-linux-x64/Website/index.html" = "-rw-r--r--"
         "keire-distribution-linux-x64/scripts/" = "drwxr-xr-x"
+        "keire-distribution-linux-x64/scripts/backup-distribution-rclone.sh" = "-rwxr-xr-x"
+        "keire-distribution-linux-x64/scripts/backup-distribution.sh" = "-rwxr-xr-x"
         "keire-distribution-linux-x64/scripts/health-check.sh" = "-rwxr-xr-x"
+        "keire-distribution-linux-x64/scripts/monitor-distribution.sh" = "-rwxr-xr-x"
         "keire-distribution-linux-x64/scripts/publish-snapshot.sh" = "-rwxr-xr-x"
+        "keire-distribution-linux-x64/scripts/restore-distribution-rclone.sh" = "-rwxr-xr-x"
+        "keire-distribution-linux-x64/scripts/restore-distribution.sh" = "-rwxr-xr-x"
         "keire-distribution-linux-x64/tools/" = "drwxr-xr-x"
         "keire-distribution-linux-x64/tools/publisher/" = "drwxr-xr-x"
         "keire-distribution-linux-x64/tools/publisher/KeireDistributionPublisher" = "-rwxr-xr-x"

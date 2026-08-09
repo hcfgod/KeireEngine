@@ -59,9 +59,11 @@ namespace
     }
 
     [[nodiscard]] DistributionPackageCatalogSnapshot Catalog(std::string channel, std::vector<PackageManifest> packages,
-                                                             const std::uint64_t sequence = 7)
+                                                             const std::uint64_t sequence = 7,
+                                                             const std::uint32_t schemaVersion = 1)
     {
         auto catalog = std::make_shared<DistributionPackageCatalog>();
+        catalog->SchemaVersion = schemaVersion;
         catalog->Identity = {.KeyId = std::string(CatalogKeyId),
                              .Sequence = sequence,
                              .ExpiresAt = "2035-01-01T00:00:00Z",
@@ -426,6 +428,21 @@ TEST_CASE("Editor repair previews require the exact receipt-bound signed package
     CHECK(repair.Value().Install.Destination == root);
     CHECK(StepIds(repair.Value().Install) == std::vector<std::string>{runtime.Id, editor.Id});
     CHECK(repair.Value().MarkerNonce == nonce);
+
+    auto compactEditor = editor;
+    compactEditor.Files.clear();
+    compactEditor.ManifestSizeBytes = 2048;
+    compactEditor.ManifestSha256 = KeireHubTests::Digest('e');
+    auto compactRuntime = runtime;
+    compactRuntime.Files.clear();
+    compactRuntime.ManifestSizeBytes = 1024;
+    compactRuntime.ManifestSha256 = KeireHubTests::Digest('f');
+    EditorInstallCatalog compact(registry, Specification());
+    REQUIRE(compact.Refresh(Distribution(
+        {Catalog("stable", {compactEditor, compactRuntime}, 43, DistributionPackageCatalog::CompactSchemaVersion)})));
+    const auto compactRepair = compact.PreviewRepair(request);
+    REQUIRE(compactRepair);
+    CHECK(StepIds(compactRepair.Value().Install) == std::vector<std::string>{runtime.Id, editor.Id});
 
     const auto ordinaryInstall = catalog.PreviewInstall({.InstallationId = installation.Id,
                                                          .Destination = root,

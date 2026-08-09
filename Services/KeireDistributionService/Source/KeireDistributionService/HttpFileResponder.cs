@@ -39,6 +39,22 @@ public static class HttpFileResponder
             cancellationToken);
     }
 
+    public static Task SendManifestAsync(
+        HttpContext context,
+        DistributionFile file,
+        int bufferSize,
+        CancellationToken cancellationToken)
+    {
+        return SendAsync(
+            context,
+            file,
+            "application/json; charset=utf-8",
+            "public, max-age=31536000, immutable",
+            allowRanges: false,
+            bufferSize,
+            cancellationToken);
+    }
+
     private static async Task SendAsync(
         HttpContext context,
         DistributionFile file,

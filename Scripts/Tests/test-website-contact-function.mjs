@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
 import {
     ContactRequestError,
@@ -52,5 +53,33 @@ const spoofedForwarding = new Request("https://example.invalid", {
 });
 assert.equal(requestAddress(spoofedForwarding), "203.0.113.42");
 assert.equal(requestAddress(new Request("https://example.invalid")), "unknown");
+
+const functionSource = await readFile(
+    new URL("../../supabase/functions/website-contact/index.ts", import.meta.url),
+    "utf8",
+);
+assert.match(functionSource, /Deno\.env\.get\("CONTACT_RATE_LIMIT_SECRET"\)/u);
+assert.doesNotMatch(functionSource, /CONTACT_RATE_LIMIT_SECRET[^\n]*\?\?\s*adminKey/u);
+assert.match(functionSource, /\.rpc\("submit_website_contact"/u);
+assert.doesNotMatch(functionSource, /reserve_website_contact_submission/u);
+assert.doesNotMatch(functionSource, /\.from\("website_contact_submissions"\)/u);
+
+const migrationSource = await readFile(
+    new URL(
+        "../../supabase/migrations/20260809082811_submit_website_contact_atomically_and_schedule_cleanup.sql",
+        import.meta.url,
+    ),
+    "utf8",
+);
+assert.match(migrationSource, /create function public\.submit_website_contact\(/u);
+assert.match(migrationSource, /pg_advisory_xact_lock/u);
+assert.match(migrationSource, /insert into public\.website_contact_rate_limits/u);
+assert.match(migrationSource, /insert into public\.website_contact_submissions/u);
+assert.match(migrationSource, /cron\.schedule\(/u);
+const submitFunctionSource = migrationSource.slice(
+    migrationSource.indexOf("create function public.submit_website_contact"),
+    migrationSource.indexOf("revoke all on function public.submit_website_contact"),
+);
+assert.doesNotMatch(submitFunctionSource, /delete from public\.website_contact_rate_limits/u);
 
 console.log("Website contact Edge Function request guards passed.");

@@ -44,10 +44,24 @@ namespace
                std::string(extra) + "}";
     }
 
-    [[nodiscard]] std::string
-    PackageCatalog(const std::string_view keyId, const std::uint64_t sequence, const std::vector<std::string>& packages,
-                   const std::string_view channel = "stable", const std::string_view platform = "windows",
-                   const std::string_view architecture = "x86_64", const std::string_view extra = {})
+    [[nodiscard]] std::string CompactPackage(const std::string_view id = "keire.editor",
+                                             const std::string_view version = "1.2.3")
+    {
+        return "{\"schemaVersion\":1,\"packageId\":\"" + std::string(id) + "\",\"version\":\"" + std::string(version) +
+               "\",\"type\":\"editor\",\"displayName\":\"Kéire Editor\",\"channel\":\"stable\","
+               "\"platform\":\"windows\",\"architecture\":\"x86_64\",\"artifact\":{\"sizeBytes\":3,"
+               "\"sha256\":\"" +
+               KeireHubTests::Digest('a') +
+               "\"},\"installedSizeBytes\":3,\"manifest\":{\"sizeBytes\":1024,\"sha256\":\"" +
+               KeireHubTests::Digest('c') + "\"},\"signatureKeyId\":\"" + std::string(ParserKeyId) + "\"}";
+    }
+
+    [[nodiscard]] std::string PackageCatalog(const std::string_view keyId, const std::uint64_t sequence,
+                                             const std::vector<std::string>& packages,
+                                             const std::string_view channel = "stable",
+                                             const std::string_view platform = "windows",
+                                             const std::string_view architecture = "x86_64",
+                                             const std::string_view extra = {}, const std::uint32_t schemaVersion = 1)
     {
         std::string values;
         for (std::size_t index = 0; index < packages.size(); ++index)
@@ -56,7 +70,7 @@ namespace
                 values += ',';
             values += packages[index];
         }
-        return "{\"schemaVersion\":1,\"keyId\":\"" + std::string(keyId) +
+        return "{\"schemaVersion\":" + std::to_string(schemaVersion) + ",\"keyId\":\"" + std::string(keyId) +
                "\",\"sequence\":" + std::to_string(sequence) + ",\"expiresAt\":\"" + std::string(Expiry) +
                "\",\"channel\":\"" + std::string(channel) + "\",\"platform\":\"" + std::string(platform) +
                "\",\"architecture\":\"" + std::string(architecture) + "\",\"packages\":[" + values + "]" +
@@ -212,6 +226,21 @@ TEST_CASE("Distribution package catalogs strictly parse bounded generic manifest
     CHECK(mismatchedExpiry.Error().Code == HubErrorCode::CatalogIdentityMismatch);
 }
 
+TEST_CASE("Compact distribution catalogs defer their complete package file inventories")
+{
+    const auto compact =
+        ParseCatalog(PackageCatalog(ParserKeyId, 7, {CompactPackage()}, "stable", "windows", "x86_64", {}, 2));
+    REQUIRE(compact);
+    REQUIRE(compact.Value().SchemaVersion == DistributionPackageCatalog::CompactSchemaVersion);
+    REQUIRE(compact.Value().Packages.size() == 1U);
+    CHECK(compact.Value().Packages.front().Files.empty());
+    CHECK(compact.Value().Packages.front().ManifestSizeBytes == 1024U);
+    CHECK(compact.Value().Packages.front().ManifestSha256 == KeireHubTests::Digest('c'));
+
+    CHECK_FALSE(ParseCatalog(PackageCatalog(ParserKeyId, 7, {CompactPackage()})));
+    CHECK_FALSE(ParseCatalog(PackageCatalog(ParserKeyId, 7, {Package()}, "stable", "windows", "x86_64", {}, 2)));
+}
+
 TEST_CASE("Distribution package catalogs reject excessive, duplicate, and incompatible entries")
 {
     std::vector<std::string> tooMany(4097, "{}");
@@ -296,6 +325,29 @@ TEST_CASE("Distribution catalog sessions publish immutable online package and co
     CHECK(snapshot->Content.Status.Sequence == 8U);
     CHECK(snapshot->Content.Catalog->Locale == "en-US");
     CHECK(requestCount == 2U);
+}
+
+TEST_CASE("Distribution catalog sessions remain online when no platform catalogs are published")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    KeireHubTests::TestSodiumSigner signer;
+    auto session = DistributionCatalogSession::Create(
+        Configuration(signer), Settings(temporary.Path() / "cache"),
+        Environment(
+            temporary.Path(), signer, [](const CatalogHttpRequest& request)
+            { return HubResult<CatalogHttpResponse>::Success({.StatusCode = 404, .EffectiveUrl = request.Url}); }));
+    REQUIRE(session);
+    REQUIRE(session.Value().Refresh());
+
+    const auto snapshot = session.Value().Snapshot();
+    REQUIRE(snapshot);
+    REQUIRE(snapshot->PackageCatalogs.size() == 1U);
+    CHECK(snapshot->PackageCatalogs.front().Status.State == DistributionCatalogSourceState::Online);
+    CHECK_FALSE(snapshot->PackageCatalogs.front().Catalog);
+    CHECK_FALSE(snapshot->PackageCatalogs.front().Status.Error);
+    CHECK(snapshot->Content.Status.State == DistributionCatalogSourceState::Online);
+    CHECK_FALSE(snapshot->Content.Catalog);
+    CHECK_FALSE(snapshot->Content.Status.Error);
 }
 
 TEST_CASE("Distribution catalog sessions distinguish online fallback and offline last-known-good state")

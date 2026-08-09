@@ -49,6 +49,7 @@ if ($LASTEXITCODE -ne 0) { throw "Ninja dependency-file rule checks failed." }
 & (Join-Path $PSScriptRoot "test-installer-windows.ps1")
 & (Join-Path $PSScriptRoot "test-hub-installer-windows.ps1")
 & (Join-Path $PSScriptRoot "test-distribution-service-package-windows.ps1")
+& (Join-Path $PSScriptRoot "test-rclone-distribution-backup-windows.ps1")
 $generateScript = Get-Content (Join-Path $Windows "generate.ps1") -Raw
 Assert-True ($generateScript.Contains('--file=premake5.lua')) "Unicode-safe relative Premake script path"
 Assert-True ($generateScript.Contains('Get-ProjectGenerationFingerprint')) "Source-inventory project regeneration"
@@ -222,6 +223,10 @@ Assert-True ($vendorUpdateScript.Contains('"SDL_shadercross"')) "Shader compiler
 Assert-True ($vendorScript.Contains('Vendor/assimp') -and $vendorScript.Contains('$Lock.ASSIMP_COMMIT') -and $vendorScript.Contains('Vendor/stb') -and $vendorScript.Contains('$Lock.STB_COMMIT')) "Asset importer vendor mappings"
 $dependencyScript = Get-Content (Join-Path $Windows "dependencies.ps1") -Raw
 Assert-True ($dependencyScript.Contains('$Lock.SDL_COMMIT') -and $dependencyScript.Contains('$compiler') -and $dependencyScript.Contains('keire-dependency.stamp')) "Dependency cache identity inputs"
+Assert-True ($dependencyScript.Contains('[string]::IsNullOrWhiteSpace($LinkTarget)') -and
+             $dependencyScript.Contains('Dependency junction target is not an existing directory') -and
+             $dependencyScript.Contains('Remove-Item -LiteralPath $Path -Force')) `
+    "Dependency bootstrap repairs dangling junctions without normalizing an empty target"
 Assert-True ($dependencyScript.Contains('"Debug", "Release"') -and $dependencyScript.Contains('SDL_DUMMYVIDEO=ON') -and $dependencyScript.Contains('SDL_OFFSCREEN=ON')) "SDL variants and headless drivers"
 Assert-True ($dependencyScript.Contains('SDL_GPU=ON') -and $dependencyScript.Contains('SDL_RENDER=OFF')) "SDL GPU renderer policy"
 Assert-True ($dependencyScript.Contains('shader-compiler.ps1')) "Host shader compiler bootstrap"
@@ -269,6 +274,12 @@ Assert-True ($corePremake.Contains('touch-ninja-stamp.ps1') -and
     "Ninja prebuild and prelink rules publish their declared Windows outputs"
 $managedPremake = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Premake\Managed.lua") -Raw
 $unixFfmpegBuild = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Unix\ffmpeg.sh") -Raw
+$canonicalFfmpegArchive = 'git -C "$VENDOR_SOURCE" archive --format=tar "$COMMIT"'
+Assert-True $unixFfmpegBuild.Contains($canonicalFfmpegArchive) `
+    "Unix FFmpeg builds use canonical Git bytes instead of Windows-translated shell files"
+$windowsFfmpegBuild = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Windows\ffmpeg.ps1") -Raw
+Assert-True $windowsFfmpegBuild.Contains('git -C $VendorSource archive --format=tar') `
+    "Windows FFmpeg builds use canonical Git bytes instead of CRLF-translated Makefiles"
 $windowsBuild = Get-Content (Join-Path $Windows "build.ps1") -Raw
 $windowsManagedBuild = Get-Content (Join-Path $Windows "build-managed.ps1") -Raw
 $windowsRun = Get-Content (Join-Path $Windows "run.ps1") -Raw
@@ -525,6 +536,11 @@ Assert-True ($editorPackageScript.Contains('editor=bin/$($Project.CLIENT_TARGET)
     -not $editorPackageScript.Contains('"--entrypoint", "hub=') -and
     -not $editorPackageScript.Contains('"--entrypoint", "worker=') -and
     -not $editorPackageScript.Contains('KeireHubContent')) "Windows editor package excludes Hub ownership"
+$packagePublisher = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireHubPackagePublisher\Source\Main.cpp') -Raw
+Assert-True ($packagePublisher.Contains('value.at("dirty").get<bool>()') -and
+    $packagePublisher.Contains('value.at("developmentArtifact").get<bool>()') -and
+    $packagePublisher.Contains('editor product manifest must be a clean schema-2')) `
+    "Stable editor publisher rejects dirty development artifacts"
 $packageConfig = Get-Content (Join-Path (Get-RepositoryRoot) "Config\PackageConfig.cmake.in") -Raw
 Assert-True ($packageConfig.Contains('@PROJECT_NAMESPACE@ImGui.lib') -and
     $packageConfig.Contains('@PROJECT_NAMESPACE@Zstd.a') -and

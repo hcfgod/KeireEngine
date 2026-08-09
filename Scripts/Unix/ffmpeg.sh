@@ -12,17 +12,17 @@ source "$ROOT/Scripts/Unix/common.sh"
 LOCK="$ROOT/Config/Dependencies.lock"
 COMMIT="$(config_value "$LOCK" FFMPEG_COMMIT)"
 MACOS_DEPLOYMENT_TARGET="$(config_value "$LOCK" MACOS_DEPLOYMENT_TARGET)"
-SOURCE="$ROOT/Vendor/ffmpeg"
+VENDOR_SOURCE="$ROOT/Vendor/ffmpeg"
 OUTPUT="$ROOT/Build/Dependencies/ffmpeg/$CONFIGURATION"
 INSTALL="$OUTPUT/install"
 STAMP="$OUTPUT/keire-ffmpeg.stamp"
-EXPECTED="$COMMIT|$CONFIGURATION|$MACOS_DEPLOYMENT_TARGET|shared-lgpl-avformat-avcodec-swresample-avutil-v2"
+EXPECTED="$COMMIT|$CONFIGURATION|$MACOS_DEPLOYMENT_TARGET|shared-lgpl-avformat-avcodec-swresample-avutil-v3"
 
-[[ -x "$SOURCE/configure" ]] || {
+[[ -x "$VENDOR_SOURCE/configure" ]] || {
   printf 'Vendor/ffmpeg is unavailable. Initialize the locked submodule first.\n' >&2
   exit 1
 }
-[[ "$(git -C "$SOURCE" rev-parse HEAD)" == "$COMMIT" ]] || {
+[[ "$(git -C "$VENDOR_SOURCE" rev-parse HEAD)" == "$COMMIT" ]] || {
   printf 'Vendor/ffmpeg is not at locked commit %s.\n' "$COMMIT" >&2
   exit 1
 }
@@ -35,9 +35,21 @@ command -v make >/dev/null || {
   printf 'GNU Make is required to source-build private FFmpeg.\n' >&2
   exit 1
 }
+command -v tar >/dev/null || {
+  printf 'tar is required to materialize canonical FFmpeg source bytes.\n' >&2
+  exit 1
+}
 
 rm -rf "$OUTPUT"
-mkdir -p "$OUTPUT"
+SOURCE="$OUTPUT/source"
+mkdir -p "$SOURCE"
+# A Windows checkout may translate executable shell files to CRLF inside the submodule. Build from the locked Git
+# object bytes so Linux and macOS never depend on host worktree line-ending policy and Vendor remains untouched.
+git -C "$VENDOR_SOURCE" archive --format=tar "$COMMIT" | tar -xf - -C "$SOURCE"
+[[ -x "$SOURCE/configure" ]] || {
+  printf 'The canonical FFmpeg archive is missing its executable configure script.\n' >&2
+  exit 1
+}
 debug_options=(--disable-debug)
 if [[ "$CONFIGURATION" == Debug ]]; then
   debug_options=(--enable-debug=3 --disable-optimizations)

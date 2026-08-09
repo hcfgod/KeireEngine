@@ -505,6 +505,7 @@ perl -Mopen=:std -e 1 || { printf 'Perl open module is unavailable.\n' >&2; exit
 install_dotnet_sdk
 install_logical_packages curl-dev
 install_logical_packages sdl-video
+ensure_command zenity native-dialog
 if ! pkg-config --exists x11 && ! pkg-config --exists wayland-client; then
     printf 'SDL video requires at least one available X11 or Wayland development backend.\n' >&2
     exit 1

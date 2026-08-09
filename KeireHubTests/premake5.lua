@@ -13,6 +13,7 @@ project(HubTestsTarget)
         "../KeireHub/Source/HubBuildSupportInventoryWorkflow.cpp",
         "../KeireHub/Source/HubChromeLayout.cpp",
         "../KeireHub/Source/HubAccountWorkflow.cpp",
+        "../KeireHub/Source/HubDistributionWorkflow.cpp",
         "../KeireHub/Source/HubEditorDiscovery.cpp",
         "../KeireHub/Source/HubInstance.cpp",
         "../KeireHub/Source/HubEditorInstallWorkflow.cpp",

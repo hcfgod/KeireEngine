@@ -83,25 +83,37 @@ namespace KeireHub
             return HubStatus::Success();
         }
 
-        [[nodiscard]] HubStatus ValidatePackageShape(const Detail::Json& value, std::size_t& aggregateItems)
+        [[nodiscard]] HubStatus ValidatePackageShape(const Detail::Json& value, const std::uint32_t catalogSchema,
+                                                     std::size_t& aggregateItems)
         {
             constexpr std::array required{std::string_view{"schemaVersion"}, std::string_view{"packageId"},
                                           std::string_view{"version"},       std::string_view{"type"},
                                           std::string_view{"displayName"},   std::string_view{"channel"},
                                           std::string_view{"platform"},      std::string_view{"architecture"},
                                           std::string_view{"artifact"},      std::string_view{"installedSizeBytes"},
-                                          std::string_view{"files"},         std::string_view{"signatureKeyId"}};
-            constexpr std::array optional{std::string_view{"engineCompatibility"}, std::string_view{"dependencies"},
-                                          std::string_view{"conflicts"}, std::string_view{"licenses"}};
+                                          std::string_view{"signatureKeyId"}};
+            constexpr std::array optional{std::string_view{"engineCompatibility"},
+                                          std::string_view{"dependencies"},
+                                          std::string_view{"conflicts"},
+                                          std::string_view{"licenses"},
+                                          std::string_view{"files"},
+                                          std::string_view{"manifest"}};
             constexpr std::array artifactKeys{std::string_view{"sizeBytes"}, std::string_view{"sha256"}};
+            constexpr std::array manifestKeys{std::string_view{"sizeBytes"}, std::string_view{"sha256"}};
             constexpr std::array fileKeys{std::string_view{"path"}, std::string_view{"sizeBytes"},
                                           std::string_view{"sha256"}};
             constexpr std::array fileOptional{std::string_view{"mode"}};
             constexpr std::array relationRequired{std::string_view{"packageId"}};
             constexpr std::array relationOptional{std::string_view{"version"}};
 
+            const bool hasFiles = value.contains("files");
+            const bool hasManifest = value.contains("manifest");
             if (!HasObjectShape(value, required, optional) || !HasObjectShape(value.at("artifact"), artifactKeys) ||
-                !value.at("files").is_array())
+                hasFiles == hasManifest ||
+                (catalogSchema == DistributionPackageCatalog::CurrentSchemaVersion && !hasFiles) ||
+                (catalogSchema == DistributionPackageCatalog::CompactSchemaVersion && !hasManifest) ||
+                (hasFiles && !value.at("files").is_array()) ||
+                (hasManifest && !HasObjectShape(value.at("manifest"), manifestKeys)))
             {
                 return HubStatus::Failure(CatalogError(HubErrorCode::PackageManifestInvalid,
                                                        "A package catalog entry has an unexpected schema."));
@@ -116,17 +128,20 @@ namespace KeireHub
                 aggregateItems += collection.size();
                 return true;
             };
-            if (!countCollection(value.at("files")))
+            if (hasFiles && !countCollection(value.at("files")))
             {
                 return HubStatus::Failure(CatalogError(HubErrorCode::PackageManifestInvalid,
                                                        "The package catalog inventory exceeds its item limit."));
             }
-            for (const auto& file : value.at("files"))
+            if (hasFiles)
             {
-                if (!HasObjectShape(file, fileKeys, fileOptional))
+                for (const auto& file : value.at("files"))
                 {
-                    return HubStatus::Failure(CatalogError(HubErrorCode::PackageManifestInvalid,
-                                                           "A package file entry has an unexpected schema."));
+                    if (!HasObjectShape(file, fileKeys, fileOptional))
+                    {
+                        return HubStatus::Failure(CatalogError(HubErrorCode::PackageManifestInvalid,
+                                                               "A package file entry has an unexpected schema."));
+                    }
                 }
             }
             for (const auto key : {std::string_view{"dependencies"}, std::string_view{"conflicts"}})
@@ -191,7 +206,7 @@ namespace KeireHub
                 throw std::invalid_argument("The package catalog header has an unexpected schema.");
 
             const auto schemaVersion = root.at("schemaVersion").get<std::uint32_t>();
-            if (schemaVersion != DistributionPackageCatalog::CurrentSchemaVersion)
+            if (!DistributionPackageCatalog::IsSupportedSchema(schemaVersion))
             {
                 return HubResult<DistributionPackageCatalog>::Failure(
                     CatalogError(HubErrorCode::UnsupportedSchema, "The signed package catalog schema is unsupported.",
@@ -240,7 +255,7 @@ namespace KeireHub
             std::set<std::pair<std::string, SemanticVersion>> identities;
             for (const auto& value : packages)
             {
-                if (const auto status = ValidatePackageShape(value, aggregateItems); !status)
+                if (const auto status = ValidatePackageShape(value, schemaVersion, aggregateItems); !status)
                     return HubResult<DistributionPackageCatalog>::Failure(status.Error());
                 auto manifest = ParsePackageManifest(value.dump());
                 if (!manifest)

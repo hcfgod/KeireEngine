@@ -28,11 +28,19 @@ coverage; line movement alone is not a useful refactor.
 
 The highest-value seams are:
 
-- `ScriptSystem.cpp`: runtime hosting, native-call adapters, reload transactions, managed jobs, and build orchestration.
-- `MaterialGraph.cpp`: schema/validation, lowering, shader emission, and asset import/publication.
+- `ScriptSystem.cpp`: runtime hosting, native-call adapters, reload transactions, and managed jobs. Managed build workspace
+  generation, diagnostics parsing, source fingerprinting, and atomic text publication now live behind the private
+  `ManagedBuildWorkspace` boundary.
+- `MaterialGraph.cpp`: schema/validation, lowering, shader emission, and asset import/publication. The immutable node
+  descriptor catalog and its lookup/type-ID contract now live in `MaterialGraphNodeCatalog.cpp` behind the existing
+  typed material-graph API.
 - `RenderSceneRecording.cpp`: snapshot extraction, preparation, pass recording, and submission telemetry.
-- `VfxAssets.cpp` and `VfxSystem.cpp`: encoding/import, compilation, CPU simulation, and GPU publication.
-- editor asset/VFX panels: document commands, background operations, canvas interaction, and presentation.
+- `VfxAssets.cpp` and `VfxSystem.cpp`: encoding/import, compilation, CPU simulation, and GPU publication. Reusable JSON
+  encoding and strict decoding of asset IDs, vectors, matrices, colors, curves, and gradients now live behind the
+  private `VfxAssetValueCodec` boundary.
+- editor asset/VFX panels: document commands, background operations, canvas interaction, and presentation. Editor file
+  validation/diagnostics now use `EditorAssetFileService`, while VFX canvas node construction, stable IDs, colors, and
+  compatibility rules now use the typed `VfxEffectPanelModel` boundary.
 
 When a unit falls below the default ceiling, remove its exception in the same change. Do not increase a ceiling to
 make a check pass.

@@ -18,7 +18,15 @@ public static class DistributionEndpoints
                 [HttpMethods.Get, HttpMethods.Head],
                 (HttpContext context, SnapshotProvider snapshots, DistributionOptions options, string channel,
                     string platform, string architecture) =>
-                    SendCatalogAsync(context, snapshots, options, channel, platform, architecture))
+                    SendCatalogAsync(context, snapshots, options, channel, platform, architecture, compact: false))
+            .RequireRateLimiting(MetadataRateLimitPolicy);
+
+        app.MapMethods(
+                "/v2/catalog/{channel}/{platform}/{architecture}",
+                [HttpMethods.Get, HttpMethods.Head],
+                (HttpContext context, SnapshotProvider snapshots, DistributionOptions options, string channel,
+                    string platform, string architecture) =>
+                    SendCatalogAsync(context, snapshots, options, channel, platform, architecture, compact: true))
             .RequireRateLimiting(MetadataRateLimitPolicy);
 
         app.MapMethods(
@@ -26,6 +34,13 @@ public static class DistributionEndpoints
                 [HttpMethods.Get, HttpMethods.Head],
                 (HttpContext context, SnapshotProvider snapshots, DistributionOptions options, string locale) =>
                     SendContentAsync(context, snapshots, options, locale))
+            .RequireRateLimiting(MetadataRateLimitPolicy);
+
+        app.MapMethods(
+                "/v1/manifests/{sha256}",
+                [HttpMethods.Get, HttpMethods.Head],
+                (HttpContext context, SnapshotProvider snapshots, DistributionOptions options, string sha256) =>
+                    SendManifestAsync(context, snapshots, options, sha256))
             .RequireRateLimiting(MetadataRateLimitPolicy);
 
         app.MapMethods(
@@ -88,12 +103,15 @@ public static class DistributionEndpoints
         DistributionOptions options,
         string channel,
         string platform,
-        string architecture)
+        string architecture,
+        bool compact)
     {
         string path;
         try
         {
-            path = DistributionPaths.CatalogPath(channel, platform, architecture);
+            path = compact
+                ? DistributionPaths.CompactCatalogPath(channel, platform, architecture)
+                : DistributionPaths.CatalogPath(channel, platform, architecture);
         }
         catch (InvalidDataException)
         {
@@ -183,6 +201,38 @@ public static class DistributionEndpoints
         }
 
         await HttpFileResponder.SendPackageAsync(context, file, options.StreamBufferBytes, context.RequestAborted);
+    }
+
+    private static async Task SendManifestAsync(
+        HttpContext context,
+        SnapshotProvider snapshots,
+        DistributionOptions options,
+        string sha256)
+    {
+        string path;
+        try
+        {
+            path = DistributionPaths.ManifestPath(sha256);
+        }
+        catch (InvalidDataException)
+        {
+            await WriteErrorAsync(context, StatusCodes.Status404NotFound, "distribution.manifest_not_found", "Package manifest not found.");
+            return;
+        }
+
+        SnapshotIndex? snapshot = await RequireSnapshotAsync(context, snapshots);
+        if (snapshot is null)
+        {
+            return;
+        }
+
+        if (!snapshot.TryGet(path, out DistributionFile? file) || file is null)
+        {
+            await WriteErrorAsync(context, StatusCodes.Status404NotFound, "distribution.manifest_not_found", "Package manifest not found.");
+            return;
+        }
+
+        await HttpFileResponder.SendManifestAsync(context, file, options.StreamBufferBytes, context.RequestAborted);
     }
 
     private static async Task<SnapshotIndex?> RequireSnapshotAsync(HttpContext context, SnapshotProvider snapshots)

@@ -61,6 +61,16 @@ class DistributionSnapshotPreparationTests(unittest.TestCase):
     def write_manifest(self) -> None:
         self.manifest.write_text(json.dumps(self.document), encoding="utf-8")
 
+    @staticmethod
+    def compact_descriptor(document: dict[str, object], manifest: Path) -> dict[str, object]:
+        descriptor = {key: value for key, value in document.items() if key != "files"}
+        manifest_bytes = manifest.read_bytes()
+        descriptor["manifest"] = {
+            "sizeBytes": len(manifest_bytes),
+            "sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+        }
+        return descriptor
+
     def run_preparer(
         self,
         output: str,
@@ -112,7 +122,28 @@ class DistributionSnapshotPreparationTests(unittest.TestCase):
         )
         self.assertEqual(catalog["keyId"], KEY_ID)
         self.assertEqual(catalog["sequence"], 7)
+        self.assertEqual(catalog["schemaVersion"], 1)
         self.assertEqual(catalog["packages"], [self.document])
+        compact_catalog = json.loads(
+            (
+                self.root
+                / "prepared"
+                / "catalogs-v2"
+                / "stable"
+                / "windows"
+                / "x86_64.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(compact_catalog["schemaVersion"], 2)
+        self.assertEqual(
+            compact_catalog["packages"],
+            [self.compact_descriptor(self.document, self.manifest)],
+        )
+        manifest_digest = hashlib.sha256(self.manifest.read_bytes()).hexdigest()
+        self.assertEqual(
+            (self.root / "prepared" / "manifests" / f"{manifest_digest}.json").read_bytes(),
+            self.manifest.read_bytes(),
+        )
         digest = self.document["artifact"]["sha256"]
         self.assertEqual(
             (self.root / "prepared" / "packages" / digest).read_bytes(),
@@ -174,11 +205,14 @@ class DistributionSnapshotPreparationTests(unittest.TestCase):
             ["keire.editor", "keire.hub"],
         )
         linux = json.loads(
-            (self.root / "combined/catalogs/stable/linux/x86_64.json").read_text(
+            (self.root / "combined/catalogs-v2/stable/linux/x86_64.json").read_text(
                 encoding="utf-8"
             )
         )
-        self.assertEqual(linux["packages"], [linux_document])
+        self.assertEqual(
+            linux["packages"],
+            [self.compact_descriptor(linux_document, linux_manifest)],
+        )
         self.assertEqual(
             (self.root / "combined/packages" / installer_digest).read_bytes(),
             installer.read_bytes(),

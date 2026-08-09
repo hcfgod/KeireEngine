@@ -2,9 +2,14 @@
 
 #include "KeireHubRuntime/PackageResolver.h"
 
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
+#include <KeireHubRuntimeInternal/Persistence.h>
+
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <span>
+#include <vector>
 
 using namespace KeireHub;
 
@@ -101,6 +106,42 @@ TEST_CASE("Package manifests encode and parse without losing signed catalog fiel
     CHECK(decoded.Value().Dependencies.front().Versions.ToString() == package.Dependencies.front().Versions.ToString());
     REQUIRE(decoded.Value().Conflicts.size() == 1);
     CHECK(decoded.Value().Conflicts.front().Versions.ToString() == "<1.0.0");
+}
+
+TEST_CASE("Compact catalog references hydrate only exact matching package manifests")
+{
+    const auto package = Package("editor", "2.3.4");
+    const auto encoded = EncodePackageManifest(package);
+    REQUIRE(encoded);
+    const auto bytes = std::as_bytes(std::span(encoded.Value()));
+
+    auto reference = package;
+    reference.Files.clear();
+    reference.ManifestSizeBytes = bytes.size();
+    reference.ManifestSha256 = Detail::Sha256Hex(bytes);
+    auto encodedReference = EncodePackageManifest(reference);
+    REQUIRE(encodedReference);
+    auto parsedReference = ParsePackageManifest(encodedReference.Value());
+    REQUIRE(parsedReference);
+    CHECK(parsedReference.Value().Files.empty());
+    CHECK(parsedReference.Value().ManifestSha256 == reference.ManifestSha256);
+
+    auto hydrated = HydratePackageManifest(parsedReference.Value(), bytes);
+    REQUIRE(hydrated);
+    REQUIRE(hydrated.Value().Files.size() == 1U);
+    CHECK(hydrated.Value().Files.front().Path == package.Files.front().Path);
+
+    auto tampered = std::vector<std::byte>(bytes.begin(), bytes.end());
+    tampered.back() ^= std::byte{1};
+    const auto rejectedBytes = HydratePackageManifest(reference, tampered);
+    REQUIRE_FALSE(rejectedBytes);
+    CHECK(rejectedBytes.Error().Code == HubErrorCode::DownloadChecksumMismatch);
+
+    auto wrongReference = reference;
+    wrongReference.DisplayName = "Different signed catalog identity";
+    const auto rejectedIdentity = HydratePackageManifest(wrongReference, bytes);
+    REQUIRE_FALSE(rejectedIdentity);
+    CHECK(rejectedIdentity.Error().Code == HubErrorCode::CatalogIdentityMismatch);
 }
 
 TEST_CASE("Package resolver selects the highest compatible dependency in topological order")

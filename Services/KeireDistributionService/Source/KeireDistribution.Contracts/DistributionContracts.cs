@@ -35,6 +35,7 @@ public static class DistributionFileKinds
 {
     public const string Catalog = "catalog";
     public const string Content = "content";
+    public const string Manifest = "manifest";
     public const string Package = "package";
 }
 

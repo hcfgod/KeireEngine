@@ -65,9 +65,20 @@ try {
     Copy-Item -LiteralPath (Join-Path (Get-RepositoryRoot) "Config\Supabase.json") `
         -Destination (Join-Path $stage "Config\Supabase.json") -Force
     $distributionWriter = Join-Path (Get-RepositoryRoot) "Scripts\Packaging\write-distribution-config.py"
+    $distributionSource = Join-Path (Get-RepositoryRoot) "Config\Distribution.json"
     Invoke-CheckedWindowsCommand {
-        & $python $distributionWriter --output (Join-Path $stage "Config\Distribution.json")
+        & $python $distributionWriter --output (Join-Path $stage "Config\Distribution.json") `
+            --source-config $distributionSource
     } "Fixture distribution configuration generation"
+    $distribution = Get-Content -LiteralPath (Join-Path $stage "Config\Distribution.json") -Raw |
+        ConvertFrom-Json
+    $distributionAuthority = Get-Content -LiteralPath $distributionSource -Raw | ConvertFrom-Json
+    if (-not $distribution.onlineDiscoveryEnabled -or
+        $distribution.serviceBaseUrl -ne $distributionAuthority.serviceBaseUrl -or
+        $distribution.trustedKeys.Count -lt 1 -or
+        $distribution.trustedKeys[0].keyId -ne $distributionAuthority.trustedKeys[0].keyId) {
+        throw "The Windows Hub package fixture did not preserve online distribution trust."
+    }
     $manifestWriter = Join-Path (Get-RepositoryRoot) "Scripts\Packaging\write-package-manifest.py"
     $manifestArguments = @(
         $manifestWriter, "write", "--stage", $stage, "--output", "hub-package.json",

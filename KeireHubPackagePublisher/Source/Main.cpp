@@ -154,9 +154,10 @@ namespace
             throw std::runtime_error(document.Error().Message + " " + document.Error().TechnicalDetails);
         const auto& value = document.Value();
         if (!value.is_object() || value.at("schemaVersion").get<std::uint32_t>() != 2U ||
-            value.at("artifact").get<std::string>() != "editor" || !value.at("files").is_array())
+            value.at("artifact").get<std::string>() != "editor" || value.at("dirty").get<bool>() ||
+            value.at("developmentArtifact").get<bool>() || !value.at("files").is_array())
         {
-            throw std::runtime_error("The editor product manifest must use schema 2.");
+            throw std::runtime_error("The editor product manifest must be a clean schema-2 distribution manifest.");
         }
 
         auto version = KeireHub::SemanticVersion::Parse(value.at("version").get<std::string>());

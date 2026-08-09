@@ -277,13 +277,21 @@ public static class SnapshotValidator
         {
             if (entry.Signature is not null)
             {
-                throw new InvalidDataException($"Package files may not carry document signature metadata: '{entry.Path}'.");
+                throw new InvalidDataException($"Immutable payload files may not carry document signature metadata: '{entry.Path}'.");
             }
 
-            string digestName = Path.GetFileName(entry.Path);
+            if (expectedKind == DistributionFileKinds.Manifest &&
+                (entry.Size <= 0 || entry.Size > options.MaximumManifestBytes))
+            {
+                throw new InvalidDataException($"Package manifest is outside its size limit: '{entry.Path}'.");
+            }
+
+            string digestName = expectedKind == DistributionFileKinds.Manifest
+                ? Path.GetFileNameWithoutExtension(entry.Path)
+                : Path.GetFileName(entry.Path);
             if (!string.Equals(digestName, entry.Sha256, StringComparison.Ordinal))
             {
-                throw new InvalidDataException($"Package filename does not match its digest: '{entry.Path}'.");
+                throw new InvalidDataException($"Immutable payload filename does not match its digest: '{entry.Path}'.");
             }
         }
     }

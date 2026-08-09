@@ -218,7 +218,9 @@ SHA-256 package identity, managed-install ownership markers, or editor project l
 
 ## Distribution and trust
 
-`Config/Distribution.json` in a Hub package contains the initial service URL and trusted Ed25519 public-key documents.
+The checked-in `Config/Distribution.json` is the shared Windows, Linux, and macOS release-trust authority. Hub packaging
+validates and copies it into the package so online discovery does not depend on host-specific environment variables.
+The packaged file contains the initial service URL and trusted Ed25519 public-key documents.
 If either is absent, online discovery is disabled and the Hub continues with installed content, imported packages, and a
 valid last-known-good cache. HTTPS is required except for explicit loopback development mode; there is no certificate
 bypass.
@@ -262,8 +264,9 @@ distribution into the generic archive/catalog manifest. `create-hub-installer` c
 manifest only for a clean Hub package and platform-native `.exe`, `.dmg`, or `.deb`; native signing/notarization remains
 a release prerequisite. `prepare-distribution-snapshot.py` accepts repeated manifest/artifact pairs, rechecks every
 length and digest, rejects duplicate identities, and groups records into their host catalog before offline signing. A
-production Hub enables online Installs only after its package is generated with the real HTTPS service URL and trusted
-release public key. Caddy serves the package-local public website for every other route while preserving `/v1/*` and
+production Hub enables online Installs from the checked-in real HTTPS service URL and trusted release public key.
+Explicit packaging environment variables may replace that public configuration for another deployment. Caddy serves
+the package-local public website for every other route while preserving `/v1/*` and
 `/health/*` as exact backend interfaces.
 
 ## Launch and activation

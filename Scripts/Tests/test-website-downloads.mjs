@@ -80,6 +80,15 @@ assert.equal(ordered.length, 3);
 assert.equal(ordered[0].version.raw, "2.0.0");
 assert.equal(ordered[1].version.raw, "2.0.0-beta.1");
 
+const compact = packageRecord("2.1.0", {
+    manifest: { sizeBytes: 1024, sha256: "c".repeat(64) },
+});
+delete compact.files;
+const compactCandidates = validate(catalog([compact], { schemaVersion: 2 }));
+assert.equal(compactCandidates.length, 1);
+assert.equal(compactCandidates[0].installerName, "KeireHubSetup.exe");
+assert.equal(validate(catalog([packageRecord("2.1.0")], { schemaVersion: 2 })).length, 0);
+
 assert.equal(validate(catalog([packageRecord("1.2.3")], { expiresAt: "2020-01-01T00:00:00Z" })).length, 0);
 assert.equal(validate(catalog([packageRecord("1.2.3")], { keyId: "release-key" })).length, 0);
 assert.equal(validate(catalog([packageRecord("1.2.3")], { platform: "linux" })).length, 0);

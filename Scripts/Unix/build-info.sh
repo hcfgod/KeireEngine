@@ -41,7 +41,7 @@ commit=unknown
 dirty=false
 if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   commit="$(git -C "$ROOT" rev-parse --verify HEAD 2>/dev/null || printf unknown)"
-  [[ -z "$(git -C "$ROOT" status --porcelain --untracked-files=normal)" ]] || dirty=true
+  [[ -z "$(git_worktree_status "$ROOT")" ]] || dirty=true
 fi
 
 directory="$ROOT/Build/Generated/$PROJECT_NAMESPACE"

@@ -164,7 +164,7 @@ def main() -> int:
     downloads = (WEBSITE / "assets" / "downloads.js").read_text(encoding="utf-8")
     for contract in (
         "hubInstaller",
-        "/v1/catalog/",
+        "/v2/catalog/",
         "/v1/packages/",
         "/preview-downloads/",
         "windows",

@@ -31,6 +31,12 @@ namespace KeireHub
     struct DistributionPackageCatalog final
     {
         static constexpr std::uint32_t CurrentSchemaVersion = 1;
+        static constexpr std::uint32_t CompactSchemaVersion = 2;
+
+        [[nodiscard]] static constexpr bool IsSupportedSchema(const std::uint32_t version) noexcept
+        {
+            return version == CurrentSchemaVersion || version == CompactSchemaVersion;
+        }
 
         std::uint32_t SchemaVersion = CurrentSchemaVersion;
         DistributionPackageCatalogIdentity Identity;

@@ -86,13 +86,19 @@ foreach ($runtimeIdentifier in $RuntimeIdentifiers) {
         -Destination $deploymentDirectory
     Copy-Item -LiteralPath (Join-Path $serviceRoot 'Deployment\keire-distribution.service.example') `
         -Destination $deploymentDirectory
-    foreach ($scriptName in @('health-check.ps1', 'health-check.sh', 'publish-snapshot.ps1',
-            'publish-snapshot.sh')) {
+    foreach ($scriptName in @('health-check.ps1', 'health-check.sh', 'monitor-distribution.ps1',
+            'monitor-distribution.sh', 'backup-distribution.ps1', 'backup-distribution.sh',
+            'backup-distribution-rclone.ps1', 'backup-distribution-rclone.sh', 'restore-distribution.ps1',
+            'restore-distribution.sh', 'restore-distribution-rclone.ps1', 'restore-distribution-rclone.sh',
+            'publish-snapshot.ps1', 'publish-snapshot.sh', 'start-wsl2-host-bridge.sh',
+            'install-wsl2-host-bridge.sh')) {
         Copy-Item -LiteralPath (Join-Path $serviceRoot "scripts\$scriptName") -Destination $scriptsDirectory
     }
     if ($runtimeIdentifier.StartsWith('win-', [StringComparison]::Ordinal)) {
-        Copy-Item -LiteralPath (Join-Path $serviceRoot 'scripts\start-windows-host.ps1') `
-            -Destination $scriptsDirectory
+        foreach ($scriptName in @('start-windows-host.ps1', 'install-windows-startup-task.ps1',
+                'install-windows-backup-task.ps1', 'migrate-windows-host.ps1')) {
+            Copy-Item -LiteralPath (Join-Path $serviceRoot "scripts\$scriptName") -Destination $scriptsDirectory
+        }
     }
 
     if ($runtimeIdentifier.StartsWith('win-', [StringComparison]::Ordinal)) {
@@ -106,7 +112,14 @@ foreach ($runtimeIdentifier in $RuntimeIdentifiers) {
             --executable 'KeireDistributionService' `
             --executable 'tools/publisher/KeireDistributionPublisher' `
             --executable 'scripts/health-check.sh' `
-            --executable 'scripts/publish-snapshot.sh'
+            --executable 'scripts/monitor-distribution.sh' `
+            --executable 'scripts/backup-distribution.sh' `
+            --executable 'scripts/backup-distribution-rclone.sh' `
+            --executable 'scripts/restore-distribution.sh' `
+            --executable 'scripts/restore-distribution-rclone.sh' `
+            --executable 'scripts/publish-snapshot.sh' `
+            --executable 'scripts/start-wsl2-host-bridge.sh' `
+            --executable 'scripts/install-wsl2-host-bridge.sh'
         if ($LASTEXITCODE -ne 0) {
             throw "Archive creation failed for '$runtimeIdentifier'."
         }

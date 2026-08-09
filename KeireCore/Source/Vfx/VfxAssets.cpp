@@ -1,5 +1,6 @@
 #include "Keire/Vfx/VfxSystem.h"
 
+#include "KeireInternal/Vfx/VfxAssetValueCodec.h"
 #include "KeireInternal/Vfx/VfxExecutionInternal.h"
 #include "KeireInternal/Vfx/VfxExpressionInternal.h"
 
@@ -27,6 +28,30 @@ namespace Keire
     {
         using Json = nlohmann::json;
 
+        const auto IdText = Detail::VfxAssetIdText;
+        const auto ParseId = Detail::ParseVfxAssetId;
+        const auto DerivedGraphId = Detail::DerivedVfxGraphId;
+        const auto EncodeVector2 = Detail::EncodeVfxVector2;
+        const auto EncodeVector = Detail::EncodeVfxVector3;
+        const auto EncodeVector4 = Detail::EncodeVfxVector4;
+        const auto EncodeQuaternion = Detail::EncodeVfxQuaternion;
+        const auto EncodeMatrix = Detail::EncodeVfxMatrix;
+        const auto DecodeVector2 = Detail::DecodeVfxVector2;
+        const auto DecodeVector = Detail::DecodeVfxVector3;
+        const auto DecodeVector4 = Detail::DecodeVfxVector4;
+        const auto DecodeQuaternion = Detail::DecodeVfxQuaternion;
+        const auto DecodeMatrix = Detail::DecodeVfxMatrix;
+        const auto EncodeColor = Detail::EncodeVfxColor;
+        const auto DecodeColor = Detail::DecodeVfxColor;
+        const auto CurveInterpolationName = Detail::VfxCurveInterpolationName;
+        const auto ParseCurveInterpolation = Detail::ParseVfxCurveInterpolation;
+        const auto EncodeCurve = Detail::EncodeVfxCurve;
+        const auto DecodeCurve = Detail::DecodeVfxCurve;
+        const auto GradientInterpolationName = Detail::VfxGradientInterpolationName;
+        const auto ParseGradientInterpolation = Detail::ParseVfxGradientInterpolation;
+        const auto EncodeGradient = Detail::EncodeVfxGradient;
+        const auto DecodeGradient = Detail::DecodeVfxGradient;
+
         constexpr std::size_t MaximumDocumentBytes = std::size_t{4} * 1024U * 1024U;
         constexpr std::size_t MaximumModules = 128;
         constexpr std::size_t MaximumSystems = 64;
@@ -45,196 +70,6 @@ namespace Keire
             using Ts::operator()...;
         };
         template <typename... Ts> Overloaded(Ts...) -> Overloaded<Ts...>;
-
-        [[nodiscard]] std::string IdText(const AssetId id) { return id ? id.ToString() : std::string{}; }
-
-        [[nodiscard]] AssetId ParseId(const Json& object, const char* key)
-        {
-            const auto text = object.value(key, std::string{});
-            return text.empty() ? AssetId{} : AssetId::Parse(text);
-        }
-
-        [[nodiscard]] AssetId DerivedGraphId(const AssetId source, const std::uint64_t salt) noexcept
-        {
-            auto high = source.High() ^ 0x4752415048564658ULL;
-            auto low = source.Low() ^ salt;
-            high = (high & 0xffffffffffff0fffULL) | 0x0000000000005000ULL;
-            low = (low & 0x3fffffffffffffffULL) | 0x8000000000000000ULL;
-            return AssetId(high, low);
-        }
-
-        [[nodiscard]] Json EncodeVector(const Vector3 value) { return Json::array({value.X, value.Y, value.Z}); }
-
-        [[nodiscard]] Json EncodeVector2(const Vector2 value) { return Json::array({value.X, value.Y}); }
-
-        [[nodiscard]] Json EncodeVector4(const Vector4 value)
-        {
-            return Json::array({value.X, value.Y, value.Z, value.W});
-        }
-
-        [[nodiscard]] Json EncodeQuaternion(const Quaternion value)
-        {
-            return Json::array({value.X, value.Y, value.Z, value.W});
-        }
-
-        [[nodiscard]] Json EncodeMatrix(const Matrix4& value)
-        {
-            auto result = Json::array();
-            for (const auto element : value.Elements)
-                result.push_back(element);
-            return result;
-        }
-
-        [[nodiscard]] Vector2 DecodeVector2(const Json& value)
-        {
-            if (!value.is_array() || value.size() != 2)
-                throw std::runtime_error("VFX Vector2 values must contain exactly two scalars.");
-            return {value.at(0).get<float>(), value.at(1).get<float>()};
-        }
-
-        [[nodiscard]] Vector3 DecodeVector(const Json& value)
-        {
-            if (!value.is_array() || value.size() != 3)
-                throw std::runtime_error("VFX vector values must contain exactly three scalars.");
-            return {value.at(0).get<float>(), value.at(1).get<float>(), value.at(2).get<float>()};
-        }
-
-        [[nodiscard]] Vector4 DecodeVector4(const Json& value)
-        {
-            if (!value.is_array() || value.size() != 4)
-                throw std::runtime_error("VFX Vector4 values must contain exactly four scalars.");
-            return {value.at(0).get<float>(), value.at(1).get<float>(), value.at(2).get<float>(),
-                    value.at(3).get<float>()};
-        }
-
-        [[nodiscard]] Quaternion DecodeQuaternion(const Json& value)
-        {
-            if (!value.is_array() || value.size() != 4)
-                throw std::runtime_error("VFX quaternion values must contain exactly four scalars.");
-            return {value.at(0).get<float>(), value.at(1).get<float>(), value.at(2).get<float>(),
-                    value.at(3).get<float>()};
-        }
-
-        [[nodiscard]] Matrix4 DecodeMatrix(const Json& value)
-        {
-            if (!value.is_array() || value.size() != 16)
-                throw std::runtime_error("VFX matrix values must contain exactly sixteen scalars.");
-            Matrix4 result;
-            for (std::size_t index = 0; index < result.Elements.size(); ++index)
-                result.Elements[index] = value.at(index).get<float>();
-            return result;
-        }
-
-        [[nodiscard]] Json EncodeColor(const Color value)
-        {
-            return Json::array({value.Red, value.Green, value.Blue, value.Alpha});
-        }
-
-        [[nodiscard]] Color DecodeColor(const Json& value)
-        {
-            if (!value.is_array() || value.size() != 4)
-                throw std::runtime_error("VFX color values must contain exactly four scalars.");
-            return {value.at(0).get<float>(), value.at(1).get<float>(), value.at(2).get<float>(),
-                    value.at(3).get<float>()};
-        }
-
-        [[nodiscard]] std::string_view CurveInterpolationName(const CurveInterpolation interpolation)
-        {
-            switch (interpolation)
-            {
-            case CurveInterpolation::Constant:
-                return "constant";
-            case CurveInterpolation::Linear:
-                return "linear";
-            case CurveInterpolation::Cubic:
-                return "cubic";
-            }
-            throw std::invalid_argument("VFX curve interpolation is unsupported.");
-        }
-
-        [[nodiscard]] CurveInterpolation ParseCurveInterpolation(const std::string_view value)
-        {
-            if (value == "constant")
-                return CurveInterpolation::Constant;
-            if (value == "linear")
-                return CurveInterpolation::Linear;
-            if (value == "cubic")
-                return CurveInterpolation::Cubic;
-            throw std::runtime_error("VFX curve interpolation is unsupported.");
-        }
-
-        [[nodiscard]] Json EncodeCurve(const Curve1D& curve)
-        {
-            auto result = Json::array();
-            for (const auto& key : curve.Keys())
-            {
-                result.push_back({{"time", key.Time},
-                                  {"value", key.Value},
-                                  {"inTangent", key.InTangent},
-                                  {"outTangent", key.OutTangent},
-                                  {"interpolation", CurveInterpolationName(key.Interpolation)}});
-            }
-            return result;
-        }
-
-        [[nodiscard]] Curve1D DecodeCurve(const Json& value)
-        {
-            if (!value.is_array() || value.size() > Curve1D::MaximumKeys)
-                throw std::runtime_error("VFX curve is not an array or exceeds its key limit.");
-            std::vector<CurveKey> keys;
-            keys.reserve(value.size());
-            for (const auto& key : value)
-            {
-                keys.push_back({key.at("time").get<float>(), key.at("value").get<float>(), key.value("inTangent", 0.0F),
-                                key.value("outTangent", 0.0F),
-                                ParseCurveInterpolation(key.value("interpolation", std::string("linear")))});
-            }
-            return Curve1D(std::move(keys));
-        }
-
-        [[nodiscard]] std::string_view GradientInterpolationName(const GradientInterpolation interpolation)
-        {
-            switch (interpolation)
-            {
-            case GradientInterpolation::Constant:
-                return "constant";
-            case GradientInterpolation::Linear:
-                return "linear";
-            }
-            throw std::invalid_argument("VFX gradient interpolation is unsupported.");
-        }
-
-        [[nodiscard]] GradientInterpolation ParseGradientInterpolation(const std::string_view value)
-        {
-            if (value == "constant")
-                return GradientInterpolation::Constant;
-            if (value == "linear")
-                return GradientInterpolation::Linear;
-            throw std::runtime_error("VFX gradient interpolation is unsupported.");
-        }
-
-        [[nodiscard]] Json EncodeGradient(const ColorGradient& gradient)
-        {
-            auto keys = Json::array();
-            for (const auto& key : gradient.Keys())
-                keys.push_back({{"time", key.Time}, {"color", EncodeColor(key.Value)}});
-            return {{"interpolation", GradientInterpolationName(gradient.Interpolation())}, {"keys", std::move(keys)}};
-        }
-
-        [[nodiscard]] ColorGradient DecodeGradient(const Json& value)
-        {
-            if (!value.is_object() || !value.contains("keys") || !value.at("keys").is_array() ||
-                value.at("keys").size() > ColorGradient::MaximumKeys)
-            {
-                throw std::runtime_error("VFX gradient is malformed or exceeds its key limit.");
-            }
-            std::vector<ColorGradientKey> keys;
-            keys.reserve(value.at("keys").size());
-            for (const auto& key : value.at("keys"))
-                keys.push_back({key.at("time").get<float>(), DecodeColor(key.at("color"))});
-            return ColorGradient(std::move(keys),
-                                 ParseGradientInterpolation(value.value("interpolation", std::string("linear"))));
-        }
 
         [[nodiscard]] std::string_view SpaceName(const VfxSimulationSpace value)
         {

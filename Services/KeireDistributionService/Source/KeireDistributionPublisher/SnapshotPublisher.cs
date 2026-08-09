@@ -76,9 +76,16 @@ public static class SnapshotPublisher
 
                     SnapshotValidator.ValidateSignature(signature);
                 }
-                else if (!string.Equals(Path.GetFileName(relativePath), digest, StringComparison.Ordinal))
+                else
                 {
-                    throw new InvalidDataException($"Package filename must equal its SHA-256 digest: '{relativePath}'.");
+                    string digestName = kind == DistributionFileKinds.Manifest
+                        ? Path.GetFileNameWithoutExtension(relativePath)
+                        : Path.GetFileName(relativePath);
+                    if (!string.Equals(digestName, digest, StringComparison.Ordinal))
+                    {
+                        throw new InvalidDataException(
+                            $"Content-addressed filename must equal its SHA-256 digest: '{relativePath}'.");
+                    }
                 }
 
                 string destinationPath = DistributionPaths.ResolveConfined(stagingDirectory, relativePath);

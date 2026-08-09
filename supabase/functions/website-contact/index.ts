@@ -114,42 +114,35 @@ Deno.serve(async (request: Request) => {
 
     const url = Deno.env.get("SUPABASE_URL") ?? "";
     const adminKey = secretKey();
-    if (!url || !adminKey) {
-        console.error("website-contact is missing its Supabase admin configuration");
+    const rateLimitSecret = Deno.env.get("CONTACT_RATE_LIMIT_SECRET") ?? "";
+    if (!url || !adminKey || !rateLimitSecret) {
+        console.error("website-contact is missing its server-side configuration");
         return json(origin, 503, { ok: false, message: "Contact is temporarily unavailable." });
     }
     const admin = createClient(url, adminKey, {
         auth: { autoRefreshToken: false, persistSession: false },
         global: { headers: { "X-Client-Info": "keire-website-contact/1.0" } },
     });
-    const rateLimitSecret = Deno.env.get("CONTACT_RATE_LIMIT_SECRET") ?? adminKey;
     const ipHash = await hmacSha256(requestAddress(request), rateLimitSecret);
-    const { data: reserved, error: throttleError } = await admin.rpc("reserve_website_contact_submission", {
+    const { data: accepted, error: submissionError } = await admin.rpc("submit_website_contact", {
         p_ip_hash: ipHash,
+        p_name: name,
+        p_email: email,
+        p_category: category,
+        p_subject: subject,
+        p_message: message,
     });
-    if (throttleError) {
-        console.error("website-contact throttle failed", throttleError.code);
+    if (submissionError) {
+        console.error("website-contact transaction failed", submissionError.code);
         return json(origin, 503, { ok: false, message: "Contact is temporarily unavailable." });
     }
-    if (reserved !== true) {
+    if (accepted !== true) {
         return json(
             origin,
             429,
             { ok: false, message: "Please wait before sending another message." },
             { "Retry-After": "3600" },
         );
-    }
-
-    const { error } = await admin.from("website_contact_submissions").insert({
-        name,
-        email,
-        category,
-        subject,
-        message,
-    });
-    if (error) {
-        console.error("website-contact insert failed", error.code);
-        return json(origin, 503, { ok: false, message: "Contact is temporarily unavailable." });
     }
     return json(origin, 201, { ok: true, message: "Thanks. Your message was received." });
 });

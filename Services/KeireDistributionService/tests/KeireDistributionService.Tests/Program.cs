@@ -52,6 +52,10 @@ internal static class Program
             TestAssert.True(
                 index.TryGet($"packages/{fixture.PackageSha256}", out DistributionFile? package) && package is not null,
                 "Published package was not indexed.");
+            TestAssert.True(
+                index.TryGet($"manifests/{fixture.ManifestSha256}.json", out DistributionFile? manifest) &&
+                    manifest is not null,
+                "Published package manifest was not indexed.");
             TestAssert.Throws<InvalidDataException>(
                 () => DistributionPaths.NormalizeRelativePath("../outside"),
                 "Traversal path was accepted.");
@@ -74,7 +78,7 @@ internal static class Program
                 {
                     Algorithm = DistributionContract.SignatureAlgorithm,
                     KeyId = "test-release-key",
-                    Value = fixture.Signature + "\n",
+                    Value = fixture.CatalogSignature + "\n",
                     Sequence = 7,
                     ExpiresAt = new DateTimeOffset(2035, 1, 1, 0, 0, 0, TimeSpan.Zero),
                 }),
@@ -137,7 +141,7 @@ internal static class Program
             byte[] actualCatalog = await catalog.Content.ReadAsByteArrayAsync();
             TestAssert.BytesEqual(fixture.CatalogBytes, actualCatalog, "Catalog bytes were rewritten in transit.");
             TestAssert.Equal(
-                fixture.Signature,
+                fixture.CatalogSignature,
                 catalog.Headers.GetValues("X-Keire-Signature").Single(),
                 "Detached signature header was not preserved.");
             string etag = catalog.Headers.ETag?.Tag
@@ -149,6 +153,19 @@ internal static class Program
             await TestAssert.StatusAsync(HttpStatusCode.NotModified, conditional);
             TestAssert.Equal(0L, conditional.Content.Headers.ContentLength ?? 0, "304 response carried a body length.");
 
+            using HttpResponseMessage compactCatalog =
+                await server.Client.GetAsync("/v2/catalog/stable/windows/x86_64");
+            await TestAssert.StatusAsync(HttpStatusCode.OK, compactCatalog);
+            byte[] actualCompactCatalog = await compactCatalog.Content.ReadAsByteArrayAsync();
+            TestAssert.BytesEqual(
+                fixture.CompactCatalogBytes,
+                actualCompactCatalog,
+                "Compact catalog bytes were rewritten in transit.");
+            TestAssert.Equal(
+                fixture.CompactCatalogSignature,
+                compactCatalog.Headers.GetValues("X-Keire-Signature").Single(),
+                "Compact catalog detached signature header was not preserved.");
+
             using HttpResponseMessage content = await server.Client.GetAsync("/v1/content/en-US");
             await TestAssert.StatusAsync(HttpStatusCode.OK, content);
             byte[] actualContent = await content.Content.ReadAsByteArrayAsync();
@@ -156,6 +173,23 @@ internal static class Program
                 fixture.ContentBytes,
                 actualContent,
                 "Content catalog bytes were rewritten in transit.");
+
+            using HttpResponseMessage manifest =
+                await server.Client.GetAsync($"/v1/manifests/{fixture.ManifestSha256}");
+            await TestAssert.StatusAsync(HttpStatusCode.OK, manifest);
+            byte[] actualManifest = await manifest.Content.ReadAsByteArrayAsync();
+            TestAssert.BytesEqual(
+                fixture.ManifestBytes,
+                actualManifest,
+                "Package manifest bytes were rewritten in transit.");
+            TestAssert.Equal(
+                "application/json",
+                manifest.Content.Headers.ContentType?.MediaType ?? string.Empty,
+                "Package manifest response used the wrong media type.");
+            TestAssert.True(
+                manifest.Headers.CacheControl?.Extensions.Any(
+                    extension => string.Equals(extension.Name, "immutable", StringComparison.OrdinalIgnoreCase)) == true,
+                "Content-addressed package manifest was not immutable-cacheable.");
 
             using HttpResponseMessage malformed = await server.Client.GetAsync("/v1/content/en%2FUS");
             TestAssert.True(

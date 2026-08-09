@@ -48,7 +48,23 @@ assert_true grep -Fq 'cp -R -- "$documentation_output/." "$package_directory/Web
   "$ROOT/Services/KeireDistributionService/scripts/package-service.sh"
 assert_true grep -Fq 'node_modules/beautiful-mermaid/LICENSE' \
   "$ROOT/Services/KeireDistributionService/scripts/package-service.sh"
-assert_true grep -Fq '@distribution_api path /v1 /v1/* /health /health/*' \
+for script in monitor-distribution backup-distribution backup-distribution-rclone restore-distribution \
+  restore-distribution-rclone; do
+  assert_true grep -Fq "$script.sh" "$ROOT/Services/KeireDistributionService/scripts/package-service.sh"
+  bash -n "$ROOT/Services/KeireDistributionService/scripts/$script.sh"
+done
+bash "$ROOT/Scripts/Tests/test-rclone-distribution-backup-unix.sh"
+for script in start-wsl2-host-bridge install-wsl2-host-bridge; do
+  assert_true grep -Fq "$script.sh" "$ROOT/Services/KeireDistributionService/scripts/package-service.sh"
+  bash -n "$ROOT/Services/KeireDistributionService/scripts/$script.sh"
+done
+assert_true grep -Fq 'DynamicUser=yes' \
+  "$ROOT/Services/KeireDistributionService/scripts/install-wsl2-host-bridge.sh"
+assert_true grep -Fq 'AmbientCapabilities=CAP_NET_BIND_SERVICE' \
+  "$ROOT/Services/KeireDistributionService/scripts/install-wsl2-host-bridge.sh"
+bash "$ROOT/Services/KeireDistributionService/scripts/install-wsl2-host-bridge.sh" \
+  --host distribution.example.test --upstream-port 50255 --validate-only
+assert_true grep -Fq '@distribution_api path /v1 /v1/* /v2 /v2/* /health /health/*' \
   "$ROOT/Services/KeireDistributionService/Deployment/Caddyfile.example"
 python3 "$ROOT/Scripts/Tests/test-supabase-config.py"
 python3 "$ROOT/Scripts/Tests/test-patch-ninja-depfiles.py"
@@ -190,6 +206,10 @@ assert_false grep -Fqw Mesa-libgbm-devel <<< "$(package_name zypper sdl-video)"
 assert_true grep -Fqw libxtst-dev <<< "$(package_name apt-get sdl-video)"
 assert_true grep -Fqw libXtst-devel <<< "$(package_name dnf sdl-video)"
 assert_true grep -Fqw libxtst <<< "$(package_name pacman sdl-video)"
+assert_equal "$(package_name apt-get native-dialog)" zenity 'APT native dialog package'
+assert_equal "$(package_name dnf native-dialog)" zenity 'DNF native dialog package'
+assert_equal "$(package_name pacman native-dialog)" zenity 'Pacman native dialog package'
+assert_equal "$(package_name zypper native-dialog)" zenity 'Zypper native dialog package'
 assert_true grep -Fqw libXtst-devel <<< "$(package_name zypper sdl-video)"
 assert_equal "$(package_name apt-get llvm)" llvm 'LLVM tools package'
 assert_equal "$(package_name pacman binutils)" binutils 'binutils package'
@@ -208,6 +228,7 @@ printf '%s\n' clean > "$package_policy_fixture/tracked.txt"
 git -C "$package_policy_fixture" add tracked.txt
 git -C "$package_policy_fixture" commit --quiet -m fixture
 assert_equal "$(package_worktree_policy "$package_policy_fixture" 0 0)" 'false false' 'clean production package policy'
+assert_true grep -Fq 'git_worktree_status "$ROOT"' "$ROOT/Scripts/Unix/build-info.sh"
 printf '%s\n' dirty > "$package_policy_fixture/untracked.txt"
 assert_false package_worktree_policy "$package_policy_fixture" 0 0
 assert_equal "$(package_worktree_policy "$package_policy_fixture" 1 0)" 'true true' 'local dirty development package policy'
@@ -442,6 +463,8 @@ assert_true grep -F -q 'filter { "system:macosx"' "$ROOT/KeireAssetWorker/premak
 assert_true grep -F -q '"-Wl,-rpath,@loader_path"' "$ROOT/KeireAssetWorker/premake5.lua"
 assert_false grep -F -q '"system:linux or macosx"' "$ROOT/KeireAssetWorker/premake5.lua"
 assert_true grep -F -q -- '--install-name-dir=@rpath' "$ROOT/Scripts/Unix/ffmpeg.sh"
+assert_true grep -F -q 'git -C "$VENDOR_SOURCE" archive --format=tar "$COMMIT"' \
+  "$ROOT/Scripts/Unix/ffmpeg.sh"
 assert_true test -z "$(find "$ROOT/KeireCore/Source" "$ROOT/KeireClient/Source" "$ROOT/KeireHub/Source" "$ROOT/KeireTests/Source" "$ROOT/AssetTool/Source" "$ROOT/KeireRuntime/Source" -type f -name '*.h' -print -quit)"
 assert_true test -f "$ROOT/KeireCore/Include/Keire/Assets/Asset.h"
 assert_true test -f "$ROOT/KeireCore/Source/Assets/AssetSystem.cpp"
@@ -605,6 +628,9 @@ assert_true grep -F -q 'cp -RL "$dotnet_source/." "$dotnet_destination/"' \
   "$ROOT/Scripts/Unix/package-editor.sh"
 assert_true grep -q 'Build/Distributions' "$ROOT/Scripts/Unix/package-editor.sh"
 assert_true grep -q 'validate_editor_package_stage' "$ROOT/Scripts/Unix/package-editor.sh"
+assert_true grep -Fq 'xvfb-run -a "$stage/bin/$runtime"' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -q 'editor product manifest must be a clean schema-2' \
+  "$ROOT/KeireHubPackagePublisher/Source/Main.cpp"
 assert_true grep -q '@PROJECT_NAMESPACE@ImGui.a' "$ROOT/Config/PackageConfig.cmake.in"
 assert_true grep -q '"${_assimp_sdk_library}" "${_assimp_zlib_sdk_library}"' "$ROOT/Config/PackageConfig.cmake.in"
 assert_true grep -q '"${_jolt_sdk_library}" "${_recast_sdk_libraries}" "${_miniaudio_sdk_library}"' "$ROOT/Config/PackageConfig.cmake.in"
