@@ -139,7 +139,11 @@ package_worktree_policy() {
     git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { printf '%s\n' 'Release packaging requires a Git working tree.' >&2; return 1; }
     status="$(git_worktree_status "$root")" || { printf 'Unable to inspect the package worktree at %s.\n' "$root" >&2; return 1; }
     [[ -z "$status" ]] || dirty=true
-    [[ "$dirty" == false || "$allow_dirty" == 1 ]] || { printf '%s\n' 'Release packaging requires a clean worktree. Use --allow-dirty only for a local development artifact.' >&2; return 1; }
+    if [[ "$dirty" != false && "$allow_dirty" != 1 ]]; then
+        printf '%s\n' 'Release packaging requires a clean worktree. Use --allow-dirty only for a local development artifact.' >&2
+        printf 'Reported worktree status: %q\n' "$status" >&2
+        return 1
+    fi
     printf '%s %s\n' "$dirty" "$([[ "$dirty" == true && "$allow_dirty" == 1 ]] && printf true || printf false)"
 }
 
