@@ -229,6 +229,14 @@ git -C "$package_policy_fixture" add tracked.txt
 git -C "$package_policy_fixture" commit --quiet -m fixture
 assert_equal "$(package_worktree_policy "$package_policy_fixture" 0 0)" 'false false' 'clean production package policy'
 assert_true grep -Fq 'git_worktree_status "$ROOT"' "$ROOT/Scripts/Unix/build-info.sh"
+windows_git_failure_is_not_native_fallback() (
+  uname() { printf '%s\n' 'Linux microsoft-standard-WSL2'; }
+  wslpath() { printf '%s\n' 'C:\fixture'; }
+  git.exe() { return 1; }
+  git() { return 0; }
+  ! git_worktree_status /mnt/c/fixture
+)
+assert_true windows_git_failure_is_not_native_fallback
 printf '%s\n' dirty > "$package_policy_fixture/untracked.txt"
 assert_false package_worktree_policy "$package_policy_fixture" 0 0
 assert_equal "$(package_worktree_policy "$package_policy_fixture" 1 0)" 'true true' 'local dirty development package policy'

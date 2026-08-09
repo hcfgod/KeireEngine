@@ -120,15 +120,19 @@ is_semantic_version() {
 }
 
 git_worktree_status() {
-    local root="$1" kernel windows_root windows_status
+    local root="$1" kernel windows_root windows_status attempt
     kernel="$(uname -r 2>/dev/null || true)"
     if [[ "$kernel" == *[Mm]icrosoft* && "$root" == /mnt/[A-Za-z]/* ]] &&
         command -v git.exe >/dev/null 2>&1 && command -v wslpath >/dev/null 2>&1; then
         windows_root="$(wslpath -w "$root")" || return 1
-        if windows_status="$(git.exe -C "$windows_root" status --porcelain --untracked-files=normal 2>/dev/null)"; then
-            [[ -z "$windows_status" ]] || printf '%s\n' "${windows_status//$'\r'/}"
-            return
-        fi
+        for attempt in 1 2 3 4 5; do
+            if windows_status="$(git.exe -C "$windows_root" status --porcelain --untracked-files=normal 2>/dev/null)"; then
+                [[ -z "$windows_status" ]] || printf '%s\n' "${windows_status//$'\r'/}"
+                return
+            fi
+            sleep 0.2
+        done
+        return 1
     fi
     git -C "$root" status --porcelain --untracked-files=normal
 }
