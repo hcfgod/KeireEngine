@@ -210,8 +210,7 @@ namespace KeireHub
                 issues.push_back(issue.Message);
             const auto projectCount =
                 std::ranges::count_if(projects,
-                                      [&](const auto& project)
-                                      {
+                                      [&](const auto& project) {
                                           return project.PreferredEditorInstallationId &&
                                                  *project.PreferredEditorInstallationId == installation.Id;
                                       });
@@ -547,18 +546,15 @@ namespace KeireHub
 
         const auto taskId = "editor-management-" + std::to_string(operation->OperationId);
         std::erase_if(product.Tasks, [&](const HubTaskUiRecord& task) { return task.Id == taskId; });
-        const auto failed = operation->State == HubEditorManagementState::Failed;
+        if (!operation->IsRunning())
+            return;
         product.Tasks.push_back({.Id = taskId,
                                  .Title = OperationTitle(operation->Operation),
-                                 .Phase = operation->IsRunning() ? "Checking"
-                                          : failed               ? "Failed"
-                                                                 : "Completed",
-                                 .Message = failed && operation->Failure ? operation->Failure->Message
-                                            : operation->IsRunning()     ? RunningMessage(operation->Operation)
-                                                                         : "Editor installation check completed.",
+                                 .Phase = "Checking",
+                                 .Message = RunningMessage(operation->Operation),
                                  .CurrentPackage = operation->InstallationId,
-                                 .Progress = operation->IsRunning() ? 0.0F : 1.0F,
-                                 .Active = operation->IsRunning(),
+                                 .Progress = 0.0F,
+                                 .Active = true,
                                  .Retryable = false});
     }
 
@@ -799,8 +795,7 @@ namespace KeireHub
         }
         const auto tasks = m_Controller.Tasks().Snapshot();
         activity.HasActiveTask = std::ranges::any_of(*tasks,
-                                                     [&](const auto& task)
-                                                     {
+                                                     [&](const auto& task) {
                                                          return !IsTerminal(task.State) && task.TargetInstallationId &&
                                                                 *task.TargetInstallationId == installation.Id;
                                                      });

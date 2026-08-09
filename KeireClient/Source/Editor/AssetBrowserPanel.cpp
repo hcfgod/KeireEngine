@@ -1581,10 +1581,10 @@ namespace KeireEditor
                     }
                     else if (assets && record.Type == Keire::PrefabAsset::StaticType())
                     {
-                        const auto source = Keire::Detail::ReadTextFile(AssetRoot / record.RelativePath,
-                                                                        std::size_t{64} * 1024U * 1024U);
+                        const auto prefabSource = Keire::Detail::ReadTextFile(AssetRoot / record.RelativePath,
+                                                                              std::size_t{64} * 1024U * 1024U);
                         Keire::Ref<const Keire::PrefabAsset> prefab =
-                            Keire::PrefabAsset::Decode(std::as_bytes(std::span(source)));
+                            Keire::PrefabAsset::Decode(std::as_bytes(std::span(prefabSource)));
                         request.PreviewAsset = prefab;
                         ready = static_cast<bool>(request.PreviewAsset);
                         if (prefab)
@@ -1600,10 +1600,10 @@ namespace KeireEditor
                                     Keire::Ref<const Keire::PrefabAsset> loaded;
                                     if (dependencyRecord)
                                     {
-                                        const auto source =
+                                        const auto dependencySource =
                                             Keire::Detail::ReadTextFile(AssetRoot / dependencyRecord->RelativePath,
                                                                         std::size_t{64} * 1024U * 1024U);
-                                        loaded = Keire::PrefabAsset::Decode(std::as_bytes(std::span(source)));
+                                        loaded = Keire::PrefabAsset::Decode(std::as_bytes(std::span(dependencySource)));
                                     }
                                     else
                                     {

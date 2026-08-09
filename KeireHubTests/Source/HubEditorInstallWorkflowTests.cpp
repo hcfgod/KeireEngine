@@ -18,6 +18,18 @@
 
 using namespace KeireHub;
 
+TEST_CASE("Active editor install matching requires the same package and version")
+{
+    const std::vector<HubTaskUiRecord> tasks{
+        {.Id = "install", .Active = true, .EditorPackageId = "keire.editor", .EditorVersion = "1.2.3"},
+        {.Id = "finished", .Active = false, .EditorPackageId = "keire.editor", .EditorVersion = "2.0.0"}};
+
+    CHECK(HasActiveEditorInstall(tasks, "keire.editor", "1.2.3"));
+    CHECK_FALSE(HasActiveEditorInstall(tasks, "keire.editor", "1.2.4"));
+    CHECK_FALSE(HasActiveEditorInstall(tasks, "other.editor", "1.2.3"));
+    CHECK_FALSE(HasActiveEditorInstall(tasks, "keire.editor", "2.0.0"));
+}
+
 namespace
 {
     constexpr std::string_view CatalogKeyId = "ed25519-00000000000000000000000000000000";

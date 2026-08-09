@@ -702,16 +702,19 @@ TEST_CASE("Managed editor removal resumes from its same-parent tombstone journal
                                           .PackageReceiptSha256 = prepared.Value().PackageReceiptSha256,
                                           .MarkerNonce = prepared.Value().MarkerNonce,
                                           .CurrentHealth = InstallationHealth::Healthy};
+    bool preparedForCommit = false;
     auto interrupted = RemoveManagedEditorInstallation(plan, "removal-restart",
                                                        {.ContinueAfterPhase = [](const ManagedEditorRemovalPhase phase)
-                                                        { return phase != ManagedEditorRemovalPhase::RootRenamed; }});
+                                                        { return phase != ManagedEditorRemovalPhase::RootRenamed; },
+                                                        .PrepareForCommit = [&]() { preparedForCommit = true; }});
     REQUIRE_FALSE(interrupted);
+    CHECK(preparedForCommit);
     CHECK(interrupted.Error().Code == HubErrorCode::WorkerInterrupted);
     CHECK(interrupted.Error().Retryable);
     CHECK_FALSE(std::filesystem::exists(destination));
     CHECK(std::filesystem::is_directory(installs / ".keire-remove-tombstone-removal-restart"));
 
-    auto recovered = RemoveManagedEditorInstallation(plan, "removal-restart");
+    auto recovered = RemoveManagedEditorInstallation(plan, "replacement-removal-task");
     const auto recoveryDetails =
         recovered ? std::string{} : recovered.Error().Message + " " + recovered.Error().TechnicalDetails;
     INFO(recoveryDetails);

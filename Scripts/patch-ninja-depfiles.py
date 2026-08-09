@@ -50,7 +50,8 @@ def patch_project(path: Path) -> int:
             lines[rule_start:index] = block
         rule_start = index
     if patched:
-        path.write_text("".join(lines), encoding="utf-8", newline="")
+        with path.open("w", encoding="utf-8", newline="") as stream:
+            stream.write("".join(lines))
     return patched
 
 

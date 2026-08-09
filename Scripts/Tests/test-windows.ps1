@@ -52,6 +52,10 @@ if ($LASTEXITCODE -ne 0) { throw "Ninja dependency-file rule checks failed." }
 $generateScript = Get-Content (Join-Path $Windows "generate.ps1") -Raw
 Assert-True ($generateScript.Contains('--file=premake5.lua')) "Unicode-safe relative Premake script path"
 Assert-True ($generateScript.Contains('Get-ProjectGenerationFingerprint')) "Source-inventory project regeneration"
+$windowsCommonSource = Get-Content (Join-Path $Windows "common.ps1") -Raw
+Assert-True ($windowsCommonSource.Contains('$generationInfrastructureInputs') -and
+             $windowsCommonSource.Contains('Scripts\Unix\dependencies.sh') -and
+             $windowsCommonSource.Contains('Scripts\Dependencies')) "Dependency-infrastructure project regeneration"
 $windowsCommon = Get-Content (Join-Path $Windows "common.ps1") -Raw
 Assert-True ($windowsCommon.Contains('"KeireHubRuntime"') -and $windowsCommon.Contains('"KeireHubTests"') -and
              $windowsCommon.Contains('"KeireHubWorker"')) "Hub target source-inventory project regeneration"
@@ -235,6 +239,10 @@ Assert-True ($coralWarningPatch.Contains('memcpy(buffer, InString.data(), InStri
              $coralWarningPatch.Contains('target_compile_options(Coral.Native PRIVATE /wd4996)')) "Warning-clean Coral native host patch"
 $premakePolicy = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Premake\Common.lua") -Raw
 Assert-True ($premakePolicy.Contains('SDL3DebugLibrary') -and $premakePolicy.Contains('SDL3ReleaseLibrary')) "Premake SDL variant selection"
+$unixDependencies = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Unix\dependencies.sh") -Raw
+$windowsDependencies = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Windows\dependencies.ps1") -Raw
+Assert-True ($unixDependencies.Contains('CPP_RTTI_ENABLED=ON') -and
+             $windowsDependencies.Contains('CPP_RTTI_ENABLED=ON')) "Jolt and engine RTTI ABI compatibility"
 $windowsCommon = Get-Content (Join-Path $Windows "common.ps1") -Raw
 Assert-True ($windowsCommon.Contains('KEIRE_VSDEV_ENVIRONMENT_KEY')) "Idempotent Visual Studio environment setup"
 Assert-True ($windowsCommon.Contains('"KeireManaged"') -and
@@ -283,14 +291,16 @@ Assert-True ($premakePolicy.Contains('buildoptions { "-fms-runtime-lib=dll_dbg" 
 Assert-True ($premakePolicy.Contains('function GeneratorRootPath(path)') -and
              $premakePolicy.Contains('SelectedToolset ~= "msc"') -and
              $premakePolicy.Contains('path:gsub("^%.%./", "")') -and
+             $premakePolicy.Contains('local directory, library = resolved:match("^(.*)/(lib[^/]+%.a)$")') -and
+             $premakePolicy.Contains('return ":" .. library') -and
              $premakePolicy.Contains('links(DependencyLinks(DependencyManifest.RecastDebugLibraries))') -and
-             $premakePolicy.Contains('GeneratorRootPath(DependencyManifest.SDL3DebugLibrary)') -and
+             $premakePolicy.Contains('DependencyLink(DependencyManifest.SDL3DebugLibrary)') -and
              $assetWorkerPremake.Contains('libdirs { GeneratorRootPath(ffmpegDebug .. "/lib") }')) `
     "Toolset-aware root-relative Ninja and GNU Make dependency links"
 Assert-True ($assetToolSource.Contains("--worker-timeout-seconds") -and
              $assetToolSource.Contains("commandLine.WorkerTimeout")) "Configurable asset-worker CLI timeout"
 Assert-True ($assetWorkerPremake.Contains('filter { "system:linux"') -and
-             $assetWorkerPremake.Contains('"-Wl,-rpath,$ORIGIN"') -and
+             $assetWorkerPremake.Contains('"-Wl,-rpath,''$$ORIGIN''"') -and
              $assetWorkerPremake.Contains('filter { "system:macosx"') -and
              $assetWorkerPremake.Contains('"-Wl,-rpath,@loader_path"') -and
              -not $assetWorkerPremake.Contains('"system:linux or macosx"') -and

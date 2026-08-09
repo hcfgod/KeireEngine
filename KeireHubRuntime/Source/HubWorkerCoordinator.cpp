@@ -339,10 +339,11 @@ namespace KeireHub
                                 (queue->EditorRemoval && queue->EditorRemoval->InstallationId == *targetInstallation));
                     });
                 const bool activeTarget =
-                    m_Snapshot->Tasks &&
-                    std::ranges::any_of(
-                        *m_Snapshot->Tasks, [&](const HubTask& task)
-                        { return !IsTerminal(task.State) && task.TargetInstallationId == targetInstallation; });
+                    m_Snapshot->Tasks && std::ranges::any_of(*m_Snapshot->Tasks,
+                                                             [&](const HubTask& task) {
+                                                                 return !IsTerminal(task.State) &&
+                                                                        task.TargetInstallationId == targetInstallation;
+                                                             });
                 if (pendingTarget || activeTarget)
                 {
                     return HubStatus::Failure({.Code = HubErrorCode::InstallationBusy,
@@ -613,7 +614,14 @@ namespace KeireHub
                                                    : std::nullopt,
                  .State = HubTaskState::Queued,
                  .CreatedUnixSeconds = now,
-                 .UpdatedUnixSeconds = now});
+                 .UpdatedUnixSeconds = now,
+                 .EditorInstall = workerRequest.EditorInstall &&
+                                          workerRequest.EditorInstall->Mode == HubWorkerEditorInstallMode::Install
+                                      ? std::optional(HubEditorInstallTaskMetadata{
+                                            .PackageId = workerRequest.EditorInstall->Package.Id,
+                                            .Version = workerRequest.EditorInstall->Package.Version.ToString(),
+                                            .Destination = workerRequest.EditorInstall->Destination})
+                                      : std::nullopt});
             if (!status)
             {
                 RemoveKnownFile(paths.Request);

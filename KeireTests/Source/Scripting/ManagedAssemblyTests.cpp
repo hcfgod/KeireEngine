@@ -7,6 +7,7 @@
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstring>
@@ -219,12 +220,12 @@ TEST_CASE("Managed IDE workspace references the engine API project in source che
 
 TEST_CASE("Managed builds publish only successful replacements")
 {
-    const auto dotnet = std::filesystem::absolute("Library/DotnetSdk10/sdk/dotnet.exe");
-    if (!std::filesystem::is_regular_file(dotnet))
-    {
-        MESSAGE("Skipping managed build integration test because the isolated .NET 10 SDK is unavailable.");
-        return;
-    }
+#if defined(_WIN32)
+    const auto dotnet = std::filesystem::absolute("Build/Dependencies/dotnet-sdk/dotnet.exe");
+#else
+    const auto dotnet = std::filesystem::absolute("Build/Dependencies/dotnet-sdk/dotnet");
+#endif
+    REQUIRE(std::filesystem::is_regular_file(dotnet));
 
     const auto root =
         std::filesystem::absolute("Library/ManagedBuildIntegration-" + Keire::AssetId::Generate().ToString());

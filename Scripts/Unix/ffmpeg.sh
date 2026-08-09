@@ -72,7 +72,7 @@ fi
     --enable-muxer=flac \
     "${platform_options[@]}" \
     "${debug_options[@]}"
-  make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf 1)"
+  make -j"$(build_parallel_jobs)"
   make install
 )
 

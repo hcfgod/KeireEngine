@@ -23,39 +23,47 @@ Review target: modern commercial-engine and AAA team-production readiness, not f
 ## Final Local Engineering Audit (2026-08-08)
 
 The repository-wide remediation audit is complete locally. This update grades the current tree independently from the
-frozen 2026-08-02 snapshot. It does not treat the account-level GitHub Actions quota exhaustion as a code failure, and
-it does not substitute Windows-hosted emulation for native Linux, macOS, or Metal evidence.
+frozen 2026-08-02 snapshot. It does not treat the account-level GitHub Actions quota exhaustion as a code failure.
+Windows and Linux are now directly exercised; macOS, Metal, ARM64, and hosted execution remain unobserved.
 
 | Assessment | Grade | Score |
 | --- | ---: | ---: |
-| Engineering foundation | A | 95/100 |
+| Engineering foundation | A | 96/100 |
 | Architecture, ownership, and lifecycle | A | 95/100 |
-| Tests and local quality policy | A- | 93/100 |
-| Build, CI, packaging, and SDK design | A | 95/100 |
+| Tests and local quality policy | A | 95/100 |
+| Build, CI, packaging, and SDK design | A | 96/100 |
 | Current feature completeness | B+ | 87/100 |
 | Unity 6.3 VFX catalog parity | C- | 70/100 |
-| Cross-platform and hardware evidence | B | 84/100 |
-| Release and shipping readiness | B+ | 89/100 |
-| Overall production readiness | **B+** | **89/100** |
+| Cross-platform and hardware evidence | A- | 92/100 |
+| Release and shipping readiness | A- | 91/100 |
+| Overall production readiness | **A-** | **90/100** |
 
-Current local evidence includes complete Debug and Release/NDEBUG matrices; AddressSanitizer; 532 core, 118 editor,
-and 303 Hub tests; 18 rendered-output cases on both Direct3D 12 and Vulkan; client, managed, distribution-service, and
-packaged-project smoke tests; and a Release package validated by low-level, managed, and source-module CMake consumers.
-The final measured line coverage is 74.81% for core and 63.14% across core/editor/Hub/client, above the enforced 74.5%
-and 63.0% non-regression floors. The compile database covers all 448 Premake-owned translation units, and all 166
-changed workflow-scope C++ translation units pass local LLVM 22 clang-tidy with warnings treated as errors.
+Windows evidence includes complete Debug and Release/NDEBUG matrices, AddressSanitizer, 534 core tests, 118 editor
+tests, 309 Hub tests, and 18 rendered-output cases on both Direct3D 12 and Vulkan. Client, managed,
+distribution-service, packaged-project, and direct/managed/source-module CMake consumers also pass. The final measured
+line coverage is 74.81% for core and 63.14% across core/editor/Hub/client, above the enforced 74.5% and 63.0%
+non-regression floors. The compile database covers all 448 Premake-owned translation units, and all 166 changed
+workflow-scope C++ translation units pass local LLVM 22 clang-tidy with warnings treated as errors.
 
-The remaining release-evidence gates are a clean hosted matrix after Actions quota is restored, native Linux/macOS and
-Metal runs, privileged symbolic-link confinement probes, and broader named-hardware/long-duration performance evidence.
-Feature closure also remains material: the frozen 278-row Unity VFX manifest still records 153 disabled rows. These
-limits prevent an A-range overall production-readiness claim even though the locally observable engineering and release
-machinery are now A-range.
+Linux evidence includes clean WSL2 Debug, Release, AddressSanitizer, and Undefined Behavior Sanitizer runs plus an
+interactive WSLg Vulkan launch of both the Hub and editor. Containerized builds exercise Ubuntu 22.04/24.04, Debian 12,
+Fedora, Arch, openSUSE Tumbleweed, and Rocky Linux 9 across `apt`, `dnf`, `pacman`, and `zypper`. The oldest enterprise
+baseline passes the warnings-as-errors Core/editor/Hub/managed/client matrix with 528 core, 118 editor, and 308 Hub
+tests, followed by a dummy-window client startup. The bootstrap uses checksum-pinned project-local fallbacks when an
+older distro cannot provide the required CMake, Ninja, NASM, patchelf, .NET, Premake, or GCC version; it does not
+replace system toolchains.
+
+The remaining release-evidence gates are a clean hosted matrix after Actions quota is restored, macOS/Metal and ARM64
+runs, privileged symbolic-link confinement probes, and broader named-hardware/long-duration performance evidence.
+Feature closure also remains material: the frozen 278-row Unity VFX manifest still records 153 disabled rows. The A-
+overall score reflects the now-proven Windows/Linux engineering and shipping foundation; it is not a claim of complete
+Unity-class feature parity or hardware coverage.
 
 The remediation includes atomic job dependency registration and worker-safe close, bounded replay decoding and rewind,
 explicit replay failure diagnostics, crash-safe/link-safe project upgrades, editor composition of module importers,
 correct pre-1.0 caret ranges, synchronized streaming lifecycle/statistics, bounded managed-job record retention, a
 valid primary workflow, recursive quality coverage, parsed-workflow/UTF-8 gates, and enforced source-unit non-growth
-budgets. Focused tests and local validation are recorded below. VFX catalog closure, Metal/Linux evidence, sustained
+budgets. Focused tests and local validation are recorded below. VFX catalog closure, Metal/macOS evidence, sustained
 named-hardware baselines, and a clean hosted release matrix remain release gates rather than being relabeled complete.
 
 ## Executive Assessment

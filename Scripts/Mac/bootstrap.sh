@@ -45,8 +45,14 @@ brew_install() {
 check_version() { version_at_least "$2" "$3" || { printf '%s %s is older than required %s; rerun with --update.\n' "$1" "$2" "$3" >&2; exit 1; }; }
 
 install_premake() {
+    local version_output=""
     mkdir -p "$(dirname "$PREMAKE")"
-    if [[ $FORCE -eq 0 && -x "$PREMAKE" ]] && "$PREMAKE" --version 2>/dev/null | grep -q "$PREMAKE_VERSION"; then step "Premake $PREMAKE_VERSION already installed"; return; fi
+    if [[ $FORCE -eq 0 && -x "$PREMAKE" ]] &&
+       version_output="$(tool_version_from_temporary_directory "$PREMAKE" --version 2>/dev/null)" &&
+       [[ "$version_output" == *"$PREMAKE_VERSION"* ]]; then
+        step "Premake $PREMAKE_VERSION already installed"
+        return
+    fi
     local archive hash url
     TEMPORARY="$(mktemp -d)"; archive="$TEMPORARY/premake.tar.gz"
     if [[ "$ARCHITECTURE" == x86_64 ]]; then hash="$PREMAKE_X64_HASH"; url="$PREMAKE_X64_URL";
@@ -55,7 +61,14 @@ install_premake() {
     [[ "$(shasum -a 256 "$archive" | awk '{print $1}')" == "$hash" ]] || { printf 'Premake checksum mismatch.\n' >&2; exit 1; }
     tar -xf "$archive" -C "$TEMPORARY"
     cp "$(find_premake_binary "$TEMPORARY")" "$PREMAKE"; chmod +x "$PREMAKE"
-    "$PREMAKE" --version | grep -q "$PREMAKE_VERSION"
+    version_output="$(tool_version_from_temporary_directory "$PREMAKE" --version)" || {
+        printf 'Downloaded Premake could not report its version.\n' >&2
+        exit 1
+    }
+    [[ "$version_output" == *"$PREMAKE_VERSION"* ]] || {
+        printf 'Downloaded Premake did not report the pinned version %s.\n' "$PREMAKE_VERSION" >&2
+        exit 1
+    }
     rm -rf "$TEMPORARY"; TEMPORARY=""
 }
 
@@ -82,9 +95,9 @@ else
 fi
 
 if ! have git; then brew_install git git; fi
-check_version Git "$(git --version | extract_version)" 2.40
+check_version Git "$(git --version | extract_version)" 2.34
 brew_install cmake cmake
-check_version CMake "$(cmake --version | extract_version)" 3.20
+check_version CMake "$(cmake --version | extract_version)" 3.24
 brew_install ninja ninja
 check_version Ninja "$(ninja --version)" 1.11
 [[ "$GENERATOR" == compilecommands ]] && brew_install python3 python

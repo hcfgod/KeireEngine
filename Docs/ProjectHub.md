@@ -86,8 +86,12 @@ fail closed. This covers editors launched outside the Hub or left running across
 the exact marker, receipt, manifest, declared bytes, and absence of undeclared files immediately before atomically
 renaming the root to a same-parent tombstone. A durable journal resumes an interrupted purge, and the Hub removes the
 registry entry only after the root is absent and every persisted identity field still matches. Repeating Remove after
-a retryable failure resumes the task identity that owns that journal instead of creating a conflicting removal owner.
-The recovery task stays in the task center until it succeeds or is no longer retryable. Damaged receipt-bound managed
+a retryable failure resumes the task identity that owns that journal instead of creating a conflicting removal owner;
+if that task record was lost, a new task may adopt only a journal whose complete ownership proof and derived paths
+still match. A retryable recovery task can be dismissed from visible history without deleting its durable recovery
+identity, and it becomes visible again if Remove or Retry resumes it. Before the Windows commit rename, the worker asks
+the verified bundled .NET SDK to stop its compiler/build servers so an editor that has already closed does not remain
+locked by an idle `VBCSCompiler` process. Damaged receipt-bound managed
 installations expose **Repair** when no editor or installation task is active. Repair resolves the exact signed editor
 and component versions recorded by the registry, downloads and verifies that complete dependency closure, and
 atomically replaces the damaged tree while preserving its installation ID and ownership nonce. An ordinary install
@@ -102,6 +106,12 @@ the runtime matches the exact managed registration and root, proves no filesyste
 the stale registration. It never deletes editor files and immediately exposes the matching version for reinstall.
 Editor removal is also disabled while any Build Support operation is active, so its selected Asset Tool and
 version-scoped component storage cannot disappear beneath an import, repair, or removal worker.
+
+When an install of the same catalog package and version is already active, choosing **Install again** opens an explicit
+confirmation instead of silently queuing duplicate work. Continuing selects a distinct available managed destination;
+declining leaves the existing download or installation untouched. Editor inventory refresh, verification, and
+authorization checks appear in the task center only while they are running; their result is reported through the
+calling workflow rather than left behind as an undismissable synthetic task.
 
 Verified editor catalogs populate Stable, Pre-release, and Nightly sections only when an enabled channel contains a
 host-compatible editor. An install review selects a confined destination and compatible optional components, then shows

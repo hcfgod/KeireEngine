@@ -531,6 +531,10 @@ TEST_CASE("Worker coordinator preserves catalog-bound editor installs through co
     CHECK(completed->Tasks->front().Kind == HubTaskKind::Install);
     CHECK(completed->Tasks->front().PackageIds == std::vector<std::string>{"test.toolchain", "test.package"});
     CHECK(completed->Tasks->front().TargetInstallationId == "editor-1");
+    REQUIRE(completed->Tasks->front().EditorInstall);
+    CHECK(completed->Tasks->front().EditorInstall->PackageId == install.EditorPackage.Id);
+    CHECK(completed->Tasks->front().EditorInstall->Version == install.EditorPackage.Version.ToString());
+    CHECK(completed->Tasks->front().EditorInstall->Destination == install.Destination);
     REQUIRE(completed->CompletedEditorInstalls);
     REQUIRE(completed->CompletedEditorInstalls->size() == 1);
     CHECK(completed->CompletedEditorInstalls->front().TaskId == "install-editor");
@@ -553,6 +557,10 @@ TEST_CASE("Worker coordinator preserves catalog-bound editor installs through co
     REQUIRE(restarted);
     auto recovered = std::move(restarted).Value();
     REQUIRE(WaitUntil([&] { return recovered->Snapshot()->State == HubWorkerCoordinatorState::Ready; }));
+    REQUIRE(recovered->Snapshot()->Tasks);
+    REQUIRE(recovered->Snapshot()->Tasks->size() == 1);
+    REQUIRE(recovered->Snapshot()->Tasks->front().EditorInstall);
+    CHECK(recovered->Snapshot()->Tasks->front().EditorInstall->Version == install.EditorPackage.Version.ToString());
     REQUIRE(recovered->Snapshot()->CompletedEditorInstalls);
     REQUIRE(recovered->Snapshot()->CompletedEditorInstalls->size() == 1);
     CHECK(recovered->Snapshot()->CompletedEditorInstalls->front().Root == install.Destination);
@@ -815,8 +823,7 @@ TEST_CASE("Worker coordinator pause resume and cancellation control the detached
 
     REQUIRE(coordinator->Resume("controlled-download"));
     REQUIRE(WaitUntil(
-        [&]
-        {
+        [&] {
             return fake->Launches().size() == 2 &&
                    HasState(*coordinator, "controlled-download", HubTaskState::Downloading);
         }));

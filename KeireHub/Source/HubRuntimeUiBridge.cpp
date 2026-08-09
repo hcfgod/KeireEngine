@@ -140,6 +140,8 @@ namespace KeireHub
         product.Tasks.reserve(tasks.size());
         for (const auto& task : tasks)
         {
+            if (task.HiddenFromHistory)
+                continue;
             const auto progress = task.Progress.TotalBytes == 0
                                       ? 0.0F
                                       : std::clamp(static_cast<float>(task.Progress.BytesTransferred) /
@@ -164,9 +166,10 @@ namespace KeireHub
                  .Paused = task.State == HubTaskState::Paused,
                  .Cancellable = !IsTerminal(task.State) && task.State != HubTaskState::Cancelling,
                  .Retryable = task.State == HubTaskState::Failed && task.Failure && task.Failure->Retryable,
-                 .Dismissible = IsTerminal(task.State) &&
-                                !(task.Kind == HubTaskKind::Remove && task.State == HubTaskState::Failed &&
-                                  task.Failure && task.Failure->Retryable)});
+                 .Dismissible = IsTerminal(task.State),
+                 .EditorPackageId = task.EditorInstall ? task.EditorInstall->PackageId : std::string{},
+                 .EditorVersion = task.EditorInstall ? task.EditorInstall->Version : std::string{},
+                 .EditorDestination = task.EditorInstall ? task.EditorInstall->Destination : std::filesystem::path{}});
         }
     }
 

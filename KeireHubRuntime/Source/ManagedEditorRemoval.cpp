@@ -248,11 +248,10 @@ namespace KeireHub
             return output.Value()->Publish(journal.Paths.Journal);
         }
 
-        [[nodiscard]] HubResult<RemovalJournal> LoadJournal(const RemovalPaths& expected,
-                                                            const EditorManagedOperationPlan& plan,
-                                                            const std::string_view operationId)
+        [[nodiscard]] HubResult<RemovalJournal> LoadJournal(const std::filesystem::path& journalPath,
+                                                            const EditorManagedOperationPlan& plan)
         {
-            auto document = Detail::ReadJsonFile(expected.Journal, MaximumJournalBytes);
+            auto document = Detail::ReadJsonFile(journalPath, MaximumJournalBytes);
             if (!document)
                 return HubResult<RemovalJournal>::Failure(document.Error());
             try
@@ -274,8 +273,10 @@ namespace KeireHub
                               .Tombstone = Detail::PathFromUtf8(paths.at("tombstone").get<std::string>()),
                               .Journal = Detail::PathFromUtf8(paths.at("journal").get<std::string>())},
                     .Phase = phase.value_or(ManagedEditorRemovalPhase::Prepared)};
-                if (journal.SchemaVersion != JournalSchemaVersion || !phase || journal.OperationId != operationId ||
-                    !SamePlan(journal.Plan, plan) || !SamePaths(journal.Paths, expected))
+                auto expected = PlanPaths(plan, journal.OperationId);
+                if (journal.SchemaVersion != JournalSchemaVersion || !phase || !expected ||
+                    !SamePlan(journal.Plan, plan) || !SamePaths(journal.Paths, expected.Value()) ||
+                    journal.Paths.Journal.lexically_normal() != journalPath.lexically_normal())
                 {
                     throw std::invalid_argument("The removal journal does not match this authorization.");
                 }
@@ -286,6 +287,32 @@ namespace KeireHub
                 return HubResult<RemovalJournal>::Failure(RemovalError(
                     HubErrorCode::UnsafeInstallRoot, "Another or invalid removal operation owns this editor location.",
                     plan, error.what(), true));
+            }
+        }
+
+        [[nodiscard]] HubStatus PrepareForCommit(const ManagedEditorRemovalCallbacks& callbacks,
+                                                 const EditorManagedOperationPlan& plan)
+        {
+            if (!callbacks.PrepareForCommit)
+                return HubStatus::Success();
+            try
+            {
+                callbacks.PrepareForCommit();
+                return HubStatus::Success();
+            }
+            catch (const std::exception& error)
+            {
+                return HubStatus::Failure(RemovalError(HubErrorCode::InstallationBusy,
+                                                       "Background editor services could not be stopped before "
+                                                       "uninstall. Close the editor and retry.",
+                                                       plan, error.what(), true));
+            }
+            catch (...)
+            {
+                return HubStatus::Failure(RemovalError(HubErrorCode::InstallationBusy,
+                                                       "Background editor services could not be stopped before "
+                                                       "uninstall. Close the editor and retry.",
+                                                       plan, {}, true));
             }
         }
 
@@ -460,11 +487,15 @@ namespace KeireHub
 #endif
             if (error)
             {
+                const bool busy = error == std::errc::permission_denied || error == std::errc::device_or_resource_busy;
                 return HubStatus::Failure(RemovalError(
-                    error == std::errc::file_exists || error == std::errc::directory_not_empty
+                    error == std::errc::file_exists || error == std::errc::directory_not_empty || busy
                         ? HubErrorCode::InstallationBusy
                         : HubErrorCode::IoWrite,
-                    "The managed editor could not be moved into its removal tombstone.", plan, error.message(), true));
+                    busy ? "The editor installation is still in use. Close the editor and background build tools, "
+                           "then retry uninstall."
+                         : "The managed editor could not be moved into its removal tombstone.",
+                    plan, error.message(), true));
             }
             return HubStatus::Success();
         }
@@ -669,7 +700,7 @@ namespace KeireHub
         auto planned = PlanPaths(plan, operationId);
         if (!planned)
             return HubResult<ManagedEditorRemovalResult>::Failure(planned.Error());
-        const auto paths = std::move(planned).Value();
+        auto paths = std::move(planned).Value();
         if (!IsSafeDirectory(paths.AllowedParent))
         {
             return HubResult<ManagedEditorRemovalResult>::Failure(
@@ -685,10 +716,11 @@ namespace KeireHub
                 return HubResult<ManagedEditorRemovalResult>::Failure(RemovalError(
                     HubErrorCode::UnsafeInstallRoot, "The managed editor removal journal is unsafe.", plan));
             }
-            auto loaded = LoadJournal(paths, plan, operationId);
+            auto loaded = LoadJournal(paths.Journal, plan);
             if (!loaded)
                 return HubResult<ManagedEditorRemovalResult>::Failure(loaded.Error());
             journal = std::move(loaded).Value();
+            paths = journal->Paths;
         }
         else if (IsMissing(paths.Root))
         {
@@ -714,9 +746,12 @@ namespace KeireHub
             {
                 if (!IsMissing(paths.Journal))
                 {
-                    auto existing = LoadJournal(paths, plan, journal->OperationId);
+                    auto existing = LoadJournal(paths.Journal, plan);
                     if (existing)
+                    {
                         journal = std::move(existing).Value();
+                        paths = journal->Paths;
+                    }
                     else
                         return HubResult<ManagedEditorRemovalResult>::Failure(existing.Error());
                 }
@@ -748,8 +783,12 @@ namespace KeireHub
             }
             if (!IsMissing(paths.Root))
             {
-                // This second full verification is deliberately adjacent to the commit rename. It closes the normal
-                // authorization-to-worker window without relying on the owner-thread snapshot as deletion permission.
+                // Verification is repeated after the preparation callback so the commit still relies on a fresh,
+                // complete tree proof even when preparation had to stop processes owned by this installation.
+                if (const auto verified = VerifyCompleteTree(paths.Root, plan); !verified)
+                    return HubResult<ManagedEditorRemovalResult>::Failure(verified.Error());
+                if (const auto prepared = PrepareForCommit(callbacks, plan); !prepared)
+                    return HubResult<ManagedEditorRemovalResult>::Failure(prepared.Error());
                 if (const auto verified = VerifyCompleteTree(paths.Root, plan); !verified)
                     return HubResult<ManagedEditorRemovalResult>::Failure(verified.Error());
                 if (const auto renamed = RenameNoReplace(paths.Root, paths.Tombstone, plan); !renamed)

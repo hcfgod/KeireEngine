@@ -17,6 +17,7 @@ run_fast=0; run_integration=0
 assert_equal() { [[ "$1" == "$2" ]] || { printf '%s: expected %s, got %s\n' "$3" "$2" "$1" >&2; exit 1; }; }
 assert_true() { "$@" || { printf 'Assertion failed: %s\n' "$*" >&2; exit 1; }; }
 assert_false() { if "$@"; then printf 'Expected failure: %s\n' "$*" >&2; exit 1; fi; }
+build_jobs_with_override() { KEIRE_BUILD_JOBS="$1" build_parallel_jobs; }
 sha256_file() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$1"
@@ -135,20 +136,70 @@ assert_true version_at_least 16.0.1 16.0
 assert_true version_at_least 17 16.9
 assert_false version_at_least 15.9 16.0
 assert_equal "$(printf 'Xcode 16.4\nBuild version 16F6\n' | extract_version)" 16.4 'multi-line version extraction'
+version_probe_fixture="$(mktemp -d)"
+cat > "$version_probe_fixture/version-tool" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ ! -f premake5.lua ]] || exit 23
+printf '%s\n' 'fixture tool 5.0.0-beta8'
+EOF
+chmod +x "$version_probe_fixture/version-tool"
+touch "$version_probe_fixture/premake5.lua"
+version_probe_output="$(cd "$version_probe_fixture" &&
+  tool_version_from_temporary_directory "$version_probe_fixture/version-tool" --version)"
+assert_equal "$version_probe_output" 'fixture tool 5.0.0-beta8' 'isolated tool version query'
+rm -rf "$version_probe_fixture"
+dotnet_fixture="$(mktemp -d)"
+mkdir -p "$dotnet_fixture/root/sdk"
+cat > "$dotnet_fixture/dotnet" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' '9.0.305 [/unused/dotnet/sdk]' '10.0.100 [$dotnet_fixture/root/sdk]'
+EOF
+chmod +x "$dotnet_fixture/dotnet"
+assert_equal "$(dotnet_sdk_root "$dotnet_fixture/dotnet" 10)" "$dotnet_fixture/root" \
+  'dotnet SDK root parsing'
+assert_false dotnet_sdk_root "$dotnet_fixture/dotnet" 11
+rm -rf "$dotnet_fixture"
 assert_equal "$(package_name apt-get ninja)" ninja-build 'APT Ninja package'
 assert_equal "$(package_name pacman ninja)" ninja 'pacman Ninja package'
+assert_equal "$(package_name zypper ninja)" ninja 'Zypper Ninja package'
 assert_equal "$(package_name dnf cxx)" gcc-c++ 'DNF C++ package'
+assert_equal "$(package_name apt-get modern-cxx)" 'gcc-12 g++-12' 'APT modern GCC packages'
+assert_equal "$(package_name dnf modern-cxx)" 'gcc-toolset-12-gcc gcc-toolset-12-gcc-c++' 'DNF modern GCC packages'
 assert_equal "$(package_name pacman python)" python 'pacman Python package'
+assert_equal "$(package_name apt-get perl-json)" libjson-perl 'APT Perl JSON package'
+assert_equal "$(package_name dnf perl-json)" perl-JSON 'DNF Perl JSON package'
+assert_equal "$(package_name pacman perl-json)" perl-json 'pacman Perl JSON package'
+assert_equal "$(package_name zypper perl-json)" perl-JSON 'Zypper Perl JSON package'
+assert_equal "$(package_name dnf perl-open)" perl-open 'DNF Perl open package'
+assert_equal "$(package_name apt-get perl-open)" perl 'APT Perl open package'
+assert_true grep -Fqw libicu-dev <<< "$(package_name apt-get dotnet-runtime-deps)"
+assert_true grep -Fqw openssl-libs <<< "$(package_name dnf dotnet-runtime-deps)"
+assert_true grep -Fqw icu <<< "$(package_name pacman dotnet-runtime-deps)"
+assert_true grep -Fqw libopenssl3 <<< "$(package_name zypper dotnet-runtime-deps)"
+assert_equal "$(package_name apt-get curl-dev)" libcurl4-openssl-dev 'APT libcurl development package'
+assert_equal "$(package_name dnf curl-dev)" libcurl-devel 'DNF libcurl development package'
+assert_equal "$(package_name pacman curl-dev)" curl 'pacman libcurl development package'
+assert_equal "$(package_name zypper curl-dev)" libcurl-devel 'Zypper libcurl development package'
 assert_equal "$(package_name apt-get uuid)" uuid-dev 'APT UUID development package'
 assert_equal "$(package_name dnf uuid)" libuuid-devel 'DNF UUID development package'
 assert_equal "$(package_name pacman uuid)" util-linux-libs 'pacman UUID development package'
 assert_equal "$(package_name zypper uuid)" libuuid-devel 'Zypper UUID development package'
+assert_true grep -Fqw libgbm-devel <<< "$(package_name zypper sdl-video)"
+assert_false grep -Fqw Mesa-libgbm-devel <<< "$(package_name zypper sdl-video)"
+assert_true grep -Fqw libxtst-dev <<< "$(package_name apt-get sdl-video)"
+assert_true grep -Fqw libXtst-devel <<< "$(package_name dnf sdl-video)"
+assert_true grep -Fqw libxtst <<< "$(package_name pacman sdl-video)"
+assert_true grep -Fqw libXtst-devel <<< "$(package_name zypper sdl-video)"
 assert_equal "$(package_name apt-get llvm)" llvm 'LLVM tools package'
 assert_equal "$(package_name pacman binutils)" binutils 'binutils package'
 assert_equal "$(package_install_arguments pacman | tr '\n' ' ' | sed 's/ $//')" '-Syu --needed --noconfirm' 'pacman safe install arguments'
 assert_equal "$(package_install_arguments apt-get)" -y 'APT install arguments'
-assert_equal "$(package_install_arguments dnf)" -y 'DNF install arguments'
+assert_equal "$(package_install_arguments dnf | tr '\n' ' ' | sed 's/ $//')" 'install -y' 'DNF install arguments'
 assert_equal "$(package_install_arguments zypper | tr '\n' ' ' | sed 's/ $//')" '--non-interactive install' 'Zypper install arguments'
+assert_equal "$(KEIRE_BUILD_JOBS=3 build_parallel_jobs)" 3 'explicit Unix build parallelism'
+assert_false build_jobs_with_override 0
+assert_false build_jobs_with_override invalid
 package_policy_fixture="$(mktemp -d)"
 git -C "$package_policy_fixture" init --quiet
 git -C "$package_policy_fixture" config user.email tests@keire.invalid
@@ -181,6 +232,12 @@ assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" SDL_SHADERCROSS_SP
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" ASSIMP_COMMIT)" 392a658f9c271be965271f45e7521a1b80ea4392 'Assimp lock'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" STB_COMMIT)" 31c1ad37456438565541f4919958214b6e762fb4 'stb lock'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" LIBSODIUM_COMMIT)" 77e1ce5d6dee871c49ef211222ba18ef0c486bda 'libsodium lock'
+assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" DOTNET_SDK_VERSION)" 10.0.302 '.NET SDK lock'
+assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" CMAKE_VERSION)" 3.31.12 'CMake version lock'
+assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" CMAKE_LINUX_X86_64_SHA256)" \
+  0dc2e9a6860f06bf10bd8fadc03e35d9eeb4df46e33763a7e480e987758f385c 'CMake x86_64 archive lock'
+assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" NASM_VERSION)" 3.02 'NASM source lock'
+assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" PATCHELF_VERSION)" 0.18.0 'patchelf source lock'
 assert_true grep -q 'Vendor/imgui' "$ROOT/Scripts/Unix/vendor.sh"
 assert_true grep -q 'Scripts/Premake/DearImGui.lua' "$ROOT/Scripts/Unix/vendor.sh"
 assert_true grep -q 'imgui|zstd|entt|glm|SDL_shadercross|assimp|stb)' "$ROOT/Scripts/Unix/vendor-update.sh"
@@ -199,7 +256,77 @@ assert_true grep -q 'SDL_DUMMYVIDEO=ON' "$ROOT/Scripts/Unix/dependencies.sh"
 assert_true grep -q 'SDL_OFFSCREEN=ON' "$ROOT/Scripts/Unix/dependencies.sh"
 assert_true grep -q 'SDL_GPU=ON' "$ROOT/Scripts/Unix/dependencies.sh"
 assert_true grep -q 'SDL_RENDER=OFF' "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -q 'SDL_INSTALL_CMAKEDIR_ROOT=cmake' "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -q 'SDL_INSTALL_CMAKEDIR_ROOT=cmake' "$ROOT/Scripts/Windows/dependencies.ps1"
+assert_true grep -q 'CPP_RTTI_ENABLED=ON' "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -q 'CPP_RTTI_ENABLED=ON' "$ROOT/Scripts/Windows/dependencies.ps1"
 assert_true grep -q 'shader-compiler.sh' "$ROOT/Scripts/Unix/dependencies.sh"
+assert_false grep -F -q 'ensure_command patchelf patchelf' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'ensure_command awk awk' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'ensure_command find findutils' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'ensure_command python3 python' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'ensure_command bison bison' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'ensure_command flex flex' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'install_nasm' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'install_patchelf' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'install_logical_packages perl-json' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'install_logical_packages perl-open' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'perl -Mopen=:std -e 1' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'install_dotnet_sdk' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'install_gcc_toolchain' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'gcc-environment.sh' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'activate_linux_toolchain' "$ROOT/Scripts/Linux/build.sh" \
+  "$ROOT/Scripts/Linux/generate.sh" "$ROOT/Scripts/Unix/run-target.sh" "$ROOT/Scripts/Unix/package.sh" \
+  "$ROOT/Scripts/Unix/package-editor.sh" "$ROOT/Scripts/Unix/package-hub.sh" \
+  "$ROOT/Scripts/Unix/package-installer.sh" "$ROOT/Scripts/Unix/package-hub-installer.sh" \
+  "$ROOT/Scripts/Unix/coverage.sh"
+assert_true grep -F -q 'install_logical_packages curl-dev' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'DOTNET_LINUX_X86_64_SHA512' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q '$(build_parallel_jobs)' "$ROOT/Scripts/Linux/bootstrap.sh" \
+  "$ROOT/Scripts/Linux/build.sh" "$ROOT/Scripts/Unix/dependencies.sh" "$ROOT/Scripts/Unix/coral.sh" \
+  "$ROOT/Scripts/Unix/ffmpeg.sh" "$ROOT/Scripts/Unix/shader-compiler.sh"
+assert_true grep -F -q 'ubuntu-22.04 ubuntu-24.04 debian-12 fedora arch tumbleweed rocky-9' \
+  "$ROOT/Scripts/Tests/test-linux-distros.sh"
+assert_true grep -F -q -- '--volume "$cache_prefix-build:/work/Build"' \
+  "$ROOT/Scripts/Tests/test-linux-distros.sh"
+assert_true grep -F -q 'building the pinned source' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'PREMAKE_LINUX_SOURCE_SHA256' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'NINJA_SOURCE_SHA256' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'NASM_SOURCE_SHA256' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'PATCHELF_SOURCE_SHA256' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'distro repositories did not provide Ninja 1.11 or newer' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'CMAKE_LINUX_X86_64_SHA256' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'distro repositories did not provide CMake 3.24 or newer' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'have g++ && actual="$(g++ -dumpfullversion -dumpversion 2>/dev/null)"' \
+  "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'export PATH="$ROOT/Tools/Linux:$PATH"' "$ROOT/Scripts/project.sh" \
+  "$ROOT/Scripts/Linux/bootstrap.sh" "$ROOT/Scripts/Linux/generate.sh" "$ROOT/Scripts/Linux/build.sh"
+assert_true grep -F -q -- '--smoke-window) SMOKE_WINDOW=1' "$ROOT/Scripts/project.sh"
+assert_true grep -F -q -- 'bash Scripts/project.sh run "${project_arguments[@]}" --ci --smoke-window' \
+  "$ROOT/Scripts/Tests/test-linux-distros.sh"
+assert_true grep -F -q -- 'matrix_arguments+=(--ci)' "$ROOT/Scripts/Tests/test-linux-distros.sh"
+assert_true grep -F -q -- '-DCMAKE_INSTALL_BINDIR=. -DCMAKE_INSTALL_LIBDIR=.' "$ROOT/Scripts/Unix/shader-compiler.sh"
+assert_true grep -F -q -- '-DSPIRV_WERROR=OFF' "$ROOT/Scripts/Unix/shader-compiler.sh"
+assert_true grep -F -q 'readelf -d "$published_compiler"' "$ROOT/Scripts/Unix/shader-compiler.sh"
+assert_true grep -F -q "install_name_tool -add_rpath '@executable_path'" "$ROOT/Scripts/Unix/shader-compiler.sh"
+assert_true grep -F -q 'cp -L "$runtime_library"' "$ROOT/Scripts/Unix/shader-compiler.sh"
+assert_true grep -F -q '"$published_compiler" --help' "$ROOT/Scripts/Unix/shader-compiler.sh"
+assert_false grep -F -q 'for (index =' "$ROOT/Scripts/Unix/builtin-skinning.sh" "$ROOT/Scripts/Unix/builtin-vfx.sh"
+assert_true grep -F -q 'for (field =' "$ROOT/Scripts/Unix/builtin-skinning.sh"
+assert_true grep -F -q 'for (field =' "$ROOT/Scripts/Unix/builtin-vfx.sh"
+while IFS= read -r source_file; do
+  if grep -E -q 'std::ranges::(all_of|any_of|none_of|find|find_if|sort|stable_sort|count|count_if|equal|transform|for_each|min_element|max_element|clamp)' "$source_file"; then
+    assert_true grep -F -q '#include <algorithm>' "$source_file"
+  fi
+  if grep -E -q 'std::(memcpy|memmove|memset|memcmp|strlen|strcmp|strchr|strerror)' "$source_file"; then
+    assert_true grep -F -q '#include <cstring>' "$source_file"
+  fi
+  if grep -E -q 'std::(round|floor|ceil|trunc|sqrt|pow|sin|cos|tan|asin|acos|atan|atan2|abs|fabs|fmod|isfinite|isnan|isinf|exp|log|log2|log10)[[:space:]]*\(' "$source_file"; then
+    assert_true grep -F -q '#include <cmath>' "$source_file"
+  fi
+done < <(find "$ROOT/AssetTool" "$ROOT/KeireAssetWorker" "$ROOT/KeireClient" "$ROOT/KeireCore" \
+  "$ROOT/KeireEditorTests" "$ROOT/KeireHub" "$ROOT/KeireHubRuntime" "$ROOT/KeireHubTests" \
+  "$ROOT/KeireHubWorker" "$ROOT/KeireRuntime" "$ROOT/KeireTests" -type f \( -name '*.cpp' -o -name '*.h' \))
 assert_true grep -q 'libsodium.*configure' "$ROOT/Scripts/Unix/dependencies.sh"
 assert_true grep -q 'LIBSODIUM_COMMIT' "$ROOT/Scripts/Unix/dependencies.sh"
 coral_bootstrap_patch="$ROOT/Patches/Coral/0004-keire-apply-host-settings-before-discovery.patch"
@@ -215,9 +342,16 @@ assert_true grep -F -q 'reinterpret_cast<const UCChar*>(UINTPTR_MAX)' "$coral_wa
 assert_true grep -F -q 'target_compile_options(Coral.Native PRIVATE /wd4996)' "$coral_warning_patch"
 assert_true grep -q 'SDL3DebugLibrary' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -q 'SDL3ReleaseLibrary' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'local directory, library = resolved:match("^(.*)/(lib[^/]+%.a)$")' \
+  "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'return ":" .. library' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'DependencyLink(DependencyManifest.AssimpDebugLibrary)' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'DependencyLink(DependencyManifest.SDL3DebugLibrary)' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -q 'project_generation_fingerprint' "$ROOT/Scripts/Linux/generate.sh"
 assert_true grep -q 'KeireHubRuntime KeireHubTests KeireHubWorker' "$ROOT/Scripts/Unix/common.sh"
 assert_true grep -q 'find "$root/Scripts/Premake" -type f -name '\''\*.lua'\''' "$ROOT/Scripts/Unix/common.sh"
+assert_true grep -F -q 'Scripts/Unix/dependencies.sh Scripts/Windows/dependencies.ps1' "$ROOT/Scripts/Unix/common.sh"
+assert_true grep -F -q 'find "$root/Scripts/Dependencies" -type f -print' "$ROOT/Scripts/Unix/common.sh"
 assert_true grep -q 'run_args=(--project "$ROOT/Samples/KeireSandbox" --smoke-project)' "$ROOT/Scripts/Unix/coverage.sh"
 assert_true grep -q 'minimum_core_line_coverage=74.5' "$ROOT/Scripts/Unix/coverage.sh"
 assert_true grep -q 'minimum_aggregate_line_coverage=63.0' "$ROOT/Scripts/Unix/coverage.sh"
@@ -302,7 +436,7 @@ assert_true grep -q 'KeireManaged KeireManaged.Tests SourceModules Scripts/Prema
 assert_true grep -F -q -- "-name '*.csproj'" "$ROOT/Scripts/Unix/common.sh"
 assert_true grep -F -q 'dependson { AssetWorkerTarget }' "$ROOT/AssetTool/premake5.lua"
 assert_true grep -F -q 'filter { "system:linux"' "$ROOT/KeireAssetWorker/premake5.lua"
-assert_true grep -F -q '"-Wl,-rpath,$ORIGIN"' "$ROOT/KeireAssetWorker/premake5.lua"
+assert_true grep -F -q '"-Wl,-rpath,'\''$$ORIGIN'\''"' "$ROOT/KeireAssetWorker/premake5.lua"
 assert_true grep -q 'SelectedToolset ~= "msc"' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'filter { "system:macosx"' "$ROOT/KeireAssetWorker/premake5.lua"
 assert_true grep -F -q '"-Wl,-rpath,@loader_path"' "$ROOT/KeireAssetWorker/premake5.lua"
@@ -409,6 +543,13 @@ assert_false grep -E -q 'c506e2a8-62f9-44f0-8831-b66755cc9b9b|070fedd0-9e84-435e
 assert_false grep -R -E '#include[[:space:]]*[<"]imgui|ImGui::|ImGui[A-Z]' "$ROOT/KeireClient"
 assert_false grep -R -E 'SDL3/|nlohmann/json|imgui|entt/|glm/|assimp/|stb_image' "$ROOT/KeireCore/Include/Keire"
 assert_true grep -q 'client_build_args=.*--target.*CLIENT_TARGET' "$ROOT/Scripts/Unix/run-target.sh"
+assert_true grep -F -q "bash -c 'ulimit -c 0;" "$ROOT/Scripts/Unix/run-target.sh"
+assert_true grep -F -q 'Config/LeakSanitizer.supp' "$ROOT/Scripts/Unix/run-target.sh"
+assert_true grep -F -q 'leak:libcoreclr.so' "$ROOT/Config/LeakSanitizer.supp"
+assert_true grep -F -q 'leak:System.Private.CoreLib.dll' "$ROOT/Config/LeakSanitizer.supp"
+assert_false grep -F -q 'detect_leaks=0' "$ROOT/Scripts/Unix/run-target.sh" "$ROOT/Config/LeakSanitizer.supp"
+assert_true grep -F -q 'halt_on_error=1:print_stacktrace=1' "$ROOT/Scripts/Unix/run-target.sh"
+assert_true grep -F -q '#define STBIR_NO_SIMD' "$ROOT/KeireHubRuntime/Source/ProjectThumbnailDecode.cpp"
 assert_true grep -q 'hub_tests_target="${PROJECT_NAMESPACE}HubTests"' "$ROOT/Scripts/Unix/run-target.sh"
 assert_true grep -q '"$hub_tests"' "$ROOT/Scripts/Unix/run-target.sh"
 assert_false grep -q 'HubInstance.cpp' "$ROOT/KeireEditorTests/premake5.lua"
@@ -448,8 +589,10 @@ assert_true grep -q 'glm-COPYING.txt' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q 'GLM_COMMIT' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q 'KeireShaderCompiler' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q 'SDL-shadercross-LICENSE.txt' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -F -q 'share/licenses/SDL3' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q 'SDL_SHADERCROSS_COMMIT' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q 'asset_worker' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -F -q -- '-exec cp -L {} "$stage/bin/"' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q 'developmentArtifact' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q 'manifest commit does not match' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -F -q 'package_worktree_policy "$ROOT" "$ALLOW_DIRTY" "$CI"' "$ROOT/Scripts/Unix/package.sh"
@@ -458,6 +601,8 @@ assert_true grep -q -- '-Configuration Dist' "$ROOT/Scripts/Windows/package-edit
 assert_true grep -q -- '--configuration Dist' "$ROOT/Scripts/Unix/package-editor.sh"
 assert_true grep -q -- '--stage-only' "$ROOT/Scripts/Unix/package-editor.sh"
 assert_true grep -q 'Build/Dependencies/dotnet-sdk' "$ROOT/Scripts/Unix/package-editor.sh"
+assert_true grep -F -q 'cp -RL "$dotnet_source/." "$dotnet_destination/"' \
+  "$ROOT/Scripts/Unix/package-editor.sh"
 assert_true grep -q 'Build/Distributions' "$ROOT/Scripts/Unix/package-editor.sh"
 assert_true grep -q 'validate_editor_package_stage' "$ROOT/Scripts/Unix/package-editor.sh"
 assert_true grep -q '@PROJECT_NAMESPACE@ImGui.a' "$ROOT/Config/PackageConfig.cmake.in"

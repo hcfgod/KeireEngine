@@ -525,7 +525,7 @@ void EditorWorkspaceLayer::HandleExternalAssetDrop(const Keire::WindowFileDropEv
                     {
                         m_ViewportAssetDropRouter->Route(record->Type, record->Id, target, *this);
                     }
-                    catch (const std::invalid_argument& error)
+                    catch (const std::invalid_argument& exception)
                     {
                         if (record->Type == Keire::MeshAsset::StaticType() ||
                             record->Type == Keire::MaterialAsset::StaticType() ||
@@ -533,7 +533,7 @@ void EditorWorkspaceLayer::HandleExternalAssetDrop(const Keire::WindowFileDropEv
                             record->Type == Keire::MaterialGraphInstanceAsset::StaticType())
                         {
                             m_AssetStatus = "Create or open a scene before dropping meshes or materials.";
-                            m_Notice = error.what();
+                            m_Notice = exception.what();
                             m_NoticeColor = m_Theme.Warning;
                         }
                     }

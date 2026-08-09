@@ -266,7 +266,7 @@ namespace Keire
         {
           public:
             WeakRef<InputRuntimeState> Runtime;
-            AssetHandle<InputActionAsset> AssetHandle;
+            Keire::AssetHandle<InputActionAsset> AssetHandle;
             AssetId AssetIdValue;
             InputUserId User;
             InputContextRole Role = InputContextRole::Gameplay;

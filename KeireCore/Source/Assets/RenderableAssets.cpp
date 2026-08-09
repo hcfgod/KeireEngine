@@ -124,10 +124,10 @@ namespace Keire
                 static_assert(std::is_unsigned_v<Unsigned>);
                 if (Remaining() < sizeof(Unsigned))
                     throw std::invalid_argument("Asset binary is truncated.");
-                Unsigned result = 0;
+                std::uintmax_t result = 0;
                 for (std::size_t index = 0; index < sizeof(Unsigned); ++index)
-                    result |= static_cast<Unsigned>(std::to_integer<std::uint8_t>(m_Bytes[m_Offset++])) << (index * 8U);
-                return result;
+                    result |= std::to_integer<std::uintmax_t>(m_Bytes[m_Offset++]) << (index * 8U);
+                return static_cast<Unsigned>(result);
             }
 
             [[nodiscard]] float Float() { return std::bit_cast<float>(UnsignedValue<std::uint32_t>()); }
@@ -1685,9 +1685,9 @@ namespace Keire
                                 return keys[count - 1].mValue;
                             const auto alpha = static_cast<float>((time - keys[upper - 1].mTime) /
                                                                   (keys[upper].mTime - keys[upper - 1].mTime));
-                            aiQuaternion result;
-                            aiQuaternion::Interpolate(result, keys[upper - 1].mValue, keys[upper].mValue, alpha);
-                            return result.Normalize();
+                            aiQuaternion interpolated;
+                            aiQuaternion::Interpolate(interpolated, keys[upper - 1].mValue, keys[upper].mValue, alpha);
+                            return interpolated.Normalize();
                         };
                         const auto& bind = skeletonBones[bone->second].BindPose;
                         AnimationTrack track;
@@ -2104,14 +2104,14 @@ namespace Keire
         result.NormalizeImportSettings = [settings](const AssetImportSettings& values)
         {
             const auto normalized = ApplyTextureImportSettings(settings, values);
-            auto result = values;
+            auto normalizedSettings = values;
             if (normalized.Semantic != TextureSemantic::Color)
-                result["colorSpace"] = std::string("linear");
-            return result;
+                normalizedSettings["colorSpace"] = std::string("linear");
+            return normalizedSettings;
         };
         result.SuggestImportSettings = [](const std::filesystem::path& path, const AssetImportSettings& defaults)
         {
-            auto result = defaults;
+            auto suggestedSettings = defaults;
             std::string stem = path.stem().string();
             std::ranges::transform(stem, stem.begin(),
                                    [](const unsigned char value) { return static_cast<char>(std::tolower(value)); });
@@ -2142,23 +2142,23 @@ namespace Keire
                               containsToken("mask") || containsToken("pbr");
             if (Lowercase(path.extension().string()) == ".hdr")
             {
-                result["semantic"] = std::string("environment");
-                result["colorSpace"] = std::string("linear");
-                result["mips"] = std::string("none");
-                result["addressV"] = std::string("clamp");
-                result["environmentLayout"] = std::string("equirectangular");
+                suggestedSettings["semantic"] = std::string("environment");
+                suggestedSettings["colorSpace"] = std::string("linear");
+                suggestedSettings["mips"] = std::string("none");
+                suggestedSettings["addressV"] = std::string("clamp");
+                suggestedSettings["environmentLayout"] = std::string("equirectangular");
             }
             else if (normal)
             {
-                result["semantic"] = std::string("normal");
-                result["colorSpace"] = std::string("linear");
+                suggestedSettings["semantic"] = std::string("normal");
+                suggestedSettings["colorSpace"] = std::string("linear");
             }
             else if (data)
             {
-                result["semantic"] = std::string("data");
-                result["colorSpace"] = std::string("linear");
+                suggestedSettings["semantic"] = std::string("data");
+                suggestedSettings["colorSpace"] = std::string("linear");
             }
-            return result;
+            return suggestedSettings;
         };
         result.RestoreCachedOutput = [](const std::span<const std::byte> bytes)
         {

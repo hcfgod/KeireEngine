@@ -39,6 +39,12 @@ cross-platform workflow.
 
 ## First Linux Build
 
+Kéire's clean Linux path is validated on Ubuntu 22.04/24.04, Debian 12, current Fedora and Arch, openSUSE
+Tumbleweed, and Rocky Linux 9. The bootstrap recognizes `apt`, `dnf`, `pacman`, and `zypper`; installs the required
+X11/Wayland, compiler, CMake, .NET, shader, and media prerequisites; and keeps pinned fallback tools beneath
+`Tools/Linux` or the user's Kéire toolchain cache. It does not replace the distribution's system compiler or .NET
+installation.
+
 ```sh
 bash Scripts/project.sh bootstrap --generator ninja --toolset gcc
 bash Scripts/project.sh generate --generator ninja --toolset gcc
@@ -47,6 +53,20 @@ bash Scripts/project.sh run --generator ninja --configuration Debug --toolset gc
 ```
 
 Use `--toolset clang` when Clang is the intended compiler.
+
+For WSL2, clone into the WSL ext4 filesystem rather than a Windows-mounted path:
+
+```sh
+mkdir -p ~/src
+cd ~/src
+git clone --recurse-submodules https://github.com/hcfgod/KeireEngine.git
+cd KeireEngine
+bash Scripts/project.sh test --generator ninja --configuration Debug --toolset gcc
+```
+
+The first clean build can be lengthy because it compiles locked native dependencies and the shader compiler. Builds
+use at most four parallel jobs by default to avoid memory exhaustion. Override that only when appropriate, for example
+`KEIRE_BUILD_JOBS=8 bash Scripts/project.sh test --generator ninja --configuration Debug --toolset gcc`.
 
 ## First macOS Build
 

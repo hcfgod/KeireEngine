@@ -2,6 +2,7 @@
 
 #include "Keire/Audio/AudioAssets.h"
 
+#include <algorithm>
 #include <cmath>
 #include <ranges>
 #include <stdexcept>

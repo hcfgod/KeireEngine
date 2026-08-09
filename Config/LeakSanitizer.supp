@@ -1,0 +1,3 @@
+# CoreCLR keeps process-lifetime runtime and JIT allocations after hosted execution ends.
+leak:libcoreclr.so
+leak:System.Private.CoreLib.dll

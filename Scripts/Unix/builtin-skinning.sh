@@ -28,8 +28,8 @@ emit_array() {
   printf '    inline constexpr unsigned char %s[] = {\n' "$name"
   od -An -v -tx1 "$file" | awk '{
     printf "        "
-    for (index = 1; index <= NF; ++index)
-      printf "0x%s, ", $index
+    for (field = 1; field <= NF; ++field)
+      printf "0x%s, ", $field
     printf "\n"
   }'
   printf '    };\n\n'

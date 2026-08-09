@@ -186,10 +186,7 @@ TEST_CASE("Editor verification rejects a result when current tracked activity ch
     HubProductSnapshot product;
     workflow.ApplySnapshot(product);
     workflow.ApplyOperationSnapshot(product);
-    REQUIRE(product.Tasks.size() == 1);
-    CHECK(product.Tasks.front().Phase == "Failed");
-    CHECK_FALSE(product.Tasks.front().Active);
-    CHECK_FALSE(product.Tasks.front().Retryable);
+    CHECK(product.Tasks.empty());
 }
 
 TEST_CASE("Editor verification rejects a result when a targeted package task starts")

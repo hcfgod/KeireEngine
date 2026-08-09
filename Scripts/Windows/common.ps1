@@ -71,13 +71,27 @@ function Get-ProjectGenerationFingerprint {
     }
     $premakeSupportInputs = Get-ChildItem -LiteralPath (Join-Path $Root "Scripts\Premake") `
         -Recurse -Filter "*.lua" -File | ForEach-Object FullName
+    $generationInfrastructureInputs = @(
+        "Scripts\Unix\common.sh", "Scripts\Windows\common.ps1",
+        "Scripts\Linux\bootstrap.sh", "Scripts\Linux\generate.sh",
+        "Scripts\Mac\bootstrap.sh", "Scripts\Mac\generate.sh",
+        "Scripts\Windows\bootstrap.ps1", "Scripts\Windows\generate.ps1",
+        "Scripts\Unix\dependencies.sh", "Scripts\Windows\dependencies.ps1",
+        "Scripts\Unix\shader-compiler.sh", "Scripts\Windows\shader-compiler.ps1",
+        "Scripts\Unix\coral.sh", "Scripts\Windows\coral.ps1",
+        "Scripts\Unix\ffmpeg.sh", "Scripts\Windows\ffmpeg.ps1",
+        "Scripts\Unix\vendor.sh", "Scripts\Linux\vendor.sh", "Scripts\Mac\vendor.sh",
+        "Scripts\Windows\vendor.ps1"
+    ) | ForEach-Object { Join-Path $Root $_ }
+    $generationInfrastructureInputs += Get-ChildItem -LiteralPath (Join-Path $Root "Scripts\Dependencies") `
+        -Recurse -File | ForEach-Object FullName
     $premakeInputs = @(
         (Join-Path $Root "premake5.lua"),
         (Join-Path $Root "Config\Project.conf"),
         (Join-Path $Root "Config\Dependencies.lock")
     ) + @($premakeSearchRoots | ForEach-Object {
         Get-ChildItem -LiteralPath $_.FullName -Recurse -Filter "premake5.lua" -File | ForEach-Object FullName
-    }) + @($premakeSupportInputs)
+    }) + @($premakeSupportInputs) + @($generationInfrastructureInputs)
 
     $lines = @($inventory | Sort-Object -Unique)
     foreach ($path in $premakeInputs | Sort-Object -Unique) {

@@ -1,5 +1,6 @@
 #include "KeireHub/HubProjectWorkflow.h"
 
+#include <algorithm>
 #include <ranges>
 #include <utility>
 

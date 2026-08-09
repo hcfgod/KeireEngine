@@ -662,6 +662,58 @@ namespace
         return "Removing";
     }
 
+    void ShutdownManagedBuildServers(const std::filesystem::path& root) noexcept
+    {
+#if defined(_WIN32)
+        try
+        {
+            const auto dotnet = root / "bin" / "Managed" / "Dotnet" / "dotnet.exe";
+            std::error_code error;
+            const auto status = std::filesystem::symlink_status(NativeIoPath(dotnet), error);
+            if (error || status.type() != std::filesystem::file_type::regular || HasUnsafeLinkAncestor(dotnet))
+                return;
+
+            const auto executable = NativeIoPath(dotnet).wstring();
+            auto commandLine = L'"' + executable + L"\" build-server shutdown --msbuild --vbcscompiler --razor";
+            const auto workingDirectory = NativeIoPath(root).wstring();
+            STARTUPINFOW startup{};
+            startup.cb = sizeof(startup);
+            struct ScopedProcessInformation final
+            {
+                PROCESS_INFORMATION Value{};
+
+                ScopedProcessInformation() = default;
+                ~ScopedProcessInformation()
+                {
+                    if (Value.hThread)
+                        CloseHandle(Value.hThread);
+                    if (Value.hProcess)
+                        CloseHandle(Value.hProcess);
+                }
+
+                ScopedProcessInformation(const ScopedProcessInformation&) = delete;
+                ScopedProcessInformation& operator=(const ScopedProcessInformation&) = delete;
+            } process;
+            if (!CreateProcessW(executable.c_str(), commandLine.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
+                                nullptr, workingDirectory.c_str(), &startup, &process.Value))
+            {
+                return;
+            }
+            constexpr DWORD MaximumShutdownMilliseconds = 15'000;
+            if (WaitForSingleObject(process.Value.hProcess, MaximumShutdownMilliseconds) == WAIT_TIMEOUT)
+            {
+                (void)TerminateProcess(process.Value.hProcess, 1);
+                (void)WaitForSingleObject(process.Value.hProcess, 1'000);
+            }
+        }
+        catch (...)
+        {
+        }
+#else
+        static_cast<void>(root);
+#endif
+    }
+
     [[nodiscard]] int RunEditorRemoval(const CommandLine& commandLine, const KeireHub::HubWorkerRequest& request,
                                        WorkerReporter& reporter)
     {
@@ -686,7 +738,8 @@ namespace
                  reporter.Publish(KeireHub::HubTaskState::Installing, {.CurrentPackage = removal.InstallationId,
                                                                        .Phase = std::string(RemovalPhase(phase))});
                  return !reporter.Failure();
-             }});
+             },
+             .PrepareForCommit = [&]() { ShutdownManagedBuildServers(removal.Root); }});
         if (!removed)
         {
             return WriteFailure(commandLine, request, reporter, removed.Error(),

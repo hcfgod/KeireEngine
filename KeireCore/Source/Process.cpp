@@ -9,6 +9,8 @@
 #include <cstddef>
 #include <limits>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 #include <system_error>
 #include <thread>
 #include <utility>
@@ -769,7 +771,31 @@ namespace Keire::Detail
 #else
         if (processId > static_cast<std::uint64_t>(std::numeric_limits<pid_t>::max()))
             return false;
-        return kill(static_cast<pid_t>(processId), 0) == 0 || errno == EPERM;
+        const auto nativeProcessId = static_cast<pid_t>(processId);
+        if (kill(nativeProcessId, 0) != 0 && errno != EPERM)
+            return false;
+#if defined(__linux__)
+        const auto statusPath = "/proc/" + std::to_string(processId) + "/stat";
+        const auto descriptor = open(statusPath.c_str(), O_RDONLY | O_CLOEXEC);
+        if (descriptor >= 0)
+        {
+            std::array<char, 512> statusBuffer{};
+            const auto count = read(descriptor, statusBuffer.data(), statusBuffer.size());
+            close(descriptor);
+            if (count > 0)
+            {
+                const std::string_view status(statusBuffer.data(), static_cast<std::size_t>(count));
+                const auto stateMarker = status.rfind(") ");
+                if (stateMarker != std::string_view::npos && stateMarker + 2U < status.size())
+                {
+                    const auto state = status[stateMarker + 2U];
+                    if (state == 'Z' || state == 'X')
+                        return false;
+                }
+            }
+        }
+#endif
+        return true;
 #endif
     }
 

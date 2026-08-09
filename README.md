@@ -33,7 +33,8 @@ capabilities and remaining production-readiness work directly rather than presen
 
 The Hub is the normal entry point. Direct editor launch remains available for automation and focused development.
 Its task and notification centers retain useful history across restarts; finished tasks and read notifications can be
-dismissed individually, and the task center can clear all finished work at once.
+dismissed individually, and the task center can clear all finished work at once. Dismissing a retryable editor removal
+hides its recovery record durably while preserving the exact journal identity needed by a later Retry or Remove action.
 
 ## What Is Implemented
 
@@ -86,6 +87,15 @@ bash Scripts/project.sh bootstrap --generator ninja --toolset gcc
 bash Scripts/project.sh test --generator ninja --configuration Debug --toolset gcc
 bash Scripts/project.sh run --generator ninja --configuration Debug --toolset gcc
 ```
+
+The clean Linux workflow is validated on Ubuntu 22.04/24.04, Debian 12, current Fedora and Arch, openSUSE
+Tumbleweed, and Rocky Linux 9. The bootstrap supports the `apt`, `dnf`, `pacman`, and `zypper` package families and
+installs verified project-private fallbacks when a distribution's Premake, CMake, Ninja, NASM, patchelf, .NET SDK, or
+GCC is missing or too old. On WSL2, keep the clone in the Linux filesystem (for example `~/src/KeireEngine`) rather
+than under `/mnt/c` for correct case-sensitive behavior and substantially better dependency-build performance.
+
+Large dependency builds default to at most four compiler jobs to remain reliable on ordinary workstations and WSL2.
+Set `KEIRE_BUILD_JOBS` to a positive integer when the machine can safely support a different limit.
 
 macOS with Ninja and Clang:
 
@@ -201,7 +211,7 @@ Packaging is performed on the target operating system:
 
 - Windows produces ZIP distributions and native EXE installers.
 - macOS produces native application/distribution output and requires platform signing and notarization for release.
-- Linux produces native distribution output and DEB installers.
+- Linux produces native `.tar.gz` distributions on every validated distro and DEB installers on Debian/Ubuntu.
 
 The distribution service uses offline Ed25519 signing, immutable SHA-256 package addressing, transactional snapshot
 activation, ETags, conditional requests, and range requests. Public release catalogs publish only artifacts that have

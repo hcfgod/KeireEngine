@@ -25,6 +25,9 @@ class DistributionSnapshotPreparationTests(unittest.TestCase):
             prefix="keire-distribution-preparation-"
         )
         self.root = Path(self.temporary.name)
+        self.expiry = (datetime.now(timezone.utc) + timedelta(days=1)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
         self.package = self.root / "editor.keirepackage"
         self.package.write_bytes(b"package-bytes")
         digest = hashlib.sha256(self.package.read_bytes()).hexdigest()
@@ -64,9 +67,6 @@ class DistributionSnapshotPreparationTests(unittest.TestCase):
         additional: list[tuple[Path, Path]] | None = None,
         reverse: bool = False,
     ) -> subprocess.CompletedProcess[str]:
-        expiry = (datetime.now(timezone.utc) + timedelta(days=1)).strftime(
-            "%Y-%m-%dT%H:%M:%SZ"
-        )
         environment = dict(os.environ)
         environment["PYTHONDONTWRITEBYTECODE"] = "1"
         package_pairs = [(self.manifest, self.package), *(additional or [])]
@@ -89,7 +89,7 @@ class DistributionSnapshotPreparationTests(unittest.TestCase):
                 "--sequence",
                 "7",
                 "--expires-at",
-                expiry,
+                self.expiry,
             ],
             check=False,
             capture_output=True,

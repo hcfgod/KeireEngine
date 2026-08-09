@@ -97,8 +97,7 @@ namespace Keire
         [[nodiscard]] bool Blocked(const Vector3 point, const std::span<const NavigationObstacle> obstacles) noexcept
         {
             return std::ranges::any_of(obstacles,
-                                       [point](const NavigationObstacle& obstacle)
-                                       {
+                                       [point](const NavigationObstacle& obstacle) {
                                            return obstacle.Enabled && DistanceSquared(point, obstacle.Position) <=
                                                                           obstacle.Radius * obstacle.Radius;
                                        });
@@ -445,7 +444,7 @@ namespace Keire
                 edges.emplace(std::min(first, second), std::max(first, second));
             }
         }
-        for (const auto [first, second] : edges)
+        for (const auto& [first, second] : edges)
         {
             const auto& firstNode = result.Mesh.Nodes[first - 1U];
             const auto& secondNode = result.Mesh.Nodes[second - 1U];

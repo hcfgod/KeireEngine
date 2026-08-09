@@ -26,6 +26,7 @@ common=(--generator "$GENERATOR" --architecture "$ARCHITECTURE" --toolset "$TOOL
 [[ $FORCE -eq 1 ]] && common+=(--force)
 [[ $ALLOW_DIRTY -eq 1 ]] && common+=(--allow-dirty)
 bash "$ROOT/Scripts/Unix/package-hub.sh" "$PLATFORM" "${common[@]}" --stage-only
+[[ "$PLATFORM" == Linux ]] && activate_linux_toolchain "$ROOT" "$TOOLSET"
 
 os_name=linux
 [[ "$PLATFORM" == Mac ]] && os_name=macos

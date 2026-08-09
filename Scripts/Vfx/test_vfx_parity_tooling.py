@@ -85,7 +85,8 @@ class RuntimeCatalogIntegrityTests(unittest.TestCase):
         encoded = json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
         with tempfile.TemporaryDirectory() as temporary_directory:
             path = Path(temporary_directory) / "manifest.json"
-            path.write_text(encoded, encoding="utf-8", newline="\n")
+            with path.open("w", encoding="utf-8", newline="\n") as stream:
+                stream.write(encoded)
             result = subprocess.run(
                 [sys.executable, str(VALIDATOR), "--manifest", str(path)],
                 cwd=REPOSITORY_ROOT,

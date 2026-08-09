@@ -28,6 +28,7 @@ common=(--generator "$GENERATOR" --configuration Dist --architecture "$ARCHITECT
 [[ $FORCE -eq 1 ]] && common+=(--force)
 [[ $ALLOW_DIRTY -eq 1 ]] && common+=(--allow-dirty)
 bash "$ROOT/Scripts/Unix/package.sh" "$PLATFORM" "${common[@]}" --stage-only
+[[ "$PLATFORM" == Linux ]] && activate_linux_toolchain "$ROOT" "$TOOLSET"
 hub_worker="${PROJECT_NAMESPACE}HubWorker"
 bash "$ROOT/Scripts/$PLATFORM/build.sh" "${common[@]}" --target "$hub_worker"
 
@@ -77,7 +78,10 @@ dotnet_destination="$stage/bin/Managed/Dotnet"
 }
 rm -rf "$dotnet_destination"
 mkdir -p "$dotnet_destination"
-cp -R "$dotnet_source/." "$dotnet_destination/"
+# Product manifests and deterministic archives intentionally reject symbolic links.
+# Materialize the SDK's platform-pack aliases so the installed editor payload is
+# self-contained and remains valid after the source SDK tree is removed.
+cp -RL "$dotnet_source/." "$dotnet_destination/"
 chmod +x "$dotnet_destination/dotnet"
 
 dotnet_sdk="$(find "$dotnet_destination/sdk" -mindepth 1 -maxdepth 1 -type d -name '10.*' -print |

@@ -145,7 +145,7 @@ namespace Keire
 
     struct SceneRenderRequest
     {
-        Ref<Scene> Scene;
+        Ref<Keire::Scene> Scene;
         Ref<RenderView> View;
         bool DrawGrid = false;
         RenderEnvironmentSettings Environment;

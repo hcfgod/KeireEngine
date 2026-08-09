@@ -1246,7 +1246,7 @@ namespace Keire::RenderBackend
 
         RenderSpecification Specification;
         Ref<WindowSystem> Windows;
-        Ref<Window> Window;
+        Ref<Keire::Window> Window;
         Ref<AssetSystem> Assets;
         Ref<StreamingSystem> Streaming;
         std::thread::id OwnerThread;

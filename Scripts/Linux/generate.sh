@@ -2,6 +2,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/Scripts/Unix/common.sh"
+export PATH="$ROOT/Tools/Linux:$PATH"
 GENERATOR=ninja; CONFIGURATION=Debug; ARCHITECTURE="$(native_architecture)"; TOOLSET=default; TARGET=KeireClient; CI=0; UPDATE=0; FORCE=0; INSTALL_OPTIONAL=0
 parse_build_arguments "$@"
 load_project_config "$ROOT"
@@ -11,6 +12,7 @@ validate_unix_combination Linux "$GENERATOR" "$TOOLSET"
 bootstrap=(--generator "$GENERATOR" --architecture "$ARCHITECTURE" --toolset "$TOOLSET")
 [[ $UPDATE -eq 1 ]] && bootstrap+=(--update)
 bash "$ROOT/Scripts/Linux/bootstrap.sh" "${bootstrap[@]}"
+activate_linux_toolchain "$ROOT" "$TOOLSET"
 force_dependencies=0; [[ $FORCE -eq 1 ]] && force_dependencies=1
 bash "$ROOT/Scripts/Unix/dependencies.sh" Linux "$ARCHITECTURE" "$TOOLSET" "$force_dependencies"
 

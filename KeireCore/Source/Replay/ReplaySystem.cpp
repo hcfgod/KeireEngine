@@ -50,10 +50,10 @@ namespace Keire
             static_assert(std::is_unsigned_v<T>);
             if (offset > input.size() || sizeof(T) > input.size() - offset)
                 throw std::runtime_error("Replay chunk is truncated.");
-            T result = 0;
+            std::uintmax_t result = 0;
             for (std::size_t index = 0; index < sizeof(T); ++index)
-                result |= static_cast<T>(std::to_integer<std::uint8_t>(input[offset++])) << (index * 8U);
-            return result;
+                result |= static_cast<std::uintmax_t>(std::to_integer<std::uint8_t>(input[offset++])) << (index * 8U);
+            return static_cast<T>(result);
         }
 
         void AppendBytes(std::vector<std::byte>& output, const std::span<const std::byte> bytes)

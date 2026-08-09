@@ -120,6 +120,7 @@ namespace Keire::Detail
 
     namespace
     {
+#if defined(_WIN32)
         [[nodiscard]] bool FilesMatch(const std::filesystem::path& first, const std::filesystem::path& second)
         {
             std::error_code error;
@@ -145,6 +146,7 @@ namespace Keire::Detail
             }
             return left.eof() && right.eof();
         }
+#endif
 
         void FlushFileToStorage(const std::filesystem::path& path)
         {

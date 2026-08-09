@@ -11,6 +11,7 @@ case "$(uname -s)" in
     *) printf 'Use Scripts/project.ps1 on Windows.\n' >&2; exit 1 ;;
 esac
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+[[ "$PLATFORM_NAME" == Linux ]] && export PATH="$ROOT/Tools/Linux:$PATH"
 load_project_config "$ROOT"
 
 COMMAND="${1:-menu}"
@@ -34,6 +35,7 @@ ALLOW_DIRTY=0
 CI=0
 SMOKE_UI=0
 SMOKE_PROJECT=0
+SMOKE_WINDOW=0
 EDITOR=0
 PROJECT_PATH=""
 
@@ -57,6 +59,7 @@ while [[ $# -gt 0 ]]; do
         --ci) CI=1; shift ;;
         --smoke-ui) SMOKE_UI=1; shift ;;
         --smoke-project) SMOKE_PROJECT=1; shift ;;
+        --smoke-window) SMOKE_WINDOW=1; shift ;;
         --editor) EDITOR=1; shift ;;
         --project) PROJECT_PATH="$2"; shift 2 ;;
         *) printf "Unknown argument '%s'.\n" "$1" >&2; exit 1 ;;
@@ -83,7 +86,7 @@ run_command() {
         generate) bash "$PLATFORM_DIR/generate.sh" "${common[@]}" ;;
         build) bash "$PLATFORM_DIR/build.sh" "${common[@]}" --configuration "$CONFIGURATION" --target "$TARGET" ;;
         test) bash "$PLATFORM_DIR/test.sh" "${common[@]}" --configuration "$CONFIGURATION" ;;
-        run) KEIRE_SMOKE_UI="$SMOKE_UI" KEIRE_SMOKE_PROJECT="$SMOKE_PROJECT" KEIRE_EDITOR="$EDITOR" KEIRE_PROJECT_PATH="$PROJECT_PATH" bash "$PLATFORM_DIR/run.sh" "${common[@]}" --configuration "$CONFIGURATION" ;;
+        run) KEIRE_SMOKE_UI="$SMOKE_UI" KEIRE_SMOKE_PROJECT="$SMOKE_PROJECT" KEIRE_SMOKE_WINDOW="$SMOKE_WINDOW" KEIRE_EDITOR="$EDITOR" KEIRE_PROJECT_PATH="$PROJECT_PATH" bash "$PLATFORM_DIR/run.sh" "${common[@]}" --configuration "$CONFIGURATION" ;;
         clean) bash "$PLATFORM_DIR/clean.sh" "$CLEAN_SCOPE" ;;
         coverage) bash "$SCRIPT_DIR/Unix/coverage.sh" "$PLATFORM_NAME" "${common[@]}" ;;
         package)
@@ -136,6 +139,7 @@ Common options:
   --architecture <x86_64|ARM64> --toolset <default|gcc|clang>
   --smoke-ui (run command only; requires a graphics-capable environment)
   --smoke-project (run the sample project editor and exit after several frames)
+  --smoke-window (run the client with SDL's dummy video backend and exit after startup)
   --editor --project <path> (open the editor directly instead of the project hub)
   --clean-scope <full|build|generated> (clean only; full removes the complete Build directory)
   package-editor writes a ready-to-run Dist editor under Build/Distributions and an archive under Artifacts

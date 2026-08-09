@@ -124,7 +124,7 @@ namespace
                               const std::string_view mode)
     {
         profile.Signing.Policy = Keire::PlayerSigningPolicy::Required;
-        profile.Signing.TimeoutSeconds = 1;
+        profile.Signing.TimeoutSeconds = mode == "timeout" ? 1U : 10U;
 #if defined(_WIN32)
         const auto script = directory / "signing-hook.ps1";
         Write(script, R"(param([string]$Mode, [string]$Root, [string]$Request, [string]$Response)

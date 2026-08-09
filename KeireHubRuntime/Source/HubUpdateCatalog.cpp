@@ -1,5 +1,6 @@
 #include "KeireHubRuntime/HubUpdateCatalog.h"
 
+#include <algorithm>
 #include <array>
 #include <ranges>
 #include <string>

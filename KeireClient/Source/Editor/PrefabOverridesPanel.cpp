@@ -3,6 +3,7 @@
 #include "KeireClient/Editor/PrefabAuthoring.h"
 #include "KeireClient/Editor/SceneDocument.h"
 
+#include <algorithm>
 #include <fstream>
 #include <ranges>
 #include <stdexcept>

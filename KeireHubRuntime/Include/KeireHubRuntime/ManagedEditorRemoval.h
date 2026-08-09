@@ -24,6 +24,9 @@ namespace KeireHub
         // A false result simulates or reports an interruption after a durable phase boundary. It is primarily a
         // deterministic recovery-test seam; production workers normally leave it empty.
         std::function<bool(ManagedEditorRemovalPhase)> ContinueAfterPhase;
+        // Called only after the complete managed tree has been verified and immediately before the final verification
+        // and commit rename. Implementations may release trusted background services that hold files in the tree.
+        std::function<void()> PrepareForCommit;
     };
 
     struct ManagedEditorRemovalResult final

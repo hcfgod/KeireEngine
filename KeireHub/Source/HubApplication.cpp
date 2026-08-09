@@ -34,6 +34,7 @@
 #include "KeireHub/HubUpdateHandoffWorkflow.h"
 #include "KeireHub/HubUpdateIntegration.h"
 #include "KeireHub/HubWorkflowError.h"
+#include "KeireHubInternal/HubNoticeUi.h"
 
 #include "KeireHubRuntime/EditorProcessTracker.h"
 #include "KeireHubRuntime/HubUpdateManager.h"
@@ -743,45 +744,7 @@ namespace
 
         void DrawNotice(Keire::UiFrame& ui, const KeireHub::HubDesignTokens& tokens)
         {
-            const auto now = std::chrono::steady_clock::now();
-            if (m_ObservedNotice != m_Notice)
-            {
-                m_ObservedNotice = m_Notice;
-                m_NoticeStarted = now;
-            }
-            if (!m_NoticeError && !m_Notice.empty() && now - m_NoticeStarted >= std::chrono::seconds(5))
-            {
-                m_Notice.clear();
-                m_ObservedNotice.clear();
-            }
-            if (m_Notice.empty())
-                return;
-
-            [[maybe_unused]] const auto bannerBackground =
-                ui.PushStyleColor(Keire::UiStyleColorRole::ChildBackground, tokens.Elevated);
-            if (auto banner = ui.BeginChild("HubGlobalNotice", {0.0F, 48.0F}, true); banner)
-            {
-                Keire::UiTableOptions layout;
-                layout.Borders = false;
-                layout.Resizable = false;
-                layout.RowBackground = false;
-                layout.PersistSettings = false;
-                if (auto table = ui.BeginTable("HubGlobalNoticeLayout", 2, layout); table)
-                {
-                    ui.TableSetupColumn("Message", Keire::UiTableColumnSizing::Stretch, 1.0F);
-                    ui.TableSetupColumn("Action", Keire::UiTableColumnSizing::Fixed, 76.0F);
-                    ui.TableNextRow();
-                    (void)ui.TableNextColumn();
-                    ui.TextColoredWrapped(m_NoticeError ? tokens.Danger : tokens.Success, m_Notice);
-                    (void)ui.TableNextColumn();
-                    if (ui.Button("Dismiss##HubNotice", {68.0F, 28.0F}))
-                    {
-                        m_Notice.clear();
-                        m_ObservedNotice.clear();
-                    }
-                }
-            }
-            ui.Spacing();
+            KeireHub::Detail::DrawHubNotice(ui, tokens, m_Notice, m_NoticeError, m_ObservedNotice, m_NoticeStarted);
         }
 
         void SavePreferences()

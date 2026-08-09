@@ -1,5 +1,6 @@
 #include "KeireHubRuntime/TaskNotificationTracker.h"
 
+#include <algorithm>
 #include <ranges>
 
 namespace KeireHub

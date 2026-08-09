@@ -5,6 +5,7 @@
 #include <doctest/doctest.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <ranges>
 
 using namespace KeireHub;

@@ -13,6 +13,7 @@
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
 #include "KeireInternal/Scripting/CoralLog.h"
+#include "KeireInternal/Scripting/ManagedGenerationSequence.h"
 #include "KeireInternal/Scripting/ManagedSdk.h"
 
 #if defined(_MSC_VER)
@@ -588,8 +589,7 @@ namespace Keire
                 }
             }
             std::ranges::sort(result,
-                              [](const ComponentMethod& left, const ComponentMethod& right)
-                              {
+                              [](const ComponentMethod& left, const ComponentMethod& right) {
                                   return left.Name != right.Name ? left.Name < right.Name
                                                                  : left.ParameterTypes < right.ParameterTypes;
                               });
@@ -1035,8 +1035,7 @@ namespace Keire
 
             std::ranges::sort(result.Types, {}, &ManagedAssetTypeDescriptor::FullName);
             std::ranges::sort(result.Diagnostics,
-                              [](const ManagedAssetTypeDiagnostic& left, const ManagedAssetTypeDiagnostic& right)
-                              {
+                              [](const ManagedAssetTypeDiagnostic& left, const ManagedAssetTypeDiagnostic& right) {
                                   return left.TypeName != right.TypeName ? left.TypeName < right.TypeName
                                                                          : left.Message < right.Message;
                               });
@@ -1229,47 +1228,7 @@ namespace Keire
             }
         }
 
-        void ResumeGenerationSequence()
-        {
-            std::uint64_t highestGeneration = 0;
-            const auto generations = OutputRoot / "Generations";
-            if (std::filesystem::is_directory(generations))
-            {
-                for (const auto& entry : std::filesystem::directory_iterator(generations))
-                {
-                    if (!entry.is_directory())
-                        continue;
-                    const auto name = entry.path().filename().string();
-                    try
-                    {
-                        std::size_t consumed = 0;
-                        const auto generation = std::stoull(name, &consumed);
-                        if (consumed == name.size())
-                            highestGeneration = std::max(highestGeneration, generation);
-                    }
-                    catch (const std::exception&)
-                    {
-                    }
-                }
-            }
-
-            const auto manifest = OutputRoot / "active-generation.json";
-            if (std::filesystem::is_regular_file(manifest))
-            {
-                try
-                {
-                    const auto document = nlohmann::json::parse(Detail::ReadTextFile(manifest, std::size_t{1} << 20U));
-                    highestGeneration = std::max(highestGeneration, document.value("generation", std::uint64_t{0}));
-                }
-                catch (const nlohmann::json::exception&)
-                {
-                }
-            }
-
-            if (highestGeneration == std::numeric_limits<std::uint64_t>::max())
-                throw std::overflow_error("Managed generation sequence is exhausted.");
-            NextOperation = highestGeneration + 1;
-        }
+        void ResumeGenerationSequence() { NextOperation = Detail::NextManagedGeneration(OutputRoot); }
 
         [[nodiscard]] std::filesystem::path FindManagedApiProject() const
         {

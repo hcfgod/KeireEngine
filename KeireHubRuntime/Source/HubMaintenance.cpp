@@ -2,6 +2,7 @@
 
 #include <KeireHubRuntimeInternal/Persistence.h>
 
+#include <algorithm>
 #include <ranges>
 #include <system_error>
 

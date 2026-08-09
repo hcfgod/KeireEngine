@@ -11,6 +11,8 @@
 #include <imgui_impl_sdlgpu3.h>
 #include <stb_easy_font.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <future>
 #include <stdexcept>

@@ -787,9 +787,9 @@ void EditorWorkspaceLayer::RecordSceneUndo(const std::string_view name, std::str
             m_SceneDocument->PlaySession()->ReplaceRuntime(definition);
             return;
         }
-        auto scene = Keire::CreateRef<Keire::Scene>(asset, definition, components);
-        scene->MarkDirty();
-        m_SceneDocument->ReplaceEditingScene(std::move(scene), false);
+        auto replacementScene = Keire::CreateRef<Keire::Scene>(asset, definition, components);
+        replacementScene->MarkDirty();
+        m_SceneDocument->ReplaceEditingScene(std::move(replacementScene), false);
     };
     const auto estimatedBytes = Keire::SceneAsset::Encode(before).size();
     Keire::UndoOperation redo = [after, apply]

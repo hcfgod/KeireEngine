@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <functional>
 #include <ranges>
@@ -647,8 +648,7 @@ namespace KeireEditor
                                 {
                                     action->ValueType = Keire::InputValueType::Boolean;
                                     std::erase_if(map->Bindings,
-                                                  [&](const auto& binding)
-                                                  {
+                                                  [&](const auto& binding) {
                                                       return binding.Action == action->Id &&
                                                              (!binding.Composite.empty() ||
                                                               !binding.CompositePart.empty());
@@ -817,8 +817,7 @@ namespace KeireEditor
                                     if (!conflicts.empty())
                                     {
                                         std::erase_if(map->Bindings,
-                                                      [&](const auto& candidate)
-                                                      {
+                                                      [&](const auto& candidate) {
                                                           return std::ranges::any_of(
                                                               conflicts, [&](const auto& conflict)
                                                               { return conflict.Binding == candidate.Id; });

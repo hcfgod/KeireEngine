@@ -1180,21 +1180,22 @@ namespace Keire
         for (auto& sample : output)
             sample = std::clamp(sample, -1.0F, 1.0F);
         m_Impl->RenderedFrames += frameCount;
-        std::erase_if(m_Impl->Voices,
-                      [implementation = m_Impl.get()](auto& item)
-                      {
-                          auto& voice = item.second;
-                          const auto frames =
-                              voice.Specification.Clip->Frames == 0
-                                  ? voice.Specification.Clip->Samples.size() / voice.Specification.Clip->Channels
-                                  : voice.Specification.Clip->Frames;
-                          if (!voice.Paused && !voice.Specification.Loop && voice.Frame >= static_cast<double>(frames))
-                          {
-                              implementation->DestroyVoice(voice);
-                              return true;
-                          }
-                          return false;
-                      });
+        for (auto iterator = m_Impl->Voices.begin(); iterator != m_Impl->Voices.end();)
+        {
+            auto& voice = iterator->second;
+            const auto frames = voice.Specification.Clip->Frames == 0
+                                    ? voice.Specification.Clip->Samples.size() / voice.Specification.Clip->Channels
+                                    : voice.Specification.Clip->Frames;
+            if (!voice.Paused && !voice.Specification.Loop && voice.Frame >= static_cast<double>(frames))
+            {
+                m_Impl->DestroyVoice(voice);
+                iterator = m_Impl->Voices.erase(iterator);
+            }
+            else
+            {
+                ++iterator;
+            }
+        }
         return output;
     }
 

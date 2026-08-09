@@ -28,6 +28,7 @@
 
 #include "KeireInternal/FileSystem.h"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -636,15 +637,13 @@ TEST_CASE("play change tracker distinguishes mixed values and enforces created-p
     CHECK(property->Origin == KeireEditor::ScenePlayChangeOrigin::Mixed);
     CHECK(property->Selected);
     auto parentChange = std::ranges::find_if(all,
-                                             [&](const auto& change)
-                                             {
+                                             [&](const auto& change) {
                                                  return change.Entity == parent.Id().Value() &&
                                                         change.Kind == KeireEditor::ScenePlayChangeKind::CreateEntity;
                                              });
     const auto childChange = std::ranges::find_if(
         all,
-        [&](const auto& change)
-        {
+        [&](const auto& change) {
             return change.Entity == child.Id().Value() && change.Kind == KeireEditor::ScenePlayChangeKind::CreateEntity;
         });
     REQUIRE(parentChange != all.end());
@@ -654,8 +653,7 @@ TEST_CASE("play change tracker distinguishes mixed values and enforces created-p
 
     changes.KeepCreatedEntityAtRoot(child.Id().Value(), true);
     parentChange = std::ranges::find_if(changes.Changes(),
-                                        [&](const auto& change)
-                                        {
+                                        [&](const auto& change) {
                                             return change.Entity == parent.Id().Value() &&
                                                    change.Kind == KeireEditor::ScenePlayChangeKind::CreateEntity;
                                         });

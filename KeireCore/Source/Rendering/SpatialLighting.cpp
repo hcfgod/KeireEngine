@@ -168,7 +168,8 @@ namespace Keire::Detail
         const auto x1 = std::min(x0 + 1U, volume.CountX - 1U);
         const auto y1 = std::min(y0 + 1U, volume.CountY - 1U);
         const auto z1 = std::min(z0 + 1U, volume.CountZ - 1U);
-        const auto fraction = Vector3{grid.X - x0, grid.Y - y0, grid.Z - z0};
+        const auto fraction =
+            Vector3{grid.X - static_cast<float>(x0), grid.Y - static_cast<float>(y0), grid.Z - static_cast<float>(z0)};
         std::array<Vector3, 9> coefficients{};
         float accumulatedWeight = 0.0F;
         for (std::uint32_t corner = 0; corner < 8U; ++corner)

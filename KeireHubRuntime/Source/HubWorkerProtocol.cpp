@@ -2,6 +2,7 @@
 
 #include <KeireHubRuntimeInternal/Persistence.h>
 
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <chrono>

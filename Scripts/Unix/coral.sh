@@ -73,11 +73,13 @@ else
   printf '==> Coral patch cache is current\n'
 fi
 
+command -v dotnet >/dev/null 2>&1 || {
+  printf 'Coral requires the .NET 10 SDK. A .NET 10 runtime alone cannot compile Coral.Managed.\n' >&2
+  exit 1
+}
+dotnet_root="$(dotnet_sdk_root dotnet 10)" || exit 1
+
 if [[ "$build" == 1 ]]; then
-  dotnet --list-sdks | grep -Eq '^10\.' || {
-    printf 'Coral requires the .NET 10 SDK. A .NET 10 runtime alone cannot compile Coral.Managed.\n' >&2
-    exit 1
-  }
   native_build="$patched/Build/$configuration"
   if [[ "$force" == 1 && -e "$native_build" ]]; then
     case "$native_build" in "$patched"/Build/*) rm -rf "$native_build" ;; *) exit 1 ;; esac
@@ -87,7 +89,7 @@ if [[ "$build" == 1 ]]; then
     cmake_options+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=$macos_deployment_target")
   fi
   cmake -S "$patched/cmake" -B "$native_build" -G Ninja "${cmake_options[@]}"
-  cmake --build "$native_build" --target Coral.Native --parallel
+  cmake --build "$native_build" --target Coral.Native --parallel "$(build_parallel_jobs)"
   [[ -f "$native_build/Coral.Managed.dll" ]] || {
     printf 'Patched Coral build did not produce Coral.Managed.dll.\n' >&2
     exit 1
@@ -95,8 +97,6 @@ if [[ "$build" == 1 ]]; then
   printf '==> Patched Coral %s build is ready\n' "$configuration"
 fi
 
-sdk_directory="$(dotnet --list-sdks | awk '$1 ~ /^10[.]/ { line=$0 } END { sub(/^.*\\[/, "", line); sub(/\\].*$/, "", line); print line }')"
-dotnet_root="$(dirname "$sdk_directory")"
 nethost_library="$(find "$dotnet_root/packs" -type f -name libnethost.a -print | sort | tail -n 1)"
 [[ -n "$nethost_library" ]] || { printf 'The .NET 10 SDK does not contain nethost.\n' >&2; exit 1; }
 printf 'CORAL_SOURCE=%s\nCORAL_COMMIT=%s\nCORAL_PATCH_DIGEST=%s\nCORAL_NETHOST_LIBRARY=%s\n' \

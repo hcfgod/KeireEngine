@@ -27,10 +27,22 @@ function GeneratorRootPath(path)
     return path
 end
 
+local function DependencyLink(path)
+    local resolved = GeneratorRootPath(path)
+    if (_ACTION == "ninja" or _ACTION == "gmake") and SelectedToolset ~= "msc" then
+        local directory, library = resolved:match("^(.*)/(lib[^/]+%.a)$")
+        if directory ~= nil then
+            libdirs { directory }
+            return ":" .. library
+        end
+    end
+    return resolved
+end
+
 local function DependencyLinks(paths)
     local result = {}
     for _, path in ipairs(paths) do
-        table.insert(result, GeneratorRootPath(path))
+        table.insert(result, DependencyLink(path))
     end
     return result
 end
@@ -46,27 +58,27 @@ function LinkKeireCore()
     filter { "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
         links
         {
-            GeneratorRootPath(DependencyManifest.AssimpDebugLibrary),
-            GeneratorRootPath(DependencyManifest.AssimpZlibDebugLibrary),
-            GeneratorRootPath(DependencyManifest.JoltDebugLibrary),
-            GeneratorRootPath(DependencyManifest.MiniaudioDebugLibrary),
-            GeneratorRootPath(DependencyManifest.CoralDebugLibrary)
+            DependencyLink(DependencyManifest.AssimpDebugLibrary),
+            DependencyLink(DependencyManifest.AssimpZlibDebugLibrary),
+            DependencyLink(DependencyManifest.JoltDebugLibrary),
+            DependencyLink(DependencyManifest.MiniaudioDebugLibrary),
+            DependencyLink(DependencyManifest.CoralDebugLibrary)
         }
         links(DependencyLinks(DependencyManifest.RecastDebugLibraries))
 
     filter { "configurations:Release or Dist" }
         links
         {
-            GeneratorRootPath(DependencyManifest.AssimpReleaseLibrary),
-            GeneratorRootPath(DependencyManifest.AssimpZlibReleaseLibrary),
-            GeneratorRootPath(DependencyManifest.JoltReleaseLibrary),
-            GeneratorRootPath(DependencyManifest.MiniaudioReleaseLibrary),
-            GeneratorRootPath(DependencyManifest.CoralReleaseLibrary)
+            DependencyLink(DependencyManifest.AssimpReleaseLibrary),
+            DependencyLink(DependencyManifest.AssimpZlibReleaseLibrary),
+            DependencyLink(DependencyManifest.JoltReleaseLibrary),
+            DependencyLink(DependencyManifest.MiniaudioReleaseLibrary),
+            DependencyLink(DependencyManifest.CoralReleaseLibrary)
         }
         links(DependencyLinks(DependencyManifest.RecastReleaseLibraries))
 
     filter {}
-        links { GeneratorRootPath(DependencyManifest.CoralNetHostLibrary) }
+        links { DependencyLink(DependencyManifest.CoralNetHostLibrary) }
 
     filter "system:windows"
         links { "crypt32", "winhttp" }
@@ -127,10 +139,10 @@ function LinkSDL3()
     links { DependencyManifest.SDL3PlatformLinks }
 
     filter { "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
-        links { GeneratorRootPath(DependencyManifest.SDL3DebugLibrary) }
+        links { DependencyLink(DependencyManifest.SDL3DebugLibrary) }
 
     filter { "configurations:Release or Dist" }
-        links { GeneratorRootPath(DependencyManifest.SDL3ReleaseLibrary) }
+        links { DependencyLink(DependencyManifest.SDL3ReleaseLibrary) }
 
     filter {}
 end
@@ -193,7 +205,7 @@ function ApplyCommonProjectSettings(repositoryRoot)
         buildoptions { "-Wpedantic", "-Wconversion", "-Wshadow" }
 
     -- Partial C++20 aggregate initialization intentionally value-initializes fields that retain their defaults.
-    filter "toolset:clang"
+    filter { "toolset:gcc or clang" }
         buildoptions { "-Wno-missing-field-initializers" }
 
     filter { "system:windows", "toolset:clang", "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }

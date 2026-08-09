@@ -13,6 +13,7 @@ for target in "${targets[@]}"; do
   [[ $UPDATE -eq 1 ]] && args+=(--update)
   [[ $FORCE -eq 1 ]] && args+=(--force)
   bash "$ROOT/Scripts/$PLATFORM/build.sh" "${args[@]}"
+  [[ "$PLATFORM" == Linux ]] && activate_linux_toolchain "$ROOT" "$TOOLSET"
   executable="$ROOT/Build/Bin/Coverage-$system-$output_arch/$target/$target"
   [[ -x "$executable" ]] || { printf 'Coverage executable was not found: %s\n' "$executable" >&2; exit 1; }
   executables+=("$executable")

@@ -32,19 +32,23 @@
 
 namespace Keire
 {
-    namespace
+    namespace Detail
     {
-        using Json = nlohmann::json;
-
-        struct FileSignature
+        struct AssetFileSignature final
         {
             std::filesystem::file_time_type Modified{};
             std::uintmax_t Size = 0;
             std::filesystem::file_time_type MetadataModified{};
             std::uintmax_t MetadataSize = 0;
 
-            [[nodiscard]] bool operator==(const FileSignature&) const noexcept = default;
+            [[nodiscard]] bool operator==(const AssetFileSignature&) const noexcept = default;
         };
+    } // namespace Detail
+
+    namespace
+    {
+        using Json = nlohmann::json;
+        using FileSignature = Detail::AssetFileSignature;
 
         [[maybe_unused, nodiscard]] std::filesystem::path ConfinedPath(const std::filesystem::path& root,
                                                                        const std::filesystem::path& relative)
@@ -713,7 +717,7 @@ namespace Keire
             std::unordered_map<std::string, std::size_t> ByPath;
         };
 
-        explicit Impl(AssetDatabaseSpecification value) : Specification(std::move(value))
+        explicit Impl(AssetDatabaseSpecification specification) : Specification(std::move(specification))
         {
             if (Specification.MaximumSourceBytes == 0 || Specification.ChangeDebounce.count() < 0 ||
                 Specification.ChangeMonitorInterval.count() <= 0)

@@ -7,6 +7,7 @@
 #include "Keire/Jobs/JobSystem.h"
 #include "Keire/Scripting/ManagedDataAsset.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <exception>

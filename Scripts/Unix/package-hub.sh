@@ -45,6 +45,7 @@ common=(--generator "$GENERATOR" --configuration Dist --architecture "$ARCHITECT
 bash "$ROOT/Scripts/$PLATFORM/build.sh" "${common[@]}" --target "$HUB_TARGET"
 hub_worker="${PROJECT_NAMESPACE}HubWorker"
 bash "$ROOT/Scripts/$PLATFORM/build.sh" "${common[@]}" --target "$hub_worker"
+[[ "$PLATFORM" == Linux ]] && activate_linux_toolchain "$ROOT" "$TOOLSET"
 
 output_arch="$(architecture_output_name "$ARCHITECTURE")"
 source_root="$ROOT/Build/Bin/Dist-$system-$output_arch/$HUB_TARGET"

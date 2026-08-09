@@ -85,27 +85,27 @@ namespace KeireEditor
             document.SetComponentProperty(canvas, Keire::RectTransformComponent::StaticType(), "sizeDelta",
                                           Keire::Vector2{});
 
-            const auto panel =
+            const auto modernPanel =
                 document.CreateEntity("Modern Panel", canvas, Keire::RectTransformComponent::StaticType());
-            (void)document.AddComponent(panel, Keire::UiImageComponent::StaticType());
-            (void)document.AddComponent(panel, Keire::UiLayoutComponent::StaticType());
-            document.SetComponentProperty(panel, Keire::RectTransformComponent::StaticType(), "sizeDelta",
+            (void)document.AddComponent(modernPanel, Keire::UiImageComponent::StaticType());
+            (void)document.AddComponent(modernPanel, Keire::UiLayoutComponent::StaticType());
+            document.SetComponentProperty(modernPanel, Keire::RectTransformComponent::StaticType(), "sizeDelta",
                                           Keire::Vector2{560.0F, 360.0F});
-            document.SetComponentProperty(panel, Keire::UiImageComponent::StaticType(), "tint",
+            document.SetComponentProperty(modernPanel, Keire::UiImageComponent::StaticType(), "tint",
                                           Keire::Color{0.025F, 0.045F, 0.075F, 0.96F});
-            document.SetComponentProperty(panel, Keire::UiLayoutComponent::StaticType(), "spacing", 18.0);
-            document.SetComponentProperty(panel, Keire::UiLayoutComponent::StaticType(), "padding",
+            document.SetComponentProperty(modernPanel, Keire::UiLayoutComponent::StaticType(), "spacing", 18.0);
+            document.SetComponentProperty(modernPanel, Keire::UiLayoutComponent::StaticType(), "padding",
                                           Keire::Vector4{36.0F, 36.0F, 36.0F, 36.0F});
 
-            const auto title = createText(panel, "Title", "MISSION CONTROL");
+            const auto title = createText(modernPanel, "Title", "MISSION CONTROL");
             document.SetComponentProperty(title, Keire::UiTextComponent::StaticType(), "fontSize", 34.0);
             document.SetComponentProperty(title, Keire::UiTextComponent::StaticType(), "color",
                                           Keire::Color{0.86F, 0.94F, 1.0F, 1.0F});
-            const auto subtitle = createText(panel, "Subtitle", "SYSTEMS READY");
+            const auto subtitle = createText(modernPanel, "Subtitle", "SYSTEMS READY");
             document.SetComponentProperty(subtitle, Keire::UiTextComponent::StaticType(), "fontSize", 16.0);
             document.SetComponentProperty(subtitle, Keire::UiTextComponent::StaticType(), "color",
                                           Keire::Color{0.33F, 0.78F, 0.95F, 1.0F});
-            (void)createButton(panel, "Primary Action");
+            (void)createButton(modernPanel, "Primary Action");
             return canvas;
         };
         if (ui.WindowFocused())

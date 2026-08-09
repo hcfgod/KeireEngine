@@ -77,6 +77,27 @@ compile-database coverage gate rejects any omitted Premake-owned translation uni
 direct and CMake package-consumer builds. A hosted workflow that did not start because Actions quota was exhausted is
 unavailable evidence, not a product failure and not a passing lane.
 
+## Local Linux Distribution Matrix
+
+Run the containerized Linux matrix from a standalone Linux or WSL2 clone with initialized submodules and Podman:
+
+```sh
+bash Scripts/Tests/test-linux-distros.sh --suite test --distro all
+```
+
+The matrix covers Ubuntu 22.04/24.04, Debian 12, Fedora, Arch, openSUSE Tumbleweed, and Rocky Linux 9. Each distro uses
+its native package manager, an isolated source overlay, and separate persistent build/tool/cache volumes. The default
+`test` suite performs the same complete warnings-as-errors core, editor, Hub, managed, and client compile validation as
+the hosted Linux launcher, then starts the built client through SDL's dummy window backend. Use `--suite bootstrap`
+for a faster clean-machine prerequisite check, `--distro <name>` for a focused run, or `--refresh-images` to pull
+current base images. `--jobs <count>` controls compiler concurrency inside each container.
+
+This is the locally repeatable substitute when hosted Actions execution is unavailable; it does not convert an
+unobserved hosted check into a pass. Linux `.tar.gz` distributions are the common archive format produced on each
+intended Linux release baseline; a binary built against a newer glibc is not relabeled as universal. Native DEB
+installers target Debian/Ubuntu; RPM/repository publication remains a separate release artifact rather than being
+simulated by the matrix.
+
 ## Risk-Based Matrix
 
 | Change type | Required additional validation |

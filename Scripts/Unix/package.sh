@@ -16,7 +16,9 @@ bash "$ROOT/Scripts/Unix/build-info.sh"
 command -v cmake >/dev/null 2>&1 || { printf 'CMake 3.20 or newer is required for SDK package validation.\n' >&2; exit 1; }
 common=(--generator "$GENERATOR" --configuration "$CONFIGURATION" --architecture "$ARCHITECTURE" --toolset "$TOOLSET"); [[ $CI -eq 1 ]] && common+=(--ci)
 test_args=("${common[@]}"); [[ $UPDATE -eq 1 ]] && test_args+=(--update); [[ $FORCE -eq 1 ]] && test_args+=(--force)
-bash "$ROOT/Scripts/$PLATFORM/test.sh" "${test_args[@]}"; KEIRE_SMOKE_WINDOW=1 bash "$ROOT/Scripts/$PLATFORM/run.sh" "${common[@]}"
+bash "$ROOT/Scripts/$PLATFORM/test.sh" "${test_args[@]}"
+[[ "$PLATFORM" == Linux ]] && activate_linux_toolchain "$ROOT" "$TOOLSET"
+KEIRE_SMOKE_WINDOW=1 bash "$ROOT/Scripts/$PLATFORM/run.sh" "${common[@]}"
 asset_tool="${PROJECT_NAMESPACE}AssetTool"; bash "$ROOT/Scripts/$PLATFORM/build.sh" "${common[@]}" --target "$asset_tool"
 asset_worker="${PROJECT_NAMESPACE}AssetWorker"; bash "$ROOT/Scripts/$PLATFORM/build.sh" "${common[@]}" --target "$asset_worker"
 runtime="${PROJECT_NAMESPACE}Runtime"; bash "$ROOT/Scripts/$PLATFORM/build.sh" "${common[@]}" --target "$runtime"
@@ -35,7 +37,10 @@ core_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$CORE_TARGET/li
 imgui_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/DearImGui/lib$imgui_library.a"
 zstd_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/Zstd/lib$zstd_library.a"
 cp "$client_source" "$hub_source" "$stage/bin/"; cp "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$asset_tool/$asset_tool" "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$asset_worker/$asset_worker" "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$runtime/$runtime" "$stage/bin/"; cp "$core_source" "$imgui_source" "$zstd_source" "$stage/lib/"
-find "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$asset_worker" -maxdepth 1 -type f \( -name 'libav*.so*' -o -name 'libav*.dylib' -o -name 'libswresample*.so*' -o -name 'libswresample*.dylib' \) -exec cp {} "$stage/bin/" \;
+find "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$asset_worker" -maxdepth 1 \
+  \( -type f -o -type l \) \
+  \( -name 'libav*.so*' -o -name 'libav*.dylib' -o -name 'libswresample*.so*' -o -name 'libswresample*.dylib' \) \
+  -exec cp -L {} "$stage/bin/" \;
 cp -R "$ROOT/Build/Dependencies/ffmpeg/Release/install/share/licenses/ffmpeg" "$stage/third-party/licenses/"
 cp -R "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$runtime/Managed" "$stage/bin/"
 dependency_install="$ROOT/Build/Dependencies/$system-$output_arch-$TOOLSET/Release/install"
@@ -74,7 +79,7 @@ mkdir -p "$stage/third-party/SDL3/include" "$stage/third-party/SDL3/lib" "$stage
 cp -R "$sdl_install/include/SDL3" "$stage/third-party/SDL3/include/"
 cp "$sdl_install/lib/libSDL3.a" "$stage/third-party/SDL3/lib/"
 cp -R "$sdl_install/cmake/"* "$stage/third-party/SDL3/cmake/"
-cp -R "$sdl_install/licenses/SDL3" "$stage/third-party/SDL3/licenses/"
+cp -R "$sdl_install/share/licenses/SDL3" "$stage/third-party/SDL3/licenses/"
 cp "$ROOT/README.md" "$ROOT/LICENSE.txt" "$ROOT/THIRD_PARTY_NOTICES.md" "$stage/"
 cp -R "$ROOT/Docs/Diagnostics/"* "$stage/Docs/Diagnostics/"
 cp "$ROOT/Docs/PlayerBuilds.md" "$stage/Docs/"

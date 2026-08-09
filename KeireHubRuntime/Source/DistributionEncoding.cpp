@@ -367,7 +367,7 @@ namespace KeireHub::Detail
         if (!port.empty())
         {
             if (port.size() > 5U ||
-                !std::ranges::all_of(port, [](const unsigned char value) { return std::isdigit(value); }))
+                !std::ranges::all_of(port, [](const unsigned char character) { return std::isdigit(character); }))
                 return std::nullopt;
             const auto number = std::stoul(port);
             if (number == 0UL || number > 65535UL)

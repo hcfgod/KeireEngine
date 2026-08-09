@@ -49,6 +49,13 @@ namespace KeireHub
         std::string Phase;
     };
 
+    struct HubEditorInstallTaskMetadata final
+    {
+        std::string PackageId;
+        std::string Version;
+        std::filesystem::path Destination;
+    };
+
     struct HubTask final
     {
         std::string Id;
@@ -62,6 +69,8 @@ namespace KeireHub
         std::uint64_t UpdatedUnixSeconds = 0;
         std::optional<std::uint64_t> WorkerProcessId;
         std::optional<HubError> Failure;
+        std::optional<HubEditorInstallTaskMetadata> EditorInstall;
+        bool HiddenFromHistory = false;
     };
 
     [[nodiscard]] bool IsTerminal(HubTaskState state) noexcept;

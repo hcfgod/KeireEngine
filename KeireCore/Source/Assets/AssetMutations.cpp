@@ -1,5 +1,7 @@
 #include "KeireInternal/Assets/AssetDatabaseImplementation.h"
 
+#include <algorithm>
+
 namespace Keire
 {
     void AssetDatabase::CreateFolder(const std::filesystem::path& relativePath)

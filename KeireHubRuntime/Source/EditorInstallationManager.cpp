@@ -47,19 +47,17 @@ namespace KeireHub
             return value;
         }
 
+#if defined(_WIN32)
         [[nodiscard]] std::filesystem::path NativeIoPath(const std::filesystem::path& path)
         {
-#if defined(_WIN32)
             auto value = std::filesystem::absolute(path).lexically_normal().native();
             if (value.starts_with(LR"(\\?\)"))
                 return value;
             if (value.starts_with(LR"(\\)"))
                 return LR"(\\?\UNC\)" + value.substr(2);
             return LR"(\\?\)" + value;
-#else
-            return path;
-#endif
         }
+#endif
 
         [[nodiscard]] bool IsUnsafeLinkLike(const std::filesystem::path& path)
         {

@@ -62,10 +62,11 @@ namespace Keire
                 static_assert(std::is_unsigned_v<T>);
                 if (Offset > Bytes.size() || sizeof(T) > Bytes.size() - Offset)
                     throw std::runtime_error("VFX checkpoint is truncated.");
-                T result = 0;
+                std::uintmax_t result = 0;
                 for (std::size_t index = 0; index < sizeof(T); ++index)
-                    result |= static_cast<T>(std::to_integer<std::uint8_t>(Bytes[Offset++])) << (index * 8U);
-                return result;
+                    result |= static_cast<std::uintmax_t>(std::to_integer<std::uint8_t>(Bytes[Offset++]))
+                              << (index * 8U);
+                return static_cast<T>(result);
             }
 
             [[nodiscard]] bool Boolean()
@@ -997,8 +998,7 @@ namespace Keire
         {
             const auto hasRuntimeModuleBinding = std::ranges::any_of(
                 slot.Program.Bindings,
-                [](const VfxCompiledBinding& binding)
-                {
+                [](const VfxCompiledBinding& binding) {
                     return binding.ValueRegister != ~std::uint32_t{0} && !IsGpuParticleModuleProperty(binding.Property);
                 });
             if (slot.Program.ValueInstructions.empty() || !hasRuntimeModuleBinding)

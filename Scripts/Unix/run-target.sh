@@ -16,9 +16,16 @@ fi
 args=(--generator "$GENERATOR" --configuration "$CONFIGURATION" --architecture "$ARCHITECTURE" --toolset "$TOOLSET" --target "$TARGET")
 [[ $CI -eq 1 ]] && args+=(--ci); [[ $UPDATE -eq 1 ]] && args+=(--update); [[ $FORCE -eq 1 ]] && args+=(--force)
 bash "$ROOT/Scripts/$PLATFORM/build.sh" "${args[@]}"
+[[ "$PLATFORM" == Linux ]] && activate_linux_toolchain "$ROOT" "$TOOLSET"
 system=linux; [[ "$PLATFORM" == Mac ]] && system=macosx
 executable="$ROOT/Build/Bin/$CONFIGURATION-$system-$(architecture_output_name "$ARCHITECTURE")/$TARGET/$TARGET"
 [[ -x "$executable" ]] || { printf 'Executable not found: %s\n' "$executable" >&2; exit 1; }
+if [[ "$MODE" == test && "$PLATFORM" == Linux && "$CONFIGURATION" == DebugASan ]]; then
+    export LSAN_OPTIONS="${LSAN_OPTIONS:+$LSAN_OPTIONS:}suppressions=$ROOT/Config/LeakSanitizer.supp"
+fi
+if [[ "$MODE" == test && "$CONFIGURATION" == DebugUBSan ]]; then
+    export UBSAN_OPTIONS="${UBSAN_OPTIONS:+$UBSAN_OPTIONS:}halt_on_error=1:print_stacktrace=1"
+fi
 printf '==> Running %s %s for %s\n' "$TARGET" "$CONFIGURATION" "$ARCHITECTURE"
 if [[ "$MODE" == run && "${KEIRE_SMOKE_UI:-0}" == 1 ]]; then
     (cd "$ROOT" && "$executable" --smoke-ui)
@@ -36,7 +43,7 @@ fi
 if [[ "$MODE" == test && "$CONFIGURATION" =~ ^Debug ]]; then
     probe_output="$(mktemp)"
     set +e
-    (cd "$ROOT" && "$executable" --core-assert-probe) 2>"$probe_output"
+    bash -c 'ulimit -c 0; cd "$1" && "$2" --core-assert-probe' _ "$ROOT" "$executable" 2>"$probe_output"
     probe_status=$?
     set -e
     [[ $probe_status -ne 0 ]] || { printf 'Assertion probe unexpectedly succeeded.\n' >&2; rm -f "$probe_output"; exit 1; }

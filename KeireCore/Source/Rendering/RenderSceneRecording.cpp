@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -48,7 +49,6 @@ namespace
         CpuVertex,
         CpuFragment
     };
-
     struct EmbeddedShader final
     {
         const unsigned char* Code = nullptr;
@@ -64,7 +64,8 @@ namespace
     if (format == SDL_GPU_SHADERFORMAT_SPIRV)                                                                          \
         return {Keire::Detail::BuiltinVfx##StageName##Spirv, sizeof(Keire::Detail::BuiltinVfx##StageName##Spirv)};     \
     if (format == SDL_GPU_SHADERFORMAT_MSL)                                                                            \
-        return { Keire::Detail::BuiltinVfx##StageName##Msl, sizeof(Keire::Detail::BuiltinVfx##StageName##Msl) }
+        return {Keire::Detail::BuiltinVfx##StageName##Msl, sizeof(Keire::Detail::BuiltinVfx##StageName##Msl)};         \
+    break
         switch (stage)
         {
         case BuiltinVfxShaderStage::Initialize:
@@ -312,8 +313,7 @@ namespace Keire::RenderBackend
                                                         const std::uint32_t outputIndex,
                                                         const std::span<const VfxValueType> inputs) noexcept
         {
-            const auto allScalar = [&inputs]()
-            {
+            const auto allScalar = [&inputs]() {
                 return std::ranges::all_of(inputs,
                                            [](const VfxValueType type) { return type == VfxValueType::Scalar; });
             };

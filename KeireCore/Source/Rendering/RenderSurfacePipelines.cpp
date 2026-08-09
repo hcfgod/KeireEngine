@@ -382,7 +382,7 @@ namespace Keire::RenderBackend
                                                                               {std::uint8_t{4}, SDL_GPU_SAMPLECOUNT_4},
                                                                               {std::uint8_t{2}, SDL_GPU_SAMPLECOUNT_2},
                                                                               {std::uint8_t{1}, SDL_GPU_SAMPLECOUNT_1}};
-        for (const auto [value, candidate] : candidates)
+        for (const auto& [value, candidate] : candidates)
         {
             if (value > maximum)
                 continue;

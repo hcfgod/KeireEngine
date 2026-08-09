@@ -119,7 +119,8 @@ def main() -> int:
                 f"VFX parity manifest Kéire projection is current ({manifest['counts']['Total']} entries)."
             )
             return 0
-        options.manifest.write_text(encoded, encoding="utf-8", newline="\n")
+        with options.manifest.open("w", encoding="utf-8", newline="\n") as stream:
+            stream.write(encoded)
         print(f"Reconciled {options.manifest} ({manifest['counts']['Total']} entries).")
         return 0
     except (OSError, ValueError, json.JSONDecodeError) as error:

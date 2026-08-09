@@ -8,6 +8,7 @@
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <array>
 #include <ranges>
 #include <span>
@@ -336,7 +337,7 @@ TEST_CASE("Clearing finished task history preserves active work")
     CHECK(store.Snapshot()->front().State == HubTaskState::Queued);
 }
 
-TEST_CASE("Retryable editor removals retain their recovery task")
+TEST_CASE("Retryable editor removals hide durably while retaining their recovery task")
 {
     KeireHubTests::TemporaryDirectory temporary;
     HubTaskStore store(temporary.Path() / "tasks.json");
@@ -350,10 +351,64 @@ TEST_CASE("Retryable editor removals retain their recovery task")
                                       .Retryable = true,
                                       .AffectedItem = "editor-1"}));
 
-    CHECK_FALSE(store.RemoveTerminal("task-a"));
+    REQUIRE(store.RemoveTerminal("task-a"));
+    REQUIRE(store.Snapshot()->size() == 1);
+    CHECK(store.Snapshot()->front().HiddenFromHistory);
+
+    HubTaskStore reloaded(store.Path());
+    REQUIRE(reloaded.Load());
+    REQUIRE(reloaded.Snapshot()->size() == 1);
+    CHECK(reloaded.Snapshot()->front().HiddenFromHistory);
+    REQUIRE(reloaded.Transition("task-a", HubTaskState::Queued, 12));
+    CHECK_FALSE(reloaded.Snapshot()->front().HiddenFromHistory);
+    REQUIRE(reloaded.Transition("task-a", HubTaskState::Installing, 13));
+    REQUIRE(reloaded.Transition("task-a", HubTaskState::Failed, 14,
+                                HubError{.Code = HubErrorCode::IoWrite,
+                                         .Message = "The editor is still locked.",
+                                         .Retryable = true,
+                                         .AffectedItem = "editor-1"}));
+
+    REQUIRE(reloaded.ClearTerminal());
+    REQUIRE(reloaded.Snapshot()->size() == 1);
+    CHECK(reloaded.Snapshot()->front().HiddenFromHistory);
+}
+
+TEST_CASE("Editor install task metadata persists across restart")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    HubTaskStore store(temporary.Path() / "tasks.json");
+    auto install = QueuedTask();
+    install.Kind = HubTaskKind::Install;
+    install.EditorInstall = HubEditorInstallTaskMetadata{
+        .PackageId = "keire.editor", .Version = "1.2.3+build.4", .Destination = temporary.Path() / "Editor"};
+    REQUIRE(store.Add(std::move(install)));
+
+    HubTaskStore reloaded(store.Path());
+    REQUIRE(reloaded.Load());
+    REQUIRE(reloaded.Snapshot()->size() == 1);
+    REQUIRE(reloaded.Snapshot()->front().EditorInstall);
+    CHECK(reloaded.Snapshot()->front().EditorInstall->PackageId == "keire.editor");
+    CHECK(reloaded.Snapshot()->front().EditorInstall->Version == "1.2.3+build.4");
+    CHECK(reloaded.Snapshot()->front().EditorInstall->Destination == temporary.Path() / "Editor");
+}
+
+TEST_CASE("Clearing retryable editor removals preserves hidden recovery state")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    HubTaskStore store(temporary.Path() / "tasks.json");
+    auto removal = QueuedTask();
+    removal.Kind = HubTaskKind::Remove;
+    removal.TargetInstallationId = "editor-1";
+    REQUIRE(store.Add(std::move(removal)));
+    REQUIRE(store.Transition("task-a", HubTaskState::Failed, 11,
+                             HubError{.Code = HubErrorCode::IoWrite,
+                                      .Message = "The editor is still locked.",
+                                      .Retryable = true,
+                                      .AffectedItem = "editor-1"}));
+
     REQUIRE(store.ClearTerminal());
     REQUIRE(store.Snapshot()->size() == 1);
-    CHECK(store.Snapshot()->front().Id == "task-a");
+    CHECK(store.Snapshot()->front().HiddenFromHistory);
 }
 
 TEST_CASE("Notification history is bounded newest-first and tracks unread count")

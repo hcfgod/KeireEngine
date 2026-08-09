@@ -638,8 +638,10 @@ namespace
                 return;
             const auto logical = Owner().MainWindow()->LogicalSize();
             const auto pixels = Owner().MainWindow()->PixelSize();
-            const float scaleX = logical.Width == 0 ? 1.0F : static_cast<float>(pixels.Width) / logical.Width;
-            const float scaleY = logical.Height == 0 ? 1.0F : static_cast<float>(pixels.Height) / logical.Height;
+            const float scaleX =
+                logical.Width == 0 ? 1.0F : static_cast<float>(pixels.Width) / static_cast<float>(logical.Width);
+            const float scaleY =
+                logical.Height == 0 ? 1.0F : static_cast<float>(pixels.Height) / static_cast<float>(logical.Height);
             const auto move = [&](const float x, const float y)
             {
                 m_PointerX = x * scaleX;

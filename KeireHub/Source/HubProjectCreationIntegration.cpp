@@ -1,5 +1,6 @@
 #include "KeireHub/HubProjectCreationIntegration.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <ranges>
 

@@ -74,8 +74,13 @@ namespace Keire::Detail
         curl_easy_setopt(curl, CURLOPT_URL, encodedUrl.c_str());
         curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
         curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 8L);
+#if LIBCURL_VERSION_NUM >= 0x075500
         curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "https");
         curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "https");
+#else
+        curl_easy_setopt(curl, CURLOPT_PROTOCOLS, static_cast<long>(CURLPROTO_HTTPS));
+        curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS, static_cast<long>(CURLPROTO_HTTPS));
+#endif
         curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
         curl_easy_setopt(curl, CURLOPT_USERAGENT, "KeireBuildSupport/1");
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteDownload);

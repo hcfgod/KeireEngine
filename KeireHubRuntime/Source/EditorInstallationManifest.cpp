@@ -281,10 +281,10 @@ namespace KeireHub::Detail
             }
             return HubResult<EditorPackageManifest>::Success(std::move(result));
         }
-        catch (const std::exception& error)
+        catch (const std::exception& exception)
         {
             return HubResult<EditorPackageManifest>::Failure(
-                ManifestError("The editor package manifest is malformed.", "editor-package.json", error.what()));
+                ManifestError("The editor package manifest is malformed.", "editor-package.json", exception.what()));
         }
     }
 } // namespace KeireHub::Detail

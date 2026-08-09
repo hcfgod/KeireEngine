@@ -26,6 +26,7 @@
 #include <csignal>
 #include <fcntl.h>
 #include <poll.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -376,7 +377,9 @@ TEST_CASE("Hub instance coordination rejects a precreated Unix activation symlin
 
     const auto runtimeDirectory =
         temporary.Path() / ("keire-hub-" + std::to_string(static_cast<unsigned long long>(geteuid())));
-    struct stat runtimeStatus{};
+    struct stat runtimeStatus
+    {
+    };
     REQUIRE(stat(runtimeDirectory.c_str(), &runtimeStatus) == 0);
     CHECK(S_ISDIR(runtimeStatus.st_mode));
     CHECK(runtimeStatus.st_uid == geteuid());

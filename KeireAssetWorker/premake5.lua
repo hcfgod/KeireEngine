@@ -53,7 +53,7 @@ project(AssetWorkerTarget)
             }
 
         filter { "system:linux", "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
-            linkoptions { "-Wl,-rpath,$ORIGIN" }
+            linkoptions { "-Wl,-rpath,'$$ORIGIN'" }
             prelinkcommands
             {
                 CopyUnixRuntime(commandRepositoryRoot .. "/Build/Dependencies/ffmpeg/Debug/install/lib")
@@ -84,7 +84,7 @@ project(AssetWorkerTarget)
             }
 
         filter { "system:linux", "configurations:Release or Dist" }
-            linkoptions { "-Wl,-rpath,$ORIGIN" }
+            linkoptions { "-Wl,-rpath,'$$ORIGIN'" }
             prelinkcommands
             {
                 CopyUnixRuntime(commandRepositoryRoot .. "/Build/Dependencies/ffmpeg/Release/install/lib")

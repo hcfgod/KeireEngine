@@ -1,11 +1,15 @@
 # Changelog
 
 - Added durable task and notification cleanup in the Hub, including per-item dismissal and bulk clearing of finished
-  tasks. All project dialogs now follow the selected Hub appearance, recovery presents transaction-specific guidance,
-  and upgraded projects refresh lock metadata after the launched editor exits instead of remaining falsely in use.
+  tasks. Retryable editor removals now retain their recovery identity out of sight after dismissal instead of becoming
+  permanent task cards, and transient editor checks disappear when they finish. All project dialogs now follow the
+  selected Hub appearance, recovery presents transaction-specific guidance, and upgraded projects refresh lock
+  metadata after the launched editor exits instead of remaining falsely in use.
 - Fixed managed script builds leaving the bundled .NET compiler server alive after editor shutdown, which locked the
-  editor installation on Windows. Repeating a retryable managed-editor removal now resumes its journal-owning task
-  instead of creating a conflicting removal operation.
+  editor installation on Windows. Uninstall also shuts down verified bundled build servers before its commit rename,
+  and a replacement removal task can safely adopt an exact matching journal instead of becoming a conflicting removal
+  owner. Starting another install of an already active editor version now asks whether to download again and chooses a
+  distinct managed destination when confirmed.
 - Fixed Windows custom-caption clicks being consumed after hover without completing the minimize, maximize/restore, or
   close action. Caption buttons now use one native press/release transaction, cancel when released outside their
   original region, and retain Windows 11 Snap Layout discovery on the maximize button.
@@ -28,6 +32,37 @@ version tags.
 
 ## Unreleased
 
+- Added a repeatable Podman matrix for Ubuntu 22.04/24.04, Debian 12, Fedora, Arch, openSUSE Tumbleweed, and Rocky
+  Linux 9. Linux bootstrap now handles all four package-manager families, installs a pinned .NET 10 SDK, bounds native
+  compilation by default, and installs verified Premake, CMake, Ninja, NASM, or patchelf fallbacks when distro
+  binaries are incompatible or unavailable. Older supported distributions receive project-private GCC 12 shims
+  without replacing their system compiler.
+- Fixed GCC/Linux portability defects in renderer, input, logging, audio cleanup, and process-liveness code. Linux
+  process checks now reject reaped-but-still-visible zombie states, Rocky GCC Toolset runtime activation follows every
+  build/run/package path, and shader/compiler runtime publication no longer depends on distro-specific `patchelf`
+  availability. Python tooling remains compatible with Rocky Linux 9's Python 3.9, the native Build Support downloader
+  supports both old and current libcurl HTTPS-policy APIs, and headless client startup is independent from the
+  warnings-as-errors CI compile policy. GCC warnings-as-errors now covers the complete engine, editor, Hub, tests, and
+  client surface without compiler-specific aggregate-initialization noise.
+- Fixed clean Linux and macOS bootstraps failing when Premake evaluated the repository before dependency metadata
+  existed, made SDL's installed CMake package location deterministic across host toolchains, and corrected .NET 10 SDK
+  root discovery for Coral and managed builds. Build and test entrypoints now fingerprint dependency and bootstrap
+  infrastructure so ABI-affecting script updates regenerate project metadata and native dependency caches.
+- Fixed Unix dependency and runtime publication: pinned archives now use exact `-L`/`-l:archive` linker pairs, Jolt is
+  built with the RTTI ABI required by the job-system adapter, and the shader compiler and Asset Worker retain
+  relocatable `$ORIGIN` loader paths with complete runtime-library aliases. Cached shader compilers are executed before
+  acceptance instead of being trusted solely from their stamp.
+- Hardened cross-platform compilation by using POSIX-compatible awk, direct standard-library and POSIX declarations,
+  and fixed-width managed-generation identifiers across Windows LLP64 and Unix LP64 data models. Managed generation
+  sequencing and Hub notice rendering were also split into focused implementation units to keep source-size budgets
+  enforceable without raising their limits. The managed replacement integration test now requires the repository's
+  platform-specific .NET 10 dependency instead of silently skipping behind a Windows-only executable path.
+- Fixed Linux validation and distribution edge cases: intentional assertion probes no longer escape the test harness,
+  AddressSanitizer retains leak detection while excluding only hosted CoreCLR process-lifetime allocations, packaged
+  SDL and FFmpeg files use their real Unix layouts and materialized aliases, and editor installers materialize bundled
+  .NET SDK links into self-contained regular files accepted by deterministic manifests and archives. Undefined
+  Behavior Sanitizer runs now fail on their first diagnostic, and bounded Hub thumbnail resizing uses stb's scalar path
+  instead of its formally invalid SIMD lookup-table pointer arithmetic.
 - Applied the public security-header policy to both ordinary Caddy responses and branded site/docs error routes, with
   regression coverage for the shared policy. The rebuilt 52-guide documentation site was deployed transactionally
   without changing signed catalog bytes, trust headers, ETags, conditional requests, or package range behavior.

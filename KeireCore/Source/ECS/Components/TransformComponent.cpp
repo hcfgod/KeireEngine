@@ -2,6 +2,7 @@
 
 #include "KeireInternal/SceneState.h"
 
+#include <cmath>
 #include <stdexcept>
 
 namespace Keire

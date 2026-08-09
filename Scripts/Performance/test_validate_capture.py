@@ -22,30 +22,29 @@ class PerformanceGateTests(unittest.TestCase):
             snapshot_path = root / "snapshot.txt"
             history_path = root / "history.csv"
             metadata_path = root / "metadata.json"
-            snapshot_path.write_text(snapshot, encoding="utf-8", newline="\n")
-            history_path.write_text(
-                "sequence,duration_us\n"
-                + "".join(f"{index},5000\n" for index in range(300)),
-                encoding="utf-8",
-                newline="\n",
-            )
-            metadata_path.write_text(
-                json.dumps(
-                    {
-                        "hardwareId": "keire-win-rtx3060-i7-12700f",
-                        "gpuBackend": "direct3d12",
-                        "gpuName": "NVIDIA GeForce RTX 3060",
-                        "gpuDriver": "32.0.15.9597",
-                        "cpuName": "12th Gen Intel(R) Core(TM) i7-12700F",
-                        "buildConfiguration": "Release",
-                        "resolution": "3440x1377",
-                        "workload": "sandbox-vfx-reference",
-                        "engineCommit": "0" * 40,
-                    }
-                ),
-                encoding="utf-8",
-                newline="\n",
-            )
+            with snapshot_path.open("w", encoding="utf-8", newline="\n") as stream:
+                stream.write(snapshot)
+            with history_path.open("w", encoding="utf-8", newline="\n") as stream:
+                stream.write(
+                    "sequence,duration_us\n"
+                    + "".join(f"{index},5000\n" for index in range(300))
+                )
+            with metadata_path.open("w", encoding="utf-8", newline="\n") as stream:
+                stream.write(
+                    json.dumps(
+                        {
+                            "hardwareId": "keire-win-rtx3060-i7-12700f",
+                            "gpuBackend": "direct3d12",
+                            "gpuName": "NVIDIA GeForce RTX 3060",
+                            "gpuDriver": "32.0.15.9597",
+                            "cpuName": "12th Gen Intel(R) Core(TM) i7-12700F",
+                            "buildConfiguration": "Release",
+                            "resolution": "3440x1377",
+                            "workload": "sandbox-vfx-reference",
+                            "engineCommit": "0" * 40,
+                        }
+                    )
+                )
             return subprocess.run(
                 [
                     sys.executable,

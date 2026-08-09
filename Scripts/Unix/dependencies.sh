@@ -73,14 +73,15 @@ if command -v sha256sum >/dev/null 2>&1; then bridge_hash="$(sha256sum "$bridge"
 options=(-DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
   -DSDL_AUDIO=OFF -DSDL_CAMERA=OFF -DSDL_JOYSTICK=OFF -DSDL_HAPTIC=OFF -DSDL_SENSOR=OFF
   -DSDL_RENDER=OFF -DSDL_GPU=ON -DSDL_DUMMYVIDEO=ON -DSDL_OFFSCREEN=ON -DSDL_INSTALL=ON
-  -DSDL_INSTALL_DOCS=OFF -DSDL_DEPS_SHARED=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_LIBDIR=lib
+  -DSDL_INSTALL_DOCS=OFF -DSDL_INSTALL_CMAKEDIR_ROOT=cmake -DSDL_DEPS_SHARED=ON
+  -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_LIBDIR=lib
   -DCMAKE_POLICY_VERSION_MINIMUM=3.5
   -DBUILD_SHARED_LIBS=OFF -DASSIMP_BUILD_TESTS=OFF -DASSIMP_BUILD_ASSIMP_TOOLS=OFF -DASSIMP_BUILD_SAMPLES=OFF
   -DASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT=OFF -DASSIMP_BUILD_OBJ_IMPORTER=ON -DASSIMP_BUILD_FBX_IMPORTER=ON
   -DASSIMP_BUILD_GLTF_IMPORTER=ON -DASSIMP_NO_EXPORT=ON
   -DASSIMP_BUILD_ZLIB=ON -DASSIMP_BUILD_DRACO=OFF -DASSIMP_WARNINGS_AS_ERRORS=OFF -DASSIMP_INSTALL=ON
   -DASSIMP_INJECT_DEBUG_POSTFIX=OFF -DASSIMP_IGNORE_GIT_HASH=ON -DLIBRARY_SUFFIX=
-  -DJPH_BUILD_SHARED_LIBS=OFF -DENABLE_INSTALL=ON -DOVERRIDE_CXX_FLAGS=OFF
+  -DJPH_BUILD_SHARED_LIBS=OFF -DCPP_RTTI_ENABLED=ON -DENABLE_INSTALL=ON -DOVERRIDE_CXX_FLAGS=OFF
   -DINTERPROCEDURAL_OPTIMIZATION=OFF -DENABLE_ALL_WARNINGS=OFF
   -DFLOATING_POINT_EXCEPTIONS_ENABLED=OFF -DUSE_SSE4_1=OFF -DUSE_SSE4_2=OFF
   -DUSE_AVX=OFF -DUSE_AVX2=OFF -DUSE_AVX512=OFF -DUSE_LZCNT=OFF
@@ -121,7 +122,7 @@ for configuration in Debug Release; do
   rm -rf "$build"
   mkdir -p "$build"
   cmake -S "$ROOT/Scripts/Dependencies" -B "$build" -G Ninja -DKEIRE_SDL_SOURCE="$ROOT/Vendor/SDL" -DKEIRE_ASSIMP_SOURCE="$ROOT/Vendor/assimp" -DKEIRE_JOLT_SOURCE="$jolt_source" -DKEIRE_RECAST_SOURCE="$recast_source" -DKEIRE_MINIAUDIO_SOURCE="$miniaudio_source" -DCMAKE_BUILD_TYPE="$configuration" -DCMAKE_INSTALL_PREFIX="$install" "${options[@]}"
-  cmake --build "$build" --target install --parallel
+  cmake --build "$build" --target install --parallel "$(build_parallel_jobs)"
   sodium_build="$build/libsodium"
   mkdir -p "$sodium_build"
   sodium_cflags="-O2"
@@ -170,8 +171,8 @@ dotnet_sdk_link="$ROOT/Build/Dependencies/dotnet-sdk"
 mkdir -p "$ROOT/Build/Dependencies"
 ln -sfn "$coral_source" "$coral_link"
 ln -sfn "$(dirname "$coral_nethost_library")" "$nethost_link"
-dotnet_sdk_directory="$(dotnet --list-sdks | awk '$1 ~ /^10[.]/ { line=$0 } END { sub(/^.*\\[/, "", line); sub(/\\].*$/, "", line); print line }')"
-ln -sfn "$(dirname "$dotnet_sdk_directory")" "$dotnet_sdk_link"
+dotnet_root="$(dotnet_sdk_root dotnet 10)" || exit 1
+ln -sfn "$dotnet_root" "$dotnet_sdk_link"
 nethost_name="$(basename "$coral_nethost_library")"
 
 managed_output="$ROOT/Build/Managed"

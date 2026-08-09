@@ -1,8 +1,48 @@
 #!/usr/bin/env bash
 
 config_value() {
-    local file="$1" key="$2"
-    awk -v key="$key" 'index($0, key "=") == 1 { value = substr($0, length(key) + 2); sub(/\r$/, "", value); print value; exit }' "$file"
+    local file="$1" key="$2" line prefix
+    prefix="$key="
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%$'\r'}"
+        if [[ "$line" == "$prefix"* ]]; then
+            printf '%s\n' "${line#"$prefix"}"
+            return 0
+        fi
+    done < "$file"
+}
+
+tool_version_from_temporary_directory() {
+    local executable="$1" temporary_directory output="" status
+    shift
+    temporary_directory="$(mktemp -d)"
+    if output="$(cd "$temporary_directory" && "$executable" "$@")"; then
+        status=0
+    else
+        status=$?
+    fi
+    rm -rf "$temporary_directory"
+    printf '%s\n' "$output"
+    return "$status"
+}
+
+dotnet_sdk_root() {
+    local executable="$1" major="$2" listing line sdk_directory=""
+    listing="$("$executable" --list-sdks)" || {
+        printf 'Unable to query installed .NET SDKs with %s.\n' "$executable" >&2
+        return 1
+    }
+    while IFS= read -r line; do
+        [[ "$line" == "$major."* ]] || continue
+        if [[ "$line" =~ \[([^][]+)\][[:space:]]*$ ]]; then
+            sdk_directory="${BASH_REMATCH[1]}"
+        fi
+    done <<< "$listing"
+    [[ -n "$sdk_directory" && -d "$sdk_directory" ]] || {
+        printf 'A valid .NET %s SDK installation was not found.\n' "$major" >&2
+        return 1
+    }
+    dirname "$sdk_directory"
 }
 
 load_project_config() {
@@ -56,6 +96,19 @@ project_generation_fingerprint() {
             cksum "$source_root"
         done
         find "$root/Scripts/Premake" -type f -name '*.lua' -print | LC_ALL=C sort | while IFS= read -r source_root; do
+            cksum "$source_root"
+        done
+        for source_root in \
+          Scripts/Unix/common.sh Scripts/Windows/common.ps1 \
+          Scripts/Linux/bootstrap.sh Scripts/Linux/generate.sh Scripts/Mac/bootstrap.sh Scripts/Mac/generate.sh \
+          Scripts/Windows/bootstrap.ps1 Scripts/Windows/generate.ps1 \
+          Scripts/Unix/dependencies.sh Scripts/Windows/dependencies.ps1 \
+          Scripts/Unix/shader-compiler.sh Scripts/Windows/shader-compiler.ps1 \
+          Scripts/Unix/coral.sh Scripts/Windows/coral.ps1 Scripts/Unix/ffmpeg.sh Scripts/Windows/ffmpeg.ps1 \
+          Scripts/Unix/vendor.sh Scripts/Linux/vendor.sh Scripts/Mac/vendor.sh Scripts/Windows/vendor.ps1; do
+            [[ -f "$root/$source_root" ]] && cksum "$root/$source_root"
+        done
+        find "$root/Scripts/Dependencies" -type f -print | LC_ALL=C sort | while IFS= read -r source_root; do
             cksum "$source_root"
         done
         cksum "$root/Config/Project.conf" "$root/Config/Dependencies.lock"
@@ -652,23 +705,39 @@ resolve_llvm_tool() {
 package_name() {
     local manager="$1" logical="$2"
     case "$manager:$logical" in
-        apt-get:ninja|dnf:ninja|zypper:ninja) printf 'ninja-build' ;;
-        pacman:ninja) printf 'ninja' ;;
+        apt-get:ninja|dnf:ninja) printf 'ninja-build' ;;
+        pacman:ninja|zypper:ninja) printf 'ninja' ;;
         apt-get:cxx) printf 'g++' ;;
         dnf:cxx|zypper:cxx) printf 'gcc-c++' ;;
         pacman:cxx) printf 'gcc' ;;
+        apt-get:modern-cxx) printf 'gcc-12 g++-12' ;;
+        dnf:modern-cxx) printf 'gcc-toolset-12-gcc gcc-toolset-12-gcc-c++' ;;
         apt-get:build) printf 'build-essential' ;;
         dnf:build|zypper:build) printf 'gcc-c++ make' ;;
         pacman:build) printf 'base-devel' ;;
         pacman:python) printf 'python' ;;
         *:python) printf 'python3' ;;
+        apt-get:perl-json) printf 'libjson-perl' ;;
+        dnf:perl-json|zypper:perl-json) printf 'perl-JSON' ;;
+        pacman:perl-json) printf 'perl-json' ;;
+        dnf:perl-open) printf 'perl-open' ;;
+        apt-get:perl-open|pacman:perl-open|zypper:perl-open) printf 'perl' ;;
+        apt-get:dotnet-runtime-deps) printf 'ca-certificates libicu-dev libssl-dev libgssapi-krb5-2 zlib1g' ;;
+        dnf:dotnet-runtime-deps) printf 'ca-certificates libicu openssl-libs krb5-libs zlib' ;;
+        pacman:dotnet-runtime-deps) printf 'ca-certificates icu openssl krb5 zlib' ;;
+        zypper:dotnet-runtime-deps) printf 'ca-certificates libicu-devel libopenssl3 krb5 libz1' ;;
+        apt-get:curl-dev) printf 'libcurl4-openssl-dev' ;;
+        dnf:curl-dev|zypper:curl-dev) printf 'libcurl-devel' ;;
+        pacman:curl-dev) printf 'curl' ;;
+        apt-get:awk) printf 'mawk' ;;
+        dnf:awk|pacman:awk|zypper:awk) printf 'gawk' ;;
         apt-get:uuid) printf 'uuid-dev' ;;
         dnf:uuid|zypper:uuid) printf 'libuuid-devel' ;;
         pacman:uuid) printf 'util-linux-libs' ;;
-        apt-get:sdl-video) printf 'libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libwayland-dev libxkbcommon-dev libdrm-dev libgbm-dev' ;;
-        dnf:sdl-video) printf 'libX11-devel libXext-devel libXrandr-devel libXcursor-devel libXfixes-devel libXi-devel libXScrnSaver-devel wayland-devel libxkbcommon-devel libdrm-devel mesa-libgbm-devel' ;;
-        pacman:sdl-video) printf 'libx11 libxext libxrandr libxcursor libxfixes libxi libxss wayland libxkbcommon libdrm mesa' ;;
-        zypper:sdl-video) printf 'libX11-devel libXext-devel libXrandr-devel libXcursor-devel libXfixes-devel libXi-devel libXss-devel wayland-devel libxkbcommon-devel libdrm-devel Mesa-libgbm-devel' ;;
+        apt-get:sdl-video) printf 'libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev libwayland-dev libxkbcommon-dev libdrm-dev libgbm-dev' ;;
+        dnf:sdl-video) printf 'libX11-devel libXext-devel libXrandr-devel libXcursor-devel libXfixes-devel libXi-devel libXScrnSaver-devel libXtst-devel wayland-devel libxkbcommon-devel libdrm-devel mesa-libgbm-devel' ;;
+        pacman:sdl-video) printf 'libx11 libxext libxrandr libxcursor libxfixes libxi libxss libxtst wayland libxkbcommon libdrm mesa' ;;
+        zypper:sdl-video) printf 'libX11-devel libXext-devel libXrandr-devel libXcursor-devel libXfixes-devel libXi-devel libXss-devel libXtst-devel wayland-devel libxkbcommon-devel libdrm-devel libgbm-devel' ;;
         *:llvm) printf 'llvm' ;;
         *:*) printf '%s' "$logical" ;;
     esac
@@ -676,7 +745,8 @@ package_name() {
 
 package_install_arguments() {
     case "$1" in
-        apt-get|dnf) printf '%s\n' -y ;;
+        apt-get) printf '%s\n' -y ;;
+        dnf) printf '%s\n' install -y ;;
         pacman) printf '%s\n' -Syu --needed --noconfirm ;;
         zypper) printf '%s\n' --non-interactive install ;;
         *) printf "Unsupported package manager '%s'.\n" "$1" >&2; return 1 ;;
@@ -689,6 +759,33 @@ run_checked() {
     if [[ $status -ne 0 ]]; then
         printf "Command failed with exit code %s: %s\n" "$status" "$*" >&2
         return "$status"
+    fi
+}
+
+build_parallel_jobs() {
+    local detected
+    if [[ -n "${KEIRE_BUILD_JOBS:-}" ]]; then
+        if [[ ! "$KEIRE_BUILD_JOBS" =~ ^[1-9][0-9]*$ ]]; then
+            printf 'KEIRE_BUILD_JOBS must be a positive integer.\n' >&2
+            return 1
+        fi
+        printf '%s\n' "$KEIRE_BUILD_JOBS"
+        return 0
+    fi
+
+    detected="$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf 1)"
+    [[ "$detected" =~ ^[1-9][0-9]*$ ]] || detected=1
+    ((detected > 4)) && detected=4
+    printf '%s\n' "$detected"
+}
+
+activate_linux_toolchain() {
+    local root="$1" toolset="$2" environment
+    [[ "$toolset" == gcc ]] || return 0
+    environment="$root/Tools/Linux/gcc-environment.sh"
+    if [[ -f "$environment" ]]; then
+        # shellcheck disable=SC1090
+        source "$environment"
     fi
 }
 

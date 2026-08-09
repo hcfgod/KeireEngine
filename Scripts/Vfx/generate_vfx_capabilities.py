@@ -130,7 +130,8 @@ def main() -> int:
             print(f"Generated VFX capability reference is current: {options.output}")
             return 0
         options.output.parent.mkdir(parents=True, exist_ok=True)
-        options.output.write_text(encoded, encoding="utf-8", newline="\n")
+        with options.output.open("w", encoding="utf-8", newline="\n") as stream:
+            stream.write(encoded)
         print(f"Generated {options.output}")
         return 0
     except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:

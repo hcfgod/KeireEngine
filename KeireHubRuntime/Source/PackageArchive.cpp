@@ -417,10 +417,10 @@ namespace KeireHub
         template <typename Integer>
         [[nodiscard]] Integer DecodeLittleEndian(const std::span<const std::byte, sizeof(Integer)> bytes)
         {
-            Integer result = 0;
+            std::uintmax_t result = 0;
             for (std::size_t index = 0; index < bytes.size(); ++index)
-                result |= static_cast<Integer>(std::to_integer<unsigned>(bytes[index])) << (index * 8U);
-            return result;
+                result |= static_cast<std::uintmax_t>(std::to_integer<unsigned>(bytes[index])) << (index * 8U);
+            return static_cast<Integer>(result);
         }
 
         struct ContextDeleter final

@@ -11,6 +11,7 @@
 #include <ranges>
 #include <sstream>
 #include <string_view>
+#include <system_error>
 #include <tuple>
 #include <utility>
 
@@ -98,6 +99,40 @@ namespace KeireHub
                 result += " +" + std::to_string(packageIds.size() - visible);
             return result;
         }
+
+        [[nodiscard]] bool DestinationUnavailable(const std::filesystem::path& destination,
+                                                  const std::span<const HubTaskUiRecord> tasks)
+        {
+            if (std::ranges::any_of(tasks,
+                                    [&](const HubTaskUiRecord& task)
+                                    {
+                                        return task.Active && !task.EditorDestination.empty() &&
+                                               task.EditorDestination.lexically_normal() ==
+                                                   destination.lexically_normal();
+                                    }))
+            {
+                return true;
+            }
+            std::error_code error;
+            const auto status = std::filesystem::symlink_status(destination, error);
+            return error ? error != std::errc::no_such_file_or_directory
+                         : status.type() != std::filesystem::file_type::not_found;
+        }
+
+        [[nodiscard]] std::filesystem::path NextEditorInstallDestination(const std::filesystem::path& preferred,
+                                                                         const std::span<const HubTaskUiRecord> tasks)
+        {
+            if (!DestinationUnavailable(preferred, tasks))
+                return preferred;
+            for (std::size_t suffix = 2; suffix <= 1'000; ++suffix)
+            {
+                const auto candidate = preferred.parent_path() / PathFromUtf8(Utf8Path(preferred.filename()) + " (" +
+                                                                              std::to_string(suffix) + ')');
+                if (!DestinationUnavailable(candidate, tasks))
+                    return candidate;
+            }
+            return preferred;
+        }
     } // namespace
 
     bool HubProductUi::RequestEditorInstall(const std::string_view packageOrVersion, const HubProductSnapshot& snapshot)
@@ -145,6 +180,8 @@ namespace KeireHub
         m_EditorComponentSearch.clear();
         m_SelectedEditorComponents.clear();
         m_LastEditorInstallRequest.reset();
+        m_ConfirmDuplicateEditorInstall =
+            HasActiveEditorInstall(snapshot.Tasks, candidate->PackageId, candidate->Version);
         m_RequestEditorInstall = true;
         return true;
     }
@@ -176,6 +213,7 @@ namespace KeireHub
                 auto id = ui.PushId(editor.PackageId + "@" + editor.Version);
                 if (auto card = ui.BeginChild("AvailableEditor", {0.0F, 166.0F}, true); card)
                 {
+                    const bool activeInstall = HasActiveEditorInstall(snapshot.Tasks, editor.PackageId, editor.Version);
                     ui.TextColored(m_Tokens.PrimaryText,
                                    editor.DisplayName.empty() ? "Kéire Editor " + editor.Version : editor.DisplayName);
                     ui.TextColored(m_Tokens.SecondaryText,
@@ -188,7 +226,9 @@ namespace KeireHub
                         ui.TextColored(m_Tokens.Success, "Installed");
                     else if (auto disabled = ui.BeginDisabled(snapshot.EditorManagementBusy); disabled)
                     {
-                        if (ui.Button("Install...", {96.0F, 30.0F}))
+                        if (activeInstall)
+                            ui.TextColored(m_Tokens.Warning, "Download or installation already in progress");
+                        if (ui.Button(activeInstall ? "Install again..." : "Install...", {116.0F, 30.0F}))
                             (void)RequestEditorInstall(editor.PackageId, snapshot);
                     }
                 }
@@ -220,6 +260,32 @@ namespace KeireHub
 
         const auto& editor = *m_PendingEditorInstall;
         const auto editorName = editor.DisplayName.empty() ? std::string("Kéire Editor") : editor.DisplayName;
+        if (m_ConfirmDuplicateEditorInstall)
+        {
+            DrawHubModalHeader(ui, m_Tokens, "Editor version already downloading",
+                               editorName + " " + editor.Version + " already has an active download or installation.",
+                               "INSTALLS  •  CONFIRM");
+            ui.TextColoredWrapped(
+                m_Tokens.Warning,
+                "Downloading again will create another managed copy in a different location. Continue?");
+            if (HubPrimaryButton(ui, m_Tokens, "Download again", {144.0F, 38.0F}))
+            {
+                m_EditorInstallDestination = Utf8Path(NextEditorInstallDestination(
+                    PathFromUtf8(m_EditorInstallDestination).lexically_normal(), snapshot.Tasks));
+                m_ConfirmDuplicateEditorInstall = false;
+            }
+            ui.SameLine();
+            if (HubSecondaryButton(ui, m_Tokens, "Not now", {88.0F, 38.0F}))
+            {
+                m_PendingEditorInstall.reset();
+                m_LastEditorInstallRequest.reset();
+                m_EditorComponentSearch.clear();
+                m_SelectedEditorComponents.clear();
+                m_ConfirmDuplicateEditorInstall = false;
+                ui.CloseCurrentPopup();
+            }
+            return;
+        }
         auto request = BuildRequest(editor, m_EditorInstallDestination, m_SelectedEditorComponents);
         bool previewMatches = snapshot.EditorInstallPreview && snapshot.EditorInstallPreview->Request == request;
         DrawHubModalHeader(ui, m_Tokens, previewMatches ? "Review editor installation" : "Configure editor install",
@@ -334,6 +400,7 @@ namespace KeireHub
                     m_LastEditorInstallRequest.reset();
                     m_EditorComponentSearch.clear();
                     m_SelectedEditorComponents.clear();
+                    m_ConfirmDuplicateEditorInstall = false;
                     ui.CloseCurrentPopup();
                 }
             }
@@ -345,6 +412,7 @@ namespace KeireHub
             m_LastEditorInstallRequest.reset();
             m_EditorComponentSearch.clear();
             m_SelectedEditorComponents.clear();
+            m_ConfirmDuplicateEditorInstall = false;
             ui.CloseCurrentPopup();
         }
     }

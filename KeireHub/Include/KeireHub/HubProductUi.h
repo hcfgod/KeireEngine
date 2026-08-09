@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -149,7 +150,22 @@ namespace KeireHub
         bool Cancellable = false;
         bool Retryable = false;
         bool Dismissible = false;
+        std::string EditorPackageId;
+        std::string EditorVersion;
+        std::filesystem::path EditorDestination;
     };
+
+    [[nodiscard]] inline bool HasActiveEditorInstall(const std::span<const HubTaskUiRecord> tasks,
+                                                     const std::string_view packageId,
+                                                     const std::string_view version) noexcept
+    {
+        for (const auto& task : tasks)
+        {
+            if (task.Active && task.EditorPackageId == packageId && task.EditorVersion == version)
+                return true;
+        }
+        return false;
+    }
 
     struct HubNotificationUiRecord final
     {
@@ -382,6 +398,7 @@ namespace KeireHub
         bool m_RequestEditorRemoval = false;
         bool m_ConfirmManagedEditorRemoval = false;
         bool m_RequestEditorInstall = false;
+        bool m_ConfirmDuplicateEditorInstall = false;
         bool m_RequestResetSettings = false;
         bool m_RequestClearCache = false;
         std::size_t m_FirstRunStep = 0;

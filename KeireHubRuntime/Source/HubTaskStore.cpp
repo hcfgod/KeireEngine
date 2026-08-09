@@ -1,5 +1,7 @@
 #include "KeireHubRuntime/HubTaskStore.h"
 
+#include "KeireHubRuntime/PackageResolver.h"
+
 #include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <algorithm>
@@ -18,6 +20,19 @@ namespace KeireHub
         {
             return task.Kind == HubTaskKind::Remove && task.State == HubTaskState::Failed && task.Failure &&
                    task.Failure->Retryable;
+        }
+
+        [[nodiscard]] bool IsValidTaskPath(const std::filesystem::path& path) noexcept
+        {
+            try
+            {
+                return !path.empty() && path.is_absolute() && path != path.root_path() &&
+                       path.generic_u8string().size() <= 4096;
+            }
+            catch (...)
+            {
+                return false;
+            }
         }
 
         [[nodiscard]] std::string_view ToString(const HubTaskKind value) noexcept
@@ -49,11 +64,17 @@ namespace KeireHub
 
         [[nodiscard]] HubStatus Validate(const HubTask& task)
         {
+            const bool invalidEditorInstall =
+                task.EditorInstall &&
+                (task.Kind != HubTaskKind::Install || !Detail::IsBoundedIdentifier(task.EditorInstall->PackageId) ||
+                 !SemanticVersion::Parse(task.EditorInstall->Version) ||
+                 !IsValidTaskPath(task.EditorInstall->Destination));
             if (task.Kind < HubTaskKind::Download || task.Kind > HubTaskKind::CreateProject ||
                 task.State < HubTaskState::Queued || task.State > HubTaskState::Cancelled ||
                 !Detail::IsBoundedIdentifier(task.Id) || task.DisplayName.empty() || task.DisplayName.size() > 512 ||
                 task.PackageIds.size() > MaximumPackagesPerTask ||
                 (task.TargetInstallationId && !Detail::IsBoundedIdentifier(*task.TargetInstallationId)) ||
+                invalidEditorInstall || (task.HiddenFromHistory && !IsTerminal(task.State)) ||
                 task.Progress.Attempt > 1'000'000U || task.Progress.CurrentPackage.size() > 256 ||
                 task.Progress.Phase.size() > 256 ||
                 (task.Progress.TotalBytes != 0 && task.Progress.BytesTransferred > task.Progress.TotalBytes))
@@ -121,6 +142,14 @@ namespace KeireHub
                                    {"updated", task.UpdatedUnixSeconds}};
                 if (task.TargetInstallationId)
                     value["targetInstallationId"] = *task.TargetInstallationId;
+                if (task.EditorInstall)
+                {
+                    value["editorInstall"] = {{"packageId", task.EditorInstall->PackageId},
+                                              {"version", task.EditorInstall->Version},
+                                              {"destination", Detail::PathToUtf8(task.EditorInstall->Destination)}};
+                }
+                if (task.HiddenFromHistory)
+                    value["hiddenFromHistory"] = true;
                 if (task.WorkerProcessId)
                     value["workerProcessId"] = *task.WorkerProcessId;
                 if (task.Failure)
@@ -184,6 +213,15 @@ namespace KeireHub
                     task.PackageIds = value.at("packageIds").get<std::vector<std::string>>();
                     if (value.contains("targetInstallationId"))
                         task.TargetInstallationId = value.at("targetInstallationId").get<std::string>();
+                    if (value.contains("editorInstall"))
+                    {
+                        const auto& install = value.at("editorInstall");
+                        task.EditorInstall = HubEditorInstallTaskMetadata{
+                            .PackageId = install.at("packageId").get<std::string>(),
+                            .Version = install.at("version").get<std::string>(),
+                            .Destination = Detail::PathFromUtf8(install.at("destination").get<std::string>())};
+                    }
+                    task.HiddenFromHistory = value.value("hiddenFromHistory", false);
                     const auto& progress = value.at("progress");
                     task.Progress.BytesTransferred = progress.value("bytesTransferred", 0ULL);
                     task.Progress.TotalBytes = progress.value("totalBytes", 0ULL);
@@ -366,7 +404,10 @@ namespace KeireHub
         found->UpdatedUnixSeconds = updatedUnixSeconds;
         found->Failure = std::move(failure);
         if (state == HubTaskState::Queued)
+        {
             found->Progress = {};
+            found->HiddenFromHistory = false;
+        }
         if (IsTerminal(state) || state == HubTaskState::Paused || state == HubTaskState::Queued)
             found->WorkerProcessId.reset();
         return Commit(std::move(tasks));
@@ -433,9 +474,12 @@ namespace KeireHub
                                        .Message = "An active task cannot be removed from history.",
                                        .AffectedItem = taskId});
         if (OwnsRetryableRemovalRecovery(*found))
-            return HubStatus::Failure({.Code = HubErrorCode::InvalidTransition,
-                                       .Message = "Retry or resolve this editor removal before dismissing it.",
-                                       .AffectedItem = taskId});
+        {
+            if (found->HiddenFromHistory)
+                return HubStatus::Success();
+            found->HiddenFromHistory = true;
+            return Commit(std::move(tasks));
+        }
         tasks.erase(found);
         return Commit(std::move(tasks));
     }
@@ -444,9 +488,18 @@ namespace KeireHub
     {
         auto tasks = *m_Snapshot;
         const auto previousSize = tasks.size();
+        bool changed = false;
+        for (auto& task : tasks)
+        {
+            if (OwnsRetryableRemovalRecovery(task) && !task.HiddenFromHistory)
+            {
+                task.HiddenFromHistory = true;
+                changed = true;
+            }
+        }
         std::erase_if(tasks, [](const HubTask& task)
                       { return IsTerminal(task.State) && !OwnsRetryableRemovalRecovery(task); });
-        if (tasks.size() == previousSize)
+        if (!changed && tasks.size() == previousSize)
             return HubStatus::Success();
         return Commit(std::move(tasks));
     }

@@ -1,5 +1,6 @@
 #include "KeireInternal/Assets/AssetDatabaseImplementation.h"
 
+#include <algorithm>
 #include <memory>
 
 namespace Keire
@@ -87,8 +88,7 @@ namespace Keire
         m_Impl->SourceRevision.fetch_add(1, std::memory_order_release);
         m_Impl->RequestChangeMonitorScan();
         std::erase_if(m_Impl->ImportStatuses,
-                      [this](const auto& entry)
-                      {
+                      [this](const auto& entry) {
                           return std::ranges::find(m_Impl->Records, entry.first, &AssetSourceRecord::Id) ==
                                  m_Impl->Records.end();
                       });
