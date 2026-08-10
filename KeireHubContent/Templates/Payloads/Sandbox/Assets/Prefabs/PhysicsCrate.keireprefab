@@ -1,0 +1,28 @@
+{
+  "prefabSchemaVersion": 1,
+  "basePrefab": null,
+  "schemaVersion": 3,
+  "name": "PhysicsCrate",
+  "entities": [
+    {
+      "id": "73616e64-626f-4078-8000-000000000101",
+      "parent": null,
+      "name": "Physics Crate",
+      "active": true,
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [0.0, 1.0, 0.0],
+            "rotation": [0.0, 0.0, 0.0, 1.0],
+            "scale": [1.0, 1.0, 1.0]
+          }
+        }
+      ]
+    }
+  ],
+  "prefabInstances": [],
+  "prefabOverrides": []
+}

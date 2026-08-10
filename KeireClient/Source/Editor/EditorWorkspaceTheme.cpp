@@ -325,7 +325,7 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
             DrawPanelMenuItem(ui, m_RiggingStudioPanel->Registration());
             DrawPanelMenuItem(ui, m_AudioMixerPanel->Registration());
             DrawPanelMenuItem(ui, m_VfxEffectPanel->Registration());
-            DrawPanelMenuItem(ui, m_MaterialGraphPanel->Registration());
+            DrawPanelMenuItem(ui, m_ShaderGraphPanel->Registration());
             DrawPanelMenuItem(ui, m_InputDebugger);
             DrawPanelMenuItem(ui, m_ProjectSettingsPanel->Registration());
             DrawPanelMenuItem(ui, m_LightingPanel->Registration());
@@ -498,8 +498,8 @@ void EditorWorkspaceLayer::OpenPendingDialog(Keire::UiFrame& ui)
     case Dialog::DirtyScene:
         ui.OpenPopup("Unsaved Scene Changes");
         break;
-    case Dialog::DirtyMaterialGraph:
-        ui.OpenPopup("Unsaved Material Graph Changes");
+    case Dialog::DirtyShaderGraph:
+        ui.OpenPopup("Unsaved Shader Graph Changes");
         break;
     case Dialog::DirtyPlayerBuild:
         ui.OpenPopup("Unsaved Player Build State");
@@ -524,7 +524,7 @@ void EditorWorkspaceLayer::DrawDialogs(Keire::UiFrame& ui, Keire::UiWorkspace& w
     DrawDeleteDialog(ui, workspace, "Delete Theme", true);
     DrawDirtyThemeDialog(ui, workspace);
     DrawDirtySceneDialog(ui);
-    DrawDirtyMaterialGraphDialog(ui);
+    DrawDirtyShaderGraphDialog(ui);
     DrawDirtyPlayerBuildDialog(ui);
 }
 
@@ -732,17 +732,17 @@ void EditorWorkspaceLayer::DrawDirtySceneDialog(Keire::UiFrame& ui)
     }
 }
 
-void EditorWorkspaceLayer::DrawDirtyMaterialGraphDialog(Keire::UiFrame& ui)
+void EditorWorkspaceLayer::DrawDirtyShaderGraphDialog(Keire::UiFrame& ui)
 {
-    if (auto popup = ui.BeginPopupModal("Unsaved Material Graph Changes"); popup)
+    if (auto popup = ui.BeginPopupModal("Unsaved Shader Graph Changes"); popup)
     {
-        ui.Text("Save the open Material Graph before closing the editor?");
+        ui.Text("Save the open Shader Graph before closing the editor?");
         if (ui.Button("Save"))
         {
             try
             {
-                SaveMaterialGraph();
-                if (!m_MaterialGraphDocument->Dirty())
+                SaveShaderGraph();
+                if (!m_ShaderGraphDocument->Dirty())
                 {
                     ui.CloseCurrentPopup();
                     ExecutePendingSceneAction();
@@ -750,13 +750,13 @@ void EditorWorkspaceLayer::DrawDirtyMaterialGraphDialog(Keire::UiFrame& ui)
             }
             catch (const std::exception& error)
             {
-                ReportError("Material Graph", error.what());
+                ReportError("Shader Graph", error.what());
             }
         }
         ui.SameLine();
         if (ui.Button("Discard"))
         {
-            m_MaterialGraphDocument->Discard();
+            m_ShaderGraphDocument->Discard();
             ui.CloseCurrentPopup();
             ExecutePendingSceneAction();
         }

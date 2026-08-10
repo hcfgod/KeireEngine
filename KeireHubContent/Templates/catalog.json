@@ -91,32 +91,640 @@
     },
     {
       "id": "keire.sandbox",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "displayName": "Kéire Sandbox",
-      "description": "A clean learning sample with a runtime assembly and an introductory behavior.",
+      "description": "The complete Kéire production Sandbox with Shader Graph, Material Graph, VFX, scripting, rendering, physics, UI, audio, meshes, textures, and staged example scenes.",
       "category": "learning",
       "tags": [
         "Sample",
         "Learning",
+        "Shader Graph",
+        "Material Graph",
+        "VFX",
         "Scripting"
       ],
       "thumbnail": "Thumbnails/sandbox.png",
       "screenshots": [],
-      "compatibleEditors": ">=0.1.0 <2.0.0",
+      "compatibleEditors": ">=0.2.0 <2.0.0",
       "projectSchema": 3,
       "platformTarget": "desktop",
-      "estimatedSizeBytes": 967,
+      "estimatedSizeBytes": 24626369,
       "payloadRoot": "Payloads/Sandbox",
       "payloadFiles": [
         {
-          "path": "Assets/Scripts/Runtime/SandboxWelcome.cs",
-          "sizeBytes": 260,
-          "sha256": "7d8099551c94a968dad14dddf8b0d04c7b15266da05dcbf9ff6829d880bd9692"
+          "path": ".gitignore",
+          "sizeBytes": 32,
+          "sha256": "7e3260c8ab793f075ae88b78f9983f8300b95a407c6de5fa653f21e342166933"
         },
         {
-          "path": "Assets/Scripts/Sandbox.keireasm",
+          "path": "Assets/Audio/InterfaceConfirm.wav",
+          "sizeBytes": 30764,
+          "sha256": "3cc5c10c44dc8420c364dcef69bcd85a7efa5a7b2267ee91a3ad63f009b76cf5"
+        },
+        {
+          "path": "Assets/Audio/InterfaceConfirm.wav.keiremeta",
+          "sizeBytes": 269,
+          "sha256": "c73a753961bf71ffcff5e08f003e85a1ff4244756008093f8a85d1080e41d284"
+        },
+        {
+          "path": "Assets/Audio/MainMixer.keiremixer",
+          "sizeBytes": 342,
+          "sha256": "eb8ff8e6f579bfc0483fa6ffdf1d411195e38931f0e5bbb55d9614e725038492"
+        },
+        {
+          "path": "Assets/Audio/MainMixer.keiremixer.keiremeta",
+          "sizeBytes": 222,
+          "sha256": "1090c3896b2446fe149b966737b0ccee8009293bc6018cfcdddd0b960ab23ab0"
+        },
+        {
+          "path": "Assets/Audio/SpatialEmitter.wav",
+          "sizeBytes": 172844,
+          "sha256": "b2f50427d555fa736d43c3dcc9ef11ca8a0acccbb75496b5139d31f0d64fcac6"
+        },
+        {
+          "path": "Assets/Audio/SpatialEmitter.wav.keiremeta",
+          "sizeBytes": 269,
+          "sha256": "27751604f58a0e0255732e7c159bc08ae0ad943d0eae734f188f23b3d601dbf1"
+        },
+        {
+          "path": "Assets/Input/DefaultInput.keireinput",
+          "sizeBytes": 20330,
+          "sha256": "a36c6d912bc1ba73c7374c621fe5f7b01e3f7e6fedd02d40c69079ed2365f35a"
+        },
+        {
+          "path": "Assets/Input/DefaultInput.keireinput.keiremeta",
+          "sizeBytes": 224,
+          "sha256": "956c4bf5ca3c9a827416f12b9ab631fc43472a923ee54735074c14dee15b884f"
+        },
+        {
+          "path": "Assets/Materials/DefaultUnlit.keirematerial",
+          "sizeBytes": 237,
+          "sha256": "6fc9428f56bb90f829949fdbb89e1711832f382785b741958b8387ddd5895adc"
+        },
+        {
+          "path": "Assets/Materials/DefaultUnlit.keirematerial.keiremeta",
+          "sizeBytes": 266,
+          "sha256": "d6faac4d991dac6b028d82597651176acb98559a89bcdc20c39507166d57d500"
+        },
+        {
+          "path": "Assets/Materials/Material.keirematerial",
+          "sizeBytes": 283,
+          "sha256": "61d70747292f6af40e19f6b29b358bb9ccc293453e8971a9999841bc79a1d6dc"
+        },
+        {
+          "path": "Assets/Materials/Material.keirematerial.keiremeta",
+          "sizeBytes": 220,
+          "sha256": "b7164e805c32a6d676e3aa46b2c6ccbd57837831cc66fe2548d27429f3d7fb1b"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/01_BasicPaint.keirematerialgraph",
+          "sizeBytes": 1434,
+          "sha256": "4c5be8b8c3d23f396c7df2b74ab454885b209d396520393665c2df0ac5ce27fb"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/01_BasicPaint.keirematerialgraph.keiremeta",
+          "sizeBytes": 377,
+          "sha256": "12f8f6f0d79ec336ab6820bb7f0c51222533dcfe63df3bcc99c43ae7025f82f7"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/01_BasicPaint_Shader.keireshadergraph",
+          "sizeBytes": 9767,
+          "sha256": "91b814a66041aeba401b29ff15ea4a69bc4f7fc7e07f7696a9003d86e8acbe40"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/01_BasicPaint_Shader.keireshadergraph.keiremeta",
+          "sizeBytes": 314,
+          "sha256": "f74966d605f4f296e1cfe36a5cf4e377d0f40dcf8ced912e210830526270816a"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/02_TexturedSurface.keirematerialgraph",
+          "sizeBytes": 1770,
+          "sha256": "d9094f600d0183170392fcbf105b9cf3889bb3dbe9865027ba3398d2322aedf6"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/02_TexturedSurface.keirematerialgraph.keiremeta",
+          "sizeBytes": 377,
+          "sha256": "d3d7c37ed3660eb6302869a86ea824a9de9dcab484062df8c76758aca13ecb72"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/02_TexturedSurface_Shader.keireshadergraph",
+          "sizeBytes": 27080,
+          "sha256": "e6c7d4c5fe9e514a62ce1432f2a556e098e89ede6506c6f26c405e968bcc3b09"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/02_TexturedSurface_Shader.keireshadergraph.keiremeta",
+          "sizeBytes": 314,
+          "sha256": "c8c7e35274ba7f87c39bce96cca988db63cc8a4927d0c46b08573abdfe853bc3"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/03_ProceduralEmissive.keirematerialgraph",
+          "sizeBytes": 1632,
+          "sha256": "f3b6ec92db16846c74e78c7ad07c93f73fcd22f60646d08e34e3d3e5e1073487"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/03_ProceduralEmissive.keirematerialgraph.keiremeta",
+          "sizeBytes": 377,
+          "sha256": "6491a70fc943062bf402c5ca71ee07a240006c75b8960e678f3490d5857c0a28"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/03_ProceduralEmissive_Shader.keireshadergraph",
+          "sizeBytes": 31673,
+          "sha256": "e0ff6560ceb31913d8af062365366476bab8216236131538710c745a1cb200f3"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/03_ProceduralEmissive_Shader.keireshadergraph.keiremeta",
+          "sizeBytes": 314,
+          "sha256": "46a0e8e6f87cef878ddf429376bdc572ac974d4d515e073cbe640a4b8ea739d8"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/04_ClearCoatDetail.keirematerialgraph",
+          "sizeBytes": 1737,
+          "sha256": "1f5559a8fee406d197ce7a96a28220eb3b355064760c88d3d4029d9f52f43ad0"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/04_ClearCoatDetail.keirematerialgraph.keiremeta",
+          "sizeBytes": 377,
+          "sha256": "1e444834c83784cb7eef517dc23bd15b4b3c948ba8ea188c957d6a25e4785bf7"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/04_ClearCoatDetail_Shader.keireshadergraph",
+          "sizeBytes": 39288,
+          "sha256": "e1c8bb8b4e926737412e5e030cb28d55dfe7875770accec68610de4ad5e19213"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/04_ClearCoatDetail_Shader.keireshadergraph.keiremeta",
+          "sizeBytes": 314,
+          "sha256": "7954c13a9358341a1bcaffc081ec3a979b8c6d60950f69a5255950bd14349d95"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/05_AdaptiveTechSurface.keirematerialgraph",
+          "sizeBytes": 1990,
+          "sha256": "d8f6b6f241300fb1985a8f895cf8e6c2a9bfbe53b815a6d2dec9502372dad3fe"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/05_AdaptiveTechSurface.keirematerialgraph.keiremeta",
+          "sizeBytes": 377,
+          "sha256": "8a0652b41f7cd17f54846e06269696f9d74c63a4a7518a475c85e9ace2ecc81c"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/05_AdaptiveTechSurface_Shader.keireshadergraph",
+          "sizeBytes": 54485,
+          "sha256": "77d8a93b718da184881fbd8900917f717cdf8cab33da8309189f9c003ea5364b"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/05_AdaptiveTechSurface_Shader.keireshadergraph.keiremeta",
+          "sizeBytes": 423,
+          "sha256": "8ebe664f875e2815c9160de5d85d46cf62a292dc9716982623d021f8a1d8da41"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/06_AnisotropicBrushedMetal.keirematerialgraph",
+          "sizeBytes": 1403,
+          "sha256": "276093105de83a4e83e1a333630d0db25fec0c6bb9475e8416e5c4c9c0dee63f"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/06_AnisotropicBrushedMetal.keirematerialgraph.keiremeta",
+          "sizeBytes": 377,
+          "sha256": "9fc3e8bbc3bed50d7b4411988890528def1ab961167e6f458ab454cbe1108906"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/06_AnisotropicBrushedMetal_Shader.keireshadergraph",
+          "sizeBytes": 7635,
+          "sha256": "378931ff120ae0bd39093a16bae209382410777bdfc122ce34901e743b1af9ea"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/06_AnisotropicBrushedMetal_Shader.keireshadergraph.keiremeta",
+          "sizeBytes": 314,
+          "sha256": "7bdabbdd47d9870cdda2b181b195c8d29d844b2b13cf911c1da05a5f9eb9652c"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/07_TransmissionGlass.keirematerialgraph",
+          "sizeBytes": 2454,
+          "sha256": "55d126ae7104744c91beadb2db302696bcb9ccfce19bb3d1c5d63e0c4974038c"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/07_TransmissionGlass.keirematerialgraph.keiremeta",
+          "sizeBytes": 377,
+          "sha256": "1ef5b28426fea52f09a92f2f9536b9d1b2dd312f8f870ee25e38e952cf4877f1"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/07_TransmissionGlass_Shader.keireshadergraph",
+          "sizeBytes": 14335,
+          "sha256": "981db0e5361a12afd342d49e6bddb1e91d4058b001a7d168b6eca13bf1bef565"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/07_TransmissionGlass_Shader.keireshadergraph.keiremeta",
+          "sizeBytes": 314,
+          "sha256": "178c8010da0facf3388bf5d98be57bfb8ac13b9e8d820b0fb36ff4065f6eaced"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/08_ProceduralVertexDisplacement.keirematerialgraph",
+          "sizeBytes": 1144,
+          "sha256": "049bb76f4e40ab1c6d92f6bf25e405c6316bfe012fe2590ac451c8e39ad503fa"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/08_ProceduralVertexDisplacement.keirematerialgraph.keiremeta",
+          "sizeBytes": 377,
+          "sha256": "505dbe90138102850667cbc3d61f2f8491692580a1ce09ede743ec77eaf7c89b"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/08_ProceduralVertexDisplacement_Shader.keireshadergraph",
+          "sizeBytes": 16330,
+          "sha256": "683b1f74f901306143c11168ee79e7806b0364d314e4ffb76006a7b4f21cb011"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/08_ProceduralVertexDisplacement_Shader.keireshadergraph.keiremeta",
+          "sizeBytes": 314,
+          "sha256": "81191f0c61224140e5fb6ad4f924bbb6885af7f79e67b5f9fcf117e9e02e079e"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/09_HolographicVoronoi.keirematerialgraph",
+          "sizeBytes": 656,
+          "sha256": "78101d365d91ac0fc11bc0f1405ef8060f0dbf560d2a9612fedf27d4e0e19923"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/09_HolographicVoronoi.keirematerialgraph.keiremeta",
+          "sizeBytes": 377,
+          "sha256": "5d7963cc83dd14f1da274fa63413181777f3dd3e85801f8da5a26eba44f7ba18"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/09_HolographicVoronoi_Shader.keireshadergraph",
+          "sizeBytes": 34225,
+          "sha256": "f78043c19e1a7ad4da249020675b50ce508f350a69b163196ac0a6dca5adf82c"
+        },
+        {
+          "path": "Assets/Materials/MaterialGraphs/09_HolographicVoronoi_Shader.keireshadergraph.keiremeta",
+          "sizeBytes": 314,
+          "sha256": "37ebc9f7c2de32624af009eae721e79f25f0dd46cfcc202e55ea908351ad1034"
+        },
+        {
+          "path": "Assets/Materials/Monster1.keirematerial",
+          "sizeBytes": 543,
+          "sha256": "6e10a8d89ae30f51f216956f8554511c3b6a295a5df6a81ad59d005c2dddefe4"
+        },
+        {
+          "path": "Assets/Materials/Monster1.keirematerial.keiremeta",
+          "sizeBytes": 220,
+          "sha256": "04336a23e5d6f8ce5b4632dfebc1da1b56b4261eb3bc4b6f1475f647fd0e556e"
+        },
+        {
+          "path": "Assets/Meshes/Idle.fbx",
+          "sizeBytes": 377792,
+          "sha256": "fc8af15f3454c358fb60f68fb3438f65e5fba1f829359693d990f47d0c2965e0"
+        },
+        {
+          "path": "Assets/Meshes/Idle.fbx.keiremeta",
+          "sizeBytes": 535,
+          "sha256": "9990a3f12daadc926e3d030c60b3c8c8befcbefdf32ca371eb299e6a3fdb33b0"
+        },
+        {
+          "path": "Assets/Meshes/T-Pose.fbx",
+          "sizeBytes": 3343648,
+          "sha256": "245622ec3abe90b671123c2d604a5428a1cd03f6651f7dda01102f4fd4e0bb5a"
+        },
+        {
+          "path": "Assets/Meshes/T-Pose.fbx.keiremeta",
+          "sizeBytes": 619,
+          "sha256": "ce7f8f39249aaf6603ed0dea01d9ae7fb03970f6f2b81b648016ad34d3ccec55"
+        },
+        {
+          "path": "Assets/Meshes/TexturedPyramid.obj",
+          "sizeBytes": 369,
+          "sha256": "514b1870aa6db2f29264cda9d3281f4c1fce3e9981593bac6869902c60acc3aa"
+        },
+        {
+          "path": "Assets/Meshes/TexturedPyramid.obj.keiremeta",
+          "sizeBytes": 263,
+          "sha256": "aa29dbd5813a7663466c8beee45517ae1a832b8bc4f73ce0ce542c00b038f51f"
+        },
+        {
+          "path": "Assets/NewAnimatorController.keireanimgraph",
+          "sizeBytes": 684,
+          "sha256": "01f8ab1ece62b036225c12ac46996face35b7f96a48b6c7916b63ee35b6ba79f"
+        },
+        {
+          "path": "Assets/NewAnimatorController.keireanimgraph.keiremeta",
+          "sizeBytes": 226,
+          "sha256": "478728a01a610ad3344a500790288db6f01c61b1b5449832fe01a970f6c5dca1"
+        },
+        {
+          "path": "Assets/Prefabs/HeavyCrate.keireprefab",
+          "sizeBytes": 325,
+          "sha256": "ac9d6810db56e7433c0abbf9a9cdb7599c5b9a106c06d7d0a3d046b36aa614da"
+        },
+        {
+          "path": "Assets/Prefabs/HeavyCrate.keireprefab.keiremeta",
+          "sizeBytes": 264,
+          "sha256": "e5c71c9424cddc13b10db219d4642f6bcbf43919ce437161209bdbfc80436a93"
+        },
+        {
+          "path": "Assets/Prefabs/PhysicsCrate.keireprefab",
+          "sizeBytes": 626,
+          "sha256": "fdddaf5b2791a7fae14d71366c4bd87715570fc3c51e5f138ee05079021721b3"
+        },
+        {
+          "path": "Assets/Prefabs/PhysicsCrate.keireprefab.keiremeta",
+          "sizeBytes": 218,
+          "sha256": "1318ca74e00e5ad8a4c1fe6bbcbdbba5f533514422a97d22358db57625b551f8"
+        },
+        {
+          "path": "Assets/Scenes/SampleScene.keirescene",
+          "sizeBytes": 39024,
+          "sha256": "6e60bd104260664950eb851bb6ea2e2e64b3ca63f3ca02b1abea6792238b4994"
+        },
+        {
+          "path": "Assets/Scenes/SampleScene.keirescene.keiremeta",
+          "sizeBytes": 217,
+          "sha256": "3198f4dec3f32876b74c1805dc4b83eefa322756da035ca861ce33cf9504d8a6"
+        },
+        {
+          "path": "Assets/Scenes/ShaderMaterialShowcase.keirescene",
+          "sizeBytes": 16000,
+          "sha256": "61522c9b010378960b082c6647fbafd8c007759dba07a59d0075901b05eaa416"
+        },
+        {
+          "path": "Assets/Scenes/ShaderMaterialShowcase.keirescene.keiremeta",
+          "sizeBytes": 217,
+          "sha256": "a369cb9263cb4c3f8bada156dea584a6d808062ab73bb3ee73cacd357777929a"
+        },
+        {
+          "path": "Assets/Scenes/TestScene.keirescene",
+          "sizeBytes": 65,
+          "sha256": "ae102d6cc4f57d7619c98aac0987b8027b80df7dadb2ecb2ce15578266c8b8ef"
+        },
+        {
+          "path": "Assets/Scenes/TestScene.keirescene.keiremeta",
+          "sizeBytes": 217,
+          "sha256": "0ccc060eb311238e24766bf81c152ed956aae51bca060c6ec0a593bdb318da22"
+        },
+        {
+          "path": "Assets/Scripts/Gameplay.keireasm",
           "sizeBytes": 193,
           "sha256": "dd125866fc4e1777e1756729d06cb39b01e82b5c9765d4a2e254cd7ba9e2cb3b"
+        },
+        {
+          "path": "Assets/Scripts/Gameplay.keireasm.keiremeta",
+          "sizeBytes": 227,
+          "sha256": "a78a2a869402011dfa2f6d0e7e21e7b30470c77a8adb2cfec5901f7f47dde485"
+        },
+        {
+          "path": "Assets/Scripts/Runtime/FirstPersonCamera.cs",
+          "sizeBytes": 7981,
+          "sha256": "d8e6ac0723c2150a0c5a4d6429b60232fe5e71713a772b054586e29633c96ae1"
+        },
+        {
+          "path": "Assets/Scripts/Runtime/FirstPersonCamera.cs.keiremeta",
+          "sizeBytes": 218,
+          "sha256": "25fbf387c34d6841d9dac3d46efa8328b4a8b135866e064b361118caec5085a3"
+        },
+        {
+          "path": "Assets/Scripts/Runtime/FpsVfxShowcase.cs",
+          "sizeBytes": 3193,
+          "sha256": "47d6ebe097973593c08b2c319c4fd505a48cb808128904b6c1a884b038355a64"
+        },
+        {
+          "path": "Assets/Scripts/Runtime/FpsVfxShowcase.cs.keiremeta",
+          "sizeBytes": 216,
+          "sha256": "27ab65118c26ded1dff2abfa6f736c9599b3f188f46228bcd108967e2be62c9a"
+        },
+        {
+          "path": "Assets/Scripts/Runtime/HealthTarget.cs",
+          "sizeBytes": 1229,
+          "sha256": "af3d7d1e2a05dd3ef9d19505df284c97053aa09a49ea62bf20dbb33ec445e2a5"
+        },
+        {
+          "path": "Assets/Scripts/Runtime/HealthTarget.cs.keiremeta",
+          "sizeBytes": 216,
+          "sha256": "4d471f643b3ac27561838b0440c72d48b56a1d2de177b99d3066553a4f49b5c1"
+        },
+        {
+          "path": "Assets/Scripts/Runtime/NavPatrolAgent.cs",
+          "sizeBytes": 1191,
+          "sha256": "9dc409b19993a85c5c8207588cd313c42f68c19217c9bf705f4a5752bea41fb3"
+        },
+        {
+          "path": "Assets/Scripts/Runtime/NavPatrolAgent.cs.keiremeta",
+          "sizeBytes": 218,
+          "sha256": "e771c7d336c0c34e2036bf25f3609235f981e39a48ec880a12bb52819e167293"
+        },
+        {
+          "path": "Assets/Scripts/Runtime/ThirdPersonController.cs",
+          "sizeBytes": 1639,
+          "sha256": "3dcce1057f491df744bdcc2ea83ba5f21c468f847cfdfd56b4adf63f614b128e"
+        },
+        {
+          "path": "Assets/Scripts/Runtime/ThirdPersonController.cs.keiremeta",
+          "sizeBytes": 218,
+          "sha256": "8ca18ec118a74477d2b80aefd0afe5f647a05ecba9710704160dcbd80ba31e8c"
+        },
+        {
+          "path": "Assets/Scripts/Runtime/UIController.cs",
+          "sizeBytes": 3801,
+          "sha256": "d2aebb6395426208f7ce6c27c4254b311196ab3f4132ae8ed529e9a9e2f162e0"
+        },
+        {
+          "path": "Assets/Scripts/Runtime/UIController.cs.keiremeta",
+          "sizeBytes": 216,
+          "sha256": "a14e636c2c7388870f051704381b53ec78a2f9b6269086e9b712324b350ddf0d"
+        },
+        {
+          "path": "Assets/Scripts/Runtime/WeaponController.cs",
+          "sizeBytes": 6225,
+          "sha256": "21c4712c086f7112721baa276edb01a229a8c29c0059007e64dd66cea2f7228d"
+        },
+        {
+          "path": "Assets/Scripts/Runtime/WeaponController.cs.keiremeta",
+          "sizeBytes": 216,
+          "sha256": "35ca1bf2e9193cb4ccdc7831a833a88bb133410eba6bd8a670d0da0e3ae485db"
+        },
+        {
+          "path": "Assets/Shaders/DefaultUnlit.hlsl",
+          "sizeBytes": 33253,
+          "sha256": "991e29bc9f04a6d3ec71fad590ecc1ddfbb0349e869b1b911136c420fb46c90e"
+        },
+        {
+          "path": "Assets/Shaders/DefaultUnlit.hlsl.keiremeta",
+          "sizeBytes": 216,
+          "sha256": "a25b55893856b9e82b179870014a31bcf82eaffd2da4605783a9eef6c3955618"
+        },
+        {
+          "path": "Assets/Shaders/DefaultUnlit.keireshader",
+          "sizeBytes": 3237,
+          "sha256": "0c48c1284373c5ba4304e177f4369b98be7b251474d75f15fe8fba55cb126ab9"
+        },
+        {
+          "path": "Assets/Shaders/DefaultUnlit.keireshader.keiremeta",
+          "sizeBytes": 218,
+          "sha256": "ac4bd9dee1c23d18bebace4781c579d9101cd89e7c5602be1bdf3eca4a07ebc8"
+        },
+        {
+          "path": "Assets/Textures/97d0277d-60f6-48bf-8314-347f79180b7b.png",
+          "sizeBytes": 3559525,
+          "sha256": "f4d592df587a78891da6014532a813a3831943650d1ef20ad2fcf329df789809"
+        },
+        {
+          "path": "Assets/Textures/97d0277d-60f6-48bf-8314-347f79180b7b.png.keiremeta",
+          "sizeBytes": 552,
+          "sha256": "f43a26d0be523adc897577554436fa91a1374eef449fc6725c39916dd8849f3e"
+        },
+        {
+          "path": "Assets/Textures/SlateInlay.png",
+          "sizeBytes": 3421619,
+          "sha256": "2df2e5b79c00ca2441b38950522b71a294f4055c6d457e66166d76bb6bc22248"
+        },
+        {
+          "path": "Assets/Textures/SlateInlay.png.keiremeta",
+          "sizeBytes": 553,
+          "sha256": "3ebd354908ba58623aa8ec082948af091a88aa53c7c6c02d3d5fcf1cf2e943a6"
+        },
+        {
+          "path": "Assets/Textures/texture_diffuse.png",
+          "sizeBytes": 5265167,
+          "sha256": "9f3794668be9db8c2974b0f39662506538d727f797e84957a16c934425728643"
+        },
+        {
+          "path": "Assets/Textures/texture_diffuse.png.keiremeta",
+          "sizeBytes": 552,
+          "sha256": "ba6222f5de61a502a350be08c5291bf7a31d00f813e519ae1c9bcfd6896cf4fc"
+        },
+        {
+          "path": "Assets/Textures/texture_metallic.png",
+          "sizeBytes": 530767,
+          "sha256": "d24ba5192baabea893c8c58a1207c21aa2202fb8079487cb0261a643bba67969"
+        },
+        {
+          "path": "Assets/Textures/texture_metallic.png.keiremeta",
+          "sizeBytes": 553,
+          "sha256": "8639215a252b4b2070b0c1454dd36d0ea6a8b1bde0e95beee930db857eb9fc6f"
+        },
+        {
+          "path": "Assets/Textures/texture_normal.png",
+          "sizeBytes": 4753519,
+          "sha256": "da5fa9d8effd3f12e60efe918c4ca802c4145ccdbe627144268a0e531f10e8d0"
+        },
+        {
+          "path": "Assets/Textures/texture_normal.png.keiremeta",
+          "sizeBytes": 555,
+          "sha256": "3d76b988326542f96a550f1524393ce7fa424e50b881842a06435bc59da0381c"
+        },
+        {
+          "path": "Assets/Textures/texture_roughness.png",
+          "sizeBytes": 1740702,
+          "sha256": "e1210b04ba2b47509790753ac5831103aa4bd11f5c28d1780afa3a8b6c4107ac"
+        },
+        {
+          "path": "Assets/Textures/texture_roughness.png.keiremeta",
+          "sizeBytes": 553,
+          "sha256": "c0e38b305f66a0cc59619b8b991cdb93cdba8d29a1c78b78f6bcec6804d07549"
+        },
+        {
+          "path": "Assets/Vfx/ArcaneNova.keirevfx",
+          "sizeBytes": 21123,
+          "sha256": "5c352e38040233ae54988ee234e0abdf9ec1eefbc04eb38d01a99b7eb0703eb5"
+        },
+        {
+          "path": "Assets/Vfx/ArcaneNova.keirevfx.keiremeta",
+          "sizeBytes": 221,
+          "sha256": "24bb433b0232b9f046b056d7ef31bbfc3b8e107b68da2f84eacbabaa98688f4f"
+        },
+        {
+          "path": "Assets/Vfx/ArcaneSigilOrbit.keirevfx",
+          "sizeBytes": 22264,
+          "sha256": "132426dc637870cd7e89c4b8140a0c51d1adb526dfaaeaca3140662ce38efdb0"
+        },
+        {
+          "path": "Assets/Vfx/ArcaneSigilOrbit.keirevfx.keiremeta",
+          "sizeBytes": 267,
+          "sha256": "355263e978cbc01c2a42731b3ee221cded4b32998f7c1e6723d8fde41c0a5752"
+        },
+        {
+          "path": "Assets/Vfx/EmberShardCyclone.keirevfx",
+          "sizeBytes": 22223,
+          "sha256": "da01d82826a2bea12d578fe95d6897fa29232430099480e0a4216061f76cd872"
+        },
+        {
+          "path": "Assets/Vfx/EmberShardCyclone.keirevfx.keiremeta",
+          "sizeBytes": 267,
+          "sha256": "26f8ef701a9611f8b884a693eb0e0e07806ca100f0750f3b311a1dc842dba2a5"
+        },
+        {
+          "path": "Assets/Vfx/ForgeSparks.keirevfx",
+          "sizeBytes": 22147,
+          "sha256": "f50dbb7d2b1c3874f0c377c1aa96704f4304eb59cc1f037416944a5147b0c129"
+        },
+        {
+          "path": "Assets/Vfx/ForgeSparks.keirevfx.keiremeta",
+          "sizeBytes": 221,
+          "sha256": "7f2111f26c36065289550ba9ba18cca8a0980d315ad043f0ccb6a86f7db2b82f"
+        },
+        {
+          "path": "Assets/Vfx/Meshes/ArcaneSigil.gltf",
+          "sizeBytes": 1933,
+          "sha256": "14322316492bf8f3929cb78b9558e93c07c57a5beac580ffa0d7a946faf1e5ad"
+        },
+        {
+          "path": "Assets/Vfx/Meshes/ArcaneSigil.gltf.keiremeta",
+          "sizeBytes": 263,
+          "sha256": "99f576adf5fa672e87c8a14ed3c80260204f5c629440aaac1de29c08964f5a47"
+        },
+        {
+          "path": "Assets/Vfx/Meshes/EmberShard.gltf",
+          "sizeBytes": 1028,
+          "sha256": "4bbe0c7753ae0e3bfdc449ccfe478af7ec815c927c12412c48f22b28d02c4a22"
+        },
+        {
+          "path": "Assets/Vfx/Meshes/EmberShard.gltf.keiremeta",
+          "sizeBytes": 263,
+          "sha256": "92a1b29c70fd843276868f85cf483630accd23945fb2db52678bdfd70ae10fd6"
+        },
+        {
+          "path": "Assets/Vfx/PlasmaLance.keirematerial",
+          "sizeBytes": 387,
+          "sha256": "96fe4d1e1d517a66e64482240dc130c2df8fa2cb4a5e02360f406e6889a60ac8"
+        },
+        {
+          "path": "Assets/Vfx/PlasmaLance.keirematerial.keiremeta",
+          "sizeBytes": 310,
+          "sha256": "7e25b0fdc20363f2933222c1e6b0bbffd1b33cf343b40def21ff3d663e7c2500"
+        },
+        {
+          "path": "Assets/Vfx/SpectralMist.keirevfx",
+          "sizeBytes": 20983,
+          "sha256": "8d771b8144297577c92f91f0cdc8da3ff23066dc1087f33ee717b5f047e5ddb8"
+        },
+        {
+          "path": "Assets/Vfx/SpectralMist.keirevfx.keiremeta",
+          "sizeBytes": 221,
+          "sha256": "6523544f5cedc0f073943a70ba431bdf35b89a1c206b9c0f77b53099b0e6df36"
+        },
+        {
+          "path": "Assets/Vfx/Textures/PlasmaCore.png",
+          "sizeBytes": 883505,
+          "sha256": "aef14e45421d6747f7726126182cff0e819a5c8bd9865ca097f4ee5968761311"
+        },
+        {
+          "path": "Assets/Vfx/Textures/PlasmaCore.png.keiremeta",
+          "sizeBytes": 550,
+          "sha256": "dff5db82c494fefd609a43341ab3ccf4a3e9584e7f768748531b657dd02887f5"
+        },
+        {
+          "path": "Assets/Vfx/VfxEffect.keirevfx",
+          "sizeBytes": 22608,
+          "sha256": "fc40d3df0a7c08f15e9662a06a5bd671c4f7f9994b0b74cb4e76b8ca0b163408"
+        },
+        {
+          "path": "Assets/Vfx/VfxEffect.keirevfx.keiremeta",
+          "sizeBytes": 311,
+          "sha256": "aaa2f6b85b6531356ee3fcb1fb8877917cfddbea803612d3af1453c6ff49cec9"
+        },
+        {
+          "path": "ProjectSettings/Authoring.keiresettings",
+          "sizeBytes": 1164,
+          "sha256": "33c5b454d07e6f34deb3c04f3bd81e2be2c9c550f24a9010b7702803baf7e3ce"
+        },
+        {
+          "path": "ProjectSettings/Rendering.keiresettings",
+          "sizeBytes": 147,
+          "sha256": "97f411877322a60f334e4b8aa55be0abd77c4f496959f57b9eb8e97ae7c22aa9"
         },
         {
           "path": "ProjectSettings/Scripting.keiresettings",
@@ -125,13 +733,20 @@
         },
         {
           "path": "README.md",
-          "sizeBytes": 216,
-          "sha256": "b36d648d28bfde767685c5b7fbc23463ef4201b867e0b8113341b1e975162383"
+          "sizeBytes": 1187,
+          "sha256": "9d24dad1a6e1d93200cf99047caf9d69a67a4d9b57a04b4abff0c8072ea29209"
         }
       ],
-      "defaultProjectConfiguration": {},
+      "defaultProjectConfiguration": {
+        "startupScene": "a1aa0000-0000-4000-8000-000000000001",
+        "defaultInput": "97b38693-6dc3-4f06-a228-44ba5786e8d1"
+      },
       "starterContent": [
-        "Assets/Scripts/Runtime/SandboxWelcome.cs"
+        "Assets/Scenes/ShaderMaterialShowcase.keirescene",
+        "Assets/Scenes/SampleScene.keirescene",
+        "Assets/Materials/MaterialGraphs/01_BasicPaint_Shader.keireshadergraph",
+        "Assets/Materials/MaterialGraphs/09_HolographicVoronoi_Shader.keireshadergraph",
+        "Assets/Vfx/ArcaneNova.keirevfx"
       ],
       "requiredPackages": [],
       "recommendedPackages": [],

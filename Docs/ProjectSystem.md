@@ -25,6 +25,11 @@ and a sorted source-module requirement catalog. Asset and scene references use s
 `Project::Save` preserves the immutable project ID and schema, advances the last-saved engine version, and replaces the
 descriptor atomically.
 
+Project upgrades are explicit dry-run plans followed by a journaled transaction. The built-in v1 → v2 and v2 → v3
+steps are composed in order, snapshot every affected file, validate staged metadata before publication, retain a
+recoverable active transaction after interruption, and keep timestamped backups. This allows older projects to remain
+discoverable and upgradeable without silently rewriting them during inspection.
+
 ## Creation And Opening
 
 `Project::Create` is transactional: it validates the name and destination, creates the complete directory shape, writes

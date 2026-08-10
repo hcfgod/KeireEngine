@@ -24,6 +24,7 @@ if [[ $FORCE -eq 1 || $UPDATE -eq 1 || ! -f "$ROOT/$generated" || ! -f "$stamp" 
 fi
 activate_linux_toolchain "$ROOT" "$TOOLSET"
 
+bash "$ROOT/Scripts/Unix/build-info.sh"
 bash "$ROOT/Scripts/Unix/build-managed.sh"
 
 case "$GENERATOR" in

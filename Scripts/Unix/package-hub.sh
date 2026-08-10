@@ -162,14 +162,22 @@ distribution_arguments=(
 distribution_source="$ROOT/Config/Distribution.json"
 distribution_service_url="${KEIRE_DISTRIBUTION_SERVICE_URL:-}"
 distribution_trusted_key="${KEIRE_DISTRIBUTION_TRUSTED_KEY:-}"
+distribution_trusted_keys_value="${KEIRE_DISTRIBUTION_TRUSTED_KEYS:-$distribution_trusted_key}"
 distribution_minimum_sequence="${KEIRE_DISTRIBUTION_MINIMUM_SEQUENCE:-}"
-if [[ -n "$distribution_service_url" || -n "$distribution_trusted_key" ]]; then
-  distribution_arguments+=(--service-url "$distribution_service_url" --trusted-key "$distribution_trusted_key")
+distribution_trusted_keys=()
+if [[ -n "$distribution_trusted_keys_value" ]]; then
+  IFS=: read -r -a distribution_trusted_keys <<< "$distribution_trusted_keys_value"
+fi
+if [[ -n "$distribution_service_url" || ${#distribution_trusted_keys[@]} -gt 0 ]]; then
+  distribution_arguments+=(--service-url "$distribution_service_url")
+  for trusted_key in "${distribution_trusted_keys[@]}"; do
+    [[ -n "$trusted_key" ]] && distribution_arguments+=(--trusted-key "$trusted_key")
+  done
 else
   distribution_arguments+=(--source-config "$distribution_source")
 fi
 if [[ -n "$distribution_minimum_sequence" && \
-      ( -n "$distribution_service_url" || -n "$distribution_trusted_key" ) ]]; then
+      ( -n "$distribution_service_url" || ${#distribution_trusted_keys[@]} -gt 0 ) ]]; then
   distribution_arguments+=(--minimum-sequence "$distribution_minimum_sequence")
 fi
 python3 "${distribution_arguments[@]}"

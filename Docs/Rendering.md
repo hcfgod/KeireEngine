@@ -68,8 +68,9 @@ published together so a scene never observes a partially updated lighting set.
 
 ## Static-scene submission contracts
 
-The renderer consumes mesh schema v4 as ordered LOD, submesh, material-slot, and UV1 records. Schema v1 and v2 meshes
-decode as one LOD with one submesh and one slot; schema v3 carries the production LOD structure without UV1. Submission
+The renderer consumes mesh schema v5 as ordered LOD, submesh, material-slot, UV1, and primitive-topology records.
+Schema v1 and v2 meshes decode as one LOD with one submesh and one slot; schema v3 carries the production LOD structure
+without UV1, and schema v4 adds UV1 while implying triangle-list topology. Submission
 selects a projected-height LOD, frustum-tests its submesh bounds, resolves indexed material overrides or imported
 defaults, and creates a deterministic draw order. Opaque and
 masked work is state sorted; premultiplied blend work remains depth-tested, disables depth writes, and sorts

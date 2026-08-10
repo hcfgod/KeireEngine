@@ -73,10 +73,12 @@ try {
     $distribution = Get-Content -LiteralPath (Join-Path $stage "Config\Distribution.json") -Raw |
         ConvertFrom-Json
     $distributionAuthority = Get-Content -LiteralPath $distributionSource -Raw | ConvertFrom-Json
+    $packagedKeyIds = @($distribution.trustedKeys | ForEach-Object { $_.keyId })
+    $authorityKeyIds = @($distributionAuthority.trustedKeys | ForEach-Object { $_.keyId })
     if (-not $distribution.onlineDiscoveryEnabled -or
         $distribution.serviceBaseUrl -ne $distributionAuthority.serviceBaseUrl -or
-        $distribution.trustedKeys.Count -lt 1 -or
-        $distribution.trustedKeys[0].keyId -ne $distributionAuthority.trustedKeys[0].keyId) {
+        $packagedKeyIds.Count -lt 1 -or
+        (Compare-Object $packagedKeyIds $authorityKeyIds)) {
         throw "The Windows Hub package fixture did not preserve online distribution trust."
     }
     $manifestWriter = Join-Path (Get-RepositoryRoot) "Scripts\Packaging\write-package-manifest.py"

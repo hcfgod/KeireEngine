@@ -10,6 +10,13 @@
       "keyId": "ed25519-a671edca5727bd85a6e2fabb8cffc104",
       "publicKey": "of4J7IiHETbsxu2i+VVEaCMMXMmsf5U9boovWpMEXfA=",
       "fingerprint": "sha256:a671edca5727bd85a6e2fabb8cffc104b7511707f45a5db2e52469da5cb93251"
+    },
+    {
+      "schemaVersion": 1,
+      "algorithm": "Ed25519",
+      "keyId": "ed25519-019da85781015fa51aefbaeb3acdca5e",
+      "publicKey": "dP1xri/lDsKpJGVWySHC8a6U5sFOhiFcnXboD5pjB50=",
+      "fingerprint": "sha256:019da85781015fa51aefbaeb3acdca5eb1f9a923d70f47d9b7e11a768dbd72ed"
     }
   ]
 }

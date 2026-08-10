@@ -6,6 +6,7 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <cstdlib>
@@ -689,4 +690,38 @@ TEST_CASE("Newer scene importers upgrade older metadata revisions but reject fut
     database = Keire::CreateRef<Keire::AssetDatabase>(std::move(specification));
     CHECK_THROWS_WITH_AS((void)database->ImportAll(),
                          "No compatible importer is registered for asset: Legacy.keirescene", std::runtime_error);
+}
+
+TEST_CASE("Sandbox Shader and Material Graph gallery decodes every progressive material pairing")
+{
+    const auto source = KeireTests::ReadFile(std::filesystem::current_path() /
+                                             "Samples/KeireSandbox/Assets/Scenes/ShaderMaterialShowcase.keirescene");
+    REQUIRE_FALSE(source.empty());
+    const std::vector<std::byte> bytes(reinterpret_cast<const std::byte*>(source.data()),
+                                       reinterpret_cast<const std::byte*>(source.data() + source.size()));
+    const auto scene = Keire::SceneAsset::Decode(bytes);
+    REQUIRE(scene);
+    CHECK(scene->Definition().SchemaVersion == Keire::CurrentSceneSchemaVersion);
+
+    constexpr std::array examples{
+        std::pair{"01 · Basic Paint", "fb5f2683-f3d9-516c-a24e-3817e6386ab9"},
+        std::pair{"02 · Textured Surface", "4b473098-5a2d-5262-a7a1-5697f10758be"},
+        std::pair{"03 · Procedural Emissive", "996f627b-a568-5fcc-87bb-79f898bcf69b"},
+        std::pair{"04 · Clear Coat Detail", "6f7bf3a9-8da1-5495-a0d5-f9e1245baf1f"},
+        std::pair{"05 · Adaptive Tech Surface", "ae58f8d7-40da-59e1-ba5a-ee8368eaa7c2"},
+        std::pair{"06 · Anisotropic Brushed Metal", "fa9bfd9f-30c6-517b-aa84-b669b2727c47"},
+        std::pair{"07 · Transmission Glass", "56dfa187-c6e1-5788-9930-3f525451f3b9"},
+        std::pair{"08 · Procedural Vertex Displacement", "2677fd5e-d50a-5b1e-8b62-7cf72f1314ba"},
+        std::pair{"09 · Holographic Voronoi", "34785da2-6545-5c4a-a67a-d6248839e5ba"},
+    };
+    for (const auto& [name, material] : examples)
+    {
+        const auto entity = std::ranges::find(scene->Definition().Objects, name, &Keire::SceneObjectDefinition::Name);
+        REQUIRE(entity != scene->Definition().Objects.end());
+        const auto renderer = std::ranges::find(entity->Components, Keire::MeshRendererComponent::StaticType(),
+                                                &Keire::SceneComponentDefinition::Type);
+        REQUIRE(renderer != entity->Components.end());
+        CHECK(renderer->SchemaVersion == 3);
+        CHECK(renderer->Data.find(material) != std::string::npos);
+    }
 }

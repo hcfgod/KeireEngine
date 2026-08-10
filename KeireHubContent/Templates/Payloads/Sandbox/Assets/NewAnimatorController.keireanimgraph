@@ -1,0 +1,31 @@
+{
+  "layers": [
+    {
+      "avatarMask": "",
+      "defaultWeight": 1.0,
+      "entryStateId": "ae39318e-fc59-4725-87db-0e69e966a6e2",
+      "id": "b25b7c99-77bc-4da6-bba4-4bf4e46b7978",
+      "mode": 0,
+      "name": "Base Layer",
+      "states": [
+        {
+          "editorPosition": [
+            0.0,
+            0.0
+          ],
+          "id": "ae39318e-fc59-4725-87db-0e69e966a6e2",
+          "loop": true,
+          "motion": {
+            "clip": "803c0e5b-d937-521c-821e-92de5a986179",
+            "type": 0
+          },
+          "name": "Idle",
+          "speed": 1.0,
+          "transitions": []
+        }
+      ]
+    }
+  ],
+  "parameters": [],
+  "schemaVersion": 2
+}

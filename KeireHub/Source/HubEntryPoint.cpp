@@ -2,6 +2,7 @@
 
 #include "KeireHub/HubApplicationFactory.h"
 #include "KeireHub/HubConfiguration.h"
+#include "KeireHub/HubLocalContent.h"
 #include "KeireHub/HubPathMigration.h"
 
 #include "KeireInternal/FileSystem.h"
@@ -74,17 +75,16 @@ namespace Keire
         specification.MainWindow.MinimumWidth = 960;
         specification.MainWindow.MinimumHeight = 640;
         specification.MainWindow.Decoration = WindowDecoration::Custom;
-        auto windowIcon = executable.parent_path().parent_path() / "Config/Branding/Keire.png";
-        if (!std::filesystem::is_regular_file(windowIcon))
-            windowIcon = std::filesystem::current_path() / "Config/Branding/Keire.png";
+        const auto distributionRoot = KeireHub::ResolveHubDistributionRoot(executable);
+        auto windowIcon = distributionRoot / "Config/Branding/Keire.png";
         if (std::filesystem::is_regular_file(windowIcon))
             specification.MainWindow.Icon = std::move(windowIcon);
         specification.Logging.LogDirectory = (preferenceRoot / "Hub" / "Logs").string();
         specification.Ui.Mode = UiMode::Rendered;
         specification.Ui.EnableDocking = false;
-        auto fontRoot = executable.parent_path().parent_path() / "content" / "Fonts";
+        auto fontRoot = distributionRoot / "content" / "Fonts";
         if (!std::filesystem::is_regular_file(fontRoot / "Inter-Variable.ttf"))
-            fontRoot = std::filesystem::current_path() / "KeireHubContent" / "Fonts";
+            fontRoot = distributionRoot / "KeireHubContent" / "Fonts";
         if (std::filesystem::is_regular_file(fontRoot / "Inter-Variable.ttf") &&
             std::filesystem::is_regular_file(fontRoot / "MaterialSymbolsRounded-Subset.ttf"))
         {

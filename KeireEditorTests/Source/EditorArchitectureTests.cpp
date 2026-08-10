@@ -1,4 +1,5 @@
 #include "KeireClient/Editor/AssetBrowserFolderCache.h"
+#include "KeireClient/Editor/AssetBrowserUtilities.h"
 #include "KeireClient/Editor/AssetOperationService.h"
 #include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
@@ -266,6 +267,28 @@ TEST_CASE("Range selection follows display order and retains the clicked item as
     REQUIRE(additive.size() == 4);
     CHECK(additive.front() == order[0]);
     CHECK(additive.back() == order[4]);
+}
+
+TEST_CASE("Asset Browser double-click routes material and shader authoring assets internally")
+{
+    using enum KeireEditor::AssetBrowserOpenAction;
+
+    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Materials/Surface.keirematerial") == Material);
+    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Materials/Surface.keirematerialgraph") == MaterialGraph);
+    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Shaders/Surface.keireshadergraph") == ShaderGraph);
+    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Shaders/Surface.KEIRESHADERGRAPH") == ShaderGraph);
+    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Textures/Surface.png") == External);
+
+    Keire::MaterialGraphDefinition definition;
+    definition.Shader.Kind = Keire::MaterialShaderSourceKind::ShaderGraph;
+    definition.Shader.Asset = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000030");
+    CHECK(KeireEditor::ResolveMaterialGraphEditorTarget(definition) == definition.Shader.Asset);
+
+    definition.Shader.Kind = Keire::MaterialShaderSourceKind::ShaderAsset;
+    CHECK_FALSE(KeireEditor::ResolveMaterialGraphEditorTarget(definition));
+    definition.Shader.Kind = Keire::MaterialShaderSourceKind::ShaderGraph;
+    definition.Shader.Asset = {};
+    CHECK_FALSE(KeireEditor::ResolveMaterialGraphEditorTarget(definition));
 }
 
 TEST_CASE("Play changes review remains pending until it is explicitly resolved")
@@ -1162,6 +1185,83 @@ TEST_CASE("material document owns draft and committed source state")
     CHECK_FALSE(document.PendingCatalogRefresh(true));
 }
 
+TEST_CASE("material documents preserve Shader Graph references while publishing resolved runtime shaders")
+{
+    const auto graph = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000025");
+    const auto runtimeShader = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000026");
+    Keire::ShaderAssetDefinition shaderDefinition;
+    shaderDefinition.Source = "Assets/Generated/ShaderGraphs/Test.hlsl";
+    shaderDefinition.Properties = {{"Roughness", Keire::ShaderPropertyType::Scalar, {0.5F, 0.0F, 0.0F, 0.0F}}};
+
+    Keire::MaterialAuthoringDefinition sourceDefinition;
+    sourceDefinition.Shader.Kind = Keire::MaterialShaderSourceKind::ShaderGraph;
+    sourceDefinition.Shader.Asset = graph;
+    sourceDefinition.Shader.Keywords.emplace("USE_DETAIL", "true");
+    sourceDefinition.Properties.emplace("Roughness", 0.25F);
+    const auto source = Keire::MaterialAsset::EncodeAuthoringSource(sourceDefinition);
+    const KeireEditor::MaterialDocument::ShaderReferenceResolver resolver =
+        [&](const Keire::MaterialShaderReference& reference)
+        -> std::optional<KeireEditor::MaterialDocument::ResolvedShader>
+    {
+        if (reference != sourceDefinition.Shader)
+            return std::nullopt;
+        return KeireEditor::MaterialDocument::ResolvedShader{runtimeShader, shaderDefinition};
+    };
+
+    KeireEditor::MaterialDocument document;
+    document.Open(source, resolver);
+    CHECK(document.Shader() == graph);
+    CHECK(document.Definition().Shader == runtimeShader);
+    CHECK(document.ShaderReference().Keywords == sourceDefinition.Shader.Keywords);
+    CHECK(document.SetProperty("Roughness", 0.75F));
+
+    const auto saved = Keire::MaterialAsset::DecodeAuthoringSource(document.SaveSource());
+    CHECK(saved.Shader == sourceDefinition.Shader);
+    CHECK(std::get<float>(saved.Properties.at("Roughness")) == doctest::Approx(0.75F));
+}
+
+TEST_CASE("material documents edit Material Graph bindings by stable shader property identity")
+{
+    const auto graph = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000027");
+    const auto runtimeShader = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000028");
+    const auto propertyId = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000029");
+    Keire::ShaderPropertyDefinition property;
+    property.Id = propertyId;
+    property.Name = "RenamedRoughness";
+    property.Type = Keire::ShaderPropertyType::Scalar;
+    property.DefaultValue.X = 0.5F;
+    Keire::ShaderAssetDefinition shaderDefinition;
+    shaderDefinition.Source = "Assets/Generated/ShaderGraphs/Test.hlsl";
+    shaderDefinition.Properties.push_back(property);
+
+    Keire::MaterialGraphDefinition sourceDefinition;
+    sourceDefinition.Shader.Kind = Keire::MaterialShaderSourceKind::ShaderGraph;
+    sourceDefinition.Shader.Asset = graph;
+    sourceDefinition.Properties.push_back({propertyId, "OldRoughness", 0.25F});
+    const auto source = Keire::MaterialGraphAsset::EncodeSource(sourceDefinition);
+    const KeireEditor::MaterialDocument::ShaderReferenceResolver resolver =
+        [&](const Keire::MaterialShaderReference& reference)
+        -> std::optional<KeireEditor::MaterialDocument::ResolvedShader>
+    {
+        if (reference != sourceDefinition.Shader)
+            return std::nullopt;
+        return KeireEditor::MaterialDocument::ResolvedShader{runtimeShader, shaderDefinition};
+    };
+
+    KeireEditor::MaterialDocument document;
+    document.OpenMaterialGraphAsset(graph, "Assets/Materials/Test.keirematerialgraph", source, resolver);
+    CHECK(document.IsMaterialGraph());
+    CHECK(document.Definition().Shader == runtimeShader);
+    CHECK(std::get<float>(document.Property("RenamedRoughness")) == doctest::Approx(0.25F));
+    CHECK(document.SetProperty("RenamedRoughness", 0.8F));
+
+    const auto saved = Keire::MaterialGraphAsset::DecodeSource(document.SaveSource());
+    REQUIRE(saved.Properties.size() == 1);
+    CHECK(saved.Properties.front().Property == propertyId);
+    CHECK(saved.Properties.front().Name == "RenamedRoughness");
+    CHECK(std::get<float>(saved.Properties.front().Value) == doctest::Approx(0.8F));
+}
+
 TEST_CASE("scene picker selects transform-only and rendered entities by nearest viewport hit")
 {
     auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000030"),
@@ -1316,16 +1416,16 @@ TEST_CASE("viewport asset drops dispatch through narrow typed commands")
     CHECK(commands.Material == asset);
     CHECK(commands.Target == target);
     commands.Material = {};
-    router.Route(Keire::MaterialGraphAsset::StaticType(), asset, target, commands);
+    router.Route(Keire::ShaderGraphAsset::StaticType(), asset, target, commands);
     CHECK(commands.Material == asset);
     CHECK(commands.Target == target);
     commands.Material = {};
-    router.Route(Keire::MaterialGraphInstanceAsset::StaticType(), asset, target, commands);
+    router.Route(Keire::ShaderGraphInstanceAsset::StaticType(), asset, target, commands);
     CHECK(commands.Material == asset);
     CHECK(commands.Target == target);
     CHECK_THROWS_AS(router.Route(Keire::MaterialAsset::StaticType(), asset, {}, commands), std::invalid_argument);
-    CHECK_THROWS_AS(router.Route(Keire::MaterialGraphAsset::StaticType(), asset, {}, commands), std::invalid_argument);
-    CHECK_THROWS_AS(router.Route(Keire::MaterialGraphInstanceAsset::StaticType(), asset, {}, commands),
+    CHECK_THROWS_AS(router.Route(Keire::ShaderGraphAsset::StaticType(), asset, {}, commands), std::invalid_argument);
+    CHECK_THROWS_AS(router.Route(Keire::ShaderGraphInstanceAsset::StaticType(), asset, {}, commands),
                     std::invalid_argument);
     CHECK_THROWS_AS(
         router.Route(Keire::AssetTypeId::Parse("ed170000-0000-4000-8000-000000000042"), asset, {}, commands),
@@ -1561,9 +1661,9 @@ TEST_CASE("content previews use immutable loaded assets without blocking shutdow
 
     const auto materialGraphId = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000075");
     REQUIRE(thumbnails.Request({.Asset = materialGraphId,
-                                .Type = Keire::MaterialGraphAsset::StaticType(),
+                                .Type = Keire::ShaderGraphAsset::StaticType(),
                                 .PreviewAsset = material,
-                                .RelativePath = "Preview.keirematerialgraph",
+                                .RelativePath = "Preview.keireshadergraph",
                                 .Digest = "material-graph-preview"}));
     const auto materialGraphResult = await();
     REQUIRE(materialGraphResult.Pixels.size() == 96U * 96U * 4U);
@@ -1584,9 +1684,9 @@ TEST_CASE("content previews use immutable loaded assets without blocking shutdow
     CHECK(std::to_integer<unsigned>(vfxResult.Pixels[badgeBorder]) > 200U);
 
     const auto materialGraphFallback =
-        KeireEditor::MakeAssetFallbackThumbnail(Keire::MaterialGraphAsset::StaticType(), 96, 96);
+        KeireEditor::MakeAssetFallbackThumbnail(Keire::ShaderGraphAsset::StaticType(), 96, 96);
     const auto materialInstanceFallback =
-        KeireEditor::MakeAssetFallbackThumbnail(Keire::MaterialGraphInstanceAsset::StaticType(), 96, 96);
+        KeireEditor::MakeAssetFallbackThumbnail(Keire::ShaderGraphInstanceAsset::StaticType(), 96, 96);
     const auto vfxFallback = KeireEditor::MakeAssetFallbackThumbnail(Keire::VfxEffectAsset::StaticType(), 96, 96);
     CHECK(materialGraphFallback != materialInstanceFallback);
     CHECK(materialGraphFallback != vfxFallback);
@@ -1873,15 +1973,15 @@ TEST_CASE("Asset picker resolves graph and instance drops and built-in meshes to
 {
     Keire::AssetSourceRecord graph;
     graph.Id = Keire::AssetId::Generate();
-    graph.Type = Keire::MaterialGraphAsset::StaticType();
-    graph.RelativePath = "Materials/Layered.keirematerialgraph";
+    graph.Type = Keire::ShaderGraphAsset::StaticType();
+    graph.RelativePath = "Materials/Layered.keireshadergraph";
     const auto compiledShader = Keire::AssetId::Generate();
     const auto runtimeMaterial = Keire::AssetId::Generate();
     graph.SubAssets = {compiledShader, runtimeMaterial};
     Keire::AssetSourceRecord instance;
     instance.Id = Keire::AssetId::Generate();
-    instance.Type = Keire::MaterialGraphInstanceAsset::StaticType();
-    instance.RelativePath = "Materials/LayeredInstance.keirematerialinstance";
+    instance.Type = Keire::ShaderGraphInstanceAsset::StaticType();
+    instance.RelativePath = "Materials/LayeredInstance.keireshadergraphinstance";
     const auto instanceMaterial = Keire::AssetId::Generate();
     instance.SubAssets = {instanceMaterial};
     const std::array records{graph, instance};

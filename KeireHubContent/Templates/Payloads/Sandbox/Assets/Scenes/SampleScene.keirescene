@@ -1,0 +1,1517 @@
+{
+  "bakedLighting": null,
+  "entities": [
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0.5301623344421387,
+              1.3600428104400635,
+              -2.593120813369751
+            ],
+            "rotation": [
+              0.0,
+              -0.07845911383628845,
+              0.0,
+              0.9969173669815063
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "height": 1.7999999523162842,
+            "layer": 1,
+            "mask": 4294967295,
+            "maximumSlope": 50.0,
+            "radius": 0.3499999940395355,
+            "runtimeId": "ea934ebd-5fec-4623-be45-c192b90f371e",
+            "skinWidth": 0.03999999910593033,
+            "stepHeight": 0.3499999940395355
+          },
+          "enabled": true,
+          "type": "4b454952-4543-4841-5241-435445520001",
+          "version": 2
+        }
+      ],
+      "id": "d6e7aa06-b25a-4e19-a84c-00635691a83a",
+      "layer": 0,
+      "name": "FPS Player",
+      "parent": null
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0.0,
+              0.6499999761581421,
+              0.0
+            ],
+            "rotation": [
+              0.13052618503570557,
+              0.0,
+              0.0,
+              0.9914448857307434
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "clearColor": [
+              0.1791045069694519,
+              0.1791045069694519,
+              0.1791045069694519,
+              1.0
+            ],
+            "clearMode": 0,
+            "farPlane": 1000.0,
+            "fieldOfView": 61.058998107910156,
+            "nearPlane": 0.009999999776482582,
+            "orthographicSize": 10.0,
+            "primary": true,
+            "priority": 0,
+            "projection": 0
+          },
+          "enabled": true,
+          "type": "4b454952-4543-414d-4552-410000000001",
+          "version": 1
+        },
+        {
+          "data": {
+            "gain": 1.0,
+            "primary": true
+          },
+          "enabled": true,
+          "type": "4b454952-4541-5544-494f-4c4953540001",
+          "version": 1
+        },
+        {
+          "data": {
+            "managedState": "{\"fields\":[],\"version\":1}"
+          },
+          "enabled": true,
+          "type": "73616e64-626f-4078-8000-000000000040",
+          "version": 1
+        },
+        {
+          "data": {
+            "_airControl": 0.28,
+            "_coyoteTime": 0.12,
+            "_gravity": 24.0,
+            "_groundStickSpeed": 2.0,
+            "_invertHorizontal": false,
+            "_invertVertical": false,
+            "_jumpBufferTime": 0.12,
+            "_jumpHeight": 1.15,
+            "_lookSensitivity": 1.0,
+            "_lookSharpness": 53.3,
+            "_maximumPitch": 89.0,
+            "_movementSharpness": 14.0,
+            "_movementSpeed": 6.5,
+            "_sprintMultiplier": 1.65,
+            "managedState": "{\"fields\":[{\"Aliases\":[],\"Name\":\"_movementSpeed\",\"StableId\":\"\",\"Type\":\"\",\"Value\":6.5},{\"Aliases\":[],\"Name\":\"_lookSensitivity\",\"StableId\":\"\",\"Type\":\"\",\"Value\":1.0},{\"Aliases\":[],\"Name\":\"_maximumPitch\",\"StableId\":\"\",\"Type\":\"\",\"Value\":89.0},{\"Aliases\":[],\"Name\":\"_movementSharpness\",\"StableId\":\"\",\"Type\":\"\",\"Value\":14.0},{\"Aliases\":[],\"Name\":\"_invertHorizontal\",\"StableId\":\"\",\"Type\":\"\",\"Value\":false},{\"Aliases\":[],\"Name\":\"_invertVertical\",\"StableId\":\"\",\"Type\":\"\",\"Value\":false},{\"Aliases\":[],\"Name\":\"_lookSharpness\",\"StableId\":\"\",\"Type\":\"\",\"Value\":53.3},{\"Aliases\":[],\"Name\":\"_sprintMultiplier\",\"StableId\":\"\",\"Type\":\"\",\"Value\":1.65},{\"Aliases\":[],\"Name\":\"_airControl\",\"StableId\":\"\",\"Type\":\"\",\"Value\":0.28},{\"Aliases\":[],\"Name\":\"_gravity\",\"StableId\":\"\",\"Type\":\"\",\"Value\":24.0},{\"Aliases\":[],\"Name\":\"_jumpHeight\",\"StableId\":\"\",\"Type\":\"\",\"Value\":1.15},{\"Aliases\":[],\"Name\":\"_coyoteTime\",\"StableId\":\"\",\"Type\":\"\",\"Value\":0.12},{\"Aliases\":[],\"Name\":\"_jumpBufferTime\",\"StableId\":\"\",\"Type\":\"\",\"Value\":0.12},{\"Aliases\":[],\"Name\":\"_groundStickSpeed\",\"StableId\":\"\",\"Type\":\"\",\"Value\":2.0}],\"version\":1}"
+          },
+          "enabled": true,
+          "type": "73616e64-626f-4078-8000-000000000030",
+          "version": 1
+        },
+        {
+          "data": {
+            "managedState": "{\"fields\":[{\"Aliases\":[],\"Name\":\"uiPanel\",\"StableId\":\"\",\"Type\":\"\",\"Value\":{\"Id\":{\"High\":8968286786875574750,\"Low\":11350882427125024393}}},{\"Aliases\":[],\"Name\":\"uiButton\",\"StableId\":\"\",\"Type\":\"\",\"Value\":{\"Id\":{\"High\":6584940885720255740,\"Low\":9300562048828532685}}},{\"Aliases\":[],\"Name\":\"uiOpened\",\"StableId\":\"\",\"Type\":\"\",\"Value\":{\"persistentCalls\":[]}},{\"Aliases\":[],\"Name\":\"uiClosed\",\"StableId\":\"\",\"Type\":\"\",\"Value\":{\"persistentCalls\":[]}},{\"Aliases\":[],\"Name\":\"uiAudioClip\",\"StableId\":\"\",\"Type\":\"\",\"Value\":{\"Id\":{\"High\":17595254351269544466,\"Low\":12566757923369154885}}}],\"version\":1}",
+            "uiAudioClip": "f42ee69b-dc11-4212-ae66-17bff0be7945",
+            "uiButton": "5b6268d8-d84d-4cfc-8112-3be82be767cd",
+            "uiClosed": [],
+            "uiOpened": [],
+            "uiPanel": "7c75c151-0f8c-49de-9d86-6f6d8c02c689"
+          },
+          "enabled": true,
+          "type": "3f100613-b2cc-4dc0-a7b2-216428d75ae0",
+          "version": 1
+        }
+      ],
+      "id": "a1b2c3d4-1000-4000-8000-000000000001",
+      "layer": 0,
+      "name": "Main Camera",
+      "parent": "d6e7aa06-b25a-4e19-a84c-00635691a83a"
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0.2800000011920929,
+              -0.18000000715255737,
+              0.6499999761581421
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "autoDestroy": false,
+            "boundsCenter": [
+              0.0,
+              0.0,
+              1.5
+            ],
+            "boundsExtent": [
+              2.0,
+              2.0,
+              4.0
+            ],
+            "culling": 0,
+            "editModePreview": false,
+            "effect": "518e44da-1d18-4197-8ebd-ca805295869e",
+            "parameterOverrides": "[]",
+            "playOnAwake": true,
+            "quality": 2,
+            "seedOffset": 31415,
+            "simulationSpeed": 1.0
+          },
+          "enabled": true,
+          "type": "4b454952-4556-4658-454d-495454455201",
+          "version": 2
+        },
+        {
+          "data": {
+            "managedState": "{\"fields\":[],\"version\":1}"
+          },
+          "enabled": true,
+          "type": "73616e64-626f-4078-8000-000000000050",
+          "version": 1
+        }
+      ],
+      "id": "a37594bf-28fd-4ad3-b613-cbb9b3b9df21",
+      "layer": 0,
+      "name": "VX-9 Plasma Lance Muzzle",
+      "parent": "a1b2c3d4-1000-4000-8000-000000000001"
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0.0,
+              14.748805046081543,
+              13.1070556640625
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              3.630000114440918,
+              2.5399999618530273,
+              3.2100000381469727
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "castShadows": true,
+            "giReceive": 0,
+            "lightmapScale": 1.0,
+            "material": "fb5f2683-f3d9-516c-a24e-3817e6386ab9",
+            "mesh": "c0ffee00-0000-4000-8000-000000000001",
+            "preserveLightmapUvs": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "tint": [
+              0.8855721354484558,
+              0.8855721354484558,
+              0.8855721354484558,
+              1.0
+            ],
+            "visible": true
+          },
+          "enabled": true,
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 3
+        },
+        {
+          "data": {
+            "center": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "collisionMesh": null,
+            "halfExtent": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "height": 1.0,
+            "layer": 1,
+            "mask": 4294967295,
+            "physicsMaterial": null,
+            "radius": 0.5,
+            "shape": 0,
+            "trigger": false
+          },
+          "enabled": true,
+          "type": "4b454952-4543-4f4c-4c49-444552000001",
+          "version": 2
+        },
+        {
+          "data": {
+            "attenuation": [
+              {
+                "inTangent": 0.0,
+                "interpolation": 1,
+                "outTangent": 0.0,
+                "time": 0.0,
+                "value": 1.0
+              }
+            ],
+            "bus": "SFX",
+            "busId": "",
+            "clip": "d09e3f28-06e6-49eb-a714-0261348f5eee",
+            "gain": 1.0,
+            "loop": false,
+            "maximumDistance": 100.0,
+            "minimumDistance": 1.0,
+            "mixer": null,
+            "pitch": 1.0,
+            "playOnAwake": true,
+            "priority": 128,
+            "spatial": true
+          },
+          "enabled": true,
+          "type": "4b454952-4541-5544-494f-535243000001",
+          "version": 2
+        }
+      ],
+      "id": "a1b2c3d4-1000-4000-8000-000000000003",
+      "layer": 0,
+      "name": "Cube",
+      "parent": null
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              1.782796859741211,
+              14.389034271240234,
+              1.5814927816390991
+            ],
+            "rotation": [
+              0.8806512951850891,
+              0.11315173655748367,
+              -0.3761037588119507,
+              0.26494553685188293
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "bakeMode": 0,
+            "color": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "contactShadows": false,
+            "cookie": null,
+            "cookieOffset": [
+              0.0,
+              0.0
+            ],
+            "cookieRotation": 0.0,
+            "cookieScale": [
+              1.0,
+              1.0
+            ],
+            "indirectMultiplier": 1.0,
+            "intensity": 4.501999855041504,
+            "shadowBias": 0.054999999701976776,
+            "shadowResolution": 2,
+            "shadowStrength": 1.0,
+            "shadows": 2,
+            "temperature": 6394.43994140625,
+            "useTemperature": false
+          },
+          "enabled": true,
+          "type": "4b454952-4544-4952-4c49-474854000001",
+          "version": 2
+        }
+      ],
+      "id": "a1b2c3d4-1000-4000-8000-000000000002",
+      "layer": 0,
+      "name": "Directional Light",
+      "parent": null
+    },
+    {
+      "active": false,
+      "components": [
+        {
+          "data": {
+            "position": [
+              -0.3025888502597809,
+              21.438827514648438,
+              13.822236061096191
+            ],
+            "rotation": [
+              0.7460574507713318,
+              0.0,
+              0.0,
+              0.6658815741539001
+            ],
+            "scale": [
+              1.0,
+              1.0000001192092896,
+              1.0000001192092896
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "bakeMode": 0,
+            "color": [
+              0.5938958525657654,
+              0.0,
+              0.641791045665741,
+              1.0
+            ],
+            "contactShadows": false,
+            "cookie": null,
+            "cookieOffset": [
+              0.0,
+              0.0
+            ],
+            "cookieRotation": 0.0,
+            "cookieScale": [
+              1.0,
+              1.0
+            ],
+            "indirectMultiplier": 1.0,
+            "innerAngle": 5.0,
+            "intensity": 47.150001525878906,
+            "outerAngle": 15.5,
+            "range": 11.699999809265137,
+            "shadowBias": 0.0024999999441206455,
+            "shadowResolution": 1,
+            "shadowStrength": 1.0,
+            "shadows": 2
+          },
+          "enabled": true,
+          "type": "4b454952-4553-504f-544c-494748540001",
+          "version": 2
+        }
+      ],
+      "id": "c00a8f81-2a41-49d5-8387-5a15343a9c31",
+      "layer": 0,
+      "name": "RedSpotLight",
+      "parent": null
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              100.0,
+              1.0,
+              100.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "castShadows": true,
+            "giReceive": 0,
+            "lightmapScale": 1.0,
+            "material": "6f7bf3a9-8da1-5495-a0d5-f9e1245baf1f",
+            "mesh": "4b454952-4543-5542-454d-455348000001",
+            "preserveLightmapUvs": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "tint": [
+              0.8855721354484558,
+              0.8855721354484558,
+              0.8855721354484558,
+              1.0
+            ],
+            "visible": true
+          },
+          "enabled": true,
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 3
+        },
+        {
+          "data": {
+            "center": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "collisionMesh": null,
+            "halfExtent": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "height": 1.0,
+            "layer": 1,
+            "mask": 4294967295,
+            "physicsMaterial": null,
+            "radius": 0.5,
+            "shape": 0,
+            "trigger": false
+          },
+          "enabled": true,
+          "type": "4b454952-4543-4f4c-4c49-444552000001",
+          "version": 2
+        }
+      ],
+      "id": "e3fbe155-f210-4d98-93e5-e32eadd53d5e",
+      "layer": 0,
+      "name": "Ground",
+      "parent": null
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "accessibilityScale": 1.0,
+            "match": 0.5,
+            "pixelPerfect": false,
+            "referenceResolution": [
+              1920.0,
+              1080.0
+            ],
+            "respectSafeArea": true,
+            "scaleMode": 1,
+            "sortingOrder": 0
+          },
+          "enabled": true,
+          "type": "4b454952-4555-4943-414e-564153000001",
+          "version": 1
+        },
+        {
+          "data": {
+            "anchorMaximum": [
+              1.0,
+              1.0
+            ],
+            "anchorMinimum": [
+              0.0,
+              0.0
+            ],
+            "anchoredPosition": [
+              0.0,
+              0.0
+            ],
+            "pivot": [
+              0.5,
+              0.5
+            ],
+            "rotation": 0.0,
+            "scale": [
+              1.0,
+              1.0
+            ],
+            "sizeDelta": [
+              0.0,
+              0.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4555-4952-4543-545452410001",
+          "version": 1
+        }
+      ],
+      "id": "c87ed874-ece2-4223-b00d-b53fb7a33c0f",
+      "layer": 0,
+      "name": "Canvas",
+      "parent": null
+    },
+    {
+      "active": false,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "anchorMaximum": [
+              1.0,
+              1.0
+            ],
+            "anchorMinimum": [
+              0.0,
+              0.0
+            ],
+            "anchoredPosition": [
+              0.0,
+              0.0
+            ],
+            "pivot": [
+              0.5,
+              0.5
+            ],
+            "rotation": 0.0,
+            "scale": [
+              1.0,
+              1.0
+            ],
+            "sizeDelta": [
+              0.0,
+              0.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4555-4952-4543-545452410001",
+          "version": 1
+        },
+        {
+          "data": {
+            "fillAmount": 1.0,
+            "imageType": 1,
+            "pixelsPerUnit": 100.0,
+            "preserveAspect": false,
+            "raycastTarget": true,
+            "sprite": null,
+            "tint": [
+              0.02500000037252903,
+              0.04500000178813934,
+              0.07500000298023224,
+              0.9599999785423279
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4555-4949-4d41-474500000001",
+          "version": 1
+        },
+        {
+          "data": {
+            "alignment": 4,
+            "cellSize": [
+              160.0,
+              48.0
+            ],
+            "controlChildHeight": false,
+            "controlChildWidth": false,
+            "direction": 1,
+            "forceExpandHeight": false,
+            "forceExpandWidth": false,
+            "padding": [
+              36.0,
+              36.0,
+              36.0,
+              36.0
+            ],
+            "spacing": 18.0
+          },
+          "enabled": true,
+          "type": "4b454952-4555-494c-4159-4f5554000001",
+          "version": 1
+        }
+      ],
+      "id": "7c75c151-0f8c-49de-9d86-6f6d8c02c689",
+      "layer": 0,
+      "name": "Modern Panel",
+      "parent": "c87ed874-ece2-4223-b00d-b53fb7a33c0f"
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "anchorMaximum": [
+              0.5,
+              0.5
+            ],
+            "anchorMinimum": [
+              0.5,
+              0.5
+            ],
+            "anchoredPosition": [
+              0.0,
+              0.0
+            ],
+            "pivot": [
+              0.5,
+              0.5
+            ],
+            "rotation": 0.0,
+            "scale": [
+              1.0,
+              1.0
+            ],
+            "sizeDelta": [
+              320.0,
+              96.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4555-4952-4543-545452410001",
+          "version": 1
+        },
+        {
+          "data": {
+            "alignment": 4,
+            "color": [
+              0.8600000143051147,
+              0.9399999976158142,
+              1.0,
+              1.0
+            ],
+            "font": null,
+            "fontSize": 34.0,
+            "raycastTarget": false,
+            "richText": true,
+            "text": "MISSION CONTROL",
+            "wrap": true
+          },
+          "enabled": true,
+          "type": "4b454952-4555-4954-4558-540000000001",
+          "version": 1
+        }
+      ],
+      "id": "e7c65904-e1fa-470e-92a2-67d240edc190",
+      "layer": 0,
+      "name": "Title",
+      "parent": "7c75c151-0f8c-49de-9d86-6f6d8c02c689"
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "anchorMaximum": [
+              0.5,
+              0.5
+            ],
+            "anchorMinimum": [
+              0.5,
+              0.5
+            ],
+            "anchoredPosition": [
+              0.0,
+              0.0
+            ],
+            "pivot": [
+              0.5,
+              0.5
+            ],
+            "rotation": 0.0,
+            "scale": [
+              1.0,
+              1.0
+            ],
+            "sizeDelta": [
+              320.0,
+              96.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4555-4952-4543-545452410001",
+          "version": 1
+        },
+        {
+          "data": {
+            "alignment": 4,
+            "color": [
+              0.33000001311302185,
+              0.7799999713897705,
+              0.949999988079071,
+              1.0
+            ],
+            "font": null,
+            "fontSize": 16.0,
+            "raycastTarget": false,
+            "richText": true,
+            "text": "SYSTEMS READY",
+            "wrap": true
+          },
+          "enabled": true,
+          "type": "4b454952-4555-4954-4558-540000000001",
+          "version": 1
+        }
+      ],
+      "id": "c78e5405-06e6-4018-828b-c893b0a48c77",
+      "layer": 0,
+      "name": "Subtitle",
+      "parent": "7c75c151-0f8c-49de-9d86-6f6d8c02c689"
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "anchorMaximum": [
+              0.5,
+              0.5
+            ],
+            "anchorMinimum": [
+              0.5,
+              0.5
+            ],
+            "anchoredPosition": [
+              0.0,
+              0.0
+            ],
+            "pivot": [
+              0.5,
+              0.5
+            ],
+            "rotation": 0.0,
+            "scale": [
+              1.0,
+              1.0
+            ],
+            "sizeDelta": [
+              250.0,
+              42.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4555-4952-4543-545452410001",
+          "version": 1
+        },
+        {
+          "data": {
+            "fillAmount": 1.0,
+            "imageType": 1,
+            "pixelsPerUnit": 100.0,
+            "preserveAspect": false,
+            "raycastTarget": true,
+            "sprite": null,
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              0.9599999785423279
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4555-4949-4d41-474500000001",
+          "version": 1
+        },
+        {
+          "data": {
+            "action": "",
+            "disabledColor": [
+              0.20000000298023224,
+              0.23000000417232513,
+              0.2800000011920929,
+              0.550000011920929
+            ],
+            "hoverColor": [
+              0.11999999731779099,
+              0.6000000238418579,
+              0.9200000166893005,
+              1.0
+            ],
+            "interactable": true,
+            "normalColor": [
+              0.07999999821186066,
+              0.44999998807907104,
+              0.7200000286102295,
+              1.0
+            ],
+            "pressedColor": [
+              0.05000000074505806,
+              0.3199999928474426,
+              0.5600000023841858,
+              1.0
+            ],
+            "transition": 1,
+            "transitionDuration": 0.11999999731779099
+          },
+          "enabled": true,
+          "type": "4b454952-4555-4942-5554-544f4e000001",
+          "version": 1
+        }
+      ],
+      "id": "5b6268d8-d84d-4cfc-8112-3be82be767cd",
+      "layer": 0,
+      "name": "Primary Action",
+      "parent": "7c75c151-0f8c-49de-9d86-6f6d8c02c689"
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "anchorMaximum": [
+              1.0,
+              1.0
+            ],
+            "anchorMinimum": [
+              0.0,
+              0.0
+            ],
+            "anchoredPosition": [
+              0.0,
+              0.0
+            ],
+            "pivot": [
+              0.5,
+              0.5
+            ],
+            "rotation": 0.0,
+            "scale": [
+              1.0,
+              1.0
+            ],
+            "sizeDelta": [
+              0.0,
+              0.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4555-4952-4543-545452410001",
+          "version": 1
+        },
+        {
+          "data": {
+            "alignment": 4,
+            "color": [
+              0.9399999976158142,
+              0.9700000286102295,
+              1.0,
+              1.0
+            ],
+            "font": null,
+            "fontSize": 24.0,
+            "raycastTarget": false,
+            "richText": true,
+            "text": "CONTINUE",
+            "wrap": true
+          },
+          "enabled": true,
+          "type": "4b454952-4555-4954-4558-540000000001",
+          "version": 1
+        }
+      ],
+      "id": "e4617127-881d-4ed6-b0c3-bc4bba434ec1",
+      "layer": 0,
+      "name": "Label",
+      "parent": "5b6268d8-d84d-4cfc-8112-3be82be767cd"
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0.0,
+              0.5040000081062317,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.02500000037252903,
+              0.02500000037252903,
+              0.02500000037252903
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "castShadows": true,
+            "giReceive": 0,
+            "lightmapScale": 1.0,
+            "material": "e843c376-73b4-47e5-905a-3776564d5e4f",
+            "mesh": "51cd8956-a6c4-4d63-b990-7d86829f92ff",
+            "preserveLightmapUvs": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "visible": true
+          },
+          "enabled": true,
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 3
+        },
+        {
+          "data": {
+            "applyRootMotion": true,
+            "footCollisionMask": 4294967295,
+            "footGrounding": false,
+            "footIkWeight": 1.0,
+            "footOffset": 0.019999999552965164,
+            "footPelvis": "Hips",
+            "footRaycastDistance": 0.75,
+            "footRaycastHeight": 0.3499999940395355,
+            "footRotationWeight": 1.0,
+            "graph": "9ec01b6f-4862-443e-8cfd-efa2f23ef04a",
+            "leftFoot": "LeftFoot",
+            "leftLowerLeg": "LeftLeg",
+            "leftUpperLeg": "LeftUpLeg",
+            "maximumPelvisAdjustment": 0.5,
+            "rightFoot": "RightFoot",
+            "rightLowerLeg": "RightLeg",
+            "rightUpperLeg": "RightUpLeg",
+            "skeleton": "c8bf2eaf-9146-5b53-85c8-c3e6dc9b8f08",
+            "skinnedMesh": "78c8dbe3-2951-54b9-b34e-9221c49c506b",
+            "speed": 1.0
+          },
+          "enabled": true,
+          "type": "4b454952-4541-4e49-4d41-544f52000001",
+          "version": 2
+        }
+      ],
+      "id": "b814c702-6a84-47a1-90fb-777fadf4cb98",
+      "layer": 0,
+      "name": "T-Pose",
+      "parent": null
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        }
+      ],
+      "id": "f8e5df3c-47c2-46a3-b524-87d61d7da1e8",
+      "layer": 0,
+      "name": "Vfx",
+      "parent": null
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              18.235937118530273,
+              2.491081714630127,
+              -7.571257591247559
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "autoDestroy": false,
+            "boundsCenter": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "boundsExtent": [
+              5.0,
+              5.0,
+              5.0
+            ],
+            "culling": 0,
+            "editModePreview": true,
+            "effect": "c27fbc8b-ef96-40ad-a5bc-30c688438f3c",
+            "parameterOverrides": "[]",
+            "playOnAwake": true,
+            "quality": 2,
+            "seedOffset": 0,
+            "simulationSpeed": 1.0
+          },
+          "enabled": true,
+          "type": "4b454952-4556-4658-454d-495454455201",
+          "version": 2
+        }
+      ],
+      "id": "56438164-b589-4350-970b-a13b0223fdf2",
+      "layer": 0,
+      "name": "SigilOrbit",
+      "parent": "f8e5df3c-47c2-46a3-b524-87d61d7da1e8"
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              24.81574821472168,
+              2.491081714630127,
+              -7.571257591247559
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "autoDestroy": false,
+            "boundsCenter": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "boundsExtent": [
+              5.0,
+              5.0,
+              5.0
+            ],
+            "culling": 0,
+            "editModePreview": true,
+            "effect": "2cd9a41b-120c-4bbc-988d-3d719fc4d264",
+            "parameterOverrides": "[]",
+            "playOnAwake": true,
+            "quality": 2,
+            "seedOffset": 0,
+            "simulationSpeed": 1.0
+          },
+          "enabled": true,
+          "type": "4b454952-4556-4658-454d-495454455201",
+          "version": 2
+        }
+      ],
+      "id": "ced92197-6be1-439d-8051-26609c6f294b",
+      "layer": 0,
+      "name": "Shard Cylicone",
+      "parent": "f8e5df3c-47c2-46a3-b524-87d61d7da1e8"
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              24.81574821472168,
+              2.491081714630127,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "autoDestroy": false,
+            "boundsCenter": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "boundsExtent": [
+              5.0,
+              5.0,
+              5.0
+            ],
+            "culling": 0,
+            "editModePreview": true,
+            "effect": "b8da08ac-aa68-44a9-859d-6d36e96f58b2",
+            "parameterOverrides": "[]",
+            "playOnAwake": true,
+            "quality": 2,
+            "seedOffset": 0,
+            "simulationSpeed": 1.0
+          },
+          "enabled": true,
+          "type": "4b454952-4556-4658-454d-495454455201",
+          "version": 2
+        }
+      ],
+      "id": "204e7db8-1f11-4d1f-b7e1-d091830ac5d4",
+      "layer": 0,
+      "name": "Arcane nova",
+      "parent": "f8e5df3c-47c2-46a3-b524-87d61d7da1e8"
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              12.698086738586426,
+              2.491081714630127,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "autoDestroy": false,
+            "boundsCenter": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "boundsExtent": [
+              5.0,
+              5.0,
+              5.0
+            ],
+            "culling": 0,
+            "editModePreview": true,
+            "effect": "2bc4f762-0ca3-4a1d-a6bf-f7eb5ee4f09e",
+            "parameterOverrides": "[]",
+            "playOnAwake": true,
+            "quality": 2,
+            "seedOffset": 0,
+            "simulationSpeed": 1.0
+          },
+          "enabled": true,
+          "type": "4b454952-4556-4658-454d-495454455201",
+          "version": 2
+        }
+      ],
+      "id": "7a2f2b21-84a6-4790-b1a9-529da68fe10b",
+      "layer": 0,
+      "name": "Mist",
+      "parent": "f8e5df3c-47c2-46a3-b524-87d61d7da1e8"
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              18.346534729003906,
+              2.491081714630127,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "autoDestroy": false,
+            "boundsCenter": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "boundsExtent": [
+              5.0,
+              5.0,
+              5.0
+            ],
+            "culling": 0,
+            "editModePreview": true,
+            "effect": "6f17db40-57f3-4e48-9d54-a4a69b1d7c01",
+            "parameterOverrides": "[]",
+            "playOnAwake": true,
+            "quality": 2,
+            "seedOffset": 0,
+            "simulationSpeed": 1.0
+          },
+          "enabled": true,
+          "type": "4b454952-4556-4658-454d-495454455201",
+          "version": 2
+        }
+      ],
+      "id": "c2c43e14-f374-4f0e-8516-93b5e507e10c",
+      "layer": 0,
+      "name": "Sparks",
+      "parent": "f8e5df3c-47c2-46a3-b524-87d61d7da1e8"
+    }
+  ],
+  "lighting": {
+    "backend": 0,
+    "bakeAmbientOcclusion": true,
+    "denoise": true,
+    "indirectBounceCount": 2,
+    "lightmapResolution": 1024,
+    "maximumLightmapResolution": 4096,
+    "paddingTexels": 4,
+    "quality": 1,
+    "samplesPerTexel": 64,
+    "texelsPerUnit": 32
+  },
+  "name": "SampleScene",
+  "prefabInstances": [],
+  "prefabOverrides": [],
+  "schemaVersion": 5
+}

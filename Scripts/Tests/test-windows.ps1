@@ -23,6 +23,8 @@ $python = (Get-Command python -ErrorAction Stop).Source
 if ($runFast) {
 & $python (Join-Path $PSScriptRoot "check-repository-layout.py")
 if ($LASTEXITCODE -ne 0) { throw "Repository layout checks failed." }
+& $python (Join-Path $PSScriptRoot "..\Packaging\sync-sandbox-template.py") --check
+if ($LASTEXITCODE -ne 0) { throw "Sandbox template synchronization checks failed." }
 & (Join-Path $PSScriptRoot "test-clean-windows.ps1")
 & (Join-Path $PSScriptRoot "test-managed-host-staging-windows.ps1")
 & (Join-Path $PSScriptRoot "test-editor-package-windows.ps1")
@@ -347,6 +349,9 @@ Assert-Equal ([regex]::Matches($windowsBuild, '(?m)^\s+Invoke-ManagedBuild\s*$')
 Assert-True ($windowsBuild.Contains('"build-managed.ps1"') -and
              $windowsManagedBuild.Contains('"Keire.Managed.dll"') -and
              $windowsManagedBuild.Contains('LastWriteTimeUtc')) "Managed runtime API freshness and output validation"
+Assert-True ($windowsBuild.Contains('"build-info.ps1"') -and
+             $windowsBuild.Contains('"Build metadata generation"')) `
+    "Every Windows build refreshes generated product identity before compilation"
 Assert-True ($windowsRun.Contains('[Diagnostics.ProcessStartInfo]::new()') -and
              $windowsRun.Contains('$invalid.StandardError.ReadToEnd()') -and
              $windowsRun.Contains('$invalid.WaitForExit()') -and
@@ -546,6 +551,11 @@ Assert-True ($editorPackageScript.Contains('editor=bin/$($Project.CLIENT_TARGET)
     -not $editorPackageScript.Contains('"--entrypoint", "hub=') -and
     -not $editorPackageScript.Contains('"--entrypoint", "worker=') -and
     -not $editorPackageScript.Contains('KeireHubContent')) "Windows editor package excludes Hub ownership"
+$hubPackageScript = Get-Content (Join-Path $Windows "package-hub.ps1") -Raw
+Assert-True ($hubPackageScript.Contains('KEIRE_DISTRIBUTION_TRUSTED_KEYS') -and
+    $hubPackageScript.Contains('[IO.Path]::PathSeparator') -and
+    $hubPackageScript.Contains('foreach ($trustedKeyPath in $trustedKeyPaths)')) `
+    "Windows Hub packaging supports overlapping distribution trust keys"
 $packagePublisher = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireHubPackagePublisher\Source\Main.cpp') -Raw
 Assert-True ($packagePublisher.Contains('value.at("dirty").get<bool>()') -and
     $packagePublisher.Contains('value.at("developmentArtifact").get<bool>()') -and

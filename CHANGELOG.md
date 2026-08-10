@@ -1,5 +1,31 @@
 # Changelog
 
+- Rotated the Hub distribution signing identity with an overlap period that retains the previous trusted public key,
+  allowing updated Hubs to validate both the current catalog and newly signed release snapshots. Hub packaging now
+  accepts multiple environment-supplied public keys while retaining the legacy single-key override.
+- Added signed-catalog and Hub regression coverage ensuring Kéire Editor 0.1.0 and 0.2.0 remain independently visible
+  and downloadable when both immutable packages are carried into the Stable release snapshot.
+- Promoted the Kéire Editor and Project Hub product line to 0.2.0 while retaining side-by-side 0.1.0 editor
+  installations. The graph-enabled Sandbox template now declares 0.2.0 as its minimum compatible editor; older
+  projects remain discoverable and upgradeable through the existing versioned project workflow.
+- Fixed normal Windows, Linux, and macOS builds retaining stale generated product identity after `Project.conf`
+  version changes. Every build now refreshes `BuildInfo.generated.h` before native dependency evaluation.
+- Fixed Asset Browser double-click handling so materials open in the Material Inspector, Shader Graphs open a clean
+  Shader Graph canvas, and Material Graphs open both their material bindings and their referenced Shader Graph when
+  one is assigned.
+- Fixed development Hub binaries depending on the launcher's current working directory to find templates, learning
+  content, licenses, branding, and fonts. The Hub now resolves the nearest packaged or repository distribution root
+  from its executable ancestry and retains the explicit missing-content diagnostics for genuinely incomplete layouts.
+- Split visual shader logic into first-class `.keireshadergraph` assets while retaining `.keirematerialgraph` as a
+  first-class material binding asset. Direct Materials and Material Graphs now use tagged built-in, raw-Shader, or
+  Shader-Graph references and bake to the renderer's unchanged immutable `MaterialAsset` contract.
+- Added stable Shader Graph property identities, canonical target/keyword variant keys, Shader/Material Graph Asset
+  Browser creation and badges, custom Shader Graph selection for direct Materials and Inspector-editable Material Graph
+  bindings, and transactional legacy Material Graph extraction through `KeireAssetTool migrate-shader-graphs` with a
+  read-only `--check` mode.
+- Migrated the nine Sandbox graph examples into paired Shader Graph and Material Graph assets while preserving original
+  material and generated-shader identities. Added deterministic encoding, importer, interface-validation, editor,
+  direct-material, and rollback-focused migration tests.
 - Expanded the frozen Unity 6.3 VFX parity ledger by 120 evidence-backed rows, from 125 to 245 enabled equivalents.
   Added 76 canonical runtime Operators for derived attributes, structured inline values, geometry math, curves,
   gradients, deterministic selection, and bounded CPU texture/mesh/buffer queries; extended the packed CPU/GPU opcode
@@ -57,6 +83,14 @@ version tags.
 
 ## Unreleased
 
+- Expanded the packaged Sandbox template from a minimal scripting stub to the canonical clean authoring sample and
+  added a deterministic cross-platform sync/check tool. New Sandbox projects now open a nine-display Shader Graph and
+  Material Graph gallery spanning basic paint through transmission, vertex displacement, and holographic Voronoi,
+  while generated output, caches, builds, and project identity remain safely regenerated per project.
+- Fixed migrated Shader Graph variant resolution in Material Graphs, direct Materials, and Shader Graph instances.
+  Importers now honor the graph's preserved generated-asset owner, reimport older caches through versioned metadata,
+  and publish catalogs without replacing legacy generated shader identities.
+
 - Fixed scene renames retaining a stale open-document path that could recreate the old `.keirescene` on the next save.
   Rename, undo, and redo now refresh the document by stable asset identity, preserve references and metadata, and reject
   collisions without publishing a second scene.
@@ -65,17 +99,17 @@ version tags.
   the panel; and every authored asset type uses a focused, select-all naming prompt before publication.
 - Added line-list and point-list mesh persistence, import, shader-manifest, and SDL GPU rendering compatibility plus
   safe strip/fan triangulation, with precise diagnostics for rigged non-triangle topology. The Editor window now also
-  applies the packaged Kéire icon through the cross-platform SDL window boundary.
+  applies a bounded 256x256 version of the packaged Kéire icon through the cross-platform SDL window boundary.
 - Added signed generic Build Support publication from verified `.keireplayersupport` archives, exact editor-version
   compatibility, Linux release-matrix documentation, and Windows/Unix publisher integration. Hub install review now
   supports a validated native folder picker, first-run progress has a readable fixed height, and Starter 3D includes an
   active camera and directional light while **Empty Project** remains content-free.
-- Material Graph shutdown now joins the editor's unsaved-change transaction instead of silently discarding the draft.
+- Shader Graph shutdown now joins the editor's unsaved-change transaction instead of silently discarding the draft.
   Save publishes source and generated variants atomically, Discard is explicit, and regression coverage closes and
   reopens the serialized graph definition.
-- Integrated Material and VFX node search into their creation menus with open-time focus, live filtering, wrapping
+- Integrated Shader and VFX node search into their creation menus with open-time focus, live filtering, wrapping
   keyboard selection, Enter-to-create, recent/common entries, and preserved category browsing.
-- Added the searchable Material Graph node palette to right-clicks anywhere on the canvas, with new nodes placed at the
+- Added the searchable Shader Graph node palette to right-clicks anywhere on the canvas, with new nodes placed at the
   requested graph position while retaining the top-bar creation menu.
 - Fixed older-schema projects being forced into Hub upgrade review after a Hub/Editor update even when a compatible
   previous Editor remains installed. The Hub now launches the exact or least-disruptive compatible Editor directly,

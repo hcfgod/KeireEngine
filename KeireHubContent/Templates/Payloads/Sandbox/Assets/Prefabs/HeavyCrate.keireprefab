@@ -1,0 +1,15 @@
+{
+  "prefabSchemaVersion": 1,
+  "basePrefab": "73616e64-626f-4078-8000-000000000102",
+  "schemaVersion": 3,
+  "name": "HeavyCrate",
+  "entities": [],
+  "prefabInstances": [],
+  "prefabOverrides": [
+    {
+      "kind": 0,
+      "object": "73616e64-626f-4078-8000-000000000101",
+      "name": "Heavy Physics Crate"
+    }
+  ]
+}

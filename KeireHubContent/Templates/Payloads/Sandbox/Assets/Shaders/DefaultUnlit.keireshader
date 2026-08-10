@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 1,
+  "source": "Assets/Shaders/DefaultUnlit.hlsl",
+  "vertexLayoutVersion": 3,
+  "receivesShadows": true,
+  "usesForwardPlus": true,
+  "usesInstancing": true,
+  "usesImageBasedLighting": true,
+  "spatialLightingAbiVersion": 2,
+  "stages": {
+    "vertex": "VSMain",
+    "fragment": "PSMain"
+  },
+  "defines": {},
+  "includeRoots": [
+    "Assets/Shaders"
+  ],
+  "renderState": {
+    "topology": "TriangleList",
+    "culling": "Back",
+    "depthTest": true,
+    "depthWrite": true,
+    "blend": false
+  },
+  "properties": [
+    {
+      "name": "Tint",
+      "displayName": "Base Color Factor",
+      "category": "Surface",
+      "type": "Color",
+      "default": [
+        0.25,
+        0.55,
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "name": "MainTexture",
+      "displayName": "Base Color Texture",
+      "category": "Surface",
+      "type": "Texture2D",
+      "semantic": "BaseColor",
+      "default": null
+    },
+    {
+      "name": "MetallicFactor",
+      "displayName": "Metallic",
+      "category": "Surface",
+      "type": "Float",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "step": 0.01,
+      "default": [1.0, 0.0, 0.0, 0.0]
+    },
+    {
+      "name": "RoughnessFactor",
+      "displayName": "Roughness",
+      "category": "Surface",
+      "type": "Float",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "step": 0.01,
+      "default": [1.0, 0.0, 0.0, 0.0]
+    },
+    {
+      "name": "NormalScale",
+      "displayName": "Normal Scale",
+      "category": "Surface",
+      "type": "Float",
+      "minimum": 0.0,
+      "maximum": 2.0,
+      "step": 0.01,
+      "default": [1.0, 0.0, 0.0, 0.0]
+    },
+    {
+      "name": "OcclusionStrength",
+      "displayName": "Occlusion Strength",
+      "category": "Surface",
+      "type": "Float",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "step": 0.01,
+      "default": [1.0, 0.0, 0.0, 0.0]
+    },
+    {
+      "name": "EmissiveFactor",
+      "displayName": "Emissive Factor",
+      "category": "Surface",
+      "type": "Color",
+      "default": [0.0, 0.0, 0.0, 1.0]
+    },
+    {
+      "name": "NormalTexture",
+      "displayName": "Normal Map",
+      "category": "Textures",
+      "type": "Texture2D",
+      "semantic": "Normal",
+      "default": null
+    },
+    {
+      "name": "MetallicRoughnessTexture",
+      "displayName": "Metallic Roughness",
+      "category": "Textures",
+      "type": "Texture2D",
+      "semantic": "MetallicRoughness",
+      "default": null
+    },
+    {
+      "name": "OcclusionTexture",
+      "displayName": "Occlusion",
+      "category": "Textures",
+      "type": "Texture2D",
+      "semantic": "Occlusion",
+      "default": null
+    },
+    {
+      "name": "EmissiveTexture",
+      "displayName": "Emissive",
+      "category": "Textures",
+      "type": "Texture2D",
+      "semantic": "Emissive",
+      "default": null
+    },
+    {
+      "name": "MetallicTexture",
+      "displayName": "Metallic Map",
+      "category": "Textures",
+      "type": "Texture2D",
+      "semantic": "Metallic",
+      "default": null
+    },
+    {
+      "name": "RoughnessTexture",
+      "displayName": "Roughness Map",
+      "category": "Textures",
+      "type": "Texture2D",
+      "semantic": "Roughness",
+      "default": null
+    }
+  ]
+}

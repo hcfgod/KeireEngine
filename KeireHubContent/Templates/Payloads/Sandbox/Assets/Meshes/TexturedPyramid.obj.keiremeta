@@ -1,0 +1,11 @@
+{
+  "dependencies": [],
+  "id": "c0ffee00-0000-4000-8000-000000000001",
+  "importer": "Keire.Mesh",
+  "importerVersion": 14,
+  "schemaVersion": 1,
+  "subAssets": [
+    "153db4b3-942f-5e0e-a8fe-0705420fab00"
+  ],
+  "type": "4b454952-454d-4553-4841-535345540001"
+}

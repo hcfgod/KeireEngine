@@ -189,6 +189,30 @@ TEST_CASE("Editor install catalogs expose stable editors and compatible componen
     CHECK(optedIn.Snapshot()->PopulatedChannels == std::vector<std::string>{"stable", "preview"});
 }
 
+TEST_CASE("Editor install catalogs preserve multiple downloadable stable editor versions")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    EditorInstallationRegistry registry(temporary.Path() / "installations.json");
+    auto previous = Package("keire.editor", "0.1.0", PackageKind::Editor);
+    previous.DisplayName = "Keire Editor 0.1.0";
+    auto current = Package("keire.editor", "0.2.0", PackageKind::Editor);
+    current.DisplayName = "Keire Editor 0.2.0";
+
+    EditorInstallCatalog catalog(registry, Specification());
+    REQUIRE(catalog.Refresh(Distribution({Catalog("stable", {previous, current})})));
+
+    const auto snapshot = catalog.Snapshot();
+    REQUIRE(snapshot);
+    REQUIRE(snapshot->AvailableEditors.size() == 2U);
+    CHECK(snapshot->PopulatedChannels == std::vector<std::string>{"stable"});
+    CHECK(snapshot->AvailableEditors[0].Version == "0.2.0");
+    CHECK(snapshot->AvailableEditors[0].DisplayName == "Keire Editor 0.2.0");
+    CHECK(snapshot->AvailableEditors[1].Version == "0.1.0");
+    CHECK(snapshot->AvailableEditors[1].DisplayName == "Keire Editor 0.1.0");
+    CHECK(snapshot->AvailableEditors[0].InstalledInstallationIds.empty());
+    CHECK(snapshot->AvailableEditors[1].InstalledInstallationIds.empty());
+}
+
 TEST_CASE("Editor install catalog refresh rejects invalid bounded sources without replacing its snapshot")
 {
     KeireHubTests::TemporaryDirectory temporary;

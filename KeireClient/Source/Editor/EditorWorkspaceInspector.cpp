@@ -167,13 +167,13 @@ void EditorWorkspaceLayer::RecordInspectorUndo(const std::string_view name, std:
 
 void EditorWorkspaceLayer::NotifyInspectorMaterialAssigned(const Keire::AssetId material)
 {
-    if (!material || !m_AssetDatabase || !m_MaterialGraphDocument->Asset())
+    if (!material || !m_AssetDatabase || !m_ShaderGraphDocument->Asset())
         return;
-    const auto record = m_AssetDatabase->Find(m_MaterialGraphDocument->Asset());
-    if (record && record->Type == Keire::MaterialGraphAsset::StaticType() &&
+    const auto record = m_AssetDatabase->Find(m_ShaderGraphDocument->Asset());
+    if (record && record->Type == Keire::ShaderGraphAsset::StaticType() &&
         std::ranges::find(record->SubAssets, material) != record->SubAssets.end())
     {
-        m_MaterialGraphDocument->ApplyLiveRevision();
+        m_ShaderGraphDocument->ApplyLiveRevision();
     }
 }
 

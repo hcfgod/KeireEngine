@@ -18,11 +18,11 @@ namespace KeireEditor
         else if (type == Keire::MeshAsset::StaticType())
             commands.CreateDroppedMeshEntity(asset);
         else if (type == Keire::MaterialAsset::StaticType() || type == Keire::MaterialGraphAsset::StaticType() ||
-                 type == Keire::MaterialGraphInstanceAsset::StaticType())
+                 type == Keire::ShaderGraphAsset::StaticType() || type == Keire::ShaderGraphInstanceAsset::StaticType())
         {
             if (!target)
                 throw std::invalid_argument(
-                    "Drop a material, Material Graph, or material instance over a rendered scene entity.");
+                    "Drop a material, Material Graph, Shader Graph, or instance over a rendered scene entity.");
             commands.AssignDroppedMaterial(target, asset);
         }
         else

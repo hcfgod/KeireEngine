@@ -13,6 +13,7 @@
 #include "Keire/Audio/AudioAssets.h"
 #include "Keire/ECS/Components/RuntimeUiComponents.h"
 #include "Keire/ECS/Components/VfxEmitterComponent.h"
+#include "Keire/Rendering/ShaderGraph.h"
 
 #include <algorithm>
 #include <array>
@@ -1507,22 +1508,56 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
         if (!assetStatus.empty())
             ui.TextColored(theme.MutedText, assetStatus);
     }
-    else if (record->RelativePath.extension() == ".keirematerial")
+    else if (record->RelativePath.extension() == ".keirematerial" ||
+             record->RelativePath.extension() == ".keirematerialgraph")
     {
+        const bool materialGraph = record->RelativePath.extension() == ".keirematerialgraph";
         ui.Separator();
-        ui.TextColored(theme.Accent, "MATERIAL");
-        ui.Text("Shader-driven texture assignments");
+        ui.TextColored(theme.Accent, materialGraph ? "MATERIAL GRAPH" : "MATERIAL");
+        ui.Text(materialGraph ? "Stable shader property bindings" : "Shader-driven texture assignments");
         try
         {
             const auto sourceRoot = database->Specification().ProjectRoot / database->Specification().SourceDirectory;
-            const auto resolveShader = [&](const Keire::AssetId shader) -> std::optional<Keire::ShaderAssetDefinition>
+            const KeireEditor::MaterialDocument::ShaderReferenceResolver resolveShader =
+                [&](const Keire::MaterialShaderReference& shader)
+                -> std::optional<KeireEditor::MaterialDocument::ResolvedShader>
             {
-                const auto shaderRecord = database->Find(shader);
-                if (!shaderRecord || shaderRecord->Type != Keire::ShaderAsset::StaticType())
+                const auto shaderRecord = database->Find(shader.Asset);
+                if (!shaderRecord)
                     return std::nullopt;
                 try
                 {
-                    return Keire::ShaderAsset::DecodeManifest(ReadBytes(sourceRoot / shaderRecord->RelativePath));
+                    if (shader.Kind != Keire::MaterialShaderSourceKind::ShaderGraph)
+                    {
+                        if (shaderRecord->Type != Keire::ShaderAsset::StaticType())
+                            return std::nullopt;
+                        return KeireEditor::MaterialDocument::ResolvedShader{
+                            shader.Asset,
+                            Keire::ShaderAsset::DecodeManifest(ReadBytes(sourceRoot / shaderRecord->RelativePath))};
+                    }
+                    if (shader.Target != "default" || shaderRecord->Type != Keire::ShaderGraphAsset::StaticType() ||
+                        !assets)
+                        return std::nullopt;
+                    const auto graph =
+                        Keire::ShaderGraphAsset::DecodeSource(ReadBytes(sourceRoot / shaderRecord->RelativePath));
+                    Keire::ShaderGraphInstanceDefinition selection;
+                    selection.Parent = shader.Asset;
+                    selection.KeywordOverrides = shader.Keywords;
+                    const std::array ancestry{selection};
+                    const auto resolvedSelection = Keire::ResolveShaderGraphInstance(graph, ancestry);
+                    const auto variants = Keire::EnumerateShaderGraphKeywordVariants(graph.Keywords);
+                    const auto variant =
+                        std::ranges::find_if(variants, [&resolvedSelection](const auto& candidate)
+                                             { return std::ranges::equal(candidate, resolvedSelection.Keywords); });
+                    const auto index = static_cast<std::size_t>(std::distance(variants.begin(), variant));
+                    if (variant == variants.end() || index >= shaderRecord->SubAssets.size())
+                        return std::nullopt;
+                    const auto runtimeShader = shaderRecord->SubAssets[index];
+                    const auto loaded = assets->Load<Keire::ShaderAsset>(runtimeShader, Keire::AssetPriority::High);
+                    const auto definition = loaded.TryGetLoaded();
+                    if (!definition)
+                        return std::nullopt;
+                    return KeireEditor::MaterialDocument::ResolvedShader{runtimeShader, definition->Definition()};
                 }
                 catch (...)
                 {
@@ -1535,16 +1570,37 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
             {
                 m_Controller.CommitInspectorMaterial();
                 const auto source = ReadBytes(sourcePath);
-                materialDocument.OpenAsset(record->Id, sourcePath, source, resolveShader);
+                if (materialGraph)
+                    materialDocument.OpenMaterialGraphAsset(record->Id, sourcePath, source, resolveShader);
+                else
+                    materialDocument.OpenAsset(record->Id, sourcePath, source, resolveShader);
             }
+            else if (materialGraph)
+                materialDocument.OpenMaterialGraph(materialDocument.DraftSource(), resolveShader);
             else
                 materialDocument.Open(materialDocument.DraftSource(), resolveShader);
             auto& document = materialDocument;
             InspectorPropertyEditor editor(ui, records, assets, scene, *m_AssetPicker);
             bool changed = false;
-            auto shader = document.Shader();
-            if (editor.EditAsset("Shader", shader, Keire::ShaderAsset::StaticType()))
-                changed = document.SetShader(shader, resolveShader) || changed;
+            const auto currentShader = document.ShaderReference();
+            auto shaderGraph = currentShader.Kind == Keire::MaterialShaderSourceKind::ShaderGraph ? currentShader.Asset
+                                                                                                  : Keire::AssetId{};
+            if (editor.EditAsset("Shader Graph", shaderGraph, Keire::ShaderGraphAsset::StaticType()))
+            {
+                Keire::MaterialShaderReference replacement;
+                replacement.Kind = shaderGraph ? Keire::MaterialShaderSourceKind::ShaderGraph
+                                               : Keire::MaterialShaderSourceKind::ShaderAsset;
+                replacement.Asset = shaderGraph;
+                changed = document.SetShaderReference(std::move(replacement), resolveShader) || changed;
+            }
+            auto rawShader = currentShader.Kind == Keire::MaterialShaderSourceKind::ShaderGraph ? Keire::AssetId{}
+                                                                                                : currentShader.Asset;
+            if (editor.EditAsset("Raw Shader", rawShader, Keire::ShaderAsset::StaticType()))
+            {
+                Keire::MaterialShaderReference replacement;
+                replacement.Asset = rawShader;
+                changed = document.SetShaderReference(std::move(replacement), resolveShader) || changed;
+            }
 
             if (document.Properties().empty())
                 ui.TextColored(theme.MutedText, "The selected shader declares no material properties.");
@@ -1557,12 +1613,15 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
             if (changed)
             {
                 document.CaptureDraft();
-                if (assets)
+                if (assets && (!materialGraph || !record->SubAssets.empty()))
                 {
+                    const auto runtimeMaterial =
+                        materialGraph && !record->SubAssets.empty() ? record->SubAssets.back() : record->Id;
                     (void)assets->PublishDevelopmentAsset(
-                        record->Id, Keire::CreateRef<Keire::MaterialAsset>(document.Definition()));
+                        runtimeMaterial, Keire::CreateRef<Keire::MaterialAsset>(document.Definition()));
                 }
-                m_Controller.SetInspectorAssetStatus("Previewing material changes live.");
+                m_Controller.SetInspectorAssetStatus(materialGraph ? "Previewing Material Graph changes live."
+                                                                   : "Previewing material changes live.");
             }
             if (editor.EditBoundary())
                 m_Controller.CommitInspectorMaterial();
@@ -1574,7 +1633,7 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
             ui.TextColored(theme.Error, std::string("Material editor unavailable: ") + error.what());
         }
         ui.TextColored(theme.MutedText, "Invalid shaders resolve to the error material at runtime.");
-        if (ui.Button("Reimport Material"))
+        if (ui.Button(materialGraph ? "Reimport Material Graph" : "Reimport Material"))
         {
             m_Controller.CommitInspectorMaterial();
             m_Controller.ImportInspectorAssets();

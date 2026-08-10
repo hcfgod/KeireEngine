@@ -156,7 +156,10 @@ manifest parsing, and inventory hashing never run inside a UI frame.
 
 Templates are data-driven. The browser searches and filters the three verified templates packaged with this release:
 Empty Project, 3D Starter, and Kéire Sandbox. The 3D Starter payload opens a ready-to-run scene with an active camera
-and directional light; Empty Project deliberately has no startup scene. Featured entries are ordered first, and the
+and directional light; Empty Project deliberately has no startup scene. Sandbox packages the canonical sample's clean
+authoring content, including its paired Shader/Material Graph library, gallery and gameplay scenes, VFX, scripts,
+meshes, textures, audio, and applicable project settings. Caches, builds, generated graph output, and project-specific
+identity files are deliberately regenerated in the created project. Featured entries are ordered first, and the
 detail panel reports tags, packaged thumbnail previews, editor-version constraints, project schema, platform target,
 starter content, package requirements, and license references from the manifest. Compatibility is evaluated against
 each healthy installed editor before the creation dialog offers a template/editor pair. Remote template download and
@@ -169,12 +172,20 @@ editor. Validation observes Hub shutdown, terminates its child process promptly,
 application shutdown wait for the full validation timeout. Creation progress appears in the task center and never
 blocks the UI thread.
 
+`Scripts/Packaging/sync-sandbox-template.py` owns the deterministic Sandbox projection and manifest hashes. Run it
+after changing canonical Sandbox authoring content; `--check` is part of the Windows and Unix fast regression suites
+and fails when payload bytes, file inventory, startup references, or catalog metadata drift.
+
 Learn and Resources load real packaged or signed catalog entries only. Packaged entries include the documentation and
 Kéire Sandbox; remote entries require HTTPS and a valid signed content catalog. Licenses loads the MIT license and real
 third-party/package license files, grouped by source, with search, copy, and reveal actions. Installed-package notices
 are resolved off the UI thread from receipt-bound paths and are shown only while their current size and digest still
 match the verified inventory. Missing or malformed packaged content/license catalogs produce explicit page warnings and
 typed error notifications rather than ordinary empty states.
+
+Packaged and development Hubs resolve this local content from the executable's distribution ancestry. Development
+binaries therefore load repository-owned templates, documentation, licenses, branding, and fonts consistently when
+started from an IDE, the command line, File Explorer, or another process with an unrelated working directory.
 
 ## First run and settings
 
@@ -272,10 +283,20 @@ distribution into the generic archive/catalog manifest. `create-hub-installer` c
 manifest only for a clean Hub package and platform-native `.exe`, `.dmg`, or `.deb`; native signing/notarization remains
 a release prerequisite. `prepare-distribution-snapshot.py` accepts repeated manifest/artifact pairs, rechecks every
 length and digest, rejects duplicate identities, and groups records into their host catalog before offline signing. A
-production Hub enables online Installs from the checked-in real HTTPS service URL and trusted release public key.
+new Editor release carries every retained Editor manifest and its original content-addressed package into that input;
+publishing a newer version must not silently retire an older downloadable Editor. Retirement is an explicit release
+decision, while ordinary publication is additive across supported versions and preserves each artifact's exact digest.
+A production Hub enables online Installs from the checked-in real HTTPS service URL and trusted release public key.
 Explicit packaging environment variables may replace that public configuration for another deployment. Caddy serves
 the package-local public website for every other route while preserving `/v1/*` and
 `/health/*` as exact backend interfaces.
+
+Signing-key rotation uses an overlap window: updated Hubs package both the retiring and replacement public keys before
+any catalog is signed by the replacement identity. Only public keys enter the repository or online host. The raw
+private key remains outside both, and any cloud backup must be independently encrypted with its recovery secret stored
+separately. After the replacement Hub has been distributed and the transition policy is complete, retiring an old
+public key is a separate release decision. Packaging overrides may supply an operating-system path-separated
+`KEIRE_DISTRIBUTION_TRUSTED_KEYS` list during an overlap; the legacy singular key variable remains supported.
 
 ## Launch and activation
 

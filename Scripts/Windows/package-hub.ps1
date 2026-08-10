@@ -139,15 +139,29 @@ $distributionArguments = @(
 $distributionSource = Join-Path $Root "Config\Distribution.json"
 $distributionServiceUrl = [string]$env:KEIRE_DISTRIBUTION_SERVICE_URL
 $distributionTrustedKey = [string]$env:KEIRE_DISTRIBUTION_TRUSTED_KEY
+$distributionTrustedKeys = [string]$env:KEIRE_DISTRIBUTION_TRUSTED_KEYS
 $distributionMinimumSequence = [string]$env:KEIRE_DISTRIBUTION_MINIMUM_SEQUENCE
-if ($distributionServiceUrl -or $distributionTrustedKey) {
-    $distributionArguments += @("--service-url", $distributionServiceUrl,
-        "--trusted-key", $distributionTrustedKey)
+$trustedKeyPaths = if ($distributionTrustedKeys) {
+    @($distributionTrustedKeys.Split([IO.Path]::PathSeparator, [StringSplitOptions]::RemoveEmptyEntries) |
+        ForEach-Object { $_.Trim() } | Where-Object { $_ })
+}
+elseif ($distributionTrustedKey) {
+    @($distributionTrustedKey)
+}
+else {
+    @()
+}
+$hasDistributionOverride = $distributionServiceUrl -or $trustedKeyPaths.Count -gt 0
+if ($hasDistributionOverride) {
+    $distributionArguments += @("--service-url", $distributionServiceUrl)
+    foreach ($trustedKeyPath in $trustedKeyPaths) {
+        $distributionArguments += @("--trusted-key", $trustedKeyPath)
+    }
 }
 else {
     $distributionArguments += @("--source-config", $distributionSource)
 }
-if ($distributionMinimumSequence -and ($distributionServiceUrl -or $distributionTrustedKey)) {
+if ($distributionMinimumSequence -and $hasDistributionOverride) {
     $distributionArguments += @("--minimum-sequence", $distributionMinimumSequence)
 }
 Invoke-CheckedWindowsCommand { & $python @distributionArguments } "Hub distribution configuration generation"

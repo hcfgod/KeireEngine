@@ -120,7 +120,8 @@ namespace
                     continue;
                 auto label = record.RelativePath.generic_string() + " / " + GeneratedAssetLabel(*type);
                 const auto materialSource = record.Type == Keire::MaterialGraphAsset::StaticType() ||
-                                            record.Type == Keire::MaterialGraphInstanceAsset::StaticType();
+                                            record.Type == Keire::ShaderGraphAsset::StaticType() ||
+                                            record.Type == Keire::ShaderGraphInstanceAsset::StaticType();
                 const auto dropAlias =
                     materialSource && *type == Keire::MaterialAsset::StaticType() ? record.Id : Keire::AssetId{};
                 result.push_back({subAsset, dropAlias, label, label + "##" + subAsset.ToString()});

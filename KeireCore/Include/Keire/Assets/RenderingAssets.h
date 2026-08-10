@@ -73,6 +73,46 @@ namespace Keire
         std::optional<float> Maximum;
         std::optional<float> Step;
         ShaderTextureSemantic TextureSemantic = ShaderTextureSemantic::Generic;
+        /// Stable authoring identity. Names may change without invalidating material bindings when this is populated.
+        AssetId Id;
+
+        bool operator==(const ShaderPropertyDefinition&) const = default;
+    };
+
+    enum class ShaderInterfaceDomain : std::uint8_t
+    {
+        Surface,
+        Vfx,
+        Fullscreen,
+        CustomGraphicsPass
+    };
+
+    struct ShaderInterfaceDefinition
+    {
+        std::uint32_t SchemaVersion = 1;
+        std::uint32_t AbiVersion = 1;
+        ShaderInterfaceDomain Domain = ShaderInterfaceDomain::Surface;
+        std::vector<ShaderPropertyDefinition> Properties;
+        std::vector<std::string> Keywords;
+
+        bool operator==(const ShaderInterfaceDefinition&) const = default;
+    };
+
+    enum class MaterialShaderSourceKind : std::uint8_t
+    {
+        Builtin,
+        ShaderAsset,
+        ShaderGraph
+    };
+
+    struct MaterialShaderReference
+    {
+        MaterialShaderSourceKind Kind = MaterialShaderSourceKind::ShaderAsset;
+        AssetId Asset;
+        std::string Target = "default";
+        std::map<std::string, std::string, std::less<>> Keywords;
+
+        bool operator==(const MaterialShaderReference&) const = default;
     };
 
     struct ShaderVariant
@@ -160,6 +200,19 @@ namespace Keire
         [[nodiscard]] std::optional<AssetId> Texture(std::string_view name) const;
     };
 
+    /// Editable material source. Import resolves graph targets to an immutable runtime MaterialAssetDefinition.
+    struct MaterialAuthoringDefinition
+    {
+        std::uint32_t SchemaVersion = 4;
+        MaterialShaderReference Shader;
+        MaterialSurfaceState Surface;
+        bool ContributeEmissionToGI = true;
+        float EmissiveGIIntensity = 1.0F;
+        std::map<std::string, MaterialPropertyValue, std::less<>> Properties;
+
+        bool operator==(const MaterialAuthoringDefinition&) const = default;
+    };
+
     class KEIRE_API MaterialAsset final : public Asset
     {
       public:
@@ -177,6 +230,9 @@ namespace Keire
         [[nodiscard]] static std::vector<std::byte> Encode(const MaterialAssetDefinition& definition);
         [[nodiscard]] static MaterialAssetDefinition DecodeSource(std::span<const std::byte> bytes);
         [[nodiscard]] static std::vector<std::byte> EncodeSource(const MaterialAssetDefinition& definition);
+        [[nodiscard]] static MaterialAuthoringDefinition DecodeAuthoringSource(std::span<const std::byte> bytes);
+        [[nodiscard]] static std::vector<std::byte>
+        EncodeAuthoringSource(const MaterialAuthoringDefinition& definition);
         [[nodiscard]] static Ref<MaterialAsset> Error();
 
       private:

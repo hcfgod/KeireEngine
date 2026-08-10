@@ -8,6 +8,7 @@
 #include "Keire/Project/Project.h"
 #include "Keire/Project/ProjectAuthoringSettings.h"
 #include "Keire/Project/ProjectUpgrade.h"
+#include "Keire/Project/ShaderGraphMigration.h"
 #include "Keire/Rendering/LightingBaker.h"
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/PrefabAsset.h"
@@ -71,6 +72,7 @@ namespace
         bool ApplyUpgrade = false;
         bool RecoverUpgrade = false;
         bool RollbackUpgrade = false;
+        bool CheckOnly = false;
         bool ProjectSpecified = false;
     };
 
@@ -184,6 +186,8 @@ namespace
                 result.RecoverUpgrade = true;
             else if (option == "--rollback")
                 result.RollbackUpgrade = true;
+            else if (option == "--check")
+                result.CheckOnly = true;
             else
                 throw std::invalid_argument("Unknown option: " + std::string(option));
         }
@@ -219,6 +223,7 @@ namespace
                      "  KeireAssetTool describe-player-support-host\n"
                      "  KeireAssetTool validate-project --project <path>\n"
                      "  KeireAssetTool upgrade-project [--project <path>] [--apply|--recover|--rollback]\n"
+                     "  KeireAssetTool migrate-shader-graphs --project <path> [--check]\n"
                      "  KeireAssetTool validate --catalog <path>\n";
         std::cout << "  KeireAssetTool bake-lighting [--project <path>] [--input <scene.keirescene>] [--force]\n";
         std::cout << "  KeireAssetTool convert-mesh --input <model> [--output <file.keiremesh>]\n";
@@ -943,6 +948,31 @@ namespace
 
             if (commandLine.Command == "validate-project" && !commandLine.ProjectSpecified)
                 throw std::invalid_argument("validate-project requires --project <path>.");
+            if (commandLine.Command == "migrate-shader-graphs")
+            {
+                if (!commandLine.ProjectSpecified)
+                    throw std::invalid_argument("migrate-shader-graphs requires --project <path>.");
+                const auto report = commandLine.CheckOnly ? Keire::InspectShaderGraphMigration(commandLine.Project)
+                                                          : Keire::ApplyShaderGraphMigration(commandLine.Project);
+                for (const auto& item : report.Items)
+                {
+                    const auto disposition =
+                        item.Disposition == Keire::ShaderGraphMigrationDisposition::Migrate
+                            ? (commandLine.CheckOnly ? "migrate" : "migrated")
+                        : item.Disposition == Keire::ShaderGraphMigrationDisposition::AlreadyMigrated ? "current"
+                        : item.Disposition == Keire::ShaderGraphMigrationDisposition::Conflict        ? "conflict"
+                                                                                                      : "invalid";
+                    std::cout << disposition << ": " << item.MaterialGraph.generic_string();
+                    if (item.Disposition == Keire::ShaderGraphMigrationDisposition::Migrate)
+                        std::cout << " -> " << item.ShaderGraph.generic_string();
+                    if (!item.Diagnostic.empty())
+                        std::cout << " (" << item.Diagnostic << ')';
+                    std::cout << '\n';
+                }
+                std::cout << (commandLine.CheckOnly ? "Migration check: " : "Migration complete: ")
+                          << report.PendingCount() << " legacy Material Graph asset(s).\n";
+                return report.CanApply() ? 0 : 2;
+            }
             auto modules = Keire::CreateRef<Keire::ModuleRegistry>(
                 Keire::ModuleRegistrySpecification{KeireProjectModules::CreateSourceModules()});
             const auto project = Keire::Project::Open(commandLine.Project, Keire::ProjectOpenMode::ReadOnly);

@@ -1,5 +1,7 @@
 #include "Keire/Assets/RenderingAssets.h"
 
+#include "Keire/Rendering/ShaderGraph.h"
+
 #include "KeireInternal/Assets/AssetInternal.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
@@ -32,6 +34,24 @@ namespace Keire
         constexpr std::size_t MaximumShaderDependencies = 256;
         constexpr std::size_t MaximumDefines = 128;
         constexpr std::size_t MaximumIncludeRoots = 16;
+
+        [[nodiscard]] AssetId ResolveShaderGraphVariantOwner(const AssetImportContext& context,
+                                                             const AssetId graphAsset)
+        {
+            if (context.ProjectRoot.empty() || context.SourceRoot.empty() || !context.ReadProjectFile ||
+                !context.ResolveAssetSource)
+            {
+                throw std::invalid_argument(
+                    "Shader Graph material references require source and cross-asset resolvers.");
+            }
+            const auto source = context.ResolveAssetSource(graphAsset);
+            if (!source || source->Type != ShaderGraphAsset::StaticType())
+                throw std::runtime_error("Material references a Shader Graph that is not present in the source index.");
+            const auto sourcePrefix = std::filesystem::relative(context.SourceRoot, context.ProjectRoot);
+            const auto graph =
+                ShaderGraphAsset::DecodeSource(context.ReadProjectFile(sourcePrefix / source->RelativePath));
+            return graph.GeneratedAssetOwner ? graph.GeneratedAssetOwner : graphAsset;
+        }
 
         template <typename Range> [[nodiscard]] std::vector<std::byte> ToBytes(const Range& values)
         {
@@ -115,12 +135,14 @@ namespace Keire
                 throw std::invalid_argument("Shader definition exceeds a bounded collection or lacks variants.");
 
             std::set<std::string, std::less<>> propertyNames;
+            std::set<AssetId> propertyIds;
             std::size_t numericProperties = 0;
             std::size_t textureProperties = 0;
             for (const auto& property : definition.Properties)
             {
                 if (!ValidIdentifier(property.Name) || !propertyNames.insert(property.Name).second ||
-                    property.Type > ShaderPropertyType::Texture2D)
+                    property.Type > ShaderPropertyType::Texture2D ||
+                    (property.Id && !propertyIds.insert(property.Id).second))
                     throw std::invalid_argument(
                         "Shader property names and types must be unique supported identifiers.");
                 if (property.Type == ShaderPropertyType::Texture2D)
@@ -201,6 +223,153 @@ namespace Keire
             }
         }
 
+        [[nodiscard]] bool ValidShaderTarget(const std::string_view value)
+        {
+            return !value.empty() && value.size() <= 64 &&
+                   std::ranges::all_of(value, [](const unsigned char character)
+                                       { return std::isalnum(character) || character == '_' || character == '-'; });
+        }
+
+        void ValidateMaterialAuthoringDefinition(const MaterialAuthoringDefinition& definition)
+        {
+            MaterialAssetDefinition runtime;
+            runtime.Surface = definition.Surface;
+            runtime.ContributeEmissionToGI = definition.ContributeEmissionToGI;
+            runtime.EmissiveGIIntensity = definition.EmissiveGIIntensity;
+            runtime.Properties = definition.Properties;
+            ValidateMaterialDefinition(runtime);
+            if (definition.SchemaVersion != 4 || definition.Shader.Kind > MaterialShaderSourceKind::ShaderGraph ||
+                (definition.Shader.Kind != MaterialShaderSourceKind::ShaderAsset && !definition.Shader.Asset) ||
+                definition.Shader.Keywords.size() > 16 ||
+                (definition.Shader.Kind == MaterialShaderSourceKind::ShaderGraph &&
+                 !ValidShaderTarget(definition.Shader.Target)))
+            {
+                throw std::invalid_argument("Material authoring shader reference is invalid.");
+            }
+            if (definition.Shader.Kind != MaterialShaderSourceKind::ShaderGraph &&
+                (!definition.Shader.Keywords.empty() || definition.Shader.Target != "default"))
+            {
+                throw std::invalid_argument("Only Shader Graph references may select targets or keywords.");
+            }
+            for (const auto& [name, option] : definition.Shader.Keywords)
+            {
+                if (!ValidIdentifier(name) || (option != "true" && option != "false" && !ValidIdentifier(option)))
+                    throw std::invalid_argument("Material Shader Graph keyword selection is invalid.");
+            }
+        }
+
+        [[nodiscard]] Json EncodeMaterialProperty(const MaterialPropertyValue& value)
+        {
+            return std::visit(
+                [](const auto& typed) -> Json
+                {
+                    using T = std::decay_t<decltype(typed)>;
+                    if constexpr (std::same_as<T, AssetId>)
+                        return typed ? Json(typed.ToString()) : Json(nullptr);
+                    else if constexpr (std::same_as<T, float>)
+                        return typed;
+                    else if constexpr (std::same_as<T, Vector2>)
+                        return Json::array({typed.X, typed.Y});
+                    else if constexpr (std::same_as<T, Vector3>)
+                        return Json::array({typed.X, typed.Y, typed.Z});
+                    else if constexpr (std::same_as<T, Vector4>)
+                        return Json::array({typed.X, typed.Y, typed.Z, typed.W});
+                    else
+                        return Json::array({typed.Red, typed.Green, typed.Blue, typed.Alpha});
+                },
+                value);
+        }
+
+        [[nodiscard]] MaterialPropertyValue DecodeMaterialProperty(const Json& encoded)
+        {
+            const auto type = encoded.at("type").get<std::size_t>();
+            const auto& value = encoded.at("value");
+            if (type > std::variant_size_v<MaterialPropertyValue> - 1U)
+                throw std::invalid_argument("Material property type is invalid.");
+            const auto component = [&](const std::size_t index)
+            {
+                if (!value.is_array() || value.size() <= index)
+                    throw std::invalid_argument("Material vector property has an invalid component count.");
+                return value[index].get<float>();
+            };
+            switch (type)
+            {
+            case 0:
+                return value.get<float>();
+            case 1:
+                return Vector2{component(0), component(1)};
+            case 2:
+                return Vector3{component(0), component(1), component(2)};
+            case 3:
+                return Vector4{component(0), component(1), component(2), component(3)};
+            case 4:
+                return Color{component(0), component(1), component(2), component(3)};
+            case 5:
+                return value.is_null() ? AssetId{} : AssetId::Parse(value.get<std::string>());
+            default:
+                throw std::invalid_argument("Material property type is invalid.");
+            }
+        }
+
+        [[nodiscard]] MaterialAssetDefinition ParseMaterialSource(const Json& source);
+
+        [[nodiscard]] MaterialAuthoringDefinition ParseMaterialAuthoringSource(const Json& source)
+        {
+            if (!source.is_object())
+                throw std::invalid_argument("Material authoring source must be an object.");
+            const auto schemaVersion = source.value("schemaVersion", 0U);
+            if (schemaVersion <= 3)
+            {
+                const auto legacy = ParseMaterialSource(source);
+                MaterialAuthoringDefinition result;
+                result.Shader.Asset = legacy.Shader;
+                result.Surface = legacy.Surface;
+                result.ContributeEmissionToGI = legacy.ContributeEmissionToGI;
+                result.EmissiveGIIntensity = legacy.EmissiveGIIntensity;
+                result.Properties = legacy.Properties;
+                return result;
+            }
+            if (schemaVersion != 4)
+                throw std::invalid_argument("Material authoring source has an unsupported schema.");
+
+            MaterialAuthoringDefinition result;
+            const auto& shader = source.at("shader");
+            if (!shader.is_object())
+                throw std::invalid_argument("Material shader reference must be an object.");
+            const auto kind = shader.at("kind").get<std::string>();
+            if (kind == "builtin")
+                result.Shader.Kind = MaterialShaderSourceKind::Builtin;
+            else if (kind == "asset")
+                result.Shader.Kind = MaterialShaderSourceKind::ShaderAsset;
+            else if (kind == "graph")
+                result.Shader.Kind = MaterialShaderSourceKind::ShaderGraph;
+            else
+                throw std::invalid_argument("Material shader reference kind is unsupported.");
+            result.Shader.Asset = AssetId::Parse(shader.at("asset").get<std::string>());
+            result.Shader.Target = shader.value("target", std::string("default"));
+            const auto keywords = shader.value("keywords", Json::object());
+            if (!keywords.is_object())
+                throw std::invalid_argument("Material shader keywords must be an object.");
+            for (const auto& [name, value] : keywords.items())
+                result.Shader.Keywords.emplace(name, value.get<std::string>());
+
+            const auto& surface = source.value("surface", Json::object());
+            result.Surface.AlphaMode =
+                static_cast<MaterialAlphaMode>(surface.value("alphaMode", static_cast<std::uint8_t>(0)));
+            result.Surface.AlphaCutoff = surface.value("alphaCutoff", 0.5F);
+            result.Surface.DoubleSided = surface.value("doubleSided", false);
+            const auto& lighting = source.value("bakedLighting", Json::object());
+            result.ContributeEmissionToGI = lighting.value("contributeEmission", true);
+            result.EmissiveGIIntensity = lighting.value("emissiveIntensity", 1.0F);
+            const auto& properties = source.value("properties", Json::object());
+            if (!properties.is_object())
+                throw std::invalid_argument("Material authoring properties must be an object.");
+            for (const auto& [name, value] : properties.items())
+                result.Properties.emplace(name, DecodeMaterialProperty(value));
+            ValidateMaterialAuthoringDefinition(result);
+            return result;
+        }
+
         [[nodiscard]] MaterialAssetDefinition ParseMaterialSource(const Json& source)
         {
             MaterialAssetDefinition definition;
@@ -252,6 +421,8 @@ namespace Keire
             for (const auto& property : definition.Properties)
             {
                 Json encoded{{"name", property.Name}, {"type", static_cast<std::uint8_t>(property.Type)}};
+                if (property.Id)
+                    encoded["id"] = property.Id.ToString();
                 if (!property.DisplayName.empty())
                     encoded["displayName"] = property.DisplayName;
                 if (!property.Category.empty())
@@ -328,6 +499,8 @@ namespace Keire
             for (const auto& property : source.at("properties"))
             {
                 ShaderPropertyDefinition decoded;
+                if (property.contains("id"))
+                    decoded.Id = AssetId::Parse(property.at("id").get<std::string>());
                 decoded.Name = property.at("name").get<std::string>();
                 decoded.Type = static_cast<ShaderPropertyType>(property.at("type").get<std::uint8_t>());
                 decoded.DisplayName = property.value("displayName", std::string{});
@@ -970,6 +1143,43 @@ namespace Keire
         return ToBytes(text);
     }
 
+    MaterialAuthoringDefinition MaterialAsset::DecodeAuthoringSource(const std::span<const std::byte> bytes)
+    {
+        return ParseMaterialAuthoringSource(Json::parse(Text(bytes)));
+    }
+
+    std::vector<std::byte> MaterialAsset::EncodeAuthoringSource(const MaterialAuthoringDefinition& definition)
+    {
+        ValidateMaterialAuthoringDefinition(definition);
+        const auto kind = definition.Shader.Kind == MaterialShaderSourceKind::Builtin       ? "builtin"
+                          : definition.Shader.Kind == MaterialShaderSourceKind::ShaderGraph ? "graph"
+                                                                                            : "asset";
+        Json keywords = Json::object();
+        for (const auto& [name, option] : definition.Shader.Keywords)
+            keywords[name] = option;
+        Json shader{{"kind", kind}, {"asset", definition.Shader.Asset.ToString()}};
+        if (definition.Shader.Kind == MaterialShaderSourceKind::ShaderGraph)
+        {
+            shader["target"] = definition.Shader.Target;
+            shader["keywords"] = std::move(keywords);
+        }
+        Json properties = Json::object();
+        for (const auto& [name, value] : definition.Properties)
+            properties[name] = {{"type", value.index()}, {"value", EncodeMaterialProperty(value)}};
+        const Json source{{"schemaVersion", definition.SchemaVersion},
+                          {"shader", std::move(shader)},
+                          {"surface",
+                           {{"alphaMode", static_cast<std::uint8_t>(definition.Surface.AlphaMode)},
+                            {"alphaCutoff", definition.Surface.AlphaCutoff},
+                            {"doubleSided", definition.Surface.DoubleSided}}},
+                          {"bakedLighting",
+                           {{"contributeEmission", definition.ContributeEmissionToGI},
+                            {"emissiveIntensity", definition.EmissiveGIIntensity}}},
+                          {"properties", std::move(properties)}};
+        const auto text = source.dump(2) + '\n';
+        return ToBytes(text);
+    }
+
     Ref<MaterialAsset> MaterialAsset::Error()
     {
         MaterialAssetDefinition definition;
@@ -1166,15 +1376,33 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.Material";
-        result.Version = 2;
+        result.Version = 4;
         result.Type = MaterialAsset::StaticType();
         result.Extensions = {".keirematerial"};
-        result.ContextualImport = [](const AssetImportContext&, const std::span<const std::byte> bytes)
+        result.ContextualImport = [](const AssetImportContext& context, const std::span<const std::byte> bytes)
         {
-            auto definition = MaterialAsset::DecodeSource(bytes);
+            const auto source = MaterialAsset::DecodeAuthoringSource(bytes);
+            MaterialAssetDefinition definition;
+            definition.Surface = source.Surface;
+            definition.ContributeEmissionToGI = source.ContributeEmissionToGI;
+            definition.EmissiveGIIntensity = source.EmissiveGIIntensity;
+            definition.Properties = source.Properties;
+            if (source.Shader.Kind == MaterialShaderSourceKind::ShaderGraph)
+            {
+                if (!context.ResolveSubAssetIdFor)
+                    throw std::invalid_argument(
+                        "Shader Graph material references require a stable cross-asset subasset resolver.");
+                definition.Shader = context.ResolveSubAssetIdFor(
+                    ResolveShaderGraphVariantOwner(context, source.Shader.Asset),
+                    MakeShaderGraphVariantSubAssetKey(source.Shader.Target, source.Shader.Keywords));
+            }
+            else
+                definition.Shader = source.Shader.Asset;
             AssetImportOutput output;
             output.Bytes = MaterialAsset::Encode(definition);
-            if (definition.Shader)
+            if (source.Shader.Asset)
+                output.AssetDependencies.push_back(source.Shader.Asset);
+            if (definition.Shader != source.Shader.Asset)
                 output.AssetDependencies.push_back(definition.Shader);
             for (const auto& [name, value] : definition.Properties)
             {

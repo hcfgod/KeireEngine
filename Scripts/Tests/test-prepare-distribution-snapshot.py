@@ -239,6 +239,67 @@ class DistributionSnapshotPreparationTests(unittest.TestCase):
         duplicate = self.run_preparer("duplicate", [(self.manifest, self.package)])
         self.assertNotEqual(duplicate.returncode, 0)
 
+    def test_preserves_multiple_versions_of_the_same_editor_package(self) -> None:
+        previous_document = dict(self.document)
+        previous_document["version"] = "0.1.0"
+        previous_document["displayName"] = "Keire Editor 0.1.0"
+        previous_package = self.root / "editor-0.1.0.keirepackage"
+        previous_package.write_bytes(b"previous-editor-package")
+        previous_document["artifact"] = {
+            "sizeBytes": previous_package.stat().st_size,
+            "sha256": hashlib.sha256(previous_package.read_bytes()).hexdigest(),
+        }
+        previous_manifest = self.root / "editor-0.1.0.manifest.json"
+        previous_manifest.write_text(json.dumps(previous_document), encoding="utf-8")
+
+        self.document["version"] = "0.2.0"
+        self.document["displayName"] = "Keire Editor 0.2.0"
+        self.write_manifest()
+        result = self.run_preparer(
+            "editor-history", [(previous_manifest, previous_package)], reverse=True
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        legacy = json.loads(
+            (
+                self.root
+                / "editor-history"
+                / "catalogs"
+                / "stable"
+                / "windows"
+                / "x86_64.json"
+            ).read_text(encoding="utf-8")
+        )
+        compact = json.loads(
+            (
+                self.root
+                / "editor-history"
+                / "catalogs-v2"
+                / "stable"
+                / "windows"
+                / "x86_64.json"
+            ).read_text(encoding="utf-8")
+        )
+        expected_versions = ["0.1.0", "0.2.0"]
+        self.assertEqual(
+            [package["version"] for package in legacy["packages"]],
+            expected_versions,
+        )
+        self.assertEqual(
+            [package["version"] for package in compact["packages"]],
+            expected_versions,
+        )
+        self.assertEqual(
+            {
+                package["version"]: package["artifact"]["sha256"]
+                for package in legacy["packages"]
+            },
+            {
+                "0.1.0": previous_document["artifact"]["sha256"],
+                "0.2.0": self.document["artifact"]["sha256"],
+            },
+        )
+
     def test_rejects_tampering_draft_contracts_and_existing_outputs(self) -> None:
         self.package.write_bytes(b"tampered")
         self.assertNotEqual(self.run_preparer("tampered").returncode, 0)

@@ -8,7 +8,7 @@
 #include "Keire/ECS/Components/PointLightComponent.h"
 #include "Keire/ECS/Components/SpotLightComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
-#include "Keire/Rendering/MaterialGraph.h"
+#include "Keire/Rendering/ShaderGraph.h"
 #include "Keire/Scenes/Scene.h"
 #include "Keire/Vfx/VfxSystem.h"
 #include "Keire/Vfx/VfxVolumeAsset.h"
@@ -428,7 +428,7 @@ namespace
             return Keire::Texture2DAsset::Encode(textureSettings, {&mip, 1});
         }
 
-        explicit RenderAssetFixture(const bool includeMaterialGraph = false,
+        explicit RenderAssetFixture(const bool includeShaderGraph = false,
                                     const bool includeProceduralVertexOffset = false,
                                     const bool parameterDrivenVertexOffset = false)
             : Root(std::filesystem::temp_directory_path() /
@@ -439,7 +439,7 @@ namespace
             const auto meshImporter = Keire::CreateMeshAssetImporter();
             const auto shaderImporter = Keire::CreateShaderAssetImporter();
             const auto materialImporter = Keire::CreateMaterialAssetImporter();
-            const auto materialGraphImporter = Keire::CreateMaterialGraphAssetImporter();
+            const auto materialGraphImporter = Keire::CreateShaderGraphAssetImporter();
             const auto volumeImporter = Keire::CreateVfxVolumeAssetImporter();
             Keire::AssetImporterRegistration skinImporter;
             skinImporter.Name = "KeireTests.SkinnedMesh";
@@ -554,40 +554,39 @@ namespace
             Material =
                 Database->CreateAsset("Material.keirematerial", materialImporter,
                                       std::as_bytes(std::span(materialManifest.data(), materialManifest.size())));
-            if (includeMaterialGraph)
+            if (includeShaderGraph)
             {
-                auto graph = Keire::CreateDefaultMaterialGraph();
-                auto baseColor =
-                    std::ranges::find(graph.Nodes.front().Pins, "BaseColor", &Keire::MaterialGraphPin::Name);
+                auto graph = Keire::CreateDefaultShaderGraph();
+                auto baseColor = std::ranges::find(graph.Nodes.front().Pins, "BaseColor", &Keire::ShaderGraphPin::Name);
                 if (baseColor == graph.Nodes.front().Pins.end())
-                    throw std::logic_error("The default Material Graph does not expose a BaseColor input.");
+                    throw std::logic_error("The default Shader Graph does not expose a BaseColor input.");
                 baseColor->DefaultValue = Keire::Color{0.0F, 1.0F, 0.0F, 1.0F};
                 if (includeProceduralVertexOffset)
                 {
-                    auto offset = Keire::CreateMaterialGraphNode(parameterDrivenVertexOffset
-                                                                     ? Keire::MaterialGraphNodeKind::Parameter
-                                                                     : Keire::MaterialGraphNodeKind::Constant,
-                                                                 Keire::MaterialGraphValueType::Vector3);
+                    auto offset =
+                        Keire::CreateShaderGraphNode(parameterDrivenVertexOffset ? Keire::ShaderGraphNodeKind::Parameter
+                                                                                 : Keire::ShaderGraphNodeKind::Constant,
+                                                     Keire::ShaderGraphValueType::Vector3);
                     offset.Value = Keire::Vector3{0.0F, 0.05F, 0.0F};
                     if (parameterDrivenVertexOffset)
                         offset.Symbol = "VertexOffset";
                     graph.Nodes.push_back(std::move(offset));
                     const auto offsetOutput =
-                        std::ranges::find(graph.Nodes.back().Pins, "Value", &Keire::MaterialGraphPin::Name);
+                        std::ranges::find(graph.Nodes.back().Pins, "Value", &Keire::ShaderGraphPin::Name);
                     const auto masterInput = std::ranges::find(graph.Nodes.front().Pins, "WorldPositionOffset",
-                                                               &Keire::MaterialGraphPin::Name);
+                                                               &Keire::ShaderGraphPin::Name);
                     if (offsetOutput == graph.Nodes.back().Pins.end() || masterInput == graph.Nodes.front().Pins.end())
-                        throw std::logic_error("The procedural Material Graph vertex pins are unavailable.");
+                        throw std::logic_error("The procedural Shader Graph vertex pins are unavailable.");
                     graph.Connections.push_back({Keire::AssetId::Generate(),
                                                  {graph.Nodes.back().Id, offsetOutput->Id},
                                                  {graph.Nodes.front().Id, masterInput->Id}});
                 }
-                MaterialGraph = Database->CreateAsset("Basic.keirematerialgraph", materialGraphImporter,
-                                                      Keire::MaterialGraphAsset::EncodeSource(graph));
-                const auto record = Database->Find(MaterialGraph);
+                ShaderGraph = Database->CreateAsset("Basic.keireshadergraph", materialGraphImporter,
+                                                    Keire::ShaderGraphAsset::EncodeSource(graph));
+                const auto record = Database->Find(ShaderGraph);
                 if (!record || record->SubAssets.empty())
-                    throw std::runtime_error("The Material Graph import did not publish its runtime material.");
-                MaterialGraphMaterial = record->SubAssets.back();
+                    throw std::runtime_error("The Shader Graph import did not publish its runtime material.");
+                ShaderGraphMaterial = record->SubAssets.back();
             }
             Catalog = Database->ImportAll(Keire::AssetImportPolicy::KeepLastGood).CatalogPath;
         }
@@ -667,8 +666,8 @@ namespace
         Keire::AssetId Skin;
         Keire::AssetId CubeMesh;
         Keire::AssetId Material;
-        Keire::AssetId MaterialGraph;
-        Keire::AssetId MaterialGraphMaterial;
+        Keire::AssetId ShaderGraph;
+        Keire::AssetId ShaderGraphMaterial;
         Keire::AssetId Shader;
         Keire::AssetId Texture;
         Keire::AssetId TransparentTexture;
@@ -2364,7 +2363,7 @@ TEST_CASE("renderer replaces the deterministic error mesh with an asset-backed i
     CHECK(results->Statistics.RendererLatencyMilliseconds >= 0.0F);
 }
 
-TEST_CASE("generated Material Graph shaders create a graphics pipeline with a dense resource layout")
+TEST_CASE("generated Shader Graph shaders create a graphics pipeline with a dense resource layout")
 {
     RenderAssetFixture assets(true);
     const auto results = std::make_shared<CaptureResults>();
@@ -2374,7 +2373,7 @@ TEST_CASE("generated Material Graph shaders create a graphics pipeline with a de
     {
         Keire::Application application(std::move(specification));
         (void)application.PushLayer(
-            std::make_unique<AssetMeshCaptureLayer>(Keire::MeshAsset::CubeId(), assets.MaterialGraphMaterial, results));
+            std::make_unique<AssetMeshCaptureLayer>(Keire::MeshAsset::CubeId(), assets.ShaderGraphMaterial, results));
         REQUIRE(application.Run() == 0);
     }
 
@@ -2398,7 +2397,7 @@ TEST_CASE("procedural vertex displacement graphs create a graphics pipeline with
         {
             Keire::Application application(std::move(specification));
             (void)application.PushLayer(std::make_unique<AssetMeshCaptureLayer>(
-                assets.Mesh, assets.MaterialGraphMaterial, results, Keire::RenderSampleCount::Four));
+                assets.Mesh, assets.ShaderGraphMaterial, results, Keire::RenderSampleCount::Four));
             REQUIRE(application.Run() == 0);
         }
 

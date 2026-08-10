@@ -3,14 +3,14 @@
   "id": "d7e2d43a-3427-4de9-bbca-e3b7e3ba0001",
   "name": "KeireSandbox",
   "createdWithEngineVersion": "0.1.0",
-  "minimumEngineVersion": "0.1.0",
+  "minimumEngineVersion": "0.2.0",
   "createdAt": "2026-01-01T00:00:00Z",
-  "lastSavedWithEngineVersion": "0.1.0",
+  "lastSavedWithEngineVersion": "0.2.0",
   "template": {
     "id": "keire.sandbox",
     "version": "1.0.0"
   },
-  "startupScene": "bf4f49b2-fef2-4d9e-9f5e-9df8e945a001",
+  "startupScene": "a1aa0000-0000-4000-8000-000000000001",
   "defaultInput": "97b38693-6dc3-4f06-a228-44ba5786e8d1",
   "requiredModules": []
 }

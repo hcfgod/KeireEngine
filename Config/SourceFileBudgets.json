@@ -26,15 +26,15 @@
   "testRoots": ["KeireEditorTests", "KeireHubTests", "KeireManaged.Tests", "KeireRenderTests", "KeireTests"],
   "exceptions": {
     "KeireClient/Source/Editor/AnimatorControllerPanel.cpp": 1970,
-    "KeireClient/Source/Editor/AssetBrowserPanel.cpp": 1792,
-    "KeireClient/Source/Editor/EditorWorkspaceAssets.cpp": 2869,
-    "KeireClient/Source/Editor/InspectorPanel.cpp": 1640,
-    "KeireClient/Source/Editor/MaterialGraphPreview.cpp": 1932,
+    "KeireClient/Source/Editor/AssetBrowserPanel.cpp": 1821,
+    "KeireClient/Source/Editor/EditorWorkspaceAssets.cpp": 2960,
+    "KeireClient/Source/Editor/InspectorPanel.cpp": 1699,
+    "KeireClient/Source/Editor/ShaderGraphPreview.cpp": 1902,
     "KeireClient/Source/Editor/VfxEffectPanel.cpp": 2854,
     "KeireCore/Source/Animation/AnimationSystem.cpp": 2486,
-    "KeireCore/Source/Assets/RenderableAssets.cpp": 2183,
+    "KeireCore/Source/Assets/RenderableAssets.cpp": 2186,
     "KeireCore/Source/Input/InputSystem.cpp": 1993,
-    "KeireCore/Source/Rendering/MaterialGraph.cpp": 4586,
+    "KeireCore/Source/Rendering/ShaderGraph.cpp": 4581,
     "KeireCore/Source/Rendering/RenderSceneRecording.cpp": 4448,
     "KeireCore/Source/Scenes/SceneRuntime.cpp": 2038,
     "KeireCore/Source/Scripting/ScriptSystem.cpp": 4816,
@@ -43,6 +43,7 @@
     "KeireCore/Source/Vfx/VfxAssets.cpp": 4411,
     "KeireCore/Source/Vfx/VfxExpressions.cpp": 2000,
     "KeireCore/Source/Vfx/VfxSystem.cpp": 2511,
-    "KeireRenderTests/Source/RenderedOutputTests.cpp": 2606
+    "KeireHub/Source/HubApplication.cpp": 1505,
+    "KeireRenderTests/Source/RenderedOutputTests.cpp": 2605
   }
 }

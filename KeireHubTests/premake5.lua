@@ -17,6 +17,7 @@ project(HubTestsTarget)
         "../KeireHub/Source/HubDistributionWorkflow.cpp",
         "../KeireHub/Source/HubEditorDiscovery.cpp",
         "../KeireHub/Source/HubInstance.cpp",
+        "../KeireHub/Source/HubLocalContent.cpp",
         "../KeireHub/Source/HubEditorInstallWorkflow.cpp",
         "../KeireHub/Source/HubEditorManagementWorkflow.cpp",
         "../KeireHub/Source/HubFirstRunImportPreparation.cpp",

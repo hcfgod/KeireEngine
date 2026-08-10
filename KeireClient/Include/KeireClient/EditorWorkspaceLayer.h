@@ -8,8 +8,8 @@
 #include "KeireClient/Editor/AudioMixerPanel.h"
 #include "KeireClient/Editor/EditorPanels.h"
 #include "KeireClient/Editor/LightingPanel.h"
-#include "KeireClient/Editor/MaterialGraphPanel.h"
 #include "KeireClient/Editor/RiggingStudioPanel.h"
+#include "KeireClient/Editor/ShaderGraphPanel.h"
 #include "KeireClient/Editor/VfxEffectPanel.h"
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
 
@@ -41,10 +41,10 @@ namespace KeireEditor
     class ExternalAssetImportController;
     class InputActionsDocument;
     class MaterialDocument;
-    class MaterialGraphDocument;
+    class ShaderGraphDocument;
     class InputActionsPanel;
     class AudioMixerPanel;
-    class MaterialGraphPanel;
+    class ShaderGraphPanel;
     class PlayerBuildService;
     class VfxEffectPanel;
     class InspectorPanel;
@@ -72,7 +72,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
                                    private KeireEditor::IRiggingStudioController,
                                    private KeireEditor::IAudioMixerPanelController,
                                    private KeireEditor::IVfxEffectPanelController,
-                                   private KeireEditor::IMaterialGraphPanelController,
+                                   private KeireEditor::IShaderGraphPanelController,
                                    private KeireEditor::IProjectSettingsController,
                                    private KeireEditor::ILightingPanelController,
                                    private KeireEditor::IAssetBrowserController,
@@ -102,7 +102,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
         DeleteTheme,
         DirtyTheme,
         DirtyScene,
-        DirtyMaterialGraph,
+        DirtyShaderGraph,
         DirtyPlayerBuild,
         RenameEntity
     };
@@ -135,7 +135,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void DrawDeleteDialog(Keire::UiFrame& ui, Keire::UiWorkspace& workspace, std::string_view title, bool theme);
     void DrawDirtyThemeDialog(Keire::UiFrame& ui, Keire::UiWorkspace& workspace);
     void DrawDirtySceneDialog(Keire::UiFrame& ui);
-    void DrawDirtyMaterialGraphDialog(Keire::UiFrame& ui);
+    void DrawDirtyShaderGraphDialog(Keire::UiFrame& ui);
     void DrawDirtyPlayerBuildDialog(Keire::UiFrame& ui);
     void DrawThemeEditor(Keire::UiFrame& ui, Keire::UiWorkspace& workspace);
     [[nodiscard]] KeireEditor::InputActionsDocument& InputActionsState() noexcept override;
@@ -223,7 +223,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     bool CreateAssetBrowserPhysicsMaterial(std::string_view name) override;
     bool CreateAssetBrowserVfxEffect(std::string_view name) override;
     bool CreateAssetBrowserMaterialGraph(std::string_view name) override;
-    bool CreateAssetBrowserMaterialGraphInstance(std::string_view name) override;
+    bool CreateAssetBrowserShaderGraph(std::string_view name) override;
+    bool CreateAssetBrowserShaderGraphInstance(std::string_view name) override;
     bool CreateAssetBrowserPrefab(std::string_view name) override;
     bool CreateAssetBrowserPrefabVariant(Keire::AssetId basePrefab, std::string_view name) override;
     void CreateAssetBrowserPrefabFromObject(Keire::AssetId object, const std::filesystem::path& folder) override;
@@ -237,7 +238,9 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void OpenAssetBrowserAnimationGraph(Keire::AssetId asset) override;
     void OpenAssetBrowserAudioMixer(Keire::AssetId asset) override;
     void OpenAssetBrowserVfxEffect(Keire::AssetId asset) override;
+    void OpenAssetBrowserMaterial(Keire::AssetId asset) override;
     void OpenAssetBrowserMaterialGraph(Keire::AssetId asset) override;
+    void OpenAssetBrowserShaderGraph(Keire::AssetId asset) override;
     void OpenAssetBrowserPrefab(Keire::AssetId asset) override;
     void OpenAssetBrowserScene(Keire::AssetId asset) override;
     void PrepareAssetBrowserExternalOpen(Keire::AssetId asset) override;
@@ -373,22 +376,23 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void SetVfxEffectPreviewSpeed(float speed) override;
     void StopVfxEffectPreview() noexcept override;
     void ReportVfxEffectError(std::string message) noexcept override;
-    [[nodiscard]] KeireEditor::MaterialGraphDocument& MaterialGraphState() noexcept override;
-    [[nodiscard]] const Keire::UiThemeDefinition& MaterialGraphTheme() const noexcept override;
-    void SaveMaterialGraphDocument() override;
-    void UndoMaterialGraphEdit() override;
-    void RedoMaterialGraphEdit() override;
-    [[nodiscard]] std::span<const Keire::AssetSourceRecord> MaterialGraphAssetRecords() const noexcept override;
-    [[nodiscard]] Keire::Ref<const Keire::MeshAsset> ResolveMaterialGraphPreviewMesh(Keire::AssetId asset) override;
-    void RevealMaterialGraphAsset(Keire::AssetId asset) override;
-    void ReportMaterialGraphError(std::string message) noexcept override;
+    [[nodiscard]] KeireEditor::ShaderGraphDocument& ShaderGraphState() noexcept override;
+    [[nodiscard]] const Keire::UiThemeDefinition& ShaderGraphTheme() const noexcept override;
+    void SaveShaderGraphDocument() override;
+    void UndoShaderGraphEdit() override;
+    void RedoShaderGraphEdit() override;
+    [[nodiscard]] std::span<const Keire::AssetSourceRecord> ShaderGraphAssetRecords() const noexcept override;
+    [[nodiscard]] Keire::Ref<const Keire::MeshAsset> ResolveShaderGraphPreviewMesh(Keire::AssetId asset) override;
+    void RevealShaderGraphAsset(Keire::AssetId asset) override;
+    void ReportShaderGraphError(std::string message) noexcept override;
     [[nodiscard]] bool CreateCSharpScript(std::string_view name);
     [[nodiscard]] bool CreateManagedAssembly(std::string_view name);
     [[nodiscard]] bool CreateAudioMixer(std::string_view name);
     [[nodiscard]] bool CreatePhysicsMaterial(std::string_view name);
     [[nodiscard]] bool CreateVfxEffect(std::string_view name);
     [[nodiscard]] bool CreateMaterialGraph(std::string_view name);
-    [[nodiscard]] bool CreateMaterialGraphInstance(std::string_view name);
+    [[nodiscard]] bool CreateShaderGraph(std::string_view name);
+    [[nodiscard]] bool CreateShaderGraphInstance(std::string_view name);
     [[nodiscard]] bool CreatePrefabFromSelection(std::string_view name);
     [[nodiscard]] bool CreatePrefabVariant(Keire::AssetId basePrefab, std::string_view name);
     void CreatePrefabFromObject(Keire::AssetId object, const std::filesystem::path& folder);
@@ -413,13 +417,13 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void SaveVfxEffect();
     void PersistVfxEffect(Keire::AssetId asset, std::span<const std::byte> bytes);
     void PreviewVfxEffect(Keire::AssetId asset, const Keire::VfxEffectDefinition& definition);
-    void OpenMaterialGraph(Keire::AssetId asset);
-    void SaveMaterialGraph();
+    void OpenShaderGraph(Keire::AssetId asset);
+    void SaveShaderGraph();
     void
-    ApplyMaterialGraphDevelopmentRevision(Keire::AssetId asset, const Keire::MaterialGraphDefinition& definition,
-                                          const Keire::MaterialGraphCompilation& compilation,
-                                          std::span<const Keire::Ref<Keire::ShaderAsset>> developmentShaders) noexcept;
-    void PersistMaterialGraph(Keire::AssetId asset, std::span<const std::byte> bytes);
+    ApplyShaderGraphDevelopmentRevision(Keire::AssetId asset, const Keire::ShaderGraphDefinition& definition,
+                                        const Keire::ShaderGraphCompilation& compilation,
+                                        std::span<const Keire::Ref<Keire::ShaderAsset>> developmentShaders) noexcept;
+    void PersistShaderGraph(Keire::AssetId asset, std::span<const std::byte> bytes);
     void EnsureEditorVfxPreviewWorld(std::uint32_t minimumParticleCapacity);
     void ResetEditorVfxPreviewWorld() noexcept;
     void SynchronizeEditModeVfxPreviews();
@@ -530,7 +534,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::unique_ptr<KeireEditor::AnimatorControllerDocument> m_AnimatorControllerDocument;
     std::unique_ptr<KeireEditor::AudioMixerDocument> m_AudioMixerDocument;
     std::unique_ptr<KeireEditor::VfxEffectDocument> m_VfxEffectDocument;
-    std::unique_ptr<KeireEditor::MaterialGraphDocument> m_MaterialGraphDocument;
+    std::unique_ptr<KeireEditor::ShaderGraphDocument> m_ShaderGraphDocument;
     std::unique_ptr<KeireEditor::ProjectSettingsDocument> m_ProjectSettingsDocument;
     std::unique_ptr<KeireEditor::MaterialDocument> m_MaterialDocument;
     std::unique_ptr<KeireEditor::EditorCommandRouter> m_CommandRouter;
@@ -542,7 +546,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::unique_ptr<KeireEditor::RiggingStudioPanel> m_RiggingStudioPanel;
     std::unique_ptr<KeireEditor::AudioMixerPanel> m_AudioMixerPanel;
     std::unique_ptr<KeireEditor::VfxEffectPanel> m_VfxEffectPanel;
-    std::unique_ptr<KeireEditor::MaterialGraphPanel> m_MaterialGraphPanel;
+    std::unique_ptr<KeireEditor::ShaderGraphPanel> m_ShaderGraphPanel;
     std::unique_ptr<KeireEditor::ProjectSettingsPanel> m_ProjectSettingsPanel;
     std::unique_ptr<KeireEditor::LightingPanel> m_LightingPanel;
     std::unique_ptr<KeireEditor::PropertyDrawerRegistry> m_PropertyDrawers;
@@ -666,7 +670,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::uint32_t m_FrameCount = 0;
     std::uint64_t m_AudioMixerDocumentRevision = 0;
     std::uint64_t m_VfxEffectDocumentRevision = 0;
-    std::uint64_t m_MaterialGraphDocumentRevision = 0;
+    std::uint64_t m_ShaderGraphDocumentRevision = 0;
     std::uint64_t m_VfxEffectPreviewRevision = 0;
     std::uint32_t m_VfxEffectPreviewCapacity = 0;
     float m_VfxEffectPreviewSpeed = 1.0F;

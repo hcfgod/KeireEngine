@@ -456,10 +456,10 @@ void EditorWorkspaceLayer::ExecutePendingSceneAction()
     const auto action = std::exchange(m_PendingSceneAction, PendingSceneAction::None);
     const auto asset = std::exchange(m_PendingSceneAsset, Keire::AssetId{});
     m_Dialog = Dialog::None;
-    if (action == PendingSceneAction::Exit && m_MaterialGraphDocument && m_MaterialGraphDocument->Dirty())
+    if (action == PendingSceneAction::Exit && m_ShaderGraphDocument && m_ShaderGraphDocument->Dirty())
     {
         m_PendingSceneAction = PendingSceneAction::Exit;
-        OpenDialog(Dialog::DirtyMaterialGraph);
+        OpenDialog(Dialog::DirtyShaderGraph);
         return;
     }
     QueueSceneTransition(action, asset);
@@ -479,9 +479,9 @@ void EditorWorkspaceLayer::RequestEditorExit()
         OpenDialog(Dialog::DirtyScene);
         return;
     }
-    if (m_MaterialGraphDocument && m_MaterialGraphDocument->Dirty())
+    if (m_ShaderGraphDocument && m_ShaderGraphDocument->Dirty())
     {
-        OpenDialog(Dialog::DirtyMaterialGraph);
+        OpenDialog(Dialog::DirtyShaderGraph);
         return;
     }
     ExecutePendingSceneAction();
@@ -1094,7 +1094,8 @@ void EditorWorkspaceLayer::AssignDroppedMaterial(const Keire::EntityId entity, c
 
     auto runtimeMaterial = asset;
     if (record->Type == Keire::MaterialGraphAsset::StaticType() ||
-        record->Type == Keire::MaterialGraphInstanceAsset::StaticType())
+        record->Type == Keire::ShaderGraphAsset::StaticType() ||
+        record->Type == Keire::ShaderGraphInstanceAsset::StaticType())
     {
         const auto assets = Owner().Assets();
         const auto generated =
@@ -1119,7 +1120,7 @@ void EditorWorkspaceLayer::AssignDroppedMaterial(const Keire::EntityId entity, c
     }
     else if (record->Type != Keire::MaterialAsset::StaticType())
         throw std::runtime_error(
-            "Only materials, Material Graphs, and material instances can be assigned to a Mesh Renderer.");
+            "Only materials, Material Graphs, Shader Graphs, and instances can be assigned to a Mesh Renderer.");
 
     std::optional<Keire::Color> materialTint;
     if (record->Type == Keire::MaterialAsset::StaticType())
@@ -1131,6 +1132,17 @@ void EditorWorkspaceLayer::AssignDroppedMaterial(const Keire::EntityId entity, c
             if (const auto* color = std::get_if<Keire::Color>(&tint->second))
                 materialTint = *color;
     }
+    else if (record->Type == Keire::MaterialGraphAsset::StaticType())
+    {
+        const auto source = m_AssetDatabase->Specification().ProjectRoot /
+                            m_AssetDatabase->Specification().SourceDirectory / record->RelativePath;
+        const auto graph = Keire::MaterialGraphAsset::DecodeSource(ReadBytes(source));
+        const auto tint =
+            std::ranges::find(graph.Properties, std::string_view("Tint"), &Keire::MaterialGraphPropertyBinding::Name);
+        if (tint != graph.Properties.end())
+            if (const auto* color = std::get_if<Keire::Color>(&tint->Value))
+                materialTint = *color;
+    }
     RecordSceneUndo("Assign Material");
     for (const auto target : destinations)
     {
@@ -1139,8 +1151,8 @@ void EditorWorkspaceLayer::AssignDroppedMaterial(const Keire::EntityId entity, c
             m_SceneDocument->SetComponentProperty(target, Keire::MeshRendererComponent::StaticType(), "tint",
                                                   *materialTint);
     }
-    if (record->Type == Keire::MaterialGraphAsset::StaticType() && m_MaterialGraphDocument->Asset() == asset)
-        m_MaterialGraphDocument->ApplyLiveRevision();
+    if (record->Type == Keire::ShaderGraphAsset::StaticType() && m_ShaderGraphDocument->Asset() == asset)
+        m_ShaderGraphDocument->ApplyLiveRevision();
     m_SceneDocument->Select(destination.Id().Value());
     m_SelectedAsset = {};
     m_SceneDocument->SetStatus(

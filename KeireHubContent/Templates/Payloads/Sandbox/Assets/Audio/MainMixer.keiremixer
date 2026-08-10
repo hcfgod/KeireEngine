@@ -1,0 +1,18 @@
+{
+  "buses": [
+    {
+      "effects": [],
+      "gain": 1.0,
+      "id": "4b454952-454d-4958-4552-4d4153544552",
+      "mute": false,
+      "name": "Master",
+      "parent": "",
+      "sends": [],
+      "solo": false
+    }
+  ],
+  "ducking": [],
+  "masterBus": "4b454952-454d-4958-4552-4d4153544552",
+  "schemaVersion": 1,
+  "snapshots": []
+}

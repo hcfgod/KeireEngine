@@ -50,6 +50,8 @@ function Invoke-ManagedBuild {
     if ($LASTEXITCODE -ne 0) { throw "Managed runtime API build failed with exit code $LASTEXITCODE." }
 }
 
+Invoke-CheckedWindowsCommand { & (Join-Path $PSScriptRoot "build-info.ps1") } "Build metadata generation"
+
 switch ($Generator) {
     { $_ -like "vs*" } {
         $majorVersion = Get-VisualStudioMajorVersion $Generator

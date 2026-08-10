@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <optional>
 #include <string_view>
 #include <utility>
 
@@ -14,6 +15,36 @@ namespace KeireHub
 {
     namespace
     {
+        [[nodiscard]] bool IsHubDistributionRoot(const std::filesystem::path& candidate)
+        {
+            std::error_code error;
+            if (!std::filesystem::is_regular_file(candidate / "LICENSE.txt", error))
+                return false;
+
+            error.clear();
+            if (std::filesystem::is_directory(candidate / "Docs", error))
+                return true;
+
+            error.clear();
+            return std::filesystem::is_directory(candidate / "docs", error);
+        }
+
+        [[nodiscard]] std::optional<std::filesystem::path> FindHubDistributionRoot(std::filesystem::path candidate)
+        {
+            candidate = candidate.lexically_normal();
+            while (!candidate.empty())
+            {
+                if (IsHubDistributionRoot(candidate))
+                    return candidate;
+
+                const auto parent = candidate.parent_path();
+                if (parent == candidate)
+                    break;
+                candidate = parent;
+            }
+            return std::nullopt;
+        }
+
         [[nodiscard]] std::string_view DifficultyLabel(const ContentDifficulty difficulty) noexcept
         {
             switch (difficulty)
@@ -60,16 +91,12 @@ namespace KeireHub
 
     std::filesystem::path ResolveHubDistributionRoot(const std::filesystem::path& executable)
     {
-        std::array candidates{executable.parent_path().parent_path(), std::filesystem::current_path()};
-        const auto found =
-            std::ranges::find_if(candidates,
-                                 [](const auto& candidate)
-                                 {
-                                     return std::filesystem::is_regular_file(candidate / "LICENSE.txt") &&
-                                            (std::filesystem::is_directory(candidate / "Docs") ||
-                                             std::filesystem::is_directory(candidate / "docs"));
-                                 });
-        return found == candidates.end() ? executable.parent_path().parent_path() : *found;
+        const auto normalizedExecutable = std::filesystem::absolute(executable).lexically_normal();
+        if (const auto resolved = FindHubDistributionRoot(normalizedExecutable.parent_path()))
+            return *resolved;
+        if (const auto resolved = FindHubDistributionRoot(std::filesystem::current_path()))
+            return *resolved;
+        return normalizedExecutable.parent_path().parent_path();
     }
 
     std::filesystem::path ResolveHubTemplatesRoot(const std::filesystem::path& executable)

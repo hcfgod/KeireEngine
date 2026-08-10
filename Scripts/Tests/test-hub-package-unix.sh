@@ -58,7 +58,9 @@ with open(sys.argv[2], encoding="utf-8") as stream:
 assert distribution["onlineDiscoveryEnabled"] is True
 assert distribution["serviceBaseUrl"] == authority["serviceBaseUrl"]
 assert distribution["trustedKeys"]
-assert distribution["trustedKeys"][0]["keyId"] == authority["trustedKeys"][0]["keyId"]
+assert [key["keyId"] for key in distribution["trustedKeys"]] == [
+    key["keyId"] for key in authority["trustedKeys"]
+]
 PY
 manifest_arguments=(
   "$manifest_writer" write --stage "$stage" --output hub-package.json --artifact hub

@@ -1,0 +1,1055 @@
+{
+    "schemaVersion":  1,
+    "output":  0,
+    "includeRoots":  [
+                         "Assets"
+                     ],
+    "keywords":  [
+                     {
+                         "name":  "EMISSIVE_MODE",
+                         "options":  [
+
+                                     ],
+                         "default":  "true",
+                         "exposed":  true
+                     }
+                 ],
+    "nodes":  [
+                  {
+                      "id":  "a1050000-0000-4000-8000-000000000001",
+                      "kind":  0,
+                      "name":  "Adaptive Tech Surface PBR",
+                      "position":  [
+                                       1480.0,
+                                       170.0
+                                   ],
+                      "valueType":  4,
+                      "value":  [
+                                    1.0,
+                                    1.0,
+                                    1.0,
+                                    1.0
+                                ],
+                      "pins":  [
+                                   {
+                                       "id":  "a1051000-0000-4000-8000-000000000001",
+                                       "name":  "BaseColor",
+                                       "type":  4,
+                                       "direction":  0,
+                                       "default":  [
+                                                       0.03,
+                                                       0.045,
+                                                       0.07,
+                                                       1.0
+                                                   ]
+                                   },
+                                   {
+                                       "id":  "a1051000-0000-4000-8000-000000000002",
+                                       "name":  "Metallic",
+                                       "type":  0,
+                                       "direction":  0,
+                                       "default":  0.68
+                                   },
+                                   {
+                                       "id":  "a1051000-0000-4000-8000-000000000003",
+                                       "name":  "Roughness",
+                                       "type":  0,
+                                       "direction":  0,
+                                       "default":  0.3
+                                   },
+                                   {
+                                       "id":  "a1051000-0000-4000-8000-000000000004",
+                                       "name":  "Specular",
+                                       "type":  0,
+                                       "direction":  0,
+                                       "default":  0.7
+                                   },
+                                   {
+                                       "id":  "a1051000-0000-4000-8000-000000000005",
+                                       "name":  "ClearCoat",
+                                       "type":  0,
+                                       "direction":  0,
+                                       "default":  0.75
+                                   },
+                                   {
+                                       "id":  "a1051000-0000-4000-8000-000000000006",
+                                       "name":  "ClearCoatRoughness",
+                                       "type":  0,
+                                       "direction":  0,
+                                       "default":  0.1
+                                   },
+                                   {
+                                       "id":  "a1051000-0000-4000-8000-000000000007",
+                                       "name":  "SheenColor",
+                                       "type":  4,
+                                       "direction":  0,
+                                       "default":  [
+                                                       0.02,
+                                                       0.16,
+                                                       0.28,
+                                                       1.0
+                                                   ]
+                                   },
+                                   {
+                                       "id":  "a1051000-0000-4000-8000-000000000008",
+                                       "name":  "SheenRoughness",
+                                       "type":  0,
+                                       "direction":  0,
+                                       "default":  0.35
+                                   },
+                                   {
+                                       "id":  "a1051000-0000-4000-8000-000000000009",
+                                       "name":  "Normal",
+                                       "type":  2,
+                                       "direction":  0,
+                                       "default":  [
+                                                       0.0,
+                                                       0.0,
+                                                       1.0
+                                                   ]
+                                   },
+                                   {
+                                       "id":  "a1051000-0000-4000-8000-00000000000a",
+                                       "name":  "DetailNormal",
+                                       "type":  2,
+                                       "direction":  0,
+                                       "default":  [
+                                                       0.0,
+                                                       0.0,
+                                                       1.0
+                                                   ]
+                                   },
+                                   {
+                                       "id":  "a1051000-0000-4000-8000-00000000000b",
+                                       "name":  "Parallax",
+                                       "type":  0,
+                                       "direction":  0,
+                                       "default":  0.025
+                                   },
+                                   {
+                                       "id":  "a1051000-0000-4000-8000-00000000000c",
+                                       "name":  "Emission",
+                                       "type":  4,
+                                       "direction":  0,
+                                       "default":  [
+                                                       0.0,
+                                                       0.0,
+                                                       0.0,
+                                                       1.0
+                                                   ]
+                                   },
+                                   {
+                                       "id":  "a1051000-0000-4000-8000-00000000000d",
+                                       "name":  "Occlusion",
+                                       "type":  0,
+                                       "direction":  0,
+                                       "default":  1.0
+                                   },
+                                   {
+                                       "id":  "a1051000-0000-4000-8000-00000000000e",
+                                       "name":  "Opacity",
+                                       "type":  0,
+                                       "direction":  0,
+                                       "default":  1.0
+                                   }
+                               ]
+                  },
+                  {
+                      "id":  "a1050001-0000-4000-8000-000000000001",
+                      "kind":  1,
+                      "name":  "Tech Texture",
+                      "position":  [
+                                       20.0,
+                                       20.0
+                                   ],
+                      "valueType":  5,
+                      "value":  "c0ffee00-0000-4000-8000-000000000002",
+                      "symbol":  "TechTexture",
+                      "textureSemantic":  1,
+                      "pins":  [
+                                   {
+                                       "id":  "a1051100-0000-4000-8000-000000000001",
+                                       "name":  "Value",
+                                       "type":  5,
+                                       "direction":  1,
+                                       "default":  "00000000-0000-0000-0000-000000000000"
+                                   }
+                               ]
+                  },
+                  {
+                      "id":  "a1050002-0000-4000-8000-000000000001",
+                      "kind":  1,
+                      "name":  "Armor Tint",
+                      "position":  [
+                                       20.0,
+                                       170.0
+                                   ],
+                      "valueType":  4,
+                      "value":  [
+                                    0.025,
+                                    0.06,
+                                    0.11,
+                                    1.0
+                                ],
+                      "symbol":  "ArmorTint",
+                      "pins":  [
+                                   {
+                                       "id":  "a1051200-0000-4000-8000-000000000001",
+                                       "name":  "Value",
+                                       "type":  4,
+                                       "direction":  1,
+                                       "default":  [
+                                                       0.0,
+                                                       0.0,
+                                                       0.0,
+                                                       0.0
+                                                   ]
+                                   }
+                               ]
+                  },
+                  {
+                      "id":  "a1050003-0000-4000-8000-000000000001",
+                      "kind":  1,
+                      "name":  "Circuit Emission",
+                      "position":  [
+                                       20.0,
+                                       320.0
+                                   ],
+                      "valueType":  4,
+                      "value":  [
+                                    0.0,
+                                    3.5,
+                                    7.5,
+                                    1.0
+                                ],
+                      "symbol":  "CircuitEmission",
+                      "pins":  [
+                                   {
+                                       "id":  "a1051300-0000-4000-8000-000000000001",
+                                       "name":  "Value",
+                                       "type":  4,
+                                       "direction":  1,
+                                       "default":  [
+                                                       0.0,
+                                                       0.0,
+                                                       0.0,
+                                                       0.0
+                                                   ]
+                                   }
+                               ]
+                  },
+                  {
+                      "id":  "a1050004-0000-4000-8000-000000000001",
+                      "kind":  4,
+                      "name":  "UV0",
+                      "position":  [
+                                       20.0,
+                                       530.0
+                                   ],
+                      "valueType":  1,
+                      "value":  [
+                                    0.0,
+                                    0.0
+                                ],
+                      "pins":  [
+                                   {
+                                       "id":  "a1051400-0000-4000-8000-000000000001",
+                                       "name":  "UV",
+                                       "type":  1,
+                                       "direction":  1,
+                                       "default":  [
+                                                       0.0,
+                                                       0.0
+                                                   ]
+                                   }
+                               ]
+                  },
+                  {
+                      "id":  "a1050005-0000-4000-8000-000000000001",
+                      "kind":  39,
+                      "name":  "Panel Direction",
+                      "position":  [
+                                       250.0,
+                                       510.0
+                                   ],
+                      "valueType":  1,
+                      "value":  [
+                                    0.0,
+                                    0.0
+                                ],
+                      "pins":  [
+                                   {
+                                       "id":  "a1051500-0000-4000-8000-000000000001",
+                                       "name":  "UV",
+                                       "type":  1,
+                                       "direction":  0,
+                                       "default":  [
+                                                       0.0,
+                                                       0.0
+                                                   ]
+                                   },
+                                   {
+                                       "id":  "a1051500-0000-4000-8000-000000000002",
+                                       "name":  "Center",
+                                       "type":  1,
+                                       "direction":  0,
+                                       "default":  [
+                                                       0.5,
+                                                       0.5
+                                                   ]
+                                   },
+                                   {
+                                       "id":  "a1051500-0000-4000-8000-000000000003",
+                                       "name":  "Rotation",
+                                       "type":  0,
+                                       "direction":  0,
+                                       "default":  0.7853982
+                                   },
+                                   {
+                                       "id":  "a1051500-0000-4000-8000-000000000004",
+                                       "name":  "UV",
+                                       "type":  1,
+                                       "direction":  1,
+                                       "default":  [
+                                                       0.0,
+                                                       0.0
+                                                   ]
+                                   }
+                               ]
+                  },
+                  {
+                      "id":  "a1050006-0000-4000-8000-000000000001",
+                      "kind":  40,
+                      "name":  "Panel Noise",
+                      "position":  [
+                                       500.0,
+                                       560.0
+                                   ],
+                      "valueType":  0,
+                      "value":  0.0,
+                      "pins":  [
+                                   {
+                                       "id":  "a1051600-0000-4000-8000-000000000001",
+                                       "name":  "UV",
+                                       "type":  1,
+                                       "direction":  0,
+                                       "default":  [
+                                                       0.0,
+                                                       0.0
+                                                   ]
+                                   },
+                                   {
+                                       "id":  "a1051600-0000-4000-8000-000000000002",
+                                       "name":  "Scale",
+                                       "type":  0,
+                                       "direction":  0,
+                                       "default":  11.0
+                                   },
+                                   {
+                                       "id":  "a1051600-0000-4000-8000-000000000003",
+                                       "name":  "Detail",
+                                       "type":  0,
+                                       "direction":  0,
+                                       "default":  0.82
+                                   },
+                                   {
+                                       "id":  "a1051600-0000-4000-8000-000000000004",
+                                       "name":  "Noise",
+                                       "type":  0,
+                                       "direction":  1,
+                                       "default":  0.0
+                                   }
+                               ]
+                  },
+                  {
+                      "id":  "a1050007-0000-4000-8000-000000000001",
+                      "kind":  8,
+                      "name":  "Panel Parallax",
+                      "position":  [
+                                       520.0,
+                                       300.0
+                                   ],
+                      "valueType":  1,
+                      "value":  [
+                                    0.0,
+                                    0.0
+                                ],
+                      "pins":  [
+                                   {
+                                       "id":  "a1051700-0000-4000-8000-000000000001",
+                                       "name":  "UV",
+                                       "type":  1,
+                                       "direction":  0,
+                                       "default":  [
+                                                       0.0,
+                                                       0.0
+                                                   ]
+                                   },
+                                   {
+                                       "id":  "a1051700-0000-4000-8000-000000000002",
+                                       "name":  "Height",
+                                       "type":  0,
+                                       "direction":  0,
+                                       "default":  0.5
+                                   },
+                                   {
+                                       "id":  "a1051700-0000-4000-8000-000000000003",
+                                       "name":  "Scale",
+                                       "type":  0,
+                                       "direction":  0,
+                                       "default":  0.035
+                                   },
+                                   {
+                                       "id":  "a1051700-0000-4000-8000-000000000004",
+                                       "name":  "UV",
+                                       "type":  1,
+                                       "direction":  1,
+                                       "default":  [
+                                                       0.0,
+                                                       0.0
+                                                   ]
+                                   }
+                               ]
+                  },
+                  {
+                      "id":  "a1050008-0000-4000-8000-000000000001",
+                      "kind":  3,
+                      "name":  "Sample Tech Surface",
+                      "position":  [
+                                       770.0,
+                                       60.0
+                                   ],
+                      "valueType":  4,
+                      "value":  [
+                                    0.0,
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                      "pins":  [
+                                   {
+                                       "id":  "a1051800-0000-4000-8000-000000000001",
+                                       "name":  "Texture",
+                                       "type":  5,
+                                       "direction":  0,
+                                       "default":  "00000000-0000-0000-0000-000000000000"
+                                   },
+                                   {
+                                       "id":  "a1051800-0000-4000-8000-000000000002",
+                                       "name":  "UV",
+                                       "type":  1,
+                                       "direction":  0,
+                                       "default":  [
+                                                       0.0,
+                                                       0.0
+                                                   ]
+                                   },
+                                   {
+                                       "id":  "a1051800-0000-4000-8000-000000000003",
+                                       "name":  "RGBA",
+                                       "type":  4,
+                                       "direction":  1,
+                                       "default":  [
+                                                       0.0,
+                                                       0.0,
+                                                       0.0,
+                                                       0.0
+                                                   ]
+                                   }
+                               ]
+                  },
+                  {
+                      "id":  "a1050009-0000-4000-8000-000000000001",
+                      "kind":  42,
+                      "name":  "Panel Quantization",
+                      "position":  [
+                                       770.0,
+                                       570.0
+                                   ],
+                      "valueType":  0,
+                      "value":  0.0,
+                      "pins":  [
+                                   {
+                                       "id":  "a1051900-0000-4000-8000-000000000001",
+                                       "name":  "Value",
+                                       "type":  0,
+                                       "direction":  0,
+                                       "default":  0.0
+                                   },
+                                   {
+                                       "id":  "a1051900-0000-4000-8000-000000000002",
+                                       "name":  "Steps",
+                                       "type":  0,
+                                       "direction":  0,
+                                       "default":  5.0
+                                   },
+                                   {
+                                       "id":  "a1051900-0000-4000-8000-000000000003",
+                                       "name":  "Result",
+                                       "type":  0,
+                                       "direction":  1,
+                                       "default":  0.0
+                                   }
+                               ]
+                  },
+                  {
+                      "id":  "a105000a-0000-4000-8000-000000000001",
+                      "kind":  11,
+                      "name":  "Adaptive Surface Blend",
+                      "position":  [
+                                       1020.0,
+                                       120.0
+                                   ],
+                      "valueType":  4,
+                      "value":  [
+                                    0.0,
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                      "pins":  [
+                                   {
+                                       "id":  "a1051a00-0000-4000-8000-000000000001",
+                                       "name":  "A",
+                                       "type":  4,
+                                       "direction":  0,
+                                       "default":  [
+                                                       0.0,
+                                                       0.0,
+                                                       0.0,
+                                                       0.0
+                                                   ]
+                                   },
+                                   {
+                                       "id":  "a1051a00-0000-4000-8000-000000000002",
+                                       "name":  "B",
+                                       "type":  4,
+                                       "direction":  0,
+                                       "default":  [
+                                                       0.0,
+                                                       0.0,
+                                                       0.0,
+                                                       0.0
+                                                   ]
+                                   },
+                                   {
+                                       "id":  "a1051a00-0000-4000-8000-000000000003",
+                                       "name":  "T",
+                                       "type":  0,
+                                       "direction":  0,
+                                       "default":  0.5
+                                   },
+                                   {
+                                       "id":  "a1051a00-0000-4000-8000-000000000004",
+                                       "name":  "Result",
+                                       "type":  4,
+                                       "direction":  1,
+                                       "default":  [
+                                                       0.0,
+                                                       0.0,
+                                                       0.0,
+                                                       0.0
+                                                   ]
+                                   }
+                               ]
+                  },
+                  {
+                      "id":  "a105000b-0000-4000-8000-000000000001",
+                      "kind":  31,
+                      "name":  "Adaptive Roughness",
+                      "position":  [
+                                       1020.0,
+                                       690.0
+                                   ],
+                      "valueType":  0,
+                      "value":  0.0,
+                      "pins":  [
+                                   {
+                                       "id":  "a1051b00-0000-4000-8000-000000000001",
+                                       "name":  "Value",
+                                       "type":  0,
+                                       "direction":  0,
+                                       "default":  0.0
+                                   },
+                                   {
+                                       "id":  "a1051b00-0000-4000-8000-000000000002",
+                                       "name":  "In Min",
+                                       "type":  0,
+                                       "direction":  0,
+                                       "default":  0.0
+                                   },
+                                   {
+                                       "id":  "a1051b00-0000-4000-8000-000000000003",
+                                       "name":  "In Max",
+                                       "type":  0,
+                                       "direction":  0,
+                                       "default":  1.0
+                                   },
+                                   {
+                                       "id":  "a1051b00-0000-4000-8000-000000000004",
+                                       "name":  "Out Min",
+                                       "type":  0,
+                                       "direction":  0,
+                                       "default":  0.18
+                                   },
+                                   {
+                                       "id":  "a1051b00-0000-4000-8000-000000000005",
+                                       "name":  "Out Max",
+                                       "type":  0,
+                                       "direction":  0,
+                                       "default":  0.55
+                                   },
+                                   {
+                                       "id":  "a1051b00-0000-4000-8000-000000000006",
+                                       "name":  "Result",
+                                       "type":  0,
+                                       "direction":  1,
+                                       "default":  0.0
+                                   }
+                               ]
+                  },
+                  {
+                      "id":  "a105000c-0000-4000-8000-000000000001",
+                      "kind":  37,
+                      "name":  "World Normal",
+                      "position":  [
+                                       770.0,
+                                       880.0
+                                   ],
+                      "valueType":  2,
+                      "value":  [
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                      "pins":  [
+                                   {
+                                       "id":  "a1051c00-0000-4000-8000-000000000001",
+                                       "name":  "Vector",
+                                       "type":  2,
+                                       "direction":  1,
+                                       "default":  [
+                                                       0.0,
+                                                       0.0,
+                                                       0.0
+                                                   ]
+                                   }
+                               ]
+                  },
+                  {
+                      "id":  "a105000d-0000-4000-8000-000000000001",
+                      "kind":  34,
+                      "name":  "Edge Fresnel",
+                      "position":  [
+                                       1020.0,
+                                       900.0
+                                   ],
+                      "valueType":  0,
+                      "value":  0.0,
+                      "pins":  [
+                                   {
+                                       "id":  "a1051d00-0000-4000-8000-000000000001",
+                                       "name":  "Normal",
+                                       "type":  2,
+                                       "direction":  0,
+                                       "default":  [
+                                                       0.0,
+                                                       0.0,
+                                                       1.0
+                                                   ]
+                                   },
+                                   {
+                                       "id":  "a1051d00-0000-4000-8000-000000000002",
+                                       "name":  "Power",
+                                       "type":  0,
+                                       "direction":  0,
+                                       "default":  4.5
+                                   },
+                                   {
+                                       "id":  "a1051d00-0000-4000-8000-000000000003",
+                                       "name":  "F0",
+                                       "type":  0,
+                                       "direction":  0,
+                                       "default":  0.04
+                                   },
+                                   {
+                                       "id":  "a1051d00-0000-4000-8000-000000000004",
+                                       "name":  "Fresnel",
+                                       "type":  0,
+                                       "direction":  1,
+                                       "default":  0.0
+                                   }
+                               ]
+                  },
+                  {
+                      "id":  "a105000e-0000-4000-8000-000000000001",
+                      "kind":  10,
+                      "name":  "Fresnel Emission",
+                      "position":  [
+                                       1240.0,
+                                       760.0
+                                   ],
+                      "valueType":  4,
+                      "value":  [
+                                    0.0,
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                      "pins":  [
+                                   {
+                                       "id":  "a1051e00-0000-4000-8000-000000000001",
+                                       "name":  "A",
+                                       "type":  4,
+                                       "direction":  0,
+                                       "default":  [
+                                                       0.0,
+                                                       0.0,
+                                                       0.0,
+                                                       0.0
+                                                   ]
+                                   },
+                                   {
+                                       "id":  "a1051e00-0000-4000-8000-000000000002",
+                                       "name":  "B",
+                                       "type":  4,
+                                       "direction":  0,
+                                       "default":  [
+                                                       0.0,
+                                                       0.0,
+                                                       0.0,
+                                                       0.0
+                                                   ]
+                                   },
+                                   {
+                                       "id":  "a1051e00-0000-4000-8000-000000000003",
+                                       "name":  "Result",
+                                       "type":  4,
+                                       "direction":  1,
+                                       "default":  [
+                                                       0.0,
+                                                       0.0,
+                                                       0.0,
+                                                       0.0
+                                                   ]
+                                   }
+                               ]
+                  },
+                  {
+                      "id":  "a105000f-0000-4000-8000-000000000001",
+                      "kind":  14,
+                      "name":  "Emissive Mode",
+                      "position":  [
+                                       1010.0,
+                                       1100.0
+                                   ],
+                      "valueType":  0,
+                      "value":  0.0,
+                      "symbol":  "EMISSIVE_MODE",
+                      "pins":  [
+                                   {
+                                       "id":  "a1051f00-0000-4000-8000-000000000001",
+                                       "name":  "Enabled",
+                                       "type":  0,
+                                       "direction":  1,
+                                       "default":  0.0
+                                   }
+                               ]
+                  },
+                  {
+                      "id":  "a1050010-0000-4000-8000-000000000001",
+                      "kind":  15,
+                      "name":  "Emission Variant",
+                      "position":  [
+                                       1260.0,
+                                       1040.0
+                                   ],
+                      "valueType":  4,
+                      "value":  [
+                                    0.0,
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                      "pins":  [
+                                   {
+                                       "id":  "a1052000-0000-4000-8000-000000000001",
+                                       "name":  "Condition",
+                                       "type":  0,
+                                       "direction":  0,
+                                       "default":  0.0
+                                   },
+                                   {
+                                       "id":  "a1052000-0000-4000-8000-000000000002",
+                                       "name":  "True",
+                                       "type":  4,
+                                       "direction":  0,
+                                       "default":  [
+                                                       0.0,
+                                                       0.0,
+                                                       0.0,
+                                                       0.0
+                                                   ]
+                                   },
+                                   {
+                                       "id":  "a1052000-0000-4000-8000-000000000003",
+                                       "name":  "False",
+                                       "type":  4,
+                                       "direction":  0,
+                                       "default":  [
+                                                       0.0,
+                                                       0.0,
+                                                       0.0,
+                                                       1.0
+                                                   ]
+                                   },
+                                   {
+                                       "id":  "a1052000-0000-4000-8000-000000000004",
+                                       "name":  "Result",
+                                       "type":  4,
+                                       "direction":  1,
+                                       "default":  [
+                                                       0.0,
+                                                       0.0,
+                                                       0.0,
+                                                       0.0
+                                                   ]
+                                   }
+                               ]
+                  }
+              ],
+    "connections":  [
+                        {
+                            "id":  "a1053000-0000-4000-8000-000000000001",
+                            "output":  [
+                                           "a1050004-0000-4000-8000-000000000001",
+                                           "a1051400-0000-4000-8000-000000000001"
+                                       ],
+                            "input":  [
+                                          "a1050005-0000-4000-8000-000000000001",
+                                          "a1051500-0000-4000-8000-000000000001"
+                                      ]
+                        },
+                        {
+                            "id":  "a1053000-0000-4000-8000-000000000002",
+                            "output":  [
+                                           "a1050005-0000-4000-8000-000000000001",
+                                           "a1051500-0000-4000-8000-000000000004"
+                                       ],
+                            "input":  [
+                                          "a1050006-0000-4000-8000-000000000001",
+                                          "a1051600-0000-4000-8000-000000000001"
+                                      ]
+                        },
+                        {
+                            "id":  "a1053000-0000-4000-8000-000000000003",
+                            "output":  [
+                                           "a1050005-0000-4000-8000-000000000001",
+                                           "a1051500-0000-4000-8000-000000000004"
+                                       ],
+                            "input":  [
+                                          "a1050007-0000-4000-8000-000000000001",
+                                          "a1051700-0000-4000-8000-000000000001"
+                                      ]
+                        },
+                        {
+                            "id":  "a1053000-0000-4000-8000-000000000004",
+                            "output":  [
+                                           "a1050006-0000-4000-8000-000000000001",
+                                           "a1051600-0000-4000-8000-000000000004"
+                                       ],
+                            "input":  [
+                                          "a1050007-0000-4000-8000-000000000001",
+                                          "a1051700-0000-4000-8000-000000000002"
+                                      ]
+                        },
+                        {
+                            "id":  "a1053000-0000-4000-8000-000000000005",
+                            "output":  [
+                                           "a1050001-0000-4000-8000-000000000001",
+                                           "a1051100-0000-4000-8000-000000000001"
+                                       ],
+                            "input":  [
+                                          "a1050008-0000-4000-8000-000000000001",
+                                          "a1051800-0000-4000-8000-000000000001"
+                                      ]
+                        },
+                        {
+                            "id":  "a1053000-0000-4000-8000-000000000006",
+                            "output":  [
+                                           "a1050007-0000-4000-8000-000000000001",
+                                           "a1051700-0000-4000-8000-000000000004"
+                                       ],
+                            "input":  [
+                                          "a1050008-0000-4000-8000-000000000001",
+                                          "a1051800-0000-4000-8000-000000000002"
+                                      ]
+                        },
+                        {
+                            "id":  "a1053000-0000-4000-8000-000000000007",
+                            "output":  [
+                                           "a1050006-0000-4000-8000-000000000001",
+                                           "a1051600-0000-4000-8000-000000000004"
+                                       ],
+                            "input":  [
+                                          "a1050009-0000-4000-8000-000000000001",
+                                          "a1051900-0000-4000-8000-000000000001"
+                                      ]
+                        },
+                        {
+                            "id":  "a1053000-0000-4000-8000-000000000008",
+                            "output":  [
+                                           "a1050002-0000-4000-8000-000000000001",
+                                           "a1051200-0000-4000-8000-000000000001"
+                                       ],
+                            "input":  [
+                                          "a105000a-0000-4000-8000-000000000001",
+                                          "a1051a00-0000-4000-8000-000000000001"
+                                      ]
+                        },
+                        {
+                            "id":  "a1053000-0000-4000-8000-000000000009",
+                            "output":  [
+                                           "a1050008-0000-4000-8000-000000000001",
+                                           "a1051800-0000-4000-8000-000000000003"
+                                       ],
+                            "input":  [
+                                          "a105000a-0000-4000-8000-000000000001",
+                                          "a1051a00-0000-4000-8000-000000000002"
+                                      ]
+                        },
+                        {
+                            "id":  "a1053000-0000-4000-8000-00000000000a",
+                            "output":  [
+                                           "a1050009-0000-4000-8000-000000000001",
+                                           "a1051900-0000-4000-8000-000000000003"
+                                       ],
+                            "input":  [
+                                          "a105000a-0000-4000-8000-000000000001",
+                                          "a1051a00-0000-4000-8000-000000000003"
+                                      ]
+                        },
+                        {
+                            "id":  "a1053000-0000-4000-8000-00000000000b",
+                            "output":  [
+                                           "a105000a-0000-4000-8000-000000000001",
+                                           "a1051a00-0000-4000-8000-000000000004"
+                                       ],
+                            "input":  [
+                                          "a1050000-0000-4000-8000-000000000001",
+                                          "a1051000-0000-4000-8000-000000000001"
+                                      ]
+                        },
+                        {
+                            "id":  "a1053000-0000-4000-8000-00000000000c",
+                            "output":  [
+                                           "a1050009-0000-4000-8000-000000000001",
+                                           "a1051900-0000-4000-8000-000000000003"
+                                       ],
+                            "input":  [
+                                          "a1050000-0000-4000-8000-000000000001",
+                                          "a1051000-0000-4000-8000-000000000002"
+                                      ]
+                        },
+                        {
+                            "id":  "a1053000-0000-4000-8000-00000000000d",
+                            "output":  [
+                                           "a1050006-0000-4000-8000-000000000001",
+                                           "a1051600-0000-4000-8000-000000000004"
+                                       ],
+                            "input":  [
+                                          "a105000b-0000-4000-8000-000000000001",
+                                          "a1051b00-0000-4000-8000-000000000001"
+                                      ]
+                        },
+                        {
+                            "id":  "a1053000-0000-4000-8000-00000000000e",
+                            "output":  [
+                                           "a105000b-0000-4000-8000-000000000001",
+                                           "a1051b00-0000-4000-8000-000000000006"
+                                       ],
+                            "input":  [
+                                          "a1050000-0000-4000-8000-000000000001",
+                                          "a1051000-0000-4000-8000-000000000003"
+                                      ]
+                        },
+                        {
+                            "id":  "a1053000-0000-4000-8000-00000000000f",
+                            "output":  [
+                                           "a105000c-0000-4000-8000-000000000001",
+                                           "a1051c00-0000-4000-8000-000000000001"
+                                       ],
+                            "input":  [
+                                          "a105000d-0000-4000-8000-000000000001",
+                                          "a1051d00-0000-4000-8000-000000000001"
+                                      ]
+                        },
+                        {
+                            "id":  "a1053000-0000-4000-8000-000000000010",
+                            "output":  [
+                                           "a105000d-0000-4000-8000-000000000001",
+                                           "a1051d00-0000-4000-8000-000000000004"
+                                       ],
+                            "input":  [
+                                          "a1050000-0000-4000-8000-000000000001",
+                                          "a1051000-0000-4000-8000-000000000005"
+                                      ]
+                        },
+                        {
+                            "id":  "a1053000-0000-4000-8000-000000000011",
+                            "output":  [
+                                           "a1050003-0000-4000-8000-000000000001",
+                                           "a1051300-0000-4000-8000-000000000001"
+                                       ],
+                            "input":  [
+                                          "a105000e-0000-4000-8000-000000000001",
+                                          "a1051e00-0000-4000-8000-000000000001"
+                                      ]
+                        },
+                        {
+                            "id":  "a1053000-0000-4000-8000-000000000012",
+                            "output":  [
+                                           "a105000d-0000-4000-8000-000000000001",
+                                           "a1051d00-0000-4000-8000-000000000004"
+                                       ],
+                            "input":  [
+                                          "a105000e-0000-4000-8000-000000000001",
+                                          "a1051e00-0000-4000-8000-000000000002"
+                                      ]
+                        },
+                        {
+                            "id":  "a1053000-0000-4000-8000-000000000013",
+                            "output":  [
+                                           "a105000f-0000-4000-8000-000000000001",
+                                           "a1051f00-0000-4000-8000-000000000001"
+                                       ],
+                            "input":  [
+                                          "a1050010-0000-4000-8000-000000000001",
+                                          "a1052000-0000-4000-8000-000000000001"
+                                      ]
+                        },
+                        {
+                            "id":  "a1053000-0000-4000-8000-000000000014",
+                            "output":  [
+                                           "a105000e-0000-4000-8000-000000000001",
+                                           "a1051e00-0000-4000-8000-000000000003"
+                                       ],
+                            "input":  [
+                                          "a1050010-0000-4000-8000-000000000001",
+                                          "a1052000-0000-4000-8000-000000000002"
+                                      ]
+                        },
+                        {
+                            "id":  "a1053000-0000-4000-8000-000000000015",
+                            "output":  [
+                                           "a1050010-0000-4000-8000-000000000001",
+                                           "a1052000-0000-4000-8000-000000000004"
+                                       ],
+                            "input":  [
+                                          "a1050000-0000-4000-8000-000000000001",
+                                          "a1051000-0000-4000-8000-00000000000c"
+                                      ]
+                        }
+                    ],
+    "generatedAssetOwner":  "a105ffff-0000-4000-8000-000000000001"
+}

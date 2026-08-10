@@ -1,0 +1,679 @@
+{
+  "schemaVersion": 5,
+  "name": "Shader & Material Graph Gallery",
+  "entities": [
+    {
+      "id": "cafe0000-0000-4000-8000-000000000001",
+      "name": "Showcase Camera",
+      "active": true,
+      "layer": 0,
+      "parent": null,
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              0,
+              5.25,
+              -18
+            ],
+            "rotation": [
+              0.13052618503570557,
+              0,
+              0,
+              0.9914448857307434
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        {
+          "type": "4b454952-4543-414d-4552-410000000001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "projection": 0,
+            "clearMode": 0,
+            "primary": true,
+            "priority": 100,
+            "fieldOfView": 54,
+            "orthographicSize": 10,
+            "nearPlane": 0.05,
+            "farPlane": 1000,
+            "clearColor": [
+              0.012,
+              0.018,
+              0.032,
+              1
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "cafe0000-0000-4000-8000-000000000002",
+      "name": "Key Directional Light",
+      "active": true,
+      "layer": 0,
+      "parent": null,
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              0,
+              10,
+              -5
+            ],
+            "rotation": [
+              0.8806512951850891,
+              0.11315173655748367,
+              -0.3761037588119507,
+              0.26494553685188293
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        {
+          "type": "4b454952-4544-4952-4c49-474854000001",
+          "version": 2,
+          "enabled": true,
+          "data": {
+            "bakeMode": 0,
+            "color": [
+              1,
+              0.93,
+              0.82,
+              1
+            ],
+            "contactShadows": false,
+            "cookie": null,
+            "cookieOffset": [
+              0,
+              0
+            ],
+            "cookieRotation": 0,
+            "cookieScale": [
+              1,
+              1
+            ],
+            "indirectMultiplier": 1,
+            "intensity": 4.25,
+            "shadowBias": 0.035,
+            "shadowResolution": 2,
+            "shadowStrength": 1,
+            "shadows": 2,
+            "temperature": 6200,
+            "useTemperature": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "cafe0000-0000-4000-8000-000000000003",
+      "name": "Graph Gallery Floor",
+      "active": true,
+      "layer": 0,
+      "parent": null,
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              0,
+              -0.65,
+              1
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              18,
+              0.3,
+              13
+            ]
+          }
+        },
+        {
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 3,
+          "enabled": true,
+          "data": {
+            "mesh": "4b454952-4543-5542-454d-455348000001",
+            "material": "6f7bf3a9-8da1-5495-a0d5-f9e1245baf1f",
+            "tint": [
+              0.22,
+              0.25,
+              0.32,
+              1
+            ],
+            "visible": true,
+            "castShadows": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "giReceive": 0,
+            "lightmapScale": 1,
+            "preserveLightmapUvs": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "cafe0001-0000-4000-8000-000000000001",
+      "name": "01 · Basic Paint",
+      "active": true,
+      "layer": 0,
+      "parent": null,
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              -6,
+              1,
+              -4
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1.7,
+              1.7,
+              1.7
+            ]
+          }
+        },
+        {
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 3,
+          "enabled": true,
+          "data": {
+            "mesh": "4b454952-4543-5542-454d-455348000001",
+            "material": "fb5f2683-f3d9-516c-a24e-3817e6386ab9",
+            "tint": [
+              1,
+              1,
+              1,
+              1
+            ],
+            "visible": true,
+            "castShadows": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "giReceive": 0,
+            "lightmapScale": 1,
+            "preserveLightmapUvs": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "cafe0001-0000-4000-8000-000000000002",
+      "name": "02 · Textured Surface",
+      "active": true,
+      "layer": 0,
+      "parent": null,
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              0,
+              1,
+              -4
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1.75,
+              1.75,
+              1.75
+            ]
+          }
+        },
+        {
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 3,
+          "enabled": true,
+          "data": {
+            "mesh": "4b454952-4553-5048-4552-454d45534801",
+            "material": "4b473098-5a2d-5262-a7a1-5697f10758be",
+            "tint": [
+              1,
+              1,
+              1,
+              1
+            ],
+            "visible": true,
+            "castShadows": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "giReceive": 0,
+            "lightmapScale": 1,
+            "preserveLightmapUvs": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "cafe0001-0000-4000-8000-000000000003",
+      "name": "03 · Procedural Emissive",
+      "active": true,
+      "layer": 0,
+      "parent": null,
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              6,
+              1,
+              -4
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1.9,
+              1.9,
+              1.9
+            ]
+          }
+        },
+        {
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 3,
+          "enabled": true,
+          "data": {
+            "mesh": "4b454952-4554-4f52-5553-4d4553480001",
+            "material": "996f627b-a568-5fcc-87bb-79f898bcf69b",
+            "tint": [
+              1,
+              1,
+              1,
+              1
+            ],
+            "visible": true,
+            "castShadows": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "giReceive": 0,
+            "lightmapScale": 1,
+            "preserveLightmapUvs": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "cafe0001-0000-4000-8000-000000000004",
+      "name": "04 · Clear Coat Detail",
+      "active": true,
+      "layer": 0,
+      "parent": null,
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              -6,
+              1,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1.75,
+              1.75,
+              1.75
+            ]
+          }
+        },
+        {
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 3,
+          "enabled": true,
+          "data": {
+            "mesh": "4b454952-4553-5048-4552-454d45534801",
+            "material": "6f7bf3a9-8da1-5495-a0d5-f9e1245baf1f",
+            "tint": [
+              1,
+              1,
+              1,
+              1
+            ],
+            "visible": true,
+            "castShadows": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "giReceive": 0,
+            "lightmapScale": 1,
+            "preserveLightmapUvs": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "cafe0001-0000-4000-8000-000000000005",
+      "name": "05 · Adaptive Tech Surface",
+      "active": true,
+      "layer": 0,
+      "parent": null,
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              0,
+              1,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1.65,
+              1.65,
+              1.65
+            ]
+          }
+        },
+        {
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 3,
+          "enabled": true,
+          "data": {
+            "mesh": "4b454952-4543-594c-494e-4445524d5301",
+            "material": "ae58f8d7-40da-59e1-ba5a-ee8368eaa7c2",
+            "tint": [
+              1,
+              1,
+              1,
+              1
+            ],
+            "visible": true,
+            "castShadows": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "giReceive": 0,
+            "lightmapScale": 1,
+            "preserveLightmapUvs": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "cafe0001-0000-4000-8000-000000000006",
+      "name": "06 · Anisotropic Brushed Metal",
+      "active": true,
+      "layer": 0,
+      "parent": null,
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              6,
+              1,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1.9,
+              1.9,
+              1.9
+            ]
+          }
+        },
+        {
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 3,
+          "enabled": true,
+          "data": {
+            "mesh": "4b454952-4554-4f52-5553-4d4553480001",
+            "material": "fa9bfd9f-30c6-517b-aa84-b669b2727c47",
+            "tint": [
+              1,
+              1,
+              1,
+              1
+            ],
+            "visible": true,
+            "castShadows": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "giReceive": 0,
+            "lightmapScale": 1,
+            "preserveLightmapUvs": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "cafe0001-0000-4000-8000-000000000007",
+      "name": "07 · Transmission Glass",
+      "active": true,
+      "layer": 0,
+      "parent": null,
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              -6,
+              1,
+              4
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1.75,
+              1.75,
+              1.75
+            ]
+          }
+        },
+        {
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 3,
+          "enabled": true,
+          "data": {
+            "mesh": "4b454952-4553-5048-4552-454d45534801",
+            "material": "56dfa187-c6e1-5788-9930-3f525451f3b9",
+            "tint": [
+              1,
+              1,
+              1,
+              1
+            ],
+            "visible": true,
+            "castShadows": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "giReceive": 0,
+            "lightmapScale": 1,
+            "preserveLightmapUvs": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "cafe0001-0000-4000-8000-000000000008",
+      "name": "08 · Procedural Vertex Displacement",
+      "active": true,
+      "layer": 0,
+      "parent": null,
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              0,
+              1,
+              4
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1.55,
+              1.55,
+              1.55
+            ]
+          }
+        },
+        {
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 3,
+          "enabled": true,
+          "data": {
+            "mesh": "4b454952-4543-4150-5355-4c454d455301",
+            "material": "2677fd5e-d50a-5b1e-8b62-7cf72f1314ba",
+            "tint": [
+              1,
+              1,
+              1,
+              1
+            ],
+            "visible": true,
+            "castShadows": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "giReceive": 0,
+            "lightmapScale": 1,
+            "preserveLightmapUvs": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "cafe0001-0000-4000-8000-000000000009",
+      "name": "09 · Holographic Voronoi",
+      "active": true,
+      "layer": 0,
+      "parent": null,
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              6,
+              1,
+              4
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1.9,
+              1.9,
+              1.9
+            ]
+          }
+        },
+        {
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 3,
+          "enabled": true,
+          "data": {
+            "mesh": "4b454952-4554-4f52-5553-4d4553480001",
+            "material": "34785da2-6545-5c4a-a67a-d6248839e5ba",
+            "tint": [
+              1,
+              1,
+              1,
+              1
+            ],
+            "visible": true,
+            "castShadows": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "giReceive": 0,
+            "lightmapScale": 1,
+            "preserveLightmapUvs": true
+          }
+        }
+      ]
+    }
+  ],
+  "prefabInstances": [],
+  "prefabOverrides": [],
+  "lighting": {
+    "backend": 0,
+    "bakeAmbientOcclusion": true,
+    "denoise": true,
+    "indirectBounceCount": 2,
+    "lightmapResolution": 1024,
+    "maximumLightmapResolution": 4096,
+    "paddingTexels": 4,
+    "quality": 1,
+    "samplesPerTexel": 64,
+    "texelsPerUnit": 32
+  },
+  "bakedLighting": null
+}

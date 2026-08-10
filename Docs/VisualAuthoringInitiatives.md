@@ -4,16 +4,16 @@ Review date: 2026-08-09
 Scope: KE-021 and the first major VFX parity milestone
 
 Kéire measures these initiatives by stable capability contracts and production scenarios. Node totals are supporting
-evidence, not the acceptance test, and visual similarity to another editor is not a completion criterion. Kéire calls
-its custom shader-authoring asset a **Material Graph** because the graph publishes both generated shaders and an
-assignable runtime material; it is the engine's Shader Graph system.
+evidence, not the acceptance test, and visual similarity to another editor is not a completion criterion. Shader Graph
+owns executable shader logic. Material Graph owns shader selection and material bindings. They publish through the
+same immutable shader/material runtime boundary and remain independently authorable assets.
 
 ## Executive Baseline
 
 | Initiative | Current validated baseline | First decision |
 | --- | --- | --- |
 | VFX parity | 278 frozen Unity 6.3 rows, 245 enabled Kéire-equivalent rows, 33 disabled rows, and 240 runtime descriptors | Deliver the remaining event/behavior and renderer-specific rows by production slice; never enable a catalog row without runtime, test, documentation, and scenario evidence. |
-| Shader Graph | 103 stable node types, six output models, generated DXIL/SPIR-V/MSL, material instances, live previews, and transactional publication | Complete context-menu creation, sampler/resource breadth, node previews, and enforceable performance gates before expanding specialized shading models. |
+| Shader Graph | 103 stable node types, six output models, generated DXIL/SPIR-V/MSL, tagged Material and Material Graph integration, live previews, and transactional publication | Complete sampler/resource breadth, node previews, and enforceable performance gates before expanding specialized shading models. |
 
 The VFX first-major-milestone target is 50 enabled parity rows. The next portable expansion targets 120 additional rows
 above the validated 125-row baseline. The checked-in ledger closes all 120, for 245 total. This satisfies both
@@ -39,9 +39,9 @@ runtime mappings, and enabled implementations that do not belong to a tested pro
 
 | ID | Capability | Status | Priority | Current evidence and remaining acceptance |
 | --- | --- | --- | --- | --- |
-| SG-001 | Create, rename, duplicate, move, and recover assets | Shipped | Complete | Project creation and generic stable-ID asset mutations cover `.keirematerialgraph`; deletion uses recoverable project trash. |
+| SG-001 | Create, rename, duplicate, move, and recover assets | Shipped | Complete | Project creation and generic stable-ID asset mutations cover `.keireshadergraph`; deletion uses recoverable project trash. |
 | SG-002 | Deterministic source, cooking, packaging, and transactional publication | Shipped | Complete | Schema-v2 JSON, bounded decoding, stable subassets, staged directory replacement, rollback, and target-specific shader cooking are tested. |
-| SG-003 | Assign generated shaders through ordinary materials | Shipped | Complete | Graph import publishes an ordinary `MaterialAsset`; Mesh Renderer assignment and live development revisions use the normal renderer boundary. |
+| SG-003 | Assign generated shaders through ordinary materials | Shipped | Complete | Direct Materials and Material Graphs store tagged raw-Shader or Shader-Graph references and import to ordinary `MaterialAsset` data; Mesh Renderer assignment uses the normal renderer boundary. |
 | SG-004 | Searchable, organized node library | Shipped | Complete | The catalog exposes 103 stable type IDs grouped by authoring category and the panel filters names and categories. |
 | SG-005 | Right-click creation and keyboard-first palette navigation | Shipped | Complete | The top-bar chooser and canvas-positioned right-click menu share focused live search, wrapping keyboard selection, Enter-to-create, recent/common entries, category browsing, and click-position placement. |
 | SG-006 | Exposed scalars, vectors, colors, and textures | Shipped | Complete | Typed parameters include metadata, ranges, step, category, stable symbols, texture semantics, and material-instance overrides. |
@@ -52,10 +52,10 @@ runtime mappings, and enabled implementations that do not belong to a tested pro
 | SG-011 | Graph-, node-, pin-, and generated-line diagnostics | Shipped | Complete | Validation and compilation diagnostics carry stable `MG` codes, node/pin IDs, and generated line metadata while last-good output remains active. |
 | SG-012 | Graph-format and generated-shader compatibility versions | Shipped | Complete | Public source-schema, generator, and vertex-layout versions are embedded in generated HLSL/manifests; future source schemas fail early with a specific recoverable error. |
 | SG-013 | Renderer boundary and cross-platform shader compilation | Shipped | Complete | Generated source uses the renderer-neutral material contract and production importer for DXIL, SPIR-V, and MSL. |
-| SG-014 | Consistent Material Graph thumbnails and badge | Shipped | Complete | Asset Browser resolves generated runtime materials, renders the ordinary material preview asynchronously, and overlays stable `MG`/`MI` badges with type-specific loading and failure fallbacks. |
-| SG-015 | VFX outputs driven by Material Graph assets | Partial | P0 | Material-backed particle mesh output is enabled and tested. Dedicated quad and strip authoring contracts, exposed-property binding, and strip tiling modes remain disabled VFX parity rows. |
+| SG-014 | Consistent Shader and Material Graph thumbnails and badges | Shipped | Complete | Asset Browser resolves generated runtime materials, renders ordinary material previews asynchronously, and distinguishes `SG`, `MG`, and instance sources with type-specific fallbacks. |
+| SG-015 | VFX outputs driven by Shader/Material Graph assets | Partial | P0 | Material-backed particle mesh output is enabled and tested. Dedicated quad and strip authoring contracts, exposed-property binding, and strip tiling modes remain disabled VFX parity rows. |
 | SG-016 | Performance statistics and enforceable budgets | Partial | P0 | Compilation reports node, connection, reachability, texture, ALU, and variant counts. Reference-hardware compile, preview, and runtime gates remain required. |
-| SG-017 | Examples, focused tests, and user documentation | Shipped | Complete | Nine progressive Sandbox graphs, engine/editor/render tests, and the Shaders and Materials guide cover the supported workflow. |
+| SG-017 | Examples, focused tests, and user documentation | Shipped | Complete | Nine paired Sandbox Shader/Material Graph examples, engine/editor/render tests, migration coverage, and the Shaders and Materials guide cover the supported workflow. |
 
 `Partial` never means an unsupported choice silently degrades. Unsupported graph resources or future formats are
 rejected, and failed edits retain the last-good preview and runtime assets.
@@ -75,7 +75,7 @@ rejected, and failed edits retain the last-good preview and runtime assets.
 
 ## Delivery Order
 
-1. Close P0 resource/output boundaries: Material Graph sampler/resource model, VFX quad/strip graph outputs, and
+1. Close P0 resource/output boundaries: Shader Graph sampler/resource model, VFX quad/strip graph outputs, and
    property binding.
 2. Close P0 production behavior: VFX scalability, deterministic checkpoints, frame-exact GPU handoff, GPU inspection,
    and enforceable reference-hardware budgets for both graph systems.
@@ -98,5 +98,6 @@ python Scripts/Vfx/test_vfx_parity_tooling.py
 ./Scripts/project.ps1 test -Generator ninja -Configuration Debug -Toolset msc
 ```
 
-The VFX tooling checks the frozen external catalog and live runtime contract. Material Graph engine, editor, rendering,
-asset, and package tests remain the executable authority for Shader Graph rows; prose does not upgrade a row.
+The VFX tooling checks the frozen external catalog and live runtime contract. Shader Graph and Material Graph engine,
+editor, rendering, asset, and package tests remain the executable authority for graph rows; prose does not upgrade a
+row.

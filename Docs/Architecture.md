@@ -655,18 +655,20 @@ The retained tree owns layout, focus, hit testing, clipping, batching metadata, 
 adapts its draw commands to the SDL_GPU-backed application UI pass; managed code reaches the presentation runtime only
 through Coral internal calls and `IScriptRuntimeServices`, never through native pointers.
 
-Editor material authoring is split between `MaterialDocument`, which owns the selected asset/path, draft and committed
-source snapshots, shader-driven state, dirty lifecycle, and validation, and `MaterialInspectorPanel`, which maps that
-state onto the engine-owned property editor interface. Material file snapshots enter the project-assets undo context;
+Editor material authoring is split between `MaterialDocument`, which owns a selected direct Material or Material Graph,
+its asset/path, draft and committed source snapshots, tagged raw-Shader or Shader-Graph reference, resolved runtime
+shader, stable graph bindings, dirty lifecycle, and validation, and `MaterialInspectorPanel`, which maps that state onto
+the engine-owned property editor interface. Material file
+snapshots enter the project-assets undo context;
 the workspace layer composes the panel while `MaterialDocument` and the asset-operation service coordinate persistence.
 Continuous numeric/color edits update a development-only in-memory asset revision for immediate rendering and share a
 property-scoped undo command until the UI edit boundary. The final serialized source is written once and its catalog
 refresh runs in the background. Startup mounts a current development catalog directly; stale non-startup sources are
 refreshed after the editor becomes usable.
 
-`MaterialGraphDocument` is a separate authoring document layered on the shared stable node-graph canvas rather than a
+`ShaderGraphDocument` is a separate authoring document layered on the shared stable node-graph canvas rather than a
 second graph interaction implementation. It owns graph validation, undo/redo, compile options, generated diagnostics,
-and the last-good preview definition and compilation. `MaterialGraphPanel` owns only transient selection, inspector
+and the last-good preview definition and compilation. `ShaderGraphPanel` owns only transient selection, inspector
 buffers, searchable node-palette state, graph gestures, output/preview controls, bounded adaptive software-preview
 pixels, and presentation. The preview evaluates the validated built-in graph per shaded sample using the same coercion,
 UV, procedural, shaping, surface, and neutral texture-semantic rules as generated shaders; unsupported custom functions
@@ -751,11 +753,18 @@ the same transactional catalog as the parent. Model materials and embedded textu
 extraction reimports the model in the isolated asset worker, transactionally creates editable source assets, and only
 then publishes the replacement development catalog and source index.
 
-Material Graph import uses the same generated-subasset boundary: each keyword variant becomes a compiled `ShaderAsset`
-and the final subasset is the graph's default `MaterialAsset`. Editor assignment resolves the user-facing graph to that
-material identity before writing scene data, so `RenderSystem` continues to consume only its ordinary material/shader
-asset contract. Graph source, generated variants, and the runtime material therefore reload and cook as one dependency
-transaction without teaching Mesh Renderer components about authoring graph types.
+Shader Graph import uses the same generated-subasset boundary: each keyword variant becomes a compiled `ShaderAsset`
+and a default `MaterialAsset` is published for direct assignment. Material Graph and direct Material sources sit above
+that interface. They store a tagged built-in, raw-Shader, or Shader-Graph reference plus property, keyword, surface, and
+baked-lighting state, then import to an ordinary immutable `MaterialAsset`. Editor assignment resolves every
+user-facing material source to that runtime identity before writing scene data, so `RenderSystem` continues to consume
+only its material/shader asset contract. Shader generation, material binding, reload, dependency closure, and cooking
+remain asset transactions without teaching Mesh Renderer components about authoring graph types.
+
+Shader properties carry optional stable IDs. Material Graph resolves a binding by stable ID before its display name,
+which preserves values through source-level renames and reports unknown or type-incompatible bindings explicitly. Raw
+Shader manifests without stable IDs retain name-based compatibility. Renderer-specific shader generation remains
+behind `ShaderAsset`; neither Material Graph nor direct Material public data exposes backend handles or compiler types.
 
 Generated material shaders obey the fixed six-lane mesh vertex ABI and the renderer's complete pixel-interpolator ABI,
 including variants whose graph does not consume every lane. Their vertex stage applies world-position offset before
@@ -765,7 +774,7 @@ Eye outputs are authored through the same ABI with output-specific neutral defau
 are packed into the ordinary material-property block; a zero-property sentinel keeps resource layouts valid on strict
 graphics backends.
 
-Material Graph authoring separates serialized editor metadata from runtime-affecting edits. Node layout uses the
+Shader Graph authoring separates serialized editor metadata from runtime-affecting edits. Node layout uses the
 document host's validated metadata transaction and preserves undo/redo without invoking preview publication. Exposed
 parameter defaults patch the last-good material compilation and publish immediately; topology, pin defaults, keywords,
 and other shader-affecting changes use the generation-checked background compiler. Live shader imports request only the

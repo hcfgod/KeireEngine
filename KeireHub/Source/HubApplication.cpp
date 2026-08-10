@@ -99,9 +99,8 @@ namespace
                 {
                     Keire::SystemTraySpecification tray;
                     tray.Tooltip = "Kéire Project Hub";
-                    tray.Icon = m_Executable.parent_path().parent_path() / "Config" / "Branding" / "Keire.png";
-                    if (!std::filesystem::is_regular_file(tray.Icon))
-                        tray.Icon = std::filesystem::current_path() / "Config" / "Branding" / "Keire.png";
+                    tray.Icon =
+                        KeireHub::ResolveHubDistributionRoot(m_Executable) / "Config" / "Branding" / "Keire.png";
                     tray.Actions = {{"Show Hub", [this] { ShowHub(); }}, {"Quit", [this] { Owner().RequestExit(); }}};
                     m_Tray = Owner().Windows()->CreateSystemTray(std::move(tray));
                     if (!m_Tray->IsAvailable())

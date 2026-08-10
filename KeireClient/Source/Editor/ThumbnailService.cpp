@@ -296,10 +296,10 @@ namespace KeireEditor
             return result;
         }
 
-        [[nodiscard]] std::vector<std::byte> MakeMaterialGraphPreview(const ThumbnailRequest& request,
-                                                                      const std::uint32_t width,
-                                                                      const std::uint32_t height,
-                                                                      const std::string_view badge)
+        [[nodiscard]] std::vector<std::byte> MakeShaderGraphPreview(const ThumbnailRequest& request,
+                                                                    const std::uint32_t width,
+                                                                    const std::uint32_t height,
+                                                                    const std::string_view badge)
         {
             auto result = MakeMaterialPreview(request, width, height);
             ApplyBadge(result, width, height, badge);
@@ -813,13 +813,19 @@ namespace KeireEditor
     std::vector<std::byte> MakeAssetFallbackThumbnail(const Keire::AssetTypeId type, const std::uint32_t width,
                                                       const std::uint32_t height, const bool missing)
     {
+        if (type == Keire::ShaderGraphAsset::StaticType())
+        {
+            auto result = MakeIcon(width, height, {34, 35, 57}, {105, 151, 255}, 'S', missing);
+            ApplyBadge(result, width, height, "SG");
+            return result;
+        }
         if (type == Keire::MaterialGraphAsset::StaticType())
         {
             auto result = MakeIcon(width, height, {47, 31, 48}, {213, 94, 199}, 'M', missing);
             ApplyBadge(result, width, height, "MG");
             return result;
         }
-        if (type == Keire::MaterialGraphInstanceAsset::StaticType())
+        if (type == Keire::ShaderGraphInstanceAsset::StaticType())
         {
             auto result = MakeIcon(width, height, {43, 33, 47}, {196, 111, 212}, 'M', missing);
             ApplyBadge(result, width, height, "MI");
@@ -856,7 +862,8 @@ namespace KeireEditor
             materialId = source.Id;
         }
         else if (source.Type == Keire::MaterialGraphAsset::StaticType() ||
-                 source.Type == Keire::MaterialGraphInstanceAsset::StaticType())
+                 source.Type == Keire::ShaderGraphAsset::StaticType() ||
+                 source.Type == Keire::ShaderGraphInstanceAsset::StaticType())
         {
             const auto preview = std::ranges::find_if(source.SubAssets,
                                                       [&](const Keire::AssetId subAsset)
@@ -1055,12 +1062,15 @@ namespace KeireEditor
             { return MakeIcon(width, height, background, accent, glyph, request.Missing); };
         };
         RegisterProvider(".keirematerial", 5, MakeMaterialPreview);
+        RegisterProvider(".keireshadergraph", 1,
+                         [](const ThumbnailRequest& request, const auto width, const auto height)
+                         { return MakeShaderGraphPreview(request, width, height, "SG"); });
         RegisterProvider(".keirematerialgraph", 1,
                          [](const ThumbnailRequest& request, const auto width, const auto height)
-                         { return MakeMaterialGraphPreview(request, width, height, "MG"); });
-        RegisterProvider(".keirematerialinstance", 1,
+                         { return MakeShaderGraphPreview(request, width, height, "MG"); });
+        RegisterProvider(".keireshadergraphinstance", 1,
                          [](const ThumbnailRequest& request, const auto width, const auto height)
-                         { return MakeMaterialGraphPreview(request, width, height, "MI"); });
+                         { return MakeShaderGraphPreview(request, width, height, "MI"); });
         RegisterProvider(".keirevfx", 1, MakeVfxPreview);
         RegisterProvider(".png", 4, MakeTexturePreview);
         RegisterProvider(".jpg", 4, MakeTexturePreview);

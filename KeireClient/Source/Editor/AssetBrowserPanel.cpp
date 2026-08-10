@@ -52,7 +52,8 @@ namespace KeireEditor
             PhysicsMaterial,
             VfxEffect,
             MaterialGraph,
-            MaterialGraphInstance,
+            ShaderGraph,
+            ShaderGraphInstance,
             Prefab,
             PrefabVariant,
             Shader,
@@ -132,6 +133,7 @@ namespace KeireEditor
             Images.clear();
             ImageDigests.clear();
             FolderImage.Reset();
+            ShaderGraphFallbackImage.Reset();
             MaterialGraphFallbackImage.Reset();
             MaterialInstanceFallbackImage.Reset();
             VfxFallbackImage.Reset();
@@ -292,21 +294,36 @@ namespace KeireEditor
         {
             try
             {
-                if (record.RelativePath.extension() == ".keireinput")
+                switch (ResolveAssetBrowserOpenAction(record.RelativePath))
+                {
+                case AssetBrowserOpenAction::InputActions:
                     editor.OpenAssetBrowserInputActions(record.Id);
-                else if (record.RelativePath.extension() == ".keireanimgraph")
+                    break;
+                case AssetBrowserOpenAction::AnimationGraph:
                     editor.OpenAssetBrowserAnimationGraph(record.Id);
-                else if (record.RelativePath.extension() == ".keiremixer")
+                    break;
+                case AssetBrowserOpenAction::AudioMixer:
                     editor.OpenAssetBrowserAudioMixer(record.Id);
-                else if (record.RelativePath.extension() == ".keirevfx")
+                    break;
+                case AssetBrowserOpenAction::VfxEffect:
                     editor.OpenAssetBrowserVfxEffect(record.Id);
-                else if (record.RelativePath.extension() == ".keirematerialgraph")
+                    break;
+                case AssetBrowserOpenAction::Material:
+                    editor.OpenAssetBrowserMaterial(record.Id);
+                    break;
+                case AssetBrowserOpenAction::MaterialGraph:
                     editor.OpenAssetBrowserMaterialGraph(record.Id);
-                else if (record.RelativePath.extension() == ".keirescene")
+                    break;
+                case AssetBrowserOpenAction::ShaderGraph:
+                    editor.OpenAssetBrowserShaderGraph(record.Id);
+                    break;
+                case AssetBrowserOpenAction::Scene:
                     editor.OpenAssetBrowserScene(record.Id);
-                else if (record.RelativePath.extension() == ".keireprefab")
+                    break;
+                case AssetBrowserOpenAction::Prefab:
                     editor.OpenAssetBrowserPrefab(record.Id);
-                else
+                    break;
+                case AssetBrowserOpenAction::External:
                 {
                     editor.PrepareAssetBrowserExternalOpen(record.Id);
                     std::string diagnostic;
@@ -315,6 +332,8 @@ namespace KeireEditor
                         throw std::runtime_error(diagnostic);
                     editor.SetAssetBrowserStatus("Opened " + record.RelativePath.filename().string() +
                                                  " in an external editor.");
+                    break;
+                }
                 }
             }
             catch (const std::exception& error)
@@ -363,9 +382,11 @@ namespace KeireEditor
             if (ui.MenuItem("VFX Effect"))
                 RequestNamedCreate(NamedCreateKind::VfxEffect, "VfxEffect");
             if (ui.MenuItem("Material Graph"))
-                RequestNamedCreate(NamedCreateKind::MaterialGraph, "PBRMaterial");
+                RequestNamedCreate(NamedCreateKind::MaterialGraph, "MaterialGraph");
+            if (ui.MenuItem("Shader Graph"))
+                RequestNamedCreate(NamedCreateKind::ShaderGraph, "PBRMaterial");
             if (ui.MenuItem("Material Instance"))
-                RequestNamedCreate(NamedCreateKind::MaterialGraphInstance, "MaterialInstance");
+                RequestNamedCreate(NamedCreateKind::ShaderGraphInstance, "MaterialInstance");
             const auto managedTypes = editor.AssetBrowserManagedAssetTypes();
             if (std::ranges::any_of(managedTypes, [](const auto& type) { return !type.MenuPath.empty(); }))
             {
@@ -717,21 +738,22 @@ namespace KeireEditor
             if (auto create = ui.BeginPopupModal("Create Asset"); create)
             {
                 const std::string_view type =
-                    PendingCreateKind == NamedCreateKind::Scene                   ? "scene"
-                    : PendingCreateKind == NamedCreateKind::Material              ? "material"
-                    : PendingCreateKind == NamedCreateKind::AnimationGraph        ? "Animator Controller"
-                    : PendingCreateKind == NamedCreateKind::Script                ? "C# script"
-                    : PendingCreateKind == NamedCreateKind::ManagedAssembly       ? "managed assembly"
-                    : PendingCreateKind == NamedCreateKind::ManagedData           ? "managed data asset"
-                    : PendingCreateKind == NamedCreateKind::AudioMixer            ? "audio mixer"
-                    : PendingCreateKind == NamedCreateKind::PhysicsMaterial       ? "physics material"
-                    : PendingCreateKind == NamedCreateKind::VfxEffect             ? "VFX effect"
-                    : PendingCreateKind == NamedCreateKind::MaterialGraph         ? "material graph"
-                    : PendingCreateKind == NamedCreateKind::MaterialGraphInstance ? "material instance"
-                    : PendingCreateKind == NamedCreateKind::Prefab                ? "prefab"
-                    : PendingCreateKind == NamedCreateKind::PrefabVariant         ? "prefab variant"
-                    : PendingCreateKind == NamedCreateKind::Shader                ? "shader"
-                                                                                  : "Input Actions asset";
+                    PendingCreateKind == NamedCreateKind::Scene                 ? "scene"
+                    : PendingCreateKind == NamedCreateKind::Material            ? "material"
+                    : PendingCreateKind == NamedCreateKind::AnimationGraph      ? "Animator Controller"
+                    : PendingCreateKind == NamedCreateKind::Script              ? "C# script"
+                    : PendingCreateKind == NamedCreateKind::ManagedAssembly     ? "managed assembly"
+                    : PendingCreateKind == NamedCreateKind::ManagedData         ? "managed data asset"
+                    : PendingCreateKind == NamedCreateKind::AudioMixer          ? "audio mixer"
+                    : PendingCreateKind == NamedCreateKind::PhysicsMaterial     ? "physics material"
+                    : PendingCreateKind == NamedCreateKind::VfxEffect           ? "VFX effect"
+                    : PendingCreateKind == NamedCreateKind::MaterialGraph       ? "material graph"
+                    : PendingCreateKind == NamedCreateKind::ShaderGraph         ? "shader graph"
+                    : PendingCreateKind == NamedCreateKind::ShaderGraphInstance ? "material instance"
+                    : PendingCreateKind == NamedCreateKind::Prefab              ? "prefab"
+                    : PendingCreateKind == NamedCreateKind::PrefabVariant       ? "prefab variant"
+                    : PendingCreateKind == NamedCreateKind::Shader              ? "shader"
+                                                                                : "Input Actions asset";
                 ui.Text("Choose a name for the new " + std::string(type));
                 if (FocusCreateName)
                 {
@@ -771,8 +793,10 @@ namespace KeireEditor
                                     ? editor.CreateAssetBrowserVfxEffect(CreateNameBuffer)
                                 : PendingCreateKind == NamedCreateKind::MaterialGraph
                                     ? editor.CreateAssetBrowserMaterialGraph(CreateNameBuffer)
-                                : PendingCreateKind == NamedCreateKind::MaterialGraphInstance
-                                    ? editor.CreateAssetBrowserMaterialGraphInstance(CreateNameBuffer)
+                                : PendingCreateKind == NamedCreateKind::ShaderGraph
+                                    ? editor.CreateAssetBrowserShaderGraph(CreateNameBuffer)
+                                : PendingCreateKind == NamedCreateKind::ShaderGraphInstance
+                                    ? editor.CreateAssetBrowserShaderGraphInstance(CreateNameBuffer)
                                 : PendingCreateKind == NamedCreateKind::Prefab
                                     ? editor.CreateAssetBrowserPrefab(CreateNameBuffer)
                                 : PendingCreateKind == NamedCreateKind::PrefabVariant
@@ -1100,9 +1124,11 @@ namespace KeireEditor
             auto image = Images.contains(record.Id) ? Images.at(record.Id) : FolderImage;
             if (!Images.contains(record.Id))
             {
-                if (record.Type == Keire::MaterialGraphAsset::StaticType())
+                if (record.Type == Keire::ShaderGraphAsset::StaticType())
+                    image = ShaderGraphFallbackImage;
+                else if (record.Type == Keire::MaterialGraphAsset::StaticType())
                     image = MaterialGraphFallbackImage;
-                else if (record.Type == Keire::MaterialGraphInstanceAsset::StaticType())
+                else if (record.Type == Keire::ShaderGraphInstanceAsset::StaticType())
                     image = MaterialInstanceFallbackImage;
                 else if (record.Type == Keire::VfxEffectAsset::StaticType())
                     image = VfxFallbackImage;
@@ -1489,12 +1515,14 @@ namespace KeireEditor
                     const auto pixels = MakeFolderThumbnail(96, 96);
                     FolderImage = ui.CreateImage(96, 96, pixels);
                 }
-                if (!MaterialGraphFallbackImage)
+                if (!ShaderGraphFallbackImage)
                 {
+                    ShaderGraphFallbackImage = ui.CreateImage(
+                        96, 96, MakeAssetFallbackThumbnail(Keire::ShaderGraphAsset::StaticType(), 96, 96));
                     MaterialGraphFallbackImage = ui.CreateImage(
                         96, 96, MakeAssetFallbackThumbnail(Keire::MaterialGraphAsset::StaticType(), 96, 96));
                     MaterialInstanceFallbackImage = ui.CreateImage(
-                        96, 96, MakeAssetFallbackThumbnail(Keire::MaterialGraphInstanceAsset::StaticType(), 96, 96));
+                        96, 96, MakeAssetFallbackThumbnail(Keire::ShaderGraphInstanceAsset::StaticType(), 96, 96));
                     VfxFallbackImage =
                         ui.CreateImage(96, 96, MakeAssetFallbackThumbnail(Keire::VfxEffectAsset::StaticType(), 96, 96));
                 }
@@ -1709,6 +1737,7 @@ namespace KeireEditor
         std::unordered_map<Keire::AssetId, std::string> ImageDigests;
         std::uint64_t ObservedRecordRevision = 0;
         Keire::Ref<Keire::UiImage> FolderImage;
+        Keire::Ref<Keire::UiImage> ShaderGraphFallbackImage;
         Keire::Ref<Keire::UiImage> MaterialGraphFallbackImage;
         Keire::Ref<Keire::UiImage> MaterialInstanceFallbackImage;
         Keire::Ref<Keire::UiImage> VfxFallbackImage;

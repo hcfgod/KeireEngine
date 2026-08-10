@@ -55,6 +55,13 @@ namespace
                 .HostArchitecture = "x86_64"};
     }
 
+    [[nodiscard]] TemplateCreateRequest SandboxRequest(const std::filesystem::path& destination)
+    {
+        auto request = Request(destination, "keire.sandbox");
+        request.EditorVersion = Version("0.2.0");
+        return request;
+    }
+
     void WriteFixtureCatalog(const std::filesystem::path& root, const std::uint64_t size = 5,
                              const std::string_view sha256 = HelloSha256,
                              const std::string_view payloadPath = "README.md",
@@ -203,14 +210,47 @@ TEST_CASE("Sandbox creation copies packaged clean content and never mutates its 
     REQUIRE(manager.Load());
     const auto source = BuiltInTemplates() / "Payloads" / "Sandbox";
     const auto sourceBefore = ReadTree(source);
-    auto first = manager.CreateProject(Request(temporary.Path() / "SandboxOne", "keire.sandbox"));
-    auto second = manager.CreateProject(Request(temporary.Path() / "SandboxTwo", "keire.sandbox"));
+    auto firstRequest = SandboxRequest(temporary.Path() / "SandboxOne");
+    auto secondRequest = SandboxRequest(temporary.Path() / "SandboxTwo");
+    auto first = manager.CreateProject(firstRequest);
+    auto second = manager.CreateProject(secondRequest);
     REQUIRE(first);
     REQUIRE(second);
     CHECK(first.Value().ProjectId != second.Value().ProjectId);
     CHECK(ReadTree(source) == sourceBefore);
     CHECK_FALSE(std::filesystem::exists(source / "ProjectSettings" / "Project.keireproject"));
-    CHECK(std::filesystem::exists(first.Value().Root / "Assets" / "Scripts" / "Runtime" / "SandboxWelcome.cs"));
+    CHECK(std::filesystem::exists(first.Value().Root / "Assets/Scenes/ShaderMaterialShowcase.keirescene"));
+    CHECK(std::filesystem::exists(first.Value().Root / "Assets/Scenes/SampleScene.keirescene"));
+    CHECK(std::filesystem::exists(first.Value().Root /
+                                  "Assets/Materials/MaterialGraphs/01_BasicPaint_Shader.keireshadergraph"));
+    CHECK(std::filesystem::exists(first.Value().Root /
+                                  "Assets/Materials/MaterialGraphs/09_HolographicVoronoi.keirematerialgraph"));
+    CHECK(std::filesystem::exists(first.Value().Root / "Assets/Vfx/ArcaneNova.keirevfx"));
+    CHECK(std::filesystem::exists(first.Value().Root / "Assets/Scripts/Runtime/FirstPersonCamera.cs"));
+    CHECK(std::filesystem::exists(first.Value().Root / "Assets/Audio/InterfaceConfirm.wav"));
+    CHECK_FALSE(std::filesystem::exists(first.Value().Root / "Assets/Generated"));
+    const auto descriptor =
+        nlohmann::json::parse(KeireHubTests::ReadText(first.Value().Root / "ProjectSettings/Project.keireproject"));
+    CHECK(descriptor.at("startupScene") == "a1aa0000-0000-4000-8000-000000000001");
+    CHECK(descriptor.at("defaultInput") == "97b38693-6dc3-4f06-a228-44ba5786e8d1");
+    CHECK(descriptor.at("createdWithEngineVersion") == "0.2.0");
+    CHECK(descriptor.at("minimumEngineVersion") == "0.2.0");
+    CHECK(descriptor.at("template").at("version") == "1.1.0");
+}
+
+TEST_CASE("Sandbox requires the Shader Graph capable editor line")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    TemplateManager manager(BuiltInTemplates(), Services());
+    REQUIRE(manager.Load());
+
+    auto legacyRequest = Request(temporary.Path() / "LegacySandbox", "keire.sandbox");
+    auto legacy = manager.Preflight(legacyRequest);
+    REQUIRE_FALSE(legacy);
+    CHECK(legacy.Error().Code == HubErrorCode::TemplateIncompatible);
+
+    auto currentRequest = SandboxRequest(temporary.Path() / "CurrentSandbox");
+    CHECK(manager.Preflight(currentRequest));
 }
 
 TEST_CASE("Preflight rejects incompatible editor versions schemas platforms and unavailable versions")
@@ -305,7 +345,7 @@ TEST_CASE("Editor validation failure rolls back the complete staging transaction
     KeireHubTests::TemporaryDirectory temporary;
     TemplateManager manager(BuiltInTemplates(), Services());
     REQUIRE(manager.Load());
-    auto request = Request(temporary.Path() / "Rejected", "keire.sandbox");
+    auto request = SandboxRequest(temporary.Path() / "Rejected");
     request.ValidateStagedProject = [](const std::filesystem::path& staging)
     {
         KeireHubTests::WriteText(staging / "validator-output.txt", "temporary");

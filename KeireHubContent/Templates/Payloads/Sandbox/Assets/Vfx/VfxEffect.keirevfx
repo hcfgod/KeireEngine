@@ -1,0 +1,731 @@
+{
+  "blackboard": [
+    {
+      "default": [
+        0.11999999731779099,
+        0.8199999928474426,
+        1.0,
+        1.0
+      ],
+      "exposed": true,
+      "id": "eda50d66-6ff0-44de-a8e8-481e82a7a6c8",
+      "name": "Energy Color",
+      "type": "color"
+    },
+    {
+      "default": [
+        0.07000000029802322,
+        0.1599999964237213
+      ],
+      "exposed": true,
+      "id": "8047e195-c5ad-4479-bd28-24a26ed6cb45",
+      "name": "Particle Size Range",
+      "type": "vector2"
+    }
+  ],
+  "capacity": 4096,
+  "compatibilityMode": "migratedLegacyModules",
+  "duration": 0.6000000238418579,
+  "emitterId": "56465844-4546-4155-0000-000000000001",
+  "executionSource": "graph",
+  "loop": false,
+  "modules": [
+    {
+      "enabled": true,
+      "id": "56465844-4546-4155-0000-000000000002",
+      "particlesPerSecond": 0.0,
+      "type": "emissionRate"
+    },
+    {
+      "boxHalfExtent": [
+        0.5,
+        0.5,
+        0.5
+      ],
+      "coneAngleDegrees": 0.800000011920929,
+      "coneLength": 0.11999999731779099,
+      "enabled": true,
+      "id": "56465844-4546-4155-0000-000000000003",
+      "mesh": "",
+      "radius": 0.017999999225139618,
+      "shape": "cone",
+      "type": "shape",
+      "volume": ""
+    },
+    {
+      "enabled": true,
+      "id": "56465844-4546-4155-0000-000000000004",
+      "lifetimeMaximum": 0.550000011920929,
+      "lifetimeMinimum": 0.3400000035762787,
+      "rotationMaximum": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotationMinimum": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "type": "initialize",
+      "velocityMaximum": [
+        0.07999999821186066,
+        0.07999999821186066,
+        48.0
+      ],
+      "velocityMinimum": [
+        -0.07999999821186066,
+        -0.07999999821186066,
+        36.0
+      ]
+    },
+    {
+      "curve": [
+        {
+          "inTangent": 0.0,
+          "interpolation": "linear",
+          "outTangent": 0.0,
+          "time": 0.0,
+          "value": 0.11999999731779099
+        }
+      ],
+      "enabled": true,
+      "id": "56465844-4546-4155-0000-000000000005",
+      "type": "sizeOverLifetime"
+    },
+    {
+      "enabled": true,
+      "gradient": {
+        "interpolation": "linear",
+        "keys": [
+          {
+            "color": [
+              0.11999999731779099,
+              0.8199999928474426,
+              1.0,
+              1.0
+            ],
+            "time": 0.0
+          }
+        ]
+      },
+      "id": "56465844-4546-4155-0000-000000000006",
+      "type": "colorOverLifetime"
+    },
+    {
+      "enabled": true,
+      "id": "56465844-4546-4155-0000-000000000007",
+      "material": "34b8ec88-39a6-47bd-a5b2-c44a665876bb",
+      "mesh": "",
+      "renderer": "sprite",
+      "sprite": "b2c4f70a-7f2f-47f0-b83e-a554a0bda703",
+      "type": "renderer"
+    }
+  ],
+  "name": "VX-9 Plasma Lance",
+  "schemaVersion": 4,
+  "seed": 1,
+  "space": "world",
+  "systems": [
+    {
+      "connections": [
+        {
+          "id": "11141914-0d10-570d-8000-000000008000",
+          "inputBlock": "",
+          "inputNode": "11141914-0d10-570d-8000-000000002101",
+          "inputPin": "56465844-4546-5155-8000-000000002100",
+          "outputBlock": "",
+          "outputNode": "11141914-0d10-570d-8000-000000002001",
+          "outputPin": "56465844-4546-5155-8000-000000002003"
+        },
+        {
+          "id": "11141914-0d10-570d-8000-000000008005",
+          "inputBlock": "",
+          "inputNode": "11141914-0d10-570d-8000-000000002201",
+          "inputPin": "56465844-4546-5155-8000-000000002200",
+          "outputBlock": "",
+          "outputNode": "11141914-0d10-570d-8000-000000002101",
+          "outputPin": "56465844-4546-5155-8000-000000002103"
+        },
+        {
+          "id": "11141914-0d10-570d-8000-000000008009",
+          "inputBlock": "",
+          "inputNode": "11141914-0d10-570d-8000-000000002301",
+          "inputPin": "56465844-4546-5155-8000-000000002300",
+          "outputBlock": "",
+          "outputNode": "11141914-0d10-570d-8000-000000002201",
+          "outputPin": "56465844-4546-5155-8000-000000002203"
+        },
+        {
+          "id": "d09d43c1-6fea-4022-8a44-1be213d8ca74",
+          "inputBlock": "11141914-0d10-570d-8000-000000003006",
+          "inputNode": "11141914-0d10-570d-8000-000000002201",
+          "inputPin": "11141914-0d10-570d-8000-000000003113",
+          "outputBlock": "",
+          "outputNode": "1d46d1de-8f13-4281-b910-3fc1cfd3f96b",
+          "outputPin": "ed088231-6b7f-4f44-a23c-eddc7a64a076"
+        },
+        {
+          "id": "6e791fe5-548d-4176-97fa-e6254d6f1e7f",
+          "inputBlock": "11141914-0d10-570d-8000-000000003005",
+          "inputNode": "11141914-0d10-570d-8000-000000002201",
+          "inputPin": "11141914-0d10-570d-8000-000000003111",
+          "outputBlock": "",
+          "outputNode": "201f3387-7634-472e-85a1-4ba2639dbf7d",
+          "outputPin": "55781afe-3b8c-494a-9ea9-1f3297beefe2"
+        },
+        {
+          "id": "bdbd136b-b830-4a15-a217-d99970808dd2",
+          "inputBlock": "",
+          "inputNode": "d63a094f-d037-4241-a548-574eb2628f6d",
+          "inputPin": "55aa9ba5-1273-4cf7-b5c2-0c86f58eb719",
+          "outputBlock": "",
+          "outputNode": "60a228f0-432a-47b4-943c-60dd89f223e5",
+          "outputPin": "ced37dd8-c4fb-429d-9156-4e311d3dc08c"
+        },
+        {
+          "id": "14778ad9-ef2f-4256-8e35-3a6e7047575a",
+          "inputBlock": "",
+          "inputNode": "201f3387-7634-472e-85a1-4ba2639dbf7d",
+          "inputPin": "a449c96b-0197-477d-844f-0ebe6bd6aee9",
+          "outputBlock": "",
+          "outputNode": "d63a094f-d037-4241-a548-574eb2628f6d",
+          "outputPin": "86e655b8-ec3d-466c-9ce8-13a5a8c132f7"
+        },
+        {
+          "id": "5c2c4077-bbfc-4f43-b469-1d940c9176cb",
+          "inputBlock": "",
+          "inputNode": "201f3387-7634-472e-85a1-4ba2639dbf7d",
+          "inputPin": "fd530bc4-67c6-49ef-a3ca-16b99bbe0c20",
+          "outputBlock": "",
+          "outputNode": "d63a094f-d037-4241-a548-574eb2628f6d",
+          "outputPin": "f8508440-91f2-45f2-951e-33f219770290"
+        }
+      ],
+      "dataType": "particle",
+      "id": "11141914-0d10-570d-8000-000000001001",
+      "name": "Particle System",
+      "nodes": [
+        {
+          "blocks": [],
+          "context": "event",
+          "customHlsl": "",
+          "definitionVersion": 1,
+          "dynamicPinOrder": [],
+          "id": "11141914-0d10-570d-8000-000000002001",
+          "kind": "context",
+          "pins": [
+            {
+              "default": null,
+              "id": "56465844-4546-5155-8000-000000002003",
+              "input": false,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            }
+          ],
+          "position": [
+            -448.5348815917969,
+            257.8845520019531
+          ],
+          "properties": [],
+          "reference": "",
+          "resolvedSignature": [],
+          "type": "PlasmaFire",
+          "typeId": "keire.context.event"
+        },
+        {
+          "blocks": [
+            {
+              "definitionVersion": 2,
+              "enabled": true,
+              "id": "11141914-0d10-570d-8000-000000003003",
+              "pins": [
+                {
+                  "default": [
+                    0.5,
+                    0.5,
+                    0.5
+                  ],
+                  "id": "11141914-0d10-570d-8000-000000003107",
+                  "input": true,
+                  "name": "Box Half Extent",
+                  "semantic": "boxHalfExtent",
+                  "type": "vector3"
+                },
+                {
+                  "default": 0.017999999225139618,
+                  "id": "11141914-0d10-570d-8000-000000003106",
+                  "input": true,
+                  "name": "Radius",
+                  "semantic": "radius",
+                  "type": "scalar"
+                },
+                {
+                  "default": 0.800000011920929,
+                  "id": "11141914-0d10-570d-8000-000000003105",
+                  "input": true,
+                  "name": "Cone Angle",
+                  "semantic": "coneAngleDegrees",
+                  "type": "scalar"
+                },
+                {
+                  "default": 0.11999999731779099,
+                  "id": "11141914-0d10-570d-8000-000000003104",
+                  "input": true,
+                  "name": "Cone Length",
+                  "semantic": "coneLength",
+                  "type": "scalar"
+                },
+                {
+                  "default": "",
+                  "id": "11141914-0d10-570d-8000-00000000310b",
+                  "input": true,
+                  "name": "Mesh",
+                  "semantic": "mesh",
+                  "type": "mesh"
+                },
+                {
+                  "default": "",
+                  "id": "11141914-0d10-570d-8000-00000000310a",
+                  "input": true,
+                  "name": "Volume",
+                  "semantic": "volume",
+                  "type": "asset"
+                }
+              ],
+              "properties": [],
+              "reference": "56465844-4546-4155-0000-000000000003",
+              "type": "shape",
+              "typeId": "keire.block.shape"
+            },
+            {
+              "definitionVersion": 1,
+              "enabled": true,
+              "id": "11141914-0d10-570d-8000-000000003004",
+              "pins": [
+                {
+                  "default": 0.3400000035762787,
+                  "id": "11141914-0d10-570d-8000-00000000310d",
+                  "input": true,
+                  "name": "Lifetime Minimum",
+                  "semantic": "lifetimeMinimum",
+                  "type": "scalar"
+                },
+                {
+                  "default": 0.550000011920929,
+                  "id": "11141914-0d10-570d-8000-00000000310e",
+                  "input": true,
+                  "name": "Lifetime Maximum",
+                  "semantic": "lifetimeMaximum",
+                  "type": "scalar"
+                },
+                {
+                  "default": [
+                    -0.07999999821186066,
+                    -0.07999999821186066,
+                    36.0
+                  ],
+                  "id": "11141914-0d10-570d-8000-00000000310f",
+                  "input": true,
+                  "name": "Velocity Minimum",
+                  "semantic": "velocityMinimum",
+                  "type": "vector3"
+                },
+                {
+                  "default": [
+                    0.07999999821186066,
+                    0.07999999821186066,
+                    48.0
+                  ],
+                  "id": "11141914-0d10-570d-8000-000000003108",
+                  "input": true,
+                  "name": "Velocity Maximum",
+                  "semantic": "velocityMaximum",
+                  "type": "vector3"
+                },
+                {
+                  "default": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "id": "11141914-0d10-570d-8000-000000003114",
+                  "input": true,
+                  "name": "Rotation Minimum",
+                  "semantic": "rotationMinimum",
+                  "type": "vector3"
+                },
+                {
+                  "default": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "id": "11141914-0d10-570d-8000-000000003115",
+                  "input": true,
+                  "name": "Rotation Maximum",
+                  "semantic": "rotationMaximum",
+                  "type": "vector3"
+                }
+              ],
+              "properties": [],
+              "reference": "56465844-4546-4155-0000-000000000004",
+              "type": "initialize",
+              "typeId": "keire.block.initialize"
+            }
+          ],
+          "context": "initialize",
+          "customHlsl": "",
+          "definitionVersion": 1,
+          "dynamicPinOrder": [],
+          "id": "11141914-0d10-570d-8000-000000002101",
+          "kind": "context",
+          "pins": [
+            {
+              "default": null,
+              "id": "56465844-4546-5155-8000-000000002100",
+              "input": true,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            },
+            {
+              "default": null,
+              "id": "56465844-4546-5155-8000-000000002103",
+              "input": false,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            }
+          ],
+          "position": [
+            -132.3762664794922,
+            257.1429748535156
+          ],
+          "properties": [],
+          "reference": "",
+          "resolvedSignature": [],
+          "type": "initialize Context",
+          "typeId": "keire.context.initialize"
+        },
+        {
+          "blocks": [
+            {
+              "definitionVersion": 1,
+              "enabled": true,
+              "id": "11141914-0d10-570d-8000-000000003005",
+              "pins": [
+                {
+                  "default": 1.0,
+                  "id": "11141914-0d10-570d-8000-000000003111",
+                  "input": true,
+                  "name": "Size",
+                  "semantic": "size",
+                  "type": "scalar"
+                }
+              ],
+              "properties": [],
+              "reference": "56465844-4546-4155-0000-000000000005",
+              "type": "sizeOverLifetime",
+              "typeId": "keire.block.size-over-lifetime"
+            },
+            {
+              "definitionVersion": 1,
+              "enabled": true,
+              "id": "11141914-0d10-570d-8000-000000003006",
+              "pins": [
+                {
+                  "default": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ],
+                  "id": "11141914-0d10-570d-8000-000000003113",
+                  "input": true,
+                  "name": "Color",
+                  "semantic": "color",
+                  "type": "color"
+                }
+              ],
+              "properties": [],
+              "reference": "56465844-4546-4155-0000-000000000006",
+              "type": "colorOverLifetime",
+              "typeId": "keire.block.color-over-lifetime"
+            }
+          ],
+          "context": "update",
+          "customHlsl": "",
+          "definitionVersion": 1,
+          "dynamicPinOrder": [],
+          "id": "11141914-0d10-570d-8000-000000002201",
+          "kind": "context",
+          "pins": [
+            {
+              "default": null,
+              "id": "56465844-4546-5155-8000-000000002200",
+              "input": true,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            },
+            {
+              "default": null,
+              "id": "56465844-4546-5155-8000-000000002203",
+              "input": false,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            }
+          ],
+          "position": [
+            514.2857055664063,
+            362.8573303222656
+          ],
+          "properties": [],
+          "reference": "",
+          "resolvedSignature": [],
+          "type": "update Context",
+          "typeId": "keire.context.update"
+        },
+        {
+          "blocks": [
+            {
+              "definitionVersion": 2,
+              "enabled": true,
+              "id": "11141914-0d10-570d-8000-000000003007",
+              "pins": [
+                {
+                  "default": "b2c4f70a-7f2f-47f0-b83e-a554a0bda703",
+                  "id": "11141914-0d10-570d-8000-00000000311d",
+                  "input": true,
+                  "name": "Sprite",
+                  "semantic": "sprite",
+                  "type": "texture"
+                },
+                {
+                  "default": "34b8ec88-39a6-47bd-a5b2-c44a665876bb",
+                  "id": "11141914-0d10-570d-8000-00000000311c",
+                  "input": true,
+                  "name": "Mesh",
+                  "semantic": "mesh",
+                  "type": "mesh"
+                },
+                {
+                  "default": "",
+                  "id": "56465844-4546-5155-9049-4e0000003005",
+                  "input": true,
+                  "name": "Material",
+                  "semantic": "material",
+                  "type": "asset"
+                }
+              ],
+              "properties": [],
+              "reference": "56465844-4546-4155-0000-000000000007",
+              "type": "renderer",
+              "typeId": "keire.output.renderer"
+            }
+          ],
+          "context": "output",
+          "customHlsl": "",
+          "definitionVersion": 1,
+          "dynamicPinOrder": [],
+          "id": "11141914-0d10-570d-8000-000000002301",
+          "kind": "context",
+          "pins": [
+            {
+              "default": null,
+              "id": "56465844-4546-5155-8000-000000002300",
+              "input": true,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            }
+          ],
+          "position": [
+            957.1341552734375,
+            334.28594970703125
+          ],
+          "properties": [],
+          "reference": "",
+          "resolvedSignature": [],
+          "type": "output Context",
+          "typeId": "keire.context.output"
+        },
+        {
+          "blocks": [],
+          "context": "update",
+          "customHlsl": "",
+          "definitionVersion": 1,
+          "dynamicPinOrder": [],
+          "id": "1d46d1de-8f13-4281-b910-3fc1cfd3f96b",
+          "kind": "parameter",
+          "pins": [
+            {
+              "default": null,
+              "id": "ed088231-6b7f-4f44-a23c-eddc7a64a076",
+              "input": false,
+              "name": "Energy Color",
+              "semantic": "value",
+              "type": "color"
+            }
+          ],
+          "position": [
+            176.06298828125,
+            877.3665161132813
+          ],
+          "properties": [],
+          "reference": "eda50d66-6ff0-44de-a8e8-481e82a7a6c8",
+          "resolvedSignature": [],
+          "type": "Blackboard Parameter",
+          "typeId": "keire.parameter"
+        },
+        {
+          "blocks": [],
+          "context": "update",
+          "customHlsl": "",
+          "definitionVersion": 1,
+          "dynamicPinOrder": [],
+          "id": "201f3387-7634-472e-85a1-4ba2639dbf7d",
+          "kind": "operator",
+          "pins": [
+            {
+              "default": 0.0,
+              "id": "a449c96b-0197-477d-844f-0ebe6bd6aee9",
+              "input": true,
+              "name": "Min",
+              "semantic": "minimum",
+              "type": "scalar"
+            },
+            {
+              "default": 1.0,
+              "id": "fd530bc4-67c6-49ef-a3ca-16b99bbe0c20",
+              "input": true,
+              "name": "Max",
+              "semantic": "maximum",
+              "type": "scalar"
+            },
+            {
+              "default": null,
+              "id": "55781afe-3b8c-494a-9ea9-1f3297beefe2",
+              "input": false,
+              "name": "Out",
+              "semantic": "out",
+              "type": "scalar"
+            }
+          ],
+          "position": [
+            164.81922912597656,
+            727.1424560546875
+          ],
+          "properties": [
+            {
+              "name": "Scope",
+              "type": "unsignedInteger",
+              "value": 0
+            },
+            {
+              "name": "Constant",
+              "type": "boolean",
+              "value": false
+            },
+            {
+              "name": "Independent Channels",
+              "type": "boolean",
+              "value": true
+            }
+          ],
+          "reference": "",
+          "resolvedSignature": [
+            "scalar",
+            "scalar",
+            "scalar"
+          ],
+          "type": "Random Number",
+          "typeId": "keire.operator.random"
+        },
+        {
+          "blocks": [],
+          "context": "update",
+          "customHlsl": "",
+          "definitionVersion": 1,
+          "dynamicPinOrder": [],
+          "id": "60a228f0-432a-47b4-943c-60dd89f223e5",
+          "kind": "parameter",
+          "pins": [
+            {
+              "default": null,
+              "id": "ced37dd8-c4fb-429d-9156-4e311d3dc08c",
+              "input": false,
+              "name": "Particle Size Range",
+              "semantic": "value",
+              "type": "vector2"
+            }
+          ],
+          "position": [
+            -627.598876953125,
+            737.6082153320313
+          ],
+          "properties": [],
+          "reference": "8047e195-c5ad-4479-bd28-24a26ed6cb45",
+          "resolvedSignature": [],
+          "type": "Blackboard Parameter",
+          "typeId": "keire.parameter"
+        },
+        {
+          "blocks": [],
+          "context": "update",
+          "customHlsl": "",
+          "definitionVersion": 1,
+          "dynamicPinOrder": [],
+          "id": "d63a094f-d037-4241-a548-574eb2628f6d",
+          "kind": "operator",
+          "pins": [
+            {
+              "default": [
+                0.0,
+                0.0
+              ],
+              "id": "55aa9ba5-1273-4cf7-b5c2-0c86f58eb719",
+              "input": true,
+              "name": "Input",
+              "semantic": "input",
+              "type": "vector2"
+            },
+            {
+              "default": null,
+              "id": "86e655b8-ec3d-466c-9ce8-13a5a8c132f7",
+              "input": false,
+              "name": "X",
+              "semantic": "x",
+              "type": "scalar"
+            },
+            {
+              "default": null,
+              "id": "f8508440-91f2-45f2-951e-33f219770290",
+              "input": false,
+              "name": "Y",
+              "semantic": "y",
+              "type": "scalar"
+            }
+          ],
+          "position": [
+            -201.81483459472656,
+            735.1297607421875
+          ],
+          "properties": [],
+          "reference": "",
+          "resolvedSignature": [
+            "vector2",
+            "scalar",
+            "scalar"
+          ],
+          "type": "Split Vector 2",
+          "typeId": "keire.operator.split-vector2"
+        }
+      ],
+      "particlesPerStrip": 32
+    }
+  ]
+}

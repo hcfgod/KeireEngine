@@ -29,6 +29,7 @@ sha256_file() {
 load_project_config "$ROOT"
 if [[ $run_fast -eq 1 ]]; then
 python3 "$ROOT/Scripts/Tests/check-repository-layout.py"
+python3 "$ROOT/Scripts/Packaging/sync-sandbox-template.py" --check
 bash "$ROOT/Scripts/Tests/test-clean-unix.sh"
 bash "$ROOT/Scripts/Tests/test-editor-package-unix.sh"
 bash "$ROOT/Scripts/Tests/test-hub-package-unix.sh"
@@ -464,6 +465,8 @@ assert_true grep -F -q -- '-newer "$assembly"' "$ROOT/Scripts/Unix/build-managed
 assert_true test -f "$ROOT/Scripts/Premake/ManagedBuildAnchor.cpp"
 assert_true grep -q 'Scripts/Unix/build-managed.sh' "$ROOT/Scripts/Linux/build.sh"
 assert_true grep -q 'Scripts/Unix/build-managed.sh' "$ROOT/Scripts/Mac/build.sh"
+assert_true grep -q 'Scripts/Unix/build-info.sh' "$ROOT/Scripts/Linux/build.sh"
+assert_true grep -q 'Scripts/Unix/build-info.sh' "$ROOT/Scripts/Mac/build.sh"
 assert_true grep -q 'KeireManaged KeireManaged.Tests SourceModules Scripts/Premake' "$ROOT/Scripts/Unix/common.sh"
 assert_true grep -F -q -- "-name '*.csproj'" "$ROOT/Scripts/Unix/common.sh"
 assert_true grep -F -q 'dependson { AssetWorkerTarget }' "$ROOT/AssetTool/premake5.lua"
@@ -637,6 +640,9 @@ assert_true grep -q 'package-editor' "$ROOT/Scripts/project.sh"
 assert_true grep -q -- '-Configuration Dist' "$ROOT/Scripts/Windows/package-editor.ps1"
 assert_true grep -q -- '--configuration Dist' "$ROOT/Scripts/Unix/package-editor.sh"
 assert_true grep -q -- '--stage-only' "$ROOT/Scripts/Unix/package-editor.sh"
+assert_true grep -q 'KEIRE_DISTRIBUTION_TRUSTED_KEYS' "$ROOT/Scripts/Unix/package-hub.sh"
+assert_true grep -Fq 'for trusted_key in "${distribution_trusted_keys[@]}"' \
+  "$ROOT/Scripts/Unix/package-hub.sh"
 assert_true grep -q 'Build/Dependencies/dotnet-sdk' "$ROOT/Scripts/Unix/package-editor.sh"
 assert_true grep -F -q 'cp -RL "$dotnet_source/." "$dotnet_destination/"' \
   "$ROOT/Scripts/Unix/package-editor.sh"

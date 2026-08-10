@@ -1,5 +1,7 @@
 #include "KeireClient/Editor/AssetBrowserUtilities.h"
 
+#include <algorithm>
+#include <cctype>
 #include <sstream>
 #include <stdexcept>
 #include <variant>
@@ -40,7 +42,9 @@ namespace KeireEditor
             return "Material";
         if (extension == ".keirematerialgraph")
             return "Material Graph";
-        if (extension == ".keirematerialinstance")
+        if (extension == ".keireshadergraph")
+            return "Shader Graph";
+        if (extension == ".keireshadergraphinstance")
             return "Material Instance";
         if (extension == ".keireanimgraph")
             return "Animator Controller";
@@ -63,6 +67,40 @@ namespace KeireEditor
         if (extension == ".hlsl")
             return "HLSL Source";
         return "Asset";
+    }
+
+    AssetBrowserOpenAction ResolveAssetBrowserOpenAction(const std::filesystem::path& path) noexcept
+    {
+        auto extension = path.extension().string();
+        std::ranges::transform(extension, extension.begin(), [](const unsigned char character)
+                               { return static_cast<char>(std::tolower(character)); });
+        if (extension == ".keireinput")
+            return AssetBrowserOpenAction::InputActions;
+        if (extension == ".keireanimgraph")
+            return AssetBrowserOpenAction::AnimationGraph;
+        if (extension == ".keiremixer")
+            return AssetBrowserOpenAction::AudioMixer;
+        if (extension == ".keirevfx")
+            return AssetBrowserOpenAction::VfxEffect;
+        if (extension == ".keirematerial")
+            return AssetBrowserOpenAction::Material;
+        if (extension == ".keirematerialgraph")
+            return AssetBrowserOpenAction::MaterialGraph;
+        if (extension == ".keireshadergraph")
+            return AssetBrowserOpenAction::ShaderGraph;
+        if (extension == ".keirescene")
+            return AssetBrowserOpenAction::Scene;
+        if (extension == ".keireprefab")
+            return AssetBrowserOpenAction::Prefab;
+        return AssetBrowserOpenAction::External;
+    }
+
+    std::optional<Keire::AssetId>
+    ResolveMaterialGraphEditorTarget(const Keire::MaterialGraphDefinition& definition) noexcept
+    {
+        if (definition.Shader.Kind != Keire::MaterialShaderSourceKind::ShaderGraph || !definition.Shader.Asset)
+            return std::nullopt;
+        return definition.Shader.Asset;
     }
 
     std::vector<Keire::AssetId> DecodeAssetPayload(const std::span<const std::byte> bytes)
