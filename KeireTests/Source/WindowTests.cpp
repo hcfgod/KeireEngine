@@ -550,9 +550,8 @@ TEST_CASE("Window system shutdown closes surviving system tray handles")
     CHECK(windowIcon->w == 256);
     CHECK(windowIcon->h == 256);
     auto system = Keire::CreateRef<Keire::WindowSystem>();
-    auto tray = system->CreateSystemTray({.Icon = iconPath,
-                                          .Tooltip = "Kéire tray shutdown test",
-                                          .Actions = {{"Close", [] {}}}});
+    auto tray = system->CreateSystemTray(
+        {.Icon = iconPath, .Tooltip = "Kéire tray shutdown test", .Actions = {{"Close", [] {}}}});
     system->Shutdown();
     CHECK_NOTHROW(tray->Close());
     CHECK_FALSE(tray->IsAvailable());
