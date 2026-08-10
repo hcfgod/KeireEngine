@@ -46,7 +46,7 @@ Kéire already includes substantial, integrated engine and authoring foundations
 - Stable asset identities, metadata sidecars, dependency tracking, deterministic imports, asynchronous runtime loading,
   hot reload, cooked packs, and native player packaging.
 - SDL3 multi-window and SDL_GPU rendering, Scene and Game views, cameras, picking, separate Shader and Material Graphs,
-  tagged custom-shader materials, LODs,
+  Direct Materials, inherited Material Instances, tagged custom-shader materials, LODs,
   spatial lighting data, animation, rigging, VFX authoring, and performance gates.
 - Input actions and rebinding, physics, navigation, audio graphs, production mixer/reverb-zone foundations,
   replay/diagnostic foundations, and profiling.

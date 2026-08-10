@@ -34,6 +34,7 @@ namespace Keire
         result.emplace_back(CreateShaderAssetImporter());
         result.emplace_back(CreateMaterialAssetImporter());
         result.emplace_back(CreateMaterialGraphAssetImporter());
+        result.emplace_back(CreateMaterialInstanceAssetImporter());
         result.emplace_back(CreateShaderGraphAssetImporter());
         result.emplace_back(CreateShaderGraphInstanceAssetImporter());
         result.emplace_back(CreateMeshAssetImporter());
@@ -75,6 +76,7 @@ namespace Keire
         result.emplace_back(CreateShaderAssetDecoder());
         result.emplace_back(CreateMaterialAssetDecoder());
         result.emplace_back(CreateMaterialGraphAssetDecoder());
+        result.emplace_back(CreateMaterialInstanceAssetDecoder());
         result.emplace_back(CreateShaderGraphAssetDecoder());
         result.emplace_back(CreateShaderGraphInstanceAssetDecoder());
         result.emplace_back(CreateMeshAssetDecoder());

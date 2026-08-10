@@ -99,7 +99,7 @@ TEST_CASE("Shader Graph document reuses the stable canvas and preserves last-goo
     const auto initialPreviewDefinition = *document.LastGoodDefinition();
     const auto canvas = document.BuildCanvasModel();
     REQUIRE(canvas.Nodes.size() == 1);
-    CHECK(canvas.Nodes.front().Label == "PBR Master");
+    CHECK(canvas.Nodes.front().Label == "Lit Shader Output");
     CHECK(canvas.Nodes.front().Pins.size() == document.Definition().Nodes.front().Pins.size());
     CHECK(canvas.Node(canvas.Nodes.front().Id) == document.Definition().Nodes.front().Id);
     const auto masterId = document.Definition().Nodes.front().Id;

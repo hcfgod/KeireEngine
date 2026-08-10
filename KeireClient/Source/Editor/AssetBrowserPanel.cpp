@@ -3,8 +3,11 @@
 #include "KeireClient/Editor/AssetBrowserFolderCache.h"
 #include "KeireClient/Editor/AssetBrowserUtilities.h"
 #include "KeireClient/Editor/ExternalAssetImportController.h"
+#include "KeireClient/Editor/MaterialGraphCreationPicker.h"
+#include "KeireClient/Editor/NamedAssetCreation.h"
 #include "KeireClient/Editor/SceneDocument.h"
 #include "KeireClient/Editor/SelectionRange.h"
+#include "KeireClient/Editor/ShaderGraphCreationMenu.h"
 #include "KeireClient/Editor/ThumbnailService.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
@@ -39,26 +42,7 @@ namespace KeireEditor
             Cut
         };
 
-        enum class NamedCreateKind : std::uint8_t
-        {
-            None,
-            Scene,
-            Material,
-            AnimationGraph,
-            Script,
-            ManagedAssembly,
-            ManagedData,
-            AudioMixer,
-            PhysicsMaterial,
-            VfxEffect,
-            MaterialGraph,
-            ShaderGraph,
-            ShaderGraphInstance,
-            Prefab,
-            PrefabVariant,
-            Shader,
-            InputActions
-        };
+        using NamedCreateKind = NamedAssetCreationKind;
 
         struct ClipboardEntry final
         {
@@ -71,7 +55,6 @@ namespace KeireEditor
             Keire::UiItemRect Rect;
             std::filesystem::path Folder;
         };
-
         [[nodiscard]] std::filesystem::path ResolveExternalDropFolder(const Keire::UiPosition position) const
         {
             for (auto iterator = ExternalDropTargets.rbegin(); iterator != ExternalDropTargets.rend(); ++iterator)
@@ -80,7 +63,6 @@ namespace KeireEditor
                     return iterator->Folder;
             return CurrentFolder;
         }
-
         void SetProjectRoot(const std::filesystem::path& root)
         {
             Close();
@@ -93,11 +75,8 @@ namespace KeireEditor
             LoadPreferences();
             RefreshFolderCache(true);
         }
-
         void SetUndoContext(Keire::Ref<Keire::UndoContext> context) { Undo = std::move(context); }
-
         void RequestCreateMaterial() { RequestNamedCreate(NamedCreateKind::Material, "Material"); }
-
         void RequestNamedCreate(const NamedCreateKind kind, const std::string_view defaultName)
         {
             PendingCreateKind = kind;
@@ -105,25 +84,21 @@ namespace KeireEditor
             CreateNameBuffer = defaultName;
             OpenNamedCreatePopup = true;
         }
-
         void RequestInputActionsCreate(Keire::InputActionAssetDefinition definition, const std::string_view defaultName)
         {
             PendingInputActions = std::move(definition);
             RequestNamedCreate(NamedCreateKind::InputActions, defaultName);
         }
-
         void RequestManagedDataCreate(const Keire::ManagedAssetTypeDescriptor& descriptor)
         {
             PendingManagedType = descriptor.StableTypeId;
             RequestNamedCreate(NamedCreateKind::ManagedData, descriptor.DefaultFileName);
         }
-
         void InvalidateThumbnail(const Keire::AssetId asset)
         {
             Images.erase(asset);
             ImageDigests.erase(asset);
         }
-
         void Close() noexcept
         {
             SavePreferences();
@@ -314,6 +289,9 @@ namespace KeireEditor
                 case AssetBrowserOpenAction::MaterialGraph:
                     editor.OpenAssetBrowserMaterialGraph(record.Id);
                     break;
+                case AssetBrowserOpenAction::MaterialInstance:
+                    editor.OpenAssetBrowserMaterialInstance(record.Id);
+                    break;
                 case AssetBrowserOpenAction::ShaderGraph:
                     editor.OpenAssetBrowserShaderGraph(record.Id);
                     break;
@@ -382,11 +360,18 @@ namespace KeireEditor
             if (ui.MenuItem("VFX Effect"))
                 RequestNamedCreate(NamedCreateKind::VfxEffect, "VfxEffect");
             if (ui.MenuItem("Material Graph"))
-                RequestNamedCreate(NamedCreateKind::MaterialGraph, "MaterialGraph");
-            if (ui.MenuItem("Shader Graph"))
-                RequestNamedCreate(NamedCreateKind::ShaderGraph, "PBRMaterial");
+            {
+                MaterialGraphCreation.Begin(Selection.empty() ? Keire::AssetId{} : Selection.back(),
+                                            editor.AssetBrowserRecords());
+                RequestNamedCreate(NamedCreateKind::MaterialGraph, "NewMaterialGraph");
+            }
+            if (const auto graphTemplate = DrawShaderGraphCreationMenu(ui))
+            {
+                PendingShaderGraphTemplate = *graphTemplate;
+                RequestNamedCreate(NamedCreateKind::ShaderGraph, "NewShaderGraph");
+            }
             if (ui.MenuItem("Material Instance"))
-                RequestNamedCreate(NamedCreateKind::ShaderGraphInstance, "MaterialInstance");
+                RequestNamedCreate(NamedCreateKind::MaterialInstance, "NewMaterialInstance");
             const auto managedTypes = editor.AssetBrowserManagedAssetTypes();
             if (std::ranges::any_of(managedTypes, [](const auto& type) { return !type.MenuPath.empty(); }))
             {
@@ -737,23 +722,7 @@ namespace KeireEditor
             }
             if (auto create = ui.BeginPopupModal("Create Asset"); create)
             {
-                const std::string_view type =
-                    PendingCreateKind == NamedCreateKind::Scene                 ? "scene"
-                    : PendingCreateKind == NamedCreateKind::Material            ? "material"
-                    : PendingCreateKind == NamedCreateKind::AnimationGraph      ? "Animator Controller"
-                    : PendingCreateKind == NamedCreateKind::Script              ? "C# script"
-                    : PendingCreateKind == NamedCreateKind::ManagedAssembly     ? "managed assembly"
-                    : PendingCreateKind == NamedCreateKind::ManagedData         ? "managed data asset"
-                    : PendingCreateKind == NamedCreateKind::AudioMixer          ? "audio mixer"
-                    : PendingCreateKind == NamedCreateKind::PhysicsMaterial     ? "physics material"
-                    : PendingCreateKind == NamedCreateKind::VfxEffect           ? "VFX effect"
-                    : PendingCreateKind == NamedCreateKind::MaterialGraph       ? "material graph"
-                    : PendingCreateKind == NamedCreateKind::ShaderGraph         ? "shader graph"
-                    : PendingCreateKind == NamedCreateKind::ShaderGraphInstance ? "material instance"
-                    : PendingCreateKind == NamedCreateKind::Prefab              ? "prefab"
-                    : PendingCreateKind == NamedCreateKind::PrefabVariant       ? "prefab variant"
-                    : PendingCreateKind == NamedCreateKind::Shader              ? "shader"
-                                                                                : "Input Actions asset";
+                const auto type = NamedAssetCreationDisplayName(PendingCreateKind);
                 ui.Text("Choose a name for the new " + std::string(type));
                 if (FocusCreateName)
                 {
@@ -761,74 +730,82 @@ namespace KeireEditor
                     FocusCreateName = false;
                 }
                 (void)ui.InputText("Name", CreateNameBuffer, true);
-                if (ui.Button("Create"))
-                {
-                    try
+                if (PendingCreateKind == NamedCreateKind::MaterialGraph)
+                    MaterialGraphCreation.Draw(ui, editor.AssetBrowserRecords(), editor.AssetBrowserTheme());
+                const auto canCreate = PendingCreateKind != NamedCreateKind::MaterialGraph ||
+                                       static_cast<bool>(MaterialGraphCreation.Shader());
+                if (auto disabled = ui.BeginDisabled(!canCreate); disabled)
+                    if (ui.Button("Create"))
                     {
-                        if (CreateNameBuffer.empty() || CreateNameBuffer == "." || CreateNameBuffer == ".." ||
-                            CreateNameBuffer.find_first_of("/\\") != std::string::npos)
-                            throw std::invalid_argument("Asset name must be one non-empty path component.");
-                        const auto previousFolder = std::exchange(CurrentFolder, PendingCreateFolder);
-                        bool created = false;
                         try
                         {
-                            created =
-                                PendingCreateKind == NamedCreateKind::Scene
-                                    ? editor.CreateAssetBrowserScene(CreateNameBuffer)
-                                : PendingCreateKind == NamedCreateKind::Material
-                                    ? editor.CreateAssetBrowserMaterial(CreateNameBuffer)
-                                : PendingCreateKind == NamedCreateKind::AnimationGraph
-                                    ? editor.CreateAssetBrowserAnimationGraph(CreateNameBuffer)
-                                : PendingCreateKind == NamedCreateKind::Script
-                                    ? editor.CreateAssetBrowserScript(CreateNameBuffer)
-                                : PendingCreateKind == NamedCreateKind::ManagedAssembly
-                                    ? editor.CreateAssetBrowserManagedAssembly(CreateNameBuffer)
-                                : PendingCreateKind == NamedCreateKind::ManagedData
-                                    ? editor.CreateAssetBrowserManagedData(PendingManagedType, CreateNameBuffer)
-                                : PendingCreateKind == NamedCreateKind::AudioMixer
-                                    ? editor.CreateAssetBrowserAudioMixer(CreateNameBuffer)
-                                : PendingCreateKind == NamedCreateKind::PhysicsMaterial
-                                    ? editor.CreateAssetBrowserPhysicsMaterial(CreateNameBuffer)
-                                : PendingCreateKind == NamedCreateKind::VfxEffect
-                                    ? editor.CreateAssetBrowserVfxEffect(CreateNameBuffer)
-                                : PendingCreateKind == NamedCreateKind::MaterialGraph
-                                    ? editor.CreateAssetBrowserMaterialGraph(CreateNameBuffer)
-                                : PendingCreateKind == NamedCreateKind::ShaderGraph
-                                    ? editor.CreateAssetBrowserShaderGraph(CreateNameBuffer)
-                                : PendingCreateKind == NamedCreateKind::ShaderGraphInstance
-                                    ? editor.CreateAssetBrowserShaderGraphInstance(CreateNameBuffer)
-                                : PendingCreateKind == NamedCreateKind::Prefab
-                                    ? editor.CreateAssetBrowserPrefab(CreateNameBuffer)
-                                : PendingCreateKind == NamedCreateKind::PrefabVariant
-                                    ? editor.CreateAssetBrowserPrefabVariant(PendingVariantBase, CreateNameBuffer)
-                                : PendingCreateKind == NamedCreateKind::Shader
-                                    ? editor.CreateAssetBrowserShader(CreateNameBuffer)
-                                : PendingInputActions
-                                    ? editor.CreateAssetBrowserInputActions(*PendingInputActions, CreateNameBuffer)
-                                    : false;
-                        }
-                        catch (...)
-                        {
+                            if (CreateNameBuffer.empty() || CreateNameBuffer == "." || CreateNameBuffer == ".." ||
+                                CreateNameBuffer.find_first_of("/\\") != std::string::npos)
+                                throw std::invalid_argument("Asset name must be one non-empty path component.");
+                            const auto previousFolder = std::exchange(CurrentFolder, PendingCreateFolder);
+                            bool created = false;
+                            try
+                            {
+                                created =
+                                    PendingCreateKind == NamedCreateKind::Scene
+                                        ? editor.CreateAssetBrowserScene(CreateNameBuffer)
+                                    : PendingCreateKind == NamedCreateKind::Material
+                                        ? editor.CreateAssetBrowserMaterial(CreateNameBuffer)
+                                    : PendingCreateKind == NamedCreateKind::AnimationGraph
+                                        ? editor.CreateAssetBrowserAnimationGraph(CreateNameBuffer)
+                                    : PendingCreateKind == NamedCreateKind::Script
+                                        ? editor.CreateAssetBrowserScript(CreateNameBuffer)
+                                    : PendingCreateKind == NamedCreateKind::ManagedAssembly
+                                        ? editor.CreateAssetBrowserManagedAssembly(CreateNameBuffer)
+                                    : PendingCreateKind == NamedCreateKind::ManagedData
+                                        ? editor.CreateAssetBrowserManagedData(PendingManagedType, CreateNameBuffer)
+                                    : PendingCreateKind == NamedCreateKind::AudioMixer
+                                        ? editor.CreateAssetBrowserAudioMixer(CreateNameBuffer)
+                                    : PendingCreateKind == NamedCreateKind::PhysicsMaterial
+                                        ? editor.CreateAssetBrowserPhysicsMaterial(CreateNameBuffer)
+                                    : PendingCreateKind == NamedCreateKind::VfxEffect
+                                        ? editor.CreateAssetBrowserVfxEffect(CreateNameBuffer)
+                                    : PendingCreateKind == NamedCreateKind::MaterialGraph
+                                        ? editor.CreateAssetBrowserMaterialGraph(CreateNameBuffer,
+                                                                                 MaterialGraphCreation.Shader())
+                                    : PendingCreateKind == NamedCreateKind::ShaderGraph
+                                        ? editor.CreateAssetBrowserShaderGraph(CreateNameBuffer,
+                                                                               PendingShaderGraphTemplate)
+                                    : PendingCreateKind == NamedCreateKind::MaterialInstance
+                                        ? editor.CreateAssetBrowserMaterialInstance(CreateNameBuffer)
+                                    : PendingCreateKind == NamedCreateKind::Prefab
+                                        ? editor.CreateAssetBrowserPrefab(CreateNameBuffer)
+                                    : PendingCreateKind == NamedCreateKind::PrefabVariant
+                                        ? editor.CreateAssetBrowserPrefabVariant(PendingVariantBase, CreateNameBuffer)
+                                    : PendingCreateKind == NamedCreateKind::Shader
+                                        ? editor.CreateAssetBrowserShader(CreateNameBuffer)
+                                    : PendingInputActions
+                                        ? editor.CreateAssetBrowserInputActions(*PendingInputActions, CreateNameBuffer)
+                                        : false;
+                            }
+                            catch (...)
+                            {
+                                CurrentFolder = previousFolder;
+                                throw;
+                            }
                             CurrentFolder = previousFolder;
-                            throw;
+                            if (created)
+                            {
+                                PendingCreateKind = NamedCreateKind::None;
+                                PendingCreateFolder.clear();
+                                PendingManagedType = {};
+                                PendingInputActions.reset();
+                                PendingVariantBase = {};
+                                MaterialGraphCreation.Reset();
+                                CreateNameBuffer.clear();
+                                ui.CloseCurrentPopup();
+                            }
                         }
-                        CurrentFolder = previousFolder;
-                        if (created)
+                        catch (const std::exception& error)
                         {
-                            PendingCreateKind = NamedCreateKind::None;
-                            PendingCreateFolder.clear();
-                            PendingManagedType = {};
-                            PendingInputActions.reset();
-                            PendingVariantBase = {};
-                            CreateNameBuffer.clear();
-                            ui.CloseCurrentPopup();
+                            editor.ReportAssetBrowserError(std::string("Asset creation failed: ") + error.what());
                         }
                     }
-                    catch (const std::exception& error)
-                    {
-                        editor.ReportAssetBrowserError(std::string("Asset creation failed: ") + error.what());
-                    }
-                }
                 ui.SameLine();
                 if (ui.Button("Cancel"))
                 {
@@ -837,6 +814,7 @@ namespace KeireEditor
                     PendingManagedType = {};
                     PendingInputActions.reset();
                     PendingVariantBase = {};
+                    MaterialGraphCreation.Reset();
                     CreateNameBuffer.clear();
                     ui.CloseCurrentPopup();
                 }
@@ -1128,7 +1106,8 @@ namespace KeireEditor
                     image = ShaderGraphFallbackImage;
                 else if (record.Type == Keire::MaterialGraphAsset::StaticType())
                     image = MaterialGraphFallbackImage;
-                else if (record.Type == Keire::ShaderGraphInstanceAsset::StaticType())
+                else if (record.Type == Keire::MaterialInstanceAsset::StaticType() ||
+                         record.Type == Keire::ShaderGraphInstanceAsset::StaticType())
                     image = MaterialInstanceFallbackImage;
                 else if (record.Type == Keire::VfxEffectAsset::StaticType())
                     image = VfxFallbackImage;
@@ -1522,7 +1501,7 @@ namespace KeireEditor
                     MaterialGraphFallbackImage = ui.CreateImage(
                         96, 96, MakeAssetFallbackThumbnail(Keire::MaterialGraphAsset::StaticType(), 96, 96));
                     MaterialInstanceFallbackImage = ui.CreateImage(
-                        96, 96, MakeAssetFallbackThumbnail(Keire::ShaderGraphInstanceAsset::StaticType(), 96, 96));
+                        96, 96, MakeAssetFallbackThumbnail(Keire::MaterialInstanceAsset::StaticType(), 96, 96));
                     VfxFallbackImage =
                         ui.CreateImage(96, 96, MakeAssetFallbackThumbnail(Keire::VfxEffectAsset::StaticType(), 96, 96));
                 }
@@ -1752,6 +1731,7 @@ namespace KeireEditor
         Keire::AssetId RevealAsset;
         Keire::AssetId SelectionAnchor;
         Keire::AssetId PendingVariantBase;
+        MaterialGraphCreationPicker MaterialGraphCreation;
         std::string Search;
         std::string RenameBuffer;
         std::string CreateNameBuffer;
@@ -1760,6 +1740,7 @@ namespace KeireEditor
         std::filesystem::path ExternalEditor;
         std::filesystem::path PendingCreateFolder;
         NamedCreateKind PendingCreateKind = NamedCreateKind::None;
+        Keire::ShaderGraphTemplate PendingShaderGraphTemplate = Keire::ShaderGraphTemplate::Lit;
         Keire::ManagedTypeId PendingManagedType;
         std::optional<Keire::InputActionAssetDefinition> PendingInputActions;
         ViewMode Mode = ViewMode::Grid;

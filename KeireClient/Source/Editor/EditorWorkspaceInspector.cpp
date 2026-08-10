@@ -8,6 +8,7 @@
 #include "KeireClient/Editor/AssetOperationService.h"
 #include "KeireClient/Editor/ConsolePanel.h"
 #include "KeireClient/Editor/DiagnosticsPanel.h"
+#include "KeireClient/Editor/EditorAssetFileService.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
 #include "KeireClient/Editor/ExternalAssetImportController.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
@@ -237,6 +238,24 @@ void EditorWorkspaceLayer::AddScriptToEntity(const Keire::EntityId entity, const
 void EditorWorkspaceLayer::CommitInspectorMaterial() { CommitMaterialDraft(); }
 
 void EditorWorkspaceLayer::OpenInspectorInputActions(const Keire::AssetId asset) { OpenInputActions(asset); }
+
+void EditorWorkspaceLayer::OpenInspectorMaterialGraph(const Keire::AssetId asset) { OpenMaterialGraph(asset); }
+
+void EditorWorkspaceLayer::PersistInspectorMaterialInstance(const Keire::AssetId asset,
+                                                            const std::span<const std::byte> bytes)
+{
+    if (!m_AssetDatabase || !m_AssetOperations)
+        throw std::runtime_error("Material Instance persistence services are unavailable.");
+    const auto record = m_AssetDatabase->Find(asset);
+    if (!record || record->Type != Keire::MaterialInstanceAsset::StaticType() ||
+        record->RelativePath.extension() != ".keirematerialinstance")
+        throw std::invalid_argument("Only Material Instance sources can be persisted here.");
+    const auto& specification = m_AssetDatabase->Specification();
+    KeireEditor::Detail::WriteBytesAtomically(
+        specification.ProjectRoot / specification.SourceDirectory / record->RelativePath, bytes);
+    m_AssetOperations->QueueImport(KeireEditor::AssetOperationPriority::ExplicitAction, {.ReloadAsset = asset});
+    m_AssetStatus = "Saved Material Instance overrides and queued its runtime material rebuild.";
+}
 
 void EditorWorkspaceLayer::ImportInspectorAssets() { ImportAssets(); }
 

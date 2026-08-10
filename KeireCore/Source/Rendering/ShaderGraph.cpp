@@ -23,6 +23,11 @@ namespace Keire
 {
     namespace
     {
+        [[nodiscard]] constexpr bool IsUnlitOutput(const ShaderGraphOutput output) noexcept
+        {
+            return output == ShaderGraphOutput::Unlit || output == ShaderGraphOutput::Fullscreen;
+        }
+
         using Json = nlohmann::json;
 
         constexpr std::size_t MaximumGraphNodes = 1024;
@@ -846,7 +851,7 @@ namespace Keire
                 const auto master =
                     std::ranges::find(m_Definition.Nodes, ShaderGraphNodeKind::Master, &ShaderGraphNode::Kind);
                 if (master == m_Definition.Nodes.end())
-                    throw std::invalid_argument("Shader Graph has no Master node.");
+                    throw std::invalid_argument("Shader Graph has no Shader Output node.");
 
                 std::optional<std::string> worldPositionOffset;
                 if (const auto* offsetPin = FindPin(*master, "WorldPositionOffset", ShaderGraphPinDirection::Input))
@@ -869,7 +874,7 @@ namespace Keire
                 {
                     const auto* pin = FindPin(*master, name, ShaderGraphPinDirection::Input);
                     if (!pin)
-                        throw std::invalid_argument("Shader Graph Master node is missing the " + std::string(name) +
+                        throw std::invalid_argument("Shader Output node is missing the " + std::string(name) +
                                                     " input.");
                     return Coerce(Input(*master, *pin), type).Code;
                 };
@@ -885,7 +890,7 @@ namespace Keire
                     return pin ? Coerce(Input(*master, *pin), type).Code : std::string(fallback);
                 };
 
-                const bool unlit = m_Definition.Output == ShaderGraphOutput::Unlit;
+                const bool unlit = IsUnlitOutput(m_Definition.Output);
                 const bool hasMaterialAttributes = !unlit && inputConnected("MaterialAttributes");
                 const auto materialAttributes =
                     hasMaterialAttributes ? input("MaterialAttributes", ShaderGraphValueType::MaterialAttributes)
@@ -928,7 +933,7 @@ namespace Keire
                                                 ? attribute("SheenRoughness")
                                                 : optionalInput("SheenRoughness", ShaderGraphValueType::Scalar, "0.5F");
                 const auto normal = unlit || (!hasMaterialAttributes && !inputConnected("Normal")) ? "input.Normal"
-                                    : hasMaterialAttributes                                        ? attribute("Normal")
+                                    : hasMaterialAttributes ? attribute("Normal")
                                                             : input("Normal", ShaderGraphValueType::Vector3);
                 const bool hasDetailNormal = !unlit && !hasMaterialAttributes && inputConnected("DetailNormal");
                 const auto detailNormal = hasDetailNormal ? input("DetailNormal", ShaderGraphValueType::Vector3)
@@ -2783,7 +2788,7 @@ float4 PSMain(VertexOutput input) : SV_Target0
                     break;
                 }
                 case ShaderGraphNodeKind::Master:
-                    throw std::invalid_argument("Master node outputs cannot feed another node.");
+                    throw std::invalid_argument("Shader Output nodes cannot feed another node.");
                 }
                 m_Visiting.erase(endpoint.Node);
                 m_Cache.emplace(endpoint, result);
@@ -3158,7 +3163,7 @@ float4 PSMain(VertexOutput input) : SV_Target0
         switch (kind)
         {
         case ShaderGraphNodeKind::Master:
-            node.Name = "PBR Master";
+            node.Name = "Lit Shader Output";
             input("BaseColor", ShaderGraphValueType::Color, Color{1.0F, 1.0F, 1.0F, 1.0F});
             input("Metallic", ShaderGraphValueType::Scalar, 0.0F);
             input("Roughness", ShaderGraphValueType::Scalar, 0.5F);
@@ -3839,57 +3844,10 @@ float4 PSMain(VertexOutput input) : SV_Target0
         return node;
     }
 
-    ShaderGraphDefinition CreateDefaultShaderGraph(const ShaderGraphOutput output)
-    {
-        ShaderGraphDefinition definition;
-        definition.Output = output;
-        auto master = CreateShaderGraphNode(ShaderGraphNodeKind::Master, ShaderGraphValueType::Color);
-        master.EditorPosition = {480.0F, 120.0F};
-        if (output == ShaderGraphOutput::Unlit)
-        {
-            master.Name = "Unlit Master";
-            std::erase_if(master.Pins,
-                          [](const ShaderGraphPin& pin)
-                          {
-                              return pin.Name != "BaseColor" && pin.Name != "Emission" && pin.Name != "Opacity" &&
-                                     pin.Name != "WorldPositionOffset" && pin.Name != "PixelDepthOffset";
-                          });
-            master.Pins.front().Name = "Color";
-        }
-        else if (output == ShaderGraphOutput::Transparent)
-            master.Name = "Transparent PBR Master";
-        else if (output == ShaderGraphOutput::Decal)
-            master.Name = "Decal PBR Master";
-        else if (output == ShaderGraphOutput::Hair)
-        {
-            master.Name = "Hair PBR Master";
-            const auto anisotropy = std::ranges::find(master.Pins, "Anisotropy", &ShaderGraphPin::Name);
-            const auto roughness = std::ranges::find(master.Pins, "Roughness", &ShaderGraphPin::Name);
-            const auto sheen = std::ranges::find(master.Pins, "SheenColor", &ShaderGraphPin::Name);
-            anisotropy->DefaultValue = 0.8F;
-            roughness->DefaultValue = 0.35F;
-            sheen->DefaultValue = Color{0.12F, 0.08F, 0.04F, 1.0F};
-        }
-        else if (output == ShaderGraphOutput::Eye)
-        {
-            master.Name = "Eye PBR Master";
-            const auto clearCoat = std::ranges::find(master.Pins, "ClearCoat", &ShaderGraphPin::Name);
-            const auto clearCoatRoughness = std::ranges::find(master.Pins, "ClearCoatRoughness", &ShaderGraphPin::Name);
-            const auto ior = std::ranges::find(master.Pins, "IndexOfRefraction", &ShaderGraphPin::Name);
-            const auto refraction = std::ranges::find(master.Pins, "Refraction", &ShaderGraphPin::Name);
-            clearCoat->DefaultValue = 1.0F;
-            clearCoatRoughness->DefaultValue = 0.05F;
-            ior->DefaultValue = 1.336F;
-            refraction->DefaultValue = 0.2F;
-        }
-        definition.Nodes.push_back(std::move(master));
-        return definition;
-    }
-
     void ValidateShaderGraph(const ShaderGraphDefinition& definition)
     {
         if ((definition.SchemaVersion != 1 && definition.SchemaVersion != ShaderGraphSourceSchemaVersion) ||
-            definition.Output > ShaderGraphOutput::Eye || definition.Nodes.empty() ||
+            definition.Output > ShaderGraphOutput::Fullscreen || definition.Nodes.empty() ||
             definition.Nodes.size() > MaximumGraphNodes || definition.Connections.size() > MaximumGraphConnections ||
             definition.Keywords.size() > MaximumGraphKeywords || definition.IncludeRoots.empty() ||
             definition.IncludeRoots.size() > MaximumGraphIncludeRoots)
@@ -3974,7 +3932,7 @@ float4 PSMain(VertexOutput input) : SV_Target0
             if (node.Kind == ShaderGraphNodeKind::Master)
             {
                 if (!outputPinNames.empty())
-                    throw std::invalid_argument("Shader Graph Master nodes cannot expose output pins.");
+                    throw std::invalid_argument("Shader Output nodes cannot expose output pins.");
             }
             else if (node.Kind == ShaderGraphNodeKind::Custom)
             {
@@ -4004,17 +3962,17 @@ float4 PSMain(VertexOutput input) : SV_Target0
                 throw std::invalid_argument("Shader Graph numeric nodes require scalar, vector, or color values.");
         }
         if (masters != 1 || propertyCount > MaximumGraphProperties)
-            throw std::invalid_argument("Shader Graph requires one Master node and at most 80 properties.");
-        const auto maximumTextures = definition.Output == ShaderGraphOutput::Unlit ? 16U : 12U;
+            throw std::invalid_argument("Shader Graph requires one Shader Output node and at most 80 properties.");
+        const auto maximumTextures = IsUnlitOutput(definition.Output) ? 16U : 12U;
         if (texturePropertyCount > maximumTextures)
             throw std::invalid_argument("Shader Graph texture parameters exceed the portable sampler budget.");
         const auto master = std::ranges::find(definition.Nodes, ShaderGraphNodeKind::Master, &ShaderGraphNode::Kind);
-        const auto required = definition.Output == ShaderGraphOutput::Unlit
+        const auto required = IsUnlitOutput(definition.Output)
                                   ? std::array<std::string_view, 3>{"Color", "Emission", "Opacity"}
                                   : std::array<std::string_view, 3>{"BaseColor", "Emission", "Opacity"};
         for (const auto name : required)
             if (const auto* pin = FindPin(*master, name, ShaderGraphPinDirection::Input); !pin)
-                throw std::invalid_argument("Shader Graph Master node is missing a required input.");
+                throw std::invalid_argument("Shader Output node is missing a required input.");
 
         std::set<std::string, std::less<>> keywordNames;
         std::set<std::string, std::less<>> tokens;

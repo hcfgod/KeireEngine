@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Keire/Rendering/MaterialGraph.h"
+#include "Keire/Assets/RenderingAssets.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -35,13 +35,10 @@ namespace KeireEditor
 
         void Open(std::span<const std::byte> source, const ShaderResolver& resolveShader);
         void Open(std::span<const std::byte> source, const ShaderReferenceResolver& resolveShader);
-        void OpenMaterialGraph(std::span<const std::byte> source, const ShaderReferenceResolver& resolveShader);
         void OpenAsset(Keire::AssetId asset, std::filesystem::path sourcePath, std::span<const std::byte> source,
                        const ShaderResolver& resolveShader);
         void OpenAsset(Keire::AssetId asset, std::filesystem::path sourcePath, std::span<const std::byte> source,
                        const ShaderReferenceResolver& resolveShader);
-        void OpenMaterialGraphAsset(Keire::AssetId asset, std::filesystem::path sourcePath,
-                                    std::span<const std::byte> source, const ShaderReferenceResolver& resolveShader);
         [[nodiscard]] bool SetShader(Keire::AssetId shader, const ShaderResolver& resolveShader);
         [[nodiscard]] bool SetShaderReference(Keire::MaterialShaderReference shader,
                                               const ShaderReferenceResolver& resolveShader);
@@ -63,7 +60,6 @@ namespace KeireEditor
             return m_TextureProperties;
         }
         [[nodiscard]] const Keire::MaterialAssetDefinition& Definition() const noexcept { return m_Definition; }
-        [[nodiscard]] bool IsMaterialGraph() const noexcept { return m_MaterialGraphDefinition.has_value(); }
         [[nodiscard]] std::string_view LastChangedProperty() const noexcept { return m_LastChangedProperty; }
         [[nodiscard]] std::vector<std::byte> SaveSource() const;
         void CaptureDraft();
@@ -86,11 +82,9 @@ namespace KeireEditor
         [[nodiscard]] static ShaderReferenceResolver AdaptShaderResolver(const ShaderResolver& resolveShader);
         void OpenDefinition(Keire::MaterialAuthoringDefinition definition,
                             const ShaderReferenceResolver& resolveShader);
-        void SynchronizeMaterialGraphBindings();
         void SetResolvedShader(std::optional<Keire::ShaderAssetDefinition> definition);
 
         Keire::MaterialAuthoringDefinition m_AuthoringDefinition;
-        std::optional<Keire::MaterialGraphDefinition> m_MaterialGraphDefinition;
         Keire::MaterialAssetDefinition m_Definition;
         std::optional<Keire::ShaderAssetDefinition> m_ShaderDefinition;
         std::vector<Keire::ShaderPropertyDefinition> m_TextureProperties;

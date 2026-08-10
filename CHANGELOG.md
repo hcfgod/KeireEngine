@@ -1,5 +1,20 @@
 # Changelog
 
+- Separated shader authoring from material authoring throughout the editor. Shader Graph creation now offers Lit/PBR,
+  Unlit, Transparent, Decal, Fullscreen, Hair, and Eye templates under `NewShaderGraph`; double-clicking a Material
+  Graph opens its own visual Material Output canvas with dynamically reflected shader inputs instead of redirecting to
+  the Shader Graph.
+- Made graph identity explicit in the authoring UI: Shader Graphs expose a Shader Target, Shader Output node, and live
+  shader preview, while Material Graph creation requires an explicit Shader Graph or raw Shader in its creation dialog
+  instead of depending on hidden Project-panel selection state or emitting repeated prerequisite errors.
+- Added first-class `.keirematerialinstance` assets inheriting from Direct Materials, Material Graphs, or other Material
+  Instances. Import resolves bounded ancestry without duplicating shader code and rejects cycles, missing roots,
+  unknown properties, and type-changing overrides. Legacy `.keireshadergraphinstance` assets remain readable for
+  project compatibility but are no longer created by the editor.
+- Upgraded Material Graph sources to schema 2 with deterministic output/pin identities, typed value nodes and
+  connections, interface synchronization, undo/redo, diagnostics, live runtime-material preview, safe schema-1
+  upgrades, and unsaved-exit protection. Shader Graph preview materials are now internal and Shader Graph assets are no
+  longer exposed as assignable Mesh Renderer materials.
 - Rotated the Hub distribution signing identity with an overlap period that retains the previous trusted public key,
   allowing updated Hubs to validate both the current catalog and newly signed release snapshots. Hub packaging now
   accepts multiple environment-supplied public keys while retaining the legacy single-key override.
@@ -11,8 +26,7 @@
 - Fixed normal Windows, Linux, and macOS builds retaining stale generated product identity after `Project.conf`
   version changes. Every build now refreshes `BuildInfo.generated.h` before native dependency evaluation.
 - Fixed Asset Browser double-click handling so materials open in the Material Inspector, Shader Graphs open a clean
-  Shader Graph canvas, and Material Graphs open both their material bindings and their referenced Shader Graph when
-  one is assigned.
+  Shader Graph canvas, and Material Graphs open their own material-authoring canvas.
 - Fixed development Hub binaries depending on the launcher's current working directory to find templates, learning
   content, licenses, branding, and fonts. The Hub now resolves the nearest packaged or repository distribution root
   from its executable ancestry and retains the explicit missing-content diagnostics for genuinely incomplete layouts.

@@ -1494,7 +1494,7 @@ namespace KeireEditor
                     result = GraphValue(node.Value, node.ValueType);
                     break;
                 case Keire::ShaderGraphNodeKind::Master:
-                    throw std::invalid_argument("The Shader Graph Master node cannot be used as an expression.");
+                    throw std::invalid_argument("The Shader Output node cannot be used as an expression.");
                 }
                 m_Cache[cacheIndex->second] = result;
                 return result;
@@ -1512,7 +1512,6 @@ namespace KeireEditor
             Keire::Vector3 m_Normal{0.0F, 0.0F, 1.0F};
             Keire::Vector3 m_Position;
         };
-
         [[nodiscard]] PreviewMaterial ResolveMaterial(const ShaderGraphPreviewRequest& request,
                                                       GraphPreviewEvaluator* evaluator = nullptr,
                                                       const Keire::Vector2 uv = {},
@@ -1520,7 +1519,8 @@ namespace KeireEditor
                                                       const Keire::Vector3 position = {})
         {
             PreviewMaterial result;
-            result.Unlit = request.Output == Keire::ShaderGraphOutput::Unlit;
+            result.Unlit = request.Output == Keire::ShaderGraphOutput::Unlit ||
+                           request.Output == Keire::ShaderGraphOutput::Fullscreen;
             bool foundColor = false;
             for (const auto& property : request.Properties)
             {
@@ -1578,7 +1578,7 @@ namespace KeireEditor
                 }
                 else
                 {
-                    const auto colorName = request.Output == Keire::ShaderGraphOutput::Unlit ? "Color" : "BaseColor";
+                    const auto colorName = result.Unlit ? "Color" : "BaseColor";
                     if (const auto value = evaluator->MasterInput(colorName, Keire::ShaderGraphValueType::Color))
                         result.BaseColor = *value;
                     if (const auto value = evaluator->MasterInput("Emission", Keire::ShaderGraphValueType::Color))

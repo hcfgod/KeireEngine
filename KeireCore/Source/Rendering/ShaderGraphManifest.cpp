@@ -89,7 +89,8 @@ namespace Keire::Detail
             roots.push_back(root.generic_string());
         const bool transparent =
             definition.Output == ShaderGraphOutput::Transparent || definition.Output == ShaderGraphOutput::Decal;
-        const bool lit = definition.Output != ShaderGraphOutput::Unlit;
+        const bool fullscreen = definition.Output == ShaderGraphOutput::Fullscreen;
+        const bool lit = definition.Output != ShaderGraphOutput::Unlit && !fullscreen;
         const Json manifest{{"schemaVersion", 1},
                             {"materialGraphSourceSchemaVersion", definition.SchemaVersion},
                             {"materialGraphGeneratedShaderVersion", ShaderGraphGeneratedShaderVersion},
@@ -105,11 +106,12 @@ namespace Keire::Detail
                             {"includeRoots", std::move(roots)},
                             {"renderState",
                              {{"topology", "TriangleList"},
-                              {"culling", definition.Output == ShaderGraphOutput::Decal  ? "Front"
-                                          : definition.Output == ShaderGraphOutput::Hair ? "None"
-                                                                                         : "Back"},
-                              {"depthTest", true},
-                              {"depthWrite", !transparent},
+                              {"culling", fullscreen                                      ? "None"
+                                          : definition.Output == ShaderGraphOutput::Decal ? "Front"
+                                          : definition.Output == ShaderGraphOutput::Hair  ? "None"
+                                                                                          : "Back"},
+                              {"depthTest", !fullscreen},
+                              {"depthWrite", !transparent && !fullscreen},
                               {"blend", transparent}}},
                             {"properties", std::move(encodedProperties)}};
         return manifest.dump(2) + '\n';

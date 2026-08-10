@@ -31,6 +31,18 @@ namespace Keire
         Decal,
         Unlit,
         Hair,
+        Eye,
+        Fullscreen
+    };
+
+    enum class ShaderGraphTemplate : std::uint8_t
+    {
+        Lit,
+        Unlit,
+        Transparent,
+        Decal,
+        Fullscreen,
+        Hair,
         Eye
     };
 
@@ -412,6 +424,7 @@ namespace Keire
 
     [[nodiscard]] KEIRE_API ShaderGraphDefinition
     CreateDefaultShaderGraph(ShaderGraphOutput output = ShaderGraphOutput::Surface);
+    [[nodiscard]] KEIRE_API ShaderGraphDefinition CreateShaderGraphTemplate(ShaderGraphTemplate graphTemplate);
     [[nodiscard]] KEIRE_API ShaderGraphNode
     CreateShaderGraphNode(ShaderGraphNodeKind kind, ShaderGraphValueType valueType = ShaderGraphValueType::Scalar);
     [[nodiscard]] KEIRE_API ShaderGraphNode
@@ -428,6 +441,8 @@ namespace Keire
     [[nodiscard]] KEIRE_API std::string
     MakeShaderGraphVariantSubAssetKey(std::string_view target,
                                       const std::map<std::string, std::string, std::less<>>& keywords);
+    [[nodiscard]] KEIRE_API std::string
+    MakeShaderGraphVariantSubAssetKey(std::string_view target, std::span<const std::string> canonicalKeywords);
     [[nodiscard]] KEIRE_API ResolvedShaderGraphInstance ResolveShaderGraphInstance(
         const ShaderGraphDefinition& graph, std::span<const ShaderGraphInstanceDefinition> ancestry);
     [[nodiscard]] KEIRE_API MaterialAssetDefinition

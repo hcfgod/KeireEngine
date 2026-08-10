@@ -44,8 +44,10 @@ namespace KeireEditor
             return "Material Graph";
         if (extension == ".keireshadergraph")
             return "Shader Graph";
-        if (extension == ".keireshadergraphinstance")
+        if (extension == ".keirematerialinstance")
             return "Material Instance";
+        if (extension == ".keireshadergraphinstance")
+            return "Legacy Shader Graph Instance";
         if (extension == ".keireanimgraph")
             return "Animator Controller";
         if (extension == ".keireanim")
@@ -86,6 +88,8 @@ namespace KeireEditor
             return AssetBrowserOpenAction::Material;
         if (extension == ".keirematerialgraph")
             return AssetBrowserOpenAction::MaterialGraph;
+        if (extension == ".keirematerialinstance")
+            return AssetBrowserOpenAction::MaterialInstance;
         if (extension == ".keireshadergraph")
             return AssetBrowserOpenAction::ShaderGraph;
         if (extension == ".keirescene")
@@ -93,14 +97,6 @@ namespace KeireEditor
         if (extension == ".keireprefab")
             return AssetBrowserOpenAction::Prefab;
         return AssetBrowserOpenAction::External;
-    }
-
-    std::optional<Keire::AssetId>
-    ResolveMaterialGraphEditorTarget(const Keire::MaterialGraphDefinition& definition) noexcept
-    {
-        if (definition.Shader.Kind != Keire::MaterialShaderSourceKind::ShaderGraph || !definition.Shader.Asset)
-            return std::nullopt;
-        return definition.Shader.Asset;
     }
 
     std::vector<Keire::AssetId> DecodeAssetPayload(const std::span<const std::byte> bytes)

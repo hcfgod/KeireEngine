@@ -220,9 +220,10 @@ TEST_CASE("Shader Graph v2 lowers multi-output nodes and parameter authoring met
 
 TEST_CASE("Shader Graph compiles every output model to bounded runtime shader manifests")
 {
-    constexpr std::array outputs{Keire::ShaderGraphOutput::Surface, Keire::ShaderGraphOutput::Transparent,
-                                 Keire::ShaderGraphOutput::Decal,   Keire::ShaderGraphOutput::Unlit,
-                                 Keire::ShaderGraphOutput::Hair,    Keire::ShaderGraphOutput::Eye};
+    constexpr std::array outputs{Keire::ShaderGraphOutput::Surface,   Keire::ShaderGraphOutput::Transparent,
+                                 Keire::ShaderGraphOutput::Decal,     Keire::ShaderGraphOutput::Unlit,
+                                 Keire::ShaderGraphOutput::Hair,      Keire::ShaderGraphOutput::Eye,
+                                 Keire::ShaderGraphOutput::Fullscreen};
     for (const auto output : outputs)
     {
         const auto graph = Keire::CreateDefaultShaderGraph(output);
@@ -238,7 +239,7 @@ TEST_CASE("Shader Graph compiles every output model to bounded runtime shader ma
         else
             CHECK(compilation.Variants.front().Manifest.find("\"blend\": false") != std::string::npos);
         const auto& manifest = compilation.Variants.front().Manifest;
-        if (output == Keire::ShaderGraphOutput::Unlit)
+        if (output == Keire::ShaderGraphOutput::Unlit || output == Keire::ShaderGraphOutput::Fullscreen)
         {
             CHECK(manifest.find("\"receivesShadows\": false") != std::string::npos);
             CHECK(manifest.find("\"usesForwardPlus\": false") != std::string::npos);
@@ -252,7 +253,31 @@ TEST_CASE("Shader Graph compiles every output model to bounded runtime shader ma
         }
         if (output == Keire::ShaderGraphOutput::Hair)
             CHECK(manifest.find("\"culling\": \"None\"") != std::string::npos);
+        if (output == Keire::ShaderGraphOutput::Fullscreen)
+        {
+            CHECK(manifest.find("\"culling\": \"None\"") != std::string::npos);
+            CHECK(manifest.find("\"depthTest\": false") != std::string::npos);
+            CHECK(manifest.find("\"depthWrite\": false") != std::string::npos);
+        }
     }
+}
+
+TEST_CASE("Shader Graph creation templates map to deliberate output domains")
+{
+    const auto lit = Keire::CreateShaderGraphTemplate(Keire::ShaderGraphTemplate::Lit);
+    REQUIRE(lit.Nodes.size() == 1);
+    CHECK(lit.Output == Keire::ShaderGraphOutput::Surface);
+    CHECK(lit.Nodes.front().Name == "Lit Shader Output");
+    CHECK(Keire::CreateShaderGraphTemplate(Keire::ShaderGraphTemplate::Unlit).Output ==
+          Keire::ShaderGraphOutput::Unlit);
+    CHECK(Keire::CreateShaderGraphTemplate(Keire::ShaderGraphTemplate::Transparent).Output ==
+          Keire::ShaderGraphOutput::Transparent);
+    CHECK(Keire::CreateShaderGraphTemplate(Keire::ShaderGraphTemplate::Decal).Output ==
+          Keire::ShaderGraphOutput::Decal);
+    CHECK(Keire::CreateShaderGraphTemplate(Keire::ShaderGraphTemplate::Fullscreen).Output ==
+          Keire::ShaderGraphOutput::Fullscreen);
+    CHECK(Keire::CreateShaderGraphTemplate(Keire::ShaderGraphTemplate::Hair).Output == Keire::ShaderGraphOutput::Hair);
+    CHECK(Keire::CreateShaderGraphTemplate(Keire::ShaderGraphTemplate::Eye).Output == Keire::ShaderGraphOutput::Eye);
 }
 
 TEST_CASE("Shader Graph generated HLSL compiles through the production shader importer")

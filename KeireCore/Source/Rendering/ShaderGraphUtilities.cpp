@@ -61,7 +61,19 @@ namespace Keire
             else if (option != "false")
                 enabled.push_back(name + '_' + option);
         }
-        const auto suffix = KeywordSuffix(enabled);
+        return MakeShaderGraphVariantSubAssetKey(target, enabled);
+    }
+
+    std::string MakeShaderGraphVariantSubAssetKey(const std::string_view target,
+                                                  const std::span<const std::string> canonicalKeywords)
+    {
+        if (target.empty() || target.size() > 64 ||
+            !std::ranges::all_of(target, [](const unsigned char character)
+                                 { return std::isalnum(character) || character == '_' || character == '-'; }))
+            throw std::invalid_argument("Shader Graph target ID is invalid.");
+        if (!std::ranges::all_of(canonicalKeywords, ValidIdentifier))
+            throw std::invalid_argument("Shader Graph canonical keyword selection is invalid.");
+        const auto suffix = KeywordSuffix(canonicalKeywords);
         return target == "default" ? "shader/" + suffix : "shader/" + std::string(target) + '/' + suffix;
     }
 } // namespace Keire

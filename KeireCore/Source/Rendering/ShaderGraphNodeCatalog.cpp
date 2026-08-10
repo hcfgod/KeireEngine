@@ -13,7 +13,7 @@ namespace Keire
             static_cast<ShaderGraphShaderStage>(static_cast<std::uint8_t>(ShaderGraphShaderStage::Vertex) |
                                                 static_cast<std::uint8_t>(ShaderGraphShaderStage::Fragment));
         constexpr std::array ShaderGraphNodeDescriptors{
-            NodeDescriptor{ShaderGraphNodeKind::Master, "keire.output.material", "PBR Master", "Output",
+            NodeDescriptor{ShaderGraphNodeKind::Master, "keire.output.material", "Lit Shader Output", "Output",
                            ShaderGraphValueType::Color, ShaderGraphShaderStage::Fragment, 48, false},
             NodeDescriptor{ShaderGraphNodeKind::Parameter, "keire.input.parameter", "Parameter", "Parameters"},
             NodeDescriptor{ShaderGraphNodeKind::Constant, "keire.input.constant", "Constant", "Constants",

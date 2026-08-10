@@ -1,33 +1,70 @@
 {
-    "schemaVersion":  1,
-    "shader":  {
-                   "kind":  "graph",
-                   "asset":  "b9c5cfb8-d1f6-4bba-895a-a09feee76339",
-                   "target":  "default",
-                   "keywords":  {
-
-                                }
-               },
-    "surface":  {
-                    "alphaMode":  0,
-                    "alphaCutoff":  0.5,
-                    "doubleSided":  false
-                },
-    "bakedLighting":  {
-                          "contributeEmission":  true,
-                          "emissiveIntensity":  1
-                      },
-    "properties":  [
-                       {
-                           "id":  "a1080001-0000-4000-8000-000000000001",
-                           "name":  "SurfaceColor",
-                           "type":  4,
-                           "value":  [
-                                         0.08,
-                                         0.28,
-                                         0.34,
-                                         1.0
-                                     ]
-                       }
-                   ]
+  "schemaVersion": 2,
+  "shader": {
+    "kind": "graph",
+    "asset": "b9c5cfb8-d1f6-4bba-895a-a09feee76339",
+    "target": "default",
+    "keywords": {}
+  },
+  "surface": {
+    "alphaMode": 0,
+    "alphaCutoff": 0.5,
+    "doubleSided": false
+  },
+  "bakedLighting": {
+    "contributeEmission": true,
+    "emissiveIntensity": 1
+  },
+  "properties": [
+    {
+      "id": "a1080001-0000-4000-8000-000000000001",
+      "name": "SurfaceColor",
+      "type": 4,
+      "value": [
+        0.08,
+        0.28,
+        0.34,
+        1
+      ],
+      "pin": "2de0daaa-44a8-4365-af83-f1325ecf3e8c"
+    }
+  ],
+  "output": {
+    "node": "14f82f81-1e42-40a1-aaaa-0c14d4e4c8a5",
+    "position": [
+      620,
+      120
+    ]
+  },
+  "nodes": [
+    {
+      "id": "be1ef1b6-b458-4999-988f-76aeda40b492",
+      "name": "Surface Color",
+      "position": [
+        120,
+        120
+      ],
+      "type": 4,
+      "outputPin": "a790be76-3aa8-4480-8ff8-18d3ba6fb880",
+      "value": [
+        0.08,
+        0.28,
+        0.34,
+        1
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "b6d959ee-3711-4545-a4e8-fe07cc8e3dd6",
+      "output": {
+        "node": "be1ef1b6-b458-4999-988f-76aeda40b492",
+        "pin": "a790be76-3aa8-4480-8ff8-18d3ba6fb880"
+      },
+      "input": {
+        "node": "14f82f81-1e42-40a1-aaaa-0c14d4e4c8a5",
+        "pin": "2de0daaa-44a8-4365-af83-f1325ecf3e8c"
+      }
+    }
+  ]
 }

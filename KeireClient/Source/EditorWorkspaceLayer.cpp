@@ -15,6 +15,8 @@
 #include "KeireClient/Editor/ExternalAssetImportController.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/MaterialDocument.h"
+#include "KeireClient/Editor/MaterialGraphDocument.h"
+#include "KeireClient/Editor/MaterialGraphPanel.h"
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
 #include "KeireClient/Editor/PlayerBuildService.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
@@ -338,6 +340,18 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
               .Persist = [this](const Keire::AssetId asset, const std::span<const std::byte> bytes)
               { PersistShaderGraph(asset, bytes); },
           })),
+      m_MaterialGraphDocument(
+          std::make_unique<KeireEditor::MaterialGraphDocument>(KeireEditor::MaterialGraphDocumentSpecification{
+              .ResolveInterface = [this](const Keire::MaterialShaderReference& shader)
+              { return ResolveMaterialGraphInterface(shader); },
+              .ResolveShader = [this](const Keire::MaterialShaderReference& shader)
+              { return ResolveMaterialGraphShader(shader); },
+              .Preview = [this](const Keire::AssetId asset, const Keire::MaterialAssetDefinition& material)
+              { ApplyMaterialGraphDevelopmentRevision(asset, material); },
+              .StopPreview = [](const Keire::AssetId) {},
+              .Persist = [this](const Keire::AssetId asset, const std::span<const std::byte> bytes)
+              { PersistMaterialGraph(asset, bytes); },
+          })),
       m_ProjectSettingsDocument(std::make_unique<KeireEditor::ProjectSettingsDocument>()),
       m_MaterialDocument(std::make_unique<KeireEditor::MaterialDocument>()),
       m_CommandRouter(std::make_unique<KeireEditor::EditorCommandRouter>()),
@@ -359,6 +373,8 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
           std::make_unique<KeireEditor::VfxEffectPanel>(static_cast<KeireEditor::IVfxEffectPanelController&>(*this))),
       m_ShaderGraphPanel(std::make_unique<KeireEditor::ShaderGraphPanel>(
           static_cast<KeireEditor::IShaderGraphPanelController&>(*this))),
+      m_MaterialGraphPanel(std::make_unique<KeireEditor::MaterialGraphPanel>(
+          static_cast<KeireEditor::IMaterialGraphPanelController&>(*this))),
       m_ProjectSettingsPanel(std::make_unique<KeireEditor::ProjectSettingsPanel>(
           *m_ProjectSettingsDocument, static_cast<KeireEditor::IProjectSettingsController&>(*this))),
       m_LightingPanel(
@@ -676,6 +692,7 @@ void EditorWorkspaceLayer::OnAttach()
     m_AudioMixerPanel->Attach(workspace);
     m_VfxEffectPanel->Attach(workspace);
     m_ShaderGraphPanel->Attach(workspace);
+    m_MaterialGraphPanel->Attach(workspace);
     m_InputDebugger = workspace.RegisterPanel({"editor.input-debugger", "Input Debugger", false});
     m_ProjectSettingsPanel->Attach(workspace);
     m_LightingPanel->Attach(workspace);
@@ -905,6 +922,8 @@ void EditorWorkspaceLayer::OnDetach() noexcept
         m_VfxEffectDocument->UndoContext()->Close();
     if (m_ShaderGraphDocument->UndoContext())
         m_ShaderGraphDocument->UndoContext()->Close();
+    if (m_MaterialGraphDocument->UndoContext())
+        m_MaterialGraphDocument->UndoContext()->Close();
     if (m_SceneDocument->UndoContext())
         m_SceneDocument->UndoContext()->Close();
     if (m_ThemeUndoContext)
@@ -928,6 +947,7 @@ void EditorWorkspaceLayer::OnDetach() noexcept
     m_AudioMixerDocument->Close();
     m_VfxEffectDocument->Close();
     m_ShaderGraphDocument->Close();
+    m_MaterialGraphDocument->Close();
     m_SceneDocument->Close();
     if (m_PrefabReturnDocument)
         m_PrefabReturnDocument->Close();
@@ -1136,6 +1156,8 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
             m_ActiveUndoContext = m_VfxEffectDocument->UndoContext();
         else if (m_ShaderGraphDocument->UndoContext() && m_ShaderGraphDocument->UndoContext()->IsOpen())
             m_ActiveUndoContext = m_ShaderGraphDocument->UndoContext();
+        else if (m_MaterialGraphDocument->UndoContext() && m_MaterialGraphDocument->UndoContext()->IsOpen())
+            m_ActiveUndoContext = m_MaterialGraphDocument->UndoContext();
         else if (m_AssetBrowserPanel)
             m_ActiveUndoContext = m_AssetBrowserPanel->UndoContext();
     }
@@ -1159,8 +1181,20 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
         SaveSceneAs();
     else if (ui.Shortcut({.Key = Keire::UiKey::S, .Primary = true, .Global = true}))
     {
-        if (m_ShaderGraphDocument->Dirty() && m_ShaderGraphPanel->Registration().Visible() &&
-            m_ActiveUndoContext == m_ShaderGraphDocument->UndoContext())
+        if (m_MaterialGraphDocument->Dirty() && m_MaterialGraphPanel->Registration().Visible() &&
+            m_ActiveUndoContext == m_MaterialGraphDocument->UndoContext())
+        {
+            try
+            {
+                SaveMaterialGraph();
+            }
+            catch (const std::exception& error)
+            {
+                ReportError("Material Graph", error.what());
+            }
+        }
+        else if (m_ShaderGraphDocument->Dirty() && m_ShaderGraphPanel->Registration().Visible() &&
+                 m_ActiveUndoContext == m_ShaderGraphDocument->UndoContext())
         {
             try
             {
@@ -1316,6 +1350,7 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
         m_AudioMixerPanel->Draw(ui);
         m_VfxEffectPanel->Draw(ui);
         m_ShaderGraphPanel->Draw(ui);
+        m_MaterialGraphPanel->Draw(ui);
         DrawInputDebugger(ui);
         m_ProjectSettingsPanel->Draw(ui, m_Theme);
         m_LightingPanel->Draw(ui, m_Theme);

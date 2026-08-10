@@ -20,6 +20,7 @@
 #include <set>
 #include <stdexcept>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace Keire
@@ -35,8 +36,14 @@ namespace Keire
         constexpr std::size_t MaximumDefines = 128;
         constexpr std::size_t MaximumIncludeRoots = 16;
 
-        [[nodiscard]] AssetId ResolveShaderGraphVariantOwner(const AssetImportContext& context,
-                                                             const AssetId graphAsset)
+        struct ResolvedShaderGraphVariant final
+        {
+            AssetId Owner;
+            std::vector<std::string> Keywords;
+        };
+
+        [[nodiscard]] ResolvedShaderGraphVariant ResolveShaderGraphVariant(const AssetImportContext& context,
+                                                                           const MaterialShaderReference& reference)
         {
             if (context.ProjectRoot.empty() || context.SourceRoot.empty() || !context.ReadProjectFile ||
                 !context.ResolveAssetSource)
@@ -44,13 +51,19 @@ namespace Keire
                 throw std::invalid_argument(
                     "Shader Graph material references require source and cross-asset resolvers.");
             }
-            const auto source = context.ResolveAssetSource(graphAsset);
+            const auto source = context.ResolveAssetSource(reference.Asset);
             if (!source || source->Type != ShaderGraphAsset::StaticType())
                 throw std::runtime_error("Material references a Shader Graph that is not present in the source index.");
             const auto sourcePrefix = std::filesystem::relative(context.SourceRoot, context.ProjectRoot);
             const auto graph =
                 ShaderGraphAsset::DecodeSource(context.ReadProjectFile(sourcePrefix / source->RelativePath));
-            return graph.GeneratedAssetOwner ? graph.GeneratedAssetOwner : graphAsset;
+            ShaderGraphInstanceDefinition selection;
+            selection.Parent = reference.Asset;
+            selection.KeywordOverrides = reference.Keywords;
+            const std::array ancestry{selection};
+            auto resolved = ResolveShaderGraphInstance(graph, ancestry);
+            return {graph.GeneratedAssetOwner ? graph.GeneratedAssetOwner : reference.Asset,
+                    std::move(resolved.Keywords)};
         }
 
         template <typename Range> [[nodiscard]] std::vector<std::byte> ToBytes(const Range& values)
@@ -1376,7 +1389,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.Material";
-        result.Version = 4;
+        result.Version = 5;
         result.Type = MaterialAsset::StaticType();
         result.Extensions = {".keirematerial"};
         result.ContextualImport = [](const AssetImportContext& context, const std::span<const std::byte> bytes)
@@ -1392,9 +1405,9 @@ namespace Keire
                 if (!context.ResolveSubAssetIdFor)
                     throw std::invalid_argument(
                         "Shader Graph material references require a stable cross-asset subasset resolver.");
+                const auto variant = ResolveShaderGraphVariant(context, source.Shader);
                 definition.Shader = context.ResolveSubAssetIdFor(
-                    ResolveShaderGraphVariantOwner(context, source.Shader.Asset),
-                    MakeShaderGraphVariantSubAssetKey(source.Shader.Target, source.Shader.Keywords));
+                    variant.Owner, MakeShaderGraphVariantSubAssetKey(source.Shader.Target, variant.Keywords));
             }
             else
                 definition.Shader = source.Shader.Asset;

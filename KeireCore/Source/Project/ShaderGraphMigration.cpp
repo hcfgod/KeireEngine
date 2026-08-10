@@ -86,37 +86,42 @@ namespace Keire
             return result;
         }
 
-        [[nodiscard]] MaterialPropertyValue PropertyValue(const ShaderGraphValue& value)
-        {
-            return std::visit(
-                [](const auto& typed) -> MaterialPropertyValue
-                {
-                    using T = std::decay_t<decltype(typed)>;
-                    if constexpr (std::same_as<T, ShaderGraphMaterialAttributesValue> ||
-                                  std::same_as<T, ShaderGraphBsdfValue>)
-                        throw std::invalid_argument("Structured Shader Graph values cannot become material defaults.");
-                    else
-                        return typed;
-                },
-                value);
-        }
-
         [[nodiscard]] MaterialGraphDefinition CreateMaterialDefinition(const ShaderGraphDefinition& graph,
                                                                        const AssetId shaderGraph)
         {
-            MaterialGraphDefinition result;
-            result.Shader.Kind = MaterialShaderSourceKind::ShaderGraph;
-            result.Shader.Asset = shaderGraph;
+            MaterialShaderReference shader;
+            shader.Kind = MaterialShaderSourceKind::ShaderGraph;
+            shader.Asset = shaderGraph;
             for (const auto& keyword : graph.Keywords)
             {
                 const auto value = keyword.DefaultOption.empty()
                                        ? (keyword.Options.empty() ? std::string("false") : keyword.Options.front())
                                        : keyword.DefaultOption;
-                result.Shader.Keywords.emplace(keyword.Name, value);
+                shader.Keywords.emplace(keyword.Name, value);
             }
+            ShaderInterfaceDefinition interfaceDefinition;
             for (const auto& node : graph.Nodes)
                 if (node.Kind == ShaderGraphNodeKind::Parameter)
-                    result.Properties.push_back({node.Id, node.Symbol, PropertyValue(node.Value)});
+                {
+                    ShaderPropertyDefinition property;
+                    property.Id = node.Id;
+                    property.Name = node.Symbol;
+                    property.Type = static_cast<ShaderPropertyType>(node.ValueType);
+                    property.DefaultTexture =
+                        node.ValueType == ShaderGraphValueType::Texture2D ? std::get<AssetId>(node.Value) : AssetId{};
+                    if (const auto* scalar = std::get_if<float>(&node.Value))
+                        property.DefaultValue.X = *scalar;
+                    else if (const auto* vector2 = std::get_if<Vector2>(&node.Value))
+                        property.DefaultValue = {vector2->X, vector2->Y, 0.0F, 0.0F};
+                    else if (const auto* vector3 = std::get_if<Vector3>(&node.Value))
+                        property.DefaultValue = {vector3->X, vector3->Y, vector3->Z, 0.0F};
+                    else if (const auto* vector4 = std::get_if<Vector4>(&node.Value))
+                        property.DefaultValue = *vector4;
+                    else if (const auto* color = std::get_if<Color>(&node.Value))
+                        property.DefaultValue = {color->Red, color->Green, color->Blue, color->Alpha};
+                    interfaceDefinition.Properties.push_back(std::move(property));
+                }
+            auto result = CreateMaterialGraph(std::move(shader), interfaceDefinition);
             if (graph.Output == ShaderGraphOutput::Transparent || graph.Output == ShaderGraphOutput::Decal)
                 result.Surface.AlphaMode = MaterialAlphaMode::Blend;
             else if (graph.Output == ShaderGraphOutput::Hair)

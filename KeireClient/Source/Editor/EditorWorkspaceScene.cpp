@@ -462,6 +462,12 @@ void EditorWorkspaceLayer::ExecutePendingSceneAction()
         OpenDialog(Dialog::DirtyShaderGraph);
         return;
     }
+    if (action == PendingSceneAction::Exit && m_MaterialGraphDocument && m_MaterialGraphDocument->Dirty())
+    {
+        m_PendingSceneAction = PendingSceneAction::Exit;
+        OpenDialog(Dialog::DirtyMaterialGraph);
+        return;
+    }
     QueueSceneTransition(action, asset);
 }
 
@@ -482,6 +488,11 @@ void EditorWorkspaceLayer::RequestEditorExit()
     if (m_ShaderGraphDocument && m_ShaderGraphDocument->Dirty())
     {
         OpenDialog(Dialog::DirtyShaderGraph);
+        return;
+    }
+    if (m_MaterialGraphDocument && m_MaterialGraphDocument->Dirty())
+    {
+        OpenDialog(Dialog::DirtyMaterialGraph);
         return;
     }
     ExecutePendingSceneAction();
@@ -1094,7 +1105,7 @@ void EditorWorkspaceLayer::AssignDroppedMaterial(const Keire::EntityId entity, c
 
     auto runtimeMaterial = asset;
     if (record->Type == Keire::MaterialGraphAsset::StaticType() ||
-        record->Type == Keire::ShaderGraphAsset::StaticType() ||
+        record->Type == Keire::MaterialInstanceAsset::StaticType() ||
         record->Type == Keire::ShaderGraphInstanceAsset::StaticType())
     {
         const auto assets = Owner().Assets();
@@ -1120,7 +1131,7 @@ void EditorWorkspaceLayer::AssignDroppedMaterial(const Keire::EntityId entity, c
     }
     else if (record->Type != Keire::MaterialAsset::StaticType())
         throw std::runtime_error(
-            "Only materials, Material Graphs, Shader Graphs, and instances can be assigned to a Mesh Renderer.");
+            "Only Materials, Material Graphs, and Material Instances can be assigned to a Mesh Renderer.");
 
     std::optional<Keire::Color> materialTint;
     if (record->Type == Keire::MaterialAsset::StaticType())

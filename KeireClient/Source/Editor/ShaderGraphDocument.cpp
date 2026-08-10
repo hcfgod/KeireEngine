@@ -16,6 +16,28 @@ namespace KeireEditor
     {
         constexpr double LiveCompilationIntervalSeconds = 0.075;
 
+        [[nodiscard]] constexpr std::string_view ShaderOutputLabel(const Keire::ShaderGraphOutput output) noexcept
+        {
+            switch (output)
+            {
+            case Keire::ShaderGraphOutput::Surface:
+                return "Lit Shader Output";
+            case Keire::ShaderGraphOutput::Transparent:
+                return "Transparent Shader Output";
+            case Keire::ShaderGraphOutput::Decal:
+                return "Decal Shader Output";
+            case Keire::ShaderGraphOutput::Unlit:
+                return "Unlit Shader Output";
+            case Keire::ShaderGraphOutput::Hair:
+                return "Hair Shader Output";
+            case Keire::ShaderGraphOutput::Eye:
+                return "Eye Shader Output";
+            case Keire::ShaderGraphOutput::Fullscreen:
+                return "Fullscreen Shader Output";
+            }
+            return "Shader Output";
+        }
+
         [[nodiscard]] std::vector<std::byte> TextBytes(const std::string_view text)
         {
             std::vector<std::byte> result(text.size());
@@ -483,7 +505,7 @@ namespace KeireEditor
                         if (found == definition.Nodes.end())
                             throw std::invalid_argument("Shader Graph node is unavailable.");
                         if (found->Kind == Keire::ShaderGraphNodeKind::Master)
-                            throw std::invalid_argument("Shader Graph Master node cannot be removed.");
+                            throw std::invalid_argument("Shader Output node cannot be removed.");
                         definition.Nodes.erase(found);
                         std::erase_if(definition.Connections, [node](const auto& connection)
                                       { return connection.Output.Node == node || connection.Input.Node == node; });
@@ -562,7 +584,9 @@ namespace KeireEditor
             result.NodeIdentities.emplace_back(nodeId, source.Id);
             NodeGraphNode node;
             node.Id = nodeId;
-            node.Label = source.Name;
+            node.Label = source.Kind == Keire::ShaderGraphNodeKind::Master
+                             ? std::string(ShaderOutputLabel(m_Host.Draft().Output))
+                             : source.Name;
             node.Subtitle = NodeCategory(source.Kind);
             node.Position = source.EditorPosition;
             node.Size = {220.0F, std::max(72.0F, 42.0F + static_cast<float>(source.Pins.size()) * 20.0F)};

@@ -6,17 +6,18 @@ bakes both material authoring forms to the same immutable `MaterialAsset` consum
 
 ```text
 Raw HLSL + .keireshader ----\
-                             +--> ShaderAsset --> Material / Material Graph --> MaterialAsset --> RenderSystem
-.keireshadergraph ----------/
+                             +--> ShaderAsset --> Direct Material ----\
+.keireshadergraph --> generated ShaderAsset --> Material Graph -------+--> MaterialAsset --> RenderSystem
+                                                    Material Instance -/
 ```
 
 This boundary keeps Material Graphs as first-class material assets. Adding Shader Graph does not replace them, and the
 renderer never needs to understand either authoring graph format.
 
-Double-clicking a `.keireshadergraph` asset opens it in the Shader Graph panel. Double-clicking a
-`.keirematerialgraph` asset keeps the material binding selected in the Inspector and opens its referenced Shader Graph
-in the graph panel when the material uses one. Ordinary `.keirematerial` assets open directly in the Material
-Inspector. This keeps shader authoring and per-material authoring connected without conflating their ownership.
+Double-clicking a `.keireshadergraph` asset opens its shader logic in the Shader Graph panel. Double-clicking a
+`.keirematerialgraph` opens its own Material Graph canvas and Material Output node; it never redirects into the
+referenced Shader Graph. Ordinary `.keirematerial` and `.keirematerialinstance` assets open in the Inspector. Shader
+Graphs are not assignable to Mesh Renderers: users create a Direct Material or Material Graph that selects the shader.
 
 ## Asset Roles
 
@@ -25,18 +26,21 @@ Inspector. This keeps shader authoring and per-material authoring connected with
 | Raw shader | `.hlsl` + `.keireshader` | Expert-authored HLSL, entries, defines, render state, and exposed properties. |
 | Shader Graph | `.keireshadergraph` | Visual shader logic, exposed interface, keyword variants, generated shaders, and live preview. |
 | Direct Material | `.keirematerial` | Compact material authoring with a tagged raw-shader or Shader-Graph reference. |
-| Material Graph | `.keirematerialgraph` | Stable property bindings, textures, keywords, surface state, and a raw-shader or Shader-Graph reference. |
-| Shader Graph instance | `.keireshadergraphinstance` | Bounded inherited property and keyword overrides for a Shader Graph. |
+| Material Graph | `.keirematerialgraph` | Visual material values connected to a Material Output whose inputs reflect a raw Shader or Shader Graph. |
+| Material Instance | `.keirematerialinstance` | Lightweight property and surface overrides inherited from a Direct Material, Material Graph, or Material Instance. |
+| Legacy Shader Graph instance | `.keireshadergraphinstance` | Readable compatibility format from 0.1.x; new assets use Material Instance. |
 
-Direct Materials and Material Graphs are equally valid workflows. Both support custom shaders without exposing
-generated code, both cook to ordinary `MaterialAsset` data, and both remain assignable to Mesh Renderer slots and
-viewport drops.
+Direct Materials, Material Graphs, and Material Instances are equally valid assignment workflows. All support custom
+shaders without exposing generated code and cook to the same immutable `MaterialAsset` consumed by the renderer.
 
 ## Shader Graph Authoring
 
-Create **Shader Graph** in the Project panel and open the `.keireshadergraph` asset in the dockable editor. Nodes,
+Create **Shader Graph** in the Project panel, choose Lit/PBR, Unlit, Transparent, Decal, Fullscreen, Hair, or Eye, and
+open the resulting `NewShaderGraph.keireshadergraph` asset in the dockable editor. Nodes,
 pins, connections, and parameter properties use stable opaque identities. Validated cable replacement, bounded
 undo/redo, deterministic schema upgrades, and last-good compilation make incomplete edits recoverable.
+The header deliberately uses **Shader Target**, **Shader Output**, and **Live Shader Preview** terminology so shader
+program authoring remains visibly distinct from material-value authoring.
 
 The shared search-first node palette is available from the toolbar and the canvas context menu. Typing filters names
 and categories; Up/Down wraps through results; Enter creates at the requested canvas position. The current catalog has
@@ -49,7 +53,7 @@ Supported authoring includes:
 - UV, vertex/world/object/camera/screen inputs, time, derivatives, normal operations, and texture sampling.
 - Scalar/vector math, masks, color transforms, procedural noise, waves, dithering, and utility operations.
 - Material Attributes, Standard Surface, clear coat, sheen, subsurface, transmission, Hair, Eye, Decal, Transparent,
-  Unlit, and Surface output workflows.
+  Unlit, Fullscreen, and Surface output workflows.
 - Boolean and enumerated keywords with deterministic, bounded variant enumeration.
 - Confined custom HLSL functions beneath declared project include roots.
 
@@ -65,28 +69,37 @@ generation-checked background job, and stale completions are discarded.
 
 Saving stages generated HLSL and manifests outside the asset root, compiles through the normal shader importer, and
 transactionally replaces `Assets/Generated/ShaderGraphs/<graph-id>/`. Each keyword variant is a stable generated
-`ShaderAsset`; a default generated `MaterialAsset` remains available for direct Shader Graph assignment. DXIL,
-SPIR-V, and MSL outputs pass the same reflection and ABI validation as raw shaders.
+`ShaderAsset`. The importer retains a private default `MaterialAsset` for shader preview and backward compatibility,
+but editor material pickers and viewport drops do not expose it as a user material. DXIL, SPIR-V, and MSL outputs pass
+the same reflection and ABI validation as raw shaders.
 
 ## Materials Using Custom Shader Graphs
 
-Select either a raw Shader or Shader Graph before creating a Material or Material Graph. The created source stores a
-tagged shader reference:
+Creating a Material Graph opens an explicit shader picker in the creation dialog. Choose either a Shader Graph or raw
+Shader; that choice defines the Material Output inputs and runtime program. The created source stores a tagged shader
+reference:
 
 - `asset` selects a raw `ShaderAsset`.
 - `graph` selects a Shader Graph target and canonical keyword permutation.
 - `builtin` reserves explicit engine-provided shader contracts.
 
-The Material Inspector edits both direct Materials and Material Graphs. It exposes separate **Shader Graph** and **Raw
-Shader** pickers, resolves the selected graph variant to its generated shader, and builds property controls from that
-shader interface. Double-clicking a Material Graph focuses this Inspector workflow. Saving preserves the graph identity,
-target, keyword map, and stable Material Graph property bindings; live preview publishes only the resolved runtime
-material subasset. Legacy material schemas 1 through 3 remain readable and upgrade to the tagged schema when edited.
+The Material Inspector edits Direct Materials with separate **Shader Graph** and **Raw Shader** pickers. The Material
+Graph panel provides the visual workflow: selecting a shader rebuilds Material Output from its exposed interface,
+unconnected inputs use editable defaults, and typed scalar, vector, color, or texture value nodes can be connected to
+those inputs. Connections, node positions, surface state, and fallback values are undoable and serialized
+deterministically. Live edits publish only the resolved runtime material subasset; saving queues an isolated import and
+hot reload. Legacy material schemas 1 through 3 remain readable and upgrade when edited.
 
 Shader Graph parameters publish stable property IDs. Material Graph bindings resolve those IDs before display names,
 so a property rename retains its value. Unknown properties and type changes produce `MAT` diagnostics instead of
-silently binding unrelated data. Material Graph source is bounded to 80 properties and 16 keywords; source and cooked
-payloads are capped at 4 MiB.
+silently binding unrelated data. Schema-1 Material Graph bindings upgrade in memory to deterministic schema-2 Material
+Output pins and retain their values. Material Graph source is bounded to 80 properties, 256 value nodes, 256
+connections, and 16 keywords; source and cooked payloads are capped at 4 MiB.
+
+Material Instances never compile or duplicate shader code. Creation requires a selected Direct Material, Material
+Graph, or Material Instance parent. The Inspector presents the inherited shader interface and stores only explicit
+property or surface overrides. Import resolves at most 16 ancestors, rejects cycles, missing roots, unknown properties,
+and type changes, then publishes one stable runtime `MaterialAsset`. Resetting overrides returns to inherited values.
 
 The immutable runtime material source schema version 3 includes alpha mode, alpha cutoff, double-sided state,
 baked-emission contribution, emissive GI intensity, and validated property overrides. Opaque and masked materials
@@ -98,8 +111,8 @@ depth writes, and submit back-to-front.
 Earlier Kéire releases used `.keirematerialgraph` for shader logic. Migration extracts that logic to a sibling
 `*_Shader.keireshadergraph` and replaces the original path with a Material Graph that references it. The original
 Material Graph ID, runtime material subasset ID, and generated shader subasset IDs are retained.
-Material Graph, direct Material, and Shader Graph instance import all resolve variants through that preserved owner;
-their importer versions force stale caches to rebuild without changing those identities.
+Material Graph, Direct Material, new Material Instance, and legacy Shader Graph instance import all resolve variants
+through that preserved owner; importer versions force stale caches to rebuild without changing those identities.
 
 Inspect without writing:
 
@@ -153,7 +166,8 @@ holographic shading.
 from basic through advanced, with an active camera, lighting, and a staged gallery floor. It is the canonical Sandbox
 startup scene and the startup scene for projects created from the packaged Sandbox template.
 
-Engine tests cover deterministic encoding, graph compilation, variants, direct materials, Material Graph interface
-validation, importer output, and transactional migration. Editor tests cover graph documents, publication, live
-material documents, and custom Shader Graph references. Render tests keep generated output on the production graphics
-path rather than validating screenshots alone.
+Engine tests cover deterministic encoding, graph compilation, templates, variants, Direct Materials, visual Material
+Graph topology and schema upgrades, Material Instance ancestry, importer output, and transactional migration. Editor
+tests cover separate Shader and Material Graph documents, reflected pins, connection undo/redo, publication, and custom
+Shader Graph references. Render tests keep generated output on the production graphics path rather than validating
+screenshots alone.

@@ -104,6 +104,8 @@ namespace KeireEditor
         }
         virtual void CommitInspectorMaterial() = 0;
         virtual void OpenInspectorInputActions(Keire::AssetId asset) = 0;
+        virtual void OpenInspectorMaterialGraph(Keire::AssetId asset) = 0;
+        virtual void PersistInspectorMaterialInstance(Keire::AssetId asset, std::span<const std::byte> bytes) = 0;
         virtual void ImportInspectorAssets() = 0;
         virtual void PreviewInspectorManagedData(Keire::AssetId asset,
                                                  const Keire::ManagedDataDefinition& definition) = 0;

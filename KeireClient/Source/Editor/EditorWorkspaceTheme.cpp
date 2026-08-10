@@ -326,6 +326,7 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
             DrawPanelMenuItem(ui, m_AudioMixerPanel->Registration());
             DrawPanelMenuItem(ui, m_VfxEffectPanel->Registration());
             DrawPanelMenuItem(ui, m_ShaderGraphPanel->Registration());
+            DrawPanelMenuItem(ui, m_MaterialGraphPanel->Registration());
             DrawPanelMenuItem(ui, m_InputDebugger);
             DrawPanelMenuItem(ui, m_ProjectSettingsPanel->Registration());
             DrawPanelMenuItem(ui, m_LightingPanel->Registration());
@@ -501,6 +502,9 @@ void EditorWorkspaceLayer::OpenPendingDialog(Keire::UiFrame& ui)
     case Dialog::DirtyShaderGraph:
         ui.OpenPopup("Unsaved Shader Graph Changes");
         break;
+    case Dialog::DirtyMaterialGraph:
+        ui.OpenPopup("Unsaved Material Graph Changes");
+        break;
     case Dialog::DirtyPlayerBuild:
         ui.OpenPopup("Unsaved Player Build State");
         break;
@@ -525,6 +529,7 @@ void EditorWorkspaceLayer::DrawDialogs(Keire::UiFrame& ui, Keire::UiWorkspace& w
     DrawDirtyThemeDialog(ui, workspace);
     DrawDirtySceneDialog(ui);
     DrawDirtyShaderGraphDialog(ui);
+    DrawDirtyMaterialGraphDialog(ui);
     DrawDirtyPlayerBuildDialog(ui);
 }
 
@@ -769,6 +774,46 @@ void EditorWorkspaceLayer::DrawDirtyShaderGraphDialog(Keire::UiFrame& ui)
         }
         ui.TextColored(m_Theme.MutedText,
                        "Save publishes the graph source and its generated runtime shader variants atomically.");
+    }
+}
+
+void EditorWorkspaceLayer::DrawDirtyMaterialGraphDialog(Keire::UiFrame& ui)
+{
+    if (auto popup = ui.BeginPopupModal("Unsaved Material Graph Changes"); popup)
+    {
+        ui.Text("Save the open Material Graph before closing the editor?");
+        if (ui.Button("Save"))
+        {
+            try
+            {
+                SaveMaterialGraph();
+                if (!m_MaterialGraphDocument->Dirty())
+                {
+                    ui.CloseCurrentPopup();
+                    ExecutePendingSceneAction();
+                }
+            }
+            catch (const std::exception& error)
+            {
+                ReportError("Material Graph", error.what());
+            }
+        }
+        ui.SameLine();
+        if (ui.Button("Discard"))
+        {
+            m_MaterialGraphDocument->Discard();
+            ui.CloseCurrentPopup();
+            ExecutePendingSceneAction();
+        }
+        ui.SameLine();
+        if (ui.Button("Cancel"))
+        {
+            m_PendingSceneAction = PendingSceneAction::None;
+            m_Dialog = Dialog::None;
+            ui.CloseCurrentPopup();
+        }
+        ui.TextColored(m_Theme.MutedText,
+                       "Save updates the Material Graph source and queues its runtime material for rebuild.");
     }
 }
 

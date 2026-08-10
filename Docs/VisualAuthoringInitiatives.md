@@ -13,7 +13,7 @@ same immutable shader/material runtime boundary and remain independently authora
 | Initiative | Current validated baseline | First decision |
 | --- | --- | --- |
 | VFX parity | 278 frozen Unity 6.3 rows, 245 enabled Kéire-equivalent rows, 33 disabled rows, and 240 runtime descriptors | Deliver the remaining event/behavior and renderer-specific rows by production slice; never enable a catalog row without runtime, test, documentation, and scenario evidence. |
-| Shader Graph | 103 stable node types, six output models, generated DXIL/SPIR-V/MSL, tagged Material and Material Graph integration, live previews, and transactional publication | Complete sampler/resource breadth, node previews, and enforceable performance gates before expanding specialized shading models. |
+| Shader Graph | 103 stable node types, seven output models, generated DXIL/SPIR-V/MSL, tagged Direct Material and Material Graph integration, live previews, and transactional publication | Complete sampler/resource breadth, node previews, and enforceable performance gates before expanding specialized shading models. |
 
 The VFX first-major-milestone target is 50 enabled parity rows. The next portable expansion targets 120 additional rows
 above the validated 125-row baseline. The checked-in ledger closes all 120, for 245 total. This satisfies both
@@ -44,9 +44,9 @@ runtime mappings, and enabled implementations that do not belong to a tested pro
 | SG-003 | Assign generated shaders through ordinary materials | Shipped | Complete | Direct Materials and Material Graphs store tagged raw-Shader or Shader-Graph references and import to ordinary `MaterialAsset` data; Mesh Renderer assignment uses the normal renderer boundary. |
 | SG-004 | Searchable, organized node library | Shipped | Complete | The catalog exposes 103 stable type IDs grouped by authoring category and the panel filters names and categories. |
 | SG-005 | Right-click creation and keyboard-first palette navigation | Shipped | Complete | The top-bar chooser and canvas-positioned right-click menu share focused live search, wrapping keyboard selection, Enter-to-create, recent/common entries, category browsing, and click-position placement. |
-| SG-006 | Exposed scalars, vectors, colors, and textures | Shipped | Complete | Typed parameters include metadata, ranges, step, category, stable symbols, texture semantics, and material-instance overrides. |
+| SG-006 | Exposed scalars, vectors, colors, and textures | Shipped | Complete | Typed parameters include metadata, ranges, step, category, stable symbols, texture semantics, reflected Material Output pins, and Material Instance overrides. |
 | SG-007 | Explicit samplers and broader resource types | Partial | P0 | Texture2D sampling, level sampling, and triplanar sampling ship; sampler-state authoring, arrays, cubes, 3D textures, and buffers remain designed work. |
-| SG-008 | Math, UV, normal, lighting, attributes, BSDF, and output nodes | Shipped | Complete | The catalog includes scalar/vector math, coordinate and derivative nodes, procedural tools, layered attributes, five BSDF operations, and six output models. |
+| SG-008 | Math, UV, normal, lighting, attributes, BSDF, and output nodes | Shipped | Complete | The catalog includes scalar/vector math, coordinate and derivative nodes, procedural tools, layered attributes, five BSDF operations, and seven output models including Fullscreen. |
 | SG-009 | Live material and mesh preview | Shipped | Complete | Last-good asynchronous sphere, plane, cube, and custom-mesh previews expose environment and exposure controls. |
 | SG-010 | Per-node previews | Partial | P1 | Built-in nodes are evaluated by the preview renderer, but persistent per-node preview tiles and selective preview compilation are not exposed. |
 | SG-011 | Graph-, node-, pin-, and generated-line diagnostics | Shipped | Complete | Validation and compilation diagnostics carry stable `MG` codes, node/pin IDs, and generated line metadata while last-good output remains active. |

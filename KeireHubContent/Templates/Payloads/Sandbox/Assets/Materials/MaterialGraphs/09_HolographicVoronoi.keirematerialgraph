@@ -1,23 +1,28 @@
 {
-    "schemaVersion":  1,
-    "shader":  {
-                   "kind":  "graph",
-                   "asset":  "21f2fa1e-f71f-4bb1-904d-e4b7be1cb335",
-                   "target":  "default",
-                   "keywords":  {
-
-                                }
-               },
-    "surface":  {
-                    "alphaMode":  0,
-                    "alphaCutoff":  0.5,
-                    "doubleSided":  false
-                },
-    "bakedLighting":  {
-                          "contributeEmission":  true,
-                          "emissiveIntensity":  1
-                      },
-    "properties":  [
-
-                   ]
+  "schemaVersion": 2,
+  "shader": {
+    "kind": "graph",
+    "asset": "21f2fa1e-f71f-4bb1-904d-e4b7be1cb335",
+    "target": "default",
+    "keywords": {}
+  },
+  "surface": {
+    "alphaMode": 0,
+    "alphaCutoff": 0.5,
+    "doubleSided": false
+  },
+  "bakedLighting": {
+    "contributeEmission": true,
+    "emissiveIntensity": 1
+  },
+  "properties": [],
+  "output": {
+    "node": "f423c1f1-b127-4678-a434-4fff45d7c7a3",
+    "position": [
+      620,
+      120
+    ]
+  },
+  "nodes": [],
+  "connections": []
 }

@@ -1,44 +1,109 @@
 {
-    "schemaVersion":  1,
-    "shader":  {
-                   "kind":  "graph",
-                   "asset":  "9fcc97ee-2251-4f7d-94a2-881ca0a4acac",
-                   "target":  "default",
-                   "keywords":  {
-
-                                }
-               },
-    "surface":  {
-                    "alphaMode":  0,
-                    "alphaCutoff":  0.5,
-                    "doubleSided":  false
-                },
-    "bakedLighting":  {
-                          "contributeEmission":  true,
-                          "emissiveIntensity":  1
-                      },
-    "properties":  [
-                       {
-                           "id":  "a1030001-0000-4000-8000-000000000001",
-                           "name":  "BaseColor",
-                           "type":  4,
-                           "value":  [
-                                         0.025,
-                                         0.05,
-                                         0.095,
-                                         1.0
-                                     ]
-                       },
-                       {
-                           "id":  "a1030002-0000-4000-8000-000000000001",
-                           "name":  "EnergyColor",
-                           "type":  4,
-                           "value":  [
-                                         0.02,
-                                         1.35,
-                                         3.5,
-                                         1.0
-                                     ]
-                       }
-                   ]
+  "schemaVersion": 2,
+  "shader": {
+    "kind": "graph",
+    "asset": "9fcc97ee-2251-4f7d-94a2-881ca0a4acac",
+    "target": "default",
+    "keywords": {}
+  },
+  "surface": {
+    "alphaMode": 0,
+    "alphaCutoff": 0.5,
+    "doubleSided": false
+  },
+  "bakedLighting": {
+    "contributeEmission": true,
+    "emissiveIntensity": 1
+  },
+  "properties": [
+    {
+      "id": "a1030001-0000-4000-8000-000000000001",
+      "name": "BaseColor",
+      "type": 4,
+      "value": [
+        0.025,
+        0.05,
+        0.095,
+        1
+      ],
+      "pin": "386e4bd4-b618-406d-b0a2-c74196c73e29"
+    },
+    {
+      "id": "a1030002-0000-4000-8000-000000000001",
+      "name": "EnergyColor",
+      "type": 4,
+      "value": [
+        0.02,
+        1.35,
+        3.5,
+        1
+      ],
+      "pin": "33221813-f3cd-4eb7-b14a-7cb721048283"
+    }
+  ],
+  "output": {
+    "node": "61c480a4-a1fd-4aac-94ba-2b074edd7b2d",
+    "position": [
+      620,
+      120
+    ]
+  },
+  "nodes": [
+    {
+      "id": "d0a4b406-edac-4887-b022-0e41143a0016",
+      "name": "Deep Navy",
+      "position": [
+        120,
+        120
+      ],
+      "type": 4,
+      "outputPin": "eab511c5-86a5-4f10-a10b-938997f9d7fe",
+      "value": [
+        0.025,
+        0.05,
+        0.095,
+        1
+      ]
+    },
+    {
+      "id": "d8b21adc-b78c-4499-80d8-16342734c54d",
+      "name": "Energy Color",
+      "position": [
+        120,
+        216
+      ],
+      "type": 4,
+      "outputPin": "29880ca8-7362-4bae-ae06-f64067f41fc7",
+      "value": [
+        0.02,
+        1.35,
+        3.5,
+        1
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "7be5c93a-0d6d-487b-aab9-405cc811d55e",
+      "output": {
+        "node": "d0a4b406-edac-4887-b022-0e41143a0016",
+        "pin": "eab511c5-86a5-4f10-a10b-938997f9d7fe"
+      },
+      "input": {
+        "node": "61c480a4-a1fd-4aac-94ba-2b074edd7b2d",
+        "pin": "386e4bd4-b618-406d-b0a2-c74196c73e29"
+      }
+    },
+    {
+      "id": "d8fac8d2-dc96-4e85-8f9b-aebd73c37ae7",
+      "output": {
+        "node": "d8b21adc-b78c-4499-80d8-16342734c54d",
+        "pin": "29880ca8-7362-4bae-ae06-f64067f41fc7"
+      },
+      "input": {
+        "node": "61c480a4-a1fd-4aac-94ba-2b074edd7b2d",
+        "pin": "33221813-f3cd-4eb7-b14a-7cb721048283"
+      }
+    }
+  ]
 }

@@ -1,50 +1,140 @@
 {
-    "schemaVersion":  1,
-    "shader":  {
-                   "kind":  "graph",
-                   "asset":  "b6a25e04-5d40-49ad-baea-af928cb5f986",
-                   "target":  "default",
-                   "keywords":  {
-                                    "EMISSIVE_MODE":  "true"
-                                }
-               },
-    "surface":  {
-                    "alphaMode":  0,
-                    "alphaCutoff":  0.5,
-                    "doubleSided":  false
-                },
-    "bakedLighting":  {
-                          "contributeEmission":  true,
-                          "emissiveIntensity":  1
-                      },
-    "properties":  [
-                       {
-                           "id":  "a1050001-0000-4000-8000-000000000001",
-                           "name":  "TechTexture",
-                           "type":  5,
-                           "value":  "c0ffee00-0000-4000-8000-000000000002"
-                       },
-                       {
-                           "id":  "a1050002-0000-4000-8000-000000000001",
-                           "name":  "ArmorTint",
-                           "type":  4,
-                           "value":  [
-                                         0.025,
-                                         0.06,
-                                         0.11,
-                                         1.0
-                                     ]
-                       },
-                       {
-                           "id":  "a1050003-0000-4000-8000-000000000001",
-                           "name":  "CircuitEmission",
-                           "type":  4,
-                           "value":  [
-                                         0.0,
-                                         3.5,
-                                         7.5,
-                                         1.0
-                                     ]
-                       }
-                   ]
+  "schemaVersion": 2,
+  "shader": {
+    "kind": "graph",
+    "asset": "b6a25e04-5d40-49ad-baea-af928cb5f986",
+    "target": "default",
+    "keywords": {
+      "EMISSIVE_MODE": "true"
+    }
+  },
+  "surface": {
+    "alphaMode": 0,
+    "alphaCutoff": 0.5,
+    "doubleSided": false
+  },
+  "bakedLighting": {
+    "contributeEmission": true,
+    "emissiveIntensity": 1
+  },
+  "properties": [
+    {
+      "id": "a1050001-0000-4000-8000-000000000001",
+      "name": "TechTexture",
+      "type": 5,
+      "value": "c0ffee00-0000-4000-8000-000000000002",
+      "pin": "795f278a-3a9d-4c43-8aa2-35e3dc29ff60"
+    },
+    {
+      "id": "a1050002-0000-4000-8000-000000000001",
+      "name": "ArmorTint",
+      "type": 4,
+      "value": [
+        0.025,
+        0.06,
+        0.11,
+        1
+      ],
+      "pin": "573eaaed-353e-484b-a7c0-3e3e552e1adc"
+    },
+    {
+      "id": "a1050003-0000-4000-8000-000000000001",
+      "name": "CircuitEmission",
+      "type": 4,
+      "value": [
+        0,
+        3.5,
+        7.5,
+        1
+      ],
+      "pin": "0767a0a3-3092-4b52-99be-bcf39e7f2a91"
+    }
+  ],
+  "output": {
+    "node": "893c24b2-d8b9-4e3f-a04f-73c057c9c079",
+    "position": [
+      620,
+      120
+    ]
+  },
+  "nodes": [
+    {
+      "id": "df4c66d6-3758-4d03-8262-2a3aae66f164",
+      "name": "Tech Texture",
+      "position": [
+        120,
+        120
+      ],
+      "type": 5,
+      "outputPin": "e785b691-2477-4ae4-8838-cb96b2d592b1",
+      "value": "c0ffee00-0000-4000-8000-000000000002"
+    },
+    {
+      "id": "55f68533-2060-440b-84ce-e827bfb2bd79",
+      "name": "Armor Tint",
+      "position": [
+        120,
+        216
+      ],
+      "type": 4,
+      "outputPin": "c6a0a8b3-6dde-40e0-a541-a967786b222c",
+      "value": [
+        0.025,
+        0.06,
+        0.11,
+        1
+      ]
+    },
+    {
+      "id": "01fd8532-13fb-4012-9ed4-d3ac398ac2f3",
+      "name": "Circuit Emission",
+      "position": [
+        120,
+        312
+      ],
+      "type": 4,
+      "outputPin": "6a637ae7-29d1-46fd-ade9-b5e3dc808450",
+      "value": [
+        0,
+        3.5,
+        7.5,
+        1
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "2f2117f4-af9c-4bf3-8122-8fc638199f7b",
+      "output": {
+        "node": "df4c66d6-3758-4d03-8262-2a3aae66f164",
+        "pin": "e785b691-2477-4ae4-8838-cb96b2d592b1"
+      },
+      "input": {
+        "node": "893c24b2-d8b9-4e3f-a04f-73c057c9c079",
+        "pin": "795f278a-3a9d-4c43-8aa2-35e3dc29ff60"
+      }
+    },
+    {
+      "id": "0f25401c-a671-437b-aae1-39d9adf28681",
+      "output": {
+        "node": "55f68533-2060-440b-84ce-e827bfb2bd79",
+        "pin": "c6a0a8b3-6dde-40e0-a541-a967786b222c"
+      },
+      "input": {
+        "node": "893c24b2-d8b9-4e3f-a04f-73c057c9c079",
+        "pin": "573eaaed-353e-484b-a7c0-3e3e552e1adc"
+      }
+    },
+    {
+      "id": "d2dd7fdc-62a9-42a2-882f-cf751a3b711e",
+      "output": {
+        "node": "01fd8532-13fb-4012-9ed4-d3ac398ac2f3",
+        "pin": "6a637ae7-29d1-46fd-ade9-b5e3dc808450"
+      },
+      "input": {
+        "node": "893c24b2-d8b9-4e3f-a04f-73c057c9c079",
+        "pin": "0767a0a3-3092-4b52-99be-bcf39e7f2a91"
+      }
+    }
+  ]
 }

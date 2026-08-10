@@ -655,12 +655,12 @@ The retained tree owns layout, focus, hit testing, clipping, batching metadata, 
 adapts its draw commands to the SDL_GPU-backed application UI pass; managed code reaches the presentation runtime only
 through Coral internal calls and `IScriptRuntimeServices`, never through native pointers.
 
-Editor material authoring is split between `MaterialDocument`, which owns a selected direct Material or Material Graph,
-its asset/path, draft and committed source snapshots, tagged raw-Shader or Shader-Graph reference, resolved runtime
-shader, stable graph bindings, dirty lifecycle, and validation, and `MaterialInspectorPanel`, which maps that state onto
-the engine-owned property editor interface. Material file
-snapshots enter the project-assets undo context;
-the workspace layer composes the panel while `MaterialDocument` and the asset-operation service coordinate persistence.
+Editor material authoring has three deliberate workflows. `MaterialDocument` and `MaterialInspectorPanel` own compact
+Direct Material editing. `MaterialGraphDocument` and `MaterialGraphPanel` own the separate visual graph, reflected
+Material Output pins, typed value nodes, connections, diagnostics, preview, dirty lifecycle, and bounded undo/redo.
+`MaterialInstanceAsset` stores only inherited property and surface overrides and is edited through the Inspector. All
+three preserve a tagged raw-Shader or Shader-Graph reference behind the same runtime material boundary. Material file
+snapshots enter the project-assets undo context; the workspace and asset-operation service coordinate persistence.
 Continuous numeric/color edits update a development-only in-memory asset revision for immediate rendering and share a
 property-scoped undo command until the UI edit boundary. The final serialized source is written once and its catalog
 refresh runs in the background. Startup mounts a current development catalog directly; stale non-startup sources are
@@ -693,11 +693,13 @@ after the staged directory is live. Any source-publication failure restores the 
 preserving the original exception. The asset scanner ignores engine atomic-write temporaries and editor backups, so a
 concurrent scan cannot assign identities to files that will disappear at commit. A successful save then queues a
 targeted import of the parent graph, every generated shader/material subasset, and dependent loaded assets. Runtime
-`MaterialGraphAsset` and `MaterialGraphInstanceAsset` remain immutable
-data; instance resolution starts from graph defaults before applying bounded ancestry overrides and does not introduce
-mutable renderer-global material state. Instance import resolves source-indexed graph/instance ancestry and publishes
-its own stable ordinary `MaterialAsset` subasset referencing the root graph's deterministic shader variant; editor
-pickers and viewport drops alias the authoring instance to that renderer-safe identity.
+`MaterialGraphAsset` and `MaterialInstanceAsset` remain immutable data. Material Graph evaluation starts from reflected
+output defaults and applies typed visual connections. Material Instance resolution starts from a Direct Material or
+Material Graph root before applying at most 16 ancestors; it rejects cycles, unknown properties, and type changes
+without introducing mutable renderer-global state. Instance import publishes its own stable ordinary `MaterialAsset`
+subasset referencing the inherited shader variant; editor pickers and viewport drops alias the authoring instance to
+that renderer-safe identity. Legacy `ShaderGraphInstanceAsset` remains registered for 0.1.x project compatibility but
+is not offered for new creation.
 Catalog-producing editor work is isolated in the private `KeireAssetWorker` executable. `AssetOperationService` owns
 one child at a time, prioritizes external imports and explicit actions ahead of cook and coalesced material refreshes,
 and exchanges versioned request/progress/result documents under `Library/AssetOperations/<operation-id>`. A worker
@@ -753,13 +755,14 @@ the same transactional catalog as the parent. Model materials and embedded textu
 extraction reimports the model in the isolated asset worker, transactionally creates editable source assets, and only
 then publishes the replacement development catalog and source index.
 
-Shader Graph import uses the same generated-subasset boundary: each keyword variant becomes a compiled `ShaderAsset`
-and a default `MaterialAsset` is published for direct assignment. Material Graph and direct Material sources sit above
-that interface. They store a tagged built-in, raw-Shader, or Shader-Graph reference plus property, keyword, surface, and
-baked-lighting state, then import to an ordinary immutable `MaterialAsset`. Editor assignment resolves every
-user-facing material source to that runtime identity before writing scene data, so `RenderSystem` continues to consume
-only its material/shader asset contract. Shader generation, material binding, reload, dependency closure, and cooking
-remain asset transactions without teaching Mesh Renderer components about authoring graph types.
+Shader Graph import uses the same generated-subasset boundary: each keyword variant becomes a compiled `ShaderAsset`.
+Its default `MaterialAsset` is an internal preview and legacy-compatibility artifact, not a user-facing assignable
+material. Direct Material, Material Graph, and Material Instance sources sit above the shader interface. They store
+tagged shader references plus property, keyword, surface, and baked-lighting state, then import to an ordinary immutable
+`MaterialAsset`. Editor assignment resolves only those user-facing material sources to the runtime identity before
+writing scene data, so `RenderSystem` continues to consume only its material/shader asset contract. Shader generation,
+material binding, reload, dependency closure, and cooking remain asset transactions without teaching Mesh Renderer
+components about authoring graph types.
 
 Shader properties carry optional stable IDs. Material Graph resolves a binding by stable ID before its display name,
 which preserves values through source-level renames and reports unknown or type-incompatible bindings explicitly. Raw

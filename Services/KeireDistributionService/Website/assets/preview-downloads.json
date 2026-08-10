@@ -3,6 +3,21 @@
   "packages": [
     {
       "type": "hubInstallerPreview",
+      "releaseId": "windows-x86_64-0.2.0-20260810.183335",
+      "version": "0.2.0",
+      "editorVersion": "0.2.0",
+      "publishedAt": "2026-08-10T18:33:35Z",
+      "platform": "windows",
+      "architecture": "x86_64",
+      "fileName": "keire-hub-windows-x86_64-0.2.0-preview-97a76b1c.exe",
+      "url": "/preview-downloads/keire-hub-windows-x86_64-0.2.0-preview-97a76b1c.exe",
+      "sizeBytes": 55686855,
+      "sha256": "97a76b1c5d8bdf12338eafa262eaceaece52eb81648728463618f044a6ea05e0",
+      "signed": false,
+      "developmentArtifact": true
+    },
+    {
+      "type": "hubInstallerPreview",
       "releaseId": "windows-x86_64-0.1.0-20260809.4",
       "version": "0.1.0",
       "editorVersion": "0.1.0",

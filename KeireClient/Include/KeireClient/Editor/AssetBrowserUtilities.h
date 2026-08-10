@@ -4,7 +4,6 @@
 
 #include <cstdint>
 #include <filesystem>
-#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -20,6 +19,7 @@ namespace KeireEditor
         VfxEffect,
         Material,
         MaterialGraph,
+        MaterialInstance,
         ShaderGraph,
         Scene,
         Prefab
@@ -29,8 +29,6 @@ namespace KeireEditor
     [[nodiscard]] bool SameOrChild(const std::filesystem::path& parent, const std::filesystem::path& candidate);
     [[nodiscard]] std::string AssetTypeName(const Keire::AssetSourceRecord& record);
     [[nodiscard]] AssetBrowserOpenAction ResolveAssetBrowserOpenAction(const std::filesystem::path& path) noexcept;
-    [[nodiscard]] std::optional<Keire::AssetId>
-    ResolveMaterialGraphEditorTarget(const Keire::MaterialGraphDefinition& definition) noexcept;
     [[nodiscard]] std::vector<Keire::AssetId> DecodeAssetPayload(std::span<const std::byte> bytes);
     [[nodiscard]] std::string EncodeAssetPayload(std::span<const Keire::AssetId> assets);
 } // namespace KeireEditor

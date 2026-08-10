@@ -108,7 +108,7 @@
       "compatibleEditors": ">=0.2.0 <2.0.0",
       "projectSchema": 3,
       "platformTarget": "desktop",
-      "estimatedSizeBytes": 24626369,
+      "estimatedSizeBytes": 24635811,
       "payloadRoot": "Payloads/Sandbox",
       "payloadFiles": [
         {
@@ -178,8 +178,8 @@
         },
         {
           "path": "Assets/Materials/MaterialGraphs/01_BasicPaint.keirematerialgraph",
-          "sizeBytes": 1434,
-          "sha256": "4c5be8b8c3d23f396c7df2b74ab454885b209d396520393665c2df0ac5ce27fb"
+          "sizeBytes": 2208,
+          "sha256": "b1a737b44ebf1c95e6c2f3c4a73299ed63a739a60d4ec8fa55eb32844c716a8d"
         },
         {
           "path": "Assets/Materials/MaterialGraphs/01_BasicPaint.keirematerialgraph.keiremeta",
@@ -198,8 +198,8 @@
         },
         {
           "path": "Assets/Materials/MaterialGraphs/02_TexturedSurface.keirematerialgraph",
-          "sizeBytes": 1770,
-          "sha256": "d9094f600d0183170392fcbf105b9cf3889bb3dbe9865027ba3398d2322aedf6"
+          "sizeBytes": 3706,
+          "sha256": "168c91382a1ff33e829fb2b85a7fcaac0bc5b374986270e52c877aaa001ad9b1"
         },
         {
           "path": "Assets/Materials/MaterialGraphs/02_TexturedSurface.keirematerialgraph.keiremeta",
@@ -218,8 +218,8 @@
         },
         {
           "path": "Assets/Materials/MaterialGraphs/03_ProceduralEmissive.keirematerialgraph",
-          "sizeBytes": 1632,
-          "sha256": "f3b6ec92db16846c74e78c7ad07c93f73fcd22f60646d08e34e3d3e5e1073487"
+          "sizeBytes": 2271,
+          "sha256": "baab743cb7c76d6cef022caa6c2c1d5fcfad5a4b2acb72dc3d3ea5d62046c738"
         },
         {
           "path": "Assets/Materials/MaterialGraphs/03_ProceduralEmissive.keirematerialgraph.keiremeta",
@@ -238,8 +238,8 @@
         },
         {
           "path": "Assets/Materials/MaterialGraphs/04_ClearCoatDetail.keirematerialgraph",
-          "sizeBytes": 1737,
-          "sha256": "1f5559a8fee406d197ce7a96a28220eb3b355064760c88d3d4029d9f52f43ad0"
+          "sizeBytes": 3067,
+          "sha256": "53a5936d4523e840706c0c315ab0ee2eb370665683e4cef1a669f64877a9f763"
         },
         {
           "path": "Assets/Materials/MaterialGraphs/04_ClearCoatDetail.keirematerialgraph.keiremeta",
@@ -258,8 +258,8 @@
         },
         {
           "path": "Assets/Materials/MaterialGraphs/05_AdaptiveTechSurface.keirematerialgraph",
-          "sizeBytes": 1990,
-          "sha256": "d8f6b6f241300fb1985a8f895cf8e6c2a9bfbe53b815a6d2dec9502372dad3fe"
+          "sizeBytes": 3139,
+          "sha256": "e9066437560c79fbe4cd8ac957bd8741db67f648ddb1c98b999bfd0c172866d4"
         },
         {
           "path": "Assets/Materials/MaterialGraphs/05_AdaptiveTechSurface.keirematerialgraph.keiremeta",
@@ -278,8 +278,8 @@
         },
         {
           "path": "Assets/Materials/MaterialGraphs/06_AnisotropicBrushedMetal.keirematerialgraph",
-          "sizeBytes": 1403,
-          "sha256": "276093105de83a4e83e1a333630d0db25fec0c6bb9475e8416e5c4c9c0dee63f"
+          "sizeBytes": 2158,
+          "sha256": "5bfe7f01b210f14e6d6ac0759ea737686ba0b118d4faae2ef5fd68c8da7631e7"
         },
         {
           "path": "Assets/Materials/MaterialGraphs/06_AnisotropicBrushedMetal.keirematerialgraph.keiremeta",
@@ -298,8 +298,8 @@
         },
         {
           "path": "Assets/Materials/MaterialGraphs/07_TransmissionGlass.keirematerialgraph",
-          "sizeBytes": 2454,
-          "sha256": "55d126ae7104744c91beadb2db302696bcb9ccfce19bb3d1c5d63e0c4974038c"
+          "sizeBytes": 5209,
+          "sha256": "3c65d6fbbebe956752a4d05dd158cc00a925dae570e6364bbb2231f3f34ade95"
         },
         {
           "path": "Assets/Materials/MaterialGraphs/07_TransmissionGlass.keirematerialgraph.keiremeta",
@@ -318,8 +318,8 @@
         },
         {
           "path": "Assets/Materials/MaterialGraphs/08_ProceduralVertexDisplacement.keirematerialgraph",
-          "sizeBytes": 1144,
-          "sha256": "049bb76f4e40ab1c6d92f6bf25e405c6316bfe012fe2590ac451c8e39ad503fa"
+          "sizeBytes": 1396,
+          "sha256": "15923dbb6058c4adf91a77a582d9d1e329af2290a1dd362a9ef61063300ff4f5"
         },
         {
           "path": "Assets/Materials/MaterialGraphs/08_ProceduralVertexDisplacement.keirematerialgraph.keiremeta",
@@ -338,8 +338,8 @@
         },
         {
           "path": "Assets/Materials/MaterialGraphs/09_HolographicVoronoi.keirematerialgraph",
-          "sizeBytes": 656,
-          "sha256": "78101d365d91ac0fc11bc0f1405ef8060f0dbf560d2a9612fedf27d4e0e19923"
+          "sizeBytes": 508,
+          "sha256": "f1bc0c373a3b3245a1579063dbb27bd45d3cc53530eab356c45d2ea74b4d1859"
         },
         {
           "path": "Assets/Materials/MaterialGraphs/09_HolographicVoronoi.keirematerialgraph.keiremeta",

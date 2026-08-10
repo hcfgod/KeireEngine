@@ -23,23 +23,7 @@ namespace KeireEditor
 
     void MaterialDocument::Open(const std::span<const std::byte> source, const ShaderReferenceResolver& resolveShader)
     {
-        m_MaterialGraphDefinition.reset();
         OpenDefinition(Keire::MaterialAsset::DecodeAuthoringSource(source), resolveShader);
-    }
-
-    void MaterialDocument::OpenMaterialGraph(const std::span<const std::byte> source,
-                                             const ShaderReferenceResolver& resolveShader)
-    {
-        auto graph = Keire::MaterialGraphAsset::DecodeSource(source);
-        Keire::MaterialAuthoringDefinition authoring;
-        authoring.Shader = graph.Shader;
-        authoring.Surface = graph.Surface;
-        authoring.ContributeEmissionToGI = graph.ContributeEmissionToGI;
-        authoring.EmissiveGIIntensity = graph.EmissiveGIIntensity;
-        for (const auto& binding : graph.Properties)
-            authoring.Properties.emplace(binding.Name, binding.Value);
-        m_MaterialGraphDefinition = std::move(graph);
-        OpenDefinition(std::move(authoring), resolveShader);
     }
 
     void MaterialDocument::OpenDefinition(Keire::MaterialAuthoringDefinition authoring,
@@ -48,25 +32,6 @@ namespace KeireEditor
         auto resolved = authoring.Shader.Asset ? resolveShader(authoring.Shader) : std::optional<ResolvedShader>{};
         if (authoring.Shader.Asset && !resolved)
             throw std::invalid_argument("The selected material shader source could not be resolved.");
-        if (m_MaterialGraphDefinition && resolved)
-        {
-            authoring.Properties.clear();
-            for (const auto& binding : m_MaterialGraphDefinition->Properties)
-            {
-                auto property = resolved->Definition.Properties.end();
-                if (binding.Property)
-                    property = std::ranges::find(resolved->Definition.Properties, binding.Property,
-                                                 &Keire::ShaderPropertyDefinition::Id);
-                if (property == resolved->Definition.Properties.end())
-                    property = std::ranges::find(resolved->Definition.Properties, binding.Name,
-                                                 &Keire::ShaderPropertyDefinition::Name);
-                if (property == resolved->Definition.Properties.end())
-                    throw std::invalid_argument("Material Graph property is not exposed by its selected shader: " +
-                                                binding.Name);
-                authoring.Properties.emplace(property->Name, binding.Value);
-            }
-        }
-
         Keire::MaterialAssetDefinition runtime;
         runtime.SchemaVersion = 3;
         runtime.Shader = resolved ? resolved->RuntimeAsset : Keire::AssetId{};
@@ -93,18 +58,6 @@ namespace KeireEditor
                                      const ShaderReferenceResolver& resolveShader)
     {
         Open(source, resolveShader);
-        m_Asset = asset;
-        m_SourcePath = std::move(sourcePath);
-        m_DraftSource.assign(source.begin(), source.end());
-        m_BaselineSource = m_DraftSource;
-        m_Dirty = false;
-    }
-
-    void MaterialDocument::OpenMaterialGraphAsset(const Keire::AssetId asset, std::filesystem::path sourcePath,
-                                                  const std::span<const std::byte> source,
-                                                  const ShaderReferenceResolver& resolveShader)
-    {
-        OpenMaterialGraph(source, resolveShader);
         m_Asset = asset;
         m_SourcePath = std::move(sourcePath);
         m_DraftSource.assign(source.begin(), source.end());
@@ -148,9 +101,6 @@ namespace KeireEditor
         m_AuthoringDefinition.Shader = std::move(shader);
         m_Definition.Shader = resolved ? resolved->RuntimeAsset : Keire::AssetId{};
         m_Definition.Properties = m_AuthoringDefinition.Properties;
-        if (m_MaterialGraphDefinition)
-            m_MaterialGraphDefinition->Shader = m_AuthoringDefinition.Shader;
-        SynchronizeMaterialGraphBindings();
         m_LastChangedProperty = "$shader";
         SetResolvedShader(resolved ? std::optional(std::move(resolved->Definition)) : std::nullopt);
         return true;
@@ -180,7 +130,6 @@ namespace KeireEditor
         Keire::ValidateMaterialAgainstShader(replacement, *m_ShaderDefinition);
         m_Definition = std::move(replacement);
         m_AuthoringDefinition.Properties.insert_or_assign(std::string(property), std::move(value));
-        SynchronizeMaterialGraphBindings();
         m_LastChangedProperty = property;
         return true;
     }
@@ -194,8 +143,6 @@ namespace KeireEditor
             return false;
         m_Definition.Surface = surface;
         m_AuthoringDefinition.Surface = surface;
-        if (m_MaterialGraphDefinition)
-            m_MaterialGraphDefinition->Surface = surface;
         m_LastChangedProperty = "$surface";
         return true;
     }
@@ -245,8 +192,6 @@ namespace KeireEditor
 
     std::vector<std::byte> MaterialDocument::SaveSource() const
     {
-        if (m_MaterialGraphDefinition)
-            return Keire::MaterialGraphAsset::EncodeSource(*m_MaterialGraphDefinition);
         return Keire::MaterialAsset::EncodeAuthoringSource(m_AuthoringDefinition);
     }
 
@@ -319,35 +264,6 @@ namespace KeireEditor
         };
     }
 
-    void MaterialDocument::SynchronizeMaterialGraphBindings()
-    {
-        if (!m_MaterialGraphDefinition)
-            return;
-        for (const auto& [name, value] : m_AuthoringDefinition.Properties)
-        {
-            Keire::AssetId propertyId;
-            if (m_ShaderDefinition)
-            {
-                const auto declared =
-                    std::ranges::find(m_ShaderDefinition->Properties, name, &Keire::ShaderPropertyDefinition::Name);
-                if (declared != m_ShaderDefinition->Properties.end())
-                    propertyId = declared->Id;
-            }
-            const auto binding = std::ranges::find(m_MaterialGraphDefinition->Properties, name,
-                                                   &Keire::MaterialGraphPropertyBinding::Name);
-            if (binding != m_MaterialGraphDefinition->Properties.end())
-            {
-                binding->Value = value;
-                if (propertyId)
-                    binding->Property = propertyId;
-                continue;
-            }
-            m_MaterialGraphDefinition->Properties.push_back({propertyId, name, value});
-        }
-        std::erase_if(m_MaterialGraphDefinition->Properties, [&](const Keire::MaterialGraphPropertyBinding& binding)
-                      { return !m_AuthoringDefinition.Properties.contains(binding.Name); });
-    }
-
     void MaterialDocument::SetResolvedShader(std::optional<Keire::ShaderAssetDefinition> definition)
     {
         m_ShaderDefinition = std::move(definition);
@@ -373,6 +289,5 @@ namespace KeireEditor
                              [](const Keire::ShaderPropertyDefinition& property)
                              { return property.Type == Keire::ShaderPropertyType::Texture2D; });
         m_AuthoringDefinition.Properties = m_Definition.Properties;
-        SynchronizeMaterialGraphBindings();
     }
 } // namespace KeireEditor

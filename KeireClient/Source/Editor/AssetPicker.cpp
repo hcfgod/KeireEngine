@@ -118,9 +118,11 @@ namespace
                 auto type = options.ResolveType(subAsset);
                 if (!type || !AcceptsCandidate(record, subAsset, *type, options))
                     continue;
+                if (record.Type == Keire::ShaderGraphAsset::StaticType() && *type == Keire::MaterialAsset::StaticType())
+                    continue;
                 auto label = record.RelativePath.generic_string() + " / " + GeneratedAssetLabel(*type);
                 const auto materialSource = record.Type == Keire::MaterialGraphAsset::StaticType() ||
-                                            record.Type == Keire::ShaderGraphAsset::StaticType() ||
+                                            record.Type == Keire::MaterialInstanceAsset::StaticType() ||
                                             record.Type == Keire::ShaderGraphInstanceAsset::StaticType();
                 const auto dropAlias =
                     materialSource && *type == Keire::MaterialAsset::StaticType() ? record.Id : Keire::AssetId{};

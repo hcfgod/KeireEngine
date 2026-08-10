@@ -1,8 +1,8 @@
 #include "KeireClient/Editor/EditorPanels.h"
 
 #include "KeireClient/Editor/AssetPicker.h"
-#include "KeireClient/Editor/AuthoringWidgets.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
+#include "KeireClient/Editor/InspectorPropertyEditor.h"
 #include "KeireClient/Editor/ManagedDataInspectorPanel.h"
 #include "KeireClient/Editor/MaterialDocument.h"
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
@@ -189,292 +189,6 @@ namespace
         return result;
     }
 
-    class InspectorPropertyEditor final : public KeireEditor::IPropertyEditor
-    {
-      public:
-        InspectorPropertyEditor(Keire::UiFrame& ui, const std::span<const Keire::AssetSourceRecord> assets,
-                                const Keire::Ref<Keire::AssetSystem>& assetSystem,
-                                const Keire::Ref<Keire::Scene>& scene, KeireEditor::AssetPicker& assetPicker)
-            : m_Ui(ui), m_Assets(assets), m_AssetSystem(assetSystem), m_Scene(scene), m_AssetPicker(assetPicker)
-        {
-        }
-
-        [[nodiscard]] bool EditBoundary() const noexcept { return m_EditBoundary; }
-
-        bool EditBoolean(const std::string_view label, bool& value) override
-        {
-            return Track(m_Ui.Checkbox(label, value));
-        }
-
-        bool EditInteger(const std::string_view label, std::int64_t& value, const double step,
-                         const std::optional<double> minimum, const std::optional<double> maximum) override
-        {
-            const auto lower =
-                minimum ? std::optional<std::int64_t>(static_cast<std::int64_t>(*minimum)) : std::nullopt;
-            const auto upper =
-                maximum ? std::optional<std::int64_t>(static_cast<std::int64_t>(*maximum)) : std::nullopt;
-            return Track(m_Ui.DragInteger(label, value, step, lower, upper));
-        }
-
-        bool EditChoice(const std::string_view label, std::int64_t& value,
-                        const std::span<const std::string_view> choices) override
-        {
-            const auto preview = value >= 0 && static_cast<std::size_t>(value) < choices.size()
-                                     ? choices[static_cast<std::size_t>(value)]
-                                     : std::string_view("Invalid");
-            bool changed = false;
-            if (auto combo = m_Ui.BeginCombo(label, preview); combo)
-            {
-                for (std::size_t index = 0; index < choices.size(); ++index)
-                {
-                    if (m_Ui.Selectable(choices[index], value == static_cast<std::int64_t>(index)))
-                    {
-                        value = static_cast<std::int64_t>(index);
-                        changed = true;
-                    }
-                }
-            }
-            return Track(changed);
-        }
-
-        bool EditScalar(const std::string_view label, double& value, const double step,
-                        const std::optional<double> minimum, const std::optional<double> maximum) override
-        {
-            return Track(m_Ui.DragScalar(label, value, step, minimum, maximum));
-        }
-
-        bool EditText(const std::string_view label, std::string& value) override
-        {
-            return Track(m_Ui.InputText(label, value));
-        }
-        bool EditVector2(const std::string_view label, Keire::Vector2& value, const double step) override
-        {
-            return Track(m_Ui.DragVector2(label, value, static_cast<float>(step)));
-        }
-        bool EditVector3(const std::string_view label, Keire::Vector3& value, const double step) override
-        {
-            return Track(m_Ui.DragVector3(label, value, static_cast<float>(step)));
-        }
-        bool EditVector4(const std::string_view label, Keire::Vector4& value, const double step) override
-        {
-            return Track(m_Ui.DragVector4(label, value, static_cast<float>(step)));
-        }
-        bool EditQuaternion(const std::string_view label, Keire::Quaternion& value, const double step) override
-        {
-            return Track(m_Ui.DragQuaternion(label, value, static_cast<float>(step)));
-        }
-        bool EditColor(const std::string_view label, Keire::Color& value) override
-        {
-            Keire::UiColor color{value.Red, value.Green, value.Blue, value.Alpha};
-            const bool changed = m_Ui.ColorEdit(label, color);
-            (void)Track(changed);
-            if (!changed)
-                return false;
-            value = {color.Red, color.Green, color.Blue, color.Alpha};
-            return true;
-        }
-        bool EditCurve(const std::string_view label, Keire::Curve1D& value) override
-        {
-            return Track(KeireEditor::AuthoringValueEditors::Curve(m_Ui, label, value));
-        }
-        bool EditGradient(const std::string_view label, Keire::ColorGradient& value) override
-        {
-            return Track(KeireEditor::AuthoringValueEditors::Gradient(m_Ui, label, value));
-        }
-        bool EditAsset(const std::string_view label, Keire::AssetId& value,
-                       const std::optional<Keire::AssetTypeId> expectedType) override
-        {
-            KeireEditor::AssetPickerOptions options;
-            options.Label = label;
-            options.ExpectedType = expectedType;
-            if (m_AssetSystem)
-                options.ResolveType = [assets = m_AssetSystem](const Keire::AssetId id)
-                { return assets->TryGetType(id); };
-            const bool changed = m_AssetPicker.Draw(m_Ui, m_Assets, value, options);
-            if (changed)
-                m_EditBoundary = true;
-            return Track(changed);
-        }
-        bool EditTextureAsset(const std::string_view label, Keire::AssetId& value,
-                              const Keire::ShaderTextureSemantic semantic) override
-        {
-            KeireEditor::AssetPickerOptions options;
-            options.Label = label;
-            options.ExpectedType = Keire::Texture2DAsset::StaticType();
-            options.Filter = [semantic](const Keire::AssetSourceRecord& record)
-            { return KeireEditor::MaterialInspectorPanel::AcceptsTexture(record, semantic); };
-            const bool changed = m_AssetPicker.Draw(m_Ui, m_Assets, value, options);
-            if (changed)
-                m_EditBoundary = true;
-            return changed;
-        }
-        bool EditEntity(const std::string_view label, Keire::EntityId& value) override
-        {
-            const auto selected = m_Scene ? m_Scene->FindEntity(value) : Keire::Entity{};
-            const auto preview = selected ? selected.Name() : (value ? "Missing entity" : "None");
-            bool changed = false;
-            if (auto combo = m_Ui.BeginCombo(label, preview); combo)
-            {
-                if (m_Ui.Selectable("None", !value))
-                {
-                    value = {};
-                    changed = true;
-                }
-                if (m_Scene)
-                {
-                    for (const auto& entity : SceneEntities())
-                    {
-                        if (m_Ui.Selectable(entity.Name(), entity.Id() == value))
-                        {
-                            value = entity.Id();
-                            changed = true;
-                        }
-                    }
-                }
-            }
-            return changed;
-        }
-
-        bool EditEvent(const std::string_view label, Keire::ComponentEventValue& value,
-                       const std::size_t argumentCount) override
-        {
-            if (!m_Scene)
-                return false;
-            const auto registry = m_Scene->Components();
-            auto eventId = m_Ui.PushId(label);
-            bool changed = false;
-            m_Ui.Text(label);
-            m_Ui.TextColored({0.48F, 0.55F, 0.64F, 1.0F},
-                             std::to_string(value.Listeners.size()) +
-                                 (value.Listeners.size() == 1 ? " persistent listener" : " persistent listeners"));
-
-            for (std::size_t index = 0; index < value.Listeners.size(); ++index)
-            {
-                auto& listener = value.Listeners[index];
-                const auto listenerId = std::to_string(index);
-                auto id = m_Ui.PushId(listenerId);
-                changed |= m_Ui.Checkbox("Enabled", listener.Enabled);
-
-                auto target = m_Scene->FindEntity(listener.Target);
-                const auto targetPreview = target ? target.Name() : std::string("None");
-                if (auto combo = m_Ui.BeginCombo("Target", targetPreview); combo)
-                {
-                    if (m_Ui.Selectable("None", !listener.Target))
-                    {
-                        listener.Target = {};
-                        listener.Component = {};
-                        listener.Method.clear();
-                        changed = true;
-                    }
-                    for (const auto& entity : SceneEntities())
-                    {
-                        if (m_Ui.Selectable(entity.Name(), entity.Id() == listener.Target))
-                        {
-                            listener.Target = entity.Id();
-                            listener.Component = {};
-                            listener.Method.clear();
-                            changed = true;
-                        }
-                    }
-                }
-
-                target = m_Scene->FindEntity(listener.Target);
-                std::optional<Keire::ComponentRegistration> selectedRegistration;
-                if (listener.Component)
-                    selectedRegistration = registry->Find(listener.Component);
-                const auto componentPreview = selectedRegistration ? selectedRegistration->Name : std::string("None");
-                if (auto combo = m_Ui.BeginCombo("Component", componentPreview); combo)
-                {
-                    if (m_Ui.Selectable("None", !listener.Component))
-                    {
-                        listener.Component = {};
-                        listener.Method.clear();
-                        changed = true;
-                    }
-                    if (target)
-                    {
-                        for (const auto& component : target.GetComponents())
-                        {
-                            const auto registration = registry->Find(component->Type());
-                            if (!registration || !registration->Methods ||
-                                std::ranges::none_of(*registration->Methods, [argumentCount](const auto& method)
-                                                     { return method.ParameterTypes.size() == argumentCount; }))
-                            {
-                                continue;
-                            }
-                            if (m_Ui.Selectable(registration->Name, component->Type() == listener.Component))
-                            {
-                                listener.Component = component->Type();
-                                listener.Method.clear();
-                                changed = true;
-                            }
-                        }
-                    }
-                }
-
-                selectedRegistration = listener.Component ? registry->Find(listener.Component) : std::nullopt;
-                const auto methodPreview = listener.Method.empty() ? std::string("No Function") : listener.Method;
-                if (auto combo = m_Ui.BeginCombo("Function", methodPreview); combo)
-                {
-                    if (m_Ui.Selectable("No Function", listener.Method.empty()))
-                    {
-                        listener.Method.clear();
-                        changed = true;
-                    }
-                    if (selectedRegistration && selectedRegistration->Methods)
-                    {
-                        for (const auto& method : *selectedRegistration->Methods)
-                        {
-                            if (method.ParameterTypes.size() != argumentCount)
-                                continue;
-                            if (m_Ui.Selectable(method.DisplayName, method.Name == listener.Method))
-                            {
-                                listener.Method = method.Name;
-                                changed = true;
-                            }
-                        }
-                    }
-                }
-
-                if (m_Ui.Button("Remove Listener"))
-                {
-                    value.Listeners.erase(value.Listeners.begin() + static_cast<std::ptrdiff_t>(index));
-                    return true;
-                }
-                m_Ui.Separator();
-            }
-
-            if (m_Ui.Button("Add Listener"))
-            {
-                value.Listeners.emplace_back();
-                changed = true;
-            }
-            return changed;
-        }
-
-      private:
-        const std::vector<Keire::Entity>& SceneEntities()
-        {
-            if (!m_EntityCache)
-                m_EntityCache = m_Scene ? m_Scene->Entities() : std::vector<Keire::Entity>{};
-            return *m_EntityCache;
-        }
-
-        bool Track(const bool changed)
-        {
-            const auto state = m_Ui.LastItemState();
-            m_EditBoundary = m_EditBoundary || state.DeactivatedAfterEdit || (changed && !state.Active);
-            return changed;
-        }
-
-        Keire::UiFrame& m_Ui;
-        std::span<const Keire::AssetSourceRecord> m_Assets;
-        Keire::Ref<Keire::AssetSystem> m_AssetSystem;
-        Keire::Ref<Keire::Scene> m_Scene;
-        KeireEditor::AssetPicker& m_AssetPicker;
-        std::optional<std::vector<Keire::Entity>> m_EntityCache;
-        bool m_EditBoundary = false;
-    };
 } // namespace
 
 KeireEditor::InspectorPanel::InspectorPanel(IInspectorController& controller)
@@ -1508,13 +1222,120 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
         if (!assetStatus.empty())
             ui.TextColored(theme.MutedText, assetStatus);
     }
-    else if (record->RelativePath.extension() == ".keirematerial" ||
-             record->RelativePath.extension() == ".keirematerialgraph")
+    else if (record->RelativePath.extension() == ".keirematerialinstance")
     {
-        const bool materialGraph = record->RelativePath.extension() == ".keirematerialgraph";
         ui.Separator();
-        ui.TextColored(theme.Accent, materialGraph ? "MATERIAL GRAPH" : "MATERIAL");
-        ui.Text(materialGraph ? "Stable shader property bindings" : "Shader-driven texture assignments");
+        ui.TextColored(theme.Accent, "MATERIAL INSTANCE");
+        ui.Text("Lightweight overrides inherited from a Material, Material Graph, or Material Instance.");
+        try
+        {
+            const auto sourceRoot = database->Specification().ProjectRoot / database->Specification().SourceDirectory;
+            const auto sourcePath = sourceRoot / record->RelativePath;
+            auto instance = Keire::MaterialInstanceAsset::DecodeSource(ReadBytes(sourcePath));
+            const auto parentRecord = database->Find(instance.Parent);
+            if (!parentRecord || !assets)
+                throw std::runtime_error("The Material Instance parent is unavailable.");
+            auto runtimeMaterial = instance.Parent;
+            if (parentRecord->Type != Keire::MaterialAsset::StaticType())
+            {
+                const auto runtime =
+                    std::ranges::find_if(parentRecord->SubAssets,
+                                         [&](const Keire::AssetId candidate)
+                                         {
+                                             const auto type = assets->TryGetType(candidate);
+                                             return type && *type == Keire::MaterialAsset::StaticType();
+                                         });
+                if (runtime == parentRecord->SubAssets.end())
+                    throw std::runtime_error("The parent runtime material has not been imported yet.");
+                runtimeMaterial = *runtime;
+            }
+            const auto parent =
+                assets->Load<Keire::MaterialAsset>(runtimeMaterial, Keire::AssetPriority::High).TryGetLoaded();
+            if (!parent)
+                throw std::runtime_error("The parent runtime material is still loading.");
+            const auto shader =
+                assets->Load<Keire::ShaderAsset>(parent->Definition().Shader, Keire::AssetPriority::High)
+                    .TryGetLoaded();
+            if (!shader)
+                throw std::runtime_error("The inherited shader interface is still loading.");
+
+            ui.TextColored(theme.MutedText, "Parent");
+            ui.Text(parentRecord->RelativePath.generic_string());
+            Keire::MaterialAuthoringDefinition authoring;
+            authoring.Shader.Asset = parent->Definition().Shader;
+            authoring.Surface = instance.Surface.value_or(parent->Definition().Surface);
+            authoring.ContributeEmissionToGI =
+                instance.ContributeEmissionToGI.value_or(parent->Definition().ContributeEmissionToGI);
+            authoring.EmissiveGIIntensity =
+                instance.EmissiveGIIntensity.value_or(parent->Definition().EmissiveGIIntensity);
+            authoring.Properties = parent->Definition().Properties;
+            for (const auto& [name, value] : instance.Properties)
+                authoring.Properties.insert_or_assign(name, value);
+            KeireEditor::MaterialDocument editorDocument;
+            editorDocument.Open(Keire::MaterialAsset::EncodeAuthoringSource(authoring),
+                                [&](const Keire::AssetId candidate) -> std::optional<Keire::ShaderAssetDefinition>
+                                {
+                                    return candidate == parent->Definition().Shader
+                                               ? std::optional(shader->Definition())
+                                               : std::nullopt;
+                                });
+            InspectorPropertyEditor propertyEditor(ui, records, assets, scene, *m_AssetPicker);
+            if (KeireEditor::MaterialInspectorPanel{}.Draw(propertyEditor, editorDocument))
+            {
+                const auto changed = editorDocument.LastChangedProperty();
+                if (changed == "$surface")
+                    instance.Surface = editorDocument.Surface();
+                else if (!changed.empty())
+                    instance.Properties.insert_or_assign(std::string(changed), editorDocument.Property(changed));
+                m_Controller.PersistInspectorMaterialInstance(record->Id,
+                                                              Keire::MaterialInstanceAsset::EncodeSource(instance));
+            }
+            ui.TextColored(theme.MutedText, std::to_string(instance.Properties.size()) +
+                                                " explicit property override(s). Shader code is never duplicated.");
+            if (!instance.Properties.empty() && ui.Button("Reset All Property Overrides"))
+            {
+                instance.Properties.clear();
+                m_Controller.PersistInspectorMaterialInstance(record->Id,
+                                                              Keire::MaterialInstanceAsset::EncodeSource(instance));
+            }
+            ui.SameLine();
+            if (ui.Button("Reimport Material Instance"))
+                m_Controller.ImportInspectorAssets();
+        }
+        catch (const std::exception& error)
+        {
+            ui.TextColored(theme.Error, std::string("Material Instance editor unavailable: ") + error.what());
+        }
+    }
+    else if (record->RelativePath.extension() == ".keirematerialgraph")
+    {
+        ui.Separator();
+        ui.TextColored(theme.Accent, "MATERIAL GRAPH");
+        ui.Text("Visual material authoring with a reflected shader interface and Material Output node.");
+        ui.TextColored(theme.MutedText,
+                       "Shader code remains owned by its Shader Graph or raw Shader; this asset stores material data.");
+        if (ui.Button("Open Material Graph"))
+        {
+            try
+            {
+                m_Controller.OpenInspectorMaterialGraph(record->Id);
+            }
+            catch (const std::exception& error)
+            {
+                m_Controller.ReportInspectorAssetError(std::string("Material Graph editor failed to open: ") +
+                                                       error.what());
+            }
+        }
+        ui.SameLine();
+        if (ui.Button("Reimport Material Graph"))
+            m_Controller.ImportInspectorAssets();
+        ui.TextColored(theme.MutedText, "Double-clicking this asset opens its own Material Graph document.");
+    }
+    else if (record->RelativePath.extension() == ".keirematerial")
+    {
+        ui.Separator();
+        ui.TextColored(theme.Accent, "MATERIAL");
+        ui.Text("Inspector-based material authoring with shader-driven properties.");
         try
         {
             const auto sourceRoot = database->Specification().ProjectRoot / database->Specification().SourceDirectory;
@@ -1570,13 +1391,8 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
             {
                 m_Controller.CommitInspectorMaterial();
                 const auto source = ReadBytes(sourcePath);
-                if (materialGraph)
-                    materialDocument.OpenMaterialGraphAsset(record->Id, sourcePath, source, resolveShader);
-                else
-                    materialDocument.OpenAsset(record->Id, sourcePath, source, resolveShader);
+                materialDocument.OpenAsset(record->Id, sourcePath, source, resolveShader);
             }
-            else if (materialGraph)
-                materialDocument.OpenMaterialGraph(materialDocument.DraftSource(), resolveShader);
             else
                 materialDocument.Open(materialDocument.DraftSource(), resolveShader);
             auto& document = materialDocument;
@@ -1613,15 +1429,10 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
             if (changed)
             {
                 document.CaptureDraft();
-                if (assets && (!materialGraph || !record->SubAssets.empty()))
-                {
-                    const auto runtimeMaterial =
-                        materialGraph && !record->SubAssets.empty() ? record->SubAssets.back() : record->Id;
+                if (assets)
                     (void)assets->PublishDevelopmentAsset(
-                        runtimeMaterial, Keire::CreateRef<Keire::MaterialAsset>(document.Definition()));
-                }
-                m_Controller.SetInspectorAssetStatus(materialGraph ? "Previewing Material Graph changes live."
-                                                                   : "Previewing material changes live.");
+                        record->Id, Keire::CreateRef<Keire::MaterialAsset>(document.Definition()));
+                m_Controller.SetInspectorAssetStatus("Previewing material changes live.");
             }
             if (editor.EditBoundary())
                 m_Controller.CommitInspectorMaterial();
@@ -1633,7 +1444,7 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
             ui.TextColored(theme.Error, std::string("Material editor unavailable: ") + error.what());
         }
         ui.TextColored(theme.MutedText, "Invalid shaders resolve to the error material at runtime.");
-        if (ui.Button(materialGraph ? "Reimport Material Graph" : "Reimport Material"))
+        if (ui.Button("Reimport Material"))
         {
             m_Controller.CommitInspectorMaterial();
             m_Controller.ImportInspectorAssets();

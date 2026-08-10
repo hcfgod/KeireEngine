@@ -1,45 +1,128 @@
 {
-    "schemaVersion":  1,
-    "shader":  {
-                   "kind":  "graph",
-                   "asset":  "5f8b0439-2fca-41a6-b487-a4946557006e",
-                   "target":  "default",
-                   "keywords":  {
-
-                                }
-               },
-    "surface":  {
-                    "alphaMode":  0,
-                    "alphaCutoff":  0.5,
-                    "doubleSided":  false
-                },
-    "bakedLighting":  {
-                          "contributeEmission":  true,
-                          "emissiveIntensity":  1
-                      },
-    "properties":  [
-                       {
-                           "id":  "a1040001-0000-4000-8000-000000000001",
-                           "name":  "BaseTexture",
-                           "type":  5,
-                           "value":  "c0ffee00-0000-4000-8000-000000000002"
-                       },
-                       {
-                           "id":  "a1040002-0000-4000-8000-000000000001",
-                           "name":  "NormalTexture",
-                           "type":  5,
-                           "value":  "0a8ba309-c28a-4842-8949-09ff8c60a1fa"
-                       },
-                       {
-                           "id":  "a104000b-0000-4000-8000-000000000001",
-                           "name":  "SheenColor",
-                           "type":  4,
-                           "value":  [
-                                         0.06,
-                                         0.18,
-                                         0.3,
-                                         1.0
-                                     ]
-                       }
-                   ]
+  "schemaVersion": 2,
+  "shader": {
+    "kind": "graph",
+    "asset": "5f8b0439-2fca-41a6-b487-a4946557006e",
+    "target": "default",
+    "keywords": {}
+  },
+  "surface": {
+    "alphaMode": 0,
+    "alphaCutoff": 0.5,
+    "doubleSided": false
+  },
+  "bakedLighting": {
+    "contributeEmission": true,
+    "emissiveIntensity": 1
+  },
+  "properties": [
+    {
+      "id": "a1040001-0000-4000-8000-000000000001",
+      "name": "BaseTexture",
+      "type": 5,
+      "value": "c0ffee00-0000-4000-8000-000000000002",
+      "pin": "00e0dbd5-2471-4393-9e41-8a7d3e6e0706"
+    },
+    {
+      "id": "a1040002-0000-4000-8000-000000000001",
+      "name": "NormalTexture",
+      "type": 5,
+      "value": "0a8ba309-c28a-4842-8949-09ff8c60a1fa",
+      "pin": "d0b773b1-9862-4054-88fc-ae279a69e246"
+    },
+    {
+      "id": "a104000b-0000-4000-8000-000000000001",
+      "name": "SheenColor",
+      "type": 4,
+      "value": [
+        0.06,
+        0.18,
+        0.3,
+        1
+      ],
+      "pin": "48c5d766-5071-41f7-a315-0691dbeb6452"
+    }
+  ],
+  "output": {
+    "node": "d4658bcd-d35a-4597-8642-ec12f29bebc9",
+    "position": [
+      620,
+      120
+    ]
+  },
+  "nodes": [
+    {
+      "id": "2d1478c0-598d-4d13-b25f-c41ec2fe86f3",
+      "name": "Slate Inlay",
+      "position": [
+        120,
+        120
+      ],
+      "type": 5,
+      "outputPin": "e433c479-a5fa-4bb8-8949-5a4fd8f0baf1",
+      "value": "c0ffee00-0000-4000-8000-000000000002"
+    },
+    {
+      "id": "9ac12f60-8fba-47d4-8285-034107c2a75b",
+      "name": "Detail Normal Texture",
+      "position": [
+        120,
+        216
+      ],
+      "type": 5,
+      "outputPin": "bc2cf3a8-3790-49cb-ba12-49ba31f2b641",
+      "value": "0a8ba309-c28a-4842-8949-09ff8c60a1fa"
+    },
+    {
+      "id": "b2bf447d-0c12-4877-852d-59d162c7aa0d",
+      "name": "Edge Sheen",
+      "position": [
+        120,
+        312
+      ],
+      "type": 4,
+      "outputPin": "0b843778-5bd0-430e-9ed1-ee960d299cdf",
+      "value": [
+        0.06,
+        0.18,
+        0.3,
+        1
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "1a62a76e-816f-47c3-88e6-ac36cbdb19f8",
+      "output": {
+        "node": "2d1478c0-598d-4d13-b25f-c41ec2fe86f3",
+        "pin": "e433c479-a5fa-4bb8-8949-5a4fd8f0baf1"
+      },
+      "input": {
+        "node": "d4658bcd-d35a-4597-8642-ec12f29bebc9",
+        "pin": "00e0dbd5-2471-4393-9e41-8a7d3e6e0706"
+      }
+    },
+    {
+      "id": "ae2347e6-83ad-4004-917a-f034a7cdf4f1",
+      "output": {
+        "node": "9ac12f60-8fba-47d4-8285-034107c2a75b",
+        "pin": "bc2cf3a8-3790-49cb-ba12-49ba31f2b641"
+      },
+      "input": {
+        "node": "d4658bcd-d35a-4597-8642-ec12f29bebc9",
+        "pin": "d0b773b1-9862-4054-88fc-ae279a69e246"
+      }
+    },
+    {
+      "id": "a29a941b-d518-4187-b1fb-1b09d33bd117",
+      "output": {
+        "node": "b2bf447d-0c12-4877-852d-59d162c7aa0d",
+        "pin": "0b843778-5bd0-430e-9ed1-ee960d299cdf"
+      },
+      "input": {
+        "node": "d4658bcd-d35a-4597-8642-ec12f29bebc9",
+        "pin": "48c5d766-5071-41f7-a315-0691dbeb6452"
+      }
+    }
+  ]
 }

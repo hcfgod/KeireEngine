@@ -825,7 +825,7 @@ namespace KeireEditor
             ApplyBadge(result, width, height, "MG");
             return result;
         }
-        if (type == Keire::ShaderGraphInstanceAsset::StaticType())
+        if (type == Keire::MaterialInstanceAsset::StaticType() || type == Keire::ShaderGraphInstanceAsset::StaticType())
         {
             auto result = MakeIcon(width, height, {43, 33, 47}, {196, 111, 212}, 'M', missing);
             ApplyBadge(result, width, height, "MI");
@@ -863,6 +863,7 @@ namespace KeireEditor
         }
         else if (source.Type == Keire::MaterialGraphAsset::StaticType() ||
                  source.Type == Keire::ShaderGraphAsset::StaticType() ||
+                 source.Type == Keire::MaterialInstanceAsset::StaticType() ||
                  source.Type == Keire::ShaderGraphInstanceAsset::StaticType())
         {
             const auto preview = std::ranges::find_if(source.SubAssets,
@@ -1068,6 +1069,9 @@ namespace KeireEditor
         RegisterProvider(".keirematerialgraph", 1,
                          [](const ThumbnailRequest& request, const auto width, const auto height)
                          { return MakeShaderGraphPreview(request, width, height, "MG"); });
+        RegisterProvider(".keirematerialinstance", 1,
+                         [](const ThumbnailRequest& request, const auto width, const auto height)
+                         { return MakeShaderGraphPreview(request, width, height, "MI"); });
         RegisterProvider(".keireshadergraphinstance", 1,
                          [](const ThumbnailRequest& request, const auto width, const auto height)
                          { return MakeShaderGraphPreview(request, width, height, "MI"); });

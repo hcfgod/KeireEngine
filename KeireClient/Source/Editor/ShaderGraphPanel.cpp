@@ -67,9 +67,10 @@ namespace KeireEditor
 
         constexpr std::array PreviewNames{std::string_view("Sphere"), std::string_view("Plane"),
                                           std::string_view("Cube"), std::string_view("Custom Mesh")};
-        constexpr std::array OutputNames{std::string_view("Surface PBR"), std::string_view("Transparent PBR"),
-                                         std::string_view("Decal PBR"),   std::string_view("Unlit"),
-                                         std::string_view("Hair PBR"),    std::string_view("Eye PBR")};
+        constexpr std::array OutputNames{std::string_view("Lit Surface"),  std::string_view("Transparent Surface"),
+                                         std::string_view("Decal"),        std::string_view("Unlit Surface"),
+                                         std::string_view("Hair Surface"), std::string_view("Eye Surface"),
+                                         std::string_view("Fullscreen")};
         constexpr std::array TextureSemanticNames{
             std::string_view("Generic"),   std::string_view("Base Color"),
             std::string_view("Normal"),    std::string_view("Metallic / Roughness"),
@@ -109,7 +110,7 @@ namespace KeireEditor
             auto master =
                 std::ranges::find(definition.Nodes, Keire::ShaderGraphNodeKind::Master, &Keire::ShaderGraphNode::Kind);
             if (master == definition.Nodes.end())
-                throw std::invalid_argument("Shader Graph Master node is unavailable.");
+                throw std::invalid_argument("Shader Output node is unavailable.");
             auto replacement = Keire::CreateDefaultShaderGraph(output).Nodes.front();
             replacement.Id = master->Id;
             replacement.EditorPosition = master->EditorPosition;
@@ -297,7 +298,7 @@ namespace KeireEditor
 
         auto output = document.Definition().Output;
         auto outputIndex = static_cast<std::size_t>(output);
-        if (auto combo = ui.BeginCombo("Material Output", OutputNames[outputIndex]); combo)
+        if (auto combo = ui.BeginCombo("Shader Target", OutputNames[outputIndex]); combo)
             for (std::size_t index = 0; index < OutputNames.size(); ++index)
                 if (ui.Selectable(OutputNames[index], index == outputIndex))
                     try
@@ -348,7 +349,7 @@ namespace KeireEditor
             m_PreviewRender = {};
             m_PreviewRenderState.reset();
         }
-        ui.TextColored(theme.Accent, "LIVE MATERIAL PREVIEW");
+        ui.TextColored(theme.Accent, "LIVE SHADER PREVIEW");
         auto preview = m_Controller.ShaderGraphState().PreviewSettings();
         bool previewChanged = false;
         previewChanged |= ui.SliderFloat("Exposure", preview.Exposure, 0.1F, 4.0F);
