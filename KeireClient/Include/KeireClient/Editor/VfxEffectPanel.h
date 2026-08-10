@@ -101,7 +101,9 @@ namespace KeireEditor
         Keire::AssetId m_ContextConnection;
         Keire::Vector2 m_NodePalettePosition;
         std::string m_NodePaletteSearch;
+        NodeMenuSelection m_NodeMenuSelection;
         std::string m_Message;
         bool m_WasVisible = false;
+        bool m_NodePaletteMenuOpen = false;
     };
 } // namespace KeireEditor

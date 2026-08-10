@@ -3,6 +3,7 @@
 #include "KeireInternal/Rendering/InstanceBatchInternal.h"
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 #include "KeireInternal/Rendering/TransparencyInternal.h"
+#include "KeireInternal/Vfx/VfxGpuValidationInternal.h"
 
 #include "Keire/BuiltinSkinningShaders.h"
 #include "Keire/BuiltinVfxShaders.h"
@@ -241,20 +242,17 @@ namespace Keire::RenderBackend
         {
             return IsVfxGpuExpressionValueType(type);
         }
-
         [[nodiscard]] constexpr bool FloatGpuValueType(const VfxValueType type) noexcept
         {
             return type == VfxValueType::Scalar || type == VfxValueType::Vector2 || type == VfxValueType::Vector3 ||
                    type == VfxValueType::Vector4 || type == VfxValueType::Color;
         }
-
         [[nodiscard]] constexpr bool FloatGpuRangeType(const VfxValueType type) noexcept
         {
             return type == VfxValueType::ScalarRange || type == VfxValueType::Vector2Range ||
                    type == VfxValueType::Vector3Range || type == VfxValueType::Vector4Range ||
                    type == VfxValueType::ColorRange;
         }
-
         [[nodiscard]] constexpr std::uint32_t GpuValueComponentCount(const VfxValueType type) noexcept
         {
             if (type == VfxValueType::Vector2 || type == VfxValueType::Vector2Range)
@@ -308,12 +306,14 @@ namespace Keire::RenderBackend
             }
             return true;
         }
-
         [[nodiscard]] bool ValidGpuInstructionSignature(const VfxValueOpcode opcode, const VfxValueType output,
                                                         const std::uint32_t outputIndex,
                                                         const std::span<const VfxValueType> inputs) noexcept
         {
-            const auto allScalar = [&inputs]() {
+            if (opcode > VfxValueOpcode::Rotate3D)
+                return Internal::ValidVfxExtendedGpuInstructionSignature(opcode, output, outputIndex, inputs);
+            const auto allScalar = [&inputs]()
+            {
                 return std::ranges::all_of(inputs,
                                            [](const VfxValueType type) { return type == VfxValueType::Scalar; });
             };
@@ -538,7 +538,7 @@ namespace Keire::RenderBackend
         for (std::size_t instructionIndex = 0; instructionIndex < program.Instructions.size(); ++instructionIndex)
         {
             const auto& instruction = program.Instructions[instructionIndex];
-            if (instruction.Header[0] > static_cast<std::uint32_t>(VfxValueOpcode::Rotate3D))
+            if (instruction.Header[0] > static_cast<std::uint32_t>(VfxValueOpcode::SpawnState))
                 return IndexedGpuPayloadError("instruction", instructionIndex, "uses an unsupported opcode.");
             if (instruction.Header[1] > static_cast<std::uint32_t>(VfxValueType::SignedDistanceField))
                 return IndexedGpuPayloadError("instruction", instructionIndex, "uses an unknown value type.");

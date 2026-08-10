@@ -3,6 +3,9 @@ param(
     [ValidateSet('x86_64', 'arm64')]
     [string]$Architecture = 'x86_64',
     [string]$OutputDirectory,
+    [string]$SignatureKeyId,
+    [ValidateSet('stable', 'preview', 'nightly')]
+    [string]$Channel = 'stable',
     [switch]$KeepStaging
 )
 
@@ -109,6 +112,16 @@ try {
     [IO.File]::WriteAllText($catalogTemporary, (($catalog | ConvertTo-Json -Depth 6) + "`n"), [Text.UTF8Encoding]::new($false))
     Move-Item -LiteralPath $catalogTemporary -Destination $catalogPath -Force
     Write-Host "Created $archive"
+    if ($SignatureKeyId) {
+        & (Join-Path $repositoryRoot 'Scripts\project.ps1') build -Generator ninja -Configuration Debug -Architecture x86_64 -Toolset msc -Target KeireHubPackagePublisher
+        if ($LASTEXITCODE -ne 0) { throw 'Could not build KeireHubPackagePublisher.' }
+        $publisher = Join-Path $repositoryRoot 'Build\Bin\Debug-windows-x86_64\KeireHubPackagePublisher\KeireHubPackagePublisher.exe'
+        & $publisher create-build-support --player-support-package $archive --channel $Channel `
+            --output (Join-Path $OutputDirectory "$packId.keirepackage") `
+            --manifest-output (Join-Path $OutputDirectory "$packId.manifest.json") `
+            --signature-key-id $SignatureKeyId
+        if ($LASTEXITCODE -ne 0) { throw 'Could not publish the generic Build Support component package.' }
+    }
 }
 finally {
     if (-not $KeepStaging -and (Test-Path -LiteralPath $staging)) {

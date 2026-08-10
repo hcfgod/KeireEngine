@@ -13,6 +13,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace
@@ -73,6 +74,11 @@ namespace Keire
         specification.MainWindow.MinimumWidth = 960;
         specification.MainWindow.MinimumHeight = 640;
         specification.MainWindow.Decoration = WindowDecoration::Custom;
+        auto windowIcon = executable.parent_path().parent_path() / "Config/Branding/Keire.png";
+        if (!std::filesystem::is_regular_file(windowIcon))
+            windowIcon = std::filesystem::current_path() / "Config/Branding/Keire.png";
+        if (std::filesystem::is_regular_file(windowIcon))
+            specification.MainWindow.Icon = std::move(windowIcon);
         specification.Logging.LogDirectory = (preferenceRoot / "Hub" / "Logs").string();
         specification.Ui.Mode = UiMode::Rendered;
         specification.Ui.EnableDocking = false;

@@ -1114,6 +1114,61 @@ namespace KeireEditor
         return {(position.X - canvas.Minimum.X) / m_Zoom - m_Pan.X, (position.Y - canvas.Minimum.Y) / m_Zoom - m_Pan.Y};
     }
 
+    void NodeMenuSelection::Open() noexcept
+    {
+        m_Selected.clear();
+        m_FocusRequested = true;
+    }
+
+    bool NodeMenuSelection::ConsumeFocusRequest() noexcept { return std::exchange(m_FocusRequested, false); }
+
+    void NodeMenuSelection::Synchronize(const std::span<const std::string_view> visibleIds)
+    {
+        if (visibleIds.empty())
+        {
+            m_Selected.clear();
+            return;
+        }
+        if (std::ranges::find(visibleIds, m_Selected) == visibleIds.end())
+            m_Selected = visibleIds.front();
+    }
+
+    void NodeMenuSelection::MovePrevious(const std::span<const std::string_view> visibleIds) { Move(visibleIds, -1); }
+
+    void NodeMenuSelection::MoveNext(const std::span<const std::string_view> visibleIds) { Move(visibleIds, 1); }
+
+    void NodeMenuSelection::Remember(const std::string_view id)
+    {
+        if (id.empty())
+            return;
+        const auto existing = std::ranges::find(m_Recent, id);
+        if (existing != m_Recent.end())
+            m_Recent.erase(existing);
+        m_Recent.insert(m_Recent.begin(), std::string(id));
+        if (m_Recent.size() > RecentCapacity)
+            m_Recent.resize(RecentCapacity);
+    }
+
+    std::optional<std::string_view> NodeMenuSelection::Selected() const noexcept
+    {
+        return m_Selected.empty() ? std::nullopt : std::optional<std::string_view>(m_Selected);
+    }
+
+    bool NodeMenuSelection::IsSelected(const std::string_view id) const noexcept { return m_Selected == id; }
+
+    void NodeMenuSelection::Move(const std::span<const std::string_view> visibleIds, const int direction)
+    {
+        Synchronize(visibleIds);
+        if (visibleIds.empty())
+            return;
+        const auto selected = std::ranges::find(visibleIds, m_Selected);
+        const auto index =
+            selected == visibleIds.end() ? std::size_t{0} : static_cast<std::size_t>(selected - visibleIds.begin());
+        const auto count = visibleIds.size();
+        const auto next = direction < 0 ? (index + count - 1) % count : (index + 1) % count;
+        m_Selected = visibleIds[next];
+    }
+
     bool AuthoringValueEditors::Curve(Keire::UiFrame& ui, const std::string_view label, Keire::Curve1D& value,
                                       const float minimumTime, const float maximumTime)
     {

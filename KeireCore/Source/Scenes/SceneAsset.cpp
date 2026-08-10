@@ -196,7 +196,7 @@ namespace Keire
                     if (!value || value->is_null())
                         continue;
                     const auto dependency = AssetId::Parse(value->get<std::string>());
-                    if (dependency != MeshAsset::CubeId() && dependency != MeshAsset::ErrorId())
+                    if (!MeshAsset::IsBuiltin(dependency))
                         InsertDependency(dependencies, dependency);
                 }
             }

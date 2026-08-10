@@ -1,5 +1,16 @@
 # Changelog
 
+- Expanded the frozen Unity 6.3 VFX parity ledger by 120 evidence-backed rows, from 125 to 245 enabled equivalents.
+  Added 76 canonical runtime Operators for derived attributes, structured inline values, geometry math, curves,
+  gradients, deterministic selection, and bounded CPU texture/mesh/buffer queries; extended the packed CPU/GPU opcode
+  contract and DXIL/SPIR-V shader interpreter through opcode 131; and reduced the tracked remainder to 33 deliberate
+  event/kill/spawn behavior, flipbook, renderer-pipeline, camera/depth, vector-field, terrain, and custom-HLSL rows.
+- Fixed Material Graph assignments showing the generated material in the Inspector without reliably replaying the
+  current unsaved shader and parameter revision onto the mesh. Assigning an open graph now reapplies its last-good live
+  revision, material-slot edits mark the scene dirty, and GPU coverage verifies red parameter output on built-in cubes.
+- Fixed Windows shortcut activation briefly exposing an unrendered white Hub window and failing to take focus. Secondary
+  launches now exit before initializing runtime services and let the primary Hub restore its own window. A Hub hidden
+  automatically for an editor also returns when the final tracked editor exits and stays visible if tracking failed.
 - Fixed asset scans on mounted Linux filesystems reporting duplicate identities when creating metadata changed the
   directory during iteration. Scans now snapshot and sort source paths before writing any missing metadata.
 - Fixed development Hubs silently starting without their distribution, account configuration, and pinned catalog
@@ -46,6 +57,41 @@ version tags.
 
 ## Unreleased
 
+- Fixed scene renames retaining a stale open-document path that could recreate the old `.keirescene` on the next save.
+  Rename, undo, and redo now refresh the document by stable asset identity, preserve references and metadata, and reject
+  collisions without publishing a second scene.
+- Completed the reported Editor workflow fixes: transform gizmos remain usable during Play mode with temporary-edit
+  guidance; new and existing folder blank space opens the correct create menu; Hierarchy blank-space context menus fill
+  the panel; and every authored asset type uses a focused, select-all naming prompt before publication.
+- Added line-list and point-list mesh persistence, import, shader-manifest, and SDL GPU rendering compatibility plus
+  safe strip/fan triangulation, with precise diagnostics for rigged non-triangle topology. The Editor window now also
+  applies the packaged Kéire icon through the cross-platform SDL window boundary.
+- Added signed generic Build Support publication from verified `.keireplayersupport` archives, exact editor-version
+  compatibility, Linux release-matrix documentation, and Windows/Unix publisher integration. Hub install review now
+  supports a validated native folder picker, first-run progress has a readable fixed height, and Starter 3D includes an
+  active camera and directional light while **Empty Project** remains content-free.
+- Material Graph shutdown now joins the editor's unsaved-change transaction instead of silently discarding the draft.
+  Save publishes source and generated variants atomically, Discard is explicit, and regression coverage closes and
+  reopens the serialized graph definition.
+- Integrated Material and VFX node search into their creation menus with open-time focus, live filtering, wrapping
+  keyboard selection, Enter-to-create, recent/common entries, and preserved category browsing.
+- Added the searchable Material Graph node palette to right-clicks anywhere on the canvas, with new nodes placed at the
+  requested graph position while retaining the top-bar creation menu.
+- Fixed older-schema projects being forced into Hub upgrade review after a Hub/Editor update even when a compatible
+  previous Editor remains installed. The Hub now launches the exact or least-disruptive compatible Editor directly,
+  while interrupted upgrades still use the recovery workflow.
+- Added asynchronous Material Graph, Material Instance, and bounded VFX thumbnails with consistent source-type badges
+  and stable loading/failure fallbacks that never run preview work on the Content Browser thread.
+- Expanded the stable built-in mesh catalog with Sphere, Capsule, Cylinder, Cone, Plane, Quad, and Torus, including
+  consistent metre-scale geometry, picker/runtime/VFX/baker resolution, collision guidance, and invariant coverage.
+- Began KE-019's production audio phases by executing mixer effects/sends/hierarchy/ducking in headless renders,
+  repairing algorithmic reverb tails, publishing automatic bus meters and mixer diagnostics, activating priority-
+  blended Reverb Zones, and replacing anonymous Editor effect controls with bounded named parameters and IR picking.
+  Stateful device-callback DSP and decoded convolution IR binding remain explicitly scheduled later phases.
+- Added validated VFX parity milestone accounting and P0/P1/P2/Deferred priorities for every unfinished frozen Unity
+  6.3 row, plus a production-scenario matrix spanning VFX and Shader Graph delivery. Material Graph sources and
+  generated shaders now expose explicit compatibility versions, embed those versions in HLSL/manifests, and reject
+  future source schemas before decoding or mutation.
 - Download and previous-release cards now show each artifact's publication date, time, and timezone in the viewer's
   browser locale while retaining the exact UTC timestamp as semantic metadata.
 - Added compact signed package discovery without breaking previously downloaded Hubs. Current clients and the website

@@ -762,7 +762,7 @@ namespace KeireHub
         auto displayEntries = entries;
         for (auto& entry : displayEntries)
         {
-            if (entry.Status == Keire::ProjectStatus::Ready ||
+            if (entry.Status == Keire::ProjectStatus::Ready || entry.Status == Keire::ProjectStatus::UpgradeAvailable ||
                 entry.Status == Keire::ProjectStatus::RequiresNewerEngine ||
                 entry.Status == Keire::ProjectStatus::UnsupportedSchema)
             {

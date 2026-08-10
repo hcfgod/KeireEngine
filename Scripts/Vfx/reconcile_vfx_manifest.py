@@ -67,6 +67,12 @@ def reconcile(manifest: dict[str, object]) -> dict[str, object]:
         )
         entry["keire"] = {
             "support": "Kéire Equivalent" if enabled else "Disabled",
+            "priority": generator.parity_priority(
+                str(entry.get("kind", "")),
+                str(entry.get("unityLabel", "")),
+                str(entry.get("unityCategory", "")),
+                "Kéire Equivalent" if enabled else "Disabled",
+            ),
             "implementation": implementation,
             "backendTier": backend,
             "tests": generator.KEIRE_TESTS.get(implementation, [])
@@ -94,7 +100,15 @@ def reconcile(manifest: dict[str, object]) -> dict[str, object]:
         bool(entry.get("keire", {}).get("implementation")) for entry in entries
     )
     manifest["counts"] = counts
+    manifest["firstMajorParityMilestone"] = generator.first_major_parity_milestone(
+        entries
+    )
+    manifest["portableParityExpansion"] = generator.portable_parity_expansion(entries)
     manifest["productionSlices"] = generator.PRODUCTION_SLICES
+    policy = manifest.get("policy")
+    if not isinstance(policy, dict):
+        raise ValueError("Manifest policy must be an object.")
+    policy["priorityValues"] = list(generator.PRIORITY_VALUES)
     tooling = manifest.get("tooling")
     if not isinstance(tooling, dict):
         raise ValueError("Manifest tooling must be an object.")

@@ -23,7 +23,7 @@ release work honestly. Roadmap material is labeled as roadmap material and does 
 
 ## Complete Guide Library
 
-All 52 published guides are listed below in the same groups used by the documentation website.
+All 55 published guides are listed below in the same groups used by the documentation website.
 
 ### Start Here
 
@@ -44,6 +44,7 @@ All 52 published guides are listed below in the same groups used by the document
 | [ECS and Components](ECSAndComponents.md) | Entity handles, component registration/lifetime, transforms, layers, scene serialization, and Play Mode. |
 | [Scene System](SceneSystem.md) | Scene schema, validation, instances, asynchronous loading, activation, mutation, and events. |
 | [Gameplay Foundations](GameplayFoundations.md) | Prefabs, managed builds, physics, audio, navigation, animation, and cooked runtime manifests. |
+| [Audio Production Workflow](AudioProduction.md) | Mixer/reverb status, Editor workflow, performance budgets, phased gaps, and validation. |
 | [Input System](InputSystem.md) | Devices, users, actions, snapshots, rebinding, overrides, focus, and cursor modes. |
 
 ### Editor and Authoring
@@ -66,11 +67,13 @@ All 52 published guides are listed below in the same groups used by the document
 | --- | --- |
 | [Asset Runtime](AssetRuntime.md) | Handles, fallbacks, asynchronous loading, mounts, integrity, reloads, and thread contracts. |
 | [Asset Pipeline](AssetPipeline.md) | Metadata, identities, import cache, workers, mesh/texture import, cooking, validation, and CLI operations. |
+| [Built-In Meshes](BuiltinMeshes.md) | Primitive IDs, dimensions, orientation, UV/normal conventions, collision expectations, and usage. |
 | [Rendering](Rendering.md) | Render ownership, frame order, viewports, cameras, static submission, spatial lighting, and diagnostics. |
 | [Shaders and Materials](ShadersAndMaterials.md) | Shader manifests, compilation, reflection, material graphs, instances, fallback, and target cooking. |
 | [VFX Authoring and Runtime](Vfx.md) | Graph mental model, effects, scene emitters, C++/C# control, CPU/GPU execution, diagnostics, and budgets. |
 | [VFX Beyond-Parity Roadmap](VfxBeyondParityRoadmap.md) | Explicit future VFX milestones and acceptance evidence; not a current capability contract. |
 | [Generated VFX Capabilities](generated/VfxCapabilities.md) | Generated feature/evidence matrix derived from the reviewed VFX parity manifest. |
+| [VFX and Shader Graph Initiatives](VisualAuthoringInitiatives.md) | Prioritized capability matrix, production scenarios, and phased acceptance for the VFX and Shader Graph initiatives. |
 | [Desktop Player Builds](PlayerBuilds.md) | Build profiles, platform support, output layouts, automation, branding, signing hooks, and launch. |
 
 ### C# Scripting

@@ -40,6 +40,9 @@ namespace Keire
             AssetHandle<AudioMixerAsset> Handle;
             AudioMixerRoutingId Routing;
             std::uint64_t Revision = 0;
+            AssetId AppliedSnapshot;
+            float AppliedWeight = -1.0F;
+            float AppliedReverbSend = -1.0F;
         };
 
         Impl(Ref<AssetSystem> assets, Ref<AudioSystem> audio, const std::size_t maximumUiElements)
@@ -272,8 +275,61 @@ namespace Keire
                 if (!Audio->UpdateMixer(state.Routing, loaded->Definition()))
                     state.Routing = Audio->RegisterMixer(mixer, loaded->Definition());
                 state.Revision = revision;
+                state.AppliedSnapshot = {};
+                state.AppliedWeight = -1.0F;
+                state.AppliedReverbSend = -1.0F;
             }
             return state.Routing;
+        }
+
+        [[nodiscard]] bool ApplyReverbZone(const AudioReverbZoneComponent& zone, const float weight)
+        {
+            const auto routing = EnsureMixer(zone.Mixer());
+            if (!routing)
+                return false;
+            auto& state = AudioMixers.at(zone.Mixer());
+            if (state.AppliedSnapshot == zone.SnapshotId() && state.AppliedWeight == weight &&
+                state.AppliedReverbSend == zone.ReverbSend())
+            {
+                return true;
+            }
+            const auto loaded = state.Handle.TryGetLoaded();
+            if (!loaded)
+                return false;
+            try
+            {
+                auto definition = zone.SnapshotId()
+                                      ? BlendAudioMixerSnapshot(loaded->Definition(), zone.SnapshotId(), weight)
+                                      : loaded->Definition();
+                const float sendScale = 1.0F + (zone.ReverbSend() - 1.0F) * weight;
+                for (auto& bus : definition.Buses)
+                    for (auto& send : bus.Sends)
+                        send.Gain *= sendScale;
+                if (!Audio->UpdateMixer(routing, definition))
+                    return false;
+            }
+            catch (const std::exception&)
+            {
+                return false;
+            }
+            state.AppliedSnapshot = zone.SnapshotId();
+            state.AppliedWeight = weight;
+            state.AppliedReverbSend = zone.ReverbSend();
+            return true;
+        }
+
+        void RestoreInactiveReverbZones(const std::set<AssetId>& activeMixers)
+        {
+            for (auto& [mixer, state] : AudioMixers)
+            {
+                if (activeMixers.contains(mixer) || state.AppliedWeight < 0.0F)
+                    continue;
+                if (const auto loaded = state.Handle.TryGetLoaded(); loaded && state.Routing)
+                    (void)Audio->UpdateMixer(state.Routing, loaded->Definition());
+                state.AppliedSnapshot = {};
+                state.AppliedWeight = -1.0F;
+                state.AppliedReverbSend = -1.0F;
+            }
         }
 
         void RemoveMixer(AudioMixerState& state) noexcept
@@ -511,17 +567,8 @@ namespace Keire
                     ++iterator;
             }
             PendingAudio = pending;
-            for (auto iterator = AudioMixers.begin(); iterator != AudioMixers.end();)
-            {
-                if (!SeenMixers.contains(iterator->first))
-                {
-                    RemoveMixer(iterator->second);
-                    iterator = AudioMixers.erase(iterator);
-                }
-                else
-                    ++iterator;
-            }
-
+            Vector3 listenerPosition;
+            bool listenerFound = false;
             for (const auto& entity : scene->Query<AudioListenerComponent>())
             {
                 const auto listener = entity.GetComponent<AudioListenerComponent>();
@@ -531,7 +578,72 @@ namespace Keire
                 if (const auto transform = entity.GetComponent<TransformComponent>())
                     state.Position = transform->WorldPosition();
                 Audio->SetListener(state);
+                listenerPosition = state.Position;
+                listenerFound = true;
                 break;
+            }
+
+            const AudioReverbZoneComponent* activeZone = nullptr;
+            float activeWeight = 0.0F;
+            if (listenerFound)
+            {
+                for (const auto& entity : scene->Query<AudioReverbZoneComponent>())
+                {
+                    const auto zone = entity.GetComponent<AudioReverbZoneComponent>();
+                    const auto transform = entity.GetComponent<TransformComponent>();
+                    if (!entity.ActiveInHierarchy() || !zone->Enabled() || !zone->Mixer() || !transform)
+                        continue;
+                    const auto center = transform->WorldPosition();
+                    const Vector3 delta{listenerPosition.X - center.X, listenerPosition.Y - center.Y,
+                                        listenerPosition.Z - center.Z};
+                    float outsideDistance = 0.0F;
+                    if (zone->Shape() == AudioReverbZoneShape::Sphere)
+                    {
+                        outsideDistance =
+                            std::max(0.0F, std::sqrt(delta.X * delta.X + delta.Y * delta.Y + delta.Z * delta.Z) -
+                                               zone->SphereRadius());
+                    }
+                    else
+                    {
+                        const auto extent = zone->BoxHalfExtent();
+                        const float x = std::max(std::abs(delta.X) - extent.X, 0.0F);
+                        const float y = std::max(std::abs(delta.Y) - extent.Y, 0.0F);
+                        const float z = std::max(std::abs(delta.Z) - extent.Z, 0.0F);
+                        outsideDistance = std::sqrt(x * x + y * y + z * z);
+                    }
+                    const float weight = zone->BlendDistance() == 0.0F
+                                             ? (outsideDistance == 0.0F ? 1.0F : 0.0F)
+                                             : std::clamp(1.0F - outsideDistance / zone->BlendDistance(), 0.0F, 1.0F);
+                    if (weight <= 0.0F)
+                        continue;
+                    if (!activeZone || zone->Priority() > activeZone->Priority() ||
+                        (zone->Priority() == activeZone->Priority() && weight > activeWeight))
+                    {
+                        activeZone = zone.Get();
+                        activeWeight = weight;
+                    }
+                }
+            }
+            std::set<AssetId> activeReverbMixers;
+            if (activeZone)
+            {
+                SeenMixers.insert(activeZone->Mixer());
+                if (ApplyReverbZone(*activeZone, activeWeight))
+                    activeReverbMixers.insert(activeZone->Mixer());
+                else
+                    ++PendingAudio;
+            }
+            RestoreInactiveReverbZones(activeReverbMixers);
+
+            for (auto iterator = AudioMixers.begin(); iterator != AudioMixers.end();)
+            {
+                if (!SeenMixers.contains(iterator->first))
+                {
+                    RemoveMixer(iterator->second);
+                    iterator = AudioMixers.erase(iterator);
+                }
+                else
+                    ++iterator;
             }
         }
 

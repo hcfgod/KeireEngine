@@ -145,6 +145,54 @@ class RuntimeCatalogIntegrityTests(unittest.TestCase):
             for sample in production_slice["samples"]:
                 self.assertTrue((REPOSITORY_ROOT / sample).is_file(), sample)
 
+    def test_first_major_milestone_and_priorities_are_auditable(self) -> None:
+        manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        milestone = manifest["firstMajorParityMilestone"]
+        self.assertEqual(milestone["target"], 50)
+        self.assertGreaterEqual(milestone["completedParityRows"], milestone["target"])
+        self.assertTrue(milestone["achieved"])
+        self.assertEqual(
+            milestone["remainingParityRows"], manifest["counts"]["Disabled"]
+        )
+        expansion = manifest["portableParityExpansion"]
+        self.assertEqual(expansion["baselineParityRows"], 125)
+        self.assertEqual(expansion["targetAdditionalRows"], 120)
+        self.assertEqual(expansion["completedAdditionalRows"], 120)
+        self.assertEqual(expansion["remainingAdditionalRows"], 0)
+        self.assertTrue(expansion["achieved"])
+
+        for entry in manifest["entries"]:
+            expected = generator.parity_priority(
+                entry["kind"],
+                entry["unityLabel"],
+                entry["unityCategory"],
+                entry["keire"]["support"],
+            )
+            self.assertEqual(entry["keire"]["priority"], expected, entry["id"])
+
+    def test_validator_rejects_priority_drift(self) -> None:
+        manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        unfinished = next(
+            entry
+            for entry in manifest["entries"]
+            if entry["keire"]["support"] == "Disabled"
+        )
+        unfinished["keire"]["priority"] = "Complete"
+        encoded = json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "manifest.json"
+            with path.open("w", encoding="utf-8", newline="\n") as stream:
+                stream.write(encoded)
+            result = subprocess.run(
+                [sys.executable, str(VALIDATOR), "--manifest", str(path)],
+                cwd=REPOSITORY_ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("priority drifted", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

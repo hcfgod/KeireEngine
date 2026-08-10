@@ -390,6 +390,13 @@ accepts up to 4,096 verified assignments to Position, Velocity, billboard Rotati
 dynamic lowered instruction stream. Unrestricted Unity-style HLSL, arbitrary resources, branches, loops, subgraphs,
 decals, and froxel injection remain explicit capability tiers.
 
+CPU texture, mesh, buffer, and attribute-map expressions cross a separate renderer-neutral `ResourceQuery` callback on
+`VfxWorldSpecification`. Requests carry only a stable `AssetId`, operation kind, coordinate, integer index, and level;
+results use bounded value lanes, dimensions, count, and transform data. Renderer handles, SDL types, and asset-system
+ownership never enter the public graph or compiled-program ABI. A missing provider, rejected query, callback exception,
+or invalid returned value fails the affected expression and records `SimulationValueInvalid`. These descriptors remain
+explicitly CPU-only until the renderer exposes an equivalent cross-platform resource-table contract.
+
 Schema 1-3 module documents remain readable and always decode as `LegacyModules`. Explicit Save publishes schema 4 without
 changing their execution source; the explicit deterministic conversion operation replaces previous presentation
 systems with one canonical graph while preserving emitter, payload, and Blackboard stable IDs. CPU-incompatible
@@ -1061,11 +1068,12 @@ immutable compiled routing snapshots behind generation-safe registrations. Each 
 registrations when a mixer is no longer referenced or the presentation clears, so multiple presentations cannot
 invalidate one another or reuse stale project state. A valid stable bus ID wins over the compatibility name and
 applies its authored fader, mute, solo, and parent hierarchy to existing and new voices; invalid replacement leaves
-the last snapshot active. Legacy string gain and stop controls forward through the currently resolved authored bus
-name, while voice diagnostics report the resolved mixer, bus ID, and registration. Meter publication is owner-thread
-bounded and immutable to editor consumers. The editor's mixer panel owns a typed `AudioMixerDocument`;
-preview-through-bus stays unavailable until it can exercise the same complete device DSP graph as runtime, so opening
-or closing the document cannot create hidden scene state.
+the last snapshot active. Headless rendering executes ordered effects, sends, parent routing, ducking, and bounded
+automatic meters. Reverb Zones select against the primary listener, blend one priority-resolved mixer snapshot and
+send scale, and restore the immutable source definition after exit. Legacy string gain and stop controls forward
+through the currently resolved authored bus name, while voice diagnostics report the resolved mixer, bus ID, and
+registration. The editor's typed `AudioMixerDocument` publishes transient live routing/fader previews; complete
+stateful device-callback DSP and decoded convolution IR binding remain an explicit later phase.
 
 `VfxWorld` owns fixed-capacity effect and particle storage. Activation is transactional, handles include generations,
 and revision-aware replacement preserves bounded lifecycle behavior. Non-looping GPU effects advance through their

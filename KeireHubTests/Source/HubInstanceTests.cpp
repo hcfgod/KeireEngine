@@ -36,6 +36,12 @@ namespace
 {
     using namespace std::chrono_literals;
 
+    [[nodiscard]] std::string PathToUtf8(const std::filesystem::path& path)
+    {
+        const auto encoded = path.generic_u8string();
+        return {encoded.begin(), encoded.end()};
+    }
+
     [[nodiscard]] std::optional<KeireHub::HubActivationRequest>
     WaitForActivation(KeireHub::HubInstanceCoordinator& instance)
     {
@@ -99,6 +105,42 @@ namespace
         result.append(slashes * 2U, L'\\');
         result.push_back(L'\"');
         return result;
+    }
+
+    class ScopedNativeWindow final
+    {
+      public:
+        ScopedNativeWindow()
+        {
+            m_Window = CreateWindowExW(0, L"STATIC", L"Keire Hub activation test", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,
+                                       CW_USEDEFAULT, 320, 200, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+            if (!m_Window)
+                throw std::runtime_error("Could not create the Hub activation test window.");
+        }
+
+        ~ScopedNativeWindow()
+        {
+            if (m_Window)
+                (void)DestroyWindow(m_Window);
+        }
+
+        ScopedNativeWindow(const ScopedNativeWindow&) = delete;
+        ScopedNativeWindow& operator=(const ScopedNativeWindow&) = delete;
+
+        [[nodiscard]] HWND Get() const noexcept { return m_Window; }
+
+      private:
+        HWND m_Window = nullptr;
+    };
+
+    void DrainNativeWindowMessages()
+    {
+        MSG message{};
+        while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE))
+        {
+            (void)TranslateMessage(&message);
+            (void)DispatchMessageW(&message);
+        }
     }
 #else
     void StopUnixChild(const pid_t process) noexcept
@@ -303,7 +345,7 @@ namespace
 
     void SendActivation(const std::filesystem::path& identity, const std::vector<std::string>& arguments)
     {
-        std::vector<std::string> processArguments{"--hub-instance-secondary", identity.string()};
+        std::vector<std::string> processArguments{"--hub-instance-secondary", PathToUtf8(identity)};
         processArguments.insert(processArguments.end(), arguments.begin(), arguments.end());
         const auto exitCode = RunSecondary(processArguments);
         REQUIRE(exitCode);
@@ -349,6 +391,25 @@ TEST_CASE("Hub instance coordination activates one primary process and releases 
     CHECK(replacement.IsPrimary());
 }
 
+#if defined(_WIN32)
+TEST_CASE("Secondary Hub activation leaves native window visibility to the primary owner thread")
+{
+    const auto identity = KeireHubTests::ExecutablePath;
+    KeireHub::HubInstanceCoordinator primary(identity, {}, true);
+    REQUIRE(primary.IsPrimary());
+    ScopedNativeWindow window;
+    REQUIRE(window.Get());
+    CHECK_FALSE(IsWindowVisible(window.Get()));
+
+    SendActivation(identity, {"--show"});
+    const auto activation = WaitForActivation(primary);
+    REQUIRE(activation);
+    CHECK(activation->Action == KeireHub::HubActivationAction::Show);
+    DrainNativeWindowMessages();
+    CHECK_FALSE(IsWindowVisible(window.Get()));
+}
+#endif
+
 #if !defined(_WIN32)
 TEST_CASE("Hub instance ownership is not inherited by a long-lived exec child")
 {
@@ -377,9 +438,7 @@ TEST_CASE("Hub instance coordination rejects a precreated Unix activation symlin
 
     const auto runtimeDirectory =
         temporary.Path() / ("keire-hub-" + std::to_string(static_cast<unsigned long long>(geteuid())));
-    struct stat runtimeStatus
-    {
-    };
+    struct stat runtimeStatus{};
     REQUIRE(stat(runtimeDirectory.c_str(), &runtimeStatus) == 0);
     CHECK(S_ISDIR(runtimeStatus.st_mode));
     CHECK(runtimeStatus.st_uid == geteuid());

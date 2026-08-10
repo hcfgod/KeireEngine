@@ -1,4 +1,5 @@
 #include "Keire/Rendering/MaterialGraph.h"
+#include "KeireInternal/Rendering/MaterialGraphManifest.h"
 
 #include <nlohmann/json.hpp>
 
@@ -223,7 +224,7 @@ namespace Keire
             Json roots = Json::array();
             for (const auto& root : definition.IncludeRoots)
                 roots.push_back(root.generic_string());
-            return {{"schemaVersion", 2U},
+            return {{"schemaVersion", MaterialGraphSourceSchemaVersion},
                     {"output", static_cast<std::uint8_t>(definition.Output)},
                     {"nodes", std::move(nodes)},
                     {"connections", std::move(connections)},
@@ -235,6 +236,13 @@ namespace Keire
         {
             if (!source.is_object())
                 throw std::invalid_argument("Material Graph data must be an object.");
+            const auto sourceSchemaVersion = source.value("schemaVersion", 0U);
+            if (sourceSchemaVersion == 0U)
+                throw std::invalid_argument("Material Graph schema version is missing or unsupported.");
+            if (sourceSchemaVersion > MaterialGraphSourceSchemaVersion)
+                throw std::invalid_argument("Material Graph schema version " + std::to_string(sourceSchemaVersion) +
+                                            " is newer than the supported version " +
+                                            std::to_string(MaterialGraphSourceSchemaVersion) + '.');
             const auto& nodes = source.at("nodes");
             const auto& connections = source.at("connections");
             const auto& keywords = source.value("keywords", Json::array());
@@ -245,7 +253,6 @@ namespace Keire
                 includeRoots.size() > MaximumGraphIncludeRoots)
                 throw std::invalid_argument("Material Graph source collections exceed their bounds.");
             MaterialGraphDefinition result;
-            const auto sourceSchemaVersion = source.value("schemaVersion", 0U);
             result.SchemaVersion = sourceSchemaVersion;
             result.Output = static_cast<MaterialGraphOutput>(source.value("output", static_cast<std::uint8_t>(0)));
             result.IncludeRoots.clear();
@@ -377,7 +384,7 @@ namespace Keire
                     }
             }
             ValidateMaterialGraph(result);
-            result.SchemaVersion = 2U;
+            result.SchemaVersion = MaterialGraphSourceSchemaVersion;
             return result;
         }
 
@@ -738,8 +745,6 @@ namespace Keire
             return "_KeireVertexMaterial_" + std::string(name);
         }
 
-        [[nodiscard]] std::string KeywordDefine(const std::string_view name) { return "KEIRE_MG_" + std::string(name); }
-
         [[nodiscard]] bool SupportsStage(const MaterialGraphShaderStage stages,
                                          const MaterialGraphShaderStage stage) noexcept
         {
@@ -810,61 +815,6 @@ namespace Keire
             auto result = base;
             const auto extension = result.extension();
             result.replace_filename(result.stem().string() + '-' + std::string(suffix) + extension.string());
-            return result;
-        }
-
-        [[nodiscard]] std::string PropertyTypeName(const MaterialGraphValueType type)
-        {
-            switch (type)
-            {
-            case MaterialGraphValueType::Scalar:
-                return "Float";
-            case MaterialGraphValueType::Vector2:
-                return "Vector2";
-            case MaterialGraphValueType::Vector3:
-                return "Vector3";
-            case MaterialGraphValueType::Vector4:
-                return "Vector4";
-            case MaterialGraphValueType::Color:
-                return "Color";
-            case MaterialGraphValueType::Texture2D:
-                return "Texture2D";
-            case MaterialGraphValueType::MaterialAttributes:
-                return "MaterialAttributes";
-            case MaterialGraphValueType::Bsdf:
-                return "BSDF";
-            }
-            return "Float";
-        }
-
-        [[nodiscard]] std::string SemanticName(const ShaderTextureSemantic semantic)
-        {
-            constexpr std::array names{"Generic",   "BaseColor", "Normal",   "MetallicRoughness",
-                                       "Occlusion", "Emissive",  "Metallic", "Roughness"};
-            const auto index = static_cast<std::size_t>(semantic);
-            return index < names.size() ? names[index] : names.front();
-        }
-
-        [[nodiscard]] Json ManifestProperty(const ShaderPropertyDefinition& property)
-        {
-            Json result{
-                {"name", property.Name}, {"displayName", property.DisplayName}, {"category", property.Category}};
-            const auto graphType = static_cast<MaterialGraphValueType>(property.Type);
-            result["type"] = PropertyTypeName(graphType);
-            if (property.Type == ShaderPropertyType::Texture2D)
-            {
-                result["semantic"] = SemanticName(property.TextureSemantic);
-                result["default"] = property.DefaultTexture ? Json(property.DefaultTexture.ToString()) : Json(nullptr);
-            }
-            else
-                result["default"] = Json::array({property.DefaultValue.X, property.DefaultValue.Y,
-                                                 property.DefaultValue.Z, property.DefaultValue.W});
-            if (property.Minimum)
-                result["minimum"] = *property.Minimum;
-            if (property.Maximum)
-                result["maximum"] = *property.Maximum;
-            if (property.Step)
-                result["step"] = *property.Step;
             return result;
         }
 
@@ -972,7 +922,7 @@ namespace Keire
                     : hasMaterialAttributes ? attribute("SheenRoughness")
                                             : optionalInput("SheenRoughness", MaterialGraphValueType::Scalar, "0.5F");
                 const auto normal = unlit || (!hasMaterialAttributes && !inputConnected("Normal")) ? "input.Normal"
-                                    : hasMaterialAttributes                                        ? attribute("Normal")
+                                    : hasMaterialAttributes ? attribute("Normal")
                                                             : input("Normal", MaterialGraphValueType::Vector3);
                 const bool hasDetailNormal = !unlit && !hasMaterialAttributes && inputConnected("DetailNormal");
                 const auto detailNormal = hasDetailNormal ? input("DetailNormal", MaterialGraphValueType::Vector3)
@@ -1020,7 +970,9 @@ namespace Keire
                                                   : std::string("0.0F");
 
                 std::ostringstream source;
-                source << "// Generated by Keire Material Graph. Do not edit.\n";
+                source << "// Generated by Keire Material Graph. Do not edit. Generator version "
+                       << MaterialGraphGeneratedShaderVersion << ", source schema " << m_Definition.SchemaVersion
+                       << ".\n";
                 for (const auto& include : m_CustomIncludes)
                     source << "#include \"" << include.generic_string() << "\"\n";
                 source << R"HLSL(
@@ -2941,47 +2893,6 @@ float4 PSMain(VertexOutput input) : SV_Target0
             bool m_UsesVertexMaterialParameters = false;
         };
 
-        [[nodiscard]] std::string BuildManifest(const MaterialGraphDefinition& definition,
-                                                const std::filesystem::path& generatedSource,
-                                                const std::span<const ShaderPropertyDefinition> properties,
-                                                const std::span<const std::string> keywords,
-                                                const bool usesVertexMaterialParameters)
-        {
-            Json encodedProperties = Json::array();
-            for (const auto& property : properties)
-                encodedProperties.push_back(ManifestProperty(property));
-            Json defines = Json::object();
-            for (const auto& keyword : keywords)
-                defines[KeywordDefine(keyword)] = "1";
-            Json roots = Json::array();
-            for (const auto& root : definition.IncludeRoots)
-                roots.push_back(root.generic_string());
-            const bool transparent = definition.Output == MaterialGraphOutput::Transparent ||
-                                     definition.Output == MaterialGraphOutput::Decal;
-            const bool lit = definition.Output != MaterialGraphOutput::Unlit;
-            const Json manifest{{"schemaVersion", 1},
-                                {"source", generatedSource.generic_string()},
-                                {"vertexLayoutVersion", 3},
-                                {"receivesShadows", lit},
-                                {"usesForwardPlus", lit},
-                                {"usesInstancing", true},
-                                {"usesImageBasedLighting", lit},
-                                {"usesVertexMaterialParameters", usesVertexMaterialParameters},
-                                {"stages", {{"vertex", "VSMain"}, {"fragment", "PSMain"}}},
-                                {"defines", std::move(defines)},
-                                {"includeRoots", std::move(roots)},
-                                {"renderState",
-                                 {{"topology", "TriangleList"},
-                                  {"culling", definition.Output == MaterialGraphOutput::Decal  ? "Front"
-                                              : definition.Output == MaterialGraphOutput::Hair ? "None"
-                                                                                               : "Back"},
-                                  {"depthTest", true},
-                                  {"depthWrite", !transparent},
-                                  {"blend", transparent}}},
-                                {"properties", std::move(encodedProperties)}};
-            return manifest.dump(2) + '\n';
-        }
-
         [[nodiscard]] bool MaterialValueMatches(const MaterialPropertyValue& value, const MaterialGraphValueType type)
         {
             return value.index() == static_cast<std::size_t>(type);
@@ -3984,7 +3895,7 @@ float4 PSMain(VertexOutput input) : SV_Target0
 
     void ValidateMaterialGraph(const MaterialGraphDefinition& definition)
     {
-        if ((definition.SchemaVersion != 1 && definition.SchemaVersion != 2) ||
+        if ((definition.SchemaVersion != 1 && definition.SchemaVersion != MaterialGraphSourceSchemaVersion) ||
             definition.Output > MaterialGraphOutput::Eye || definition.Nodes.empty() ||
             definition.Nodes.size() > MaximumGraphNodes || definition.Connections.size() > MaximumGraphConnections ||
             definition.Keywords.size() > MaximumGraphKeywords || definition.IncludeRoots.empty() ||
@@ -4344,9 +4255,10 @@ float4 PSMain(VertexOutput input) : SV_Target0
                 auto hlsl = compiler.BuildHlsl();
                 auto suffix = KeywordSuffix(keywords);
                 auto generatedSource = VariantSourcePath(options.GeneratedSource, suffix);
-                result.Variants.push_back({keywords, std::move(suffix), generatedSource, std::move(hlsl),
-                                           BuildManifest(definition, generatedSource, result.Properties, keywords,
-                                                         compiler.UsesVertexMaterialParameters())});
+                result.Variants.push_back(
+                    {keywords, std::move(suffix), generatedSource, std::move(hlsl),
+                     Detail::BuildMaterialGraphManifest(definition, generatedSource, result.Properties, keywords,
+                                                        compiler.UsesVertexMaterialParameters())});
             }
             std::ranges::sort(result.Dependencies);
             result.Dependencies.erase(std::unique(result.Dependencies.begin(), result.Dependencies.end()),
@@ -4462,7 +4374,7 @@ float4 PSMain(VertexOutput input) : SV_Target0
     {
         AssetImporterRegistration result;
         result.Name = "Keire.MaterialGraph";
-        result.Version = 13;
+        result.Version = 14;
         result.Type = MaterialGraphAsset::StaticType();
         result.Extensions = {".keirematerialgraph"};
         result.ContextualImport = [](const AssetImportContext& context, const std::span<const std::byte> bytes)

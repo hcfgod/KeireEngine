@@ -2,6 +2,7 @@
 #include "Keire/Assets/RenderingAssets.h"
 
 #include "Keire/Animation/RiggingSystem.h"
+#include "KeireInternal/Assets/BuiltinMeshes.h"
 
 #include <assimp/GltfMaterial.h>
 #include <assimp/Importer.hpp>
@@ -38,7 +39,7 @@ namespace Keire
         using Json = nlohmann::json;
         constexpr std::array<char, 8> MeshMagic{'K', 'E', 'I', 'R', 'E', 'M', 'S', 'H'};
         constexpr std::array<char, 8> TextureMagic{'K', 'E', 'I', 'R', 'E', 'T', 'E', 'X'};
-        constexpr std::uint32_t MeshVersion = 4;
+        constexpr std::uint32_t MeshVersion = 5;
         constexpr std::uint32_t TextureVersion = 3;
         constexpr std::size_t MaximumMeshVertices = std::size_t{16} * 1024U * 1024U;
         constexpr std::size_t MaximumMeshIndices = std::size_t{48} * 1024U * 1024U;
@@ -188,8 +189,8 @@ namespace Keire
         void ValidateMesh(const std::span<const MeshVertex> vertices, const std::span<const std::uint32_t> indices)
         {
             if (vertices.empty() || vertices.size() > MaximumMeshVertices || indices.empty() ||
-                indices.size() > MaximumMeshIndices || indices.size() % 3 != 0)
-                throw std::invalid_argument("Mesh vertex/index counts are empty, excessive, or not triangles.");
+                indices.size() > MaximumMeshIndices)
+                throw std::invalid_argument("Mesh vertex/index counts are empty or excessive.");
             (void)CalculateBounds(vertices);
             if (std::ranges::any_of(indices,
                                     [vertices](const std::uint32_t index) { return index >= vertices.size(); }))
@@ -210,10 +211,14 @@ namespace Keire
             for (const auto& submesh : submeshes)
             {
                 const auto end = static_cast<std::uint64_t>(submesh.FirstIndex) + submesh.IndexCount;
-                if (submesh.IndexCount == 0 || submesh.IndexCount % 3U != 0 || end > indices.size() ||
+                const bool validPrimitiveCount =
+                    (submesh.Topology == ShaderPrimitiveTopology::TriangleList && submesh.IndexCount % 3U == 0) ||
+                    (submesh.Topology == ShaderPrimitiveTopology::LineList && submesh.IndexCount % 2U == 0) ||
+                    submesh.Topology == ShaderPrimitiveTopology::PointList;
+                if (submesh.IndexCount == 0 || !validPrimitiveCount || end > indices.size() ||
                     submesh.MaterialSlot >= materialSlots.size() || !Math::IsFinite(submesh.Bounds.Minimum) ||
                     !Math::IsFinite(submesh.Bounds.Maximum))
-                    throw std::invalid_argument("Mesh submesh range, material slot, or bounds are invalid.");
+                    throw std::invalid_argument("Mesh submesh topology, range, material slot, or bounds are invalid.");
             }
             float previousThreshold = 1.0F;
             for (const auto& lod : lods)
@@ -263,49 +268,6 @@ namespace Keire
                      std::max(first.Maximum.Z, second.Maximum.Z)}};
         }
 
-        [[nodiscard]] std::pair<std::vector<MeshVertex>, std::vector<std::uint32_t>> CubeGeometry(const Color color)
-        {
-            struct Face final
-            {
-                Vector3 Normal;
-                Vector4 Tangent;
-                std::array<Vector3, 4> Positions;
-            };
-            constexpr std::array faces{
-                Face{{0.0F, 0.0F, 1.0F},
-                     {1.0F, 0.0F, 0.0F, 1.0F},
-                     {{{-0.5F, -0.5F, 0.5F}, {0.5F, -0.5F, 0.5F}, {0.5F, 0.5F, 0.5F}, {-0.5F, 0.5F, 0.5F}}}},
-                Face{{0.0F, 0.0F, -1.0F},
-                     {-1.0F, 0.0F, 0.0F, 1.0F},
-                     {{{0.5F, -0.5F, -0.5F}, {-0.5F, -0.5F, -0.5F}, {-0.5F, 0.5F, -0.5F}, {0.5F, 0.5F, -0.5F}}}},
-                Face{{1.0F, 0.0F, 0.0F},
-                     {0.0F, 0.0F, -1.0F, 1.0F},
-                     {{{0.5F, -0.5F, 0.5F}, {0.5F, -0.5F, -0.5F}, {0.5F, 0.5F, -0.5F}, {0.5F, 0.5F, 0.5F}}}},
-                Face{{-1.0F, 0.0F, 0.0F},
-                     {0.0F, 0.0F, 1.0F, 1.0F},
-                     {{{-0.5F, -0.5F, -0.5F}, {-0.5F, -0.5F, 0.5F}, {-0.5F, 0.5F, 0.5F}, {-0.5F, 0.5F, -0.5F}}}},
-                Face{{0.0F, 1.0F, 0.0F},
-                     {1.0F, 0.0F, 0.0F, 1.0F},
-                     {{{-0.5F, 0.5F, 0.5F}, {0.5F, 0.5F, 0.5F}, {0.5F, 0.5F, -0.5F}, {-0.5F, 0.5F, -0.5F}}}},
-                Face{{0.0F, -1.0F, 0.0F},
-                     {1.0F, 0.0F, 0.0F, -1.0F},
-                     {{{-0.5F, -0.5F, -0.5F}, {0.5F, -0.5F, -0.5F}, {0.5F, -0.5F, 0.5F}, {-0.5F, -0.5F, 0.5F}}}}};
-            constexpr std::array uvs{Vector2{0.0F, 1.0F}, Vector2{1.0F, 1.0F}, Vector2{1.0F, 0.0F},
-                                     Vector2{0.0F, 0.0F}};
-            std::vector<MeshVertex> vertices;
-            std::vector<std::uint32_t> indices;
-            vertices.reserve(24);
-            indices.reserve(36);
-            for (const auto& face : faces)
-            {
-                const auto base = static_cast<std::uint32_t>(vertices.size());
-                for (std::size_t corner = 0; corner < face.Positions.size(); ++corner)
-                    vertices.push_back({face.Positions[corner], face.Normal, uvs[corner], color, face.Tangent});
-                indices.insert(indices.end(), {base, base + 1, base + 2, base, base + 2, base + 3});
-            }
-            return {std::move(vertices), std::move(indices)};
-        }
-
         [[nodiscard]] Vector3 Cross(const Vector3 left, const Vector3 right) noexcept
         {
             return {left.Y * right.Z - left.Z * right.Y, left.Z * right.X - left.X * right.Z,
@@ -326,40 +288,47 @@ namespace Keire
             return {value.X * inverseLength, value.Y * inverseLength, value.Z * inverseLength};
         }
 
-        void GenerateTangents(std::vector<MeshVertex>& vertices, const std::span<const std::uint32_t> indices)
+        void GenerateTangents(std::vector<MeshVertex>& vertices, const std::span<const std::uint32_t> indices,
+                              const std::span<const MeshSubmesh> submeshes)
         {
             std::vector<Vector3> tangents(vertices.size());
             std::vector<Vector3> bitangents(vertices.size());
-            for (std::size_t triangle = 0; triangle < indices.size(); triangle += 3)
+            for (const auto& submesh : submeshes)
             {
-                const auto first = indices[triangle];
-                const auto second = indices[triangle + 1];
-                const auto third = indices[triangle + 2];
-                const auto& a = vertices[first];
-                const auto& b = vertices[second];
-                const auto& c = vertices[third];
-                const Vector3 edgeOne{b.Position.X - a.Position.X, b.Position.Y - a.Position.Y,
-                                      b.Position.Z - a.Position.Z};
-                const Vector3 edgeTwo{c.Position.X - a.Position.X, c.Position.Y - a.Position.Y,
-                                      c.Position.Z - a.Position.Z};
-                const Vector2 uvOne{b.UV0.X - a.UV0.X, b.UV0.Y - a.UV0.Y};
-                const Vector2 uvTwo{c.UV0.X - a.UV0.X, c.UV0.Y - a.UV0.Y};
-                const auto determinant = uvOne.X * uvTwo.Y - uvOne.Y * uvTwo.X;
-                if (std::abs(determinant) <= 1.0e-12F)
+                if (submesh.Topology != ShaderPrimitiveTopology::TriangleList)
                     continue;
-                const auto inverse = 1.0F / determinant;
-                const Vector3 tangent{(edgeOne.X * uvTwo.Y - edgeTwo.X * uvOne.Y) * inverse,
-                                      (edgeOne.Y * uvTwo.Y - edgeTwo.Y * uvOne.Y) * inverse,
-                                      (edgeOne.Z * uvTwo.Y - edgeTwo.Z * uvOne.Y) * inverse};
-                const Vector3 bitangent{(edgeTwo.X * uvOne.X - edgeOne.X * uvTwo.X) * inverse,
-                                        (edgeTwo.Y * uvOne.X - edgeOne.Y * uvTwo.X) * inverse,
-                                        (edgeTwo.Z * uvOne.X - edgeOne.Z * uvTwo.X) * inverse};
-                for (const auto index : {first, second, third})
+                for (std::size_t triangle = submesh.FirstIndex;
+                     triangle < static_cast<std::size_t>(submesh.FirstIndex) + submesh.IndexCount; triangle += 3)
                 {
-                    tangents[index] = {tangents[index].X + tangent.X, tangents[index].Y + tangent.Y,
-                                       tangents[index].Z + tangent.Z};
-                    bitangents[index] = {bitangents[index].X + bitangent.X, bitangents[index].Y + bitangent.Y,
-                                         bitangents[index].Z + bitangent.Z};
+                    const auto first = indices[triangle];
+                    const auto second = indices[triangle + 1];
+                    const auto third = indices[triangle + 2];
+                    const auto& a = vertices[first];
+                    const auto& b = vertices[second];
+                    const auto& c = vertices[third];
+                    const Vector3 edgeOne{b.Position.X - a.Position.X, b.Position.Y - a.Position.Y,
+                                          b.Position.Z - a.Position.Z};
+                    const Vector3 edgeTwo{c.Position.X - a.Position.X, c.Position.Y - a.Position.Y,
+                                          c.Position.Z - a.Position.Z};
+                    const Vector2 uvOne{b.UV0.X - a.UV0.X, b.UV0.Y - a.UV0.Y};
+                    const Vector2 uvTwo{c.UV0.X - a.UV0.X, c.UV0.Y - a.UV0.Y};
+                    const auto determinant = uvOne.X * uvTwo.Y - uvOne.Y * uvTwo.X;
+                    if (std::abs(determinant) <= 1.0e-12F)
+                        continue;
+                    const auto inverse = 1.0F / determinant;
+                    const Vector3 tangent{(edgeOne.X * uvTwo.Y - edgeTwo.X * uvOne.Y) * inverse,
+                                          (edgeOne.Y * uvTwo.Y - edgeTwo.Y * uvOne.Y) * inverse,
+                                          (edgeOne.Z * uvTwo.Y - edgeTwo.Z * uvOne.Y) * inverse};
+                    const Vector3 bitangent{(edgeTwo.X * uvOne.X - edgeOne.X * uvTwo.X) * inverse,
+                                            (edgeTwo.Y * uvOne.X - edgeOne.Y * uvTwo.X) * inverse,
+                                            (edgeTwo.Z * uvOne.X - edgeOne.Z * uvTwo.X) * inverse};
+                    for (const auto index : {first, second, third})
+                    {
+                        tangents[index] = {tangents[index].X + tangent.X, tangents[index].Y + tangent.Y,
+                                           tangents[index].Z + tangent.Z};
+                        bitangents[index] = {bitangents[index].X + bitangent.X, bitangents[index].Y + bitangent.Y,
+                                             bitangents[index].Z + bitangent.Z};
+                    }
                 }
             }
             for (std::size_t index = 0; index < vertices.size(); ++index)
@@ -826,13 +795,12 @@ namespace Keire
 
     MeshAsset::MeshAsset(const BuiltinMesh mesh) : m_Mesh(mesh)
     {
-        auto [vertices, indices] = CubeGeometry(mesh == BuiltinMesh::Error ? Color{1.0F, 0.0F, 1.0F, 1.0F} : Color{});
+        auto [vertices, indices] = Detail::CreateBuiltinMeshGeometry(mesh);
         m_Vertices = std::move(vertices);
         m_Indices = std::move(indices);
         m_Bounds = CalculateBounds(m_Vertices);
         std::tie(m_Submeshes, m_MaterialSlots, m_Lods) = DefaultMeshStructure(m_Indices, m_Bounds);
     }
-
     MeshAsset::MeshAsset(std::vector<MeshVertex> vertices, std::vector<std::uint32_t> indices, const MeshBounds bounds)
         : m_Mesh(BuiltinMesh::Error), m_Vertices(std::move(vertices)), m_Indices(std::move(indices)), m_Bounds(bounds)
     {
@@ -842,7 +810,6 @@ namespace Keire
             throw std::invalid_argument("Mesh bounds do not match its vertices.");
         std::tie(m_Submeshes, m_MaterialSlots, m_Lods) = DefaultMeshStructure(m_Indices, m_Bounds);
     }
-
     MeshAsset::MeshAsset(std::vector<MeshVertex> vertices, std::vector<std::uint32_t> indices,
                          std::vector<MeshSubmesh> submeshes, std::vector<MeshMaterialSlot> materialSlots,
                          std::vector<MeshLod> lods, const MeshBounds bounds)
@@ -865,9 +832,6 @@ namespace Keire
             result += slot.Name.size();
         return result;
     }
-
-    Ref<MeshAsset> MeshAsset::Cube() { return CreateRef<MeshAsset>(BuiltinMesh::Cube); }
-    Ref<MeshAsset> MeshAsset::Error() { return CreateRef<MeshAsset>(BuiltinMesh::Error); }
 
     std::vector<std::byte> MeshAsset::Encode(const std::span<const MeshVertex> vertices,
                                              const std::span<const std::uint32_t> indices)
@@ -907,6 +871,7 @@ namespace Keire
             for (const float value : {submesh.Bounds.Minimum.X, submesh.Bounds.Minimum.Y, submesh.Bounds.Minimum.Z,
                                       submesh.Bounds.Maximum.X, submesh.Bounds.Maximum.Y, submesh.Bounds.Maximum.Z})
                 AppendFloat(result, value);
+            AppendUnsigned(result, static_cast<std::uint8_t>(submesh.Topology));
         }
         for (const auto& slot : materialSlots)
         {
@@ -947,7 +912,7 @@ namespace Keire
         const auto vertexCount = reader.UnsignedValue<std::uint64_t>();
         const auto indexCount = reader.UnsignedValue<std::uint64_t>();
         if (vertexCount == 0 || vertexCount > MaximumMeshVertices || indexCount == 0 ||
-            indexCount > MaximumMeshIndices || indexCount % 3U != 0)
+            indexCount > MaximumMeshIndices || (version < 5 && indexCount % 3U != 0))
             throw std::invalid_argument("Mesh asset counts are invalid.");
         MeshBounds bounds{{reader.Float(), reader.Float(), reader.Float()},
                           {reader.Float(), reader.Float(), reader.Float()}};
@@ -971,6 +936,10 @@ namespace Keire
                 submesh.MaterialSlot = reader.UnsignedValue<std::uint32_t>();
                 submesh.Bounds = {{reader.Float(), reader.Float(), reader.Float()},
                                   {reader.Float(), reader.Float(), reader.Float()}};
+                if (version >= 5)
+                {
+                    submesh.Topology = static_cast<ShaderPrimitiveTopology>(reader.UnsignedValue<std::uint8_t>());
+                }
                 submeshes.push_back(submesh);
             }
             materialSlots.reserve(materialSlotCount);
@@ -1012,10 +981,10 @@ namespace Keire
         std::vector<std::uint32_t> indices(static_cast<std::size_t>(indexCount));
         for (auto& index : indices)
             index = reader.UnsignedValue<std::uint32_t>();
-        if (version == 1)
-            GenerateTangents(vertices, indices);
         if (version < 3)
             std::tie(submeshes, materialSlots, lods) = DefaultMeshStructure(indices, bounds);
+        if (version == 1)
+            GenerateTangents(vertices, indices, submeshes);
         return CreateRef<MeshAsset>(std::move(vertices), std::move(indices), std::move(submeshes),
                                     std::move(materialSlots), std::move(lods), bounds);
     }
@@ -1146,7 +1115,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.Mesh";
-        result.Version = 13;
+        result.Version = 14;
         result.Type = MeshAsset::StaticType();
         result.CompatibleTypes = {AnimationSourceAsset::StaticType()};
         result.Extensions = {".obj", ".fbx", ".gltf", ".glb", ".keiremesh"};
@@ -1765,14 +1734,43 @@ namespace Keire
             {
                 unsigned int Index = 0;
                 std::uint32_t Lod = 0;
+                ShaderPrimitiveTopology Topology = ShaderPrimitiveTopology::TriangleList;
             };
             std::vector<OrderedMesh> orderedMeshes;
             orderedMeshes.reserve(scene->mNumMeshes);
             for (unsigned int meshIndex = 0; meshIndex < scene->mNumMeshes; ++meshIndex)
             {
                 const auto* mesh = scene->mMeshes[meshIndex];
-                orderedMeshes.push_back({meshIndex, mesh ? MeshLodIndex(mesh->mName.C_Str()) : 0U});
+                if (!mesh)
+                    continue;
+                const auto primitives = mesh->mPrimitiveTypes;
+                ShaderPrimitiveTopology topology;
+                if (primitives == static_cast<unsigned int>(aiPrimitiveType_TRIANGLE))
+                    topology = ShaderPrimitiveTopology::TriangleList;
+                else if (primitives == static_cast<unsigned int>(aiPrimitiveType_LINE))
+                {
+                    topology = ShaderPrimitiveTopology::LineList;
+                    output.Diagnostics.push_back({AssetDiagnosticSeverity::Information, context.RelativePath, 0, 0,
+                                                  "Imported line-list primitive '" + std::string(mesh->mName.C_Str()) +
+                                                      "'; assign a shader whose renderState.topology is LineList."});
+                }
+                else if (primitives == static_cast<unsigned int>(aiPrimitiveType_POINT))
+                {
+                    topology = ShaderPrimitiveTopology::PointList;
+                    output.Diagnostics.push_back({AssetDiagnosticSeverity::Information, context.RelativePath, 0, 0,
+                                                  "Imported point-list primitive '" + std::string(mesh->mName.C_Str()) +
+                                                      "'; assign a shader whose renderState.topology is PointList."});
+                }
+                else
+                {
+                    throw std::invalid_argument("Mesh primitive '" + std::string(mesh->mName.C_Str()) +
+                                                "' contains a mixed or unsupported topology after conversion.");
+                }
+                orderedMeshes.push_back({meshIndex, MeshLodIndex(mesh->mName.C_Str()), topology});
             }
+            if (orderedMeshes.empty())
+                throw std::invalid_argument(
+                    "Mesh source contains no supported triangle-list, line-list, or point-list primitives.");
             std::ranges::stable_sort(orderedMeshes, {}, &OrderedMesh::Lod);
             std::vector<std::uint32_t> lodValues;
             for (const auto ordered : orderedMeshes)
@@ -1789,10 +1787,11 @@ namespace Keire
                 while (orderedOffset < orderedMeshes.size() &&
                        orderedMeshes[orderedOffset].Lod == lodValues[lodPosition])
                 {
-                    const auto meshIndex = orderedMeshes[orderedOffset++].Index;
+                    const auto orderedMesh = orderedMeshes[orderedOffset++];
+                    const auto meshIndex = orderedMesh.Index;
                     const auto* mesh = scene->mMeshes[meshIndex];
-                    if (!mesh || (mesh->mPrimitiveTypes & ~static_cast<unsigned int>(aiPrimitiveType_TRIANGLE)) != 0U)
-                        throw std::invalid_argument("Mesh import rejects non-triangle primitives.");
+                    if (generateRig && orderedMesh.Topology != ShaderPrimitiveTopology::TriangleList)
+                        throw std::invalid_argument("Automatic rig generation requires triangle-list primitives.");
                     if (vertices.size() > std::numeric_limits<std::uint32_t>::max() - mesh->mNumVertices)
                         throw std::overflow_error("Merged mesh vertex count exceeds 32-bit indices.");
                     const auto base = static_cast<std::uint32_t>(vertices.size());
@@ -1876,9 +1875,13 @@ namespace Keire
                     for (unsigned int faceIndex = 0; faceIndex < mesh->mNumFaces; ++faceIndex)
                     {
                         const auto& face = mesh->mFaces[faceIndex];
-                        if (face.mNumIndices != 3)
-                            throw std::invalid_argument("Assimp did not triangulate a mesh face.");
-                        for (unsigned int corner = 0; corner < 3; ++corner)
+                        const auto expectedIndices = orderedMesh.Topology == ShaderPrimitiveTopology::TriangleList ? 3U
+                                                     : orderedMesh.Topology == ShaderPrimitiveTopology::LineList   ? 2U
+                                                                                                                   : 1U;
+                        if (face.mNumIndices != expectedIndices)
+                            throw std::invalid_argument("Assimp emitted a face that does not match its converted "
+                                                        "primitive topology.");
+                        for (unsigned int corner = 0; corner < expectedIndices; ++corner)
                             indices.push_back(base + face.mIndices[corner]);
                     }
                     const auto meshBounds = CalculateBounds(
@@ -1886,7 +1889,7 @@ namespace Keire
                     submeshes.push_back(
                         {firstIndex, static_cast<std::uint32_t>(indices.size()) - firstIndex,
                          std::min(mesh->mMaterialIndex, static_cast<unsigned int>(materialSlots.size() - 1U)),
-                         meshBounds});
+                         meshBounds, orderedMesh.Topology});
                     lodBounds = lodBounds ? CombineBounds(*lodBounds, meshBounds) : meshBounds;
                 }
                 const auto threshold =
@@ -1894,7 +1897,7 @@ namespace Keire
                 lods.push_back(
                     {threshold, firstSubmesh, static_cast<std::uint32_t>(submeshes.size()) - firstSubmesh, *lodBounds});
             }
-            GenerateTangents(vertices, indices);
+            GenerateTangents(vertices, indices, submeshes);
             const auto bounds = CalculateBounds(vertices);
             if (generateRig)
             {

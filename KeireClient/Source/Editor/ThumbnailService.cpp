@@ -72,6 +72,60 @@ namespace KeireEditor
             return pixels;
         }
 
+        [[nodiscard]] constexpr std::array<std::uint8_t, 5> GlyphRows(const char glyph) noexcept
+        {
+            switch (glyph)
+            {
+            case 'F':
+                return {0b111, 0b100, 0b110, 0b100, 0b100};
+            case 'G':
+                return {0b111, 0b100, 0b101, 0b101, 0b111};
+            case 'I':
+                return {0b111, 0b010, 0b010, 0b010, 0b111};
+            case 'M':
+                return {0b101, 0b111, 0b111, 0b101, 0b101};
+            case 'V':
+                return {0b101, 0b101, 0b101, 0b101, 0b010};
+            case 'X':
+                return {0b101, 0b101, 0b010, 0b101, 0b101};
+            default:
+                return {};
+            }
+        }
+
+        void ApplyBadge(std::vector<std::byte>& pixels, const std::uint32_t width, const std::uint32_t height,
+                        const std::string_view text)
+        {
+            if (pixels.size() != static_cast<std::size_t>(width) * height * 4 || width < 24 || height < 16 ||
+                text.size() != 2)
+            {
+                return;
+            }
+            constexpr std::uint32_t badgeWidth = 22;
+            constexpr std::uint32_t badgeHeight = 14;
+            const auto left = width - badgeWidth - 3;
+            const auto top = height - badgeHeight - 3;
+            for (std::uint32_t y = top; y < top + badgeHeight; ++y)
+                for (std::uint32_t x = left; x < left + badgeWidth; ++x)
+                {
+                    const bool border =
+                        x == left || y == top || x + 1 == left + badgeWidth || y + 1 == top + badgeHeight;
+                    PutPixel(pixels, width, x, y, border ? 229 : 20, border ? 178 : 25, border ? 65 : 34, 255);
+                }
+            for (std::size_t character = 0; character < text.size(); ++character)
+            {
+                const auto rows = GlyphRows(text[character]);
+                const auto glyphLeft = left + 4 + static_cast<std::uint32_t>(character) * 8;
+                for (std::uint32_t row = 0; row < rows.size(); ++row)
+                    for (std::uint32_t column = 0; column < 3; ++column)
+                        if ((rows[row] & (1U << (2U - column))) != 0)
+                            for (std::uint32_t pixelY = 0; pixelY < 2; ++pixelY)
+                                for (std::uint32_t pixelX = 0; pixelX < 2; ++pixelX)
+                                    PutPixel(pixels, width, glyphLeft + column * 2 + pixelX, top + 2 + row * 2 + pixelY,
+                                             248, 225, 151, 255);
+            }
+        }
+
         [[nodiscard]] std::string Lower(std::string value)
         {
             std::ranges::transform(value, value.begin(), [](const char input)
@@ -240,6 +294,94 @@ namespace KeireEditor
                              channel(sample[2], tint.Blue));
                 }
             return result;
+        }
+
+        [[nodiscard]] std::vector<std::byte> MakeMaterialGraphPreview(const ThumbnailRequest& request,
+                                                                      const std::uint32_t width,
+                                                                      const std::uint32_t height,
+                                                                      const std::string_view badge)
+        {
+            auto result = MakeMaterialPreview(request, width, height);
+            ApplyBadge(result, width, height, badge);
+            return result;
+        }
+
+        [[nodiscard]] std::vector<std::byte> MakeVfxPreview(const ThumbnailRequest& request, const std::uint32_t width,
+                                                            const std::uint32_t height)
+        {
+            auto fallback =
+                MakeAssetFallbackThumbnail(Keire::VfxEffectAsset::StaticType(), width, height, request.Missing);
+            const auto effect = Keire::DynamicRefCast<const Keire::VfxEffectAsset>(request.PreviewAsset);
+            if (!effect)
+                return fallback;
+            try
+            {
+                Keire::VfxWorld world({.MaximumEffects = 1,
+                                       .MaximumSystemsPerEffect = 16,
+                                       .MaximumParticles = 2048,
+                                       .Backend = Keire::VfxBackend::Cpu});
+                const auto handle = world.Activate({.Effect = effect, .Revision = 1});
+                if (!handle)
+                    return fallback;
+                for (std::size_t frame = 0; frame < 36; ++frame)
+                    world.Update(1.0F / 30.0F);
+                const auto snapshot = world.CaptureRenderSnapshot(2048);
+                if (snapshot.Particles().empty())
+                    return fallback;
+
+                std::vector<std::byte> result(static_cast<std::size_t>(width) * height * 4);
+                FillPreviewBackground(result, width, height);
+                float extent = 0.5F;
+                for (const auto& particle : snapshot.Particles())
+                {
+                    extent = std::max({extent, std::abs(particle.Position.X), std::abs(particle.Position.Y),
+                                       std::abs(particle.Position.Z)});
+                }
+                const auto drawParticle = [&](const Keire::VfxRenderParticle& particle)
+                {
+                    const float projectedX = (particle.Position.X - particle.Position.Z) * 0.70710678F / extent;
+                    const float projectedY =
+                        (particle.Position.Y * 0.82F - (particle.Position.X + particle.Position.Z) * 0.2F) / extent;
+                    const int centerX = static_cast<int>(static_cast<float>(width) * (0.5F + projectedX * 0.36F));
+                    const int centerY = static_cast<int>(static_cast<float>(height) * (0.52F - projectedY * 0.36F));
+                    const int radius = std::clamp(static_cast<int>(particle.Size * 4.0F / extent), 1, 6);
+                    for (int y = -radius; y <= radius; ++y)
+                        for (int x = -radius; x <= radius; ++x)
+                        {
+                            const int pixelX = centerX + x;
+                            const int pixelY = centerY + y;
+                            if (x * x + y * y > radius * radius || pixelX < 0 || pixelY < 0 ||
+                                pixelX >= static_cast<int>(width) || pixelY >= static_cast<int>(height))
+                            {
+                                continue;
+                            }
+                            const float alpha =
+                                std::clamp(particle.Tint.Alpha * (1.0F - std::sqrt(static_cast<float>(x * x + y * y)) /
+                                                                             static_cast<float>(radius + 1)),
+                                           0.15F, 1.0F);
+                            const auto offset =
+                                (static_cast<std::size_t>(pixelY) * width + static_cast<std::size_t>(pixelX)) * 4;
+                            const auto blend = [&](const std::size_t channel, const float value)
+                            {
+                                return static_cast<std::uint8_t>(
+                                    std::clamp(static_cast<float>(Byte(result[offset + channel])) * (1.0F - alpha) +
+                                                   value * 255.0F * alpha,
+                                               0.0F, 255.0F));
+                            };
+                            PutPixel(result, width, static_cast<std::uint32_t>(pixelX),
+                                     static_cast<std::uint32_t>(pixelY), blend(0, particle.Tint.Red),
+                                     blend(1, particle.Tint.Green), blend(2, particle.Tint.Blue), 255);
+                        }
+                };
+                for (const auto& particle : snapshot.Particles())
+                    drawParticle(particle);
+                ApplyBadge(result, width, height, "FX");
+                return result;
+            }
+            catch (const std::exception&)
+            {
+                return fallback;
+            }
         }
 
         void DrawLine(std::vector<std::byte>& pixels, const std::uint32_t width, const std::uint32_t height, int x0,
@@ -668,6 +810,118 @@ namespace KeireEditor
         return pixels;
     }
 
+    std::vector<std::byte> MakeAssetFallbackThumbnail(const Keire::AssetTypeId type, const std::uint32_t width,
+                                                      const std::uint32_t height, const bool missing)
+    {
+        if (type == Keire::MaterialGraphAsset::StaticType())
+        {
+            auto result = MakeIcon(width, height, {47, 31, 48}, {213, 94, 199}, 'M', missing);
+            ApplyBadge(result, width, height, "MG");
+            return result;
+        }
+        if (type == Keire::MaterialGraphInstanceAsset::StaticType())
+        {
+            auto result = MakeIcon(width, height, {43, 33, 47}, {196, 111, 212}, 'M', missing);
+            ApplyBadge(result, width, height, "MI");
+            return result;
+        }
+        if (type == Keire::VfxEffectAsset::StaticType())
+        {
+            auto result = MakeIcon(width, height, {25, 37, 52}, {74, 181, 238}, 'V', missing);
+            ApplyBadge(result, width, height, "FX");
+            return result;
+        }
+        return MakeIcon(width, height, {40, 44, 52}, {130, 142, 162}, 'X', missing);
+    }
+
+    std::optional<bool> PrepareGeneratedAssetThumbnail(const Keire::Ref<Keire::AssetSystem>& assets,
+                                                       const Keire::AssetSourceRecord& source,
+                                                       ThumbnailRequest& request)
+    {
+        if (!assets)
+            return std::nullopt;
+        if (source.Type == Keire::VfxEffectAsset::StaticType())
+        {
+            const auto handle = assets->Load<Keire::VfxEffectAsset>(source.Id, Keire::AssetPriority::Low);
+            request.PreviewAsset = handle.TryGetLoaded();
+            request.Missing = handle.State() == Keire::AssetState::Failed;
+            if (!request.PreviewAsset && request.Missing)
+                request.PreviewAsset = handle.Get();
+            return static_cast<bool>(request.PreviewAsset);
+        }
+
+        Keire::AssetId materialId;
+        if (source.Type == Keire::MaterialAsset::StaticType())
+        {
+            materialId = source.Id;
+        }
+        else if (source.Type == Keire::MaterialGraphAsset::StaticType() ||
+                 source.Type == Keire::MaterialGraphInstanceAsset::StaticType())
+        {
+            const auto preview = std::ranges::find_if(source.SubAssets,
+                                                      [&](const Keire::AssetId subAsset)
+                                                      {
+                                                          const auto type = assets->TryGetType(subAsset);
+                                                          return type && *type == Keire::MaterialAsset::StaticType();
+                                                      });
+            if (preview == source.SubAssets.end())
+                return false;
+            materialId = *preview;
+        }
+        else
+        {
+            return std::nullopt;
+        }
+
+        const auto handle = assets->Load<Keire::MaterialAsset>(materialId, Keire::AssetPriority::Low);
+        const auto material = handle.TryGetLoaded();
+        request.PreviewAsset = material;
+        request.Missing = handle.State() == Keire::AssetState::Failed;
+        if (!request.PreviewAsset && request.Missing)
+            request.PreviewAsset = handle.Get();
+        bool ready = static_cast<bool>(request.PreviewAsset);
+        if (material && material->Definition().Shader)
+        {
+            const auto shaderHandle =
+                assets->Load<Keire::ShaderAsset>(material->Definition().Shader, Keire::AssetPriority::Low);
+            request.PreviewShader = shaderHandle.TryGetLoaded();
+            if (!request.PreviewShader && shaderHandle.State() == Keire::AssetState::Failed)
+                request.PreviewShader = shaderHandle.Get();
+            ready = ready && static_cast<bool>(request.PreviewShader);
+        }
+
+        Keire::AssetId texture;
+        if (material)
+        {
+            if (const auto found = material->Definition().Properties.find("MainTexture");
+                found != material->Definition().Properties.end())
+                if (const auto* id = std::get_if<Keire::AssetId>(&found->second))
+                    texture = *id;
+            if (request.PreviewShader)
+            {
+                for (const auto& property : request.PreviewShader->Definition().Properties)
+                {
+                    if (property.TextureSemantic != Keire::ShaderTextureSemantic::BaseColor)
+                        continue;
+                    if (const auto found = material->Definition().Properties.find(property.Name);
+                        found != material->Definition().Properties.end())
+                        if (const auto* id = std::get_if<Keire::AssetId>(&found->second))
+                            texture = *id;
+                    break;
+                }
+            }
+        }
+        if (texture)
+        {
+            const auto textureHandle = assets->Load<Keire::Texture2DAsset>(texture, Keire::AssetPriority::Low);
+            request.PreviewTexture = textureHandle.TryGetLoaded();
+            if (!request.PreviewTexture && textureHandle.State() == Keire::AssetState::Failed)
+                request.PreviewTexture = textureHandle.Get();
+            ready = ready && static_cast<bool>(request.PreviewTexture);
+        }
+        return ready;
+    }
+
     class ThumbnailService::Impl final
     {
       public:
@@ -801,6 +1055,13 @@ namespace KeireEditor
             { return MakeIcon(width, height, background, accent, glyph, request.Missing); };
         };
         RegisterProvider(".keirematerial", 5, MakeMaterialPreview);
+        RegisterProvider(".keirematerialgraph", 1,
+                         [](const ThumbnailRequest& request, const auto width, const auto height)
+                         { return MakeMaterialGraphPreview(request, width, height, "MG"); });
+        RegisterProvider(".keirematerialinstance", 1,
+                         [](const ThumbnailRequest& request, const auto width, const auto height)
+                         { return MakeMaterialGraphPreview(request, width, height, "MI"); });
+        RegisterProvider(".keirevfx", 1, MakeVfxPreview);
         RegisterProvider(".png", 4, MakeTexturePreview);
         RegisterProvider(".jpg", 4, MakeTexturePreview);
         RegisterProvider(".jpeg", 4, MakeTexturePreview);

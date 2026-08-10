@@ -103,6 +103,11 @@ derived deterministically from source and metadata digests, dependency IDs, prov
 and live under `Library/Thumbnails`.
 
 Textures display their imported pixels at the correct aspect ratio with transparency composited over a checkerboard.
+Material Graph and Material Instance sources resolve their generated runtime material and render the same shaded-sphere
+preview as ordinary materials. VFX assets run a bounded CPU simulation on the thumbnail worker when practical. Small
+`MG`, `MI`, and `FX` badges identify the source graph type; stable type-specific placeholders remain visible during
+loading, failed import, invalid content, cache misses, and unsupported VFX output. No preview simulation or disk cache
+write runs on the Content Browser/UI thread.
 Materials use a neutral shaded sphere driven by their current Base Color semantic, tint, and texture. Mesh/model assets
 use their imported geometry and catalog bounds for a framed isometric clay preview without material textures. Scene,
 shader, input-action, folder,

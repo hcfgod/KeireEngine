@@ -9,7 +9,7 @@
     "skinningMethod": "linearBlend"
   },
   "importer": "Keire.Mesh",
-  "importerVersion": 13,
+  "importerVersion": 14,
   "schemaVersion": 1,
   "subAssets": [
     "89e86ecc-863b-5daf-853f-06227914c107",

@@ -498,6 +498,9 @@ void EditorWorkspaceLayer::OpenPendingDialog(Keire::UiFrame& ui)
     case Dialog::DirtyScene:
         ui.OpenPopup("Unsaved Scene Changes");
         break;
+    case Dialog::DirtyMaterialGraph:
+        ui.OpenPopup("Unsaved Material Graph Changes");
+        break;
     case Dialog::DirtyPlayerBuild:
         ui.OpenPopup("Unsaved Player Build State");
         break;
@@ -521,6 +524,7 @@ void EditorWorkspaceLayer::DrawDialogs(Keire::UiFrame& ui, Keire::UiWorkspace& w
     DrawDeleteDialog(ui, workspace, "Delete Theme", true);
     DrawDirtyThemeDialog(ui, workspace);
     DrawDirtySceneDialog(ui);
+    DrawDirtyMaterialGraphDialog(ui);
     DrawDirtyPlayerBuildDialog(ui);
 }
 
@@ -725,6 +729,46 @@ void EditorWorkspaceLayer::DrawDirtySceneDialog(Keire::UiFrame& ui)
             ui.CloseCurrentPopup();
         }
         ui.TextColored(m_Theme.MutedText, "Save is atomic; Cancel leaves the scene and selection unchanged.");
+    }
+}
+
+void EditorWorkspaceLayer::DrawDirtyMaterialGraphDialog(Keire::UiFrame& ui)
+{
+    if (auto popup = ui.BeginPopupModal("Unsaved Material Graph Changes"); popup)
+    {
+        ui.Text("Save the open Material Graph before closing the editor?");
+        if (ui.Button("Save"))
+        {
+            try
+            {
+                SaveMaterialGraph();
+                if (!m_MaterialGraphDocument->Dirty())
+                {
+                    ui.CloseCurrentPopup();
+                    ExecutePendingSceneAction();
+                }
+            }
+            catch (const std::exception& error)
+            {
+                ReportError("Material Graph", error.what());
+            }
+        }
+        ui.SameLine();
+        if (ui.Button("Discard"))
+        {
+            m_MaterialGraphDocument->Discard();
+            ui.CloseCurrentPopup();
+            ExecutePendingSceneAction();
+        }
+        ui.SameLine();
+        if (ui.Button("Cancel"))
+        {
+            m_PendingSceneAction = PendingSceneAction::None;
+            m_Dialog = Dialog::None;
+            ui.CloseCurrentPopup();
+        }
+        ui.TextColored(m_Theme.MutedText,
+                       "Save publishes the graph source and its generated runtime shader variants atomically.");
     }
 }
 

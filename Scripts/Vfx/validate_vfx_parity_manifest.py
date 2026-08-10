@@ -107,6 +107,11 @@ def validate_top_level(manifest: dict[str, Any], errors: list[str]) -> None:
         errors,
     )
     require(
+        policy.get("priorityValues") == list(generator.PRIORITY_VALUES),
+        "policy.priorityValues changed",
+        errors,
+    )
+    require(
         policy.get("unityAssetCompatibility") is False,
         "Unity asset compatibility must remain out of scope",
         errors,
@@ -261,6 +266,23 @@ def validate_entry(
         errors,
     )
     require(support != "Missing", f"{location} may not use Missing support", errors)
+    priority = keire.get("priority")
+    require(
+        priority in generator.PRIORITY_VALUES,
+        f"{location}.keire.priority is invalid",
+        errors,
+    )
+    expected_priority = generator.parity_priority(
+        str(entry.get("kind", "")),
+        str(entry.get("unityLabel", "")),
+        str(entry.get("unityCategory", "")),
+        str(support),
+    )
+    require(
+        priority == expected_priority,
+        f"{location}.keire.priority drifted; expected {expected_priority!r}",
+        errors,
+    )
     implementation = keire.get("implementation")
     require(
         implementation is None
@@ -403,6 +425,38 @@ def validate_counts(
     )
     require(
         manifest.get("counts") == actual, f"counts are stale; expected {actual}", errors
+    )
+
+
+def validate_first_major_milestone(
+    manifest: dict[str, Any], entries: list[dict[str, Any]], errors: list[str]
+) -> None:
+    expected = generator.first_major_parity_milestone(entries)
+    require(
+        manifest.get("firstMajorParityMilestone") == expected,
+        f"firstMajorParityMilestone is stale; expected {expected}",
+        errors,
+    )
+    require(
+        expected["achieved"],
+        "first major parity milestone has fewer than 50 validated parity rows",
+        errors,
+    )
+
+
+def validate_portable_parity_expansion(
+    manifest: dict[str, Any], entries: list[dict[str, Any]], errors: list[str]
+) -> None:
+    expected = generator.portable_parity_expansion(entries)
+    require(
+        manifest.get("portableParityExpansion") == expected,
+        f"portableParityExpansion is stale; expected {expected}",
+        errors,
+    )
+    require(
+        expected["achieved"],
+        "portable parity expansion has fewer than 120 validated additional rows",
+        errors,
     )
 
 
@@ -559,6 +613,8 @@ def main() -> int:
     )
     require(entries == expected_order, "entries are not in canonical order", errors)
     validate_counts(manifest, entries, errors)
+    validate_first_major_milestone(manifest, entries, errors)
+    validate_portable_parity_expansion(manifest, entries, errors)
     validate_production_slices(manifest, entries, errors)
     if options.unity_source:
         validate_source(manifest, entries, options.unity_source.resolve(), errors)

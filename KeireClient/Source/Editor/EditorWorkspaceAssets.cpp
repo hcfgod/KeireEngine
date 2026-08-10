@@ -165,7 +165,7 @@ void EditorWorkspaceLayer::ReportAssetBrowserError(std::string message) noexcept
 
 void EditorWorkspaceLayer::ImportAssetBrowserAssets() { ImportAssets(); }
 
-void EditorWorkspaceLayer::RequestAssetBrowserCreateScene() { RequestCreateScene(); }
+bool EditorWorkspaceLayer::CreateAssetBrowserScene(const std::string_view name) { return CreateSceneAsset(name); }
 
 bool EditorWorkspaceLayer::CreateAssetBrowserMaterial(const std::string_view name) { return CreateMaterial(name); }
 
@@ -254,12 +254,12 @@ void EditorWorkspaceLayer::CreateAssetBrowserPrefabFromObject(const Keire::Asset
     CreatePrefabFromObject(object, folder);
 }
 
-void EditorWorkspaceLayer::CreateAssetBrowserShader() { CreateUnlitShader(); }
+bool EditorWorkspaceLayer::CreateAssetBrowserShader(const std::string_view name) { return CreateUnlitShader(name); }
 
-void EditorWorkspaceLayer::CreateAssetBrowserInputActions(Keire::InputActionAssetDefinition definition,
+bool EditorWorkspaceLayer::CreateAssetBrowserInputActions(Keire::InputActionAssetDefinition definition,
                                                           const std::string_view baseName)
 {
-    CreateInputActions(std::move(definition), baseName);
+    return CreateInputActions(std::move(definition), baseName, true);
 }
 
 void EditorWorkspaceLayer::ExtractAssetBrowserMaterials(const Keire::AssetId model)
@@ -669,6 +669,21 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
             }
             if (completion->Kind == Keire::Detail::AssetWorkerOperationKind::Mutate)
             {
+                if (m_SceneDocument && m_SceneDocument->Asset())
+                {
+                    const auto scene = m_SceneDocument->Asset();
+                    if (std::ranges::find(completion->Result.MutatedAssets, scene) !=
+                        completion->Result.MutatedAssets.end())
+                    {
+                        if (const auto record = m_AssetDatabase->Find(scene))
+                        {
+                            const auto& specification = m_AssetDatabase->Specification();
+                            m_SceneDocument->SetIdentity(scene, (specification.ProjectRoot /
+                                                                 specification.SourceDirectory / record->RelativePath)
+                                                                    .lexically_normal());
+                        }
+                    }
+                }
                 if (const auto& state = completion->Context.MutationUndo)
                 {
                     const auto phase = completion->Context.MutationPhase;
@@ -1067,28 +1082,33 @@ void EditorWorkspaceLayer::CookAssets()
     }
 }
 
-void EditorWorkspaceLayer::CreateInputActions(Keire::InputActionAssetDefinition definition,
-                                              const std::string_view baseName)
+bool EditorWorkspaceLayer::CreateInputActions(Keire::InputActionAssetDefinition definition,
+                                              const std::string_view baseName, const bool requireExactName)
 {
     if (!m_AssetDatabase || !m_AssetOperations)
-        return;
+        return false;
     try
     {
         if (m_AssetOperations->Busy())
             (void)m_AssetOperations->PreemptBackgroundImports();
         const auto directory = m_AssetBrowserPanel ? m_AssetBrowserPanel->CurrentFolder() : std::filesystem::path{};
         auto destination = directory / (std::string(baseName) + ".keireinput");
-        for (std::size_t copy = 2; m_AssetDatabase->Find(destination); ++copy)
-            destination = directory / (std::string(baseName) + " " + std::to_string(copy) + ".keireinput");
+        if (requireExactName && m_AssetDatabase->Find(destination))
+            throw std::runtime_error("An Input Actions asset with that name already exists in this folder.");
+        if (!requireExactName)
+            for (std::size_t copy = 2; m_AssetDatabase->Find(destination); ++copy)
+                destination = directory / (std::string(baseName) + " " + std::to_string(copy) + ".keireinput");
         definition.Name = destination.stem().string();
         m_AssetOperations->QueueCreateAsset(
             destination, Keire::InputActionAsset::Encode(definition), {},
             {.FollowUp = KeireEditor::AssetOperationFollowUp::OpenInputActions, .UndoName = "Create Input Actions"});
         m_AssetStatus = "Creating " + destination.generic_string() + " in the isolated asset worker.";
+        return true;
     }
     catch (const std::exception& error)
     {
         SetAssetError(std::string("Input asset creation failed: ") + error.what());
+        return false;
     }
 }
 
@@ -1737,16 +1757,18 @@ void EditorWorkspaceLayer::ApplySelectedPrefabOverrides()
     ImportAssets();
 }
 
-void EditorWorkspaceLayer::CreateUnlitShader()
+bool EditorWorkspaceLayer::CreateUnlitShader(const std::string_view name)
 {
     if (!m_AssetDatabase || !m_AssetOperations)
-        return;
+        return false;
     std::filesystem::path manifest;
     std::filesystem::path hlsl;
     try
     {
         const auto directory = m_AssetBrowserPanel ? m_AssetBrowserPanel->CurrentFolder() : std::filesystem::path{};
-        std::string baseName = "UnlitShader";
+        if (!name.empty() && (name == "." || name == ".." || name.find_first_of("/\\") != std::string_view::npos))
+            throw std::invalid_argument("Shader name must be one non-empty path component.");
+        std::string baseName = name.empty() ? "UnlitShader" : std::string(name);
         for (std::size_t copy = 2;; ++copy)
         {
             manifest = directory / (baseName + ".keireshader");
@@ -1754,6 +1776,8 @@ void EditorWorkspaceLayer::CreateUnlitShader()
             if (!m_AssetDatabase->Find(manifest) &&
                 !std::filesystem::exists(m_AssetDatabase->Specification().ProjectRoot / "Assets" / hlsl))
                 break;
+            if (!name.empty())
+                throw std::runtime_error("A shader or HLSL source with that name already exists in this folder.");
             baseName = "UnlitShader " + std::to_string(copy);
         }
 
@@ -1809,10 +1833,12 @@ float4 PSMain(VertexOutput input) : SV_Target0
             manifest, std::vector<std::byte>(manifestBytes.begin(), manifestBytes.end()), {},
             {.FollowUp = KeireEditor::AssetOperationFollowUp::Reveal}, std::move(auxiliary));
         m_AssetStatus = "Creating and compiling " + manifest.generic_string() + " in the isolated asset worker.";
+        return true;
     }
     catch (const std::exception& error)
     {
         SetAssetError(std::string("Shader creation failed: ") + error.what());
+        return false;
     }
 }
 
@@ -1928,128 +1954,6 @@ void EditorWorkspaceLayer::RedoAnimatorControllerEdit() { (void)m_AnimatorContro
 void EditorWorkspaceLayer::ReportAnimatorControllerError(std::string message) noexcept
 {
     SetAssetError(std::move(message));
-}
-
-KeireEditor::AudioMixerDocument& EditorWorkspaceLayer::AudioMixerState() noexcept { return *m_AudioMixerDocument; }
-
-const Keire::UiThemeDefinition& EditorWorkspaceLayer::AudioMixerTheme() const noexcept { return m_Theme; }
-
-Keire::Ref<Keire::AssetDatabase> EditorWorkspaceLayer::AudioMixerDatabase() const noexcept { return m_AssetDatabase; }
-
-std::string_view EditorWorkspaceLayer::AudioMixerPreviewDiagnostic() const noexcept
-{
-    return m_AudioMixerPreviewDiagnostic;
-}
-
-void EditorWorkspaceLayer::ActivateAudioMixerHistory() noexcept
-{
-    m_ActiveUndoContext = m_AudioMixerDocument->UndoContext();
-}
-
-void EditorWorkspaceLayer::SaveAudioMixerDocument() { SaveAudioMixer(); }
-
-void EditorWorkspaceLayer::DiscardAudioMixerDocument()
-{
-    m_AudioMixerDocument->Discard();
-    m_AudioMixerPanel->SetMessage("Discarded unsaved Audio Mixer changes.");
-}
-
-void EditorWorkspaceLayer::ReloadAudioMixerDocument(const Keire::AssetId asset)
-{
-    if (!m_AssetDatabase || asset != m_AudioMixerDocument->Asset())
-        return;
-    const auto record = m_AssetDatabase->Find(asset);
-    if (!record || record->Type != Keire::AudioMixerAsset::StaticType() ||
-        record->RelativePath.extension() != ".keiremixer")
-        throw std::invalid_argument("Only .keiremixer assets can be reloaded in the Audio Mixer editor.");
-    const auto source = m_AssetDatabase->Specification().ProjectRoot /
-                        m_AssetDatabase->Specification().SourceDirectory / record->RelativePath;
-    if (++m_AudioMixerDocumentRevision == 0)
-        ++m_AudioMixerDocumentRevision;
-    const auto result = m_AudioMixerDocument->Reload(ReadBytes(source), m_AudioMixerDocumentRevision);
-    switch (result)
-    {
-    case KeireEditor::AssetDocumentReloadResult::Applied:
-        m_AudioMixerPanel->SetMessage("Reloaded " + record->RelativePath.generic_string() + ".");
-        break;
-    case KeireEditor::AssetDocumentReloadResult::Unchanged:
-        m_AudioMixerPanel->SetMessage("Audio Mixer source is unchanged.");
-        break;
-    case KeireEditor::AssetDocumentReloadResult::LocalChanges:
-        m_AudioMixerPanel->SetMessage("Reload skipped because the Audio Mixer has unsaved local changes.");
-        break;
-    }
-}
-
-void EditorWorkspaceLayer::UndoAudioMixerEdit() { (void)m_AudioMixerDocument->Undo(); }
-
-void EditorWorkspaceLayer::RedoAudioMixerEdit() { (void)m_AudioMixerDocument->Redo(); }
-
-void EditorWorkspaceLayer::StopAudioMixerPreview() noexcept { m_AudioMixerPreviewAsset = {}; }
-
-void EditorWorkspaceLayer::ReportAudioMixerError(std::string message) noexcept { SetAssetError(std::move(message)); }
-
-void EditorWorkspaceLayer::PreviewAudioMixer(const Keire::AssetId asset, const Keire::AudioMixerDefinition& definition)
-{
-    (void)definition;
-    m_AudioMixerPreviewAsset = asset;
-    m_AudioMixerPreviewDiagnostic =
-        "Live DSP audition is unavailable: device voices are not yet routed through authored mixer buses. "
-        "Document edits remain transient and never dirty scene state.";
-}
-
-void EditorWorkspaceLayer::PersistAudioMixer(const Keire::AssetId asset, const std::span<const std::byte> bytes)
-{
-    if (!m_AssetDatabase)
-        throw std::runtime_error("The Asset Database is unavailable.");
-    const auto record = m_AssetDatabase->Find(asset);
-    if (!record || record->Type != Keire::AudioMixerAsset::StaticType() ||
-        record->RelativePath.extension() != ".keiremixer")
-        throw std::runtime_error("The edited Audio Mixer source is unavailable.");
-    const auto source = m_AssetDatabase->Specification().ProjectRoot /
-                        m_AssetDatabase->Specification().SourceDirectory / record->RelativePath;
-    WriteBytesAtomically(source, bytes);
-}
-
-void EditorWorkspaceLayer::OpenAudioMixer(const Keire::AssetId asset)
-{
-    if (!m_AssetDatabase)
-        return;
-    const auto record = m_AssetDatabase->Find(asset);
-    if (!record || record->Type != Keire::AudioMixerAsset::StaticType() ||
-        record->RelativePath.extension() != ".keiremixer")
-        throw std::invalid_argument("Only .keiremixer assets can be opened in the Audio Mixer editor.");
-    const auto source = m_AssetDatabase->Specification().ProjectRoot /
-                        m_AssetDatabase->Specification().SourceDirectory / record->RelativePath;
-    const auto bytes = ReadBytes(source);
-    if (const auto context = m_AudioMixerDocument->UndoContext())
-        context->Close();
-    Keire::Ref<Keire::UndoContext> context;
-    if (const auto undo = Owner().Undo())
-        context = undo->CreateContext(
-            {.Name = "Audio Mixer: " + record->RelativePath.stem().string(), .MaximumCommands = 128});
-    if (++m_AudioMixerDocumentRevision == 0)
-        ++m_AudioMixerDocumentRevision;
-    m_AudioMixerDocument->Open(asset, bytes, m_AudioMixerDocumentRevision, std::move(context));
-    m_ActiveUndoContext = m_AudioMixerDocument->UndoContext();
-    m_AudioMixerPanel->ResetTransientState();
-    m_AudioMixerPanel->SetMessage("Loaded " + record->RelativePath.generic_string() + ".");
-    m_AudioMixerPanel->Registration().SetVisible(true);
-    m_AudioMixerPanel->Registration().RequestFocus();
-}
-
-void EditorWorkspaceLayer::SaveAudioMixer()
-{
-    if (!m_AssetDatabase || !m_AudioMixerDocument->Asset())
-        return;
-    const auto record = m_AssetDatabase->Find(m_AudioMixerDocument->Asset());
-    if (!record)
-        throw std::runtime_error("The edited Audio Mixer no longer exists.");
-    m_AudioMixerDocument->Save();
-    ImportAssets();
-    if (const auto assets = Owner().Assets())
-        (void)assets->Reload(m_AudioMixerDocument->Asset());
-    m_AudioMixerPanel->SetMessage("Saved and queued import for " + record->RelativePath.generic_string() + ".");
 }
 
 KeireEditor::VfxEffectDocument& EditorWorkspaceLayer::VfxEffectState() noexcept { return *m_VfxEffectDocument; }
@@ -2691,8 +2595,8 @@ std::span<const Keire::AssetSourceRecord> EditorWorkspaceLayer::MaterialGraphAss
 
 Keire::Ref<const Keire::MeshAsset> EditorWorkspaceLayer::ResolveMaterialGraphPreviewMesh(const Keire::AssetId asset)
 {
-    if (asset == Keire::MeshAsset::CubeId())
-        return Keire::MeshAsset::Cube();
+    if (auto builtin = Keire::MeshAsset::ResolveBuiltin(asset))
+        return builtin;
     const auto assets = Owner().Assets();
     if (!asset || !assets)
         return {};

@@ -361,12 +361,20 @@ TEST_CASE("scene presentation treats automatic and manual audio playback as edge
     project.Write("OneShot.testaudio", "test");
     const Keire::AssetId masterBus(0x50524553454e5441ULL, 1);
     const Keire::AssetId effectsBus(0x50524553454e5441ULL, 2);
+    const Keire::AssetId reverbSnapshot(0x50524553454e5441ULL, 3);
     Keire::AudioMixerDefinition mixerDefinition{
         .MasterBus = masterBus,
         .Buses =
             {
                 {.Id = masterBus, .Name = "Master", .Gain = 1.0F},
                 {.Id = effectsBus, .Name = "Effects", .Parent = masterBus, .Gain = 0.5F},
+            },
+        .Snapshots =
+            {
+                {.Id = reverbSnapshot,
+                 .Name = "Reverb Zone",
+                 .Parameters =
+                     {{.Type = Keire::AudioMixerSnapshotParameterType::BusGain, .Target = effectsBus, .Value = 0.25F}}},
             },
     };
     const auto mixerBytes = Keire::AudioMixerAsset::Encode(mixerDefinition);
@@ -435,6 +443,32 @@ TEST_CASE("scene presentation treats automatic and manual audio playback as edge
     const auto initialRoutedSample = 0.25F * 0.5F * centerPanGain;
     CHECK(routed[0] == doctest::Approx(initialRoutedSample));
     CHECK(routed[1] == doctest::Approx(initialRoutedSample));
+
+    auto listenerEntity = scene->CreateEntity("Listener");
+    REQUIRE(listenerEntity.AddComponent<Keire::AudioListenerComponent>());
+    auto zoneEntity = scene->CreateEntity("Reverb zone");
+    const auto zone = zoneEntity.AddComponent<Keire::AudioReverbZoneComponent>();
+    REQUIRE(zone);
+    zone->SetMixer(mixerRecord->Id);
+    zone->SetSnapshotId(reverbSnapshot);
+    zone->SetShape(Keire::AudioReverbZoneShape::Sphere);
+    zone->SetSphereRadius(5.0F);
+    zone->SetBlendDistance(0.0F);
+    presentation->Synchronize(scene, 320.0F, 180.0F, true);
+    const auto zoned = audio->RenderVoicesOffline(1);
+    REQUIRE(zoned.size() == 2);
+    const auto zonedSample = 0.25F * 0.25F * centerPanGain;
+    CHECK(zoned[0] == doctest::Approx(zonedSample));
+    CHECK(zoned[1] == doctest::Approx(zonedSample));
+
+    const auto zoneTransform = zoneEntity.GetComponent<Keire::TransformComponent>();
+    REQUIRE(zoneTransform);
+    zoneTransform->SetLocalPosition({100.0F, 0.0F, 0.0F});
+    presentation->Synchronize(scene, 320.0F, 180.0F, true);
+    const auto restored = audio->RenderVoicesOffline(1);
+    REQUIRE(restored.size() == 2);
+    CHECK(restored[0] == doctest::Approx(initialRoutedSample));
+    CHECK(restored[1] == doctest::Approx(initialRoutedSample));
 
     mixerDefinition.Buses[1].Gain = 0.25F;
     const auto revisedMixerBytes = Keire::AudioMixerAsset::Encode(mixerDefinition);

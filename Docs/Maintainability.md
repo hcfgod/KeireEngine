@@ -32,8 +32,9 @@ The highest-value seams are:
   generation, diagnostics parsing, source fingerprinting, and atomic text publication now live behind the private
   `ManagedBuildWorkspace` boundary.
 - `MaterialGraph.cpp`: schema/validation, lowering, shader emission, and asset import/publication. The immutable node
-  descriptor catalog and its lookup/type-ID contract now live in `MaterialGraphNodeCatalog.cpp` behind the existing
-  typed material-graph API.
+  descriptor catalog and its lookup/type-ID contract live in `MaterialGraphNodeCatalog.cpp`; deterministic generated
+  shader manifest assembly lives in `MaterialGraphManifest.cpp`. Both use private boundaries behind the existing typed
+  material-graph API.
 - `RenderSceneRecording.cpp`: snapshot extraction, preparation, pass recording, and submission telemetry.
 - `VfxAssets.cpp` and `VfxSystem.cpp`: encoding/import, compilation, CPU simulation, and GPU publication. Reusable JSON
   encoding and strict decoding of asset IDs, vectors, matrices, colors, curves, and gradients now live behind the

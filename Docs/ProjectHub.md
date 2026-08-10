@@ -63,6 +63,11 @@ when installed; otherwise the least newer compatible version is recommended and 
 preferred installation never bypasses these checks. Projects whose exact editor is unavailable link to the real
 Installs/Locate flow rather than a placeholder action.
 
+An older project schema is not itself a reason to force an upgrade. When the exact previous Editor or another
+schema-compatible Editor remains installed, **Open** launches it directly and leaves the project unchanged until that
+Editor performs an ordinary save. Upgrade review is used only when no installed Editor can open the older schema;
+interrupted upgrade journals always enter the dedicated recovery workflow.
+
 Project metadata and thumbnails are scanned asynchronously with bounded filesystem work. Once a scan is ready, all
 cached project metadata is validated together and persisted in one atomic registry write. If any project disappeared or
 any result is invalid or duplicated, no project receives a partial metadata refresh and the prior thumbnail snapshot is
@@ -119,14 +124,16 @@ the dependency resolver's exact topological package closure, download size, disk
 relationships before any task is queued. Versions with missing or conflicting dependencies remain visible with their
 actionable catalog error but cannot be installed.
 
+The destination remains manually editable and has a native **Browse** action. Folder-picker results pass through the
+same absolute, non-root, writable-location validation as typed paths before the install task can begin.
+
 Each healthy editor card exposes **Manage Components** through that installation's typed Asset Tool. Component counts
-come from the installed legacy Build Support inventory and are matched to the editor's exact engine version; the modal
-then applies any requested platform/architecture filter. Import and repair accept only `.keireplayersupport` archives,
-validate the requested pack/target inside the selected editor process, and publish status through an atomic status
-document. Removal requires confirmation and also runs in that selected Asset Tool process. Its bounded atomic journal
-completes a post-rename interruption or clears a pre-rename interruption on the next inventory reconciliation, so a
-tombstone is never exposed as installed. Generic `.keirepackage` import remains hidden until its product task flow is
-connected.
+come from the installed Build Support inventory and are matched to the editor's exact engine version; the modal then
+applies any requested platform/architecture filter. Signed catalog `.keirepackage` Build Support participates in the
+editor install dependency closure, while offline import, repair, and removal continue through the selected editor's
+typed Asset Tool using `.keireplayersupport` archives. Those operations validate the requested pack/target, publish
+atomic status, and retain the existing bounded removal journal so a tombstone is never exposed as installed. Generic
+offline `.keirepackage` import remains hidden until its product task flow is connected.
 
 The Hub also keeps a bounded atomic operation journal for these legacy Asset Tool tasks. It records the exact operation,
 editor installation, typed Asset Tool, confined status/cancel paths, and child PID before presenting the task as active.
@@ -148,11 +155,12 @@ modal consume immutable snapshots and show a deliberate checking state while tha
 manifest parsing, and inventory hashing never run inside a UI frame.
 
 Templates are data-driven. The browser searches and filters the three verified templates packaged with this release:
-Empty, 3D Starter, and Kéire Sandbox. Featured entries are ordered first, and the detail panel reports tags, packaged
-thumbnail previews, editor-version constraints, project schema, platform target, starter content, package
-requirements, and license references from the manifest. Compatibility is evaluated against each healthy installed
-editor before the creation dialog offers a template/editor pair. Remote template download and update controls remain
-absent until template packages are connected to the persistent package-task pipeline.
+Empty Project, 3D Starter, and Kéire Sandbox. The 3D Starter payload opens a ready-to-run scene with an active camera
+and directional light; Empty Project deliberately has no startup scene. Featured entries are ordered first, and the
+detail panel reports tags, packaged thumbnail previews, editor-version constraints, project schema, platform target,
+starter content, package requirements, and license references from the manifest. Compatibility is evaluated against
+each healthy installed editor before the creation dialog offers a template/editor pair. Remote template download and
+update controls remain absent until template packages are connected to the persistent package-task pipeline.
 
 Creation stages only declared payload files, writes schema-3 project metadata, validates the staged project
 out-of-process with the selected editor's Asset Tool, and publishes atomically. Failures remove staging and leave an
@@ -279,11 +287,13 @@ KeireClient --project <canonical-root>
 
 The editor independently validates the descriptor and acquires the exclusive project lock. After a successful launch,
 the Hub records the project, installation ID, and last-opened time. Depending on settings it remains alive while hidden
-to the tray/taskbar, or exits normally.
+to the tray/taskbar, or exits normally. A Hub hidden automatically for a tracked editor restores its window when the
+final tracked editor exits; a manual close-to-tray remains hidden until the user explicitly shows it.
 
 Only one Hub process owns a window and tray entry for each canonical installed executable. Secondary processes send a
 bounded, versioned activation request for show, open-project, install-version, import-package, navigation, or legacy
-Build Support actions, then exit before creating UI. Native callbacks enqueue work until the owner-thread safe boundary.
+Build Support actions, authorize the primary process to take foreground focus, then exit without initializing window or
+rendering services. The primary restores and raises its own window at the owner-thread safe boundary.
 
 ## Launcher and validation workflows
 

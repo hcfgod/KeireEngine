@@ -4,6 +4,8 @@
 #include <KeireHubRuntimeInternal/Persistence.h>
 #include <KeireHubRuntimeInternal/Sha256.h>
 
+#include "KeireInternal/Build/PlayerSupportPackage.h"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -12,6 +14,7 @@
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
+#include <functional>
 #include <iostream>
 #include <map>
 #include <optional>
@@ -29,6 +32,7 @@ namespace
     enum class Command
     {
         CreateEditor,
+        CreateBuildSupport,
         CreateHubInstaller
     };
 
@@ -38,9 +42,11 @@ namespace
         std::filesystem::path PayloadRoot;
         std::filesystem::path HubManifest;
         std::filesystem::path Installer;
+        std::filesystem::path PlayerSupportPackage;
         std::filesystem::path Output;
         std::filesystem::path ManifestOutput;
         std::string SignatureKeyId;
+        std::string Channel;
     };
 
     [[nodiscard]] std::filesystem::path Path(const std::string_view value)
@@ -55,11 +61,17 @@ namespace
         return {reinterpret_cast<const char*>(encoded.data()), encoded.size()};
     }
 
+    [[nodiscard]] std::string Lower(std::string value);
+
     [[nodiscard]] Arguments Parse(const int count, const char* const* values)
     {
         if (count == 2 && std::string_view(values[1]) == "--help")
         {
             std::cout << "Usage: KeireHubPackagePublisher create-editor --payload-root <directory> "
+                         "--output <archive.keirepackage> --manifest-output <manifest.json> "
+                         "--signature-key-id <ed25519-key-id>\n"
+                         "       KeireHubPackagePublisher create-build-support "
+                         "--player-support-package <module.keireplayersupport> --channel <channel> "
                          "--output <archive.keirepackage> --manifest-output <manifest.json> "
                          "--signature-key-id <ed25519-key-id>\n"
                          "       KeireHubPackagePublisher create-hub-installer "
@@ -70,7 +82,7 @@ namespace
         if (count < 2)
             throw std::invalid_argument("A publisher command is required. Use --help for usage.");
         const auto command = std::string_view(values[1]);
-        if (command != "create-editor" && command != "create-hub-installer")
+        if (command != "create-editor" && command != "create-build-support" && command != "create-hub-installer")
             throw std::invalid_argument("The publisher command is unsupported. Use --help for usage.");
         std::map<std::string, std::string, std::less<>> options;
         for (int index = 2; index < count; index += 2)
@@ -81,19 +93,38 @@ namespace
                 throw std::invalid_argument("A publisher option was repeated.");
         }
         constexpr std::array editorNames{"--payload-root", "--output", "--manifest-output", "--signature-key-id"};
+        constexpr std::array componentNames{"--player-support-package", "--channel", "--output", "--manifest-output",
+                                            "--signature-key-id"};
         constexpr std::array installerNames{"--hub-manifest", "--installer", "--manifest-output", "--signature-key-id"};
-        const auto& names = command == "create-editor" ? editorNames : installerNames;
-        if (options.size() != names.size() ||
-            std::ranges::any_of(names, [&](const std::string_view name) { return !options.contains(name); }))
+        const bool validOptions =
+            (command == "create-editor" && options.size() == editorNames.size() &&
+             std::ranges::all_of(editorNames, [&](const std::string_view name) { return options.contains(name); })) ||
+            (command == "create-build-support" && options.size() == componentNames.size() &&
+             std::ranges::all_of(componentNames,
+                                 [&](const std::string_view name) { return options.contains(name); })) ||
+            (command == "create-hub-installer" && options.size() == installerNames.size() &&
+             std::ranges::all_of(installerNames, [&](const std::string_view name) { return options.contains(name); }));
+        if (!validOptions)
         {
             throw std::invalid_argument("The publisher options are incomplete or unsupported. Use --help for usage.");
         }
         Arguments result;
-        result.SelectedCommand = command == "create-editor" ? Command::CreateEditor : Command::CreateHubInstaller;
+        result.SelectedCommand = command == "create-editor"          ? Command::CreateEditor
+                                 : command == "create-build-support" ? Command::CreateBuildSupport
+                                                                     : Command::CreateHubInstaller;
         if (result.SelectedCommand == Command::CreateEditor)
         {
             result.PayloadRoot = std::filesystem::absolute(Path(options.at("--payload-root"))).lexically_normal();
             result.Output = std::filesystem::absolute(Path(options.at("--output"))).lexically_normal();
+        }
+        else if (result.SelectedCommand == Command::CreateBuildSupport)
+        {
+            result.PlayerSupportPackage =
+                std::filesystem::absolute(Path(options.at("--player-support-package"))).lexically_normal();
+            result.Output = std::filesystem::absolute(Path(options.at("--output"))).lexically_normal();
+            result.Channel = Lower(options.at("--channel"));
+            if (result.Channel != "stable" && result.Channel != "preview" && result.Channel != "nightly")
+                throw std::invalid_argument("The Build Support channel is invalid.");
         }
         else
         {
@@ -135,7 +166,7 @@ namespace
         std::error_code error;
         const auto status = std::filesystem::symlink_status(full, error);
         if (error || !std::filesystem::is_regular_file(status) || std::filesystem::is_symlink(status))
-            throw std::runtime_error("The editor package contains an unsafe inventory file: " + Text(relative));
+            throw std::runtime_error("The package contains an unsafe inventory file: " + Text(relative));
         const auto size = std::filesystem::file_size(full, error);
         if (error)
             throw std::runtime_error("An editor package file size could not be read: " + Text(relative));
@@ -199,6 +230,56 @@ namespace
         }
         // Archive transport size and digest are unknowable until the final compressed bytes exist. The archive
         // encoder validates all other fields with its canonical placeholders, then replaces them after writing.
+        if (auto canonical = KeireHub::EncodePackageArchiveManifest(result); !canonical)
+            throw std::runtime_error(canonical.Error().Message + " " + canonical.Error().TechnicalDetails);
+        return result;
+    }
+
+    [[nodiscard]] KeireHub::PackageManifest
+    ReadBuildSupportManifest(const Arguments& arguments, const Keire::Detail::PlayerSupportManifest& support,
+                             const std::filesystem::path& payloadRoot)
+    {
+        auto version = KeireHub::SemanticVersion::Parse(support.EngineVersion);
+        if (!version)
+            throw std::runtime_error("The Build Support engine version is not semantic.");
+        auto compatibility = KeireHub::VersionConstraint::Parse('=' + support.EngineVersion);
+        if (!compatibility)
+            throw std::runtime_error(compatibility.Error().Message);
+
+        const auto platform = std::string(Keire::ToString(support.Platform));
+        const auto architecture = std::string(Keire::ToString(support.Architecture));
+        KeireHub::PackageManifest result;
+        result.Id = "keire-build-support-" + platform + '-' + architecture;
+        result.Version = std::move(version).Value();
+        result.Kind = KeireHub::PackageKind::BuildSupport;
+        result.DisplayName = platform + " " + architecture + " Build Support";
+        result.Channel = arguments.Channel;
+        // Build targets are cross-installable; compatibility is expressed against the editor engine version.
+        result.Platform = "any";
+        result.Architecture = "any";
+        result.EngineCompatibility = std::move(compatibility).Value();
+        result.SignatureKeyId = arguments.SignatureKeyId;
+
+        std::map<std::string, KeireHub::PackageFile, std::less<>> files;
+        for (std::filesystem::recursive_directory_iterator iterator(payloadRoot), end; iterator != end; ++iterator)
+        {
+            const auto status = iterator->symlink_status();
+            if (std::filesystem::is_symlink(status) ||
+                (!std::filesystem::is_directory(status) && !std::filesystem::is_regular_file(status)))
+                throw std::runtime_error("The Build Support payload contains an unsafe filesystem entry.");
+            if (std::filesystem::is_directory(status))
+                continue;
+            const auto relative = iterator->path().lexically_relative(payloadRoot).lexically_normal();
+            auto file = InventoryFile(payloadRoot, relative, platform);
+            if (!files.emplace(Text(relative), std::move(file)).second)
+                throw std::runtime_error("The Build Support payload contains a duplicate path.");
+        }
+        for (auto& [path, file] : files)
+        {
+            (void)path;
+            result.InstalledSizeBytes += file.SizeBytes;
+            result.Files.push_back(std::move(file));
+        }
         if (auto canonical = KeireHub::EncodePackageArchiveManifest(result); !canonical)
             throw std::runtime_error(canonical.Error().Message + " " + canonical.Error().TechnicalDetails);
         return result;
@@ -301,6 +382,59 @@ namespace
                           << "\nSHA-256: " << manifest.ArtifactSha256 << "\nBytes: " << manifest.ArtifactSizeBytes
                           << '\n';
                 return 0;
+            }
+            if (arguments.SelectedCommand == Command::CreateBuildSupport)
+            {
+                if (!std::filesystem::is_regular_file(arguments.PlayerSupportPackage) ||
+                    !std::filesystem::is_directory(arguments.Output.parent_path()) ||
+                    arguments.ManifestOutput == arguments.Output || std::filesystem::exists(arguments.Output))
+                {
+                    throw std::invalid_argument("The publisher input or output path is unavailable.");
+                }
+                // Keep the entire staging root short: Build Support contains deep .NET SDK paths that otherwise reach
+                // the legacy Windows MAX_PATH boundary even when long paths are enabled for the final installation.
+                const auto stagingIdentity = std::hash<std::string>{}(Text(arguments.Output.lexically_normal()));
+                const auto payloadRoot =
+                    std::filesystem::temp_directory_path() / (".keire-bs-" + std::to_string(stagingIdentity));
+                if (std::filesystem::exists(payloadRoot))
+                    throw std::invalid_argument("A Build Support publication staging directory already exists.");
+                try
+                {
+                    const auto support = Keire::Detail::InstallPlayerSupportPackage(arguments.PlayerSupportPackage, {},
+                                                                                    {}, payloadRoot / "BuildSupport");
+                    auto archive = KeireHub::WritePackageArchive(
+                        {.Manifest = ReadBuildSupportManifest(arguments, support.Manifest, payloadRoot),
+                         .PayloadRoot = payloadRoot,
+                         .Output = arguments.Output});
+                    if (!archive)
+                        throw std::runtime_error(archive.Error().Message + " " + archive.Error().TechnicalDetails);
+                    try
+                    {
+                        WriteManifest(arguments.ManifestOutput, archive.Value().Manifest);
+                    }
+                    catch (...)
+                    {
+                        std::error_code archiveError;
+                        std::filesystem::remove(arguments.Output, archiveError);
+                        throw;
+                    }
+                    std::error_code cleanupError;
+                    std::filesystem::remove_all(payloadRoot, cleanupError);
+                    if (cleanupError)
+                        throw std::filesystem::filesystem_error("Could not remove Build Support publisher staging.",
+                                                                payloadRoot, cleanupError);
+                    std::cout << "Published " << archive.Value().Manifest.Id << '@'
+                              << archive.Value().Manifest.Version.ToString() << "\nArchive: " << Text(arguments.Output)
+                              << "\nSHA-256: " << archive.Value().ArchiveSha256
+                              << "\nBytes: " << archive.Value().ArchiveSizeBytes << '\n';
+                    return 0;
+                }
+                catch (...)
+                {
+                    std::error_code cleanupError;
+                    std::filesystem::remove_all(payloadRoot, cleanupError);
+                    throw;
+                }
             }
             if (!std::filesystem::is_directory(arguments.PayloadRoot) ||
                 !std::filesystem::is_directory(arguments.Output.parent_path()) ||

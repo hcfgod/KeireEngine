@@ -395,7 +395,7 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         }
     }
     const std::string viewportStatus = std::to_string(activeScene->ObjectCount()) + " objects  |  " +
-                                       (document.PlaySession() ? "Play" : "Edit") +
+                                       (playActive ? "Play  |  Runtime edits are temporary" : "Edit") +
                                        (document.EditingScene()->Dirty() ? "  |  Unsaved" : "");
     const Keire::UiPosition statusPosition{imageRect.Minimum.X + 12.0F, imageRect.Maximum.Y - 24.0F};
     ui.DrawFilledRectangle(
@@ -403,12 +403,12 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
          {statusPosition.X + static_cast<float>(viewportStatus.size()) * 7.0F + 5.0F, statusPosition.Y + 18.0F}},
         {0.03F, 0.04F, 0.06F, 0.72F}, 4.0F);
     ui.DrawOverlayText(statusPosition, theme.MutedText, viewportStatus);
-    const bool pointerBlocked =
-        toolbarRect.Contains(ui.PointerState().Position) || orientationRect.Contains(ui.PointerState().Position) ||
-        (m_CameraPreviewVisible && cameraPreviewRect.Contains(ui.PointerState().Position)) || playActive;
+    const bool pointerBlocked = toolbarRect.Contains(ui.PointerState().Position) ||
+                                orientationRect.Contains(ui.PointerState().Position) ||
+                                (m_CameraPreviewVisible && cameraPreviewRect.Contains(ui.PointerState().Position));
     if (renderScene)
     {
-        const bool allowManipulation = !playActive && !m_Controller.SceneViewportPlayReviewActive();
+        const bool allowManipulation = !m_Controller.SceneViewportPlayReviewActive();
         const auto pointer = ui.PointerState();
         std::vector<Keire::AssetId> selectionBeforePointer;
         if (imageState.Hovered && pointer.LeftPressed)
@@ -468,7 +468,7 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
             }
         }
     }
-    if (playActive)
+    if (m_Controller.SceneViewportPlayReviewActive())
     {
         m_BoxSelecting = false;
         m_BoxSelectionBase.clear();

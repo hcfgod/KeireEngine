@@ -89,7 +89,8 @@ TEST_CASE("Material Graph document reuses the stable canvas and preserves last-g
              persisted.assign(bytes.begin(), bytes.end());
          }});
 
-    document.Create(Keire::AssetId::Generate(), Keire::CreateDefaultMaterialGraph(), undo);
+    const auto asset = Keire::AssetId::Generate();
+    document.Create(asset, Keire::CreateDefaultMaterialGraph(), undo);
     REQUIRE(document.Publishable());
     REQUIRE(document.LastGoodCompilation());
     REQUIRE(document.LastGoodDefinition());
@@ -154,9 +155,17 @@ TEST_CASE("Material Graph document reuses the stable canvas and preserves last-g
     CHECK(previewCount == 5);
     CHECK(liveApplyCount == 4);
     CHECK_THROWS_AS(document.SetPreviewSettings({.Exposure = 0.0F}), std::invalid_argument);
+    const auto savedDefinition = document.Definition();
     document.Save();
     CHECK(persistCount == 1);
     CHECK_FALSE(persisted.empty());
+    CHECK(Keire::MaterialGraphAsset::DecodeSource(persisted) == savedDefinition);
+    CHECK_FALSE(document.Dirty());
+
+    document.Close();
+    document.Open(asset, persisted, 2, undo);
+    CHECK(document.Definition() == savedDefinition);
+    CHECK_FALSE(document.Dirty());
 }
 
 TEST_CASE("Material Graph live apply publishes parameters immediately and compiles only when runtime code changes")
@@ -211,6 +220,11 @@ TEST_CASE("Material Graph live apply publishes parameters immediately and compil
     CHECK_FALSE(document.CompilationPending());
     REQUIRE(publishedShaderCounts.size() == publicationsBeforeParameters + 2);
     CHECK(publishedShaderCounts.back() == 0);
+    CHECK(publishedRoughness.back() == doctest::Approx(0.8F));
+
+    document.ApplyLiveRevision();
+    REQUIRE(publishedShaderCounts.size() == publicationsBeforeParameters + 3);
+    CHECK(publishedShaderCounts.back() == 1);
     CHECK(publishedRoughness.back() == doctest::Approx(0.8F));
 
     REQUIRE(document.EditNode(masterId,

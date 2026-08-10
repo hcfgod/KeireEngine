@@ -209,6 +209,7 @@ TEST_CASE("shader assets preserve deterministic variants and target cooking")
     Keire::ShaderAssetDefinition definition;
     definition.Source = "Assets/Shaders/Test.hlsl";
     definition.ReceivesShadows = true;
+    definition.Topology = Keire::ShaderPrimitiveTopology::PointList;
     definition.Properties.push_back({"Tint", Keire::ShaderPropertyType::Color, {1.0F, 0.5F, 0.25F, 1.0F}});
     const auto defaultTexture = Keire::AssetId::Parse("11111111-2222-4333-8444-555555555555");
     definition.Properties.push_back({"MainTexture", Keire::ShaderPropertyType::Texture2D, {}, defaultTexture});
@@ -240,7 +241,15 @@ TEST_CASE("shader assets preserve deterministic variants and target cooking")
     CHECK(decoded->Definition().Properties[2].TextureSemantic == Keire::ShaderTextureSemantic::Metallic);
     CHECK(decoded->Definition().Properties[3].TextureSemantic == Keire::ShaderTextureSemantic::Roughness);
     CHECK(decoded->Definition().ReceivesShadows);
+    CHECK(decoded->Definition().Topology == Keire::ShaderPrimitiveTopology::PointList);
     CHECK(Keire::ShaderAsset::Encode(decoded->Definition()) == encoded);
+
+    constexpr std::string_view pointManifest =
+        R"({"schemaVersion":1,"source":"Points.hlsl","stages":{"vertex":"VSMain","fragment":"PSMain"},"renderState":{"topology":"PointList"}})";
+    std::vector<std::byte> pointManifestBytes(pointManifest.size());
+    std::ranges::transform(pointManifest, pointManifestBytes.begin(),
+                           [](const char value) { return std::byte(static_cast<unsigned char>(value)); });
+    CHECK(Keire::ShaderAsset::DecodeManifest(pointManifestBytes).Topology == Keire::ShaderPrimitiveTopology::PointList);
 
     const auto importer = Keire::CreateShaderAssetImporter();
     REQUIRE(importer.Cook);
@@ -410,6 +419,58 @@ TEST_CASE("mesh assets validate and preserve production vertex data")
     CHECK(error->Vertices().front().VertexColor == (Keire::Color{1.0F, 0.0F, 1.0F, 1.0F}));
 }
 
+TEST_CASE("built-in mesh catalog has stable identities and production geometry conventions")
+{
+    const auto catalog = Keire::BuiltinMeshCatalog();
+    REQUIRE(catalog.size() == 8);
+    for (const auto& descriptor : catalog)
+    {
+        CAPTURE(descriptor.Name);
+        CHECK(descriptor.Id);
+        CHECK_FALSE(descriptor.Name.empty());
+        CHECK_FALSE(descriptor.CollisionExpectation.empty());
+        CHECK(Keire::MeshAsset::BuiltinId(descriptor.Mesh) == descriptor.Id);
+        CHECK(Keire::MeshAsset::BuiltinKind(descriptor.Id) == descriptor.Mesh);
+        CHECK(Keire::MeshAsset::IsBuiltin(descriptor.Id));
+        CHECK(std::ranges::count(catalog, descriptor.Id, &Keire::BuiltinMeshDescriptor::Id) == 1);
+        CHECK(std::ranges::count(catalog, descriptor.Name, &Keire::BuiltinMeshDescriptor::Name) == 1);
+
+        const auto mesh = Keire::MeshAsset::ResolveBuiltin(descriptor.Id);
+        REQUIRE(mesh);
+        CHECK(mesh->Mesh() == descriptor.Mesh);
+        CHECK_FALSE(mesh->Vertices().empty());
+        CHECK_FALSE(mesh->Indices().empty());
+        CHECK(mesh->Indices().size() % 3 == 0);
+        CHECK(mesh->Bounds().Minimum.X >= -0.501F);
+        CHECK(mesh->Bounds().Minimum.Y >= -0.501F);
+        CHECK(mesh->Bounds().Minimum.Z >= -0.501F);
+        CHECK(mesh->Bounds().Maximum.X <= 0.501F);
+        CHECK(mesh->Bounds().Maximum.Y <= 0.501F);
+        CHECK(mesh->Bounds().Maximum.Z <= 0.501F);
+        CHECK(mesh->Bounds().Minimum.X + mesh->Bounds().Maximum.X == doctest::Approx(0.0F).epsilon(0.001));
+        CHECK(mesh->Bounds().Minimum.Y + mesh->Bounds().Maximum.Y == doctest::Approx(0.0F).epsilon(0.001));
+        CHECK(mesh->Bounds().Minimum.Z + mesh->Bounds().Maximum.Z == doctest::Approx(0.0F).epsilon(0.001));
+        for (const auto& vertex : mesh->Vertices())
+        {
+            const float normalLength = std::sqrt(vertex.Normal.X * vertex.Normal.X + vertex.Normal.Y * vertex.Normal.Y +
+                                                 vertex.Normal.Z * vertex.Normal.Z);
+            CHECK(normalLength == doctest::Approx(1.0F).epsilon(0.001));
+            CHECK(vertex.UV0.X >= 0.0F);
+            CHECK(vertex.UV0.X <= 1.0F);
+            CHECK(vertex.UV0.Y >= 0.0F);
+            CHECK(vertex.UV0.Y <= 1.0F);
+        }
+        for (const auto index : mesh->Indices())
+            CHECK(index < mesh->Vertices().size());
+    }
+
+    CHECK(Keire::MeshAsset::Plane()->Bounds().Minimum.Y == 0.0F);
+    CHECK(Keire::MeshAsset::Plane()->Bounds().Maximum.Y == 0.0F);
+    CHECK(Keire::MeshAsset::Quad()->Bounds().Minimum.Z == 0.0F);
+    CHECK(Keire::MeshAsset::Quad()->Bounds().Maximum.Z == 0.0F);
+    CHECK_FALSE(Keire::MeshAsset::ResolveBuiltin(Keire::AssetId::Generate()));
+}
+
 TEST_CASE("mesh version one payloads generate the same deterministic tangent frame as version two")
 {
     const std::array vertices{Keire::MeshVertex{{0.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, {0.0F, 0.0F}, {}},
@@ -449,6 +510,34 @@ TEST_CASE("mesh version three preserves ordered submeshes material slots and LOD
     CHECK(decoded->Lods()[0].SubmeshCount == 2);
 }
 
+TEST_CASE("mesh version five preserves line-list submesh topology")
+{
+    const std::array vertices{Keire::MeshVertex{{0.0F, 0.0F, 0.0F}}, Keire::MeshVertex{{1.0F, 1.0F, 0.0F}}};
+    constexpr std::array<std::uint32_t, 2> indices{0, 1};
+    const Keire::MeshBounds bounds{{0.0F, 0.0F, 0.0F}, {1.0F, 1.0F, 0.0F}};
+    const std::array submeshes{Keire::MeshSubmesh{0, 2, 0, bounds, Keire::ShaderPrimitiveTopology::LineList}};
+    const std::array slots{Keire::MeshMaterialSlot{"Lines", {}}};
+    const std::array lods{Keire::MeshLod{0.0F, 0, 1, bounds}};
+    const auto decoded = Keire::MeshAsset::Decode(Keire::MeshAsset::Encode(vertices, indices, submeshes, slots, lods));
+    REQUIRE(decoded->Submeshes().size() == 1);
+    CHECK(std::ranges::equal(decoded->Indices(), indices));
+    CHECK(decoded->Submeshes().front().Topology == Keire::ShaderPrimitiveTopology::LineList);
+}
+
+TEST_CASE("mesh version five preserves point-list submesh topology")
+{
+    const std::array vertices{Keire::MeshVertex{{0.0F, 0.0F, 0.0F}}, Keire::MeshVertex{{1.0F, 1.0F, 0.0F}}};
+    constexpr std::array<std::uint32_t, 2> indices{0, 1};
+    const Keire::MeshBounds bounds{{0.0F, 0.0F, 0.0F}, {1.0F, 1.0F, 0.0F}};
+    const std::array submeshes{Keire::MeshSubmesh{0, 2, 0, bounds, Keire::ShaderPrimitiveTopology::PointList}};
+    const std::array slots{Keire::MeshMaterialSlot{"Points", {}}};
+    const std::array lods{Keire::MeshLod{0.0F, 0, 1, bounds}};
+    const auto decoded = Keire::MeshAsset::Decode(Keire::MeshAsset::Encode(vertices, indices, submeshes, slots, lods));
+    REQUIRE(decoded->Submeshes().size() == 1);
+    CHECK(std::ranges::equal(decoded->Indices(), indices));
+    CHECK(decoded->Submeshes().front().Topology == Keire::ShaderPrimitiveTopology::PointList);
+}
+
 TEST_CASE("Assimp imports a deterministic static OBJ into the Kéire mesh format")
 {
     TemporaryDirectory directory("MeshImportTests");
@@ -482,6 +571,52 @@ TEST_CASE("Assimp imports a deterministic static OBJ into the Kéire mesh format
     CHECK(mesh->Indices()[1] == 1);
     CHECK(mesh->Indices()[2] == 0);
     CHECK(mesh->Vertices().front().Tangent.X == doctest::Approx(1.0F));
+}
+
+TEST_CASE("Assimp imports OBJ lines with actionable topology diagnostics")
+{
+    TemporaryDirectory directory("MeshLineImportTests");
+    const auto sourcePath = directory.Path / "lines.obj";
+    {
+        std::ofstream source(sourcePath);
+        source << "v 0 0 0\nv 1 1 0\nl 1 2\n";
+    }
+    const auto importer = Keire::CreateMeshAssetImporter();
+    Keire::AssetImportContext context;
+    context.ProjectRoot = directory.Path;
+    context.SourceRoot = directory.Path;
+    context.SourcePath = sourcePath;
+    context.RelativePath = sourcePath.filename();
+    const auto output = importer.ContextualImport(context, ReadTestBytes(sourcePath));
+    const auto mesh = Keire::MeshAsset::Decode(output.Bytes);
+    REQUIRE(mesh->Submeshes().size() == 1);
+    CHECK(mesh->Indices().size() == 2);
+    CHECK(mesh->Submeshes().front().Topology == Keire::ShaderPrimitiveTopology::LineList);
+    CHECK(std::ranges::any_of(output.Diagnostics, [](const auto& diagnostic)
+                              { return diagnostic.Message.find("LineList") != std::string::npos; }));
+}
+
+TEST_CASE("Assimp imports OBJ points with actionable topology diagnostics")
+{
+    TemporaryDirectory directory("MeshPointImportTests");
+    const auto sourcePath = directory.Path / "points.obj";
+    {
+        std::ofstream source(sourcePath);
+        source << "v 0 0 0\nv 1 1 0\np 1 2\n";
+    }
+    const auto importer = Keire::CreateMeshAssetImporter();
+    Keire::AssetImportContext context;
+    context.ProjectRoot = directory.Path;
+    context.SourceRoot = directory.Path;
+    context.SourcePath = sourcePath;
+    context.RelativePath = sourcePath.filename();
+    const auto output = importer.ContextualImport(context, ReadTestBytes(sourcePath));
+    const auto mesh = Keire::MeshAsset::Decode(output.Bytes);
+    REQUIRE(mesh->Submeshes().size() == 1);
+    CHECK(mesh->Indices().size() == 2);
+    CHECK(mesh->Submeshes().front().Topology == Keire::ShaderPrimitiveTopology::PointList);
+    CHECK(std::ranges::any_of(output.Diagnostics, [](const auto& diagnostic)
+                              { return diagnostic.Message.find("PointList") != std::string::npos; }));
 }
 
 TEST_CASE("Sandbox pyramid triangle winding agrees with its authored outward normals")
@@ -534,7 +669,7 @@ TEST_CASE("Sandbox pyramid triangle winding agrees with its authored outward nor
 TEST_CASE("model importer exposes explicit animation source routing")
 {
     const auto importer = Keire::CreateMeshAssetImporter();
-    CHECK(importer.Version == 13);
+    CHECK(importer.Version == 14);
     const auto content =
         std::ranges::find(importer.ImportOptions, std::string("contentType"), &Keire::AssetImportOptionDescriptor::Key);
     REQUIRE(content != importer.ImportOptions.end());

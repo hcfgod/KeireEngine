@@ -93,11 +93,14 @@ namespace
             capacity += record.SubAssets.size();
 
         std::vector<AssetPickerCandidate> result;
-        result.reserve(capacity + 1U);
+        result.reserve(capacity + Keire::BuiltinMeshCatalog().size());
         if (options.ExpectedType == Keire::MeshAsset::StaticType())
         {
-            const auto cube = Keire::MeshAsset::CubeId();
-            result.push_back({cube, {}, "Built-in / Cube", "Built-in / Cube##" + cube.ToString()});
+            for (const auto& mesh : Keire::BuiltinMeshCatalog())
+            {
+                const auto label = "Built-in / " + std::string(mesh.Name);
+                result.push_back({mesh.Id, {}, label, label + "##" + mesh.Id.ToString()});
+            }
         }
         for (const auto& record : records)
         {

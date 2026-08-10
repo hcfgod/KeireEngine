@@ -35,6 +35,7 @@ export const docGroups = [
         "Vfx.md",
         "VfxBeyondParityRoadmap.md",
         "generated/VfxCapabilities.md",
+        "VisualAuthoringInitiatives.md",
         "PlayerBuilds.md",
     ]),
     group("C# scripting", "seti:c-sharp", [
@@ -126,6 +127,7 @@ export const docAuthorities = {
     "Vfx.md": ["KeireCore/Include/Keire/Vfx/VfxSystem.h", "KeireClient/Source/Editor/VfxEffectPanel.cpp"],
     "VfxBeyondParityRoadmap.md": ["Docs/VfxParityManifest.json", "Scripts/Vfx/runtime_vfx_catalog.py"],
     "generated/VfxCapabilities.md": ["Docs/VfxParityManifest.json", "Scripts/Vfx/generate_vfx_capabilities.py"],
+    "VisualAuthoringInitiatives.md": ["Docs/VfxParityManifest.json", "KeireCore/Include/Keire/Rendering/MaterialGraph.h"],
     "PlayerBuilds.md": ["KeireCore/Include/Keire/Build/PlayerBuild.h", "KeireClient/Source/Editor/PlayerBuildService.cpp"],
     "Scripting/README.md": ["KeireManaged/Behaviour.cs", "KeireManaged/RuntimeApi.cs"],
     "Scripting/GettingStarted.md": ["KeireCore/Include/Keire/Scripting/ManagedAssemblyAsset.h", "KeireManaged/Keire.Managed.csproj"],

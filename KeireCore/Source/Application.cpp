@@ -114,8 +114,14 @@ namespace Keire
             throw std::logic_error("Application::Run may be called exactly once.");
         }
 
+        const auto requestedExitCode = m_Impl->ExitCode.load(std::memory_order_acquire);
+        if (requestedExitCode != Impl::NoExitRequested)
+        {
+            m_Impl->RuntimeState = Impl::State::Stopped;
+            return requestedExitCode;
+        }
+
         m_Impl->RuntimeState = Impl::State::Running;
-        m_Impl->ExitCode.store(Impl::NoExitRequested, std::memory_order_release);
         bool initialized = false;
         std::exception_ptr failure;
 

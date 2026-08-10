@@ -185,6 +185,33 @@ void EditorWorkspaceLayer::CreateScene()
     }
 }
 
+bool EditorWorkspaceLayer::CreateSceneAsset(const std::string_view name)
+{
+    if (!m_AssetDatabase || !m_AssetOperations)
+        return false;
+    try
+    {
+        if (m_AssetOperations->Busy())
+            (void)m_AssetOperations->PreemptBackgroundImports();
+        if (name.empty() || name == "." || name == ".." || name.find_first_of("/\\") != std::string_view::npos)
+            throw std::invalid_argument("Scene name must be one non-empty path component.");
+        const auto directory = m_AssetBrowserPanel ? m_AssetBrowserPanel->CurrentFolder() : std::filesystem::path{};
+        const auto destination = directory / (std::string(name) + ".keirescene");
+        if (m_AssetDatabase->Find(destination))
+            throw std::runtime_error("A scene with that name already exists in this folder.");
+        m_AssetOperations->QueueCreateAsset(
+            destination, Keire::SceneAsset::Encode(Keire::SceneAsset::EmptyDefinition(std::string(name))), {},
+            {.FollowUp = KeireEditor::AssetOperationFollowUp::OpenScene, .UndoName = "Create Scene"});
+        m_AssetStatus = "Creating " + destination.generic_string() + " in the isolated asset worker.";
+        return true;
+    }
+    catch (const std::exception& error)
+    {
+        SetAssetError(std::string("Scene creation failed: ") + error.what());
+        return false;
+    }
+}
+
 void EditorWorkspaceLayer::RequestCreateScene()
 {
     m_PlayStartPending = false;
@@ -429,7 +456,35 @@ void EditorWorkspaceLayer::ExecutePendingSceneAction()
     const auto action = std::exchange(m_PendingSceneAction, PendingSceneAction::None);
     const auto asset = std::exchange(m_PendingSceneAsset, Keire::AssetId{});
     m_Dialog = Dialog::None;
+    if (action == PendingSceneAction::Exit && m_MaterialGraphDocument && m_MaterialGraphDocument->Dirty())
+    {
+        m_PendingSceneAction = PendingSceneAction::Exit;
+        OpenDialog(Dialog::DirtyMaterialGraph);
+        return;
+    }
     QueueSceneTransition(action, asset);
+}
+
+void EditorWorkspaceLayer::RequestEditorExit()
+{
+    if (m_SceneDocument->PlaySession())
+    {
+        m_PendingSceneAction = PendingSceneAction::Exit;
+        RequestStopPlayMode();
+        return;
+    }
+    m_PendingSceneAction = PendingSceneAction::Exit;
+    if (m_SceneDocument->EditingScene() && m_SceneDocument->EditingScene()->Dirty())
+    {
+        OpenDialog(Dialog::DirtyScene);
+        return;
+    }
+    if (m_MaterialGraphDocument && m_MaterialGraphDocument->Dirty())
+    {
+        OpenDialog(Dialog::DirtyMaterialGraph);
+        return;
+    }
+    ExecutePendingSceneAction();
 }
 
 void EditorWorkspaceLayer::QueueSceneTransition(const PendingSceneAction action, const Keire::AssetId asset)
@@ -1084,6 +1139,8 @@ void EditorWorkspaceLayer::AssignDroppedMaterial(const Keire::EntityId entity, c
             m_SceneDocument->SetComponentProperty(target, Keire::MeshRendererComponent::StaticType(), "tint",
                                                   *materialTint);
     }
+    if (record->Type == Keire::MaterialGraphAsset::StaticType() && m_MaterialGraphDocument->Asset() == asset)
+        m_MaterialGraphDocument->ApplyLiveRevision();
     m_SceneDocument->Select(destination.Id().Value());
     m_SelectedAsset = {};
     m_SceneDocument->SetStatus(

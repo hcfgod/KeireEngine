@@ -104,14 +104,14 @@ TEST_CASE("Material Graph source and cooked assets preserve stable graph identit
 
     const auto importer = Keire::CreateMaterialGraphAssetImporter();
     CHECK(importer.Name == "Keire.MaterialGraph");
-    CHECK(importer.Version == 13);
+    CHECK(importer.Version == 14);
     CHECK(importer.Extensions == std::vector<std::string>{".keirematerialgraph"});
 }
 
 TEST_CASE("Material Graph v2 catalogs stable node identities and migrates v1 sources")
 {
     const auto catalog = Keire::MaterialGraphNodeCatalog();
-    REQUIRE(catalog.size() > 70);
+    REQUIRE(catalog.size() >= 100);
     std::vector<std::string_view> typeIds;
     for (const auto& descriptor : catalog)
     {
@@ -156,6 +156,31 @@ TEST_CASE("Material Graph v2 catalogs stable node identities and migrates v1 sou
     REQUIRE(attributesFirst != upgradedFirst.Nodes.front().Pins.end());
     REQUIRE(attributesSecond != upgradedSecond.Nodes.front().Pins.end());
     CHECK(attributesFirst->Id == attributesSecond->Id);
+}
+
+TEST_CASE("Material Graph compatibility versions are explicit and future sources fail recoverably")
+{
+    CHECK(Keire::MaterialGraphSourceSchemaVersion == 2);
+    CHECK(Keire::MaterialGraphGeneratedShaderVersion == 1);
+    CHECK(Keire::MaterialGraphVertexLayoutVersion == 3);
+
+    const auto graph = Keire::CreateDefaultMaterialGraph();
+    const auto compilation = Keire::CompileMaterialGraph(graph);
+    REQUIRE(compilation.Succeeded());
+    REQUIRE(compilation.Variants.size() == 1);
+
+    const auto& variant = compilation.Variants.front();
+    const auto manifest = nlohmann::json::parse(variant.Manifest);
+    CHECK(manifest.at("materialGraphSourceSchemaVersion") == Keire::MaterialGraphSourceSchemaVersion);
+    CHECK(manifest.at("materialGraphGeneratedShaderVersion") == Keire::MaterialGraphGeneratedShaderVersion);
+    CHECK(manifest.at("vertexLayoutVersion") == Keire::MaterialGraphVertexLayoutVersion);
+    CHECK(variant.Hlsl.find("Generator version 1, source schema 2") != std::string::npos);
+
+    const auto future = nlohmann::json{{"schemaVersion", Keire::MaterialGraphSourceSchemaVersion + 1U}}.dump();
+    const auto futureBytes = std::as_bytes(std::span(future));
+    CHECK_THROWS_WITH_AS((void)Keire::MaterialGraphAsset::DecodeSource(futureBytes),
+                         "Material Graph schema version 3 is newer than the supported version 2.",
+                         std::invalid_argument);
 }
 
 TEST_CASE("Material Graph v2 lowers multi-output nodes and parameter authoring metadata")

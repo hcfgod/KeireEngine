@@ -1,4 +1,5 @@
 #include "Keire/Vfx/VfxSystem.h"
+#include "KeireInternal/Vfx/VfxNodeCatalogInternal.h"
 
 #include <algorithm>
 #include <array>
@@ -6,6 +7,7 @@
 #include <cmath>
 #include <concepts>
 #include <cstdint>
+#include <iterator>
 #include <set>
 #include <stdexcept>
 
@@ -47,13 +49,13 @@ namespace Keire
 
         [[nodiscard]] constexpr bool HasValidatedGpuSemantics(const VfxValueOpcode opcode) noexcept
         {
-            return opcode <= VfxValueOpcode::Rotate3D;
+            return opcode <= VfxValueOpcode::SpawnState;
         }
 
         [[nodiscard]] bool IsGpuInterpretedOperator(const VfxNodeDescriptor& descriptor) noexcept
         {
-            constexpr auto MaximumGpuOpcode = VfxValueOpcode::Rotate3D;
-            static_assert(static_cast<std::uint8_t>(MaximumGpuOpcode) == 108);
+            constexpr auto MaximumGpuOpcode = VfxValueOpcode::SpawnState;
+            static_assert(static_cast<std::uint8_t>(MaximumGpuOpcode) == 131);
             const auto executable = descriptor.SupportTier == VfxNodeSupportTier::Supported ||
                                     descriptor.SupportTier == VfxNodeSupportTier::KeireEquivalent;
             return descriptor.Class == VfxNodeClass::Operator && executable && descriptor.Lowering &&
@@ -266,7 +268,7 @@ namespace Keire
         [[nodiscard]] std::vector<VfxNodeDescriptor> BuildCatalog()
         {
             std::vector<VfxNodeDescriptor> result;
-            result.reserve(180);
+            result.reserve(260);
             result.push_back(Structural("keire.block.burst", "Burst", "Block/Spawn", VfxNodeClass::Block,
                                         {VfxContextType::Spawn},
                                         {Input("Time", "time", VfxValueType::Scalar, 0.0F),
@@ -1022,6 +1024,10 @@ namespace Keire
                                          Input("Mesh", "mesh", VfxValueType::Mesh, AssetId{}),
                                          Input("Material", "material", VfxValueType::Asset, AssetId{})},
                                         {{"Renderer", std::uint64_t{0}}}, VfxNodeSupportTier::KeireEquivalent));
+
+            auto extended = Internal::BuildVfxExtendedNodeCatalog();
+            result.insert(result.end(), std::make_move_iterator(extended.begin()),
+                          std::make_move_iterator(extended.end()));
 
             std::set<std::string> typeIds;
             for (auto& descriptor : result)

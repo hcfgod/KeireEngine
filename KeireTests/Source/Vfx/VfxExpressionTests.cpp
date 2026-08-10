@@ -740,9 +740,10 @@ TEST_CASE("particle Attribute Operators read authoritative CPU simulation state"
           doctest::Approx(0.5F));
 }
 
-TEST_CASE("every executable packed value Operator is available on CPU and GPU")
+TEST_CASE("executable value Operators publish an accurate CPU and GPU support tier")
 {
     static_assert(static_cast<std::uint8_t>(Keire::VfxValueOpcode::Rotate3D) == 108);
+    static_assert(static_cast<std::uint8_t>(Keire::VfxValueOpcode::SpawnState) == 131);
     std::size_t executableCount = 0;
     std::size_t gpuInterpretedCount = 0;
     for (const auto& descriptor : Keire::VfxNodeCatalog())
@@ -755,18 +756,27 @@ TEST_CASE("every executable packed value Operator is available on CPU and GPU")
         ++executableCount;
 
         const auto opcodeSupported = static_cast<std::uint8_t>(*descriptor.Lowering) <=
-                                     static_cast<std::uint8_t>(Keire::VfxValueOpcode::Rotate3D);
+                                     static_cast<std::uint8_t>(Keire::VfxValueOpcode::SpawnState);
         const auto typesSupported = std::ranges::all_of(descriptor.Pins, [](const Keire::VfxNodePinDescriptor& pin)
                                                         { return Keire::IsVfxGpuExpressionValueType(pin.Type); });
         CAPTURE(descriptor.TypeId.Value);
-        REQUIRE(opcodeSupported);
-        REQUIRE(typesSupported);
-        ++gpuInterpretedCount;
-        CHECK(descriptor.BackendTier == Keire::VfxNodeBackendTier::CpuAndGpu);
+        if (descriptor.BackendTier == Keire::VfxNodeBackendTier::CpuAndGpu)
+        {
+            REQUIRE(opcodeSupported);
+            REQUIRE(typesSupported);
+            ++gpuInterpretedCount;
+        }
+        else
+        {
+            CHECK(descriptor.BackendTier == Keire::VfxNodeBackendTier::CpuOnly);
+            const auto fullyGpuInterpreted = opcodeSupported && typesSupported;
+            CHECK_FALSE(fullyGpuInterpreted);
+        }
     }
 
     CHECK(executableCount > 0);
-    CHECK(gpuInterpretedCount == executableCount);
+    CHECK(gpuInterpretedCount > 0);
+    CHECK(gpuInterpretedCount < executableCount);
 }
 
 TEST_CASE("schema-4 VFX resident bytes include nested graph and typed-value storage")

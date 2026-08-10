@@ -298,6 +298,44 @@ TEST_CASE("Audio graph snapshots reject zero-delay cycles and publish atomically
     CHECK_THROWS_AS((void)audio->RenderOffline(input, 4), std::logic_error);
 }
 
+TEST_CASE("Algorithmic reverb preserves dry input and produces a bounded deterministic tail")
+{
+    Keire::AudioGraphSnapshot graph;
+    graph.Revision = 1;
+    graph.SampleRate = 8000;
+    graph.Channels = 1;
+    graph.Output = Keire::AudioGraphNodeId(3);
+    graph.Nodes = {{Keire::AudioGraphNodeId(1), "Input", Keire::AudioGraphNodeType::Input, {}, {}},
+                   {Keire::AudioGraphNodeId(2),
+                    "Room",
+                    Keire::AudioGraphNodeType::AlgorithmicReverb,
+                    {{Keire::AudioGraphNodeId(1), false}},
+                    {10.0F, 0.6F, 0.5F}},
+                   {Keire::AudioGraphNodeId(3),
+                    "Output",
+                    Keire::AudioGraphNodeType::Output,
+                    {{Keire::AudioGraphNodeId(2), false}},
+                    {}}};
+    Keire::AudioSystemSpecification specification;
+    specification.Mode = Keire::AudioMode::Headless;
+    auto audio = Keire::CreateRef<Keire::AudioSystem>(specification);
+    audio->SubmitGraph(std::make_shared<const Keire::AudioGraphSnapshot>(graph));
+    std::vector<float> impulse(256, 0.0F);
+    impulse.front() = 1.0F;
+    const auto first = audio->RenderOffline(impulse, impulse.size());
+    const auto second = audio->RenderOffline(impulse, impulse.size());
+    REQUIRE(first.size() == impulse.size());
+    CHECK(first == second);
+    CHECK(first.front() == doctest::Approx(0.5F));
+    bool hasTail = false;
+    for (std::size_t index = 20; index < first.size(); ++index)
+        hasTail = hasTail || std::abs(first[index]) > 0.001F;
+    CHECK(hasTail);
+    for (const auto sample : first)
+        CHECK(std::isfinite(sample));
+    audio->Close();
+}
+
 TEST_CASE("Audio voices spatialize, virtualize, loop, and interpolate mixer snapshots")
 {
     Keire::AudioSystemSpecification specification;

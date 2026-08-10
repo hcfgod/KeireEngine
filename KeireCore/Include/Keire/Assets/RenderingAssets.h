@@ -28,7 +28,8 @@ namespace Keire
     enum class ShaderPrimitiveTopology : std::uint8_t
     {
         TriangleList,
-        LineList
+        LineList,
+        PointList
     };
 
     enum class ShaderCullMode : std::uint8_t
@@ -185,8 +186,27 @@ namespace Keire
     enum class BuiltinMesh : std::uint8_t
     {
         Error,
-        Cube
+        Cube,
+        Sphere,
+        Capsule,
+        Cylinder,
+        Cone,
+        Plane,
+        Quad,
+        Torus
     };
+
+    struct BuiltinMeshDescriptor
+    {
+        BuiltinMesh Mesh = BuiltinMesh::Error;
+        AssetId Id;
+        std::string_view Name;
+        std::string_view CollisionExpectation;
+        bool Closed = true;
+    };
+
+    /// Stable built-in content catalog. All meshes use metres, a centered origin, and the engine's Y-up convention.
+    [[nodiscard]] KEIRE_API std::span<const BuiltinMeshDescriptor> BuiltinMeshCatalog() noexcept;
 
     struct MeshVertex
     {
@@ -212,6 +232,7 @@ namespace Keire
         std::uint32_t IndexCount = 0;
         std::uint32_t MaterialSlot = 0;
         MeshBounds Bounds;
+        ShaderPrimitiveTopology Topology = ShaderPrimitiveTopology::TriangleList;
 
         auto operator<=>(const MeshSubmesh&) const noexcept = default;
     };
@@ -264,7 +285,47 @@ namespace Keire
         {
             return AssetId(0x4b45495245455252ULL, 0x4f524d4553480001ULL);
         }
+        [[nodiscard]] static constexpr AssetId SphereId() noexcept
+        {
+            return AssetId(0x4b45495245535048ULL, 0x4552454d45534801ULL);
+        }
+        [[nodiscard]] static constexpr AssetId CapsuleId() noexcept
+        {
+            return AssetId(0x4b45495245434150ULL, 0x53554c454d455301ULL);
+        }
+        [[nodiscard]] static constexpr AssetId CylinderId() noexcept
+        {
+            return AssetId(0x4b4549524543594cULL, 0x494e4445524d5301ULL);
+        }
+        [[nodiscard]] static constexpr AssetId ConeId() noexcept
+        {
+            return AssetId(0x4b45495245434f4eULL, 0x454d455348000001ULL);
+        }
+        [[nodiscard]] static constexpr AssetId PlaneId() noexcept
+        {
+            return AssetId(0x4b45495245504c41ULL, 0x4e454d4553480001ULL);
+        }
+        [[nodiscard]] static constexpr AssetId QuadId() noexcept
+        {
+            return AssetId(0x4b45495245515541ULL, 0x444d455348000001ULL);
+        }
+        [[nodiscard]] static constexpr AssetId TorusId() noexcept
+        {
+            return AssetId(0x4b45495245544f52ULL, 0x55534d4553480001ULL);
+        }
+        [[nodiscard]] static AssetId BuiltinId(BuiltinMesh mesh) noexcept;
+        [[nodiscard]] static std::optional<BuiltinMesh> BuiltinKind(AssetId id) noexcept;
+        [[nodiscard]] static bool IsBuiltin(AssetId id) noexcept { return BuiltinKind(id).has_value(); }
+        [[nodiscard]] static Ref<MeshAsset> Builtin(BuiltinMesh mesh);
+        [[nodiscard]] static Ref<MeshAsset> ResolveBuiltin(AssetId id);
         [[nodiscard]] static Ref<MeshAsset> Cube();
+        [[nodiscard]] static Ref<MeshAsset> Sphere();
+        [[nodiscard]] static Ref<MeshAsset> Capsule();
+        [[nodiscard]] static Ref<MeshAsset> Cylinder();
+        [[nodiscard]] static Ref<MeshAsset> Cone();
+        [[nodiscard]] static Ref<MeshAsset> Plane();
+        [[nodiscard]] static Ref<MeshAsset> Quad();
+        [[nodiscard]] static Ref<MeshAsset> Torus();
         [[nodiscard]] static Ref<MeshAsset> Error();
         [[nodiscard]] static Ref<MeshAsset> Decode(std::span<const std::byte> bytes);
         [[nodiscard]] static std::vector<std::byte> Encode(std::span<const MeshVertex> vertices,

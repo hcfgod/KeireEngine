@@ -116,6 +116,7 @@ namespace KeireEditor
         [[nodiscard]] const MaterialGraphPreviewSettings& PreviewSettings() const noexcept { return m_PreviewSettings; }
         void AdvanceCompilation(double deltaSeconds);
         [[nodiscard]] bool CompilationPending() const noexcept;
+        void ApplyLiveRevision() const;
 
       private:
         struct BackgroundCompilation
@@ -147,6 +148,7 @@ namespace KeireEditor
         Keire::MaterialGraphCompilation m_Compilation;
         std::optional<Keire::MaterialGraphCompilation> m_LastGoodCompilation;
         std::optional<Keire::MaterialGraphDefinition> m_LastGoodDefinition;
+        std::vector<Keire::Ref<Keire::ShaderAsset>> m_LastGoodDevelopmentShaders;
         std::optional<Keire::MaterialGraphDefinition> m_PendingDefinition;
         Keire::Ref<Keire::JobSystem> m_JobSystem;
         Keire::Ref<Keire::JobScope> m_JobScope;

@@ -264,6 +264,7 @@ namespace KeireHub
         AddProject,
         RefreshProjects,
         LocateEditor,
+        BrowseEditorInstallLocation,
         PreviewEditorInstall,
         InstallEditor,
         ManageBuildSupport,
@@ -338,6 +339,7 @@ namespace KeireHub
         void SetAppearance(HubAppearance appearance, bool systemPrefersDark = true) noexcept;
         void ResetSettingsEditor() noexcept { m_EditedSettings.reset(); }
         [[nodiscard]] bool RequestEditorInstall(std::string_view packageOrVersion, const HubProductSnapshot& snapshot);
+        void SetEditorInstallParent(const std::filesystem::path& parent);
 
         void DrawTitleBar(Keire::UiFrame& ui, Keire::Window& window, HubPage page, const HubProductSnapshot& snapshot,
                           HubUiCommand& command);

@@ -35,6 +35,9 @@ namespace Keire::Internal
         float Size = 1.0F;
         std::uint32_t ParticleIndexInStrip = 0;
         std::uint32_t ParticlesPerStrip = 1;
+        Vector3 EmitterPosition;
+        Quaternion EmitterRotation;
+        const std::function<std::optional<VfxResourceQueryResult>(const VfxResourceQuery&)>* ResourceQuery = nullptr;
     };
 
     [[nodiscard]] VfxExpressionCompilation CompileVfxExpressions(const VfxGraphSystem& system,
@@ -53,4 +56,9 @@ namespace Keire::Internal
     /// Converts one validated graph value to the two-lane shader representation. Parameter callers use this after
     /// resolving overrides; compilation uses it for immutable literal values.
     [[nodiscard]] bool PackVfxGpuValue(VfxValueType type, const VfxParameterValue& value, VfxGpuValue& packed) noexcept;
+
+    [[nodiscard]] std::optional<VfxParameterValue>
+    EvaluateVfxExtendedExpression(VfxValueOpcode opcode, std::span<const VfxParameterValue* const> inputs,
+                                  VfxValueType outputType, std::uint32_t outputIndex,
+                                  const VfxExpressionEvaluationContext* context) noexcept;
 } // namespace Keire::Internal

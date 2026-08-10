@@ -17,6 +17,13 @@
 
 namespace Keire
 {
+    /// Latest canonical source schema emitted by MaterialGraphAsset::EncodeSource.
+    inline constexpr std::uint32_t MaterialGraphSourceSchemaVersion = 2;
+    /// Version of the deterministic HLSL generator contract embedded in every generated shader manifest.
+    inline constexpr std::uint32_t MaterialGraphGeneratedShaderVersion = 1;
+    /// Renderer-facing vertex input and interpolator contract required by generated Material Graph shaders.
+    inline constexpr std::uint32_t MaterialGraphVertexLayoutVersion = 3;
+
     enum class MaterialGraphOutput : std::uint8_t
     {
         Surface,
@@ -260,7 +267,7 @@ namespace Keire
 
     struct MaterialGraphDefinition
     {
-        std::uint32_t SchemaVersion = 2;
+        std::uint32_t SchemaVersion = MaterialGraphSourceSchemaVersion;
         MaterialGraphOutput Output = MaterialGraphOutput::Surface;
         std::vector<MaterialGraphNode> Nodes;
         std::vector<MaterialGraphConnection> Connections;

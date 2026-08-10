@@ -540,9 +540,17 @@ TEST_CASE("Shutdown makes surviving window handles inert")
 TEST_CASE("Window system shutdown closes surviving system tray handles")
 {
     UseDummyVideoDriver();
-    CHECK(Keire::Detail::LoadTrayIcon(std::filesystem::current_path() / "Config/Branding/Keire.png"));
+    const auto iconPath = std::filesystem::current_path() / "Config/Branding/Keire.png";
+    const auto trayIcon = Keire::Detail::LoadTrayIcon(iconPath);
+    const auto windowIcon = Keire::Detail::LoadWindowIcon(iconPath);
+    REQUIRE(trayIcon);
+    REQUIRE(windowIcon);
+    CHECK(trayIcon->w == 1024);
+    CHECK(trayIcon->h == 1024);
+    CHECK(windowIcon->w == 256);
+    CHECK(windowIcon->h == 256);
     auto system = Keire::CreateRef<Keire::WindowSystem>();
-    auto tray = system->CreateSystemTray({.Icon = std::filesystem::current_path() / "Config/Branding/Keire.png",
+    auto tray = system->CreateSystemTray({.Icon = iconPath,
                                           .Tooltip = "Kéire tray shutdown test",
                                           .Actions = {{"Close", [] {}}}});
     system->Shutdown();

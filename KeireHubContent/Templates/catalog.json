@@ -4,7 +4,7 @@
     {
       "id": "keire.empty",
       "version": "1.0.0",
-      "displayName": "Empty",
+      "displayName": "Empty Project",
       "description": "A clean Kéire project with no starter assets.",
       "category": "core",
       "tags": [
@@ -36,7 +36,7 @@
       "id": "keire.3d-starter",
       "version": "1.0.0",
       "displayName": "3D Starter",
-      "description": "A compact 3D starting point with forward-renderer settings and an unlit shader.",
+      "description": "A practical 3D starting point with a camera, directional light, rendering settings, and an unlit shader.",
       "category": "core",
       "tags": [
         "3D",
@@ -48,13 +48,23 @@
       "compatibleEditors": ">=0.1.0 <2.0.0",
       "projectSchema": 3,
       "platformTarget": "desktop",
-      "estimatedSizeBytes": 408,
+      "estimatedSizeBytes": 3183,
       "payloadRoot": "Payloads/Starter3D",
       "payloadFiles": [
         {
           "path": "Assets/Shaders/StarterUnlit.hlsl",
           "sizeBytes": 154,
           "sha256": "58b67763118c5d71fee9385edc179ffce6a40b1598bc83bcb45441b7521209e5"
+        },
+        {
+          "path": "Assets/Scenes/StarterScene.keirescene",
+          "sizeBytes": 2534,
+          "sha256": "6ca5bbbf27e722473ad543b62655002fdaf8c921a02a8184c06511ec9a837023"
+        },
+        {
+          "path": "Assets/Scenes/StarterScene.keirescene.keiremeta",
+          "sizeBytes": 241,
+          "sha256": "0399fdd3e21a5dc89c61a34fe0171a2ef05c2d53713542c5e0a8ee29d39cc1f9"
         },
         {
           "path": "ProjectSettings/Rendering.keiresettings",
@@ -67,9 +77,12 @@
           "sha256": "20fd83c8ddd221fe5ab6c76685e96f12ecbfec335cf9a2f8a1bb154f1ac74abd"
         }
       ],
-      "defaultProjectConfiguration": {},
+      "defaultProjectConfiguration": {
+        "startupScene": "10000000-0000-4000-8000-000000000001"
+      },
       "starterContent": [
-        "Assets/Shaders/StarterUnlit.hlsl"
+        "Assets/Shaders/StarterUnlit.hlsl",
+        "Assets/Scenes/StarterScene.keirescene"
       ],
       "requiredPackages": [],
       "recommendedPackages": [],

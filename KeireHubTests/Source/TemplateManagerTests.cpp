@@ -154,6 +154,12 @@ TEST_CASE("Project creation is byte-reproducible with deterministic identity and
     REQUIRE(first.CreateProject(firstRequest));
     REQUIRE(second.CreateProject(secondRequest));
     CHECK(ReadTree(firstRequest.Destination) == ReadTree(secondRequest.Destination));
+    CHECK(std::filesystem::is_regular_file(firstRequest.Destination / "Assets/Scenes/StarterScene.keirescene"));
+    CHECK(
+        std::filesystem::is_regular_file(firstRequest.Destination / "Assets/Scenes/StarterScene.keirescene.keiremeta"));
+    const auto descriptor = nlohmann::json::parse(
+        KeireHubTests::ReadText(firstRequest.Destination / "ProjectSettings/Project.keireproject"));
+    CHECK(descriptor.at("startupScene") == "10000000-0000-4000-8000-000000000001");
 }
 
 TEST_CASE("Created projects receive schema-three identity and template provenance")

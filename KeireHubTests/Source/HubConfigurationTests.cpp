@@ -40,7 +40,16 @@ TEST_CASE("Packaged Hub configuration takes precedence over the development fall
 
 TEST_CASE("Hub remains visible after editor launch when no system tray is available")
 {
-    CHECK(KeireHub::ShouldHideHubAfterEditorLaunch(true, true));
-    CHECK_FALSE(KeireHub::ShouldHideHubAfterEditorLaunch(true, false));
-    CHECK_FALSE(KeireHub::ShouldHideHubAfterEditorLaunch(false, true));
+    CHECK(KeireHub::ShouldHideHubAfterEditorLaunch(true, true, true));
+    CHECK_FALSE(KeireHub::ShouldHideHubAfterEditorLaunch(true, true, false));
+    CHECK_FALSE(KeireHub::ShouldHideHubAfterEditorLaunch(true, false, true));
+    CHECK_FALSE(KeireHub::ShouldHideHubAfterEditorLaunch(false, true, true));
+}
+
+TEST_CASE("Hub restores only when its final tracked editor exits after an automatic hide")
+{
+    CHECK(KeireHub::ShouldRestoreHubAfterEditorExit(true, true, false));
+    CHECK_FALSE(KeireHub::ShouldRestoreHubAfterEditorExit(false, true, false));
+    CHECK_FALSE(KeireHub::ShouldRestoreHubAfterEditorExit(true, true, true));
+    CHECK_FALSE(KeireHub::ShouldRestoreHubAfterEditorExit(true, false, false));
 }

@@ -368,6 +368,7 @@ namespace KeireEditor
         if (!renderer)
             throw std::invalid_argument("Material editing requires a Mesh Renderer in the active scene.");
         renderer->SetMaterial(slot, material);
+        scene->MarkDirty();
     }
 
     void SceneDocument::Open(Keire::Ref<Keire::Scene> scene, const Keire::AssetId asset, std::filesystem::path source,

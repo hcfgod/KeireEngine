@@ -165,6 +165,18 @@ void EditorWorkspaceLayer::RecordInspectorUndo(const std::string_view name, std:
     RecordSceneUndo(name, std::move(mergeKey));
 }
 
+void EditorWorkspaceLayer::NotifyInspectorMaterialAssigned(const Keire::AssetId material)
+{
+    if (!material || !m_AssetDatabase || !m_MaterialGraphDocument->Asset())
+        return;
+    const auto record = m_AssetDatabase->Find(m_MaterialGraphDocument->Asset());
+    if (record && record->Type == Keire::MaterialGraphAsset::StaticType() &&
+        std::ranges::find(record->SubAssets, material) != record->SubAssets.end())
+    {
+        m_MaterialGraphDocument->ApplyLiveRevision();
+    }
+}
+
 void EditorWorkspaceLayer::AddScriptToEntity(const Keire::EntityId entity, const Keire::AssetId script)
 {
     if (!m_AssetDatabase)

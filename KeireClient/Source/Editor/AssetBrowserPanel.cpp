@@ -1,6 +1,7 @@
 #include "KeireClient/Editor/AssetBrowserPanel.h"
 
 #include "KeireClient/Editor/AssetBrowserFolderCache.h"
+#include "KeireClient/Editor/AssetBrowserUtilities.h"
 #include "KeireClient/Editor/ExternalAssetImportController.h"
 #include "KeireClient/Editor/SceneDocument.h"
 #include "KeireClient/Editor/SelectionRange.h"
@@ -15,105 +16,11 @@
 #include <optional>
 #include <ranges>
 #include <set>
-#include <sstream>
 #include <unordered_map>
 #include <utility>
 
 namespace KeireEditor
 {
-    namespace
-    {
-        [[nodiscard]] std::string DisplayName(const std::filesystem::path& path)
-        {
-            const auto stem = path.stem().string();
-            return stem.empty() ? path.filename().string() : stem;
-        }
-
-        [[nodiscard]] bool SameOrChild(const std::filesystem::path& parent, const std::filesystem::path& candidate)
-        {
-            const auto normalizedParent = parent.lexically_normal();
-            const auto normalizedCandidate = candidate.lexically_normal();
-            if (normalizedParent == normalizedCandidate)
-                return true;
-            const auto relative = normalizedCandidate.lexically_relative(normalizedParent);
-            return !relative.empty() && !relative.is_absolute() && !relative.generic_string().starts_with("..");
-        }
-
-        [[nodiscard]] std::string AssetTypeName(const Keire::AssetSourceRecord& record)
-        {
-            if (const auto content = record.ImportSettings.find("contentType"); content != record.ImportSettings.end())
-            {
-                if (const auto* value = std::get_if<std::string>(&content->second); value && *value == "animation")
-                    return "Animation Source";
-            }
-            const auto extension = record.RelativePath.extension().string();
-            if (extension == ".keirescene")
-                return "Scene";
-            if (extension == ".keireinput")
-                return "Input Actions";
-            if (extension == ".keireshader")
-                return "Shader";
-            if (extension == ".keirematerial")
-                return "Material";
-            if (extension == ".keirematerialgraph")
-                return "Material Graph";
-            if (extension == ".keirematerialinstance")
-                return "Material Instance";
-            if (extension == ".keireanimgraph")
-                return "Animator Controller";
-            if (extension == ".keireanim")
-                return "Animation Clip";
-            if (extension == ".keiremixer")
-                return "Audio Mixer";
-            if (extension == ".keirephysicsmaterial")
-                return "Physics Material";
-            if (extension == ".keirevfx")
-                return "VFX Effect";
-            if (extension == ".keiredata")
-                return "Managed Data";
-            if (extension == ".keireprefab")
-                return "Prefab";
-            if (extension == ".keireasm")
-                return "Managed Assembly";
-            if (extension == ".cs")
-                return "C# Script";
-            if (extension == ".hlsl")
-                return "HLSL Source";
-            return "Asset";
-        }
-
-        [[nodiscard]] std::vector<Keire::AssetId> DecodeAssetPayload(const std::span<const std::byte> bytes)
-        {
-            const std::string text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-            std::istringstream stream(text);
-            std::vector<Keire::AssetId> result;
-            std::string line;
-            while (std::getline(stream, line))
-            {
-                if (line.empty())
-                    continue;
-                const auto id = Keire::AssetId::Parse(line);
-                if (!id || result.size() >= 1024)
-                    throw std::invalid_argument("Asset drag payload is invalid or exceeds 1024 entries.");
-                result.push_back(id);
-            }
-            if (result.empty())
-                throw std::invalid_argument("Asset drag payload is empty.");
-            return result;
-        }
-
-        [[nodiscard]] std::string EncodeAssetPayload(const std::span<const Keire::AssetId> assets)
-        {
-            std::string result;
-            for (const auto asset : assets)
-            {
-                result += asset.ToString();
-                result.push_back('\n');
-            }
-            return result;
-        }
-    } // namespace
-
     class AssetBrowserPanel::Impl final
     {
       public:
@@ -135,6 +42,7 @@ namespace KeireEditor
         enum class NamedCreateKind : std::uint8_t
         {
             None,
+            Scene,
             Material,
             AnimationGraph,
             Script,
@@ -146,7 +54,9 @@ namespace KeireEditor
             MaterialGraph,
             MaterialGraphInstance,
             Prefab,
-            PrefabVariant
+            PrefabVariant,
+            Shader,
+            InputActions
         };
 
         struct ClipboardEntry final
@@ -190,8 +100,15 @@ namespace KeireEditor
         void RequestNamedCreate(const NamedCreateKind kind, const std::string_view defaultName)
         {
             PendingCreateKind = kind;
+            PendingCreateFolder = CurrentFolder;
             CreateNameBuffer = defaultName;
             OpenNamedCreatePopup = true;
+        }
+
+        void RequestInputActionsCreate(Keire::InputActionAssetDefinition definition, const std::string_view defaultName)
+        {
+            PendingInputActions = std::move(definition);
+            RequestNamedCreate(NamedCreateKind::InputActions, defaultName);
         }
 
         void RequestManagedDataCreate(const Keire::ManagedAssetTypeDescriptor& descriptor)
@@ -215,6 +132,9 @@ namespace KeireEditor
             Images.clear();
             ImageDigests.clear();
             FolderImage.Reset();
+            MaterialGraphFallbackImage.Reset();
+            MaterialInstanceFallbackImage.Reset();
+            VfxFallbackImage.Reset();
             Selection.clear();
             VisibleSelectionOrder.clear();
             SelectionAnchor = {};
@@ -225,7 +145,9 @@ namespace KeireEditor
             RenamingFolder.clear();
             RenameBuffer.clear();
             CreateNameBuffer.clear();
+            PendingCreateFolder.clear();
             PendingManagedType = {};
+            PendingInputActions.reset();
             PendingCreateKind = NamedCreateKind::None;
             ExternalEditorBuffer.clear();
             ExternalEditor.clear();
@@ -425,7 +347,7 @@ namespace KeireEditor
             if (ui.MenuItem("Folder"))
                 CreateFolder(editor);
             if (ui.MenuItem("Scene"))
-                editor.RequestAssetBrowserCreateScene();
+                RequestNamedCreate(NamedCreateKind::Scene, "NewScene");
             if (ui.MenuItem("Material"))
                 RequestCreateMaterial();
             if (ui.MenuItem("Animator Controller"))
@@ -457,18 +379,17 @@ namespace KeireEditor
             if (ui.MenuItem("Prefab from Selection"))
                 RequestNamedCreate(NamedCreateKind::Prefab, "NewPrefab");
             if (ui.MenuItem("Unlit Shader"))
-                editor.CreateAssetBrowserShader();
+                RequestNamedCreate(NamedCreateKind::Shader, "UnlitShader");
             if (auto input = ui.BeginMenu("Input Actions"); input)
             {
                 if (ui.MenuItem("Empty"))
-                    editor.CreateAssetBrowserInputActions({.SchemaVersion = 1, .Name = "InputActions"}, "InputActions");
+                    RequestInputActionsCreate({.SchemaVersion = 1, .Name = "InputActions"}, "InputActions");
                 if (ui.MenuItem("Default"))
-                    editor.CreateAssetBrowserInputActions(Keire::InputActionAsset::DefaultDefinition(), "DefaultInput");
+                    RequestInputActionsCreate(Keire::InputActionAsset::DefaultDefinition(), "DefaultInput");
                 if (ui.MenuItem("3D Gameplay"))
-                    editor.CreateAssetBrowserInputActions(Keire::InputActionAsset::GameplayDefinition(),
-                                                          "GameplayInput");
+                    RequestInputActionsCreate(Keire::InputActionAsset::GameplayDefinition(), "GameplayInput");
                 if (ui.MenuItem("UI Navigation"))
-                    editor.CreateAssetBrowserInputActions(Keire::InputActionAsset::UiDefinition(), "UiInput");
+                    RequestInputActionsCreate(Keire::InputActionAsset::UiDefinition(), "UiInput");
             }
         }
 
@@ -791,11 +712,13 @@ namespace KeireEditor
             {
                 ui.OpenPopup("Create Asset");
                 OpenNamedCreatePopup = false;
+                FocusCreateName = true;
             }
             if (auto create = ui.BeginPopupModal("Create Asset"); create)
             {
                 const std::string_view type =
-                    PendingCreateKind == NamedCreateKind::Material                ? "material"
+                    PendingCreateKind == NamedCreateKind::Scene                   ? "scene"
+                    : PendingCreateKind == NamedCreateKind::Material              ? "material"
                     : PendingCreateKind == NamedCreateKind::AnimationGraph        ? "Animator Controller"
                     : PendingCreateKind == NamedCreateKind::Script                ? "C# script"
                     : PendingCreateKind == NamedCreateKind::ManagedAssembly       ? "managed assembly"
@@ -806,9 +729,16 @@ namespace KeireEditor
                     : PendingCreateKind == NamedCreateKind::MaterialGraph         ? "material graph"
                     : PendingCreateKind == NamedCreateKind::MaterialGraphInstance ? "material instance"
                     : PendingCreateKind == NamedCreateKind::Prefab                ? "prefab"
-                                                                                  : "prefab variant";
+                    : PendingCreateKind == NamedCreateKind::PrefabVariant         ? "prefab variant"
+                    : PendingCreateKind == NamedCreateKind::Shader                ? "shader"
+                                                                                  : "Input Actions asset";
                 ui.Text("Choose a name for the new " + std::string(type));
-                (void)ui.InputText("Name", CreateNameBuffer);
+                if (FocusCreateName)
+                {
+                    ui.RequestKeyboardFocus();
+                    FocusCreateName = false;
+                }
+                (void)ui.InputText("Name", CreateNameBuffer, true);
                 if (ui.Button("Create"))
                 {
                     try
@@ -816,34 +746,55 @@ namespace KeireEditor
                         if (CreateNameBuffer.empty() || CreateNameBuffer == "." || CreateNameBuffer == ".." ||
                             CreateNameBuffer.find_first_of("/\\") != std::string::npos)
                             throw std::invalid_argument("Asset name must be one non-empty path component.");
-                        const bool created =
-                            PendingCreateKind == NamedCreateKind::Material
-                                ? editor.CreateAssetBrowserMaterial(CreateNameBuffer)
-                            : PendingCreateKind == NamedCreateKind::AnimationGraph
-                                ? editor.CreateAssetBrowserAnimationGraph(CreateNameBuffer)
-                            : PendingCreateKind == NamedCreateKind::Script
-                                ? editor.CreateAssetBrowserScript(CreateNameBuffer)
-                            : PendingCreateKind == NamedCreateKind::ManagedAssembly
-                                ? editor.CreateAssetBrowserManagedAssembly(CreateNameBuffer)
-                            : PendingCreateKind == NamedCreateKind::ManagedData
-                                ? editor.CreateAssetBrowserManagedData(PendingManagedType, CreateNameBuffer)
-                            : PendingCreateKind == NamedCreateKind::AudioMixer
-                                ? editor.CreateAssetBrowserAudioMixer(CreateNameBuffer)
-                            : PendingCreateKind == NamedCreateKind::PhysicsMaterial
-                                ? editor.CreateAssetBrowserPhysicsMaterial(CreateNameBuffer)
-                            : PendingCreateKind == NamedCreateKind::VfxEffect
-                                ? editor.CreateAssetBrowserVfxEffect(CreateNameBuffer)
-                            : PendingCreateKind == NamedCreateKind::MaterialGraph
-                                ? editor.CreateAssetBrowserMaterialGraph(CreateNameBuffer)
-                            : PendingCreateKind == NamedCreateKind::MaterialGraphInstance
-                                ? editor.CreateAssetBrowserMaterialGraphInstance(CreateNameBuffer)
-                            : PendingCreateKind == NamedCreateKind::Prefab
-                                ? editor.CreateAssetBrowserPrefab(CreateNameBuffer)
-                                : editor.CreateAssetBrowserPrefabVariant(PendingVariantBase, CreateNameBuffer);
+                        const auto previousFolder = std::exchange(CurrentFolder, PendingCreateFolder);
+                        bool created = false;
+                        try
+                        {
+                            created =
+                                PendingCreateKind == NamedCreateKind::Scene
+                                    ? editor.CreateAssetBrowserScene(CreateNameBuffer)
+                                : PendingCreateKind == NamedCreateKind::Material
+                                    ? editor.CreateAssetBrowserMaterial(CreateNameBuffer)
+                                : PendingCreateKind == NamedCreateKind::AnimationGraph
+                                    ? editor.CreateAssetBrowserAnimationGraph(CreateNameBuffer)
+                                : PendingCreateKind == NamedCreateKind::Script
+                                    ? editor.CreateAssetBrowserScript(CreateNameBuffer)
+                                : PendingCreateKind == NamedCreateKind::ManagedAssembly
+                                    ? editor.CreateAssetBrowserManagedAssembly(CreateNameBuffer)
+                                : PendingCreateKind == NamedCreateKind::ManagedData
+                                    ? editor.CreateAssetBrowserManagedData(PendingManagedType, CreateNameBuffer)
+                                : PendingCreateKind == NamedCreateKind::AudioMixer
+                                    ? editor.CreateAssetBrowserAudioMixer(CreateNameBuffer)
+                                : PendingCreateKind == NamedCreateKind::PhysicsMaterial
+                                    ? editor.CreateAssetBrowserPhysicsMaterial(CreateNameBuffer)
+                                : PendingCreateKind == NamedCreateKind::VfxEffect
+                                    ? editor.CreateAssetBrowserVfxEffect(CreateNameBuffer)
+                                : PendingCreateKind == NamedCreateKind::MaterialGraph
+                                    ? editor.CreateAssetBrowserMaterialGraph(CreateNameBuffer)
+                                : PendingCreateKind == NamedCreateKind::MaterialGraphInstance
+                                    ? editor.CreateAssetBrowserMaterialGraphInstance(CreateNameBuffer)
+                                : PendingCreateKind == NamedCreateKind::Prefab
+                                    ? editor.CreateAssetBrowserPrefab(CreateNameBuffer)
+                                : PendingCreateKind == NamedCreateKind::PrefabVariant
+                                    ? editor.CreateAssetBrowserPrefabVariant(PendingVariantBase, CreateNameBuffer)
+                                : PendingCreateKind == NamedCreateKind::Shader
+                                    ? editor.CreateAssetBrowserShader(CreateNameBuffer)
+                                : PendingInputActions
+                                    ? editor.CreateAssetBrowserInputActions(*PendingInputActions, CreateNameBuffer)
+                                    : false;
+                        }
+                        catch (...)
+                        {
+                            CurrentFolder = previousFolder;
+                            throw;
+                        }
+                        CurrentFolder = previousFolder;
                         if (created)
                         {
                             PendingCreateKind = NamedCreateKind::None;
+                            PendingCreateFolder.clear();
                             PendingManagedType = {};
+                            PendingInputActions.reset();
                             PendingVariantBase = {};
                             CreateNameBuffer.clear();
                             ui.CloseCurrentPopup();
@@ -858,7 +809,9 @@ namespace KeireEditor
                 if (ui.Button("Cancel"))
                 {
                     PendingCreateKind = NamedCreateKind::None;
+                    PendingCreateFolder.clear();
                     PendingManagedType = {};
+                    PendingInputActions.reset();
                     PendingVariantBase = {};
                     CreateNameBuffer.clear();
                     ui.CloseCurrentPopup();
@@ -1144,7 +1097,16 @@ namespace KeireEditor
                        const bool grid)
         {
             auto id = ui.PushId(record.Id.ToString());
-            const auto image = Images.contains(record.Id) ? Images.at(record.Id) : FolderImage;
+            auto image = Images.contains(record.Id) ? Images.at(record.Id) : FolderImage;
+            if (!Images.contains(record.Id))
+            {
+                if (record.Type == Keire::MaterialGraphAsset::StaticType())
+                    image = MaterialGraphFallbackImage;
+                else if (record.Type == Keire::MaterialGraphInstanceAsset::StaticType())
+                    image = MaterialInstanceFallbackImage;
+                else if (record.Type == Keire::VfxEffectAsset::StaticType())
+                    image = VfxFallbackImage;
+            }
             const bool selected = std::ranges::find(Selection, record.Id) != Selection.end();
             bool open = false;
             if (grid)
@@ -1400,22 +1362,25 @@ namespace KeireEditor
                 CurrentFolder = CurrentFolder.parent_path();
         }
 
+        void DrawBlankContextItems(Keire::UiFrame& ui, IAssetBrowserController& editor)
+        {
+            if (auto create = ui.BeginMenu("Create"); create)
+                DrawCreateItems(ui, editor);
+            if (ui.MenuItem("Paste", false, ClipboardModeValue != ClipboardMode::Empty))
+                Paste(CurrentFolder, editor);
+            ui.Separator();
+            if (ui.MenuItem("Refresh and Reimport"))
+                editor.ImportAssetBrowserAssets();
+            if (ui.MenuItem("Reveal in File Explorer"))
+                RevealPath(editor, AssetRoot / CurrentFolder);
+            if (ui.MenuItem("Open Trash"))
+                OpenTrashPopup = true;
+        }
+
         void DrawBlankContext(Keire::UiFrame& ui, IAssetBrowserController& editor)
         {
             if (auto context = ui.BeginWindowContextMenu("AssetBlankContext"); context)
-            {
-                if (auto create = ui.BeginMenu("Create"); create)
-                    DrawCreateItems(ui, editor);
-                if (ui.MenuItem("Paste", false, ClipboardModeValue != ClipboardMode::Empty))
-                    Paste(CurrentFolder, editor);
-                ui.Separator();
-                if (ui.MenuItem("Refresh and Reimport"))
-                    editor.ImportAssetBrowserAssets();
-                if (ui.MenuItem("Reveal in File Explorer"))
-                    RevealPath(editor, AssetRoot / CurrentFolder);
-                if (ui.MenuItem("Open Trash"))
-                    OpenTrashPopup = true;
-            }
+                DrawBlankContextItems(ui, editor);
         }
 
         void DrawContentPane(Keire::UiFrame& ui, IAssetBrowserController& editor)
@@ -1445,6 +1410,8 @@ namespace KeireEditor
                 const auto remaining = ui.ContentAvailable();
                 (void)ui.InvisibleButton("AssetCurrentFolderDrop",
                                          {std::max(remaining.Width, 1.0F), std::max(remaining.Height, 24.0F)});
+                if (auto context = ui.BeginItemContextMenu("AssetBlankDropContext"); context)
+                    DrawBlankContextItems(ui, editor);
                 AcceptFolderDrop(ui, contentDropArea, CurrentFolder, editor);
                 DrawKeyboardCommands(ui, assets, editor);
                 DrawBlankContext(ui, editor);
@@ -1490,6 +1457,8 @@ namespace KeireEditor
             const auto remaining = ui.ContentAvailable();
             (void)ui.InvisibleButton("AssetCurrentFolderDrop",
                                      {std::max(remaining.Width, 1.0F), std::max(remaining.Height, 24.0F)});
+            if (auto context = ui.BeginItemContextMenu("AssetBlankDropContext"); context)
+                DrawBlankContextItems(ui, editor);
             AcceptFolderDrop(ui, contentDropArea, CurrentFolder, editor);
             DrawKeyboardCommands(ui, assets, editor);
             DrawBlankContext(ui, editor);
@@ -1519,6 +1488,15 @@ namespace KeireEditor
                 {
                     const auto pixels = MakeFolderThumbnail(96, 96);
                     FolderImage = ui.CreateImage(96, 96, pixels);
+                }
+                if (!MaterialGraphFallbackImage)
+                {
+                    MaterialGraphFallbackImage = ui.CreateImage(
+                        96, 96, MakeAssetFallbackThumbnail(Keire::MaterialGraphAsset::StaticType(), 96, 96));
+                    MaterialInstanceFallbackImage = ui.CreateImage(
+                        96, 96, MakeAssetFallbackThumbnail(Keire::MaterialGraphInstanceAsset::StaticType(), 96, 96));
+                    VfxFallbackImage =
+                        ui.CreateImage(96, 96, MakeAssetFallbackThumbnail(Keire::VfxEffectAsset::StaticType(), 96, 96));
                 }
                 for (auto& completed : Thumbnails->DrainCompleted())
                     Images[completed.Asset] = ui.CreateImage(completed.Width, completed.Height, completed.Pixels);
@@ -1627,12 +1605,9 @@ namespace KeireEditor
                                     if (!renderer || !renderer->Enabled() || !renderer->Visible() ||
                                         !renderer->Mesh() || !transform)
                                         continue;
-                                    Keire::Ref<const Keire::MeshAsset> mesh;
-                                    if (renderer->Mesh() == Keire::MeshAsset::CubeId())
-                                        mesh = Keire::MeshAsset::Cube();
-                                    else if (renderer->Mesh() == Keire::MeshAsset::ErrorId())
-                                        mesh = Keire::MeshAsset::Error();
-                                    else
+                                    Keire::Ref<const Keire::MeshAsset> mesh =
+                                        Keire::MeshAsset::ResolveBuiltin(renderer->Mesh());
+                                    if (!mesh)
                                     {
                                         const auto meshHandle =
                                             assets->Load<Keire::MeshAsset>(renderer->Mesh(), Keire::AssetPriority::Low);
@@ -1648,55 +1623,8 @@ namespace KeireEditor
                             ready = dependenciesReady;
                         }
                     }
-                    else if (assets && record.Type == Keire::MaterialAsset::StaticType())
-                    {
-                        const auto handle = assets->Load<Keire::MaterialAsset>(record.Id, Keire::AssetPriority::Low);
-                        const auto material = handle.TryGetLoaded();
-                        request.PreviewAsset = material;
-                        request.Missing = handle.State() == Keire::AssetState::Failed;
-                        if (!request.PreviewAsset && request.Missing)
-                            request.PreviewAsset = handle.Get();
-                        ready = static_cast<bool>(request.PreviewAsset);
-                        if (material && material->Definition().Shader)
-                        {
-                            const auto shaderHandle = assets->Load<Keire::ShaderAsset>(material->Definition().Shader,
-                                                                                       Keire::AssetPriority::Low);
-                            request.PreviewShader = shaderHandle.TryGetLoaded();
-                            if (!request.PreviewShader && shaderHandle.State() == Keire::AssetState::Failed)
-                                request.PreviewShader = shaderHandle.Get();
-                            ready = ready && static_cast<bool>(request.PreviewShader);
-                        }
-                        Keire::AssetId texture;
-                        if (material)
-                        {
-                            if (const auto found = material->Definition().Properties.find("MainTexture");
-                                found != material->Definition().Properties.end())
-                                if (const auto* id = std::get_if<Keire::AssetId>(&found->second))
-                                    texture = *id;
-                            if (request.PreviewShader)
-                            {
-                                for (const auto& property : request.PreviewShader->Definition().Properties)
-                                {
-                                    if (property.TextureSemantic != Keire::ShaderTextureSemantic::BaseColor)
-                                        continue;
-                                    if (const auto found = material->Definition().Properties.find(property.Name);
-                                        found != material->Definition().Properties.end())
-                                        if (const auto* id = std::get_if<Keire::AssetId>(&found->second))
-                                            texture = *id;
-                                    break;
-                                }
-                            }
-                        }
-                        if (texture)
-                        {
-                            const auto textureHandle =
-                                assets->Load<Keire::Texture2DAsset>(texture, Keire::AssetPriority::Low);
-                            request.PreviewTexture = textureHandle.TryGetLoaded();
-                            if (!request.PreviewTexture && textureHandle.State() == Keire::AssetState::Failed)
-                                request.PreviewTexture = textureHandle.Get();
-                            ready = ready && static_cast<bool>(request.PreviewTexture);
-                        }
-                    }
+                    else if (const auto generated = PrepareGeneratedAssetThumbnail(assets, record, request))
+                        ready = *generated;
                     if (ready && Thumbnails->Request(std::move(request)))
                         ImageDigests.emplace(record.Id, std::move(digest));
                 }
@@ -1781,6 +1709,9 @@ namespace KeireEditor
         std::unordered_map<Keire::AssetId, std::string> ImageDigests;
         std::uint64_t ObservedRecordRevision = 0;
         Keire::Ref<Keire::UiImage> FolderImage;
+        Keire::Ref<Keire::UiImage> MaterialGraphFallbackImage;
+        Keire::Ref<Keire::UiImage> MaterialInstanceFallbackImage;
+        Keire::Ref<Keire::UiImage> VfxFallbackImage;
         Keire::Ref<Keire::UndoContext> Undo;
         std::vector<Keire::AssetId> Selection;
         std::vector<Keire::AssetId> VisibleSelectionOrder;
@@ -1798,14 +1729,17 @@ namespace KeireEditor
         std::string ExternalEditorBuffer;
         std::string TrashError;
         std::filesystem::path ExternalEditor;
+        std::filesystem::path PendingCreateFolder;
         NamedCreateKind PendingCreateKind = NamedCreateKind::None;
         Keire::ManagedTypeId PendingManagedType;
+        std::optional<Keire::InputActionAssetDefinition> PendingInputActions;
         ViewMode Mode = ViewMode::Grid;
         ClipboardMode ClipboardModeValue = ClipboardMode::Empty;
         float ThumbnailSize = 88.0F;
         float FolderPaneWidth = 210.0F;
         bool OpenRenamePopup = false;
         bool OpenNamedCreatePopup = false;
+        bool FocusCreateName = false;
         bool OpenExternalEditorPopup = false;
         bool OpenFolderRenamePopup = false;
         bool OpenDeletePopup = false;

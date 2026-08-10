@@ -47,7 +47,10 @@ Kéire already includes substantial, integrated engine and authoring foundations
   hot reload, cooked packs, and native player packaging.
 - SDL3 multi-window and SDL_GPU rendering, Scene and Game views, cameras, picking, material graphs, shaders, LODs,
   spatial lighting data, animation, rigging, VFX authoring, and performance gates.
-- Input actions and rebinding, physics, navigation, audio graphs and mixers, replay/diagnostic foundations, and profiling.
+- Input actions and rebinding, physics, navigation, audio graphs, production mixer/reverb-zone foundations,
+  replay/diagnostic foundations, and profiling.
+- Search-first Material/VFX node menus, portable geometry and structured-value operators, bounded CPU resource
+  sampling, asynchronous graph thumbnails, and stable built-in prototype meshes.
 - Managed assemblies, component discovery, serialized Inspector fields, lifecycle callbacks, hot reload, gameplay APIs,
   diagnostics, and packaged CoreCLR publication.
 - Focused native and managed tests, sanitizer configurations, source-budget enforcement, reproducible dependency locks,
@@ -197,7 +200,7 @@ Current authoring and runtime contracts include:
 | --- | ---: | --- |
 | Project descriptor | 3 | Older descriptors are inspected and upgraded transactionally before mutation. |
 | Scene source | 5 | Schemas 1–4 migrate in memory; saves emit canonical schema 5. |
-| Static mesh | 4 | Earlier mesh payloads remain readable with deterministic compatibility defaults. |
+| Static mesh | 5 | Earlier payloads remain readable; schema 5 preserves triangle-, line-, and point-list submeshes. |
 | VFX source | 4 | Graph and compatibility payloads are validated as related, distinct execution sources. |
 | Cooked runtime manifest | 4 | Older builds require a recook; newer unsupported schemas fail before partial startup. |
 

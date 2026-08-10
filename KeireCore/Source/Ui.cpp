@@ -1019,11 +1019,11 @@ namespace Keire
         const std::string safeLabel(label);
         return ImGui::SliderInt(safeLabel.c_str(), &value, minimum, maximum);
     }
-    bool UiFrame::InputText(std::string_view label, std::string& value)
+    bool UiFrame::InputText(std::string_view label, std::string& value, const bool selectAllOnFocus)
     {
         m_Impl->RequireActive("InputText");
-        const std::string safeLabel(label);
-        return ImGui::InputText(safeLabel.c_str(), &value);
+        return ImGui::InputText(std::string(label).c_str(), &value,
+                                selectAllOnFocus ? ImGuiInputTextFlags_AutoSelectAll : ImGuiInputTextFlags_None);
     }
     bool UiFrame::InputPassword(std::string_view label, std::string& value)
     {

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "KeireClient/Editor/AssetPicker.h"
+
 #include "Keire/Core.h"
 
 #include <functional>
@@ -50,6 +52,7 @@ namespace KeireEditor
         void DrawDucking(Keire::UiFrame& ui);
 
         IAudioMixerPanelController& m_Controller;
+        AssetPicker m_AssetPicker;
         Keire::UiPanelRegistration m_Registration;
         Keire::AssetId m_SelectedSnapshot;
         Keire::AssetId m_SelectedDucking;

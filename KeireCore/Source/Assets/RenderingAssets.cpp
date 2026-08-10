@@ -100,6 +100,7 @@ namespace Keire
         {
             if (definition.SchemaVersion != 1 ||
                 (definition.VertexLayoutVersion < 1 || definition.VertexLayoutVersion > 3) ||
+                definition.Topology > ShaderPrimitiveTopology::PointList || definition.Culling > ShaderCullMode::Back ||
                 (definition.SpatialLightingAbiVersion != 0U && definition.SpatialLightingAbiVersion != 2U) ||
                 (definition.SpatialLightingAbiVersion == 2U &&
                  (!definition.UsesImageBasedLighting || definition.VertexLayoutVersion != 3U)) ||
@@ -634,12 +635,13 @@ namespace Keire
             const auto& state = manifest.value("renderState", Json::object());
             const auto topology = state.value("topology", std::string("TriangleList"));
             const auto culling = state.value("culling", std::string("Back"));
-            if (topology != "TriangleList" && topology != "LineList")
+            if (topology != "TriangleList" && topology != "LineList" && topology != "PointList")
                 throw std::invalid_argument("Shader render-state topology is invalid.");
             if (culling != "None" && culling != "Front" && culling != "Back")
                 throw std::invalid_argument("Shader render-state culling is invalid.");
-            result.Topology =
-                topology == "LineList" ? ShaderPrimitiveTopology::LineList : ShaderPrimitiveTopology::TriangleList;
+            result.Topology = topology == "PointList"  ? ShaderPrimitiveTopology::PointList
+                              : topology == "LineList" ? ShaderPrimitiveTopology::LineList
+                                                       : ShaderPrimitiveTopology::TriangleList;
             result.Culling = culling == "None"    ? ShaderCullMode::None
                              : culling == "Front" ? ShaderCullMode::Front
                                                   : ShaderCullMode::Back;

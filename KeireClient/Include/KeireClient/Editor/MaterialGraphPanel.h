@@ -72,8 +72,10 @@ namespace KeireEditor
         void DrawInspector(Keire::UiFrame& ui);
         void DrawDiagnostics(Keire::UiFrame& ui);
         void EnsureJobScope();
+        [[nodiscard]] bool DrawNodeCreationMenu(Keire::UiFrame& ui, std::optional<Keire::Vector2> graphPosition);
         [[nodiscard]] bool AddNode(Keire::MaterialGraphNodeKind kind,
-                                   Keire::MaterialGraphValueType type = Keire::MaterialGraphValueType::Scalar);
+                                   Keire::MaterialGraphValueType type = Keire::MaterialGraphValueType::Scalar,
+                                   std::optional<Keire::Vector2> graphPosition = std::nullopt);
         void Report(std::string message) noexcept;
 
         IMaterialGraphPanelController& m_Controller;
@@ -101,6 +103,8 @@ namespace KeireEditor
         bool m_InspectorHasMaximum = false;
         bool m_InspectorHasStep = false;
         std::string m_NodeSearch;
+        NodeMenuSelection m_NodeMenuSelection;
+        std::optional<Keire::Vector2> m_NodeCreationPosition;
         std::string m_Message;
         std::uint32_t m_PreviewWidth = 320;
         std::uint32_t m_PreviewHeight = 220;
@@ -114,5 +118,6 @@ namespace KeireEditor
         bool m_PreviewRefinement = false;
         bool m_PreviewDirty = false;
         bool m_OwnJobSystem = false;
+        bool m_NodeMenuOpen = false;
     };
 } // namespace KeireEditor

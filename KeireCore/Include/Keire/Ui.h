@@ -587,7 +587,7 @@ namespace Keire
         [[nodiscard]] bool DragQuaternion(std::string_view label, Quaternion& value, float speed = 0.01F);
         [[nodiscard]] bool SliderFloat(std::string_view label, float& value, float minimum, float maximum);
         [[nodiscard]] bool SliderInt(std::string_view label, int& value, int minimum, int maximum);
-        [[nodiscard]] bool InputText(std::string_view label, std::string& value);
+        [[nodiscard]] bool InputText(std::string_view label, std::string& value, bool selectAllOnFocus = false);
         [[nodiscard]] bool InputPassword(std::string_view label, std::string& value);
         [[nodiscard]] bool InputTextWithHint(std::string_view label, std::string_view hint, std::string& value);
         [[nodiscard]] bool Selectable(std::string_view label, bool selected = false);

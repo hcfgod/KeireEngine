@@ -15,6 +15,8 @@ namespace
             : Keire::Application(std::move(specification)), m_Executable(std::move(executable)), m_Smoke(smoke),
               m_PendingStartupActivation(std::move(pendingStartupActivation)), m_Instance(std::move(instance))
         {
+            if (!m_Instance->IsPrimary())
+                RequestExit();
         }
 
       protected:

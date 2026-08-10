@@ -102,6 +102,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
         DeleteTheme,
         DirtyTheme,
         DirtyScene,
+        DirtyMaterialGraph,
         DirtyPlayerBuild,
         RenameEntity
     };
@@ -134,6 +135,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void DrawDeleteDialog(Keire::UiFrame& ui, Keire::UiWorkspace& workspace, std::string_view title, bool theme);
     void DrawDirtyThemeDialog(Keire::UiFrame& ui, Keire::UiWorkspace& workspace);
     void DrawDirtySceneDialog(Keire::UiFrame& ui);
+    void DrawDirtyMaterialGraphDialog(Keire::UiFrame& ui);
     void DrawDirtyPlayerBuildDialog(Keire::UiFrame& ui);
     void DrawThemeEditor(Keire::UiFrame& ui, Keire::UiWorkspace& workspace);
     [[nodiscard]] KeireEditor::InputActionsDocument& InputActionsState() noexcept override;
@@ -211,7 +213,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void SetAssetBrowserStatus(std::string status) noexcept override;
     void ReportAssetBrowserError(std::string message) noexcept override;
     void ImportAssetBrowserAssets() override;
-    void RequestAssetBrowserCreateScene() override;
+    bool CreateAssetBrowserScene(std::string_view name) override;
     bool CreateAssetBrowserMaterial(std::string_view name) override;
     bool CreateAssetBrowserAnimationGraph(std::string_view name) override;
     bool CreateAssetBrowserScript(std::string_view name) override;
@@ -225,8 +227,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     bool CreateAssetBrowserPrefab(std::string_view name) override;
     bool CreateAssetBrowserPrefabVariant(Keire::AssetId basePrefab, std::string_view name) override;
     void CreateAssetBrowserPrefabFromObject(Keire::AssetId object, const std::filesystem::path& folder) override;
-    void CreateAssetBrowserShader() override;
-    void CreateAssetBrowserInputActions(Keire::InputActionAssetDefinition definition,
+    bool CreateAssetBrowserShader(std::string_view name) override;
+    bool CreateAssetBrowserInputActions(Keire::InputActionAssetDefinition definition,
                                         std::string_view baseName) override;
     void ExtractAssetBrowserMaterials(Keire::AssetId model) override;
     void MutateAssetBrowser(Keire::Detail::AssetWorkerMutation mutation, Keire::Detail::AssetWorkerMutation reverse,
@@ -260,6 +262,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void ActivateInspectorHistory() noexcept override;
     void ActivateInspectorManagedDataHistory() noexcept override;
     void RecordInspectorUndo(std::string_view name, std::string mergeKey = {}) override;
+    void NotifyInspectorMaterialAssigned(Keire::AssetId material) override;
     void AddScriptToEntity(Keire::EntityId entity, Keire::AssetId script) override;
     void CommitInspectorMaterial() override;
     void OpenInspectorInputActions(Keire::AssetId asset) override;
@@ -325,7 +328,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void RevealPlayerBuild();
     [[nodiscard]] bool CanBuildPlayer(bool runAfterBuild) const noexcept;
     [[nodiscard]] bool CanRevealPlayerBuild() const noexcept;
-    void CreateInputActions(Keire::InputActionAssetDefinition definition, std::string_view baseName);
+    bool CreateInputActions(Keire::InputActionAssetDefinition definition, std::string_view baseName,
+                            bool requireExactName = false);
     [[nodiscard]] KeireEditor::AnimatorControllerDocument& AnimatorControllerState() noexcept override;
     [[nodiscard]] const Keire::UiThemeDefinition& AnimatorControllerTheme() const noexcept override;
     [[nodiscard]] Keire::Ref<Keire::AssetDatabase> AnimatorControllerDatabase() const noexcept override;
@@ -396,7 +400,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void ClosePrefabEditingStage();
     void ApplySelectedPrefabOverrides();
     void ReplacePrefabSource(Keire::AssetId asset, const Keire::PrefabDefinition& definition);
-    void CreateUnlitShader();
+    bool CreateUnlitShader(std::string_view name = {});
     [[nodiscard]] bool CreateMaterial(std::string_view name = "Material");
     [[nodiscard]] bool CreateAnimationGraph(std::string_view name = "NewAnimatorController");
     void OpenAnimationGraph(Keire::AssetId asset);
@@ -463,6 +467,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void ReportError(std::string category, std::string message) noexcept;
     void SetAssetError(std::string message) noexcept;
     void CreateScene();
+    bool CreateSceneAsset(std::string_view name);
     void RequestCreateScene();
     void OpenScene(Keire::AssetId asset);
     void RequestOpenScene(Keire::AssetId asset);
@@ -472,6 +477,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void RequestCloseScene();
     void CloseScene();
     void ExecutePendingSceneAction();
+    void RequestEditorExit();
     void QueueSceneTransition(PendingSceneAction action, Keire::AssetId asset = {});
     void ProcessSceneTransition();
     void WriteSceneRecovery();

@@ -174,10 +174,11 @@ headers.
 ## Mesh and texture sources
 
 OBJ, FBX, glTF, and GLB static meshes import through the pinned private Assimp build. Import applies source node
-transforms, triangulates and deterministically merges meshes, rejects animation and skinning, and intentionally ignores
-source material assignment. The resulting `.keiremesh` payload is a versioned Kéire binary containing finite
-position/normal/UV/color vertices, unsigned 32-bit triangle indices, and verified bounds. `KeireAssetTool convert-mesh
---input <model> [--output <asset.keiremesh>]` emits the same format for inspection or source-control workflows.
+transforms, triangulates polygonal surfaces, preserves line-list and point-list primitives, deterministically merges
+meshes, rejects animation and skinning, and intentionally ignores source material assignment. The resulting
+`.keiremesh` payload is a versioned Kéire binary containing finite position/normal/UV/color vertices, unsigned 32-bit
+indices, per-submesh primitive topology, and verified bounds. `KeireAssetTool convert-mesh --input <model> [--output
+<asset.keiremesh>]` emits the same format for inspection or source-control workflows.
 
 PNG, JPEG, TGA, and BMP sources decode privately through stb_image into RGBA8 `Texture2DAsset` data. Normalized import
 settings select color/data/normal semantics, linear or sRGB interpretation, maximum dimensions, mip policy, filtering,
@@ -196,8 +197,9 @@ The built-in PBR surface accepts either glTF packed metallic-roughness data (G r
 linear Data textures through Metallic Map and Roughness Map. Separate maps use their red channel. Their neutral
 fallbacks are black metallic and white roughness, so omitted optional slots do not alter a packed workflow.
 
-`.keiremesh` version 2 stores a float4 tangent direction and handedness, and version 4 adds UV1. Version 1 remains
-readable and receives deterministically generated tangents. Mesh import bounds are written into catalog schema 2;
+`.keiremesh` version 2 stores a float4 tangent direction and handedness, version 4 adds UV1, and version 5 records each
+submesh as TriangleList, LineList, or PointList. Version 1 remains readable and receives deterministically generated
+tangents. Mesh import bounds are written into catalog schema 2;
 `AssetSystem` exposes them through a read-only metadata query, so viewport picking never reparses OBJ/FBX/glTF/GLB
 source.
 Assimp sources are normalized during import from its right-handed, lower-left-UV, counter-clockwise output to Kéire's

@@ -910,9 +910,10 @@ namespace Keire::RenderBackend
                                                                        ? static_cast<std::uint32_t>(attributes.size())
                                                                    : definition.VertexLayoutVersion == 2 ? 5U
                                                                                                          : 4U;
-            information.primitive_type = definition.Topology == ShaderPrimitiveTopology::LineList
-                                             ? SDL_GPU_PRIMITIVETYPE_LINELIST
-                                             : SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+            information.primitive_type =
+                definition.Topology == ShaderPrimitiveTopology::PointList  ? SDL_GPU_PRIMITIVETYPE_POINTLIST
+                : definition.Topology == ShaderPrimitiveTopology::LineList ? SDL_GPU_PRIMITIVETYPE_LINELIST
+                                                                           : SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
             information.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
             information.rasterizer_state.cull_mode =
                 surface.DoubleSided                           ? SDL_GPU_CULLMODE_NONE

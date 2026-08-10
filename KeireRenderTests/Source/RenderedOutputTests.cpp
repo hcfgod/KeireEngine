@@ -2374,7 +2374,7 @@ TEST_CASE("generated Material Graph shaders create a graphics pipeline with a de
     {
         Keire::Application application(std::move(specification));
         (void)application.PushLayer(
-            std::make_unique<AssetMeshCaptureLayer>(assets.Mesh, assets.MaterialGraphMaterial, results));
+            std::make_unique<AssetMeshCaptureLayer>(Keire::MeshAsset::CubeId(), assets.MaterialGraphMaterial, results));
         REQUIRE(application.Run() == 0);
     }
 

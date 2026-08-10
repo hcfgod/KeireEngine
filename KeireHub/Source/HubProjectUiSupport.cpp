@@ -85,6 +85,28 @@ namespace KeireHub
                status == Keire::ProjectStatus::RecoveryRequired;
     }
 
+    HubProjectOpenAction ResolveProjectOpenAction(const Keire::ProjectStatus status,
+                                                  const bool hasCompatibleEditor) noexcept
+    {
+        switch (status)
+        {
+        case Keire::ProjectStatus::Ready:
+        case Keire::ProjectStatus::RequiresNewerEngine:
+        case Keire::ProjectStatus::UnsupportedSchema:
+            return hasCompatibleEditor ? HubProjectOpenAction::OpenWithEditor
+                                       : HubProjectOpenAction::FindCompatibleEditor;
+        case Keire::ProjectStatus::UpgradeAvailable:
+            return hasCompatibleEditor ? HubProjectOpenAction::OpenWithEditor : HubProjectOpenAction::ReviewUpgrade;
+        case Keire::ProjectStatus::RecoveryRequired:
+            return HubProjectOpenAction::ReviewUpgrade;
+        case Keire::ProjectStatus::Missing:
+        case Keire::ProjectStatus::Invalid:
+        case Keire::ProjectStatus::InUse:
+            return HubProjectOpenAction::Unavailable;
+        }
+        return HubProjectOpenAction::Unavailable;
+    }
+
     std::string FormatLastOpened(const std::uint64_t seconds)
     {
         if (seconds == 0)

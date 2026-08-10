@@ -718,6 +718,76 @@ namespace Keire
         return result;
     }
 
+    AudioMixerDefinition BlendAudioMixerSnapshot(const AudioMixerDefinition& definition, const AssetId snapshot,
+                                                 const float weight)
+    {
+        ValidateAudioMixer(definition);
+        if (!snapshot || !std::isfinite(weight) || weight < 0.0F || weight > 1.0F)
+            throw std::invalid_argument("Audio mixer snapshot blend request is invalid.");
+        const auto source = std::ranges::find(definition.Snapshots, snapshot, &AudioMixerSnapshotDefinition::Id);
+        if (source == definition.Snapshots.end())
+            throw std::invalid_argument("Audio mixer snapshot is unavailable.");
+        auto result = definition;
+        const auto blend = [weight](const float base, const float target) { return base + (target - base) * weight; };
+        for (const auto& parameter : source->Parameters)
+        {
+            switch (parameter.Type)
+            {
+            case AudioMixerSnapshotParameterType::BusGain:
+            {
+                const auto target = std::ranges::find(result.Buses, parameter.Target, &AudioMixerBusDefinition::Id);
+                target->Gain = blend(target->Gain, parameter.Value);
+                break;
+            }
+            case AudioMixerSnapshotParameterType::BusMute:
+            case AudioMixerSnapshotParameterType::BusSolo:
+            {
+                const auto target = std::ranges::find(result.Buses, parameter.Target, &AudioMixerBusDefinition::Id);
+                if (weight >= 0.5F)
+                {
+                    if (parameter.Type == AudioMixerSnapshotParameterType::BusMute)
+                        target->Mute = parameter.Value != 0.0F;
+                    else
+                        target->Solo = parameter.Value != 0.0F;
+                }
+                break;
+            }
+            case AudioMixerSnapshotParameterType::SendGain:
+                for (auto& bus : result.Buses)
+                    if (const auto target =
+                            std::ranges::find(bus.Sends, parameter.Target, &AudioMixerSendDefinition::Id);
+                        target != bus.Sends.end())
+                    {
+                        target->Gain = blend(target->Gain, parameter.Value);
+                        break;
+                    }
+                break;
+            case AudioMixerSnapshotParameterType::EffectBypass:
+            case AudioMixerSnapshotParameterType::EffectParameter:
+                for (auto& bus : result.Buses)
+                    if (const auto target =
+                            std::ranges::find(bus.Effects, parameter.Target, &AudioMixerEffectDefinition::Id);
+                        target != bus.Effects.end())
+                    {
+                        if (parameter.Type == AudioMixerSnapshotParameterType::EffectBypass)
+                        {
+                            if (weight >= 0.5F)
+                                target->Bypassed = parameter.Value != 0.0F;
+                        }
+                        else
+                        {
+                            target->Parameters[parameter.Parameter] =
+                                blend(target->Parameters[parameter.Parameter], parameter.Value);
+                        }
+                        break;
+                    }
+                break;
+            }
+        }
+        ValidateAudioMixer(result);
+        return result;
+    }
+
     AudioMixerAsset::AudioMixerAsset(AudioMixerDefinition definition) : m_Definition(std::move(definition))
     {
         ValidateAudioMixer(m_Definition);

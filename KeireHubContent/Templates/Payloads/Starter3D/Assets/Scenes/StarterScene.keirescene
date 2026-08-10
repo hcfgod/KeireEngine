@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 5,
+  "name": "StarterScene",
+  "entities": [
+    {
+      "id": "10000000-0000-4000-8000-000000000002",
+      "name": "Main Camera",
+      "active": true,
+      "layer": 0,
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [0.0, 1.0, -10.0],
+            "rotation": [0.0, 0.0, 0.0, 1.0],
+            "scale": [1.0, 1.0, 1.0]
+          }
+        },
+        {
+          "type": "4b454952-4543-414d-4552-410000000001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "projection": 0,
+            "clearMode": 0,
+            "primary": true,
+            "priority": 0,
+            "fieldOfView": 60.0,
+            "orthographicSize": 10.0,
+            "nearPlane": 0.1,
+            "farPlane": 1000.0,
+            "clearColor": [0.1, 0.12, 0.16, 1.0]
+          }
+        }
+      ],
+      "parent": null
+    },
+    {
+      "id": "10000000-0000-4000-8000-000000000003",
+      "name": "Directional Light",
+      "active": true,
+      "layer": 0,
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [0.0, 3.0, 0.0],
+            "rotation": [0.4226, -0.2346, 0.1094, 0.8682],
+            "scale": [1.0, 1.0, 1.0]
+          }
+        },
+        {
+          "type": "4b454952-4544-4952-4c49-474854000001",
+          "version": 2,
+          "enabled": true,
+          "data": {
+            "color": [1.0, 1.0, 1.0, 1.0],
+            "intensity": 1.0,
+            "useTemperature": false,
+            "temperature": 6500.0,
+            "shadows": 2,
+            "shadowStrength": 1.0,
+            "shadowBias": 0.005,
+            "bakeMode": 0,
+            "shadowResolution": 2,
+            "cookie": null,
+            "cookieScale": [1.0, 1.0],
+            "cookieOffset": [0.0, 0.0],
+            "cookieRotation": 0.0,
+            "contactShadows": false,
+            "indirectMultiplier": 1.0
+          }
+        }
+      ],
+      "parent": null
+    }
+  ],
+  "prefabInstances": [],
+  "prefabOverrides": [],
+  "lighting": {
+    "backend": 0,
+    "quality": 1,
+    "lightmapResolution": 1024,
+    "maximumLightmapResolution": 4096,
+    "texelsPerUnit": 32,
+    "paddingTexels": 4,
+    "indirectBounceCount": 2,
+    "samplesPerTexel": 64,
+    "bakeAmbientOcclusion": true,
+    "denoise": true
+  },
+  "bakedLighting": null
+}

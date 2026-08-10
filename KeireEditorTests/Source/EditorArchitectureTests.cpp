@@ -469,6 +469,14 @@ TEST_CASE("scene document commands validate and target the active scene")
     REQUIRE(entity.GetComponent<Keire::PointLightComponent>());
     CHECK(entity.GetComponent<Keire::PointLightComponent>()->Intensity() == doctest::Approx(12.0F));
 
+    const auto rendered = document.CreateEntity("Rendered", {}, Keire::MeshRendererComponent::StaticType());
+    scene->MarkSaved();
+    const auto material = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000071");
+    document.SetMeshRendererMaterial(rendered, 0, material);
+    REQUIRE(scene->FindEntity(rendered).GetComponent<Keire::MeshRendererComponent>());
+    CHECK(scene->FindEntity(rendered).GetComponent<Keire::MeshRendererComponent>()->Material() == material);
+    CHECK(scene->Dirty());
+
     document.BeginPlay();
     document.RenameEntity(child, "Runtime light");
     CHECK(document.ActiveScene()->FindEntity(child).Name() == "Runtime light");
@@ -556,6 +564,20 @@ TEST_CASE("scene document owns atomic save and recovery lifecycle")
     const std::vector<char> characters{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
     const auto bytes = std::as_bytes(std::span(characters.data(), characters.size()));
     CHECK(Keire::SceneAsset::Decode(bytes)->Definition().Objects.front().Name == "Recovered name");
+    input.close();
+
+    const auto renamed = source.parent_path() / "Renamed.keirescene";
+    std::filesystem::rename(source, renamed);
+    document.SetIdentity(asset, renamed);
+    document.EditingScene()->FindEntity(entity.Id()).SetName("Saved after rename");
+    document.Save();
+    CHECK_FALSE(std::filesystem::exists(source));
+    REQUIRE(std::filesystem::is_regular_file(renamed));
+    std::ifstream renamedInput(renamed, std::ios::binary);
+    const std::vector<char> renamedCharacters{std::istreambuf_iterator<char>(renamedInput),
+                                              std::istreambuf_iterator<char>()};
+    CHECK(Keire::SceneAsset::Decode(std::as_bytes(std::span(renamedCharacters)))->Definition().Objects.front().Name ==
+          "Saved after rename");
     document.Close();
     std::error_code error;
     std::filesystem::remove_all(root, error);
@@ -637,13 +659,15 @@ TEST_CASE("play change tracker distinguishes mixed values and enforces created-p
     CHECK(property->Origin == KeireEditor::ScenePlayChangeOrigin::Mixed);
     CHECK(property->Selected);
     auto parentChange = std::ranges::find_if(all,
-                                             [&](const auto& change) {
+                                             [&](const auto& change)
+                                             {
                                                  return change.Entity == parent.Id().Value() &&
                                                         change.Kind == KeireEditor::ScenePlayChangeKind::CreateEntity;
                                              });
     const auto childChange = std::ranges::find_if(
         all,
-        [&](const auto& change) {
+        [&](const auto& change)
+        {
             return change.Entity == child.Id().Value() && change.Kind == KeireEditor::ScenePlayChangeKind::CreateEntity;
         });
     REQUIRE(parentChange != all.end());
@@ -653,7 +677,8 @@ TEST_CASE("play change tracker distinguishes mixed values and enforces created-p
 
     changes.KeepCreatedEntityAtRoot(child.Id().Value(), true);
     parentChange = std::ranges::find_if(changes.Changes(),
-                                        [&](const auto& change) {
+                                        [&](const auto& change)
+                                        {
                                             return change.Entity == parent.Id().Value() &&
                                                    change.Kind == KeireEditor::ScenePlayChangeKind::CreateEntity;
                                         });
@@ -1534,6 +1559,39 @@ TEST_CASE("content previews use immutable loaded assets without blocking shutdow
     CHECK(std::to_integer<unsigned>(materialResult.Pixels[center]) >
           std::to_integer<unsigned>(materialResult.Pixels[center + 1]));
 
+    const auto materialGraphId = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000075");
+    REQUIRE(thumbnails.Request({.Asset = materialGraphId,
+                                .Type = Keire::MaterialGraphAsset::StaticType(),
+                                .PreviewAsset = material,
+                                .RelativePath = "Preview.keirematerialgraph",
+                                .Digest = "material-graph-preview"}));
+    const auto materialGraphResult = await();
+    REQUIRE(materialGraphResult.Pixels.size() == 96U * 96U * 4U);
+    CHECK(std::to_integer<unsigned>(materialGraphResult.Pixels[center]) >
+          std::to_integer<unsigned>(materialGraphResult.Pixels[center + 1]));
+    const auto badgeBorder = (79U * 96U + 71U) * 4U;
+    CHECK(std::to_integer<unsigned>(materialGraphResult.Pixels[badgeBorder]) > 200U);
+    CHECK(std::to_integer<unsigned>(materialGraphResult.Pixels[badgeBorder + 1]) > 150U);
+
+    const auto vfxId = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000076");
+    REQUIRE(thumbnails.Request({.Asset = vfxId,
+                                .Type = Keire::VfxEffectAsset::StaticType(),
+                                .PreviewAsset = Keire::VfxEffectAsset::Default(),
+                                .RelativePath = "Preview.keirevfx",
+                                .Digest = "vfx-preview"}));
+    const auto vfxResult = await();
+    REQUIRE(vfxResult.Pixels.size() == 96U * 96U * 4U);
+    CHECK(std::to_integer<unsigned>(vfxResult.Pixels[badgeBorder]) > 200U);
+
+    const auto materialGraphFallback =
+        KeireEditor::MakeAssetFallbackThumbnail(Keire::MaterialGraphAsset::StaticType(), 96, 96);
+    const auto materialInstanceFallback =
+        KeireEditor::MakeAssetFallbackThumbnail(Keire::MaterialGraphInstanceAsset::StaticType(), 96, 96);
+    const auto vfxFallback = KeireEditor::MakeAssetFallbackThumbnail(Keire::VfxEffectAsset::StaticType(), 96, 96);
+    CHECK(materialGraphFallback != materialInstanceFallback);
+    CHECK(materialGraphFallback != vfxFallback);
+    CHECK(materialInstanceFallback != vfxFallback);
+
     const auto meshId = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000072");
     REQUIRE(thumbnails.Request({.Asset = meshId,
                                 .Type = Keire::MeshAsset::StaticType(),
@@ -1851,5 +1909,7 @@ TEST_CASE("Asset picker resolves graph and instance drops and built-in meshes to
     meshOptions.ExpectedType = Keire::MeshAsset::StaticType();
     CHECK(KeireEditor::AssetPicker::ResolveCompatibleAsset({}, Keire::MeshAsset::CubeId(), meshOptions) ==
           Keire::MeshAsset::CubeId());
+    CHECK(KeireEditor::AssetPicker::ResolveCompatibleAsset({}, Keire::MeshAsset::TorusId(), meshOptions) ==
+          Keire::MeshAsset::TorusId());
     CHECK_FALSE(KeireEditor::AssetPicker::ResolveCompatibleAsset({}, Keire::AssetId::Generate(), meshOptions));
 }

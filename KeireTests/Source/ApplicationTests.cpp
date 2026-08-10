@@ -482,6 +482,25 @@ namespace
         void OnInitialize() override { RequestExit(); }
     };
 
+    class PreRunExitApplication final : public Keire::Application
+    {
+      public:
+        PreRunExitApplication(bool& initialized, bool& shutdown)
+            : Application(HiddenApplicationSpecification("pre-run-exit")), m_Initialized(initialized),
+              m_Shutdown(shutdown)
+        {
+            RequestExit(9);
+        }
+
+      protected:
+        void OnInitialize() override { m_Initialized = true; }
+        void OnShutdown() noexcept override { m_Shutdown = true; }
+
+      private:
+        bool& m_Initialized;
+        bool& m_Shutdown;
+    };
+
     class MinimizeTransitionLayer final : public Keire::Layer
     {
       public:
@@ -581,6 +600,22 @@ TEST_CASE("Application accepts cross-thread exit and runs only once")
     UseApplicationDummyVideoDriver();
     ThreadExitApplication application;
     CHECK(application.Run() == 4);
+    CHECK_THROWS_AS((void)application.Run(), std::logic_error);
+}
+
+TEST_CASE("Application requested to exit before Run does not initialize runtime services")
+{
+    bool initialized = false;
+    bool shutdown = false;
+    PreRunExitApplication application(initialized, shutdown);
+
+    CHECK(application.ExitRequested());
+    CHECK(application.Run() == 9);
+    CHECK_FALSE(initialized);
+    CHECK_FALSE(shutdown);
+    CHECK_FALSE(application.IsRunning());
+    CHECK_FALSE(application.Windows());
+    CHECK_FALSE(application.MainWindow());
     CHECK_THROWS_AS((void)application.Run(), std::logic_error);
 }
 

@@ -4,16 +4,35 @@
 
 #include "Keire/Application.h"
 
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <optional>
 
 namespace KeireHub
 {
-    [[nodiscard]] constexpr bool ShouldHideHubAfterEditorLaunch(const bool keepRunning,
-                                                                const bool trayAvailable) noexcept
+    enum class HubFolderTarget : std::uint8_t
     {
-        return keepRunning && trayAvailable;
+        None,
+        CreateLocation,
+        OpenProject,
+        LocateEditor,
+        EditorInstallLocation,
+        DuplicateProject,
+        LocateProject
+    };
+
+    [[nodiscard]] constexpr bool ShouldHideHubAfterEditorLaunch(const bool keepRunning, const bool trayAvailable,
+                                                                const bool processTracked) noexcept
+    {
+        return keepRunning && trayAvailable && processTracked;
+    }
+
+    [[nodiscard]] constexpr bool ShouldRestoreHubAfterEditorExit(const bool hiddenForEditorLaunch,
+                                                                 const bool hadTrackedEditors,
+                                                                 const bool hasTrackedEditors) noexcept
+    {
+        return hiddenForEditorLaunch && hadTrackedEditors && !hasTrackedEditors;
     }
 
     [[nodiscard]] std::unique_ptr<Keire::Application>

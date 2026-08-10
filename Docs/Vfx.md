@@ -165,9 +165,20 @@ The enabled **Get Attribute** nodes read live simulation state on CPU and GPU:
 | `seed` | Unsigned Integer deterministic 32-bit particle seed carried in Kéire's 64-bit unsigned graph value. |
 | Ratio Over Strip | Scalar normalized index; a one-particle strip returns zero. |
 
-Attributes that are not independently represented by current particle state—custom attributes, angular velocity,
-direction, mass, pivot, non-uniform scale, target position, and texture index—remain disabled with explicit reasons.
-They are not aliases for decorative defaults.
+The portable expansion also exposes derived attributes as explicit **Kéire Equivalent** contracts rather than adding
+hidden particle lanes. `direction` is normalized velocity; `scale` is uniform `size`; `targetPosition` is the current
+position plus one velocity unit; and `texIndex` is the stable particle index inside its strip. Until independent
+simulation lanes are introduced, `angularVelocity` and `pivot` are zero and `mass` is one on both CPU and GPU. **Get
+Custom Attribute** is a graph-defined Vector4 identity value, not a lookup into undeclared particle storage. These
+semantics are stable, tested, visible in the node catalog, and deliberately differ from Unity's extensible attribute
+store.
+
+Structured Inline nodes represent boxes, circles, cones, cylinders, lines, planes, spheres, tori, flipbook layouts,
+matrices, transforms, curves, gradients, textures, meshes, and resource references through ordered typed pins. Numeric
+structures use the shared CPU/GPU value VM; owned curve/gradient/matrix and asset-resource values are CPU-only.
+Geometry Operators cover circle area, point-to-line/plane/sphere distance, primitive volumes, Bezier sampling,
+deterministic weighted selection, swizzling, and transform/matrix operations. Invalid zero-length directions and
+degenerate line segments resolve deterministically instead of producing NaNs.
 
 Coordinate conversions follow the pinned Unity formulas. **Polar to Rectangular** takes Angle in degrees; spherical
 Theta/Phi and Rotate 2D/3D angles use radians. Zero-length rectangular coordinates return zero spherical angles, and a
@@ -195,15 +206,22 @@ different backend limit.
 The [machine-readable parity manifest](VfxParityManifest.json) freezes Kéire's comparison baseline to Unity 6.3 LTS,
 Unity Editor 6000.3, `com.unity.visualeffectgraph` 17.3.0, and Unity Graphics commit
 `2d2e78cc9d6254bc6e7c9c5552cea053508e86cb`. It records the exact user-facing label, category, settings, source
-provenance, Kéire implementation ID, backend tier, tests, documentation, support state, and disabled reason for every
-catalogued Operator, Block, Context, and Output.
+provenance, Kéire implementation ID, backend tier, tests, documentation, support state, priority, and disabled reason
+for every catalogued Operator, Block, Context, and Output.
 
-The frozen snapshot contains 278 rows: 214 Operators, 46 Blocks, 5 Contexts, and 13 Outputs. One hundred twenty-five
-rows carry the explicit **Kéire Equivalent** tier for tested value, attribute, procedural-noise, context, event,
-collision, sampling, and renderer workflows; 153 remain `Disabled`. A `keire` implementation mapping alone means related native
-functionality exists and does not claim Unity parity. A row is enabled only when its native descriptor, backend tier,
-focused tests, documentation, and deliberately documented semantic differences agree. Disabled entries remain visible
-to tooling but creation or compilation must reject them with their recorded reason.
+The frozen snapshot contains 278 rows: 214 Operators, 46 Blocks, 5 Contexts, and 13 Outputs. Two hundred forty-five
+rows carry the explicit **Kéire Equivalent** tier for tested value, attribute, structured-value, geometry, sampling,
+context, event, collision, and renderer workflows; 33 remain `Disabled`. A `keire` implementation mapping alone means
+related native functionality exists and does not claim Unity parity. A row is enabled only when its native descriptor,
+backend tier, focused tests, documentation, and deliberately documented semantic differences agree. Disabled entries
+remain visible to tooling but creation or compilation must reject them with their recorded reason.
+
+The portable expansion starts from the validated 125-row baseline and requires 120 additional evidence-backed rows.
+The checked-in ledger now closes exactly those 120 rows, for 245 total, so both the 50-row first-major target and the
+120-row expansion gate are achieved. It does not imply full parity. Every disabled row is assigned P0, P1, P2, or
+Deferred through the checked-in priority policy, and the validator rejects drifted priorities or milestone counts. The
+[initiative matrix](VisualAuthoringInitiatives.md) defines the production scenarios and delivery meaning behind those
+tiers.
 
 The [VFX Beyond-Parity Roadmap](VfxBeyondParityRoadmap.md) tracks Kéire-specific runtime, networking, debugging,
 scalability, streaming, collaboration, and production-operations features. Those items are deliberately excluded from
@@ -533,6 +551,10 @@ Native import or migration tools can perform the same conversion with
 
 Use **Add Node** above the canvas, or right-click empty canvas space to open the ranked node palette at that graph
 position. Results are filtered by Context, requested pin direction/type, backend, and support status:
+
+The search field lives inside each palette and receives focus when it opens. Results update while typing; **Up/Down**
+wrap the available entries and **Enter** creates the selected node. Empty searches keep recent/common entries visible
+without replacing the categorized Context, Operator, module, and Blackboard menus.
 
 | Node kind | Purpose | Executable requirements |
 | --- | --- | --- |
@@ -1851,9 +1873,23 @@ advance or hide newer particles.
 | `Backend` | CPU | CPU particle storage or GPU emitter-work publication. |
 | `CollisionQuery` | Empty | Optional segment query for CPU collision. |
 | `ShapeSample` | Empty | Optional Mesh/Volume asset sampler for CPU initialization. |
+| `ResourceQuery` | Empty | Optional renderer-neutral provider for CPU texture, mesh, and buffer expression nodes. |
 
 Construction rejects zero capacities, more than `1,000,000` effects, more than 256 systems per effect, more than
 `10,000,000` particles, or a root/system product that exceeds the internal bounded slot budget.
+
+`ResourceQuery` receives a bounded `VfxResourceQuery` containing an operation kind, stable asset ID, coordinate,
+integer index, and mip/level value. It returns generic value lanes plus optional dimensions, count, and transform data.
+The callback never exposes a renderer handle through the public VFX API. Missing resources, a rejected query, a thrown
+callback, or a type-mismatched result fails that expression deterministically and publishes `SimulationValueInvalid`;
+CPU resource nodes never silently substitute a sampled value. Resource-backed descriptors are marked `CPU Only` until
+the renderer owns a matching cross-platform bindless-resource contract.
+
+Point Cache is represented by a stable `PointCache` asset value and sampled through the buffer query lane. Skinned-mesh
+topology, vertex sampling, mesh-index sampling, and local/world root transforms use a Mesh asset ID; the provider may
+resolve that ID to the current deformed snapshot without exposing skinning handles to the graph. Signed-distance-field
+sampling returns the first scalar result lane. These are Kéire-equivalent CPU contracts, not Unity object references,
+and each request remains deterministic for a fixed asset revision and simulation step.
 
 ### Activation And Handles
 

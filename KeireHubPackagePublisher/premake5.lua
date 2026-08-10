@@ -13,7 +13,8 @@ project(HubPackagePublisherTarget)
 
     includedirs
     {
-        "../KeireHubRuntime/Include"
+        "../KeireHubRuntime/Include",
+        "../" .. ProjectConfig.CORE_DIRECTORY .. "/Include"
     }
 
     externalincludedirs
@@ -28,4 +29,8 @@ project(HubPackagePublisherTarget)
         ZstdProject
     }
 
+    LinkKeireCore()
+    LinkSDL3()
+
     LinkKeireHubNativeHttp()
+    ApplyLargeWindowsStack()

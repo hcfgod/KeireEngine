@@ -31,7 +31,7 @@ namespace KeireEditor
         virtual void SetAssetBrowserStatus(std::string status) noexcept = 0;
         virtual void ReportAssetBrowserError(std::string message) noexcept = 0;
         virtual void ImportAssetBrowserAssets() = 0;
-        virtual void RequestAssetBrowserCreateScene() = 0;
+        virtual bool CreateAssetBrowserScene(std::string_view name) = 0;
         virtual bool CreateAssetBrowserMaterial(std::string_view name) = 0;
         virtual bool CreateAssetBrowserAnimationGraph(std::string_view name) = 0;
         virtual bool CreateAssetBrowserScript(std::string_view name) = 0;
@@ -45,8 +45,8 @@ namespace KeireEditor
         virtual bool CreateAssetBrowserPrefab(std::string_view name) = 0;
         virtual bool CreateAssetBrowserPrefabVariant(Keire::AssetId basePrefab, std::string_view name) = 0;
         virtual void CreateAssetBrowserPrefabFromObject(Keire::AssetId object, const std::filesystem::path& folder) = 0;
-        virtual void CreateAssetBrowserShader() = 0;
-        virtual void CreateAssetBrowserInputActions(Keire::InputActionAssetDefinition definition,
+        virtual bool CreateAssetBrowserShader(std::string_view name) = 0;
+        virtual bool CreateAssetBrowserInputActions(Keire::InputActionAssetDefinition definition,
                                                     std::string_view baseName) = 0;
         virtual void ExtractAssetBrowserMaterials(Keire::AssetId model) = 0;
         virtual void MutateAssetBrowser(Keire::Detail::AssetWorkerMutation mutation,

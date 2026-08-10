@@ -41,7 +41,13 @@ namespace KeireHub
                                "Set up the Hub once. Every choice can be changed later in Settings.",
                                "WELCOME  •  STEP " + std::to_string(m_FirstRunStep + 1) + " OF " +
                                    std::to_string(titles.size()));
-            ui.ProgressBar(static_cast<float>(m_FirstRunStep + 1) / static_cast<float>(titles.size()), {0.0F, 6.0F});
+            const float setupProgress = static_cast<float>(m_FirstRunStep + 1) / static_cast<float>(titles.size());
+            const auto setupPercent = std::to_string((m_FirstRunStep + 1) * 100 / titles.size()) + '%';
+            const float percentWidth = ui.MeasureText(setupPercent).Width;
+            ui.ProgressBar(setupProgress, {std::max(ui.ContentAvailable().Width - percentWidth - 12.0F, 120.0F), 18.0F},
+                           " ");
+            ui.SameLine();
+            ui.TextColored(m_Tokens.SecondaryText, setupPercent);
             ui.Spacing();
             if (m_FirstRunStep == 0)
             {

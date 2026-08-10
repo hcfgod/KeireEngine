@@ -261,6 +261,32 @@ namespace KeireEditor
         bool m_DragMoved = false;
     };
 
+    /// Shared interaction state for searchable node-creation menus. Identifiers, rather than display indexes, preserve
+    /// selection as live search results are rebuilt and let different graph editors keep a small recent-node list.
+    class NodeMenuSelection final
+    {
+      public:
+        static constexpr std::size_t RecentCapacity = 6;
+
+        void Open() noexcept;
+        [[nodiscard]] bool ConsumeFocusRequest() noexcept;
+        void Synchronize(std::span<const std::string_view> visibleIds);
+        void MovePrevious(std::span<const std::string_view> visibleIds);
+        void MoveNext(std::span<const std::string_view> visibleIds);
+        void Remember(std::string_view id);
+
+        [[nodiscard]] std::optional<std::string_view> Selected() const noexcept;
+        [[nodiscard]] bool IsSelected(std::string_view id) const noexcept;
+        [[nodiscard]] std::span<const std::string> Recent() const noexcept { return m_Recent; }
+
+      private:
+        void Move(std::span<const std::string_view> visibleIds, int direction);
+
+        std::string m_Selected;
+        std::vector<std::string> m_Recent;
+        bool m_FocusRequested = false;
+    };
+
     class AuthoringValueEditors final
     {
       public:

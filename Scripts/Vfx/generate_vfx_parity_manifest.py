@@ -36,6 +36,10 @@ IGNORED_REFERENCE_PAGES = {
 
 SUPPORTED_STATUSES = ("Supported", "GPU Required", "Kéire Equivalent", "Disabled")
 BACKEND_TIERS = ("CPU Only", "CPU and GPU", "GPU Required")
+PRIORITY_VALUES = ("Complete", "P0", "P1", "P2", "Deferred")
+FIRST_MAJOR_PARITY_TARGET = 50
+PORTABLE_PARITY_BASELINE = 125
+PORTABLE_PARITY_TARGET = 120
 
 # These mappings describe implementation presence, not parity closure. A mapped
 # row remains Disabled until its Unity type rules, settings, CPU/GPU behavior,
@@ -290,6 +294,194 @@ KEIRE_ENABLED_EQUIVALENTS = {
     "keire.operator.rotate-3d",
 }
 
+# The first production expansion deliberately favors renderer-neutral behavior. Structured values and resource
+# samples remain CPU-only until the renderer exposes matching bindless-resource contracts; numeric operators retain
+# the shared CPU/GPU bytecode path. Multiple Unity rows may map to one Kéire primitive where Kéire represents the
+# behavior through a setting or typed graph input instead of a distinct runtime class.
+KEIRE_IMPLEMENTATIONS.update(
+    {
+        "Get Attribute: angularVelocity": "keire.operator.attribute-angular-velocity",
+        "Get Attribute: direction": "keire.operator.attribute-direction",
+        "Get Attribute: mass": "keire.operator.attribute-mass",
+        "Get Attribute: pivot": "keire.operator.attribute-pivot",
+        "Get Attribute: scale": "keire.operator.attribute-scale",
+        "Get Attribute: targetPosition": "keire.operator.attribute-target-position",
+        "Get Attribute: texIndex": "keire.operator.attribute-texture-index",
+        "Get Custom Attribute": "keire.operator.custom-attribute",
+        "Local To World": "keire.operator.local-to-world",
+        "World To Local": "keire.operator.world-to-local",
+        "AABox": "keire.operator.inline-box",
+        "AnimationCurve": "keire.operator.inline-curve",
+        "ArcCircle": "keire.operator.inline-circle",
+        "ArcCone": "keire.operator.inline-cone",
+        "ArcSphere": "keire.operator.inline-sphere",
+        "ArcTorus": "keire.operator.inline-torus",
+        "Operator > Inline|Circle": "keire.operator.inline-circle",
+        "Operator > Inline|Cone": "keire.operator.inline-cone",
+        "Operator > Inline|Cubemap": "keire.operator.inline-texture-cube",
+        "Operator > Inline|CubemapArray": "keire.operator.inline-texture-cube-array",
+        "Operator > Inline|Cylinder": "keire.operator.inline-cylinder",
+        "Operator > Inline|FlipBook": "keire.operator.inline-flipbook",
+        "Operator > Inline|Gradient": "keire.operator.inline-gradient",
+        "Operator > Inline|Line": "keire.operator.inline-line",
+        "Operator > Inline|Matrix4x4": "keire.operator.inline-matrix",
+        "Operator > Inline|Mesh": "keire.operator.inline-mesh",
+        "Operator > Inline|OrientedBox": "keire.operator.inline-box",
+        "Operator > Inline|Plane": "keire.operator.inline-plane",
+        "Operator > Inline|Sphere": "keire.operator.inline-sphere",
+        "Operator > Inline|Texture2D": "keire.operator.inline-texture2d",
+        "Operator > Inline|Texture2DArray": "keire.operator.inline-texture2d-array",
+        "Operator > Inline|Texture3D": "keire.operator.inline-texture3d",
+        "Operator > Inline|Torus": "keire.operator.inline-torus",
+        "Operator > Inline|Transform": "keire.operator.inline-transform",
+        "Random Selector Weighted": "keire.operator.weighted-select",
+        "Switch": "keire.operator.branch",
+        "Construct Matrix": "keire.operator.construct-matrix",
+        "Look At": "keire.operator.look-at",
+        "Sample Bezier": "keire.operator.sample-bezier",
+        "Swizzle": "keire.operator.swizzle",
+        "Append Vector": "keire.operator.combine-vector4",
+        "Area (Circle)": "keire.operator.area-circle",
+        "Change Space": "keire.operator.change-space",
+        "Distance (Line)": "keire.operator.distance-line",
+        "Distance (Plane)": "keire.operator.distance-plane",
+        "Distance (Sphere)": "keire.operator.distance-sphere",
+        "InvertTRS (Matrix)": "keire.operator.invert-trs",
+        "Transform (Direction)": "keire.operator.transform-direction",
+        "Transform (Matrix)": "keire.operator.transform-matrix",
+        "Transform (Position)": "keire.operator.transform-position",
+        "Transform (Vector)": "keire.operator.transform-vector",
+        "Transform (Vector4)": "keire.operator.transform-vector4",
+        "Transpose (Matrix)": "keire.operator.transpose-matrix",
+        "Volume (Axis Aligned Box)": "keire.operator.volume-box",
+        "Volume (Cone)": "keire.operator.volume-cone",
+        "Volume (Cylinder)": "keire.operator.volume-cylinder",
+        "Volume (Oriented Box)": "keire.operator.volume-box",
+        "Volume (Sphere)": "keire.operator.volume-sphere",
+        "Volume (Torus)": "keire.operator.volume-torus",
+        "Attribute Map": "keire.operator.attribute-map",
+        "Buffer Count": "keire.operator.buffer-count",
+        "Get Mesh Index Count": "keire.operator.mesh-index-count",
+        "Get Mesh Triangle Count": "keire.operator.mesh-triangle-count",
+        "Get Mesh Vertex Count": "keire.operator.mesh-vertex-count",
+        "Get Skinned Mesh Index Count": "keire.operator.mesh-index-count",
+        "Get Skinned Mesh Local Root Transform": "keire.operator.skinned-local-transform",
+        "Get Skinned Mesh Triangle Count": "keire.operator.mesh-triangle-count",
+        "Get Skinned Mesh Vertex Count": "keire.operator.mesh-vertex-count",
+        "Get Skinned Mesh World Root Transform": "keire.operator.skinned-world-transform",
+        "Get Texture Dimensions": "keire.operator.texture-dimensions",
+        "Load Texture2D": "keire.operator.load-texture2d",
+        "Load Texture2DArray": "keire.operator.load-texture2d-array",
+        "Load Texture3D": "keire.operator.load-texture3d",
+        "Sample Curve": "keire.operator.sample-curve",
+        "Sample Gradient": "keire.operator.sample-gradient",
+        "Sample Graphics Buffer": "keire.operator.sample-buffer",
+        "Sample Mesh": "keire.operator.sample-mesh",
+        "Operator > Sampling|Sample Mesh Index": "keire.operator.sample-mesh-index",
+        "Sample Skinned Mesh": "keire.operator.sample-mesh",
+        "Sample Skinned Mesh Renderer Index": "keire.operator.sample-mesh-index",
+        "Sample Point Cache": "keire.operator.sample-buffer",
+        "Sample Signed Distance Field": "keire.operator.sample-sdf",
+        "Sample Texture2D": "keire.operator.sample-texture2d",
+        "Sample Texture2DArray": "keire.operator.sample-texture2d-array",
+        "Sample Texture3D": "keire.operator.sample-texture3d",
+        "Sample TextureCube": "keire.operator.sample-texture-cube",
+        "Sample TextureCubeArray": "keire.operator.sample-texture-cube-array",
+        "Spawn State": "keire.operator.spawn-state",
+        "Point Cache": "keire.operator.inline-point-cache",
+        "Set Attribute from Map": "keire.block.portable-hlsl",
+        "Set Attribute from Curve/Gradient": "keire.block.portable-hlsl",
+        "Set Attribute": "keire.block.portable-hlsl",
+        "Collision Shape": "keire.block.collision",
+        "Attractor Shape Sphere": "keire.block.force",
+        "Force|Force": "keire.block.force",
+        "Gravity": "keire.block.force",
+        "Linear Drag": "keire.block.portable-hlsl",
+        "Turbulence": "keire.block.portable-hlsl",
+        "Custom HLSL Block": "keire.block.portable-hlsl",
+        "Integration : Update Position": "keire.block.portable-hlsl",
+        "Integration : Update Rotation": "keire.block.portable-hlsl",
+        "Connect Target": "keire.block.portable-hlsl",
+        "Orient: Face [Mode]": "keire.block.portable-hlsl",
+        "Set Position (Sequential)": "keire.block.portable-hlsl",
+        "Tile/Warp Positions": "keire.block.portable-hlsl",
+        "Set Position Shape": "keire.block.shape",
+        "Constant Rate": "keire.block.emission-rate",
+        "Periodic Burst": "keire.block.burst",
+        "Single Burst": "keire.block.burst",
+        "Variable Rate": "keire.block.emission-rate",
+        "Velocity from Direction & Speed (Change Speed)": "keire.block.portable-hlsl",
+        "Velocity from Direction & Speed (New Direction)": "keire.block.portable-hlsl",
+        "Velocity from Direction & Speed (Random Direction)": "keire.block.portable-hlsl",
+        "Velocity from Direction & Speed (Spherical)": "keire.block.portable-hlsl",
+        "Velocity from Direction & Speed (Tangent)": "keire.block.portable-hlsl",
+        "Output Mesh": "keire.output.renderer",
+        "Output Particle Point": "keire.output.renderer",
+        "Output ShaderGraph Quad": "keire.output.renderer",
+        "Output ShaderGraph Strip": "keire.output.renderer",
+    }
+)
+
+PORTABLE_PARITY_CPU_ONLY = {
+    "keire.operator.attribute-map",
+    "keire.operator.buffer-count",
+    "keire.operator.change-space",
+    "keire.operator.construct-matrix",
+    "keire.operator.inline-curve",
+    "keire.operator.inline-gradient",
+    "keire.operator.inline-matrix",
+    "keire.operator.inline-mesh",
+    "keire.operator.inline-point-cache",
+    "keire.operator.inline-texture-cube",
+    "keire.operator.inline-texture-cube-array",
+    "keire.operator.inline-texture2d",
+    "keire.operator.inline-texture2d-array",
+    "keire.operator.inline-texture3d",
+    "keire.operator.inline-transform",
+    "keire.operator.invert-trs",
+    "keire.operator.load-texture2d",
+    "keire.operator.load-texture2d-array",
+    "keire.operator.load-texture3d",
+    "keire.operator.local-to-world",
+    "keire.operator.look-at",
+    "keire.operator.mesh-index-count",
+    "keire.operator.mesh-triangle-count",
+    "keire.operator.mesh-vertex-count",
+    "keire.operator.sample-buffer",
+    "keire.operator.sample-curve",
+    "keire.operator.sample-gradient",
+    "keire.operator.sample-mesh",
+    "keire.operator.sample-mesh-index",
+    "keire.operator.sample-sdf",
+    "keire.operator.sample-texture-cube",
+    "keire.operator.sample-texture-cube-array",
+    "keire.operator.sample-texture2d",
+    "keire.operator.sample-texture2d-array",
+    "keire.operator.sample-texture3d",
+    "keire.operator.texture-dimensions",
+    "keire.operator.skinned-local-transform",
+    "keire.operator.skinned-world-transform",
+    "keire.operator.transform-direction",
+    "keire.operator.transform-matrix",
+    "keire.operator.transform-position",
+    "keire.operator.transform-vector",
+    "keire.operator.transform-vector4",
+    "keire.operator.transpose-matrix",
+    "keire.operator.world-to-local",
+}
+PORTABLE_PARITY_IMPLEMENTATIONS = (
+    set(KEIRE_IMPLEMENTATIONS.values()) - KEIRE_ENABLED_EQUIVALENTS
+)
+PORTABLE_PARITY_IMPLEMENTATIONS.update(
+    {
+        "keire.operator.branch",
+        "keire.operator.combine-vector4",
+        "keire.operator.random",
+        "keire.output.renderer",
+    }
+)
+KEIRE_ENABLED_EQUIVALENTS.update(PORTABLE_PARITY_IMPLEMENTATIONS)
+
 PRODUCTION_SLICES = [
     {
         "id": "core-value-modulation",
@@ -299,11 +491,38 @@ PRODUCTION_SLICES = [
             implementation
             for implementation in KEIRE_ENABLED_EQUIVALENTS
             if implementation.startswith("keire.operator.")
+            and implementation not in PORTABLE_PARITY_IMPLEMENTATIONS
         ),
         "tests": [
             "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
             "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp",
         ],
+        "samples": ["Samples/KeireSandbox/Assets/Vfx/VfxEffect.keirevfx"],
+        "documentation": ["Docs/Vfx.md"],
+    },
+    {
+        "id": "portable-numeric-expansion",
+        "name": "Portable attributes, inline values, and geometry math",
+        "backendTier": "CPU and GPU",
+        "implementations": sorted(
+            implementation
+            for implementation in PORTABLE_PARITY_IMPLEMENTATIONS
+            if implementation.startswith("keire.operator.")
+            and implementation not in PORTABLE_PARITY_CPU_ONLY
+        ),
+        "tests": [
+            "KeireTests/Source/Vfx/VfxParityExpansionTests.cpp",
+            "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp",
+        ],
+        "samples": ["Samples/KeireSandbox/Assets/Vfx/VfxEffect.keirevfx"],
+        "documentation": ["Docs/Vfx.md"],
+    },
+    {
+        "id": "cpu-resource-and-structured-values",
+        "name": "CPU structured values and host resource queries",
+        "backendTier": "CPU Only",
+        "implementations": sorted(PORTABLE_PARITY_CPU_ONLY),
+        "tests": ["KeireTests/Source/Vfx/VfxParityExpansionTests.cpp"],
         "samples": ["Samples/KeireSandbox/Assets/Vfx/VfxEffect.keirevfx"],
         "documentation": ["Docs/Vfx.md"],
     },
@@ -335,7 +554,21 @@ CORE_UTILITY_TESTS = [
 ]
 
 KEIRE_TESTS = {
+    "keire.block.burst": [
+        "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+        "KeireTests/Source/Vfx/VfxTests.cpp",
+    ],
     "keire.block.collision": ["KeireTests/Source/Vfx/VfxGpuCapabilityTests.cpp"],
+    "keire.block.emission-rate": ["KeireTests/Source/Vfx/VfxTests.cpp"],
+    "keire.block.force": [
+        "KeireTests/Source/Vfx/VfxGpuCapabilityTests.cpp",
+        "KeireTests/Source/Vfx/VfxTests.cpp",
+    ],
+    "keire.block.portable-hlsl": [
+        "KeireTests/Source/Vfx/VfxGpuCapabilityTests.cpp",
+        "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+        "KeireTests/Source/Vfx/VfxTests.cpp",
+    ],
     "keire.block.shape": ["KeireTests/Source/Vfx/VfxGpuCapabilityTests.cpp"],
     "keire.context.event": ["KeireTests/Source/Vfx/VfxTests.cpp"],
     "keire.context.initialize": ["KeireTests/Source/Vfx/VfxTests.cpp"],
@@ -461,6 +694,11 @@ for implementation in (
     "keire.operator.rotate-3d",
 ):
     KEIRE_TESTS[implementation] = CORE_UTILITY_TESTS
+
+for implementation in PORTABLE_PARITY_IMPLEMENTATIONS:
+    KEIRE_TESTS.setdefault(
+        implementation, ["KeireTests/Source/Vfx/VfxParityExpansionTests.cpp"]
+    )
 
 GPU_KEYWORDS = (
     "attribute map",
@@ -747,6 +985,103 @@ def disabled_reason(kind: str, implementation: str | None, backend: str) -> str:
     return f"No production Kéire {kind} implementation is registered; creation and compilation must reject this row."
 
 
+def parity_priority(kind: str, label: str, category: str, support: str) -> str:
+    """Prioritize unfinished rows by production impact, not visual similarity."""
+    if support != "Disabled":
+        return "Complete"
+
+    normalized_label = label.casefold()
+    normalized_category = category.casefold()
+    if kind == "Context":
+        return "P0"
+    if kind == "Block":
+        production_block_categories = (
+            "attribute",
+            "collision",
+            "force",
+            "gpuevent",
+            "implicit",
+            "kill",
+            "orientation",
+            "position",
+            "spawn",
+            "velocity",
+        )
+        return (
+            "P0"
+            if normalized_category.startswith(production_block_categories)
+            else "P1"
+        )
+    if kind == "Output":
+        if "hdrp" in normalized_label or "urp" in normalized_label:
+            return "Deferred"
+        if "shadergraph" in normalized_label or "mesh" in normalized_label:
+            return "P0"
+        return "P1"
+    if normalized_category.startswith(
+        (
+            "operator > attribute",
+            "operator > builtin",
+            "operator > camera",
+            "operator > logic",
+            "operator > math",
+        )
+    ):
+        return "P0"
+    if normalized_category.startswith("operator > sampling"):
+        specialized_sampling = (
+            "buffer",
+            "point cache",
+            "signed distance field",
+            "skinned",
+        )
+        return (
+            "P2"
+            if any(marker in normalized_label for marker in specialized_sampling)
+            else "P1"
+        )
+    if normalized_category.startswith("operator > inline"):
+        return "Deferred" if "terrain" in normalized_label else "P1"
+    return "P2"
+
+
+def first_major_parity_milestone(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    completed = sum(entry["keire"]["support"] != "Disabled" for entry in entries)
+    remaining_priorities = {
+        priority: sum(entry["keire"]["priority"] == priority for entry in entries)
+        for priority in PRIORITY_VALUES[1:]
+    }
+    return {
+        "target": FIRST_MAJOR_PARITY_TARGET,
+        "completedParityRows": completed,
+        "remainingParityRows": len(entries) - completed,
+        "achieved": completed >= FIRST_MAJOR_PARITY_TARGET,
+        "measurement": (
+            "Enabled frozen Unity parity rows with a runtime catalog implementation, "
+            "focused tests, documentation, and production-slice coverage."
+        ),
+        "remainingPriorities": remaining_priorities,
+    }
+
+
+def portable_parity_expansion(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    enabled = sum(entry["keire"]["support"] != "Disabled" for entry in entries)
+    completed = max(0, enabled - PORTABLE_PARITY_BASELINE)
+    target_total = PORTABLE_PARITY_BASELINE + PORTABLE_PARITY_TARGET
+    return {
+        "baselineParityRows": PORTABLE_PARITY_BASELINE,
+        "targetAdditionalRows": PORTABLE_PARITY_TARGET,
+        "targetTotalRows": target_total,
+        "completedAdditionalRows": completed,
+        "remainingAdditionalRows": max(0, PORTABLE_PARITY_TARGET - completed),
+        "achieved": enabled >= target_total,
+        "measurement": (
+            "Additional enabled frozen Unity parity rows above the validated 125-row baseline; "
+            "each row requires a live runtime descriptor, focused test, documentation, and production slice."
+        ),
+    }
+
+
 def keire_implementation(category: str, label: str, reference_title: str) -> str | None:
     return (
         KEIRE_IMPLEMENTATIONS.get(f"{category}|{label}")
@@ -849,6 +1184,7 @@ def make_entries(package_root: Path, documents: list[Path]) -> list[dict[str, An
                     },
                     "keire": {
                         "support": support,
+                        "priority": parity_priority(kind, label, category, support),
                         "implementation": implementation,
                         "backendTier": backend,
                         "tests": KEIRE_TESTS.get(implementation, [])
@@ -906,6 +1242,7 @@ def build_manifest(graphics_root: Path) -> dict[str, Any]:
         "policy": {
             "supportValues": list(SUPPORTED_STATUSES),
             "backendTierValues": list(BACKEND_TIERS),
+            "priorityValues": list(PRIORITY_VALUES),
             "unfinishedBehavior": "Disabled rows must be rejected with disabledReason and must never lower as no-ops.",
             "unityAssetCompatibility": False,
             "copiedUnitySourceOrIcons": False,
@@ -920,6 +1257,8 @@ def build_manifest(graphics_root: Path) -> dict[str, Any]:
             "canonicalEncoding": "UTF-8 JSON, two-space indentation, LF newline",
         },
         "counts": counts,
+        "firstMajorParityMilestone": first_major_parity_milestone(entries),
+        "portableParityExpansion": portable_parity_expansion(entries),
         "productionSlices": PRODUCTION_SLICES,
         "entries": entries,
     }

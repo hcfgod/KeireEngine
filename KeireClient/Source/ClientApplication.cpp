@@ -349,6 +349,12 @@ namespace Keire
         else if (commandLine.ConfigurationExplicit)
             throw ConfigurationError(commandLine.ConfigurationPath, "/", "explicit configuration file does not exist");
 
+        auto windowIcon = commandLine.ExecutablePath.parent_path().parent_path() / "Config/Branding/Keire.png";
+        if (!std::filesystem::is_regular_file(windowIcon))
+            windowIcon = std::filesystem::current_path() / "Config/Branding/Keire.png";
+        if (std::filesystem::is_regular_file(windowIcon))
+            specification.MainWindow.Icon = std::move(windowIcon);
+
         specification.TargetFrameRate = commandLine.SmokeWindow ? 240 : 0;
         specification.Ui.Mode = commandLine.SmokeWindow ? UiMode::Disabled : UiMode::Rendered;
         specification.Ui.PresentMode = UiPresentMode::Mailbox;

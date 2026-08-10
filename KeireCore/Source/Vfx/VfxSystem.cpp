@@ -890,23 +890,19 @@ namespace Keire
             slot.Random = value == 0 ? 0x9e3779b9U : value;
             return slot.Random;
         }
-
         [[nodiscard]] float UnitRandom(EffectSlot& slot) noexcept
         {
             return static_cast<float>(NextRandom(slot) >> 8U) * (1.0F / 16'777'216.0F);
         }
-
         [[nodiscard]] float Range(EffectSlot& slot, const float minimum, const float maximum) noexcept
         {
             return minimum + (maximum - minimum) * UnitRandom(slot);
         }
-
         [[nodiscard]] Vector3 Range(EffectSlot& slot, const Vector3 minimum, const Vector3 maximum) noexcept
         {
             return {Range(slot, minimum.X, maximum.X), Range(slot, minimum.Y, maximum.Y),
                     Range(slot, minimum.Z, maximum.Z)};
         }
-
         [[nodiscard]] bool EvaluateValueContext(EffectSlot& slot, const VfxContextType context,
                                                 const float deltaSeconds, const Particle* particle = nullptr,
                                                 const std::uint64_t spawnIndex = 0) noexcept
@@ -936,6 +932,9 @@ namespace Keire
             evaluation.Size = particle ? particle->Size : 1.0F;
             evaluation.ParticleIndexInStrip = particle ? particle->ParticleIndexInStrip : 0U;
             evaluation.ParticlesPerStrip = std::max<std::uint32_t>(slot.Program.ParticlesPerStrip, 1U);
+            evaluation.EmitterPosition = slot.Position;
+            evaluation.EmitterRotation = slot.Rotation;
+            evaluation.ResourceQuery = std::addressof(Specification.ResourceQuery);
             if (!Internal::EvaluateVfxExpressions(slot.Program, slot.Parameters, evaluation, slot.ExpressionRegisters))
             {
                 slot.Diagnostics |= VfxRuntimeDiagnostic::SimulationValueInvalid;
@@ -998,7 +997,8 @@ namespace Keire
         {
             const auto hasRuntimeModuleBinding = std::ranges::any_of(
                 slot.Program.Bindings,
-                [](const VfxCompiledBinding& binding) {
+                [](const VfxCompiledBinding& binding)
+                {
                     return binding.ValueRegister != ~std::uint32_t{0} && !IsGpuParticleModuleProperty(binding.Property);
                 });
             if (slot.Program.ValueInstructions.empty() || !hasRuntimeModuleBinding)

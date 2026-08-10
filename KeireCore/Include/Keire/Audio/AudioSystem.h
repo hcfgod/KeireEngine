@@ -190,6 +190,11 @@ namespace Keire
         std::size_t Voices = 0;
         std::size_t AudibleVoices = 0;
         std::size_t VirtualVoices = 0;
+        std::size_t MixerAssets = 0;
+        std::size_t MixerRoutings = 0;
+        std::size_t MixerBuses = 0;
+        std::size_t MixerEffects = 0;
+        std::size_t MeterReadings = 0;
         std::uint64_t RenderedFrames = 0;
         std::uint64_t Underruns = 0;
     };

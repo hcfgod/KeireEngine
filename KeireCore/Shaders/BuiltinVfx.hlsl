@@ -293,6 +293,29 @@ static const uint VfxOpcodeRectangularToSpherical = 105;
 static const uint VfxOpcodeSphericalToRectangular = 106;
 static const uint VfxOpcodeRotate2D = 107;
 static const uint VfxOpcodeRotate3D = 108;
+static const uint VfxOpcodePassthrough = 109;
+static const uint VfxOpcodeAttributeAngularVelocity = 110;
+static const uint VfxOpcodeAttributeDirection = 111;
+static const uint VfxOpcodeAttributeMass = 112;
+static const uint VfxOpcodeAttributePivot = 113;
+static const uint VfxOpcodeAttributeScale = 114;
+static const uint VfxOpcodeAttributeTargetPosition = 115;
+static const uint VfxOpcodeAttributeTextureIndex = 116;
+static const uint VfxOpcodeWeightedSelect = 117;
+static const uint VfxOpcodeLookAtDirection = 118;
+static const uint VfxOpcodeSampleBezier = 119;
+static const uint VfxOpcodeSwizzle = 120;
+static const uint VfxOpcodeAreaCircle = 121;
+static const uint VfxOpcodeDistanceLine = 122;
+static const uint VfxOpcodeDistancePlane = 123;
+static const uint VfxOpcodeDistanceSphere = 124;
+static const uint VfxOpcodeVolumeAxisAlignedBox = 125;
+static const uint VfxOpcodeVolumeCone = 126;
+static const uint VfxOpcodeVolumeCylinder = 127;
+static const uint VfxOpcodeVolumeOrientedBox = 128;
+static const uint VfxOpcodeVolumeSphere = 129;
+static const uint VfxOpcodeVolumeTorus = 130;
+static const uint VfxOpcodeSpawnState = 131;
 
 uint Hash(uint value)
 {
@@ -1230,6 +1253,197 @@ bool ExecuteValueInstruction(VfxGpuValueInstruction instruction, GpuParticle par
         const float angle = asfloat(inputs[3].Primary.x);
         output.Primary.xyz = asuint(
             FiniteOrZero(projection + tangent * cos(angle) + cross(tangent, axis) * sin(angle)));
+        return true;
+    }
+    if (opcode == VfxOpcodePassthrough)
+    {
+        const uint selected = instruction.Output.y;
+        if (selected >= inputCount || inputTypes[selected] != type)
+            return false;
+        output = inputs[selected];
+        return true;
+    }
+    if (opcode >= VfxOpcodeAttributeAngularVelocity && opcode <= VfxOpcodeAttributeTextureIndex)
+    {
+        if (inputCount != 0U)
+            return false;
+        if (opcode == VfxOpcodeAttributeMass)
+        {
+            if (type != VfxValueTypeScalar)
+                return false;
+            output.Primary.x = asuint(1.0F);
+        }
+        else if (opcode == VfxOpcodeAttributeTextureIndex)
+        {
+            if (type != VfxValueTypeUnsignedInteger)
+                return false;
+            output.Primary.xy = Modulo64(particle.SequenceIdentity.xy, uint2(max(RenderMetadata.w, 1U), 0U));
+        }
+        else
+        {
+            if (type != VfxValueTypeVector3)
+                return false;
+            const float3 velocity = particle.VelocityLifetime.xyz;
+            const float velocityLength = FiniteOrZero(length(velocity));
+            const float3 value = opcode == VfxOpcodeAttributeDirection
+                                     ? (velocityLength <= 0.000001F ? 0.0F.xxx : velocity / velocityLength)
+                                 : opcode == VfxOpcodeAttributeScale
+                                     ? particle.SizeRotation.xxx
+                                 : opcode == VfxOpcodeAttributeTargetPosition
+                                     ? particle.PositionAge.xyz + velocity
+                                     : 0.0F.xxx;
+            output.Primary.xyz = asuint(FiniteOrZero(value));
+        }
+        return true;
+    }
+    if (opcode == VfxOpcodeWeightedSelect)
+    {
+        if (type != VfxValueTypeVector3 || inputCount != 5U || inputTypes[0] != VfxValueTypeVector3 ||
+            inputTypes[1] != VfxValueTypeVector3 || inputTypes[2] != VfxValueTypeScalar ||
+            inputTypes[3] != VfxValueTypeScalar || inputTypes[4] != VfxValueTypeScalar)
+            return false;
+        const float firstWeight = max(0.0F, asfloat(inputs[2].Primary.x));
+        const float secondWeight = max(0.0F, asfloat(inputs[3].Primary.x));
+        const float total = firstWeight + secondWeight;
+        output.Primary.xyz = total <= 0.0F || saturate(asfloat(inputs[4].Primary.x)) * total < firstWeight
+                                 ? inputs[0].Primary.xyz
+                                 : inputs[1].Primary.xyz;
+        return true;
+    }
+    if (opcode == VfxOpcodeLookAtDirection)
+    {
+        if (type != VfxValueTypeVector3 || inputCount != 2U || inputTypes[0] != VfxValueTypeVector3 ||
+            inputTypes[1] != VfxValueTypeVector3)
+            return false;
+        const float3 direction = asfloat(inputs[1].Primary.xyz) - asfloat(inputs[0].Primary.xyz);
+        const float directionLength = FiniteOrZero(length(direction));
+        output.Primary.xyz = asuint(directionLength <= 0.000001F ? 0.0F.xxx : direction / directionLength);
+        return true;
+    }
+    if (opcode == VfxOpcodeSampleBezier)
+    {
+        if (type != VfxValueTypeVector3 || inputCount != 5U || inputTypes[0] != VfxValueTypeVector3 ||
+            inputTypes[1] != VfxValueTypeVector3 || inputTypes[2] != VfxValueTypeVector3 ||
+            inputTypes[3] != VfxValueTypeVector3 || inputTypes[4] != VfxValueTypeScalar)
+            return false;
+        const float time = saturate(asfloat(inputs[4].Primary.x));
+        const float inverse = 1.0F - time;
+        const float3 value = asfloat(inputs[0].Primary.xyz) * (inverse * inverse * inverse) +
+                             asfloat(inputs[1].Primary.xyz) * (3.0F * inverse * inverse * time) +
+                             asfloat(inputs[2].Primary.xyz) * (3.0F * inverse * time * time) +
+                             asfloat(inputs[3].Primary.xyz) * (time * time * time);
+        output.Primary.xyz = asuint(FiniteOrZero(value));
+        return true;
+    }
+    if (opcode == VfxOpcodeSwizzle)
+    {
+        if (type != VfxValueTypeVector4 || inputCount != 5U || inputTypes[0] != VfxValueTypeVector4 ||
+            inputTypes[1] != VfxValueTypeUnsignedInteger || inputTypes[2] != VfxValueTypeUnsignedInteger ||
+            inputTypes[3] != VfxValueTypeUnsignedInteger || inputTypes[4] != VfxValueTypeUnsignedInteger)
+            return false;
+        const float4 value = asfloat(inputs[0].Primary);
+        const uint4 channels = uint4(inputs[1].Primary.x, inputs[2].Primary.x, inputs[3].Primary.x,
+                                     inputs[4].Primary.x);
+        if (any(channels >= 4U.xxxx))
+            return false;
+        output.Primary = asuint(float4(value[channels.x], value[channels.y], value[channels.z], value[channels.w]));
+        return true;
+    }
+    if (opcode == VfxOpcodeAreaCircle)
+    {
+        if (type != VfxValueTypeScalar || !RequireScalarInputs(inputTypes, inputCount, 1U))
+            return false;
+        const float radius = asfloat(inputs[0].Primary.x);
+        output.Primary.x = asuint(FiniteOrZero(3.14159265358979323846F * radius * radius));
+        return true;
+    }
+    if (opcode >= VfxOpcodeDistanceLine && opcode <= VfxOpcodeDistanceSphere)
+    {
+        if (type != VfxValueTypeScalar || inputCount != 3U || inputTypes[0] != VfxValueTypeVector3 ||
+            inputTypes[1] != VfxValueTypeVector3)
+            return false;
+        const float3 samplePosition = asfloat(inputs[0].Primary.xyz);
+        const float3 reference = asfloat(inputs[1].Primary.xyz);
+        float distanceValue = 0.0F;
+        if (opcode == VfxOpcodeDistanceLine)
+        {
+            if (inputTypes[2] != VfxValueTypeVector3)
+                return false;
+            const float3 segment = asfloat(inputs[2].Primary.xyz) - reference;
+            const float lengthSquared = dot(segment, segment);
+            const float factor = lengthSquared <= 0.000001F
+                                     ? 0.0F
+                                     : saturate(dot(samplePosition - reference, segment) / lengthSquared);
+            distanceValue = length(samplePosition - (reference + segment * factor));
+        }
+        else if (opcode == VfxOpcodeDistancePlane)
+        {
+            if (inputTypes[2] != VfxValueTypeVector3)
+                return false;
+            const float3 normal = asfloat(inputs[2].Primary.xyz);
+            const float normalLength = length(normal);
+            distanceValue = normalLength <= 0.000001F
+                                ? 0.0F
+                                : abs(dot(samplePosition - reference, normal / normalLength));
+        }
+        else
+        {
+            if (inputTypes[2] != VfxValueTypeScalar)
+                return false;
+            distanceValue = abs(length(samplePosition - reference) - asfloat(inputs[2].Primary.x));
+        }
+        output.Primary.x = asuint(FiniteOrZero(distanceValue));
+        return true;
+    }
+    if (opcode >= VfxOpcodeVolumeAxisAlignedBox && opcode <= VfxOpcodeVolumeTorus)
+    {
+        if (type != VfxValueTypeScalar)
+            return false;
+        float volume = 0.0F;
+        if (opcode == VfxOpcodeVolumeAxisAlignedBox || opcode == VfxOpcodeVolumeOrientedBox)
+        {
+            if (inputCount != 1U || inputTypes[0] != VfxValueTypeVector3)
+                return false;
+            const float3 size = asfloat(inputs[0].Primary.xyz);
+            volume = abs(size.x * size.y * size.z);
+        }
+        else
+        {
+            if (inputCount < 1U || inputTypes[0] != VfxValueTypeScalar)
+                return false;
+            const float radius = asfloat(inputs[0].Primary.x);
+            if (opcode == VfxOpcodeVolumeSphere)
+            {
+                if (inputCount != 1U)
+                    return false;
+                volume = 4.18879020478639098462F * radius * radius * radius;
+            }
+            else
+            {
+                if (inputCount != 2U || inputTypes[1] != VfxValueTypeScalar)
+                    return false;
+                const float height = asfloat(inputs[1].Primary.x);
+                const float cylinder = 3.14159265358979323846F * radius * radius * height;
+                volume = opcode == VfxOpcodeVolumeCone     ? cylinder / 3.0F
+                         : opcode == VfxOpcodeVolumeCylinder ? cylinder
+                                                              : 19.739208802178716F * radius * radius * height;
+            }
+        }
+        output.Primary.x = asuint(FiniteOrZero(volume));
+        return true;
+    }
+    if (opcode == VfxOpcodeSpawnState)
+    {
+        if (inputCount != 0U)
+            return false;
+        if (instruction.Output.y == 0U && type == VfxValueTypeBoolean)
+            output.Primary.x = 1U;
+        else if (instruction.Output.y == 1U && type == VfxValueTypeScalar)
+            output.Primary.x = asuint(ValueRuntimeTime.x);
+        else if (instruction.Output.y == 2U && type == VfxValueTypeUnsignedInteger)
+            output.Primary.xy = particle.SequenceIdentity.xy;
+        else
+            return false;
         return true;
     }
     if (opcode == VfxOpcodeConstant)

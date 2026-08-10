@@ -6,6 +6,7 @@
 #include "Keire/Math/Curves.h"
 #include "Keire/Math/Math.h"
 #include "Keire/Ref.h"
+#include "Keire/Vfx/VfxValueOpcode.h"
 
 #include <array>
 #include <compare>
@@ -399,120 +400,6 @@ namespace Keire
         Uniform,
         Unified,
         Cascaded
-    };
-
-    /// Append-only opcode set. Underlying values are encoded into canonical compiled IR.
-    enum class VfxValueOpcode : std::uint8_t
-    {
-        Constant,
-        Range,
-        Random,
-        RandomRange,
-        Remap,
-        Add,
-        Subtract,
-        Multiply,
-        Divide,
-        Minimum,
-        Maximum,
-        Clamp,
-        Saturate,
-        Absolute,
-        Compare,
-        BooleanAnd,
-        BooleanOr,
-        BooleanNot,
-        Select,
-        Combine,
-        Split,
-        Dot,
-        Cross,
-        Normalize,
-        Length,
-        Distance,
-        Time,
-        DeltaTime,
-        Age,
-        Lifetime,
-        ParticleId,
-        SpawnIndex,
-        ToFloat,
-        ToInteger,
-        ToUnsignedInteger,
-        Sine,
-        Cosine,
-        Tangent,
-        ArcSine,
-        ArcCosine,
-        ArcTangent,
-        Atan2,
-        Power,
-        SquareRoot,
-        Exponential,
-        Logarithm,
-        LogarithmBase2,
-        LogarithmBase10,
-        Ceiling,
-        Floor,
-        Round,
-        Fractional,
-        Lerp,
-        Smoothstep,
-        Step,
-        Negate,
-        Sign,
-        AgeOverLifetime,
-        BitwiseAnd,
-        BitwiseComplement,
-        BitwiseLeftShift,
-        BitwiseOr,
-        BitwiseRightShift,
-        BitwiseXor,
-        ColorLuma,
-        HsvToRgb,
-        RgbToHsv,
-        Discretize,
-        FrameIndex,
-        InverseLerp,
-        Modulo,
-        BooleanNand,
-        BooleanNor,
-        OneMinus,
-        Reciprocal,
-        SquaredDistance,
-        SquaredLength,
-        SystemSeed,
-        AttributeAlive,
-        AttributeAlpha,
-        AttributeAngle,
-        AttributeAxisX,
-        AttributeAxisY,
-        AttributeAxisZ,
-        AttributeColor,
-        AttributeOldPosition,
-        AttributeParticleCountInStrip,
-        AttributeParticleIndexInStrip,
-        AttributePosition,
-        AttributeSeed,
-        AttributeSize,
-        AttributeSpawnTime,
-        AttributeStripIndex,
-        AttributeVelocity,
-        RatioOverStrip,
-        Epsilon,
-        Pi,
-        ValueNoise,
-        PerlinNoise,
-        CellularNoise,
-        ValueCurlNoise,
-        PerlinCurlNoise,
-        CellularCurlNoise,
-        PolarToRectangular,
-        RectangularToPolar,
-        RectangularToSpherical,
-        SphericalToRectangular,
-        Rotate2D,
-        Rotate3D
     };
 
     enum class VfxComparisonCondition : std::uint8_t
@@ -1043,6 +930,56 @@ namespace Keire
         Vector3 Normal{0.0F, 1.0F, 0.0F};
     };
 
+    /// Portable, renderer-neutral resource operations available to CPU VFX expressions. Applications may resolve
+    /// these requests from their asset system without exposing renderer handles through the public graph API.
+    enum class VfxResourceQueryKind : std::uint8_t
+    {
+        AttributeMap,
+        BufferCount,
+        MeshIndexCount,
+        MeshTriangleCount,
+        MeshVertexCount,
+        TextureDimensions,
+        LoadTexture2D,
+        LoadTexture2DArray,
+        LoadTexture3D,
+        SampleBuffer,
+        SampleMesh,
+        SampleMeshIndex,
+        SampleTexture2D,
+        SampleTexture2DArray,
+        SampleTexture3D,
+        SampleTextureCube,
+        SampleTextureCubeArray,
+        MeshLocalTransform,
+        MeshWorldTransform,
+        SampleSignedDistanceField
+    };
+
+    struct VfxResourceQuery
+    {
+        VfxResourceQueryKind Kind = VfxResourceQueryKind::SampleTexture2D;
+        AssetId Resource;
+        Vector4 Coordinate;
+        std::uint64_t Index = 0;
+        float Level = 0.0F;
+
+        [[nodiscard]] bool operator==(const VfxResourceQuery&) const noexcept = default;
+    };
+
+    /// Generic result lanes keep the callback ABI stable as additional resource-backed nodes are introduced.
+    /// Count serves buffer/index/vertex queries, Dimensions serves texture queries, Transform serves mesh queries,
+    /// and Values carries sampled position/normal/UV/color or texture data in descriptor-defined output order.
+    struct VfxResourceQueryResult
+    {
+        std::array<Vector4, 4> Values{};
+        Matrix4 Transform;
+        Vector3 Dimensions;
+        std::uint64_t Count = 0;
+
+        [[nodiscard]] bool operator==(const VfxResourceQueryResult&) const noexcept = default;
+    };
+
     /// Runtime capability and data-quality flags reported per active effect.
     enum class VfxRuntimeDiagnostic : std::uint32_t
     {
@@ -1088,6 +1025,9 @@ namespace Keire
         VfxBackend Backend = VfxBackend::Cpu;
         std::function<std::optional<VfxCollisionHit>(Vector3 start, Vector3 end)> CollisionQuery;
         std::function<std::optional<Vector3>(AssetId shapeAsset, std::uint32_t randomValue)> ShapeSample;
+        /// Optional CPU resource provider used by texture, mesh, and buffer expression nodes. A missing or rejected
+        /// query fails the affected expression deterministically and publishes SimulationValueInvalid.
+        std::function<std::optional<VfxResourceQueryResult>(const VfxResourceQuery& query)> ResourceQuery;
     };
 
     /// Parameters used to create one effect instance.

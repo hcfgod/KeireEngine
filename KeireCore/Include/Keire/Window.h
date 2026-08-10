@@ -79,6 +79,7 @@ namespace Keire
     struct WindowSpecification
     {
         std::string Title = "Kéire";
+        std::filesystem::path Icon;
         std::uint32_t Width = 1280;
         std::uint32_t Height = 720;
         bool Resizable = true;

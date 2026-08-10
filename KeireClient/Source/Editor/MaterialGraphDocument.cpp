@@ -384,6 +384,7 @@ namespace KeireEditor
     {
         m_LastGoodCompilation.reset();
         m_LastGoodDefinition.reset();
+        m_LastGoodDevelopmentShaders.clear();
         m_Host.Open(asset, std::move(definition), revision, std::move(undo));
         RecompileCurrent();
     }
@@ -393,6 +394,7 @@ namespace KeireEditor
     {
         m_LastGoodCompilation.reset();
         m_LastGoodDefinition.reset();
+        m_LastGoodDevelopmentShaders.clear();
         m_Host.Create(asset, std::move(definition), std::move(undo));
         RecompileCurrent();
     }
@@ -416,6 +418,7 @@ namespace KeireEditor
         m_Compilation = {};
         m_LastGoodCompilation.reset();
         m_LastGoodDefinition.reset();
+        m_LastGoodDevelopmentShaders.clear();
         m_Diagnostic.clear();
         m_CompileDebounceSeconds = 0.0;
         m_InFlightGeneration = 0;
@@ -621,6 +624,15 @@ namespace KeireEditor
         return m_PendingDefinition.has_value() || static_cast<bool>(m_BackgroundCompilation);
     }
 
+    void MaterialGraphDocument::ApplyLiveRevision() const
+    {
+        if (m_Specification.LiveApply && IsOpen() && m_LastGoodDefinition && m_LastGoodCompilation)
+        {
+            m_Specification.LiveApply(m_Host.Asset(), *m_LastGoodDefinition, *m_LastGoodCompilation,
+                                      m_LastGoodDevelopmentShaders);
+        }
+    }
+
     void MaterialGraphDocument::AdvanceCompilation(const double deltaSeconds)
     {
         if (!std::isfinite(deltaSeconds) || deltaSeconds < 0.0 || deltaSeconds > 60.0)
@@ -772,6 +784,8 @@ namespace KeireEditor
         }
         m_LastGoodCompilation = m_Compilation;
         m_LastGoodDefinition = std::move(definition);
+        if (!developmentShaders.empty())
+            m_LastGoodDevelopmentShaders = developmentShaders;
         if (m_Specification.LiveApply)
             m_Specification.LiveApply(m_Host.Asset(), *m_LastGoodDefinition, m_Compilation, developmentShaders);
         if (m_Specification.Preview)

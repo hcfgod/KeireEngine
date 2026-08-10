@@ -25,6 +25,9 @@ namespace KeireHub
     [[nodiscard]] HubResult<HubSelectedEditor> SelectEditorForProject(std::span<const HubEditorUiRecord> editors,
                                                                       const Keire::ProjectDescriptor& project,
                                                                       std::string_view preferredInstallationId = {});
+    [[nodiscard]] HubResult<HubSelectedEditor> SelectEditorForProject(std::span<const HubEditorUiRecord> editors,
+                                                                      const Keire::ProjectInspectionResult& inspection,
+                                                                      std::string_view preferredInstallationId = {});
 
     struct HubProjectLaunchResult final
     {

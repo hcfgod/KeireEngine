@@ -462,7 +462,7 @@ namespace KeireEditor
         }
         if (ui.PointerState().LeftReleased)
             m_PendingSelectionCollapse = {};
-        if (auto context = ui.BeginWindowContextMenu("HierarchyBlank"); context)
+        if (auto context = ui.BeginItemContextMenu("HierarchyBlank"); context)
         {
             if (ui.MenuItem("Create Empty"))
             {

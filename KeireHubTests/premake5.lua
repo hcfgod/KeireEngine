@@ -26,6 +26,7 @@ project(HubTestsTarget)
         "../KeireHub/Source/HubPathMigration.cpp",
         "../KeireHub/Source/HubProjectMetadataWorkflow.cpp",
         "../KeireHub/Source/HubProjectRegistrationWorkflow.cpp",
+        "../KeireHub/Source/HubProjectUiSupport.cpp",
         "../KeireHub/Source/HubProjectUiState.cpp",
         "../KeireHub/Source/HubProjectMutationWorkflow.cpp",
         "../KeireHub/Source/HubProjectUpgradeWorkflow.cpp",

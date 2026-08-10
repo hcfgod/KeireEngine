@@ -102,7 +102,29 @@ bash Scripts/Unix/player-support.sh arm64
 
 The Unix script emits Linux modules on Linux and macOS modules on macOS. Each invocation builds Development, Release,
 and Dist templates, creates and verifies the archive, and writes a catalog entry containing the archive size and
-SHA-256. Publishing the six Windows/Linux/macOS × x86_64/ARM64 modules remains an explicit release operation.
+SHA-256. Passing an output directory, signing-key ID, and channel additionally publishes the verified archive as a
+signed generic `.keirepackage` component for editor-install dependency resolution. Publishing the six
+Windows/Linux/macOS × x86_64/ARM64 modules remains an explicit release operation.
+
+### Supported Linux matrix
+
+Linux Editor and player releases use glibc and the supported Clang toolchain. The release gate is explicit; a row is
+not considered supported merely because it compiles on a maintainer workstation.
+
+| Distribution | x86_64 Editor / player | ARM64 Editor / player | Release validation |
+| --- | --- | --- | --- |
+| Ubuntu 22.04 LTS and 24.04 LTS | Supported | Preview | Native build, tests, packaged Build & Run |
+| Debian 12 | Supported | Preview | Native build, tests, packaged Build & Run |
+| Fedora (current supported release) | Supported | Preview | Podman bootstrap plus native packaged smoke |
+| Arch Linux (current) | Supported | Preview | Podman bootstrap plus native packaged smoke |
+| openSUSE Tumbleweed | Supported | Preview | Podman bootstrap plus native packaged smoke |
+| Rocky Linux 9 | Supported | Preview | Podman bootstrap plus native packaged smoke |
+
+`x86_64` is the production Linux architecture. ARM64 artifacts may be authored and installed for preview validation,
+but must not be advertised as a stable release until native ARM64 build, test, and packaged-game execution complete.
+Alpine/musl is outside the supported matrix. A Linux catalog release must include an exact-version Build Support
+component for every advertised target; a missing component keeps Build disabled and links directly to the Hub's
+filtered **Manage Components** workflow.
 
 The equivalent low-level commands are `pack-player-support`, `verify-player-support`, `install-player-support`,
 `list-player-support`, and `remove-player-support` on `KeireAssetTool`.
@@ -138,7 +160,8 @@ steps.
 | Player target | Native template toolchain | Cross-host assembly | Matching-host execution |
 | --- | --- | --- | --- |
 | Windows x86_64 / ARM64 | MSVC Windows toolchain | Yes | Windows only |
-| Linux x86_64 / ARM64 | Supported Linux Clang toolchain | Yes | Linux only |
+| Linux x86_64 | Supported Linux Clang toolchain | Yes | Linux x86_64 only |
+| Linux ARM64 | Supported Linux Clang toolchain (preview) | Yes | Linux ARM64 only after native validation |
 | macOS x86_64 / ARM64 | Apple Clang and SDK | Yes | macOS only |
 
 Foreign outputs are structurally validated on the assembly host. Executable smoke testing, native signing, and platform

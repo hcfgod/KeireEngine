@@ -75,8 +75,10 @@ Audio processing is submitted as immutable, monotonically revisioned `AudioGraph
 node identity, finite parameters, source references, the output contract, and cycle rejection; feedback is accepted
 only when it passes through an explicitly delayed `Delay` input. The miniaudio engine owns device or headless output,
 bounded resident voices, priority virtualization, spatial listener/source state, doppler/attenuation, snapshots,
-meters, and deterministic offline rendering. Submission is synchronized and never invokes game callbacks from the
-device thread.
+meters, and deterministic offline rendering. Headless mixer rendering executes effect racks, pre/post sends, hierarchy,
+ducking, and automatic meters; priority-blended Reverb Zones apply authored snapshots and restore base routing on exit.
+Submission is synchronized and never invokes game callbacks from the device thread. See
+[Audio Production Workflow And Audit](AudioProduction.md) for device-DSP gaps and release budgets.
 
 `BakeNavigationMesh` uses Recast to build deterministic polygon data and a Detour tile payload from explicit finite
 geometry. `NavigationWorld` atomically publishes validated revisioned meshes and supports Detour-backed synchronous

@@ -279,7 +279,8 @@ namespace Keire::RenderBackend
         packet.FrameIndex = request.FrameIndex;
         const auto renderEntities = request.Scene->Query<MeshRendererComponent>();
         const auto meshParticleCount = std::ranges::count_if(packet.Vfx.Particles(),
-                                                             [](const auto& particle) {
+                                                             [](const auto& particle)
+                                                             {
                                                                  return particle.Renderer == VfxRendererType::Mesh &&
                                                                         static_cast<bool>(particle.Mesh) &&
                                                                         particle.Size > 0.0F;
@@ -338,12 +339,29 @@ namespace Keire::RenderBackend
         if (!id || id == MeshAsset::CubeId())
             return DefaultMesh;
         if (id == MeshAsset::ErrorId() || !Assets)
-            return ErrorMesh;
+        {
+            if (id == MeshAsset::ErrorId() || !id)
+                return ErrorMesh;
+            if (!MeshAsset::IsBuiltin(id))
+                return ErrorMesh;
+        }
 
         auto [iterator, inserted] = MeshCache.try_emplace(id);
         auto& entry = iterator->second;
-        if (inserted)
+        if (inserted && MeshAsset::IsBuiltin(id))
+        {
+            if (const auto mesh = MeshAsset::ResolveBuiltin(id))
+            {
+                entry.Resources = CreateMeshResources(*mesh);
+                entry.Resources.Revision = 1;
+                entry.LoadedRevision = 1;
+                entry.LastAttemptedRevision = 1;
+            }
+        }
+        else if (inserted)
             entry.Handle = Assets->Load<MeshAsset>(id, AssetPriority::High);
+        if (MeshAsset::IsBuiltin(id))
+            return entry.Resources.Empty() ? ErrorMesh : entry.Resources;
         const auto revision = entry.Handle.Revision();
         if (revision != 0 && revision > entry.LastAttemptedRevision)
         {

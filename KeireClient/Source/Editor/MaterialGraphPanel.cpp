@@ -412,11 +412,10 @@ namespace KeireEditor
                                 .EnvironmentIntensity = settings.EnvironmentIntensity,
                                 .RotationDegrees = settings.RotationDegrees,
                                 .CancellationRequested =
-                                    [cancellation, generation, jobStop]
-                                {
-                                    return jobStop.stop_requested() ||
-                                           cancellation->load(std::memory_order_acquire) != generation;
-                                },
+                                    [cancellation, generation, jobStop] {
+                                        return jobStop.stop_requested() ||
+                                               cancellation->load(std::memory_order_acquire) != generation;
+                                    },
                             });
                         }
                         catch (const std::exception& error)
@@ -787,31 +786,125 @@ namespace KeireEditor
         }
     }
 
+    bool MaterialGraphPanel::DrawNodeCreationMenu(Keire::UiFrame& ui, const std::optional<Keire::Vector2> graphPosition)
+    {
+        if (m_NodeMenuSelection.ConsumeFocusRequest())
+            ui.RequestKeyboardFocus();
+        (void)ui.InputTextWithHint("##MaterialNodeSearch", "Search nodes and categories...", m_NodeSearch);
+        ui.Separator();
+
+        const auto search = Lower(m_NodeSearch);
+        const auto& entries = NodeEntries();
+        std::vector<std::string> paths;
+        paths.reserve(entries.size());
+        for (const auto& entry : entries)
+            paths.push_back(std::string(entry.Category) + " / " + std::string(entry.Name));
+
+        std::vector<std::size_t> visible;
+        if (!search.empty())
+        {
+            for (std::size_t index = 0; index < entries.size(); ++index)
+                if (Lower(paths[index]).find(search) != std::string::npos)
+                    visible.push_back(index);
+        }
+        else
+        {
+            const auto append = [&](const std::size_t index)
+            {
+                if (std::ranges::find(visible, index) == visible.end())
+                    visible.push_back(index);
+            };
+            for (const auto& recent : m_NodeMenuSelection.Recent())
+            {
+                const auto found = std::ranges::find(paths, recent);
+                if (found != paths.end())
+                    append(static_cast<std::size_t>(found - paths.begin()));
+            }
+            constexpr std::array common{std::string_view("Scalar Parameter"),
+                                        std::string_view("Color Parameter"),
+                                        std::string_view("Texture2D Parameter"),
+                                        std::string_view("Add"),
+                                        std::string_view("Multiply"),
+                                        std::string_view("Texture Sample")};
+            for (const auto name : common)
+            {
+                const auto found = std::ranges::find(entries, name, &NodeEntry::Name);
+                if (found != entries.end())
+                    append(static_cast<std::size_t>(found - entries.begin()));
+            }
+        }
+
+        std::vector<std::string_view> visibleIds;
+        visibleIds.reserve(visible.size());
+        for (const auto index : visible)
+            visibleIds.push_back(paths[index]);
+        m_NodeMenuSelection.Synchronize(visibleIds);
+        if (ui.Shortcut({.Key = Keire::UiKey::Up, .Global = true}))
+            m_NodeMenuSelection.MovePrevious(visibleIds);
+        if (ui.Shortcut({.Key = Keire::UiKey::Down, .Global = true}))
+            m_NodeMenuSelection.MoveNext(visibleIds);
+        const bool activateSelected = ui.Shortcut({.Key = Keire::UiKey::Enter, .Global = true});
+
+        const auto addEntry = [&](const std::size_t index, const std::string_view label)
+        {
+            const bool activated = ui.MenuItem(label, m_NodeMenuSelection.IsSelected(paths[index])) ||
+                                   (activateSelected && m_NodeMenuSelection.IsSelected(paths[index]));
+            if (!activated)
+                return false;
+            if (!AddNode(entries[index].Kind, entries[index].Type, graphPosition))
+                return false;
+            m_NodeMenuSelection.Remember(paths[index]);
+            m_NodeSearch.clear();
+            ui.CloseCurrentPopup();
+            return true;
+        };
+
+        if (search.empty())
+            ui.TextColored(m_Controller.MaterialGraphTheme().MutedText, "RECENT & COMMON");
+        for (const auto index : visible)
+            if (addEntry(index, paths[index]))
+                return true;
+        if (visible.empty())
+            ui.TextColored(m_Controller.MaterialGraphTheme().MutedText, "No nodes match this search.");
+
+        if (search.empty())
+        {
+            ui.Separator();
+            std::vector<std::string_view> categories;
+            for (const auto& entry : entries)
+                if (std::ranges::find(categories, entry.Category) == categories.end())
+                    categories.push_back(entry.Category);
+            for (const auto category : categories)
+            {
+                if (auto categoryMenu = ui.BeginMenu(category); categoryMenu)
+                {
+                    for (std::size_t index = 0; index < entries.size(); ++index)
+                        if (entries[index].Category == category && addEntry(index, entries[index].Name))
+                            return true;
+                }
+            }
+        }
+        return false;
+    }
+
     void MaterialGraphPanel::DrawCanvas(Keire::UiFrame& ui)
     {
         auto& document = m_Controller.MaterialGraphState();
         auto model = document.BuildCanvasModel();
-        (void)ui.InputTextWithHint("##MaterialNodeSearch", "Search nodes and categories...", m_NodeSearch);
+        bool nodeMenuOpen = false;
         if (auto combo = ui.BeginCombo("Add Node", "Choose..."); combo)
         {
-            const auto search = Lower(m_NodeSearch);
-            for (const auto& entry : NodeEntries())
+            nodeMenuOpen = true;
+            if (!m_NodeMenuOpen)
             {
-                const auto path = std::string(entry.Category) + " / " + std::string(entry.Name);
-                if (!search.empty() && Lower(path).find(search) == std::string::npos)
-                    continue;
-                if (ui.Selectable(path))
-                {
-                    if (AddNode(entry.Kind, entry.Type))
-                        return;
-                }
-            }
-        }
-        if (!m_NodeSearch.empty())
-        {
-            ui.SameLine();
-            if (ui.Button("Clear Search"))
                 m_NodeSearch.clear();
+                m_NodeMenuSelection.Open();
+            }
+            if (DrawNodeCreationMenu(ui, std::nullopt))
+            {
+                m_NodeMenuOpen = false;
+                return;
+            }
         }
         ui.SameLine();
         if (ui.Button("Frame All"))
@@ -859,6 +952,14 @@ namespace KeireEditor
         {
             m_SelectedNode.reset();
             m_SelectedConnection.reset();
+        }
+        if (canvas.ContextRequested)
+        {
+            m_NodeCreationPosition = canvas.ContextRequested->GraphPosition;
+            m_NodeSearch.clear();
+            m_NodeMenuSelection.Open();
+            ui.SetNextWindowSize({380.0F, 440.0F}, true);
+            ui.OpenPopup("MaterialGraphNodePalette");
         }
         if (canvas.MoveCompletedNode)
         {
@@ -918,6 +1019,20 @@ namespace KeireEditor
                     Report(error.what());
                 }
         }
+        bool contextMenuOpen = false;
+        if (auto popup = ui.BeginPopup("MaterialGraphNodePalette"); popup)
+        {
+            contextMenuOpen = true;
+            if (DrawNodeCreationMenu(ui, m_NodeCreationPosition))
+            {
+                m_NodeCreationPosition.reset();
+                m_NodeMenuOpen = false;
+                return;
+            }
+        }
+        if (!contextMenuOpen)
+            m_NodeCreationPosition.reset();
+        m_NodeMenuOpen = nodeMenuOpen || contextMenuOpen;
     }
 
     void MaterialGraphPanel::DrawDiagnostics(Keire::UiFrame& ui)
@@ -948,7 +1063,8 @@ namespace KeireEditor
         }
     }
 
-    bool MaterialGraphPanel::AddNode(const Keire::MaterialGraphNodeKind kind, const Keire::MaterialGraphValueType type)
+    bool MaterialGraphPanel::AddNode(const Keire::MaterialGraphNodeKind kind, const Keire::MaterialGraphValueType type,
+                                     const std::optional<Keire::Vector2> graphPosition)
     {
         try
         {
@@ -971,8 +1087,13 @@ namespace KeireEditor
             }
             else if (kind == Keire::MaterialGraphNodeKind::Custom)
                 node.Include = "Assets/Shaders/MaterialNodes.hlsl";
-            const auto size = m_Canvas.Zoom();
-            node.EditorPosition = {-m_Canvas.Pan().X + 280.0F / size, -m_Canvas.Pan().Y + 180.0F / size};
+            if (graphPosition)
+                node.EditorPosition = *graphPosition;
+            else
+            {
+                const auto size = m_Canvas.Zoom();
+                node.EditorPosition = {-m_Canvas.Pan().X + 280.0F / size, -m_Canvas.Pan().Y + 180.0F / size};
+            }
             const auto id = node.Id;
             const bool changed =
                 kind == Keire::MaterialGraphNodeKind::Keyword

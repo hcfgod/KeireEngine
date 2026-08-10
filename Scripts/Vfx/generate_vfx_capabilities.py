@@ -54,6 +54,24 @@ def render(manifest: dict[str, object]) -> str:
 
     manifest_support = Counter(entry["keire"]["support"] for entry in entries)
     runtime_support = Counter(SUPPORT_LABEL[entry.support] for entry in runtime)
+    priority_order = {"P0": 0, "P1": 1, "P2": 2, "Deferred": 3}
+    outstanding = [
+        entry for entry in entries if entry["keire"]["support"] == "Disabled"
+    ]
+    outstanding.sort(
+        key=lambda entry: (
+            priority_order[entry["keire"]["priority"]],
+            entry["kind"],
+            entry["unityCategory"],
+            entry["unityLabel"],
+            entry["id"],
+        )
+    )
+    outstanding_priorities = Counter(
+        entry["keire"]["priority"] for entry in outstanding
+    )
+    milestone = manifest["firstMajorParityMilestone"]
+    expansion = manifest["portableParityExpansion"]
     lines = [
         "# Generated VFX Capabilities",
         "",
@@ -79,6 +97,33 @@ def render(manifest: dict[str, object]) -> str:
         "A runtime descriptor can be fully supported by Kéire while remaining a **Kéire Equivalent** in the parity "
         "manifest when Unity exposes broader polymorphic signatures or different authoring settings.",
         "",
+        "## First Major Parity Milestone",
+        "",
+        f"The first major milestone target is **{milestone['target']}** validated parity rows. "
+        f"The checked-in ledger closes **{milestone['completedParityRows']}** rows and therefore "
+        f"{'meets' if milestone['achieved'] else 'does not meet'} the target. "
+        f"{milestone['remainingParityRows']} frozen rows remain.",
+        "",
+        f"Measurement contract: {milestone['measurement']}",
+        "",
+        "## Portable Parity Expansion",
+        "",
+        f"The expansion started from **{expansion['baselineParityRows']}** enabled rows and targeted "
+        f"**{expansion['targetAdditionalRows']}** additional rows. It now closes "
+        f"**{expansion['completedAdditionalRows']}** additional rows, for a target total of "
+        f"**{expansion['targetTotalRows']}**, and therefore "
+        f"{'meets' if expansion['achieved'] else 'does not meet'} the expansion gate. "
+        f"{expansion['remainingAdditionalRows']} expansion rows remain.",
+        "",
+        f"Measurement contract: {expansion['measurement']}",
+        "",
+        "| Priority | Remaining rows | Delivery meaning |",
+        "| --- | ---: | --- |",
+        f"| P0 | {outstanding_priorities['P0']} | Required for production simulation, events, attributes, geometry, or Shader Graph output workflows. |",
+        f"| P1 | {outstanding_priorities['P1']} | Broad authoring coverage and commonly used sampling or presentation workflows. |",
+        f"| P2 | {outstanding_priorities['P2']} | Specialized production capability after the primary runtime contracts are stable. |",
+        f"| Deferred | {outstanding_priorities['Deferred']} | Pipeline-specific or low-portability work requiring an explicit Kéire design decision. |",
+        "",
         "## Production Slices",
         "",
         "| Slice | Backend | Implementations | Samples | Tests |",
@@ -89,6 +134,22 @@ def render(manifest: dict[str, object]) -> str:
             f"| {escape(production_slice['name'])} | {escape(production_slice['backendTier'])} | "
             f"{len(production_slice['implementations'])} | {escape(', '.join(production_slice['samples']))} | "
             f"{escape(', '.join(production_slice['tests']))} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Prioritized Outstanding Matrix",
+            "",
+            "| Priority | Class | Unity capability | Category | Backend target |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+    )
+    for entry in outstanding:
+        lines.append(
+            f"| {escape(entry['keire']['priority'])} | {escape(entry['kind'])} | "
+            f"{escape(entry['unityLabel'])} | {escape(entry['unityCategory'])} | "
+            f"{escape(entry['keire']['backendTier'])} |"
         )
 
     lines.extend(

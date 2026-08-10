@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -65,4 +66,12 @@ namespace KeireEditor
 
     [[nodiscard]] std::vector<std::byte> MakeFolderThumbnail(std::uint32_t width, std::uint32_t height,
                                                              bool missing = false);
+    /// Stable, type-aware placeholder used before asynchronous preview generation completes and after failures.
+    [[nodiscard]] std::vector<std::byte> MakeAssetFallbackThumbnail(Keire::AssetTypeId type, std::uint32_t width,
+                                                                    std::uint32_t height, bool missing = false);
+    /// Resolves non-blocking runtime dependencies for material, material-graph, and VFX thumbnail requests.
+    /// A disengaged result means the asset type is not handled; otherwise the value reports readiness.
+    [[nodiscard]] std::optional<bool> PrepareGeneratedAssetThumbnail(const Keire::Ref<Keire::AssetSystem>& assets,
+                                                                     const Keire::AssetSourceRecord& source,
+                                                                     ThumbnailRequest& request);
 } // namespace KeireEditor

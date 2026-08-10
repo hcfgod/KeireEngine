@@ -1,6 +1,7 @@
 #include "Keire/Audio/AudioSystem.h"
 
 #include "Keire/Audio/AudioAssets.h"
+#include "KeireInternal/Audio/AudioMixerRuntime.h"
 
 #include <miniaudio.h>
 
@@ -158,6 +159,7 @@ namespace Keire
         struct MixerRoutingSnapshot final
         {
             AssetId MasterBus;
+            AudioMixerDefinition Definition;
             std::map<AssetId, float> BusGains;
             std::map<AssetId, std::string> BusNamesById;
             std::map<std::string, AssetId, std::less<>> BusIdsByName;
@@ -243,6 +245,7 @@ namespace Keire
 
             MixerRoutingSnapshot result;
             result.MasterBus = definition.MasterBus;
+            result.Definition = definition;
             std::map<AssetId, const AudioMixerBusDefinition*> buses;
             std::set<AssetId> soloed;
             for (const auto& bus : definition.Buses)
@@ -372,6 +375,18 @@ namespace Keire
                 return 0.0F;
             const auto gain = static_cast<double>(specification.Gain) * VoiceBusGain(specification) *
                               (1.0 - static_cast<double>(specification.Occlusion) * 0.75);
+            return static_cast<float>(std::min(gain, static_cast<double>(std::numeric_limits<float>::max())));
+        }
+
+        [[nodiscard]] float AuthoredVoiceSourceGain(const AudioVoiceSpecification& specification,
+                                                    const ResolvedVoiceBus& resolved) const noexcept
+        {
+            const auto master = BusGains.find("Master");
+            const auto bus = resolved.Name == "Master" ? BusGains.end() : BusGains.find(resolved.Name);
+            const auto gain = static_cast<double>(specification.Gain) *
+                              (1.0 - static_cast<double>(specification.Occlusion) * 0.75) *
+                              (master == BusGains.end() ? 1.0 : static_cast<double>(master->second)) *
+                              (bus == BusGains.end() ? 1.0 : static_cast<double>(bus->second));
             return static_cast<float>(std::min(gain, static_cast<double>(std::numeric_limits<float>::max())));
         }
 
@@ -666,8 +681,7 @@ namespace Keire
                 for (auto& sample : result)
                     sample = std::tanh(sample * drive) / normalization;
             }
-            else if (node.Type == AudioGraphNodeType::Delay || node.Type == AudioGraphNodeType::Chorus ||
-                     node.Type == AudioGraphNodeType::AlgorithmicReverb)
+            else if (node.Type == AudioGraphNodeType::Delay || node.Type == AudioGraphNodeType::Chorus)
             {
                 const auto delayMilliseconds =
                     std::clamp(node.Parameters.empty() ? 80.0F : node.Parameters[0], 1.0F, 2000.0F);
@@ -693,12 +707,14 @@ namespace Keire
                         const auto delayedIndex =
                             static_cast<std::size_t>(frame - delayFrames) * graph->Channels + channel;
                         const auto echo = delayed[delayedIndex];
-                        delayed[index] = result[index] * (1.0F - wet) + echo * wet;
-                        if (node.Type == AudioGraphNodeType::AlgorithmicReverb)
-                            delayed[index] += echo * feedback * 0.5F;
+                        delayed[index] = result[index] * (1.0F - wet) + echo * wet * (1.0F + feedback);
                     }
                 }
                 result = std::move(delayed);
+            }
+            else if (node.Type == AudioGraphNodeType::AlgorithmicReverb)
+            {
+                Detail::ApplyAlgorithmicReverb(result, graph->SampleRate, graph->Channels, node.Parameters);
             }
             else if (node.Type == AudioGraphNodeType::ConvolutionReverb)
             {
@@ -1086,6 +1102,7 @@ namespace Keire
         const auto up = NormalizeVector(m_Impl->Listener.Up);
         const Vector3 right{forward.Y * up.Z - forward.Z * up.Y, forward.Z * up.X - forward.X * up.Z,
                             forward.X * up.Y - forward.Y * up.X};
+        std::map<const AudioSystem::Impl::MixerRoutingSnapshot*, std::map<AssetId, std::vector<float>>> mixerInputs;
         for (auto& [id, voice] : m_Impl->Voices)
         {
             (void)id;
@@ -1114,7 +1131,18 @@ namespace Keire
             const auto clipFrames = samples->size() / clip.Channels;
             if (clipFrames == 0)
                 continue;
-            float leftGain = m_Impl->VoiceGain(voice.Specification);
+            const auto resolved = m_Impl->ResolveVoiceBus(voice.Specification);
+            auto* destination = &output;
+            if (resolved.Authored)
+            {
+                const auto registration = m_Impl->FindMixerRegistration(voice.Specification);
+                auto& input = mixerInputs[registration.Routing][resolved.Bus];
+                if (input.empty())
+                    input.assign(output.size(), 0.0F);
+                destination = &input;
+            }
+            float leftGain = resolved.Authored ? m_Impl->AuthoredVoiceSourceGain(voice.Specification, resolved)
+                                               : m_Impl->VoiceGain(voice.Specification);
             float rightGain = leftGain;
             double pitch = static_cast<double>(voice.Specification.Pitch) * clip.SampleRate / 48'000.0;
             if (voice.Specification.Spatial)
@@ -1171,10 +1199,44 @@ namespace Keire
                     };
                     const auto left = sample(0);
                     const auto rightSample = clip.Channels == 1 ? left : sample(1);
-                    output[static_cast<std::size_t>(frame) * 2U] += left * leftGain;
-                    output[static_cast<std::size_t>(frame) * 2U + 1U] += rightSample * rightGain;
+                    (*destination)[static_cast<std::size_t>(frame) * 2U] += left * leftGain;
+                    (*destination)[static_cast<std::size_t>(frame) * 2U + 1U] += rightSample * rightGain;
                 }
                 voice.Frame += pitch;
+            }
+        }
+        std::map<AssetId, AudioMeterReading> meterReadings;
+        std::uint64_t droppedMeterReadings = 0;
+        for (auto& [routing, inputs] : mixerInputs)
+        {
+            auto mixed = Detail::ProcessAudioMixer(routing->Definition, std::move(inputs), 48'000, 2,
+                                                   m_Impl->MaximumMeterReadings);
+            for (std::size_t index = 0; index < output.size(); ++index)
+                output[index] += mixed.Output[index];
+            droppedMeterReadings += mixed.DroppedMeterReadings;
+            for (const auto& reading : mixed.Meters)
+            {
+                auto& aggregate = meterReadings[reading.Bus];
+                aggregate.Bus = reading.Bus;
+                aggregate.Peak = std::max(aggregate.Peak, reading.Peak);
+                aggregate.Rms = std::max(aggregate.Rms, reading.Rms);
+                aggregate.Clipping = aggregate.Clipping || reading.Clipping;
+            }
+        }
+        if (!mixerInputs.empty())
+        {
+            ++m_Impl->Meters.Revision;
+            m_Impl->Meters.DroppedReadings = droppedMeterReadings;
+            m_Impl->Meters.Readings.clear();
+            for (const auto& [bus, reading] : meterReadings)
+            {
+                (void)bus;
+                if (m_Impl->Meters.Readings.size() >= m_Impl->MaximumMeterReadings)
+                {
+                    ++m_Impl->Meters.DroppedReadings;
+                    continue;
+                }
+                m_Impl->Meters.Readings.push_back(reading);
             }
         }
         for (auto& sample : output)
@@ -1257,6 +1319,25 @@ namespace Keire
             std::ranges::count_if(m_Impl->Voices, [](const auto& item) { return item.second.Virtualized; }));
         result.AudibleVoices = static_cast<std::size_t>(std::ranges::count_if(
             m_Impl->Voices, [](const auto& item) { return !item.second.Virtualized && !item.second.Paused; }));
+        result.MixerAssets = m_Impl->Mixers.size();
+        result.MixerRoutings = m_Impl->MixerRoutings.size();
+        const auto countMixer = [&](const AudioSystem::Impl::MixerRoutingSnapshot& mixer)
+        {
+            result.MixerBuses += mixer.Definition.Buses.size();
+            for (const auto& bus : mixer.Definition.Buses)
+                result.MixerEffects += bus.Effects.size();
+        };
+        for (const auto& [id, mixer] : m_Impl->Mixers)
+        {
+            (void)id;
+            countMixer(mixer);
+        }
+        for (const auto& [id, mixer] : m_Impl->MixerRoutings)
+        {
+            (void)id;
+            countMixer(mixer.Routing);
+        }
+        result.MeterReadings = m_Impl->Meters.Readings.size();
         result.RenderedFrames = m_Impl->RenderedFrames;
         result.Underruns = m_Impl->Underruns;
         return result;

@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -136,6 +137,20 @@ TEST_CASE("Audio mixer schema round trips deterministically and stable IDs survi
     const auto renamed = Keire::AudioMixerAsset::Decode(Keire::AudioMixerAsset::Encode(definition));
     CHECK(renamed->Definition().Buses[1].Name == "Score");
     CHECK(renamed->Definition().Buses[1].Id == Id(2));
+}
+
+TEST_CASE("Audio mixer snapshots blend scalar targets without mutating authored data")
+{
+    const auto definition = MixerDefinition();
+    const auto blended = Keire::BlendAudioMixerSnapshot(definition, Id(5), 0.5F);
+    CHECK(definition.Buses[1].Gain == doctest::Approx(0.8F));
+    CHECK(blended.Buses[1].Gain == doctest::Approx(0.7F));
+    CHECK(blended.Buses[1].Effects.front().Parameters.front() == doctest::Approx(0.625F));
+    CHECK(blended.Buses[1].Sends.front().Gain == doctest::Approx(0.325F));
+    CHECK(blended.Buses[1].Solo);
+    CHECK_FALSE(blended.Buses[2].Mute);
+    CHECK_THROWS_AS((void)Keire::BlendAudioMixerSnapshot(definition, Id(999), 1.0F), std::invalid_argument);
+    CHECK_THROWS_AS((void)Keire::BlendAudioMixerSnapshot(definition, Id(5), 1.1F), std::invalid_argument);
 }
 
 TEST_CASE("Audio mixer validation rejects malformed hierarchy and routing cycles")
@@ -282,6 +297,10 @@ TEST_CASE("Audio voices use stable authored mixer buses and retain the last vali
     constexpr auto mixer = Id(500);
 
     auto definition = MixerDefinition();
+    definition.Buses[1].Effects.clear();
+    definition.Buses[1].Sends.clear();
+    definition.Snapshots.clear();
+    definition.Ducking.clear();
     definition.Buses[0].Gain = 0.5F;
     CHECK_NOTHROW(audio->SubmitMixer(mixer, definition));
     std::atomic<bool> submitRejected = false;
@@ -457,6 +476,60 @@ TEST_CASE("Audio voices use stable authored mixer buses and retain the last vali
     audio->Close();
 }
 
+TEST_CASE("Headless voices process mixer effect racks, sends, hierarchy, and automatic meters")
+{
+    Keire::AudioSystemSpecification specification;
+    specification.Mode = Keire::AudioMode::Headless;
+    auto audio = Keire::CreateRef<Keire::AudioSystem>(specification);
+
+    constexpr auto mixer = Id(950);
+    constexpr auto master = Id(951);
+    constexpr auto dry = Id(952);
+    constexpr auto returnBus = Id(953);
+    Keire::AudioMixerDefinition definition;
+    definition.MasterBus = master;
+    definition.Buses = {
+        {.Id = master, .Name = "Master"},
+        {.Id = dry,
+         .Name = "Dry",
+         .Parent = master,
+         .Gain = 0.5F,
+         .Effects =
+             {{.Id = Id(954), .Name = "Make-up gain", .Type = Keire::AudioGraphNodeType::Gain, .Parameters = {2.0F}}},
+         .Sends = {{.Id = Id(955), .DestinationBus = returnBus, .Gain = 1.0F}}},
+        {.Id = returnBus, .Name = "Return", .Parent = master},
+    };
+    audio->SubmitMixer(mixer, definition);
+
+    auto clip = std::make_shared<Keire::AudioClipData>();
+    clip->SampleRate = 48'000;
+    clip->Channels = 1;
+    clip->Frames = 8;
+    clip->Samples.assign(8, 0.25F);
+    Keire::AudioPlaybackRequest request;
+    request.Clip = clip;
+    request.Mixer = mixer;
+    request.BusId = dry;
+    request.Loop = true;
+    request.Spatial = false;
+    REQUIRE(audio->Play(std::move(request)));
+
+    const auto rendered = audio->RenderVoicesOffline(4);
+    REQUIRE(rendered.size() == 8);
+    for (const auto sample : rendered)
+        CHECK(sample == doctest::Approx(0.5F));
+    const auto meters = audio->LatestMeterSnapshot();
+    CHECK(meters.Revision != 0);
+    REQUIRE(meters.Readings.size() == 3);
+    CHECK(std::ranges::find(meters.Readings, master, &Keire::AudioMeterReading::Bus)->Peak == doctest::Approx(0.5F));
+    const auto statistics = audio->Statistics();
+    CHECK(statistics.MixerAssets == 1);
+    CHECK(statistics.MixerBuses == 3);
+    CHECK(statistics.MixerEffects == 1);
+    CHECK(statistics.MeterReadings == 3);
+    audio->Close();
+}
+
 TEST_CASE("Audio voices pause, seek, resume, and report deterministic playback state")
 {
     Keire::AudioSystemSpecification specification;
@@ -557,6 +630,10 @@ TEST_CASE("Muted and solo-excluded mixer voices yield the audible budget while t
     auto audio = Keire::CreateRef<Keire::AudioSystem>(specification);
     constexpr auto mixer = Id(950);
     auto definition = MixerDefinition();
+    definition.Buses[1].Effects.clear();
+    definition.Buses[1].Sends.clear();
+    definition.Snapshots.clear();
+    definition.Ducking.clear();
     audio->SubmitMixer(mixer, definition);
 
     auto clip = std::make_shared<Keire::AudioClipData>();

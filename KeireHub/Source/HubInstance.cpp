@@ -379,16 +379,15 @@ namespace KeireHub
         }
 
 #if defined(_WIN32)
-        struct ExistingHubWindow final
+        struct ExistingHubProcess final
         {
             std::wstring Executable;
-            HWND Window = nullptr;
             DWORD Process = 0;
         };
 
         BOOL CALLBACK FindExistingHubWindow(HWND window, LPARAM contextValue)
         {
-            auto& context = *std::bit_cast<ExistingHubWindow*>(contextValue);
+            auto& context = *std::bit_cast<ExistingHubProcess*>(contextValue);
             DWORD processId = 0;
             (void)GetWindowThreadProcessId(window, &processId);
             if (processId == 0)
@@ -404,22 +403,19 @@ namespace KeireHub
             CloseHandle(process);
             if (!matches)
                 return TRUE;
-            context.Window = window;
             context.Process = processId;
             return FALSE;
         }
 
-        void ActivateExistingHubWindow(const std::filesystem::path& executable) noexcept
+        void AuthorizeExistingHubForeground(const std::filesystem::path& executable) noexcept
         {
             try
             {
-                ExistingHubWindow context{std::filesystem::weakly_canonical(executable).native()};
+                ExistingHubProcess context{std::filesystem::weakly_canonical(executable).native()};
                 (void)EnumWindows(&FindExistingHubWindow, std::bit_cast<LPARAM>(&context));
-                if (!context.Window)
+                if (context.Process == 0)
                     return;
                 (void)AllowSetForegroundWindow(context.Process);
-                (void)ShowWindowAsync(context.Window, SW_RESTORE);
-                (void)SetForegroundWindow(context.Window);
             }
             catch (...)
             {
@@ -631,7 +627,7 @@ namespace KeireHub
             (void)ReleaseMutex(m_ActivationGuard);
             if (!SetEvent(m_ActivationEvent))
                 throw std::runtime_error("Could not notify the active Hub.");
-            ActivateExistingHubWindow(executable);
+            AuthorizeExistingHubForeground(executable);
         }
 
         HANDLE m_Instance = nullptr;

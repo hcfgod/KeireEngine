@@ -645,23 +645,7 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
                 m_AssetOperations->CancelCurrent();
         },
         [this] { return m_AssetOperations && m_AssetOperations->Busy(); });
-    m_CommandRouter->Bind(KeireEditor::EditorCommand::Exit,
-                          [this]
-                          {
-                              if (m_SceneDocument->PlaySession())
-                              {
-                                  m_PendingSceneAction = PendingSceneAction::Exit;
-                                  RequestStopPlayMode();
-                                  return;
-                              }
-                              if (m_SceneDocument->EditingScene() && m_SceneDocument->EditingScene()->Dirty())
-                              {
-                                  m_PendingSceneAction = PendingSceneAction::Exit;
-                                  OpenDialog(Dialog::DirtyScene);
-                              }
-                              else
-                                  QueueSceneTransition(PendingSceneAction::Exit);
-                          });
+    m_CommandRouter->Bind(KeireEditor::EditorCommand::Exit, [this] { RequestEditorExit(); });
     m_CommandRouter->Bind(
         KeireEditor::EditorCommand::Undo, [this] { ApplyActiveUndo(false); },
         [this] { return m_ActiveUndoContext && m_ActiveUndoContext->CanUndo(); });
@@ -827,19 +811,7 @@ void EditorWorkspaceLayer::OnAttach()
                     if (m_PendingSceneAction != PendingSceneAction::None ||
                         (m_SceneTransitions && m_SceneTransitions->Pending()))
                         return Keire::EventFlow::Handled;
-                    if (m_SceneDocument->PlaySession())
-                    {
-                        m_PendingSceneAction = PendingSceneAction::Exit;
-                        RequestStopPlayMode();
-                        return Keire::EventFlow::Handled;
-                    }
-                    if (m_SceneDocument->EditingScene() && m_SceneDocument->EditingScene()->Dirty())
-                    {
-                        m_PendingSceneAction = PendingSceneAction::Exit;
-                        OpenDialog(Dialog::DirtyScene);
-                        return Keire::EventFlow::Handled;
-                    }
-                    QueueSceneTransition(PendingSceneAction::Exit);
+                    RequestEditorExit();
                     return Keire::EventFlow::Handled;
                 });
             Listen<Keire::WindowFileDropEvent>(

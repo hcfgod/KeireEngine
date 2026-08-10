@@ -62,6 +62,7 @@
 
 namespace
 {
+    using FolderTarget = KeireHub::HubFolderTarget;
     using PendingStartupActivation = KeireHub::HubActivationRequest;
     using KeireHub::RequireWorkflowSuccess;
     using KeireHub::Utf8Path;
@@ -274,7 +275,6 @@ namespace
                 m_Tray->Close();
             m_Tray.Reset();
         }
-
         void OnUpdate(const Keire::Time&) override
         {
             const auto desiredTheme = KeireHub::ResolveHubUiTheme(m_ProductSnapshot.Settings.Appearance);
@@ -289,11 +289,16 @@ namespace
                 else
                     Owner().RequestExit();
             }
+            const bool hadTrackedEditors = !m_EditorProcesses.Snapshot()->empty();
             if (m_EditorProcesses.Refresh())
             {
                 if (m_EditorManagement)
                     m_EditorManagement->ReloadRegistrations();
                 m_ProjectMetadataRefreshPending = true;
+                const bool hasTrackedEditors = !m_EditorProcesses.Snapshot()->empty();
+                if (KeireHub::ShouldRestoreHubAfterEditorExit(m_HiddenForEditorLaunch, hadTrackedEditors,
+                                                              hasTrackedEditors))
+                    ShowHub();
             }
             if (m_EditorManagement)
                 KeireHub::PollHubEditorManagement(*m_EditorManagement, m_EditorInstalls.get(), m_PackageTasks.get(),
@@ -496,6 +501,8 @@ namespace
                             m_OpenPath = Keire::Detail::PathToUtf8(m_FolderDialog->SelectedPath());
                         else if (m_FolderTarget == FolderTarget::LocateEditor)
                             LocateEditor(m_FolderDialog->SelectedPath());
+                        else if (m_FolderTarget == FolderTarget::EditorInstallLocation)
+                            m_ProductUi.SetEditorInstallParent(m_FolderDialog->SelectedPath());
                         else if (m_FolderTarget == FolderTarget::DuplicateProject)
                             m_ProjectsUi.SetDuplicateParent(m_FolderDialog->SelectedPath());
                         else if (m_FolderTarget == FolderTarget::LocateProject)
@@ -713,16 +720,6 @@ namespace
         }
 
       private:
-        enum class FolderTarget : std::uint8_t
-        {
-            None,
-            CreateLocation,
-            OpenProject,
-            LocateEditor,
-            DuplicateProject,
-            LocateProject
-        };
-
         void DrawRuntimeStartupFailure(Keire::UiFrame& ui)
         {
             m_ProductUi.SetAppearance(m_ProductSnapshot.Settings.Appearance, KeireHub::HubSystemPrefersDark());
@@ -889,6 +886,9 @@ namespace
                     break;
                 case KeireHub::HubUiCommandType::LocateEditor:
                     BrowseForFolder(FolderTarget::LocateEditor, m_Executable.parent_path().parent_path());
+                    break;
+                case KeireHub::HubUiCommandType::BrowseEditorInstallLocation:
+                    BrowseForFolder(FolderTarget::EditorInstallLocation, command.Path);
                     break;
                 case KeireHub::HubUiCommandType::PreviewEditorInstall:
                 case KeireHub::HubUiCommandType::InstallEditor:
@@ -1110,9 +1110,7 @@ namespace
                 ReportUnexpected("The Hub action could not be completed.", error);
             }
         }
-
         [[nodiscard]] bool TrayAvailable() const noexcept { return m_Tray && m_Tray->IsAvailable(); }
-
         void ReportUnexpected(const std::string_view userMessage, const std::exception& error) noexcept
         {
             KEIRE_CLIENT_ERROR("[Project Hub] {} {}", userMessage, error.what());
@@ -1175,7 +1173,7 @@ namespace
             }
         }
 
-        void HideHub()
+        void HideHub(const bool hiddenForEditorLaunch = false)
         {
             const auto window = Owner().MainWindow();
             if (TrayAvailable())
@@ -1183,15 +1181,18 @@ namespace
                 // Keep the cached minimized state so the hidden Hub uses the bounded background pump rate.
                 window->Minimize();
                 window->SetVisible(false);
+                m_HiddenForEditorLaunch = hiddenForEditorLaunch;
             }
             else
             {
                 window->Minimize();
+                m_HiddenForEditorLaunch = false;
             }
         }
 
         void ShowHub() override
         {
+            m_HiddenForEditorLaunch = false;
             if (m_Registry)
             {
                 try
@@ -1205,8 +1206,8 @@ namespace
                 }
             }
             const auto window = Owner().MainWindow();
-            window->SetVisible(true);
             window->Restore();
+            window->SetVisible(true);
             window->Raise();
         }
 
@@ -1323,8 +1324,8 @@ namespace
                     }
                 }
                 if (KeireHub::ShouldHideHubAfterEditorLaunch(m_ProductSnapshot.Settings.KeepRunningAfterEditorLaunch,
-                                                             TrayAvailable()))
-                    HideHub();
+                                                             TrayAvailable(), !result.TrackingFailure.has_value()))
+                    HideHub(true);
                 else if (!m_ProductSnapshot.Settings.KeepRunningAfterEditorLaunch)
                     Owner().RequestExit();
             }
@@ -1368,8 +1369,15 @@ namespace
                 KeireHub::ReloadProjectRegistry(m_Registry);
                 if (Keire::Project::IsLocked(inspection.Root))
                     throw std::runtime_error("Project is already open in another editor.");
-                if (inspection.Status == Keire::ProjectStatus::UpgradeAvailable ||
-                    inspection.Status == Keire::ProjectStatus::RecoveryRequired)
+                const bool hasCompatibleEditor =
+                    inspection.HasIdentity() &&
+                    static_cast<bool>(KeireHub::SelectEditorForProject(m_ProductSnapshot.Editors, inspection));
+                switch (KeireHub::ResolveProjectOpenAction(inspection.Status, hasCompatibleEditor))
+                {
+                case KeireHub::HubProjectOpenAction::OpenWithEditor:
+                    Launch(inspection);
+                    return;
+                case KeireHub::HubProjectOpenAction::ReviewUpgrade:
                 {
                     const auto upgrades = Owner().Modules() ? Owner().Modules()->ProjectUpgrades()
                                                             : std::vector<Keire::ProjectUpgradeStep>{};
@@ -1377,12 +1385,11 @@ namespace
                     m_RequestUpgradePopup = true;
                     return;
                 }
-                if (inspection.Status != Keire::ProjectStatus::Ready &&
-                    inspection.Status != Keire::ProjectStatus::RequiresNewerEngine)
-                {
+                case KeireHub::HubProjectOpenAction::FindCompatibleEditor:
+                    throw std::runtime_error("No compatible installed editor can open this project.");
+                case KeireHub::HubProjectOpenAction::Unavailable:
                     throw std::runtime_error("The project is not in a state that an installed editor can open.");
                 }
-                Launch(inspection);
             }
             catch (const std::exception& error)
             {
@@ -1455,6 +1462,7 @@ namespace
         bool m_DistributionRefreshPending = false;
         bool m_PackageTaskRefreshPending = false;
         bool m_ProjectMetadataRefreshPending = false;
+        bool m_HiddenForEditorLaunch = false;
         FolderTarget m_FolderTarget = FolderTarget::None;
         KeireHub::HubPage m_Page = KeireHub::HubPage::Home;
         std::string m_CreateName = "NewProject";

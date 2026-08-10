@@ -981,12 +981,10 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                             }
                         }
                         InspectorPropertyEditor propertyEditor(ui, records, assets, scene, *m_AssetPicker);
-                        Keire::Ref<const Keire::MeshAsset> mesh;
-                        if (!renderer->Mesh() || renderer->Mesh() == Keire::MeshAsset::CubeId())
-                            mesh = Keire::MeshAsset::Cube();
-                        else if (renderer->Mesh() == Keire::MeshAsset::ErrorId())
-                            mesh = Keire::MeshAsset::Error();
-                        else if (assets)
+                        Keire::Ref<const Keire::MeshAsset> mesh =
+                            renderer->Mesh() ? Keire::MeshAsset::ResolveBuiltin(renderer->Mesh())
+                                             : Keire::MeshAsset::Cube();
+                        if (!mesh && assets)
                         {
                             mesh = assets->Load<Keire::MeshAsset>(renderer->Mesh(), Keire::AssetPriority::High)
                                        .TryGetLoaded();
@@ -1007,6 +1005,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                                                      "mesh-renderer.material." + std::to_string(slot) +
                                                                          "." + entity.Id().ToString());
                                     sceneDocument.SetMeshRendererMaterial(entity.Id(), slot, material);
+                                    m_Controller.NotifyInspectorMaterialAssigned(material);
                                 }
                             }
                         }

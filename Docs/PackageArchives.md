@@ -42,6 +42,25 @@ adds the product manifest to the inventory, and refuses existing outputs. It wri
 removes it if the final catalog-manifest publication fails. The returned archive length and SHA-256 are the online
 artifact identity.
 
+## Publishing Build Support components
+
+Create the target's verified `.keireplayersupport` archive, then convert it into the generic component installed beside
+an editor:
+
+```text
+KeireHubPackagePublisher create-build-support \
+  --player-support-package <linux-x86_64-version.keireplayersupport> \
+  --channel stable \
+  --output <linux-x86_64-version.keirepackage> \
+  --manifest-output <linux-x86_64-version.manifest.json> \
+  --signature-key-id <ed25519-key-id>
+```
+
+The publisher verifies and extracts the legacy archive into the editor-relative
+`BuildSupport/<engine-version>/<pack-id>` layout, inventories it as a `BuildSupport` component, and binds it to the exact
+compatible editor version. `Scripts/Unix/player-support.sh` accepts the signature key ID as its third argument and the
+channel as its optional fourth argument; `Scripts/Windows/player-support.ps1` exposes `-SignatureKeyId` and `-Channel`.
+
 `Scripts/Packaging/prepare-distribution-snapshot.py` accepts that manifest and archive, verifies the artifact identity
 again, and creates a compatibility `catalogs/<channel>/<platform>/<architecture>.json`, compact
 `catalogs-v2/<channel>/<platform>/<architecture>.json`, exact `manifests/<sha256>.json`, and

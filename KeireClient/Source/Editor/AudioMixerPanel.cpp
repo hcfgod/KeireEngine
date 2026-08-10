@@ -137,6 +137,82 @@ namespace KeireEditor
             return found == EffectTypes.end() ? "Unsupported" : found->Name;
         }
 
+        struct EffectParameterDescriptor
+        {
+            std::string_view Name;
+            double Minimum = 0.0;
+            double Maximum = 1.0;
+            double Speed = 0.01;
+        };
+
+        [[nodiscard]] std::optional<EffectParameterDescriptor> EffectParameter(const Keire::AudioGraphNodeType type,
+                                                                               const std::size_t index)
+        {
+            using Type = Keire::AudioGraphNodeType;
+            if ((type == Type::Gain || type == Type::Equalizer) && index == 0)
+                return EffectParameterDescriptor{"Gain", 0.0, 16.0};
+            if ((type == Type::LowPass || type == Type::HighPass) && index == 0)
+                return EffectParameterDescriptor{"Cutoff (Hz)", 10.0, 20'000.0, 10.0};
+            if (type == Type::Compressor && index == 0)
+                return EffectParameterDescriptor{"Threshold", 0.001, 1.0};
+            if (type == Type::Compressor && index == 1)
+                return EffectParameterDescriptor{"Ratio", 1.0, 100.0, 0.1};
+            if (type == Type::Limiter && index == 0)
+                return EffectParameterDescriptor{"Ceiling", 0.001, 1.0};
+            if (type == Type::Gate && index == 0)
+                return EffectParameterDescriptor{"Threshold", 0.0, 1.0};
+            if ((type == Type::Delay || type == Type::Chorus) && index == 0)
+                return EffectParameterDescriptor{"Delay (ms)", 1.0, 2000.0, 1.0};
+            if ((type == Type::Delay || type == Type::Chorus) && index == 1)
+                return EffectParameterDescriptor{"Feedback", 0.0, 0.99};
+            if ((type == Type::Delay || type == Type::Chorus) && index == 2)
+                return EffectParameterDescriptor{"Wet Mix", 0.0, 1.0};
+            if (type == Type::Distortion && index == 0)
+                return EffectParameterDescriptor{"Drive", 0.0, 100.0, 0.1};
+            if (type == Type::AlgorithmicReverb && index == 0)
+                return EffectParameterDescriptor{"Room Time (ms)", 5.0, 500.0, 1.0};
+            if (type == Type::AlgorithmicReverb && index == 1)
+                return EffectParameterDescriptor{"Decay", 0.0, 0.97};
+            if (type == Type::AlgorithmicReverb && index == 2)
+                return EffectParameterDescriptor{"Wet Mix", 0.0, 1.0};
+            return std::nullopt;
+        }
+
+        [[nodiscard]] std::vector<float> DefaultEffectParameters(const Keire::AudioGraphNodeType type)
+        {
+            using Type = Keire::AudioGraphNodeType;
+            switch (type)
+            {
+            case Type::Gain:
+            case Type::Equalizer:
+                return {1.0F};
+            case Type::LowPass:
+            case Type::HighPass:
+                return {1000.0F};
+            case Type::Compressor:
+                return {0.5F, 4.0F};
+            case Type::Limiter:
+                return {0.98F};
+            case Type::Gate:
+                return {0.01F};
+            case Type::Delay:
+                return {80.0F, 0.25F, 0.25F};
+            case Type::Chorus:
+                return {20.0F, 0.1F, 0.25F};
+            case Type::Distortion:
+                return {1.0F};
+            case Type::AlgorithmicReverb:
+                return {68.0F, 0.55F, 0.3F};
+            case Type::ConvolutionReverb:
+            case Type::Meter:
+            case Type::Capture:
+            case Type::Input:
+            case Type::Output:
+                return {};
+            }
+            return {};
+        }
+
         [[nodiscard]] std::string_view SnapshotTypeName(const Keire::AudioMixerSnapshotParameterType type)
         {
             const auto found =
@@ -296,6 +372,16 @@ namespace KeireEditor
             ui.TextColored(theme.MutedText, m_Message);
         if (const auto preview = m_Controller.AudioMixerPreviewDiagnostic(); !preview.empty())
             ui.TextColored(theme.Warning, preview);
+        std::size_t effectCount = 0;
+        std::size_t sendCount = 0;
+        for (const auto& bus : document.Definition().Buses)
+        {
+            effectCount += bus.Effects.size();
+            sendCount += bus.Sends.size();
+        }
+        ui.TextColored(theme.MutedText, std::to_string(document.Definition().Buses.size()) + " buses  |  " +
+                                            std::to_string(effectCount) + " effects  |  " + std::to_string(sendCount) +
+                                            " sends  |  target: <= 64 active effects");
         ui.Separator();
 
         if (auto tabs = ui.BeginTabBar("AudioMixerTabs"); tabs)
@@ -452,49 +538,65 @@ namespace KeireEditor
                     {
                         if (ui.Selectable(type.Name, effect.Type == type.Type))
                         {
+                            auto replacementImpulse = effect.ImpulseResponse;
                             if (type.Type == Keire::AudioGraphNodeType::ConvolutionReverb && !effect.ImpulseResponse)
                             {
-                                m_Message =
-                                    "Convolution Reverb requires an impulse-response AudioClip stable ID first.";
+                                const auto database = m_Controller.AudioMixerDatabase();
+                                const auto records =
+                                    database ? database->Records() : std::vector<Keire::AssetSourceRecord>{};
+                                const auto impulse = std::ranges::find(records, Keire::AudioClipAsset::StaticType(),
+                                                                       &Keire::AssetSourceRecord::Type);
+                                if (impulse == records.end())
+                                {
+                                    m_Message =
+                                        "Import an AudioClip impulse response before adding Convolution Reverb.";
+                                    continue;
+                                }
+                                replacementImpulse = impulse->Id;
                             }
-                            else
-                            {
-                                (void)ApplyEdit(
-                                    "Change Audio Mixer effect type",
-                                    [effectId = effect.Id, replacement = type.Type](Keire::AudioMixerDefinition& mixer)
-                                    {
-                                        auto& edited = RequireEffect(mixer, effectId);
-                                        edited.Type = replacement;
-                                        if (replacement != Keire::AudioGraphNodeType::ConvolutionReverb)
-                                            edited.ImpulseResponse = {};
-                                    });
-                            }
+                            (void)ApplyEdit("Change Audio Mixer effect type",
+                                            [effectId = effect.Id, replacement = type.Type,
+                                             replacementImpulse](Keire::AudioMixerDefinition& mixer)
+                                            {
+                                                auto& edited = RequireEffect(mixer, effectId);
+                                                edited.Type = replacement;
+                                                edited.Parameters = DefaultEffectParameters(replacement);
+                                                edited.ImpulseResponse =
+                                                    replacement == Keire::AudioGraphNodeType::ConvolutionReverb
+                                                        ? replacementImpulse
+                                                        : Keire::AssetId{};
+                                            });
                         }
                     }
                 }
                 if (effect.Type == Keire::AudioGraphNodeType::ConvolutionReverb)
                 {
-                    auto impulse = effect.ImpulseResponse.ToString();
-                    if (ui.InputText("Impulse Response ID", impulse))
+                    auto impulse = effect.ImpulseResponse;
+                    const auto database = m_Controller.AudioMixerDatabase();
+                    const auto records = database ? database->Records() : std::vector<Keire::AssetSourceRecord>{};
+                    const AssetPickerOptions options{
+                        .Label = "Impulse Response",
+                        .ExpectedType = Keire::AudioClipAsset::StaticType(),
+                        .AllowNone = false,
+                    };
+                    if (m_AssetPicker.Draw(ui, records, impulse, options))
                     {
-                        try
-                        {
-                            const auto parsed = Keire::AssetId::Parse(impulse);
-                            (void)ApplyEdit("Assign convolution impulse response",
-                                            [effectId = effect.Id, parsed](Keire::AudioMixerDefinition& mixer)
-                                            { RequireEffect(mixer, effectId).ImpulseResponse = parsed; });
-                        }
-                        catch (const std::exception& error)
-                        {
-                            m_Message = error.what();
-                        }
+                        (void)ApplyEdit("Assign convolution impulse response",
+                                        [effectId = effect.Id, impulse](Keire::AudioMixerDefinition& mixer)
+                                        { RequireEffect(mixer, effectId).ImpulseResponse = impulse; });
                     }
                 }
                 ui.TextColored(theme.MutedText, "PARAMETERS");
                 for (std::size_t parameter = 0; parameter < effect.Parameters.size(); ++parameter)
                 {
                     double value = effect.Parameters[parameter];
-                    if (ui.DragScalar("Parameter " + std::to_string(parameter), value, 0.01))
+                    const auto descriptor = EffectParameter(effect.Type, parameter);
+                    const auto label =
+                        descriptor ? std::string(descriptor->Name) : "Advanced Parameter " + std::to_string(parameter);
+                    const auto speed = descriptor ? descriptor->Speed : 0.01;
+                    const auto minimum = descriptor ? std::optional(descriptor->Minimum) : std::nullopt;
+                    const auto maximum = descriptor ? std::optional(descriptor->Maximum) : std::nullopt;
+                    if (ui.DragScalar(label, value, speed, minimum, maximum))
                         (void)ApplyEdit("Edit Audio Mixer effect parameter",
                                         [effectId = effect.Id, parameter,
                                          value = static_cast<float>(value)](Keire::AudioMixerDefinition& mixer)

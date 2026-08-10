@@ -2,6 +2,8 @@
 set -euo pipefail
 
 requested_architecture="${1:-x86_64}"
+signature_key_id="${3:-}"
+channel="${4:-stable}"
 case "$(printf '%s' "$requested_architecture" | tr '[:upper:]' '[:lower:]')" in
     x86_64) architecture=x86_64; build_architecture=x86_64 ;;
     arm64|aarch64) architecture=arm64; build_architecture=ARM64 ;;
@@ -111,3 +113,11 @@ with open(temporary, "w", encoding="utf-8", newline="\n") as output:
 temporary.replace(path)
 PY
 printf 'Created %s\n' "$archive"
+if [[ -n "$signature_key_id" ]]; then
+    "$repository_root/Scripts/project.sh" build --generator ninja --configuration Debug \
+        --architecture "$host_architecture" --toolset "$toolset" --target KeireHubPackagePublisher
+    publisher="$repository_root/Build/Bin/Debug-$system-$host_architecture/KeireHubPackagePublisher/KeireHubPackagePublisher"
+    "$publisher" create-build-support --player-support-package "$archive" --channel "$channel" \
+        --output "$output_directory/$pack_id.keirepackage" \
+        --manifest-output "$output_directory/$pack_id.manifest.json" --signature-key-id "$signature_key_id"
+fi

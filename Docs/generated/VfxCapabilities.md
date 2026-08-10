@@ -8,30 +8,89 @@ This reference is generated from the runtime node catalog and the frozen Unity 6
 
 | Contract | Supported | GPU Required | Kéire Equivalent | Disabled | Total |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Unity parity rows | 0 | 0 | 125 | 153 | 278 |
-| Runtime descriptors | 136 | 0 | 28 | 0 | 164 |
+| Unity parity rows | 0 | 0 | 245 | 33 | 278 |
+| Runtime descriptors | 136 | 0 | 104 | 0 | 240 |
 
 A runtime descriptor can be fully supported by Kéire while remaining a **Kéire Equivalent** in the parity manifest when Unity exposes broader polymorphic signatures or different authoring settings.
+
+## First Major Parity Milestone
+
+The first major milestone target is **50** validated parity rows. The checked-in ledger closes **245** rows and therefore meets the target. 33 frozen rows remain.
+
+Measurement contract: Enabled frozen Unity parity rows with a runtime catalog implementation, focused tests, documentation, and production-slice coverage.
+
+## Portable Parity Expansion
+
+The expansion started from **125** enabled rows and targeted **120** additional rows. It now closes **120** additional rows, for a target total of **245**, and therefore meets the expansion gate. 0 expansion rows remain.
+
+Measurement contract: Additional enabled frozen Unity parity rows above the validated 125-row baseline; each row requires a live runtime descriptor, focused test, documentation, and production slice.
+
+| Priority | Remaining rows | Delivery meaning |
+| --- | ---: | --- |
+| P0 | 18 | Required for production simulation, events, attributes, geometry, or Shader Graph output workflows. |
+| P1 | 8 | Broad authoring coverage and commonly used sampling or presentation workflows. |
+| P2 | 3 | Specialized production capability after the primary runtime contracts are stable. |
+| Deferred | 4 | Pipeline-specific or low-portability work requiring an explicit Kéire design decision. |
 
 ## Production Slices
 
 | Slice | Backend | Implementations | Samples | Tests |
 | --- | --- | ---: | --- | --- |
-| Core value modulation | CPU and GPU | 113 | Samples/KeireSandbox/Assets/Vfx/VfxEffect.keirevfx | KeireTests/Source/Vfx/VfxExpressionTests.cpp, KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp |
-| Context and particle-output pipeline | CPU and GPU | 7 | Samples/KeireSandbox/Assets/Vfx/ArcaneSigilOrbit.keirevfx, Samples/KeireSandbox/Assets/Vfx/EmberShardCyclone.keirevfx, Samples/KeireSandbox/Assets/Vfx/VfxEffect.keirevfx | KeireTests/Source/Vfx/VfxGpuCapabilityTests.cpp, KeireTests/Source/Vfx/VfxTests.cpp |
+| Core value modulation | CPU and GPU | 112 | Samples/KeireSandbox/Assets/Vfx/VfxEffect.keirevfx | KeireTests/Source/Vfx/VfxExpressionTests.cpp, KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp |
+| Portable attributes, inline values, and geometry math | CPU and GPU | 33 | Samples/KeireSandbox/Assets/Vfx/VfxEffect.keirevfx | KeireTests/Source/Vfx/VfxParityExpansionTests.cpp, KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp |
+| CPU structured values and host resource queries | CPU Only | 45 | Samples/KeireSandbox/Assets/Vfx/VfxEffect.keirevfx | KeireTests/Source/Vfx/VfxParityExpansionTests.cpp |
+| Context and particle-output pipeline | CPU and GPU | 11 | Samples/KeireSandbox/Assets/Vfx/ArcaneSigilOrbit.keirevfx, Samples/KeireSandbox/Assets/Vfx/EmberShardCyclone.keirevfx, Samples/KeireSandbox/Assets/Vfx/VfxEffect.keirevfx | KeireTests/Source/Vfx/VfxGpuCapabilityTests.cpp, KeireTests/Source/Vfx/VfxTests.cpp |
+
+## Prioritized Outstanding Matrix
+
+| Priority | Class | Unity capability | Category | Backend target |
+| --- | --- | --- | --- | --- |
+| P0 | Block | Calculate Mass from Volume | Attribute > Derived | CPU and GPU |
+| P0 | Block | Kill Shape | Collision | CPU and GPU |
+| P0 | Block | Trigger Shape | Collision | CPU and GPU |
+| P0 | Block | Attractor Shape Signed Distance Field | Force | GPU Required |
+| P0 | Block | Vector Field Force | Force | GPU Required |
+| P0 | Block | Trigger Event | GPUEvent | CPU and GPU |
+| P0 | Block | Kill (AABox) | Kill | CPU and GPU |
+| P0 | Block | Kill (Sphere) | Kill | CPU and GPU |
+| P0 | Block | Set Position (Depth) | Position | GPU Required |
+| P0 | Block | Set Position (Skinned Mesh) | Position | GPU Required |
+| P0 | Block | Set SpawnEvent <Attribute> | Spawn | CPU and GPU |
+| P0 | Block | Increment Strip Index On Start | Spawn > Custom | CPU and GPU |
+| P0 | Block | Set Spawn Time | Spawn > Custom | CPU and GPU |
+| P0 | Block | Spawn Over Distance | Spawn > Custom | CPU and GPU |
+| P0 | Context | GPU Event | Context | CPU and GPU |
+| P0 | Operator | Main Camera | Operator > BuiltIn | GPU Required |
+| P0 | Operator | Viewport To World Point | Operator > Camera | GPU Required |
+| P0 | Operator | World To Viewport Point | Operator > Camera | GPU Required |
+| P1 | Block | Flipbook Player | FlipBook | CPU and GPU |
+| P1 | Block | Camera Fade | Output | GPU Required |
+| P1 | Block | Screen Space Size | Output | GPU Required |
+| P1 | Block | Subpixel Anti-Aliasing | Output | GPU Required |
+| P1 | Operator | Camera | Operator > Inline | GPU Required |
+| P1 | Operator | Position (Depth) | Operator > Sampling | GPU Required |
+| P1 | Output | Output Distortion | Context | GPU Required |
+| P1 | Output | Output Particle Forward Decal | Context | GPU Required |
+| P2 | Operator | Custom HLSL | Operator > HLSL | GPU Required |
+| P2 | Operator | Load CameraBuffer | Operator > Sampling | GPU Required |
+| P2 | Operator | Sample CameraBuffer | Operator > Sampling | GPU Required |
+| Deferred | Operator | TerrainType | Operator > Inline | CPU and GPU |
+| Deferred | Output | Output Particle HDRP Lit Decal | Context | GPU Required |
+| Deferred | Output | Output Particle HDRP Volumetric Fog | Context | GPU Required |
+| Deferred | Output | Output Particle URP Lit Decal | Context | GPU Required |
 
 ## Runtime Node Catalog
 
 | Type ID | Label | Class | Runtime support | Backend | Enabled Unity rows |
 | --- | --- | --- | --- | --- | ---: |
-| `keire.block.burst` | Burst | Block | Supported | CPU and GPU | 0 |
-| `keire.block.collision` | Collision | Block | Kéire Equivalent | CPU and GPU | 1 |
+| `keire.block.burst` | Burst | Block | Supported | CPU and GPU | 2 |
+| `keire.block.collision` | Collision | Block | Kéire Equivalent | CPU and GPU | 2 |
 | `keire.block.color-over-lifetime` | Color over Lifetime | Block | Supported | CPU and GPU | 0 |
-| `keire.block.emission-rate` | Emission Rate | Block | Supported | CPU and GPU | 0 |
-| `keire.block.force` | Force | Block | Supported | CPU and GPU | 0 |
+| `keire.block.emission-rate` | Emission Rate | Block | Supported | CPU and GPU | 2 |
+| `keire.block.force` | Force | Block | Supported | CPU and GPU | 3 |
 | `keire.block.initialize` | Initialize | Block | Supported | CPU and GPU | 0 |
-| `keire.block.portable-hlsl` | Portable Custom HLSL | Block | Kéire Equivalent | CPU and GPU | 0 |
-| `keire.block.shape` | Shape | Block | Kéire Equivalent | CPU and GPU | 1 |
+| `keire.block.portable-hlsl` | Portable Custom HLSL | Block | Kéire Equivalent | CPU and GPU | 17 |
+| `keire.block.shape` | Shape | Block | Kéire Equivalent | CPU and GPU | 2 |
 | `keire.block.size-over-lifetime` | Size over Lifetime | Block | Supported | CPU and GPU | 0 |
 | `keire.context.event` | Event | Context | Kéire Equivalent | CPU and GPU | 1 |
 | `keire.context.initialize` | Initialize | Context | Kéire Equivalent | CPU and GPU | 1 |
@@ -44,24 +103,33 @@ A runtime descriptor can be fully supported by Kéire while remaining a **Kéire
 | `keire.operator.age` | Age | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.age-over-lifetime` | Age Over Lifetime | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.and` | And | Operator | Supported | CPU and GPU | 1 |
+| `keire.operator.area-circle` | Area (Circle) | Operator | Kéire Equivalent | CPU and GPU | 1 |
 | `keire.operator.asin` | Asin | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.atan` | Atan | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.atan2` | Atan2 | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.attribute-alive` | Get Attribute: alive | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.attribute-alpha` | Get Attribute: alpha | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.attribute-angle` | Get Attribute: angle | Operator | Supported | CPU and GPU | 1 |
+| `keire.operator.attribute-angular-velocity` | Get Attribute: angularVelocity | Operator | Kéire Equivalent | CPU and GPU | 1 |
 | `keire.operator.attribute-axis-x` | Get Attribute: axisX | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.attribute-axis-y` | Get Attribute: axisY | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.attribute-axis-z` | Get Attribute: axisZ | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.attribute-color` | Get Attribute: color | Operator | Supported | CPU and GPU | 1 |
+| `keire.operator.attribute-direction` | Get Attribute: direction | Operator | Kéire Equivalent | CPU and GPU | 1 |
+| `keire.operator.attribute-map` | Attribute Map | Operator | Kéire Equivalent | CPU Only | 1 |
+| `keire.operator.attribute-mass` | Get Attribute: mass | Operator | Kéire Equivalent | CPU and GPU | 1 |
 | `keire.operator.attribute-old-position` | Get Attribute: oldPosition | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.attribute-particle-count-in-strip` | Get Attribute: particleCountInStrip | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.attribute-particle-index-in-strip` | Get Attribute: particleIndexInStrip | Operator | Supported | CPU and GPU | 1 |
+| `keire.operator.attribute-pivot` | Get Attribute: pivot | Operator | Kéire Equivalent | CPU and GPU | 1 |
 | `keire.operator.attribute-position` | Get Attribute: position | Operator | Supported | CPU and GPU | 1 |
+| `keire.operator.attribute-scale` | Get Attribute: scale | Operator | Kéire Equivalent | CPU and GPU | 1 |
 | `keire.operator.attribute-seed` | Get Attribute: seed | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.attribute-size` | Get Attribute: size | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.attribute-spawn-time` | Get Attribute: spawnTime | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.attribute-strip-index` | Get Attribute: stripIndex | Operator | Supported | CPU and GPU | 1 |
+| `keire.operator.attribute-target-position` | Get Attribute: targetPosition | Operator | Kéire Equivalent | CPU and GPU | 1 |
+| `keire.operator.attribute-texture-index` | Get Attribute: texIndex | Operator | Kéire Equivalent | CPU and GPU | 1 |
 | `keire.operator.attribute-velocity` | Get Attribute: velocity | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.bitwise-and` | And | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.bitwise-complement` | Complement | Operator | Supported | CPU and GPU | 1 |
@@ -69,23 +137,30 @@ A runtime descriptor can be fully supported by Kéire while remaining a **Kéire
 | `keire.operator.bitwise-or` | Or | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.bitwise-right-shift` | Right Shift | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.bitwise-xor` | Xor | Operator | Supported | CPU and GPU | 1 |
-| `keire.operator.branch` | Branch | Operator | Supported | CPU and GPU | 1 |
+| `keire.operator.branch` | Branch | Operator | Supported | CPU and GPU | 2 |
+| `keire.operator.buffer-count` | Buffer Count | Operator | Kéire Equivalent | CPU Only | 1 |
 | `keire.operator.ceiling` | Ceiling | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.cellular-curl-noise` | Cellular Curl Noise | Operator | Kéire Equivalent | CPU and GPU | 1 |
 | `keire.operator.cellular-noise` | Cellular Noise | Operator | Kéire Equivalent | CPU and GPU | 1 |
+| `keire.operator.change-space` | Change Space | Operator | Kéire Equivalent | CPU Only | 1 |
 | `keire.operator.clamp` | Clamp | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.color-luma` | Color Luma | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.color-range` | Range | Operator | Supported | CPU and GPU | 0 |
 | `keire.operator.combine-color` | Combine Color | Operator | Supported | CPU and GPU | 0 |
 | `keire.operator.combine-vector2` | Combine Vector 2 | Operator | Supported | CPU and GPU | 0 |
 | `keire.operator.combine-vector3` | Combine | Operator | Supported | CPU and GPU | 0 |
-| `keire.operator.combine-vector4` | Combine Vector 4 | Operator | Supported | CPU and GPU | 0 |
+| `keire.operator.combine-vector4` | Combine Vector 4 | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.compare` | Compare | Operator | Supported | CPU and GPU | 1 |
+| `keire.operator.construct-matrix` | Construct Matrix | Operator | Kéire Equivalent | CPU Only | 1 |
 | `keire.operator.cosine` | Cosine | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.cross-product` | Cross Product | Operator | Supported | CPU and GPU | 1 |
+| `keire.operator.custom-attribute` | Get Custom Attribute | Operator | Kéire Equivalent | CPU and GPU | 1 |
 | `keire.operator.delta-time` | Delta Time | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.discretize` | Discretize | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.distance` | Distance | Operator | Supported | CPU and GPU | 1 |
+| `keire.operator.distance-line` | Distance (Line) | Operator | Kéire Equivalent | CPU and GPU | 1 |
+| `keire.operator.distance-plane` | Distance (Plane) | Operator | Kéire Equivalent | CPU and GPU | 1 |
+| `keire.operator.distance-sphere` | Distance (Sphere) | Operator | Kéire Equivalent | CPU and GPU | 1 |
 | `keire.operator.divide` | Divide | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.dot-product` | Dot Product | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.epsilon` | Epsilon (Ɛ) | Operator | Supported | CPU and GPU | 1 |
@@ -97,11 +172,31 @@ A runtime descriptor can be fully supported by Kéire while remaining a **Kéire
 | `keire.operator.frame-index` | Frame Index | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.hsv-to-rgb` | HSV to RGB | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.inline-bool` | bool | Operator | Supported | CPU and GPU | 1 |
+| `keire.operator.inline-box` | Box | Operator | Kéire Equivalent | CPU and GPU | 2 |
+| `keire.operator.inline-circle` | Circle | Operator | Kéire Equivalent | CPU and GPU | 2 |
 | `keire.operator.inline-color` | Color | Operator | Supported | CPU and GPU | 1 |
+| `keire.operator.inline-cone` | Cone | Operator | Kéire Equivalent | CPU and GPU | 2 |
+| `keire.operator.inline-curve` | Animation Curve | Operator | Kéire Equivalent | CPU Only | 1 |
+| `keire.operator.inline-cylinder` | Cylinder | Operator | Kéire Equivalent | CPU and GPU | 1 |
 | `keire.operator.inline-direction` | Direction | Operator | Kéire Equivalent | CPU and GPU | 1 |
+| `keire.operator.inline-flipbook` | FlipBook | Operator | Kéire Equivalent | CPU and GPU | 1 |
 | `keire.operator.inline-float` | float | Operator | Supported | CPU and GPU | 1 |
+| `keire.operator.inline-gradient` | Gradient | Operator | Kéire Equivalent | CPU Only | 1 |
 | `keire.operator.inline-int` | int | Operator | Supported | CPU and GPU | 1 |
+| `keire.operator.inline-line` | Line | Operator | Kéire Equivalent | CPU and GPU | 1 |
+| `keire.operator.inline-matrix` | Matrix4x4 | Operator | Kéire Equivalent | CPU Only | 1 |
+| `keire.operator.inline-mesh` | Mesh | Operator | Kéire Equivalent | CPU Only | 1 |
+| `keire.operator.inline-plane` | Plane | Operator | Kéire Equivalent | CPU and GPU | 1 |
+| `keire.operator.inline-point-cache` | Point Cache | Operator | Kéire Equivalent | CPU Only | 1 |
 | `keire.operator.inline-position` | Position | Operator | Kéire Equivalent | CPU and GPU | 1 |
+| `keire.operator.inline-sphere` | Sphere | Operator | Kéire Equivalent | CPU and GPU | 2 |
+| `keire.operator.inline-texture-cube` | Cubemap | Operator | Kéire Equivalent | CPU Only | 1 |
+| `keire.operator.inline-texture-cube-array` | Cubemap Array | Operator | Kéire Equivalent | CPU Only | 1 |
+| `keire.operator.inline-texture2d` | Texture2D | Operator | Kéire Equivalent | CPU Only | 1 |
+| `keire.operator.inline-texture2d-array` | Texture2D Array | Operator | Kéire Equivalent | CPU Only | 1 |
+| `keire.operator.inline-texture3d` | Texture3D | Operator | Kéire Equivalent | CPU Only | 1 |
+| `keire.operator.inline-torus` | Torus | Operator | Kéire Equivalent | CPU and GPU | 2 |
+| `keire.operator.inline-transform` | Transform | Operator | Kéire Equivalent | CPU Only | 1 |
 | `keire.operator.inline-uint` | uint | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.inline-vector` | Vector | Operator | Kéire Equivalent | CPU and GPU | 1 |
 | `keire.operator.inline-vector2` | Vector2 | Operator | Supported | CPU and GPU | 1 |
@@ -110,13 +205,23 @@ A runtime descriptor can be fully supported by Kéire while remaining a **Kéire
 | `keire.operator.integer-range` | Range | Operator | Supported | CPU and GPU | 0 |
 | `keire.operator.integer-to-float` | To Float | Operator | Supported | CPU and GPU | 0 |
 | `keire.operator.inverse-lerp` | Inverse Lerp | Operator | Supported | CPU and GPU | 1 |
+| `keire.operator.invert-trs` | InvertTRS (Matrix) | Operator | Kéire Equivalent | CPU Only | 1 |
 | `keire.operator.length` | Length | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.lerp` | Lerp | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.lifetime` | Lifetime | Operator | Supported | CPU and GPU | 1 |
+| `keire.operator.load-texture2d` | Load Texture2D | Operator | Kéire Equivalent | CPU Only | 1 |
+| `keire.operator.load-texture2d-array` | Load Texture2DArray | Operator | Kéire Equivalent | CPU Only | 1 |
+| `keire.operator.load-texture3d` | Load Texture3D | Operator | Kéire Equivalent | CPU Only | 1 |
+| `keire.operator.local-to-world` | Local To World | Operator | Kéire Equivalent | CPU Only | 1 |
 | `keire.operator.log10` | Log10 | Operator | Supported | CPU and GPU | 0 |
 | `keire.operator.log2` | Log2 | Operator | Supported | CPU and GPU | 0 |
 | `keire.operator.logarithm` | Log | Operator | Supported | CPU and GPU | 1 |
+| `keire.operator.look-at` | Look At | Operator | Kéire Equivalent | CPU Only | 1 |
+| `keire.operator.look-at-direction` | Look At Direction | Operator | Kéire Equivalent | CPU and GPU | 0 |
 | `keire.operator.maximum` | Maximum | Operator | Supported | CPU and GPU | 1 |
+| `keire.operator.mesh-index-count` | Get Mesh Index Count | Operator | Kéire Equivalent | CPU Only | 2 |
+| `keire.operator.mesh-triangle-count` | Get Mesh Triangle Count | Operator | Kéire Equivalent | CPU Only | 2 |
+| `keire.operator.mesh-vertex-count` | Get Mesh Vertex Count | Operator | Kéire Equivalent | CPU Only | 2 |
 | `keire.operator.minimum` | Minimum | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.modulo` | Modulo | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.multiply` | Multiply | Operator | Supported | CPU and GPU | 1 |
@@ -133,7 +238,7 @@ A runtime descriptor can be fully supported by Kéire while remaining a **Kéire
 | `keire.operator.pi` | Pi (π) | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.polar-to-rectangular` | Polar to Rectangular | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.power` | Power | Operator | Supported | CPU and GPU | 1 |
-| `keire.operator.random` | Random Number | Operator | Supported | CPU and GPU | 0 |
+| `keire.operator.random` | Random Number | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.random-boolean` | Random Number | Operator | Supported | CPU and GPU | 0 |
 | `keire.operator.random-color` | Random Number | Operator | Supported | CPU and GPU | 0 |
 | `keire.operator.random-color-range` | Random Range | Operator | Kéire Equivalent | CPU and GPU | 0 |
@@ -158,13 +263,28 @@ A runtime descriptor can be fully supported by Kéire while remaining a **Kéire
 | `keire.operator.rotate-2d` | Rotate 2D | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.rotate-3d` | Rotate 3D | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.round` | Round | Operator | Supported | CPU and GPU | 1 |
+| `keire.operator.sample-bezier` | Sample Bezier | Operator | Kéire Equivalent | CPU and GPU | 1 |
+| `keire.operator.sample-buffer` | Sample Graphics Buffer | Operator | Kéire Equivalent | CPU Only | 2 |
+| `keire.operator.sample-curve` | Sample Curve | Operator | Kéire Equivalent | CPU Only | 1 |
+| `keire.operator.sample-gradient` | Sample Gradient | Operator | Kéire Equivalent | CPU Only | 1 |
+| `keire.operator.sample-mesh` | Sample Mesh | Operator | Kéire Equivalent | CPU Only | 2 |
+| `keire.operator.sample-mesh-index` | Sample Mesh Index | Operator | Kéire Equivalent | CPU Only | 2 |
+| `keire.operator.sample-sdf` | Sample Signed Distance Field | Operator | Kéire Equivalent | CPU Only | 1 |
+| `keire.operator.sample-texture-cube` | Sample TextureCube | Operator | Kéire Equivalent | CPU Only | 1 |
+| `keire.operator.sample-texture-cube-array` | Sample TextureCubeArray | Operator | Kéire Equivalent | CPU Only | 1 |
+| `keire.operator.sample-texture2d` | Sample Texture2D | Operator | Kéire Equivalent | CPU Only | 1 |
+| `keire.operator.sample-texture2d-array` | Sample Texture2DArray | Operator | Kéire Equivalent | CPU Only | 1 |
+| `keire.operator.sample-texture3d` | Sample Texture3D | Operator | Kéire Equivalent | CPU Only | 1 |
 | `keire.operator.saturate` | Saturate | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.sawtooth-wave` | Sawtooth Wave | Operator | Kéire Equivalent | CPU and GPU | 1 |
 | `keire.operator.sign` | Sign | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.sine` | Sine | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.sine-wave` | Sine Wave | Operator | Kéire Equivalent | CPU and GPU | 1 |
+| `keire.operator.skinned-local-transform` | Get Skinned Mesh Local Root Transform | Operator | Kéire Equivalent | CPU Only | 1 |
+| `keire.operator.skinned-world-transform` | Get Skinned Mesh World Root Transform | Operator | Kéire Equivalent | CPU Only | 1 |
 | `keire.operator.smoothstep` | Smoothstep | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.spawn-index` | Spawn Index | Operator | Supported | CPU and GPU | 1 |
+| `keire.operator.spawn-state` | Spawn State | Operator | Kéire Equivalent | CPU and GPU | 1 |
 | `keire.operator.spherical-to-rectangular` | Spherical to Rectangular | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.split-color` | Split Color | Operator | Supported | CPU and GPU | 0 |
 | `keire.operator.split-vector2` | Split Vector 2 | Operator | Supported | CPU and GPU | 0 |
@@ -176,9 +296,17 @@ A runtime descriptor can be fully supported by Kéire while remaining a **Kéire
 | `keire.operator.squared-length` | Squared Length | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.step` | Step | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.subtract` | Subtract | Operator | Supported | CPU and GPU | 1 |
+| `keire.operator.swizzle` | Swizzle | Operator | Kéire Equivalent | CPU and GPU | 1 |
 | `keire.operator.system-seed` | System Seed | Operator | Supported | CPU and GPU | 1 |
 | `keire.operator.tangent` | Tangent | Operator | Supported | CPU and GPU | 1 |
+| `keire.operator.texture-dimensions` | Get Texture Dimensions | Operator | Kéire Equivalent | CPU Only | 1 |
 | `keire.operator.time` | Total Time | Operator | Supported | CPU and GPU | 1 |
+| `keire.operator.transform-direction` | Transform (Direction) | Operator | Kéire Equivalent | CPU Only | 1 |
+| `keire.operator.transform-matrix` | Transform (Matrix) | Operator | Kéire Equivalent | CPU Only | 1 |
+| `keire.operator.transform-position` | Transform (Position) | Operator | Kéire Equivalent | CPU Only | 1 |
+| `keire.operator.transform-vector` | Transform (Vector) | Operator | Kéire Equivalent | CPU Only | 1 |
+| `keire.operator.transform-vector4` | Transform (Vector4) | Operator | Kéire Equivalent | CPU Only | 1 |
+| `keire.operator.transpose-matrix` | Transpose (Matrix) | Operator | Kéire Equivalent | CPU Only | 1 |
 | `keire.operator.triangle-wave` | Triangle Wave | Operator | Kéire Equivalent | CPU and GPU | 1 |
 | `keire.operator.unsigned-integer-range` | Range | Operator | Supported | CPU and GPU | 0 |
 | `keire.operator.unsigned-integer-to-float` | To Float | Operator | Supported | CPU and GPU | 0 |
@@ -187,4 +315,11 @@ A runtime descriptor can be fully supported by Kéire while remaining a **Kéire
 | `keire.operator.vector2-range` | Range | Operator | Supported | CPU and GPU | 0 |
 | `keire.operator.vector3-range` | Range | Operator | Supported | CPU and GPU | 0 |
 | `keire.operator.vector4-range` | Range | Operator | Supported | CPU and GPU | 0 |
-| `keire.output.renderer` | Particle Output | Output | Kéire Equivalent | CPU and GPU | 4 |
+| `keire.operator.volume-box` | Volume (Box) | Operator | Kéire Equivalent | CPU and GPU | 2 |
+| `keire.operator.volume-cone` | Volume (Cone) | Operator | Kéire Equivalent | CPU and GPU | 1 |
+| `keire.operator.volume-cylinder` | Volume (Cylinder) | Operator | Kéire Equivalent | CPU and GPU | 1 |
+| `keire.operator.volume-sphere` | Volume (Sphere) | Operator | Kéire Equivalent | CPU and GPU | 1 |
+| `keire.operator.volume-torus` | Volume (Torus) | Operator | Kéire Equivalent | CPU and GPU | 1 |
+| `keire.operator.weighted-select` | Random Selector Weighted | Operator | Kéire Equivalent | CPU and GPU | 1 |
+| `keire.operator.world-to-local` | World To Local | Operator | Kéire Equivalent | CPU Only | 1 |
+| `keire.output.renderer` | Particle Output | Output | Kéire Equivalent | CPU and GPU | 8 |

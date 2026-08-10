@@ -761,9 +761,9 @@ namespace Keire
             auto& state = VfxMeshShapes[asset];
             Ref<const MeshAsset> mesh;
             std::uint64_t revision = 1;
-            if (asset == MeshAsset::CubeId())
+            if (auto builtin = MeshAsset::ResolveBuiltin(asset))
             {
-                mesh = MeshAsset::Cube();
+                mesh = std::move(builtin);
             }
             else
             {
@@ -825,10 +825,10 @@ namespace Keire
 
         [[nodiscard]] std::optional<Vector3> SampleVfxShape(const AssetId asset, const std::uint32_t randomValue)
         {
-            if (!Assets || !asset)
+            if (!asset || (!Assets && !MeshAsset::IsBuiltin(asset)))
                 return std::nullopt;
             const auto type =
-                asset == MeshAsset::CubeId() ? std::optional{MeshAsset::StaticType()} : Assets->TryGetType(asset);
+                MeshAsset::IsBuiltin(asset) ? std::optional{MeshAsset::StaticType()} : Assets->TryGetType(asset);
             if (type == MeshAsset::StaticType())
                 return SampleVfxMesh(asset, randomValue);
             if (type != VfxVolumeAsset::StaticType())

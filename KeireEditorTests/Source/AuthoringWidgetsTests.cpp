@@ -2,10 +2,54 @@
 
 #include <doctest/doctest.h>
 
+#include <array>
 #include <limits>
 #include <optional>
+#include <ranges>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 #include <vector>
+
+TEST_CASE("Node menu selection focuses on open and follows live search results")
+{
+    KeireEditor::NodeMenuSelection selection;
+    selection.Open();
+    CHECK(selection.ConsumeFocusRequest());
+    CHECK_FALSE(selection.ConsumeFocusRequest());
+
+    constexpr std::array results{std::string_view("add"), std::string_view("multiply"),
+                                 std::string_view("texture-sample")};
+    selection.Synchronize(results);
+    CHECK(selection.Selected() == "add");
+    selection.MoveNext(results);
+    CHECK(selection.Selected() == "multiply");
+    selection.MovePrevious(results);
+    CHECK(selection.Selected() == "add");
+    selection.MovePrevious(results);
+    CHECK(selection.Selected() == "texture-sample");
+
+    constexpr std::array narrowed{std::string_view("multiply")};
+    selection.Synchronize(narrowed);
+    CHECK(selection.Selected() == "multiply");
+    selection.Synchronize({});
+    CHECK_FALSE(selection.Selected());
+}
+
+TEST_CASE("Node menu recent entries are unique, newest-first, and bounded")
+{
+    KeireEditor::NodeMenuSelection selection;
+    for (std::size_t index = 0; index < KeireEditor::NodeMenuSelection::RecentCapacity + 2; ++index)
+        selection.Remember("node-" + std::to_string(index));
+    REQUIRE(selection.Recent().size() == KeireEditor::NodeMenuSelection::RecentCapacity);
+    CHECK(selection.Recent().front() == "node-7");
+    CHECK(selection.Recent().back() == "node-2");
+
+    selection.Remember("node-4");
+    REQUIRE(selection.Recent().size() == KeireEditor::NodeMenuSelection::RecentCapacity);
+    CHECK(selection.Recent().front() == "node-4");
+    CHECK(std::ranges::count(selection.Recent(), std::string("node-4")) == 1);
+}
 
 TEST_CASE("Stable node graph validation protects local identity and references")
 {

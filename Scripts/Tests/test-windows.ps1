@@ -448,6 +448,9 @@ Assert-True ($playerSupportSource.Contains("kind = 'windows-resource-update'") -
              (Test-Path (Join-Path (Get-RepositoryRoot) "Config\Branding\Keire.ico")) -and
              (Test-Path (Join-Path (Get-RepositoryRoot) "Config\Branding\Keire.res")) -and
              $premakePolicy.Contains('AddKeireApplicationIcon')) "Windows application and player icon resources"
+Assert-True ($playerSupportSource.Contains('create-build-support') -and
+             $playerSupportSource.Contains('$SignatureKeyId') -and
+             $playerSupportSource.Contains('--manifest-output')) "Windows Build Support generic-package publication"
 $sampleScene = Get-Content (Join-Path (Get-RepositoryRoot) "Samples\KeireSandbox\Assets\Scenes\SampleScene.keirescene") -Raw
 $sampleSceneDocument = $sampleScene | ConvertFrom-Json
 Assert-True ([int]$sampleSceneDocument.schemaVersion -ge 2 -and $sampleScene.Contains('"components"') -and $sampleScene.Contains('Directional Light')) "Current-schema component sample scene"

@@ -10,6 +10,24 @@
 
 namespace KeireHub
 {
+    namespace
+    {
+        [[nodiscard]] Keire::ProjectDescriptor
+        DescriptorFromInspection(const Keire::ProjectInspectionResult& inspection)
+        {
+            Keire::ProjectDescriptor descriptor;
+            descriptor.SchemaVersion = inspection.SchemaVersion;
+            descriptor.Id = inspection.Id;
+            descriptor.Name = inspection.Name;
+            descriptor.CreatedWithEngineVersion = inspection.CreatedWithEngineVersion;
+            descriptor.MinimumEngineVersion = inspection.MinimumEngineVersion;
+            descriptor.CreatedAt = inspection.CreatedAt;
+            descriptor.LastSavedWithEngineVersion = inspection.LastSavedWithEngineVersion;
+            descriptor.Template = inspection.Template;
+            return descriptor;
+        }
+    } // namespace
+
     HubResult<HubSelectedEditor> SelectEditorForProject(const std::span<const HubEditorUiRecord> editors,
                                                         const Keire::ProjectDescriptor& project,
                                                         const std::string_view preferredInstallationId)
@@ -49,6 +67,13 @@ namespace KeireHub
         return HubResult<HubSelectedEditor>::Success({.InstallationId = installation.Id, .Executable = executable});
     }
 
+    HubResult<HubSelectedEditor> SelectEditorForProject(const std::span<const HubEditorUiRecord> editors,
+                                                        const Keire::ProjectInspectionResult& inspection,
+                                                        const std::string_view preferredInstallationId)
+    {
+        return SelectEditorForProject(editors, DescriptorFromInspection(inspection), preferredInstallationId);
+    }
+
     HubResult<HubProjectLaunchResult> LaunchProjectEditor(const std::span<const HubEditorUiRecord> editors,
                                                           EditorProcessTracker& processes,
                                                           const Keire::ProjectInspectionResult& inspection,
@@ -58,6 +83,7 @@ namespace KeireHub
     {
         if (!inspection.HasIdentity() || inspection.Root.empty() ||
             (inspection.Status != Keire::ProjectStatus::Ready &&
+             inspection.Status != Keire::ProjectStatus::UpgradeAvailable &&
              inspection.Status != Keire::ProjectStatus::RequiresNewerEngine &&
              inspection.Status != Keire::ProjectStatus::UnsupportedSchema))
         {
@@ -75,16 +101,8 @@ namespace KeireHub
                                                                .AffectedItem = inspection.Name});
         }
 
-        Keire::ProjectDescriptor descriptor;
-        descriptor.SchemaVersion = inspection.SchemaVersion;
-        descriptor.Id = inspection.Id;
-        descriptor.Name = inspection.Name;
-        descriptor.CreatedWithEngineVersion = inspection.CreatedWithEngineVersion;
-        descriptor.MinimumEngineVersion = inspection.MinimumEngineVersion;
-        descriptor.CreatedAt = inspection.CreatedAt;
-        descriptor.LastSavedWithEngineVersion = inspection.LastSavedWithEngineVersion;
-        descriptor.Template = inspection.Template;
-        auto editor = SelectEditorForProject(editors, descriptor, preferredInstallationId);
+        auto descriptor = DescriptorFromInspection(inspection);
+        auto editor = SelectEditorForProject(editors, inspection, preferredInstallationId);
         if (!editor)
             return HubResult<HubProjectLaunchResult>::Failure(editor.Error());
         if (requirePreferred && editor.Value().InstallationId != preferredInstallationId)

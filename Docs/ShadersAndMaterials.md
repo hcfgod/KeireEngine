@@ -18,6 +18,9 @@ include roots, fixed-function render state, and scalar/vector/color/Texture2D ma
 project `Assets` directory. Absolute paths, traversal, symlinks, include cycles, incompatible stages, duplicate
 properties, and unsupported resource bindings are rejected before publication.
 
+`renderState.topology` accepts `TriangleList`, `LineList`, or `PointList` and must match the rendered mesh submesh.
+Point and line imports report the matching manifest value so custom diagnostic and procedural shaders remain explicit.
+
 `.keirematerial` assets reference a stable shader asset ID and store validated property overrides. `ShaderAsset`,
 `MaterialAsset`, and the built-in `MeshAsset` are immutable runtime assets with safe fallbacks. Failed shaders and
 materials resolve to a conspicuous error material instead of leaving an invalid GPU pipeline. Numeric properties are
@@ -47,6 +50,17 @@ in bounded undo/redo. The schema-v2 catalog gives every node type a stable ident
 and migrates schema-v1 pins deterministically. The Master selector changes among Surface PBR, Transparent PBR, Decal
 PBR, Unlit, Hair PBR, and Eye PBR outputs while preserving compatible Master inputs and removing only cables whose
 destination no longer exists.
+
+Open **Add Node**, or right-click anywhere on the graph canvas, to use the same searchable node palette. Its search
+field receives keyboard focus on open and filters while typing. **Up/Down** wraps through the visible matches and
+**Enter** creates the selected node. With no query, the menu keeps recent/common nodes at the top and preserves the
+full category tree for browsing. Canvas-created nodes are placed at the clicked graph position.
+
+The public compatibility contract exposes the latest source schema, generated-shader version, and renderer vertex
+layout version. Generated HLSL records its generator and source-schema versions, and each `.keireshader` manifest
+records all three values. A source newer than the running editor fails before graph collections are decoded, with a
+specific upgrade diagnostic; it is never interpreted as an older graph or partially rewritten. Historical schema-v1
+sources still migrate deterministically to the current schema-v2 representation.
 
 The searchable graph library is grouped into Parameters, Constants, Inputs, Coordinates, Texture, Surface, Attributes,
 BSDF, Color, Vector, Math, Procedural, Scene, Utility, Logic & Variants, and Advanced categories. Its 100-plus typed
@@ -167,6 +181,12 @@ Set `KEIRE_SHADER_COMPILER` only when intentionally selecting another packaged c
 Dropping a Material Graph onto a renderer resolves only a generated material that exists in the mounted catalog. If
 the graph has not published that runtime subasset yet, the editor compiles and remounts it asynchronously, keeps the
 renderer's previous material during the operation, and applies the graph only after publication succeeds.
+
+Assigning an already open graph also replays its current last-good shader and parameter revision, including on built-in
+Cube and other built-in meshes; the Inspector assignment and rendered surface therefore cannot diverge. Graph edits
+remain dirty until **Save** atomically publishes both graph source and generated runtime variants. Closing the editor
+chains the Material Graph into the unsaved-change workflow after any dirty-scene decision and requires **Save**,
+**Discard**, or **Cancel**. Reopening always decodes the saved graph source instead of reconstructing a default draft.
 
 Material Graph-generated shaders preserve the renderer's complete fixed vertex-to-pixel interpolator ABI even when a
 simple graph does not consume every field. This avoids backend-specific sparse-interface optimization differences and

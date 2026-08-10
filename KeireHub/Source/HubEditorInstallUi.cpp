@@ -133,6 +133,24 @@ namespace KeireHub
             }
             return preferred;
         }
+
+        [[nodiscard]] std::string DestinationProblem(const std::filesystem::path& destination)
+        {
+            if (destination.empty())
+                return "Choose an install location.";
+            if (!destination.is_absolute() || destination == destination.root_path() || destination.filename().empty())
+                return "Install location must be an absolute folder below a drive or filesystem root.";
+            if (std::ranges::any_of(destination,
+                                    [](const auto& component) { return component == "." || component == ".."; }))
+                return "Install location cannot contain . or .. path components.";
+            std::error_code error;
+            const auto status = std::filesystem::symlink_status(destination, error);
+            if (error && error.default_error_condition() != std::errc::no_such_file_or_directory)
+                return "Install location could not be inspected: " + error.message();
+            if (!error && status.type() != std::filesystem::file_type::not_found)
+                return "Install location already exists. Choose a new folder name.";
+            return {};
+        }
     } // namespace
 
     bool HubProductUi::RequestEditorInstall(const std::string_view packageOrVersion, const HubProductSnapshot& snapshot)
@@ -184,6 +202,17 @@ namespace KeireHub
             HasActiveEditorInstall(snapshot.Tasks, candidate->PackageId, candidate->Version);
         m_RequestEditorInstall = true;
         return true;
+    }
+
+    void HubProductUi::SetEditorInstallParent(const std::filesystem::path& parent)
+    {
+        if (parent.empty() || !m_PendingEditorInstall)
+            return;
+        auto leaf = PathFromUtf8(m_EditorInstallDestination).filename();
+        if (leaf.empty())
+            leaf = PathFromUtf8("Kéire Editor " + m_PendingEditorInstall->Version);
+        m_EditorInstallDestination = Utf8Path((parent / leaf).lexically_normal());
+        m_LastEditorInstallRequest.reset();
     }
 
     void HubProductUi::DrawAvailableEditors(Keire::UiFrame& ui, const HubProductSnapshot& snapshot)
@@ -305,8 +334,15 @@ namespace KeireHub
         }
         ui.Spacing();
         ui.TextColored(m_Tokens.SecondaryText, "Install location");
-        ui.SetNextItemWidth(ui.ContentAvailable().Width);
+        const float browseWidth = 92.0F;
+        ui.SetNextItemWidth(std::max(ui.ContentAvailable().Width - browseWidth - 8.0F, 80.0F));
         (void)ui.InputText("##EditorInstallDestination", m_EditorInstallDestination);
+        ui.SameLine();
+        if (HubSecondaryButton(ui, m_Tokens, "Browse...", {browseWidth, 0.0F}))
+        {
+            command = {.Type = HubUiCommandType::BrowseEditorInstallLocation,
+                       .Path = PathFromUtf8(m_EditorInstallDestination).parent_path()};
+        }
         if (!editor.Components.empty())
         {
             ui.Spacing();
@@ -383,10 +419,12 @@ namespace KeireHub
                  !snapshot.EditorInstallPreviewMessage.empty())
             ui.TextColoredWrapped(m_Tokens.Danger, snapshot.EditorInstallPreviewMessage);
 
-        const bool destinationMissing = request.Destination.empty();
+        const auto destinationProblem = DestinationProblem(request.Destination);
+        if (!destinationProblem.empty())
+            ui.TextColoredWrapped(m_Tokens.Warning, destinationProblem);
         if (snapshot.EditorManagementBusy)
             ui.TextColored(m_Tokens.Warning, "Wait for the active editor installation check to finish.");
-        if (auto disabled = ui.BeginDisabled(destinationMissing || snapshot.EditorManagementBusy); disabled)
+        if (auto disabled = ui.BeginDisabled(!destinationProblem.empty() || snapshot.EditorManagementBusy); disabled)
         {
             if (HubPrimaryButton(ui, m_Tokens, previewMatches ? "Install editor" : "Review install", {132.0F, 38.0F}))
             {

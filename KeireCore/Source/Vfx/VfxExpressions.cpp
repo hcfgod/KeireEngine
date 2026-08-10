@@ -38,13 +38,11 @@ namespace Keire::Internal
                 return WaveOperatorKind::Triangle;
             return std::nullopt;
         }
-
         [[nodiscard]] const VfxGraphProperty* FindProperty(const VfxGraphNode& node, const std::string_view name)
         {
             const auto found = std::ranges::find(node.Properties, name, &VfxGraphProperty::Name);
             return found == node.Properties.end() ? nullptr : std::addressof(*found);
         }
-
         template <typename T> [[nodiscard]] T Property(const VfxGraphNode& node, const std::string_view name)
         {
             const auto* property = FindProperty(node, name);
@@ -52,7 +50,6 @@ namespace Keire::Internal
                 throw std::invalid_argument("VFX operator property '" + std::string(name) + "' is missing or invalid.");
             return std::get<T>(property->Value);
         }
-
         [[nodiscard]] VfxEvaluationDomain DomainForContext(const VfxContextType context) noexcept
         {
             switch (context)
@@ -68,7 +65,6 @@ namespace Keire::Internal
             }
             return VfxEvaluationDomain::PerEffect;
         }
-
         [[nodiscard]] bool IsParticleAttributeOpcode(const VfxValueOpcode opcode) noexcept
         {
             return opcode >= VfxValueOpcode::AttributeAlive && opcode <= VfxValueOpcode::RatioOverStrip;
@@ -1202,10 +1198,9 @@ namespace Keire::Internal
                 return SampleCurlNoise(kind, *coordinate, *frequency, *octaves, *roughness, *lacunarity, *amplitude);
             }
             default:
-                return std::nullopt;
+                return EvaluateVfxExtendedExpression(opcode, inputs, outputType, outputIndex, nullptr);
             }
         }
-
         [[nodiscard]] VfxComparisonCondition ParseComparison(const VfxGraphNode& node)
         {
             const auto value = Property<std::string>(node, "Condition");
@@ -1985,6 +1980,11 @@ namespace Keire::Internal
                         instruction.Opcode,
                         std::span<const VfxParameterValue* const>(inputs.data(), instruction.Inputs.size()),
                         instruction.Type, instruction.ClampRemap, instruction.Comparison, instruction.OutputIndex);
+                    if (!output)
+                        output = EvaluateVfxExtendedExpression(
+                            instruction.Opcode,
+                            std::span<const VfxParameterValue* const>(inputs.data(), instruction.Inputs.size()),
+                            instruction.Type, instruction.OutputIndex, std::addressof(context));
                 }
                 if (!output || !VfxValueMatchesType(instruction.Type, *output) || !IsFiniteVfxValue(*output))
                     return false;

@@ -139,6 +139,10 @@ namespace Keire
 
     KEIRE_API void ValidateAudioMixer(const AudioMixerDefinition& definition);
     [[nodiscard]] KEIRE_API std::vector<AssetId> AudioMixerDependencies(const AudioMixerDefinition& definition);
+    /// Returns a validated copy with one authored snapshot blended over its base values. Boolean targets switch at
+    /// 50%; scalar targets interpolate linearly. The input definition is never mutated.
+    [[nodiscard]] KEIRE_API AudioMixerDefinition BlendAudioMixerSnapshot(const AudioMixerDefinition& definition,
+                                                                         AssetId snapshot, float weight);
 
     class KEIRE_API AudioMixerAsset final : public Asset
     {

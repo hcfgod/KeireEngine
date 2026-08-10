@@ -71,10 +71,8 @@ namespace Keire
                 if (const auto found = m_Cache.find(id); found != m_Cache.end())
                     return found->second;
                 Ref<const Asset> result;
-                if (id == MeshAsset::CubeId())
-                    result = MeshAsset::Cube();
-                else if (id == MeshAsset::ErrorId())
-                    result = MeshAsset::Error();
+                if (auto builtin = MeshAsset::ResolveBuiltin(id))
+                    result = std::move(builtin);
                 else if (const auto type = m_Assets->TryGetType(id))
                 {
                     if (*type == MeshAsset::StaticType())
@@ -588,10 +586,10 @@ namespace Keire
                 StoreLightmapSample(result, pixel, fallback);
 
             Ref<const MeshAsset> mesh;
-            if (!renderer->Mesh() || renderer->Mesh() == MeshAsset::CubeId())
+            if (!renderer->Mesh())
                 mesh = MeshAsset::Cube();
-            else if (renderer->Mesh() == MeshAsset::ErrorId())
-                mesh = MeshAsset::Error();
+            else if (auto builtin = MeshAsset::ResolveBuiltin(renderer->Mesh()))
+                mesh = std::move(builtin);
             else if (resolveAsset)
                 mesh = DynamicRefCast<const MeshAsset>(resolveAsset(renderer->Mesh()));
             if (!mesh || mesh->Indices().size() < 3U)
