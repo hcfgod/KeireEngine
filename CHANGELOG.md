@@ -1,5 +1,8 @@
 # Changelog
 
+- Fixed fresh Ubuntu 22.04 Linux setup selecting the distribution's Clang 14 even though Kéire requires Clang 16.
+  The supported setup and getting-started path now default to the available GCC 12 toolchain, while explicit Clang
+  selection reports how to proceed when configured repositories cannot satisfy the minimum version.
 - Added a distro-aware `Scripts/setup-linux.sh` workstation entry point for `apt`, `dnf`, `pacman`, and `zypper`
   hosts. It composes the authoritative bootstrap and doctor with an optional complete test configuration, documents
   fresh-host prerequisites, Hub/editor packaging, and verified cross-machine preview handoff without changing host

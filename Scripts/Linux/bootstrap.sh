@@ -520,7 +520,12 @@ case "$TOOLSET" in
         ;;
     clang)
         ensure_command clang++ clang
-        check_version Clang "$(clang++ --version | extract_version)" 16
+        clang_version="$(clang++ --version | extract_version)"
+        version_at_least "$clang_version" 16 || {
+            printf 'Clang %s is older than required 16, and the configured repositories did not provide a newer version. ' "$clang_version" >&2
+            printf '%s\n' 'Use --toolset gcc or install Clang 16 or newer.' >&2
+            exit 1
+        }
         if [[ $UPDATE -eq 1 ]] || ! resolve_llvm_tool llvm-profdata >/dev/null 2>&1 || ! resolve_llvm_tool llvm-cov >/dev/null 2>&1; then
             install_logical_packages llvm
         fi

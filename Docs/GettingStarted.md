@@ -85,7 +85,7 @@ mkdir -p ~/src
 cd ~/src
 git clone --recurse-submodules https://github.com/hcfgod/KeireEngine.git
 cd KeireEngine
-bash Scripts/setup-linux.sh --generator ninja --toolset clang --test
+bash Scripts/setup-linux.sh --generator ninja --toolset gcc --test
 ```
 
 `Scripts/setup-linux.sh` reports the detected distribution and package-manager family, invokes the authoritative
@@ -125,23 +125,23 @@ After the Debug test passes, run the optimized and sanitizer gates independently
 configuration:
 
 ```sh
-bash Scripts/setup-linux.sh --generator ninja --toolset clang --test --configuration Release
-bash Scripts/setup-linux.sh --generator ninja --toolset clang --test --configuration DebugASan
+bash Scripts/setup-linux.sh --generator ninja --toolset gcc --test --configuration Release
+bash Scripts/setup-linux.sh --generator ninja --toolset gcc --test --configuration DebugASan
 bash Scripts/Tests/test-unix.sh
 ```
 
 Run these graphical checks from an interactive desktop session:
 
 ```sh
-bash Scripts/project.sh run --generator ninja --configuration Debug --toolset clang --smoke-ui
-bash Scripts/project.sh run --generator ninja --configuration Debug --toolset clang --smoke-project
+bash Scripts/project.sh run --generator ninja --configuration Debug --toolset gcc --smoke-ui
+bash Scripts/project.sh run --generator ninja --configuration Debug --toolset gcc --smoke-project
 ```
 
 Normal `run` opens the Hub. Direct editor launch requires a project:
 
 ```sh
-bash Scripts/project.sh run --generator ninja --configuration Debug --toolset clang
-bash Scripts/project.sh run --generator ninja --configuration Debug --toolset clang \
+bash Scripts/project.sh run --generator ninja --configuration Debug --toolset gcc
+bash Scripts/project.sh run --generator ninja --configuration Debug --toolset gcc \
   --editor --project "$PWD/Samples/KeireSandbox"
 ```
 
@@ -152,10 +152,10 @@ portable archives, while the installer commands create Debian packages under `Ar
 
 ```sh
 git status --short
-bash Scripts/project.sh package-hub --generator ninja --toolset clang
-bash Scripts/project.sh package-editor --generator ninja --toolset clang
-bash Scripts/project.sh package-hub-installer --generator ninja --toolset clang
-bash Scripts/project.sh package-installer --generator ninja --toolset clang
+bash Scripts/project.sh package-hub --generator ninja --toolset gcc
+bash Scripts/project.sh package-editor --generator ninja --toolset gcc
+bash Scripts/project.sh package-hub-installer --generator ninja --toolset gcc
+bash Scripts/project.sh package-installer --generator ninja --toolset gcc
 ls -lh Artifacts/
 ```
 

@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/Scripts/Unix/common.sh"
 
 GENERATOR=ninja
-TOOLSET=clang
+TOOLSET=gcc
 ARCHITECTURE="$(native_architecture)"
 RUN_TEST=0
 CONFIGURATION=Debug
@@ -24,7 +24,7 @@ resolved toolchain, and optionally run the complete selected test configuration.
 
 Options:
   --generator <ninja|gmake>       Build-system generator (default: ninja)
-  --toolset <clang|gcc>           Native compiler toolset (default: clang)
+  --toolset <clang|gcc>           Native compiler toolset (default: gcc)
   --architecture <x86_64|ARM64>   Target architecture (default: native)
   --test                          Run the complete test gate after setup
   --configuration <name>          Test configuration (default: Debug; requires --test)

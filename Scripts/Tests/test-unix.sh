@@ -321,6 +321,8 @@ assert_true test -f "$ROOT/Scripts/setup-linux.sh"
 assert_true bash -n "$ROOT/Scripts/setup-linux.sh"
 assert_true bash -n "$ROOT/Scripts/Tests/test-linux-distros.sh"
 assert_true bash "$ROOT/Scripts/setup-linux.sh" --help
+assert_true grep -F -q 'TOOLSET=gcc' "$ROOT/Scripts/setup-linux.sh"
+assert_true grep -F -q 'Native compiler toolset (default: gcc)' "$ROOT/Scripts/setup-linux.sh"
 assert_true grep -F -q 'for candidate in apt-get dnf pacman zypper' "$ROOT/Scripts/setup-linux.sh"
 assert_true grep -F -q 'bash "$ROOT/Scripts/project.sh" bootstrap' "$ROOT/Scripts/setup-linux.sh"
 assert_true grep -F -q 'bash "$ROOT/Scripts/project.sh" doctor' "$ROOT/Scripts/setup-linux.sh"
