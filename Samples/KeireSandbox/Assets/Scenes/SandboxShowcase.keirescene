@@ -1,0 +1,1329 @@
+{
+  "schemaVersion": 5,
+  "name": "Kéire Sandbox - Materials, Shaders, Scripts, and VFX",
+  "entities": [
+    {
+      "id": "c97c0ce3-0ec2-5b22-a6e3-845d3ee77867",
+      "name": "Material Lab - 12 Shader and Material Graph Pairs",
+      "active": true,
+      "layer": 0,
+      "parent": null,
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "cf8e5526-cd4f-5c76-82f8-bd8d7f04f8ea",
+      "name": "VFX Lab - Production Effects",
+      "active": true,
+      "layer": 0,
+      "parent": null,
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "245d3602-ba1e-55d6-afa0-074c2b9bdb51",
+      "name": "Showcase Camera",
+      "active": true,
+      "layer": 0,
+      "parent": null,
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              0.0,
+              7.25,
+              -23.0
+            ],
+            "rotation": [
+              0.152123,
+              0.0,
+              0.0,
+              0.988362
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        {
+          "type": "4b454952-4543-414d-4552-410000000001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "projection": 0,
+            "clearMode": 0,
+            "primary": true,
+            "priority": 100,
+            "fieldOfView": 56.0,
+            "orthographicSize": 10.0,
+            "nearPlane": 0.05,
+            "farPlane": 1000.0,
+            "clearColor": [
+              0.008,
+              0.012,
+              0.024,
+              1.0
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "d34bafce-f978-530f-9662-8d3dca2b3321",
+      "name": "Key Directional Light",
+      "active": true,
+      "layer": 0,
+      "parent": null,
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              0.0,
+              10.0,
+              -5.0
+            ],
+            "rotation": [
+              0.880651,
+              0.113152,
+              -0.376104,
+              0.264946
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        {
+          "type": "4b454952-4544-4952-4c49-474854000001",
+          "version": 2,
+          "enabled": true,
+          "data": {
+            "bakeMode": 0,
+            "color": [
+              1.0,
+              0.94,
+              0.86,
+              1.0
+            ],
+            "contactShadows": true,
+            "cookie": null,
+            "cookieOffset": [
+              0.0,
+              0.0
+            ],
+            "cookieRotation": 0.0,
+            "cookieScale": [
+              1.0,
+              1.0
+            ],
+            "indirectMultiplier": 1.0,
+            "intensity": 4.0,
+            "shadowBias": 0.035,
+            "shadowResolution": 2,
+            "shadowStrength": 1.0,
+            "shadows": 2,
+            "temperature": 6200.0,
+            "useTemperature": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "bf07fbe9-140f-5f08-a698-428855727be5",
+      "name": "Showcase Plinth",
+      "active": true,
+      "layer": 0,
+      "parent": null,
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              0.0,
+              -0.8,
+              2.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              20.0,
+              0.35,
+              15.0
+            ]
+          }
+        },
+        {
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 3,
+          "enabled": true,
+          "data": {
+            "mesh": "4b454952-4543-5542-454d-455348000001",
+            "material": "6f7bf3a9-8da1-5495-a0d5-f9e1245baf1f",
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "visible": true,
+            "castShadows": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "giReceive": 0,
+            "lightmapScale": 1.0,
+            "preserveLightmapUvs": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "088fbbdf-80b0-5f9e-bfa8-77a35c872ca4",
+      "name": "01 - Foundations",
+      "active": true,
+      "layer": 0,
+      "parent": "c97c0ce3-0ec2-5b22-a6e3-845d3ee77867",
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "0a90e19d-fb7f-5745-8a13-173a4c373433",
+      "name": "02 - Production",
+      "active": true,
+      "layer": 0,
+      "parent": "c97c0ce3-0ec2-5b22-a6e3-845d3ee77867",
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "2c4bf5b7-4d54-5859-af00-e8093c697c0a",
+      "name": "03 - Advanced",
+      "active": true,
+      "layer": 0,
+      "parent": "c97c0ce3-0ec2-5b22-a6e3-845d3ee77867",
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "04f57b33-a773-5d68-98db-d73fe071e312",
+      "name": "01 - Studio Paint",
+      "active": true,
+      "layer": 0,
+      "parent": "088fbbdf-80b0-5f9e-bfa8-77a35c872ca4",
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              -7.5,
+              1.15,
+              -5.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.55,
+              1.55,
+              1.55
+            ]
+          }
+        },
+        {
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 3,
+          "enabled": true,
+          "data": {
+            "mesh": "4b454952-4553-5048-4552-454d45534801",
+            "material": "77c1e51e-6397-5983-b80b-e82587b2edaa",
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "visible": true,
+            "castShadows": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "giReceive": 0,
+            "lightmapScale": 1.0,
+            "preserveLightmapUvs": true
+          }
+        },
+        {
+          "type": "73616e64-626f-4078-8000-000000000060",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "managedState": "{\"fields\":[],\"version\":1}"
+          }
+        }
+      ]
+    },
+    {
+      "id": "79e3dbe3-6b45-5647-bd75-7ce03238cbf6",
+      "name": "02 - Tiled Ceramic",
+      "active": true,
+      "layer": 0,
+      "parent": "088fbbdf-80b0-5f9e-bfa8-77a35c872ca4",
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              -2.5,
+              1.15,
+              -5.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.55,
+              1.55,
+              1.55
+            ]
+          }
+        },
+        {
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 3,
+          "enabled": true,
+          "data": {
+            "mesh": "4b454952-4543-5542-454d-455348000001",
+            "material": "295ace3d-32b9-5c8d-b2d5-f518a4af3f6c",
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "visible": true,
+            "castShadows": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "giReceive": 0,
+            "lightmapScale": 1.0,
+            "preserveLightmapUvs": true
+          }
+        },
+        {
+          "type": "73616e64-626f-4078-8000-000000000060",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "managedState": "{\"fields\":[],\"version\":1}"
+          }
+        }
+      ]
+    },
+    {
+      "id": "4ea79b42-a46e-592f-a51e-d4be8e6c707a",
+      "name": "03 - Neon Pulse",
+      "active": true,
+      "layer": 0,
+      "parent": "088fbbdf-80b0-5f9e-bfa8-77a35c872ca4",
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              2.5,
+              1.15,
+              -5.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.55,
+              1.55,
+              1.55
+            ]
+          }
+        },
+        {
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 3,
+          "enabled": true,
+          "data": {
+            "mesh": "4b454952-4554-4f52-5553-4d4553480001",
+            "material": "8b3aebee-37f7-5e6d-a096-617a4893e5b9",
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "visible": true,
+            "castShadows": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "giReceive": 0,
+            "lightmapScale": 1.0,
+            "preserveLightmapUvs": true
+          }
+        },
+        {
+          "type": "73616e64-626f-4078-8000-000000000060",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "managedState": "{\"fields\":[],\"version\":1}"
+          }
+        }
+      ]
+    },
+    {
+      "id": "4b8d1d0b-7797-582d-82fb-2c4c04211f13",
+      "name": "04 - Procedural Cutout",
+      "active": true,
+      "layer": 0,
+      "parent": "088fbbdf-80b0-5f9e-bfa8-77a35c872ca4",
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              7.5,
+              1.15,
+              -5.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.55,
+              1.55,
+              1.55
+            ]
+          }
+        },
+        {
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 3,
+          "enabled": true,
+          "data": {
+            "mesh": "4b454952-4543-594c-494e-4445524d5301",
+            "material": "0e47b16e-4304-5c11-a66c-c716daf7f6be",
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "visible": true,
+            "castShadows": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "giReceive": 0,
+            "lightmapScale": 1.0,
+            "preserveLightmapUvs": true
+          }
+        },
+        {
+          "type": "73616e64-626f-4078-8000-000000000060",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "managedState": "{\"fields\":[],\"version\":1}"
+          }
+        }
+      ]
+    },
+    {
+      "id": "f3e6d0db-27fd-52ed-9968-9ab138127fb7",
+      "name": "05 - Automotive Clear Coat",
+      "active": true,
+      "layer": 0,
+      "parent": "0a90e19d-fb7f-5745-8a13-173a4c373433",
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              -7.5,
+              1.15,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.55,
+              1.55,
+              1.55
+            ]
+          }
+        },
+        {
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 3,
+          "enabled": true,
+          "data": {
+            "mesh": "4b454952-4543-4150-5355-4c454d455301",
+            "material": "78b21fbf-d81b-511f-9d6e-78df263d3652",
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "visible": true,
+            "castShadows": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "giReceive": 0,
+            "lightmapScale": 1.0,
+            "preserveLightmapUvs": true
+          }
+        },
+        {
+          "type": "73616e64-626f-4078-8000-000000000060",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "managedState": "{\"fields\":[],\"version\":1}"
+          }
+        }
+      ]
+    },
+    {
+      "id": "f201dd55-cfa2-5374-b51a-7b98f123d919",
+      "name": "06 - Brushed Alloy",
+      "active": true,
+      "layer": 0,
+      "parent": "0a90e19d-fb7f-5745-8a13-173a4c373433",
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              -2.5,
+              1.15,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.55,
+              1.55,
+              1.55
+            ]
+          }
+        },
+        {
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 3,
+          "enabled": true,
+          "data": {
+            "mesh": "4b454952-4553-5048-4552-454d45534801",
+            "material": "3e20c25e-1348-5f09-acf2-f7fef06ca51f",
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "visible": true,
+            "castShadows": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "giReceive": 0,
+            "lightmapScale": 1.0,
+            "preserveLightmapUvs": true
+          }
+        },
+        {
+          "type": "73616e64-626f-4078-8000-000000000060",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "managedState": "{\"fields\":[],\"version\":1}"
+          }
+        }
+      ]
+    },
+    {
+      "id": "d04603ff-563e-5366-be54-4971d0dd1471",
+      "name": "07 - Frosted Glass",
+      "active": true,
+      "layer": 0,
+      "parent": "0a90e19d-fb7f-5745-8a13-173a4c373433",
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              2.5,
+              1.15,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.55,
+              1.55,
+              1.55
+            ]
+          }
+        },
+        {
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 3,
+          "enabled": true,
+          "data": {
+            "mesh": "4b454952-4543-5542-454d-455348000001",
+            "material": "5dd2203b-4b66-53d7-a2bc-6208cd7c24c0",
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "visible": true,
+            "castShadows": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "giReceive": 0,
+            "lightmapScale": 1.0,
+            "preserveLightmapUvs": true
+          }
+        },
+        {
+          "type": "73616e64-626f-4078-8000-000000000060",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "managedState": "{\"fields\":[],\"version\":1}"
+          }
+        }
+      ]
+    },
+    {
+      "id": "1c585b46-96f9-51c5-aa2c-13922d0e3435",
+      "name": "08 - World-Aligned Stone",
+      "active": true,
+      "layer": 0,
+      "parent": "0a90e19d-fb7f-5745-8a13-173a4c373433",
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              7.5,
+              1.15,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.55,
+              1.55,
+              1.55
+            ]
+          }
+        },
+        {
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 3,
+          "enabled": true,
+          "data": {
+            "mesh": "4b454952-4554-4f52-5553-4d4553480001",
+            "material": "fd8d1359-edbc-50a0-bfca-260b1686062b",
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "visible": true,
+            "castShadows": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "giReceive": 0,
+            "lightmapScale": 1.0,
+            "preserveLightmapUvs": true
+          }
+        },
+        {
+          "type": "73616e64-626f-4078-8000-000000000060",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "managedState": "{\"fields\":[],\"version\":1}"
+          }
+        }
+      ]
+    },
+    {
+      "id": "d2184f09-2347-5f8b-ace1-3e323f0a7873",
+      "name": "09 - Energy Dissolve",
+      "active": true,
+      "layer": 0,
+      "parent": "2c4bf5b7-4d54-5859-af00-e8093c697c0a",
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              -7.5,
+              1.15,
+              5.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.55,
+              1.55,
+              1.55
+            ]
+          }
+        },
+        {
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 3,
+          "enabled": true,
+          "data": {
+            "mesh": "4b454952-4543-594c-494e-4445524d5301",
+            "material": "ef1d0b19-beeb-5073-85cb-2183b5681437",
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "visible": true,
+            "castShadows": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "giReceive": 0,
+            "lightmapScale": 1.0,
+            "preserveLightmapUvs": true
+          }
+        },
+        {
+          "type": "73616e64-626f-4078-8000-000000000060",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "managedState": "{\"fields\":[],\"version\":1}"
+          }
+        }
+      ]
+    },
+    {
+      "id": "7b9d9e07-0ae9-5611-9d92-38c249750c9b",
+      "name": "10 - Hologram Scanlines",
+      "active": true,
+      "layer": 0,
+      "parent": "2c4bf5b7-4d54-5859-af00-e8093c697c0a",
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              -2.5,
+              1.15,
+              5.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.55,
+              1.55,
+              1.55
+            ]
+          }
+        },
+        {
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 3,
+          "enabled": true,
+          "data": {
+            "mesh": "4b454952-4543-4150-5355-4c454d455301",
+            "material": "f6d03ea8-c948-527b-a601-a0794fa938c7",
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "visible": true,
+            "castShadows": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "giReceive": 0,
+            "lightmapScale": 1.0,
+            "preserveLightmapUvs": true
+          }
+        },
+        {
+          "type": "73616e64-626f-4078-8000-000000000060",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "managedState": "{\"fields\":[],\"version\":1}"
+          }
+        }
+      ]
+    },
+    {
+      "id": "023fa9f9-0b98-5e40-9a3f-b069e6a0fd1a",
+      "name": "11 - Vertex Wave",
+      "active": true,
+      "layer": 0,
+      "parent": "2c4bf5b7-4d54-5859-af00-e8093c697c0a",
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              2.5,
+              1.15,
+              5.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.55,
+              1.55,
+              1.55
+            ]
+          }
+        },
+        {
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 3,
+          "enabled": true,
+          "data": {
+            "mesh": "4b454952-4553-5048-4552-454d45534801",
+            "material": "c216fa42-86b0-568a-b021-f84dfad59a94",
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "visible": true,
+            "castShadows": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "giReceive": 0,
+            "lightmapScale": 1.0,
+            "preserveLightmapUvs": true
+          }
+        },
+        {
+          "type": "73616e64-626f-4078-8000-000000000060",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "managedState": "{\"fields\":[],\"version\":1}"
+          }
+        }
+      ]
+    },
+    {
+      "id": "59775347-e597-5838-aece-8fec14add178",
+      "name": "12 - Iridescent Shield",
+      "active": true,
+      "layer": 0,
+      "parent": "2c4bf5b7-4d54-5859-af00-e8093c697c0a",
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              7.5,
+              1.15,
+              5.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.55,
+              1.55,
+              1.55
+            ]
+          }
+        },
+        {
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 3,
+          "enabled": true,
+          "data": {
+            "mesh": "4b454952-4543-5542-454d-455348000001",
+            "material": "ccdad064-d9e2-5862-9fac-ff9763c347ac",
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "visible": true,
+            "castShadows": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "giReceive": 0,
+            "lightmapScale": 1.0,
+            "preserveLightmapUvs": true
+          }
+        },
+        {
+          "type": "73616e64-626f-4078-8000-000000000060",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "managedState": "{\"fields\":[],\"version\":1}"
+          }
+        }
+      ]
+    },
+    {
+      "id": "50e307af-cab7-531b-934a-cc0c896e3bce",
+      "name": "VFX 01 - Arcane Nova",
+      "active": true,
+      "layer": 0,
+      "parent": "cf8e5526-cd4f-5c76-82f8-bd8d7f04f8ea",
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              -7.5,
+              1.2,
+              10.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        {
+          "type": "4b454952-4556-4658-454d-495454455201",
+          "version": 2,
+          "enabled": true,
+          "data": {
+            "autoDestroy": false,
+            "boundsCenter": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "boundsExtent": [
+              5.0,
+              5.0,
+              5.0
+            ],
+            "culling": 0,
+            "editModePreview": true,
+            "effect": "b8da08ac-aa68-44a9-859d-6d36e96f58b2",
+            "parameterOverrides": "[]",
+            "playOnAwake": true,
+            "quality": 2,
+            "seedOffset": 1000,
+            "simulationSpeed": 1.0
+          }
+        }
+      ]
+    },
+    {
+      "id": "83058bd3-cb4e-5ab2-964d-a2c1e3845bc5",
+      "name": "VFX 02 - Arcane Sigil Orbit",
+      "active": true,
+      "layer": 0,
+      "parent": "cf8e5526-cd4f-5c76-82f8-bd8d7f04f8ea",
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              -2.5,
+              1.2,
+              10.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        {
+          "type": "4b454952-4556-4658-454d-495454455201",
+          "version": 2,
+          "enabled": true,
+          "data": {
+            "autoDestroy": false,
+            "boundsCenter": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "boundsExtent": [
+              5.0,
+              5.0,
+              5.0
+            ],
+            "culling": 0,
+            "editModePreview": true,
+            "effect": "c27fbc8b-ef96-40ad-a5bc-30c688438f3c",
+            "parameterOverrides": "[]",
+            "playOnAwake": true,
+            "quality": 2,
+            "seedOffset": 8919,
+            "simulationSpeed": 1.0
+          }
+        }
+      ]
+    },
+    {
+      "id": "13c77609-337e-59fa-928c-573e12475b40",
+      "name": "VFX 03 - Ember Shard Cyclone",
+      "active": true,
+      "layer": 0,
+      "parent": "cf8e5526-cd4f-5c76-82f8-bd8d7f04f8ea",
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              2.5,
+              1.2,
+              10.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        {
+          "type": "4b454952-4556-4658-454d-495454455201",
+          "version": 2,
+          "enabled": true,
+          "data": {
+            "autoDestroy": false,
+            "boundsCenter": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "boundsExtent": [
+              5.0,
+              5.0,
+              5.0
+            ],
+            "culling": 0,
+            "editModePreview": true,
+            "effect": "2cd9a41b-120c-4bbc-988d-3d719fc4d264",
+            "parameterOverrides": "[]",
+            "playOnAwake": true,
+            "quality": 2,
+            "seedOffset": 16838,
+            "simulationSpeed": 1.0
+          }
+        }
+      ]
+    },
+    {
+      "id": "15c29c94-a522-57f0-923f-6d65c2dbbb6a",
+      "name": "VFX 04 - Forge Sparks",
+      "active": true,
+      "layer": 0,
+      "parent": "cf8e5526-cd4f-5c76-82f8-bd8d7f04f8ea",
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [
+              7.5,
+              1.2,
+              10.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        {
+          "type": "4b454952-4556-4658-454d-495454455201",
+          "version": 2,
+          "enabled": true,
+          "data": {
+            "autoDestroy": false,
+            "boundsCenter": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "boundsExtent": [
+              5.0,
+              5.0,
+              5.0
+            ],
+            "culling": 0,
+            "editModePreview": true,
+            "effect": "6f17db40-57f3-4e48-9d54-a4a69b1d7c01",
+            "parameterOverrides": "[]",
+            "playOnAwake": true,
+            "quality": 2,
+            "seedOffset": 24757,
+            "simulationSpeed": 1.0
+          }
+        }
+      ]
+    }
+  ],
+  "prefabInstances": [],
+  "prefabOverrides": [],
+  "lighting": {
+    "backend": 0,
+    "bakeAmbientOcclusion": true,
+    "denoise": true,
+    "indirectBounceCount": 2,
+    "lightmapResolution": 1024,
+    "maximumLightmapResolution": 4096,
+    "paddingTexels": 4,
+    "quality": 1,
+    "samplesPerTexel": 64,
+    "texelsPerUnit": 32
+  },
+  "bakedLighting": null
+}

@@ -200,20 +200,22 @@ closure, so a material cannot package without its selected graph, generated shad
 
 ## Examples And Validation
 
-Nine progressive Shader Graph/Material Graph pairs live in
-`Samples/KeireSandbox/Assets/Materials/MaterialGraphs`. Each example has a `*_Shader.keireshadergraph` shader and a
-same-numbered `.keirematerialgraph` material binding. They cover basic paint, textured and normal-mapped surfaces,
-procedural emission, clear coat, adaptive keyword variants, anisotropy, transmission, vertex displacement, and layered
-holographic shading. Basic Paint and Holographic Voronoi are authored as schema-3 Material Graph surface networks to
-demonstrate the same workflow at introductory and advanced complexity; the other pairs intentionally remain readable
-schema-2 upgrade fixtures.
+Twelve progressive Shader Graph/Material Graph pairs live in
+`Samples/KeireSandbox/Assets/Examples/MaterialLab`, with separate `ShaderGraphs` and `MaterialGraphs` trees organized
+into Foundations, Production, and Advanced tiers. The examples cover studio paint, tiled textures, animated emission,
+procedural cutout, clear coat, anisotropy, transmission and refraction, world-aligned texturing, dissolve, holographic
+scanlines, vertex displacement, and iridescent Fresnel shading. Every Shader Graph defines a reusable shader contract;
+its paired schema-3 Material Graph selects that contract, binds every exposed input, and owns a complete surface
+expression network.
 
-`Assets/Scenes/ShaderMaterialShowcase.keirescene` presents all nine pairs on production renderer primitives, ordered
-from basic through advanced, with an active camera, lighting, and a staged gallery floor. It is the canonical Sandbox
-startup scene and the startup scene for projects created from the packaged Sandbox template.
+`Assets/Scenes/SandboxShowcase.keirescene` presents all twelve pairs on production renderer primitives with an active
+camera, lighting, a staged gallery floor, managed presentation behavior, and four edit-mode VFX examples. It is the
+canonical Sandbox startup scene and the startup scene for projects created from the packaged Sandbox template. The
+broader `SampleScene.keirescene` remains available for gameplay, input, physics, UI, audio, and animation workflows.
 
 Engine tests cover deterministic encoding, graph compilation, templates, variants, Direct Materials, visual Material
 Graph topology and schema upgrades, Material Instance ancestry, importer output, and transactional migration. Editor
-tests cover separate Shader and Material Graph documents, reflected pins, connection undo/redo, publication, and custom
-Shader Graph references. Render tests keep generated output on the production graphics path rather than validating
+tests cover separate Shader and Material Graph documents, reflected pins, connection undo/redo, publication, custom
+Shader Graph references, the full twelve-example compiler progression, scene bindings, scripts, VFX staging, and
+canonical/template parity. Render tests keep generated output on the production graphics path rather than validating
 screenshots alone.

@@ -1,0 +1,582 @@
+{
+  "schemaVersion": 3,
+  "purpose": 0,
+  "output": 3,
+  "nodes": [
+    {
+      "id": "a60f7bec-96d4-500d-b9a2-bd9da3c541de",
+      "typeId": "keire.output.material",
+      "kind": 0,
+      "name": "Unlit Shader Output",
+      "position": [
+        1280.0,
+        160.0
+      ],
+      "valueType": 4,
+      "value": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "textureSemantic": 0,
+      "symbol": "",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "",
+        "category": "",
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "id": "0a6464eb-d08b-54d2-ba34-74611068cbb3",
+          "name": "Color",
+          "type": 4,
+          "direction": 0,
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "id": "a38dbd94-ef5c-5b4c-b263-3b26da8d07ca",
+          "name": "Emission",
+          "type": 4,
+          "direction": 0,
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "id": "739619f2-3d49-50d2-96d7-811cd467b3f2",
+          "name": "Opacity",
+          "type": 0,
+          "direction": 0,
+          "default": 1.0
+        },
+        {
+          "id": "cabe5717-8c42-5a22-9db6-d5be292590fe",
+          "name": "WorldPositionOffset",
+          "type": 2,
+          "direction": 0,
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "id": "93af7897-7eb7-5c66-bd08-53c454a768b6",
+          "name": "PixelDepthOffset",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        }
+      ]
+    },
+    {
+      "id": "ff16246c-0432-5c64-8bae-e2ac9cd6c0a8",
+      "typeId": "keire.input.parameter",
+      "kind": 1,
+      "name": "Base Tint",
+      "position": [
+        40.0,
+        60.0
+      ],
+      "valueType": 4,
+      "value": [
+        0.01,
+        0.03,
+        0.08,
+        1.0
+      ],
+      "textureSemantic": 0,
+      "symbol": "BaseTint",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "Base Tint for the NeonPulse example.",
+        "category": "Surface",
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "id": "bf25191f-7f60-5ccd-9998-d26300f03491",
+          "name": "Value",
+          "type": 4,
+          "direction": 1,
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "id": "6144746d-1d7d-537f-ab87-aca51c97cf1a",
+      "typeId": "keire.input.parameter",
+      "kind": 1,
+      "name": "Emission Color",
+      "position": [
+        40.0,
+        200.0
+      ],
+      "valueType": 4,
+      "value": [
+        0.05,
+        0.65,
+        1.0,
+        1.0
+      ],
+      "textureSemantic": 0,
+      "symbol": "EmissionColor",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "Emission Color for the NeonPulse example.",
+        "category": "Emission",
+        "sortPriority": 1
+      },
+      "pins": [
+        {
+          "id": "390ca29d-1076-524b-8512-18bd9c5f341b",
+          "name": "Value",
+          "type": 4,
+          "direction": 1,
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "id": "d3f0cfbb-3736-5604-b9c6-707193ce0002",
+      "typeId": "keire.input.parameter",
+      "kind": 1,
+      "name": "Pulse Speed",
+      "position": [
+        40.0,
+        340.0
+      ],
+      "valueType": 0,
+      "value": 2.4,
+      "textureSemantic": 0,
+      "symbol": "PulseSpeed",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "Pulse Speed for the NeonPulse example.",
+        "category": "Animation",
+        "sortPriority": 2,
+        "minimum": 0.0,
+        "maximum": 10.0,
+        "step": 0.05
+      },
+      "pins": [
+        {
+          "id": "ea13a387-2295-5798-bfe3-8fae2f2c45c3",
+          "name": "Value",
+          "type": 0,
+          "direction": 1,
+          "default": 0.0
+        }
+      ]
+    },
+    {
+      "id": "96a07c35-d851-5bca-a2af-04b867e5eac8",
+      "typeId": "keire.input.time",
+      "kind": 65,
+      "name": "Time",
+      "position": [
+        360.0,
+        280.0
+      ],
+      "valueType": 0,
+      "value": 0.0,
+      "textureSemantic": 0,
+      "symbol": "",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "",
+        "category": "",
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "id": "218b7a5b-cb33-5e29-b344-c5441f7192f7",
+          "name": "Seconds",
+          "type": 0,
+          "direction": 1,
+          "default": 0.0
+        }
+      ]
+    },
+    {
+      "id": "e94d479e-00e7-57f7-bec2-a3fd8fcb0565",
+      "typeId": "keire.math.multiply",
+      "kind": 10,
+      "name": "Multiply",
+      "position": [
+        580.0,
+        280.0
+      ],
+      "valueType": 0,
+      "value": 0.0,
+      "textureSemantic": 0,
+      "symbol": "",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "",
+        "category": "",
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "id": "5aca8847-9dba-5e34-a399-d52fcbed3ce0",
+          "name": "A",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "fa0e91b2-8717-5a31-aa15-e657673c8904",
+          "name": "B",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "3c4c166e-33a3-5e9f-8a23-cf078a6cfd48",
+          "name": "Result",
+          "type": 0,
+          "direction": 1,
+          "default": 0.0
+        }
+      ]
+    },
+    {
+      "id": "ef64c593-f8c8-567d-9eba-e6d47cc6ffff",
+      "typeId": "keire.math.sine",
+      "kind": 26,
+      "name": "Sine",
+      "position": [
+        800.0,
+        280.0
+      ],
+      "valueType": 0,
+      "value": 0.0,
+      "textureSemantic": 0,
+      "symbol": "",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "",
+        "category": "",
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "id": "ef5b36c9-1d09-5190-b1e1-0346fe0a382f",
+          "name": "Value",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "e45d579c-7f2f-5729-a57c-bd24468757e9",
+          "name": "Result",
+          "type": 0,
+          "direction": 1,
+          "default": 0.0
+        }
+      ]
+    },
+    {
+      "id": "62e355ec-8d4f-523a-b5ff-2efdbecc9ec4",
+      "typeId": "keire.math.multiply",
+      "kind": 10,
+      "name": "Multiply",
+      "position": [
+        1020.0,
+        280.0
+      ],
+      "valueType": 0,
+      "value": 0.0,
+      "textureSemantic": 0,
+      "symbol": "",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "",
+        "category": "",
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "id": "c4d2ce66-00d9-5c68-9bdf-c1c52b67825a",
+          "name": "A",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "29e2284e-af87-517f-b4b1-71a85504cc20",
+          "name": "B",
+          "type": 0,
+          "direction": 0,
+          "default": 0.5
+        },
+        {
+          "id": "8ff2c0ed-2317-521e-bc29-e55cdecdd80c",
+          "name": "Result",
+          "type": 0,
+          "direction": 1,
+          "default": 0.0
+        }
+      ]
+    },
+    {
+      "id": "199a14cb-97df-5547-81b4-ac581c9f1925",
+      "typeId": "keire.math.add",
+      "kind": 9,
+      "name": "Add",
+      "position": [
+        1220.0,
+        280.0
+      ],
+      "valueType": 0,
+      "value": 0.0,
+      "textureSemantic": 0,
+      "symbol": "",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "",
+        "category": "",
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "id": "205f41bd-3574-575e-adb2-6f12aa13d4ca",
+          "name": "A",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "c26c80ba-74bf-5744-bfa5-d46da530a79b",
+          "name": "B",
+          "type": 0,
+          "direction": 0,
+          "default": 0.5
+        },
+        {
+          "id": "32ac662f-2fb6-5bfc-b87a-f1450345561a",
+          "name": "Result",
+          "type": 0,
+          "direction": 1,
+          "default": 0.0
+        }
+      ]
+    },
+    {
+      "id": "32072956-74ae-5d8f-8bf0-7214248fba56",
+      "typeId": "keire.math.lerp",
+      "kind": 11,
+      "name": "Lerp",
+      "position": [
+        1220.0,
+        60.0
+      ],
+      "valueType": 4,
+      "value": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "textureSemantic": 0,
+      "symbol": "",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "",
+        "category": "",
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "id": "d5b9f2ed-2223-5b7e-89e2-f8afe69f95e2",
+          "name": "A",
+          "type": 4,
+          "direction": 0,
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "id": "6e03b69c-a0be-5e2d-b224-e0e291d24250",
+          "name": "B",
+          "type": 4,
+          "direction": 0,
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "id": "41332cd6-af76-5331-b2fa-33c8a48308ad",
+          "name": "T",
+          "type": 0,
+          "direction": 0,
+          "default": 0.5
+        },
+        {
+          "id": "f3d71b74-93c9-5911-af8a-6dd889ef65db",
+          "name": "Result",
+          "type": 4,
+          "direction": 1,
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "336d09c2-82ec-5b25-825e-ec3e96ef31b2",
+      "output": [
+        "96a07c35-d851-5bca-a2af-04b867e5eac8",
+        "218b7a5b-cb33-5e29-b344-c5441f7192f7"
+      ],
+      "input": [
+        "e94d479e-00e7-57f7-bec2-a3fd8fcb0565",
+        "5aca8847-9dba-5e34-a399-d52fcbed3ce0"
+      ]
+    },
+    {
+      "id": "8df0af1e-98c7-5ac6-83e1-41890572a37a",
+      "output": [
+        "d3f0cfbb-3736-5604-b9c6-707193ce0002",
+        "ea13a387-2295-5798-bfe3-8fae2f2c45c3"
+      ],
+      "input": [
+        "e94d479e-00e7-57f7-bec2-a3fd8fcb0565",
+        "fa0e91b2-8717-5a31-aa15-e657673c8904"
+      ]
+    },
+    {
+      "id": "a5804e57-cfb3-5f47-8fa6-da9ae543bf39",
+      "output": [
+        "e94d479e-00e7-57f7-bec2-a3fd8fcb0565",
+        "3c4c166e-33a3-5e9f-8a23-cf078a6cfd48"
+      ],
+      "input": [
+        "ef64c593-f8c8-567d-9eba-e6d47cc6ffff",
+        "ef5b36c9-1d09-5190-b1e1-0346fe0a382f"
+      ]
+    },
+    {
+      "id": "d9bfd5c5-4fba-5753-a25b-96415744ffe6",
+      "output": [
+        "ef64c593-f8c8-567d-9eba-e6d47cc6ffff",
+        "e45d579c-7f2f-5729-a57c-bd24468757e9"
+      ],
+      "input": [
+        "62e355ec-8d4f-523a-b5ff-2efdbecc9ec4",
+        "c4d2ce66-00d9-5c68-9bdf-c1c52b67825a"
+      ]
+    },
+    {
+      "id": "1767b428-4fff-5883-b257-070dbabb8386",
+      "output": [
+        "62e355ec-8d4f-523a-b5ff-2efdbecc9ec4",
+        "8ff2c0ed-2317-521e-bc29-e55cdecdd80c"
+      ],
+      "input": [
+        "199a14cb-97df-5547-81b4-ac581c9f1925",
+        "205f41bd-3574-575e-adb2-6f12aa13d4ca"
+      ]
+    },
+    {
+      "id": "96c95812-a636-5a3d-ad8c-5133a0f47ec3",
+      "output": [
+        "6144746d-1d7d-537f-ab87-aca51c97cf1a",
+        "390ca29d-1076-524b-8512-18bd9c5f341b"
+      ],
+      "input": [
+        "32072956-74ae-5d8f-8bf0-7214248fba56",
+        "6e03b69c-a0be-5e2d-b224-e0e291d24250"
+      ]
+    },
+    {
+      "id": "2b75af13-beaf-54fc-a234-7d2a2a96bfcd",
+      "output": [
+        "199a14cb-97df-5547-81b4-ac581c9f1925",
+        "32ac662f-2fb6-5bfc-b87a-f1450345561a"
+      ],
+      "input": [
+        "32072956-74ae-5d8f-8bf0-7214248fba56",
+        "41332cd6-af76-5331-b2fa-33c8a48308ad"
+      ]
+    },
+    {
+      "id": "306a00e5-2d2c-5d93-b68f-da75e8ab8557",
+      "output": [
+        "ff16246c-0432-5c64-8bae-e2ac9cd6c0a8",
+        "bf25191f-7f60-5ccd-9998-d26300f03491"
+      ],
+      "input": [
+        "a60f7bec-96d4-500d-b9a2-bd9da3c541de",
+        "0a6464eb-d08b-54d2-ba34-74611068cbb3"
+      ]
+    },
+    {
+      "id": "5885236c-64a3-56b1-b04b-057a888dbbe1",
+      "output": [
+        "32072956-74ae-5d8f-8bf0-7214248fba56",
+        "f3d71b74-93c9-5911-af8a-6dd889ef65db"
+      ],
+      "input": [
+        "a60f7bec-96d4-500d-b9a2-bd9da3c541de",
+        "a38dbd94-ef5c-5b4c-b263-3b26da8d07ca"
+      ]
+    }
+  ],
+  "keywords": [],
+  "includeRoots": [
+    "Assets"
+  ]
+}

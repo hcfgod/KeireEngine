@@ -1,0 +1,14 @@
+{
+  "dependencies": [
+    "2875c4c4-ce0a-507b-87df-7f149d1458b0"
+  ],
+  "id": "0509202b-f162-5a8f-aa3d-8016018b4136",
+  "importer": "Keire.MaterialGraph",
+  "importerVersion": 4,
+  "schemaVersion": 1,
+  "subAssets": [
+    "646fa8c9-181e-5df6-9fca-9f6ed718e60b",
+    "fd8d1359-edbc-50a0-bfca-260b1686062b"
+  ],
+  "type": "4b454952-454d-4752-4150-480000000001"
+}

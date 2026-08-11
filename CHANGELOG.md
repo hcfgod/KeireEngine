@@ -1,5 +1,10 @@
 # Changelog
 
+- Rebuilt the canonical and packaged Sandbox around a clean Material Lab with twelve separately organized Shader Graph
+  and Material Graph pairs spanning foundations, production surfaces, and advanced animated rendering. The new startup
+  gallery validates every material binding, adds reusable managed presentation behavior and four edit-mode VFX
+  displays, removes the obsolete nine-example set and stale generated shaders, and ships through deterministic sample
+  generation and template-parity checks.
 - Promoted the Kéire Editor and Project Hub product line to 0.3.0 for the Unreal-inspired Material Ecosystem milestone.
   The signed distribution remains side-by-side and immutable: 0.1.0 and 0.2.0 stay independently installable while
   0.3.0 becomes the minimum editor for the upgraded Sandbox material and shader authoring examples.

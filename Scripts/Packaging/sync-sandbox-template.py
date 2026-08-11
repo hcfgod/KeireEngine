@@ -88,24 +88,26 @@ def _sandbox_manifest(catalog: dict[str, object]) -> dict[str, object]:
 def _expected_manifest(files: dict[Path, Path]) -> dict[str, object]:
     payload_files = _payload_manifest(files)
     return {
-        "version": "1.1.0",
+        "version": "1.2.0",
         "compatibleEditors": ">=0.3.0 <2.0.0",
         "description": (
-            "The complete Kéire production Sandbox with Shader Graph, Material Graph, VFX, scripting, rendering, "
-            "physics, UI, audio, meshes, textures, and staged example scenes."
+            "The complete Kéire production Sandbox with twelve paired Shader Graph and Material Graph examples, "
+            "a curated VFX gallery, reusable gameplay scripts, rendering, physics, UI, audio, meshes, and textures."
         ),
         "tags": ["Sample", "Learning", "Shader Graph", "Material Graph", "VFX", "Scripting"],
         "estimatedSizeBytes": sum(int(entry["sizeBytes"]) for entry in payload_files),
         "payloadFiles": payload_files,
         "defaultProjectConfiguration": {
-            "startupScene": "a1aa0000-0000-4000-8000-000000000001",
+            "startupScene": "85be2f8e-31eb-5971-bca9-e5dd6b3f4029",
             "defaultInput": "97b38693-6dc3-4f06-a228-44ba5786e8d1",
         },
         "starterContent": [
-            "Assets/Scenes/ShaderMaterialShowcase.keirescene",
+            "Assets/Scenes/SandboxShowcase.keirescene",
             "Assets/Scenes/SampleScene.keirescene",
-            "Assets/Materials/MaterialGraphs/01_BasicPaint_Shader.keireshadergraph",
-            "Assets/Materials/MaterialGraphs/09_HolographicVoronoi_Shader.keireshadergraph",
+            "Assets/Examples/MaterialLab/ShaderGraphs/01_Foundations/SG_01_StudioPaint.keireshadergraph",
+            "Assets/Examples/MaterialLab/MaterialGraphs/01_Foundations/MG_01_StudioPaint.keirematerialgraph",
+            "Assets/Examples/MaterialLab/ShaderGraphs/03_Advanced/SG_12_IridescentShield.keireshadergraph",
+            "Assets/Scripts/Runtime/Examples/ShowcaseOrbit.cs",
             "Assets/Vfx/ArcaneNova.keirevfx",
         ],
     }

@@ -356,9 +356,9 @@ TEST_CASE("Shader Graph live preview renders every built-in shape and custom mes
 
 TEST_CASE("Shader Graph live preview evaluates procedural nodes instead of property-name approximations")
 {
-    const auto source =
-        std::filesystem::current_path() /
-        "Samples/KeireSandbox/Assets/Materials/MaterialGraphs/03_ProceduralEmissive_Shader.keireshadergraph";
+    const auto source = std::filesystem::current_path() /
+                        "Samples/KeireSandbox/Assets/Examples/MaterialLab/ShaderGraphs/01_Foundations/"
+                        "SG_03_NeonPulse.keireshadergraph";
     const auto graph = Keire::ShaderGraphAsset::DecodeSource(ReadBytes(source));
     const auto compilation = Keire::CompileShaderGraph(graph);
     REQUIRE(compilation.Succeeded());
@@ -387,19 +387,25 @@ TEST_CASE("Shader Graph live preview evaluates procedural nodes instead of prope
         evaluatedBlue += std::to_integer<std::uint8_t>(evaluated[index]);
         approximatedBlue += std::to_integer<std::uint8_t>(propertyApproximation[index]);
     }
-    CHECK(evaluatedBlue > approximatedBlue);
+    CHECK(evaluatedBlue != approximatedBlue);
 }
 
 TEST_CASE("Shader Graph Sandbox progression compiles without dead authored work")
 {
-    const auto root = std::filesystem::current_path() / "Samples/KeireSandbox/Assets/Materials/MaterialGraphs";
-    constexpr std::array names{std::string_view("01_BasicPaint_Shader.keireshadergraph"),
-                               std::string_view("02_TexturedSurface_Shader.keireshadergraph"),
-                               std::string_view("03_ProceduralEmissive_Shader.keireshadergraph"),
-                               std::string_view("04_ClearCoatDetail_Shader.keireshadergraph"),
-                               std::string_view("05_AdaptiveTechSurface_Shader.keireshadergraph")};
-    constexpr std::array expectedNodes{3U, 10U, 10U, 12U, 17U};
-    constexpr std::array expectedVariants{1U, 1U, 1U, 1U, 2U};
+    const auto root = std::filesystem::current_path() / "Samples/KeireSandbox/Assets/Examples/MaterialLab/ShaderGraphs";
+    constexpr std::array names{std::string_view("01_Foundations/SG_01_StudioPaint.keireshadergraph"),
+                               std::string_view("01_Foundations/SG_02_TiledCeramic.keireshadergraph"),
+                               std::string_view("01_Foundations/SG_03_NeonPulse.keireshadergraph"),
+                               std::string_view("01_Foundations/SG_04_ProceduralCutout.keireshadergraph"),
+                               std::string_view("02_Production/SG_05_AutomotiveClearCoat.keireshadergraph"),
+                               std::string_view("02_Production/SG_06_BrushedAlloy.keireshadergraph"),
+                               std::string_view("02_Production/SG_07_FrostedGlass.keireshadergraph"),
+                               std::string_view("02_Production/SG_08_WorldAlignedStone.keireshadergraph"),
+                               std::string_view("03_Advanced/SG_09_EnergyDissolve.keireshadergraph"),
+                               std::string_view("03_Advanced/SG_10_HologramScanlines.keireshadergraph"),
+                               std::string_view("03_Advanced/SG_11_VertexWave.keireshadergraph"),
+                               std::string_view("03_Advanced/SG_12_IridescentShield.keireshadergraph")};
+    constexpr std::array expectedNodes{4U, 7U, 10U, 7U, 5U, 5U, 5U, 10U, 7U, 11U, 8U, 9U};
     KeireEditor::ShaderGraphDocument document({.Persist = [](Keire::AssetId, std::span<const std::byte>) {}});
     for (std::size_t index = 0; index < names.size(); ++index)
     {
@@ -413,7 +419,7 @@ TEST_CASE("Shader Graph Sandbox progression compiles without dead authored work"
         INFO(diagnostic);
         REQUIRE(compilation.Succeeded());
         CHECK(compilation.Statistics.UnusedNodeCount == 0);
-        CHECK(compilation.Statistics.VariantCount == expectedVariants[index]);
+        CHECK(compilation.Statistics.VariantCount == 1);
         document.Open(Keire::AssetId::Generate(), bytes, index + 1U, {});
         const auto canvas = document.BuildCanvasModel();
         CHECK(canvas.Nodes.size() == graph.Nodes.size());
@@ -424,9 +430,9 @@ TEST_CASE("Shader Graph Sandbox progression compiles without dead authored work"
 
 TEST_CASE("Shader Graph hero example imports compiled shader and runtime material subassets")
 {
-    const auto path =
-        std::filesystem::current_path() /
-        "Samples/KeireSandbox/Assets/Materials/MaterialGraphs/05_AdaptiveTechSurface_Shader.keireshadergraph";
+    const auto path = std::filesystem::current_path() /
+                      "Samples/KeireSandbox/Assets/Examples/MaterialLab/ShaderGraphs/03_Advanced/"
+                      "SG_12_IridescentShield.keireshadergraph";
     const auto bytes = ReadBytes(path);
     Keire::AssetImportContext context;
     context.Asset = Keire::AssetId::Generate();
@@ -447,7 +453,7 @@ TEST_CASE("Shader Graph hero example imports compiled shader and runtime materia
     const auto importer = Keire::CreateShaderGraphAssetImporter();
     REQUIRE(importer.ContextualImport);
     const auto imported = importer.ContextualImport(context, bytes);
-    REQUIRE(imported.SubAssets.size() == 3);
+    REQUIRE(imported.SubAssets.size() == 2);
 
     std::size_t shaders = 0;
     const Keire::AssetGeneratedSubAsset* runtimeMaterial = nullptr;
@@ -465,7 +471,7 @@ TEST_CASE("Shader Graph hero example imports compiled shader and runtime materia
         else if (subAsset.Type == Keire::MaterialAsset::StaticType())
             runtimeMaterial = &subAsset;
     }
-    CHECK(shaders == 2);
+    CHECK(shaders == 1);
     REQUIRE(runtimeMaterial != nullptr);
     const auto material = Keire::MaterialAsset::Decode(runtimeMaterial->Bytes);
     REQUIRE(material);

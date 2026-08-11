@@ -219,23 +219,24 @@ TEST_CASE("Sandbox creation copies packaged clean content and never mutates its 
     CHECK(first.Value().ProjectId != second.Value().ProjectId);
     CHECK(ReadTree(source) == sourceBefore);
     CHECK_FALSE(std::filesystem::exists(source / "ProjectSettings" / "Project.keireproject"));
-    CHECK(std::filesystem::exists(first.Value().Root / "Assets/Scenes/ShaderMaterialShowcase.keirescene"));
+    CHECK(std::filesystem::exists(first.Value().Root / "Assets/Scenes/SandboxShowcase.keirescene"));
     CHECK(std::filesystem::exists(first.Value().Root / "Assets/Scenes/SampleScene.keirescene"));
-    CHECK(std::filesystem::exists(first.Value().Root /
-                                  "Assets/Materials/MaterialGraphs/01_BasicPaint_Shader.keireshadergraph"));
-    CHECK(std::filesystem::exists(first.Value().Root /
-                                  "Assets/Materials/MaterialGraphs/09_HolographicVoronoi.keirematerialgraph"));
+    CHECK(std::filesystem::exists(first.Value().Root / "Assets/Examples/MaterialLab/ShaderGraphs/01_Foundations/"
+                                                       "SG_01_StudioPaint.keireshadergraph"));
+    CHECK(std::filesystem::exists(first.Value().Root / "Assets/Examples/MaterialLab/MaterialGraphs/03_Advanced/"
+                                                       "MG_12_IridescentShield.keirematerialgraph"));
     CHECK(std::filesystem::exists(first.Value().Root / "Assets/Vfx/ArcaneNova.keirevfx"));
     CHECK(std::filesystem::exists(first.Value().Root / "Assets/Scripts/Runtime/FirstPersonCamera.cs"));
+    CHECK(std::filesystem::exists(first.Value().Root / "Assets/Scripts/Runtime/Examples/ShowcaseOrbit.cs"));
     CHECK(std::filesystem::exists(first.Value().Root / "Assets/Audio/InterfaceConfirm.wav"));
     CHECK_FALSE(std::filesystem::exists(first.Value().Root / "Assets/Generated"));
     const auto descriptor =
         nlohmann::json::parse(KeireHubTests::ReadText(first.Value().Root / "ProjectSettings/Project.keireproject"));
-    CHECK(descriptor.at("startupScene") == "a1aa0000-0000-4000-8000-000000000001");
+    CHECK(descriptor.at("startupScene") == "85be2f8e-31eb-5971-bca9-e5dd6b3f4029");
     CHECK(descriptor.at("defaultInput") == "97b38693-6dc3-4f06-a228-44ba5786e8d1");
     CHECK(descriptor.at("createdWithEngineVersion") == "0.3.0");
     CHECK(descriptor.at("minimumEngineVersion") == "0.3.0");
-    CHECK(descriptor.at("template").at("version") == "1.1.0");
+    CHECK(descriptor.at("template").at("version") == "1.2.0");
 }
 
 TEST_CASE("Sandbox requires the Material Ecosystem capable editor line")

@@ -1,0 +1,597 @@
+{
+  "schemaVersion": 3,
+  "shader": {
+    "kind": "graph",
+    "asset": "3f37cb6b-cb4d-51c0-a6e4-4d9f7d16616d",
+    "target": "default",
+    "keywords": {}
+  },
+  "surface": {
+    "alphaMode": 0,
+    "alphaCutoff": 0.5,
+    "doubleSided": false
+  },
+  "bakedLighting": {
+    "contributeEmission": true,
+    "emissiveIntensity": 1.0
+  },
+  "output": {
+    "node": "79ea0013-d3f8-530a-871b-b717c82398b6",
+    "position": [
+      620.0,
+      120.0
+    ]
+  },
+  "properties": [
+    {
+      "id": "87eb76e8-6d1b-53ea-abd9-e14c7da28a41",
+      "name": "BodyColor",
+      "type": 4,
+      "pin": "6d684838-7287-56a5-b099-463975238de3",
+      "value": [
+        0.015,
+        0.12,
+        0.5,
+        1.0
+      ]
+    },
+    {
+      "id": "ab8d19bd-cd64-5e9d-bd36-c208ead6e0b5",
+      "name": "BaseRoughness",
+      "type": 0,
+      "pin": "e0cee9d5-68aa-5131-86ad-1c28b88038ec",
+      "value": 0.2
+    },
+    {
+      "id": "2eb0500b-ead4-5e56-b406-1d16e0416812",
+      "name": "CoatStrength",
+      "type": 0,
+      "pin": "8785653e-7a48-5a19-bc65-81685000a601",
+      "value": 1.0
+    },
+    {
+      "id": "812d8b5e-6602-52ef-a544-6e06dfc6134c",
+      "name": "CoatRoughness",
+      "type": 0,
+      "pin": "ea10663c-d266-5d69-9235-52555ca8bfbc",
+      "value": 0.04
+    }
+  ],
+  "nodes": [
+    {
+      "id": "58652fdf-e148-5508-878a-367f79e5ba16",
+      "name": "Shader Default - Body Color",
+      "position": [
+        80.0,
+        80.0
+      ],
+      "type": 4,
+      "outputPin": "1d65cde8-19d2-51dd-bc43-1bc3cf727108",
+      "value": [
+        0.015,
+        0.12,
+        0.5,
+        1.0
+      ]
+    },
+    {
+      "id": "0e077d45-a316-58bb-baa5-f975d7e389f5",
+      "name": "Shader Default - Base Roughness",
+      "position": [
+        80.0,
+        190.0
+      ],
+      "type": 0,
+      "outputPin": "a6312a3d-4fa0-5536-a707-c90e6bbd9af4",
+      "value": 0.2
+    },
+    {
+      "id": "c8079657-cb40-5f7c-8cb3-584c38dd054c",
+      "name": "Shader Default - Coat Strength",
+      "position": [
+        80.0,
+        300.0
+      ],
+      "type": 0,
+      "outputPin": "3a7a8225-917f-5ab3-92d0-cc098233004c",
+      "value": 1.0
+    },
+    {
+      "id": "944e9f53-c4ab-5eb6-9b99-d053569ba84b",
+      "name": "Shader Default - Coat Roughness",
+      "position": [
+        80.0,
+        410.0
+      ],
+      "type": 0,
+      "outputPin": "1ca245d4-7afc-59e6-9210-8cdc356f1af1",
+      "value": 0.04
+    }
+  ],
+  "connections": [
+    {
+      "id": "a6237747-9345-553d-b80a-62bf82a35f41",
+      "output": {
+        "node": "58652fdf-e148-5508-878a-367f79e5ba16",
+        "pin": "1d65cde8-19d2-51dd-bc43-1bc3cf727108"
+      },
+      "input": {
+        "node": "79ea0013-d3f8-530a-871b-b717c82398b6",
+        "pin": "6d684838-7287-56a5-b099-463975238de3"
+      }
+    },
+    {
+      "id": "be90addd-a368-5808-9828-72f09c69736b",
+      "output": {
+        "node": "0e077d45-a316-58bb-baa5-f975d7e389f5",
+        "pin": "a6312a3d-4fa0-5536-a707-c90e6bbd9af4"
+      },
+      "input": {
+        "node": "79ea0013-d3f8-530a-871b-b717c82398b6",
+        "pin": "e0cee9d5-68aa-5131-86ad-1c28b88038ec"
+      }
+    },
+    {
+      "id": "16e34699-2f42-5a56-a476-1bdddda1073d",
+      "output": {
+        "node": "c8079657-cb40-5f7c-8cb3-584c38dd054c",
+        "pin": "3a7a8225-917f-5ab3-92d0-cc098233004c"
+      },
+      "input": {
+        "node": "79ea0013-d3f8-530a-871b-b717c82398b6",
+        "pin": "8785653e-7a48-5a19-bc65-81685000a601"
+      }
+    },
+    {
+      "id": "62071ce2-6a55-5a20-828c-8da01cf116ba",
+      "output": {
+        "node": "944e9f53-c4ab-5eb6-9b99-d053569ba84b",
+        "pin": "1ca245d4-7afc-59e6-9210-8cdc356f1af1"
+      },
+      "input": {
+        "node": "79ea0013-d3f8-530a-871b-b717c82398b6",
+        "pin": "ea10663c-d266-5d69-9235-52555ca8bfbc"
+      }
+    }
+  ],
+  "surfaceGraph": {
+    "schemaVersion": 3,
+    "purpose": 0,
+    "output": 0,
+    "nodes": [
+      {
+        "id": "24357006-e249-55ae-89dc-008396085fb0",
+        "typeId": "keire.output.material",
+        "kind": 0,
+        "name": "Material Output",
+        "position": [
+          1280.0,
+          160.0
+        ],
+        "valueType": 4,
+        "value": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "textureSemantic": 0,
+        "symbol": "",
+        "include": "",
+        "function": "",
+        "referencedAsset": null,
+        "parameterMetadata": {
+          "description": "",
+          "category": "",
+          "sortPriority": 0
+        },
+        "pins": [
+          {
+            "id": "af3b2781-605f-5081-9085-a4cbfc04db08",
+            "name": "BaseColor",
+            "type": 4,
+            "direction": 0,
+            "default": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          {
+            "id": "5dedbd57-6015-550b-ad4a-4a397e8bd71b",
+            "name": "Metallic",
+            "type": 0,
+            "direction": 0,
+            "default": 0.0
+          },
+          {
+            "id": "f63904bb-82e1-588b-b55d-66f3706d6976",
+            "name": "Roughness",
+            "type": 0,
+            "direction": 0,
+            "default": 0.5
+          },
+          {
+            "id": "7e293a00-4de1-5330-92d6-bbe2724463a4",
+            "name": "Specular",
+            "type": 0,
+            "direction": 0,
+            "default": 0.5
+          },
+          {
+            "id": "928c0350-6bff-5c05-b58c-a17ffc242430",
+            "name": "ClearCoat",
+            "type": 0,
+            "direction": 0,
+            "default": 0.0
+          },
+          {
+            "id": "563a1ca3-ad62-553f-9973-67196d7f7acd",
+            "name": "ClearCoatRoughness",
+            "type": 0,
+            "direction": 0,
+            "default": 0.25
+          },
+          {
+            "id": "76e9fe77-2df8-599a-8e38-01508213984d",
+            "name": "SheenColor",
+            "type": 4,
+            "direction": 0,
+            "default": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          {
+            "id": "26fde5c7-a976-598e-9052-f506f937729b",
+            "name": "SheenRoughness",
+            "type": 0,
+            "direction": 0,
+            "default": 0.5
+          },
+          {
+            "id": "c6e63925-e7cd-547e-a349-6ec6c1763570",
+            "name": "Normal",
+            "type": 2,
+            "direction": 0,
+            "default": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          {
+            "id": "5f8e23bf-974f-5037-9819-798d70636439",
+            "name": "DetailNormal",
+            "type": 2,
+            "direction": 0,
+            "default": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          {
+            "id": "19f10c7b-3e52-5f11-955a-d5c7020d5a45",
+            "name": "Parallax",
+            "type": 0,
+            "direction": 0,
+            "default": 0.0
+          },
+          {
+            "id": "60a8a292-2248-567f-8dd6-41411f0577fe",
+            "name": "Emission",
+            "type": 4,
+            "direction": 0,
+            "default": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          {
+            "id": "cd3d0d16-0672-57ae-84eb-dda96256cb8c",
+            "name": "Occlusion",
+            "type": 0,
+            "direction": 0,
+            "default": 1.0
+          },
+          {
+            "id": "85b77aad-5adf-5091-8522-d37d1e8eb046",
+            "name": "Opacity",
+            "type": 0,
+            "direction": 0,
+            "default": 1.0
+          },
+          {
+            "id": "e0d011c8-4326-5f9a-83de-07daa0c62580",
+            "name": "SubsurfaceColor",
+            "type": 4,
+            "direction": 0,
+            "default": [
+              1.0,
+              0.35,
+              0.25,
+              1.0
+            ]
+          },
+          {
+            "id": "3f7c88f4-d7e9-5603-8a1a-a04d57a42065",
+            "name": "Subsurface",
+            "type": 0,
+            "direction": 0,
+            "default": 0.0
+          },
+          {
+            "id": "759ce55f-340e-5a3e-a362-01c8d65f13cd",
+            "name": "Anisotropy",
+            "type": 0,
+            "direction": 0,
+            "default": 0.0
+          },
+          {
+            "id": "80a596b3-644f-504e-8966-ec200686715c",
+            "name": "Tangent",
+            "type": 2,
+            "direction": 0,
+            "default": [
+              1.0,
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "id": "3374468a-c6a8-5304-9202-94e74a227c7d",
+            "name": "Transmission",
+            "type": 0,
+            "direction": 0,
+            "default": 0.0
+          },
+          {
+            "id": "b768a7d7-f2f7-55cc-b661-9abcf98b6ce0",
+            "name": "IndexOfRefraction",
+            "type": 0,
+            "direction": 0,
+            "default": 1.5
+          },
+          {
+            "id": "88984362-afeb-5e36-bb80-2b736ec5faae",
+            "name": "Refraction",
+            "type": 0,
+            "direction": 0,
+            "default": 0.0
+          },
+          {
+            "id": "bd7d2c9b-d20b-507e-9d92-130837a16ccc",
+            "name": "Thickness",
+            "type": 0,
+            "direction": 0,
+            "default": 1.0
+          },
+          {
+            "id": "42622d2d-5214-5e37-8df0-38bf3bde76df",
+            "name": "MaterialAttributes",
+            "type": 6,
+            "direction": 0,
+            "default": null
+          },
+          {
+            "id": "ad019cdc-b25e-5765-818e-062043414342",
+            "name": "WorldPositionOffset",
+            "type": 2,
+            "direction": 0,
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "id": "f39822b0-5cc1-55df-9341-689942be37f5",
+            "name": "PixelDepthOffset",
+            "type": 0,
+            "direction": 0,
+            "default": 0.0
+          }
+        ]
+      },
+      {
+        "id": "8cac5d0b-e122-59ed-8837-587d08b96672",
+        "typeId": "keire.input.parameter",
+        "kind": 1,
+        "name": "Material Body Color",
+        "position": [
+          40.0,
+          60.0
+        ],
+        "valueType": 4,
+        "value": [
+          0.015,
+          0.12,
+          0.5,
+          1.0
+        ],
+        "textureSemantic": 0,
+        "symbol": "MG_BodyColor",
+        "include": "",
+        "function": "",
+        "referencedAsset": null,
+        "parameterMetadata": {
+          "description": "Material Body Color for the surface example.",
+          "category": "Paint",
+          "sortPriority": 0
+        },
+        "pins": [
+          {
+            "id": "b839997d-c257-566f-91c7-b2d36f57c623",
+            "name": "Value",
+            "type": 4,
+            "direction": 1,
+            "default": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        ]
+      },
+      {
+        "id": "04863339-dd70-54ee-aed5-8c622b63b06e",
+        "typeId": "keire.input.parameter",
+        "kind": 1,
+        "name": "Material Base Roughness",
+        "position": [
+          40.0,
+          200.0
+        ],
+        "valueType": 0,
+        "value": 0.2,
+        "textureSemantic": 0,
+        "symbol": "MG_BaseRoughness",
+        "include": "",
+        "function": "",
+        "referencedAsset": null,
+        "parameterMetadata": {
+          "description": "Material Base Roughness for the surface example.",
+          "category": "Paint",
+          "sortPriority": 1,
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "step": 0.01
+        },
+        "pins": [
+          {
+            "id": "d88ff689-f96c-56ee-9be9-e3d78910c35b",
+            "name": "Value",
+            "type": 0,
+            "direction": 1,
+            "default": 0.0
+          }
+        ]
+      },
+      {
+        "id": "4de06349-6f7b-5771-9a59-153529b62b74",
+        "typeId": "keire.input.parameter",
+        "kind": 1,
+        "name": "Material Coat Strength",
+        "position": [
+          40.0,
+          340.0
+        ],
+        "valueType": 0,
+        "value": 1.0,
+        "textureSemantic": 0,
+        "symbol": "MG_CoatStrength",
+        "include": "",
+        "function": "",
+        "referencedAsset": null,
+        "parameterMetadata": {
+          "description": "Material Coat Strength for the surface example.",
+          "category": "Clear Coat",
+          "sortPriority": 2,
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "step": 0.01
+        },
+        "pins": [
+          {
+            "id": "1aedc702-f651-53b2-90e7-8710ff3920b2",
+            "name": "Value",
+            "type": 0,
+            "direction": 1,
+            "default": 0.0
+          }
+        ]
+      },
+      {
+        "id": "8a7fa72c-a0ff-5f4a-8854-b2f48441e8ea",
+        "typeId": "keire.input.parameter",
+        "kind": 1,
+        "name": "Material Coat Roughness",
+        "position": [
+          40.0,
+          480.0
+        ],
+        "valueType": 0,
+        "value": 0.04,
+        "textureSemantic": 0,
+        "symbol": "MG_CoatRoughness",
+        "include": "",
+        "function": "",
+        "referencedAsset": null,
+        "parameterMetadata": {
+          "description": "Material Coat Roughness for the surface example.",
+          "category": "Clear Coat",
+          "sortPriority": 3,
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "step": 0.01
+        },
+        "pins": [
+          {
+            "id": "2feba061-cd0c-56d0-b878-3aa004bbe155",
+            "name": "Value",
+            "type": 0,
+            "direction": 1,
+            "default": 0.0
+          }
+        ]
+      }
+    ],
+    "connections": [
+      {
+        "id": "6dcaf79d-a7b3-5c9b-ac97-6badfe818c7a",
+        "output": [
+          "8cac5d0b-e122-59ed-8837-587d08b96672",
+          "b839997d-c257-566f-91c7-b2d36f57c623"
+        ],
+        "input": [
+          "24357006-e249-55ae-89dc-008396085fb0",
+          "af3b2781-605f-5081-9085-a4cbfc04db08"
+        ]
+      },
+      {
+        "id": "f7446559-0dba-5c06-b7a8-f0605f4a8554",
+        "output": [
+          "04863339-dd70-54ee-aed5-8c622b63b06e",
+          "d88ff689-f96c-56ee-9be9-e3d78910c35b"
+        ],
+        "input": [
+          "24357006-e249-55ae-89dc-008396085fb0",
+          "f63904bb-82e1-588b-b55d-66f3706d6976"
+        ]
+      },
+      {
+        "id": "89afd523-6e97-5a21-8d0b-7e3e981fa8f2",
+        "output": [
+          "4de06349-6f7b-5771-9a59-153529b62b74",
+          "1aedc702-f651-53b2-90e7-8710ff3920b2"
+        ],
+        "input": [
+          "24357006-e249-55ae-89dc-008396085fb0",
+          "928c0350-6bff-5c05-b58c-a17ffc242430"
+        ]
+      },
+      {
+        "id": "7181f1e6-e17a-5a53-a14c-8bb6689445c1",
+        "output": [
+          "8a7fa72c-a0ff-5f4a-8854-b2f48441e8ea",
+          "2feba061-cd0c-56d0-b878-3aa004bbe155"
+        ],
+        "input": [
+          "24357006-e249-55ae-89dc-008396085fb0",
+          "563a1ca3-ad62-553f-9973-67196d7f7acd"
+        ]
+      }
+    ],
+    "keywords": [],
+    "includeRoots": [
+      "Assets"
+    ]
+  }
+}

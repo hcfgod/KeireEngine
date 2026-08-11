@@ -1,0 +1,395 @@
+{
+  "schemaVersion": 3,
+  "purpose": 0,
+  "output": 0,
+  "nodes": [
+    {
+      "id": "4ec68e5c-4622-5fe9-a082-4363213eaaeb",
+      "typeId": "keire.output.material",
+      "kind": 0,
+      "name": "Lit Shader Output",
+      "position": [
+        1280.0,
+        160.0
+      ],
+      "valueType": 4,
+      "value": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "textureSemantic": 0,
+      "symbol": "",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "",
+        "category": "",
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "id": "e756999d-dbb8-5235-bdbc-c9580df11f7d",
+          "name": "BaseColor",
+          "type": 4,
+          "direction": 0,
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "id": "cc9f00b4-0755-5e56-89d8-a450389e0450",
+          "name": "Metallic",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "e7e2043a-fb8b-56f3-b8aa-4163f9e02521",
+          "name": "Roughness",
+          "type": 0,
+          "direction": 0,
+          "default": 0.5
+        },
+        {
+          "id": "23787d9a-355b-5e9b-a117-045e1753c674",
+          "name": "Specular",
+          "type": 0,
+          "direction": 0,
+          "default": 0.5
+        },
+        {
+          "id": "7ffcd4fa-0502-5fcd-b3f1-346689e2883b",
+          "name": "ClearCoat",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "d602cc64-596d-55f0-bbd6-7dc8402f56bd",
+          "name": "ClearCoatRoughness",
+          "type": 0,
+          "direction": 0,
+          "default": 0.25
+        },
+        {
+          "id": "63a7a980-01a4-53f3-97b9-47f4b4c4e5c1",
+          "name": "SheenColor",
+          "type": 4,
+          "direction": 0,
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "id": "1b02fbb8-4984-58a8-9617-0011728e7568",
+          "name": "SheenRoughness",
+          "type": 0,
+          "direction": 0,
+          "default": 0.5
+        },
+        {
+          "id": "af2bd086-034c-59ef-a2fd-62140f1d2e87",
+          "name": "Normal",
+          "type": 2,
+          "direction": 0,
+          "default": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "id": "bcd7684d-116a-5dc5-8644-7540b8791d4c",
+          "name": "DetailNormal",
+          "type": 2,
+          "direction": 0,
+          "default": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "id": "6319e002-24df-5789-a176-f5fa86b5e1c4",
+          "name": "Parallax",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "d84bff29-88fd-5000-9b7d-6fe1ead9130e",
+          "name": "Emission",
+          "type": 4,
+          "direction": 0,
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "id": "9d970a63-c38c-5aae-ac75-c2dd80048141",
+          "name": "Occlusion",
+          "type": 0,
+          "direction": 0,
+          "default": 1.0
+        },
+        {
+          "id": "4bfa4560-eb70-58f6-b1a0-9c7a95e1cd10",
+          "name": "Opacity",
+          "type": 0,
+          "direction": 0,
+          "default": 1.0
+        },
+        {
+          "id": "7db73ec0-3e27-5f0a-8a5f-a9ba4913ac48",
+          "name": "SubsurfaceColor",
+          "type": 4,
+          "direction": 0,
+          "default": [
+            1.0,
+            0.35,
+            0.25,
+            1.0
+          ]
+        },
+        {
+          "id": "1a2d0660-3c2d-572f-8e7b-af38759b8b77",
+          "name": "Subsurface",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "5d5740d1-5f6b-5db6-bbd6-5ab4c2ad1773",
+          "name": "Anisotropy",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "0a037133-8af6-57c9-87e7-b146b43cdc52",
+          "name": "Tangent",
+          "type": 2,
+          "direction": 0,
+          "default": [
+            1.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "id": "935c020d-11ca-5b78-ad08-917484555d0b",
+          "name": "Transmission",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "0919fbee-cc0b-5fb5-8af3-7f3ebc8fd3e5",
+          "name": "IndexOfRefraction",
+          "type": 0,
+          "direction": 0,
+          "default": 1.5
+        },
+        {
+          "id": "52641871-3183-5b2d-bea6-73e33448fbe5",
+          "name": "Refraction",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "ce983af2-76d8-54be-81b6-f99caadd0b92",
+          "name": "Thickness",
+          "type": 0,
+          "direction": 0,
+          "default": 1.0
+        },
+        {
+          "id": "45eded71-9b89-5826-bb33-329a2805dbde",
+          "name": "MaterialAttributes",
+          "type": 6,
+          "direction": 0,
+          "default": null
+        },
+        {
+          "id": "612bfb62-7d2d-57cb-b4e3-3835b439295a",
+          "name": "WorldPositionOffset",
+          "type": 2,
+          "direction": 0,
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "id": "0ec4843c-1b3f-55d9-b3fa-8effffaec892",
+          "name": "PixelDepthOffset",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        }
+      ]
+    },
+    {
+      "id": "0630330f-7fb0-5bf7-89fc-c4bc2d22f1d4",
+      "typeId": "keire.input.parameter",
+      "kind": 1,
+      "name": "Base Tint",
+      "position": [
+        40.0,
+        60.0
+      ],
+      "valueType": 4,
+      "value": [
+        0.12,
+        0.32,
+        0.72,
+        1.0
+      ],
+      "textureSemantic": 0,
+      "symbol": "BaseTint",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "Base Tint for the StudioPaint example.",
+        "category": "Surface",
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "id": "4b293fe6-67f0-518d-a960-9d58456c149c",
+          "name": "Value",
+          "type": 4,
+          "direction": 1,
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "id": "57653543-1f02-52ea-bc8c-fd754ef5703a",
+      "typeId": "keire.input.parameter",
+      "kind": 1,
+      "name": "Metallic",
+      "position": [
+        40.0,
+        200.0
+      ],
+      "valueType": 0,
+      "value": 0.0,
+      "textureSemantic": 0,
+      "symbol": "Metallic",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "Metallic for the StudioPaint example.",
+        "category": "Surface",
+        "sortPriority": 1,
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01
+      },
+      "pins": [
+        {
+          "id": "e937fe65-0c35-5c1c-baea-6537aa30532c",
+          "name": "Value",
+          "type": 0,
+          "direction": 1,
+          "default": 0.0
+        }
+      ]
+    },
+    {
+      "id": "e3fea70f-0992-5176-a9e3-73fb7e09803a",
+      "typeId": "keire.input.parameter",
+      "kind": 1,
+      "name": "Roughness",
+      "position": [
+        40.0,
+        340.0
+      ],
+      "valueType": 0,
+      "value": 0.38,
+      "textureSemantic": 0,
+      "symbol": "Roughness",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "Roughness for the StudioPaint example.",
+        "category": "Surface",
+        "sortPriority": 2,
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01
+      },
+      "pins": [
+        {
+          "id": "2cb523e2-4f4f-5f5a-b9d7-f354a799d091",
+          "name": "Value",
+          "type": 0,
+          "direction": 1,
+          "default": 0.0
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "970c6082-e04d-5643-8836-17fe1b177313",
+      "output": [
+        "0630330f-7fb0-5bf7-89fc-c4bc2d22f1d4",
+        "4b293fe6-67f0-518d-a960-9d58456c149c"
+      ],
+      "input": [
+        "4ec68e5c-4622-5fe9-a082-4363213eaaeb",
+        "e756999d-dbb8-5235-bdbc-c9580df11f7d"
+      ]
+    },
+    {
+      "id": "06e2be55-0198-50cf-b049-61377c33ba6d",
+      "output": [
+        "57653543-1f02-52ea-bc8c-fd754ef5703a",
+        "e937fe65-0c35-5c1c-baea-6537aa30532c"
+      ],
+      "input": [
+        "4ec68e5c-4622-5fe9-a082-4363213eaaeb",
+        "cc9f00b4-0755-5e56-89d8-a450389e0450"
+      ]
+    },
+    {
+      "id": "7e733297-75e3-56e0-a346-88280019b34f",
+      "output": [
+        "e3fea70f-0992-5176-a9e3-73fb7e09803a",
+        "2cb523e2-4f4f-5f5a-b9d7-f354a799d091"
+      ],
+      "input": [
+        "4ec68e5c-4622-5fe9-a082-4363213eaaeb",
+        "e7e2043a-fb8b-56f3-b8aa-4163f9e02521"
+      ]
+    }
+  ],
+  "keywords": [],
+  "includeRoots": [
+    "Assets"
+  ]
+}

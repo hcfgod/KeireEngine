@@ -1,0 +1,647 @@
+{
+  "schemaVersion": 3,
+  "purpose": 0,
+  "output": 0,
+  "nodes": [
+    {
+      "id": "aad7019e-4343-5449-bfa4-e9038405b650",
+      "typeId": "keire.output.material",
+      "kind": 0,
+      "name": "Lit Shader Output",
+      "position": [
+        1280.0,
+        160.0
+      ],
+      "valueType": 4,
+      "value": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "textureSemantic": 0,
+      "symbol": "",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "",
+        "category": "",
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "id": "fae2b03b-a4bf-5797-8f9d-6ee16005a2f9",
+          "name": "BaseColor",
+          "type": 4,
+          "direction": 0,
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "id": "cba2d1e2-89b0-57c8-9544-da93f74ce443",
+          "name": "Metallic",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "5c542ee5-5537-5901-aaca-833c71729d5a",
+          "name": "Roughness",
+          "type": 0,
+          "direction": 0,
+          "default": 0.5
+        },
+        {
+          "id": "7a14e094-e1ef-5f53-8732-1709f8fc107e",
+          "name": "Specular",
+          "type": 0,
+          "direction": 0,
+          "default": 0.5
+        },
+        {
+          "id": "557436d9-ebcc-5b77-8607-4dee9ff8ac5a",
+          "name": "ClearCoat",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "8a5d02d1-7e2d-55af-9ad1-05324d3da70f",
+          "name": "ClearCoatRoughness",
+          "type": 0,
+          "direction": 0,
+          "default": 0.25
+        },
+        {
+          "id": "f8ade2ee-1afc-557d-b8d3-b52001c4a960",
+          "name": "SheenColor",
+          "type": 4,
+          "direction": 0,
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "id": "3a8ad2fa-91a6-54d7-8933-225c2d26b330",
+          "name": "SheenRoughness",
+          "type": 0,
+          "direction": 0,
+          "default": 0.5
+        },
+        {
+          "id": "336edf95-5f9f-541b-ace7-54ca3cc1c43b",
+          "name": "Normal",
+          "type": 2,
+          "direction": 0,
+          "default": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "id": "93fc9898-2378-5795-b940-12d65531da4c",
+          "name": "DetailNormal",
+          "type": 2,
+          "direction": 0,
+          "default": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "id": "71197264-befb-53a1-9eaa-e1eb0a196e5f",
+          "name": "Parallax",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "c777dc34-f2a3-551d-9cea-62466433c797",
+          "name": "Emission",
+          "type": 4,
+          "direction": 0,
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "id": "de432979-22ee-50cf-b39f-885dc501a5df",
+          "name": "Occlusion",
+          "type": 0,
+          "direction": 0,
+          "default": 1.0
+        },
+        {
+          "id": "b50fccc2-cd03-5311-84c4-372c45babe34",
+          "name": "Opacity",
+          "type": 0,
+          "direction": 0,
+          "default": 1.0
+        },
+        {
+          "id": "8a12b902-0253-51d1-bca8-0ca11dfbb229",
+          "name": "SubsurfaceColor",
+          "type": 4,
+          "direction": 0,
+          "default": [
+            1.0,
+            0.35,
+            0.25,
+            1.0
+          ]
+        },
+        {
+          "id": "871d6cc1-2d75-59bf-b42a-8bd127314971",
+          "name": "Subsurface",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "e6dce413-7e11-5420-8e87-530fa5e4702b",
+          "name": "Anisotropy",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "fdbde5ea-101f-5015-9354-bb728a2320af",
+          "name": "Tangent",
+          "type": 2,
+          "direction": 0,
+          "default": [
+            1.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "id": "56e62396-fc5f-5ec9-a86a-2ed079c3af0e",
+          "name": "Transmission",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "6ff11c44-0d0b-57a7-913f-26e6e9f9efaf",
+          "name": "IndexOfRefraction",
+          "type": 0,
+          "direction": 0,
+          "default": 1.5
+        },
+        {
+          "id": "2e29c7fe-b676-58a9-b760-3e108553e545",
+          "name": "Refraction",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "ae0dc0e5-6634-5d0c-bc39-e050ac6f6271",
+          "name": "Thickness",
+          "type": 0,
+          "direction": 0,
+          "default": 1.0
+        },
+        {
+          "id": "10c11e5d-048d-5cab-a3a8-bf71690969da",
+          "name": "MaterialAttributes",
+          "type": 6,
+          "direction": 0,
+          "default": null
+        },
+        {
+          "id": "42388ef7-d44a-5770-a840-1c24f279ba63",
+          "name": "WorldPositionOffset",
+          "type": 2,
+          "direction": 0,
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "id": "ee5c933e-8c24-5231-a63d-5c77eefedd90",
+          "name": "PixelDepthOffset",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        }
+      ]
+    },
+    {
+      "id": "49a2cf40-9cbf-5ea2-8208-3d630b2638b2",
+      "typeId": "keire.input.parameter",
+      "kind": 1,
+      "name": "Surface Tint",
+      "position": [
+        40.0,
+        60.0
+      ],
+      "valueType": 4,
+      "value": [
+        0.03,
+        0.28,
+        0.68,
+        1.0
+      ],
+      "textureSemantic": 0,
+      "symbol": "SurfaceTint",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "Surface Tint for the VertexWave example.",
+        "category": "Surface",
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "id": "a3b3bd14-65f1-54b4-97c0-d654e47532e1",
+          "name": "Value",
+          "type": 4,
+          "direction": 1,
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "id": "6e73e3ee-1099-5314-8b9a-97614c32a5c7",
+      "typeId": "keire.input.parameter",
+      "kind": 1,
+      "name": "Wave Frequency",
+      "position": [
+        40.0,
+        200.0
+      ],
+      "valueType": 0,
+      "value": 4.0,
+      "textureSemantic": 0,
+      "symbol": "WaveFrequency",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "Wave Frequency for the VertexWave example.",
+        "category": "Displacement",
+        "sortPriority": 1,
+        "minimum": 0.1,
+        "maximum": 20.0,
+        "step": 0.1
+      },
+      "pins": [
+        {
+          "id": "72f8d120-4830-5985-8537-d0c4a1786a12",
+          "name": "Value",
+          "type": 0,
+          "direction": 1,
+          "default": 0.0
+        }
+      ]
+    },
+    {
+      "id": "89661106-8211-5928-b2f9-de48ff70e43e",
+      "typeId": "keire.input.parameter",
+      "kind": 1,
+      "name": "Wave Amplitude",
+      "position": [
+        40.0,
+        340.0
+      ],
+      "valueType": 0,
+      "value": 0.25,
+      "textureSemantic": 0,
+      "symbol": "WaveAmplitude",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "Wave Amplitude for the VertexWave example.",
+        "category": "Displacement",
+        "sortPriority": 2,
+        "minimum": 0.0,
+        "maximum": 2.0,
+        "step": 0.01
+      },
+      "pins": [
+        {
+          "id": "a5a9326a-59e1-5419-9326-ab0594567ee1",
+          "name": "Value",
+          "type": 0,
+          "direction": 1,
+          "default": 0.0
+        }
+      ]
+    },
+    {
+      "id": "a5b1bf7a-8087-5c0d-8572-9808f878a30a",
+      "typeId": "keire.input.uv0",
+      "kind": 4,
+      "name": "UV0",
+      "position": [
+        360.0,
+        300.0
+      ],
+      "valueType": 1,
+      "value": [
+        0.0,
+        0.0
+      ],
+      "textureSemantic": 0,
+      "symbol": "",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "",
+        "category": "",
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "id": "67c98eb0-843d-5c91-9f23-d985336d0c16",
+          "name": "UV",
+          "type": 1,
+          "direction": 1,
+          "default": [
+            0.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "id": "c81e1d8e-d930-56b1-b65e-e37a731861d5",
+      "typeId": "keire.procedural.wave",
+      "kind": 89,
+      "name": "Wave",
+      "position": [
+        600.0,
+        300.0
+      ],
+      "valueType": 0,
+      "value": 0.0,
+      "textureSemantic": 0,
+      "symbol": "",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "",
+        "category": "",
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "id": "cd306945-ef92-5b4d-a0df-1586eccff9ee",
+          "name": "UV",
+          "type": 1,
+          "direction": 0,
+          "default": [
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "id": "4657af13-2d52-5559-b663-7c30fd0c6218",
+          "name": "Direction",
+          "type": 1,
+          "direction": 0,
+          "default": [
+            1.0,
+            0.0
+          ]
+        },
+        {
+          "id": "18acc4b1-d9cc-5c59-977a-a1327e04459f",
+          "name": "Frequency",
+          "type": 0,
+          "direction": 0,
+          "default": 8.0
+        },
+        {
+          "id": "4ce39805-db3d-55d9-acce-91c12ef4f25e",
+          "name": "Phase",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "6ee5e707-c5a0-5a53-a947-701e275d0cc4",
+          "name": "Wave",
+          "type": 0,
+          "direction": 1,
+          "default": 0.0
+        }
+      ]
+    },
+    {
+      "id": "ceb5f595-c6d3-537a-bda4-401fae643c1a",
+      "typeId": "keire.math.multiply",
+      "kind": 10,
+      "name": "Multiply",
+      "position": [
+        860.0,
+        300.0
+      ],
+      "valueType": 0,
+      "value": 0.0,
+      "textureSemantic": 0,
+      "symbol": "",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "",
+        "category": "",
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "id": "9e2d8200-374e-5eb6-8dfa-9536b850d809",
+          "name": "A",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "d1730ee0-bbd3-5af0-b624-7f8b33967a16",
+          "name": "B",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "99b58c8e-5727-5835-9a43-6e824d0d3601",
+          "name": "Result",
+          "type": 0,
+          "direction": 1,
+          "default": 0.0
+        }
+      ]
+    },
+    {
+      "id": "e2d92b02-7484-5aac-ae53-524fa5ff3cfd",
+      "typeId": "keire.math.multiply",
+      "kind": 10,
+      "name": "Multiply",
+      "position": [
+        1120.0,
+        300.0
+      ],
+      "valueType": 2,
+      "value": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "textureSemantic": 0,
+      "symbol": "",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "",
+        "category": "",
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "id": "5d30803f-f953-5c1c-886e-28f89436f358",
+          "name": "A",
+          "type": 2,
+          "direction": 0,
+          "default": [
+            0.0,
+            1.0,
+            0.0
+          ]
+        },
+        {
+          "id": "98acb47e-4a56-5a53-a6f0-7dd4b8a9736b",
+          "name": "B",
+          "type": 2,
+          "direction": 0,
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "id": "75400757-8436-5292-b7e9-f16c4df8eccf",
+          "name": "Result",
+          "type": 2,
+          "direction": 1,
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "eca79608-9e19-5f5d-a51e-cd7aab06d34b",
+      "output": [
+        "a5b1bf7a-8087-5c0d-8572-9808f878a30a",
+        "67c98eb0-843d-5c91-9f23-d985336d0c16"
+      ],
+      "input": [
+        "c81e1d8e-d930-56b1-b65e-e37a731861d5",
+        "cd306945-ef92-5b4d-a0df-1586eccff9ee"
+      ]
+    },
+    {
+      "id": "5d2ad5f4-b321-567d-b8be-cf6bf21aefe9",
+      "output": [
+        "6e73e3ee-1099-5314-8b9a-97614c32a5c7",
+        "72f8d120-4830-5985-8537-d0c4a1786a12"
+      ],
+      "input": [
+        "c81e1d8e-d930-56b1-b65e-e37a731861d5",
+        "18acc4b1-d9cc-5c59-977a-a1327e04459f"
+      ]
+    },
+    {
+      "id": "a2179a83-72a1-51fa-aeed-e72356e7fbbc",
+      "output": [
+        "c81e1d8e-d930-56b1-b65e-e37a731861d5",
+        "6ee5e707-c5a0-5a53-a947-701e275d0cc4"
+      ],
+      "input": [
+        "ceb5f595-c6d3-537a-bda4-401fae643c1a",
+        "9e2d8200-374e-5eb6-8dfa-9536b850d809"
+      ]
+    },
+    {
+      "id": "c391233a-c08d-513f-ba65-417fa59c03e1",
+      "output": [
+        "89661106-8211-5928-b2f9-de48ff70e43e",
+        "a5a9326a-59e1-5419-9326-ab0594567ee1"
+      ],
+      "input": [
+        "ceb5f595-c6d3-537a-bda4-401fae643c1a",
+        "d1730ee0-bbd3-5af0-b624-7f8b33967a16"
+      ]
+    },
+    {
+      "id": "b6035dd3-327a-5031-b5a0-997ffa32d95e",
+      "output": [
+        "ceb5f595-c6d3-537a-bda4-401fae643c1a",
+        "99b58c8e-5727-5835-9a43-6e824d0d3601"
+      ],
+      "input": [
+        "e2d92b02-7484-5aac-ae53-524fa5ff3cfd",
+        "98acb47e-4a56-5a53-a6f0-7dd4b8a9736b"
+      ]
+    },
+    {
+      "id": "b8162ebc-4d72-5170-b721-f9723bedf5f3",
+      "output": [
+        "49a2cf40-9cbf-5ea2-8208-3d630b2638b2",
+        "a3b3bd14-65f1-54b4-97c0-d654e47532e1"
+      ],
+      "input": [
+        "aad7019e-4343-5449-bfa4-e9038405b650",
+        "fae2b03b-a4bf-5797-8f9d-6ee16005a2f9"
+      ]
+    },
+    {
+      "id": "2aaa72cb-82a2-523f-a6c2-f345c9547643",
+      "output": [
+        "e2d92b02-7484-5aac-ae53-524fa5ff3cfd",
+        "75400757-8436-5292-b7e9-f16c4df8eccf"
+      ],
+      "input": [
+        "aad7019e-4343-5449-bfa4-e9038405b650",
+        "42388ef7-d44a-5770-a840-1c24f279ba63"
+      ]
+    }
+  ],
+  "keywords": [],
+  "includeRoots": [
+    "Assets"
+  ]
+}

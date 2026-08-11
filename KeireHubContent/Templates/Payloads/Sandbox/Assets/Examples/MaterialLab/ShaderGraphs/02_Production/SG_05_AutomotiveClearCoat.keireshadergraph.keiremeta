@@ -1,0 +1,12 @@
+{
+  "dependencies": [],
+  "id": "3f37cb6b-cb4d-51c0-a6e4-4d9f7d16616d",
+  "importer": "Keire.ShaderGraph",
+  "importerVersion": 15,
+  "schemaVersion": 1,
+  "subAssets": [
+    "0b08f08a-7f05-505a-9f8e-6f62f08fd73e",
+    "85d4dbd3-5cf9-5d0a-a05a-d3f3a6aca21a"
+  ],
+  "type": "4b454952-4553-4752-4150-480000000001"
+}

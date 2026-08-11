@@ -613,19 +613,21 @@ TEST_CASE("Shader Graph keeps pre-layered PBR master assets source compatible")
 
 TEST_CASE("Sandbox Shader Graph examples decode and compile across the authored progression")
 {
-    const auto root = std::filesystem::current_path() / "Samples/KeireSandbox/Assets/Materials/MaterialGraphs";
-    constexpr std::array names{std::string_view("01_BasicPaint_Shader.keireshadergraph"),
-                               std::string_view("02_TexturedSurface_Shader.keireshadergraph"),
-                               std::string_view("03_ProceduralEmissive_Shader.keireshadergraph"),
-                               std::string_view("04_ClearCoatDetail_Shader.keireshadergraph"),
-                               std::string_view("05_AdaptiveTechSurface_Shader.keireshadergraph"),
-                               std::string_view("06_AnisotropicBrushedMetal_Shader.keireshadergraph"),
-                               std::string_view("07_TransmissionGlass_Shader.keireshadergraph"),
-                               std::string_view("08_ProceduralVertexDisplacement_Shader.keireshadergraph"),
-                               std::string_view("09_HolographicVoronoi_Shader.keireshadergraph")};
-    constexpr std::array expectedNodes{3U, 10U, 10U, 12U, 17U, 3U, 7U, 6U, 11U};
-    constexpr std::array expectedConnections{2U, 10U, 11U, 14U, 21U, 2U, 6U, 5U, 12U};
-    constexpr std::array expectedVariants{1U, 1U, 1U, 1U, 2U, 1U, 1U, 1U, 1U};
+    const auto root = std::filesystem::current_path() / "Samples/KeireSandbox/Assets/Examples/MaterialLab/ShaderGraphs";
+    constexpr std::array names{std::string_view("01_Foundations/SG_01_StudioPaint.keireshadergraph"),
+                               std::string_view("01_Foundations/SG_02_TiledCeramic.keireshadergraph"),
+                               std::string_view("01_Foundations/SG_03_NeonPulse.keireshadergraph"),
+                               std::string_view("01_Foundations/SG_04_ProceduralCutout.keireshadergraph"),
+                               std::string_view("02_Production/SG_05_AutomotiveClearCoat.keireshadergraph"),
+                               std::string_view("02_Production/SG_06_BrushedAlloy.keireshadergraph"),
+                               std::string_view("02_Production/SG_07_FrostedGlass.keireshadergraph"),
+                               std::string_view("02_Production/SG_08_WorldAlignedStone.keireshadergraph"),
+                               std::string_view("03_Advanced/SG_09_EnergyDissolve.keireshadergraph"),
+                               std::string_view("03_Advanced/SG_10_HologramScanlines.keireshadergraph"),
+                               std::string_view("03_Advanced/SG_11_VertexWave.keireshadergraph"),
+                               std::string_view("03_Advanced/SG_12_IridescentShield.keireshadergraph")};
+    constexpr std::array expectedNodes{4U, 7U, 10U, 7U, 5U, 5U, 5U, 10U, 7U, 11U, 8U, 9U};
+    constexpr std::array expectedConnections{3U, 6U, 9U, 6U, 4U, 4U, 4U, 9U, 6U, 12U, 7U, 10U};
     for (std::size_t index = 0; index < names.size(); ++index)
     {
         SUBCASE(names[index].data())
@@ -641,20 +643,24 @@ TEST_CASE("Sandbox Shader Graph examples decode and compile across the authored 
             INFO(diagnostic);
             REQUIRE(compilation.Succeeded());
             CHECK(compilation.Statistics.UnusedNodeCount == 0);
-            CHECK(compilation.Statistics.VariantCount == expectedVariants[index]);
+            CHECK(compilation.Statistics.VariantCount == 1);
         }
     }
 }
 
 TEST_CASE("Shader Graph migrates structured schema-v1 assets without changing their topology")
 {
-    const auto path =
-        std::filesystem::current_path() /
-        "Samples/KeireSandbox/Assets/Materials/MaterialGraphs/09_HolographicVoronoi_Shader.keireshadergraph";
-    const auto graph = Keire::ShaderGraphAsset::DecodeSource(ReadBytes(path));
+    const auto path = std::filesystem::current_path() /
+                      "Samples/KeireSandbox/Assets/Examples/MaterialLab/ShaderGraphs/03_Advanced/"
+                      "SG_12_IridescentShield.keireshadergraph";
+    const auto current = ReadBytes(path);
+    auto legacy = nlohmann::json::parse(std::string(reinterpret_cast<const char*>(current.data()), current.size()));
+    legacy["schemaVersion"] = 1;
+    const auto encoded = legacy.dump();
+    const auto graph = Keire::ShaderGraphAsset::DecodeSource(std::as_bytes(std::span(encoded.data(), encoded.size())));
     CHECK(graph.SchemaVersion == Keire::ShaderGraphSourceSchemaVersion);
-    CHECK(graph.Nodes.size() == 11);
-    CHECK(graph.Connections.size() == 12);
+    CHECK(graph.Nodes.size() == 9);
+    CHECK(graph.Connections.size() == 10);
     CHECK_NOTHROW(Keire::ValidateShaderGraph(graph));
     const auto roundTrip = Keire::ShaderGraphAsset::DecodeSource(Keire::ShaderGraphAsset::EncodeSource(graph));
     CHECK(roundTrip == graph);

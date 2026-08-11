@@ -1,0 +1,746 @@
+{
+  "schemaVersion": 3,
+  "shader": {
+    "kind": "graph",
+    "asset": "41d75e64-f977-52fe-82c0-e2e5a852309d",
+    "target": "default",
+    "keywords": {}
+  },
+  "surface": {
+    "alphaMode": 0,
+    "alphaCutoff": 0.5,
+    "doubleSided": false
+  },
+  "bakedLighting": {
+    "contributeEmission": true,
+    "emissiveIntensity": 1.0
+  },
+  "output": {
+    "node": "ce4fa044-1a61-5ac2-a43c-3b01a6784f64",
+    "position": [
+      620.0,
+      120.0
+    ]
+  },
+  "properties": [
+    {
+      "id": "077713e4-c23a-5729-a03d-693394a4f48c",
+      "name": "BaseTexture",
+      "type": 5,
+      "pin": "2946062c-9da4-59e7-91e6-a0c1806335c0",
+      "value": "38760a1d-9dfa-4bbc-8ba1-50921ae9d748"
+    },
+    {
+      "id": "0cd61644-dc4d-5d32-972e-32202b4ce4b9",
+      "name": "Tiling",
+      "type": 1,
+      "pin": "b094ae3c-657a-533e-b16f-8d63f369b54d",
+      "value": [
+        5.0,
+        5.0
+      ]
+    },
+    {
+      "id": "89ca3e34-dc67-5095-b023-3e740b78a870",
+      "name": "Roughness",
+      "type": 0,
+      "pin": "31d8f9ab-14a2-5a5e-89f6-3f66317ecc9b",
+      "value": 0.18
+    }
+  ],
+  "nodes": [
+    {
+      "id": "c87f9a8a-b82b-5b44-aa50-847d46febfba",
+      "name": "Shader Default - Base Texture",
+      "position": [
+        80.0,
+        80.0
+      ],
+      "type": 5,
+      "outputPin": "29ec7db0-754c-511b-a5db-e65a78fd4f42",
+      "value": "38760a1d-9dfa-4bbc-8ba1-50921ae9d748"
+    },
+    {
+      "id": "8e40a37e-bf4d-5a81-a9a6-d86b64aee690",
+      "name": "Shader Default - Tiling",
+      "position": [
+        80.0,
+        190.0
+      ],
+      "type": 1,
+      "outputPin": "7c90e9b4-66f5-538a-aa30-118f442231ff",
+      "value": [
+        5.0,
+        5.0
+      ]
+    },
+    {
+      "id": "f7b7deeb-3654-5463-85b8-868fa92066cb",
+      "name": "Shader Default - Roughness",
+      "position": [
+        80.0,
+        300.0
+      ],
+      "type": 0,
+      "outputPin": "62fd312e-e4f8-5422-853b-27c4df4d2ec1",
+      "value": 0.18
+    }
+  ],
+  "connections": [
+    {
+      "id": "0d104edd-8101-523d-85a7-4cdd5a191a5b",
+      "output": {
+        "node": "c87f9a8a-b82b-5b44-aa50-847d46febfba",
+        "pin": "29ec7db0-754c-511b-a5db-e65a78fd4f42"
+      },
+      "input": {
+        "node": "ce4fa044-1a61-5ac2-a43c-3b01a6784f64",
+        "pin": "2946062c-9da4-59e7-91e6-a0c1806335c0"
+      }
+    },
+    {
+      "id": "823dddfa-bf94-5109-8f16-4d500d56525d",
+      "output": {
+        "node": "8e40a37e-bf4d-5a81-a9a6-d86b64aee690",
+        "pin": "7c90e9b4-66f5-538a-aa30-118f442231ff"
+      },
+      "input": {
+        "node": "ce4fa044-1a61-5ac2-a43c-3b01a6784f64",
+        "pin": "b094ae3c-657a-533e-b16f-8d63f369b54d"
+      }
+    },
+    {
+      "id": "1d822970-87c7-5429-b359-415a8a7d6768",
+      "output": {
+        "node": "f7b7deeb-3654-5463-85b8-868fa92066cb",
+        "pin": "62fd312e-e4f8-5422-853b-27c4df4d2ec1"
+      },
+      "input": {
+        "node": "ce4fa044-1a61-5ac2-a43c-3b01a6784f64",
+        "pin": "31d8f9ab-14a2-5a5e-89f6-3f66317ecc9b"
+      }
+    }
+  ],
+  "surfaceGraph": {
+    "schemaVersion": 3,
+    "purpose": 0,
+    "output": 0,
+    "nodes": [
+      {
+        "id": "4e2f785b-dd5f-5acb-8d78-d92c81d0d578",
+        "typeId": "keire.output.material",
+        "kind": 0,
+        "name": "Material Output",
+        "position": [
+          1280.0,
+          160.0
+        ],
+        "valueType": 4,
+        "value": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "textureSemantic": 0,
+        "symbol": "",
+        "include": "",
+        "function": "",
+        "referencedAsset": null,
+        "parameterMetadata": {
+          "description": "",
+          "category": "",
+          "sortPriority": 0
+        },
+        "pins": [
+          {
+            "id": "be93edc0-28f6-5e29-8953-a53dada8eb16",
+            "name": "BaseColor",
+            "type": 4,
+            "direction": 0,
+            "default": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          {
+            "id": "0ed65628-9581-5b9f-9348-3df99be0622e",
+            "name": "Metallic",
+            "type": 0,
+            "direction": 0,
+            "default": 0.0
+          },
+          {
+            "id": "a6e45ad3-4818-554e-a3a1-f5983e500e0e",
+            "name": "Roughness",
+            "type": 0,
+            "direction": 0,
+            "default": 0.5
+          },
+          {
+            "id": "b0f20b8d-eb8f-5f39-afb5-2a3a026f49e1",
+            "name": "Specular",
+            "type": 0,
+            "direction": 0,
+            "default": 0.5
+          },
+          {
+            "id": "d1a9bc40-471f-5a34-915b-8ba8ddb417dc",
+            "name": "ClearCoat",
+            "type": 0,
+            "direction": 0,
+            "default": 0.0
+          },
+          {
+            "id": "76fccac5-51db-5c2e-b3a6-a1df60a8825e",
+            "name": "ClearCoatRoughness",
+            "type": 0,
+            "direction": 0,
+            "default": 0.25
+          },
+          {
+            "id": "c6244c00-ce81-5029-bfbc-8bf9abff179d",
+            "name": "SheenColor",
+            "type": 4,
+            "direction": 0,
+            "default": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          {
+            "id": "867444a8-9bd1-51f9-9739-736b12cb2ebd",
+            "name": "SheenRoughness",
+            "type": 0,
+            "direction": 0,
+            "default": 0.5
+          },
+          {
+            "id": "5d2356cb-3d8e-56e9-ba6b-a6b39dd5718e",
+            "name": "Normal",
+            "type": 2,
+            "direction": 0,
+            "default": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          {
+            "id": "5a56cbbe-c927-521e-a113-cab35f0272a2",
+            "name": "DetailNormal",
+            "type": 2,
+            "direction": 0,
+            "default": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          {
+            "id": "8992635c-12cb-5a91-9a44-9fd0c0834ba7",
+            "name": "Parallax",
+            "type": 0,
+            "direction": 0,
+            "default": 0.0
+          },
+          {
+            "id": "4357fcca-fc6e-533e-86bb-d27f3b0f9566",
+            "name": "Emission",
+            "type": 4,
+            "direction": 0,
+            "default": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          {
+            "id": "2941dfc9-22a8-5767-9e84-07e545fe03b4",
+            "name": "Occlusion",
+            "type": 0,
+            "direction": 0,
+            "default": 1.0
+          },
+          {
+            "id": "40993e04-216a-5518-be1f-450caadb2b4f",
+            "name": "Opacity",
+            "type": 0,
+            "direction": 0,
+            "default": 1.0
+          },
+          {
+            "id": "d6107d07-1a87-5215-a1f0-04e92b18adb9",
+            "name": "SubsurfaceColor",
+            "type": 4,
+            "direction": 0,
+            "default": [
+              1.0,
+              0.35,
+              0.25,
+              1.0
+            ]
+          },
+          {
+            "id": "dd5e0213-412d-5302-9805-ee94248c72a8",
+            "name": "Subsurface",
+            "type": 0,
+            "direction": 0,
+            "default": 0.0
+          },
+          {
+            "id": "e549cf8e-13fa-5132-8893-34f61ea743e3",
+            "name": "Anisotropy",
+            "type": 0,
+            "direction": 0,
+            "default": 0.0
+          },
+          {
+            "id": "4c56766b-cc42-51e6-91b3-6ad36b4119cb",
+            "name": "Tangent",
+            "type": 2,
+            "direction": 0,
+            "default": [
+              1.0,
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "id": "c585ad56-17c9-5a78-8c06-40c21d7ff26e",
+            "name": "Transmission",
+            "type": 0,
+            "direction": 0,
+            "default": 0.0
+          },
+          {
+            "id": "543c548d-d735-5e89-8328-f75fb234a1e5",
+            "name": "IndexOfRefraction",
+            "type": 0,
+            "direction": 0,
+            "default": 1.5
+          },
+          {
+            "id": "a03d554a-8ad4-576b-9dce-47b513ffbace",
+            "name": "Refraction",
+            "type": 0,
+            "direction": 0,
+            "default": 0.0
+          },
+          {
+            "id": "8c5ac112-8f41-5757-80c1-3df98b1d66bf",
+            "name": "Thickness",
+            "type": 0,
+            "direction": 0,
+            "default": 1.0
+          },
+          {
+            "id": "6e655093-d471-5a66-ae83-0656e7b668e8",
+            "name": "MaterialAttributes",
+            "type": 6,
+            "direction": 0,
+            "default": null
+          },
+          {
+            "id": "bad8d386-4ecf-5c9d-9aae-8b8d4445c442",
+            "name": "WorldPositionOffset",
+            "type": 2,
+            "direction": 0,
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "id": "4b8ba5de-5ed8-5577-b1fb-91341eec6d51",
+            "name": "PixelDepthOffset",
+            "type": 0,
+            "direction": 0,
+            "default": 0.0
+          }
+        ]
+      },
+      {
+        "id": "143d0851-2126-5a5e-b94c-14c27a2169c6",
+        "typeId": "keire.input.parameter",
+        "kind": 1,
+        "name": "Material Base Texture",
+        "position": [
+          40.0,
+          60.0
+        ],
+        "valueType": 5,
+        "value": "38760a1d-9dfa-4bbc-8ba1-50921ae9d748",
+        "textureSemantic": 0,
+        "symbol": "MG_BaseTexture",
+        "include": "",
+        "function": "",
+        "referencedAsset": null,
+        "parameterMetadata": {
+          "description": "Material Base Texture for the surface example.",
+          "category": "Textures",
+          "sortPriority": 0
+        },
+        "pins": [
+          {
+            "id": "be129a7c-edd7-597e-89d4-5446e91824fa",
+            "name": "Value",
+            "type": 5,
+            "direction": 1,
+            "default": null
+          }
+        ]
+      },
+      {
+        "id": "0b2b4417-28de-555a-ba7e-66c84acde0e0",
+        "typeId": "keire.input.parameter",
+        "kind": 1,
+        "name": "Material Tiling",
+        "position": [
+          40.0,
+          200.0
+        ],
+        "valueType": 1,
+        "value": [
+          5.0,
+          5.0
+        ],
+        "textureSemantic": 0,
+        "symbol": "MG_Tiling",
+        "include": "",
+        "function": "",
+        "referencedAsset": null,
+        "parameterMetadata": {
+          "description": "Material Tiling for the surface example.",
+          "category": "Coordinates",
+          "sortPriority": 1
+        },
+        "pins": [
+          {
+            "id": "f385368f-40f1-5991-a0bb-339c3f00b9ab",
+            "name": "Value",
+            "type": 1,
+            "direction": 1,
+            "default": [
+              0.0,
+              0.0
+            ]
+          }
+        ]
+      },
+      {
+        "id": "d94e98c5-a8b5-59ca-809f-3508ca51698f",
+        "typeId": "keire.input.parameter",
+        "kind": 1,
+        "name": "Material Roughness",
+        "position": [
+          40.0,
+          340.0
+        ],
+        "valueType": 0,
+        "value": 0.18,
+        "textureSemantic": 0,
+        "symbol": "MG_Roughness",
+        "include": "",
+        "function": "",
+        "referencedAsset": null,
+        "parameterMetadata": {
+          "description": "Material Roughness for the surface example.",
+          "category": "Surface",
+          "sortPriority": 2,
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "step": 0.01
+        },
+        "pins": [
+          {
+            "id": "e761233e-23df-517c-8999-c64c265d8826",
+            "name": "Value",
+            "type": 0,
+            "direction": 1,
+            "default": 0.0
+          }
+        ]
+      },
+      {
+        "id": "d24248ea-b663-5e19-a0c6-fd0869143c24",
+        "typeId": "keire.input.uv0",
+        "kind": 4,
+        "name": "UV0",
+        "position": [
+          360.0,
+          80.0
+        ],
+        "valueType": 1,
+        "value": [
+          0.0,
+          0.0
+        ],
+        "textureSemantic": 0,
+        "symbol": "",
+        "include": "",
+        "function": "",
+        "referencedAsset": null,
+        "parameterMetadata": {
+          "description": "",
+          "category": "",
+          "sortPriority": 0
+        },
+        "pins": [
+          {
+            "id": "21d627b3-a632-597e-9d81-e6bc1290cf20",
+            "name": "UV",
+            "type": 1,
+            "direction": 1,
+            "default": [
+              0.0,
+              0.0
+            ]
+          }
+        ]
+      },
+      {
+        "id": "9f9ceca1-6db0-5d8a-90fe-c71b4663ce5b",
+        "typeId": "keire.coordinates.uv_transform",
+        "kind": 5,
+        "name": "UV Transform",
+        "position": [
+          600.0,
+          80.0
+        ],
+        "valueType": 1,
+        "value": [
+          0.0,
+          0.0
+        ],
+        "textureSemantic": 0,
+        "symbol": "",
+        "include": "",
+        "function": "",
+        "referencedAsset": null,
+        "parameterMetadata": {
+          "description": "",
+          "category": "",
+          "sortPriority": 0
+        },
+        "pins": [
+          {
+            "id": "16c5b754-46a0-53f2-a50a-2a41ad1665e0",
+            "name": "UV",
+            "type": 1,
+            "direction": 0,
+            "default": [
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "id": "e9e9f85d-72d9-5694-a31d-46f58591656d",
+            "name": "Tiling",
+            "type": 1,
+            "direction": 0,
+            "default": [
+              1.0,
+              1.0
+            ]
+          },
+          {
+            "id": "a01a86a0-8a3f-545b-b3b9-91e55f01392a",
+            "name": "Offset",
+            "type": 1,
+            "direction": 0,
+            "default": [
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "id": "676fd3b8-3402-5e25-b77e-1f3fa4dade83",
+            "name": "UV",
+            "type": 1,
+            "direction": 1,
+            "default": [
+              0.0,
+              0.0
+            ]
+          }
+        ]
+      },
+      {
+        "id": "e6198b53-763a-5f7c-9bd1-26cd7ef831ee",
+        "typeId": "keire.texture.sample_2d",
+        "kind": 3,
+        "name": "Sample Texture 2D",
+        "position": [
+          860.0,
+          80.0
+        ],
+        "valueType": 4,
+        "value": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "textureSemantic": 0,
+        "symbol": "",
+        "include": "",
+        "function": "",
+        "referencedAsset": null,
+        "parameterMetadata": {
+          "description": "",
+          "category": "",
+          "sortPriority": 0
+        },
+        "pins": [
+          {
+            "id": "ac39c736-526e-53f5-a48f-354c7a3d0339",
+            "name": "Texture",
+            "type": 5,
+            "direction": 0,
+            "default": null
+          },
+          {
+            "id": "b7ccacd0-10c5-5389-bdf7-e14be99765e0",
+            "name": "UV",
+            "type": 1,
+            "direction": 0,
+            "default": [
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "id": "59755384-a47c-5d0f-9fab-7d027a5f199e",
+            "name": "RGBA",
+            "type": 4,
+            "direction": 1,
+            "default": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "id": "28dc1254-47c1-569f-b0dd-9b8762862635",
+            "name": "RGB",
+            "type": 2,
+            "direction": 1,
+            "default": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "id": "e6ebd513-ba90-537c-95ed-b3de42e8b394",
+            "name": "R",
+            "type": 0,
+            "direction": 1,
+            "default": 0.0
+          },
+          {
+            "id": "a436aeea-67c1-528a-8a43-592f92964837",
+            "name": "G",
+            "type": 0,
+            "direction": 1,
+            "default": 0.0
+          },
+          {
+            "id": "db0c477f-8bee-52ad-b839-aa2813747e23",
+            "name": "B",
+            "type": 0,
+            "direction": 1,
+            "default": 0.0
+          },
+          {
+            "id": "24855953-c96a-54e4-8d52-5a05eb12bb94",
+            "name": "A",
+            "type": 0,
+            "direction": 1,
+            "default": 0.0
+          }
+        ]
+      }
+    ],
+    "connections": [
+      {
+        "id": "5c4adebc-1860-5c5a-b1c8-bb01b32bf0ec",
+        "output": [
+          "d24248ea-b663-5e19-a0c6-fd0869143c24",
+          "21d627b3-a632-597e-9d81-e6bc1290cf20"
+        ],
+        "input": [
+          "9f9ceca1-6db0-5d8a-90fe-c71b4663ce5b",
+          "16c5b754-46a0-53f2-a50a-2a41ad1665e0"
+        ]
+      },
+      {
+        "id": "e63fbaab-8a2e-59fa-8e1e-5015290735f1",
+        "output": [
+          "0b2b4417-28de-555a-ba7e-66c84acde0e0",
+          "f385368f-40f1-5991-a0bb-339c3f00b9ab"
+        ],
+        "input": [
+          "9f9ceca1-6db0-5d8a-90fe-c71b4663ce5b",
+          "e9e9f85d-72d9-5694-a31d-46f58591656d"
+        ]
+      },
+      {
+        "id": "231e9c88-671e-56b7-b97e-543ea60e9d25",
+        "output": [
+          "143d0851-2126-5a5e-b94c-14c27a2169c6",
+          "be129a7c-edd7-597e-89d4-5446e91824fa"
+        ],
+        "input": [
+          "e6198b53-763a-5f7c-9bd1-26cd7ef831ee",
+          "ac39c736-526e-53f5-a48f-354c7a3d0339"
+        ]
+      },
+      {
+        "id": "112a1b76-3918-59ea-b400-b64df6a5d581",
+        "output": [
+          "9f9ceca1-6db0-5d8a-90fe-c71b4663ce5b",
+          "676fd3b8-3402-5e25-b77e-1f3fa4dade83"
+        ],
+        "input": [
+          "e6198b53-763a-5f7c-9bd1-26cd7ef831ee",
+          "b7ccacd0-10c5-5389-bdf7-e14be99765e0"
+        ]
+      },
+      {
+        "id": "ea566eca-7dac-5e86-9b99-05e1be7b1241",
+        "output": [
+          "e6198b53-763a-5f7c-9bd1-26cd7ef831ee",
+          "59755384-a47c-5d0f-9fab-7d027a5f199e"
+        ],
+        "input": [
+          "4e2f785b-dd5f-5acb-8d78-d92c81d0d578",
+          "be93edc0-28f6-5e29-8953-a53dada8eb16"
+        ]
+      },
+      {
+        "id": "c45d2819-c4f4-5494-8f69-520b748b1d38",
+        "output": [
+          "d94e98c5-a8b5-59ca-809f-3508ca51698f",
+          "e761233e-23df-517c-8999-c64c265d8826"
+        ],
+        "input": [
+          "4e2f785b-dd5f-5acb-8d78-d92c81d0d578",
+          "a6e45ad3-4818-554e-a3a1-f5983e500e0e"
+        ]
+      }
+    ],
+    "keywords": [],
+    "includeRoots": [
+      "Assets"
+    ]
+  }
+}

@@ -431,11 +431,12 @@ TEST_CASE("Material Graph schema one sources upgrade to deterministic visual top
 TEST_CASE("Sandbox and packaged template ship current Material Graph sources")
 {
     const auto repository = std::filesystem::current_path();
-    const auto sandbox = repository / "Samples/KeireSandbox/Assets/Materials/MaterialGraphs";
-    const auto packaged = repository / "KeireHubContent/Templates/Payloads/Sandbox/Assets/Materials/MaterialGraphs";
+    const auto sandbox = repository / "Samples/KeireSandbox/Assets/Examples/MaterialLab/MaterialGraphs";
+    const auto packaged =
+        repository / "KeireHubContent/Templates/Payloads/Sandbox/Assets/Examples/MaterialLab/MaterialGraphs";
     std::size_t graphCount = 0;
     std::size_t expressionGraphCount = 0;
-    for (const auto& entry : std::filesystem::directory_iterator(sandbox))
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(sandbox))
     {
         if (!entry.is_regular_file() || entry.path().extension() != ".keirematerialgraph")
             continue;
@@ -452,11 +453,11 @@ TEST_CASE("Sandbox and packaged template ship current Material Graph sources")
         if (std::ranges::any_of(definition.SurfaceGraph.Connections, [&](const Keire::ShaderGraphConnection& connection)
                                 { return connection.Input.Node == output->Id; }))
             ++expressionGraphCount;
-        CHECK(ReadAssetSource(packaged / entry.path().filename()) == source);
+        CHECK(ReadAssetSource(packaged / entry.path().lexically_relative(sandbox)) == source);
         ++graphCount;
     }
-    CHECK(graphCount == 9);
-    CHECK(expressionGraphCount >= 2);
+    CHECK(graphCount == 12);
+    CHECK(expressionGraphCount == graphCount);
 }
 
 TEST_CASE("Material Instances serialize deterministically and enforce inherited interfaces")

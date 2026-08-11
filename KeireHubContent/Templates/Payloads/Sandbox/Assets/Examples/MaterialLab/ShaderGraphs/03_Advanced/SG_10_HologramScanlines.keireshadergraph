@@ -1,0 +1,834 @@
+{
+  "schemaVersion": 3,
+  "purpose": 0,
+  "output": 1,
+  "nodes": [
+    {
+      "id": "8dee466e-371d-5810-9c2b-489c2f22bc32",
+      "typeId": "keire.output.material",
+      "kind": 0,
+      "name": "Transparent Shader Output",
+      "position": [
+        1280.0,
+        160.0
+      ],
+      "valueType": 4,
+      "value": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "textureSemantic": 0,
+      "symbol": "",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "",
+        "category": "",
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "id": "30346742-5381-51b6-8707-7be80f887774",
+          "name": "BaseColor",
+          "type": 4,
+          "direction": 0,
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "id": "42363b5f-e567-5985-b5cf-50bf40c0cab6",
+          "name": "Metallic",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "afab55d1-c074-5288-837b-d0635dcb327b",
+          "name": "Roughness",
+          "type": 0,
+          "direction": 0,
+          "default": 0.5
+        },
+        {
+          "id": "f6b8d0c5-202e-59c5-a820-7432275b4eb3",
+          "name": "Specular",
+          "type": 0,
+          "direction": 0,
+          "default": 0.5
+        },
+        {
+          "id": "f1c60c1e-b37e-5568-86a0-e4c0505c3daa",
+          "name": "ClearCoat",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "53d977ae-c6f4-5612-8061-f2a909c9d3d1",
+          "name": "ClearCoatRoughness",
+          "type": 0,
+          "direction": 0,
+          "default": 0.25
+        },
+        {
+          "id": "705b73a2-7454-53e3-907d-5dd996305545",
+          "name": "SheenColor",
+          "type": 4,
+          "direction": 0,
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "id": "3bf115dd-9406-5acc-b983-34de6b86792e",
+          "name": "SheenRoughness",
+          "type": 0,
+          "direction": 0,
+          "default": 0.5
+        },
+        {
+          "id": "541e7e6c-346c-5f69-9d37-ca73a87c72ac",
+          "name": "Normal",
+          "type": 2,
+          "direction": 0,
+          "default": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "id": "3a05c2f0-ece7-59f4-9145-f0579acaa8da",
+          "name": "DetailNormal",
+          "type": 2,
+          "direction": 0,
+          "default": [
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "id": "16dde636-1801-52c5-94d4-0eff769ccf90",
+          "name": "Parallax",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "3445ebc4-696f-5e71-8f4c-033137aab789",
+          "name": "Emission",
+          "type": 4,
+          "direction": 0,
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "id": "4f5a6a03-6af3-581f-bdb3-cd8141dea60f",
+          "name": "Occlusion",
+          "type": 0,
+          "direction": 0,
+          "default": 1.0
+        },
+        {
+          "id": "f8d0268b-f873-5714-902e-ecd441f2dc4e",
+          "name": "Opacity",
+          "type": 0,
+          "direction": 0,
+          "default": 1.0
+        },
+        {
+          "id": "20bfd6b2-9050-5265-b098-9e7ac852e57e",
+          "name": "SubsurfaceColor",
+          "type": 4,
+          "direction": 0,
+          "default": [
+            1.0,
+            0.35,
+            0.25,
+            1.0
+          ]
+        },
+        {
+          "id": "f490f9b7-f4ab-55e4-bae4-87670bf3a0d2",
+          "name": "Subsurface",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "3446d988-1276-5f2d-8334-b232a17fbce3",
+          "name": "Anisotropy",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "28b86e58-a81d-5295-9798-d038cb99b5bd",
+          "name": "Tangent",
+          "type": 2,
+          "direction": 0,
+          "default": [
+            1.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "id": "269c5145-dfb7-50a2-b6f9-8701cc912f36",
+          "name": "Transmission",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "5fdd1ad5-08a5-5247-be00-460b7cf295af",
+          "name": "IndexOfRefraction",
+          "type": 0,
+          "direction": 0,
+          "default": 1.5
+        },
+        {
+          "id": "d58b7fa0-056e-5272-8a9d-7948e96c4a21",
+          "name": "Refraction",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "d198939d-f0f9-5bb3-97fe-37cc7be9d075",
+          "name": "Thickness",
+          "type": 0,
+          "direction": 0,
+          "default": 1.0
+        },
+        {
+          "id": "b9525dd8-62f2-51bb-8b20-1144a5816ed6",
+          "name": "MaterialAttributes",
+          "type": 6,
+          "direction": 0,
+          "default": null
+        },
+        {
+          "id": "8980b6c7-8ff5-5da5-82f6-355b0d4452b5",
+          "name": "WorldPositionOffset",
+          "type": 2,
+          "direction": 0,
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "id": "97c3c0a1-5933-5e8f-b952-b188edf08589",
+          "name": "PixelDepthOffset",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        }
+      ]
+    },
+    {
+      "id": "7e511d99-4b11-5393-bc4b-59451e6da515",
+      "typeId": "keire.input.parameter",
+      "kind": 1,
+      "name": "Hologram Color",
+      "position": [
+        40.0,
+        60.0
+      ],
+      "valueType": 4,
+      "value": [
+        0.02,
+        0.45,
+        1.0,
+        1.0
+      ],
+      "textureSemantic": 0,
+      "symbol": "HologramColor",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "Hologram Color for the HologramScanlines example.",
+        "category": "Hologram",
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "id": "0ae0052b-00a8-5213-88e2-f228a6ead97a",
+          "name": "Value",
+          "type": 4,
+          "direction": 1,
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1bd7a22b-6dbc-5b04-9ba6-16424ea293d2",
+      "typeId": "keire.input.parameter",
+      "kind": 1,
+      "name": "Scan Speed",
+      "position": [
+        40.0,
+        200.0
+      ],
+      "valueType": 0,
+      "value": 0.65,
+      "textureSemantic": 0,
+      "symbol": "ScanSpeed",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "Scan Speed for the HologramScanlines example.",
+        "category": "Animation",
+        "sortPriority": 1,
+        "minimum": -4.0,
+        "maximum": 4.0,
+        "step": 0.05
+      },
+      "pins": [
+        {
+          "id": "50934bf2-0165-56e5-8680-ec3df0565e78",
+          "name": "Value",
+          "type": 0,
+          "direction": 1,
+          "default": 0.0
+        }
+      ]
+    },
+    {
+      "id": "75c2c27f-f186-5f54-8e09-2e02e88ce8d2",
+      "typeId": "keire.input.parameter",
+      "kind": 1,
+      "name": "Opacity",
+      "position": [
+        40.0,
+        340.0
+      ],
+      "valueType": 0,
+      "value": 0.52,
+      "textureSemantic": 0,
+      "symbol": "Opacity",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "Opacity for the HologramScanlines example.",
+        "category": "Transparency",
+        "sortPriority": 2,
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01
+      },
+      "pins": [
+        {
+          "id": "ef4d4133-12fa-5593-b133-f2ab583584ed",
+          "name": "Value",
+          "type": 0,
+          "direction": 1,
+          "default": 0.0
+        }
+      ]
+    },
+    {
+      "id": "49785a4b-77c8-5cce-8e8f-63bd44c7dfaf",
+      "typeId": "keire.input.uv0",
+      "kind": 4,
+      "name": "UV0",
+      "position": [
+        360.0,
+        260.0
+      ],
+      "valueType": 1,
+      "value": [
+        0.0,
+        0.0
+      ],
+      "textureSemantic": 0,
+      "symbol": "",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "",
+        "category": "",
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "id": "6b69696f-6946-5751-b112-e867e707a4f9",
+          "name": "UV",
+          "type": 1,
+          "direction": 1,
+          "default": [
+            0.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "id": "c2988dd0-ba6f-5356-a5f1-129ce63bb1e0",
+      "typeId": "keire.input.time",
+      "kind": 65,
+      "name": "Time",
+      "position": [
+        360.0,
+        440.0
+      ],
+      "valueType": 0,
+      "value": 0.0,
+      "textureSemantic": 0,
+      "symbol": "",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "",
+        "category": "",
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "id": "963b4a95-5ab8-5a9d-ab01-6fdfffc11c9d",
+          "name": "Seconds",
+          "type": 0,
+          "direction": 1,
+          "default": 0.0
+        }
+      ]
+    },
+    {
+      "id": "729ec49c-15d4-51e4-ba5b-3ee62184f8a1",
+      "typeId": "keire.math.multiply",
+      "kind": 10,
+      "name": "Multiply",
+      "position": [
+        580.0,
+        440.0
+      ],
+      "valueType": 0,
+      "value": 0.0,
+      "textureSemantic": 0,
+      "symbol": "",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "",
+        "category": "",
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "id": "a37fc4cb-ce44-5912-8733-f066e5aa2d9a",
+          "name": "A",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "9af41d10-cd06-52e3-b842-99f7d1f587eb",
+          "name": "B",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "1bc6d832-569f-58c7-b937-0edc0ffef074",
+          "name": "Result",
+          "type": 0,
+          "direction": 1,
+          "default": 0.0
+        }
+      ]
+    },
+    {
+      "id": "1907906d-d42b-597e-9be2-de8dbe479fdb",
+      "typeId": "keire.coordinates.panner",
+      "kind": 76,
+      "name": "Panner",
+      "position": [
+        600.0,
+        260.0
+      ],
+      "valueType": 1,
+      "value": [
+        0.0,
+        0.0
+      ],
+      "textureSemantic": 0,
+      "symbol": "",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "",
+        "category": "",
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "id": "2852fb42-d6b0-5532-8531-06b70cbe3055",
+          "name": "UV",
+          "type": 1,
+          "direction": 0,
+          "default": [
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "id": "83fb2c35-718e-575d-862e-a70a39c4b37e",
+          "name": "Speed",
+          "type": 1,
+          "direction": 0,
+          "default": [
+            0.0,
+            0.35
+          ]
+        },
+        {
+          "id": "e90732d0-381b-5620-90b4-5153da0dc5e0",
+          "name": "Time",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "9409511d-7fca-5f2e-9d20-9847356ec51d",
+          "name": "UV",
+          "type": 1,
+          "direction": 1,
+          "default": [
+            0.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1abcb477-81e3-57ff-b5e2-d3956aa2eb87",
+      "typeId": "keire.procedural.linear_gradient",
+      "kind": 80,
+      "name": "Linear Gradient",
+      "position": [
+        860.0,
+        260.0
+      ],
+      "valueType": 0,
+      "value": 0.0,
+      "textureSemantic": 0,
+      "symbol": "",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "",
+        "category": "",
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "id": "63aff997-e52b-572f-89d8-b6815ada49cb",
+          "name": "UV",
+          "type": 1,
+          "direction": 0,
+          "default": [
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "id": "5e91845d-600b-567c-8682-20067acb2ff1",
+          "name": "Direction",
+          "type": 1,
+          "direction": 0,
+          "default": [
+            0.0,
+            1.0
+          ]
+        },
+        {
+          "id": "82781356-2b76-55c0-914e-1883d441ca30",
+          "name": "Offset",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "7f7e299f-4792-599a-bdc4-36ae684f570e",
+          "name": "Gradient",
+          "type": 0,
+          "direction": 1,
+          "default": 0.0
+        }
+      ]
+    },
+    {
+      "id": "16c367cd-5e0a-53ce-a5a4-d885af7aaa33",
+      "typeId": "keire.color.hue_shift",
+      "kind": 73,
+      "name": "Hue Shift",
+      "position": [
+        860.0,
+        60.0
+      ],
+      "valueType": 4,
+      "value": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "textureSemantic": 0,
+      "symbol": "",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "",
+        "category": "",
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "id": "0d025588-58b6-5a74-aff2-18cd73bb34ef",
+          "name": "Color",
+          "type": 4,
+          "direction": 0,
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        {
+          "id": "934af239-6149-5a82-bdc4-8b9633a1619f",
+          "name": "Shift",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "2cd73bce-027d-5152-8d4e-f88694fccdb7",
+          "name": "Color",
+          "type": 4,
+          "direction": 1,
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "id": "e598395c-397e-55de-81ab-6ed93cab8514",
+      "typeId": "keire.math.multiply",
+      "kind": 10,
+      "name": "Multiply",
+      "position": [
+        1120.0,
+        260.0
+      ],
+      "valueType": 0,
+      "value": 0.0,
+      "textureSemantic": 0,
+      "symbol": "",
+      "include": "",
+      "function": "",
+      "referencedAsset": null,
+      "parameterMetadata": {
+        "description": "",
+        "category": "",
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "id": "7f6849ea-86c1-5935-8d67-f35e7fbbdf9e",
+          "name": "A",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "185d92b7-4e55-5d6e-884f-a754d44ec286",
+          "name": "B",
+          "type": 0,
+          "direction": 0,
+          "default": 0.0
+        },
+        {
+          "id": "eace1fc1-0ce5-5250-9aed-2fc7263a1d3f",
+          "name": "Result",
+          "type": 0,
+          "direction": 1,
+          "default": 0.0
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "f5c2b46c-9b6e-5d7e-a823-8ac495f7677f",
+      "output": [
+        "49785a4b-77c8-5cce-8e8f-63bd44c7dfaf",
+        "6b69696f-6946-5751-b112-e867e707a4f9"
+      ],
+      "input": [
+        "1907906d-d42b-597e-9be2-de8dbe479fdb",
+        "2852fb42-d6b0-5532-8531-06b70cbe3055"
+      ]
+    },
+    {
+      "id": "65a0c55b-2d9a-5e5e-a896-b1ac65adaf99",
+      "output": [
+        "c2988dd0-ba6f-5356-a5f1-129ce63bb1e0",
+        "963b4a95-5ab8-5a9d-ab01-6fdfffc11c9d"
+      ],
+      "input": [
+        "729ec49c-15d4-51e4-ba5b-3ee62184f8a1",
+        "a37fc4cb-ce44-5912-8733-f066e5aa2d9a"
+      ]
+    },
+    {
+      "id": "aaddb9e5-31a4-5377-9f9f-251993194ad0",
+      "output": [
+        "1bd7a22b-6dbc-5b04-9ba6-16424ea293d2",
+        "50934bf2-0165-56e5-8680-ec3df0565e78"
+      ],
+      "input": [
+        "729ec49c-15d4-51e4-ba5b-3ee62184f8a1",
+        "9af41d10-cd06-52e3-b842-99f7d1f587eb"
+      ]
+    },
+    {
+      "id": "9948b22c-e08f-54e1-bc28-07eecde609b3",
+      "output": [
+        "729ec49c-15d4-51e4-ba5b-3ee62184f8a1",
+        "1bc6d832-569f-58c7-b937-0edc0ffef074"
+      ],
+      "input": [
+        "1907906d-d42b-597e-9be2-de8dbe479fdb",
+        "e90732d0-381b-5620-90b4-5153da0dc5e0"
+      ]
+    },
+    {
+      "id": "758aad3a-309c-5d1f-98a9-aeab890074be",
+      "output": [
+        "1907906d-d42b-597e-9be2-de8dbe479fdb",
+        "9409511d-7fca-5f2e-9d20-9847356ec51d"
+      ],
+      "input": [
+        "1abcb477-81e3-57ff-b5e2-d3956aa2eb87",
+        "63aff997-e52b-572f-89d8-b6815ada49cb"
+      ]
+    },
+    {
+      "id": "3fc34bb5-8191-59d5-9188-722f510e99c2",
+      "output": [
+        "7e511d99-4b11-5393-bc4b-59451e6da515",
+        "0ae0052b-00a8-5213-88e2-f228a6ead97a"
+      ],
+      "input": [
+        "16c367cd-5e0a-53ce-a5a4-d885af7aaa33",
+        "0d025588-58b6-5a74-aff2-18cd73bb34ef"
+      ]
+    },
+    {
+      "id": "91772ab6-b9e8-50b7-bb26-96899ff9d4d3",
+      "output": [
+        "c2988dd0-ba6f-5356-a5f1-129ce63bb1e0",
+        "963b4a95-5ab8-5a9d-ab01-6fdfffc11c9d"
+      ],
+      "input": [
+        "16c367cd-5e0a-53ce-a5a4-d885af7aaa33",
+        "934af239-6149-5a82-bdc4-8b9633a1619f"
+      ]
+    },
+    {
+      "id": "953e2ed2-9cab-5402-bf94-1945c07969ca",
+      "output": [
+        "1abcb477-81e3-57ff-b5e2-d3956aa2eb87",
+        "7f7e299f-4792-599a-bdc4-36ae684f570e"
+      ],
+      "input": [
+        "e598395c-397e-55de-81ab-6ed93cab8514",
+        "7f6849ea-86c1-5935-8d67-f35e7fbbdf9e"
+      ]
+    },
+    {
+      "id": "135c1808-f9ef-5c44-b2e9-38af650fc2db",
+      "output": [
+        "75c2c27f-f186-5f54-8e09-2e02e88ce8d2",
+        "ef4d4133-12fa-5593-b133-f2ab583584ed"
+      ],
+      "input": [
+        "e598395c-397e-55de-81ab-6ed93cab8514",
+        "185d92b7-4e55-5d6e-884f-a754d44ec286"
+      ]
+    },
+    {
+      "id": "f80b8dd9-7a67-580e-ba65-858d3452f9e3",
+      "output": [
+        "16c367cd-5e0a-53ce-a5a4-d885af7aaa33",
+        "2cd73bce-027d-5152-8d4e-f88694fccdb7"
+      ],
+      "input": [
+        "8dee466e-371d-5810-9c2b-489c2f22bc32",
+        "30346742-5381-51b6-8707-7be80f887774"
+      ]
+    },
+    {
+      "id": "21a1e4c8-23c4-5e2e-85f8-52e36b1d49ed",
+      "output": [
+        "16c367cd-5e0a-53ce-a5a4-d885af7aaa33",
+        "2cd73bce-027d-5152-8d4e-f88694fccdb7"
+      ],
+      "input": [
+        "8dee466e-371d-5810-9c2b-489c2f22bc32",
+        "3445ebc4-696f-5e71-8f4c-033137aab789"
+      ]
+    },
+    {
+      "id": "3aaf7ea5-d28e-5ae9-8e19-6bdcce9854e6",
+      "output": [
+        "e598395c-397e-55de-81ab-6ed93cab8514",
+        "eace1fc1-0ce5-5250-9aed-2fc7263a1d3f"
+      ],
+      "input": [
+        "8dee466e-371d-5810-9c2b-489c2f22bc32",
+        "f8d0268b-f873-5714-902e-ecd441f2dc4e"
+      ]
+    }
+  ],
+  "keywords": [],
+  "includeRoots": [
+    "Assets"
+  ]
+}

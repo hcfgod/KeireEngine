@@ -695,7 +695,7 @@ TEST_CASE("Newer scene importers upgrade older metadata revisions but reject fut
 TEST_CASE("Sandbox Shader and Material Graph gallery decodes every progressive material pairing")
 {
     const auto source = KeireTests::ReadFile(std::filesystem::current_path() /
-                                             "Samples/KeireSandbox/Assets/Scenes/ShaderMaterialShowcase.keirescene");
+                                             "Samples/KeireSandbox/Assets/Scenes/SandboxShowcase.keirescene");
     REQUIRE_FALSE(source.empty());
     const std::vector<std::byte> bytes(reinterpret_cast<const std::byte*>(source.data()),
                                        reinterpret_cast<const std::byte*>(source.data() + source.size()));
@@ -704,15 +704,18 @@ TEST_CASE("Sandbox Shader and Material Graph gallery decodes every progressive m
     CHECK(scene->Definition().SchemaVersion == Keire::CurrentSceneSchemaVersion);
 
     constexpr std::array examples{
-        std::pair{"01 · Basic Paint", "fb5f2683-f3d9-516c-a24e-3817e6386ab9"},
-        std::pair{"02 · Textured Surface", "4b473098-5a2d-5262-a7a1-5697f10758be"},
-        std::pair{"03 · Procedural Emissive", "996f627b-a568-5fcc-87bb-79f898bcf69b"},
-        std::pair{"04 · Clear Coat Detail", "6f7bf3a9-8da1-5495-a0d5-f9e1245baf1f"},
-        std::pair{"05 · Adaptive Tech Surface", "ae58f8d7-40da-59e1-ba5a-ee8368eaa7c2"},
-        std::pair{"06 · Anisotropic Brushed Metal", "fa9bfd9f-30c6-517b-aa84-b669b2727c47"},
-        std::pair{"07 · Transmission Glass", "56dfa187-c6e1-5788-9930-3f525451f3b9"},
-        std::pair{"08 · Procedural Vertex Displacement", "2677fd5e-d50a-5b1e-8b62-7cf72f1314ba"},
-        std::pair{"09 · Holographic Voronoi", "34785da2-6545-5c4a-a67a-d6248839e5ba"},
+        std::pair{"01 - Studio Paint", "77c1e51e-6397-5983-b80b-e82587b2edaa"},
+        std::pair{"02 - Tiled Ceramic", "295ace3d-32b9-5c8d-b2d5-f518a4af3f6c"},
+        std::pair{"03 - Neon Pulse", "8b3aebee-37f7-5e6d-a096-617a4893e5b9"},
+        std::pair{"04 - Procedural Cutout", "0e47b16e-4304-5c11-a66c-c716daf7f6be"},
+        std::pair{"05 - Automotive Clear Coat", "78b21fbf-d81b-511f-9d6e-78df263d3652"},
+        std::pair{"06 - Brushed Alloy", "3e20c25e-1348-5f09-acf2-f7fef06ca51f"},
+        std::pair{"07 - Frosted Glass", "5dd2203b-4b66-53d7-a2bc-6208cd7c24c0"},
+        std::pair{"08 - World-Aligned Stone", "fd8d1359-edbc-50a0-bfca-260b1686062b"},
+        std::pair{"09 - Energy Dissolve", "ef1d0b19-beeb-5073-85cb-2183b5681437"},
+        std::pair{"10 - Hologram Scanlines", "f6d03ea8-c948-527b-a601-a0794fa938c7"},
+        std::pair{"11 - Vertex Wave", "c216fa42-86b0-568a-b021-f84dfad59a94"},
+        std::pair{"12 - Iridescent Shield", "ccdad064-d9e2-5862-9fac-ff9763c347ac"},
     };
     for (const auto& [name, material] : examples)
     {
@@ -724,4 +727,17 @@ TEST_CASE("Sandbox Shader and Material Graph gallery decodes every progressive m
         CHECK(renderer->SchemaVersion == 3);
         CHECK(renderer->Data.find(material) != std::string::npos);
     }
+
+    const auto showcaseScript = Keire::ComponentTypeId::Parse("73616e64-626f-4078-8000-000000000060");
+    std::size_t scriptedObjects = 0;
+    std::size_t vfxObjects = 0;
+    for (const auto& object : scene->Definition().Objects)
+    {
+        scriptedObjects +=
+            std::ranges::count(object.Components, showcaseScript, &Keire::SceneComponentDefinition::Type);
+        vfxObjects += std::ranges::count(object.Components, Keire::VfxEmitterComponent::StaticType(),
+                                         &Keire::SceneComponentDefinition::Type);
+    }
+    CHECK(scriptedObjects == examples.size());
+    CHECK(vfxObjects == 4);
 }
