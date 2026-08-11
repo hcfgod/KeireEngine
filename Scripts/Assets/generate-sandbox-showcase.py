@@ -22,12 +22,14 @@ LEGACY_GRAPH_ROOT = ASSETS_ROOT / "Materials" / "MaterialGraphs"
 LEGACY_GENERATED_GRAPH_ROOT = ASSETS_ROOT / "Generated" / "MaterialGraphs"
 SCENE_PATH = ASSETS_ROOT / "Scenes" / "SandboxShowcase.keirescene"
 LEGACY_SCENE_PATH = ASSETS_ROOT / "Scenes" / "ShaderMaterialShowcase.keirescene"
+PLINTH_MATERIAL_PATH = SHOWCASE_ROOT / "Materials" / "ShowcasePlinth.keirematerial"
 SCRIPT_PATH = ASSETS_ROOT / "Scripts" / "Runtime" / "Examples" / "ShowcaseOrbit.cs"
 VFX_GUIDE_PATH = ASSETS_ROOT / "Vfx" / "README.md"
 NAMESPACE = uuid.UUID("2fd1dd90-9e2b-54c0-a559-b654bb581a4e")
 
 SHADER_GRAPH_TYPE = "4b454952-4553-4752-4150-480000000001"
 MATERIAL_GRAPH_TYPE = "4b454952-454d-4752-4150-480000000001"
+MATERIAL_TYPE = "4b454952-454d-4154-4552-49414c000001"
 SCENE_TYPE = "4b454952-4553-4345-4e45-415353455401"
 TEXT_TYPE = "4b454952-4554-4558-5441-535345540001"
 TRANSFORM_TYPE = "4b454952-4554-5241-4e53-464f524d0001"
@@ -36,6 +38,7 @@ MESH_RENDERER_TYPE = "4b454952-454d-4553-4852-454e44455201"
 DIRECTIONAL_LIGHT_TYPE = "4b454952-4544-4952-4c49-474854000001"
 VFX_EMITTER_TYPE = "4b454952-4556-4658-454d-495454455201"
 SHOWCASE_ORBIT_TYPE = "73616e64-626f-4078-8000-000000000060"
+DEFAULT_SURFACE_SHADER = "b1b2c3d4-1000-4000-8000-000000000001"
 
 SCALAR = 0
 VECTOR2 = 1
@@ -792,7 +795,7 @@ def vfx_component(effect: str, seed: int) -> dict[str, Any]:
     }
 
 
-def showcase_scene(material_ids: dict[int, str]) -> dict[str, Any]:
+def showcase_scene(material_ids: dict[int, str], plinth_material: str) -> dict[str, Any]:
     entities: list[dict[str, Any]] = []
     material_root = stable_id("sandbox/scene/material-lab")
     vfx_root = stable_id("sandbox/scene/vfx-lab")
@@ -839,7 +842,7 @@ def showcase_scene(material_ids: dict[int, str]) -> dict[str, Any]:
     }]))
     entities[-1]["components"][0]["data"]["rotation"] = [0.880651, 0.113152, -0.376104, 0.264946]
     entities.append(scene_entity("floor", "Showcase Plinth", [0.0, -0.8, 2.0], [
-        mesh_renderer("6f7bf3a9-8da1-5495-a0d5-f9e1245baf1f", BUILTIN_MESHES[1])
+        mesh_renderer(plinth_material, BUILTIN_MESHES[1])
     ], scale=[20.0, 0.35, 15.0]))
 
     x_positions = (-7.5, -2.5, 2.5, 7.5)
@@ -987,6 +990,7 @@ public sealed class ShowcaseOrbit : Behaviour
 def expected_files() -> dict[Path, bytes]:
     result: dict[Path, bytes] = {}
     material_ids: dict[int, str] = {}
+    plinth_material = stable_id("sandbox/material-asset/showcase-plinth")
     for example in EXAMPLES:
         shader_path, material_path = graph_paths(example)
         shader_asset = stable_id(f"sandbox/shader-asset/{example.number:02d}/{example.slug}")
@@ -1004,16 +1008,30 @@ def expected_files() -> dict[Path, bytes]:
         material_ids[example.number] = material_subassets[1]
         result[shader_path] = json_text(shader).encode("utf-8")
         result[Path(f"{shader_path}.keiremeta")] = json_text(metadata(
-            shader_asset, SHADER_GRAPH_TYPE, "Keire.ShaderGraph", 15, subassets=shader_subassets)).encode("utf-8")
+            shader_asset, SHADER_GRAPH_TYPE, "Keire.ShaderGraph", 16, subassets=shader_subassets)).encode("utf-8")
         result[material_path] = json_text(material).encode("utf-8")
         result[Path(f"{material_path}.keiremeta")] = json_text(metadata(
-            material_asset, MATERIAL_GRAPH_TYPE, "Keire.MaterialGraph", 4,
+            material_asset, MATERIAL_GRAPH_TYPE, "Keire.MaterialGraph", 5,
             dependencies=[shader_asset], subassets=material_subassets)).encode("utf-8")
 
     material_readme = SHOWCASE_ROOT / "README.md"
     result[material_readme] = showcase_readme().encode("utf-8")
     result[Path(f"{material_readme}.keiremeta")] = json_text(text_metadata(material_readme)).encode("utf-8")
-    result[SCENE_PATH] = json_text(showcase_scene(material_ids)).encode("utf-8")
+    result[PLINTH_MATERIAL_PATH] = json_text({
+        "schemaVersion": 2,
+        "shader": DEFAULT_SURFACE_SHADER,
+        "surface": {"alphaMode": 0, "alphaCutoff": 0.5, "doubleSided": False},
+        "properties": {
+            "Tint": [0.025, 0.045, 0.085, 1.0],
+            "MetallicFactor": 0.18,
+            "RoughnessFactor": 0.72,
+            "EmissiveFactor": [0.0, 0.008, 0.02, 1.0],
+        },
+    }).encode("utf-8")
+    result[Path(f"{PLINTH_MATERIAL_PATH}.keiremeta")] = json_text(metadata(
+        plinth_material, MATERIAL_TYPE, "Keire.Material", 5,
+        dependencies=[DEFAULT_SURFACE_SHADER])).encode("utf-8")
+    result[SCENE_PATH] = json_text(showcase_scene(material_ids, plinth_material)).encode("utf-8")
     result[Path(f"{SCENE_PATH}.keiremeta")] = json_text(metadata(
         stable_id("sandbox/scene-asset/showcase"), SCENE_TYPE, "Keire.Scene", 6)).encode("utf-8")
     result[SCRIPT_PATH] = showcase_script().encode("utf-8")

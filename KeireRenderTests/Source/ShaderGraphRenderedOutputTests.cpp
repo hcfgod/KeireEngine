@@ -3,6 +3,7 @@
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/ECS/Components/MeshRendererComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
+#include "Keire/Rendering/MaterialGraph.h"
 #include "Keire/Rendering/ShaderGraph.h"
 #include "Keire/Scenes/Scene.h"
 #include "KeireInternal/RenderInternal.h"
@@ -16,6 +17,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <span>
 #include <stdexcept>
@@ -39,6 +42,33 @@ namespace
                 return true;
         }
         return false;
+    }
+
+    [[nodiscard]] bool ContainsCyan(const std::vector<std::uint8_t>& pixels)
+    {
+        constexpr std::uint8_t minimumChannel = 128;
+        constexpr std::uint8_t minimumRedDelta = 64;
+        for (std::size_t offset = 0; offset + 3 < pixels.size(); offset += 4)
+        {
+            const auto red = pixels[offset];
+            const auto green = pixels[offset + 1];
+            const auto blue = pixels[offset + 2];
+            if (green > minimumChannel && blue > minimumChannel && green > red + minimumRedDelta &&
+                blue > red + minimumRedDelta)
+                return true;
+        }
+        return false;
+    }
+
+    [[nodiscard]] std::vector<std::byte> ReadAssetBytes(const std::filesystem::path& path)
+    {
+        std::ifstream stream(path, std::ios::binary);
+        if (!stream)
+            throw std::runtime_error("Could not open render-test asset: " + path.string());
+        const std::vector<char> characters{std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+        std::vector<std::byte> result(characters.size());
+        std::ranges::transform(characters, result.begin(), [](const char value) { return std::byte(value); });
+        return result;
     }
 
     [[nodiscard]] Keire::ApplicationSpecification RenderTestSpecification()
@@ -270,6 +300,137 @@ namespace
         std::uint32_t m_Stage = 0;
         bool m_Submitted = false;
     };
+
+    class SandboxMaterialGraphFixture final
+    {
+      public:
+        SandboxMaterialGraphFixture()
+            : Root(std::filesystem::temp_directory_path() /
+                   ("Keire-SandboxMaterialGraphTests-" +
+                    std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())))
+        {
+            std::filesystem::create_directories(Root / "Assets");
+            const auto shaderImporter = Keire::CreateShaderAssetImporter();
+            const auto materialImporter = Keire::CreateMaterialAssetImporter();
+            const auto shaderGraphImporter = Keire::CreateShaderGraphAssetImporter();
+            const auto materialGraphImporter = Keire::CreateMaterialGraphAssetImporter();
+            Database = Keire::CreateRef<Keire::AssetDatabase>(Keire::AssetDatabaseSpecification{
+                .ProjectRoot = Root,
+                .Importers = std::vector<Keire::AssetImporterRegistration>{
+                    shaderImporter, materialImporter, shaderGraphImporter, materialGraphImporter}});
+
+            const auto repository = std::filesystem::current_path();
+            const auto shaderSource = repository /
+                                      "Samples/KeireSandbox/Assets/Examples/MaterialLab/ShaderGraphs/01_Foundations/"
+                                      "SG_03_NeonPulse.keireshadergraph";
+            const auto materialSource =
+                repository / "Samples/KeireSandbox/Assets/Examples/MaterialLab/MaterialGraphs/01_Foundations/"
+                             "MG_03_NeonPulse.keirematerialgraph";
+            Graph = Database->CreateAsset("Graphs/NeonPulse.keireshadergraph", shaderGraphImporter,
+                                          ReadAssetBytes(shaderSource));
+            auto definition = Keire::MaterialGraphAsset::DecodeSource(ReadAssetBytes(materialSource));
+            definition.Shader.Asset = Graph;
+            MaterialGraph = Database->CreateAsset("Materials/NeonPulse.keirematerialgraph", materialGraphImporter,
+                                                  Keire::MaterialGraphAsset::EncodeSource(definition));
+            const auto record = Database->Find(MaterialGraph);
+            if (!record || record->SubAssets.size() < 2)
+                throw std::runtime_error("The Sandbox Material Graph did not publish shader and material subassets.");
+            Material = record->SubAssets.back();
+            Catalog = Database->ImportAll(Keire::AssetImportPolicy::KeepLastGood).CatalogPath;
+        }
+
+        ~SandboxMaterialGraphFixture()
+        {
+            std::error_code error;
+            std::filesystem::remove_all(Root, error);
+        }
+
+        std::filesystem::path Root;
+        std::filesystem::path Catalog;
+        Keire::Ref<Keire::AssetDatabase> Database;
+        Keire::AssetId Graph;
+        Keire::AssetId MaterialGraph;
+        Keire::AssetId Material;
+    };
+
+    class SandboxMaterialGraphCaptureLayer final : public Keire::Layer
+    {
+      public:
+        SandboxMaterialGraphCaptureLayer(const Keire::AssetId material,
+                                         std::shared_ptr<std::vector<std::uint8_t>> pixels)
+            : Layer("Sandbox Material Graph capture"), m_Material(material), m_Pixels(std::move(pixels))
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            m_Scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                     Keire::SceneAsset::EmptyDefinition("Sandbox Material Graph"),
+                                                     Keire::ComponentRegistry::CreateDefault());
+            auto object = m_Scene->CreateEntity("Neon Pulse material");
+            const auto renderer = object.AddComponent<Keire::MeshRendererComponent>();
+            renderer->SetMesh(Keire::MeshAsset::CubeId());
+            renderer->SetMaterial(m_Material);
+            object.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, 2.7364445F, 7.5536985F});
+
+            Keire::RenderSurfaceSpecification surface;
+            surface.Name = "Sandbox Material Graph";
+            surface.Width = SurfaceSize;
+            surface.Height = SurfaceSize;
+            surface.ClearColor = {0.0F, 0.0F, 0.0F, 1.0F};
+            m_View = Owner().Renderer()->CreateView(surface);
+            Keire::RenderCamera camera;
+            camera.View = Keire::Math::LookAt({-9.550004F, 9.944860F, 8.224380F}, {-6.672211F, 7.929247F, 7.611357F},
+                                              {0.0F, 1.0F, 0.0F});
+            camera.Projection = Keire::Math::Perspective(50.0F, 1.0F, 0.1F, 100.0F);
+            camera.ClearColor = surface.ClearColor;
+            m_View->SetCamera(camera);
+        }
+
+        void OnDetach() noexcept override
+        {
+            if (m_Scene)
+                m_Scene->Close();
+            m_View.Reset();
+            m_Scene.Reset();
+        }
+
+        void OnUpdate(const Keire::Time&) override
+        {
+            if (m_Submitted)
+            {
+                auto pixels = Keire::RenderSystemInternalAccess::ReadbackRGBA8(*Owner().Renderer(), *m_View->Surface());
+                if (!pixels.empty())
+                    *m_Pixels = pixels;
+                if (ContainsCyan(pixels))
+                {
+                    *m_Pixels = std::move(pixels);
+                    Owner().RequestExit();
+                    return;
+                }
+            }
+            if (++m_FrameCount > 120)
+            {
+                Owner().RequestExit();
+                return;
+            }
+            Keire::RenderEnvironmentSettings environment;
+            environment.AmbientColor = {0.08F, 0.09F, 0.12F, 1.0F};
+            environment.AmbientIntensity = 0.45F;
+            environment.SkyVisible = false;
+            Owner().Renderer()->Submit({m_Scene, m_View, false, environment});
+            m_Submitted = true;
+        }
+
+      private:
+        Keire::AssetId m_Material;
+        std::shared_ptr<std::vector<std::uint8_t>> m_Pixels;
+        Keire::Ref<Keire::Scene> m_Scene;
+        Keire::Ref<Keire::RenderView> m_View;
+        std::uint32_t m_FrameCount = 0;
+        bool m_Submitted = false;
+    };
 } // namespace
 
 TEST_CASE("live Shader Graph shader and parameter revisions update assigned scene meshes")
@@ -290,4 +451,21 @@ TEST_CASE("live Shader Graph shader and parameter revisions update assigned scen
     REQUIRE_FALSE(results->Revised.empty());
     CHECK(ContainsDominantChannel(results->Initial, 1));
     CHECK(ContainsDominantChannel(results->Revised, 0));
+}
+
+TEST_CASE("Sandbox unlit Material Graph creates a native GPU pipeline")
+{
+    SandboxMaterialGraphFixture assets;
+    const auto pixels = std::make_shared<std::vector<std::uint8_t>>();
+    auto specification = RenderTestSpecification();
+    specification.Assets.Mode = Keire::AssetMode::Development;
+    specification.Assets.DevelopmentCatalog = assets.Catalog;
+    {
+        Keire::Application application(std::move(specification));
+        (void)application.PushLayer(std::make_unique<SandboxMaterialGraphCaptureLayer>(assets.Material, pixels));
+        REQUIRE(application.Run() == 0);
+    }
+
+    REQUIRE_FALSE(pixels->empty());
+    CHECK(ContainsCyan(*pixels));
 }

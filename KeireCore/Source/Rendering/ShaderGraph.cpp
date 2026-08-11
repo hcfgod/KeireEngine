@@ -1035,7 +1035,7 @@ namespace Keire
                                                 ? attribute("SheenRoughness")
                                                 : optionalInput("SheenRoughness", ShaderGraphValueType::Scalar, "0.5F");
                 const auto normal = unlit || (!hasMaterialAttributes && !inputConnected("Normal")) ? "input.Normal"
-                                    : hasMaterialAttributes                                        ? attribute("Normal")
+                                    : hasMaterialAttributes ? attribute("Normal")
                                                             : input("Normal", ShaderGraphValueType::Vector3);
                 const bool hasDetailNormal = !unlit && !hasMaterialAttributes && inputConnected("DetailNormal");
                 const auto detailNormal = hasDetailNormal ? input("DetailNormal", ShaderGraphValueType::Vector3)
@@ -2006,13 +2006,16 @@ float4 PSMain(VertexOutput input) : SV_Target0
 )HLSL";
                 }
                 source << "    // Keep the fixed interpolator ABI dense for DXIL PSO validation on D3D12.\n";
-                source << "    if (!all(isfinite(float4(input.Tangent.xy, input.Bitangent.xy))) ||\n";
+                source << "    if (!all(isfinite(float4(input.Normal, input.ViewDirection.x))) ||\n";
+                source << "        !all(isfinite(float4(input.ViewDirection.yz, input.Tangent.xy))) ||\n";
                 source << "        !all(isfinite(float4(input.UV0, input.UV1))) ||\n";
                 source << "        !all(isfinite(float4(input.Color.zw, input.WorldPosition.xy))) ||\n";
                 source << "        !all(isfinite(float4(input.WorldPosition.z, input.ObjectPosition))) ||\n";
                 source << "        !isfinite(input.ViewDepth))\n";
-                source << "        graphColor += input.Tangent + input.Bitangent + input.Color.xyz + "
-                          "input.WorldPosition + input.ObjectPosition + float3(input.UV0 + input.UV1, 0.0F);\n";
+                source
+                    << "        graphColor += input.Normal + input.Tangent + input.Bitangent + input.ViewDirection + "
+                       "input.Color.xyz + input.WorldPosition + input.ObjectPosition + "
+                       "float3(input.UV0 + input.UV1, 0.0F);\n";
                 source << "    if (!all(isfinite(" << materialBindingSentinel << ")))\n";
                 source << "        graphColor += " << materialBindingSentinel << ".xyz;\n";
                 source << "    const float alpha = saturate(graphBaseColor.a * graphOpacity);\n";
@@ -4894,7 +4897,7 @@ float4 PSMain(VertexOutput input) : SV_Target0
     {
         AssetImporterRegistration result;
         result.Name = "Keire.ShaderGraph";
-        result.Version = 15;
+        result.Version = 16;
         result.Type = ShaderGraphAsset::StaticType();
         result.Extensions = {".keireshadergraph"};
         result.ContextualImport = [](const AssetImportContext& context, const std::span<const std::byte> bytes)

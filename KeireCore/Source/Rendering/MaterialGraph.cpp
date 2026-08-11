@@ -1074,7 +1074,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.MaterialGraph";
-        result.Version = 4;
+        result.Version = 5;
         result.Type = MaterialGraphAsset::StaticType();
         result.Extensions = {".keirematerialgraph"};
         result.ContextualImport = [](const AssetImportContext& context, const std::span<const std::byte> bytes)

@@ -133,6 +133,124 @@ namespace KeireEditor
             return value;
         }
 
+        [[nodiscard]] std::string PreviewPropertyKey(const std::string_view name)
+        {
+            std::string result;
+            result.reserve(name.size());
+            for (const auto input : name)
+                if (std::isalnum(static_cast<unsigned char>(input)))
+                    result.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(input))));
+            if (name.size() >= 3 && std::tolower(static_cast<unsigned char>(name[0])) == 'm' &&
+                std::tolower(static_cast<unsigned char>(name[1])) == 'g' && name[2] == '_')
+                result.erase(0, 2);
+            return result;
+        }
+
+        [[nodiscard]] bool ContainsPreviewToken(const std::string_view value, const std::string_view token) noexcept
+        {
+            return value.find(token) != std::string_view::npos;
+        }
+
+        [[nodiscard]] int PreviewColorScore(const std::string_view name, const std::string_view category) noexcept
+        {
+            const auto colorLike = ContainsPreviewToken(name, "color") || ContainsPreviewToken(name, "tint");
+            int score = 0;
+            if (name == "errorcolor")
+                score = 1000;
+            else if (name == "tint" || name == "basecolor" || name == "basetint" || name == "albedo" ||
+                     name == "diffusecolor")
+                score = 900;
+            else if (colorLike && (ContainsPreviewToken(name, "surface") || ContainsPreviewToken(name, "body") ||
+                                   ContainsPreviewToken(name, "paint") || ContainsPreviewToken(name, "metal") ||
+                                   ContainsPreviewToken(name, "glass") || ContainsPreviewToken(name, "leaf") ||
+                                   ContainsPreviewToken(name, "stone") || ContainsPreviewToken(name, "core") ||
+                                   ContainsPreviewToken(name, "hologram")))
+                score = 700;
+            else if (colorLike)
+                score = 500;
+            else
+                score = 100;
+
+            if (ContainsPreviewToken(name, "emission") || ContainsPreviewToken(name, "emissive") ||
+                ContainsPreviewToken(name, "edge") || ContainsPreviewToken(name, "rim") ||
+                ContainsPreviewToken(name, "glow"))
+                score -= 400;
+            if (ContainsPreviewToken(category, "surface") || ContainsPreviewToken(category, "paint"))
+                score += 100;
+            return score;
+        }
+
+        [[nodiscard]] Keire::Color RepresentativeMaterialColor(const Keire::MaterialAssetDefinition& material,
+                                                               const Keire::ShaderAsset* shader)
+        {
+            Keire::Color result{1.0F, 1.0F, 1.0F, 1.0F};
+            int bestScore = std::numeric_limits<int>::min();
+            for (const auto& [name, value] : material.Properties)
+            {
+                const auto* color = std::get_if<Keire::Color>(&value);
+                if (!color)
+                    continue;
+                std::string category;
+                if (shader)
+                {
+                    const auto property = std::ranges::find(shader->Definition().Properties, name,
+                                                            &Keire::ShaderPropertyDefinition::Name);
+                    if (property != shader->Definition().Properties.end())
+                        category = PreviewPropertyKey(property->Category);
+                }
+                const auto score = PreviewColorScore(PreviewPropertyKey(name), category);
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    result = *color;
+                }
+            }
+            return result;
+        }
+
+        [[nodiscard]] int PreviewTextureScore(const std::string_view name,
+                                              const Keire::ShaderTextureSemantic semantic) noexcept
+        {
+            if (semantic == Keire::ShaderTextureSemantic::BaseColor)
+                return 1000;
+            if (name == "maintexture" || ContainsPreviewToken(name, "base") || ContainsPreviewToken(name, "albedo") ||
+                ContainsPreviewToken(name, "diffuse"))
+                return 800;
+            if (ContainsPreviewToken(name, "normal") || ContainsPreviewToken(name, "rough") ||
+                ContainsPreviewToken(name, "metal") || ContainsPreviewToken(name, "occlusion") ||
+                ContainsPreviewToken(name, "mask"))
+                return 100;
+            return 400;
+        }
+
+        [[nodiscard]] Keire::AssetId RepresentativeMaterialTexture(const Keire::MaterialAssetDefinition& material,
+                                                                   const Keire::ShaderAsset* shader)
+        {
+            Keire::AssetId result;
+            int bestScore = std::numeric_limits<int>::min();
+            for (const auto& [name, value] : material.Properties)
+            {
+                const auto* asset = std::get_if<Keire::AssetId>(&value);
+                if (!asset || !*asset)
+                    continue;
+                auto semantic = Keire::ShaderTextureSemantic::Generic;
+                if (shader)
+                {
+                    const auto property = std::ranges::find(shader->Definition().Properties, name,
+                                                            &Keire::ShaderPropertyDefinition::Name);
+                    if (property != shader->Definition().Properties.end())
+                        semantic = property->TextureSemantic;
+                }
+                const auto score = PreviewTextureScore(PreviewPropertyKey(name), semantic);
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    result = *asset;
+                }
+            }
+            return result;
+        }
+
         [[nodiscard]] std::uint8_t Byte(const std::byte value) noexcept { return std::to_integer<std::uint8_t>(value); }
 
         template <typename Value> [[nodiscard]] constexpr float AsFloat(const Value value) noexcept
@@ -234,31 +352,9 @@ namespace KeireEditor
             const auto material = Keire::DynamicRefCast<const Keire::MaterialAsset>(request.PreviewAsset);
             if (!material)
                 return MakeIcon(width, height, {48, 31, 48}, {226, 78, 211}, 'M', true);
-            Keire::Color tint{1.0F, 1.0F, 1.0F, 1.0F};
-            Keire::AssetId baseTexture;
             const auto& definition = material->Definition();
-            if (const auto found = definition.Properties.find("Tint"); found != definition.Properties.end())
-                if (const auto* color = std::get_if<Keire::Color>(&found->second))
-                    tint = *color;
-            if (const auto found = definition.Properties.find("ErrorColor"); found != definition.Properties.end())
-                if (const auto* color = std::get_if<Keire::Color>(&found->second))
-                    tint = *color;
-            if (const auto found = definition.Properties.find("MainTexture"); found != definition.Properties.end())
-                if (const auto* asset = std::get_if<Keire::AssetId>(&found->second))
-                    baseTexture = *asset;
-            if (request.PreviewShader)
-            {
-                for (const auto& property : request.PreviewShader->Definition().Properties)
-                {
-                    if (property.TextureSemantic != Keire::ShaderTextureSemantic::BaseColor)
-                        continue;
-                    if (const auto found = definition.Properties.find(property.Name);
-                        found != definition.Properties.end())
-                        if (const auto* asset = std::get_if<Keire::AssetId>(&found->second))
-                            baseTexture = *asset;
-                    break;
-                }
-            }
+            const auto tint = RepresentativeMaterialColor(definition, request.PreviewShader.Get());
+            const auto baseTexture = RepresentativeMaterialTexture(definition, request.PreviewShader.Get());
             const auto texture = baseTexture ? request.PreviewTexture : Keire::Ref<const Keire::Texture2DAsset>{};
             std::vector<std::byte> result(static_cast<std::size_t>(width) * height * 4);
             FillPreviewBackground(result, width, height);
@@ -898,27 +994,9 @@ namespace KeireEditor
             ready = ready && static_cast<bool>(request.PreviewShader);
         }
 
-        Keire::AssetId texture;
-        if (material)
-        {
-            if (const auto found = material->Definition().Properties.find("MainTexture");
-                found != material->Definition().Properties.end())
-                if (const auto* id = std::get_if<Keire::AssetId>(&found->second))
-                    texture = *id;
-            if (request.PreviewShader)
-            {
-                for (const auto& property : request.PreviewShader->Definition().Properties)
-                {
-                    if (property.TextureSemantic != Keire::ShaderTextureSemantic::BaseColor)
-                        continue;
-                    if (const auto found = material->Definition().Properties.find(property.Name);
-                        found != material->Definition().Properties.end())
-                        if (const auto* id = std::get_if<Keire::AssetId>(&found->second))
-                            texture = *id;
-                    break;
-                }
-            }
-        }
+        const auto texture = material
+                                 ? RepresentativeMaterialTexture(material->Definition(), request.PreviewShader.Get())
+                                 : Keire::AssetId{};
         if (texture)
         {
             const auto textureHandle = assets->Load<Keire::Texture2DAsset>(texture, Keire::AssetPriority::Low);
@@ -1062,17 +1140,17 @@ namespace KeireEditor
             return [=](const ThumbnailRequest& request, const auto width, const auto height)
             { return MakeIcon(width, height, background, accent, glyph, request.Missing); };
         };
-        RegisterProvider(".keirematerial", 5, MakeMaterialPreview);
-        RegisterProvider(".keireshadergraph", 1,
+        RegisterProvider(".keirematerial", 6, MakeMaterialPreview);
+        RegisterProvider(".keireshadergraph", 2,
                          [](const ThumbnailRequest& request, const auto width, const auto height)
                          { return MakeShaderGraphPreview(request, width, height, "SG"); });
-        RegisterProvider(".keirematerialgraph", 1,
+        RegisterProvider(".keirematerialgraph", 2,
                          [](const ThumbnailRequest& request, const auto width, const auto height)
                          { return MakeShaderGraphPreview(request, width, height, "MG"); });
-        RegisterProvider(".keirematerialinstance", 1,
+        RegisterProvider(".keirematerialinstance", 2,
                          [](const ThumbnailRequest& request, const auto width, const auto height)
                          { return MakeShaderGraphPreview(request, width, height, "MI"); });
-        RegisterProvider(".keireshadergraphinstance", 1,
+        RegisterProvider(".keireshadergraphinstance", 2,
                          [](const ThumbnailRequest& request, const auto width, const auto height)
                          { return MakeShaderGraphPreview(request, width, height, "MI"); });
         RegisterProvider(".keirevfx", 1, MakeVfxPreview);

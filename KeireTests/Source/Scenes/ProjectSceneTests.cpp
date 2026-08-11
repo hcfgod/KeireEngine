@@ -728,6 +728,17 @@ TEST_CASE("Sandbox Shader and Material Graph gallery decodes every progressive m
         CHECK(renderer->Data.find(material) != std::string::npos);
     }
 
+    const auto plinth =
+        std::ranges::find(scene->Definition().Objects, "Showcase Plinth", &Keire::SceneObjectDefinition::Name);
+    REQUIRE(plinth != scene->Definition().Objects.end());
+    const auto plinthRenderer = std::ranges::find(plinth->Components, Keire::MeshRendererComponent::StaticType(),
+                                                  &Keire::SceneComponentDefinition::Type);
+    REQUIRE(plinthRenderer != plinth->Components.end());
+    CHECK(plinthRenderer->Data.find("d22ab141-adbb-53e9-a556-f07c5baf89be") != std::string::npos);
+    CHECK(std::filesystem::exists(
+        std::filesystem::current_path() /
+        "Samples/KeireSandbox/Assets/Examples/MaterialLab/Materials/ShowcasePlinth.keirematerial"));
+
     const auto showcaseScript = Keire::ComponentTypeId::Parse("73616e64-626f-4078-8000-000000000060");
     std::size_t scriptedObjects = 0;
     std::size_t vfxObjects = 0;

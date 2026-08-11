@@ -1,5 +1,10 @@
 # Changelog
 
+- Fixed the Sandbox showcase ground and Neon Pulse material rendering magenta. The template now ships a dedicated,
+  valid plinth material, removes stale material references from both sample scenes, and regenerates unlit graph shaders
+  with a D3D12-compatible dense interpolator ABI and exact resource declarations. Material Graph thumbnails now choose
+  representative exposed colors and base textures instead of defaulting to white, with cache versions bumped so
+  existing projects refresh automatically.
 - Bounded unsigned website preview retention to one verified installer per Hub version, platform, and architecture.
   Preview metadata now deterministically keeps the newest build for each retained identity, while signed stable releases
   remain immutable and older supported editor versions remain available through the Hub catalog.

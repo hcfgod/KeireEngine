@@ -211,7 +211,9 @@ expression network.
 `Assets/Scenes/SandboxShowcase.keirescene` presents all twelve pairs on production renderer primitives with an active
 camera, lighting, a staged gallery floor, managed presentation behavior, and four edit-mode VFX examples. It is the
 canonical Sandbox startup scene and the startup scene for projects created from the packaged Sandbox template. The
-broader `SampleScene.keirescene` remains available for gameplay, input, physics, UI, audio, and animation workflows.
+gallery floor uses its own tracked Direct Material, and Asset Browser thumbnails derive a representative surface color
+and base texture from each generated shader interface so Material Graph previews stay identifiable. The broader
+`SampleScene.keirescene` remains available for gameplay, input, physics, UI, audio, and animation workflows.
 
 Engine tests cover deterministic encoding, graph compilation, templates, variants, Direct Materials, visual Material
 Graph topology and schema upgrades, Material Instance ancestry, importer output, and transactional migration. Editor

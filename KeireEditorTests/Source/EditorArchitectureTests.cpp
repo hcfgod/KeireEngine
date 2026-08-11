@@ -1762,6 +1762,30 @@ TEST_CASE("content previews use immutable loaded assets without blocking shutdow
     CHECK(std::to_integer<unsigned>(materialGraphResult.Pixels[badgeBorder]) > 200U);
     CHECK(std::to_integer<unsigned>(materialGraphResult.Pixels[badgeBorder + 1]) > 150U);
 
+    Keire::MaterialAssetDefinition generatedMaterialDefinition;
+    generatedMaterialDefinition.Properties.emplace("MG_SurfaceTint", Keire::Color{0.05F, 0.8F, 0.15F, 1.0F});
+    auto generatedMaterial = Keire::CreateRef<Keire::MaterialAsset>(std::move(generatedMaterialDefinition));
+    Keire::ShaderAssetDefinition generatedShaderDefinition;
+    Keire::ShaderPropertyDefinition surfaceTint;
+    surfaceTint.Name = "MG_SurfaceTint";
+    surfaceTint.Type = Keire::ShaderPropertyType::Color;
+    surfaceTint.Category = "Surface";
+    generatedShaderDefinition.Properties.push_back(std::move(surfaceTint));
+    auto generatedShader = Keire::CreateRef<Keire::ShaderAsset>(std::move(generatedShaderDefinition));
+    const auto generatedMaterialGraphId = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000077");
+    REQUIRE(thumbnails.Request({.Asset = generatedMaterialGraphId,
+                                .Type = Keire::MaterialGraphAsset::StaticType(),
+                                .PreviewAsset = generatedMaterial,
+                                .PreviewShader = generatedShader,
+                                .RelativePath = "Generated.keirematerialgraph",
+                                .Digest = "generated-material-graph-preview"}));
+    const auto generatedMaterialGraphResult = await();
+    REQUIRE(generatedMaterialGraphResult.Pixels.size() == 96U * 96U * 4U);
+    CHECK(std::to_integer<unsigned>(generatedMaterialGraphResult.Pixels[center + 1]) >
+          std::to_integer<unsigned>(generatedMaterialGraphResult.Pixels[center]));
+    CHECK(std::to_integer<unsigned>(generatedMaterialGraphResult.Pixels[center + 1]) >
+          std::to_integer<unsigned>(generatedMaterialGraphResult.Pixels[center + 2]));
+
     const auto vfxId = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000076");
     REQUIRE(thumbnails.Request({.Asset = vfxId,
                                 .Type = Keire::VfxEffectAsset::StaticType(),

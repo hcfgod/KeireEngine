@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 2,
+  "shader": "b1b2c3d4-1000-4000-8000-000000000001",
+  "surface": {
+    "alphaMode": 0,
+    "alphaCutoff": 0.5,
+    "doubleSided": false
+  },
+  "properties": {
+    "Tint": [
+      0.025,
+      0.045,
+      0.085,
+      1.0
+    ],
+    "MetallicFactor": 0.18,
+    "RoughnessFactor": 0.72,
+    "EmissiveFactor": [
+      0.0,
+      0.008,
+      0.02,
+      1.0
+    ]
+  }
+}

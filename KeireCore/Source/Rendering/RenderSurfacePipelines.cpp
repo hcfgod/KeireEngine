@@ -862,8 +862,9 @@ namespace Keire::RenderBackend
         if (vertex && definition.UsesInstancing)
             information.num_storage_buffers = 1U;
         information.num_uniform_buffers = vertex ? (definition.UsesVertexMaterialParameters ? 2U : 1U)
-                                          : definition.UsesImageBasedLighting ? 4U
-                                                                              : 3U;
+                                                 : 2U + (definition.UsesImageBasedLighting ? 2U
+                                                         : definition.ReceivesShadows      ? 1U
+                                                                                           : 0U);
         SDL_GPUShader* shader = SDL_CreateGPUShader(Device, &information);
         if (!shader)
             throw std::runtime_error("SDL_CreateGPUShader(asset) failed: " + LastSdlError());
