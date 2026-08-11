@@ -11,8 +11,17 @@
 #include <string_view>
 #include <vector>
 
+#if !defined(_WIN32)
+#include <sys/stat.h>
+#endif
+
 int main(const int argc, char** argv)
 {
+#if !defined(_WIN32)
+    // Package-tree validation requires deterministic 0755 directory and 0644
+    // file modes. Do not let the invoking user's umask make fixtures unsafe.
+    ::umask(0022);
+#endif
     KeireHubTests::ExecutablePath = std::filesystem::absolute(argv[0]);
     if (argc > 1 && std::string_view(argv[1]) == "--hub-instance-secondary")
     {
