@@ -10,7 +10,7 @@ a project-first authoring workflow. The Kéire Hub manages projects and installe
 native scene, asset, rendering, scripting, profiling, and player-build workflows; and the runtime ships only the
 systems and cooked content selected by a project.
 
-Kéire is currently **version 0.2.0 and pre-1.0**. Its foundations are production-oriented, but interfaces, content
+Kéire is currently **version 0.3.0 and pre-1.0**. Its foundations are production-oriented, but interfaces, content
 formats, and release procedures may still change before the first stable release. The project documents current
 capabilities and remaining production-readiness work directly rather than presenting roadmap work as complete.
 
@@ -46,7 +46,8 @@ Kéire already includes substantial, integrated engine and authoring foundations
 - Stable asset identities, metadata sidecars, dependency tracking, deterministic imports, asynchronous runtime loading,
   hot reload, cooked packs, and native player packaging.
 - SDL3 multi-window and SDL_GPU rendering, Scene and Game views, cameras, picking, separate Shader and Material Graphs,
-  Direct Materials, inherited Material Instances, tagged custom-shader materials, LODs,
+  Direct Materials, inherited and dynamic Material Instances, reusable material/shader functions and layers,
+  Material Parameter Collections, tagged custom-shader materials, LODs,
   spatial lighting data, animation, rigging, VFX authoring, and performance gates.
 - Input actions and rebinding, physics, navigation, audio graphs, production mixer/reverb-zone foundations,
   replay/diagnostic foundations, and profiling.

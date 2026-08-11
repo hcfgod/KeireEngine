@@ -30,6 +30,8 @@ namespace KeireEditor
         [[nodiscard]] virtual std::span<const Keire::AssetSourceRecord> ShaderGraphAssetRecords() const noexcept = 0;
         [[nodiscard]] virtual Keire::Ref<const Keire::MeshAsset>
         ResolveShaderGraphPreviewMesh(Keire::AssetId asset) = 0;
+        [[nodiscard]] virtual std::optional<Keire::ShaderGraphDefinition>
+        ResolveShaderGraphFunction(Keire::AssetId asset) const = 0;
         virtual void RevealShaderGraphAsset(Keire::AssetId asset) = 0;
         virtual void ReportShaderGraphError(std::string message) noexcept = 0;
     };
@@ -77,6 +79,8 @@ namespace KeireEditor
         [[nodiscard]] bool AddNode(Keire::ShaderGraphNodeKind kind,
                                    Keire::ShaderGraphValueType type = Keire::ShaderGraphValueType::Scalar,
                                    std::optional<Keire::Vector2> graphPosition = std::nullopt);
+        [[nodiscard]] bool AddFunctionNode(Keire::AssetId asset, std::string_view name,
+                                           std::optional<Keire::Vector2> graphPosition);
         void Report(std::string message) noexcept;
 
         IShaderGraphPanelController& m_Controller;

@@ -24,6 +24,7 @@
 #include <fstream>
 #include <iterator>
 #include <limits>
+#include <map>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -1073,6 +1074,8 @@ void KeireEditor::AssetInspectorPanel::ClearState() noexcept
 {
     m_EditingAsset = {};
     m_AssetName.clear();
+    m_MaterialParameterCollection.reset();
+    m_MaterialParameterCollectionDirty = false;
     m_ManagedDataInspector->Clear();
 }
 
@@ -1105,6 +1108,8 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
     {
         m_EditingAsset = record->Id;
         m_AssetName = record->RelativePath.filename().string();
+        m_MaterialParameterCollection.reset();
+        m_MaterialParameterCollectionDirty = false;
     }
     ui.Text(record->RelativePath.generic_string());
     ui.TextColored(theme.MutedText, "Asset ID");
@@ -1290,8 +1295,111 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
                 m_Controller.PersistInspectorMaterialInstance(record->Id,
                                                               Keire::MaterialInstanceAsset::EncodeSource(instance));
             }
+
+            std::optional<Keire::MaterialGraphDefinition> rootGraph;
+            std::vector<std::map<std::string, std::string, std::less<>>> inheritedStaticOverrides;
+            auto root = instance.Parent;
+            for (std::size_t depth = 0; depth < 16 && root; ++depth)
+            {
+                const auto rootRecord = database->Find(root);
+                if (!rootRecord)
+                    break;
+                const auto rootPath = sourceRoot / rootRecord->RelativePath;
+                if (rootRecord->Type == Keire::MaterialInstanceAsset::StaticType())
+                {
+                    const auto parentInstance = Keire::MaterialInstanceAsset::DecodeSource(ReadBytes(rootPath));
+                    inheritedStaticOverrides.push_back(parentInstance.KeywordOverrides);
+                    root = parentInstance.Parent;
+                    continue;
+                }
+                if (rootRecord->Type == Keire::MaterialGraphAsset::StaticType())
+                    rootGraph = Keire::MaterialGraphAsset::DecodeSource(ReadBytes(rootPath));
+                break;
+            }
+            if (rootGraph && rootGraph->Shader.Kind == Keire::MaterialShaderSourceKind::ShaderGraph)
+            {
+                const auto templateRecord = database->Find(rootGraph->Shader.Asset);
+                if (templateRecord && templateRecord->Type == Keire::ShaderGraphAsset::StaticType())
+                {
+                    const auto shaderTemplate =
+                        Keire::ShaderGraphAsset::DecodeSource(ReadBytes(sourceRoot / templateRecord->RelativePath));
+                    auto staticParameters = shaderTemplate.Keywords;
+                    for (const auto& keyword : rootGraph->SurfaceGraph.Keywords)
+                        if (std::ranges::none_of(staticParameters, [&](const Keire::ShaderGraphKeyword& candidate)
+                                                 { return candidate.Name == keyword.Name; }))
+                            staticParameters.push_back(keyword);
+                    if (!staticParameters.empty())
+                    {
+                        std::map<std::string, std::string, std::less<>> inheritedValues;
+                        for (const auto& keyword : staticParameters)
+                            inheritedValues[keyword.Name] =
+                                keyword.DefaultOption.empty()
+                                    ? keyword.Options.empty() ? "false" : keyword.Options.front()
+                                    : keyword.DefaultOption;
+                        for (const auto& [name, value] : rootGraph->Shader.Keywords)
+                            inheritedValues.insert_or_assign(name, value);
+                        for (auto parentOverrides = inheritedStaticOverrides.rbegin();
+                             parentOverrides != inheritedStaticOverrides.rend(); ++parentOverrides)
+                            for (const auto& [name, value] : *parentOverrides)
+                                inheritedValues.insert_or_assign(name, value);
+
+                        ui.Separator();
+                        ui.TextColored(theme.Accent, "STATIC PARAMETERS");
+                        ui.TextColored(theme.MutedText,
+                                       "Static overrides select a precompiled parent Material Graph variant.");
+                        bool staticChanged = false;
+                        for (const auto& keyword : staticParameters)
+                        {
+                            const auto existing = instance.KeywordOverrides.find(keyword.Name);
+                            bool overridden = existing != instance.KeywordOverrides.end();
+                            if (ui.Checkbox("Override##" + keyword.Name, overridden))
+                            {
+                                if (overridden)
+                                    instance.KeywordOverrides.insert_or_assign(keyword.Name,
+                                                                               inheritedValues.at(keyword.Name));
+                                else
+                                    instance.KeywordOverrides.erase(keyword.Name);
+                                staticChanged = true;
+                            }
+                            ui.SameLine();
+                            auto value = overridden ? instance.KeywordOverrides.at(keyword.Name)
+                                                    : inheritedValues.at(keyword.Name);
+                            if (auto disabled = ui.BeginDisabled(!overridden); disabled)
+                            {
+                                if (keyword.Options.empty())
+                                {
+                                    bool enabled = value == "true";
+                                    if (ui.Checkbox(keyword.Name, enabled))
+                                    {
+                                        instance.KeywordOverrides.insert_or_assign(keyword.Name,
+                                                                                   enabled ? "true" : "false");
+                                        staticChanged = true;
+                                    }
+                                }
+                                else if (auto combo = ui.BeginCombo(keyword.Name, value); combo)
+                                    for (const auto& option : keyword.Options)
+                                        if (ui.Selectable(option, option == value))
+                                        {
+                                            instance.KeywordOverrides.insert_or_assign(keyword.Name, option);
+                                            staticChanged = true;
+                                        }
+                            }
+                        }
+                        if (!instance.KeywordOverrides.empty() && ui.Button("Reset All Static Overrides"))
+                        {
+                            instance.KeywordOverrides.clear();
+                            staticChanged = true;
+                        }
+                        if (staticChanged)
+                            m_Controller.PersistInspectorMaterialInstance(
+                                record->Id, Keire::MaterialInstanceAsset::EncodeSource(instance));
+                    }
+                }
+            }
             ui.TextColored(theme.MutedText, std::to_string(instance.Properties.size()) +
-                                                " explicit property override(s). Shader code is never duplicated.");
+                                                " explicit property override(s), " +
+                                                std::to_string(instance.KeywordOverrides.size()) +
+                                                " static override(s). Shader code is never duplicated.");
             if (!instance.Properties.empty() && ui.Button("Reset All Property Overrides"))
             {
                 instance.Properties.clear();
@@ -1307,13 +1415,122 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
             ui.TextColored(theme.Error, std::string("Material Instance editor unavailable: ") + error.what());
         }
     }
+    else if (record->Type == Keire::MaterialParameterCollectionAsset::StaticType())
+    {
+        ui.Separator();
+        ui.TextColored(theme.Accent, "MATERIAL PARAMETER COLLECTION");
+        ui.TextColored(theme.MutedText,
+                       "Project-global scalar, vector, and color values shared by dependent materials.");
+        try
+        {
+            const auto sourceRoot = database->Specification().ProjectRoot / database->Specification().SourceDirectory;
+            const auto source = sourceRoot / record->RelativePath;
+            if (!m_MaterialParameterCollection)
+                m_MaterialParameterCollection =
+                    Keire::MaterialParameterCollectionAsset::DecodeSource(ReadBytes(source));
+            auto& collection = *m_MaterialParameterCollection;
+            constexpr std::array typeNames{std::string_view("Scalar"), std::string_view("Vector2"),
+                                           std::string_view("Vector3"), std::string_view("Vector4"),
+                                           std::string_view("Color")};
+            std::optional<std::size_t> remove;
+            for (std::size_t index = 0; index < collection.Parameters.size(); ++index)
+            {
+                auto& parameter = collection.Parameters[index];
+                ui.Separator();
+                ui.TextColored(theme.MutedText, parameter.DisplayName.empty() ? parameter.Name : parameter.DisplayName);
+                const auto suffix = "##collection-" + parameter.Id.ToString();
+                m_MaterialParameterCollectionDirty |= ui.InputText("Name" + suffix, parameter.Name);
+                m_MaterialParameterCollectionDirty |= ui.InputText("Display Name" + suffix, parameter.DisplayName);
+                m_MaterialParameterCollectionDirty |= ui.InputText("Description" + suffix, parameter.Description);
+                m_MaterialParameterCollectionDirty |= ui.InputText("Category" + suffix, parameter.Category);
+                auto sortPriority = static_cast<double>(parameter.SortPriority);
+                if (ui.DragScalar("Sort Priority" + suffix, sortPriority, 1.0, -10'000.0, 10'000.0))
+                {
+                    parameter.SortPriority = static_cast<std::int32_t>(std::round(sortPriority));
+                    m_MaterialParameterCollectionDirty = true;
+                }
+                auto typeIndex = static_cast<std::size_t>(parameter.Type);
+                if (auto combo = ui.BeginCombo("Type" + suffix, typeNames.at(typeIndex)); combo)
+                    for (std::size_t candidate = 0; candidate < typeNames.size(); ++candidate)
+                        if (ui.Selectable(typeNames[candidate], candidate == typeIndex))
+                        {
+                            parameter.Type = static_cast<Keire::ShaderPropertyType>(candidate);
+                            parameter.DefaultValue = candidate == 0   ? Keire::MaterialPropertyValue(0.0F)
+                                                     : candidate == 1 ? Keire::MaterialPropertyValue(Keire::Vector2{})
+                                                     : candidate == 2 ? Keire::MaterialPropertyValue(Keire::Vector3{})
+                                                     : candidate == 3 ? Keire::MaterialPropertyValue(Keire::Vector4{})
+                                                                      : Keire::MaterialPropertyValue(Keire::Color{});
+                            m_MaterialParameterCollectionDirty = true;
+                        }
+                if (auto* value = std::get_if<float>(&parameter.DefaultValue))
+                {
+                    double edited = *value;
+                    if (ui.DragScalar("Default" + suffix, edited, 0.01))
+                    {
+                        *value = static_cast<float>(edited);
+                        m_MaterialParameterCollectionDirty = true;
+                    }
+                }
+                else if (auto* vector2 = std::get_if<Keire::Vector2>(&parameter.DefaultValue))
+                    m_MaterialParameterCollectionDirty |= ui.DragVector2("Default" + suffix, *vector2);
+                else if (auto* vector3 = std::get_if<Keire::Vector3>(&parameter.DefaultValue))
+                    m_MaterialParameterCollectionDirty |= ui.DragVector3("Default" + suffix, *vector3);
+                else if (auto* vector4 = std::get_if<Keire::Vector4>(&parameter.DefaultValue))
+                    m_MaterialParameterCollectionDirty |= ui.DragVector4("Default" + suffix, *vector4);
+                else if (auto* color = std::get_if<Keire::Color>(&parameter.DefaultValue))
+                {
+                    Keire::UiColor edited{color->Red, color->Green, color->Blue, color->Alpha};
+                    if (ui.ColorEdit("Default" + suffix, edited))
+                    {
+                        *color = {edited.Red, edited.Green, edited.Blue, edited.Alpha};
+                        m_MaterialParameterCollectionDirty = true;
+                    }
+                }
+                if (ui.Button("Remove" + suffix))
+                    remove = index;
+            }
+            if (remove)
+            {
+                collection.Parameters.erase(collection.Parameters.begin() + static_cast<std::ptrdiff_t>(*remove));
+                m_MaterialParameterCollectionDirty = true;
+            }
+            if (ui.Button("Add Parameter"))
+            {
+                const auto ordinal = collection.Parameters.size() + 1U;
+                collection.Parameters.push_back({.Id = Keire::AssetId::Generate(),
+                                                 .Name = "Parameter" + std::to_string(ordinal),
+                                                 .DisplayName = "Parameter " + std::to_string(ordinal)});
+                m_MaterialParameterCollectionDirty = true;
+            }
+            ui.SameLine();
+            if (auto disabled = ui.BeginDisabled(!m_MaterialParameterCollectionDirty); disabled)
+                if (ui.Button("Save Collection"))
+                {
+                    m_Controller.PersistInspectorMaterialParameterCollection(
+                        record->Id, Keire::MaterialParameterCollectionAsset::EncodeSource(collection));
+                    m_MaterialParameterCollectionDirty = false;
+                }
+            ui.SameLine();
+            if (auto disabled = ui.BeginDisabled(!m_MaterialParameterCollectionDirty); disabled)
+                if (ui.Button("Revert Collection"))
+                {
+                    collection = Keire::MaterialParameterCollectionAsset::DecodeSource(ReadBytes(source));
+                    m_MaterialParameterCollectionDirty = false;
+                }
+        }
+        catch (const std::exception& error)
+        {
+            ui.TextColored(theme.Error,
+                           std::string("Material Parameter Collection editor unavailable: ") + error.what());
+        }
+    }
     else if (record->RelativePath.extension() == ".keirematerialgraph")
     {
         ui.Separator();
         ui.TextColored(theme.Accent, "MATERIAL GRAPH");
-        ui.Text("Visual material authoring with a reflected shader interface and Material Output node.");
+        ui.Text("Unreal-style surface expressions composed through a reusable Shader Graph template.");
         ui.TextColored(theme.MutedText,
-                       "Shader code remains owned by its Shader Graph or raw Shader; this asset stores material data.");
+                       "Parameters flow into Material Instances; generated shader variants remain engine-managed.");
         if (ui.Button("Open Material Graph"))
         {
             try

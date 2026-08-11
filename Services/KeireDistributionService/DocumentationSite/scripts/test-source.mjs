@@ -7,6 +7,7 @@ import { allDocSources, docAuthorities, docGroups, sourcePathToSlug } from "../d
 const siteRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repositoryRoot = path.resolve(siteRoot, "..", "..", "..");
 const docsRoot = path.join(repositoryRoot, "Docs");
+const fallbackLandingPath = path.join(siteRoot, "..", "Website", "docs", "index.html");
 
 async function collectMarkdown(root, directory = root) {
     const results = [];
@@ -96,6 +97,27 @@ const slugs = allDocSources.map(sourcePathToSlug);
 assert(new Set(slugs).size === slugs.length, "Documentation routes are not unique.");
 assert(docGroups.every(({ label, files }) => label && files.length > 0), "Every documentation group must be named and non-empty.");
 assert(Object.keys(docAuthorities).length === expected.length && expected.every((sourcePath) => sourcePath in docAuthorities), "Documentation authority inventory must exactly cover every published guide.");
+
+const fallbackLanding = await readFile(fallbackLandingPath, "utf8");
+const fallbackRoutes = new Map();
+for (const match of fallbackLanding.matchAll(/<a\b[^>]*\bdata-doc-path="Docs\/([^"]+)"[^>]*>/g)) {
+    const sourcePath = match[1];
+    const href = /\bhref="([^"]+)"/.exec(match[0])?.[1];
+    assert(href, `Fallback documentation card has no route: Docs/${sourcePath}`);
+    assert(!fallbackRoutes.has(sourcePath), `Fallback documentation has a duplicate card: Docs/${sourcePath}`);
+    fallbackRoutes.set(sourcePath, href);
+}
+assert(fallbackRoutes.size === allDocSources.length, "Fallback documentation does not cover every canonical guide.");
+for (const sourcePath of allDocSources) {
+    assert(
+        fallbackRoutes.get(sourcePath) === `/docs/${sourcePathToSlug(sourcePath)}/`,
+        `Fallback documentation route is stale: Docs/${sourcePath}`,
+    );
+}
+assert(
+    !/github\.com\/hcfgod\/KeireEngine\/(?:blob|tree)\/master\/Docs/.test(fallbackLanding),
+    "Fallback documentation must not redirect guide navigation to GitHub.",
+);
 
 for (const sourcePath of allDocSources) {
     const sourceAbsolute = path.join(docsRoot, ...sourcePath.split("/"));

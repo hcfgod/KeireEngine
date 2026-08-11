@@ -228,6 +228,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     bool CreateAssetBrowserVfxEffect(std::string_view name) override;
     bool CreateAssetBrowserMaterialGraph(std::string_view name, Keire::AssetId shader) override;
     bool CreateAssetBrowserShaderGraph(std::string_view name, Keire::ShaderGraphTemplate graphTemplate) override;
+    bool CreateAssetBrowserReusableGraph(std::string_view name, Keire::ShaderGraphPurpose purpose) override;
+    bool CreateAssetBrowserMaterialParameterCollection(std::string_view name) override;
     bool CreateAssetBrowserMaterialInstance(std::string_view name) override;
     bool CreateAssetBrowserPrefab(std::string_view name) override;
     bool CreateAssetBrowserPrefabVariant(Keire::AssetId basePrefab, std::string_view name) override;
@@ -246,6 +248,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void OpenAssetBrowserMaterialGraph(Keire::AssetId asset) override;
     void OpenAssetBrowserMaterialInstance(Keire::AssetId asset) override;
     void OpenAssetBrowserShaderGraph(Keire::AssetId asset) override;
+    void OpenAssetBrowserMaterialParameterCollection(Keire::AssetId asset) override;
     void OpenAssetBrowserPrefab(Keire::AssetId asset) override;
     void OpenAssetBrowserScene(Keire::AssetId asset) override;
     void PrepareAssetBrowserExternalOpen(Keire::AssetId asset) override;
@@ -276,6 +279,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void OpenInspectorInputActions(Keire::AssetId asset) override;
     void OpenInspectorMaterialGraph(Keire::AssetId asset) override;
     void PersistInspectorMaterialInstance(Keire::AssetId asset, std::span<const std::byte> bytes) override;
+    void PersistInspectorMaterialParameterCollection(Keire::AssetId asset, std::span<const std::byte> bytes) override;
     void ImportInspectorAssets() override;
     void PreviewInspectorManagedData(Keire::AssetId asset, const Keire::ManagedDataDefinition& definition) override;
     void PersistInspectorManagedData(Keire::AssetId asset, std::span<const std::byte> bytes) override;
@@ -287,6 +291,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] KeireEditor::MaterialGraphDocument& MaterialGraphState() noexcept override;
     [[nodiscard]] const Keire::UiThemeDefinition& MaterialGraphTheme() const noexcept override;
     [[nodiscard]] std::span<const Keire::AssetSourceRecord> MaterialGraphAssetRecords() const noexcept override;
+    [[nodiscard]] std::optional<Keire::ShaderGraphDefinition>
+    ResolveMaterialGraphFunction(Keire::AssetId asset) const override;
     void SaveMaterialGraphDocument() override;
     void UndoMaterialGraphEdit() override;
     void RedoMaterialGraphEdit() override;
@@ -398,6 +404,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void RedoShaderGraphEdit() override;
     [[nodiscard]] std::span<const Keire::AssetSourceRecord> ShaderGraphAssetRecords() const noexcept override;
     [[nodiscard]] Keire::Ref<const Keire::MeshAsset> ResolveShaderGraphPreviewMesh(Keire::AssetId asset) override;
+    [[nodiscard]] std::optional<Keire::ShaderGraphDefinition>
+    ResolveShaderGraphFunction(Keire::AssetId asset) const override;
     void RevealShaderGraphAsset(Keire::AssetId asset) override;
     void ReportShaderGraphError(std::string message) noexcept override;
     [[nodiscard]] bool CreateCSharpScript(std::string_view name);
@@ -407,6 +415,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] bool CreateVfxEffect(std::string_view name);
     [[nodiscard]] bool CreateMaterialGraph(std::string_view name, Keire::AssetId shader);
     [[nodiscard]] bool CreateShaderGraph(std::string_view name, Keire::ShaderGraphTemplate graphTemplate);
+    [[nodiscard]] bool CreateReusableGraph(std::string_view name, Keire::ShaderGraphPurpose purpose);
+    [[nodiscard]] bool CreateMaterialParameterCollection(std::string_view name);
     [[nodiscard]] bool CreateMaterialInstance(std::string_view name);
     [[nodiscard]] bool CreatePrefabFromSelection(std::string_view name);
     [[nodiscard]] bool CreatePrefabVariant(Keire::AssetId basePrefab, std::string_view name);
@@ -438,6 +448,9 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void SaveMaterialGraph();
     [[nodiscard]] std::optional<Keire::ShaderInterfaceDefinition>
     ResolveMaterialGraphInterface(const Keire::MaterialShaderReference& shader) const;
+    [[nodiscard]] std::optional<Keire::ShaderGraphDefinition>
+    ResolveMaterialGraphTemplate(const Keire::MaterialShaderReference& shader) const;
+    [[nodiscard]] std::optional<Keire::ShaderGraphDefinition> ResolveReusableGraph(Keire::AssetId asset) const;
     [[nodiscard]] Keire::AssetId ResolveMaterialGraphShader(const Keire::MaterialShaderReference& shader) const;
     void ApplyMaterialGraphDevelopmentRevision(Keire::AssetId asset,
                                                const Keire::MaterialAssetDefinition& material) noexcept;

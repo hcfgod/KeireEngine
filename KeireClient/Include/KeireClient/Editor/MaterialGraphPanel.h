@@ -19,6 +19,8 @@ namespace KeireEditor
         [[nodiscard]] virtual MaterialGraphDocument& MaterialGraphState() noexcept = 0;
         [[nodiscard]] virtual const Keire::UiThemeDefinition& MaterialGraphTheme() const noexcept = 0;
         [[nodiscard]] virtual std::span<const Keire::AssetSourceRecord> MaterialGraphAssetRecords() const noexcept = 0;
+        [[nodiscard]] virtual std::optional<Keire::ShaderGraphDefinition>
+        ResolveMaterialGraphFunction(Keire::AssetId asset) const = 0;
         virtual void SaveMaterialGraphDocument() = 0;
         virtual void UndoMaterialGraphEdit() = 0;
         virtual void RedoMaterialGraphEdit() = 0;
@@ -42,10 +44,17 @@ namespace KeireEditor
         void DrawCanvas(Keire::UiFrame& ui);
         void DrawInspector(Keire::UiFrame& ui);
         void DrawDiagnostics(Keire::UiFrame& ui);
+        [[nodiscard]] bool DrawExpressionCreationMenu(Keire::UiFrame& ui, std::optional<Keire::Vector2> position);
         [[nodiscard]] bool DrawValueEditor(Keire::UiFrame& ui, std::string_view label,
                                            Keire::MaterialPropertyValue& value);
+        [[nodiscard]] bool DrawExpressionValueEditor(Keire::UiFrame& ui, std::string_view label,
+                                                     Keire::ShaderGraphValue& value);
         void AddValueNode(const Keire::MaterialGraphPropertyBinding& property,
                           std::optional<Keire::Vector2> position = std::nullopt);
+        [[nodiscard]] bool AddExpressionNode(Keire::ShaderGraphNodeKind kind, Keire::ShaderGraphValueType type,
+                                             std::optional<Keire::Vector2> position = std::nullopt);
+        [[nodiscard]] bool AddFunctionNode(Keire::AssetId asset, std::string_view name,
+                                           std::optional<Keire::Vector2> position);
         void Report(std::string message) noexcept;
 
         IMaterialGraphPanelController& m_Controller;
@@ -56,7 +65,23 @@ namespace KeireEditor
         Keire::UiPanelRegistration m_Registration;
         std::optional<Keire::AssetId> m_SelectedNode;
         std::optional<Keire::AssetId> m_SelectedConnection;
+        std::optional<Keire::AssetId> m_InspectorNode;
         std::optional<Keire::Vector2> m_NodeCreationPosition;
+        std::string m_InspectorName;
+        std::string m_InspectorSymbol;
+        std::string m_InspectorInclude;
+        std::string m_InspectorFunction;
+        std::string m_InspectorDescription;
+        std::string m_InspectorCategory;
+        double m_InspectorSortPriority = 0.0;
+        double m_InspectorMinimum = 0.0;
+        double m_InspectorMaximum = 1.0;
+        double m_InspectorStep = 0.01;
+        bool m_InspectorHasMinimum = false;
+        bool m_InspectorHasMaximum = false;
+        bool m_InspectorHasStep = false;
+        bool m_ShowTemplateParameters = false;
+        std::string m_NodeSearch;
         std::string m_Message;
     };
 } // namespace KeireEditor

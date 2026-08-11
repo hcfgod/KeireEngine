@@ -60,6 +60,7 @@
 #include "Keire/Rendering/FrameGraphSnapshot.h"
 #include "Keire/Rendering/Lighting.h"
 #include "Keire/Rendering/LightingBaker.h"
+#include "Keire/Rendering/MaterialEcosystem.h"
 #include "Keire/Rendering/MaterialGraph.h"
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Rendering/ShaderGraph.h"

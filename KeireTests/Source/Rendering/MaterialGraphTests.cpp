@@ -28,6 +28,22 @@ namespace
                 reinterpret_cast<const std::byte*>(text.data() + text.size())};
     }
 
+    [[nodiscard]] Keire::ShaderGraphPin& GraphPin(Keire::ShaderGraphNode& node, const std::string_view name)
+    {
+        const auto found = std::ranges::find(node.Pins, name, &Keire::ShaderGraphPin::Name);
+        if (found == node.Pins.end())
+            throw std::logic_error("Material Graph test pin is unavailable.");
+        return *found;
+    }
+
+    void ConnectGraph(Keire::ShaderGraphDefinition& graph, Keire::ShaderGraphNode& output,
+                      const std::string_view outputPin, Keire::ShaderGraphNode& input, const std::string_view inputPin)
+    {
+        graph.Connections.push_back({Keire::AssetId::Generate(),
+                                     {output.Id, GraphPin(output, outputPin).Id},
+                                     {input.Id, GraphPin(input, inputPin).Id}});
+    }
+
     [[nodiscard]] Keire::MaterialGraphDefinition SampleMaterialGraph()
     {
         Keire::MaterialShaderReference shader;
@@ -131,6 +147,257 @@ TEST_CASE("Material Graph visual connections drive reflected Material Output inp
     Keire::ValidateMaterialGraph(definition);
 }
 
+TEST_CASE("Material Graph composes Unreal-style surface expressions through a Shader Graph template")
+{
+    auto definition = SampleMaterialGraph();
+    auto artistTint =
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Parameter, Keire::ShaderGraphValueType::Color);
+    artistTint.Name = "Artist Tint";
+    artistTint.Symbol = "ArtistTint";
+    artistTint.Value = Keire::Color{0.15F, 0.45F, 0.9F, 1.0F};
+    artistTint.ParameterMetadata.Category = "Surface";
+    definition.SurfaceGraph.Nodes.push_back(std::move(artistTint));
+    ConnectGraph(definition.SurfaceGraph, definition.SurfaceGraph.Nodes.back(), "Value",
+                 definition.SurfaceGraph.Nodes.front(), "BaseColor");
+    auto shaderTemplate = Keire::CreateDefaultShaderGraph();
+    auto baseColor =
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Parameter, Keire::ShaderGraphValueType::Color);
+    baseColor.Id = definition.Properties[0].Property;
+    baseColor.Name = "Tint";
+    baseColor.Symbol = "Tint";
+    auto roughness =
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Parameter, Keire::ShaderGraphValueType::Scalar);
+    roughness.Id = definition.Properties[1].Property;
+    roughness.Name = "Roughness";
+    roughness.Symbol = "Roughness";
+    roughness.Value = 0.5F;
+    shaderTemplate.Nodes.push_back(std::move(baseColor));
+    shaderTemplate.Nodes.push_back(std::move(roughness));
+    ConnectGraph(shaderTemplate, shaderTemplate.Nodes[1], "Value", shaderTemplate.Nodes.front(), "BaseColor");
+    ConnectGraph(shaderTemplate, shaderTemplate.Nodes[2], "Value", shaderTemplate.Nodes.front(), "Roughness");
+
+    const auto composed = Keire::ComposeMaterialGraphShader(definition, shaderTemplate);
+    CHECK(
+        std::ranges::none_of(composed.Nodes, [](const Keire::ShaderGraphNode& node)
+                             { return node.Kind == Keire::ShaderGraphNodeKind::Parameter && node.Symbol == "Tint"; }));
+    CHECK(std::ranges::any_of(
+        composed.Nodes, [](const Keire::ShaderGraphNode& node)
+        { return node.Kind == Keire::ShaderGraphNodeKind::Parameter && node.Symbol == "ArtistTint"; }));
+    const auto compilation = Keire::CompileShaderGraph(composed);
+    REQUIRE(compilation.Succeeded());
+    CHECK(std::ranges::any_of(compilation.Properties, [](const Keire::ShaderPropertyDefinition& property)
+                              { return property.Name == "ArtistTint" && property.Category == "Surface"; }));
+    const auto composedRoughness =
+        std::ranges::find(compilation.Properties, "Roughness", &Keire::ShaderPropertyDefinition::Name);
+    REQUIRE(composedRoughness != compilation.Properties.end());
+    CHECK(composedRoughness->DefaultValue.X == doctest::Approx(0.45F));
+    CHECK(Keire::MaterialGraphAsset::DecodeSource(Keire::MaterialGraphAsset::EncodeSource(definition)) == definition);
+}
+
+TEST_CASE("Material Graph surface outputs inherit the selected Shader Graph template contract")
+{
+    constexpr std::array templates{Keire::ShaderGraphTemplate::Lit,         Keire::ShaderGraphTemplate::Unlit,
+                                   Keire::ShaderGraphTemplate::Transparent, Keire::ShaderGraphTemplate::Decal,
+                                   Keire::ShaderGraphTemplate::Fullscreen,  Keire::ShaderGraphTemplate::Hair,
+                                   Keire::ShaderGraphTemplate::Eye};
+    for (const auto graphTemplate : templates)
+    {
+        const auto shader = Keire::CreateShaderGraphTemplate(graphTemplate);
+        const auto material = Keire::CreateMaterialSurfaceGraph(shader);
+        CHECK(material.Output == shader.Output);
+        REQUIRE(material.Nodes.size() == 1);
+        CHECK(material.Nodes.front().Kind == Keire::ShaderGraphNodeKind::Master);
+        CHECK(material.Nodes.front().Name == "Material Output");
+        const auto output =
+            std::ranges::find(shader.Nodes, Keire::ShaderGraphNodeKind::Master, &Keire::ShaderGraphNode::Kind);
+        REQUIRE(output != shader.Nodes.end());
+        REQUIRE(material.Nodes.front().Pins.size() == output->Pins.size());
+        for (std::size_t index = 0; index < output->Pins.size(); ++index)
+        {
+            CHECK(material.Nodes.front().Pins[index].Name == output->Pins[index].Name);
+            CHECK(material.Nodes.front().Pins[index].Type == output->Pins[index].Type);
+            CHECK(material.Nodes.front().Pins[index].Id != output->Pins[index].Id);
+        }
+        CHECK_NOTHROW(Keire::ValidateShaderGraph(material));
+    }
+}
+
+TEST_CASE("Material Graph importer publishes composed shader variants and instance parameters")
+{
+    auto definition = SampleMaterialGraph();
+    auto artistTint =
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Parameter, Keire::ShaderGraphValueType::Color);
+    artistTint.Name = "Artist Tint";
+    artistTint.Symbol = "ArtistTint";
+    artistTint.Value = Keire::Color{0.15F, 0.45F, 0.9F, 1.0F};
+    artistTint.ParameterMetadata.Category = "Surface";
+    definition.SurfaceGraph.Nodes.push_back(std::move(artistTint));
+    ConnectGraph(definition.SurfaceGraph, definition.SurfaceGraph.Nodes.back(), "Value",
+                 definition.SurfaceGraph.Nodes.front(), "BaseColor");
+
+    auto shaderTemplate = Keire::CreateDefaultShaderGraph();
+    auto tint = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Parameter, Keire::ShaderGraphValueType::Color);
+    tint.Id = definition.Properties[0].Property;
+    tint.Name = "Tint";
+    tint.Symbol = "Tint";
+    auto roughness =
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Parameter, Keire::ShaderGraphValueType::Scalar);
+    roughness.Id = definition.Properties[1].Property;
+    roughness.Name = "Roughness";
+    roughness.Symbol = "Roughness";
+    shaderTemplate.Nodes.push_back(std::move(tint));
+    shaderTemplate.Nodes.push_back(std::move(roughness));
+    ConnectGraph(shaderTemplate, shaderTemplate.Nodes[1], "Value", shaderTemplate.Nodes.front(), "BaseColor");
+    ConnectGraph(shaderTemplate, shaderTemplate.Nodes[2], "Value", shaderTemplate.Nodes.front(), "Roughness");
+    shaderTemplate.Keywords.push_back({"QUALITY", {"LOW", "HIGH"}, "HIGH", true});
+
+    const auto lowShader = Keire::AssetId::Parse("a6000000-0000-4000-8000-000000000001");
+    const auto highShader = Keire::AssetId::Parse("a6000000-0000-4000-8000-000000000002");
+    const auto runtimeMaterial = Keire::AssetId::Parse("a6000000-0000-4000-8000-000000000003");
+    const auto shaderBytes = Keire::ShaderGraphAsset::EncodeSource(shaderTemplate);
+    Keire::AssetImportContext context;
+    context.Asset = Keire::AssetId::Parse("a6000000-0000-4000-8000-000000000004");
+    context.ProjectRoot = "C:/MaterialExpressionImportTest";
+    context.SourceRoot = context.ProjectRoot / "Assets";
+    context.ReadProjectFile = [shaderBytes](const std::filesystem::path& path)
+    {
+        CHECK(path.generic_string() == "Assets/Graphs/Surface.keireshadergraph");
+        return shaderBytes;
+    };
+    context.ResolveAssetSource =
+        [graphAsset = definition.Shader.Asset](const Keire::AssetId asset) -> std::optional<Keire::AssetImportSource>
+    {
+        if (asset == graphAsset)
+            return Keire::AssetImportSource{asset, Keire::ShaderGraphAsset::StaticType(),
+                                            "Graphs/Surface.keireshadergraph"};
+        return std::nullopt;
+    };
+    context.ResolveSubAssetId = [=](const std::string_view key)
+    {
+        if (key == "material/default")
+            return runtimeMaterial;
+        if (key == "material-graph/" +
+                       Keire::MakeShaderGraphVariantSubAssetKey("default", std::array{std::string("QUALITY_LOW")}))
+            return lowShader;
+        if (key == "material-graph/" +
+                       Keire::MakeShaderGraphVariantSubAssetKey("default", std::array{std::string("QUALITY_HIGH")}))
+            return highShader;
+        throw std::logic_error("Unexpected composed Material Graph subasset key: " + std::string(key));
+    };
+
+    const auto output = Keire::CreateMaterialGraphAssetImporter().ContextualImport(
+        context, Keire::MaterialGraphAsset::EncodeSource(definition));
+    const auto material = std::ranges::find_if(
+        output.SubAssets, [](const Keire::AssetGeneratedSubAsset& subAsset)
+        { return subAsset.Type == Keire::MaterialAsset::StaticType() && subAsset.Key == "material/default"; });
+    REQUIRE(material != output.SubAssets.end());
+    const auto runtime = Keire::MaterialAsset::Decode(material->Bytes)->Definition();
+    CHECK(runtime.Shader == highShader);
+    CHECK(std::get<Keire::Color>(runtime.Properties.at("ArtistTint")) == Keire::Color{0.15F, 0.45F, 0.9F, 1.0F});
+    CHECK(std::ranges::find(output.AssetDependencies, definition.Shader.Asset) != output.AssetDependencies.end());
+}
+
+TEST_CASE("Material Instances override parameters exposed by composed Material Graphs")
+{
+    auto definition = SampleMaterialGraph();
+    definition.Shader.Keywords.clear();
+    auto artistTint =
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Parameter, Keire::ShaderGraphValueType::Color);
+    artistTint.Name = "Artist Tint";
+    artistTint.Symbol = "ArtistTint";
+    artistTint.Value = Keire::Color{0.2F, 0.4F, 0.8F, 1.0F};
+    definition.SurfaceGraph.Nodes.push_back(std::move(artistTint));
+    ConnectGraph(definition.SurfaceGraph, definition.SurfaceGraph.Nodes.back(), "Value",
+                 definition.SurfaceGraph.Nodes.front(), "BaseColor");
+
+    auto staticDetail =
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Keyword, Keire::ShaderGraphValueType::Scalar);
+    staticDetail.Name = "Static Detail";
+    staticDetail.Symbol = "STATIC_DETAIL";
+    definition.SurfaceGraph.Keywords.push_back({"STATIC_DETAIL", {}, "false", true});
+    definition.SurfaceGraph.Nodes.push_back(std::move(staticDetail));
+    ConnectGraph(definition.SurfaceGraph, definition.SurfaceGraph.Nodes.back(), "Enabled",
+                 definition.SurfaceGraph.Nodes.front(), "Metallic");
+
+    auto shaderTemplate = Keire::CreateDefaultShaderGraph();
+    auto tint = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Parameter, Keire::ShaderGraphValueType::Color);
+    tint.Id = definition.Properties[0].Property;
+    tint.Name = "Tint";
+    tint.Symbol = "Tint";
+    auto roughness =
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Parameter, Keire::ShaderGraphValueType::Scalar);
+    roughness.Id = definition.Properties[1].Property;
+    roughness.Name = "Roughness";
+    roughness.Symbol = "Roughness";
+    shaderTemplate.Nodes.push_back(std::move(tint));
+    shaderTemplate.Nodes.push_back(std::move(roughness));
+    ConnectGraph(shaderTemplate, shaderTemplate.Nodes[1], "Value", shaderTemplate.Nodes.front(), "BaseColor");
+    ConnectGraph(shaderTemplate, shaderTemplate.Nodes[2], "Value", shaderTemplate.Nodes.front(), "Roughness");
+
+    const auto parentGraph = Keire::AssetId::Parse("a6500000-0000-4000-8000-000000000001");
+    const auto instanceAsset = Keire::AssetId::Parse("a6500000-0000-4000-8000-000000000002");
+    const auto parentDefaultShader = Keire::AssetId::Parse("a6500000-0000-4000-8000-000000000003");
+    const auto parentShader = Keire::AssetId::Parse("a6500000-0000-4000-8000-000000000006");
+    const auto parentMaterial = Keire::AssetId::Parse("a6500000-0000-4000-8000-000000000004");
+    const auto instanceMaterial = Keire::AssetId::Parse("a6500000-0000-4000-8000-000000000005");
+    Keire::MaterialInstanceDefinition instance;
+    instance.Parent = parentGraph;
+    instance.Properties.emplace("ArtistTint", Keire::Color{0.9F, 0.15F, 0.35F, 1.0F});
+    instance.KeywordOverrides.emplace("STATIC_DETAIL", "true");
+    const auto graphBytes = Keire::MaterialGraphAsset::EncodeSource(definition);
+    const auto shaderBytes = Keire::ShaderGraphAsset::EncodeSource(shaderTemplate);
+
+    Keire::AssetImportContext context;
+    context.Asset = instanceAsset;
+    context.ProjectRoot = "C:/ComposedMaterialInstanceTest";
+    context.SourceRoot = context.ProjectRoot / "Assets";
+    context.ReadProjectFile = [graphBytes, shaderBytes](const std::filesystem::path& path)
+    {
+        if (path.generic_string() == "Assets/Materials/Parent.keirematerialgraph")
+            return graphBytes;
+        if (path.generic_string() == "Assets/Graphs/Surface.keireshadergraph")
+            return shaderBytes;
+        throw std::logic_error("Unexpected composed Material Instance source: " + path.generic_string());
+    };
+    context.ResolveAssetSource = [parentGraph, shaderGraph = definition.Shader.Asset](
+                                     const Keire::AssetId asset) -> std::optional<Keire::AssetImportSource>
+    {
+        if (asset == parentGraph)
+            return Keire::AssetImportSource{asset, Keire::MaterialGraphAsset::StaticType(),
+                                            "Materials/Parent.keirematerialgraph"};
+        if (asset == shaderGraph)
+            return Keire::AssetImportSource{asset, Keire::ShaderGraphAsset::StaticType(),
+                                            "Graphs/Surface.keireshadergraph"};
+        return std::nullopt;
+    };
+    context.ResolveSubAssetId = [instanceMaterial](const std::string_view key)
+    {
+        CHECK(key == "material/default");
+        return instanceMaterial;
+    };
+    context.ResolveSubAssetIdFor = [=](const Keire::AssetId owner, const std::string_view key)
+    {
+        CHECK(owner == parentGraph);
+        if (key == "material/default")
+            return parentMaterial;
+        const std::array<std::string, 0> disabled;
+        if (key == "material-graph/" + Keire::MakeShaderGraphVariantSubAssetKey("default", disabled))
+            return parentDefaultShader;
+        const std::array enabled{std::string("STATIC_DETAIL")};
+        CHECK(key == "material-graph/" + Keire::MakeShaderGraphVariantSubAssetKey("default", enabled));
+        return parentShader;
+    };
+
+    const auto output = Keire::CreateMaterialInstanceAssetImporter().ContextualImport(
+        context, Keire::MaterialInstanceAsset::EncodeSource(instance));
+    REQUIRE(output.SubAssets.size() == 1);
+    const auto material = Keire::MaterialAsset::Decode(output.SubAssets.front().Bytes)->Definition();
+    CHECK(material.Shader == parentShader);
+    CHECK(std::get<Keire::Color>(material.Properties.at("ArtistTint")) == Keire::Color{0.9F, 0.15F, 0.35F, 1.0F});
+    CHECK(std::ranges::find(output.AssetDependencies, parentGraph) != output.AssetDependencies.end());
+    CHECK(std::ranges::find(output.AssetDependencies, definition.Shader.Asset) != output.AssetDependencies.end());
+}
+
 TEST_CASE("Material Graph schema one sources upgrade to deterministic visual topology")
 {
     constexpr std::string_view legacy = R"({
@@ -167,6 +434,7 @@ TEST_CASE("Sandbox and packaged template ship current Material Graph sources")
     const auto sandbox = repository / "Samples/KeireSandbox/Assets/Materials/MaterialGraphs";
     const auto packaged = repository / "KeireHubContent/Templates/Payloads/Sandbox/Assets/Materials/MaterialGraphs";
     std::size_t graphCount = 0;
+    std::size_t expressionGraphCount = 0;
     for (const auto& entry : std::filesystem::directory_iterator(sandbox))
     {
         if (!entry.is_regular_file() || entry.path().extension() != ".keirematerialgraph")
@@ -178,10 +446,17 @@ TEST_CASE("Sandbox and packaged template ship current Material Graph sources")
         CHECK(definition.OutputNode);
         CHECK(definition.Nodes.size() == definition.Properties.size());
         CHECK(definition.Connections.size() == definition.Properties.size());
+        const auto output = std::ranges::find(definition.SurfaceGraph.Nodes, Keire::ShaderGraphNodeKind::Master,
+                                              &Keire::ShaderGraphNode::Kind);
+        REQUIRE(output != definition.SurfaceGraph.Nodes.end());
+        if (std::ranges::any_of(definition.SurfaceGraph.Connections, [&](const Keire::ShaderGraphConnection& connection)
+                                { return connection.Input.Node == output->Id; }))
+            ++expressionGraphCount;
         CHECK(ReadAssetSource(packaged / entry.path().filename()) == source);
         ++graphCount;
     }
     CHECK(graphCount == 9);
+    CHECK(expressionGraphCount >= 2);
 }
 
 TEST_CASE("Material Instances serialize deterministically and enforce inherited interfaces")
@@ -209,6 +484,13 @@ TEST_CASE("Material Instances serialize deterministically and enforce inherited 
     auto wrongType = instance;
     wrongType.Properties.insert_or_assign("Roughness", Keire::Color{});
     CHECK_THROWS_AS((void)Keire::BakeMaterialInstance(parent, wrongType), std::invalid_argument);
+
+    const auto legacy = std::string("{\"schemaVersion\":1,\"parent\":\"") + instance.Parent.ToString() +
+                        "\",\"surface\":null,\"properties\":[]}";
+    const std::span legacyBytes{reinterpret_cast<const std::byte*>(legacy.data()), legacy.size()};
+    const auto upgraded = Keire::MaterialInstanceAsset::DecodeSource(legacyBytes);
+    CHECK(upgraded.SchemaVersion == Keire::MaterialInstanceSourceSchemaVersion);
+    CHECK(upgraded.KeywordOverrides.empty());
 }
 
 TEST_CASE("Material Instance importing resolves inherited Material roots without duplicating shader code")

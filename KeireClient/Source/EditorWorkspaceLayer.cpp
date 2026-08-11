@@ -344,6 +344,9 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
           std::make_unique<KeireEditor::MaterialGraphDocument>(KeireEditor::MaterialGraphDocumentSpecification{
               .ResolveInterface = [this](const Keire::MaterialShaderReference& shader)
               { return ResolveMaterialGraphInterface(shader); },
+              .ResolveTemplate = [this](const Keire::MaterialShaderReference& shader)
+              { return ResolveMaterialGraphTemplate(shader); },
+              .ResolveFunction = [this](const Keire::AssetId asset) { return ResolveReusableGraph(asset); },
               .ResolveShader = [this](const Keire::MaterialShaderReference& shader)
               { return ResolveMaterialGraphShader(shader); },
               .Preview = [this](const Keire::AssetId asset, const Keire::MaterialAssetDefinition& material)

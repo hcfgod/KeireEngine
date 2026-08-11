@@ -120,6 +120,12 @@ def validate_page(page: Path) -> None:
             continue
         if value.startswith("//"):
             raise ValueError(f"Protocol-relative resource in {page}: {value}")
+        if (
+            page == WEBSITE / "docs" / "index.html"
+            and parsed.path.startswith("/docs/reference/")
+        ):
+            # The production documentation build overlays these generated routes during packaging.
+            continue
         target, fragment = target_file(page, value)
         try:
             target.relative_to(WEBSITE.resolve())
@@ -144,6 +150,27 @@ def main() -> int:
         )
     for page in pages:
         validate_page(page)
+
+    docs_landing = (WEBSITE / "docs" / "index.html").read_text(encoding="utf-8")
+    legacy_docs_prefixes = (
+        "https://github.com/hcfgod/KeireEngine/blob/master/Docs",
+        "https://github.com/hcfgod/KeireEngine/tree/master/Docs",
+    )
+    if any(prefix in docs_landing for prefix in legacy_docs_prefixes):
+        raise ValueError(
+            "Documentation navigation must retain first-party /docs/ routes instead of GitHub guide links."
+        )
+    docs_parser = PageParser()
+    docs_parser.feed(docs_landing)
+    native_doc_links = [
+        value
+        for _, value in docs_parser.links
+        if value.startswith("/docs/reference/")
+    ]
+    if len(native_doc_links) < 55:
+        raise ValueError(
+            "Documentation fallback must retain first-party routes for every guide card."
+        )
 
     manifest = json.loads((WEBSITE / "site.webmanifest").read_text(encoding="utf-8"))
     if (

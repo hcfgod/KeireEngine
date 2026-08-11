@@ -58,7 +58,7 @@ namespace
     [[nodiscard]] TemplateCreateRequest SandboxRequest(const std::filesystem::path& destination)
     {
         auto request = Request(destination, "keire.sandbox");
-        request.EditorVersion = Version("0.2.0");
+        request.EditorVersion = Version("0.3.0");
         return request;
     }
 
@@ -233,12 +233,12 @@ TEST_CASE("Sandbox creation copies packaged clean content and never mutates its 
         nlohmann::json::parse(KeireHubTests::ReadText(first.Value().Root / "ProjectSettings/Project.keireproject"));
     CHECK(descriptor.at("startupScene") == "a1aa0000-0000-4000-8000-000000000001");
     CHECK(descriptor.at("defaultInput") == "97b38693-6dc3-4f06-a228-44ba5786e8d1");
-    CHECK(descriptor.at("createdWithEngineVersion") == "0.2.0");
-    CHECK(descriptor.at("minimumEngineVersion") == "0.2.0");
+    CHECK(descriptor.at("createdWithEngineVersion") == "0.3.0");
+    CHECK(descriptor.at("minimumEngineVersion") == "0.3.0");
     CHECK(descriptor.at("template").at("version") == "1.1.0");
 }
 
-TEST_CASE("Sandbox requires the Shader Graph capable editor line")
+TEST_CASE("Sandbox requires the Material Ecosystem capable editor line")
 {
     KeireHubTests::TemporaryDirectory temporary;
     TemplateManager manager(BuiltInTemplates(), Services());

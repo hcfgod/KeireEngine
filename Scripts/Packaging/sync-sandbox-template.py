@@ -89,7 +89,7 @@ def _expected_manifest(files: dict[Path, Path]) -> dict[str, object]:
     payload_files = _payload_manifest(files)
     return {
         "version": "1.1.0",
-        "compatibleEditors": ">=0.2.0 <2.0.0",
+        "compatibleEditors": ">=0.3.0 <2.0.0",
         "description": (
             "The complete Kéire production Sandbox with Shader Graph, Material Graph, VFX, scripting, rendering, "
             "physics, UI, audio, meshes, textures, and staged example scenes."

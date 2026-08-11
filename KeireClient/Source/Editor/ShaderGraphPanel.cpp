@@ -78,6 +78,24 @@ namespace KeireEditor
             std::string_view("Metallic"),  std::string_view("Roughness"),
         };
 
+        [[nodiscard]] constexpr std::string_view GraphPurposeName(const Keire::ShaderGraphPurpose purpose) noexcept
+        {
+            switch (purpose)
+            {
+            case Keire::ShaderGraphPurpose::Shader:
+                return "Shader Graph";
+            case Keire::ShaderGraphPurpose::MaterialFunction:
+                return "Material Function";
+            case Keire::ShaderGraphPurpose::ShaderFunction:
+                return "Shader Function";
+            case Keire::ShaderGraphPurpose::MaterialLayer:
+                return "Material Layer";
+            case Keire::ShaderGraphPurpose::MaterialLayerBlend:
+                return "Material Layer Blend";
+            }
+            return "Reusable Graph";
+        }
+
         [[nodiscard]] std::string Lower(const std::string_view value)
         {
             std::string result(value);
@@ -195,8 +213,11 @@ namespace KeireEditor
                 return;
             }
             DrawHeader(ui);
-            ui.Separator();
-            DrawPreview(ui);
+            if (!document.ReusableGraph())
+            {
+                ui.Separator();
+                DrawPreview(ui);
+            }
             ui.Separator();
             DrawCanvas(ui);
             ui.Separator();
@@ -227,9 +248,11 @@ namespace KeireEditor
         auto& document = m_Controller.ShaderGraphState();
         const auto& theme = m_Controller.ShaderGraphTheme();
         const bool compiling = document.CompilationPending();
+        const bool reusable = document.ReusableGraph();
         ui.TextColored(!compiling && document.Publishable() ? theme.Success : theme.Warning,
                        compiling                ? "LIVE COMPILING + UPDATING SCENE"
-                       : document.Publishable() ? "GENERATED SHADER READY"
+                       : document.Publishable() ? reusable ? "REUSABLE GRAPH VALID" : "GENERATED SHADER READY"
+                       : reusable               ? "REUSABLE GRAPH HAS ERRORS"
                                                 : "PREVIEW USING LAST GOOD SHADER");
         ui.SameLine();
         if (auto disabled = ui.BeginDisabled(!document.Dirty() || !document.Publishable() || compiling); disabled)
@@ -238,7 +261,7 @@ namespace KeireEditor
                 try
                 {
                     m_Controller.SaveShaderGraphDocument();
-                    m_Message = "Saved Shader Graph.";
+                    m_Message = "Saved " + std::string(GraphPurposeName(document.Definition().Purpose)) + ".";
                 }
                 catch (const std::exception& error)
                 {
@@ -254,6 +277,17 @@ namespace KeireEditor
         if (auto disabled = ui.BeginDisabled(!undo || !undo->CanRedo()); disabled)
             if (ui.Button("Redo"))
                 m_Controller.RedoShaderGraphEdit();
+
+        if (reusable)
+        {
+            ui.SameLine();
+            ui.TextColored(theme.MutedText, GraphPurposeName(document.Definition().Purpose));
+            const auto& statistics = document.Compilation().Statistics;
+            ui.SameLine();
+            ui.TextColored(theme.MutedText, std::to_string(statistics.NodeCount) + " nodes  |  " +
+                                                std::to_string(statistics.ConnectionCount) + " connections");
+            return;
+        }
 
         auto preview = document.PreviewSettings();
         auto previewIndex = static_cast<std::size_t>(preview.Mesh);
@@ -812,6 +846,16 @@ namespace KeireEditor
 
         const auto search = Lower(m_NodeSearch);
         const auto& entries = NodeEntries();
+        std::vector<const Keire::AssetSourceRecord*> reusableGraphs;
+        for (const auto& record : m_Controller.ShaderGraphAssetRecords())
+        {
+            const bool reusable = record.Type == Keire::MaterialFunctionAsset::StaticType() ||
+                                  record.Type == Keire::ShaderFunctionAsset::StaticType() ||
+                                  record.Type == Keire::MaterialLayerAsset::StaticType() ||
+                                  record.Type == Keire::MaterialLayerBlendAsset::StaticType();
+            if (reusable && record.Id != m_Controller.ShaderGraphState().Asset())
+                reusableGraphs.push_back(&record);
+        }
         std::vector<std::string> paths;
         paths.reserve(entries.size());
         for (const auto& entry : entries)
@@ -881,7 +925,25 @@ namespace KeireEditor
         for (const auto index : visible)
             if (addEntry(index, paths[index]))
                 return true;
-        if (visible.empty())
+        bool visibleFunction = false;
+        if (!search.empty())
+        {
+            for (const auto* record : reusableGraphs)
+            {
+                const auto name = record->RelativePath.stem().string();
+                const auto path = "Functions & Layers / " + name;
+                if (Lower(path).find(search) == std::string::npos)
+                    continue;
+                visibleFunction = true;
+                if (ui.MenuItem(path) && AddFunctionNode(record->Id, name, graphPosition))
+                {
+                    m_NodeSearch.clear();
+                    ui.CloseCurrentPopup();
+                    return true;
+                }
+            }
+        }
+        if (visible.empty() && !visibleFunction)
             ui.TextColored(m_Controller.ShaderGraphTheme().MutedText, "No nodes match this search.");
 
         if (search.empty())
@@ -900,6 +962,17 @@ namespace KeireEditor
                             return true;
                 }
             }
+            if (!reusableGraphs.empty())
+                if (auto functions = ui.BeginMenu("Functions & Layers"); functions)
+                    for (const auto* record : reusableGraphs)
+                    {
+                        const auto name = record->RelativePath.stem().string();
+                        if (ui.MenuItem(name) && AddFunctionNode(record->Id, name, graphPosition))
+                        {
+                            ui.CloseCurrentPopup();
+                            return true;
+                        }
+                    }
         }
         return false;
     }
@@ -1061,10 +1134,12 @@ namespace KeireEditor
             ui.TextColored(theme.Warning, m_Message);
         if (document.Compilation().Diagnostics.empty())
         {
-            ui.TextColored(theme.Success, "Generated shader diagnostics: clear.");
+            ui.TextColored(theme.Success, document.ReusableGraph() ? "Reusable graph diagnostics: clear."
+                                                                   : "Generated shader diagnostics: clear.");
             return;
         }
-        ui.TextColored(theme.Warning, "Generated shader diagnostics (" +
+        ui.TextColored(theme.Warning, std::string(document.ReusableGraph() ? "Reusable graph diagnostics ("
+                                                                           : "Generated shader diagnostics (") +
                                           std::to_string(document.Compilation().Diagnostics.size()) + ")");
         for (const auto& diagnostic : document.Compilation().Diagnostics)
         {
@@ -1125,6 +1200,31 @@ namespace KeireEditor
             if (changed)
                 m_SelectedNode = id;
             return changed;
+        }
+        catch (const std::exception& error)
+        {
+            Report(error.what());
+            return false;
+        }
+    }
+
+    bool ShaderGraphPanel::AddFunctionNode(const Keire::AssetId asset, const std::string_view name,
+                                           const std::optional<Keire::Vector2> graphPosition)
+    {
+        try
+        {
+            const auto function = m_Controller.ResolveShaderGraphFunction(asset);
+            if (!function)
+                throw std::runtime_error("The reusable graph source is unavailable.");
+            auto node = Keire::CreateShaderGraphFunctionCallNode(asset, *function);
+            node.Name = std::string(name);
+            node.EditorPosition = graphPosition.value_or(Keire::Vector2{-m_Canvas.Pan().X + 280.0F / m_Canvas.Zoom(),
+                                                                        -m_Canvas.Pan().Y + 180.0F / m_Canvas.Zoom()});
+            const auto id = node.Id;
+            if (!m_Controller.ShaderGraphState().AddNode(std::move(node)))
+                return false;
+            m_SelectedNode = id;
+            return true;
         }
         catch (const std::exception& error)
         {

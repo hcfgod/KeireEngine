@@ -21,6 +21,7 @@ namespace KeireEditor
         MaterialGraph,
         MaterialInstance,
         ShaderGraph,
+        MaterialParameterCollection,
         Scene,
         Prefab
     };

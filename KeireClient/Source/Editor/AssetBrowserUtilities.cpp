@@ -44,6 +44,16 @@ namespace KeireEditor
             return "Material Graph";
         if (extension == ".keireshadergraph")
             return "Shader Graph";
+        if (extension == Keire::MaterialFunctionAssetSourceExtension)
+            return "Material Function";
+        if (extension == Keire::ShaderFunctionAssetSourceExtension)
+            return "Shader Function";
+        if (extension == Keire::MaterialLayerAssetSourceExtension)
+            return "Material Layer";
+        if (extension == Keire::MaterialLayerBlendAssetSourceExtension)
+            return "Material Layer Blend";
+        if (extension == Keire::MaterialParameterCollectionAssetSourceExtension)
+            return "Material Parameter Collection";
         if (extension == ".keirematerialinstance")
             return "Material Instance";
         if (extension == ".keireshadergraphinstance")
@@ -90,8 +100,13 @@ namespace KeireEditor
             return AssetBrowserOpenAction::MaterialGraph;
         if (extension == ".keirematerialinstance")
             return AssetBrowserOpenAction::MaterialInstance;
-        if (extension == ".keireshadergraph")
+        if (extension == ".keireshadergraph" || extension == Keire::MaterialFunctionAssetSourceExtension ||
+            extension == Keire::ShaderFunctionAssetSourceExtension ||
+            extension == Keire::MaterialLayerAssetSourceExtension ||
+            extension == Keire::MaterialLayerBlendAssetSourceExtension)
             return AssetBrowserOpenAction::ShaderGraph;
+        if (extension == Keire::MaterialParameterCollectionAssetSourceExtension)
+            return AssetBrowserOpenAction::MaterialParameterCollection;
         if (extension == ".keirescene")
             return AssetBrowserOpenAction::Scene;
         if (extension == ".keireprefab")

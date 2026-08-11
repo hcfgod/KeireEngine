@@ -33,6 +33,12 @@ std::span<const Keire::AssetSourceRecord> EditorWorkspaceLayer::MaterialGraphAss
     return m_AssetRecords;
 }
 
+std::optional<Keire::ShaderGraphDefinition>
+EditorWorkspaceLayer::ResolveMaterialGraphFunction(const Keire::AssetId asset) const
+{
+    return ResolveReusableGraph(asset);
+}
+
 void EditorWorkspaceLayer::SaveMaterialGraphDocument() { SaveMaterialGraph(); }
 
 void EditorWorkspaceLayer::UndoMaterialGraphEdit() { (void)m_MaterialGraphDocument->Undo(); }
@@ -114,6 +120,52 @@ EditorWorkspaceLayer::ResolveMaterialGraphInterface(const Keire::MaterialShaderR
     {
         return std::nullopt;
     }
+}
+
+std::optional<Keire::ShaderGraphDefinition>
+EditorWorkspaceLayer::ResolveMaterialGraphTemplate(const Keire::MaterialShaderReference& shader) const
+{
+    if (!m_AssetDatabase || !shader.Asset || shader.Kind != Keire::MaterialShaderSourceKind::ShaderGraph)
+        return std::nullopt;
+    const auto record = m_AssetDatabase->Find(shader.Asset);
+    if (!record || record->Type != Keire::ShaderGraphAsset::StaticType())
+        return std::nullopt;
+    try
+    {
+        const auto& specification = m_AssetDatabase->Specification();
+        return Keire::ShaderGraphAsset::DecodeSource(
+            ReadBytes(specification.ProjectRoot / specification.SourceDirectory / record->RelativePath));
+    }
+    catch (...)
+    {
+        return std::nullopt;
+    }
+}
+
+std::optional<Keire::ShaderGraphDefinition> EditorWorkspaceLayer::ResolveReusableGraph(const Keire::AssetId asset) const
+{
+    if (!m_AssetDatabase || !asset)
+        return std::nullopt;
+    const auto record = m_AssetDatabase->Find(asset);
+    if (!record)
+        return std::nullopt;
+    try
+    {
+        const auto& specification = m_AssetDatabase->Specification();
+        const auto bytes = ReadBytes(specification.ProjectRoot / specification.SourceDirectory / record->RelativePath);
+        if (record->Type == Keire::MaterialFunctionAsset::StaticType())
+            return Keire::MaterialFunctionAsset::DecodeSource(bytes).Body;
+        if (record->Type == Keire::ShaderFunctionAsset::StaticType())
+            return Keire::ShaderFunctionAsset::DecodeSource(bytes).Body;
+        if (record->Type == Keire::MaterialLayerAsset::StaticType())
+            return Keire::MaterialLayerAsset::DecodeSource(bytes).Body;
+        if (record->Type == Keire::MaterialLayerBlendAsset::StaticType())
+            return Keire::MaterialLayerBlendAsset::DecodeSource(bytes).Body;
+    }
+    catch (...)
+    {
+    }
+    return std::nullopt;
 }
 
 Keire::AssetId EditorWorkspaceLayer::ResolveMaterialGraphShader(const Keire::MaterialShaderReference& shader) const

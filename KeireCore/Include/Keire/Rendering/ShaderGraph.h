@@ -18,9 +18,9 @@
 namespace Keire
 {
     /// Latest canonical source schema emitted by ShaderGraphAsset::EncodeSource.
-    inline constexpr std::uint32_t ShaderGraphSourceSchemaVersion = 2;
+    inline constexpr std::uint32_t ShaderGraphSourceSchemaVersion = 3;
     /// Version of the deterministic HLSL generator contract embedded in every generated shader manifest.
-    inline constexpr std::uint32_t ShaderGraphGeneratedShaderVersion = 1;
+    inline constexpr std::uint32_t ShaderGraphGeneratedShaderVersion = 2;
     /// Renderer-facing vertex input and interpolator contract required by generated Shader Graph shaders.
     inline constexpr std::uint32_t ShaderGraphVertexLayoutVersion = 3;
 
@@ -44,6 +44,15 @@ namespace Keire
         Fullscreen,
         Hair,
         Eye
+    };
+
+    enum class ShaderGraphPurpose : std::uint8_t
+    {
+        Shader,
+        MaterialFunction,
+        ShaderFunction,
+        MaterialLayer,
+        MaterialLayerBlend
     };
 
     enum class ShaderGraphValueType : std::uint8_t
@@ -177,7 +186,24 @@ namespace Keire
         SheenBsdf,
         SubsurfaceBsdf,
         TransmissionBsdf,
-        BsdfToMaterialAttributes
+        BsdfToMaterialAttributes,
+        FunctionCall,
+        Reroute,
+        If,
+        Compare,
+        BooleanAnd,
+        BooleanOr,
+        BooleanNot,
+        ArcTangent,
+        HyperbolicSine,
+        HyperbolicCosine,
+        HyperbolicTangent,
+        DegreesToRadians,
+        RadiansToDegrees,
+        Negate,
+        ScaleAndBias,
+        Exponential,
+        Logarithm
     };
 
     enum class ShaderGraphDiagnosticSeverity : std::uint8_t
@@ -244,6 +270,8 @@ namespace Keire
         std::string Symbol;
         std::filesystem::path Include;
         std::string Function;
+        /// Stable referenced graph asset for function-call and other asset-backed nodes.
+        AssetId ReferencedAsset;
         ShaderGraphParameterMetadata ParameterMetadata;
         std::vector<ShaderGraphPin> Pins;
 
@@ -280,6 +308,7 @@ namespace Keire
     struct ShaderGraphDefinition
     {
         std::uint32_t SchemaVersion = ShaderGraphSourceSchemaVersion;
+        ShaderGraphPurpose Purpose = ShaderGraphPurpose::Shader;
         ShaderGraphOutput Output = ShaderGraphOutput::Surface;
         std::vector<ShaderGraphNode> Nodes;
         std::vector<ShaderGraphConnection> Connections;
@@ -346,6 +375,8 @@ namespace Keire
         std::size_t MaximumConnections = 4096;
         std::size_t MaximumCustomIncludes = 64;
         std::function<std::optional<std::string>(const std::filesystem::path&)> ReadInclude;
+        /// Resolves reusable function/layer graph bodies without exposing asset-system ownership to the compiler.
+        std::function<std::optional<ShaderGraphDefinition>(AssetId)> ResolveFunction;
     };
 
     struct ShaderGraphNodeDescriptor
@@ -429,6 +460,13 @@ namespace Keire
     CreateShaderGraphNode(ShaderGraphNodeKind kind, ShaderGraphValueType valueType = ShaderGraphValueType::Scalar);
     [[nodiscard]] KEIRE_API ShaderGraphNode
     CreateShaderGraphNode(std::string_view typeId, ShaderGraphValueType valueType = ShaderGraphValueType::Scalar);
+    [[nodiscard]] KEIRE_API ShaderGraphNode
+    CreateShaderGraphFunctionCallNode(AssetId function, const ShaderGraphDefinition& functionDefinition);
+    [[nodiscard]] KEIRE_API ShaderGraphDefinition
+    ExpandShaderGraphFunctions(const ShaderGraphDefinition& definition,
+                               const std::function<std::optional<ShaderGraphDefinition>(AssetId)>& resolveFunction,
+                               std::size_t maximumDepth = 32);
+    [[nodiscard]] KEIRE_API std::vector<AssetId> ShaderGraphReferencedAssets(const ShaderGraphDefinition& definition);
     [[nodiscard]] KEIRE_API std::string_view ShaderGraphNodeTypeId(ShaderGraphNodeKind kind) noexcept;
     [[nodiscard]] KEIRE_API const ShaderGraphNodeDescriptor*
     FindShaderGraphNodeDescriptor(std::string_view typeId) noexcept;

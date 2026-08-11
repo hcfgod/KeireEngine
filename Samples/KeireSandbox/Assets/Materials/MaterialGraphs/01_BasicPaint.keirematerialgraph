@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "shader": {
     "kind": "graph",
     "asset": "e7af67a2-bc2f-4dfd-81f9-a3495a4e780d",
@@ -95,5 +95,200 @@
         "pin": "f8b8bd19-f10e-4da4-9e67-22a791152701"
       }
     }
-  ]
+  ],
+  "surfaceGraph": {
+    "connections": [
+      {
+        "id": "b1012000-0000-4000-8000-000000000001",
+        "input": [
+          "b1010000-0000-4000-8000-000000000001",
+          "b1011000-0000-4000-8000-000000000001"
+        ],
+        "output": [
+          "b1010001-0000-4000-8000-000000000001",
+          "b1011100-0000-4000-8000-000000000001"
+        ]
+      },
+      {
+        "id": "b1012000-0000-4000-8000-000000000002",
+        "input": [
+          "b1010000-0000-4000-8000-000000000001",
+          "b1011000-0000-4000-8000-000000000003"
+        ],
+        "output": [
+          "b1010002-0000-4000-8000-000000000001",
+          "b1011200-0000-4000-8000-000000000001"
+        ]
+      }
+    ],
+    "includeRoots": [
+      "Assets"
+    ],
+    "keywords": [],
+    "nodes": [
+      {
+        "function": "",
+        "id": "b1010000-0000-4000-8000-000000000001",
+        "include": "",
+        "kind": 0,
+        "name": "Basic Paint PBR",
+        "pins": [
+          {
+            "default": [
+              0.18000000715255737,
+              0.3199999928474426,
+              0.6200000047683716,
+              1
+            ],
+            "direction": 0,
+            "id": "b1011000-0000-4000-8000-000000000001",
+            "name": "BaseColor",
+            "type": 4
+          },
+          {
+            "default": 0,
+            "direction": 0,
+            "id": "b1011000-0000-4000-8000-000000000002",
+            "name": "Metallic",
+            "type": 0
+          },
+          {
+            "default": 0.41999998688697815,
+            "direction": 0,
+            "id": "b1011000-0000-4000-8000-000000000003",
+            "name": "Roughness",
+            "type": 0
+          },
+          {
+            "default": [
+              0,
+              0,
+              1
+            ],
+            "direction": 0,
+            "id": "b1011000-0000-4000-8000-000000000004",
+            "name": "Normal",
+            "type": 2
+          },
+          {
+            "default": [
+              0,
+              0,
+              1
+            ],
+            "direction": 0,
+            "id": "b1011000-0000-4000-8000-000000000005",
+            "name": "DetailNormal",
+            "type": 2
+          },
+          {
+            "default": 0,
+            "direction": 0,
+            "id": "b1011000-0000-4000-8000-000000000006",
+            "name": "Parallax",
+            "type": 0
+          },
+          {
+            "default": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "direction": 0,
+            "id": "b1011000-0000-4000-8000-000000000007",
+            "name": "Emission",
+            "type": 4
+          },
+          {
+            "default": 1,
+            "direction": 0,
+            "id": "b1011000-0000-4000-8000-000000000008",
+            "name": "Occlusion",
+            "type": 0
+          },
+          {
+            "default": 1,
+            "direction": 0,
+            "id": "b1011000-0000-4000-8000-000000000009",
+            "name": "Opacity",
+            "type": 0
+          }
+        ],
+        "position": [
+          520,
+          120
+        ],
+        "symbol": "",
+        "textureSemantic": 0,
+        "value": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "valueType": 4
+      },
+      {
+        "function": "",
+        "id": "b1010001-0000-4000-8000-000000000001",
+        "include": "",
+        "kind": 1,
+        "name": "Paint Color",
+        "pins": [
+          {
+            "default": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "direction": 1,
+            "id": "b1011100-0000-4000-8000-000000000001",
+            "name": "Value",
+            "type": 4
+          }
+        ],
+        "position": [
+          80,
+          100
+        ],
+        "symbol": "PaintColor",
+        "textureSemantic": 0,
+        "value": [
+          0.746268630027771,
+          0,
+          0,
+          1
+        ],
+        "valueType": 4
+      },
+      {
+        "function": "",
+        "id": "b1010002-0000-4000-8000-000000000001",
+        "include": "",
+        "kind": 1,
+        "name": "Paint Roughness",
+        "pins": [
+          {
+            "default": 0,
+            "direction": 1,
+            "id": "b1011200-0000-4000-8000-000000000001",
+            "name": "Value",
+            "type": 0
+          }
+        ],
+        "position": [
+          80,
+          280
+        ],
+        "symbol": "PaintRoughness",
+        "textureSemantic": 0,
+        "value": 0.41999998688697815,
+        "valueType": 0
+      }
+    ],
+    "output": 0,
+    "schemaVersion": 1
+  }
 }

@@ -103,7 +103,7 @@ TEST_CASE("Shader Graph source and cooked assets preserve stable graph identity"
 
     const auto importer = Keire::CreateShaderGraphAssetImporter();
     CHECK(importer.Name == "Keire.ShaderGraph");
-    CHECK(importer.Version == 14);
+    CHECK(importer.Version == 15);
     CHECK(importer.Extensions == std::vector<std::string>{".keireshadergraph"});
 }
 
@@ -136,7 +136,7 @@ TEST_CASE("Shader Graph v2 catalogs stable node identities and migrates v1 sourc
     const auto legacyText = legacy.dump(2);
     const auto legacyBytes = std::as_bytes(std::span(legacyText));
     const auto migrated = Keire::ShaderGraphAsset::DecodeSource(legacyBytes);
-    CHECK(migrated.SchemaVersion == 2);
+    CHECK(migrated.SchemaVersion == Keire::ShaderGraphSourceSchemaVersion);
     REQUIRE(migrated.Nodes.size() == definition.Nodes.size());
     CHECK(migrated.Nodes.front().TypeId == "keire.output.material");
 
@@ -159,8 +159,8 @@ TEST_CASE("Shader Graph v2 catalogs stable node identities and migrates v1 sourc
 
 TEST_CASE("Shader Graph compatibility versions are explicit and future sources fail recoverably")
 {
-    CHECK(Keire::ShaderGraphSourceSchemaVersion == 2);
-    CHECK(Keire::ShaderGraphGeneratedShaderVersion == 1);
+    CHECK(Keire::ShaderGraphSourceSchemaVersion == 3);
+    CHECK(Keire::ShaderGraphGeneratedShaderVersion == 2);
     CHECK(Keire::ShaderGraphVertexLayoutVersion == 3);
 
     const auto graph = Keire::CreateDefaultShaderGraph();
@@ -173,15 +173,15 @@ TEST_CASE("Shader Graph compatibility versions are explicit and future sources f
     CHECK(manifest.at("materialGraphSourceSchemaVersion") == Keire::ShaderGraphSourceSchemaVersion);
     CHECK(manifest.at("materialGraphGeneratedShaderVersion") == Keire::ShaderGraphGeneratedShaderVersion);
     CHECK(manifest.at("vertexLayoutVersion") == Keire::ShaderGraphVertexLayoutVersion);
-    CHECK(variant.Hlsl.find("Generator version 1, source schema 2") != std::string::npos);
+    CHECK(variant.Hlsl.find("Generator version 2, source schema 3") != std::string::npos);
 
     const auto future = nlohmann::json{{"schemaVersion", Keire::ShaderGraphSourceSchemaVersion + 1U}}.dump();
     const auto futureBytes = std::as_bytes(std::span(future));
     CHECK_THROWS_WITH_AS((void)Keire::ShaderGraphAsset::DecodeSource(futureBytes),
-                         "Shader Graph schema version 3 is newer than the supported version 2.", std::invalid_argument);
+                         "Shader Graph schema version 4 is newer than the supported version 3.", std::invalid_argument);
 }
 
-TEST_CASE("Shader Graph v2 lowers multi-output nodes and parameter authoring metadata")
+TEST_CASE("Shader Graph v3 lowers multi-output nodes and parameter authoring metadata")
 {
     auto graph = Keire::CreateDefaultShaderGraph();
     auto tint = Parameter("AuthorTint", Keire::ShaderGraphValueType::Color, Keire::Color{0.2F, 0.4F, 0.8F, 1.0F});
@@ -652,7 +652,7 @@ TEST_CASE("Shader Graph migrates structured schema-v1 assets without changing th
         std::filesystem::current_path() /
         "Samples/KeireSandbox/Assets/Materials/MaterialGraphs/09_HolographicVoronoi_Shader.keireshadergraph";
     const auto graph = Keire::ShaderGraphAsset::DecodeSource(ReadBytes(path));
-    CHECK(graph.SchemaVersion == 2);
+    CHECK(graph.SchemaVersion == Keire::ShaderGraphSourceSchemaVersion);
     CHECK(graph.Nodes.size() == 11);
     CHECK(graph.Connections.size() == 12);
     CHECK_NOTHROW(Keire::ValidateShaderGraph(graph));

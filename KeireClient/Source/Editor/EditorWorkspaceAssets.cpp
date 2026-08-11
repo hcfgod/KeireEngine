@@ -240,6 +240,17 @@ bool EditorWorkspaceLayer::CreateAssetBrowserShaderGraph(const std::string_view 
     return CreateShaderGraph(name, graphTemplate);
 }
 
+bool EditorWorkspaceLayer::CreateAssetBrowserReusableGraph(const std::string_view name,
+                                                           const Keire::ShaderGraphPurpose purpose)
+{
+    return CreateReusableGraph(name, purpose);
+}
+
+bool EditorWorkspaceLayer::CreateAssetBrowserMaterialParameterCollection(const std::string_view name)
+{
+    return CreateMaterialParameterCollection(name);
+}
+
 bool EditorWorkspaceLayer::CreateAssetBrowserMaterialInstance(const std::string_view name)
 {
     return CreateMaterialInstance(name);
@@ -438,6 +449,21 @@ void EditorWorkspaceLayer::OpenAssetBrowserMaterialInstance(const Keire::AssetId
 }
 
 void EditorWorkspaceLayer::OpenAssetBrowserShaderGraph(const Keire::AssetId asset) { OpenShaderGraph(asset); }
+
+void EditorWorkspaceLayer::OpenAssetBrowserMaterialParameterCollection(const Keire::AssetId asset)
+{
+    if (!m_AssetDatabase)
+        return;
+    const auto record = m_AssetDatabase->Find(asset);
+    if (!record || record->Type != Keire::MaterialParameterCollectionAsset::StaticType())
+        throw std::invalid_argument("Only Material Parameter Collections can be opened here.");
+    m_SelectedAsset = asset;
+    if (m_InspectorPanel)
+    {
+        m_InspectorPanel->Registration().SetVisible(true);
+        m_InspectorPanel->Registration().RequestFocus();
+    }
+}
 
 void EditorWorkspaceLayer::OpenAssetBrowserPrefab(const Keire::AssetId asset) { OpenPrefabForEditing(asset); }
 
@@ -1403,6 +1429,13 @@ bool EditorWorkspaceLayer::CreateMaterialGraph(const std::string_view name, cons
         if (!shaderInterface)
             throw std::runtime_error("The selected shader does not expose a compatible material interface.");
         auto definition = Keire::CreateMaterialGraph(std::move(shaderReference), *shaderInterface);
+        if (definition.Shader.Kind == Keire::MaterialShaderSourceKind::ShaderGraph)
+        {
+            const auto shaderTemplate = ResolveMaterialGraphTemplate(definition.Shader);
+            if (!shaderTemplate)
+                throw std::runtime_error("The selected Shader Graph template could not be loaded.");
+            definition.SurfaceGraph = Keire::CreateMaterialSurfaceGraph(*shaderTemplate);
+        }
         const auto directory = m_AssetBrowserPanel ? m_AssetBrowserPanel->CurrentFolder() : std::filesystem::path{};
         const auto destination = directory / (std::string(name) + ".keirematerialgraph");
         if (m_AssetDatabase->Find(destination))
@@ -1444,6 +1477,86 @@ bool EditorWorkspaceLayer::CreateShaderGraph(const std::string_view name,
     catch (const std::exception& error)
     {
         SetAssetError(std::string("Shader Graph creation failed: ") + error.what());
+        return false;
+    }
+}
+
+bool EditorWorkspaceLayer::CreateReusableGraph(const std::string_view name, const Keire::ShaderGraphPurpose purpose)
+{
+    if (!m_AssetDatabase || !m_AssetOperations)
+        return false;
+    try
+    {
+        if (m_AssetOperations->Busy())
+            (void)m_AssetOperations->PreemptBackgroundImports();
+        if (name.empty() || name == "." || name == ".." || name.find_first_of("/\\") != std::string_view::npos)
+            throw std::invalid_argument("Reusable graph name must be one non-empty path component.");
+
+        std::string_view extension;
+        std::vector<std::byte> bytes;
+        switch (purpose)
+        {
+        case Keire::ShaderGraphPurpose::MaterialFunction:
+            extension = Keire::MaterialFunctionAssetSourceExtension;
+            bytes = Keire::MaterialFunctionAsset::Encode(Keire::CreateDefaultGraphFunction(purpose));
+            break;
+        case Keire::ShaderGraphPurpose::ShaderFunction:
+            extension = Keire::ShaderFunctionAssetSourceExtension;
+            bytes = Keire::ShaderFunctionAsset::Encode(Keire::CreateDefaultGraphFunction(purpose));
+            break;
+        case Keire::ShaderGraphPurpose::MaterialLayer:
+            extension = Keire::MaterialLayerAssetSourceExtension;
+            bytes = Keire::MaterialLayerAsset::Encode(Keire::CreateDefaultGraphFunction(purpose));
+            break;
+        case Keire::ShaderGraphPurpose::MaterialLayerBlend:
+            extension = Keire::MaterialLayerBlendAssetSourceExtension;
+            bytes = Keire::MaterialLayerBlendAsset::Encode(Keire::CreateDefaultGraphFunction(purpose));
+            break;
+        case Keire::ShaderGraphPurpose::Shader:
+            throw std::invalid_argument("Use Shader Graph creation for shader assets.");
+        }
+
+        const auto directory = m_AssetBrowserPanel ? m_AssetBrowserPanel->CurrentFolder() : std::filesystem::path{};
+        const auto destination = directory / (std::string(name) + std::string(extension));
+        if (m_AssetDatabase->Find(destination))
+            throw std::runtime_error("A reusable graph with that name already exists in this folder.");
+        m_AssetOperations->QueueCreateAsset(
+            destination, bytes, {},
+            {.FollowUp = KeireEditor::AssetOperationFollowUp::Reveal, .UndoName = "Create Reusable Graph"});
+        m_AssetStatus = "Creating " + destination.generic_string() + " in the isolated asset worker.";
+        return true;
+    }
+    catch (const std::exception& error)
+    {
+        SetAssetError(std::string("Reusable graph creation failed: ") + error.what());
+        return false;
+    }
+}
+
+bool EditorWorkspaceLayer::CreateMaterialParameterCollection(const std::string_view name)
+{
+    if (!m_AssetDatabase || !m_AssetOperations)
+        return false;
+    try
+    {
+        if (m_AssetOperations->Busy())
+            (void)m_AssetOperations->PreemptBackgroundImports();
+        if (name.empty() || name == "." || name == ".." || name.find_first_of("/\\") != std::string_view::npos)
+            throw std::invalid_argument("Material Parameter Collection name must be one non-empty path component.");
+        const auto directory = m_AssetBrowserPanel ? m_AssetBrowserPanel->CurrentFolder() : std::filesystem::path{};
+        const auto destination =
+            directory / (std::string(name) + std::string(Keire::MaterialParameterCollectionAssetSourceExtension));
+        if (m_AssetDatabase->Find(destination))
+            throw std::runtime_error("A Material Parameter Collection with that name already exists in this folder.");
+        m_AssetOperations->QueueCreateAsset(destination, Keire::MaterialParameterCollectionAsset::Encode({}), {},
+                                            {.FollowUp = KeireEditor::AssetOperationFollowUp::Reveal,
+                                             .UndoName = "Create Material Parameter Collection"});
+        m_AssetStatus = "Creating " + destination.generic_string() + " in the isolated asset worker.";
+        return true;
+    }
+    catch (const std::exception& error)
+    {
+        SetAssetError(std::string("Material Parameter Collection creation failed: ") + error.what());
         return false;
     }
 }
@@ -2690,6 +2803,12 @@ Keire::Ref<const Keire::MeshAsset> EditorWorkspaceLayer::ResolveShaderGraphPrevi
     return assets->Load<Keire::MeshAsset>(asset, Keire::AssetPriority::High).TryGetLoaded();
 }
 
+std::optional<Keire::ShaderGraphDefinition>
+EditorWorkspaceLayer::ResolveShaderGraphFunction(const Keire::AssetId asset) const
+{
+    return ResolveReusableGraph(asset);
+}
+
 void EditorWorkspaceLayer::ApplyShaderGraphDevelopmentRevision(
     const Keire::AssetId asset, const Keire::ShaderGraphDefinition& definition,
     const Keire::ShaderGraphCompilation& compilation,
@@ -2769,11 +2888,22 @@ void EditorWorkspaceLayer::PersistShaderGraph(const Keire::AssetId asset, const 
     if (!m_AssetDatabase)
         throw std::runtime_error("The Asset Database is unavailable.");
     const auto record = m_AssetDatabase->Find(asset);
-    if (!record || record->Type != Keire::ShaderGraphAsset::StaticType() ||
-        record->RelativePath.extension() != ".keireshadergraph")
-        throw std::runtime_error("The edited Shader Graph source is unavailable.");
-    if (m_ShaderGraphDocument->Asset() != asset || !m_ShaderGraphDocument->Compilation().Succeeded() ||
-        m_ShaderGraphDocument->Compilation().Variants.empty())
+    if (!record)
+        throw std::runtime_error("The edited graph source is unavailable.");
+    if (record->Type != Keire::ShaderGraphAsset::StaticType())
+    {
+        const bool reusable = record->Type == Keire::MaterialFunctionAsset::StaticType() ||
+                              record->Type == Keire::ShaderFunctionAsset::StaticType() ||
+                              record->Type == Keire::MaterialLayerAsset::StaticType() ||
+                              record->Type == Keire::MaterialLayerBlendAsset::StaticType();
+        if (!reusable || m_ShaderGraphDocument->Asset() != asset || !m_ShaderGraphDocument->Publishable())
+            throw std::runtime_error("The edited reusable graph is unavailable or invalid.");
+        const auto& specification = m_AssetDatabase->Specification();
+        WriteBytesAtomically(specification.ProjectRoot / specification.SourceDirectory / record->RelativePath, bytes);
+        return;
+    }
+    if (record->RelativePath.extension() != ".keireshadergraph" || m_ShaderGraphDocument->Asset() != asset ||
+        !m_ShaderGraphDocument->Compilation().Succeeded() || m_ShaderGraphDocument->Compilation().Variants.empty())
         throw std::runtime_error("The Shader Graph has no publishable generated shader variants.");
 
     const auto& specification = m_AssetDatabase->Specification();
@@ -2790,9 +2920,12 @@ void EditorWorkspaceLayer::OpenShaderGraph(const Keire::AssetId asset)
     if (!m_AssetDatabase)
         return;
     const auto record = m_AssetDatabase->Find(asset);
-    if (!record || record->Type != Keire::ShaderGraphAsset::StaticType() ||
-        record->RelativePath.extension() != ".keireshadergraph")
-        throw std::invalid_argument("Only .keireshadergraph assets can be opened in the Shader Graph editor.");
+    const bool reusable = record && (record->Type == Keire::MaterialFunctionAsset::StaticType() ||
+                                     record->Type == Keire::ShaderFunctionAsset::StaticType() ||
+                                     record->Type == Keire::MaterialLayerAsset::StaticType() ||
+                                     record->Type == Keire::MaterialLayerBlendAsset::StaticType());
+    if (!record || (record->Type != Keire::ShaderGraphAsset::StaticType() && !reusable))
+        throw std::invalid_argument("Only Shader Graph, function, and material-layer assets can be opened here.");
 
     m_SelectedAsset = asset;
     const auto& specification = m_AssetDatabase->Specification();
@@ -2808,6 +2941,7 @@ void EditorWorkspaceLayer::OpenShaderGraph(const Keire::AssetId asset)
     Keire::ShaderGraphCompileOptions options;
     options.GeneratedSource =
         specification.SourceDirectory / "Generated" / "ShaderGraphs" / asset.ToString() / "ShaderGraph.hlsl";
+    options.ResolveFunction = [this](const Keire::AssetId dependency) { return ResolveReusableGraph(dependency); };
     const auto allowedRoot = specification.SourceDirectory.lexically_normal();
     const auto projectRoot = specification.ProjectRoot;
     options.ReadInclude = [allowedRoot,
@@ -2839,7 +2973,21 @@ void EditorWorkspaceLayer::OpenShaderGraph(const Keire::AssetId asset)
     m_ShaderGraphDocument->SetCompileOptions(std::move(options));
     if (++m_ShaderGraphDocumentRevision == 0)
         ++m_ShaderGraphDocumentRevision;
-    m_ShaderGraphDocument->Open(asset, bytes, m_ShaderGraphDocumentRevision, std::move(context));
+    if (record->Type == Keire::ShaderGraphAsset::StaticType())
+        m_ShaderGraphDocument->Open(asset, bytes, m_ShaderGraphDocumentRevision, std::move(context));
+    else
+    {
+        Keire::GraphFunctionDefinition definition;
+        if (record->Type == Keire::MaterialFunctionAsset::StaticType())
+            definition = Keire::MaterialFunctionAsset::DecodeSource(bytes);
+        else if (record->Type == Keire::ShaderFunctionAsset::StaticType())
+            definition = Keire::ShaderFunctionAsset::DecodeSource(bytes);
+        else if (record->Type == Keire::MaterialLayerAsset::StaticType())
+            definition = Keire::MaterialLayerAsset::DecodeSource(bytes);
+        else
+            definition = Keire::MaterialLayerBlendAsset::DecodeSource(bytes);
+        m_ShaderGraphDocument->Open(asset, std::move(definition), m_ShaderGraphDocumentRevision, std::move(context));
+    }
     m_ActiveUndoContext = m_ShaderGraphDocument->UndoContext();
     m_ShaderGraphPanel->ResetTransientState();
     m_ShaderGraphPanel->SetMessage("Loaded " + record->RelativePath.generic_string() + ".");
@@ -2859,8 +3007,11 @@ void EditorWorkspaceLayer::SaveShaderGraph()
         throw std::runtime_error("The asset worker is unavailable for Shader Graph compilation.");
     m_AssetOperations->QueueImport(KeireEditor::AssetOperationPriority::ExplicitAction,
                                    {.ReloadAsset = m_ShaderGraphDocument->Asset()});
-    m_ShaderGraphPanel->SetMessage("Saved " + record->RelativePath.generic_string() +
-                                   "; compiling and hot-reloading its runtime shader variants...");
+    m_ShaderGraphPanel->SetMessage(m_ShaderGraphDocument->ReusableGraph()
+                                       ? "Saved " + record->RelativePath.generic_string() +
+                                             "; recompiling dependent graphs..."
+                                       : "Saved " + record->RelativePath.generic_string() +
+                                             "; compiling and hot-reloading its runtime shader variants...");
 }
 
 void EditorWorkspaceLayer::OpenAnimationGraph(const Keire::AssetId asset)

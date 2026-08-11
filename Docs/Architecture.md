@@ -656,8 +656,9 @@ adapts its draw commands to the SDL_GPU-backed application UI pass; managed code
 through Coral internal calls and `IScriptRuntimeServices`, never through native pointers.
 
 Editor material authoring has three deliberate workflows. `MaterialDocument` and `MaterialInspectorPanel` own compact
-Direct Material editing. `MaterialGraphDocument` and `MaterialGraphPanel` own the separate visual graph, reflected
-Material Output pins, typed value nodes, connections, diagnostics, preview, dirty lifecycle, and bounded undo/redo.
+Direct Material editing. `MaterialGraphDocument` and `MaterialGraphPanel` own the Unreal-style artist surface graph,
+template-derived Material Output, the shared Shader Graph expression catalog, instance/static parameters, composition
+diagnostics, compatibility bindings, dirty lifecycle, and bounded undo/redo.
 `MaterialInstanceAsset` stores only inherited property and surface overrides and is edited through the Inspector. All
 three preserve a tagged raw-Shader or Shader-Graph reference behind the same runtime material boundary. Material file
 snapshots enter the project-assets undo context; the workspace and asset-operation service coordinate persistence.
@@ -674,8 +675,9 @@ pixels, and presentation. The preview evaluates the validated built-in graph per
 UV, procedural, shaping, surface, and neutral texture-semantic rules as generated shaders; unsupported custom functions
 retain a bounded node-default fallback. The shared stable canvas installs an RAII draw-list clip covering the exact
 canvas rectangle, so nodes and connection feedback cannot escape into adjacent preview or inspector regions. The graph
-schema-v2 descriptor catalog assigns stable node type IDs, canonical pin contracts, cost metadata, and legal shader
-stages. Schema-v1 data is upgraded through deterministic derived pin IDs, so migration does not dirty the same asset
+schema-v3 descriptor catalog assigns stable node type IDs, canonical pin contracts, cost metadata, legal shader
+stages, graph purpose, and stable referenced-asset identities. Schema-v1/2 data is upgraded through deterministic
+derived pin IDs and an explicit Shader purpose, so migration does not dirty the same asset
 differently across machines. The compiler computes endpoint-aware reverse reachability from the single Master node
 before lowering vertex and fragment expressions; structured Material Attributes and BSDF values remain typed through
 validation and preview, then lower into private generated-shader structs rather than entering the renderer property ABI.
@@ -685,6 +687,18 @@ when disconnected, while legacy Master nodes accept neutral defaults for later s
 compilation is revisioned, debounced, and performed away from the owner thread; stale completions are discarded and only
 the newest valid result can replace the last-good preview. The workspace supplies confined include reads, nonblocking
 custom-mesh resolution through the asset system, and persistence.
+
+Reusable Material Function, Shader Function, Material Layer, and Material Layer Blend assets wrap the same typed graph
+model behind distinct immutable asset types. Their editor document runs in purpose-aware reusable mode: it validates
+and persists the body without invoking standalone shader publication or representing the asset as a material. Parameter
+nodes define typed call inputs and output-node inputs define call outputs. The compiler resolves references through a
+callback rather than taking asset-system ownership, detects missing/wrong-purpose assets, interface drift, recursion,
+and excessive depth, then deterministically clones reachable bodies from stable call-site/source identities before
+ordinary stage analysis and lowering. Importers publish sorted dependency edges so changing a function invalidates its
+consumers. Material Parameter Collections remain renderer-neutral asset/value definitions plus a revisioned,
+thread-safe runtime state object; renderer-wide collection buffers and world ownership are deliberately not hidden in
+the asset layer. Dynamic Material Instances similarly expose typed snapshots and revisions without exposing GPU or
+backend handles.
 Successful graph revisions bake parameter defaults into the stable generated material and publish that material through
 the owner-thread development-asset boundary, giving scene renderers immediate immutable revisions without accepting an
 invalid graph. Save stages the complete deterministic shader directory under `Library/Transactions`, preserves metadata
@@ -693,13 +707,16 @@ after the staged directory is live. Any source-publication failure restores the 
 preserving the original exception. The asset scanner ignores engine atomic-write temporaries and editor backups, so a
 concurrent scan cannot assign identities to files that will disappear at commit. A successful save then queues a
 targeted import of the parent graph, every generated shader/material subasset, and dependent loaded assets. Runtime
-`MaterialGraphAsset` and `MaterialInstanceAsset` remain immutable data. Material Graph evaluation starts from reflected
-output defaults and applies typed visual connections. Material Instance resolution starts from a Direct Material or
-Material Graph root before applying at most 16 ancestors; it rejects cycles, unknown properties, and type changes
-without introducing mutable renderer-global state. Instance import publishes its own stable ordinary `MaterialAsset`
-subasset referencing the inherited shader variant; editor pickers and viewport drops alias the authoring instance to
-that renderer-safe identity. Legacy `ShaderGraphInstanceAsset` remains registered for 0.1.x project compatibility but
-is not offered for new creation.
+`MaterialGraphAsset` and `MaterialInstanceAsset` remain immutable data. Schema-3 Material Graph import loads the selected
+Shader Graph template, applies compatibility defaults, replaces matching template-output branches with the material's
+typed surface expressions, prunes unreachable template work, validates the composed graph, and publishes stable
+material-owned shader variants plus one runtime material. Schema-1/2 graphs upgrade deterministically and retain their
+previous value-binding behavior. Material Instance resolution starts from a Direct Material or Material Graph root
+before applying at most 16 ancestors; it rejects cycles, unknown properties, and type changes without introducing
+mutable renderer-global state. Instance import publishes its own stable ordinary `MaterialAsset` subasset referencing
+the inherited shader variant; editor pickers and viewport drops alias the authoring instance to that renderer-safe
+identity. Legacy `ShaderGraphInstanceAsset` remains registered for 0.1.x project compatibility but is not offered for
+new creation.
 Catalog-producing editor work is isolated in the private `KeireAssetWorker` executable. `AssetOperationService` owns
 one child at a time, prioritizes external imports and explicit actions ahead of cook and coalesced material refreshes,
 and exchanges versioned request/progress/result documents under `Library/AssetOperations/<operation-id>`. A worker

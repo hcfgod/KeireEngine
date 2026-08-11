@@ -42,6 +42,8 @@ namespace KeireEditor
         virtual bool CreateAssetBrowserVfxEffect(std::string_view name) = 0;
         virtual bool CreateAssetBrowserMaterialGraph(std::string_view name, Keire::AssetId shader) = 0;
         virtual bool CreateAssetBrowserShaderGraph(std::string_view name, Keire::ShaderGraphTemplate graphTemplate) = 0;
+        virtual bool CreateAssetBrowserReusableGraph(std::string_view name, Keire::ShaderGraphPurpose purpose) = 0;
+        virtual bool CreateAssetBrowserMaterialParameterCollection(std::string_view name) = 0;
         virtual bool CreateAssetBrowserMaterialInstance(std::string_view name) = 0;
         virtual bool CreateAssetBrowserPrefab(std::string_view name) = 0;
         virtual bool CreateAssetBrowserPrefabVariant(Keire::AssetId basePrefab, std::string_view name) = 0;
@@ -61,6 +63,7 @@ namespace KeireEditor
         virtual void OpenAssetBrowserMaterialGraph(Keire::AssetId asset) = 0;
         virtual void OpenAssetBrowserMaterialInstance(Keire::AssetId asset) = 0;
         virtual void OpenAssetBrowserShaderGraph(Keire::AssetId asset) = 0;
+        virtual void OpenAssetBrowserMaterialParameterCollection(Keire::AssetId asset) = 0;
         virtual void OpenAssetBrowserPrefab(Keire::AssetId asset) = 0;
         virtual void OpenAssetBrowserScene(Keire::AssetId asset) = 0;
         virtual void PrepareAssetBrowserExternalOpen(Keire::AssetId asset) = 0;

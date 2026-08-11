@@ -252,11 +252,30 @@ class DistributionSnapshotPreparationTests(unittest.TestCase):
         previous_manifest = self.root / "editor-0.1.0.manifest.json"
         previous_manifest.write_text(json.dumps(previous_document), encoding="utf-8")
 
-        self.document["version"] = "0.2.0"
-        self.document["displayName"] = "Keire Editor 0.2.0"
+        intermediate_document = dict(self.document)
+        intermediate_document["version"] = "0.2.0"
+        intermediate_document["displayName"] = "Keire Editor 0.2.0"
+        intermediate_package = self.root / "editor-0.2.0.keirepackage"
+        intermediate_package.write_bytes(b"intermediate-editor-package")
+        intermediate_document["artifact"] = {
+            "sizeBytes": intermediate_package.stat().st_size,
+            "sha256": hashlib.sha256(intermediate_package.read_bytes()).hexdigest(),
+        }
+        intermediate_manifest = self.root / "editor-0.2.0.manifest.json"
+        intermediate_manifest.write_text(
+            json.dumps(intermediate_document), encoding="utf-8"
+        )
+
+        self.document["version"] = "0.3.0"
+        self.document["displayName"] = "Keire Editor 0.3.0"
         self.write_manifest()
         result = self.run_preparer(
-            "editor-history", [(previous_manifest, previous_package)], reverse=True
+            "editor-history",
+            [
+                (previous_manifest, previous_package),
+                (intermediate_manifest, intermediate_package),
+            ],
+            reverse=True,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -280,7 +299,7 @@ class DistributionSnapshotPreparationTests(unittest.TestCase):
                 / "x86_64.json"
             ).read_text(encoding="utf-8")
         )
-        expected_versions = ["0.1.0", "0.2.0"]
+        expected_versions = ["0.1.0", "0.2.0", "0.3.0"]
         self.assertEqual(
             [package["version"] for package in legacy["packages"]],
             expected_versions,
@@ -296,7 +315,8 @@ class DistributionSnapshotPreparationTests(unittest.TestCase):
             },
             {
                 "0.1.0": previous_document["artifact"]["sha256"],
-                "0.2.0": self.document["artifact"]["sha256"],
+                "0.2.0": intermediate_document["artifact"]["sha256"],
+                "0.3.0": self.document["artifact"]["sha256"],
             },
         )
 

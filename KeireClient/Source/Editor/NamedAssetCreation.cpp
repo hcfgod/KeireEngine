@@ -28,6 +28,16 @@ namespace KeireEditor
             return "material graph";
         case NamedAssetCreationKind::ShaderGraph:
             return "shader graph";
+        case NamedAssetCreationKind::MaterialFunction:
+            return "material function";
+        case NamedAssetCreationKind::ShaderFunction:
+            return "shader function";
+        case NamedAssetCreationKind::MaterialLayer:
+            return "material layer";
+        case NamedAssetCreationKind::MaterialLayerBlend:
+            return "material layer blend";
+        case NamedAssetCreationKind::MaterialParameterCollection:
+            return "material parameter collection";
         case NamedAssetCreationKind::MaterialInstance:
             return "material instance";
         case NamedAssetCreationKind::Prefab:

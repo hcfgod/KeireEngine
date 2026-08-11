@@ -16,6 +16,9 @@ namespace KeireEditor
     {
         std::function<std::optional<Keire::ShaderInterfaceDefinition>(const Keire::MaterialShaderReference&)>
             ResolveInterface;
+        std::function<std::optional<Keire::ShaderGraphDefinition>(const Keire::MaterialShaderReference&)>
+            ResolveTemplate;
+        std::function<std::optional<Keire::ShaderGraphDefinition>(Keire::AssetId)> ResolveFunction;
         std::function<Keire::AssetId(const Keire::MaterialShaderReference&)> ResolveShader;
         std::function<void(Keire::AssetId, const Keire::MaterialAssetDefinition&)> Preview;
         std::function<void(Keire::AssetId)> StopPreview;
@@ -68,13 +71,16 @@ namespace KeireEditor
         [[nodiscard]] bool AddNode(Keire::MaterialGraphValueNode node);
         [[nodiscard]] bool EditNode(Keire::AssetId node,
                                     const std::function<void(Keire::MaterialGraphValueNode&)>& operation);
+        [[nodiscard]] bool AddExpressionNode(Keire::ShaderGraphNode node);
+        [[nodiscard]] bool EditExpressionNode(Keire::AssetId node,
+                                              const std::function<void(Keire::ShaderGraphNode&)>& operation);
         [[nodiscard]] bool MoveNode(Keire::AssetId node, Keire::Vector2 position);
         [[nodiscard]] bool RemoveNode(Keire::AssetId node);
         [[nodiscard]] bool AddConnection(Keire::MaterialGraphConnection connection);
         [[nodiscard]] bool RemoveConnection(Keire::AssetId connection);
         [[nodiscard]] NodeGraphConnectionValidation CheckConnection(Keire::MaterialGraphEndpoint output,
                                                                     Keire::MaterialGraphEndpoint input) const;
-        [[nodiscard]] MaterialGraphCanvasModel BuildCanvasModel() const;
+        [[nodiscard]] MaterialGraphCanvasModel BuildCanvasModel(bool includeTemplateParameters = false) const;
 
       private:
         void RefreshDiagnostics();

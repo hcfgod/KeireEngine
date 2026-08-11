@@ -7,6 +7,7 @@
 #include "Keire/Assets/PhysicsMaterialAsset.h"
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/Audio/AudioAssets.h"
+#include "Keire/Rendering/MaterialEcosystem.h"
 #include "Keire/Rendering/MaterialGraph.h"
 #include "Keire/Rendering/ShaderGraph.h"
 #include "Keire/Scenes/PrefabAsset.h"
@@ -35,6 +36,11 @@ namespace Keire
         result.emplace_back(CreateMaterialAssetImporter());
         result.emplace_back(CreateMaterialGraphAssetImporter());
         result.emplace_back(CreateMaterialInstanceAssetImporter());
+        result.emplace_back(CreateMaterialFunctionAssetImporter());
+        result.emplace_back(CreateShaderFunctionAssetImporter());
+        result.emplace_back(CreateMaterialLayerAssetImporter());
+        result.emplace_back(CreateMaterialLayerBlendAssetImporter());
+        result.emplace_back(CreateMaterialParameterCollectionAssetImporter());
         result.emplace_back(CreateShaderGraphAssetImporter());
         result.emplace_back(CreateShaderGraphInstanceAssetImporter());
         result.emplace_back(CreateMeshAssetImporter());
@@ -77,6 +83,11 @@ namespace Keire
         result.emplace_back(CreateMaterialAssetDecoder());
         result.emplace_back(CreateMaterialGraphAssetDecoder());
         result.emplace_back(CreateMaterialInstanceAssetDecoder());
+        result.emplace_back(CreateMaterialFunctionAssetDecoder());
+        result.emplace_back(CreateShaderFunctionAssetDecoder());
+        result.emplace_back(CreateMaterialLayerAssetDecoder());
+        result.emplace_back(CreateMaterialLayerBlendAssetDecoder());
+        result.emplace_back(CreateMaterialParameterCollectionAssetDecoder());
         result.emplace_back(CreateShaderGraphAssetDecoder());
         result.emplace_back(CreateShaderGraphInstanceAssetDecoder());
         result.emplace_back(CreateMeshAssetDecoder());

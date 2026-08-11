@@ -1493,6 +1493,90 @@ namespace KeireEditor
                 case Keire::ShaderGraphNodeKind::Custom:
                     result = GraphValue(node.Value, node.ValueType);
                     break;
+                case Keire::ShaderGraphNodeKind::Reroute:
+                    result = Coerce(NamedInput(node, "Input"), node.ValueType);
+                    break;
+                case Keire::ShaderGraphNodeKind::If:
+                {
+                    const float left = Coerce(NamedInput(node, "A"), Keire::ShaderGraphValueType::Scalar).Data.X;
+                    const float right = Coerce(NamedInput(node, "B"), Keire::ShaderGraphValueType::Scalar).Data.X;
+                    const float threshold =
+                        Coerce(NamedInput(node, "Threshold"), Keire::ShaderGraphValueType::Scalar).Data.X;
+                    result = Coerce(NamedInput(node, std::abs(left - right) <= threshold ? "Equal"
+                                                     : left > right                      ? "Greater"
+                                                                                         : "Less"),
+                                    node.ValueType);
+                    break;
+                }
+                case Keire::ShaderGraphNodeKind::Compare:
+                {
+                    const float left = Coerce(NamedInput(node, "A"), Keire::ShaderGraphValueType::Scalar).Data.X;
+                    const float right = Coerce(NamedInput(node, "B"), Keire::ShaderGraphValueType::Scalar).Data.X;
+                    const float threshold =
+                        Coerce(NamedInput(node, "Threshold"), Keire::ShaderGraphValueType::Scalar).Data.X;
+                    const float value = outputPin->Name == "Greater" ? (left > right ? 1.0F : 0.0F)
+                                        : outputPin->Name == "Less"
+                                            ? (left < right ? 1.0F : 0.0F)
+                                            : (std::abs(left - right) <= threshold ? 1.0F : 0.0F);
+                    result = {.Data = {value, 0.0F, 0.0F, 0.0F}, .Type = Keire::ShaderGraphValueType::Scalar};
+                    break;
+                }
+                case Keire::ShaderGraphNodeKind::BooleanAnd:
+                case Keire::ShaderGraphNodeKind::BooleanOr:
+                {
+                    const bool left = Coerce(NamedInput(node, "A"), Keire::ShaderGraphValueType::Scalar).Data.X != 0.0F;
+                    const bool right =
+                        Coerce(NamedInput(node, "B"), Keire::ShaderGraphValueType::Scalar).Data.X != 0.0F;
+                    const float value =
+                        (node.Kind == Keire::ShaderGraphNodeKind::BooleanAnd ? left && right : left || right) ? 1.0F
+                                                                                                              : 0.0F;
+                    result = {.Data = {value, 0.0F, 0.0F, 0.0F}, .Type = Keire::ShaderGraphValueType::Scalar};
+                    break;
+                }
+                case Keire::ShaderGraphNodeKind::BooleanNot:
+                {
+                    const float value =
+                        Coerce(NamedInput(node, "Input"), Keire::ShaderGraphValueType::Scalar).Data.X == 0.0F ? 1.0F
+                                                                                                              : 0.0F;
+                    result = {.Data = {value, 0.0F, 0.0F, 0.0F}, .Type = Keire::ShaderGraphValueType::Scalar};
+                    break;
+                }
+                case Keire::ShaderGraphNodeKind::ArcTangent:
+                    result = Unary(node, [](const float value) { return std::atan(value); });
+                    break;
+                case Keire::ShaderGraphNodeKind::HyperbolicSine:
+                    result = Unary(node, [](const float value) { return std::sinh(value); });
+                    break;
+                case Keire::ShaderGraphNodeKind::HyperbolicCosine:
+                    result = Unary(node, [](const float value) { return std::cosh(value); });
+                    break;
+                case Keire::ShaderGraphNodeKind::HyperbolicTangent:
+                    result = Unary(node, [](const float value) { return std::tanh(value); });
+                    break;
+                case Keire::ShaderGraphNodeKind::DegreesToRadians:
+                    result = Unary(node, [](const float value) { return value * 0.017453292519943295F; });
+                    break;
+                case Keire::ShaderGraphNodeKind::RadiansToDegrees:
+                    result = Unary(node, [](const float value) { return value * 57.29577951308232F; });
+                    break;
+                case Keire::ShaderGraphNodeKind::Negate:
+                    result = Unary(node, [](const float value) { return -value; });
+                    break;
+                case Keire::ShaderGraphNodeKind::Exponential:
+                    result = Unary(node, [](const float value) { return std::exp(value); });
+                    break;
+                case Keire::ShaderGraphNodeKind::Logarithm:
+                    result = Unary(node, [](const float value) { return std::log(std::max(value, 1.0e-8F)); });
+                    break;
+                case Keire::ShaderGraphNodeKind::ScaleAndBias:
+                {
+                    const float scale = Coerce(NamedInput(node, "Scale"), Keire::ShaderGraphValueType::Scalar).Data.X;
+                    const float bias = Coerce(NamedInput(node, "Bias"), Keire::ShaderGraphValueType::Scalar).Data.X;
+                    result = Unary(node, [scale, bias](const float value) { return value * scale + bias; });
+                    break;
+                }
+                case Keire::ShaderGraphNodeKind::FunctionCall:
+                    throw std::invalid_argument("Function Call preview requires an expanded reusable graph.");
                 case Keire::ShaderGraphNodeKind::Master:
                     throw std::invalid_argument("The Shader Output node cannot be used as an expression.");
                 }

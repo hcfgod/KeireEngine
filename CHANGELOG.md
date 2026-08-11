@@ -1,5 +1,24 @@
 # Changelog
 
+- Promoted the Kéire Editor and Project Hub product line to 0.3.0 for the Unreal-inspired Material Ecosystem milestone.
+  The signed distribution remains side-by-side and immutable: 0.1.0 and 0.2.0 stay independently installable while
+  0.3.0 becomes the minimum editor for the upgraded Sandbox material and shader authoring examples.
+- Added the first Unreal-inspired Material Ecosystem parity slice: distinct Material Function, Shader Function,
+  Material Layer, Material Layer Blend, and Material Parameter Collection assets; typed reusable call nodes in both
+  graph editors; deterministic recursive expansion with dependency/cycle/depth validation; 17 additional math,
+  branching, boolean, and utility operations for a 120-node Shader Graph catalog; revisioned runtime collection state;
+  and typed Dynamic Material Instances. Reusable assets now create, badge, open, validate, save, reimport, and retain
+  metadata through their normal editor workflows, while collections provide an explicit Inspector editor.
+- Rebuilt Material Graph authoring around an Unreal-style surface workflow without collapsing it into Shader Graph.
+  Shader Graph assets now act as reusable renderer/master templates; Material Graph schema 3 embeds a full typed
+  expression graph whose Material Output branches are composed into that template and compiled as material-owned
+  shader variants. The editor exposes the complete shader-node catalog, searchable creation, instance parameters,
+  static switches, parameter metadata, node duplication, template-aware diagnostics, and an opt-in compatibility view
+  for previous reflected-value graphs. Schema-1/2 assets upgrade safely, and schema-2 Material Instances inherit both
+  dynamic and static parameters without duplicating shader code.
+- Fixed website deployments that could overwrite the generated Starlight documentation landing page with the legacy
+  marketing-site fallback. Fallback guide navigation now remains on first-party `/docs/reference/` routes, and website
+  validation rejects direct GitHub guide links before deployment.
 - Separated shader authoring from material authoring throughout the editor. Shader Graph creation now offers Lit/PBR,
   Unlit, Transparent, Decal, Fullscreen, Hair, and Eye templates under `NewShaderGraph`; double-clicking a Material
   Graph opens its own visual Material Output canvas with dynamically reflected shader inputs instead of redirecting to

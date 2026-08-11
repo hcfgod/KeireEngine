@@ -1,5 +1,7 @@
 #include "KeireClient/Editor/ShaderGraphDocument.h"
 
+#include "Keire/Rendering/MaterialEcosystem.h"
+
 #include <algorithm>
 #include <bit>
 #include <chrono>
@@ -15,6 +17,28 @@ namespace KeireEditor
     namespace
     {
         constexpr double LiveCompilationIntervalSeconds = 0.075;
+
+        [[nodiscard]] std::vector<std::byte>
+        EncodeGraphAsset(const Keire::ShaderGraphDefinition& definition,
+                         const std::optional<Keire::GraphFunctionDefinition>& metadata)
+        {
+            auto function = metadata.value_or(Keire::GraphFunctionDefinition{});
+            function.Body = definition;
+            switch (definition.Purpose)
+            {
+            case Keire::ShaderGraphPurpose::Shader:
+                return Keire::ShaderGraphAsset::EncodeSource(definition);
+            case Keire::ShaderGraphPurpose::MaterialFunction:
+                return Keire::MaterialFunctionAsset::Encode(function);
+            case Keire::ShaderGraphPurpose::ShaderFunction:
+                return Keire::ShaderFunctionAsset::Encode(function);
+            case Keire::ShaderGraphPurpose::MaterialLayer:
+                return Keire::MaterialLayerAsset::Encode(function);
+            case Keire::ShaderGraphPurpose::MaterialLayerBlend:
+                return Keire::MaterialLayerBlendAsset::Encode(function);
+            }
+            throw std::invalid_argument("Shader Graph purpose is unsupported.");
+        }
 
         [[nodiscard]] constexpr std::string_view ShaderOutputLabel(const Keire::ShaderGraphOutput output) noexcept
         {
@@ -363,8 +387,8 @@ namespace KeireEditor
         : m_Specification(std::move(specification)),
           m_Host({.Validate = [](const Keire::ShaderGraphDefinition& definition)
                   { Keire::ValidateShaderGraph(definition); },
-                  .Encode = [](const Keire::ShaderGraphDefinition& definition)
-                  { return Keire::ShaderGraphAsset::EncodeSource(definition); },
+                  .Encode = [this](const Keire::ShaderGraphDefinition& definition)
+                  { return EncodeGraphAsset(definition, m_FunctionMetadata); },
                   .Preview = [this](const Keire::AssetId, const Keire::ShaderGraphDefinition& definition)
                   { QueueCompilation(definition); },
                   .CancelPreview = m_Specification.StopPreview,
@@ -398,12 +422,15 @@ namespace KeireEditor
     void ShaderGraphDocument::Open(const Keire::AssetId asset, const std::span<const std::byte> bytes,
                                    const std::uint64_t revision, Keire::Ref<Keire::UndoContext> undo)
     {
+        m_FunctionMetadata.reset();
         Open(asset, Keire::ShaderGraphAsset::DecodeSource(bytes), revision, std::move(undo));
     }
 
     void ShaderGraphDocument::Open(const Keire::AssetId asset, Keire::ShaderGraphDefinition definition,
                                    const std::uint64_t revision, Keire::Ref<Keire::UndoContext> undo)
     {
+        if (definition.Purpose == Keire::ShaderGraphPurpose::Shader)
+            m_FunctionMetadata.reset();
         m_LastGoodCompilation.reset();
         m_LastGoodDefinition.reset();
         m_LastGoodDevelopmentShaders.clear();
@@ -411,9 +438,17 @@ namespace KeireEditor
         RecompileCurrent();
     }
 
+    void ShaderGraphDocument::Open(const Keire::AssetId asset, Keire::GraphFunctionDefinition definition,
+                                   const std::uint64_t revision, Keire::Ref<Keire::UndoContext> undo)
+    {
+        m_FunctionMetadata = definition;
+        Open(asset, std::move(definition.Body), revision, std::move(undo));
+    }
+
     void ShaderGraphDocument::Create(const Keire::AssetId asset, Keire::ShaderGraphDefinition definition,
                                      Keire::Ref<Keire::UndoContext> undo)
     {
+        m_FunctionMetadata.reset();
         m_LastGoodCompilation.reset();
         m_LastGoodDefinition.reset();
         m_LastGoodDevelopmentShaders.clear();
@@ -444,6 +479,18 @@ namespace KeireEditor
         m_Diagnostic.clear();
         m_CompileDebounceSeconds = 0.0;
         m_InFlightGeneration = 0;
+        m_ReusableValid = false;
+        m_FunctionMetadata.reset();
+    }
+
+    bool ShaderGraphDocument::Publishable() const noexcept
+    {
+        return ReusableGraph() ? m_ReusableValid : m_Compilation.Succeeded();
+    }
+
+    bool ShaderGraphDocument::ReusableGraph() const noexcept
+    {
+        return IsOpen() && m_Host.Draft().Purpose != Keire::ShaderGraphPurpose::Shader;
     }
 
     bool ShaderGraphDocument::Undo() { return m_Host.Undo(); }
@@ -670,6 +717,15 @@ namespace KeireEditor
 
     void ShaderGraphDocument::QueueCompilation(const Keire::ShaderGraphDefinition& definition)
     {
+        if (definition.Purpose != Keire::ShaderGraphPurpose::Shader)
+        {
+            if (++m_RequestedGeneration == 0)
+                ++m_RequestedGeneration;
+            m_PendingDefinition.reset();
+            CancelBackgroundCompilation();
+            CompileAndPreview(definition, false);
+            return;
+        }
         if (!m_PendingDefinition && !m_BackgroundCompilation && m_LastGoodDefinition && m_LastGoodCompilation)
         {
             Keire::ShaderGraphCompilation compilation;
@@ -819,6 +875,33 @@ namespace KeireEditor
     void ShaderGraphDocument::CompileAndPreview(const Keire::ShaderGraphDefinition& definition,
                                                 const bool compileDevelopmentShaders)
     {
+        if (definition.Purpose != Keire::ShaderGraphPurpose::Shader)
+        {
+            m_Compilation = {};
+            m_Diagnostic.clear();
+            m_ReusableValid = false;
+            try
+            {
+                Keire::ValidateShaderGraph(definition);
+                if (!Keire::ShaderGraphReferencedAssets(definition).empty())
+                    (void)Keire::ExpandShaderGraphFunctions(definition, m_Specification.CompileOptions.ResolveFunction);
+                m_Compilation.Statistics.NodeCount = definition.Nodes.size();
+                m_Compilation.Statistics.ConnectionCount = definition.Connections.size();
+                m_Compilation.Statistics.ReachableNodeCount = definition.Nodes.size();
+                m_LastGoodDefinition = definition;
+                m_LastGoodCompilation.reset();
+                m_LastGoodDevelopmentShaders.clear();
+                m_ReusableValid = true;
+            }
+            catch (const std::exception& error)
+            {
+                m_Diagnostic = error.what();
+                m_Compilation.Diagnostics.push_back(
+                    {Keire::ShaderGraphDiagnosticSeverity::Error, "SGF0001", m_Diagnostic});
+            }
+            return;
+        }
+        m_ReusableValid = false;
         auto compilation = Keire::CompileShaderGraph(definition, m_Specification.CompileOptions);
         std::vector<Keire::Ref<Keire::ShaderAsset>> developmentShaders;
         if (compileDevelopmentShaders && compilation.Succeeded() &&

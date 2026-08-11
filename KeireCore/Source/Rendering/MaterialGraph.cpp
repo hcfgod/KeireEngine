@@ -27,6 +27,19 @@ namespace Keire
         constexpr std::size_t MaximumMaterialGraphConnections = 256;
         constexpr std::size_t MaximumMaterialInstanceDepth = 16;
 
+        [[nodiscard]] std::string
+        MaterialGraphVariantKey(const std::string_view target,
+                                const std::map<std::string, std::string, std::less<>>& keywords)
+        {
+            return "material-graph/" + MakeShaderGraphVariantSubAssetKey(target, keywords);
+        }
+
+        [[nodiscard]] std::string MaterialGraphVariantKey(const std::string_view target,
+                                                          const std::span<const std::string> keywords)
+        {
+            return "material-graph/" + MakeShaderGraphVariantSubAssetKey(target, keywords);
+        }
+
         [[nodiscard]] AssetId StableGraphId(const MaterialShaderReference& shader, const std::string_view role,
                                             const AssetId property = {}, const std::string_view name = {}) noexcept
         {
@@ -246,6 +259,8 @@ namespace Keire
             return result;
         }
 
+        [[nodiscard]] ShaderGraphDefinition CreateStableMaterialSurfaceGraph(const MaterialShaderReference& shader);
+
         [[nodiscard]] Json EncodeDefinition(const MaterialGraphDefinition& definition)
         {
             Json properties = Json::array();
@@ -277,6 +292,8 @@ namespace Keire
                      {"input",
                       {{"node", connection.Input.Node.ToString()}, {"pin", connection.Input.Pin.ToString()}}}});
             }
+            const auto surfaceGraphSource = ShaderGraphAsset::EncodeSource(definition.SurfaceGraph);
+            const auto surfaceGraph = Json::parse(Text(surfaceGraphSource));
             return {{"schemaVersion", definition.SchemaVersion},
                     {"shader", EncodeShaderReference(definition.Shader)},
                     {"surface",
@@ -291,7 +308,8 @@ namespace Keire
                       {"position", Json::array({definition.OutputPosition.X, definition.OutputPosition.Y})}}},
                     {"properties", std::move(properties)},
                     {"nodes", std::move(nodes)},
-                    {"connections", std::move(connections)}};
+                    {"connections", std::move(connections)},
+                    {"surfaceGraph", surfaceGraph}};
         }
 
         [[nodiscard]] MaterialGraphDefinition DecodeDefinition(const Json& source)
@@ -300,7 +318,7 @@ namespace Keire
                 throw std::invalid_argument("Material Graph source must be an object.");
             MaterialGraphDefinition result;
             const auto sourceSchema = source.value("schemaVersion", 0U);
-            if (sourceSchema != 1 && sourceSchema != MaterialGraphSourceSchemaVersion)
+            if (sourceSchema != 1 && sourceSchema != 2 && sourceSchema != MaterialGraphSourceSchemaVersion)
                 throw std::invalid_argument("Material Graph source schema is unsupported.");
             result.SchemaVersion = MaterialGraphSourceSchemaVersion;
             result.Shader = DecodeShaderReference(source.at("shader"));
@@ -371,6 +389,13 @@ namespace Keire
                     result.Connections.push_back(std::move(connection));
                 }
             }
+            if (sourceSchema >= 3)
+            {
+                const auto encodedSurfaceGraph = source.at("surfaceGraph").dump();
+                result.SurfaceGraph = ShaderGraphAsset::DecodeSource(Bytes(encodedSurfaceGraph));
+            }
+            else
+                result.SurfaceGraph = CreateStableMaterialSurfaceGraph(result.Shader);
             ValidateMaterialGraph(result);
             return result;
         }
@@ -392,7 +417,8 @@ namespace Keire
                      definition.ContributeEmissionToGI ? Json(*definition.ContributeEmissionToGI) : Json(nullptr)},
                     {"emissiveGIIntensity",
                      definition.EmissiveGIIntensity ? Json(*definition.EmissiveGIIntensity) : Json(nullptr)},
-                    {"properties", std::move(properties)}};
+                    {"properties", std::move(properties)},
+                    {"keywords", definition.KeywordOverrides}};
         }
 
         [[nodiscard]] MaterialInstanceDefinition DecodeInstanceDefinition(const Json& source)
@@ -400,7 +426,10 @@ namespace Keire
             if (!source.is_object())
                 throw std::invalid_argument("Material Instance source must be an object.");
             MaterialInstanceDefinition result;
-            result.SchemaVersion = source.value("schemaVersion", 0U);
+            const auto sourceSchema = source.value("schemaVersion", 0U);
+            if (sourceSchema != 1 && sourceSchema != MaterialInstanceSourceSchemaVersion)
+                throw std::invalid_argument("Material Instance source schema is unsupported.");
+            result.SchemaVersion = MaterialInstanceSourceSchemaVersion;
             result.Parent =
                 source.at("parent").is_null() ? AssetId{} : AssetId::Parse(source.at("parent").get<std::string>());
             const auto& surface = source.value("surface", Json(nullptr));
@@ -430,6 +459,8 @@ namespace Keire
                          .second)
                     throw std::invalid_argument("Material Instance properties must have unique names.");
             }
+            if (sourceSchema >= 2)
+                result.KeywordOverrides = source.value("keywords", std::map<std::string, std::string, std::less<>>{});
             ValidateMaterialInstance(result);
             return result;
         }
@@ -442,6 +473,61 @@ namespace Keire
                    (type == ShaderPropertyType::Vector4 && std::holds_alternative<Vector4>(value)) ||
                    (type == ShaderPropertyType::Color && std::holds_alternative<Color>(value)) ||
                    (type == ShaderPropertyType::Texture2D && std::holds_alternative<AssetId>(value));
+        }
+
+        [[nodiscard]] ShaderGraphValue ToShaderGraphValue(const MaterialPropertyValue& value)
+        {
+            return std::visit([](const auto& typed) -> ShaderGraphValue { return typed; }, value);
+        }
+
+        [[nodiscard]] bool EquivalentSurfacePin(const std::string_view left, const std::string_view right) noexcept
+        {
+            return left == right || (left == "BaseColor" && right == "Color") ||
+                   (left == "Color" && right == "BaseColor");
+        }
+
+        [[nodiscard]] ShaderGraphDefinition CreateStableMaterialSurfaceGraph(const MaterialShaderReference& shader)
+        {
+            auto result = CreateDefaultShaderGraph();
+            for (auto& node : result.Nodes)
+            {
+                node.Id = StableGraphId(shader, "surface-expression", {}, node.TypeId);
+                for (auto& pin : node.Pins)
+                    pin.Id = StableGraphId(shader, "surface-expression-pin", node.Id, pin.Name);
+            }
+            return result;
+        }
+
+        [[nodiscard]] bool HasMaterialSurfaceExpressions(const MaterialGraphDefinition& definition)
+        {
+            const auto master =
+                std::ranges::find(definition.SurfaceGraph.Nodes, ShaderGraphNodeKind::Master, &ShaderGraphNode::Kind);
+            return master != definition.SurfaceGraph.Nodes.end() &&
+                   std::ranges::any_of(definition.SurfaceGraph.Connections, [&](const ShaderGraphConnection& connection)
+                                       { return connection.Input.Node == master->Id; });
+        }
+
+        void PruneUnreachableShaderNodes(ShaderGraphDefinition& definition)
+        {
+            const auto master =
+                std::ranges::find(definition.Nodes, ShaderGraphNodeKind::Master, &ShaderGraphNode::Kind);
+            if (master == definition.Nodes.end())
+                throw std::invalid_argument("Composed material shader has no output node.");
+
+            std::set<AssetId> reachable{master->Id};
+            std::vector<AssetId> pending{master->Id};
+            while (!pending.empty())
+            {
+                const auto input = pending.back();
+                pending.pop_back();
+                for (const auto& connection : definition.Connections)
+                    if (connection.Input.Node == input && reachable.insert(connection.Output.Node).second)
+                        pending.push_back(connection.Output.Node);
+            }
+            std::erase_if(definition.Nodes, [&](const ShaderGraphNode& node) { return !reachable.contains(node.Id); });
+            std::erase_if(
+                definition.Connections, [&](const ShaderGraphConnection& connection)
+                { return !reachable.contains(connection.Output.Node) || !reachable.contains(connection.Input.Node); });
         }
     } // namespace
 
@@ -472,8 +558,29 @@ namespace Keire
         MaterialGraphDefinition result;
         result.Shader = std::move(shader);
         result.OutputNode = StableGraphId(result.Shader, "material-output");
+        result.SurfaceGraph = CreateStableMaterialSurfaceGraph(result.Shader);
         SynchronizeMaterialGraphInterface(result, interfaceDefinition);
         ValidateMaterialGraph(result);
+        return result;
+    }
+
+    ShaderGraphDefinition CreateMaterialSurfaceGraph(const ShaderGraphDefinition& shaderTemplate)
+    {
+        ValidateShaderGraph(shaderTemplate);
+        const auto templateOutput =
+            std::ranges::find(shaderTemplate.Nodes, ShaderGraphNodeKind::Master, &ShaderGraphNode::Kind);
+        if (templateOutput == shaderTemplate.Nodes.end())
+            throw std::invalid_argument("Shader Graph template has no output contract for a Material Graph.");
+
+        ShaderGraphDefinition result;
+        result.Output = shaderTemplate.Output;
+        result.Nodes.push_back(*templateOutput);
+        result.Nodes.front().Id = AssetId::Generate();
+        result.Nodes.front().Name = "Material Output";
+        result.Nodes.front().EditorPosition = {760.0F, 180.0F};
+        for (auto& pin : result.Nodes.front().Pins)
+            pin.Id = AssetId::Generate();
+        ValidateShaderGraph(result);
         return result;
     }
 
@@ -564,6 +671,116 @@ namespace Keire
         return result;
     }
 
+    ShaderGraphDefinition ComposeMaterialGraphShader(const MaterialGraphDefinition& definition,
+                                                     const ShaderGraphDefinition& shaderTemplate)
+    {
+        ValidateMaterialGraph(definition);
+        ValidateShaderGraph(shaderTemplate);
+        if (definition.Shader.Kind != MaterialShaderSourceKind::ShaderGraph)
+            throw std::invalid_argument("Surface expressions require a Shader Graph template.");
+
+        auto result = shaderTemplate;
+        result.GeneratedAssetOwner = {};
+        const auto values = EvaluateMaterialGraphProperties(definition);
+        for (const auto& binding : definition.Properties)
+        {
+            auto parameter = result.Nodes.end();
+            if (binding.Property)
+                parameter = std::ranges::find(result.Nodes, binding.Property, &ShaderGraphNode::Id);
+            if (parameter == result.Nodes.end())
+                parameter = std::ranges::find(result.Nodes, binding.Name, &ShaderGraphNode::Symbol);
+            if (parameter == result.Nodes.end() || parameter->Kind != ShaderGraphNodeKind::Parameter)
+                throw std::invalid_argument("Material Graph template parameter is unavailable: " + binding.Name);
+            const auto value = values.find(binding.Name);
+            if (value == values.end())
+                throw std::invalid_argument("Material Graph output value is unavailable: " + binding.Name);
+            parameter->Value = ToShaderGraphValue(value->second);
+        }
+
+        const auto materialMaster =
+            std::ranges::find(definition.SurfaceGraph.Nodes, ShaderGraphNodeKind::Master, &ShaderGraphNode::Kind);
+        auto templateMaster = std::ranges::find(result.Nodes, ShaderGraphNodeKind::Master, &ShaderGraphNode::Kind);
+        if (materialMaster == definition.SurfaceGraph.Nodes.end() || templateMaster == result.Nodes.end())
+            throw std::invalid_argument("Material Graph composition requires material and template output nodes.");
+
+        std::set<AssetId> nodeIds;
+        std::set<AssetId> pinIds;
+        std::set<AssetId> connectionIds;
+        for (const auto& node : result.Nodes)
+        {
+            nodeIds.insert(node.Id);
+            for (const auto& pin : node.Pins)
+                pinIds.insert(pin.Id);
+        }
+        for (const auto& connection : result.Connections)
+            connectionIds.insert(connection.Id);
+
+        for (const auto& node : definition.SurfaceGraph.Nodes)
+        {
+            if (node.Kind == ShaderGraphNodeKind::Master)
+                continue;
+            if (!nodeIds.insert(node.Id).second)
+                throw std::invalid_argument("Material Graph expression node collides with its Shader Graph template.");
+            for (const auto& pin : node.Pins)
+                if (!pinIds.insert(pin.Id).second)
+                    throw std::invalid_argument(
+                        "Material Graph expression pin collides with its Shader Graph template.");
+            result.Nodes.push_back(node);
+        }
+        templateMaster = std::ranges::find(result.Nodes, ShaderGraphNodeKind::Master, &ShaderGraphNode::Kind);
+
+        for (const auto& connection : definition.SurfaceGraph.Connections)
+        {
+            auto composed = connection;
+            if (connection.Input.Node == materialMaster->Id)
+            {
+                const auto materialPin =
+                    std::ranges::find(materialMaster->Pins, connection.Input.Pin, &ShaderGraphPin::Id);
+                if (materialPin == materialMaster->Pins.end())
+                    throw std::invalid_argument("Material Graph output connection targets an unavailable pin.");
+                const auto targetPin =
+                    std::ranges::find_if(templateMaster->Pins,
+                                         [&](const ShaderGraphPin& pin)
+                                         {
+                                             return pin.Direction == ShaderGraphPinDirection::Input &&
+                                                    pin.Type == materialPin->Type &&
+                                                    EquivalentSurfacePin(pin.Name, materialPin->Name);
+                                         });
+                if (targetPin == templateMaster->Pins.end())
+                    throw std::invalid_argument("Shader Graph template does not support material output: " +
+                                                materialPin->Name);
+                std::erase_if(result.Connections,
+                              [&](const ShaderGraphConnection& existing)
+                              {
+                                  if (existing.Input != ShaderGraphEndpoint{templateMaster->Id, targetPin->Id})
+                                      return false;
+                                  connectionIds.erase(existing.Id);
+                                  return true;
+                              });
+                composed.Input = {templateMaster->Id, targetPin->Id};
+            }
+            if (!connectionIds.insert(composed.Id).second)
+                throw std::invalid_argument("Material Graph expression connection collides with its template.");
+            result.Connections.push_back(std::move(composed));
+        }
+
+        for (const auto& keyword : definition.SurfaceGraph.Keywords)
+        {
+            const auto existing = std::ranges::find(result.Keywords, keyword.Name, &ShaderGraphKeyword::Name);
+            if (existing == result.Keywords.end())
+                result.Keywords.push_back(keyword);
+            else if (*existing != keyword)
+                throw std::invalid_argument("Material Graph keyword conflicts with its template: " + keyword.Name);
+        }
+        for (const auto& root : definition.SurfaceGraph.IncludeRoots)
+            if (std::ranges::find(result.IncludeRoots, root) == result.IncludeRoots.end())
+                result.IncludeRoots.push_back(root);
+
+        PruneUnreachableShaderNodes(result);
+        ValidateShaderGraph(result);
+        return result;
+    }
+
     MaterialGraphAsset::MaterialGraphAsset(MaterialGraphDefinition definition) : m_Definition(std::move(definition)) {}
 
     std::size_t MaterialGraphAsset::ResidentBytes() const noexcept
@@ -576,6 +793,8 @@ namespace Keire
         for (const auto& node : m_Definition.Nodes)
             result += sizeof(node) + node.Name.size();
         result += m_Definition.Connections.size() * sizeof(MaterialGraphConnection);
+        result += m_Definition.SurfaceGraph.Nodes.size() * sizeof(ShaderGraphNode);
+        result += m_Definition.SurfaceGraph.Connections.size() * sizeof(ShaderGraphConnection);
         return result;
     }
 
@@ -688,6 +907,7 @@ namespace Keire
         for (const auto& [name, option] : definition.Shader.Keywords)
             if (!ValidIdentifier(name) || (option != "true" && option != "false" && !ValidIdentifier(option)))
                 throw std::invalid_argument("Material Graph keyword selection is invalid.");
+        ValidateShaderGraph(definition.SurfaceGraph);
 
         std::set<AssetId> propertyIds;
         std::set<std::string, std::less<>> propertyNames;
@@ -800,7 +1020,7 @@ namespace Keire
 
     void ValidateMaterialInstance(const MaterialInstanceDefinition& definition)
     {
-        if (definition.SchemaVersion != 1 || !definition.Parent ||
+        if (definition.SchemaVersion != MaterialInstanceSourceSchemaVersion || !definition.Parent ||
             definition.Properties.size() > MaximumMaterialProperties)
             throw std::invalid_argument("Material Instance definition is invalid or exceeds a portable bound.");
         if (definition.Surface && (definition.Surface->AlphaMode > MaterialAlphaMode::Blend ||
@@ -817,6 +1037,11 @@ namespace Keire
                 throw std::invalid_argument("Material Instance property names must be valid shader identifiers.");
             ValidateFiniteValue(value);
         }
+        if (definition.KeywordOverrides.size() > 16)
+            throw std::invalid_argument("Material Instance static parameter overrides exceed their portable bound.");
+        for (const auto& [name, value] : definition.KeywordOverrides)
+            if (!ValidIdentifier(name) || (value != "true" && value != "false" && !ValidIdentifier(value)))
+                throw std::invalid_argument("Material Instance static parameter override is invalid.");
     }
 
     MaterialAssetDefinition BakeMaterialInstance(const MaterialAssetDefinition& parent,
@@ -849,7 +1074,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.MaterialGraph";
-        result.Version = 3;
+        result.Version = 4;
         result.Type = MaterialGraphAsset::StaticType();
         result.Extensions = {".keirematerialgraph"};
         result.ContextualImport = [](const AssetImportContext& context, const std::span<const std::byte> bytes)
@@ -857,6 +1082,65 @@ namespace Keire
             if (!context.Asset || !context.ResolveSubAssetId)
                 throw std::invalid_argument("Material Graph import requires a stable asset and subasset resolver.");
             const auto definition = MaterialGraphAsset::DecodeSource(bytes);
+            if (HasMaterialSurfaceExpressions(definition))
+            {
+                if (definition.Shader.Kind != MaterialShaderSourceKind::ShaderGraph || context.ProjectRoot.empty() ||
+                    context.SourceRoot.empty() || !context.ReadProjectFile || !context.ResolveAssetSource)
+                    throw std::invalid_argument(
+                        "Material surface expressions require a Shader Graph and complete project resolvers.");
+                const auto source = context.ResolveAssetSource(definition.Shader.Asset);
+                if (!source || source->Type != ShaderGraphAsset::StaticType())
+                    throw std::runtime_error(
+                        "Material Graph template is not present in the Shader Graph source index.");
+                const auto sourcePrefix = std::filesystem::relative(context.SourceRoot, context.ProjectRoot);
+                const auto shaderTemplate =
+                    ShaderGraphAsset::DecodeSource(context.ReadProjectFile(sourcePrefix / source->RelativePath));
+                const auto composed = ComposeMaterialGraphShader(definition, shaderTemplate);
+                const auto graphImporter = CreateShaderGraphAssetImporter();
+                if (!graphImporter.ContextualImport)
+                    throw std::logic_error("Material Graph requires the contextual Shader Graph importer.");
+                auto graphContext = context;
+                graphContext.ResolveSubAssetId = [resolve = context.ResolveSubAssetId](const std::string_view key)
+                { return resolve(key == "material/default" ? key : "material-graph/" + std::string(key)); };
+                auto output = graphImporter.ContextualImport(graphContext, ShaderGraphAsset::EncodeSource(composed));
+                output.Bytes = MaterialGraphAsset::Encode(definition);
+                output.AssetDependencies.push_back(definition.Shader.Asset);
+
+                ShaderGraphInstanceDefinition selection;
+                selection.Parent = context.Asset;
+                selection.KeywordOverrides = definition.Shader.Keywords;
+                const std::array ancestry{selection};
+                const auto resolved = ResolveShaderGraphInstance(composed, ancestry);
+                const auto selectedShader =
+                    context.ResolveSubAssetId(MaterialGraphVariantKey(definition.Shader.Target, resolved.Keywords));
+                if (std::ranges::none_of(
+                        output.SubAssets, [selectedShader](const AssetGeneratedSubAsset& subAsset)
+                        { return subAsset.Id == selectedShader && subAsset.Type == ShaderAsset::StaticType(); }))
+                    throw std::runtime_error("Composed Material Graph selected an unpublished shader variant.");
+                const auto materialSubAsset = std::ranges::find_if(
+                    output.SubAssets, [](const AssetGeneratedSubAsset& subAsset)
+                    { return subAsset.Type == MaterialAsset::StaticType() && subAsset.Key == "material/default"; });
+                if (materialSubAsset == output.SubAssets.end())
+                    throw std::logic_error("Composed Material Graph did not publish its runtime material.");
+                auto material = MaterialAsset::Decode(materialSubAsset->Bytes)->Definition();
+                material.Shader = selectedShader;
+                material.Surface = definition.Surface;
+                material.ContributeEmissionToGI = definition.ContributeEmissionToGI;
+                material.EmissiveGIIntensity = definition.EmissiveGIIntensity;
+                materialSubAsset->Name = "Runtime Material";
+                materialSubAsset->Bytes = MaterialAsset::Encode(material);
+                materialSubAsset->AssetDependencies.push_back(definition.Shader.Asset);
+                materialSubAsset->AssetDependencies.push_back(selectedShader);
+                std::ranges::sort(materialSubAsset->AssetDependencies);
+                materialSubAsset->AssetDependencies.erase(
+                    std::unique(materialSubAsset->AssetDependencies.begin(), materialSubAsset->AssetDependencies.end()),
+                    materialSubAsset->AssetDependencies.end());
+                std::ranges::sort(output.AssetDependencies);
+                output.AssetDependencies.erase(
+                    std::unique(output.AssetDependencies.begin(), output.AssetDependencies.end()),
+                    output.AssetDependencies.end());
+                return output;
+            }
             const auto material = BakeMaterialGraph(
                 definition,
                 [&context](const MaterialShaderReference& shader)
@@ -921,6 +1205,10 @@ namespace Keire
             std::set<AssetId> visited{context.Asset};
             const auto sourcePrefix = std::filesystem::relative(context.SourceRoot, context.ProjectRoot);
             MaterialAssetDefinition material;
+            std::optional<ShaderGraphDefinition> instanceVariantGraph;
+            AssetId instanceVariantOwner;
+            std::string instanceVariantTarget = "default";
+            std::map<std::string, std::string, std::less<>> instanceVariantDefaults;
             AssetId parent = definition.Parent;
             for (std::size_t depth = 0; depth < MaximumMaterialInstanceDepth && parent; ++depth)
             {
@@ -951,7 +1239,42 @@ namespace Keire
                 if (source->Type == MaterialGraphAsset::StaticType())
                 {
                     const auto graph = MaterialGraphAsset::DecodeSource(parentBytes);
-                    material = BakeMaterialGraph(graph, resolveShader);
+                    if (HasMaterialSurfaceExpressions(graph))
+                    {
+                        auto parentContext = context;
+                        parentContext.Asset = parent;
+                        parentContext.RelativePath = source->RelativePath;
+                        parentContext.SourcePath = context.SourceRoot / source->RelativePath;
+                        parentContext.ResolveSubAssetId =
+                            [resolve = context.ResolveSubAssetIdFor, parent](const std::string_view key)
+                        { return resolve(parent, key); };
+                        const auto imported =
+                            CreateMaterialGraphAssetImporter().ContextualImport(parentContext, parentBytes);
+                        const auto runtimeMaterial =
+                            std::ranges::find_if(imported.SubAssets,
+                                                 [](const AssetGeneratedSubAsset& subAsset)
+                                                 {
+                                                     return subAsset.Type == MaterialAsset::StaticType() &&
+                                                            subAsset.Key == "material/default";
+                                                 });
+                        if (runtimeMaterial == imported.SubAssets.end())
+                            throw std::runtime_error("Material Instance parent did not publish a runtime material.");
+                        material = MaterialAsset::Decode(runtimeMaterial->Bytes)->Definition();
+                        output.AssetDependencies.insert(output.AssetDependencies.end(),
+                                                        imported.AssetDependencies.begin(),
+                                                        imported.AssetDependencies.end());
+                        const auto templateSource = context.ResolveAssetSource(graph.Shader.Asset);
+                        if (!templateSource || templateSource->Type != ShaderGraphAsset::StaticType())
+                            throw std::runtime_error("Material Instance parent Shader Graph template is unavailable.");
+                        const auto shaderTemplate = ShaderGraphAsset::DecodeSource(
+                            context.ReadProjectFile(sourcePrefix / templateSource->RelativePath));
+                        instanceVariantGraph = ComposeMaterialGraphShader(graph, shaderTemplate);
+                        instanceVariantOwner = parent;
+                        instanceVariantTarget = graph.Shader.Target;
+                        instanceVariantDefaults = graph.Shader.Keywords;
+                    }
+                    else
+                        material = BakeMaterialGraph(graph, resolveShader);
                     output.AssetDependencies.push_back(graph.Shader.Asset);
                     break;
                 }
@@ -977,6 +1300,21 @@ namespace Keire
             std::ranges::reverse(ancestry);
             for (const auto& instance : ancestry)
                 material = BakeMaterialInstance(material, instance);
+            if (instanceVariantGraph)
+            {
+                ShaderGraphInstanceDefinition selection;
+                selection.Parent = instanceVariantOwner;
+                selection.KeywordOverrides = std::move(instanceVariantDefaults);
+                for (const auto& instance : ancestry)
+                    for (const auto& [name, value] : instance.KeywordOverrides)
+                        selection.KeywordOverrides.insert_or_assign(name, value);
+                const std::array selections{selection};
+                const auto resolved = ResolveShaderGraphInstance(*instanceVariantGraph, selections);
+                material.Shader = context.ResolveSubAssetIdFor(
+                    instanceVariantOwner, MaterialGraphVariantKey(instanceVariantTarget, resolved.Keywords));
+                if (!material.Shader)
+                    throw std::runtime_error("Material Instance selected an unavailable static-parameter variant.");
+            }
             output.AssetDependencies.push_back(material.Shader);
             for (const auto& [name, value] : material.Properties)
             {

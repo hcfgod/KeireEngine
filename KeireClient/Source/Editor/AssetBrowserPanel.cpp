@@ -295,6 +295,9 @@ namespace KeireEditor
                 case AssetBrowserOpenAction::ShaderGraph:
                     editor.OpenAssetBrowserShaderGraph(record.Id);
                     break;
+                case AssetBrowserOpenAction::MaterialParameterCollection:
+                    editor.OpenAssetBrowserMaterialParameterCollection(record.Id);
+                    break;
                 case AssetBrowserOpenAction::Scene:
                     editor.OpenAssetBrowserScene(record.Id);
                     break;
@@ -370,6 +373,19 @@ namespace KeireEditor
                 PendingShaderGraphTemplate = *graphTemplate;
                 RequestNamedCreate(NamedCreateKind::ShaderGraph, "NewShaderGraph");
             }
+            if (auto reusable = ui.BeginMenu("Reusable Material Graphs"); reusable)
+            {
+                if (ui.MenuItem("Material Function"))
+                    RequestNamedCreate(NamedCreateKind::MaterialFunction, "NewMaterialFunction");
+                if (ui.MenuItem("Shader Function"))
+                    RequestNamedCreate(NamedCreateKind::ShaderFunction, "NewShaderFunction");
+                if (ui.MenuItem("Material Layer"))
+                    RequestNamedCreate(NamedCreateKind::MaterialLayer, "NewMaterialLayer");
+                if (ui.MenuItem("Material Layer Blend"))
+                    RequestNamedCreate(NamedCreateKind::MaterialLayerBlend, "NewMaterialLayerBlend");
+            }
+            if (ui.MenuItem("Material Parameter Collection"))
+                RequestNamedCreate(NamedCreateKind::MaterialParameterCollection, "GlobalMaterialParameters");
             if (ui.MenuItem("Material Instance"))
                 RequestNamedCreate(NamedCreateKind::MaterialInstance, "NewMaterialInstance");
             const auto managedTypes = editor.AssetBrowserManagedAssetTypes();
@@ -771,6 +787,20 @@ namespace KeireEditor
                                     : PendingCreateKind == NamedCreateKind::ShaderGraph
                                         ? editor.CreateAssetBrowserShaderGraph(CreateNameBuffer,
                                                                                PendingShaderGraphTemplate)
+                                    : PendingCreateKind == NamedCreateKind::MaterialFunction
+                                        ? editor.CreateAssetBrowserReusableGraph(
+                                              CreateNameBuffer, Keire::ShaderGraphPurpose::MaterialFunction)
+                                    : PendingCreateKind == NamedCreateKind::ShaderFunction
+                                        ? editor.CreateAssetBrowserReusableGraph(
+                                              CreateNameBuffer, Keire::ShaderGraphPurpose::ShaderFunction)
+                                    : PendingCreateKind == NamedCreateKind::MaterialLayer
+                                        ? editor.CreateAssetBrowserReusableGraph(
+                                              CreateNameBuffer, Keire::ShaderGraphPurpose::MaterialLayer)
+                                    : PendingCreateKind == NamedCreateKind::MaterialLayerBlend
+                                        ? editor.CreateAssetBrowserReusableGraph(
+                                              CreateNameBuffer, Keire::ShaderGraphPurpose::MaterialLayerBlend)
+                                    : PendingCreateKind == NamedCreateKind::MaterialParameterCollection
+                                        ? editor.CreateAssetBrowserMaterialParameterCollection(CreateNameBuffer)
                                     : PendingCreateKind == NamedCreateKind::MaterialInstance
                                         ? editor.CreateAssetBrowserMaterialInstance(CreateNameBuffer)
                                     : PendingCreateKind == NamedCreateKind::Prefab

@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <unordered_map>
@@ -106,6 +107,8 @@ namespace KeireEditor
         virtual void OpenInspectorInputActions(Keire::AssetId asset) = 0;
         virtual void OpenInspectorMaterialGraph(Keire::AssetId asset) = 0;
         virtual void PersistInspectorMaterialInstance(Keire::AssetId asset, std::span<const std::byte> bytes) = 0;
+        virtual void PersistInspectorMaterialParameterCollection(Keire::AssetId asset,
+                                                                 std::span<const std::byte> bytes) = 0;
         virtual void ImportInspectorAssets() = 0;
         virtual void PreviewInspectorManagedData(Keire::AssetId asset,
                                                  const Keire::ManagedDataDefinition& definition) = 0;
@@ -223,6 +226,8 @@ namespace KeireEditor
         std::unique_ptr<ManagedDataInspectorPanel> m_ManagedDataInspector;
         Keire::AssetId m_EditingAsset;
         std::string m_AssetName;
+        std::optional<Keire::MaterialParameterCollectionDefinition> m_MaterialParameterCollection;
+        bool m_MaterialParameterCollectionDirty = false;
     };
 
     class InspectorPanel final

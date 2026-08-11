@@ -281,6 +281,10 @@ TEST_CASE("Asset Browser double-click routes material and shader authoring asset
     CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Materials/Surface.keirematerialinstance") == MaterialInstance);
     CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Shaders/Surface.keireshadergraph") == ShaderGraph);
     CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Shaders/Surface.KEIRESHADERGRAPH") == ShaderGraph);
+    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Materials/Common.keirematerialfunction") == ShaderGraph);
+    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Materials/Layer.keiremateriallayer") == ShaderGraph);
+    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Materials/Globals.keirematerialcollection") ==
+          MaterialParameterCollection);
     CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Textures/Surface.png") == External);
 
     Keire::AssetSourceRecord instance;
@@ -288,6 +292,10 @@ TEST_CASE("Asset Browser double-click routes material and shader authoring asset
     CHECK(KeireEditor::AssetTypeName(instance) == "Material Instance");
     instance.RelativePath = "Materials/Legacy.keireshadergraphinstance";
     CHECK(KeireEditor::AssetTypeName(instance) == "Legacy Shader Graph Instance");
+    instance.RelativePath = "Materials/Common.keirematerialfunction";
+    CHECK(KeireEditor::AssetTypeName(instance) == "Material Function");
+    instance.RelativePath = "Materials/Globals.keirematerialcollection";
+    CHECK(KeireEditor::AssetTypeName(instance) == "Material Parameter Collection");
 }
 
 TEST_CASE("Asset creation labels keep Shader Graph and Material Graph workflows distinct")
@@ -298,6 +306,8 @@ TEST_CASE("Asset creation labels keep Shader Graph and Material Graph workflows 
     CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::ShaderGraph) == "shader graph");
     CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::MaterialGraph) == "material graph");
     CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::MaterialInstance) == "material instance");
+    CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::MaterialFunction) == "material function");
+    CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::MaterialLayer) == "material layer");
 }
 
 TEST_CASE("Material Graph creation only preselects compatible shader sources")
@@ -1253,7 +1263,7 @@ TEST_CASE("material documents preserve Shader Graph references while publishing 
     CHECK(std::get<float>(saved.Properties.at("Roughness")) == doctest::Approx(0.75F));
 }
 
-TEST_CASE("Material Graph documents expose reflected output pins and undo visual connections")
+TEST_CASE("Material Graph documents separate the surface canvas from compatibility template defaults")
 {
     const auto graph = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000032");
     const auto runtimeShader = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000033");
@@ -1267,12 +1277,31 @@ TEST_CASE("Material Graph documents expose reflected output pins and undo visual
     Keire::MaterialShaderReference shaderReference;
     shaderReference.Kind = Keire::MaterialShaderSourceKind::ShaderGraph;
     shaderReference.Asset = graph;
-    const auto definition = Keire::CreateMaterialGraph(shaderReference, shaderInterface);
+    auto shaderTemplate = Keire::CreateDefaultShaderGraph();
+    auto roughnessParameter =
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Parameter, Keire::ShaderGraphValueType::Scalar);
+    roughnessParameter.Id = roughness.Id;
+    roughnessParameter.Name = "Roughness";
+    roughnessParameter.Symbol = "Roughness";
+    const auto parameterPin = roughnessParameter.Pins.front().Id;
+    const auto masterRoughness =
+        std::ranges::find(shaderTemplate.Nodes.front().Pins, "Roughness", &Keire::ShaderGraphPin::Name);
+    REQUIRE(masterRoughness != shaderTemplate.Nodes.front().Pins.end());
+    const auto masterRoughnessPin = masterRoughness->Id;
+    const auto parameterNode = roughnessParameter.Id;
+    shaderTemplate.Nodes.push_back(std::move(roughnessParameter));
+    shaderTemplate.Connections.push_back({Keire::AssetId::Generate(),
+                                          {parameterNode, parameterPin},
+                                          {shaderTemplate.Nodes.front().Id, masterRoughnessPin}});
+    auto definition = Keire::CreateMaterialGraph(shaderReference, shaderInterface);
+    definition.SurfaceGraph = Keire::CreateMaterialSurfaceGraph(shaderTemplate);
     std::vector<std::byte> persisted;
     std::optional<Keire::MaterialAssetDefinition> preview;
     KeireEditor::MaterialGraphDocument document({
         .ResolveInterface = [&](const Keire::MaterialShaderReference& reference)
         { return reference == shaderReference ? std::optional(shaderInterface) : std::nullopt; },
+        .ResolveTemplate = [&](const Keire::MaterialShaderReference& reference)
+        { return reference == shaderReference ? std::optional(shaderTemplate) : std::nullopt; },
         .ResolveShader = [&](const Keire::MaterialShaderReference& reference)
         { return reference == shaderReference ? runtimeShader : Keire::AssetId{}; },
         .Preview = [&](const Keire::AssetId, const Keire::MaterialAssetDefinition& material) { preview = material; },
@@ -1286,9 +1315,16 @@ TEST_CASE("Material Graph documents expose reflected output pins and undo visual
     document.Open(asset, Keire::MaterialGraphAsset::EncodeSource(definition), 1, undo);
     const auto initial = document.BuildCanvasModel();
     REQUIRE(initial.Nodes.size() == 1);
-    REQUIRE(initial.Nodes.front().Pins.size() == 1);
     CHECK(initial.Nodes.front().Label == "Material Output");
-    CHECK(initial.Nodes.front().Pins.front().Label == "Roughness");
+    CHECK(std::ranges::any_of(initial.Nodes.front().Pins,
+                              [](const KeireEditor::NodeGraphPin& pin) { return pin.Label == "Roughness"; }));
+    const auto compatibility = document.BuildCanvasModel(true);
+    REQUIRE(compatibility.Nodes.size() == 2);
+    const auto defaults =
+        std::ranges::find(compatibility.Nodes, "Template Defaults", &KeireEditor::NodeGraphNode::Label);
+    REQUIRE(defaults != compatibility.Nodes.end());
+    REQUIRE(defaults->Pins.size() == 1);
+    CHECK(defaults->Pins.front().Label == "Roughness");
 
     auto value = Keire::CreateMaterialGraphValueNode(Keire::ShaderPropertyType::Scalar, 0.85F);
     const auto node = value.Id;

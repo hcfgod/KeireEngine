@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Keire/Jobs/JobSystem.h"
+#include "Keire/Rendering/MaterialEcosystem.h"
 #include "Keire/Rendering/ShaderGraph.h"
 #include "KeireClient/Editor/AssetDocumentHost.h"
 #include "KeireClient/Editor/AuthoringWidgets.h"
@@ -70,6 +71,8 @@ namespace KeireEditor
                   Keire::Ref<Keire::UndoContext> undo = {});
         void Open(Keire::AssetId asset, Keire::ShaderGraphDefinition definition, std::uint64_t revision,
                   Keire::Ref<Keire::UndoContext> undo = {});
+        void Open(Keire::AssetId asset, Keire::GraphFunctionDefinition definition, std::uint64_t revision,
+                  Keire::Ref<Keire::UndoContext> undo = {});
         void Create(Keire::AssetId asset, Keire::ShaderGraphDefinition definition = Keire::CreateDefaultShaderGraph(),
                     Keire::Ref<Keire::UndoContext> undo = {});
         void Save();
@@ -81,7 +84,8 @@ namespace KeireEditor
 
         [[nodiscard]] bool IsOpen() const noexcept { return m_Host.IsOpen(); }
         [[nodiscard]] bool Dirty() const noexcept { return m_Host.Dirty(); }
-        [[nodiscard]] bool Publishable() const noexcept { return m_Compilation.Succeeded(); }
+        [[nodiscard]] bool Publishable() const noexcept;
+        [[nodiscard]] bool ReusableGraph() const noexcept;
         [[nodiscard]] Keire::AssetId Asset() const noexcept { return m_Host.Asset(); }
         [[nodiscard]] const Keire::ShaderGraphDefinition& Definition() const { return m_Host.Draft(); }
         [[nodiscard]] const Keire::ShaderGraphCompilation& Compilation() const noexcept { return m_Compilation; }
@@ -157,5 +161,7 @@ namespace KeireEditor
         std::uint64_t m_RequestedGeneration = 0;
         std::uint64_t m_InFlightGeneration = 0;
         bool m_OwnJobSystem = false;
+        bool m_ReusableValid = false;
+        std::optional<Keire::GraphFunctionDefinition> m_FunctionMetadata;
     };
 } // namespace KeireEditor

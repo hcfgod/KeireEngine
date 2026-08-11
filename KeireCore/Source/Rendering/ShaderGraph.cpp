@@ -1,4 +1,5 @@
 #include "Keire/Rendering/ShaderGraph.h"
+#include "Keire/Rendering/MaterialEcosystem.h"
 #include "KeireInternal/Rendering/ShaderGraphManifest.h"
 
 #include <nlohmann/json.hpp>
@@ -10,6 +11,7 @@
 #include <cmath>
 #include <deque>
 #include <iomanip>
+#include <iterator>
 #include <limits>
 #include <ranges>
 #include <set>
@@ -122,6 +124,32 @@ namespace Keire
             return {high, low};
         }
 
+        [[nodiscard]] AssetId DerivedFunctionElementId(const AssetId call, const AssetId source,
+                                                       const std::string_view role) noexcept
+        {
+            std::uint64_t high = call.High() ^ 0x46554e4354494f4eULL;
+            std::uint64_t low = call.Low() ^ 0x455850414e53494fULL;
+            const auto mix = [&](const std::uint8_t value)
+            {
+                high = (high ^ value) * 1099511628211ULL;
+                low ^= static_cast<std::uint64_t>(value) + 0x9e3779b97f4a7c15ULL + (low << 6U) + (low >> 2U);
+            };
+            const auto mixInteger = [&](const std::uint64_t value)
+            {
+                for (std::size_t shift = 0; shift < 64; shift += 8)
+                    mix(static_cast<std::uint8_t>(value >> shift));
+            };
+            mixInteger(source.High());
+            mixInteger(source.Low());
+            for (const unsigned char character : role)
+                mix(character);
+            high = (high & 0xffffffffffff0fffULL) | 0x0000000000005000ULL;
+            low = (low & 0x3fffffffffffffffULL) | 0x8000000000000000ULL;
+            if ((high | low) == 0U)
+                low = 1U;
+            return {high, low};
+        }
+
         template <typename Variant> [[nodiscard]] Json EncodeValue(const Variant& value)
         {
             return std::visit(
@@ -200,19 +228,21 @@ namespace Keire
                     metadata["maximum"] = *node.ParameterMetadata.Maximum;
                 if (node.ParameterMetadata.Step)
                     metadata["step"] = *node.ParameterMetadata.Step;
-                nodes.push_back({{"id", node.Id.ToString()},
-                                 {"typeId", node.TypeId.empty() ? ShaderGraphNodeTypeId(node.Kind) : node.TypeId},
-                                 {"kind", static_cast<std::uint8_t>(node.Kind)},
-                                 {"name", node.Name},
-                                 {"position", {node.EditorPosition.X, node.EditorPosition.Y}},
-                                 {"valueType", static_cast<std::uint8_t>(node.ValueType)},
-                                 {"value", EncodeValue(node.Value)},
-                                 {"textureSemantic", static_cast<std::uint8_t>(node.TextureSemantic)},
-                                 {"symbol", node.Symbol},
-                                 {"include", node.Include.generic_string()},
-                                 {"function", node.Function},
-                                 {"parameterMetadata", std::move(metadata)},
-                                 {"pins", std::move(pins)}});
+                nodes.push_back(
+                    {{"id", node.Id.ToString()},
+                     {"typeId", node.TypeId.empty() ? ShaderGraphNodeTypeId(node.Kind) : node.TypeId},
+                     {"kind", static_cast<std::uint8_t>(node.Kind)},
+                     {"name", node.Name},
+                     {"position", {node.EditorPosition.X, node.EditorPosition.Y}},
+                     {"valueType", static_cast<std::uint8_t>(node.ValueType)},
+                     {"value", EncodeValue(node.Value)},
+                     {"textureSemantic", static_cast<std::uint8_t>(node.TextureSemantic)},
+                     {"symbol", node.Symbol},
+                     {"include", node.Include.generic_string()},
+                     {"function", node.Function},
+                     {"referencedAsset", node.ReferencedAsset ? Json(node.ReferencedAsset.ToString()) : Json(nullptr)},
+                     {"parameterMetadata", std::move(metadata)},
+                     {"pins", std::move(pins)}});
             }
             Json connections = Json::array();
             for (const auto& connection : definition.Connections)
@@ -230,6 +260,7 @@ namespace Keire
             for (const auto& root : definition.IncludeRoots)
                 roots.push_back(root.generic_string());
             Json result{{"schemaVersion", ShaderGraphSourceSchemaVersion},
+                        {"purpose", static_cast<std::uint8_t>(definition.Purpose)},
                         {"output", static_cast<std::uint8_t>(definition.Output)},
                         {"nodes", std::move(nodes)},
                         {"connections", std::move(connections)},
@@ -262,6 +293,10 @@ namespace Keire
                 throw std::invalid_argument("Shader Graph source collections exceed their bounds.");
             ShaderGraphDefinition result;
             result.SchemaVersion = sourceSchemaVersion;
+            result.Purpose = sourceSchemaVersion >= 3U
+                                 ? static_cast<ShaderGraphPurpose>(
+                                       source.value("purpose", static_cast<std::uint8_t>(ShaderGraphPurpose::Shader)))
+                                 : ShaderGraphPurpose::Shader;
             result.Output = static_cast<ShaderGraphOutput>(source.value("output", static_cast<std::uint8_t>(0)));
             if (source.contains("generatedAssetOwner"))
                 result.GeneratedAssetOwner = AssetId::Parse(source.at("generatedAssetOwner").get<std::string>());
@@ -302,6 +337,9 @@ namespace Keire
                 node.Symbol = encoded.value("symbol", std::string{});
                 node.Include = encoded.value("include", std::string{});
                 node.Function = encoded.value("function", std::string{});
+                if (sourceSchemaVersion >= 3U && encoded.contains("referencedAsset") &&
+                    !encoded.at("referencedAsset").is_null())
+                    node.ReferencedAsset = AssetId::Parse(encoded.at("referencedAsset").get<std::string>());
                 if (const auto metadata = encoded.find("parameterMetadata"); metadata != encoded.end())
                 {
                     node.ParameterMetadata.Description = metadata->value("description", std::string{});
@@ -343,6 +381,7 @@ namespace Keire
                 result.Keywords.push_back({encoded.at("name").get<std::string>(),
                                            encoded.value("options", std::vector<std::string>{}),
                                            encoded.value("default", std::string{}), encoded.value("exposed", true)});
+            if (result.Purpose == ShaderGraphPurpose::Shader)
             {
                 const auto canonicalDefinition = CreateDefaultShaderGraph(result.Output);
                 const auto& canonicalMaster = canonicalDefinition.Nodes.front();
@@ -446,6 +485,57 @@ namespace Keire
             return 1.0F;
         }
 
+        [[nodiscard]] ShaderGraphValue CoerceDefaultValue(const ShaderGraphValue& value,
+                                                          const ShaderGraphValueType source,
+                                                          const ShaderGraphValueType target)
+        {
+            if (source == target)
+                return value;
+            if (source == ShaderGraphValueType::Scalar)
+            {
+                const auto scalar = std::get<float>(value);
+                if (target == ShaderGraphValueType::Vector2)
+                    return Vector2{scalar, scalar};
+                if (target == ShaderGraphValueType::Vector3)
+                    return Vector3{scalar, scalar, scalar};
+                if (target == ShaderGraphValueType::Vector4)
+                    return Vector4{scalar, scalar, scalar, scalar};
+                if (target == ShaderGraphValueType::Color)
+                    return Color{scalar, scalar, scalar, scalar};
+            }
+            if (source == ShaderGraphValueType::Vector3 && target == ShaderGraphValueType::Vector4)
+            {
+                const auto vector = std::get<Vector3>(value);
+                return Vector4{vector.X, vector.Y, vector.Z, 1.0F};
+            }
+            if (source == ShaderGraphValueType::Vector3 && target == ShaderGraphValueType::Color)
+            {
+                const auto vector = std::get<Vector3>(value);
+                return Color{vector.X, vector.Y, vector.Z, 1.0F};
+            }
+            if (source == ShaderGraphValueType::Vector4 && target == ShaderGraphValueType::Vector3)
+            {
+                const auto vector = std::get<Vector4>(value);
+                return Vector3{vector.X, vector.Y, vector.Z};
+            }
+            if (source == ShaderGraphValueType::Color && target == ShaderGraphValueType::Vector3)
+            {
+                const auto color = std::get<Color>(value);
+                return Vector3{color.Red, color.Green, color.Blue};
+            }
+            if (source == ShaderGraphValueType::Vector4 && target == ShaderGraphValueType::Color)
+            {
+                const auto vector = std::get<Vector4>(value);
+                return Color{vector.X, vector.Y, vector.Z, vector.W};
+            }
+            if (source == ShaderGraphValueType::Color && target == ShaderGraphValueType::Vector4)
+            {
+                const auto color = std::get<Color>(value);
+                return Vector4{color.Red, color.Green, color.Blue, color.Alpha};
+            }
+            throw std::invalid_argument("A reusable graph default cannot be converted to the destination pin type.");
+        }
+
         void AddPin(ShaderGraphNode& node, std::string name, const ShaderGraphValueType type,
                     const ShaderGraphPinDirection direction, ShaderGraphValue value)
         {
@@ -514,6 +604,18 @@ namespace Keire
             case ShaderGraphNodeKind::DerivativeX:
             case ShaderGraphNodeKind::DerivativeY:
             case ShaderGraphNodeKind::FilterWidth:
+            case ShaderGraphNodeKind::Reroute:
+            case ShaderGraphNodeKind::If:
+            case ShaderGraphNodeKind::ArcTangent:
+            case ShaderGraphNodeKind::HyperbolicSine:
+            case ShaderGraphNodeKind::HyperbolicCosine:
+            case ShaderGraphNodeKind::HyperbolicTangent:
+            case ShaderGraphNodeKind::DegreesToRadians:
+            case ShaderGraphNodeKind::RadiansToDegrees:
+            case ShaderGraphNodeKind::Negate:
+            case ShaderGraphNodeKind::ScaleAndBias:
+            case ShaderGraphNodeKind::Exponential:
+            case ShaderGraphNodeKind::Logarithm:
                 return true;
             default:
                 return false;
@@ -933,7 +1035,7 @@ namespace Keire
                                                 ? attribute("SheenRoughness")
                                                 : optionalInput("SheenRoughness", ShaderGraphValueType::Scalar, "0.5F");
                 const auto normal = unlit || (!hasMaterialAttributes && !inputConnected("Normal")) ? "input.Normal"
-                                    : hasMaterialAttributes ? attribute("Normal")
+                                    : hasMaterialAttributes                                        ? attribute("Normal")
                                                             : input("Normal", ShaderGraphValueType::Vector3);
                 const bool hasDetailNormal = !unlit && !hasMaterialAttributes && inputConnected("DetailNormal");
                 const auto detailNormal = hasDetailNormal ? input("DetailNormal", ShaderGraphValueType::Vector3)
@@ -2787,6 +2889,89 @@ float4 PSMain(VertexOutput input) : SV_Target0
                     result = {node.Function + "(" + arguments + ")", node.ValueType};
                     break;
                 }
+                case ShaderGraphNodeKind::Reroute:
+                    result = Coerce(namedInput("Input"), node.ValueType);
+                    break;
+                case ShaderGraphNodeKind::If:
+                {
+                    const auto left = Coerce(namedInput("A"), ShaderGraphValueType::Scalar);
+                    const auto right = Coerce(namedInput("B"), ShaderGraphValueType::Scalar);
+                    const auto threshold = Coerce(namedInput("Threshold"), ShaderGraphValueType::Scalar);
+                    const auto greater = Coerce(namedInput("Greater"), node.ValueType);
+                    const auto equal = Coerce(namedInput("Equal"), node.ValueType);
+                    const auto less = Coerce(namedInput("Less"), node.ValueType);
+                    result = {"(abs((" + left.Code + ") - (" + right.Code + ")) <= (" + threshold.Code + ") ? (" +
+                                  equal.Code + ") : ((" + left.Code + ") > (" + right.Code + ") ? (" + greater.Code +
+                                  ") : (" + less.Code + ")))",
+                              node.ValueType};
+                    break;
+                }
+                case ShaderGraphNodeKind::Compare:
+                {
+                    const auto left = Coerce(namedInput("A"), ShaderGraphValueType::Scalar);
+                    const auto right = Coerce(namedInput("B"), ShaderGraphValueType::Scalar);
+                    const auto threshold = Coerce(namedInput("Threshold"), ShaderGraphValueType::Scalar);
+                    const auto comparison = outputPin.Name == "Greater" ? ">" : outputPin.Name == "Less" ? "<" : "==";
+                    const auto expression =
+                        comparison == std::string_view("==")
+                            ? "abs((" + left.Code + ") - (" + right.Code + ")) <= (" + threshold.Code + ")"
+                            : "(" + left.Code + ") " + comparison + " (" + right.Code + ")";
+                    result = {"(" + expression + " ? 1.0F : 0.0F)", ShaderGraphValueType::Scalar};
+                    break;
+                }
+                case ShaderGraphNodeKind::BooleanAnd:
+                case ShaderGraphNodeKind::BooleanOr:
+                {
+                    const auto left = Coerce(namedInput("A"), ShaderGraphValueType::Scalar);
+                    const auto right = Coerce(namedInput("B"), ShaderGraphValueType::Scalar);
+                    const auto operation = node.Kind == ShaderGraphNodeKind::BooleanAnd ? "&&" : "||";
+                    result = {"(((" + left.Code + ") != 0.0F " + operation + " (" + right.Code +
+                                  ") != 0.0F) ? 1.0F : 0.0F)",
+                              ShaderGraphValueType::Scalar};
+                    break;
+                }
+                case ShaderGraphNodeKind::BooleanNot:
+                {
+                    const auto input = Coerce(namedInput("Input"), ShaderGraphValueType::Scalar);
+                    result = {"((" + input.Code + ") == 0.0F ? 1.0F : 0.0F)", ShaderGraphValueType::Scalar};
+                    break;
+                }
+                case ShaderGraphNodeKind::ArcTangent:
+                case ShaderGraphNodeKind::HyperbolicSine:
+                case ShaderGraphNodeKind::HyperbolicCosine:
+                case ShaderGraphNodeKind::HyperbolicTangent:
+                case ShaderGraphNodeKind::DegreesToRadians:
+                case ShaderGraphNodeKind::RadiansToDegrees:
+                case ShaderGraphNodeKind::Negate:
+                case ShaderGraphNodeKind::Exponential:
+                case ShaderGraphNodeKind::Logarithm:
+                {
+                    const auto input = Coerce(namedInput("Input"), node.ValueType);
+                    const auto expression =
+                        node.Kind == ShaderGraphNodeKind::ArcTangent          ? "atan(" + input.Code + ")"
+                        : node.Kind == ShaderGraphNodeKind::HyperbolicSine    ? "sinh(" + input.Code + ")"
+                        : node.Kind == ShaderGraphNodeKind::HyperbolicCosine  ? "cosh(" + input.Code + ")"
+                        : node.Kind == ShaderGraphNodeKind::HyperbolicTangent ? "tanh(" + input.Code + ")"
+                        : node.Kind == ShaderGraphNodeKind::DegreesToRadians
+                            ? "((" + input.Code + ") * 0.017453292519943295F)"
+                        : node.Kind == ShaderGraphNodeKind::RadiansToDegrees
+                            ? "((" + input.Code + ") * 57.29577951308232F)"
+                        : node.Kind == ShaderGraphNodeKind::Negate      ? "(-(" + input.Code + "))"
+                        : node.Kind == ShaderGraphNodeKind::Exponential ? "exp(" + input.Code + ")"
+                                                                        : "log(max(" + input.Code + ", 1.0e-8F))";
+                    result = {expression, node.ValueType};
+                    break;
+                }
+                case ShaderGraphNodeKind::ScaleAndBias:
+                {
+                    const auto input = Coerce(namedInput("Input"), node.ValueType);
+                    const auto scale = Coerce(namedInput("Scale"), ShaderGraphValueType::Scalar);
+                    const auto bias = Coerce(namedInput("Bias"), ShaderGraphValueType::Scalar);
+                    result = {"((" + input.Code + ") * (" + scale.Code + ") + (" + bias.Code + "))", node.ValueType};
+                    break;
+                }
+                case ShaderGraphNodeKind::FunctionCall:
+                    throw std::logic_error("Function Call nodes must be expanded before shader compilation.");
                 case ShaderGraphNodeKind::Master:
                     throw std::invalid_argument("Shader Output nodes cannot feed another node.");
                 }
@@ -3840,13 +4025,381 @@ float4 PSMain(VertexOutput input) : SV_Target0
             input("Input", valueType, DefaultValue(valueType));
             output("Result", valueType);
             break;
+        case ShaderGraphNodeKind::FunctionCall:
+            node.Name = "Function Call";
+            break;
+        case ShaderGraphNodeKind::Reroute:
+            node.Name = "Reroute";
+            input("Input", valueType, DefaultValue(valueType));
+            output("Output", valueType);
+            break;
+        case ShaderGraphNodeKind::If:
+            node.Name = "If";
+            input("A", ShaderGraphValueType::Scalar, 0.0F);
+            input("B", ShaderGraphValueType::Scalar, 0.0F);
+            input("Greater", valueType, DefaultValue(valueType));
+            input("Equal", valueType, DefaultValue(valueType));
+            input("Less", valueType, DefaultValue(valueType));
+            input("Threshold", ShaderGraphValueType::Scalar, 1.0e-5F);
+            output("Result", valueType);
+            break;
+        case ShaderGraphNodeKind::Compare:
+            node.Name = "Compare";
+            node.ValueType = ShaderGraphValueType::Scalar;
+            node.Value = 0.0F;
+            input("A", ShaderGraphValueType::Scalar, 0.0F);
+            input("B", ShaderGraphValueType::Scalar, 0.0F);
+            input("Threshold", ShaderGraphValueType::Scalar, 1.0e-5F);
+            output("Equal", ShaderGraphValueType::Scalar);
+            output("Greater", ShaderGraphValueType::Scalar);
+            output("Less", ShaderGraphValueType::Scalar);
+            break;
+        case ShaderGraphNodeKind::BooleanAnd:
+        case ShaderGraphNodeKind::BooleanOr:
+            node.Name = kind == ShaderGraphNodeKind::BooleanAnd ? "And" : "Or";
+            node.ValueType = ShaderGraphValueType::Scalar;
+            node.Value = 0.0F;
+            input("A", ShaderGraphValueType::Scalar, 0.0F);
+            input("B", ShaderGraphValueType::Scalar, 0.0F);
+            output("Result", ShaderGraphValueType::Scalar);
+            break;
+        case ShaderGraphNodeKind::BooleanNot:
+            node.Name = "Not";
+            node.ValueType = ShaderGraphValueType::Scalar;
+            node.Value = 0.0F;
+            input("Input", ShaderGraphValueType::Scalar, 0.0F);
+            output("Result", ShaderGraphValueType::Scalar);
+            break;
+        case ShaderGraphNodeKind::ArcTangent:
+        case ShaderGraphNodeKind::HyperbolicSine:
+        case ShaderGraphNodeKind::HyperbolicCosine:
+        case ShaderGraphNodeKind::HyperbolicTangent:
+        case ShaderGraphNodeKind::DegreesToRadians:
+        case ShaderGraphNodeKind::RadiansToDegrees:
+        case ShaderGraphNodeKind::Negate:
+        case ShaderGraphNodeKind::Exponential:
+        case ShaderGraphNodeKind::Logarithm:
+            node.Name = kind == ShaderGraphNodeKind::ArcTangent          ? "Arc Tangent"
+                        : kind == ShaderGraphNodeKind::HyperbolicSine    ? "Hyperbolic Sine"
+                        : kind == ShaderGraphNodeKind::HyperbolicCosine  ? "Hyperbolic Cosine"
+                        : kind == ShaderGraphNodeKind::HyperbolicTangent ? "Hyperbolic Tangent"
+                        : kind == ShaderGraphNodeKind::DegreesToRadians  ? "Degrees To Radians"
+                        : kind == ShaderGraphNodeKind::RadiansToDegrees  ? "Radians To Degrees"
+                        : kind == ShaderGraphNodeKind::Negate            ? "Negate"
+                        : kind == ShaderGraphNodeKind::Exponential       ? "Exponential"
+                                                                         : "Logarithm";
+            input("Input", valueType, DefaultValue(valueType));
+            output("Result", valueType);
+            break;
+        case ShaderGraphNodeKind::ScaleAndBias:
+            node.Name = "Scale And Bias";
+            input("Input", valueType, DefaultValue(valueType));
+            input("Scale", ShaderGraphValueType::Scalar, 1.0F);
+            input("Bias", ShaderGraphValueType::Scalar, 0.0F);
+            output("Result", valueType);
+            break;
         }
         return node;
     }
 
+    ShaderGraphNode CreateShaderGraphFunctionCallNode(const AssetId function,
+                                                      const ShaderGraphDefinition& functionDefinition)
+    {
+        if (!function || functionDefinition.Purpose == ShaderGraphPurpose::Shader)
+            throw std::invalid_argument("Function Call creation requires a reusable graph asset.");
+        ValidateShaderGraph(functionDefinition);
+        const auto master =
+            std::ranges::find(functionDefinition.Nodes, ShaderGraphNodeKind::Master, &ShaderGraphNode::Kind);
+        if (master == functionDefinition.Nodes.end())
+            throw std::invalid_argument("Reusable graph asset has no output node.");
+
+        ShaderGraphNode result;
+        result.Id = AssetId::Generate();
+        result.Kind = ShaderGraphNodeKind::FunctionCall;
+        result.TypeId = std::string(ShaderGraphNodeTypeId(result.Kind));
+        result.Name = "Function Call";
+        result.ReferencedAsset = function;
+        for (const auto& parameter : functionDefinition.Nodes)
+        {
+            if (parameter.Kind != ShaderGraphNodeKind::Parameter)
+                continue;
+            const auto output =
+                std::ranges::find(parameter.Pins, ShaderGraphPinDirection::Output, &ShaderGraphPin::Direction);
+            if (output == parameter.Pins.end())
+                throw std::invalid_argument("Reusable graph parameter has no output pin.");
+            AddPin(result, parameter.Symbol, output->Type, ShaderGraphPinDirection::Input, parameter.Value);
+        }
+        for (const auto& pin : master->Pins)
+        {
+            if (pin.Direction != ShaderGraphPinDirection::Input)
+                throw std::invalid_argument("Reusable graph output node contains an invalid output pin.");
+            AddPin(result, pin.Name, pin.Type, ShaderGraphPinDirection::Output, pin.DefaultValue);
+        }
+        if (result.Pins.empty() || std::ranges::none_of(result.Pins, [](const ShaderGraphPin& pin)
+                                                        { return pin.Direction == ShaderGraphPinDirection::Output; }))
+            throw std::invalid_argument("Reusable graph functions require at least one output.");
+        const auto firstOutput =
+            std::ranges::find(result.Pins, ShaderGraphPinDirection::Output, &ShaderGraphPin::Direction);
+        result.ValueType = firstOutput->Type;
+        result.Value = DefaultValue(result.ValueType);
+        return result;
+    }
+
+    std::vector<AssetId> ShaderGraphReferencedAssets(const ShaderGraphDefinition& definition)
+    {
+        std::vector<AssetId> result;
+        for (const auto& node : definition.Nodes)
+            if (node.ReferencedAsset)
+                result.push_back(node.ReferencedAsset);
+        std::ranges::sort(result);
+        result.erase(std::unique(result.begin(), result.end()), result.end());
+        return result;
+    }
+
+    ShaderGraphDefinition
+    ExpandShaderGraphFunctions(const ShaderGraphDefinition& definition,
+                               const std::function<std::optional<ShaderGraphDefinition>(AssetId)>& resolveFunction,
+                               const std::size_t maximumDepth)
+    {
+        if (maximumDepth == 0)
+            throw std::invalid_argument("Reusable graph expansion depth must be positive.");
+
+        struct OutputBinding final
+        {
+            std::optional<ShaderGraphEndpoint> Source;
+            ShaderGraphValue DefaultValue = 0.0F;
+            ShaderGraphValueType Type = ShaderGraphValueType::Scalar;
+        };
+
+        std::function<ShaderGraphDefinition(const ShaderGraphDefinition&, std::vector<AssetId>&, std::size_t)> expand;
+        expand = [&](const ShaderGraphDefinition& source, std::vector<AssetId>& stack,
+                     const std::size_t depth) -> ShaderGraphDefinition
+        {
+            if (depth > maximumDepth)
+                throw std::invalid_argument("Reusable graph dependency depth exceeds its configured limit.");
+            auto result = source;
+            result.SchemaVersion = ShaderGraphSourceSchemaVersion;
+            ValidateShaderGraph(result);
+
+            while (true)
+            {
+                const auto call =
+                    std::ranges::find(result.Nodes, ShaderGraphNodeKind::FunctionCall, &ShaderGraphNode::Kind);
+                if (call == result.Nodes.end())
+                    break;
+                if (!resolveFunction)
+                    throw std::invalid_argument("Function Call nodes require a reusable graph resolver.");
+                if (std::ranges::find(stack, call->ReferencedAsset) != stack.end())
+                    throw std::invalid_argument("Reusable graph dependency cycle detected at " +
+                                                call->ReferencedAsset.ToString() + '.');
+                auto resolved = resolveFunction(call->ReferencedAsset);
+                if (!resolved)
+                    throw std::invalid_argument(
+                        "Reusable graph asset is unavailable: " + call->ReferencedAsset.ToString() + '.');
+                if (resolved->Purpose == ShaderGraphPurpose::Shader)
+                    throw std::invalid_argument("Function Call nodes cannot reference Shader Graph templates.");
+
+                stack.push_back(call->ReferencedAsset);
+                auto function = expand(*resolved, stack, depth + 1U);
+                stack.pop_back();
+                const auto functionMaster =
+                    std::ranges::find(function.Nodes, ShaderGraphNodeKind::Master, &ShaderGraphNode::Kind);
+                if (functionMaster == function.Nodes.end())
+                    throw std::logic_error("Validated reusable graph lost its output node.");
+
+                const auto callId = call->Id;
+                std::unordered_map<AssetId, ShaderGraphEndpoint> callInputs;
+                for (const auto& connection : result.Connections)
+                    if (connection.Input.Node == callId)
+                        callInputs.emplace(connection.Input.Pin, connection.Output);
+
+                std::unordered_map<AssetId, AssetId> nodeIds;
+                std::unordered_map<AssetId, AssetId> pinIds;
+                std::vector<ShaderGraphNode> clonedNodes;
+                for (const auto& node : function.Nodes)
+                {
+                    if (node.Kind == ShaderGraphNodeKind::Master || node.Kind == ShaderGraphNodeKind::Parameter)
+                        continue;
+                    auto cloned = node;
+                    cloned.Id = DerivedFunctionElementId(callId, node.Id, "node");
+                    nodeIds.emplace(node.Id, cloned.Id);
+                    cloned.EditorPosition.X += call->EditorPosition.X;
+                    cloned.EditorPosition.Y += call->EditorPosition.Y;
+                    for (auto& pin : cloned.Pins)
+                    {
+                        const auto original = pin.Id;
+                        pin.Id = DerivedFunctionElementId(callId, original, "pin");
+                        pinIds.emplace(original, pin.Id);
+                    }
+                    clonedNodes.push_back(std::move(cloned));
+                }
+
+                const auto mappedEndpoint = [&](const ShaderGraphEndpoint endpoint)
+                {
+                    const auto node = nodeIds.find(endpoint.Node);
+                    const auto pin = pinIds.find(endpoint.Pin);
+                    if (node == nodeIds.end() || pin == pinIds.end())
+                        throw std::logic_error("Reusable graph expansion could not map an internal endpoint.");
+                    return ShaderGraphEndpoint{node->second, pin->second};
+                };
+                const auto mutablePin = [&](const ShaderGraphEndpoint endpoint) -> ShaderGraphPin&
+                {
+                    const auto node = std::ranges::find(clonedNodes, endpoint.Node, &ShaderGraphNode::Id);
+                    if (node == clonedNodes.end())
+                        throw std::logic_error("Reusable graph expansion lost a cloned node.");
+                    const auto pin = std::ranges::find(node->Pins, endpoint.Pin, &ShaderGraphPin::Id);
+                    if (pin == node->Pins.end())
+                        throw std::logic_error("Reusable graph expansion lost a cloned pin.");
+                    return *pin;
+                };
+
+                std::unordered_map<AssetId, const ShaderGraphNode*> parameters;
+                for (const auto& node : function.Nodes)
+                    if (node.Kind == ShaderGraphNodeKind::Parameter)
+                        parameters.emplace(node.Id, &node);
+                const auto callInputPin = [&](const ShaderGraphNode& parameter) -> const ShaderGraphPin&
+                {
+                    const auto pin =
+                        std::ranges::find_if(call->Pins,
+                                             [&](const ShaderGraphPin& candidate)
+                                             {
+                                                 return candidate.Direction == ShaderGraphPinDirection::Input &&
+                                                        candidate.Name == parameter.Symbol;
+                                             });
+                    if (pin == call->Pins.end())
+                        throw std::invalid_argument("Function Call interface is stale for input " + parameter.Symbol +
+                                                    '.');
+                    const auto output =
+                        std::ranges::find(parameter.Pins, ShaderGraphPinDirection::Output, &ShaderGraphPin::Direction);
+                    if (output == parameter.Pins.end() || output->Type != pin->Type)
+                        throw std::invalid_argument("Function Call input type is stale for " + parameter.Symbol + '.');
+                    return *pin;
+                };
+
+                std::vector<ShaderGraphConnection> expandedConnections;
+                std::map<std::string, OutputBinding, std::less<>> outputs;
+                std::set<AssetId> connectedFunctionOutputs;
+                for (const auto& connection : function.Connections)
+                {
+                    const auto parameter = parameters.find(connection.Output.Node);
+                    if (connection.Input.Node == functionMaster->Id)
+                    {
+                        const auto& outputPin = RequirePin(*functionMaster, connection.Input.Pin);
+                        connectedFunctionOutputs.insert(outputPin.Id);
+                        OutputBinding binding;
+                        binding.Type = outputPin.Type;
+                        binding.DefaultValue = outputPin.DefaultValue;
+                        if (parameter != parameters.end())
+                        {
+                            const auto& inputPin = callInputPin(*parameter->second);
+                            if (const auto incoming = callInputs.find(inputPin.Id); incoming != callInputs.end())
+                                binding.Source = incoming->second;
+                            else
+                                binding.DefaultValue =
+                                    CoerceDefaultValue(inputPin.DefaultValue, inputPin.Type, outputPin.Type);
+                        }
+                        else
+                            binding.Source = mappedEndpoint(connection.Output);
+                        outputs.emplace(outputPin.Name, std::move(binding));
+                        continue;
+                    }
+
+                    const auto destination = mappedEndpoint(connection.Input);
+                    if (parameter != parameters.end())
+                    {
+                        const auto& inputPin = callInputPin(*parameter->second);
+                        if (const auto incoming = callInputs.find(inputPin.Id); incoming != callInputs.end())
+                        {
+                            expandedConnections.push_back(
+                                {DerivedFunctionElementId(callId, connection.Id, "parameter-connection"),
+                                 incoming->second, destination});
+                        }
+                        else
+                        {
+                            auto& target = mutablePin(destination);
+                            target.DefaultValue = CoerceDefaultValue(inputPin.DefaultValue, inputPin.Type, target.Type);
+                        }
+                    }
+                    else
+                    {
+                        expandedConnections.push_back({DerivedFunctionElementId(callId, connection.Id, "connection"),
+                                                       mappedEndpoint(connection.Output), destination});
+                    }
+                }
+                for (const auto& pin : functionMaster->Pins)
+                    if (!connectedFunctionOutputs.contains(pin.Id))
+                        outputs.emplace(pin.Name, OutputBinding{std::nullopt, pin.DefaultValue, pin.Type});
+
+                for (const auto& outputPin : call->Pins)
+                {
+                    if (outputPin.Direction != ShaderGraphPinDirection::Output)
+                        continue;
+                    const auto binding = outputs.find(outputPin.Name);
+                    if (binding == outputs.end() || binding->second.Type != outputPin.Type)
+                        throw std::invalid_argument("Function Call interface is stale for output " + outputPin.Name +
+                                                    '.');
+                }
+
+                std::erase_if(result.Connections,
+                              [&](ShaderGraphConnection& connection)
+                              {
+                                  if (connection.Input.Node == callId)
+                                      return true;
+                                  if (connection.Output.Node != callId)
+                                      return false;
+                                  const auto& callOutput = RequirePin(*call, connection.Output.Pin);
+                                  const auto binding = outputs.find(callOutput.Name);
+                                  if (binding == outputs.end())
+                                      throw std::invalid_argument(
+                                          "Function Call output no longer exists: " + callOutput.Name + '.');
+                                  if (binding->second.Source)
+                                  {
+                                      connection.Output = *binding->second.Source;
+                                      return false;
+                                  }
+                                  const auto destinationNode =
+                                      std::ranges::find(result.Nodes, connection.Input.Node, &ShaderGraphNode::Id);
+                                  if (destinationNode == result.Nodes.end())
+                                      throw std::logic_error("Function Call destination node is unavailable.");
+                                  const auto destinationPin = std::ranges::find(
+                                      destinationNode->Pins, connection.Input.Pin, &ShaderGraphPin::Id);
+                                  if (destinationPin == destinationNode->Pins.end())
+                                      throw std::logic_error("Function Call destination pin is unavailable.");
+                                  destinationPin->DefaultValue = CoerceDefaultValue(
+                                      binding->second.DefaultValue, binding->second.Type, destinationPin->Type);
+                                  return true;
+                              });
+                std::erase_if(result.Nodes, [&](const ShaderGraphNode& node) { return node.Id == callId; });
+                result.Nodes.insert(result.Nodes.end(), std::make_move_iterator(clonedNodes.begin()),
+                                    std::make_move_iterator(clonedNodes.end()));
+                result.Connections.insert(result.Connections.end(),
+                                          std::make_move_iterator(expandedConnections.begin()),
+                                          std::make_move_iterator(expandedConnections.end()));
+                for (const auto& keyword : function.Keywords)
+                {
+                    const auto existing = std::ranges::find(result.Keywords, keyword.Name, &ShaderGraphKeyword::Name);
+                    if (existing == result.Keywords.end())
+                        result.Keywords.push_back(keyword);
+                    else if (*existing != keyword)
+                        throw std::invalid_argument("Reusable graph keyword contract conflicts for " + keyword.Name +
+                                                    '.');
+                }
+                for (const auto& root : function.IncludeRoots)
+                    if (std::ranges::find(result.IncludeRoots, root) == result.IncludeRoots.end())
+                        result.IncludeRoots.push_back(root);
+            }
+            ValidateShaderGraph(result);
+            return result;
+        };
+
+        std::vector<AssetId> stack;
+        return expand(definition, stack, 0);
+    }
+
     void ValidateShaderGraph(const ShaderGraphDefinition& definition)
     {
-        if ((definition.SchemaVersion != 1 && definition.SchemaVersion != ShaderGraphSourceSchemaVersion) ||
+        if (definition.SchemaVersion == 0 || definition.SchemaVersion > ShaderGraphSourceSchemaVersion ||
+            definition.Purpose > ShaderGraphPurpose::MaterialLayerBlend ||
             definition.Output > ShaderGraphOutput::Fullscreen || definition.Nodes.empty() ||
             definition.Nodes.size() > MaximumGraphNodes || definition.Connections.size() > MaximumGraphConnections ||
             definition.Keywords.size() > MaximumGraphKeywords || definition.IncludeRoots.empty() ||
@@ -3864,8 +4417,7 @@ float4 PSMain(VertexOutput input) : SV_Target0
                 throw std::invalid_argument("Shader Graph include roots must be confined relative paths.");
         for (const auto& node : definition.Nodes)
         {
-            if (!node.Id || !identities.insert(node.Id).second ||
-                node.Kind > ShaderGraphNodeKind::BsdfToMaterialAttributes ||
+            if (!node.Id || !identities.insert(node.Id).second || node.Kind > ShaderGraphNodeKind::Logarithm ||
                 node.ValueType > ShaderGraphValueType::Bsdf || node.Name.size() > MaximumGraphText ||
                 node.TextureSemantic > ShaderTextureSemantic::Roughness || node.Pins.empty() ||
                 node.Pins.size() > MaximumGraphPinsPerNode || !Math::IsFinite(node.EditorPosition) ||
@@ -3880,8 +4432,9 @@ float4 PSMain(VertexOutput input) : SV_Target0
                 ++masters;
             if (node.Kind == ShaderGraphNodeKind::Parameter)
             {
-                if (node.ValueType == ShaderGraphValueType::MaterialAttributes ||
-                    node.ValueType == ShaderGraphValueType::Bsdf)
+                if (definition.Purpose == ShaderGraphPurpose::Shader &&
+                    (node.ValueType == ShaderGraphValueType::MaterialAttributes ||
+                     node.ValueType == ShaderGraphValueType::Bsdf))
                     throw std::invalid_argument("Shader Graph structured values cannot be exposed as parameters.");
                 ++propertyCount;
                 texturePropertyCount += node.ValueType == ShaderGraphValueType::Texture2D ? 1U : 0U;
@@ -3908,6 +4461,10 @@ float4 PSMain(VertexOutput input) : SV_Target0
             if (node.Kind == ShaderGraphNodeKind::Custom &&
                 (!SafeRelativePath(node.Include) || !ValidIdentifier(node.Function)))
                 throw std::invalid_argument("Custom Shader Graph nodes require a safe include and function name.");
+            if (node.Kind == ShaderGraphNodeKind::FunctionCall && !node.ReferencedAsset)
+                throw std::invalid_argument("Shader Graph Function Call nodes require a referenced function asset.");
+            if (node.Kind != ShaderGraphNodeKind::FunctionCall && node.ReferencedAsset)
+                throw std::invalid_argument("Only Shader Graph Function Call nodes may reference graph assets.");
             std::set<std::string, std::less<>> inputPinNames;
             std::set<std::string, std::less<>> outputPinNames;
             for (const auto& pin : node.Pins)
@@ -3939,6 +4496,11 @@ float4 PSMain(VertexOutput input) : SV_Target0
                 if (outputPinNames.size() != 1 || node.Pins.size() == outputPinNames.size())
                     throw std::invalid_argument("Custom Shader Graph nodes require inputs and exactly one output.");
             }
+            else if (node.Kind == ShaderGraphNodeKind::FunctionCall)
+            {
+                if (outputPinNames.empty())
+                    throw std::invalid_argument("Shader Graph Function Call nodes require typed outputs.");
+            }
             else
             {
                 const auto canonical = CreateShaderGraphNode(node.Kind, node.ValueType);
@@ -3964,15 +4526,20 @@ float4 PSMain(VertexOutput input) : SV_Target0
         if (masters != 1 || propertyCount > MaximumGraphProperties)
             throw std::invalid_argument("Shader Graph requires one Shader Output node and at most 80 properties.");
         const auto maximumTextures = IsUnlitOutput(definition.Output) ? 16U : 12U;
-        if (texturePropertyCount > maximumTextures)
+        if (definition.Purpose == ShaderGraphPurpose::Shader && texturePropertyCount > maximumTextures)
             throw std::invalid_argument("Shader Graph texture parameters exceed the portable sampler budget.");
         const auto master = std::ranges::find(definition.Nodes, ShaderGraphNodeKind::Master, &ShaderGraphNode::Kind);
-        const auto required = IsUnlitOutput(definition.Output)
-                                  ? std::array<std::string_view, 3>{"Color", "Emission", "Opacity"}
-                                  : std::array<std::string_view, 3>{"BaseColor", "Emission", "Opacity"};
-        for (const auto name : required)
-            if (const auto* pin = FindPin(*master, name, ShaderGraphPinDirection::Input); !pin)
-                throw std::invalid_argument("Shader Output node is missing a required input.");
+        if (definition.Purpose == ShaderGraphPurpose::Shader)
+        {
+            const auto required = IsUnlitOutput(definition.Output)
+                                      ? std::array<std::string_view, 3>{"Color", "Emission", "Opacity"}
+                                      : std::array<std::string_view, 3>{"BaseColor", "Emission", "Opacity"};
+            for (const auto name : required)
+                if (const auto* pin = FindPin(*master, name, ShaderGraphPinDirection::Input); !pin)
+                    throw std::invalid_argument("Shader Output node is missing a required input.");
+        }
+        else if (master->Pins.empty())
+            throw std::invalid_argument("Reusable graph functions require at least one output pin.");
 
         std::set<std::string, std::less<>> keywordNames;
         std::set<std::string, std::less<>> tokens;
@@ -4089,33 +4656,38 @@ float4 PSMain(VertexOutput input) : SV_Target0
         ShaderGraphCompilation result;
         try
         {
+            ValidateShaderGraph(definition);
+            if (definition.Purpose != ShaderGraphPurpose::Shader)
+                throw std::invalid_argument("Reusable graph bodies must be called from a Shader or Material Graph.");
+            const auto expanded = ShaderGraphReferencedAssets(definition).empty()
+                                      ? definition
+                                      : ExpandShaderGraphFunctions(definition, options.ResolveFunction);
             if (options.MaximumNodes == 0 || options.MaximumNodes > MaximumGraphNodes ||
                 options.MaximumConnections == 0 || options.MaximumConnections > MaximumGraphConnections ||
                 options.MaximumCustomIncludes == 0 || options.MaximumCustomIncludes > 256 ||
-                !SafeRelativePath(options.GeneratedSource) || definition.Nodes.size() > options.MaximumNodes ||
-                definition.Connections.size() > options.MaximumConnections)
+                !SafeRelativePath(options.GeneratedSource) || expanded.Nodes.size() > options.MaximumNodes ||
+                expanded.Connections.size() > options.MaximumConnections)
                 throw std::invalid_argument("Shader Graph compile options or graph bounds are invalid.");
-            ValidateShaderGraph(definition);
-            result.Statistics = AnalyzeGraph(definition);
-            const auto variants = EnumerateShaderGraphKeywordVariants(definition.Keywords, options.MaximumVariants);
+            result.Statistics = AnalyzeGraph(expanded);
+            const auto variants = EnumerateShaderGraphKeywordVariants(expanded.Keywords, options.MaximumVariants);
             result.Statistics.VariantCount = variants.size();
             std::size_t unusedDiagnostics = 0;
             constexpr std::size_t MaximumUnusedDiagnostics = 16;
             if (result.Statistics.UnusedNodeCount != 0)
             {
                 const auto master =
-                    std::ranges::find(definition.Nodes, ShaderGraphNodeKind::Master, &ShaderGraphNode::Kind);
+                    std::ranges::find(expanded.Nodes, ShaderGraphNodeKind::Master, &ShaderGraphNode::Kind);
                 std::unordered_set<AssetId> reachable{master->Id};
                 std::vector<AssetId> pending{master->Id};
                 while (!pending.empty())
                 {
                     const auto inputNode = pending.back();
                     pending.pop_back();
-                    for (const auto& connection : definition.Connections)
+                    for (const auto& connection : expanded.Connections)
                         if (connection.Input.Node == inputNode && reachable.insert(connection.Output.Node).second)
                             pending.push_back(connection.Output.Node);
                 }
-                for (const auto& node : definition.Nodes)
+                for (const auto& node : expanded.Nodes)
                 {
                     if (reachable.contains(node.Id) || unusedDiagnostics == MaximumUnusedDiagnostics)
                         continue;
@@ -4163,19 +4735,18 @@ float4 PSMain(VertexOutput input) : SV_Target0
                                               {},
                                               {},
                                               0});
-            const auto master =
-                std::ranges::find(definition.Nodes, ShaderGraphNodeKind::Master, &ShaderGraphNode::Kind);
-            if (master != definition.Nodes.end())
+            const auto master = std::ranges::find(expanded.Nodes, ShaderGraphNodeKind::Master, &ShaderGraphNode::Kind);
+            if (master != expanded.Nodes.end())
             {
                 const auto attributes = FindPin(*master, "MaterialAttributes", ShaderGraphPinDirection::Input);
                 const bool attributesConnected =
                     attributes &&
-                    std::ranges::any_of(definition.Connections, [&](const ShaderGraphConnection& value)
+                    std::ranges::any_of(expanded.Connections, [&](const ShaderGraphConnection& value)
                                         { return value.Input == ShaderGraphEndpoint{master->Id, attributes->Id}; });
                 if (attributesConnected)
                 {
                     std::vector<std::string_view> ignoredInputs;
-                    for (const auto& connection : definition.Connections)
+                    for (const auto& connection : expanded.Connections)
                     {
                         if (connection.Input.Node != master->Id || connection.Input.Pin == attributes->Id)
                             continue;
@@ -4201,13 +4772,13 @@ float4 PSMain(VertexOutput input) : SV_Target0
             }
             for (const auto& keywords : variants)
             {
-                GraphCompiler compiler(definition, options, keywords, result.Properties, result.Dependencies);
+                GraphCompiler compiler(expanded, options, keywords, result.Properties, result.Dependencies);
                 auto hlsl = compiler.BuildHlsl();
                 auto suffix = KeywordSuffix(keywords);
                 auto generatedSource = VariantSourcePath(options.GeneratedSource, suffix);
                 result.Variants.push_back(
                     {keywords, std::move(suffix), generatedSource, std::move(hlsl),
-                     Detail::BuildShaderGraphManifest(definition, generatedSource, result.Properties, keywords,
+                     Detail::BuildShaderGraphManifest(expanded, generatedSource, result.Properties, keywords,
                                                       compiler.UsesVertexMaterialParameters())});
             }
             std::ranges::sort(result.Dependencies);
@@ -4323,7 +4894,7 @@ float4 PSMain(VertexOutput input) : SV_Target0
     {
         AssetImporterRegistration result;
         result.Name = "Keire.ShaderGraph";
-        result.Version = 14;
+        result.Version = 15;
         result.Type = ShaderGraphAsset::StaticType();
         result.Extensions = {".keireshadergraph"};
         result.ContextualImport = [](const AssetImportContext& context, const std::span<const std::byte> bytes)
@@ -4346,6 +4917,9 @@ float4 PSMain(VertexOutput input) : SV_Target0
                     if (texture)
                         output.AssetDependencies.push_back(texture);
                 }
+            const auto functionDependencies = ShaderGraphReferencedAssets(definition);
+            output.AssetDependencies.insert(output.AssetDependencies.end(), functionDependencies.begin(),
+                                            functionDependencies.end());
             std::ranges::sort(output.AssetDependencies);
             output.AssetDependencies.erase(
                 std::unique(output.AssetDependencies.begin(), output.AssetDependencies.end()),
@@ -4367,6 +4941,25 @@ float4 PSMain(VertexOutput input) : SV_Target0
                 {
                     return std::nullopt;
                 }
+            };
+            compileOptions.ResolveFunction = [&context](const AssetId asset) -> std::optional<ShaderGraphDefinition>
+            {
+                if (!context.ResolveAssetSource || !context.ReadProjectFile)
+                    return std::nullopt;
+                const auto source = context.ResolveAssetSource(asset);
+                if (!source)
+                    return std::nullopt;
+                const auto sourcePrefix = std::filesystem::relative(context.SourceRoot, context.ProjectRoot);
+                const auto functionBytes = context.ReadProjectFile(sourcePrefix / source->RelativePath);
+                if (source->Type == MaterialFunctionAsset::StaticType())
+                    return MaterialFunctionAsset::DecodeSource(functionBytes).Body;
+                if (source->Type == ShaderFunctionAsset::StaticType())
+                    return ShaderFunctionAsset::DecodeSource(functionBytes).Body;
+                if (source->Type == MaterialLayerAsset::StaticType())
+                    return MaterialLayerAsset::DecodeSource(functionBytes).Body;
+                if (source->Type == MaterialLayerBlendAsset::StaticType())
+                    return MaterialLayerBlendAsset::DecodeSource(functionBytes).Body;
+                return std::nullopt;
             };
             const auto compilation = CompileShaderGraph(definition, compileOptions);
             if (!compilation.Succeeded() || compilation.Variants.empty())

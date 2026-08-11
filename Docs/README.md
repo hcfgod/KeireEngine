@@ -5,7 +5,7 @@ authoring, runtime, scripting, packaging, and release workflows implemented by t
 [Kéire documentation site](https://keireengine.duckdns.org/docs/) is generated from these exact Markdown files; GitHub
 and the website therefore present one maintained body of documentation rather than parallel copies.
 
-Kéire is currently version 0.2.0 and pre-1.0. Guides describe the checked-in implementation and identify unfinished
+Kéire is currently version 0.3.0 and pre-1.0. Guides describe the checked-in implementation and identify unfinished
 release work honestly. Roadmap material is labeled as roadmap material and does not redefine the supported API.
 
 ## Choose a Starting Point
@@ -70,6 +70,7 @@ All 55 published guides are listed below in the same groups used by the document
 | [Built-In Meshes](BuiltinMeshes.md) | Primitive IDs, dimensions, orientation, UV/normal conventions, collision expectations, and usage. |
 | [Rendering](Rendering.md) | Render ownership, frame order, viewports, cameras, static submission, spatial lighting, and diagnostics. |
 | [Shaders and Materials](ShadersAndMaterials.md) | Shader manifests, compilation, reflection, material graphs, instances, fallback, and target cooking. |
+| [Material Ecosystem Parity](MaterialParityMatrix.md) | Unreal-inspired capability matrix, delivered evidence, remaining priorities, and production acceptance gates. |
 | [VFX Authoring and Runtime](Vfx.md) | Graph mental model, effects, scene emitters, C++/C# control, CPU/GPU execution, diagnostics, and budgets. |
 | [VFX Beyond-Parity Roadmap](VfxBeyondParityRoadmap.md) | Explicit future VFX milestones and acceptance evidence; not a current capability contract. |
 | [Generated VFX Capabilities](generated/VfxCapabilities.md) | Generated feature/evidence matrix derived from the reviewed VFX parity manifest. |

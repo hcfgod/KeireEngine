@@ -105,10 +105,10 @@
       ],
       "thumbnail": "Thumbnails/sandbox.png",
       "screenshots": [],
-      "compatibleEditors": ">=0.2.0 <2.0.0",
+      "compatibleEditors": ">=0.3.0 <2.0.0",
       "projectSchema": 3,
       "platformTarget": "desktop",
-      "estimatedSizeBytes": 24635811,
+      "estimatedSizeBytes": 24656540,
       "payloadRoot": "Payloads/Sandbox",
       "payloadFiles": [
         {
@@ -178,13 +178,13 @@
         },
         {
           "path": "Assets/Materials/MaterialGraphs/01_BasicPaint.keirematerialgraph",
-          "sizeBytes": 2208,
-          "sha256": "b1a737b44ebf1c95e6c2f3c4a73299ed63a739a60d4ec8fa55eb32844c716a8d"
+          "sizeBytes": 6828,
+          "sha256": "e520a2d5602828db41112af3d4c55b147dadf162e3ef0ecfdd1a27064016cb87"
         },
         {
           "path": "Assets/Materials/MaterialGraphs/01_BasicPaint.keirematerialgraph.keiremeta",
-          "sizeBytes": 377,
-          "sha256": "12f8f6f0d79ec336ab6820bb7f0c51222533dcfe63df3bcc99c43ae7025f82f7"
+          "sizeBytes": 368,
+          "sha256": "d4783b8270cab4e4b54f2a81ab0490851dec6b2d34b2ba83d8a9e70af68b36b6"
         },
         {
           "path": "Assets/Materials/MaterialGraphs/01_BasicPaint_Shader.keireshadergraph",
@@ -193,8 +193,8 @@
         },
         {
           "path": "Assets/Materials/MaterialGraphs/01_BasicPaint_Shader.keireshadergraph.keiremeta",
-          "sizeBytes": 314,
-          "sha256": "f74966d605f4f296e1cfe36a5cf4e377d0f40dcf8ced912e210830526270816a"
+          "sizeBytes": 304,
+          "sha256": "264c0c103d79d211fc525bffe371a020a62c1754f3d4339e80160cdc74e90a4c"
         },
         {
           "path": "Assets/Materials/MaterialGraphs/02_TexturedSurface.keirematerialgraph",
@@ -203,8 +203,8 @@
         },
         {
           "path": "Assets/Materials/MaterialGraphs/02_TexturedSurface.keirematerialgraph.keiremeta",
-          "sizeBytes": 377,
-          "sha256": "d3d7c37ed3660eb6302869a86ea824a9de9dcab484062df8c76758aca13ecb72"
+          "sizeBytes": 368,
+          "sha256": "0c2f190103b3724977a61a9dfe38ddef1d0d9d667af88eb285a9f69e58170bfe"
         },
         {
           "path": "Assets/Materials/MaterialGraphs/02_TexturedSurface_Shader.keireshadergraph",
@@ -213,8 +213,8 @@
         },
         {
           "path": "Assets/Materials/MaterialGraphs/02_TexturedSurface_Shader.keireshadergraph.keiremeta",
-          "sizeBytes": 314,
-          "sha256": "c8c7e35274ba7f87c39bce96cca988db63cc8a4927d0c46b08573abdfe853bc3"
+          "sizeBytes": 304,
+          "sha256": "14d91540d80b1181ec3faf1606fb0daf95998bd68d7ef3aa1264422825b86ca6"
         },
         {
           "path": "Assets/Materials/MaterialGraphs/03_ProceduralEmissive.keirematerialgraph",
@@ -223,8 +223,8 @@
         },
         {
           "path": "Assets/Materials/MaterialGraphs/03_ProceduralEmissive.keirematerialgraph.keiremeta",
-          "sizeBytes": 377,
-          "sha256": "6491a70fc943062bf402c5ca71ee07a240006c75b8960e678f3490d5857c0a28"
+          "sizeBytes": 368,
+          "sha256": "9b2c6776946a3a398f1160ae7dd629366c9af2aead9ac3946723412dd1538b44"
         },
         {
           "path": "Assets/Materials/MaterialGraphs/03_ProceduralEmissive_Shader.keireshadergraph",
@@ -233,8 +233,8 @@
         },
         {
           "path": "Assets/Materials/MaterialGraphs/03_ProceduralEmissive_Shader.keireshadergraph.keiremeta",
-          "sizeBytes": 314,
-          "sha256": "46a0e8e6f87cef878ddf429376bdc572ac974d4d515e073cbe640a4b8ea739d8"
+          "sizeBytes": 304,
+          "sha256": "952c01063069a1a941a60fdfaa831d39d13f519080ae4085b72670f1bbee8310"
         },
         {
           "path": "Assets/Materials/MaterialGraphs/04_ClearCoatDetail.keirematerialgraph",
@@ -243,8 +243,8 @@
         },
         {
           "path": "Assets/Materials/MaterialGraphs/04_ClearCoatDetail.keirematerialgraph.keiremeta",
-          "sizeBytes": 377,
-          "sha256": "1e444834c83784cb7eef517dc23bd15b4b3c948ba8ea188c957d6a25e4785bf7"
+          "sizeBytes": 368,
+          "sha256": "d4590f85014a0f50ee780e29f92c1ea4d4c62adea1f8e4dfaeaaf12ccfc01e0c"
         },
         {
           "path": "Assets/Materials/MaterialGraphs/04_ClearCoatDetail_Shader.keireshadergraph",
@@ -253,8 +253,8 @@
         },
         {
           "path": "Assets/Materials/MaterialGraphs/04_ClearCoatDetail_Shader.keireshadergraph.keiremeta",
-          "sizeBytes": 314,
-          "sha256": "7954c13a9358341a1bcaffc081ec3a979b8c6d60950f69a5255950bd14349d95"
+          "sizeBytes": 304,
+          "sha256": "4d38624bbad9d00453120fdbd9595dd5a04d0c5667b7c101025939d157cdd8fe"
         },
         {
           "path": "Assets/Materials/MaterialGraphs/05_AdaptiveTechSurface.keirematerialgraph",
@@ -263,8 +263,8 @@
         },
         {
           "path": "Assets/Materials/MaterialGraphs/05_AdaptiveTechSurface.keirematerialgraph.keiremeta",
-          "sizeBytes": 377,
-          "sha256": "8a0652b41f7cd17f54846e06269696f9d74c63a4a7518a475c85e9ace2ecc81c"
+          "sizeBytes": 368,
+          "sha256": "0356371113b9197088dea603ea8e003b063f37db00dd1527e4cc3fcbdb8f4df9"
         },
         {
           "path": "Assets/Materials/MaterialGraphs/05_AdaptiveTechSurface_Shader.keireshadergraph",
@@ -273,8 +273,8 @@
         },
         {
           "path": "Assets/Materials/MaterialGraphs/05_AdaptiveTechSurface_Shader.keireshadergraph.keiremeta",
-          "sizeBytes": 423,
-          "sha256": "8ebe664f875e2815c9160de5d85d46cf62a292dc9716982623d021f8a1d8da41"
+          "sizeBytes": 410,
+          "sha256": "4adcd8682d21863476b9567f495e064c31ce733a2d53e86f3f2d3ed222a7686b"
         },
         {
           "path": "Assets/Materials/MaterialGraphs/06_AnisotropicBrushedMetal.keirematerialgraph",
@@ -283,8 +283,8 @@
         },
         {
           "path": "Assets/Materials/MaterialGraphs/06_AnisotropicBrushedMetal.keirematerialgraph.keiremeta",
-          "sizeBytes": 377,
-          "sha256": "9fc3e8bbc3bed50d7b4411988890528def1ab961167e6f458ab454cbe1108906"
+          "sizeBytes": 368,
+          "sha256": "efbb1c56a4dc1c00bb0a4c79871ddc6664db5815870384ad2f482ffcf6e1d986"
         },
         {
           "path": "Assets/Materials/MaterialGraphs/06_AnisotropicBrushedMetal_Shader.keireshadergraph",
@@ -293,8 +293,8 @@
         },
         {
           "path": "Assets/Materials/MaterialGraphs/06_AnisotropicBrushedMetal_Shader.keireshadergraph.keiremeta",
-          "sizeBytes": 314,
-          "sha256": "7bdabbdd47d9870cdda2b181b195c8d29d844b2b13cf911c1da05a5f9eb9652c"
+          "sizeBytes": 304,
+          "sha256": "37f6395c51907d5e1a3cdf0a523eac7931679fec24a8f03bea8206bbf9fc0e7b"
         },
         {
           "path": "Assets/Materials/MaterialGraphs/07_TransmissionGlass.keirematerialgraph",
@@ -303,8 +303,8 @@
         },
         {
           "path": "Assets/Materials/MaterialGraphs/07_TransmissionGlass.keirematerialgraph.keiremeta",
-          "sizeBytes": 377,
-          "sha256": "1ef5b28426fea52f09a92f2f9536b9d1b2dd312f8f870ee25e38e952cf4877f1"
+          "sizeBytes": 368,
+          "sha256": "dbf79e7eb9476453070752db0fa8f26151dce2d63e843f0ffda2835babd9e5df"
         },
         {
           "path": "Assets/Materials/MaterialGraphs/07_TransmissionGlass_Shader.keireshadergraph",
@@ -313,8 +313,8 @@
         },
         {
           "path": "Assets/Materials/MaterialGraphs/07_TransmissionGlass_Shader.keireshadergraph.keiremeta",
-          "sizeBytes": 314,
-          "sha256": "178c8010da0facf3388bf5d98be57bfb8ac13b9e8d820b0fb36ff4065f6eaced"
+          "sizeBytes": 304,
+          "sha256": "bf31d3a8d7ad2c3b49e1eb2c30afef06abff9473c85ff6e86482be48be18c95f"
         },
         {
           "path": "Assets/Materials/MaterialGraphs/08_ProceduralVertexDisplacement.keirematerialgraph",
@@ -323,8 +323,8 @@
         },
         {
           "path": "Assets/Materials/MaterialGraphs/08_ProceduralVertexDisplacement.keirematerialgraph.keiremeta",
-          "sizeBytes": 377,
-          "sha256": "505dbe90138102850667cbc3d61f2f8491692580a1ce09ede743ec77eaf7c89b"
+          "sizeBytes": 368,
+          "sha256": "a7f59201dc3bb19d9686388eda6db361b61fe470624c48ed46f71d9623e364f1"
         },
         {
           "path": "Assets/Materials/MaterialGraphs/08_ProceduralVertexDisplacement_Shader.keireshadergraph",
@@ -333,18 +333,18 @@
         },
         {
           "path": "Assets/Materials/MaterialGraphs/08_ProceduralVertexDisplacement_Shader.keireshadergraph.keiremeta",
-          "sizeBytes": 314,
-          "sha256": "81191f0c61224140e5fb6ad4f924bbb6885af7f79e67b5f9fcf117e9e02e079e"
+          "sizeBytes": 304,
+          "sha256": "ca2355f24bcf676b700e53d4eaf7c26956f053e94ac08adb9f6d18d2aa25311f"
         },
         {
           "path": "Assets/Materials/MaterialGraphs/09_HolographicVoronoi.keirematerialgraph",
-          "sizeBytes": 508,
-          "sha256": "f1bc0c373a3b3245a1579063dbb27bd45d3cc53530eab356c45d2ea74b4d1859"
+          "sizeBytes": 16791,
+          "sha256": "00ea54467a905ac37fba34d21e64be742fbe3cb81ef583dd632ccf138acf5f50"
         },
         {
           "path": "Assets/Materials/MaterialGraphs/09_HolographicVoronoi.keirematerialgraph.keiremeta",
-          "sizeBytes": 377,
-          "sha256": "5d7963cc83dd14f1da274fa63413181777f3dd3e85801f8da5a26eba44f7ba18"
+          "sizeBytes": 368,
+          "sha256": "414110ba793527a68c965389bfc21916a041ecce1deedd66f019ad9edf00c3f8"
         },
         {
           "path": "Assets/Materials/MaterialGraphs/09_HolographicVoronoi_Shader.keireshadergraph",
@@ -353,8 +353,8 @@
         },
         {
           "path": "Assets/Materials/MaterialGraphs/09_HolographicVoronoi_Shader.keireshadergraph.keiremeta",
-          "sizeBytes": 314,
-          "sha256": "37ebc9f7c2de32624af009eae721e79f25f0dd46cfcc202e55ea908351ad1034"
+          "sizeBytes": 304,
+          "sha256": "c8edba2e9cb92ce975cb34138210e8500ee7b5721d325bb58eb238b7e4fef2d7"
         },
         {
           "path": "Assets/Materials/Monster1.keirematerial",

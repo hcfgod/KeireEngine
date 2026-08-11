@@ -257,6 +257,22 @@ void EditorWorkspaceLayer::PersistInspectorMaterialInstance(const Keire::AssetId
     m_AssetStatus = "Saved Material Instance overrides and queued its runtime material rebuild.";
 }
 
+void EditorWorkspaceLayer::PersistInspectorMaterialParameterCollection(const Keire::AssetId asset,
+                                                                       const std::span<const std::byte> bytes)
+{
+    if (!m_AssetDatabase || !m_AssetOperations)
+        throw std::runtime_error("Material Parameter Collection persistence services are unavailable.");
+    const auto record = m_AssetDatabase->Find(asset);
+    if (!record || record->Type != Keire::MaterialParameterCollectionAsset::StaticType() ||
+        record->RelativePath.extension() != Keire::MaterialParameterCollectionAssetSourceExtension)
+        throw std::invalid_argument("Only Material Parameter Collection sources can be persisted here.");
+    const auto& specification = m_AssetDatabase->Specification();
+    KeireEditor::Detail::WriteBytesAtomically(
+        specification.ProjectRoot / specification.SourceDirectory / record->RelativePath, bytes);
+    m_AssetOperations->QueueImport(KeireEditor::AssetOperationPriority::ExplicitAction, {.ReloadAsset = asset});
+    m_AssetStatus = "Saved Material Parameter Collection and queued dependent material rebuilds.";
+}
+
 void EditorWorkspaceLayer::ImportInspectorAssets() { ImportAssets(); }
 
 void EditorWorkspaceLayer::PreviewInspectorManagedData(const Keire::AssetId asset,

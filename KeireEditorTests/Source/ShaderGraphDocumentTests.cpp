@@ -43,6 +43,42 @@ namespace
 
 } // namespace
 
+TEST_CASE("Shader Graph document preserves reusable function metadata without standalone shader publication")
+{
+    std::vector<std::byte> persisted;
+    KeireEditor::ShaderGraphDocument document(
+        {.Persist = [&persisted](Keire::AssetId, const std::span<const std::byte> bytes)
+         { persisted.assign(bytes.begin(), bytes.end()); }});
+    auto function = Keire::CreateDefaultGraphFunction(Keire::ShaderGraphPurpose::MaterialFunction);
+    function.Description = "Shared production color transform.";
+    function.Category = "Project / Surface";
+    function.SortPriority = 42;
+    function.ExposeToLibrary = false;
+    const auto input =
+        std::ranges::find(function.Body.Nodes, Keire::ShaderGraphNodeKind::Parameter, &Keire::ShaderGraphNode::Kind);
+    REQUIRE(input != function.Body.Nodes.end());
+    const auto inputId = input->Id;
+
+    document.Open(Keire::AssetId::Generate(), function, 1);
+    CHECK(document.ReusableGraph());
+    CHECK(document.Publishable());
+    CHECK(document.Compilation().Variants.empty());
+    REQUIRE(document.EditNode(inputId, [](auto& node) { node.Name = "Source Color"; }));
+    CHECK(document.Dirty());
+    document.Save();
+    CHECK_FALSE(document.Dirty());
+    REQUIRE_FALSE(persisted.empty());
+
+    const auto decoded = Keire::MaterialFunctionAsset::DecodeSource(persisted);
+    CHECK(decoded.Description == function.Description);
+    CHECK(decoded.Category == function.Category);
+    CHECK(decoded.SortPriority == function.SortPriority);
+    CHECK(decoded.ExposeToLibrary == function.ExposeToLibrary);
+    const auto decodedInput = std::ranges::find(decoded.Body.Nodes, inputId, &Keire::ShaderGraphNode::Id);
+    REQUIRE(decodedInput != decoded.Body.Nodes.end());
+    CHECK(decodedInput->Name == "Source Color");
+}
+
 TEST_CASE("Shader Graph document reuses the stable canvas and preserves last-good preview")
 {
     std::size_t previewCount = 0;

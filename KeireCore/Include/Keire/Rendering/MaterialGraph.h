@@ -2,6 +2,7 @@
 
 #include "Keire/Api.h"
 #include "Keire/Assets/RenderingAssets.h"
+#include "Keire/Rendering/ShaderGraph.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -14,7 +15,8 @@
 
 namespace Keire
 {
-    inline constexpr std::uint32_t MaterialGraphSourceSchemaVersion = 2;
+    inline constexpr std::uint32_t MaterialGraphSourceSchemaVersion = 3;
+    inline constexpr std::uint32_t MaterialInstanceSourceSchemaVersion = 2;
 
     struct MaterialGraphPropertyBinding
     {
@@ -68,6 +70,9 @@ namespace Keire
         std::vector<MaterialGraphPropertyBinding> Properties;
         std::vector<MaterialGraphValueNode> Nodes;
         std::vector<MaterialGraphConnection> Connections;
+        /// Artist-authored surface expressions. The Shader Graph supplies the reusable renderer/master template;
+        /// connections to this graph's Master node override matching template outputs during material compilation.
+        ShaderGraphDefinition SurfaceGraph;
 
         bool operator==(const MaterialGraphDefinition&) const = default;
     };
@@ -93,9 +98,10 @@ namespace Keire
 
     struct MaterialInstanceDefinition
     {
-        std::uint32_t SchemaVersion = 1;
+        std::uint32_t SchemaVersion = MaterialInstanceSourceSchemaVersion;
         AssetId Parent;
         std::map<std::string, MaterialPropertyValue, std::less<>> Properties;
+        std::map<std::string, std::string, std::less<>> KeywordOverrides;
         std::optional<MaterialSurfaceState> Surface;
         std::optional<bool> ContributeEmissionToGI;
         std::optional<float> EmissiveGIIntensity;
@@ -152,6 +158,8 @@ namespace Keire
     [[nodiscard]] KEIRE_API MaterialPropertyValue DefaultMaterialGraphValue(const ShaderPropertyDefinition& property);
     [[nodiscard]] KEIRE_API MaterialGraphDefinition
     CreateMaterialGraph(MaterialShaderReference shader, const ShaderInterfaceDefinition& interfaceDefinition);
+    [[nodiscard]] KEIRE_API ShaderGraphDefinition
+    CreateMaterialSurfaceGraph(const ShaderGraphDefinition& shaderTemplate);
     KEIRE_API void SynchronizeMaterialGraphInterface(MaterialGraphDefinition& definition,
                                                      const ShaderInterfaceDefinition& interfaceDefinition);
     [[nodiscard]] KEIRE_API MaterialGraphValueNode CreateMaterialGraphValueNode(ShaderPropertyType type,
@@ -159,6 +167,8 @@ namespace Keire
                                                                                 Vector2 position = {120.0F, 120.0F});
     [[nodiscard]] KEIRE_API std::map<std::string, MaterialPropertyValue, std::less<>>
     EvaluateMaterialGraphProperties(const MaterialGraphDefinition& definition);
+    [[nodiscard]] KEIRE_API ShaderGraphDefinition
+    ComposeMaterialGraphShader(const MaterialGraphDefinition& definition, const ShaderGraphDefinition& shaderTemplate);
     KEIRE_API void ValidateMaterialGraph(const MaterialGraphDefinition& definition);
     [[nodiscard]] KEIRE_API std::vector<MaterialGraphDiagnostic>
     ValidateMaterialGraphAgainstInterface(const MaterialGraphDefinition& definition,
