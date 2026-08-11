@@ -542,6 +542,9 @@ assert_true grep -q "windows-resource-update" "$ROOT/Scripts/Windows/player-supp
 assert_true grep -q 'create-build-support' "$ROOT/Scripts/Unix/player-support.sh"
 assert_true grep -q 'signature_key_id' "$ROOT/Scripts/Unix/player-support.sh"
 assert_true grep -q -- '--manifest-output' "$ROOT/Scripts/Unix/player-support.sh"
+for package_script in package.sh package-editor.sh package-hub.sh package-installer.sh package-hub-installer.sh; do
+  assert_true grep -Fqx 'umask 0022' "$ROOT/Scripts/Unix/$package_script"
+done
 assert_true test -f "$ROOT/Config/Branding/Keire.ico"
 assert_true test -f "$ROOT/Config/Branding/Keire.res"
 assert_true python3 -c \
