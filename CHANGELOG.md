@@ -1,5 +1,8 @@
 # Changelog
 
+- Bounded unsigned website preview retention to one verified installer per Hub version, platform, and architecture.
+  Preview metadata now deterministically keeps the newest build for each retained identity, while signed stable releases
+  remain immutable and older supported editor versions remain available through the Hub catalog.
 - Rebuilt the canonical and packaged Sandbox around a clean Material Lab with twelve separately organized Shader Graph
   and Material Graph pairs spanning foundations, production surfaces, and advanced animated rendering. The new startup
   gallery validates every material binding, adds reusable managed presentation behavior and four edit-mode VFX

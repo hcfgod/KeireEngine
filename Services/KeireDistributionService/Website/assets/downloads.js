@@ -169,7 +169,15 @@ function validatePreviewMetadata(metadata) {
         candidates.push({ packageRecord, version, editorVersion });
     }
     candidates.sort(comparePreviewCandidates);
-    return candidates;
+    const retainedIdentities = new Set();
+    return candidates.filter(({ packageRecord }) => {
+        const identity = `${packageRecord.platform}/${packageRecord.architecture}/${packageRecord.version}`;
+        if (retainedIdentities.has(identity)) {
+            return false;
+        }
+        retainedIdentities.add(identity);
+        return true;
+    });
 }
 
 function bytes(value) {

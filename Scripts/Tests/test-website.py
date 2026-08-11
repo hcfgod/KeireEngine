@@ -234,8 +234,14 @@ def main() -> int:
             "Preview download metadata must retain at least one explicit preview."
         )
     release_ids = set()
+    retained_previews = set()
     for preview in packages:
         release_id = str(preview.get("releaseId", ""))
+        retained_preview = (
+            str(preview.get("platform", "")),
+            str(preview.get("architecture", "")),
+            str(preview.get("version", "")),
+        )
         if (
             preview.get("type") != "hubInstallerPreview"
             or preview.get("platform") not in {"windows", "macos", "linux"}
@@ -245,15 +251,17 @@ def main() -> int:
             or not str(preview.get("publishedAt", "")).endswith("Z")
             or not release_id
             or release_id in release_ids
+            or retained_preview in retained_previews
             or not str(preview.get("url", "")).startswith("/preview-downloads/")
             or str(preview.get("sha256", ""))[:8] not in str(preview.get("fileName", ""))
             or len(str(preview.get("sha256", ""))) != 64
             or int(preview.get("sizeBytes", 0)) < 1
         ):
             raise ValueError(
-                "Preview download metadata does not preserve its versioned unsigned development identity."
+                "Preview download metadata does not preserve its unique retained unsigned development identity."
             )
         release_ids.add(release_id)
+        retained_previews.add(retained_preview)
 
     contact = (WEBSITE / "assets" / "contact.js").read_text(encoding="utf-8")
     if (

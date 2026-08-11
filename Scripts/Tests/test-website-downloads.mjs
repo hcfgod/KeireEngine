@@ -129,6 +129,17 @@ assert.equal(validatePreview({ ...preview, packages: [{ ...preview.packages[0], 
 assert.equal(validatePreview({ ...preview, packages: [{ ...preview.packages[0], releaseId: "../preview" }] }).length, 0);
 assert.equal(validatePreview({ ...preview, packages: [{ ...preview.packages[0], url: "https://example.com/setup.exe" }] }).length, 0);
 assert.equal(validatePreview({ ...preview, packages: [{ ...preview.packages[0], fileName: "../setup.exe" }] }).length, 0);
+const olderDuplicate = {
+    ...preview.packages[0],
+    releaseId: "windows-x86_64-0.1.0-20260807.1",
+    publishedAt: "2026-08-07T01:06:57Z",
+    fileName: "keire-hub-windows-x86_64-0.1.0-preview-bbbbbbbb.exe",
+    url: "/preview-downloads/keire-hub-windows-x86_64-0.1.0-preview-bbbbbbbb.exe",
+    sha256: "b".repeat(64),
+};
+const retainedPreview = validatePreview({ ...preview, packages: [olderDuplicate, preview.packages[0]] });
+assert.equal(retainedPreview.length, 1);
+assert.equal(retainedPreview[0].packageRecord.releaseId, preview.packages[0].releaseId);
 
 await new Promise((resolve) => setTimeout(resolve, 0));
 
