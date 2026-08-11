@@ -171,6 +171,19 @@ TEST_CASE("WindowSystem enforces one active instance and supports reinitializati
     second->Shutdown();
 }
 
+TEST_CASE("WindowSystem tolerates configured icons on the headless video driver")
+{
+    UseDummyVideoDriver();
+    auto system = Keire::CreateRef<Keire::WindowSystem>();
+    auto specification = HiddenSpecification("headless-icon");
+    specification.Icon = std::filesystem::current_path() / "Config/Branding/Keire.png";
+    auto window = system->CreateWindow(specification);
+    CHECK(window->IsOpen());
+    window->Close();
+    window.Reset();
+    system->Shutdown();
+}
+
 TEST_CASE("WindowSystem creates and routes multiple opaque window identities")
 {
     UseDummyVideoDriver();

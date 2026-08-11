@@ -1,8 +1,8 @@
 #include "KeireInternal/Assets/BuiltinMeshes.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
-#include <ranges>
 #include <stdexcept>
 
 namespace Keire::Detail

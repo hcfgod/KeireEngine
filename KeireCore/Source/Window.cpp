@@ -14,6 +14,7 @@
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -511,7 +512,9 @@ namespace Keire
                 const auto icon = Detail::LoadWindowIcon(specification.Icon);
                 if (!icon)
                     throw WindowError("LoadWindowIcon", "could not decode the configured window icon");
-                if (!SDL_SetWindowIcon(native.get(), icon.get()))
+                const auto* videoDriver = SDL_GetCurrentVideoDriver();
+                if (!SDL_SetWindowIcon(native.get(), icon.get()) &&
+                    (!videoDriver || std::string_view(videoDriver) != "dummy"))
                     throw WindowError("SDL_SetWindowIcon", LastSdlError());
             }
             Detail::ConfigureMinimumWindowSize(native.get(), specification);

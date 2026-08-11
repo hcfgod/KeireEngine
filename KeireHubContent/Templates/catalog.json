@@ -108,7 +108,7 @@
       "compatibleEditors": ">=0.3.0 <2.0.0",
       "projectSchema": 3,
       "platformTarget": "desktop",
-      "estimatedSizeBytes": 24782639,
+      "estimatedSizeBytes": 24782310,
       "payloadRoot": "Payloads/Sandbox",
       "payloadFiles": [
         {
@@ -628,8 +628,8 @@
         },
         {
           "path": "Assets/Shaders/DefaultUnlit.hlsl",
-          "sizeBytes": 33253,
-          "sha256": "991e29bc9f04a6d3ec71fad590ecc1ddfbb0349e869b1b911136c420fb46c90e"
+          "sizeBytes": 32924,
+          "sha256": "d22e9aa26181fae0b102c4ba0855e237594c943269de1c253b787eb766b2b0d6"
         },
         {
           "path": "Assets/Shaders/DefaultUnlit.hlsl.keiremeta",

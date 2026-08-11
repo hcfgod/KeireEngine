@@ -2,12 +2,12 @@
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <ranges>
 #include <stdexcept>
 #include <string>
 #include <thread>

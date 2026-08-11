@@ -129,6 +129,11 @@ version tags.
 
 ## Unreleased
 
+- Fixed Linux release validation when SDL's headless video driver does not support setting a window icon, while still
+  surfacing icon failures on normal desktop video drivers.
+- Hardened cross-platform packaging inputs: generated managed `bin`/`obj` trees no longer invalidate native project
+  generation, Sandbox binary payloads retain their exact bytes across checkouts, and distribution-service shell tools
+  are installed with executable permissions.
 - Expanded the packaged Sandbox template from a minimal scripting stub to the canonical clean authoring sample and
   added a deterministic cross-platform sync/check tool. New Sandbox projects now open a nine-display Shader Graph and
   Material Graph gallery spanning basic paint through transmission, vertex displacement, and holographic Voronoi,

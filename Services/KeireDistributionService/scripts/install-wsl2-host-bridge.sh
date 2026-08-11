@@ -52,10 +52,6 @@ fi
   exit 2
 }
 [[ -f "$source_bridge" ]] || { printf 'The WSL2 bridge script is missing.\n' >&2; exit 1; }
-grep -qi microsoft /proc/sys/kernel/osrelease || {
-  printf 'The Windows host bridge installer is supported only inside WSL2.\n' >&2
-  exit 2
-}
 
 if [[ $validate_only -eq 1 ]]; then
   bash -n "$source_bridge"
@@ -63,6 +59,10 @@ if [[ $validate_only -eq 1 ]]; then
   exit 0
 fi
 
+grep -qi microsoft /proc/sys/kernel/osrelease || {
+  printf 'The Windows host bridge installer is supported only inside WSL2.\n' >&2
+  exit 2
+}
 [[ $EUID -eq 0 ]] || { printf 'Installation requires root.\n' >&2; exit 1; }
 command -v systemctl >/dev/null 2>&1 || { printf 'systemd is required.\n' >&2; exit 1; }
 for command_name in curl getent ip socat; do

@@ -30,6 +30,9 @@ KeireHubContent/Templates/** text eol=lf
 *.ico binary
 *.jpg binary
 *.jpeg binary
+*.png binary
+*.wav binary
+*.fbx binary
 *.res binary
 *.ttf binary
 *.zip binary

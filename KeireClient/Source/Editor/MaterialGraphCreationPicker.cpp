@@ -1,6 +1,6 @@
 #include "KeireClient/Editor/MaterialGraphCreationPicker.h"
 
-#include <ranges>
+#include <algorithm>
 
 namespace KeireEditor
 {

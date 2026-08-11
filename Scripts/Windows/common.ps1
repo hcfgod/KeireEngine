@@ -61,7 +61,8 @@ function Get-ProjectGenerationFingerprint {
         $absoluteRoot = Join-Path $Root $sourceRoot
         if (-not (Test-Path -LiteralPath $absoluteRoot -PathType Container)) { continue }
         Get-ChildItem -LiteralPath $absoluteRoot -Recurse -File | Where-Object {
-            $_.Extension -in @(".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".lua", ".cs", ".csproj")
+            $_.Extension -in @(".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".lua", ".cs", ".csproj") -and
+                $_.FullName -notmatch '[\\/](?:bin|obj)[\\/]'
         } | ForEach-Object {
             $_.FullName.Substring($Root.ToString().Length).TrimStart("\", "/").Replace("\", "/")
         }
