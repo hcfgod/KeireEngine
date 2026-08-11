@@ -99,10 +99,13 @@ namespace KeireHub::Detail
         }
         const auto size = static_cast<std::uint64_t>(fileSize.QuadPart);
 #else
-        std::error_code error;
-        const auto size = std::filesystem::file_size(path, error);
-        if (error)
-            return HubResult<std::string>::Failure(IoError(HubErrorCode::IoRead, path, error.message()));
+        std::ifstream stream(path, std::ios::binary | std::ios::ate);
+        if (!stream)
+            return HubResult<std::string>::Failure(IoError(HubErrorCode::IoRead, path, "Could not open file."));
+        const auto end = stream.tellg();
+        if (end < 0)
+            return HubResult<std::string>::Failure(IoError(HubErrorCode::IoRead, path, "Could not determine size."));
+        const auto size = static_cast<std::uintmax_t>(end);
 #endif
         if (size > maximumBytes)
         {
@@ -134,9 +137,9 @@ namespace KeireHub::Detail
             offset += read;
         }
 #else
-        std::ifstream stream(path, std::ios::binary);
+        stream.seekg(0, std::ios::beg);
         if (!stream)
-            return HubResult<std::string>::Failure(IoError(HubErrorCode::IoRead, path, "Could not open file."));
+            return HubResult<std::string>::Failure(IoError(HubErrorCode::IoRead, path, "Could not seek file."));
         std::string result(static_cast<std::size_t>(size), '\0');
         if (!result.empty())
             stream.read(result.data(), static_cast<std::streamsize>(result.size()));

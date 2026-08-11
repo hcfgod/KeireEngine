@@ -7,6 +7,8 @@ versions.
 
 ### Changed
 
+- Fixed Hub journal reads intermittently failing while workers atomically published status and result replacements on
+  Linux. Text readers now determine size from the opened file version, preventing mixed metadata and content reads.
 - Made Shader Graph preview evaluation stack-safe for deep expression chains, prevented invalid replay controls from
   escaping the editor frame, and kept rejected replay host steps from advancing the committed fixed clock.
 - Added active distribution-snapshot metadata checks and periodic cryptographic revalidation, withdrawing a mutated

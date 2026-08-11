@@ -5,14 +5,19 @@
 #include "KeireHubRuntime/NotificationStore.h"
 
 #include <KeireHubRuntimeInternal/DistributionEncoding.h>
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <doctest/doctest.h>
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <stdexcept>
+#include <string>
+#include <thread>
 #include <utility>
 
 using namespace KeireHub;
@@ -53,6 +58,51 @@ namespace
         return std::move(parsed).Value();
     }
 } // namespace
+
+TEST_CASE("Atomic text reads stay bound to one published file version")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    const auto path = temporary.Path() / "atomic-read.txt";
+    const std::string shortVersion(64, 'a');
+    const std::string longVersion(4096, 'b');
+    REQUIRE(Detail::WriteTextFileAtomically(path, shortVersion));
+
+    std::atomic_bool writerDone = false;
+    HubStatus writerStatus = HubStatus::Success();
+    std::jthread writer(
+        [&]
+        {
+            for (std::size_t iteration = 0; iteration < 2'000; ++iteration)
+            {
+                writerStatus = Detail::WriteTextFileAtomically(
+                    path, iteration % 2 == 0 ? std::string_view(longVersion) : std::string_view(shortVersion));
+                if (!writerStatus)
+                    break;
+            }
+            writerDone.store(true, std::memory_order_release);
+        });
+
+    std::optional<HubError> readFailure;
+    while (!writerDone.load(std::memory_order_acquire) && !readFailure)
+    {
+        auto contents = Detail::ReadTextFile(path, longVersion.size());
+        if (!contents)
+        {
+            readFailure = contents.Error();
+            continue;
+        }
+        if (contents.Value() != shortVersion && contents.Value() != longVersion)
+        {
+            readFailure = {.Code = HubErrorCode::InvalidData,
+                           .Message = "An atomic read mixed two published file versions.",
+                           .AffectedItem = "atomic-read.txt"};
+        }
+    }
+    writer.join();
+
+    REQUIRE(writerStatus);
+    CHECK_FALSE(readFailure);
+}
 
 TEST_CASE("External installations can be registered but not treated as managed")
 {
