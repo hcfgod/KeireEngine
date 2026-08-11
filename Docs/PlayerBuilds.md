@@ -114,6 +114,7 @@ not considered supported merely because it compiles on a maintainer workstation.
 | Distribution | x86_64 Editor / player | ARM64 Editor / player | Release validation |
 | --- | --- | --- | --- |
 | Ubuntu 22.04 LTS and 24.04 LTS | Supported | Preview | Native build, tests, packaged Build & Run |
+| Ubuntu 26.04 LTS | Validation target | Unobserved | Distro-aware setup and Podman matrix added; native graphics/package evidence pending |
 | Debian 12 | Supported | Preview | Native build, tests, packaged Build & Run |
 | Fedora (current supported release) | Supported | Preview | Podman bootstrap plus native packaged smoke |
 | Arch Linux (current) | Supported | Preview | Podman bootstrap plus native packaged smoke |

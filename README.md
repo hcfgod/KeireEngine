@@ -86,21 +86,27 @@ Windows PowerShell with Ninja and MSVC:
 ./Scripts/project.ps1 run -Generator ninja -Configuration Debug -Toolset msc
 ```
 
-Linux with Ninja and GCC:
+Linux with distro-aware setup, Ninja, and GCC:
 
 ```sh
-bash Scripts/project.sh bootstrap --generator ninja --toolset gcc
-bash Scripts/project.sh test --generator ninja --configuration Debug --toolset gcc
+bash Scripts/setup-linux.sh --generator ninja --toolset gcc --test
 bash Scripts/project.sh run --generator ninja --configuration Debug --toolset gcc
 ```
 
 The clean Linux workflow is validated on Ubuntu 22.04/24.04, Debian 12, current Fedora and Arch, openSUSE
-Tumbleweed, and Rocky Linux 9. The bootstrap supports the `apt`, `dnf`, `pacman`, and `zypper` package families and
+Tumbleweed, and Rocky Linux 9. Ubuntu 26.04 is a setup and container-matrix target pending complete native validation.
+`Scripts/setup-linux.sh` detects the host and runs the authoritative bootstrap, workstation doctor, and optional test
+gate as one command. The bootstrap supports the `apt`, `dnf`, `pacman`, and `zypper` package families and
 installs verified project-private fallbacks when a distribution's Premake, CMake, Ninja, NASM, patchelf, .NET SDK, or
 GCC is missing or too old. It also installs the native dialog backend used when a desktop portal is unavailable; the
 Debian/Ubuntu Hub installer declares the same runtime dependency. On WSL2, keep the clone in the Linux filesystem (for
 example `~/src/KeireEngine`) rather than under `/mnt/c` for correct case-sensitive behavior and substantially better
 dependency-build performance.
+
+The setup script intentionally does not upgrade or reboot the operating system, install hypervisor guest additions,
+or change DNS, firewall, and network policy. Those host-owner operations remain explicit. A fresh machine needs only
+Git and trusted CA certificates before cloning; the complete per-distribution commands, release validation, graphical
+smokes, and Hub/editor packaging workflow are in [Getting Started](Docs/GettingStarted.md).
 
 Large dependency builds default to at most four compiler jobs to remain reliable on ordinary workstations and WSL2.
 Set `KEIRE_BUILD_JOBS` to a positive integer when the machine can safely support a different limit.

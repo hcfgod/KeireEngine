@@ -26,7 +26,7 @@ pointers or stage Git changes.
 | Platform | Current evidence | Public preview |
 | --- | --- | --- |
 | Windows x86-64 | Debug, Release, AddressSanitizer, complete Core/editor/Hub suites, SDK/package consumers, Direct3D 12, and Vulkan | Unsigned native Hub installer |
-| Linux x86-64 (glibc) | Ubuntu 22.04/24.04, Debian 12, Fedora, Arch, openSUSE Tumbleweed, and Rocky Linux 9; GCC warnings-as-errors, Debug/Release, sanitizers, packages, and WSLg Vulkan | Unsigned Hub DEB for Debian/Ubuntu; source builds on the other validated families |
+| Linux x86-64 (glibc) | Ubuntu 22.04/24.04, Debian 12, Fedora, Arch, openSUSE Tumbleweed, and Rocky Linux 9; Ubuntu 26.04 setup/matrix target pending native validation; GCC warnings-as-errors, Debug/Release, sanitizers, packages, and WSLg Vulkan | Unsigned Hub DEB for Debian/Ubuntu; source builds on the other validated families |
 | Linux ARM64 or Alpine/musl | Build contracts retained but not validated in this audit | Not published |
 | macOS x86-64/ARM64 | Build and packaging contracts retained; native macOS and Metal evidence remains outstanding | Not published |
 
@@ -54,10 +54,47 @@ cross-platform workflow.
 ## First Linux Build
 
 Kéire's clean Linux path is validated on Ubuntu 22.04/24.04, Debian 12, current Fedora and Arch, openSUSE
-Tumbleweed, and Rocky Linux 9. The bootstrap recognizes `apt`, `dnf`, `pacman`, and `zypper`; installs the required
-X11/Wayland, compiler, CMake, .NET, shader, and media prerequisites; and keeps pinned fallback tools beneath
+Tumbleweed, and Rocky Linux 9. Ubuntu 26.04 is included as a setup and container-matrix target, but it remains a new
+native compatibility observation until the full test and graphics gates pass on a real host. The bootstrap recognizes
+`apt`, `dnf`, `pacman`, and `zypper`; installs the required X11/Wayland, compiler, CMake, .NET, shader, and media
+prerequisites; and keeps pinned fallback tools beneath
 `Tools/Linux` or the user's Kéire toolchain cache. It does not replace the distribution's system compiler or .NET
 installation.
+
+### Fresh-distribution preparation
+
+Bring a fresh operating-system installation current using that distribution's supported update workflow and reboot
+when its kernel or core runtime changes. Kéire does not automate system upgrades or reboots. Install only Git and the
+system CA bundle before cloning; the repository setup installs the remaining build prerequisites:
+
+| Distribution family | Initial command |
+| --- | --- |
+| Ubuntu or Debian (`apt`) | `sudo apt-get update && sudo apt-get install -y git ca-certificates` |
+| Fedora or Rocky Linux (`dnf`) | `sudo dnf install -y git ca-certificates` |
+| Arch Linux (`pacman`) | `sudo pacman -Syu --needed git ca-certificates` |
+| openSUSE Tumbleweed (`zypper`) | `sudo zypper --non-interactive install git ca-certificates` |
+
+VM guest additions, shared folders, GPU passthrough, DNS overrides, and firewall policy belong to the VM or host
+administrator. The project setup never changes them. Use a native Linux filesystem for the checkout, including inside
+a VM; shared folders are appropriate for transferring final artifacts but not for dependency-heavy builds.
+
+Clone, set up, and run the complete Debug gate:
+
+```sh
+mkdir -p ~/src
+cd ~/src
+git clone --recurse-submodules https://github.com/hcfgod/KeireEngine.git
+cd KeireEngine
+bash Scripts/setup-linux.sh --generator ninja --toolset clang --test
+```
+
+`Scripts/setup-linux.sh` reports the detected distribution and package-manager family, invokes the authoritative
+`project.sh bootstrap`, runs `project.sh doctor`, and optionally runs one complete test configuration. It is safe to
+rerun. Use `--jobs <count>` only when the machine can support more or fewer than the default maximum of four compiler
+workers. `--configuration Release --test` selects the Release gate; `--update` refreshes installed prerequisites; and
+`--force` intentionally restores project-private pinned tools.
+
+The equivalent explicit launcher sequence remains supported:
 
 ```sh
 bash Scripts/project.sh bootstrap --generator ninja --toolset gcc
@@ -81,6 +118,64 @@ bash Scripts/project.sh test --generator ninja --configuration Debug --toolset g
 The first clean build can be lengthy because it compiles locked native dependencies and the shader compiler. Builds
 use at most four parallel jobs by default to avoid memory exhaustion. Override that only when appropriate, for example
 `KEIRE_BUILD_JOBS=8 bash Scripts/project.sh test --generator ninja --configuration Debug --toolset gcc`.
+
+### Linux Hub and editor validation
+
+After the Debug test passes, run the optimized and sanitizer gates independently so a failure identifies its exact
+configuration:
+
+```sh
+bash Scripts/setup-linux.sh --generator ninja --toolset clang --test --configuration Release
+bash Scripts/setup-linux.sh --generator ninja --toolset clang --test --configuration DebugASan
+bash Scripts/Tests/test-unix.sh
+```
+
+Run these graphical checks from an interactive desktop session:
+
+```sh
+bash Scripts/project.sh run --generator ninja --configuration Debug --toolset clang --smoke-ui
+bash Scripts/project.sh run --generator ninja --configuration Debug --toolset clang --smoke-project
+```
+
+Normal `run` opens the Hub. Direct editor launch requires a project:
+
+```sh
+bash Scripts/project.sh run --generator ninja --configuration Debug --toolset clang
+bash Scripts/project.sh run --generator ninja --configuration Debug --toolset clang \
+  --editor --project "$PWD/Samples/KeireSandbox"
+```
+
+### Linux Hub and editor packages
+
+Packaging requires a clean checkout and always builds the `Dist` configuration. The distribution commands create
+portable archives, while the installer commands create Debian packages under `Artifacts/`:
+
+```sh
+git status --short
+bash Scripts/project.sh package-hub --generator ninja --toolset clang
+bash Scripts/project.sh package-editor --generator ninja --toolset clang
+bash Scripts/project.sh package-hub-installer --generator ninja --toolset clang
+bash Scripts/project.sh package-installer --generator ninja --toolset clang
+ls -lh Artifacts/
+```
+
+Verify the Hub installer from inside the artifact directory because its checksum file records the immutable basename:
+
+```sh
+cd Artifacts
+project_version="$(sed -n 's/^PROJECT_VERSION=//p' ../Config/Project.conf)"
+deb_architecture="$(dpkg --print-architecture)"
+hub_installer="keire-hub_${project_version}_${deb_architecture}.deb"
+sha256sum --check "${hub_installer}.sha256"
+dpkg-deb --info "$hub_installer"
+dpkg-deb --contents "$hub_installer"
+cd ..
+```
+
+A source build on a current Fedora, Arch, openSUSE, or new Ubuntu host validates that host; it does not make its linked
+binaries universal. Build a public Debian/Ubuntu preview on the declared Debian/Ubuntu release baseline, and use the
+oldest claimed Ubuntu baseline when the same artifact is intended to run on every newer supported Ubuntu version.
+Never relabel a binary built against a newer glibc as an older-baseline or distribution-independent artifact.
 
 ## First macOS Build
 

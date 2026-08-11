@@ -51,7 +51,8 @@ Fedora, Arch, openSUSE Tumbleweed, and Rocky Linux 9 across `apt`, `dnf`, `pacma
 baseline passes the warnings-as-errors Core/editor/Hub/managed/client matrix with 528 core, 118 editor, and 308 Hub
 tests, followed by a dummy-window client startup. The bootstrap uses checksum-pinned project-local fallbacks when an
 older distro cannot provide the required CMake, Ninja, NASM, patchelf, .NET, Premake, or GCC version; it does not
-replace system toolchains.
+replace system toolchains. Ubuntu 26.04 is now an explicit setup and container-matrix target, but it is not included in
+the observed evidence totals until its full native and graphics validation completes.
 
 The remaining release-evidence gates are a clean hosted matrix after Actions quota is restored, macOS/Metal and ARM64
 runs, privileged symbolic-link confinement probes, and broader named-hardware/long-duration performance evidence.

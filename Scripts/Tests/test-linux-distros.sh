@@ -18,8 +18,9 @@ Usage: bash Scripts/Tests/test-linux-distros.sh [options]
 
 Options:
   --suite <bootstrap|test>     Validation depth (default: test)
-  --distro <name|all>         ubuntu-22.04, ubuntu-24.04, debian-12, fedora,
-                              arch, tumbleweed, rocky-9, or all (default: all)
+  --distro <name|all>         ubuntu-22.04, ubuntu-24.04, ubuntu-26.04,
+                              debian-12, fedora, arch, tumbleweed, rocky-9,
+                              or all (default: all)
   --configuration <name>      Debug or Release for the test suite (default: Debug)
   --jobs <count>              Compiler workers per container (default: at most 4)
   --refresh-images            Pull newer images before testing
@@ -60,10 +61,10 @@ if git -C "$ROOT" submodule status --recursive | grep -q '^-'; then
     exit 1
 fi
 
-all_distros=(ubuntu-22.04 ubuntu-24.04 debian-12 fedora arch tumbleweed rocky-9)
+all_distros=(ubuntu-22.04 ubuntu-24.04 ubuntu-26.04 debian-12 fedora arch tumbleweed rocky-9)
 case "$distro" in
     all) selected=("${all_distros[@]}") ;;
-    ubuntu-22.04|ubuntu-24.04|debian-12|fedora|arch|tumbleweed|rocky-9) selected=("$distro") ;;
+    ubuntu-22.04|ubuntu-24.04|ubuntu-26.04|debian-12|fedora|arch|tumbleweed|rocky-9) selected=("$distro") ;;
     *) printf 'Unknown Linux distribution: %s\n' "$distro" >&2; exit 2 ;;
 esac
 
@@ -71,6 +72,7 @@ image_for() {
     case "$1" in
         ubuntu-22.04) printf 'docker.io/library/ubuntu:22.04' ;;
         ubuntu-24.04) printf 'docker.io/library/ubuntu:24.04' ;;
+        ubuntu-26.04) printf 'docker.io/library/ubuntu:26.04' ;;
         debian-12) printf 'docker.io/library/debian:12-slim' ;;
         fedora) printf 'registry.fedoraproject.org/fedora:latest' ;;
         arch) printf 'docker.io/archlinux:base-devel' ;;
@@ -102,6 +104,10 @@ for current in "${selected[@]}"; do
     if [[ "$suite" == test ]]; then
         matrix_arguments+=(--ci)
     fi
+    container_command=(bash Scripts/project.sh "$suite" "${matrix_arguments[@]}")
+    if [[ "$suite" == bootstrap ]]; then
+        container_command=(bash Scripts/setup-linux.sh --generator ninja --toolset gcc)
+    fi
     podman run --rm --name "$current_container" \
         --env "KEIRE_BUILD_JOBS=$jobs" \
         --env DOTNET_CLI_TELEMETRY_OPTOUT=1 \
@@ -113,7 +119,7 @@ for current in "${selected[@]}"; do
         --volume "$cache_prefix-tools:/work/Tools/Linux" \
         --volume "$cache_prefix-home-cache:/root/.cache" \
         --workdir /work "$image" \
-        bash Scripts/project.sh "$suite" "${matrix_arguments[@]}"
+        "${container_command[@]}"
     if [[ "$suite" == test ]]; then
         current_container="${cache_prefix}-$$-smoke"
         podman run --rm --name "$current_container" \

@@ -315,7 +315,17 @@ assert_true grep -F -q 'DOTNET_LINUX_X86_64_SHA512' "$ROOT/Scripts/Linux/bootstr
 assert_true grep -F -q '$(build_parallel_jobs)' "$ROOT/Scripts/Linux/bootstrap.sh" \
   "$ROOT/Scripts/Linux/build.sh" "$ROOT/Scripts/Unix/dependencies.sh" "$ROOT/Scripts/Unix/coral.sh" \
   "$ROOT/Scripts/Unix/ffmpeg.sh" "$ROOT/Scripts/Unix/shader-compiler.sh"
-assert_true grep -F -q 'ubuntu-22.04 ubuntu-24.04 debian-12 fedora arch tumbleweed rocky-9' \
+assert_true grep -F -q 'ubuntu-22.04 ubuntu-24.04 ubuntu-26.04 debian-12 fedora arch tumbleweed rocky-9' \
+  "$ROOT/Scripts/Tests/test-linux-distros.sh"
+assert_true test -f "$ROOT/Scripts/setup-linux.sh"
+assert_true bash -n "$ROOT/Scripts/setup-linux.sh"
+assert_true bash -n "$ROOT/Scripts/Tests/test-linux-distros.sh"
+assert_true bash "$ROOT/Scripts/setup-linux.sh" --help
+assert_true grep -F -q 'for candidate in apt-get dnf pacman zypper' "$ROOT/Scripts/setup-linux.sh"
+assert_true grep -F -q 'bash "$ROOT/Scripts/project.sh" bootstrap' "$ROOT/Scripts/setup-linux.sh"
+assert_true grep -F -q 'bash "$ROOT/Scripts/project.sh" doctor' "$ROOT/Scripts/setup-linux.sh"
+assert_true grep -F -q 'bash "$ROOT/Scripts/project.sh" test' "$ROOT/Scripts/setup-linux.sh"
+assert_true grep -F -q 'container_command=(bash Scripts/setup-linux.sh --generator ninja --toolset gcc)' \
   "$ROOT/Scripts/Tests/test-linux-distros.sh"
 assert_true grep -F -q -- '--volume "$cache_prefix-build:/work/Build"' \
   "$ROOT/Scripts/Tests/test-linux-distros.sh"

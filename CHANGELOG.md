@@ -1,5 +1,11 @@
 # Changelog
 
+- Added a distro-aware `Scripts/setup-linux.sh` workstation entry point for `apt`, `dnf`, `pacman`, and `zypper`
+  hosts. It composes the authoritative bootstrap and doctor with an optional complete test configuration, documents
+  fresh-host prerequisites, Hub/editor packaging, and verified cross-machine preview handoff without changing host
+  upgrade, reboot, VM, DNS, or firewall policy, and adds Ubuntu 26.04 as an explicit setup/container-matrix target
+  pending full native validation. Canonical Sandbox text assets now retain LF bytes across Windows and Linux checkouts
+  so template manifests remain deterministic on either host.
 - Fixed the Sandbox showcase ground and Neon Pulse material rendering magenta. The template now ships a dedicated,
   valid plinth material, removes stale material references from both sample scenes, and regenerates unlit graph shaders
   with a D3D12-compatible dense interpolator ABI and exact resource declarations. Material Graph thumbnails now choose

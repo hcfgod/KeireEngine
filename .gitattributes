@@ -25,6 +25,7 @@
 *.hpp text eol=lf
 
 KeireHubContent/Templates/** text eol=lf
+Samples/KeireSandbox/** text eol=lf
 
 *.exe binary
 *.ico binary

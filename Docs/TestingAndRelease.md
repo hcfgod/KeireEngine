@@ -85,9 +85,11 @@ Run the containerized Linux matrix from a standalone Linux or WSL2 clone with in
 bash Scripts/Tests/test-linux-distros.sh --suite test --distro all
 ```
 
-The matrix covers Ubuntu 22.04/24.04, Debian 12, Fedora, Arch, openSUSE Tumbleweed, and Rocky Linux 9. Each distro uses
-its native package manager, an isolated source overlay, and separate persistent build/tool/cache volumes. The default
-`test` suite performs the same complete warnings-as-errors core, editor, Hub, managed, and client compile validation as
+The matrix covers Ubuntu 22.04/24.04, Debian 12, Fedora, Arch, openSUSE Tumbleweed, and Rocky Linux 9, with Ubuntu 26.04
+included as a new setup and compatibility target pending complete native evidence. Each distro uses its native package
+manager, an isolated source overlay, and separate persistent build/tool/cache volumes. The `bootstrap` suite exercises
+the same distro-aware `Scripts/setup-linux.sh` entry point documented for real workstations. The default `test` suite
+performs the same complete warnings-as-errors core, editor, Hub, managed, and client compile validation as
 the hosted Linux launcher, then starts the built client through SDL's dummy window backend. Use `--suite bootstrap`
 for a faster clean-machine prerequisite check, `--distro <name>` for a focused run, or `--refresh-images` to pull
 current base images. `--jobs <count>` controls compiler concurrency inside each container.
@@ -95,8 +97,8 @@ current base images. `--jobs <count>` controls compiler concurrency inside each 
 This is the locally repeatable substitute when hosted Actions execution is unavailable; it does not convert an
 unobserved hosted check into a pass. Linux `.tar.gz` distributions are the common archive format produced on each
 intended Linux release baseline; a binary built against a newer glibc is not relabeled as universal. Native DEB
-installers target Debian/Ubuntu; RPM/repository publication remains a separate release artifact rather than being
-simulated by the matrix.
+installers target Debian/Ubuntu and must be built and tested on their declared Debian/Ubuntu baseline; RPM/repository
+publication remains a separate release artifact rather than being simulated by the matrix.
 
 Stable Linux editor catalog packages are produced from a clean detached release commit inside the Rocky Linux 9
 baseline container (glibc 2.34 and GCC Toolset 12). Headless release validation uses Xvfb with Mesa Vulkan for the
@@ -405,6 +407,14 @@ under an immutable digest-suffixed filename and appends a schema-2 entry to
 binds a unique release ID, Hub version, editor version, UTC publication time, platform, architecture, byte size, and
 SHA-256. The current Downloads page selects the newest available preview per platform, while
 `/downloads/previous/` lists every retained artifact that still passes a same-origin availability and size check.
+
+When the native release builder and distribution host are different machines, transfer the installer and its checksum
+through a private authenticated channel or a hypervisor shared folder into a non-served incoming directory. Do not add
+an upload endpoint to the public GET/HEAD-only website. Recompute the artifact size and SHA-256 on the distribution
+host, require them to match the builder's checksum, then copy the verified bytes under a new digest-suffixed name and
+append the metadata record with the actual UTC publication time. A transfer never overwrites an existing preview,
+changes a signed catalog, or removes an older retained artifact. Public HEAD/download checks and a second digest
+comparison complete the handoff.
 
 ## Native Editor Installers
 
