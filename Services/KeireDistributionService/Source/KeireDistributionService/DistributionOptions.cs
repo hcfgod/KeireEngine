@@ -7,6 +7,7 @@ public sealed class DistributionOptions
     public required string StorageRoot { get; init; }
     public required string BindUrl { get; init; }
     public required TimeSpan SnapshotPollInterval { get; init; }
+    public required TimeSpan SnapshotIntegrityPollInterval { get; init; }
     public required SnapshotValidationOptions Validation { get; init; }
     public int MetadataRequestsPerMinute { get; init; }
     public int PackageConcurrentStreams { get; init; }
@@ -32,6 +33,8 @@ public sealed class DistributionOptions
             StorageRoot = root,
             BindUrl = bindUrl,
             SnapshotPollInterval = TimeSpan.FromSeconds(BoundedInt(section, "SnapshotPollSeconds", 2, 1, 300)),
+            SnapshotIntegrityPollInterval =
+                TimeSpan.FromSeconds(BoundedInt(section, "SnapshotIntegrityPollSeconds", 300, 1, 86_400)),
             Validation = new SnapshotValidationOptions
             {
                 MaximumFiles = BoundedInt(section, "MaximumSnapshotFiles", 100_000, 1, 1_000_000),

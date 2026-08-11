@@ -559,7 +559,8 @@ namespace KeireHub
         for (auto& editor : product.Editors)
         {
             editor.HasActiveTask = std::ranges::any_of(*snapshot->Tasks,
-                                                       [&](const HubTask& task) {
+                                                       [&](const HubTask& task)
+                                                       {
                                                            return !IsTerminal(task.State) &&
                                                                   task.TargetInstallationId &&
                                                                   *task.TargetInstallationId == editor.Id;

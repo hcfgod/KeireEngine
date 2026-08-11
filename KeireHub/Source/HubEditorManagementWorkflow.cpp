@@ -210,7 +210,8 @@ namespace KeireHub
                 issues.push_back(issue.Message);
             const auto projectCount =
                 std::ranges::count_if(projects,
-                                      [&](const auto& project) {
+                                      [&](const auto& project)
+                                      {
                                           return project.PreferredEditorInstallationId &&
                                                  *project.PreferredEditorInstallationId == installation.Id;
                                       });
@@ -795,7 +796,8 @@ namespace KeireHub
         }
         const auto tasks = m_Controller.Tasks().Snapshot();
         activity.HasActiveTask = std::ranges::any_of(*tasks,
-                                                     [&](const auto& task) {
+                                                     [&](const auto& task)
+                                                     {
                                                          return !IsTerminal(task.State) && task.TargetInstallationId &&
                                                                 *task.TargetInstallationId == installation.Id;
                                                      });

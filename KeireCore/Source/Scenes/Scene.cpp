@@ -739,7 +739,8 @@ namespace Keire
                                                     return true;
                                                 });
                                   std::erase_if(instance.Overrides,
-                                                [&](const PrefabOverrideDefinition& overrideValue) {
+                                                [&](const PrefabOverrideDefinition& overrideValue)
+                                                {
                                                     return std::ranges::find(removedSources, overrideValue.Object) !=
                                                            removedSources.end();
                                                 });

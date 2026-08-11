@@ -823,7 +823,8 @@ TEST_CASE("Worker coordinator pause resume and cancellation control the detached
 
     REQUIRE(coordinator->Resume("controlled-download"));
     REQUIRE(WaitUntil(
-        [&] {
+        [&]
+        {
             return fake->Launches().size() == 2 &&
                    HasState(*coordinator, "controlled-download", HubTaskState::Downloading);
         }));

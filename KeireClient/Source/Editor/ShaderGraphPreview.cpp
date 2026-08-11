@@ -1,5 +1,8 @@
 #include "KeireClient/Editor/ShaderGraphPreview.h"
 
+#include "KeireClient/Editor/ShaderGraphPreviewGeometry.h"
+#include "KeireClient/Editor/ShaderGraphPreviewRaster.h"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -24,39 +27,13 @@ namespace KeireEditor
 {
     namespace
     {
-        constexpr std::size_t MaximumPreviewTriangles = 500'000;
-
         void CheckPreviewCancellation(const ShaderGraphPreviewRequest& request)
         {
             if (request.CancellationRequested && request.CancellationRequested())
                 throw std::runtime_error("Shader Graph preview rendering was superseded.");
         }
 
-        struct PreviewMaterial
-        {
-            Keire::Vector4 BaseColor{0.72F, 0.72F, 0.74F, 1.0F};
-            Keire::Vector3 Emission;
-            float Metallic = 0.0F;
-            float Roughness = 0.45F;
-            float Specular = 0.5F;
-            float ClearCoat = 0.0F;
-            float ClearCoatRoughness = 0.1F;
-            Keire::Vector3 SheenColor;
-            float SheenRoughness = 0.5F;
-            float Opacity = 1.0F;
-            float Occlusion = 1.0F;
-            Keire::Vector3 Normal;
-            bool HasBaseTexture = false;
-            bool HasNormal = false;
-            bool Unlit = false;
-        };
-
-        struct PreviewVertex
-        {
-            Keire::Vector3 Position;
-            Keire::Vector3 Normal;
-            Keire::Vector2 UV;
-        };
+        using Detail::PreviewMaterial;
 
         struct ProjectedVertex
         {
@@ -66,12 +43,6 @@ namespace KeireEditor
             Keire::Vector3 Position;
             Keire::Vector3 Normal;
             Keire::Vector2 UV;
-        };
-
-        struct PreviewGeometry
-        {
-            std::vector<PreviewVertex> Vertices;
-            std::vector<std::uint32_t> Indices;
         };
 
         [[nodiscard]] std::string Lower(std::string_view value)
@@ -390,6 +361,19 @@ namespace KeireEditor
                 return Input(node, *pin);
             }
 
+            enum class EvaluationPhase : std::uint8_t
+            {
+                Begin,
+                SelectBranch,
+                Execute,
+            };
+
+            struct EvaluationTask
+            {
+                Keire::ShaderGraphEndpoint Endpoint;
+                EvaluationPhase Phase = EvaluationPhase::Begin;
+            };
+
             template <typename Operation>
             [[nodiscard]] PreviewGraphValue Binary(const Keire::ShaderGraphNode& node, Operation operation)
             {
@@ -447,31 +431,140 @@ namespace KeireEditor
                 return {.Data = sample, .Type = Keire::ShaderGraphValueType::Color};
             }
 
+            void QueueConnectedInput(std::vector<EvaluationTask>& tasks, const Keire::ShaderGraphNode& node,
+                                     const std::string_view name)
+            {
+                const auto pin = std::ranges::find_if(
+                    node.Pins, [&](const Keire::ShaderGraphPin& candidate)
+                    { return candidate.Direction == Keire::ShaderGraphPinDirection::Input && candidate.Name == name; });
+                if (pin == node.Pins.end())
+                    throw std::invalid_argument("Preview graph node is missing a canonical input.");
+                const auto incoming = m_Incoming.find({node.Id, pin->Id});
+                if (incoming != m_Incoming.end())
+                    tasks.push_back({incoming->second, EvaluationPhase::Begin});
+            }
+
             [[nodiscard]] PreviewGraphValue Evaluate(const Keire::ShaderGraphEndpoint endpoint)
             {
-                const auto located = m_Nodes.find(endpoint.Node);
-                if (located == m_Nodes.end())
+                if (!m_Nodes.contains(endpoint.Node))
                     throw std::invalid_argument("Preview graph connection references a missing node.");
-                const auto index = located->second;
-                const auto cacheIndex = m_CacheIndices.find({endpoint.Node, endpoint.Pin});
-                if (cacheIndex == m_CacheIndices.end())
+                const auto rootCacheIndex = m_CacheIndices.find({endpoint.Node, endpoint.Pin});
+                if (rootCacheIndex == m_CacheIndices.end())
                     throw std::invalid_argument("Preview graph connection references a missing output pin.");
-                if (const auto& cached = m_Cache[cacheIndex->second])
+                if (const auto& cached = m_Cache[rootCacheIndex->second])
                     return *cached;
-                if (m_Visiting[index])
-                    throw std::invalid_argument("Preview graph contains an expression cycle.");
-                m_Visiting[index] = true;
-                struct VisitingReset final
-                {
-                    std::uint8_t& Value;
 
-                    ~VisitingReset() { Value = 0; }
+                struct TraversalReset final
+                {
+                    std::vector<std::uint8_t>& Visiting;
+                    bool Complete = false;
+
+                    ~TraversalReset()
+                    {
+                        if (!Complete)
+                            std::ranges::fill(Visiting, std::uint8_t{0});
+                    }
                 };
-                const VisitingReset visitingReset{m_Visiting[index]};
-                const auto& node = m_Definition.Nodes[index];
-                const auto outputPin = std::ranges::find(node.Pins, endpoint.Pin, &Keire::ShaderGraphPin::Id);
-                if (outputPin == node.Pins.end() || outputPin->Direction != Keire::ShaderGraphPinDirection::Output)
-                    throw std::invalid_argument("Preview graph endpoint is not an output pin.");
+                TraversalReset reset{m_Visiting};
+                std::vector<EvaluationTask> tasks;
+                tasks.reserve(m_Definition.Nodes.size());
+                tasks.push_back({endpoint, EvaluationPhase::Begin});
+                while (!tasks.empty())
+                {
+                    const EvaluationTask task = tasks.back();
+                    tasks.pop_back();
+                    const auto located = m_Nodes.find(task.Endpoint.Node);
+                    if (located == m_Nodes.end())
+                        throw std::invalid_argument("Preview graph connection references a missing node.");
+                    const auto cacheIndex = m_CacheIndices.find({task.Endpoint.Node, task.Endpoint.Pin});
+                    if (cacheIndex == m_CacheIndices.end())
+                        throw std::invalid_argument("Preview graph connection references a missing output pin.");
+                    const auto index = located->second;
+                    const auto& node = m_Definition.Nodes[index];
+                    const auto outputPin = std::ranges::find(node.Pins, task.Endpoint.Pin, &Keire::ShaderGraphPin::Id);
+                    if (outputPin == node.Pins.end() || outputPin->Direction != Keire::ShaderGraphPinDirection::Output)
+                        throw std::invalid_argument("Preview graph endpoint is not an output pin.");
+
+                    if (task.Phase == EvaluationPhase::Begin)
+                    {
+                        if (m_Cache[cacheIndex->second])
+                            continue;
+                        if (m_Visiting[index])
+                            throw std::invalid_argument("Preview graph contains an expression cycle.");
+                        m_Visiting[index] = 1;
+                        tasks.push_back({task.Endpoint, EvaluationPhase::Execute});
+
+                        if (node.Kind == Keire::ShaderGraphNodeKind::StaticSwitch)
+                        {
+                            tasks.push_back({task.Endpoint, EvaluationPhase::SelectBranch});
+                            QueueConnectedInput(tasks, node, "Condition");
+                            continue;
+                        }
+                        if (node.Kind == Keire::ShaderGraphNodeKind::If)
+                        {
+                            tasks.push_back({task.Endpoint, EvaluationPhase::SelectBranch});
+                            QueueConnectedInput(tasks, node, "Threshold");
+                            QueueConnectedInput(tasks, node, "B");
+                            QueueConnectedInput(tasks, node, "A");
+                            continue;
+                        }
+                        if (node.Kind == Keire::ShaderGraphNodeKind::Custom ||
+                            node.Kind == Keire::ShaderGraphNodeKind::FunctionCall ||
+                            node.Kind == Keire::ShaderGraphNodeKind::Keyword ||
+                            node.Kind == Keire::ShaderGraphNodeKind::Master)
+                        {
+                            continue;
+                        }
+                        for (auto pin = node.Pins.rbegin(); pin != node.Pins.rend(); ++pin)
+                        {
+                            if (pin->Direction != Keire::ShaderGraphPinDirection::Input)
+                                continue;
+                            const auto incoming = m_Incoming.find({node.Id, pin->Id});
+                            if (incoming != m_Incoming.end())
+                                tasks.push_back({incoming->second, EvaluationPhase::Begin});
+                        }
+                        continue;
+                    }
+
+                    if (task.Phase == EvaluationPhase::SelectBranch)
+                    {
+                        if (node.Kind == Keire::ShaderGraphNodeKind::StaticSwitch)
+                        {
+                            const float condition =
+                                Coerce(NamedInput(node, "Condition"), Keire::ShaderGraphValueType::Scalar).Data.X;
+                            QueueConnectedInput(tasks, node, condition != 0.0F ? "True" : "False");
+                        }
+                        else
+                        {
+                            const float left =
+                                Coerce(NamedInput(node, "A"), Keire::ShaderGraphValueType::Scalar).Data.X;
+                            const float right =
+                                Coerce(NamedInput(node, "B"), Keire::ShaderGraphValueType::Scalar).Data.X;
+                            const float threshold =
+                                Coerce(NamedInput(node, "Threshold"), Keire::ShaderGraphValueType::Scalar).Data.X;
+                            QueueConnectedInput(tasks, node,
+                                                std::abs(left - right) <= threshold ? "Equal"
+                                                : left > right                      ? "Greater"
+                                                                                    : "Less");
+                        }
+                        continue;
+                    }
+
+                    m_Cache[cacheIndex->second] = EvaluateNode(node, outputPin);
+                    m_Visiting[index] = 0;
+                }
+
+                reset.Complete = true;
+                const auto& result = m_Cache[rootCacheIndex->second];
+                if (!result)
+                    throw std::logic_error("Preview graph traversal completed without evaluating its root.");
+                return *result;
+            }
+
+            [[nodiscard]] PreviewGraphValue
+            EvaluateNode(const Keire::ShaderGraphNode& node,
+                         const std::vector<Keire::ShaderGraphPin>::const_iterator outputPin)
+            {
                 PreviewGraphValue result;
                 switch (node.Kind)
                 {
@@ -1580,7 +1673,6 @@ namespace KeireEditor
                 case Keire::ShaderGraphNodeKind::Master:
                     throw std::invalid_argument("The Shader Output node cannot be used as an expression.");
                 }
-                m_Cache[cacheIndex->second] = result;
                 return result;
             }
 
@@ -1712,131 +1804,7 @@ namespace KeireEditor
             return result;
         }
 
-        [[nodiscard]] PreviewGeometry SphereGeometry()
-        {
-            constexpr std::uint32_t rings = 24;
-            constexpr std::uint32_t segments = 36;
-            constexpr float pi = 3.14159265358979323846F;
-            PreviewGeometry result;
-            result.Vertices.reserve(static_cast<std::size_t>(rings + 1U) * (segments + 1U));
-            result.Indices.reserve(static_cast<std::size_t>(rings) * segments * 6U);
-            for (std::uint32_t ring = 0; ring <= rings; ++ring)
-            {
-                const float v = static_cast<float>(ring) / rings;
-                const float latitude = (0.5F - v) * pi;
-                const float radius = std::cos(latitude);
-                const float y = std::sin(latitude);
-                for (std::uint32_t segment = 0; segment <= segments; ++segment)
-                {
-                    const float u = static_cast<float>(segment) / segments;
-                    const float longitude = u * pi * 2.0F;
-                    const Keire::Vector3 normal{radius * std::sin(longitude), y, radius * std::cos(longitude)};
-                    result.Vertices.push_back({normal, normal, {u, v}});
-                }
-            }
-            for (std::uint32_t ring = 0; ring < rings; ++ring)
-                for (std::uint32_t segment = 0; segment < segments; ++segment)
-                {
-                    const auto first = ring * (segments + 1U) + segment;
-                    const auto second = first + segments + 1U;
-                    result.Indices.insert(result.Indices.end(),
-                                          {first, second, first + 1U, first + 1U, second, second + 1U});
-                }
-            return result;
-        }
-
-        [[nodiscard]] PreviewGeometry PlaneGeometry()
-        {
-            return {{{{-1.0F, -1.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, {0.0F, 1.0F}},
-                     {{1.0F, -1.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, {1.0F, 1.0F}},
-                     {{1.0F, 1.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, {1.0F, 0.0F}},
-                     {{-1.0F, 1.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, {0.0F, 0.0F}}},
-                    {0, 1, 2, 0, 2, 3}};
-        }
-
-        [[nodiscard]] PreviewGeometry FromMesh(const Keire::MeshAsset& mesh)
-        {
-            PreviewGeometry result;
-            const auto vertices = mesh.Vertices();
-            const auto indices = mesh.Indices();
-            if (vertices.empty() || indices.size() < 3 || indices.size() / 3 > MaximumPreviewTriangles)
-                throw std::invalid_argument("Shader Graph preview mesh has unsupported geometry.");
-            result.Vertices.reserve(vertices.size());
-            for (const auto& vertex : vertices)
-                result.Vertices.push_back({vertex.Position, vertex.Normal, vertex.UV0});
-            result.Indices.assign(indices.begin(), indices.end());
-            return result;
-        }
-
-        void PutPixel(std::vector<std::byte>& pixels, const std::uint32_t width, const std::uint32_t x,
-                      const std::uint32_t y, const std::array<float, 4> color)
-        {
-            const auto offset = (static_cast<std::size_t>(y) * width + x) * 4U;
-            for (std::size_t channel = 0; channel < 4; ++channel)
-                pixels[offset + channel] = static_cast<std::byte>(std::lround(Clamp01(color[channel]) * 255.0F));
-        }
-
-        [[nodiscard]] std::array<float, 3> Background(const std::uint32_t x, const std::uint32_t y) noexcept
-        {
-            const float checker = ((x / 14U + y / 14U) & 1U) == 0 ? 0.115F : 0.145F;
-            const float vignette = 1.0F - std::min(0.28F, std::abs(static_cast<float>(x % 256U) - 128.0F) / 900.0F);
-            return {checker * vignette, (checker + 0.012F) * vignette, (checker + 0.025F) * vignette};
-        }
-
-        [[nodiscard]] std::array<float, 4> Shade(const PreviewMaterial& material, const Keire::Vector3 normal,
-                                                 const Keire::Vector2 uv, const float exposure,
-                                                 const float environmentIntensity)
-        {
-            const auto n = Normalize(material.HasNormal ? material.Normal : normal, Normalize(normal));
-            const auto light = Normalize(Keire::Vector3{-0.45F, 0.62F, 0.68F});
-            const auto view = Keire::Vector3{0.0F, 0.0F, 1.0F};
-            const auto halfVector = Normalize({light.X + view.X, light.Y + view.Y, light.Z + view.Z});
-            const float noL = Clamp01(Dot(n, light));
-            const float noH = Clamp01(Dot(n, halfVector));
-            const float noV = Clamp01(Dot(n, view));
-            const float texture =
-                material.HasBaseTexture
-                    ? (((static_cast<int>(std::floor(uv.X * 10.0F)) + static_cast<int>(std::floor(uv.Y * 10.0F))) &
-                        1) == 0
-                           ? 0.88F
-                           : 0.58F)
-                    : 1.0F;
-            const float glossExponent = 4.0F + (1.0F - material.Roughness) * 124.0F;
-            const float dielectric = 0.08F * material.Specular;
-            const float specular =
-                std::pow(noH, glossExponent) * (dielectric + material.Metallic * (1.0F - dielectric));
-            const float clearCoatExponent = 4.0F + (1.0F - material.ClearCoatRoughness) * 252.0F;
-            const float clearCoat = std::pow(noH, clearCoatExponent) * material.ClearCoat * 0.32F;
-            const float sheen = std::pow(1.0F - noV, 2.0F + material.SheenRoughness * 4.0F);
-            const float diffuse =
-                material.Unlit ? 1.0F : 0.08F * environmentIntensity * material.Occlusion + noL * 0.82F;
-            const float diffuseWeight = material.Unlit ? 1.0F : 1.0F - material.Metallic * 0.72F;
-            const auto channel = [&](const float base, const float emission, const float sheenChannel)
-            {
-                const float linear =
-                    base * texture * diffuse * diffuseWeight + specular + clearCoat + sheenChannel * sheen + emission;
-                return 1.0F - std::exp(-std::max(linear, 0.0F) * exposure);
-            };
-            return {channel(material.BaseColor.X, material.Emission.X, material.SheenColor.X),
-                    channel(material.BaseColor.Y, material.Emission.Y, material.SheenColor.Y),
-                    channel(material.BaseColor.Z, material.Emission.Z, material.SheenColor.Z),
-                    material.BaseColor.W * material.Opacity};
-        }
-
-        [[nodiscard]] Keire::Vector3 Rotate(const Keire::Vector3 value, const float rotationDegrees) noexcept
-        {
-            constexpr float radiansPerDegree = 0.01745329251994329577F;
-            const float yaw = rotationDegrees * radiansPerDegree;
-            const float cosineYaw = std::cos(yaw);
-            const float sineYaw = std::sin(yaw);
-            constexpr float cosinePitch = 0.97133797F;
-            constexpr float sinePitch = -0.23770263F;
-            const float x = cosineYaw * value.X + sineYaw * value.Z;
-            const float z = -sineYaw * value.X + cosineYaw * value.Z;
-            return {x, cosinePitch * value.Y - sinePitch * z, sinePitch * value.Y + cosinePitch * z};
-        }
-
-        void Rasterize(const PreviewGeometry& geometry, const ShaderGraphPreviewRequest& request,
+        void Rasterize(const Detail::PreviewGeometry& geometry, const ShaderGraphPreviewRequest& request,
                        GraphPreviewEvaluator* evaluator, const std::uint32_t width, const std::uint32_t height,
                        const float exposure, const float environmentIntensity, const float rotationDegrees,
                        std::vector<std::byte>& pixels)
@@ -1863,12 +1831,13 @@ namespace KeireEditor
             projected.reserve(geometry.Vertices.size());
             for (const auto& vertex : geometry.Vertices)
             {
-                const auto position =
-                    Rotate({vertex.Position.X - center.X, vertex.Position.Y - center.Y, vertex.Position.Z - center.Z},
-                           rotationDegrees);
+                const auto position = Detail::RotatePreviewVector(
+                    {vertex.Position.X - center.X, vertex.Position.Y - center.Y, vertex.Position.Z - center.Z},
+                    rotationDegrees);
                 projected.push_back({static_cast<float>(width) * 0.5F + position.X * scale,
                                      static_cast<float>(height) * 0.51F - position.Y * scale, -position.Z, position,
-                                     Normalize(Rotate(vertex.Normal, rotationDegrees)), vertex.UV});
+                                     Normalize(Detail::RotatePreviewVector(vertex.Normal, rotationDegrees)),
+                                     vertex.UV});
             }
 
             std::vector<float> depth(static_cast<std::size_t>(width) * height, std::numeric_limits<float>::infinity());
@@ -1922,14 +1891,16 @@ namespace KeireEditor
                         const Keire::Vector2 uv{first.UV.X * w0 + second.UV.X * w1 + third.UV.X * w2,
                                                 first.UV.Y * w0 + second.UV.Y * w1 + third.UV.Y * w2};
                         const auto material = ResolveMaterial(request, evaluator, uv, normal, position);
-                        const auto shaded = Shade(material, normal, uv, exposure, environmentIntensity);
+                        const auto shaded =
+                            Detail::ShadePreviewMaterial(material, normal, uv, exposure, environmentIntensity);
                         const auto background =
-                            Background(static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(y));
+                            Detail::PreviewBackground(static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(y));
                         const float alpha = Clamp01(shaded[3]);
-                        PutPixel(pixels, width, static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(y),
-                                 {shaded[0] * alpha + background[0] * (1.0F - alpha),
-                                  shaded[1] * alpha + background[1] * (1.0F - alpha),
-                                  shaded[2] * alpha + background[2] * (1.0F - alpha), 1.0F});
+                        Detail::WritePreviewPixel(pixels, width, static_cast<std::uint32_t>(x),
+                                                  static_cast<std::uint32_t>(y),
+                                                  {shaded[0] * alpha + background[0] * (1.0F - alpha),
+                                                   shaded[1] * alpha + background[1] * (1.0F - alpha),
+                                                   shaded[2] * alpha + background[2] * (1.0F - alpha), 1.0F});
                     }
                 }
             }
@@ -1951,27 +1922,28 @@ namespace KeireEditor
             CheckPreviewCancellation(request);
             for (std::uint32_t x = 0; x < request.Width; ++x)
             {
-                const auto background = Background(x, y);
-                PutPixel(pixels, request.Width, x, y, {background[0], background[1], background[2], 1.0F});
+                const auto background = Detail::PreviewBackground(x, y);
+                Detail::WritePreviewPixel(pixels, request.Width, x, y,
+                                          {background[0], background[1], background[2], 1.0F});
             }
         }
 
-        PreviewGeometry geometry;
+        Detail::PreviewGeometry geometry;
         switch (request.Mesh)
         {
         case Keire::ShaderGraphPreviewMesh::Sphere:
-            geometry = SphereGeometry();
+            geometry = Detail::SphereGeometry();
             break;
         case Keire::ShaderGraphPreviewMesh::Plane:
-            geometry = PlaneGeometry();
+            geometry = Detail::PlaneGeometry();
             break;
         case Keire::ShaderGraphPreviewMesh::Cube:
-            geometry = FromMesh(*Keire::MeshAsset::Cube());
+            geometry = Detail::GeometryFromMesh(*Keire::MeshAsset::Cube());
             break;
         case Keire::ShaderGraphPreviewMesh::Custom:
             if (!request.CustomMesh)
                 throw std::invalid_argument("Custom Shader Graph preview mesh is unavailable.");
-            geometry = FromMesh(*request.CustomMesh);
+            geometry = Detail::GeometryFromMesh(*request.CustomMesh);
             break;
         default:
             throw std::invalid_argument("Shader Graph preview mesh is invalid.");

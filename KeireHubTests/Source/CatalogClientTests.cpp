@@ -190,7 +190,8 @@ TEST_CASE("Catalog client rejects exact-byte tampering and untrusted signing key
 
     const auto untrustedBody = PackageCatalog(otherSigner, 3);
     auto untrustedClient = Client(trustedSigner, Options(temporary.Path() / "untrusted"),
-                                  [&](const CatalogHttpRequest& request) {
+                                  [&](const CatalogHttpRequest& request)
+                                  {
                                       return HubResult<CatalogHttpResponse>::Success(
                                           Response(otherSigner, untrustedBody, 3, ValidExpiry, request.Url));
                                   });

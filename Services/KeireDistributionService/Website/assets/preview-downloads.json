@@ -3,6 +3,21 @@
   "packages": [
     {
       "type": "hubInstallerPreview",
+      "releaseId": "linux-x86_64-0.3.0-20260811.160805",
+      "version": "0.3.0",
+      "editorVersion": "0.3.0",
+      "publishedAt": "2026-08-11T16:08:05Z",
+      "platform": "linux",
+      "architecture": "x86_64",
+      "fileName": "keire-hub-linux-x86_64-0.3.0-preview-e754b433.deb",
+      "url": "/preview-downloads/keire-hub-linux-x86_64-0.3.0-preview-e754b433.deb",
+      "sizeBytes": 85028390,
+      "sha256": "e754b43374bfea62818b8a2ea238eea849893b55bd93082eb69e146295276eb8",
+      "signed": false,
+      "developmentArtifact": true
+    },
+    {
+      "type": "hubInstallerPreview",
       "releaseId": "windows-x86_64-0.3.0-20260811.041018",
       "version": "0.3.0",
       "editorVersion": "0.3.0",

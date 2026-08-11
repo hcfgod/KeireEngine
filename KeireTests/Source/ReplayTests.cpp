@@ -1,4 +1,5 @@
 #include "Keire/Replay/ReplaySystem.h"
+#include "Keire/Time.h"
 
 #include <doctest/doctest.h>
 
@@ -195,6 +196,50 @@ TEST_CASE("replay seek restores a checkpoint and deterministically advances to t
     playback->EndFixedTick(101);
     CHECK(playback->Status().CurrentTick == 3);
     CHECK_FALSE(playback->ShouldAdvanceFixedTick());
+}
+
+TEST_CASE("paused replay discards host fixed steps and commits exactly one clock tick when stepped")
+{
+    ReplayDirectory directory;
+    const auto path = directory.Path / "paused-clock.keirereplay";
+    int state = 0;
+    auto recorder = Keire::CreateRef<Keire::ReplaySystem>();
+    recorder->RegisterSerializer(IntegerSerializer(state));
+    recorder->BeginRecording({path});
+    for (std::uint64_t tick = 1; tick <= 2; ++tick)
+    {
+        (void)recorder->BeginFixedTick({.Tick = tick});
+        state = static_cast<int>(tick);
+        recorder->EndFixedTick(tick);
+    }
+    recorder->Stop();
+
+    auto playback = Keire::CreateRef<Keire::ReplaySystem>();
+    playback->RegisterSerializer(IntegerSerializer(state));
+    playback->BeginPlayback({path});
+    CHECK_THROWS_AS(playback->Step(), std::logic_error);
+    CHECK(playback->Status().State == Keire::ReplaySessionState::Playing);
+    playback->Pause(true);
+
+    Keire::Time time;
+    time.AdvanceFrame(Keire::TimeStep::FromMilliseconds(100.0));
+    REQUIRE_FALSE(playback->ShouldAdvanceFixedTick());
+    CHECK(time.DiscardFixedSteps() == 6);
+    CHECK(time.FixedTickCount() == 0);
+    CHECK(time.FixedTime().Seconds() == 0.0);
+
+    playback->Step();
+    time.AdvanceFrame(Keire::TimeStep::FromMilliseconds(100.0));
+    REQUIRE(playback->ShouldAdvanceFixedTick());
+    REQUIRE(time.ConsumeFixedStep());
+    const auto input = playback->BeginFixedTick({});
+    CHECK(input.Tick == 1);
+    state = 1;
+    playback->EndFixedTick(1);
+    REQUIRE_FALSE(playback->ShouldAdvanceFixedTick());
+    CHECK(time.DiscardFixedSteps() == 5);
+    CHECK(time.FixedTickCount() == 1);
+    CHECK(time.FixedTime().Seconds() == doctest::Approx(1.0 / 60.0));
 }
 
 TEST_CASE("replay checkpoint restoration rolls every serializer back when a later restore fails")

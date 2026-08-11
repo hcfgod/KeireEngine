@@ -456,10 +456,15 @@ namespace Keire
                         {
                             ProfileScope fixedUpdate(m_Impl->ProfilerService, ProfileCategory::Application,
                                                      "Fixed update");
-                            while (m_Impl->Clock->ConsumeFixedStep())
+                            while (m_Impl->Clock->PendingFixedSteps() != 0)
                             {
                                 if (m_Impl->ReplayService && !m_Impl->ReplayService->ShouldAdvanceFixedTick())
-                                    continue;
+                                {
+                                    (void)m_Impl->Clock->DiscardFixedSteps();
+                                    break;
+                                }
+                                if (!m_Impl->Clock->ConsumeFixedStep())
+                                    break;
                                 ++m_Impl->FixedTick;
                                 FixedTickInputSnapshot fixedInput;
                                 fixedInput.Tick = m_Impl->FixedTick;

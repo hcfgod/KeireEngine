@@ -19,6 +19,7 @@ internal static class Program
             ("exact signed documents and conditional requests", ExactDocumentsAndConditionalRequestsAsync),
             ("immutable package ranges and validators", PackageRangesAndValidatorsAsync),
             ("invalid snapshot retains last-known-good", InvalidSnapshotRetainsLastKnownGoodAsync),
+            ("active snapshot mutation is withdrawn", ActiveSnapshotMutationIsWithdrawnAsync),
             ("metadata rate limiting", MetadataRateLimitingAsync),
         ];
 
@@ -321,6 +322,54 @@ internal static class Program
             }
 
             throw new TimeoutException("Service did not activate the next valid snapshot.");
+        }
+        finally
+        {
+            TestDistribution.DeleteTemporaryRoot(root);
+        }
+    }
+
+    private static async Task ActiveSnapshotMutationIsWithdrawnAsync()
+    {
+        string root = TestDistribution.CreateTemporaryRoot();
+        PublishedFixture fixture = TestDistribution.Create(root, "snapshot-a", "alpha");
+        await using TestServer server = await TestServer.StartAsync(fixture.StorageRoot);
+        try
+        {
+            await server.WaitUntilReadyAsync();
+            string requestPath = $"/v1/packages/{fixture.PackageSha256}";
+            using HttpResponseMessage initial = await server.Client.GetAsync(requestPath);
+            await TestAssert.StatusAsync(HttpStatusCode.OK, initial);
+            string etag = initial.Headers.ETag?.Tag
+                ?? throw new InvalidOperationException("Package ETag was missing.");
+
+            string packagePath = Path.Combine(
+                fixture.StorageRoot,
+                "snapshots",
+                "snapshot-a",
+                "packages",
+                fixture.PackageSha256);
+            File.WriteAllBytes(packagePath, Enumerable.Repeat((byte)'X', fixture.PackageBytes.Length).ToArray());
+            File.SetLastWriteTimeUtc(packagePath, DateTime.UtcNow.AddMinutes(1));
+
+            using HttpRequestMessage conditionalRequest = new(HttpMethod.Get, requestPath);
+            conditionalRequest.Headers.TryAddWithoutValidation("If-None-Match", etag);
+            using HttpResponseMessage conditional = await server.Client.SendAsync(conditionalRequest);
+            await TestAssert.StatusAsync(HttpStatusCode.ServiceUnavailable, conditional);
+
+            DateTimeOffset deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                using HttpResponseMessage ready = await server.Client.GetAsync("/health/ready");
+                if (ready.StatusCode == HttpStatusCode.ServiceUnavailable)
+                {
+                    return;
+                }
+
+                await Task.Delay(100);
+            }
+
+            throw new TimeoutException("Service did not withdraw the mutated active snapshot.");
         }
         finally
         {

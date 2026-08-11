@@ -8,6 +8,7 @@ public sealed record DistributionFile(
     string Kind,
     long Size,
     string Sha256,
+    DateTime LastWriteTimeUtc,
     SignedDocumentMetadata? Signature);
 
 public sealed class SnapshotIndex

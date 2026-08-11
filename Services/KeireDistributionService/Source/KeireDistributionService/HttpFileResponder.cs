@@ -64,6 +64,17 @@ public static class HttpFileResponder
         int bufferSize,
         CancellationToken cancellationToken)
     {
+        if (!MatchesValidatedMetadata(file))
+        {
+            context.Response.Clear();
+            await DistributionEndpoints.WriteErrorAsync(
+                context,
+                StatusCodes.Status503ServiceUnavailable,
+                "distribution.snapshot_integrity_failed",
+                "The active distribution snapshot failed its immutability check.");
+            return;
+        }
+
         string etag = $"\"sha256-{file.Sha256}\"";
         context.Response.Headers.ETag = etag;
         context.Response.Headers.CacheControl = cacheControl;
@@ -123,6 +134,10 @@ public static class HttpFileResponder
             {
                 throw new IOException("An immutable distribution file changed after snapshot validation.");
             }
+            if (File.GetLastWriteTimeUtc(file.AbsolutePath) != file.LastWriteTimeUtc)
+            {
+                throw new IOException("An immutable distribution file timestamp changed after snapshot validation.");
+            }
 
             stream.Position = start;
             long remaining = responseLength;
@@ -142,6 +157,25 @@ public static class HttpFileResponder
         finally
         {
             ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    private static bool MatchesValidatedMetadata(DistributionFile file)
+    {
+        try
+        {
+            FileInfo current = new(file.AbsolutePath);
+            if (!current.Exists)
+            {
+                return false;
+            }
+
+            FileSystemSafety.RejectLink(current);
+            return current.Length == file.Size && current.LastWriteTimeUtc == file.LastWriteTimeUtc;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
         }
     }
 

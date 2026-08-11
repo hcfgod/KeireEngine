@@ -13,6 +13,7 @@ public sealed class SnapshotProvider : BackgroundService
     private readonly ILogger<SnapshotProvider> m_Logger;
     private SnapshotProviderState m_State = new(null, "No validated snapshot has been loaded.", DateTimeOffset.MinValue);
     private string? m_LastRejectedSnapshotId;
+    private DateTimeOffset m_NextIntegrityValidation = DateTimeOffset.MinValue;
 
     public SnapshotProvider(DistributionOptions options, ILogger<SnapshotProvider> logger)
     {
@@ -42,10 +43,13 @@ public sealed class SnapshotProvider : BackgroundService
     {
         DateTimeOffset attempt = DateTimeOffset.UtcNow;
         SnapshotProviderState previous = State;
+        string? snapshotId = null;
+        bool revalidatingActiveSnapshot = false;
         try
         {
-            string snapshotId = SnapshotValidator.ReadCurrentSnapshotId(m_Options.StorageRoot);
-            if (string.Equals(previous.Current?.SnapshotId, snapshotId, StringComparison.Ordinal))
+            snapshotId = SnapshotValidator.ReadCurrentSnapshotId(m_Options.StorageRoot);
+            revalidatingActiveSnapshot = string.Equals(previous.Current?.SnapshotId, snapshotId, StringComparison.Ordinal);
+            if (revalidatingActiveSnapshot && attempt < m_NextIntegrityValidation)
             {
                 if (previous.LastRefreshError is not null)
                 {
@@ -76,10 +80,18 @@ public sealed class SnapshotProvider : BackgroundService
 
             Volatile.Write(ref m_State, new SnapshotProviderState(candidate, null, attempt));
             m_LastRejectedSnapshotId = null;
-            m_Logger.LogInformation(
-                "Activated validated distribution snapshot {SnapshotId} created at {CreatedAt}",
-                candidate.SnapshotId,
-                candidate.CreatedAt);
+            m_NextIntegrityValidation = attempt + m_Options.SnapshotIntegrityPollInterval;
+            if (revalidatingActiveSnapshot)
+            {
+                m_Logger.LogInformation("Revalidated active distribution snapshot {SnapshotId}", candidate.SnapshotId);
+            }
+            else
+            {
+                m_Logger.LogInformation(
+                    "Activated validated distribution snapshot {SnapshotId} created at {CreatedAt}",
+                    candidate.SnapshotId,
+                    candidate.CreatedAt);
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -87,7 +99,8 @@ public sealed class SnapshotProvider : BackgroundService
         catch (Exception exception)
         {
             string message = exception.Message;
-            Volatile.Write(ref m_State, new SnapshotProviderState(previous.Current, message, attempt));
+            SnapshotIndex? retained = revalidatingActiveSnapshot ? null : previous.Current;
+            Volatile.Write(ref m_State, new SnapshotProviderState(retained, message, attempt));
             try
             {
                 m_LastRejectedSnapshotId = SnapshotValidator.ReadCurrentSnapshotId(m_Options.StorageRoot);
@@ -101,8 +114,10 @@ public sealed class SnapshotProvider : BackgroundService
             {
                 m_Logger.LogError(
                     exception,
-                    "Rejected distribution snapshot refresh; continuing with snapshot {SnapshotId}",
-                    previous.Current?.SnapshotId ?? "none");
+                    revalidatingActiveSnapshot
+                        ? "Active distribution snapshot {SnapshotId} failed integrity revalidation and was withdrawn"
+                        : "Rejected distribution snapshot refresh; continuing with snapshot {SnapshotId}",
+                    revalidatingActiveSnapshot ? snapshotId : previous.Current?.SnapshotId ?? "none");
             }
         }
     }

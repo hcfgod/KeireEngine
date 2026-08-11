@@ -7,6 +7,16 @@ import {
     readBoundedJson,
     requestAddress,
 } from "../../supabase/functions/website-contact/request.mjs";
+import {
+    normalizeText,
+    unicodeLength,
+} from "../../supabase/functions/website-contact/validation.mjs";
+
+assert.equal(unicodeLength("😀"), 1);
+assert.equal(unicodeLength("😀😀"), 2);
+assert.equal(normalizeText(` ${"😀".repeat(80)} `, 80), "😀".repeat(80));
+assert.equal(normalizeText("😀".repeat(81), 80), null);
+assert.equal(normalizeText("valid\0invalid", 80), null);
 
 const validPayload = JSON.stringify({ message: "bounded" });
 const validRequest = new Request("https://example.invalid", {
@@ -61,6 +71,9 @@ const functionSource = await readFile(
 assert.match(functionSource, /Deno\.env\.get\("CONTACT_RATE_LIMIT_SECRET"\)/u);
 assert.doesNotMatch(functionSource, /CONTACT_RATE_LIMIT_SECRET[^\n]*\?\?\s*adminKey/u);
 assert.match(functionSource, /\.rpc\("submit_website_contact"/u);
+assert.match(functionSource, /unicodeLength\(name\) < 2/u);
+assert.match(functionSource, /unicodeLength\(subject\) < 3/u);
+assert.match(functionSource, /unicodeLength\(message\) < 10/u);
 assert.doesNotMatch(functionSource, /reserve_website_contact_submission/u);
 assert.doesNotMatch(functionSource, /\.from\("website_contact_submissions"\)/u);
 

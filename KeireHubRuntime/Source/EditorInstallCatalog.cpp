@@ -107,7 +107,8 @@ namespace KeireHub
                 for (const auto& dependency : parent.Dependencies)
                 {
                     const auto child = std::ranges::find_if(packages,
-                                                            [&](const PackageManifest& candidate) {
+                                                            [&](const PackageManifest& candidate)
+                                                            {
                                                                 return candidate.Id == dependency.PackageId &&
                                                                        dependency.Versions.Matches(candidate.Version);
                                                             });
@@ -511,7 +512,8 @@ namespace KeireHub
             if (!version)
                 return HubResult<EditorInstallPlan>::Failure(version.Error());
             const auto component = std::ranges::find_if(m_Packages,
-                                                        [&](const IndexedPackage& candidate) {
+                                                        [&](const IndexedPackage& candidate)
+                                                        {
                                                             return candidate.Manifest.Id == selection.PackageId &&
                                                                    candidate.Manifest.Version == version.Value();
                                                         });

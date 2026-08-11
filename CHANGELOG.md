@@ -1,5 +1,23 @@
 # Changelog
 
+All notable Kéire changes are documented here. The format follows Keep a Changelog, and releases use semantic
+versions.
+
+## Unreleased
+
+### Changed
+
+- Made Shader Graph preview evaluation stack-safe for deep expression chains, prevented invalid replay controls from
+  escaping the editor frame, and kept rejected replay host steps from advancing the committed fixed clock.
+- Added active distribution-snapshot metadata checks and periodic cryptographic revalidation, withdrawing a mutated
+  active snapshot instead of serving bytes under its previous digest-derived ETag.
+- Matched website contact-field limits to PostgreSQL `char_length` by validating Unicode code points at the Edge
+  Function boundary.
+- Fixed Linux release validation when SDL's headless video driver does not support setting a window icon, while still
+  surfacing icon failures on normal desktop video drivers.
+- Hardened cross-platform packaging inputs: generated managed `bin`/`obj` trees no longer invalidate native project
+  generation, Sandbox binary payloads retain their exact bytes across checkouts, and distribution-service shell tools
+  are installed with executable permissions.
 - Fixed fresh Ubuntu 22.04 Linux setup selecting the distribution's Clang 14 even though Kéire requires Clang 16.
   The supported setup and getting-started path now default to the available GCC 12 toolchain, while explicit Clang
   selection reports how to proceed when configured repositories cannot satisfy the minimum version.
@@ -22,6 +40,11 @@
   gallery validates every material binding, adds reusable managed presentation behavior and four edit-mode VFX
   displays, removes the obsolete nine-example set and stale generated shaders, and ships through deterministic sample
   generation and template-parity checks.
+
+## 0.3.0 - 2026-08-10
+
+### Changed
+
 - Promoted the Kéire Editor and Project Hub product line to 0.3.0 for the Unreal-inspired Material Ecosystem milestone.
   The signed distribution remains side-by-side and immutable: 0.1.0 and 0.2.0 stay independently installable while
   0.3.0 becomes the minimum editor for the upgraded Sandbox material and shader authoring examples.
@@ -56,6 +79,11 @@
   connections, interface synchronization, undo/redo, diagnostics, live runtime-material preview, safe schema-1
   upgrades, and unsaved-exit protection. Shader Graph preview materials are now internal and Shader Graph assets are no
   longer exposed as assignable Mesh Renderer materials.
+
+## 0.2.0 - 2026-08-10
+
+### Changed
+
 - Rotated the Hub distribution signing identity with an overlap period that retains the previous trusted public key,
   allowing updated Hubs to validate both the current catalog and newly signed release snapshots. Hub packaging now
   accepts multiple environment-supplied public keys while retaining the legacy single-key override.
@@ -133,16 +161,6 @@
   valid host-compatible editor versions. Server-revalidated HTTP 304 catalogs now also retain online status instead of
   making the sidebar report that the service is unavailable.
 
-All notable template changes are documented here. The format follows Keep a Changelog, and releases use semantic
-version tags.
-
-## Unreleased
-
-- Fixed Linux release validation when SDL's headless video driver does not support setting a window icon, while still
-  surfacing icon failures on normal desktop video drivers.
-- Hardened cross-platform packaging inputs: generated managed `bin`/`obj` trees no longer invalidate native project
-  generation, Sandbox binary payloads retain their exact bytes across checkouts, and distribution-service shell tools
-  are installed with executable permissions.
 - Expanded the packaged Sandbox template from a minimal scripting stub to the canonical clean authoring sample and
   added a deterministic cross-platform sync/check tool. New Sandbox projects now open a nine-display Shader Graph and
   Material Graph gallery spanning basic paint through transmission, vertex displacement, and holographic Voronoi,
@@ -1310,6 +1328,8 @@ version tags.
   overrides, and report transactional catalog-validation failures without leaving fallback-only assets behind.
 - Scene-view overlay controls no longer mutate ImGui layout cursors or trigger a window-boundary assertion when the
   editor opens.
+
+## 0.1.0 - 2026-07-11
 
 ### Added
 

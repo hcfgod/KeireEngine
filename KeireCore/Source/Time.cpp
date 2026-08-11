@@ -105,6 +105,13 @@ namespace Keire
         return true;
     }
 
+    std::uint32_t Time::DiscardFixedSteps() noexcept
+    {
+        const auto discarded = m_PendingFixedSteps;
+        m_PendingFixedSteps = 0;
+        return discarded;
+    }
+
     void Time::SetTimeScale(const double scale)
     {
         if (!std::isfinite(scale) || scale < 0.0 || scale > 100.0)

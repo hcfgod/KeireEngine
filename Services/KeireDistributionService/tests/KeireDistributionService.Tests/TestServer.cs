@@ -28,6 +28,7 @@ internal sealed class TestServer : IAsyncDisposable
             $"--Distribution:StorageRoot={storageRoot}",
             "--Distribution:BindUrl=http://127.0.0.1:0",
             "--Distribution:SnapshotPollSeconds=1",
+            "--Distribution:SnapshotIntegrityPollSeconds=1",
             $"--Distribution:MetadataRequestsPerMinute={metadataRequestsPerMinute}",
             "--Distribution:PackageConcurrentStreams=2",
             "--Distribution:PackageQueueLimit=2",

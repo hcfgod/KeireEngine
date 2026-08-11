@@ -311,11 +311,8 @@ namespace Keire
                     result.push_back(std::move(reflected));
                 }
             }
-            std::ranges::sort(result,
-                              [](const ComponentMethod& left, const ComponentMethod& right) {
-                                  return left.Name != right.Name ? left.Name < right.Name
-                                                                 : left.ParameterTypes < right.ParameterTypes;
-                              });
+            std::ranges::sort(result, {}, [](const ComponentMethod& method)
+                              { return std::tie(method.Name, method.ParameterTypes); });
             return result;
         }
 
@@ -757,11 +754,8 @@ namespace Keire
             }
 
             std::ranges::sort(result.Types, {}, &ManagedAssetTypeDescriptor::FullName);
-            std::ranges::sort(result.Diagnostics,
-                              [](const ManagedAssetTypeDiagnostic& left, const ManagedAssetTypeDiagnostic& right) {
-                                  return left.TypeName != right.TypeName ? left.TypeName < right.TypeName
-                                                                         : left.Message < right.Message;
-                              });
+            std::ranges::sort(result.Diagnostics, {}, [](const ManagedAssetTypeDiagnostic& diagnostic)
+                              { return std::tie(diagnostic.TypeName, diagnostic.Message); });
             std::set<ManagedTypeId> stableTypeIds;
             std::set<std::string, std::less<>> fullNames;
             std::set<std::string, std::less<>> menuPaths;

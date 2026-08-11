@@ -56,7 +56,7 @@ the observed evidence totals until its full native and graphics validation compl
 
 The remaining release-evidence gates are a clean hosted matrix after Actions quota is restored, macOS/Metal and ARM64
 runs, privileged symbolic-link confinement probes, and broader named-hardware/long-duration performance evidence.
-Feature closure also remains material: the frozen 278-row Unity VFX manifest still records 153 disabled rows. The A-
+Feature closure also remains material: the frozen 278-row Unity VFX manifest still records 33 disabled rows. The A-
 overall score reflects the now-proven Windows/Linux engineering and shipping foundation; it is not a claim of complete
 Unity-class feature parity or hardware coverage.
 

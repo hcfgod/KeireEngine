@@ -1,6 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.95.0";
 
 import { ContactRequestError, readBoundedJson, requestAddress } from "./request.mjs";
+import { normalizeText, unicodeLength } from "./validation.mjs";
 
 const allowedOrigins = new Set([
     "https://keireengine.duckdns.org",
@@ -28,17 +29,6 @@ function json(origin: string, status: number, body: Record<string, unknown>, ext
         status,
         headers: { ...responseHeaders(origin), ...extra },
     });
-}
-
-function text(value: unknown, maximum: number): string | null {
-    if (typeof value !== "string") {
-        return null;
-    }
-    const normalized = value.trim();
-    if (normalized.length > maximum || normalized.includes("\0")) {
-        return null;
-    }
-    return normalized;
 }
 
 async function hmacSha256(value: string, secret: string): Promise<string> {
@@ -94,7 +84,7 @@ Deno.serve(async (request: Request) => {
         return json(origin, 400, { ok: false, message: "The request could not be read." });
     }
 
-    const honeypot = text(body.company, 200);
+    const honeypot = normalizeText(body.company, 200);
     if (honeypot === null) {
         return json(origin, 400, { ok: false, message: "Please review the form fields." });
     }
@@ -102,13 +92,14 @@ Deno.serve(async (request: Request) => {
         return json(origin, 202, { ok: true, message: "Thanks. Your message was received." });
     }
 
-    const name = text(body.name, 80);
-    const email = text(body.email, 254)?.toLowerCase() ?? null;
-    const category = text(body.category, 32);
-    const subject = text(body.subject, 120);
-    const message = text(body.message, 5000);
-    if (!name || name.length < 2 || !email || !emailPattern.test(email) || !category || !categories.has(category) ||
-        !subject || subject.length < 3 || !message || message.length < 10) {
+    const name = normalizeText(body.name, 80);
+    const email = normalizeText(body.email, 254)?.toLowerCase() ?? null;
+    const category = normalizeText(body.category, 32);
+    const subject = normalizeText(body.subject, 120);
+    const message = normalizeText(body.message, 5000);
+    if (!name || unicodeLength(name) < 2 || !email || !emailPattern.test(email) || !category ||
+        !categories.has(category) || !subject || unicodeLength(subject) < 3 || !message ||
+        unicodeLength(message) < 10) {
         return json(origin, 400, { ok: false, message: "Please review the form fields." });
     }
 

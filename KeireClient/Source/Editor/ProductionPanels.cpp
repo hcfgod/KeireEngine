@@ -7,6 +7,8 @@
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
 #include "KeireClient/Editor/SceneDocument.h"
 
+#include "KeireClient/Editor/ReplayPanelState.h"
+
 #include "KeireInternal/Build/PlayerSupport.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
@@ -186,30 +188,6 @@ namespace
             return "Audio";
         case Keire::StreamingClass::Animation:
             return "Animation";
-        }
-        return "Unknown";
-    }
-
-    [[nodiscard]] std::string_view ReplayStateName(const Keire::ReplaySessionState value) noexcept
-    {
-        switch (value)
-        {
-        case Keire::ReplaySessionState::Idle:
-            return "Idle";
-        case Keire::ReplaySessionState::Recording:
-            return "Recording";
-        case Keire::ReplaySessionState::Playing:
-            return "Playing";
-        case Keire::ReplaySessionState::Verifying:
-            return "Verifying";
-        case Keire::ReplaySessionState::Paused:
-            return "Paused";
-        case Keire::ReplaySessionState::Completed:
-            return "Completed";
-        case Keire::ReplaySessionState::Diverged:
-            return "Diverged";
-        case Keire::ReplaySessionState::Failed:
-            return "Failed";
         }
         return "Unknown";
     }
@@ -1366,8 +1344,8 @@ void EditorWorkspaceLayer::DrawArchitectureDashboard(Keire::UiFrame& ui)
                 m_ReplayPath = (root / "Library" / "Replays" / "editor.keirereplay").generic_string();
             }
             const auto status = replay->Status();
-            ui.Text(std::string(ReplayStateName(status.State)) + "  tick " + std::to_string(status.CurrentTick) +
-                    " / " + std::to_string(status.TickCount) + "  checkpoints " +
+            ui.Text(std::string(KeireEditor::Detail::ReplayStateName(status.State)) + "  tick " +
+                    std::to_string(status.CurrentTick) + " / " + std::to_string(status.TickCount) + "  checkpoints " +
                     std::to_string(status.CheckpointCount));
             (void)ui.InputText("Replay file", m_ReplayPath);
             (void)ui.Checkbox("Performance capture profile", m_ReplayPerformanceProfile);
@@ -1447,17 +1425,59 @@ void EditorWorkspaceLayer::DrawArchitectureDashboard(Keire::UiFrame& ui)
                 }
             }
             const bool paused = status.State == Keire::ReplaySessionState::Paused;
-            if (ui.Button(paused ? "Resume" : "Pause"))
-                replay->Pause(!paused);
+            const auto runReplayAction = [this](auto&& action)
+            {
+                try
+                {
+                    m_ReplayActionStatus = action();
+                }
+                catch (const std::exception& error)
+                {
+                    m_ReplayActionStatus = error.what();
+                }
+            };
+            const bool canTogglePause = KeireEditor::Detail::CanToggleReplayPause(status.State);
+            if (auto disabled = ui.BeginDisabled(!canTogglePause); disabled)
+            {
+                if (ui.Button(paused ? "Resume" : "Pause"))
+                {
+                    runReplayAction(
+                        [&]
+                        {
+                            replay->Pause(!paused);
+                            return paused ? "Replay session resumed." : "Replay session paused.";
+                        });
+                }
+            }
             ui.SameLine();
-            if (ui.Button("Step"))
-                replay->Step();
+            if (auto disabled = ui.BeginDisabled(!KeireEditor::Detail::CanStepReplay(status.State)); disabled)
+            {
+                if (ui.Button("Step"))
+                {
+                    runReplayAction(
+                        [&]
+                        {
+                            replay->Step();
+                            return "One replay tick requested.";
+                        });
+                }
+            }
             (void)ui.DragInteger("Seek tick", m_ReplaySeekTick, 1.0, 0);
             ui.SameLine();
-            if (ui.Button("Seek"))
-                m_ReplayActionStatus = replay->Seek(static_cast<std::uint64_t>(m_ReplaySeekTick))
-                                           ? "Checkpoint restored."
-                                           : "No checkpoint is available for that tick.";
+            const bool canSeek = KeireEditor::Detail::CanSeekReplay(status.State);
+            if (auto disabled = ui.BeginDisabled(!canSeek); disabled)
+            {
+                if (ui.Button("Seek"))
+                {
+                    runReplayAction(
+                        [&]
+                        {
+                            return replay->Seek(static_cast<std::uint64_t>(m_ReplaySeekTick))
+                                       ? "Checkpoint restored."
+                                       : "No checkpoint is available for that tick.";
+                        });
+                }
+            }
             if (status.Divergence)
                 ui.TextColored(m_Theme.Error, "Diverged at tick " + std::to_string(status.Divergence->Tick) + ": " +
                                                   status.Divergence->Message);

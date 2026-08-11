@@ -74,7 +74,10 @@ served file, type, byte length, SHA-256, and detached signature metadata. Snapsh
 service rejects path traversal, absolute paths, symbolic links/reparse points, undeclared files, case-colliding paths,
 digest or size mismatches, unsupported path layouts, malformed JSON, and invalid signed-document metadata. It validates
 a candidate fully before swapping its in-memory index. If a newly selected snapshot is invalid, requests continue using
-the last validated snapshot and readiness reports `ready-degraded`.
+the last validated snapshot and readiness reports `ready-degraded`. Every request also verifies the indexed size,
+timestamp, and link status before emitting a digest-derived validator. The active snapshot is cryptographically
+revalidated every `SnapshotIntegrityPollSeconds` (300 seconds by default); a failure withdraws that snapshot and makes
+readiness fail until a different immutable snapshot ID is activated.
 
 Publisher input uses the same `catalogs/`, `catalogs-v2/`, `content/`, `manifests/`, and `packages/` layout plus an offline-generated
 `signatures.json`:

@@ -80,6 +80,25 @@ TEST_CASE("Time can suspend scaled simulation while retaining real and unscaled 
     CHECK_FALSE(time.Paused());
 }
 
+TEST_CASE("Time can discard rejected fixed steps without advancing committed simulation time")
+{
+    Keire::Time time;
+    time.AdvanceFrame(Keire::TimeStep::FromMilliseconds(100.0));
+    REQUIRE(time.PendingFixedSteps() == 6);
+
+    CHECK(time.DiscardFixedSteps() == 6);
+    CHECK(time.PendingFixedSteps() == 0);
+    CHECK(time.FixedTickCount() == 0);
+    CHECK(time.FixedTime().Seconds() == 0.0);
+    CHECK(time.DroppedSimulationTime().Seconds() == 0.0);
+
+    time.AdvanceFrame(Keire::TimeStep::FromMilliseconds(100.0));
+    REQUIRE(time.ConsumeFixedStep());
+    CHECK(time.DiscardFixedSteps() == 5);
+    CHECK(time.FixedTickCount() == 1);
+    CHECK(time.FixedTime().Seconds() == doctest::Approx(1.0 / 60.0));
+}
+
 TEST_CASE("Time validates configuration, scale, and frame samples")
 {
     Keire::TimeSpecification invalidSpecification;

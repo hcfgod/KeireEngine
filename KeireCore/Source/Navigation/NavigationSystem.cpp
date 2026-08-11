@@ -97,7 +97,8 @@ namespace Keire
         [[nodiscard]] bool Blocked(const Vector3 point, const std::span<const NavigationObstacle> obstacles) noexcept
         {
             return std::ranges::any_of(obstacles,
-                                       [point](const NavigationObstacle& obstacle) {
+                                       [point](const NavigationObstacle& obstacle)
+                                       {
                                            return obstacle.Enabled && DistanceSquared(point, obstacle.Position) <=
                                                                           obstacle.Radius * obstacle.Radius;
                                        });

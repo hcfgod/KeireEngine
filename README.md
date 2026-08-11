@@ -270,7 +270,7 @@ documentation authorities.
 
 ## Documentation
 
-The [documentation library](Docs/README.md) contains 52 maintained guides grouped around real tasks:
+The [documentation library](Docs/README.md) contains 56 maintained guides grouped around real tasks:
 
 - [Getting Started](Docs/GettingStarted.md) and [Project Hub](Docs/ProjectHub.md)
 - [Architecture](Docs/Architecture.md), [Runtime Lifecycle](Docs/RuntimeLifecycle.md), and

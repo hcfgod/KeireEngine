@@ -935,7 +935,7 @@ namespace Keire
             return {};
         }
 
-        [[nodiscard]] bool GetFlag(const WindowId id, const bool CachedWindow::*member) const
+        [[nodiscard]] bool GetFlag(const WindowId id, const bool CachedWindow::* member) const
         {
             std::scoped_lock lock(m_StateMutex);
             if (const auto iterator = m_Windows.find(id.Value()); iterator != m_Windows.end())

@@ -203,8 +203,10 @@ cross-device bit identity. Networking and rollback transport remain outside this
 Replay input and checkpoints are decoded under the configured total-size and rewind budgets before allocation, and
 variable-count fields are bounded before reservation. Recording charges the exact metadata, input, compressed
 checkpoint, header, and footer sizes as data is captured, so it fails before retained tick data can exceed the eventual
-file limit. Playback advances on the recorded logical tick rather than the host frame's tick argument. Recording,
-decoding, restore, verification, and finalization faults transition the session to `Failed` and emit
+file limit. Playback advances on the recorded logical tick rather than the host frame's tick argument. While playback
+is paused, host-produced fixed steps are discarded without advancing `Time::FixedTime` or `FixedTickCount`; Step commits
+exactly one replay and clock tick before the remaining host backlog is discarded. Recording, decoding, restore,
+verification, and finalization faults transition the session to `Failed` and emit
 `KEIRE-REPLAY-0002`; `Close` remains non-throwing without hiding that terminal state.
 
 ## Project upgrades and source modules

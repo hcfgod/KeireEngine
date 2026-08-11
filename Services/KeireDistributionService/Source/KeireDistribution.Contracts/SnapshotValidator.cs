@@ -150,7 +150,14 @@ public static class SnapshotValidator
                     entry.Signature!);
             }
 
-            files.Add(new DistributionFile(relativePath, fullPath, expectedKind, entry.Size, entry.Sha256, entry.Signature));
+            files.Add(new DistributionFile(
+                relativePath,
+                fullPath,
+                expectedKind,
+                entry.Size,
+                entry.Sha256,
+                fileInfo.LastWriteTimeUtc,
+                entry.Signature));
         }
 
         int maximumFilesystemEntries = checked(validationOptions.MaximumFiles * 2 + 1024);

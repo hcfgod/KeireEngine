@@ -93,6 +93,8 @@ namespace Keire
         void Reset() noexcept;
         void AdvanceFrame(TimeStep rawDeltaTime, bool suspendSimulation = false);
         [[nodiscard]] bool ConsumeFixedStep() noexcept;
+        /// Discards scheduled steps without advancing the committed simulation clock.
+        [[nodiscard]] std::uint32_t DiscardFixedSteps() noexcept;
 
         void SetTimeScale(double scale);
         [[nodiscard]] double TimeScale() const noexcept { return m_TimeScale; }

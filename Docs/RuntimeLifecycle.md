@@ -108,7 +108,9 @@ time feeds the fixed-step accumulator; pause and minimized suspension stop scale
 
 The fixed-step cap prevents a slow frame from running unbounded simulation work. Excess whole ticks are recorded as
 dropped time, while the fractional remainder remains available for interpolation. Changes to clamping, scaling,
-smoothing, tick caps, or remainder behavior are observable and require deterministic tests.
+smoothing, tick caps, or remainder behavior are observable and require deterministic tests. A scheduler that rejects
+already-produced work can explicitly discard pending fixed steps; discarding drains only the pending count and never
+advances committed fixed time, fixed tick count, or dropped-time accounting.
 
 ## UI
 

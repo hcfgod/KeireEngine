@@ -390,6 +390,96 @@ TEST_CASE("Shader Graph live preview evaluates procedural nodes instead of prope
     CHECK(evaluatedBlue != approximatedBlue);
 }
 
+TEST_CASE("Shader Graph live preview evaluates deep expression chains without recursive dispatcher frames")
+{
+    auto graph = Keire::CreateDefaultShaderGraph();
+    REQUIRE_FALSE(graph.Nodes.empty());
+    const auto masterInput =
+        std::ranges::find(graph.Nodes.front().Pins, std::string("BaseColor"), &Keire::ShaderGraphPin::Name);
+    REQUIRE(masterInput != graph.Nodes.front().Pins.end());
+
+    auto constant =
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Constant, Keire::ShaderGraphValueType::Color);
+    constant.Value = Keire::Color{0.1F, 0.2F, 0.3F, 1.0F};
+    const auto constantOutput =
+        std::ranges::find(constant.Pins, Keire::ShaderGraphPinDirection::Output, &Keire::ShaderGraphPin::Direction);
+    REQUIRE(constantOutput != constant.Pins.end());
+    Keire::ShaderGraphEndpoint previous{constant.Id, constantOutput->Id};
+    graph.Nodes.push_back(std::move(constant));
+
+    constexpr std::size_t expressionDepth = 128;
+    for (std::size_t index = 0; index < expressionDepth; ++index)
+    {
+        auto add = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Add, Keire::ShaderGraphValueType::Color);
+        const auto input = std::ranges::find(add.Pins, std::string("A"), &Keire::ShaderGraphPin::Name);
+        const auto output =
+            std::ranges::find(add.Pins, Keire::ShaderGraphPinDirection::Output, &Keire::ShaderGraphPin::Direction);
+        REQUIRE(input != add.Pins.end());
+        REQUIRE(output != add.Pins.end());
+        graph.Connections.push_back({Keire::AssetId::Generate(), previous, {add.Id, input->Id}});
+        previous = {add.Id, output->Id};
+        graph.Nodes.push_back(std::move(add));
+    }
+    graph.Connections.push_back({Keire::AssetId::Generate(), previous, {graph.Nodes.front().Id, masterInput->Id}});
+
+    const KeireEditor::ShaderGraphPreviewRequest request{
+        .Output = graph.Output,
+        .Mesh = Keire::ShaderGraphPreviewMesh::Plane,
+        .Definition = &graph,
+        .Width = 32,
+        .Height = 32,
+        .Exposure = 1.0F,
+        .EnvironmentIntensity = 1.0F,
+        .RotationDegrees = 0.0F,
+    };
+    const auto pixels = KeireEditor::RenderShaderGraphPreview(request);
+    CHECK(pixels.size() == static_cast<std::size_t>(request.Width) * request.Height * 4U);
+}
+
+TEST_CASE("Shader Graph live preview resolves only the selected static-switch branch")
+{
+    auto graph = Keire::CreateDefaultShaderGraph();
+    auto custom = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Custom, Keire::ShaderGraphValueType::Color);
+    auto switchNode =
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::StaticSwitch, Keire::ShaderGraphValueType::Color);
+    const auto pin = [](Keire::ShaderGraphNode& node, const std::string_view name) -> Keire::ShaderGraphPin&
+    {
+        const auto located = std::ranges::find(node.Pins, name, &Keire::ShaderGraphPin::Name);
+        REQUIRE(located != node.Pins.end());
+        return *located;
+    };
+    const auto endpoint = [&pin](Keire::ShaderGraphNode& node, const std::string_view name)
+    { return Keire::ShaderGraphEndpoint{node.Id, pin(node, name).Id}; };
+
+    pin(switchNode, "False").DefaultValue = Keire::Color{0.8F, 0.1F, 0.6F, 1.0F};
+    graph.Connections.push_back({Keire::AssetId::Generate(), endpoint(custom, "Result"), endpoint(custom, "Input")});
+    graph.Connections.push_back({Keire::AssetId::Generate(), endpoint(custom, "Result"), endpoint(switchNode, "True")});
+    graph.Connections.push_back(
+        {Keire::AssetId::Generate(), endpoint(switchNode, "Result"), endpoint(graph.Nodes.front(), "BaseColor")});
+    graph.Nodes.push_back(std::move(custom));
+    graph.Nodes.push_back(std::move(switchNode));
+
+    auto reference = Keire::CreateDefaultShaderGraph();
+    auto constant =
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Constant, Keire::ShaderGraphValueType::Color);
+    constant.Value = Keire::Color{0.8F, 0.1F, 0.6F, 1.0F};
+    reference.Connections.push_back(
+        {Keire::AssetId::Generate(), endpoint(constant, "Value"), endpoint(reference.Nodes.front(), "BaseColor")});
+    reference.Nodes.push_back(std::move(constant));
+
+    KeireEditor::ShaderGraphPreviewRequest request{.Output = graph.Output,
+                                                   .Mesh = Keire::ShaderGraphPreviewMesh::Plane,
+                                                   .Definition = &graph,
+                                                   .Width = 32,
+                                                   .Height = 32,
+                                                   .Exposure = 1.0F,
+                                                   .EnvironmentIntensity = 1.0F,
+                                                   .RotationDegrees = 0.0F};
+    const auto evaluated = KeireEditor::RenderShaderGraphPreview(request);
+    request.Definition = &reference;
+    CHECK(KeireEditor::RenderShaderGraphPreview(request) == evaluated);
+}
+
 TEST_CASE("Shader Graph Sandbox progression compiles without dead authored work")
 {
     const auto root = std::filesystem::current_path() / "Samples/KeireSandbox/Assets/Examples/MaterialLab/ShaderGraphs";
