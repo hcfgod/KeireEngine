@@ -8,6 +8,7 @@ const { publisher, product } = Astro.params;
 const supabase = Astro.locals.supabase;
 let listing: any = null;
 let versions: any[] = [];
+let ownsPersonalCopy = false;
 if (supabase && await marketplaceEnabled(supabase)) {
     const result = await supabase.from("marketplace_catalog").select("*")
         .eq("publisher_slug", publisher).eq("slug", product).maybeSingle();
@@ -18,6 +19,12 @@ if (supabase && await marketplaceEnabled(supabase)) {
             .eq("product_id", listing.id).in("state", ["published", "withdrawn", "security_revoked"])
             .order("published_at", { ascending: false });
         versions = versionResult.data ?? [];
+        if (Astro.locals.user) {
+            const entitlementResult = await supabase.from("marketplace_entitlements").select("id")
+                .eq("product_id", listing.id).eq("user_id", Astro.locals.user.id)
+                .is("organization_id", null).is("revoked_at", null).limit(1).maybeSingle();
+            ownsPersonalCopy = Boolean(entitlementResult.data);
+        }
     }
 }
 if (!listing) {
@@ -35,7 +42,21 @@ const structuredData = listing ? {
     {listing ? <>
         <section class="platform-shell product-hero">
             <div><p class="eyebrow">{listing.category_name} · {listing.license_spdx}</p><h1>{listing.display_name}</h1><p class="lead">{listing.short_description}</p><p>By <a href={`/marketplace/publishers/${listing.publisher_slug}/`}>{listing.publisher_name}</a>{listing.publisher_verified ? " · Verified publisher" : ""}</p></div>
-            <aside class="product-buybox" aria-label="Get this asset"><span class="product-buybox__price">Free</span><button class="button" type="button" data-claim-product={listing.id}>Get asset</button><p class="form-message" aria-live="polite" data-claim-message>Choose personal or organization ownership after signing in.</p><a class="button button--secondary" href={`keirehub://marketplace/product/${listing.id}`}>Open in Hub</a></aside>
+            <aside class="product-buybox" aria-label="Get this asset">
+                <span class="product-buybox__price">Free</span>
+                <button class="button" type="button" data-claim-product={listing.id} disabled={ownsPersonalCopy}>
+                    {ownsPersonalCopy ? "In My Assets" : "Get asset"}
+                </button>
+                <p class="form-message" aria-live="polite" data-claim-message>
+                    {ownsPersonalCopy
+                        ? "This asset is already in your personal library."
+                        : "Claim this asset for your personal library after signing in."}
+                </p>
+                <a class="button button--secondary" href="/account/#library" data-library-link hidden={!ownsPersonalCopy}>
+                    View My Assets
+                </a>
+                <a class="button button--secondary" href={`keirehub://marketplace/product/${listing.id}`}>Open in Hub</a>
+            </aside>
         </section>
         <section class="platform-shell product-details">
             <article class="prose"><h2>About this asset</h2><p class="preserve-lines">{listing.description_markdown}</p><h2>Release history</h2>{versions.length ? versions.map((version) => <section><h3>{version.version}</h3><p>{version.release_notes_markdown || "No release notes were supplied."}</p><span class={`status-badge ${version.state === "published" ? "status-badge--ready" : ""}`}>{version.state}</span></section>) : <p>No compatible published version is currently available.</p>}</article>
@@ -47,22 +68,74 @@ const structuredData = listing ? {
 <script>
     const button = document.querySelector("[data-claim-product]");
     const message = document.querySelector("[data-claim-message]");
+    const libraryLink = document.querySelector("[data-library-link]");
+    const claimAttemptKey = crypto.randomUUID();
+    const claimTimeoutMilliseconds = 18_000;
+
     button?.addEventListener("click", async () => {
-        if (!(button instanceof HTMLButtonElement) || !(message instanceof HTMLElement)) return;
+        if (!(button instanceof HTMLButtonElement) || !(message instanceof HTMLElement) || button.disabled) return;
+
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), claimTimeoutMilliseconds);
+        let completed = false;
+        let redirecting = false;
         button.disabled = true;
+        button.setAttribute("aria-busy", "true");
         message.textContent = "Checking your account and license…";
-        const response = await fetch("/marketplace/v1/claims/", {
-            method: "POST",
-            headers: { "content-type": "application/json", "idempotency-key": crypto.randomUUID() },
-            body: JSON.stringify({ productId: button.dataset.claimProduct, ownership: "personal" }),
-        });
-        const result = await response.json();
-        if (response.status === 401) {
-            location.href = `/account/sign-in/?next=${encodeURIComponent(location.pathname)}`;
-            return;
+
+        try {
+            const response = await fetch("/marketplace/v1/claims/", {
+                method: "POST",
+                headers: { "content-type": "application/json", "idempotency-key": claimAttemptKey },
+                body: JSON.stringify({ productId: button.dataset.claimProduct, ownership: "personal" }),
+                cache: "no-store",
+                credentials: "same-origin",
+                signal: controller.signal,
+            });
+            const responseText = await response.text();
+            let result = {};
+            if (responseText) {
+                try {
+                    result = JSON.parse(responseText);
+                } catch {
+                    result = {};
+                }
+            }
+
+            if (response.status === 401) {
+                redirecting = true;
+                location.href = `/account/sign-in/?next=${encodeURIComponent(location.pathname)}`;
+                return;
+            }
+            if (!response.ok) {
+                const apiMessage = result && typeof result === "object" && "error" in result
+                    && result.error && typeof result.error === "object" && "message" in result.error
+                    && typeof result.error.message === "string"
+                    ? result.error.message
+                    : null;
+                message.dataset.kind = "error";
+                message.textContent = response.status >= 500
+                    ? "The marketplace service was temporarily unavailable. Check My Assets; if it is not there, retry safely."
+                    : apiMessage ?? "The asset could not be claimed. Review the request and try again.";
+                if (response.status >= 500 && libraryLink instanceof HTMLAnchorElement) libraryLink.hidden = false;
+                return;
+            }
+
+            completed = true;
+            button.textContent = "In My Assets";
+            message.dataset.kind = "success";
+            message.textContent = "Added to your personal library. Open Hub to download it.";
+            if (libraryLink instanceof HTMLAnchorElement) libraryLink.hidden = false;
+        } catch (error) {
+            message.dataset.kind = "error";
+            message.textContent = error instanceof DOMException && error.name === "AbortError"
+                ? "This is taking longer than expected. Check My Assets; if it is not there, retry safely."
+                : "The connection was interrupted. Check My Assets; if it is not there, retry safely.";
+            if (libraryLink instanceof HTMLAnchorElement) libraryLink.hidden = false;
+        } finally {
+            window.clearTimeout(timeout);
+            button.removeAttribute("aria-busy");
+            if (!completed && !redirecting) button.disabled = false;
         }
-        message.dataset.kind = response.ok ? "success" : "error";
-        message.textContent = response.ok ? "Added to your personal library. Open Hub to download it." : result.error?.message ?? "The asset could not be claimed.";
-        button.disabled = false;
     });
 </script>

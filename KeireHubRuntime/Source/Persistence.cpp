@@ -3,10 +3,12 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <chrono>
 #include <cstdint>
 #include <fstream>
 #include <limits>
 #include <system_error>
+#include <thread>
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -19,6 +21,16 @@ namespace KeireHub::Detail
     namespace
     {
 #if defined(_WIN32)
+        [[nodiscard]] std::wstring ExtendedLengthPath(const std::filesystem::path& path)
+        {
+            auto value = std::filesystem::absolute(path).lexically_normal().native();
+            if (value.starts_with(LR"(\\?\)"))
+                return value;
+            if (value.starts_with(LR"(\\)"))
+                return LR"(\\?\UNC\)" + value.substr(2);
+            return LR"(\\?\)" + value;
+        }
+
         class WindowsFileHandle final
         {
           public:
@@ -51,12 +63,14 @@ namespace KeireHub::Detail
         }
 
         [[nodiscard]] bool ReplaceFile(const std::filesystem::path& source, const std::filesystem::path& destination,
-                                       std::error_code& error) noexcept
+                                       std::error_code& error)
         {
 #if defined(_WIN32)
+            const auto nativeSource = ExtendedLengthPath(source);
+            const auto nativeDestination = ExtendedLengthPath(destination);
             for (std::uint32_t attempt = 0; attempt < 16; ++attempt)
             {
-                if (MoveFileExW(source.c_str(), destination.c_str(),
+                if (MoveFileExW(nativeSource.c_str(), nativeDestination.c_str(),
                                 MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
                 {
                     return true;
@@ -230,6 +244,46 @@ namespace KeireHub::Detail
         }
         return HubStatus::Failure(
             IoError(HubErrorCode::IoWrite, path, "Could not allocate a corrupt-file quarantine name."));
+    }
+
+    bool TryRenamePathWithRetry(const std::filesystem::path& source, const std::filesystem::path& destination,
+                                std::error_code& error)
+    {
+        if (source.empty() || destination.empty())
+        {
+            error = std::make_error_code(std::errc::invalid_argument);
+            return false;
+        }
+        constexpr std::array delays{std::chrono::milliseconds(10), std::chrono::milliseconds(20),
+                                    std::chrono::milliseconds(40), std::chrono::milliseconds(80),
+                                    std::chrono::milliseconds(160)};
+#if defined(_WIN32)
+        const auto nativeSource = ExtendedLengthPath(source);
+        const auto nativeDestination = ExtendedLengthPath(destination);
+#endif
+        for (const auto delay : delays)
+        {
+#if defined(_WIN32)
+            if (MoveFileExW(nativeSource.c_str(), nativeDestination.c_str(), MOVEFILE_WRITE_THROUGH))
+            {
+                error.clear();
+                return true;
+            }
+            error = std::error_code(static_cast<int>(GetLastError()), std::system_category());
+            const bool retryable = error.value() == ERROR_ACCESS_DENIED || error.value() == ERROR_SHARING_VIOLATION ||
+                                   error.value() == ERROR_LOCK_VIOLATION;
+#else
+            error.clear();
+            std::filesystem::rename(source, destination, error);
+            if (!error)
+                return true;
+            const bool retryable = error == std::errc::permission_denied || error == std::errc::device_or_resource_busy;
+#endif
+            if (!retryable)
+                return false;
+            std::this_thread::sleep_for(delay);
+        }
+        return false;
     }
 
     std::string PathToUtf8(const std::filesystem::path& path)

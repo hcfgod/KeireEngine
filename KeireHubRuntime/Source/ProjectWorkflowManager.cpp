@@ -962,8 +962,7 @@ namespace KeireHub
                 HubErrorCode::DestinationConflict, "The duplicate destination was created by another operation.",
                 plan.Request.SourceProjectId, error.message()));
         }
-        std::filesystem::rename(plan.Staging, plan.Destination, error);
-        if (error)
+        if (!Detail::TryRenamePathWithRetry(plan.Staging, plan.Destination, error))
         {
             return HubResult<ProjectDuplicateResult>::Failure(
                 WorkflowError(HubErrorCode::IoWrite, "The staged duplicate could not be published.",

@@ -17,6 +17,8 @@ namespace KeireHub::Detail
     [[nodiscard]] HubStatus WriteTextFileAtomically(const std::filesystem::path& path, std::string_view text);
     [[nodiscard]] HubStatus WriteJsonFileAtomically(const std::filesystem::path& path, const Json& document);
     [[nodiscard]] HubStatus QuarantineCorruptFile(const std::filesystem::path& path);
+    [[nodiscard]] bool TryRenamePathWithRetry(const std::filesystem::path& source,
+                                              const std::filesystem::path& destination, std::error_code& error);
 
     [[nodiscard]] std::string PathToUtf8(const std::filesystem::path& path);
     [[nodiscard]] std::filesystem::path PathFromUtf8(std::string_view path);

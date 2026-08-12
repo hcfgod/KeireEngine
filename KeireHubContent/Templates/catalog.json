@@ -108,7 +108,7 @@
       "compatibleEditors": ">=0.3.0 <2.0.0",
       "projectSchema": 3,
       "platformTarget": "desktop",
-      "estimatedSizeBytes": 24782310,
+      "estimatedSizeBytes": 24782363,
       "payloadRoot": "Payloads/Sandbox",
       "payloadFiles": [
         {
@@ -558,8 +558,8 @@
         },
         {
           "path": "Assets/Scripts/Runtime/FirstPersonCamera.cs",
-          "sizeBytes": 7981,
-          "sha256": "d8e6ac0723c2150a0c5a4d6429b60232fe5e71713a772b054586e29633c96ae1"
+          "sizeBytes": 7997,
+          "sha256": "a871747f6fba08699ae9bc6277b71dd0b97ea98a82f852bb07967ef24cedf5dc"
         },
         {
           "path": "Assets/Scripts/Runtime/FirstPersonCamera.cs.keiremeta",
@@ -598,8 +598,8 @@
         },
         {
           "path": "Assets/Scripts/Runtime/ThirdPersonController.cs",
-          "sizeBytes": 1639,
-          "sha256": "3dcce1057f491df744bdcc2ea83ba5f21c468f847cfdfd56b4adf63f614b128e"
+          "sizeBytes": 1649,
+          "sha256": "f1a0b1e6d402ba5b79ac70b719bf42dc3821a503b65ae3184f25ae9041f77cb1"
         },
         {
           "path": "Assets/Scripts/Runtime/ThirdPersonController.cs.keiremeta",
@@ -608,8 +608,8 @@
         },
         {
           "path": "Assets/Scripts/Runtime/UIController.cs",
-          "sizeBytes": 3801,
-          "sha256": "d2aebb6395426208f7ce6c27c4254b311196ab3f4132ae8ed529e9a9e2f162e0"
+          "sizeBytes": 3828,
+          "sha256": "1ede877ceca2d4d6e838271674064ec67b076fce5278cc3c1d2190a39eae9f5c"
         },
         {
           "path": "Assets/Scripts/Runtime/UIController.cs.keiremeta",
