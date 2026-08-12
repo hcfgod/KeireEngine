@@ -288,7 +288,7 @@ policy; external scripts, external fonts, and inline script/style execution rema
    release metadata without crowding the primary download surface. Signed stable releases
    remain immutable and are never pruned through the preview-retention workflow. Preview builds never belong in a
    signed stable catalog.
-5. Confirm `/`, `/marketplace/`, `/docs/`, a deep guide route, `/docs/pagefind/pagefind.js`, `/health/`, and a missing
+5. Confirm `/`, `/marketplace/`, `/docs/`, a deep guide route, `/pagefind/pagefind.js`, `/health/`, and a missing
    route before running
    `scripts/health-check.sh https://distribution.example` or the PowerShell equivalent after deployment.
 
