@@ -1,0 +1,25 @@
+---
+interface Props {
+    completed: number;
+    total: number;
+    label: string;
+    compact?: boolean;
+}
+
+const { completed, total, label, compact = false } = Astro.props;
+const safeTotal = Math.max(1, total);
+const safeCompleted = Math.min(Math.max(0, completed), safeTotal);
+const percent = Math.round((safeCompleted / safeTotal) * 100);
+---
+
+<div class:list={["readiness-progress", compact && "readiness-progress--compact"]}>
+    <div class="readiness-progress__label">
+        <span>{label}</span>
+        <strong>{percent}%</strong>
+    </div>
+    <progress value={safeCompleted} max={safeTotal} aria-label={`${label}: ${safeCompleted} of ${safeTotal} gates passed`}>
+        {percent}%
+    </progress>
+    <small>{safeCompleted} of {safeTotal} gates passed</small>
+</div>
+

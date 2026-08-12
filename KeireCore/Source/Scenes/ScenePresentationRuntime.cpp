@@ -3,6 +3,7 @@
 #include "Keire/Assets/AssetSystem.h"
 #include "Keire/Audio/AudioAssets.h"
 #include "Keire/ECS/Components/AudioComponents.h"
+#include "Keire/ECS/Components/CameraComponent.h"
 #include "Keire/ECS/Components/RuntimeUiComponents.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/Scenes/Scene.h"
@@ -13,6 +14,7 @@
 #include <cmath>
 #include <deque>
 #include <exception>
+#include <limits>
 #include <map>
 #include <ranges>
 #include <set>
@@ -247,6 +249,8 @@ namespace Keire
             if (const auto transform = entity.GetComponent<TransformComponent>())
                 position = transform->WorldPosition();
             auto result = source.PlaybackRequest(std::move(clip), position);
+            if (!result.Mixer)
+                result.Mixer = DefaultMixer;
             result.MixerRouting = mixerRouting;
             if (result.Mixer && !mixerRouting)
                 result.Mixer = {};
@@ -282,12 +286,13 @@ namespace Keire
             return state.Routing;
         }
 
-        [[nodiscard]] bool ApplyReverbZone(const AudioReverbZoneComponent& zone, const float weight)
+        [[nodiscard]] bool ApplyReverbZone(const AudioReverbZoneComponent& zone, const AssetId mixer,
+                                           const float weight)
         {
-            const auto routing = EnsureMixer(zone.Mixer());
+            const auto routing = EnsureMixer(mixer);
             if (!routing)
                 return false;
-            auto& state = AudioMixers.at(zone.Mixer());
+            auto& state = AudioMixers.at(mixer);
             if (state.AppliedSnapshot == zone.SnapshotId() && state.AppliedWeight == weight &&
                 state.AppliedReverbSend == zone.ReverbSend())
             {
@@ -543,8 +548,9 @@ namespace Keire
                     continue;
                 SeenAudio.insert(entity.Id());
                 const auto source = entity.GetComponent<AudioSourceComponent>();
-                const auto mixerRouting = EnsureMixer(source->Mixer());
-                if (source->Mixer() && !mixerRouting)
+                const auto sourceMixer = source->Mixer() ? source->Mixer() : DefaultMixer;
+                const auto mixerRouting = EnsureMixer(sourceMixer);
+                if (sourceMixer && !mixerRouting)
                     ++pending;
                 auto& state = AudioSources[entity.Id()];
                 if (state.Clip != source->Clip())
@@ -608,6 +614,8 @@ namespace Keire
             PendingAudio = pending;
             Vector3 listenerPosition;
             bool listenerFound = false;
+            HasAudioListener = false;
+            UsingPrimaryCameraListener = false;
             for (const auto& entity : scene->Query<AudioListenerComponent>())
             {
                 const auto listener = entity.GetComponent<AudioListenerComponent>();
@@ -615,11 +623,48 @@ namespace Keire
                     continue;
                 AudioListenerState state;
                 if (const auto transform = entity.GetComponent<TransformComponent>())
+                {
                     state.Position = transform->WorldPosition();
+                    state.Forward = Math::TransformDirection(transform->WorldMatrix(), {0.0F, 0.0F, -1.0F});
+                    state.Up = Math::TransformDirection(transform->WorldMatrix(), {0.0F, 1.0F, 0.0F});
+                }
+                state.Gain = listener->Gain();
                 Audio->SetListener(state);
                 listenerPosition = state.Position;
                 listenerFound = true;
+                HasAudioListener = true;
                 break;
+            }
+            if (!listenerFound)
+            {
+                Entity selectedCamera;
+                auto selectedPriority = std::numeric_limits<std::int32_t>::min();
+                for (const auto& entity : scene->Query<CameraComponent>())
+                {
+                    const auto camera = entity.GetComponent<CameraComponent>();
+                    if (!entity.ActiveInHierarchy() || !camera->Enabled() || !camera->Primary() ||
+                        camera->Priority() < selectedPriority)
+                    {
+                        continue;
+                    }
+                    selectedCamera = entity;
+                    selectedPriority = camera->Priority();
+                }
+                if (selectedCamera)
+                {
+                    AudioListenerState state;
+                    if (const auto transform = selectedCamera.GetComponent<TransformComponent>())
+                    {
+                        state.Position = transform->WorldPosition();
+                        state.Forward = Math::TransformDirection(transform->WorldMatrix(), {0.0F, 0.0F, -1.0F});
+                        state.Up = Math::TransformDirection(transform->WorldMatrix(), {0.0F, 1.0F, 0.0F});
+                    }
+                    Audio->SetListener(state);
+                    listenerPosition = state.Position;
+                    listenerFound = true;
+                    HasAudioListener = true;
+                    UsingPrimaryCameraListener = true;
+                }
             }
 
             std::map<AssetId, std::pair<Ref<AudioReverbZoneComponent>, float>> activeZones;
@@ -629,43 +674,62 @@ namespace Keire
                 {
                     const auto zone = entity.GetComponent<AudioReverbZoneComponent>();
                     const auto transform = entity.GetComponent<TransformComponent>();
-                    if (!entity.ActiveInHierarchy() || !zone->Enabled() || !zone->Mixer() || !transform)
+                    const auto zoneMixer = zone->Mixer() ? zone->Mixer() : DefaultMixer;
+                    if (!entity.ActiveInHierarchy() || !zone->Enabled() || !zoneMixer || !transform)
                         continue;
-                    const auto center = transform->WorldPosition();
-                    const Vector3 delta{listenerPosition.X - center.X, listenerPosition.Y - center.Y,
-                                        listenerPosition.Z - center.Z};
+                    const auto world = transform->WorldMatrix();
+                    const auto localPosition = Math::TransformPoint(Math::Inverse(world), listenerPosition);
                     float outsideDistance = 0.0F;
                     if (zone->Shape() == AudioReverbZoneShape::Sphere)
                     {
-                        outsideDistance =
-                            std::max(0.0F, std::sqrt(delta.X * delta.X + delta.Y * delta.Y + delta.Z * delta.Z) -
-                                               zone->SphereRadius());
+                        const auto distance =
+                            std::sqrt(localPosition.X * localPosition.X + localPosition.Y * localPosition.Y +
+                                      localPosition.Z * localPosition.Z);
+                        if (distance > zone->SphereRadius())
+                        {
+                            const auto scale = zone->SphereRadius() / distance;
+                            const auto closest = Math::TransformPoint(
+                                world, {localPosition.X * scale, localPosition.Y * scale, localPosition.Z * scale});
+                            const Vector3 outside{listenerPosition.X - closest.X, listenerPosition.Y - closest.Y,
+                                                  listenerPosition.Z - closest.Z};
+                            outsideDistance =
+                                std::sqrt(outside.X * outside.X + outside.Y * outside.Y + outside.Z * outside.Z);
+                        }
                     }
                     else
                     {
                         const auto extent = zone->BoxHalfExtent();
-                        const float x = std::max(std::abs(delta.X) - extent.X, 0.0F);
-                        const float y = std::max(std::abs(delta.Y) - extent.Y, 0.0F);
-                        const float z = std::max(std::abs(delta.Z) - extent.Z, 0.0F);
-                        outsideDistance = std::sqrt(x * x + y * y + z * z);
+                        const Vector3 closestLocal{std::clamp(localPosition.X, -extent.X, extent.X),
+                                                   std::clamp(localPosition.Y, -extent.Y, extent.Y),
+                                                   std::clamp(localPosition.Z, -extent.Z, extent.Z)};
+                        const auto closest = Math::TransformPoint(world, closestLocal);
+                        const Vector3 outside{listenerPosition.X - closest.X, listenerPosition.Y - closest.Y,
+                                              listenerPosition.Z - closest.Z};
+                        outsideDistance =
+                            std::sqrt(outside.X * outside.X + outside.Y * outside.Y + outside.Z * outside.Z);
                     }
                     const float weight = zone->BlendDistance() == 0.0F
                                              ? (outsideDistance == 0.0F ? 1.0F : 0.0F)
                                              : std::clamp(1.0F - outsideDistance / zone->BlendDistance(), 0.0F, 1.0F);
-                    auto found = activeZones.find(zone->Mixer());
+                    auto found = activeZones.find(zoneMixer);
                     if (found == activeZones.end() || zone->Priority() > found->second.first->Priority() ||
                         (zone->Priority() == found->second.first->Priority() && weight > found->second.second))
                     {
-                        activeZones.insert_or_assign(zone->Mixer(), std::pair{zone, weight});
+                        activeZones.insert_or_assign(zoneMixer, std::pair{zone, weight});
                     }
                 }
             }
             std::set<AssetId> activeReverbMixers;
+            ActiveReverbZones = 0;
             for (const auto& [mixer, active] : activeZones)
             {
                 SeenMixers.insert(mixer);
-                if (ApplyReverbZone(*active.first, active.second))
+                if (ApplyReverbZone(*active.first, mixer, active.second))
+                {
                     activeReverbMixers.insert(mixer);
+                    if (active.second > 0.0F)
+                        ++ActiveReverbZones;
+                }
                 else
                     ++PendingAudio;
             }
@@ -687,6 +751,7 @@ namespace Keire
         Ref<AudioSystem> Audio;
         Ref<RuntimeUiTree> UiTree;
         Ref<Scene> ActiveScene;
+        AssetId DefaultMixer;
         std::map<EntityId, RuntimeUiElementId> UiNodes;
         std::map<std::uint64_t, EntityId> NodeEntities;
         std::set<EntityId> SeenUi;
@@ -696,6 +761,9 @@ namespace Keire
         std::set<EntityId> SeenAudio;
         std::set<AssetId> SeenMixers;
         std::size_t PendingAudio = 0;
+        std::size_t ActiveReverbZones = 0;
+        bool HasAudioListener = false;
+        bool UsingPrimaryCameraListener = false;
         bool WasPlaying = false;
         std::uint64_t SynchronizationCount = 0;
         float UiSynchronizationMilliseconds = 0.0F;
@@ -710,6 +778,10 @@ namespace Keire
     }
 
     ScenePresentationRuntime::~ScenePresentationRuntime() { Clear(); }
+
+    void ScenePresentationRuntime::SetDefaultMixer(const AssetId mixer) noexcept { m_Impl->DefaultMixer = mixer; }
+
+    AssetId ScenePresentationRuntime::DefaultMixer() const noexcept { return m_Impl->DefaultMixer; }
 
     void ScenePresentationRuntime::Synchronize(Ref<Scene> scene, const float viewportWidth, const float viewportHeight,
                                                const bool playing, const RuntimeUiInsets safeArea)
@@ -760,6 +832,9 @@ namespace Keire
         m_Impl->UiTree->Clear();
         m_Impl->ActiveScene.Reset();
         m_Impl->PendingAudio = 0;
+        m_Impl->ActiveReverbZones = 0;
+        m_Impl->HasAudioListener = false;
+        m_Impl->UsingPrimaryCameraListener = false;
         m_Impl->WasPlaying = false;
         m_Impl->SynchronizationCount = 0;
         m_Impl->UiSynchronizationMilliseconds = 0.0F;
@@ -950,6 +1025,9 @@ namespace Keire
         result.ActiveAudioSources = static_cast<std::size_t>(
             std::ranges::count_if(m_Impl->AudioSources, [](const auto& item) { return bool(item.second.Voice); }));
         result.PendingAudioAssets = m_Impl->PendingAudio;
+        result.ActiveReverbZones = m_Impl->ActiveReverbZones;
+        result.HasAudioListener = m_Impl->HasAudioListener;
+        result.UsingPrimaryCameraListener = m_Impl->UsingPrimaryCameraListener;
         result.SynchronizationCount = m_Impl->SynchronizationCount;
         result.UiSynchronizationMilliseconds = m_Impl->UiSynchronizationMilliseconds;
         result.AudioSynchronizationMilliseconds = m_Impl->AudioSynchronizationMilliseconds;

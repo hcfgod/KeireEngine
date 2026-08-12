@@ -1,70 +1,26 @@
 ---
 import PlatformLayout from "../../layouts/PlatformLayout.astro";
+import ReadinessProgress from "../../components/ReadinessProgress.astro";
+import { completedLaunchChecks, launchProgressTracks, overallLaunchProgress, totalLaunchChecks } from "../../lib/launchProgress";
 
 export const prerender = true;
 
-const roadmapTracks = [
-    {
-        status: "Substantial",
-        title: "Website and documentation platform",
-        completed: 9,
-        total: 10,
-        delivered: "Unified Astro website and documentation, shared responsive design, Caddy deployment, account surfaces, marketplace routes, local search, health checks, and transactional rollout.",
-        remaining: "Complete the formal accessibility/browser matrix and repeat the performance-budget audit on the branded production domain.",
-    },
-    {
-        status: "Active validation",
-        title: "Identity and account security",
-        completed: 8,
-        total: 10,
-        delivered: "Supabase SSR sessions, verified GitHub PKCE sign-in, MFA surfaces, hardened redirects, persistent account presentation, canonical-origin mutation protection, registered Hub OAuth, and packaged URL-protocol handoff support.",
-        remaining: "Enable leaked-password protection, configure production SMTP, and finish native Windows/Linux revocation and recovery acceptance.",
-    },
-    {
-        status: "Foundation complete",
-        title: "Asset packages and Editor integration",
-        completed: 10,
-        total: 12,
-        delivered: "Deterministic archives, bounded parsing, hashes and signature hooks, dependency resolution, lockfiles, read-only mounts, embedding, selective import, executable-code consent, and transactional recovery.",
-        remaining: "Activate the production catalog, publish signed packages, and pass complete install/update/remove/player-build scenarios on Windows and Linux.",
-    },
-    {
-        status: "Internal staging",
-        title: "Marketplace and publishing workflows",
-        completed: 7,
-        total: 12,
-        delivered: "Forced-RLS data model, private Storage boundaries, versioned APIs, feature flags, organization and publisher transitions, free entitlement contracts, and official draft products.",
-        remaining: "Finish signed official releases, moderation acceptance, community abuse controls, policy approval, and public catalog/claim testing before enabling the marketplace.",
-    },
-    {
-        status: "Provisioning",
-        title: "Validation and release operations",
-        completed: 8,
-        total: 12,
-        delivered: "Atomic validator leases, scoped broker boundary, provisioned isolated worker, archive validation, malware and secret scanning, generated no-network C# compilation, restricted service identities, firewall confinement, and authenticated empty-queue operation.",
-        remaining: "Accept a real quarantined upload and report commit, establish the asset-marketplace signing root, rehearse restore, complete platform matrices, and move from DuckDNS staging to the branded domain.",
-    },
-] as const;
-
-const completedChecks = roadmapTracks.reduce((sum, track) => sum + track.completed, 0);
-const totalChecks = roadmapTracks.reduce((sum, track) => sum + track.total, 0);
-const overallProgress = Math.round((completedChecks / totalChecks) * 100);
 ---
-<PlatformLayout title="Roadmap" description="Review Kéire Engine 0.3.1 implementation progress, validated foundations, active acceptance work, and public-launch gates.">
+<PlatformLayout title="Roadmap" description="Review Kéire Engine 0.3.1 implementation progress, validated foundations, active acceptance work, and public-launch gates." active="roadmap">
     <section class="platform-section roadmap-hero">
         <div class="platform-shell">
             <div class="section-heading">
                 <div><p class="eyebrow">0.3.1 evidence snapshot</p><h1>Substantial progress. Explicit gates.</h1></div>
                 <p>Progress is measured against a maintained acceptance checklist. It changes only when implementation or staging evidence exists; it is not a release-date estimate or a quality score.</p>
             </div>
-            <div class="roadmap-summary" aria-label={`Overall roadmap progress: ${completedChecks} of ${totalChecks} tracked checks complete`}>
+            <div class="roadmap-summary" aria-label={`Overall roadmap progress: ${completedLaunchChecks} of ${totalLaunchChecks} tracked checks complete`}>
                 <div>
-                    <span class="roadmap-summary__value">{overallProgress}%</span>
+                    <span class="roadmap-summary__value">{overallLaunchProgress}%</span>
                     <strong>of the current 0.3.1 checklist is evidenced</strong>
                 </div>
                 <div class="roadmap-summary__facts">
-                    <span><strong>{completedChecks}</strong> checks closed</span>
-                    <span><strong>{totalChecks - completedChecks}</strong> checks remain</span>
+                    <span><strong>{completedLaunchChecks}</strong> checks closed</span>
+                    <span><strong>{totalLaunchChecks - completedLaunchChecks}</strong> checks remain</span>
                     <span>Audited <time datetime="2026-08-12">12 Aug 2026</time></span>
                 </div>
             </div>
@@ -78,27 +34,14 @@ const overallProgress = Math.round((completedChecks / totalChecks) * 100);
                 <p>Each bar is completed checks divided by the defined checks for that workstream. The delivered and remaining summaries explain what moved the number.</p>
             </div>
             <div class="roadmap-grid">
-                {roadmapTracks.map((track, index) => {
-                    const percent = Math.round((track.completed / track.total) * 100);
+                {launchProgressTracks.map((track, index) => {
                     const titleId = `roadmap-track-${index + 1}`;
                     return (
                         <article class="roadmap-track">
                             <header class="roadmap-track__header">
                                 <div><span class="status-badge">{track.status}</span><h3 id={titleId}>{track.title}</h3></div>
-                                <strong class="roadmap-track__percent" aria-hidden="true">{percent}%</strong>
                             </header>
-                            <div
-                                class="roadmap-meter"
-                                role="progressbar"
-                                aria-labelledby={titleId}
-                                aria-valuemin="0"
-                                aria-valuemax={track.total}
-                                aria-valuenow={track.completed}
-                                aria-valuetext={`${track.completed} of ${track.total} checks complete`}
-                            >
-                                <span style={`--roadmap-progress: ${percent}%`}></span>
-                            </div>
-                            <p class="roadmap-track__count">{track.completed} of {track.total} acceptance checks evidenced</p>
+                            <ReadinessProgress completed={track.completed} total={track.total} label={track.title} compact />
                             <dl class="roadmap-track__detail">
                                 <div><dt>Delivered</dt><dd>{track.delivered}</dd></div>
                                 <div><dt>Remaining gate</dt><dd>{track.remaining}</dd></div>

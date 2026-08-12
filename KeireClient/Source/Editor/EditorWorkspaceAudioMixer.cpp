@@ -24,6 +24,19 @@ std::string_view EditorWorkspaceLayer::AudioMixerPreviewDiagnostic() const noexc
     return m_AudioMixerPreviewDiagnostic;
 }
 
+Keire::AudioMeterSnapshot EditorWorkspaceLayer::AudioMixerMeters() const noexcept
+{
+    try
+    {
+        if (const auto audio = Owner().Audio())
+            return audio->LatestMeterSnapshot();
+    }
+    catch (...)
+    {
+    }
+    return {};
+}
+
 void EditorWorkspaceLayer::ActivateAudioMixerHistory() noexcept
 {
     m_ActiveUndoContext = m_AudioMixerDocument->UndoContext();

@@ -7,6 +7,7 @@
 #include <functional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 
 namespace KeireEditor
@@ -21,6 +22,7 @@ namespace KeireEditor
         [[nodiscard]] virtual const Keire::UiThemeDefinition& AudioMixerTheme() const noexcept = 0;
         [[nodiscard]] virtual Keire::Ref<Keire::AssetDatabase> AudioMixerDatabase() const noexcept = 0;
         [[nodiscard]] virtual std::string_view AudioMixerPreviewDiagnostic() const noexcept = 0;
+        [[nodiscard]] virtual Keire::AudioMeterSnapshot AudioMixerMeters() const noexcept = 0;
         virtual void ActivateAudioMixerHistory() noexcept = 0;
         virtual void SaveAudioMixerDocument() = 0;
         virtual void DiscardAudioMixerDocument() = 0;
@@ -46,6 +48,7 @@ namespace KeireEditor
       private:
         [[nodiscard]] bool ApplyEdit(std::string_view name,
                                      const std::function<void(Keire::AudioMixerDefinition&)>& operation);
+        void DrawMixConsole(Keire::UiFrame& ui);
         void DrawRouting(Keire::UiFrame& ui);
         void DrawSelectedBus(Keire::UiFrame& ui);
         void DrawSnapshots(Keire::UiFrame& ui);
@@ -56,6 +59,7 @@ namespace KeireEditor
         Keire::UiPanelRegistration m_Registration;
         Keire::AssetId m_SelectedSnapshot;
         Keire::AssetId m_SelectedDucking;
+        std::unordered_map<Keire::AssetId, std::string> m_EffectNameBuffers;
         std::string m_Message;
         bool m_WasVisible = false;
     };

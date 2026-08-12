@@ -10,12 +10,12 @@ public sealed class UIController : Behaviour
     public static event Action<bool>? VisibilityChanged;
     public static bool IsAnyUiVisible => s_VisibleControllerCount > 0;
 
-    [SerializeField] private Entity uiPanel;
-    [SerializeField] private UiButton? uiButton;
+    [SerializeField] private Entity uiPanel = default;
+    [SerializeField] private UiButton? uiButton = null;
     [SerializeField] private KeireEvent uiOpened = new();
     [SerializeField] private KeireEvent uiClosed = new();
 
-    [SerializeField] private AssetReference<AudioClip> uiAudioClip;
+    [SerializeField] private AssetReference<AudioClip> uiAudioClip = default;
 
     private UiButton? _subscribedButton;
     private IDisposable? _cursorVisibility;

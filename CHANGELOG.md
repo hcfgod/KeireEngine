@@ -7,6 +7,39 @@ versions.
 
 ### Changed
 
+- Fixed first-time free Marketplace claims failing while inserting an order item because a PL/pgSQL local shadowed the
+  `order_id` table column. The repaired transaction remains service-role-only and preserves entitlement idempotency,
+  exact-license acceptance, organization authorization, and audit recording. Publisher uploads now present a prominent
+  validated-to-Staff handoff so a successful upload cannot be mistaken for a moderation submission.
+- Published the six signed first-party Marketplace launch products through quarantine, isolated validation,
+  moderation, offline Ed25519 signing, and immutable release promotion. Inspector-populated Sandbox sample fields now
+  carry explicit defaults so Sandbox and Gameplay packages pass the warnings-as-errors managed-code policy, and the
+  anonymous catalog publisher policy no longer requires direct access to protected organization membership records.
+- Replaced the single-text Marketplace validator fixture with the deterministic Neon Forge Creator Pack upload sample.
+  The new unsigned quarantine input contains two VFX graphs, two Shader Graphs, two Material Graphs, and an explicit
+  runtime C# assembly with one behaviour. The retired fixture's unpublished catalog, version, upload, validation,
+  submission, and quarantine records were purged after dependency and publication checks; append-only audit evidence
+  remains intact.
+- Added a deterministic first-party Marketplace package builder for the Sandbox, Shader/Material Graph, VFX, gameplay
+  C#, and UI/input launch products, with dependency-closure, asset-identity, managed-code classification, portable-path,
+  no-overwrite, and authoritative archive verification checks. Staff official-release cards now enter the same
+  Publisher upload/validation/moderation/signing pipeline as third-party content and preselect the intended product.
+  Terminal moderation decisions leave the active queue immediately while remaining visible in explicit review history
+  and the append-only audit trail; administrators can also withdraw a pre-publication signing approval without deleting
+  evidence or mutating a published release.
+- Opened the signed-only Marketplace catalog preview after the first real package completed upload, isolated validation,
+  publisher submission, and staff moderation. Unsigned products remain explicitly in the signing queue and cannot be
+  claimed or downloaded. Centralized launch evidence now drives semantic progress indicators across Roadmap,
+  Publisher, and Staff surfaces, and first-class navigation now exposes Roadmap, policies, Marketplace, and detailed
+  download routes from desktop, mobile, and documentation navigation.
+- Established the dedicated asset-marketplace Ed25519 trust root and completed the missing post-moderation boundary.
+  A new offline tool produces and independently verifies exact publication envelopes; an administrator/MFA-only Edge
+  function verifies the detached signature, rechecks validator and moderation evidence, promotes the same quarantine
+  object into content-addressed private release Storage, and commits publication and audit state transactionally with
+  compensating cleanup on failure. The signing private key remains outside the repository, website, and Supabase.
+- Fixed publisher package validation appearing permanently pending after the backend had completed. Validation activity
+  now follows each authorized upload through a no-store status endpoint, displays queue/lease progress, backs off while
+  the page is visible, reports delayed processing without losing the job, and refreshes terminal validator evidence.
 - Fixed browser sign-in discarding valid Supabase OAuth sessions when the service issued its compact refresh-token
   format. Hub refresh tokens are now validated as opaque, non-empty, bounded values during exchange and rotation,
   while access-token, token-type, expiry, PKCE, state, and ID-token nonce checks remain enforced.
@@ -109,6 +142,18 @@ versions.
   ducking, and Reverb Zones drive direct-insert wet levels or reverb-return sends without double-scaling return effects.
   The Inspector and
   mixer editor now diagnose incomplete routes and can create a conventional reverb return in one action.
+- Reworked the 0.3.1 audio workflow around a live channel-based Mix Console, named bus/snapshot Inspector pickers,
+  typed dB/Hz/ms/% effect parameters, automatic per-bus peak/RMS meters, and focused routing diagnostics. The project
+  Default Mixer now routes blank Audio Source and Reverb Zone overrides in Editor Play Mode and cooked players.
+- Added schema-2 audio project settings for playback device, sample rate, buffer size, mono/stereo/5.1/7.1 layout, and
+  audible/virtual voice budgets with schema-1 migration and safe missing-device fallback. Portable format and capacity
+  settings now flow through cooked manifests without shipping a development-machine device identity.
+- Fixed spatial voice audibility to use the authored attenuation curve for native output and virtualization, added
+  primary-Camera listener fallback, applied listener orientation and gain, and made transformed box/sphere Reverb Zones
+  respect world rotation and scale. Audio profiling now exposes device fallback, voice pressure, listener selection,
+  active zones, pending assets, route counts, voice state, meters, clipping, and dropped readings.
+- Extended managed audio scripting with mixer/bus routing, dB volume, priority, distance, and Play On Awake controls,
+  plus validated Audio Listener and Reverb Zone handles for runtime listener gain/selection and environmental blending.
 - Extended the managed gameplay API with writable world transforms, deterministic Unity-style coroutines and yield
   instructions, and a strongly typed Rigid Body handle with runtime properties and force modes. Disable, teardown, and
   reload dispose all coroutine iterators and cancel pending work deterministically.

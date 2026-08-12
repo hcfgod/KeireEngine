@@ -31,6 +31,35 @@ namespace Keire
                    !std::isspace(static_cast<unsigned char>(value.front())) &&
                    !std::isspace(static_cast<unsigned char>(value.back()));
         }
+
+        [[nodiscard]] std::string_view AudioLayoutName(const AudioChannelLayout layout)
+        {
+            switch (layout)
+            {
+            case AudioChannelLayout::Mono:
+                return "mono";
+            case AudioChannelLayout::Stereo:
+                return "stereo";
+            case AudioChannelLayout::Surround51:
+                return "5.1";
+            case AudioChannelLayout::Surround71:
+                return "7.1";
+            }
+            throw std::invalid_argument("Project audio output layout is unsupported.");
+        }
+
+        [[nodiscard]] AudioChannelLayout ParseAudioLayout(const std::string_view value)
+        {
+            if (value == "mono")
+                return AudioChannelLayout::Mono;
+            if (value == "stereo")
+                return AudioChannelLayout::Stereo;
+            if (value == "5.1")
+                return AudioChannelLayout::Surround51;
+            if (value == "7.1")
+                return AudioChannelLayout::Surround71;
+            throw std::runtime_error("Project audio output layout is unsupported.");
+        }
     } // namespace
 
     ProjectAuthoringSettings DefaultProjectAuthoringSettings()
@@ -55,6 +84,19 @@ namespace Keire
             throw std::invalid_argument("External editor profile identifiers must be non-empty and safe.");
         if (settings.ExternalEditorExecutable.native().size() > 4096)
             throw std::invalid_argument("External editor executable path is too long.");
+        if (settings.Audio.MixSampleRate < 8000 || settings.Audio.MixSampleRate > 192000 ||
+            (settings.Audio.PeriodFrames != 128 && settings.Audio.PeriodFrames != 256 &&
+             settings.Audio.PeriodFrames != 512 && settings.Audio.PeriodFrames != 1024) ||
+            AudioChannelCount(settings.Audio.OutputLayout) == 0 || settings.Audio.MaximumVoices == 0 ||
+            settings.Audio.MaximumVoices > 65536 ||
+            settings.Audio.MaximumVirtualVoices < settings.Audio.MaximumVoices ||
+            settings.Audio.MaximumVirtualVoices > 262144 || settings.Audio.PlaybackDeviceId.size() > 512U ||
+            settings.Audio.PlaybackDeviceId.size() % 2U != 0 ||
+            !std::ranges::all_of(settings.Audio.PlaybackDeviceId, [](const char character)
+                                 { return std::isxdigit(static_cast<unsigned char>(character)) != 0; }))
+        {
+            throw std::invalid_argument("Project audio output settings are invalid.");
+        }
 
         std::unordered_set<std::string> names;
         for (const auto& name : settings.PhysicsLayerNames)
@@ -84,13 +126,28 @@ namespace Keire
         if (!document.is_object())
             throw std::runtime_error("Project authoring settings root must be an object.");
 
-        ProjectAuthoringSettings result;
-        result.SchemaVersion = document.at("schemaVersion").get<std::uint32_t>();
+        const auto schemaVersion = document.at("schemaVersion").get<std::uint32_t>();
+        if (schemaVersion != 1 && schemaVersion != ProjectAuthoringSettingsSchemaVersion)
+            throw std::runtime_error("Project authoring settings use an unsupported schema.");
+
+        auto result = DefaultProjectAuthoringSettings();
         if (const auto mixer = document.find("defaultMixer"); mixer != document.end() && !mixer->is_null())
             result.DefaultMixer = AssetId::Parse(mixer->get<std::string>());
         result.ExternalEditorId = document.value("externalEditorId", "system");
         result.ExternalEditorExecutable =
             Detail::PathFromUtf8(document.value("externalEditorExecutable", std::string{}));
+        if (schemaVersion >= 2)
+        {
+            const auto& audio = document.at("audio");
+            if (!audio.is_object())
+                throw std::runtime_error("Project audio settings must be an object.");
+            result.Audio.MixSampleRate = audio.at("mixSampleRate").get<std::uint32_t>();
+            result.Audio.PeriodFrames = audio.at("periodFrames").get<std::uint32_t>();
+            result.Audio.OutputLayout = ParseAudioLayout(audio.at("outputLayout").get<std::string>());
+            result.Audio.MaximumVoices = audio.at("maximumVoices").get<std::uint32_t>();
+            result.Audio.MaximumVirtualVoices = audio.at("maximumVirtualVoices").get<std::uint32_t>();
+            result.Audio.PlaybackDeviceId = audio.value("playbackDeviceId", std::string{});
+        }
 
         const auto& names = document.at("physicsLayerNames");
         const auto& matrix = document.at("physicsCollisionMatrix");
@@ -123,6 +180,13 @@ namespace Keire
             {"schemaVersion", settings.SchemaVersion},
             {"defaultMixer",
              settings.DefaultMixer ? nlohmann::json(settings.DefaultMixer.ToString()) : nlohmann::json(nullptr)},
+            {"audio",
+             {{"mixSampleRate", settings.Audio.MixSampleRate},
+              {"periodFrames", settings.Audio.PeriodFrames},
+              {"outputLayout", AudioLayoutName(settings.Audio.OutputLayout)},
+              {"maximumVoices", settings.Audio.MaximumVoices},
+              {"maximumVirtualVoices", settings.Audio.MaximumVirtualVoices},
+              {"playbackDeviceId", settings.Audio.PlaybackDeviceId}}},
             {"externalEditorId", settings.ExternalEditorId},
             {"externalEditorExecutable", Detail::PathToUtf8(settings.ExternalEditorExecutable)},
             {"physicsLayerNames", std::move(names)},

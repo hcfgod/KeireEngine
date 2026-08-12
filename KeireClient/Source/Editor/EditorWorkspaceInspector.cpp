@@ -90,6 +90,11 @@ std::span<const Keire::AssetSourceRecord> EditorWorkspaceLayer::InspectorAssetRe
     return m_AssetRecords;
 }
 
+Keire::AssetId EditorWorkspaceLayer::InspectorDefaultAudioMixer() const noexcept
+{
+    return m_ProjectSettingsDocument ? m_ProjectSettingsDocument->AuthoringSettings().DefaultMixer : Keire::AssetId{};
+}
+
 Keire::AssetId EditorWorkspaceLayer::InspectorSelectedAsset() const noexcept { return m_SelectedAsset; }
 
 std::string_view EditorWorkspaceLayer::InspectorAssetStatus() const noexcept { return m_AssetStatus; }

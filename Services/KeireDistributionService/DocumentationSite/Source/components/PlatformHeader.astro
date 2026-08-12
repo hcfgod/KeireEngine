@@ -2,7 +2,7 @@
 import SessionAwareAccountLink from "./SessionAwareAccountLink.astro";
 
 interface Props {
-    active?: "product" | "marketplace" | "downloads" | "docs" | "community";
+    active?: "product" | "marketplace" | "roadmap" | "downloads" | "docs" | "community";
     signedIn?: boolean;
     staffRole?: "moderator" | "administrator" | null;
 }
@@ -24,6 +24,7 @@ const { active, signedIn = false, staffRole = null } = Astro.props;
         <nav id="platform-navigation" class="platform-nav" aria-label="Primary navigation" data-platform-nav>
             <a href="/features/" aria-current={active === "product" ? "page" : undefined}>Product</a>
             <a href="/marketplace/" aria-current={active === "marketplace" ? "page" : undefined}>Marketplace</a>
+            <a href="/roadmap/" aria-current={active === "roadmap" ? "page" : undefined}>Roadmap</a>
             <a href="/downloads/" aria-current={active === "downloads" ? "page" : undefined}>Downloads</a>
             <a href="/docs/" aria-current={active === "docs" ? "page" : undefined}>Documentation</a>
             <a href="/community/" aria-current={active === "community" ? "page" : undefined}>Community</a>

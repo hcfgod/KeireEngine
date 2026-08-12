@@ -13,6 +13,7 @@ HUB = ROOT / "supabase/functions/marketplace-hub/index.ts"
 PUBLISHER = ROOT / "supabase/functions/marketplace-publisher/index.ts"
 MODERATION = ROOT / "supabase/functions/marketplace-moderation/index.ts"
 VALIDATOR_QUEUE = ROOT / "supabase/functions/marketplace-validator-queue/index.ts"
+PUBLICATION = ROOT / "supabase/functions/marketplace-publication/index.ts"
 SUPABASE_CONFIG = ROOT / "supabase/config.toml"
 MIDDLEWARE = ROOT / "Services/KeireDistributionService/DocumentationSite/Source/middleware.ts"
 API_ROOT = ROOT / "Services/KeireDistributionService/DocumentationSite/Source/pages/marketplace/v1"
@@ -31,6 +32,7 @@ hub = HUB.read_text(encoding="utf-8")
 publisher = PUBLISHER.read_text(encoding="utf-8")
 moderation = MODERATION.read_text(encoding="utf-8")
 validator_queue = VALIDATOR_QUEUE.read_text(encoding="utf-8")
+publication = PUBLICATION.read_text(encoding="utf-8")
 supabase_config = SUPABASE_CONFIG.read_text(encoding="utf-8")
 middleware = MIDDLEWARE.read_text(encoding="utf-8")
 routes = "\n".join(
@@ -49,6 +51,8 @@ require("SUPABASE_SECRET_KEYS" in shared and "SUPABASE_SERVICE_ROLE_KEY" in shar
         "Edge Functions must use the hosted secret-key contract with a legacy service-role fallback.")
 require('"marketplace_rate_limited", [429, "marketplace.rate_limited", "Too many marketplace changes were requested.' in shared,
         "Rate-limit failures must provide a bounded, actionable publisher message.")
+require('"marketplace_signing_approval_withdrawal_requires_administrator"' in shared,
+        "Signing-approval withdrawal must provide an explicit administrator-only diagnostic.")
 require('requiredUuid(input, "productId")' in library,
         "Product claims must reject missing product identifiers before reaching Postgres.")
 require('caller.assuranceLevel !== "aal2"' in library,
@@ -93,6 +97,19 @@ for moderation_rpc in (
     require(moderation_rpc in moderation, f"Moderation boundary does not call {moderation_rpc}.")
 require('functions.invoke("marketplace-moderation"' in routes,
         "The staff website adapter must use the audited moderation Edge boundary.")
+require('functions.invoke("marketplace-publication"' in routes,
+        "The staff website adapter must use the signature-verifying publication Edge boundary.")
+require('caller.assuranceLevel !== "aal2"' in publication and
+        'data !== "administrator"' in publication,
+        "Marketplace publication must require current administrator MFA.")
+require('crypto.subtle.verify("Ed25519"' in publication and
+        'from("marketplace_signature_keys")' in publication,
+        "Marketplace publication must verify the offline signature against a database trust root.")
+require('.copy(upload.storage_path, document.releaseStoragePath, { destinationBucket: "marketplace-releases" })' in publication and
+        'service_publish_marketplace_version' in publication,
+        "Marketplace publication must promote the exact quarantine object before the atomic database commit.")
+require('from("marketplace-releases").remove([document.releaseStoragePath])' in publication,
+        "A failed publication commit must compensate for the promoted release object.")
 for rpc in (
     "service_create_marketplace_organization",
     "service_claim_free_marketplace_product",
@@ -129,5 +146,8 @@ for rpc in (
 require("[functions.marketplace-validator-queue]" in supabase_config and
         "verify_jwt = false" in supabase_config.split("[functions.marketplace-validator-queue]", 1)[1],
         "The scoped-secret validator queue must bypass platform JWT parsing.")
+require("[functions.marketplace-publication]" in supabase_config and
+        "verify_jwt = true" in supabase_config.split("[functions.marketplace-publication]", 1)[1],
+        "The administrator publication boundary must require a platform-verified JWT.")
 
 print("Marketplace Edge trust-boundary validation passed.")

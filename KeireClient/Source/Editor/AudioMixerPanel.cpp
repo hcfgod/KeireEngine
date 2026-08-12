@@ -6,9 +6,11 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <iomanip>
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -18,27 +20,21 @@ namespace KeireEditor
 {
     namespace
     {
-        struct EffectTypeEntry
-        {
-            Keire::AudioGraphNodeType Type;
-            std::string_view Name;
-        };
-
         constexpr std::array EffectTypes{
-            EffectTypeEntry{Keire::AudioGraphNodeType::Gain, "Gain"},
-            EffectTypeEntry{Keire::AudioGraphNodeType::LowPass, "Low Pass"},
-            EffectTypeEntry{Keire::AudioGraphNodeType::HighPass, "High Pass"},
-            EffectTypeEntry{Keire::AudioGraphNodeType::Equalizer, "Equalizer"},
-            EffectTypeEntry{Keire::AudioGraphNodeType::Compressor, "Compressor"},
-            EffectTypeEntry{Keire::AudioGraphNodeType::Limiter, "Limiter"},
-            EffectTypeEntry{Keire::AudioGraphNodeType::Gate, "Gate"},
-            EffectTypeEntry{Keire::AudioGraphNodeType::Delay, "Delay"},
-            EffectTypeEntry{Keire::AudioGraphNodeType::Chorus, "Chorus"},
-            EffectTypeEntry{Keire::AudioGraphNodeType::Distortion, "Distortion"},
-            EffectTypeEntry{Keire::AudioGraphNodeType::AlgorithmicReverb, "Algorithmic Reverb"},
-            EffectTypeEntry{Keire::AudioGraphNodeType::ConvolutionReverb, "Convolution Reverb"},
-            EffectTypeEntry{Keire::AudioGraphNodeType::Meter, "Meter"},
-            EffectTypeEntry{Keire::AudioGraphNodeType::Capture, "Capture"},
+            Keire::AudioGraphNodeType::Gain,
+            Keire::AudioGraphNodeType::LowPass,
+            Keire::AudioGraphNodeType::HighPass,
+            Keire::AudioGraphNodeType::Equalizer,
+            Keire::AudioGraphNodeType::Compressor,
+            Keire::AudioGraphNodeType::Limiter,
+            Keire::AudioGraphNodeType::Gate,
+            Keire::AudioGraphNodeType::Delay,
+            Keire::AudioGraphNodeType::Chorus,
+            Keire::AudioGraphNodeType::Distortion,
+            Keire::AudioGraphNodeType::AlgorithmicReverb,
+            Keire::AudioGraphNodeType::ConvolutionReverb,
+            Keire::AudioGraphNodeType::Meter,
+            Keire::AudioGraphNodeType::Capture,
         };
 
         constexpr std::array SnapshotTypes{
@@ -133,84 +129,36 @@ namespace KeireEditor
 
         [[nodiscard]] std::string_view EffectTypeName(const Keire::AudioGraphNodeType type)
         {
-            const auto found = std::ranges::find(EffectTypes, type, &EffectTypeEntry::Type);
-            return found == EffectTypes.end() ? "Unsupported" : found->Name;
+            return std::ranges::find(EffectTypes, type) == EffectTypes.end() ? "Unsupported"
+                                                                             : Keire::AudioEffectName(type);
         }
 
-        struct EffectParameterDescriptor
+        [[nodiscard]] std::string EffectParameterLabel(const Keire::AudioEffectParameterDescriptor& descriptor)
         {
-            std::string_view Name;
-            double Minimum = 0.0;
-            double Maximum = 1.0;
-            double Speed = 0.01;
-        };
-
-        [[nodiscard]] std::optional<EffectParameterDescriptor> EffectParameter(const Keire::AudioGraphNodeType type,
-                                                                               const std::size_t index)
-        {
-            using Type = Keire::AudioGraphNodeType;
-            if ((type == Type::Gain || type == Type::Equalizer) && index == 0)
-                return EffectParameterDescriptor{"Gain", 0.0, 16.0};
-            if ((type == Type::LowPass || type == Type::HighPass) && index == 0)
-                return EffectParameterDescriptor{"Cutoff (Hz)", 10.0, 20'000.0, 10.0};
-            if (type == Type::Compressor && index == 0)
-                return EffectParameterDescriptor{"Threshold", 0.001, 1.0};
-            if (type == Type::Compressor && index == 1)
-                return EffectParameterDescriptor{"Ratio", 1.0, 100.0, 0.1};
-            if (type == Type::Limiter && index == 0)
-                return EffectParameterDescriptor{"Ceiling", 0.001, 1.0};
-            if (type == Type::Gate && index == 0)
-                return EffectParameterDescriptor{"Threshold", 0.0, 1.0};
-            if ((type == Type::Delay || type == Type::Chorus) && index == 0)
-                return EffectParameterDescriptor{"Delay (ms)", 1.0, 2000.0, 1.0};
-            if ((type == Type::Delay || type == Type::Chorus) && index == 1)
-                return EffectParameterDescriptor{"Feedback", 0.0, 0.99};
-            if ((type == Type::Delay || type == Type::Chorus) && index == 2)
-                return EffectParameterDescriptor{"Wet Mix", 0.0, 1.0};
-            if (type == Type::Distortion && index == 0)
-                return EffectParameterDescriptor{"Drive", 0.0, 100.0, 0.1};
-            if (type == Type::AlgorithmicReverb && index == 0)
-                return EffectParameterDescriptor{"Room Time (ms)", 5.0, 500.0, 1.0};
-            if (type == Type::AlgorithmicReverb && index == 1)
-                return EffectParameterDescriptor{"Decay", 0.0, 0.97};
-            if (type == Type::AlgorithmicReverb && index == 2)
-                return EffectParameterDescriptor{"Wet Mix", 0.0, 1.0};
-            return std::nullopt;
-        }
-
-        [[nodiscard]] std::vector<float> DefaultEffectParameters(const Keire::AudioGraphNodeType type)
-        {
-            using Type = Keire::AudioGraphNodeType;
-            switch (type)
+            switch (descriptor.Unit)
             {
-            case Type::Gain:
-            case Type::Equalizer:
-                return {1.0F};
-            case Type::LowPass:
-            case Type::HighPass:
-                return {1000.0F};
-            case Type::Compressor:
-                return {0.5F, 4.0F};
-            case Type::Limiter:
-                return {0.98F};
-            case Type::Gate:
-                return {0.01F};
-            case Type::Delay:
-                return {80.0F, 0.25F, 0.25F};
-            case Type::Chorus:
-                return {20.0F, 0.1F, 0.25F};
-            case Type::Distortion:
-                return {1.0F};
-            case Type::AlgorithmicReverb:
-                return {68.0F, 0.55F, 0.3F};
-            case Type::ConvolutionReverb:
-            case Type::Meter:
-            case Type::Capture:
-            case Type::Input:
-            case Type::Output:
-                return {};
+            case Keire::AudioParameterUnit::LinearGain:
+            case Keire::AudioParameterUnit::Decibels:
+                return std::string(descriptor.Name) + " (dB)";
+            case Keire::AudioParameterUnit::Hertz:
+                return std::string(descriptor.Name) + " (Hz)";
+            case Keire::AudioParameterUnit::Milliseconds:
+                return std::string(descriptor.Name) + " (ms)";
+            case Keire::AudioParameterUnit::Ratio:
+                return std::string(descriptor.Name) + " (ratio)";
+            case Keire::AudioParameterUnit::Percent:
+                return std::string(descriptor.Name) + " (%)";
+            case Keire::AudioParameterUnit::Normalized:
+                return std::string(descriptor.Name);
             }
-            return {};
+            return std::string(descriptor.Name);
+        }
+
+        [[nodiscard]] std::string FormatDecibels(const float linear)
+        {
+            std::ostringstream stream;
+            stream << std::fixed << std::setprecision(1) << Keire::LinearToDecibels(linear) << " dB";
+            return stream.str();
         }
 
         [[nodiscard]] std::string_view SnapshotTypeName(const Keire::AudioMixerSnapshotParameterType type)
@@ -437,9 +385,11 @@ namespace KeireEditor
 
         if (auto tabs = ui.BeginTabBar("AudioMixerTabs"); tabs)
         {
+            if (auto console = ui.BeginTabItem("Mix Console"); console)
+                DrawMixConsole(ui);
             if (auto routing = ui.BeginTabItem("Routing"); routing)
                 DrawRouting(ui);
-            if (auto bus = ui.BeginTabItem("Selected Bus"); bus)
+            if (auto bus = ui.BeginTabItem("Channel Inspector"); bus)
                 DrawSelectedBus(ui);
             if (auto snapshots = ui.BeginTabItem("Snapshots"); snapshots)
                 DrawSnapshots(ui);
@@ -448,19 +398,96 @@ namespace KeireEditor
         }
     }
 
+    void AudioMixerPanel::DrawMixConsole(Keire::UiFrame& ui)
+    {
+        auto& document = m_Controller.AudioMixerState();
+        const auto& definition = document.Definition();
+        const auto& theme = m_Controller.AudioMixerTheme();
+        const auto meters = m_Controller.AudioMixerMeters();
+        ui.TextColored(theme.Accent, "LIVE MIX CONSOLE");
+        ui.TextColored(
+            theme.MutedText,
+            "Select a channel to inspect its effects. Faders, mute, solo, routing, and meters preview live.");
+        const Keire::UiTableOptions options{.Sizing = Keire::UiTableSizing::Proportional,
+                                            .Borders = true,
+                                            .Resizable = true,
+                                            .RowBackground = true,
+                                            .PersistSettings = true};
+        if (auto table = ui.BeginTable("AudioMixerConsole", 6, options); table)
+        {
+            ui.TableSetupColumn("Channel", Keire::UiTableColumnSizing::Stretch, 1.7F);
+            ui.TableSetupColumn("Output", Keire::UiTableColumnSizing::Stretch, 1.2F);
+            ui.TableSetupColumn("Peak", Keire::UiTableColumnSizing::Stretch, 1.5F);
+            ui.TableSetupColumn("Volume", Keire::UiTableColumnSizing::Stretch, 1.4F);
+            ui.TableSetupColumn("Mute", Keire::UiTableColumnSizing::Fixed, 56.0F);
+            ui.TableSetupColumn("Solo", Keire::UiTableColumnSizing::Fixed, 56.0F);
+            ui.TableHeaderRow();
+            for (const auto& bus : definition.Buses)
+            {
+                auto id = ui.PushId("Console-" + bus.Id.ToString());
+                ui.TableNextRow();
+                (void)ui.TableNextColumn();
+                const auto channelLabel = std::string(BusDepth(definition, bus) * 2, ' ') + bus.Name;
+                if (ui.Selectable(channelLabel, document.SelectedBus() == bus.Id))
+                    document.SelectBus(bus.Id);
+
+                (void)ui.TableNextColumn();
+                if (bus.Id == definition.MasterBus)
+                    ui.TextColored(theme.MutedText, "Device Output");
+                else if (const auto parent = FindBus(definition, bus.Parent))
+                    ui.Text(parent->Name);
+                else
+                    ui.TextColored(theme.Error, "Missing Output");
+
+                (void)ui.TableNextColumn();
+                const auto meter = std::ranges::find(meters.Readings, bus.Id, &Keire::AudioMeterReading::Bus);
+                const auto peak = meter == meters.Readings.end() ? 0.0F : meter->Peak;
+                const auto peakDb = Keire::LinearToDecibels(peak);
+                ui.ProgressBar(std::clamp((peakDb + 60.0F) / 60.0F, 0.0F, 1.0F), {0.0F, 12.0F},
+                               meter == meters.Readings.end() ? "-- dB" : FormatDecibels(peak));
+                if (meter != meters.Readings.end() && meter->Clipping)
+                    ui.TextColored(theme.Error, "CLIP");
+
+                (void)ui.TableNextColumn();
+                double gain = Keire::LinearToDecibels(bus.Gain);
+                if (ui.DragScalar("##Volume", gain, 0.1, -96.0, 24.0824))
+                    (void)ApplyEdit("Edit Audio Mixer fader",
+                                    [busId = bus.Id, value = Keire::DecibelsToLinear(static_cast<float>(gain))](
+                                        Keire::AudioMixerDefinition& mixer) { RequireBus(mixer, busId).Gain = value; });
+
+                (void)ui.TableNextColumn();
+                bool mute = bus.Mute;
+                if (ui.Checkbox("##Mute", mute))
+                    (void)ApplyEdit("Edit Audio Mixer mute", [busId = bus.Id, mute](Keire::AudioMixerDefinition& mixer)
+                                    { RequireBus(mixer, busId).Mute = mute; });
+
+                (void)ui.TableNextColumn();
+                bool solo = bus.Solo;
+                if (ui.Checkbox("##Solo", solo))
+                    (void)ApplyEdit("Edit Audio Mixer solo", [busId = bus.Id, solo](Keire::AudioMixerDefinition& mixer)
+                                    { RequireBus(mixer, busId).Solo = solo; });
+            }
+        }
+    }
+
     void AudioMixerPanel::DrawRouting(Keire::UiFrame& ui)
     {
         auto& document = m_Controller.AudioMixerState();
         const auto& definition = document.Definition();
         const auto& theme = m_Controller.AudioMixerTheme();
-        if (auto hierarchy = ui.BeginChild("MixerBusHierarchy", {230.0F, 0.0F}, true); hierarchy)
+        const auto meters = m_Controller.AudioMixerMeters();
+        if (auto hierarchy = ui.BeginChild("MixerBusHierarchy", {280.0F, 0.0F}, true); hierarchy)
         {
             ui.TextColored(theme.Accent, "BUS HIERARCHY");
             for (const auto& bus : definition.Buses)
             {
-                const auto label = std::string(BusDepth(definition, bus) * 2, ' ') + bus.Name;
+                const auto meter = std::ranges::find(meters.Readings, bus.Id, &Keire::AudioMeterReading::Bus);
+                const auto level = meter == meters.Readings.end() ? std::string("-- dB") : FormatDecibels(meter->Peak);
+                const auto label = std::string(BusDepth(definition, bus) * 2, ' ') + bus.Name + "  " + level;
                 if (ui.Selectable(label, document.SelectedBus() == bus.Id))
                     document.SelectBus(bus.Id);
+                if (meter != meters.Readings.end() && meter->Clipping)
+                    ui.TextColored(theme.Error, "  CLIP  " + bus.Name);
             }
             ui.Separator();
             if (ui.Button("+ Bus"))
@@ -523,6 +550,16 @@ namespace KeireEditor
 
         ui.TextColored(theme.Accent, bus.Name);
         ui.TextColored(theme.MutedText, "Stable ID: " + bus.Id.ToString());
+        const auto meters = m_Controller.AudioMixerMeters();
+        if (const auto meter = std::ranges::find(meters.Readings, bus.Id, &Keire::AudioMeterReading::Bus);
+            meter != meters.Readings.end())
+        {
+            const auto peakDb = Keire::LinearToDecibels(meter->Peak);
+            const auto meterLevel = std::clamp((peakDb + 60.0F) / 60.0F, 0.0F, 1.0F);
+            ui.ProgressBar(meterLevel, {0.0F, 12.0F}, "Peak " + FormatDecibels(meter->Peak));
+            if (meter->Clipping)
+                ui.TextColored(theme.Error, "Output is clipping. Lower this channel or an upstream bus.");
+        }
         std::string name = bus.Name;
         if (auto disabled = ui.BeginDisabled(bus.Id == definition.MasterBus); disabled)
         {
@@ -549,11 +586,11 @@ namespace KeireEditor
                 }
             }
         }
-        double gain = bus.Gain;
-        if (ui.DragScalar("Fader (linear)", gain, 0.01, 0.0, 16.0))
+        double gain = Keire::LinearToDecibels(bus.Gain);
+        if (ui.DragScalar("Volume (dB)", gain, 0.1, -96.0, 24.0824))
             (void)ApplyEdit("Edit Audio Mixer fader",
-                            [id = bus.Id, value = static_cast<float>(gain)](Keire::AudioMixerDefinition& mixer)
-                            { RequireBus(mixer, id).Gain = value; });
+                            [id = bus.Id, value = Keire::DecibelsToLinear(static_cast<float>(gain))](
+                                Keire::AudioMixerDefinition& mixer) { RequireBus(mixer, id).Gain = value; });
         bool mute = bus.Mute;
         if (ui.Checkbox("Mute", mute))
             (void)ApplyEdit("Edit Audio Mixer mute", [id = bus.Id, mute](Keire::AudioMixerDefinition& mixer)
@@ -574,12 +611,23 @@ namespace KeireEditor
                                              effect.Id.ToString());
                 tree)
             {
-                std::string effectName = effect.Name;
-                if (ui.InputText("Name", effectName))
-                    (void)ApplyEdit("Rename Audio Mixer effect",
-                                    [effectId = effect.Id,
-                                     nameValue = std::move(effectName)](Keire::AudioMixerDefinition& mixer) mutable
-                                    { RequireEffect(mixer, effectId).Name = std::move(nameValue); });
+                auto& nameBuffer = m_EffectNameBuffers.try_emplace(effect.Id, effect.Name).first->second;
+                (void)ui.InputText("Name", nameBuffer);
+                const auto nameState = ui.LastItemState();
+                if (nameState.DeactivatedAfterEdit)
+                {
+                    const auto committedName = nameBuffer;
+                    if (!ApplyEdit("Rename Audio Mixer effect",
+                                   [effectId = effect.Id, committedName](Keire::AudioMixerDefinition& mixer)
+                                   { RequireEffect(mixer, effectId).Name = committedName; }))
+                    {
+                        nameBuffer = effect.Name;
+                    }
+                }
+                else if (!nameState.Active && !nameState.Edited && nameBuffer != effect.Name)
+                {
+                    nameBuffer = effect.Name;
+                }
                 bool bypassed = effect.Bypassed;
                 if (ui.Checkbox("Bypass", bypassed))
                     (void)ApplyEdit("Bypass Audio Mixer effect",
@@ -587,12 +635,12 @@ namespace KeireEditor
                                     { RequireEffect(mixer, effectId).Bypassed = bypassed; });
                 if (auto typeCombo = ui.BeginCombo("Type", EffectTypeName(effect.Type)); typeCombo)
                 {
-                    for (const auto& type : EffectTypes)
+                    for (const auto type : EffectTypes)
                     {
-                        if (ui.Selectable(type.Name, effect.Type == type.Type))
+                        if (ui.Selectable(Keire::AudioEffectName(type), effect.Type == type))
                         {
                             auto replacementImpulse = effect.ImpulseResponse;
-                            if (type.Type == Keire::AudioGraphNodeType::ConvolutionReverb && !effect.ImpulseResponse)
+                            if (type == Keire::AudioGraphNodeType::ConvolutionReverb && !effect.ImpulseResponse)
                             {
                                 const auto database = m_Controller.AudioMixerDatabase();
                                 const auto records =
@@ -608,12 +656,12 @@ namespace KeireEditor
                                 replacementImpulse = impulse->Id;
                             }
                             (void)ApplyEdit("Change Audio Mixer effect type",
-                                            [effectId = effect.Id, replacement = type.Type,
+                                            [effectId = effect.Id, replacement = type,
                                              replacementImpulse](Keire::AudioMixerDefinition& mixer)
                                             {
                                                 auto& edited = RequireEffect(mixer, effectId);
                                                 edited.Type = replacement;
-                                                edited.Parameters = DefaultEffectParameters(replacement);
+                                                edited.Parameters = Keire::DefaultAudioEffectParameters(replacement);
                                                 edited.ImpulseResponse =
                                                     replacement == Keire::AudioGraphNodeType::ConvolutionReverb
                                                         ? replacementImpulse
@@ -640,46 +688,70 @@ namespace KeireEditor
                     }
                 }
                 ui.TextColored(theme.MutedText, "PARAMETERS");
+                const auto descriptors = Keire::AudioEffectParameters(effect.Type);
                 for (std::size_t parameter = 0; parameter < effect.Parameters.size(); ++parameter)
                 {
                     double value = effect.Parameters[parameter];
-                    const auto descriptor = EffectParameter(effect.Type, parameter);
-                    const auto label =
-                        descriptor ? std::string(descriptor->Name) : "Advanced Parameter " + std::to_string(parameter);
-                    const auto speed = descriptor ? descriptor->Speed : 0.01;
-                    const auto minimum = descriptor ? std::optional(descriptor->Minimum) : std::nullopt;
-                    const auto maximum = descriptor ? std::optional(descriptor->Maximum) : std::nullopt;
+                    const auto* descriptor = parameter < descriptors.size() ? &descriptors[parameter] : nullptr;
+                    const auto label = descriptor ? EffectParameterLabel(*descriptor)
+                                                  : "Legacy Parameter " + std::to_string(parameter);
+                    double speed = descriptor ? descriptor->EditSpeed : 0.01;
+                    std::optional<double> minimum =
+                        descriptor ? std::optional<double>(descriptor->Minimum) : std::nullopt;
+                    std::optional<double> maximum =
+                        descriptor ? std::optional<double>(descriptor->Maximum) : std::nullopt;
+                    if (descriptor && descriptor->Unit == Keire::AudioParameterUnit::LinearGain)
+                    {
+                        value = Keire::LinearToDecibels(static_cast<float>(value));
+                        minimum = -96.0;
+                        maximum = Keire::LinearToDecibels(descriptor->Maximum);
+                        speed = 0.1;
+                    }
+                    else if (descriptor && descriptor->Unit == Keire::AudioParameterUnit::Percent)
+                    {
+                        value *= 100.0;
+                        minimum = static_cast<double>(descriptor->Minimum) * 100.0;
+                        maximum = static_cast<double>(descriptor->Maximum) * 100.0;
+                        speed = 1.0;
+                    }
                     if (ui.DragScalar(label, value, speed, minimum, maximum))
+                    {
+                        if (descriptor && descriptor->Unit == Keire::AudioParameterUnit::LinearGain)
+                            value = Keire::DecibelsToLinear(static_cast<float>(value));
+                        else if (descriptor && descriptor->Unit == Keire::AudioParameterUnit::Percent)
+                            value /= 100.0;
                         (void)ApplyEdit("Edit Audio Mixer effect parameter",
                                         [effectId = effect.Id, parameter,
                                          value = static_cast<float>(value)](Keire::AudioMixerDefinition& mixer)
                                         { RequireEffect(mixer, effectId).Parameters.at(parameter) = value; });
+                    }
                 }
-                if (effect.Parameters.size() < 64 && ui.Button("+ Parameter"))
-                    (void)ApplyEdit("Add Audio Mixer effect parameter",
-                                    [effectId = effect.Id](Keire::AudioMixerDefinition& mixer)
-                                    { RequireEffect(mixer, effectId).Parameters.push_back(0.0F); });
-                ui.SameLine();
-                if (auto disabled = ui.BeginDisabled(effect.Parameters.empty()); disabled)
+                if (effect.Parameters.size() != descriptors.size())
                 {
-                    if (ui.Button("- Parameter"))
+                    ui.TextColored(theme.Warning,
+                                   "Legacy parameter shape detected. Normalize to the typed 0.3.1 effect contract.");
+                    if (ui.Button("Normalize Parameters"))
                         (void)ApplyEdit(
-                            "Remove Audio Mixer effect parameter",
+                            "Normalize Audio Mixer effect parameters",
                             [effectId = effect.Id](Keire::AudioMixerDefinition& mixer)
                             {
                                 auto& edited = RequireEffect(mixer, effectId);
-                                const auto removed = static_cast<std::uint32_t>(edited.Parameters.size() - 1);
-                                edited.Parameters.pop_back();
+                                auto normalized = Keire::DefaultAudioEffectParameters(edited.Type);
+                                const auto preserved = std::min(normalized.size(), edited.Parameters.size());
+                                std::ranges::copy(edited.Parameters.begin(),
+                                                  edited.Parameters.begin() + static_cast<std::ptrdiff_t>(preserved),
+                                                  normalized.begin());
+                                edited.Parameters = std::move(normalized);
                                 for (auto& snapshot : mixer.Snapshots)
                                 {
                                     std::erase_if(
                                         snapshot.Parameters,
-                                        [effectId,
-                                         removed](const Keire::AudioMixerSnapshotParameterDefinition& parameter)
+                                        [effectId, size = edited.Parameters.size()](
+                                            const Keire::AudioMixerSnapshotParameterDefinition& target)
                                         {
-                                            return parameter.Type ==
+                                            return target.Type ==
                                                        Keire::AudioMixerSnapshotParameterType::EffectParameter &&
-                                                   parameter.Target == effectId && parameter.Parameter == removed;
+                                                   target.Target == effectId && target.Parameter >= size;
                                         });
                                 }
                             });
@@ -704,7 +776,7 @@ namespace KeireEditor
                 .Id = Keire::AssetId::Generate(),
                 .Name = UniqueName(bus.Effects, "Gain", &Keire::AudioMixerEffectDefinition::Name),
                 .Type = Keire::AudioGraphNodeType::Gain,
-                .Parameters = {1.0F},
+                .Parameters = Keire::DefaultAudioEffectParameters(Keire::AudioGraphNodeType::Gain),
             };
             run("Added Audio Mixer effect", [&] { return document.AddEffect(bus.Id, std::move(effect)); });
         }
@@ -743,12 +815,12 @@ namespace KeireEditor
                                         [sendId = send.Id](Keire::AudioMixerDefinition& mixer)
                                         { RequireSend(mixer, sendId).Stage = Keire::AudioMixerSendStage::PostFader; });
                 }
-                double sendGain = send.Gain;
-                if (ui.DragScalar("Gain", sendGain, 0.01, 0.0, 16.0))
-                    (void)ApplyEdit(
-                        "Edit Audio Mixer send gain",
-                        [sendId = send.Id, value = static_cast<float>(sendGain)](Keire::AudioMixerDefinition& mixer)
-                        { RequireSend(mixer, sendId).Gain = value; });
+                double sendGain = Keire::LinearToDecibels(send.Gain);
+                if (ui.DragScalar("Send Level (dB)", sendGain, 0.1, -96.0, 24.0824))
+                    (void)ApplyEdit("Edit Audio Mixer send gain",
+                                    [sendId = send.Id, value = Keire::DecibelsToLinear(static_cast<float>(sendGain))](
+                                        Keire::AudioMixerDefinition& mixer)
+                                    { RequireSend(mixer, sendId).Gain = value; });
                 if (ui.Button("Remove Send"))
                     run("Removed Audio Mixer send", [&] { return document.RemoveSend(send.Id); });
             }
@@ -918,11 +990,12 @@ namespace KeireEditor
                     {
                         for (const auto& candidate : definition.Buses)
                             if (ui.Selectable(candidate.Name, candidate.Id == parameter.Target))
-                                (void)ApplyEdit(
-                                    "Retarget Audio Mixer snapshot parameter",
-                                    [snapshotId = snapshot.Id, index,
-                                     target = candidate.Id](Keire::AudioMixerDefinition& mixer)
-                                    { RequireSnapshot(mixer, snapshotId).Parameters.at(index).Target = target; });
+                                (void)ApplyEdit("Retarget Audio Mixer snapshot parameter",
+                                                [snapshotId = snapshot.Id, index,
+                                                 target = candidate.Id](Keire::AudioMixerDefinition& mixer) {
+                                                    RequireSnapshot(mixer, snapshotId).Parameters.at(index).Target =
+                                                        target;
+                                                });
                     }
                 }
                 else if (parameter.Type == Keire::AudioMixerSnapshotParameterType::SendGain)
@@ -947,11 +1020,12 @@ namespace KeireEditor
                                 const auto destination = FindBus(definition, send.DestinationBus);
                                 const auto label = bus.Name + " -> " + (destination ? destination->Name : "Missing");
                                 if (ui.Selectable(label, send.Id == parameter.Target))
-                                    (void)ApplyEdit(
-                                        "Retarget Audio Mixer snapshot parameter",
-                                        [snapshotId = snapshot.Id, index,
-                                         target = send.Id](Keire::AudioMixerDefinition& mixer)
-                                        { RequireSnapshot(mixer, snapshotId).Parameters.at(index).Target = target; });
+                                    (void)ApplyEdit("Retarget Audio Mixer snapshot parameter",
+                                                    [snapshotId = snapshot.Id, index,
+                                                     target = send.Id](Keire::AudioMixerDefinition& mixer) {
+                                                        RequireSnapshot(mixer, snapshotId).Parameters.at(index).Target =
+                                                            target;
+                                                    });
                             }
                     }
                 }
@@ -999,8 +1073,7 @@ namespace KeireEditor
                             (void)ApplyEdit("Edit Audio Mixer snapshot parameter index",
                                             [snapshotId = snapshot.Id, index,
                                              parameterIndex = static_cast<std::uint32_t>(parameterIndex)](
-                                                Keire::AudioMixerDefinition& mixer)
-                                            {
+                                                Keire::AudioMixerDefinition& mixer) {
                                                 RequireSnapshot(mixer, snapshotId).Parameters.at(index).Parameter =
                                                     parameterIndex;
                                             });
@@ -1013,10 +1086,11 @@ namespace KeireEditor
                 {
                     bool value = parameter.Value != 0.0F;
                     if (ui.Checkbox("Value", value))
-                        (void)ApplyEdit(
-                            "Edit Audio Mixer snapshot value",
-                            [snapshotId = snapshot.Id, index, value](Keire::AudioMixerDefinition& mixer)
-                            { RequireSnapshot(mixer, snapshotId).Parameters.at(index).Value = value ? 1.0F : 0.0F; });
+                        (void)ApplyEdit("Edit Audio Mixer snapshot value",
+                                        [snapshotId = snapshot.Id, index, value](Keire::AudioMixerDefinition& mixer) {
+                                            RequireSnapshot(mixer, snapshotId).Parameters.at(index).Value =
+                                                value ? 1.0F : 0.0F;
+                                        });
                 }
                 else
                 {
@@ -1043,8 +1117,7 @@ namespace KeireEditor
                     [&](const Keire::AudioMixerBusDefinition& bus)
                     {
                         return std::ranges::none_of(snapshot.Parameters,
-                                                    [&](const Keire::AudioMixerSnapshotParameterDefinition& parameter)
-                                                    {
+                                                    [&](const Keire::AudioMixerSnapshotParameterDefinition& parameter) {
                                                         return parameter.Type ==
                                                                    Keire::AudioMixerSnapshotParameterType::BusGain &&
                                                                parameter.Target == bus.Id;
@@ -1194,6 +1267,7 @@ namespace KeireEditor
     {
         m_SelectedSnapshot = {};
         m_SelectedDucking = {};
+        m_EffectNameBuffers.clear();
         m_Message.clear();
     }
 

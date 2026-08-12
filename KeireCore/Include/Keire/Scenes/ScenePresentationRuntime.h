@@ -39,6 +39,9 @@ namespace Keire
         std::size_t TrackedAudioSources = 0;
         std::size_t ActiveAudioSources = 0;
         std::size_t PendingAudioAssets = 0;
+        std::size_t ActiveReverbZones = 0;
+        bool HasAudioListener = false;
+        bool UsingPrimaryCameraListener = false;
         std::uint64_t SynchronizationCount = 0;
         float UiSynchronizationMilliseconds = 0.0F;
         float AudioSynchronizationMilliseconds = 0.0F;
@@ -83,6 +86,8 @@ namespace Keire
 
         void Synchronize(Ref<Scene> scene, float viewportWidth, float viewportHeight, bool playing,
                          RuntimeUiInsets safeArea = {});
+        void SetDefaultMixer(AssetId mixer) noexcept;
+        [[nodiscard]] AssetId DefaultMixer() const noexcept;
         void Clear() noexcept;
 
         [[nodiscard]] bool Play(EntityId source);

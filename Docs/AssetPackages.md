@@ -39,7 +39,8 @@ payload changed during publication cannot produce a mismatched artifact.
 
 Signature verification is injected through `AssetPackageSignatureVerifier`. Kéire Core does not own marketplace public
 keys or expose an implementation-specific cryptography type in its public API. Marketplace signing uses a trust root
-separate from Editor distribution signing.
+separate from Editor distribution signing. The current public trust document lives at
+`Config/Marketplace/trusted-marketplace-key.json`; its private key remains outside the repository and online services.
 
 ## Project registry packages
 
@@ -107,6 +108,13 @@ format. Inspection and extraction report the SHA-256 of the exact canonical mani
 new staging directory directly beneath an existing authorized parent. Automation must always provide a trusted
 expected archive size and SHA-256; marketplace artifacts also require an approved signature key and verifier.
 
+Kéire's five first-party launch products are prepared with
+`python Scripts/Marketplace/create-official-marketplace-packages.py`. The builder copies only reviewed Sandbox source
+roots, proves that selected asset dependencies remain closed, explicitly declares managed assemblies, rejects links and
+nonportable paths, refuses to overwrite an output release set, and inspects every generated archive through the
+authoritative Asset Tool. The resulting packages are still unsigned quarantine inputs: official content must pass the
+same Publisher upload, isolated validation, staff moderation, and offline publication boundary as any other product.
+
 The marketplace validator is split into a networked broker and a local-only worker. A dedicated Edge boundary holds
 Supabase service privileges; the broker holds only a scoped queue secret and receives a short-lived URL for its one
 leased object. It verifies the object's exact size and digest while downloading and exchanges the bytes through a
@@ -116,6 +124,14 @@ malware, and secret indicators, then compiles only explicitly declared C# from v
 projects pin the SDK, clear NuGet sources, disable analyzers and source generators, and ignore publisher build imports.
 The worker must run behind OS-enforced outbound denial; its environment marker is an additional launch assertion, not
 a substitute for that sandbox.
+
+After staff approval, `prepare-marketplace-publication.ps1` creates an exact, independently verified Ed25519 release
+envelope on the offline signing workstation. The administrator uploads only that bounded JSON envelope. The publication
+Edge boundary verifies its signature against the active public trust root, rechecks the validator and moderation hashes,
+copies the same quarantine object into a content-addressed path in private release Storage, and then commits the
+publication, product/version state, and audit event through one service-only transaction. If that transaction fails,
+the promoted object is removed. Neither the private signing key nor an unsigned replacement package enters the online
+publication path.
 
 See [Package Archives](PackageArchives.md) for Editor distribution packages and [Asset Pipeline](AssetPipeline.md) for
 asset import, cache, and cooking behavior.

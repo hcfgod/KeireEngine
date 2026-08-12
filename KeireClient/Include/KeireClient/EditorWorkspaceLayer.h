@@ -265,6 +265,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] Keire::Ref<Keire::AssetDatabase> InspectorAssetDatabase() const noexcept override;
     [[nodiscard]] Keire::Ref<Keire::AssetSystem> InspectorAssetSystem() const noexcept override;
     [[nodiscard]] std::span<const Keire::AssetSourceRecord> InspectorAssetRecords() const noexcept override;
+    [[nodiscard]] Keire::AssetId InspectorDefaultAudioMixer() const noexcept override;
     [[nodiscard]] Keire::AssetId InspectorSelectedAsset() const noexcept override;
     [[nodiscard]] std::string_view InspectorAssetStatus() const noexcept override;
     [[nodiscard]] std::vector<Keire::ManagedAssetTypeDescriptor> InspectorManagedAssetTypes() const override;
@@ -374,6 +375,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] const Keire::UiThemeDefinition& AudioMixerTheme() const noexcept override;
     [[nodiscard]] Keire::Ref<Keire::AssetDatabase> AudioMixerDatabase() const noexcept override;
     [[nodiscard]] std::string_view AudioMixerPreviewDiagnostic() const noexcept override;
+    [[nodiscard]] Keire::AudioMeterSnapshot AudioMixerMeters() const noexcept override;
     void ActivateAudioMixerHistory() noexcept override;
     void SaveAudioMixerDocument() override;
     void DiscardAudioMixerDocument() override;

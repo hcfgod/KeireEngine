@@ -44,13 +44,17 @@ internal struct NativeRaycastHit
 internal enum AudioSourceScalarProperty : byte
 {
     Gain,
-    Pitch
+    Pitch,
+    MinimumDistance,
+    MaximumDistance,
+    Priority
 }
 
 internal enum AudioSourceFlagProperty : byte
 {
     Loop,
-    Spatial
+    Spatial,
+    PlayOnAwake
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -58,20 +62,57 @@ internal struct NativeAudioSourceProperties
 {
     internal ulong ClipHigh;
     internal ulong ClipLow;
+    internal ulong MixerHigh;
+    internal ulong MixerLow;
+    internal ulong BusHigh;
+    internal ulong BusLow;
     internal float Gain;
     internal float Pitch;
     internal float PositionSeconds;
     internal float DurationSeconds;
+    internal float MinimumDistance;
+    internal float MaximumDistance;
     internal uint Priority;
     internal byte LoopValue;
     internal byte SpatialValue;
+    internal byte PlayOnAwakeValue;
     internal byte PlaybackState;
 
     internal readonly AssetId Clip => new(ClipHigh, ClipLow);
+    internal readonly AssetId Mixer => new(MixerHigh, MixerLow);
+    internal readonly AssetId BusId => new(BusHigh, BusLow);
     internal readonly bool Loop => LoopValue != 0;
     internal readonly bool Spatial => SpatialValue != 0;
+    internal readonly bool PlayOnAwake => PlayOnAwakeValue != 0;
     internal readonly AudioSourceStatus Status =>
         new((AudioPlaybackState)PlaybackState, PositionSeconds, DurationSeconds);
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeAudioListenerProperties
+{
+    internal float Gain;
+    internal byte PrimaryValue;
+
+    internal readonly bool Primary => PrimaryValue != 0;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeAudioReverbZoneProperties
+{
+    internal ulong MixerHigh;
+    internal ulong MixerLow;
+    internal ulong SnapshotHigh;
+    internal ulong SnapshotLow;
+    internal Vector3 BoxHalfExtent;
+    internal float SphereRadius;
+    internal float BlendDistance;
+    internal float ReverbSend;
+    internal int Priority;
+    internal byte ShapeValue;
+
+    internal readonly AssetId Mixer => new(MixerHigh, MixerLow);
+    internal readonly AssetId Snapshot => new(SnapshotHigh, SnapshotLow);
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -326,8 +367,18 @@ internal static unsafe class NativeRuntime
     internal static delegate* unmanaged<ulong, ulong, ulong, NativeAudioSourceProperties*, byte>
         GetAudioSourcePropertiesIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, byte> SetAudioSourceClipIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, ulong, ulong, byte>
+        SetAudioSourceRoutingIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte, float, byte> SetAudioSourceScalarIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte, byte, byte> SetAudioSourceFlagIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, NativeAudioListenerProperties*, byte>
+        GetAudioListenerPropertiesIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, NativeAudioListenerProperties*, byte>
+        SetAudioListenerPropertiesIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, NativeAudioReverbZoneProperties*, byte>
+        GetAudioReverbZonePropertiesIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, NativeAudioReverbZoneProperties*, byte>
+        SetAudioReverbZonePropertiesIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, byte, byte> PlayVfxIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte> StopVfxIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte, byte> PauseVfxIcall;
@@ -783,6 +834,13 @@ internal static unsafe class NativeRuntime
             throw new InvalidOperationException("The Audio Source clip could not be changed.");
     }
 
+    internal static void SetAudioSourceRouting(Entity entity, AssetId mixer, AssetId bus)
+    {
+        if (SetAudioSourceRoutingIcall(entity.World, entity.Id.High, entity.Id.Low, mixer.High, mixer.Low, bus.High,
+                                       bus.Low) == 0)
+            throw new InvalidOperationException("The Audio Source mixer routing could not be changed.");
+    }
+
     internal static void SetAudioSourceScalar(Entity entity, AudioSourceScalarProperty property, float value)
     {
         if (SetAudioSourceScalarIcall(entity.World, entity.Id.High, entity.Id.Low, (byte)property, value) == 0)
@@ -794,6 +852,34 @@ internal static unsafe class NativeRuntime
         if (SetAudioSourceFlagIcall(entity.World, entity.Id.High, entity.Id.Low, (byte)property,
                                     value ? (byte)1 : (byte)0) == 0)
             throw new InvalidOperationException("The Audio Source flag could not be changed.");
+    }
+
+    internal static NativeAudioListenerProperties GetAudioListenerProperties(Entity entity)
+    {
+        NativeAudioListenerProperties properties = default;
+        if (GetAudioListenerPropertiesIcall(entity.World, entity.Id.High, entity.Id.Low, &properties) == 0)
+            throw new InvalidOperationException("The Audio Listener is unavailable.");
+        return properties;
+    }
+
+    internal static void SetAudioListenerProperties(Entity entity, NativeAudioListenerProperties properties)
+    {
+        if (SetAudioListenerPropertiesIcall(entity.World, entity.Id.High, entity.Id.Low, &properties) == 0)
+            throw new InvalidOperationException("The Audio Listener could not be changed.");
+    }
+
+    internal static NativeAudioReverbZoneProperties GetAudioReverbZoneProperties(Entity entity)
+    {
+        NativeAudioReverbZoneProperties properties = default;
+        if (GetAudioReverbZonePropertiesIcall(entity.World, entity.Id.High, entity.Id.Low, &properties) == 0)
+            throw new InvalidOperationException("The Audio Reverb Zone is unavailable.");
+        return properties;
+    }
+
+    internal static void SetAudioReverbZoneProperties(Entity entity, NativeAudioReverbZoneProperties properties)
+    {
+        if (SetAudioReverbZonePropertiesIcall(entity.World, entity.Id.High, entity.Id.Low, &properties) == 0)
+            throw new InvalidOperationException("The Audio Reverb Zone could not be changed.");
     }
 
     internal static bool PlayVfx(Entity entity, AssetId effect, bool restart) =>

@@ -1162,7 +1162,32 @@ registration. Device playback builds a private miniaudio node graph per immutabl
 effect racks, pre/post sends, faders, mute, solo, and sidechain ducking, then reattaches live voices transactionally.
 Reverb Zones scale return sends when a conventional effect-return bus exists and scale wet parameters only for
 direct-insert reverbs, preventing a return from being attenuated twice. The editor's typed `AudioMixerDocument` publishes
-transient live routing/fader previews. Decoded convolution IR binding remains an explicit later phase.
+transient live routing/fader previews. Its Mix Console exposes per-bus peak meters, dB faders, mute, solo, output
+routes, ordered effect racks, sends, snapshots, and sidechain ducking without exposing stable IDs as the normal
+authoring path. Effect names commit at the end of a text edit so the surrounding tree remains stable. Decoded
+convolution IR binding remains an explicit later phase.
+
+Project authoring-settings schema 2 owns the desktop mix sample rate, callback period, mono/stereo/5.1/7.1 output
+layout, audible and virtual voice budgets, and an optional editor playback-device identity. The editor falls back to
+the system default when that device is unavailable and reports the fallback in the Profiler. Hardware identity is not
+copied into cooked content. Cooking instead writes the portable format and capacity fields into the schema-4 runtime
+manifest; the player validates and applies those fields before constructing `AudioSystem`. A schema-1 project-settings
+document migrates in memory to the schema-2 defaults and is written canonically on the next save.
+
+The Project Settings Default Mixer is the inherited route for Audio Sources and Reverb Zones whose component override
+is empty in both Editor Play Mode and cooked players. The Inspector resolves inherited mixers, presents bus and
+snapshot names rather than UUID entry, and diagnoses missing routes or reverb returns. Spatial presentation selects an
+active primary Audio Listener first and otherwise uses the highest-priority active primary Camera. Listener direction,
+up, velocity, and gain enter the same state used by device and offline rendering. Box and sphere Reverb Zones evaluate
+the listener in local space, so entity rotation and non-uniform scale affect the authored volume; one zone per mixer is
+selected by priority and blend weight. Native spatial voices use the authored distance curve for both audibility
+virtualization and output gain while miniaudio retains speaker positioning and Doppler behavior.
+
+The managed API exposes transactional `AudioSourceHandle`, `AudioListenerHandle`, and `AudioReverbZoneHandle` value
+surfaces. Managed and native boundaries validate routing identities, gains, pitch, distance ranges, priorities, shapes,
+volume dimensions, blend distances, and wet levels before mutating a component. The Profiler reports device format,
+fallback state, voice capacity and virtualization, mixer/effect counts, listener selection, active zones, pending
+assets, per-voice state, and bounded peak/RMS/clipping readings.
 
 `VfxWorld` owns fixed-capacity effect and particle storage. Activation is transactional, handles include generations,
 and revision-aware replacement preserves bounded lifecycle behavior. Non-looping GPU effects advance through their

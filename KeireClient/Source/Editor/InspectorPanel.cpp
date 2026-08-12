@@ -12,6 +12,7 @@
 #include "KeireClient/Editor/VfxEmitterInspector.h"
 
 #include "Keire/Audio/AudioAssets.h"
+#include "Keire/ECS/Components/AudioComponents.h"
 #include "Keire/ECS/Components/RuntimeUiComponents.h"
 #include "Keire/ECS/Components/VfxEmitterComponent.h"
 #include "Keire/Rendering/ShaderGraph.h"
@@ -54,8 +55,7 @@ namespace
         if (query.empty())
             return true;
         const auto found = std::ranges::search(value, query,
-                                               [](const char left, const char right)
-                                               {
+                                               [](const char left, const char right) {
                                                    return std::tolower(static_cast<unsigned char>(left)) ==
                                                           std::tolower(static_cast<unsigned char>(right));
                                                });
@@ -826,6 +826,29 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                         }
                     }
                 }
+                const auto audioSource = registration->Type == Keire::AudioSourceComponent::StaticType()
+                                             ? Keire::DynamicRefCast<Keire::AudioSourceComponent>(component)
+                                             : Keire::Ref<Keire::AudioSourceComponent>{};
+                const auto reverbZone = registration->Type == Keire::AudioReverbZoneComponent::StaticType()
+                                            ? Keire::DynamicRefCast<Keire::AudioReverbZoneComponent>(component)
+                                            : Keire::Ref<Keire::AudioReverbZoneComponent>{};
+                const auto explicitMixer = audioSource  ? audioSource->Mixer()
+                                           : reverbZone ? reverbZone->Mixer()
+                                                        : Keire::AssetId{};
+                const auto resolvedMixer = explicitMixer ? explicitMixer : m_Controller.InspectorDefaultAudioMixer();
+                auto mixerAsset = Keire::Ref<const Keire::AudioMixerAsset>{};
+                if (assets && resolvedMixer)
+                {
+                    try
+                    {
+                        mixerAsset = assets->Load<Keire::AudioMixerAsset>(resolvedMixer, Keire::AssetPriority::High)
+                                         .TryGetLoaded();
+                    }
+                    catch (...)
+                    {
+                        // The component card reports loading and validation state below without interrupting editing.
+                    }
+                }
                 ui.Spacing();
                 auto& expanded = expansion(registration->Type.ToString());
                 const auto cardId = "ComponentCard##" + registration->Type.ToString();
@@ -945,7 +968,79 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                                     registration->Type == Keire::SpotLightComponent::StaticType();
                             const bool vfxOverrides = registration->Type == Keire::VfxEmitterComponent::StaticType() &&
                                                       property.Key == "parameterOverrides";
-                            if (vfxOverrides)
+                            if (audioSource && property.Key == "busId")
+                            {
+                                const auto current = audioSource->BusId();
+                                std::span<const Keire::AudioMixerBusDefinition> buses;
+                                std::string preview = !resolvedMixer ? "Select a Mixer" : "Loading mixer buses...";
+                                if (mixerAsset)
+                                {
+                                    buses = mixerAsset->Definition().Buses;
+                                    if (const auto selected =
+                                            std::ranges::find(buses, current, &Keire::AudioMixerBusDefinition::Id);
+                                        selected != buses.end())
+                                    {
+                                        preview = selected->Name;
+                                    }
+                                    else
+                                        preview = "Missing Bus";
+                                }
+                                if (auto disabled = ui.BeginDisabled(!mixerAsset); disabled)
+                                {
+                                    if (auto busCombo = ui.BeginCombo("Bus", preview); busCombo)
+                                    {
+                                        for (const auto& bus : buses)
+                                        {
+                                            if (ui.Selectable(bus.Name, bus.Id == current))
+                                            {
+                                                candidate = bus.Id.ToString();
+                                                changed = true;
+                                                editBoundary = true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            else if (reverbZone && property.Key == "snapshotId")
+                            {
+                                const auto current = reverbZone->SnapshotId();
+                                std::span<const Keire::AudioMixerSnapshotDefinition> snapshots;
+                                std::string preview = !current ? "None (wet blend only)" : "Missing Snapshot";
+                                if (mixerAsset && current)
+                                {
+                                    snapshots = mixerAsset->Definition().Snapshots;
+                                    if (const auto selected = std::ranges::find(
+                                            snapshots, current, &Keire::AudioMixerSnapshotDefinition::Id);
+                                        selected != snapshots.end())
+                                    {
+                                        preview = selected->Name;
+                                    }
+                                }
+                                else if (mixerAsset)
+                                    snapshots = mixerAsset->Definition().Snapshots;
+                                if (auto disabled = ui.BeginDisabled(!mixerAsset); disabled)
+                                {
+                                    if (auto snapshotCombo = ui.BeginCombo("Snapshot", preview); snapshotCombo)
+                                    {
+                                        if (ui.Selectable("None (wet blend only)", !current))
+                                        {
+                                            candidate = std::string{};
+                                            changed = true;
+                                            editBoundary = true;
+                                        }
+                                        for (const auto& snapshot : snapshots)
+                                        {
+                                            if (ui.Selectable(snapshot.Name, snapshot.Id == current))
+                                            {
+                                                candidate = snapshot.Id.ToString();
+                                                changed = true;
+                                                editBoundary = true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            else if (vfxOverrides)
                             {
                                 if (!vfxEffect)
                                 {
@@ -1043,15 +1138,14 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                     if (registration->Type == Keire::AudioReverbZoneComponent::StaticType())
                     {
                         const auto zone = Keire::DynamicRefCast<Keire::AudioReverbZoneComponent>(component);
-                        if (!zone || !zone->Mixer())
-                            ui.TextColored(theme.Warning, "Assign a Mixer containing a reverb effect or return bus.");
+                        if (!zone || !resolvedMixer)
+                            ui.TextColored(theme.Warning,
+                                           "Assign a Mixer here or configure the project's Default Mixer.");
                         else if (!assets)
                             ui.TextColored(theme.Warning, "Audio assets are unavailable for setup validation.");
-                        else if (const auto mixer =
-                                     assets->Load<Keire::AudioMixerAsset>(zone->Mixer(), Keire::AssetPriority::High)
-                                         .TryGetLoaded())
+                        else if (mixerAsset)
                         {
-                            const auto& definition = mixer->Definition();
+                            const auto& definition = mixerAsset->Definition();
                             const bool hasReverb = std::ranges::any_of(
                                 definition.Buses,
                                 [](const Keire::AudioMixerBusDefinition& bus)
@@ -1075,6 +1169,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                                             : "Zone setup valid: wet level follows listener overlap.");
                             ui.TextColored(theme.MutedText,
                                            "Snapshot is optional; Reverb Send controls wet intensity inside the zone.");
+                            if (!zone->Mixer())
+                                ui.TextColored(theme.MutedText, "Routing through the Project Settings Default Mixer.");
                         }
                         else
                             ui.TextColored(theme.MutedText, "Loading mixer setup validation...");
@@ -1082,13 +1178,11 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                     else if (registration->Type == Keire::AudioSourceComponent::StaticType())
                     {
                         const auto source = Keire::DynamicRefCast<Keire::AudioSourceComponent>(component);
-                        if (source && source->Mixer() && assets)
+                        if (source && resolvedMixer && assets)
                         {
-                            if (const auto mixer =
-                                    assets->Load<Keire::AudioMixerAsset>(source->Mixer(), Keire::AssetPriority::High)
-                                        .TryGetLoaded())
+                            if (mixerAsset)
                             {
-                                const auto& buses = mixer->Definition().Buses;
+                                const auto& buses = mixerAsset->Definition().Buses;
                                 const bool busValid =
                                     source->BusId()
                                         ? std::ranges::any_of(buses, [&](const Keire::AudioMixerBusDefinition& bus)
@@ -1098,8 +1192,14 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                 ui.TextColored(busValid ? theme.Success : theme.Warning,
                                                busValid ? "Mixer route is valid and active."
                                                         : "Selected bus is missing; audio will fall back to Master.");
+                                if (!source->Mixer())
+                                    ui.TextColored(theme.MutedText,
+                                                   "Routing through the Project Settings Default Mixer.");
                             }
                         }
+                        else if (source && !resolvedMixer)
+                            ui.TextColored(theme.Warning,
+                                           "Assign a Mixer here or configure the project's Default Mixer.");
                     }
                     if (registration->Removable && ui.Button("Remove " + registration->Name))
                     {
@@ -1368,8 +1468,7 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
                 authoring.Properties.insert_or_assign(name, value);
             KeireEditor::MaterialDocument editorDocument;
             editorDocument.Open(Keire::MaterialAsset::EncodeAuthoringSource(authoring),
-                                [&](const Keire::AssetId candidate) -> std::optional<Keire::ShaderAssetDefinition>
-                                {
+                                [&](const Keire::AssetId candidate) -> std::optional<Keire::ShaderAssetDefinition> {
                                     return candidate == parent->Definition().Shader
                                                ? std::optional(shader->Definition())
                                                : std::nullopt;

@@ -4,6 +4,8 @@
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
 #include "KeireInternal/FileSystem.h"
 
+#include <algorithm>
+#include <array>
 #include <bit>
 #include <cstdint>
 #include <exception>
@@ -171,6 +173,135 @@ namespace KeireEditor
         {
             authoringChanged = true;
             authoringCommit = true;
+        }
+        if (auto audioSettings = ui.BeginTreeNode("Audio Runtime"); audioSettings)
+        {
+            ui.TextColored(theme.MutedText,
+                           "Output changes apply on the next editor launch. Existing projects migrate automatically.");
+            const auto scanAudioDevices = [this]
+            {
+                try
+                {
+                    m_AudioPlaybackDevices = Keire::EnumerateAudioPlaybackDevices();
+                    m_AudioDeviceError.clear();
+                }
+                catch (const std::exception& error)
+                {
+                    m_AudioPlaybackDevices.clear();
+                    m_AudioDeviceError = error.what();
+                }
+                m_AudioDevicesInitialized = true;
+            };
+            if (!m_AudioDevicesInitialized)
+                scanAudioDevices();
+            const auto selectedDevice = std::ranges::find(m_AudioPlaybackDevices, authoring.Audio.PlaybackDeviceId,
+                                                          &Keire::AudioDeviceInfo::Id);
+            const auto selectedDeviceName = authoring.Audio.PlaybackDeviceId.empty() ? std::string("System Default")
+                                            : selectedDevice != m_AudioPlaybackDevices.end()
+                                                ? selectedDevice->Name
+                                                : std::string("Unavailable (using system default)");
+            if (auto combo = ui.BeginCombo("Playback Device", selectedDeviceName); combo)
+            {
+                if (ui.Selectable("System Default", authoring.Audio.PlaybackDeviceId.empty()))
+                {
+                    authoring.Audio.PlaybackDeviceId.clear();
+                    authoringChanged = true;
+                    authoringCommit = true;
+                }
+                for (const auto& device : m_AudioPlaybackDevices)
+                {
+                    const auto label = device.Name + (device.Default ? " (default)" : "");
+                    if (ui.Selectable(label, authoring.Audio.PlaybackDeviceId == device.Id))
+                    {
+                        authoring.Audio.PlaybackDeviceId = device.Id;
+                        authoringChanged = true;
+                        authoringCommit = true;
+                    }
+                }
+            }
+            if (ui.Button("Rescan Audio Devices"))
+                scanAudioDevices();
+            if (!m_AudioDeviceError.empty())
+                ui.TextColored(theme.Warning, m_AudioDeviceError);
+            constexpr std::array sampleRates{22050U, 32000U, 44100U, 48000U, 88200U, 96000U, 192000U};
+            const auto sampleRateLabel = std::to_string(authoring.Audio.MixSampleRate) + " Hz";
+            if (auto combo = ui.BeginCombo("Mix Sample Rate", sampleRateLabel); combo)
+            {
+                for (const auto sampleRate : sampleRates)
+                {
+                    const auto label = std::to_string(sampleRate) + " Hz";
+                    if (ui.Selectable(label, authoring.Audio.MixSampleRate == sampleRate))
+                    {
+                        authoring.Audio.MixSampleRate = sampleRate;
+                        authoringChanged = true;
+                        authoringCommit = true;
+                    }
+                }
+            }
+
+            constexpr std::array periods{128U, 256U, 512U, 1024U};
+            const auto periodLabel = std::to_string(authoring.Audio.PeriodFrames) + " frames";
+            if (auto combo = ui.BeginCombo("Buffer Size", periodLabel); combo)
+            {
+                for (const auto period : periods)
+                {
+                    const auto label = std::to_string(period) + " frames";
+                    if (ui.Selectable(label, authoring.Audio.PeriodFrames == period))
+                    {
+                        authoring.Audio.PeriodFrames = period;
+                        authoringChanged = true;
+                        authoringCommit = true;
+                    }
+                }
+            }
+
+            const auto layoutName = [](const Keire::AudioChannelLayout layout)
+            {
+                switch (layout)
+                {
+                case Keire::AudioChannelLayout::Mono:
+                    return "Mono";
+                case Keire::AudioChannelLayout::Stereo:
+                    return "Stereo";
+                case Keire::AudioChannelLayout::Surround51:
+                    return "Surround 5.1";
+                case Keire::AudioChannelLayout::Surround71:
+                    return "Surround 7.1";
+                }
+                return "Unsupported";
+            };
+            constexpr std::array layouts{Keire::AudioChannelLayout::Mono, Keire::AudioChannelLayout::Stereo,
+                                         Keire::AudioChannelLayout::Surround51, Keire::AudioChannelLayout::Surround71};
+            if (auto combo = ui.BeginCombo("Speaker Layout", layoutName(authoring.Audio.OutputLayout)); combo)
+            {
+                for (const auto layout : layouts)
+                {
+                    if (ui.Selectable(layoutName(layout), authoring.Audio.OutputLayout == layout))
+                    {
+                        authoring.Audio.OutputLayout = layout;
+                        authoringChanged = true;
+                        authoringCommit = true;
+                    }
+                }
+            }
+
+            auto maximumVoices = static_cast<std::int32_t>(authoring.Audio.MaximumVoices);
+            if (ui.SliderInt("Audible Voice Budget", maximumVoices, 16, 4096))
+            {
+                authoring.Audio.MaximumVoices = static_cast<std::uint32_t>(maximumVoices);
+                authoring.Audio.MaximumVirtualVoices =
+                    std::max(authoring.Audio.MaximumVirtualVoices, authoring.Audio.MaximumVoices);
+                authoringChanged = true;
+            }
+            authoringCommit |= ui.LastItemState().DeactivatedAfterEdit;
+            auto maximumVirtualVoices = static_cast<std::int32_t>(authoring.Audio.MaximumVirtualVoices);
+            if (ui.SliderInt("Virtual Voice Budget", maximumVirtualVoices, maximumVoices, 16384))
+            {
+                authoring.Audio.MaximumVirtualVoices = static_cast<std::uint32_t>(maximumVirtualVoices);
+                authoringChanged = true;
+            }
+            authoringCommit |= ui.LastItemState().DeactivatedAfterEdit;
+            ui.TextColored(theme.MutedText, "256 audible / 1024 virtual voices is the balanced desktop default.");
         }
         if (auto layers = ui.BeginTreeNode("Physics Layers (32)"); layers)
         {

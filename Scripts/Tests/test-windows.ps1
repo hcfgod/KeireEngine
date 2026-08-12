@@ -50,7 +50,7 @@ if ($LASTEXITCODE -ne 0) { throw "Supabase desktop configuration checks failed."
 if ($LASTEXITCODE -ne 0) { throw "Marketplace migration security-contract checks failed." }
 & $python (Join-Path $PSScriptRoot "test-marketplace-edge.py")
 if ($LASTEXITCODE -ne 0) { throw "Marketplace Edge trust-boundary checks failed." }
-& $python (Join-Path $PSScriptRoot "test-marketplace-package-fixture.py")
+& $python (Join-Path $PSScriptRoot "test-marketplace-upload-sample.py")
 if ($LASTEXITCODE -ne 0) { throw "Marketplace package-fixture checks failed." }
 & $python (Join-Path $PSScriptRoot "test-patch-ninja-depfiles.py")
 if ($LASTEXITCODE -ne 0) { throw "Ninja dependency-file rule checks failed." }

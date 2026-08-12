@@ -8,6 +8,7 @@
 
 #include <array>
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -385,6 +386,20 @@ namespace Keire
                 ResolveManagedApiAssembly(commandLine.ExecutablePath, commandLine.ProjectPath);
             specification.Physics.Mode = PhysicsMode::Enabled;
             specification.Audio.Mode = AudioMode::Enabled;
+            try
+            {
+                const auto authoring = LoadProjectAuthoringSettings(commandLine.ProjectPath);
+                specification.Audio.MaximumVoices = authoring.Audio.MaximumVoices;
+                specification.Audio.MaximumVirtualVoices = authoring.Audio.MaximumVirtualVoices;
+                specification.Audio.MixSampleRate = authoring.Audio.MixSampleRate;
+                specification.Audio.PeriodFrames = authoring.Audio.PeriodFrames;
+                specification.Audio.OutputLayout = authoring.Audio.OutputLayout;
+                specification.Audio.PlaybackDeviceId = authoring.Audio.PlaybackDeviceId;
+            }
+            catch (const std::exception&)
+            {
+                // The workspace reports malformed authoring settings and remains usable with safe audio defaults.
+            }
             specification.Navigation.Mode = NavigationMode::Enabled;
         }
         std::filesystem::path windowPlacementPath;

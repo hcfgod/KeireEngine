@@ -69,6 +69,7 @@ namespace
         Keire::AssetId StartupScene;
         Keire::AssetId DefaultInput;
         Keire::AssetId DefaultMixer;
+        Keire::AudioProjectSettings AudioSettings;
         Keire::RenderEnvironmentSettings Rendering;
         std::array<std::uint32_t, Keire::PhysicsCollisionLayerCount> PhysicsCollisionMatrix;
         std::vector<std::filesystem::path> ManagedAssemblyRoots;
@@ -311,6 +312,26 @@ namespace
         result.Physics = subsystems.at("physics").get<bool>();
         result.Audio = subsystems.at("audio").get<bool>();
         result.Navigation = subsystems.at("navigation").get<bool>();
+        if (const auto audio = source.find("audio"); audio != source.end())
+        {
+            if (!audio->is_object())
+                throw Keire::CommandLineError("Runtime audio settings must be an object.");
+            result.AudioSettings.MixSampleRate = audio->at("mixSampleRate").get<std::uint32_t>();
+            result.AudioSettings.PeriodFrames = audio->at("periodFrames").get<std::uint32_t>();
+            const auto layout = audio->at("outputLayout").get<std::string>();
+            if (layout == "mono")
+                result.AudioSettings.OutputLayout = Keire::AudioChannelLayout::Mono;
+            else if (layout == "stereo")
+                result.AudioSettings.OutputLayout = Keire::AudioChannelLayout::Stereo;
+            else if (layout == "5.1")
+                result.AudioSettings.OutputLayout = Keire::AudioChannelLayout::Surround51;
+            else if (layout == "7.1")
+                result.AudioSettings.OutputLayout = Keire::AudioChannelLayout::Surround71;
+            else
+                throw Keire::CommandLineError("Runtime audio output layout is unsupported.");
+            result.AudioSettings.MaximumVoices = audio->at("maximumVoices").get<std::uint32_t>();
+            result.AudioSettings.MaximumVirtualVoices = audio->at("maximumVirtualVoices").get<std::uint32_t>();
+        }
         const auto& physics = source.at("physics");
         const auto& layerNames = physics.at("layerNames");
         const auto& collisionMatrix = physics.at("collisionMatrix");
@@ -321,6 +342,7 @@ namespace
         }
         auto physicsSettings = Keire::DefaultProjectAuthoringSettings();
         physicsSettings.DefaultMixer = result.DefaultMixer;
+        physicsSettings.Audio = result.AudioSettings;
         for (std::size_t index = 0; index < Keire::PhysicsCollisionLayerCount; ++index)
         {
             physicsSettings.PhysicsLayerNames[index] = layerNames[index].get<std::string>();
@@ -456,11 +478,12 @@ namespace
     {
       public:
         RuntimeLayer(const Keire::AssetId startupScene, const Keire::AssetId defaultInput,
-                     const Keire::RenderEnvironmentSettings rendering, RuntimeCommandLine commandLine,
-                     Keire::ReplayFingerprints fingerprints, std::shared_ptr<RuntimeReplayState> replayState)
-            : Layer("Runtime"), m_StartupScene(startupScene), m_DefaultInput(defaultInput), m_Rendering(rendering),
-              m_CommandLine(std::move(commandLine)), m_ReplayFingerprints(std::move(fingerprints)),
-              m_ReplayState(std::move(replayState))
+                     const Keire::AssetId defaultMixer, const Keire::RenderEnvironmentSettings rendering,
+                     RuntimeCommandLine commandLine, Keire::ReplayFingerprints fingerprints,
+                     std::shared_ptr<RuntimeReplayState> replayState)
+            : Layer("Runtime"), m_StartupScene(startupScene), m_DefaultInput(defaultInput),
+              m_DefaultMixer(defaultMixer), m_Rendering(rendering), m_CommandLine(std::move(commandLine)),
+              m_ReplayFingerprints(std::move(fingerprints)), m_ReplayState(std::move(replayState))
         {
         }
 
@@ -548,6 +571,8 @@ namespace
                     return;
                 m_Runtime = Keire::CreateRef<Keire::SceneRuntimeSession>(m_Load->Result(), Owner().Assets(),
                                                                          Owner().Audio(), Owner().Physics());
+                if (const auto presentation = m_Runtime->Presentation())
+                    presentation->SetDefaultMixer(m_DefaultMixer);
                 m_Runtime->Play();
                 if (m_Runtime->State() == Keire::ScenePlayState::Faulted)
                     throw std::runtime_error("Startup scene Play failed: " + m_Runtime->Diagnostic().Message);
@@ -1028,6 +1053,7 @@ namespace
 
         Keire::AssetId m_StartupScene;
         Keire::AssetId m_DefaultInput;
+        Keire::AssetId m_DefaultMixer;
         Keire::RenderEnvironmentSettings m_Rendering;
         RuntimeCommandLine m_CommandLine;
         Keire::ReplayFingerprints m_ReplayFingerprints;
@@ -1336,8 +1362,8 @@ namespace
                      }});
             }
             (void)PushLayer(std::make_unique<RuntimeLayer>(m_Manifest.StartupScene, m_Manifest.DefaultInput,
-                                                           m_Manifest.Rendering, m_CommandLine, m_ReplayFingerprints,
-                                                           m_ReplayState));
+                                                           m_Manifest.DefaultMixer, m_Manifest.Rendering, m_CommandLine,
+                                                           m_ReplayFingerprints, m_ReplayState));
         }
 
       private:
@@ -1395,7 +1421,14 @@ namespace Keire
             specification.Physics.CollisionMatrix = manifest.PhysicsCollisionMatrix;
         }
         if (manifest.Audio)
+        {
             specification.Audio.Mode = specification.MainWindow.Visible ? AudioMode::Enabled : AudioMode::Headless;
+            specification.Audio.MixSampleRate = manifest.AudioSettings.MixSampleRate;
+            specification.Audio.PeriodFrames = manifest.AudioSettings.PeriodFrames;
+            specification.Audio.OutputLayout = manifest.AudioSettings.OutputLayout;
+            specification.Audio.MaximumVoices = manifest.AudioSettings.MaximumVoices;
+            specification.Audio.MaximumVirtualVoices = manifest.AudioSettings.MaximumVirtualVoices;
+        }
         if (manifest.Navigation)
             specification.Navigation.Mode = NavigationMode::Enabled;
         return std::make_unique<RuntimeApplication>(std::move(specification), std::move(manifest), commandLine,

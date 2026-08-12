@@ -502,6 +502,15 @@ button:disabled,
     content: "";
 }
 
+.workflow-line article:not(.workflow-line__complete)::before {
+    background: var(--night-950);
+}
+
+.workflow-line__complete::before {
+    background: var(--mint);
+    box-shadow: 0 0 0 1px var(--line-bright), 0 0 1rem rgba(91, 224, 187, 0.35);
+}
+
 .workflow-line small {
     color: var(--cyan);
     font-weight: 720;
@@ -613,34 +622,56 @@ button:disabled,
     line-height: 1.12;
 }
 
-.roadmap-track__percent {
+.readiness-progress {
+    display: grid;
+    gap: 0.55rem;
+}
+
+.readiness-progress--compact {
+    margin-top: 1.65rem;
+    margin-bottom: 1.5rem;
+}
+
+.readiness-progress__label {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    color: var(--ink-soft);
+    font-size: 0.8rem;
+}
+
+.readiness-progress__label strong {
     color: var(--cyan);
-    font-size: 1.35rem;
+    font-size: 1.15rem;
     font-variant-numeric: tabular-nums;
 }
 
-.roadmap-meter {
+.readiness-progress progress {
+    width: 100%;
     height: 0.72rem;
-    margin-top: 1.65rem;
     border: 1px solid var(--line);
     border-radius: 99rem;
     overflow: hidden;
+    appearance: none;
     background: rgba(2, 10, 18, 0.82);
 }
 
-.roadmap-meter span {
-    display: block;
-    width: var(--roadmap-progress);
-    height: 100%;
+.readiness-progress progress::-webkit-progress-bar {
+    border-radius: inherit;
+    background: rgba(2, 10, 18, 0.82);
+}
+
+.readiness-progress progress::-webkit-progress-value,
+.readiness-progress progress::-moz-progress-bar {
     border-radius: inherit;
     background: linear-gradient(90deg, var(--blue-strong), var(--cyan) 70%, var(--mint));
     box-shadow: 0 0 1.2rem rgba(113, 222, 244, 0.42);
 }
 
-.roadmap-track__count {
-    margin: 0.65rem 0 1.5rem;
+.readiness-progress small {
     color: var(--ink-muted);
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     font-variant-numeric: tabular-nums;
 }
 
@@ -676,6 +707,25 @@ button:disabled,
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 1.2rem;
+}
+
+.marketplace-release-queue {
+    display: grid;
+    gap: 1.5rem;
+}
+
+.market-card--preview {
+    opacity: 0.9;
+}
+
+.market-card--preview .market-card__media {
+    display: flex;
+    min-height: 8rem;
+    padding: 1rem;
+    align-items: flex-start;
+    background:
+        linear-gradient(135deg, rgba(45, 126, 210, 0.18), rgba(93, 226, 208, 0.05)),
+        repeating-linear-gradient(135deg, transparent 0 1rem, rgba(255, 255, 255, 0.018) 1rem 2rem);
 }
 
 .market-card {
@@ -1591,6 +1641,17 @@ button:disabled,
 .staff-action-form {
     padding-top: 1.2rem;
     border-top: 1px solid var(--line);
+}
+
+.staff-subsection-heading {
+    margin-top: clamp(2rem, 5vw, 3.5rem);
+    padding-top: clamp(1.5rem, 4vw, 2.5rem);
+    border-top: 1px solid var(--line);
+}
+
+.staff-withdrawal-form {
+    margin-top: 1.25rem;
+    border-top-color: rgba(255, 126, 126, 0.28);
 }
 
 .staff-decision-actions {

@@ -15,7 +15,7 @@ public sealed class ThirdPersonController : Behaviour
     private float _footstepVolume = 0.65f;
 
     [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000013")]
-    private AssetReference<object> _footstepClip;
+    private AssetReference<object> _footstepClip = default;
 
     protected override void Awake() => Log.Info($"Third-person controller attached to {Entity.Name}.");
 

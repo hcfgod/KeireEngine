@@ -50,8 +50,9 @@ Kéire already includes substantial, integrated engine and authoring foundations
   Direct Materials, inherited and dynamic Material Instances, reusable material/shader functions and layers,
   Material Parameter Collections, tagged custom-shader materials, LODs,
   spatial lighting data, animation, rigging, VFX authoring, and performance gates.
-- Input actions and rebinding, physics, navigation, audio graphs, production mixer/reverb-zone foundations,
-  replay/diagnostic foundations, and profiling.
+- Input actions and rebinding, physics, navigation, configurable mono/stereo/5.1/7.1 audio output, typed live Mix
+  Console authoring, stable mixer routing, spatial sources, listener/camera fallback, priority-blended Reverb Zones,
+  managed audio controls, replay/diagnostic foundations, and profiling.
 - Search-first Shader/VFX node menus, portable geometry and structured-value operators, bounded CPU resource
   sampling, asynchronous graph thumbnails, and stable built-in prototype meshes.
 - Managed assemblies, component discovery, serialized Inspector fields, lifecycle callbacks, hot reload, gameplay APIs,

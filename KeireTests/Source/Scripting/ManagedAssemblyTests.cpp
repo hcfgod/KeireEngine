@@ -373,6 +373,8 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                   "[SerializeField] public bool RunAudioScalarValidation = false; "
                   "[SerializeField] public bool VolumeValidationObserved = false; "
                   "[SerializeField] public bool PitchValidationObserved = false; "
+                  "[SerializeField] public bool AudioListenerValidationObserved = false; "
+                  "[SerializeField] public bool AudioReverbValidationObserved = false; "
                   "[SerializeField] public bool DisableThroughProperty = false; "
                   "[SerializeField] public bool DisableObserved = false; "
                   "[SerializeField] public bool AnimatorIkObserved = false; "
@@ -382,7 +384,7 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                   "if (DisableThroughProperty) { DisableThroughProperty = false; Enabled = false; } "
                   "try { var source = Entity.AudioSource; source.Time = 0.5f; } "
                   "catch (System.InvalidOperationException) { SeekFailureObserved = true; } "
-                  "if (RunAudioScalarValidation) ValidateAudioScalars(); "
+                  "if (RunAudioScalarValidation) { ValidateAudioScalars(); ValidateAudioEnvironment(); } "
                   "else { ValidateMissingAudioSource(); ValidateAudioBusNames(); } } "
                   "private void ValidateMissingAudioSource() { "
                   "try { var source = Entity.AudioSource; "
@@ -407,6 +409,16 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                   "try { source.Pitch = value; } "
                   "catch (System.ArgumentOutOfRangeException) { pitchFailures++; } } "
                   "PitchValidationObserved = pitchFailures == 3 && source.Pitch == 8.0f; } "
+                  "private void ValidateAudioEnvironment() { "
+                  "if (Entity.HasComponent<AudioListenerComponent>()) { var listener = Entity.AudioListener; "
+                  "listener.Primary = false; listener.VolumeDecibels = -6.0206f; "
+                  "AudioListenerValidationObserved = !listener.Primary && "
+                  "System.MathF.Abs(listener.Gain - 0.5f) < 0.001f; } "
+                  "if (Entity.HasComponent<AudioReverbZoneComponent>()) { var zone = Entity.AudioReverbZone; "
+                  "zone.Shape = AudioReverbZoneShape.Sphere; zone.SphereRadius = 8.0f; zone.BlendDistance = 2.0f; "
+                  "zone.ReverbSend = 0.75f; zone.Priority = 3; AudioReverbValidationObserved = "
+                  "zone.Shape == AudioReverbZoneShape.Sphere && zone.SphereRadius == 8.0f && "
+                  "zone.BlendDistance == 2.0f && zone.ReverbSend == 0.75f && zone.Priority == 3; } } "
                   "protected override void OnDisable() { DisableObserved = !Enabled; } "
                   "protected override void OnAnimatorIk(AnimationIkContext context) { "
                   "AnimatorIkObserved = true; AnimatorIkWeight = context.LayerWeight; } "
@@ -573,6 +585,10 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     CHECK(std::get<double>(ikResults.at("AnimatorIkWeight")) == doctest::Approx(0.625));
 
     REQUIRE(runtimeEntity.AddComponent<Keire::AudioSourceComponent>());
+    const auto listener = runtimeEntity.AddComponent<Keire::AudioListenerComponent>();
+    const auto reverbZone = runtimeEntity.AddComponent<Keire::AudioReverbZoneComponent>();
+    REQUIRE(listener);
+    REQUIRE(reverbZone);
     auto scalarValidationValues = consumedValues;
     scalarValidationValues.insert_or_assign("RunAudioScalarValidation", true);
     registration->Deserialize(*runtimeComponent, scalarValidationValues, registration->SchemaVersion);
@@ -580,8 +596,19 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     const auto scalarResults = registration->Serialize(*runtimeComponent);
     REQUIRE(scalarResults.contains("VolumeValidationObserved"));
     REQUIRE(scalarResults.contains("PitchValidationObserved"));
+    REQUIRE(scalarResults.contains("AudioListenerValidationObserved"));
+    REQUIRE(scalarResults.contains("AudioReverbValidationObserved"));
     CHECK(std::get<bool>(scalarResults.at("VolumeValidationObserved")));
     CHECK(std::get<bool>(scalarResults.at("PitchValidationObserved")));
+    CHECK(std::get<bool>(scalarResults.at("AudioListenerValidationObserved")));
+    CHECK(std::get<bool>(scalarResults.at("AudioReverbValidationObserved")));
+    CHECK_FALSE(listener->Primary());
+    CHECK(listener->Gain() == doctest::Approx(0.5F).epsilon(0.001));
+    CHECK(reverbZone->Shape() == Keire::AudioReverbZoneShape::Sphere);
+    CHECK(reverbZone->SphereRadius() == doctest::Approx(8.0F));
+    CHECK(reverbZone->BlendDistance() == doctest::Approx(2.0F));
+    CHECK(reverbZone->ReverbSend() == doctest::Approx(0.75F));
+    CHECK(reverbZone->Priority() == 3);
 
     const auto editingValues = registration->Serialize(*editingComponent);
     REQUIRE(editingValues.contains("managedState"));

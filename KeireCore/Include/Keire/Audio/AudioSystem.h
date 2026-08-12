@@ -29,11 +29,39 @@ namespace Keire
         Enabled
     };
 
+    enum class AudioChannelLayout : std::uint8_t
+    {
+        Mono,
+        Stereo,
+        Surround51,
+        Surround71
+    };
+
+    [[nodiscard]] KEIRE_API std::uint32_t AudioChannelCount(AudioChannelLayout layout) noexcept;
+    [[nodiscard]] KEIRE_API float DecibelsToLinear(float decibels) noexcept;
+    [[nodiscard]] KEIRE_API float LinearToDecibels(float gain) noexcept;
+
+    struct AudioDeviceInfo
+    {
+        std::string Id;
+        std::string Name;
+        bool Default = false;
+
+        [[nodiscard]] bool operator==(const AudioDeviceInfo&) const = default;
+    };
+
+    [[nodiscard]] KEIRE_API std::vector<AudioDeviceInfo> EnumerateAudioPlaybackDevices();
+
     struct AudioSystemSpecification
     {
         AudioMode Mode = AudioMode::Disabled;
         std::uint32_t MaximumVoices = 256;
+        std::uint32_t MaximumVirtualVoices = 1024;
         std::uint32_t MaximumMeterReadings = 256;
+        std::uint32_t MixSampleRate = 48000;
+        std::uint32_t PeriodFrames = 256;
+        AudioChannelLayout OutputLayout = AudioChannelLayout::Stereo;
+        std::string PlaybackDeviceId;
     };
 
     enum class AudioGraphNodeType : std::uint8_t
@@ -161,6 +189,7 @@ namespace Keire
         Vector3 Forward{0.0F, 0.0F, -1.0F};
         Vector3 Up{0.0F, 1.0F, 0.0F};
         Vector3 Velocity;
+        float Gain = 1.0F;
     };
 
     struct AudioVoiceInfo
@@ -197,6 +226,11 @@ namespace Keire
         std::size_t MeterReadings = 0;
         std::uint64_t RenderedFrames = 0;
         std::uint64_t Underruns = 0;
+        std::uint32_t MixSampleRate = 0;
+        std::uint32_t OutputChannels = 0;
+        std::uint32_t PeriodFrames = 0;
+        std::string PlaybackDeviceName;
+        bool PlaybackDeviceFallback = false;
     };
 
     struct AudioBusInfo
@@ -254,6 +288,7 @@ namespace Keire
         [[nodiscard]] AudioSystemStatistics Statistics() const;
         void SubmitMeterSnapshot(AudioMeterSnapshot snapshot);
         [[nodiscard]] AudioMeterSnapshot LatestMeterSnapshot() const;
+        [[nodiscard]] AudioSystemSpecification Specification() const;
         void Close();
 
       private:

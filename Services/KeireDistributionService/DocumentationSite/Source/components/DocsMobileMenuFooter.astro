@@ -6,6 +6,7 @@ import SessionAwareAccountLink from "./SessionAwareAccountLink.astro";
 ---
 
 <div class="keire-doc-mobile-account">
+    <nav aria-label="Kéire platform"><a href="/roadmap/">Roadmap</a><a href="/marketplace/">Marketplace</a><a href="/downloads/">Downloads</a></nav>
     <SessionAwareAccountLink class="keire-doc-account" sessionKnown={false} />
 </div>
 <div class="mobile-preferences sl-flex">
@@ -21,6 +22,13 @@ import SessionAwareAccountLink from "./SessionAwareAccountLink.astro";
         .keire-doc-mobile-account {
             padding-block: 0.8rem;
             border-top: 1px solid var(--sl-color-gray-6);
+        }
+
+        .keire-doc-mobile-account nav {
+            display: flex;
+            margin-bottom: 0.8rem;
+            gap: 1rem;
+            flex-wrap: wrap;
         }
 
         .social-icons {

@@ -369,14 +369,25 @@ assert(documentationStyles.includes("main .hero > .stack") && documentationStyle
 assert(!/letter-spacing:\s*-0\.0[6-9]\d*em/.test(`${platformStyles}\n${documentationStyles}`),
     "Shared display typography must not use visually compressed negative tracking.");
 const roadmapPage = await readFile(path.join(siteRoot, "Source", "pages", "roadmap", "index.astro"), "utf8");
-assert(roadmapPage.includes('role="progressbar"') && roadmapPage.includes("aria-valuenow={track.completed}") &&
-    roadmapPage.includes("aria-valuetext={`${track.completed} of ${track.total} checks complete`}"),
-    "Roadmap workstreams must expose real bounded progress values to assistive technology.");
-assert(roadmapPage.includes("completedChecks") && roadmapPage.includes("totalChecks") &&
+const readinessProgress = await readFile(path.join(siteRoot, "Source", "components", "ReadinessProgress.astro"), "utf8");
+const launchProgress = await readFile(path.join(siteRoot, "Source", "lib", "launchProgress.ts"), "utf8");
+assert(readinessProgress.includes("<progress value={safeCompleted} max={safeTotal}") &&
+    readinessProgress.includes("gates passed"),
+    "Shared launch progress must expose native bounded values and useful accessible text.");
+assert(roadmapPage.includes("completedLaunchChecks") && roadmapPage.includes("totalLaunchChecks") &&
     roadmapPage.includes("it is not a release-date estimate or a quality score"),
     "Roadmap totals must be derived from tracked checks and explain their limits.");
-assert(platformStyles.includes(".roadmap-meter span") && platformStyles.includes("width: var(--roadmap-progress)"),
-    "Roadmap progress values must visibly drive their corresponding meters.");
+const marketplaceProgress = launchProgress.split('id: "marketplace"', 2)[1]?.split('id: "operations"', 1)[0] ?? "";
+const operationsProgress = launchProgress.split('id: "operations"', 2)[1] ?? "";
+assert(marketplaceProgress.includes("completed: 9") && operationsProgress.includes("completed: 11") &&
+    platformStyles.includes(".readiness-progress progress::-webkit-progress-value") &&
+    platformStyles.includes(".readiness-progress progress::-moz-progress-bar"),
+    "Roadmap, publisher, and staff progress must share current evidence and cross-browser native-meter styling.");
+assert(platformHeader.includes('href="/roadmap/"') && platformHeader.includes('active === "roadmap"'),
+    "Roadmap must be discoverable from primary navigation and expose current-page state.");
+const platformFooter = await readFile(path.join(siteRoot, "Source", "components", "PlatformFooter.astro"), "utf8");
+assert(platformFooter.includes('href="/roadmap/"') && platformFooter.includes('href="/policies/"'),
+    "Roadmap and the policy index must remain reachable from the global footer.");
 
 const publisherPage = await readFile(path.join(siteRoot, "Source", "pages", "publisher", "index.astro"), "utf8");
 for (const contract of [
@@ -406,6 +417,19 @@ assert(publisherUploadRoutes.includes("requireAal2") && publisherUploadRoutes.in
     "Publisher upload adapters must require MFA and the private authoring feature flag.");
 assert(publisherUploadRoutes.includes('functions.invoke("marketplace-publisher"'),
     "Publisher upload adapters must use the hardened Edge transition boundary.");
+assert(publisherUploadRoutes.includes("export const GET") &&
+    publisherUploadRoutes.includes('from("marketplace_validation_reports")'),
+    "Publisher uploads must expose an authenticated, RLS-scoped validation status endpoint.");
+assert(publisherPage.includes("data-validation-upload") && publisherPage.includes("startValidationPolling") &&
+    publisherPage.includes('cache: "no-store"') && publisherPage.includes("terminalUploadStates"),
+    "Publisher validation activity must refresh asynchronous results without leaving stale pending labels.");
+assert(publisherPage.includes("publisherReleaseGates") && publisherPage.includes("completedPublisherGates") &&
+    publisherPage.includes("<ReadinessProgress"),
+    "Publisher release readiness must be derived from actual configured, validated, moderated, and published states.");
+assert(publisherPage.includes("readyForStaff") && publisherPage.includes('id="ready-for-review"') &&
+    publisherPage.includes("Upload and Staff submission are separate safeguards.") &&
+    publisherPage.includes("Submit to Staff review"),
+    "Validated packages must expose an explicit, prominent publisher-to-Staff submission checkpoint.");
 const publisherSubmitRoute = await readFile(path.join(siteRoot, "Source", "pages", "publisher", "v1", "versions",
     "[id]", "submit.ts"), "utf8");
 assert(publisherSubmitRoute.includes("requireAal2") &&
@@ -423,6 +447,22 @@ for (const contract of [
 ]) {
     assert(staffPage.includes(contract), `Staff operations center is missing ${contract}.`);
 }
+assert(staffPage.includes("launchProgressTracks") && staffPage.includes('id="readiness"') &&
+    staffPage.includes('href="/roadmap/"'),
+    "Staff operations must expose the same launch evidence as the public roadmap.");
+assert(staffPage.includes('activeSubmissions') && staffPage.includes('signingSubmissions') &&
+    staffPage.includes('submissionHistory') && staffPage.includes('id="review-history"'),
+    "Terminal package decisions must leave the active staff queue while remaining available as review history.");
+assert(staffPage.includes('id="official-releases"') &&
+    staffPage.includes('/publisher/?product=${encodeURIComponent(product.id)}#new-release') &&
+    publisherPage.includes('requestedProductId') && publisherPage.includes('selected={requestedProductId === product.id}'),
+    "Official catalog drafts must enter the standard publisher release pipeline with explicit product selection.");
+assert(publisherPage.includes('isNeonForgeUploadSample') &&
+    publisherPage.includes('"1.0.0"') &&
+    publisherPage.includes('"pbr, shader-graph, material-graph, vfx-graph"'),
+    "The mixed-content upload sample must prefill its exact version and renderer capabilities.");
+assert(staffPage.includes("Withdraw approval") && staffPage.includes("staff-withdrawal-form"),
+    "An administrator must be able to withdraw pre-publication signing approval without deleting audit evidence.");
 assert(!staffPage.includes("app_metadata"),
     "Staff page authorization must use current database roles instead of browser JWT metadata.");
 const platformLayout = await readFile(path.join(siteRoot, "Source", "layouts", "PlatformLayout.astro"), "utf8");
@@ -435,7 +475,14 @@ const staffActionRoute = await readFile(path.join(siteRoot, "Source", "pages", "
 assert(staffActionRoute.includes("requireAal2") &&
     staffActionRoute.includes('functions.invoke("marketplace-moderation"'),
     "Staff actions must use the MFA-protected moderation transition boundary.");
-for (const style of [".staff-console", ".staff-metrics", ".staff-review-card", ".staff-detail-grid"]) {
+const staffPublicationRoute = await readFile(path.join(siteRoot, "Source", "pages", "admin", "marketplace", "v1",
+    "publications", "index.ts"), "utf8");
+assert(staffPage.includes("data-publication-form") && staffPage.includes("Verify signature and publish") &&
+    staffPublicationRoute.includes("requireAal2") &&
+    staffPublicationRoute.includes('functions.invoke("marketplace-publication"'),
+    "Offline-signed packages must cross the administrator-only publication boundary.");
+for (const style of [".staff-console", ".staff-metrics", ".staff-review-card", ".staff-detail-grid",
+    ".staff-subsection-heading", ".staff-withdrawal-form"]) {
     assert(platformStyles.includes(style), `Staff operations styling is missing ${style}.`);
 }
 

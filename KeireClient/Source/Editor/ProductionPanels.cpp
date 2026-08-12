@@ -1059,12 +1059,80 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
             if (const auto audio = Owner().Audio())
             {
                 const auto statistics = audio->Statistics();
+                const auto specification = audio->Specification();
                 ui.Text("Audio voices " + std::to_string(statistics.AudibleVoices) + " audible / " +
                         std::to_string(statistics.VirtualVoices) + " virtual / " + std::to_string(statistics.Voices) +
                         " allocated");
-                ui.Text("Audio frames " + std::to_string(statistics.RenderedFrames));
+                const auto voiceUtilization = specification.MaximumVoices == 0
+                                                  ? 0.0F
+                                                  : static_cast<float>(statistics.AudibleVoices) /
+                                                        static_cast<float>(specification.MaximumVoices);
+                ui.ProgressBar(std::clamp(voiceUtilization, 0.0F, 1.0F), {0.0F, 12.0F},
+                               std::to_string(statistics.AudibleVoices) + " / " +
+                                   std::to_string(specification.MaximumVoices) + " audible voices");
+                ui.Text("Audio output " + std::to_string(statistics.MixSampleRate) + " Hz / " +
+                        std::to_string(statistics.OutputChannels) + " channels / " +
+                        std::to_string(statistics.PeriodFrames) + " frame buffer");
+                ui.Text("Audio device " + statistics.PlaybackDeviceName);
+                if (statistics.PlaybackDeviceFallback)
+                    ui.TextColored(m_Theme.Warning,
+                                   "The selected playback device was unavailable; using the system default.");
+                ui.Text("Audio routing " + std::to_string(statistics.MixerRoutings) + " mixers / " +
+                        std::to_string(statistics.MixerBuses) + " buses / " + std::to_string(statistics.MixerEffects) +
+                        " effects");
+                if (const auto session =
+                        m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+                    session && session->Presentation())
+                {
+                    const auto sceneAudio = session->Presentation()->Statistics();
+                    const auto listener = !sceneAudio.HasAudioListener            ? std::string("missing")
+                                          : sceneAudio.UsingPrimaryCameraListener ? std::string("primary Camera")
+                                                                                  : std::string("Audio Listener");
+                    ui.Text("Scene audio " + std::to_string(sceneAudio.ActiveAudioSources) + " active sources / " +
+                            std::to_string(sceneAudio.ActiveReverbZones) +
+                            " active reverb zones / listener: " + listener);
+                    if (!sceneAudio.HasAudioListener)
+                        ui.TextColored(m_Theme.Warning,
+                                       "No active primary Audio Listener or primary Camera is available.");
+                    if (sceneAudio.PendingAudioAssets != 0)
+                        ui.TextColored(m_Theme.Warning, std::to_string(sceneAudio.PendingAudioAssets) +
+                                                            " audio assets are still loading or unavailable.");
+                }
+                ui.Text("Audio frames " + std::to_string(statistics.RenderedFrames) + " / meter readings " +
+                        std::to_string(statistics.MeterReadings));
                 if (statistics.Underruns != 0)
                     ui.TextColored(m_Theme.Warning, std::to_string(statistics.Underruns) + " output underruns");
+                if (auto voices = ui.BeginTreeNode("Audio voice inspector", false); voices)
+                {
+                    const auto activeVoices = audio->Voices();
+                    if (activeVoices.empty())
+                        ui.TextColored(m_Theme.MutedText, "No active audio voices.");
+                    for (const auto& voice : activeVoices)
+                    {
+                        const auto state = voice.Paused ? "paused" : voice.Virtualized ? "virtual" : "audible";
+                        ui.Text(voice.Bus + "  |  " + state + "  |  priority " + std::to_string(voice.Priority) +
+                                "  |  frame " + std::to_string(voice.Frame) + " / " +
+                                std::to_string(voice.DurationFrames));
+                    }
+                }
+                if (auto meters = ui.BeginTreeNode("Audio bus meters", false); meters)
+                {
+                    const auto snapshot = audio->LatestMeterSnapshot();
+                    if (snapshot.Readings.empty())
+                        ui.TextColored(m_Theme.MutedText, "No mixer meter data has been rendered yet.");
+                    for (const auto& reading : snapshot.Readings)
+                    {
+                        const auto peak = Keire::LinearToDecibels(reading.Peak);
+                        const auto rms = Keire::LinearToDecibels(reading.Rms);
+                        ui.Text(reading.Bus.ToString() + "  |  peak " + std::to_string(peak) + " dB  |  RMS " +
+                                std::to_string(rms) + " dB");
+                        if (reading.Clipping)
+                            ui.TextColored(m_Theme.Error, "Clipping detected on this bus.");
+                    }
+                    if (snapshot.DroppedReadings != 0)
+                        ui.TextColored(m_Theme.Warning,
+                                       std::to_string(snapshot.DroppedReadings) + " meter readings were dropped.");
+                }
             }
         }
 

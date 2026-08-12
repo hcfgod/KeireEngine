@@ -6,12 +6,14 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <ranges>
@@ -362,6 +364,125 @@ namespace Keire
             AudioClipAsset::Silence(),
             [](const std::span<const std::byte> bytes) -> Ref<Asset> { return AudioClipAsset::Decode(bytes); },
         };
+    }
+
+    std::string_view AudioEffectName(const AudioGraphNodeType type) noexcept
+    {
+        switch (type)
+        {
+        case AudioGraphNodeType::Input:
+            return "Input";
+        case AudioGraphNodeType::Gain:
+            return "Gain";
+        case AudioGraphNodeType::LowPass:
+            return "Low Pass";
+        case AudioGraphNodeType::HighPass:
+            return "High Pass";
+        case AudioGraphNodeType::Equalizer:
+            return "Equalizer";
+        case AudioGraphNodeType::Compressor:
+            return "Compressor";
+        case AudioGraphNodeType::Limiter:
+            return "Limiter";
+        case AudioGraphNodeType::Gate:
+            return "Gate";
+        case AudioGraphNodeType::Delay:
+            return "Delay";
+        case AudioGraphNodeType::Chorus:
+            return "Chorus";
+        case AudioGraphNodeType::Distortion:
+            return "Distortion";
+        case AudioGraphNodeType::AlgorithmicReverb:
+            return "Algorithmic Reverb";
+        case AudioGraphNodeType::ConvolutionReverb:
+            return "Convolution Reverb";
+        case AudioGraphNodeType::Meter:
+            return "Meter";
+        case AudioGraphNodeType::Capture:
+            return "Capture";
+        case AudioGraphNodeType::Output:
+            return "Output";
+        }
+        return "Unsupported";
+    }
+
+    std::span<const AudioEffectParameterDescriptor> AudioEffectParameters(const AudioGraphNodeType type) noexcept
+    {
+        using Unit = AudioParameterUnit;
+        static constexpr std::array Gain{
+            AudioEffectParameterDescriptor{"gain", "Gain", Unit::LinearGain, 1.0F, 0.0F, 16.0F, 0.01F}};
+        static constexpr std::array LowPass{
+            AudioEffectParameterDescriptor{"cutoff", "Cutoff", Unit::Hertz, 1000.0F, 10.0F, 20000.0F, 10.0F}};
+        static constexpr std::array HighPass{
+            AudioEffectParameterDescriptor{"cutoff", "Cutoff", Unit::Hertz, 1000.0F, 10.0F, 20000.0F, 10.0F}};
+        static constexpr std::array Equalizer{
+            AudioEffectParameterDescriptor{"outputGain", "Output Gain", Unit::LinearGain, 1.0F, 0.0F, 16.0F, 0.01F}};
+        static constexpr std::array Compressor{
+            AudioEffectParameterDescriptor{"threshold", "Threshold", Unit::Normalized, 0.5F, 0.001F, 1.0F, 0.01F},
+            AudioEffectParameterDescriptor{"ratio", "Ratio", Unit::Ratio, 4.0F, 1.0F, 100.0F, 0.1F}};
+        static constexpr std::array Limiter{
+            AudioEffectParameterDescriptor{"ceiling", "Ceiling", Unit::Normalized, 0.98F, 0.001F, 1.0F, 0.01F}};
+        static constexpr std::array Gate{
+            AudioEffectParameterDescriptor{"threshold", "Threshold", Unit::Normalized, 0.01F, 0.0F, 1.0F, 0.01F}};
+        static constexpr std::array Delay{
+            AudioEffectParameterDescriptor{"delay", "Delay", Unit::Milliseconds, 80.0F, 1.0F, 2000.0F, 1.0F},
+            AudioEffectParameterDescriptor{"feedback", "Feedback", Unit::Normalized, 0.25F, 0.0F, 0.99F, 0.01F},
+            AudioEffectParameterDescriptor{"wet", "Wet Mix", Unit::Percent, 0.25F, 0.0F, 1.0F, 0.01F}};
+        static constexpr std::array Chorus{
+            AudioEffectParameterDescriptor{"delay", "Delay", Unit::Milliseconds, 20.0F, 1.0F, 2000.0F, 1.0F},
+            AudioEffectParameterDescriptor{"feedback", "Feedback", Unit::Normalized, 0.1F, 0.0F, 0.99F, 0.01F},
+            AudioEffectParameterDescriptor{"wet", "Wet Mix", Unit::Percent, 0.25F, 0.0F, 1.0F, 0.01F}};
+        static constexpr std::array Distortion{
+            AudioEffectParameterDescriptor{"drive", "Drive", Unit::Ratio, 1.0F, 0.0F, 100.0F, 0.1F}};
+        static constexpr std::array AlgorithmicReverb{
+            AudioEffectParameterDescriptor{"roomTime", "Room Time", Unit::Milliseconds, 68.0F, 5.0F, 500.0F, 1.0F},
+            AudioEffectParameterDescriptor{"decay", "Decay", Unit::Normalized, 0.55F, 0.0F, 0.97F, 0.01F},
+            AudioEffectParameterDescriptor{"wet", "Wet Mix", Unit::Percent, 0.3F, 0.0F, 1.0F, 0.01F}};
+        static constexpr std::array<AudioEffectParameterDescriptor, 0> None{};
+
+        switch (type)
+        {
+        case AudioGraphNodeType::Gain:
+            return Gain;
+        case AudioGraphNodeType::LowPass:
+            return LowPass;
+        case AudioGraphNodeType::HighPass:
+            return HighPass;
+        case AudioGraphNodeType::Equalizer:
+            return Equalizer;
+        case AudioGraphNodeType::Compressor:
+            return Compressor;
+        case AudioGraphNodeType::Limiter:
+            return Limiter;
+        case AudioGraphNodeType::Gate:
+            return Gate;
+        case AudioGraphNodeType::Delay:
+            return Delay;
+        case AudioGraphNodeType::Chorus:
+            return Chorus;
+        case AudioGraphNodeType::Distortion:
+            return Distortion;
+        case AudioGraphNodeType::AlgorithmicReverb:
+            return AlgorithmicReverb;
+        case AudioGraphNodeType::Input:
+        case AudioGraphNodeType::ConvolutionReverb:
+        case AudioGraphNodeType::Meter:
+        case AudioGraphNodeType::Capture:
+        case AudioGraphNodeType::Output:
+            return None;
+        }
+        return None;
+    }
+
+    std::vector<float> DefaultAudioEffectParameters(const AudioGraphNodeType type)
+    {
+        const auto descriptors = AudioEffectParameters(type);
+        std::vector<float> result;
+        result.reserve(descriptors.size());
+        std::ranges::transform(descriptors, std::back_inserter(result),
+                               [](const AudioEffectParameterDescriptor& descriptor)
+                               { return descriptor.DefaultValue; });
+        return result;
     }
 
     namespace

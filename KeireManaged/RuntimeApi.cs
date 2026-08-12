@@ -463,6 +463,35 @@ public readonly record struct AudioSourceHandle(Entity Entity)
             NativeRuntime.SetAudioSourceScalar(Entity, AudioSourceScalarProperty.Gain, value);
         }
     }
+    public float VolumeDecibels
+    {
+        get => Audio.LinearToDecibels(Volume);
+        set
+        {
+            if (!float.IsFinite(value) || value < -96.0f || value > 24.0824f)
+                throw new ArgumentOutOfRangeException(nameof(value),
+                    "Audio Source volume must be between -96 dB and +24.08 dB.");
+            Volume = Audio.DecibelsToLinear(value);
+        }
+    }
+    public AssetReference<AudioMixer> Mixer
+    {
+        get => new(NativeRuntime.GetAudioSourceProperties(Entity).Mixer);
+        set
+        {
+            NativeAudioSourceProperties properties = NativeRuntime.GetAudioSourceProperties(Entity);
+            NativeRuntime.SetAudioSourceRouting(Entity, value.Id, properties.BusId);
+        }
+    }
+    public AssetId BusId
+    {
+        get => NativeRuntime.GetAudioSourceProperties(Entity).BusId;
+        set
+        {
+            NativeAudioSourceProperties properties = NativeRuntime.GetAudioSourceProperties(Entity);
+            NativeRuntime.SetAudioSourceRouting(Entity, properties.Mixer, value);
+        }
+    }
     public float Pitch
     {
         get => NativeRuntime.GetAudioSourceProperties(Entity).Pitch;
@@ -483,6 +512,45 @@ public readonly record struct AudioSourceHandle(Entity Entity)
     {
         get => NativeRuntime.GetAudioSourceProperties(Entity).Spatial;
         set => NativeRuntime.SetAudioSourceFlag(Entity, AudioSourceFlagProperty.Spatial, value);
+    }
+    public bool PlayOnAwake
+    {
+        get => NativeRuntime.GetAudioSourceProperties(Entity).PlayOnAwake;
+        set => NativeRuntime.SetAudioSourceFlag(Entity, AudioSourceFlagProperty.PlayOnAwake, value);
+    }
+    public uint Priority
+    {
+        get => NativeRuntime.GetAudioSourceProperties(Entity).Priority;
+        set
+        {
+            if (value > 255)
+                throw new ArgumentOutOfRangeException(nameof(value), "Audio Source priority must be at most 255.");
+            NativeRuntime.SetAudioSourceScalar(Entity, AudioSourceScalarProperty.Priority, value);
+        }
+    }
+    public float MinimumDistance
+    {
+        get => NativeRuntime.GetAudioSourceProperties(Entity).MinimumDistance;
+        set
+        {
+            NativeAudioSourceProperties properties = NativeRuntime.GetAudioSourceProperties(Entity);
+            if (!float.IsFinite(value) || value < 0.0f || value >= properties.MaximumDistance)
+                throw new ArgumentOutOfRangeException(nameof(value),
+                    "Audio Source minimum distance must be non-negative and below its maximum distance.");
+            NativeRuntime.SetAudioSourceScalar(Entity, AudioSourceScalarProperty.MinimumDistance, value);
+        }
+    }
+    public float MaximumDistance
+    {
+        get => NativeRuntime.GetAudioSourceProperties(Entity).MaximumDistance;
+        set
+        {
+            NativeAudioSourceProperties properties = NativeRuntime.GetAudioSourceProperties(Entity);
+            if (!float.IsFinite(value) || value <= properties.MinimumDistance)
+                throw new ArgumentOutOfRangeException(nameof(value),
+                    "Audio Source maximum distance must exceed its minimum distance.");
+            NativeRuntime.SetAudioSourceScalar(Entity, AudioSourceScalarProperty.MaximumDistance, value);
+        }
     }
     public AudioSourceStatus Status => NativeRuntime.GetAudioSourceProperties(Entity).Status;
     public AudioPlaybackState State => Status.State;
@@ -507,8 +575,174 @@ public readonly record struct AudioSourceHandle(Entity Entity)
     public bool Stop() => Audio.Stop(Entity);
 }
 
+public enum AudioReverbZoneShape : byte
+{
+    Box,
+    Sphere
+}
+
+/// <summary>Runtime control surface for an Audio Listener component.</summary>
+public readonly record struct AudioListenerHandle(Entity Entity)
+{
+    public bool IsValid => Entity.IsValid && Entity.HasComponent<AudioListenerComponent>();
+
+    public bool Primary
+    {
+        get => NativeRuntime.GetAudioListenerProperties(Entity).Primary;
+        set
+        {
+            NativeAudioListenerProperties properties = NativeRuntime.GetAudioListenerProperties(Entity);
+            properties.PrimaryValue = value ? (byte)1 : (byte)0;
+            NativeRuntime.SetAudioListenerProperties(Entity, properties);
+        }
+    }
+
+    public float Gain
+    {
+        get => NativeRuntime.GetAudioListenerProperties(Entity).Gain;
+        set
+        {
+            if (!float.IsFinite(value) || value < 0.0f || value > 16.0f)
+                throw new ArgumentOutOfRangeException(nameof(value), "Audio Listener gain must be between zero and sixteen.");
+            NativeAudioListenerProperties properties = NativeRuntime.GetAudioListenerProperties(Entity);
+            properties.Gain = value;
+            NativeRuntime.SetAudioListenerProperties(Entity, properties);
+        }
+    }
+
+    public float VolumeDecibels
+    {
+        get => Audio.LinearToDecibels(Gain);
+        set => Gain = Audio.DecibelsToLinear(value);
+    }
+}
+
+/// <summary>Runtime control surface for a spatial Audio Reverb Zone component.</summary>
+public readonly record struct AudioReverbZoneHandle(Entity Entity)
+{
+    public bool IsValid => Entity.IsValid && Entity.HasComponent<AudioReverbZoneComponent>();
+
+    public AssetReference<AudioMixer> Mixer
+    {
+        get => new(NativeRuntime.GetAudioReverbZoneProperties(Entity).Mixer);
+        set
+        {
+            NativeAudioReverbZoneProperties properties = NativeRuntime.GetAudioReverbZoneProperties(Entity);
+            properties.MixerHigh = value.Id.High;
+            properties.MixerLow = value.Id.Low;
+            NativeRuntime.SetAudioReverbZoneProperties(Entity, properties);
+        }
+    }
+
+    public AssetId SnapshotId
+    {
+        get => NativeRuntime.GetAudioReverbZoneProperties(Entity).Snapshot;
+        set
+        {
+            NativeAudioReverbZoneProperties properties = NativeRuntime.GetAudioReverbZoneProperties(Entity);
+            properties.SnapshotHigh = value.High;
+            properties.SnapshotLow = value.Low;
+            NativeRuntime.SetAudioReverbZoneProperties(Entity, properties);
+        }
+    }
+
+    public AudioReverbZoneShape Shape
+    {
+        get => (AudioReverbZoneShape)NativeRuntime.GetAudioReverbZoneProperties(Entity).ShapeValue;
+        set
+        {
+            if (value is not AudioReverbZoneShape.Box and not AudioReverbZoneShape.Sphere)
+                throw new ArgumentOutOfRangeException(nameof(value));
+            NativeAudioReverbZoneProperties properties = NativeRuntime.GetAudioReverbZoneProperties(Entity);
+            properties.ShapeValue = (byte)value;
+            NativeRuntime.SetAudioReverbZoneProperties(Entity, properties);
+        }
+    }
+
+    public Vector3 BoxHalfExtent
+    {
+        get => NativeRuntime.GetAudioReverbZoneProperties(Entity).BoxHalfExtent;
+        set
+        {
+            if (!float.IsFinite(value.X) || !float.IsFinite(value.Y) || !float.IsFinite(value.Z) ||
+                value.X <= 0.0f || value.Y <= 0.0f || value.Z <= 0.0f ||
+                value.X > 100000.0f || value.Y > 100000.0f || value.Z > 100000.0f)
+                throw new ArgumentOutOfRangeException(nameof(value), "Reverb box half extents must be positive and finite.");
+            NativeAudioReverbZoneProperties properties = NativeRuntime.GetAudioReverbZoneProperties(Entity);
+            properties.BoxHalfExtent = value;
+            NativeRuntime.SetAudioReverbZoneProperties(Entity, properties);
+        }
+    }
+
+    public float SphereRadius
+    {
+        get => NativeRuntime.GetAudioReverbZoneProperties(Entity).SphereRadius;
+        set
+        {
+            if (!float.IsFinite(value) || value <= 0.0f || value > 100000.0f)
+                throw new ArgumentOutOfRangeException(nameof(value));
+            NativeAudioReverbZoneProperties properties = NativeRuntime.GetAudioReverbZoneProperties(Entity);
+            properties.SphereRadius = value;
+            NativeRuntime.SetAudioReverbZoneProperties(Entity, properties);
+        }
+    }
+
+    public int Priority
+    {
+        get => NativeRuntime.GetAudioReverbZoneProperties(Entity).Priority;
+        set
+        {
+            if (value < -32768 || value > 32767)
+                throw new ArgumentOutOfRangeException(nameof(value));
+            NativeAudioReverbZoneProperties properties = NativeRuntime.GetAudioReverbZoneProperties(Entity);
+            properties.Priority = value;
+            NativeRuntime.SetAudioReverbZoneProperties(Entity, properties);
+        }
+    }
+
+    public float BlendDistance
+    {
+        get => NativeRuntime.GetAudioReverbZoneProperties(Entity).BlendDistance;
+        set
+        {
+            if (!float.IsFinite(value) || value < 0.0f || value > 100000.0f)
+                throw new ArgumentOutOfRangeException(nameof(value));
+            NativeAudioReverbZoneProperties properties = NativeRuntime.GetAudioReverbZoneProperties(Entity);
+            properties.BlendDistance = value;
+            NativeRuntime.SetAudioReverbZoneProperties(Entity, properties);
+        }
+    }
+
+    public float ReverbSend
+    {
+        get => NativeRuntime.GetAudioReverbZoneProperties(Entity).ReverbSend;
+        set
+        {
+            if (!float.IsFinite(value) || value < 0.0f || value > 1.0f)
+                throw new ArgumentOutOfRangeException(nameof(value));
+            NativeAudioReverbZoneProperties properties = NativeRuntime.GetAudioReverbZoneProperties(Entity);
+            properties.ReverbSend = value;
+            NativeRuntime.SetAudioReverbZoneProperties(Entity, properties);
+        }
+    }
+}
+
 public static class Audio
 {
+    public static float DecibelsToLinear(float decibels)
+    {
+        if (!float.IsFinite(decibels) || decibels <= -96.0f)
+            return 0.0f;
+        return MathF.Pow(10.0f, decibels / 20.0f);
+    }
+
+    public static float LinearToDecibels(float gain)
+    {
+        if (!float.IsFinite(gain) || gain <= 0.0f)
+            return -96.0f;
+        return MathF.Max(-96.0f, 20.0f * MathF.Log10(gain));
+    }
+
     public static bool Play(Entity entity)
     {
         ValidateEntity(entity);

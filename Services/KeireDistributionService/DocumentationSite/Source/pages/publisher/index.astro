@@ -1,5 +1,6 @@
 ---
 import PlatformLayout from "../../layouts/PlatformLayout.astro";
+import ReadinessProgress from "../../components/ReadinessProgress.astro";
 import { mfaChallengePath } from "../../lib/auth";
 
 export const prerender = false;
@@ -78,6 +79,25 @@ const productById = new Map(products.map((product: any) => [product.id, product]
 const versionById = new Map(versions.map((version: any) => [version.id, version]));
 const reportByUploadId = new Map(validationReports.map((report: any) => [report.upload_id, report]));
 const recentUploads = uploads.slice(0, 12);
+const readyForStaff = versions.flatMap((version: any) => {
+    if (version.state !== "validated") return [];
+    const upload = uploads.find((candidate: any) =>
+        candidate.version_id === version.id && candidate.state === "validated" &&
+        reportByUploadId.get(candidate.id)?.passed === true);
+    if (!upload) return [];
+    return [{ version, upload, product: productById.get(version.product_id) as any }];
+});
+const requestedProductId = Astro.url.searchParams.get("product");
+const requestedProduct = requestedProductId ? productById.get(requestedProductId) : undefined;
+const isNeonForgeUploadSample = requestedProduct?.slug === "neon-forge-creator-pack";
+const activeValidationStates = new Set(["created", "uploading", "uploaded", "leased"]);
+const publisherReleaseGates = [
+    { label: "Release configured", passed: versions.length > 0 },
+    { label: "Exact bytes validated", passed: validationReports.some((report: any) => report.passed) },
+    { label: "Staff moderation passed", passed: versions.some((version: any) => ["approved_pending_signature", "published"].includes(version.state)) },
+    { label: "Offline signed and published", passed: versions.some((version: any) => version.state === "published") },
+];
+const completedPublisherGates = publisherReleaseGates.filter((gate) => gate.passed).length;
 ---
 
 <PlatformLayout title="Publisher portal" description="Create private package releases, upload exact bytes to quarantine, review validation, and submit immutable Kéire Marketplace releases." active="marketplace" robots="noindex">
@@ -107,6 +127,7 @@ const recentUploads = uploads.slice(0, 12);
                     <nav class="dashboard-nav" aria-label="Publisher sections">
                         <a href="#overview" aria-current="page">Overview</a>
                         <a href="#new-release">New release</a>
+                        {readyForStaff.length > 0 && <a href="#ready-for-review">Ready for review ({readyForStaff.length})</a>}
                         <a href="#activity">Validation activity</a>
                         <a href="#products">Products</a>
                         <a href="#application">Application</a>
@@ -120,17 +141,25 @@ const recentUploads = uploads.slice(0, 12);
                                 <span class="status-badge status-badge--ready">MFA verified</span>
                             </div>
                             <div class="workflow-line">
-                                <article><small>01</small><h3>Draft</h3><p>Bind exact version, compatibility, license, and release notes.</p></article>
-                                <article><small>02</small><h3>Validate</h3><p>Upload immutable bytes to quarantine and receive structured diagnostics.</p></article>
-                                <article><small>03</small><h3>Moderate</h3><p>Review provenance, content quality, safety, and store presentation.</p></article>
-                                <article><small>04</small><h3>Sign</h3><p>Sign the same validated manifest offline before a release can become visible.</p></article>
+                                {publisherReleaseGates.map((gate, index) => (
+                                    <article class:list={[gate.passed && "workflow-line__complete"]}>
+                                        <small>{String(index + 1).padStart(2, "0")}</small>
+                                        <h3>{gate.label}</h3>
+                                        <p>{gate.passed ? "Evidence recorded for this publisher account." : "This release gate still requires evidence."}</p>
+                                    </article>
+                                ))}
                             </div>
+                            <ReadinessProgress completed={completedPublisherGates} total={publisherReleaseGates.length} label="Latest publisher release path" />
                         </section>
 
                         <section id="new-release" class="publisher-section">
                             <div class="publisher-section__heading">
                                 <div><p class="eyebrow">Private quarantine</p><h2>Upload a package for validation</h2></div>
                                 <span class="status-badge">Unsigned draft</span>
+                            </div>
+                            <div class="notice-panel">
+                                <strong>Upload and Staff submission are separate safeguards.</strong>
+                                <p>After validation passes, use <strong>Submit to Staff review</strong> below. Until then, the exact package remains private to your publisher and will not appear in the Staff moderation queue.</p>
                             </div>
                             {products.length ? (
                                 <form class="publisher-upload" data-publisher-upload>
@@ -139,13 +168,13 @@ const recentUploads = uploads.slice(0, 12);
                                             <span>Product</span>
                                             <select name="productId" required>
                                                 {products.map((product: any) => (
-                                                    <option value={product.id}>{product.display_name} · {product.state}</option>
+                                                    <option value={product.id} selected={requestedProductId === product.id}>{product.display_name} · {product.state}</option>
                                                 ))}
                                             </select>
                                         </label>
                                         <label class="field">
                                             <span>Package version</span>
-                                            <input name="version" value="0.0.1" inputmode="text" maxlength="128" required />
+                                            <input name="version" value={isNeonForgeUploadSample ? "1.0.0" : "0.0.1"} inputmode="text" maxlength="128" required />
                                         </label>
                                         <label class="field">
                                             <span>Installation kind</span>
@@ -176,7 +205,7 @@ const recentUploads = uploads.slice(0, 12);
                                         </fieldset>
                                         <label class="field">
                                             <span>Renderer capabilities</span>
-                                            <input name="rendererCapabilities" value="pbr" maxlength="512" aria-describedby="renderer-help" />
+                                            <input name="rendererCapabilities" value={isNeonForgeUploadSample ? "pbr, shader-graph, material-graph, vfx-graph" : "pbr"} maxlength="512" aria-describedby="renderer-help" />
                                             <small id="renderer-help">Comma-separated portable tokens.</small>
                                         </label>
                                         <label class="field">
@@ -185,7 +214,7 @@ const recentUploads = uploads.slice(0, 12);
                                         </label>
                                         <label class="field publisher-upload__wide">
                                             <span>Release notes</span>
-                                            <textarea name="releaseNotes" maxlength="50000" placeholder="Describe the exact contents and intended validation scope."></textarea>
+                                            <textarea name="releaseNotes" maxlength="50000" placeholder="Describe the exact contents and intended validation scope.">{isNeonForgeUploadSample ? "Initial mixed-content validation sample: two VFX graphs, two Shader Graphs, two Material Graphs, and one runtime C# behaviour." : ""}</textarea>
                                         </label>
                                     </div>
 
@@ -222,6 +251,29 @@ const recentUploads = uploads.slice(0, 12);
                             )}
                         </section>
 
+                        {readyForStaff.length > 0 && (
+                            <section id="ready-for-review" class="publisher-section">
+                                <div class="publisher-section__heading">
+                                    <div><p class="eyebrow">Action required</p><h2>Validated and ready for Staff review</h2></div>
+                                    <span class="status-badge status-badge--ready">{readyForStaff.length} ready</span>
+                                </div>
+                                <div class="staff-card-grid">
+                                    {readyForStaff.map(({ version, product }: any) => (
+                                        <article class="staff-review-card">
+                                            <div class="staff-review-card__header">
+                                                <div><h3>{product?.display_name ?? "Unknown product"} <small>{version.version}</small></h3><code>{version.id}</code></div>
+                                                <span class="status-badge status-badge--ready">Validation passed</span>
+                                            </div>
+                                            <p>These exact validated bytes are still private. Submit them to create the audited Staff moderation entry.</p>
+                                            <div class="actions">
+                                                <button class="button" type="button" data-submit-version={version.id}>Submit to Staff review</button>
+                                            </div>
+                                        </article>
+                                    ))}
+                                </div>
+                            </section>
+                        )}
+
                         <section id="activity" class="publisher-section">
                             <div class="publisher-section__heading"><div><p class="eyebrow">Evidence</p><h2>Validation activity</h2></div></div>
                             {recentUploads.length ? (
@@ -233,14 +285,20 @@ const recentUploads = uploads.slice(0, 12);
                                                 const version = versionById.get(upload.version_id) as any;
                                                 const product = productById.get(version?.product_id) as any;
                                                 const report = reportByUploadId.get(upload.id) as any;
-                                                return <tr>
+                                                const validationPending = !report && activeValidationStates.has(upload.state);
+                                                const validationLabel = report ? (report.passed ? "passed" : "failed")
+                                                    : upload.state === "validated" ? "validated"
+                                                    : upload.state === "failed" ? "failed"
+                                                    : upload.state === "expired" ? "expired"
+                                                    : "pending";
+                                                return <tr data-validation-upload={validationPending ? upload.id : undefined}>
                                                     <td>{product?.display_name ?? "Unknown product"}</td>
                                                     <td><code>{version?.version ?? "—"}</code></td>
-                                                    <td><span class="status-badge">{upload.state}</span><small>{Number(upload.expected_size_bytes).toLocaleString()} bytes</small></td>
-                                                    <td>{report ? <><span class:list={["status-badge", report.passed && "status-badge--ready"]}>{report.passed ? "passed" : "failed"}</span><small>{report.validator_version}</small></> : <span class="status-badge">pending</span>}</td>
+                                                    <td><span class="status-badge" data-upload-state>{upload.state}</span><small>{Number(upload.expected_size_bytes).toLocaleString()} bytes</small></td>
+                                                    <td><span class:list={["status-badge", report?.passed && "status-badge--ready"]} data-validation-state>{validationLabel}</span><small data-validation-detail>{report ? report.validator_version : validationPending ? "Waiting for an isolated validator" : "No validation report"}</small></td>
                                                     <td>{new Date(upload.created_at).toLocaleString()}</td>
                                                     <td>{report?.passed && upload.state === "validated" && version?.state === "validated"
-                                                        ? <button class="button button--compact" type="button" data-submit-version={version.id}>Submit to staff</button>
+                                                        ? <div><button class="button button--compact" type="button" data-submit-version={version.id}>Submit to Staff review</button><small>Required before Staff can review it.</small></div>
                                                         : <small>{version?.state === "submitted" ? "In staff review" : "Available after validation"}</small>}</td>
                                                 </tr>;
                                             })}
@@ -295,6 +353,87 @@ const recentUploads = uploads.slice(0, 12);
         if (!response.ok) throw new Error(payload?.error?.message ?? "The publisher request failed.");
         return payload?.data;
     }
+
+    interface ValidationStatus {
+        uploadId: string;
+        state: string;
+        validationAttempts: number;
+        versionId: string;
+        versionState: string | null;
+        validation: null | {
+            passed: boolean;
+            diagnosticCount: number;
+            validatorVersion: string;
+            completedAt: string;
+        };
+    }
+
+    const terminalUploadStates = new Set(["validated", "failed", "expired"]);
+
+    function startValidationPolling(row: HTMLElement): void {
+        const uploadId = row.dataset.validationUpload;
+        if (!uploadId) return;
+        const uploadState = row.querySelector<HTMLElement>("[data-upload-state]");
+        const validationState = row.querySelector<HTMLElement>("[data-validation-state]");
+        const detail = row.querySelector<HTMLElement>("[data-validation-detail]");
+        const startedAt = Date.now();
+        let requestCount = 0;
+        let consecutiveFailures = 0;
+        let stopped = false;
+
+        const schedule = (delay: number) => window.setTimeout(() => void poll(), delay);
+        const poll = async (): Promise<void> => {
+            if (stopped) return;
+            if (document.hidden) {
+                schedule(2_000);
+                return;
+            }
+            try {
+                const status = await responseData(await fetch(
+                    `/publisher/v1/uploads/${encodeURIComponent(uploadId)}/`,
+                    { credentials: "same-origin", cache: "no-store" },
+                )) as ValidationStatus;
+                consecutiveFailures = 0;
+                requestCount += 1;
+                if (uploadState) uploadState.textContent = status.state;
+                if (validationState) {
+                    validationState.textContent = status.validation
+                        ? (status.validation.passed ? "passed" : "failed")
+                        : terminalUploadStates.has(status.state) ? status.state : "pending";
+                    validationState.classList.toggle("status-badge--ready", status.validation?.passed === true);
+                }
+                if (detail) {
+                    detail.textContent = status.validation
+                        ? `${status.validation.validatorVersion} · ${status.validation.diagnosticCount} diagnostic(s)`
+                        : status.state === "leased"
+                            ? `Validation in progress · attempt ${status.validationAttempts}`
+                            : "Waiting for an isolated validator";
+                }
+                if (status.validation || terminalUploadStates.has(status.state)) {
+                    stopped = true;
+                    window.location.reload();
+                    return;
+                }
+                if (Date.now() - startedAt >= 10 * 60 * 1_000) {
+                    stopped = true;
+                    if (validationState) validationState.textContent = "delayed";
+                    if (detail) detail.textContent = "Validation is delayed. It is safe to leave this page and return later.";
+                    return;
+                }
+                schedule(Math.min(10_000, 2_000 + requestCount * 750));
+            } catch {
+                consecutiveFailures += 1;
+                if (consecutiveFailures >= 3 && detail) {
+                    detail.textContent = "Status temporarily unavailable; retrying automatically.";
+                }
+                schedule(Math.min(15_000, 2_000 * (consecutiveFailures + 1)));
+            }
+        };
+
+        schedule(1_000);
+    }
+
+    document.querySelectorAll<HTMLElement>("[data-validation-upload]").forEach(startValidationPolling);
 
     function commaTokens(value: FormDataEntryValue | null): string[] {
         return String(value ?? "").split(",").map((item) => item.trim()).filter(Boolean);
@@ -491,7 +630,7 @@ const recentUploads = uploads.slice(0, 12);
                 window.setTimeout(() => window.location.reload(), 650);
             } catch (error) {
                 button.disabled = false;
-                button.textContent = "Submit to staff";
+                button.textContent = "Submit to Staff review";
                 window.alert(error instanceof Error ? error.message : "The package could not be submitted.");
             }
         });

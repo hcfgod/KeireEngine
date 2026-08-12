@@ -298,6 +298,130 @@ TEST_CASE("Audio graph snapshots reject zero-delay cycles and publish atomically
     CHECK_THROWS_AS((void)audio->RenderOffline(input, 4), std::logic_error);
 }
 
+TEST_CASE("Audio output configuration validates capacity, formats, and decibel conversion")
+{
+    CHECK(Keire::AudioChannelCount(Keire::AudioChannelLayout::Mono) == 1);
+    CHECK(Keire::AudioChannelCount(Keire::AudioChannelLayout::Stereo) == 2);
+    CHECK(Keire::AudioChannelCount(Keire::AudioChannelLayout::Surround51) == 6);
+    CHECK(Keire::AudioChannelCount(Keire::AudioChannelLayout::Surround71) == 8);
+    CHECK(Keire::DecibelsToLinear(0.0F) == doctest::Approx(1.0F));
+    CHECK(Keire::DecibelsToLinear(-6.0206F) == doctest::Approx(0.5F).epsilon(0.0001));
+    CHECK(Keire::DecibelsToLinear(-96.0F) == 0.0F);
+    CHECK(Keire::LinearToDecibels(1.0F) == doctest::Approx(0.0F));
+    CHECK(Keire::LinearToDecibels(0.5F) == doctest::Approx(-6.0206F).epsilon(0.0001));
+    CHECK(Keire::LinearToDecibels(0.0F) == -96.0F);
+
+    Keire::AudioSystemSpecification invalid;
+    invalid.Mode = Keire::AudioMode::Headless;
+    invalid.MaximumVirtualVoices = invalid.MaximumVoices - 1;
+    CHECK_THROWS_AS(Keire::CreateRef<Keire::AudioSystem>(invalid), std::invalid_argument);
+    invalid.MaximumVirtualVoices = 1024;
+    invalid.MixSampleRate = 7999;
+    CHECK_THROWS_AS(Keire::CreateRef<Keire::AudioSystem>(invalid), std::invalid_argument);
+    invalid.MixSampleRate = 48000;
+    invalid.PeriodFrames = 64;
+    CHECK_THROWS_AS(Keire::CreateRef<Keire::AudioSystem>(invalid), std::invalid_argument);
+    invalid.PeriodFrames = 256;
+    invalid.PlaybackDeviceId = "not-a-device";
+    CHECK_THROWS_AS(Keire::CreateRef<Keire::AudioSystem>(invalid), std::invalid_argument);
+
+    Keire::AudioSystemSpecification specification;
+    specification.Mode = Keire::AudioMode::Headless;
+    specification.MaximumVoices = 2;
+    specification.MaximumVirtualVoices = 8;
+    specification.MixSampleRate = 24000;
+    specification.PeriodFrames = 512;
+    specification.OutputLayout = Keire::AudioChannelLayout::Mono;
+    auto audio = Keire::CreateRef<Keire::AudioSystem>(specification);
+    const auto configured = audio->Specification();
+    CHECK(configured.MaximumVoices == 2);
+    CHECK(configured.MaximumVirtualVoices == 8);
+    CHECK(configured.MixSampleRate == 24000);
+    CHECK(configured.PeriodFrames == 512);
+    CHECK(configured.OutputLayout == Keire::AudioChannelLayout::Mono);
+    const auto statistics = audio->Statistics();
+    CHECK(statistics.MixSampleRate == 24000);
+    CHECK(statistics.OutputChannels == 1);
+    CHECK(statistics.PeriodFrames == 512);
+}
+
+TEST_CASE("Audio listener gain and configured output layouts affect offline rendering")
+{
+    auto clip = std::make_shared<Keire::AudioClipData>();
+    clip->SampleRate = 48000;
+    clip->Channels = 1;
+    clip->Samples = {1.0F, 1.0F};
+
+    Keire::AudioSystemSpecification monoSpecification;
+    monoSpecification.Mode = Keire::AudioMode::Headless;
+    monoSpecification.OutputLayout = Keire::AudioChannelLayout::Mono;
+    auto mono = Keire::CreateRef<Keire::AudioSystem>(monoSpecification);
+    Keire::AudioListenerState listener;
+    listener.Gain = 0.25F;
+    mono->SetListener(listener);
+    Keire::AudioVoiceSpecification voice;
+    voice.Clip = clip;
+    voice.Loop = true;
+    (void)mono->Play(voice);
+    const auto renderedMono = mono->RenderVoicesOffline(2);
+    REQUIRE(renderedMono.size() == 2);
+    CHECK(renderedMono[0] == doctest::Approx(0.25F));
+    CHECK(renderedMono[1] == doctest::Approx(0.25F));
+
+    listener.Gain = -1.0F;
+    CHECK_THROWS_AS(mono->SetListener(listener), std::invalid_argument);
+    const auto afterRejectedListener = mono->RenderVoicesOffline(1);
+    REQUIRE(afterRejectedListener.size() == 1);
+    CHECK(afterRejectedListener[0] == doctest::Approx(0.25F));
+
+    Keire::AudioSystemSpecification surroundSpecification;
+    surroundSpecification.Mode = Keire::AudioMode::Headless;
+    surroundSpecification.OutputLayout = Keire::AudioChannelLayout::Surround71;
+    auto surround = Keire::CreateRef<Keire::AudioSystem>(surroundSpecification);
+    (void)surround->Play(voice);
+    const auto renderedSurround = surround->RenderVoicesOffline(1);
+    REQUIRE(renderedSurround.size() == 8);
+    CHECK(renderedSurround[0] == doctest::Approx(0.70710678F));
+    CHECK(renderedSurround[1] == doctest::Approx(0.70710678F));
+    for (std::size_t channel = 2; channel < renderedSurround.size(); ++channel)
+        CHECK(renderedSurround[channel] == 0.0F);
+}
+
+TEST_CASE("Audio spatial attenuation drives audibility and follows listener changes")
+{
+    Keire::AudioSystemSpecification specification;
+    specification.Mode = Keire::AudioMode::Headless;
+    specification.MaximumVoices = 2;
+    auto audio = Keire::CreateRef<Keire::AudioSystem>(specification);
+    auto clip = std::make_shared<Keire::AudioClipData>();
+    clip->SampleRate = 48000;
+    clip->Channels = 1;
+    clip->Samples = {1.0F, 1.0F};
+
+    Keire::AudioVoiceSpecification voice;
+    voice.Clip = clip;
+    voice.Loop = true;
+    voice.Spatial = true;
+    voice.Position = {20.0F, 0.0F, 0.0F};
+    voice.MinimumDistance = 1.0F;
+    voice.MaximumDistance = 10.0F;
+    voice.Attenuation = Keire::Curve1D::Constant(1.0F);
+    const auto id = audio->Play(voice);
+    REQUIRE(audio->Voice(id));
+    CHECK(audio->Voice(id)->Virtualized);
+    CHECK(audio->RenderVoicesOffline(1) == std::vector<float>{0.0F, 0.0F});
+
+    Keire::AudioListenerState listener;
+    listener.Position = voice.Position;
+    audio->SetListener(listener);
+    REQUIRE(audio->Voice(id));
+    CHECK_FALSE(audio->Voice(id)->Virtualized);
+    const auto audible = audio->RenderVoicesOffline(1);
+    REQUIRE(audible.size() == 2);
+    CHECK(audible[0] == doctest::Approx(0.70710678F));
+    CHECK(audible[1] == doctest::Approx(0.70710678F));
+}
+
 TEST_CASE("Algorithmic reverb preserves dry input and produces a bounded deterministic tail")
 {
     Keire::AudioGraphSnapshot graph;

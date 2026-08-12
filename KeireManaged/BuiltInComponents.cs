@@ -27,6 +27,9 @@ public sealed class AudioSourceComponent;
 [StableComponentId("4b454952-4541-5544-494f-4c4953540001")]
 public sealed class AudioListenerComponent;
 
+[StableComponentId("4b454952-4541-5544-494f-52565a4f0001")]
+public sealed class AudioReverbZoneComponent;
+
 [StableComponentId("4b454952-4556-4658-454d-495454455201")]
 public sealed class VfxEmitterComponent;
 

@@ -2,6 +2,7 @@
 
 #include "Keire/Api.h"
 #include "Keire/Assets/Asset.h"
+#include "Keire/Audio/AudioSystem.h"
 #include "Keire/ECS/EntityLayer.h"
 
 #include <array>
@@ -12,13 +13,26 @@
 
 namespace Keire
 {
-    inline constexpr std::uint32_t ProjectAuthoringSettingsSchemaVersion = 1;
+    inline constexpr std::uint32_t ProjectAuthoringSettingsSchemaVersion = 2;
     inline constexpr std::size_t PhysicsCollisionLayerCount = EntityLayerCount;
+
+    struct AudioProjectSettings
+    {
+        std::uint32_t MixSampleRate = 48000;
+        std::uint32_t PeriodFrames = 256;
+        AudioChannelLayout OutputLayout = AudioChannelLayout::Stereo;
+        std::uint32_t MaximumVoices = 256;
+        std::uint32_t MaximumVirtualVoices = 1024;
+        std::string PlaybackDeviceId;
+
+        [[nodiscard]] bool operator==(const AudioProjectSettings&) const = default;
+    };
 
     struct ProjectAuthoringSettings
     {
         std::uint32_t SchemaVersion = ProjectAuthoringSettingsSchemaVersion;
         AssetId DefaultMixer;
+        AudioProjectSettings Audio;
         std::string ExternalEditorId = "system";
         std::filesystem::path ExternalEditorExecutable;
         std::array<std::string, PhysicsCollisionLayerCount> PhysicsLayerNames;

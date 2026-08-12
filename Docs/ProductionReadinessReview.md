@@ -49,7 +49,7 @@ Authenticode/notarization, marketplace acceptance, and shipped-project soak evid
 | Rendering, shaders, materials, and VFX | B | 85/100 | Modern production slices work; parity matrices and hardware evidence remain incomplete. |
 | Managed gameplay and runtime services | A- | 91/100 | Reload-safe handles, last-good retention, and broad gameplay APIs are implemented. |
 | Hub, distribution, and website | B+ | 88/100 | Signed immutable distribution and the unified site are live; native signing and full desktop SSO acceptance remain. |
-| Marketplace and package ecosystem | C | 73/100 | Strong feature-gated foundations; public catalog, signed products, moderation, and end-to-end acceptance are not open. |
+| Marketplace and package ecosystem | C | 75/100 | The signed-only staging catalog preview, real validation, and moderation path are open; signed official products and end-to-end package acceptance remain gated. |
 | Performance evidence | C+ | 78/100 | Useful profiling and machine-readable gates exist, but current reference captures cannot supply true portable GPU time. |
 | Cross-platform release evidence | C | 75/100 | Windows is current; exact-commit Linux and native macOS/Metal evidence are outstanding. |
 | Overall production readiness | **B** | **84/100** | Production-oriented preview, not finished AAA production readiness. |
@@ -108,8 +108,9 @@ search, and validates generated routes, assets, CSP-compatible output, sitemap c
 
 The unified Astro account, documentation, marketplace, publisher, policy, download, news, and roadmap surfaces are live
 behind Caddy on the DuckDNS staging origin. Supabase SSR sessions, GitHub sign-in, MFA surfaces, Hub OAuth contracts,
-forced RLS, private Storage, Edge transition boundaries, and validator deployment foundations exist. Public marketplace
-and asset-package flags remain disabled until the launch runbook passes.
+forced RLS, private Storage, Edge transition boundaries, and validator deployment foundations exist. The signed-only
+marketplace catalog preview is enabled after real validation and moderation acceptance; unsigned drafts remain
+unclaimable, while asset-package and community flags remain disabled pending signing and end-to-end acceptance.
 
 ## System Assessment
 
@@ -124,7 +125,7 @@ and asset-package flags remain disabled until the launch runbook passes.
 | Managed scripting | A- | Collectible generations, generation-safe handles, serialized fields, ScriptableObjects, gameplay services, coroutines, last-good assembly retention, and explicit Play readiness are production-minded. Cross-platform reload soaks and larger gameplay-project evidence remain necessary. |
 | Assets and project packages | A- | Stable metadata, isolated workers, deterministic cooking, content-addressed packs, archive hardening, dependency resolution, lockfiles, embedding, selective import, executable-code consent, three-way conflict handling, journals, and recovery are implemented. Catalog-backed Hub/Editor acceptance and production package corpus fuzzing remain gated. |
 | Hub and software distribution | B+ | Independent Hub/editor products, version selection, compatibility checks, resumable task worker, signed catalogs, immutable snapshots, package verification, and safe activation are implemented. The 0.3.1 Windows catalog is current; automatic desktop SSO still requires an installed protocol handler and complete native acceptance. |
-| Online platform and marketplace | C | Accounts, organizations, publisher schemas, RLS, private uploads, resumable publishing UI, bounded APIs, validator worker/broker, malware/secret checks, and free-entitlement contracts exist behind flags. No public marketplace should be claimed before signed products, moderation, legal review, backup restore, abuse controls, and Windows/Linux end-to-end scenarios pass. |
+| Online platform and marketplace | C | Accounts, organizations, publisher schemas, RLS, private uploads, resumable publishing UI, bounded APIs, validator worker/broker, malware/secret checks, a real passing upload, staff moderation, and free-entitlement contracts exist. The catalog preview is open but cannot expose claim/download controls for unsigned drafts; signed products, legal review, backup restore, abuse controls, and Windows/Linux end-to-end scenarios remain launch gates. |
 | Audio, animation, physics, navigation, input, and UI | B+ | Each area has implemented runtime/authoring contracts and focused tests. Platform/device matrices, content diversity, dense UI/controller/IME workflows, physics/crowd stress, and long-running content scenarios are not yet equivalent to shipped AAA evidence. |
 | Build, package, and SDK | A- | Premake authority, supported launchers, clean-worktree manifests, deterministic inventories, SDK consumers, native installers, distribution signing, and regression harnesses are strong. Exact-current-commit Linux packages and native macOS signing/notarization remain release evidence, not design work. |
 

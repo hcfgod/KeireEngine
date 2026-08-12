@@ -72,6 +72,8 @@ public readonly record struct Entity(ulong World, EntityId Id)
     public bool TryGetBehaviour<T>(out T? behaviour) where T : Behaviour =>
         BehaviourRegistry.TryGet(this, out behaviour);
     public AudioSourceHandle AudioSource => new(this);
+    public AudioListenerHandle AudioListener => new(this);
+    public AudioReverbZoneHandle AudioReverbZone => new(this);
 
     public void SetParent(Entity parent, bool preserveWorldTransform = true) =>
         NativeRuntime.SetEntityParent(this, parent, preserveWorldTransform);

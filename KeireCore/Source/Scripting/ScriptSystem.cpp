@@ -73,14 +73,41 @@ namespace Keire
         {
             std::uint64_t ClipHigh = 0;
             std::uint64_t ClipLow = 0;
+            std::uint64_t MixerHigh = 0;
+            std::uint64_t MixerLow = 0;
+            std::uint64_t BusHigh = 0;
+            std::uint64_t BusLow = 0;
             float Gain = 1.0F;
             float Pitch = 1.0F;
             float PositionSeconds = 0.0F;
             float DurationSeconds = 0.0F;
+            float MinimumDistance = 1.0F;
+            float MaximumDistance = 100.0F;
             std::uint32_t Priority = 128;
             std::uint8_t Loop = 0;
             std::uint8_t Spatial = 0;
+            std::uint8_t PlayOnAwake = 0;
             std::uint8_t PlaybackState = 0;
+        };
+
+        struct NativeAudioListenerProperties
+        {
+            float Gain = 1.0F;
+            std::uint8_t Primary = 1;
+        };
+
+        struct NativeAudioReverbZoneProperties
+        {
+            std::uint64_t MixerHigh = 0;
+            std::uint64_t MixerLow = 0;
+            std::uint64_t SnapshotHigh = 0;
+            std::uint64_t SnapshotLow = 0;
+            Vector3 BoxHalfExtent{5.0F, 3.0F, 5.0F};
+            float SphereRadius = 5.0F;
+            float BlendDistance = 1.0F;
+            float ReverbSend = 1.0F;
+            std::int32_t Priority = 0;
+            std::uint8_t Shape = 0;
         };
         [[nodiscard]] std::string PathText(const std::filesystem::path& path)
         {
@@ -2605,13 +2632,22 @@ namespace Keire
                 if (!source)
                     return 0;
                 const auto clip = source->Clip();
+                const auto mixer = source->Mixer();
+                const auto bus = source->BusId();
                 properties->ClipHigh = clip.High();
                 properties->ClipLow = clip.Low();
+                properties->MixerHigh = mixer.High();
+                properties->MixerLow = mixer.Low();
+                properties->BusHigh = bus.High();
+                properties->BusLow = bus.Low();
                 properties->Gain = source->Gain();
                 properties->Pitch = source->Pitch();
+                properties->MinimumDistance = source->MinimumDistance();
+                properties->MaximumDistance = source->MaximumDistance();
                 properties->Priority = source->Priority();
                 properties->Loop = source->Loop() ? 1 : 0;
                 properties->Spatial = source->Spatial() ? 1 : 0;
+                properties->PlayOnAwake = source->PlayOnAwake() ? 1 : 0;
                 if (CurrentRuntime && CurrentRuntime->Specification.RuntimeServices)
                 {
                     const auto status =
@@ -2649,6 +2685,30 @@ namespace Keire
             }
         }
 
+        [[nodiscard]] static std::uint8_t
+        RuntimeSetAudioSourceRouting(const std::uint64_t world, const std::uint64_t entityHigh,
+                                     const std::uint64_t entityLow, const std::uint64_t mixerHigh,
+                                     const std::uint64_t mixerLow, const std::uint64_t busHigh,
+                                     const std::uint64_t busLow) noexcept
+        {
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+                const auto source = entity ? entity.GetComponent<AudioSourceComponent>() : Ref<AudioSourceComponent>{};
+                if (!source)
+                    return 0;
+                auto state = source->CaptureState();
+                state.Mixer = AssetId(mixerHigh, mixerLow);
+                state.BusId = AssetId(busHigh, busLow);
+                source->ApplyState(std::move(state));
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
         [[nodiscard]] static std::uint8_t RuntimeSetAudioSourceScalar(const std::uint64_t world,
                                                                       const std::uint64_t entityHigh,
                                                                       const std::uint64_t entityLow,
@@ -2665,6 +2725,13 @@ namespace Keire
                     source->SetGain(value);
                 else if (property == 1)
                     source->SetPitch(value);
+                else if (property == 2)
+                    source->SetMinimumDistance(value);
+                else if (property == 3)
+                    source->SetMaximumDistance(value);
+                else if (property == 4 && std::isfinite(value) && value >= 0.0F && value <= 255.0F &&
+                         std::floor(value) == value)
+                    source->SetPriority(static_cast<std::uint32_t>(value));
                 else
                     return 0;
                 return 1;
@@ -2691,8 +2758,133 @@ namespace Keire
                     source->SetLoop(value != 0);
                 else if (property == 1)
                     source->SetSpatial(value != 0);
+                else if (property == 2)
+                    source->SetPlayOnAwake(value != 0);
                 else
                     return 0;
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t
+        RuntimeGetAudioListenerProperties(const std::uint64_t world, const std::uint64_t entityHigh,
+                                          const std::uint64_t entityLow,
+                                          NativeAudioListenerProperties* properties) noexcept
+        {
+            if (!properties)
+                return 0;
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+                const auto listener =
+                    entity ? entity.GetComponent<AudioListenerComponent>() : Ref<AudioListenerComponent>{};
+                if (!listener)
+                    return 0;
+                properties->Gain = listener->Gain();
+                properties->Primary = listener->Primary() ? 1 : 0;
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t
+        RuntimeSetAudioListenerProperties(const std::uint64_t world, const std::uint64_t entityHigh,
+                                          const std::uint64_t entityLow,
+                                          const NativeAudioListenerProperties* properties) noexcept
+        {
+            if (!properties || !std::isfinite(properties->Gain) || properties->Gain < 0.0F || properties->Gain > 16.0F)
+                return 0;
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+                const auto listener =
+                    entity ? entity.GetComponent<AudioListenerComponent>() : Ref<AudioListenerComponent>{};
+                if (!listener)
+                    return 0;
+                listener->SetGain(properties->Gain);
+                listener->SetPrimary(properties->Primary != 0);
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t
+        RuntimeGetAudioReverbZoneProperties(const std::uint64_t world, const std::uint64_t entityHigh,
+                                            const std::uint64_t entityLow,
+                                            NativeAudioReverbZoneProperties* properties) noexcept
+        {
+            if (!properties)
+                return 0;
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+                const auto zone =
+                    entity ? entity.GetComponent<AudioReverbZoneComponent>() : Ref<AudioReverbZoneComponent>{};
+                if (!zone)
+                    return 0;
+                const auto mixer = zone->Mixer();
+                const auto snapshot = zone->SnapshotId();
+                properties->MixerHigh = mixer.High();
+                properties->MixerLow = mixer.Low();
+                properties->SnapshotHigh = snapshot.High();
+                properties->SnapshotLow = snapshot.Low();
+                properties->BoxHalfExtent = zone->BoxHalfExtent();
+                properties->SphereRadius = zone->SphereRadius();
+                properties->BlendDistance = zone->BlendDistance();
+                properties->ReverbSend = zone->ReverbSend();
+                properties->Priority = zone->Priority();
+                properties->Shape = static_cast<std::uint8_t>(zone->Shape());
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t
+        RuntimeSetAudioReverbZoneProperties(const std::uint64_t world, const std::uint64_t entityHigh,
+                                            const std::uint64_t entityLow,
+                                            const NativeAudioReverbZoneProperties* properties) noexcept
+        {
+            if (!properties || properties->Shape > static_cast<std::uint8_t>(AudioReverbZoneShape::Sphere) ||
+                !Math::IsFinite(properties->BoxHalfExtent) || properties->BoxHalfExtent.X <= 0.0F ||
+                properties->BoxHalfExtent.Y <= 0.0F || properties->BoxHalfExtent.Z <= 0.0F ||
+                properties->BoxHalfExtent.X > 100000.0F || properties->BoxHalfExtent.Y > 100000.0F ||
+                properties->BoxHalfExtent.Z > 100000.0F || !std::isfinite(properties->SphereRadius) ||
+                properties->SphereRadius <= 0.0F || properties->SphereRadius > 100000.0F ||
+                !std::isfinite(properties->BlendDistance) || properties->BlendDistance < 0.0F ||
+                properties->BlendDistance > 100000.0F || !std::isfinite(properties->ReverbSend) ||
+                properties->ReverbSend < 0.0F || properties->ReverbSend > 1.0F || properties->Priority < -32768 ||
+                properties->Priority > 32767)
+            {
+                return 0;
+            }
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+                const auto zone =
+                    entity ? entity.GetComponent<AudioReverbZoneComponent>() : Ref<AudioReverbZoneComponent>{};
+                if (!zone)
+                    return 0;
+                zone->SetMixer(AssetId(properties->MixerHigh, properties->MixerLow));
+                zone->SetSnapshotId(AssetId(properties->SnapshotHigh, properties->SnapshotLow));
+                zone->SetShape(static_cast<AudioReverbZoneShape>(properties->Shape));
+                zone->SetBoxHalfExtent(properties->BoxHalfExtent);
+                zone->SetSphereRadius(properties->SphereRadius);
+                zone->SetPriority(properties->Priority);
+                zone->SetBlendDistance(properties->BlendDistance);
+                zone->SetReverbSend(properties->ReverbSend);
                 return 1;
             }
             catch (...)
@@ -4074,10 +4266,20 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimeGetAudioSourceProperties));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetAudioSourceClipIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeSetAudioSourceClip));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetAudioSourceRoutingIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetAudioSourceRouting));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetAudioSourceScalarIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeSetAudioSourceScalar));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetAudioSourceFlagIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeSetAudioSourceFlag));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "GetAudioListenerPropertiesIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeGetAudioListenerProperties));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetAudioListenerPropertiesIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetAudioListenerProperties));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "GetAudioReverbZonePropertiesIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeGetAudioReverbZoneProperties));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetAudioReverbZonePropertiesIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetAudioReverbZoneProperties));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "PlayVfxIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimePlayVfx));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "StopVfxIcall",

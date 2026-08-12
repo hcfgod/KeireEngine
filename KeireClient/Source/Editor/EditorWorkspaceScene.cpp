@@ -648,7 +648,9 @@ void EditorWorkspaceLayer::BeginPlayMode()
     Keire::Ref<Keire::UndoContext> playUndo;
     if (const auto undo = Owner().Undo())
         playUndo = undo->CreateContext({.Name = "Play Mode"});
-    m_SceneDocument->BeginPlay(std::move(playUndo), Owner().Assets(), Owner().Audio(), Owner().Physics());
+    const auto defaultMixer =
+        m_ProjectSettingsDocument ? m_ProjectSettingsDocument->AuthoringSettings().DefaultMixer : Keire::AssetId{};
+    m_SceneDocument->BeginPlay(std::move(playUndo), Owner().Assets(), Owner().Audio(), Owner().Physics(), defaultMixer);
     m_PlayFaultReported = false;
     m_ActiveUndoContext = m_SceneDocument->History();
     m_GameViewportInputActive = false;

@@ -88,6 +88,7 @@ namespace KeireEditor
         [[nodiscard]] virtual Keire::Ref<Keire::AssetDatabase> InspectorAssetDatabase() const noexcept = 0;
         [[nodiscard]] virtual Keire::Ref<Keire::AssetSystem> InspectorAssetSystem() const noexcept = 0;
         [[nodiscard]] virtual std::span<const Keire::AssetSourceRecord> InspectorAssetRecords() const noexcept = 0;
+        [[nodiscard]] virtual Keire::AssetId InspectorDefaultAudioMixer() const noexcept = 0;
         [[nodiscard]] virtual Keire::AssetId InspectorSelectedAsset() const noexcept = 0;
         [[nodiscard]] virtual std::string_view InspectorAssetStatus() const noexcept = 0;
         [[nodiscard]] virtual std::vector<Keire::ManagedAssetTypeDescriptor> InspectorManagedAssetTypes() const = 0;
@@ -314,11 +315,14 @@ namespace KeireEditor
         std::unique_ptr<AssetPicker> m_AssetPicker;
         Keire::UiPanelRegistration m_Registration;
         std::string m_Error;
+        std::string m_AudioDeviceError;
         std::string m_CustomSdkPath;
         std::vector<ExternalEditorProfile> m_ExternalEditorProfiles;
+        std::vector<Keire::AudioDeviceInfo> m_AudioPlaybackDevices;
         std::string m_SelectedExternalEditorId;
         std::string m_CustomEditorPath;
         bool m_SdkInitialized = false;
         bool m_EditorsInitialized = false;
+        bool m_AudioDevicesInitialized = false;
     };
 } // namespace KeireEditor

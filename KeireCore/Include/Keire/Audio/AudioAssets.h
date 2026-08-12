@@ -8,6 +8,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Keire
@@ -54,6 +55,33 @@ namespace Keire
         EffectBypass,
         EffectParameter
     };
+
+    enum class AudioParameterUnit : std::uint8_t
+    {
+        LinearGain,
+        Decibels,
+        Hertz,
+        Milliseconds,
+        Ratio,
+        Normalized,
+        Percent
+    };
+
+    struct AudioEffectParameterDescriptor
+    {
+        std::string_view Id;
+        std::string_view Name;
+        AudioParameterUnit Unit = AudioParameterUnit::Normalized;
+        float DefaultValue = 0.0F;
+        float Minimum = 0.0F;
+        float Maximum = 1.0F;
+        float EditSpeed = 0.01F;
+    };
+
+    [[nodiscard]] KEIRE_API std::string_view AudioEffectName(AudioGraphNodeType type) noexcept;
+    [[nodiscard]] KEIRE_API std::span<const AudioEffectParameterDescriptor>
+    AudioEffectParameters(AudioGraphNodeType type) noexcept;
+    [[nodiscard]] KEIRE_API std::vector<float> DefaultAudioEffectParameters(AudioGraphNodeType type);
 
     struct AudioMixerEffectDefinition
     {

@@ -414,13 +414,14 @@ TEST_CASE("scene presentation treats automatic and manual audio playback as edge
     audioSpecification.Mode = Keire::AudioMode::Headless;
     auto audio = Keire::CreateRef<Keire::AudioSystem>(audioSpecification);
     auto presentation = Keire::CreateRef<Keire::ScenePresentationRuntime>(assets, audio);
+    presentation->SetDefaultMixer(mixerRecord->Id);
+    CHECK(presentation->DefaultMixer() == mixerRecord->Id);
     auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
                                                 Keire::SceneAsset::EmptyDefinition("Presentation Audio"));
     auto sourceEntity = scene->CreateEntity("One shot");
     const auto source = sourceEntity.AddComponent<Keire::AudioSourceComponent>();
     REQUIRE(source);
     source->SetClip(record->Id);
-    source->SetMixer(mixerRecord->Id);
     source->SetBus("Stale legacy bus");
     source->SetBusId(effectsBus);
     source->SetLoop(true);
@@ -444,22 +445,29 @@ TEST_CASE("scene presentation treats automatic and manual audio playback as edge
     CHECK(routed[0] == doctest::Approx(initialRoutedSample));
     CHECK(routed[1] == doctest::Approx(initialRoutedSample));
 
-    auto listenerEntity = scene->CreateEntity("Listener");
-    REQUIRE(listenerEntity.AddComponent<Keire::AudioListenerComponent>());
+    auto listenerEntity = scene->CreateEntity("Primary Camera Listener");
+    REQUIRE(listenerEntity.AddComponent<Keire::CameraComponent>());
     auto zoneEntity = scene->CreateEntity("Reverb zone");
     const auto zone = zoneEntity.AddComponent<Keire::AudioReverbZoneComponent>();
     REQUIRE(zone);
-    zone->SetMixer(mixerRecord->Id);
     zone->SetSnapshotId(reverbSnapshot);
     zone->SetShape(Keire::AudioReverbZoneShape::Sphere);
     zone->SetSphereRadius(5.0F);
     zone->SetBlendDistance(0.0F);
     presentation->Synchronize(scene, 320.0F, 180.0F, true);
+    CHECK(presentation->Statistics().HasAudioListener);
+    CHECK(presentation->Statistics().UsingPrimaryCameraListener);
+    CHECK(presentation->Statistics().ActiveReverbZones == 1);
     const auto zoned = audio->RenderVoicesOffline(1);
     REQUIRE(zoned.size() == 2);
     const auto zonedSample = 0.25F * 0.25F * centerPanGain;
     CHECK(zoned[0] == doctest::Approx(zonedSample));
     CHECK(zoned[1] == doctest::Approx(zonedSample));
+
+    REQUIRE(listenerEntity.AddComponent<Keire::AudioListenerComponent>());
+    presentation->Synchronize(scene, 320.0F, 180.0F, true);
+    CHECK(presentation->Statistics().HasAudioListener);
+    CHECK_FALSE(presentation->Statistics().UsingPrimaryCameraListener);
 
     const auto zoneTransform = zoneEntity.GetComponent<Keire::TransformComponent>();
     REQUIRE(zoneTransform);

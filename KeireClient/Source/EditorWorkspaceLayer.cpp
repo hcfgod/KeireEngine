@@ -1,5 +1,6 @@
 #include "KeireClient/EditorWorkspaceLayer.h"
 
+#include "Keire/ECS/Components/AudioComponents.h"
 #include "Keire/Scenes/PrefabAsset.h"
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
 
@@ -459,6 +460,49 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
                 throw std::invalid_argument("Camera clear mode metadata must serialize an Integer.");
             constexpr std::array choices{std::string_view("Skybox"), std::string_view("Solid Color")};
             return editor.EditChoice(property.DisplayName, *mode, choices);
+        });
+    m_PropertyDrawers->RegisterOverride(
+        Keire::AudioReverbZoneComponent::StaticType(), "shape",
+        [](KeireEditor::IPropertyEditor& editor, const Keire::ComponentProperty& property,
+           Keire::ComponentPropertyValue& value)
+        {
+            auto* shape = std::get_if<std::int64_t>(&value);
+            if (!shape)
+                throw std::invalid_argument("Audio Reverb Zone shape metadata must serialize an Integer.");
+            constexpr std::array choices{std::string_view("Box"), std::string_view("Sphere")};
+            return editor.EditChoice(property.DisplayName, *shape, choices);
+        });
+    const auto registerDecibelGain = [this](const Keire::ComponentTypeId type, const std::string_view key)
+    {
+        m_PropertyDrawers->RegisterOverride(type, std::string(key),
+                                            [](KeireEditor::IPropertyEditor& editor, const Keire::ComponentProperty&,
+                                               Keire::ComponentPropertyValue& value)
+                                            {
+                                                auto* gain = std::get_if<double>(&value);
+                                                if (!gain)
+                                                    throw std::invalid_argument(
+                                                        "Audio gain metadata must serialize a Scalar.");
+                                                double decibels = Keire::LinearToDecibels(static_cast<float>(*gain));
+                                                if (!editor.EditScalar("Volume (dB)", decibels, 0.1, -96.0, 24.0824))
+                                                    return false;
+                                                *gain = Keire::DecibelsToLinear(static_cast<float>(decibels));
+                                                return true;
+                                            });
+    };
+    registerDecibelGain(Keire::AudioSourceComponent::StaticType(), "gain");
+    registerDecibelGain(Keire::AudioListenerComponent::StaticType(), "gain");
+    m_PropertyDrawers->RegisterOverride(
+        Keire::AudioReverbZoneComponent::StaticType(), "reverbSend",
+        [](KeireEditor::IPropertyEditor& editor, const Keire::ComponentProperty&, Keire::ComponentPropertyValue& value)
+        {
+            auto* send = std::get_if<double>(&value);
+            if (!send)
+                throw std::invalid_argument("Audio Reverb Zone send metadata must serialize a Scalar.");
+            double percentage = *send * 100.0;
+            if (!editor.EditScalar("Reverb Amount (%)", percentage, 1.0, 0.0, 100.0))
+                return false;
+            *send = percentage / 100.0;
+            return true;
         });
     m_PropertyDrawers->RegisterOverride(
         Keire::DirectionalLightComponent::StaticType(), "shadows",

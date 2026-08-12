@@ -1,6 +1,8 @@
 ---
 import PlatformLayout from "../../../layouts/PlatformLayout.astro";
+import ReadinessProgress from "../../../components/ReadinessProgress.astro";
 import { mfaChallengePath } from "../../../lib/auth";
+import { completedLaunchChecks, launchProgressTracks, totalLaunchChecks } from "../../../lib/launchProgress";
 
 export const prerender = false;
 
@@ -21,7 +23,9 @@ if (allowed && Astro.locals.assurance.currentLevel !== "aal2") {
 }
 
 let applications: any[] = [];
-let submissions: any[] = [];
+let activeSubmissions: any[] = [];
+let signingSubmissions: any[] = [];
+let submissionHistory: any[] = [];
 let reports: any[] = [];
 let staff: any[] = [];
 let flags: any[] = [];
@@ -29,16 +33,26 @@ let audits: any[] = [];
 let versions: any[] = [];
 let products: any[] = [];
 let validationReports: any[] = [];
+let officialProducts: any[] = [];
+let officialVersions: any[] = [];
 
 if (allowed && supabase) {
-    const [applicationResult, submissionResult, reportResult, staffResult, flagResult, auditResult] = await Promise.all([
+    const [applicationResult, activeSubmissionResult, signingSubmissionResult, historyResult, reportResult,
+        staffResult, flagResult, auditResult, officialPublisherResult] = await Promise.all([
         supabase.from("publisher_applications")
             .select("id,applicant_user_id,organization_id,public_name,website_url,portfolio_url,statement,state,submitted_at,updated_at")
             .in("state", ["submitted"]).order("submitted_at"),
         supabase.from("marketplace_submissions")
             .select("id,version_id,validation_report_id,submitted_by,state,assigned_to,decision_note,submitted_at,decided_at")
-            .in("state", ["submitted", "in_review", "changes_requested", "approved_pending_signature"])
+            .in("state", ["submitted", "in_review"])
             .order("submitted_at"),
+        supabase.from("marketplace_submissions")
+            .select("id,version_id,validation_report_id,submitted_by,state,assigned_to,decision_note,submitted_at,decided_at")
+            .eq("state", "approved_pending_signature").order("decided_at"),
+        supabase.from("marketplace_submissions")
+            .select("id,version_id,validation_report_id,submitted_by,state,assigned_to,decision_note,submitted_at,decided_at")
+            .in("state", ["changes_requested", "approved", "rejected", "withdrawn"])
+            .order("decided_at", { ascending: false }).limit(20),
         supabase.from("marketplace_reports")
             .select("id,reporter_user_id,product_id,review_id,reason,details,state,assigned_to,resolution_note,created_at")
             .in("state", ["open", "triaged"]).order("created_at"),
@@ -47,16 +61,20 @@ if (allowed && supabase) {
         supabase.from("platform_feature_flags")
             .select("key,enabled,description,updated_at,updated_by").order("key"),
         supabase.from("platform_audit_events")
-            .select("id,actor_user_id,action,target_type,target_id,created_at,metadata")
-            .order("created_at", { ascending: false }).limit(30),
+            .select("id,actor_user_id,action,target_type,target_id,occurred_at,metadata")
+            .order("occurred_at", { ascending: false }).limit(30),
+        supabase.from("publishers").select("id").eq("slug", "keire-engine").eq("verified", true).maybeSingle(),
     ]);
     applications = applicationResult.data ?? [];
-    submissions = submissionResult.data ?? [];
+    activeSubmissions = activeSubmissionResult.data ?? [];
+    signingSubmissions = signingSubmissionResult.data ?? [];
+    submissionHistory = historyResult.data ?? [];
     reports = reportResult.data ?? [];
     staff = staffResult.data ?? [];
     flags = flagResult.data ?? [];
     audits = auditResult.data ?? [];
 
+    const submissions = [...activeSubmissions, ...signingSubmissions, ...submissionHistory];
     const versionIds = submissions.map((submission: any) => submission.version_id);
     const reportIds = submissions.map((submission: any) => submission.validation_report_id);
     if (versionIds.length) {
@@ -78,14 +96,32 @@ if (allowed && supabase) {
             .in("id", reportIds);
         validationReports = validationResult.data ?? [];
     }
+    if (officialPublisherResult.data?.id) {
+        const officialProductResult = await supabase.from("marketplace_products")
+            .select("id,slug,display_name,state,updated_at")
+            .eq("publisher_id", officialPublisherResult.data.id).order("display_name");
+        officialProducts = officialProductResult.data ?? [];
+        const officialProductIds = officialProducts.map((product: any) => product.id);
+        if (officialProductIds.length) {
+            const officialVersionResult = await supabase.from("marketplace_product_versions")
+                .select("id,product_id,version,state,updated_at")
+                .in("product_id", officialProductIds).order("updated_at", { ascending: false });
+            officialVersions = officialVersionResult.data ?? [];
+        }
+    }
 }
 
 const versionById = new Map(versions.map((version: any) => [version.id, version]));
 const productById = new Map(products.map((product: any) => [product.id, product]));
 const validationById = new Map(validationReports.map((report: any) => [report.id, report]));
+const latestOfficialVersionByProduct = new Map<string, any>();
+for (const version of officialVersions) {
+    if (!latestOfficialVersionByProduct.has(version.product_id)) latestOfficialVersionByProduct.set(version.product_id, version);
+}
 const slugify = (value: string) => value.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "").slice(0, 63) || "publisher";
 const activeStaff = staff.filter((member: any) => member.active).length;
+const actionableSubmissionCount = activeSubmissions.length + signingSubmissions.length;
 ---
 
 <PlatformLayout title={allowed ? "Staff operations" : "Page not found"} active="marketplace"
@@ -106,7 +142,7 @@ const activeStaff = staff.filter((member: any) => member.active).length;
 
                 <div class="staff-metrics" aria-label="Moderation queue summary">
                     <article><strong>{applications.length}</strong><span>Publisher applications</span></article>
-                    <article><strong>{submissions.length}</strong><span>Package submissions</span></article>
+                    <article><strong>{actionableSubmissionCount}</strong><span>Package actions</span></article>
                     <article><strong>{reports.length}</strong><span>Open reports</span></article>
                     <article><strong>{activeStaff}</strong><span>Active staff</span></article>
                 </div>
@@ -115,8 +151,11 @@ const activeStaff = staff.filter((member: any) => member.active).length;
                     <nav class="dashboard-nav" aria-label="Staff operations">
                         <a href="#applications" aria-current="page">Applications</a>
                         <a href="#packages">Packages</a>
+                        <a href="#official-releases">Official releases</a>
+                        <a href="#review-history">Review history</a>
                         <a href="#reports">Reports</a>
                         <a href="#staff">Staff</a>
+                        <a href="#readiness">Launch readiness</a>
                         <a href="#gates">Feature gates</a>
                         <a href="#audit">Audit trail</a>
                     </nav>
@@ -158,11 +197,11 @@ const activeStaff = staff.filter((member: any) => member.active).length;
 
                         <section id="packages" class="publisher-section">
                             <div class="publisher-section__heading">
-                                <div><p class="eyebrow">Validated evidence</p><h2>Package submissions</h2></div>
-                                <span class="status-badge">Offline signing remains separate</span>
+                                <div><p class="eyebrow">Validated evidence</p><h2>Active package review</h2></div>
+                                <span class="status-badge">{activeSubmissions.length} awaiting decision</span>
                             </div>
-                            {submissions.length ? <div class="staff-card-grid">
-                                {submissions.map((submission: any) => {
+                            {activeSubmissions.length ? <div class="staff-card-grid">
+                                {activeSubmissions.map((submission: any) => {
                                     const version = versionById.get(submission.version_id) as any;
                                     const product = productById.get(version?.product_id) as any;
                                     const validation = validationById.get(submission.validation_report_id) as any;
@@ -196,6 +235,81 @@ const activeStaff = staff.filter((member: any) => member.active).length;
                                     </article>;
                                 })}
                             </div> : <p class="notice-panel">No validated package submissions are waiting for staff review.</p>}
+
+                            <div class="publisher-section__heading staff-subsection-heading">
+                                <div><p class="eyebrow">Administrator boundary</p><h2>Offline signing queue</h2></div>
+                                <span class="status-badge">{signingSubmissions.length} approved</span>
+                            </div>
+                            {signingSubmissions.length ? <div class="staff-card-grid">
+                                {signingSubmissions.map((submission: any) => {
+                                    const version = versionById.get(submission.version_id) as any;
+                                    const product = productById.get(version?.product_id) as any;
+                                    const validation = validationById.get(submission.validation_report_id) as any;
+                                    return <article class="staff-review-card">
+                                        <div class="staff-review-card__header">
+                                            <div><h3>{product?.display_name ?? "Unknown product"} <small>{version?.version}</small></h3><code>{submission.id}</code></div>
+                                            <span class="status-badge status-badge--ready">approved for signing</span>
+                                        </div>
+                                        <dl class="staff-detail-grid">
+                                            <div><dt>Package SHA-256</dt><dd><code>{validation?.package_sha256 ?? "Unavailable"}</code></dd></div>
+                                            <div><dt>Manifest SHA-256</dt><dd><code>{validation?.manifest_sha256 ?? "Unavailable"}</code></dd></div>
+                                            <div><dt>Archive size</dt><dd>{Number(version?.archive_size_bytes ?? 0).toLocaleString()} bytes</dd></div>
+                                            <div><dt>Approved</dt><dd>{submission.decided_at ? new Date(submission.decided_at).toLocaleString() : "Unavailable"}</dd></div>
+                                        </dl>
+                                        {staffRole === "administrator" ? <>
+                                            <form class="staff-action-form staff-publication-form" data-publication-form>
+                                                <input type="hidden" name="versionId" value={version?.id} />
+                                                <label class="field"><span>Offline-signed publication envelope</span><input type="file" name="signedManifest" accept="application/json,.json" required /><small>Generated and verified on the offline signing workstation. The private key never enters this page or Supabase.</small></label>
+                                                <div class="actions"><button class="button" type="submit" data-confirm="Cryptographically verify and immutably publish these exact validated bytes?">Verify signature and publish</button></div>
+                                                <p class="form-message" role="status" aria-live="polite"></p>
+                                            </form>
+                                            <form class="staff-action-form staff-withdrawal-form" data-moderation-form>
+                                                <input type="hidden" name="operation" value="submission.decide" />
+                                                <input type="hidden" name="submissionId" value={submission.id} />
+                                                <label class="field"><span>Withdrawal reason</span><textarea name="decisionNote" minlength="3" maxlength="10000" placeholder="Explain why these approved bytes must not be published." required></textarea></label>
+                                                <div class="actions"><button class="button button--quiet" type="submit" name="decision" value="rejected" data-confirm="Withdraw signing approval and reject this release? The audit record will be retained.">Withdraw approval</button></div>
+                                                <p class="form-message" role="status" aria-live="polite"></p>
+                                            </form>
+                                        </> : <p class="notice-panel">An administrator must publish or withdraw this signing approval.</p>}
+                                    </article>;
+                                })}
+                            </div> : <p class="notice-panel">No package release is waiting for an offline signature.</p>}
+                        </section>
+
+                        <section id="official-releases" class="publisher-section">
+                            <div class="publisher-section__heading">
+                                <div><p class="eyebrow">Kéire first-party content</p><h2>Official release drafts</h2></div>
+                                <span class="status-badge">Same trust pipeline</span>
+                            </div>
+                            <p class="notice-panel">Built-in catalog cards are product drafts, not packages. Prepare a deterministic <code>.keireassetpackage</code>, upload it through the Publisher portal, pass validation and moderation, then return here with the offline-signed envelope. Official assets never bypass package evidence or signature verification.</p>
+                            {officialProducts.length ? <div class="staff-card-grid">
+                                {officialProducts.map((product: any) => {
+                                    const latestVersion = latestOfficialVersionByProduct.get(product.id);
+                                    return <article class="staff-review-card staff-flag-card">
+                                        <div class="staff-review-card__header">
+                                            <div><h3>{product.display_name}</h3><code>{product.slug}</code></div>
+                                            <span class:list={["status-badge", product.state === "published" && "status-badge--ready"]}>{product.state}</span>
+                                        </div>
+                                        <p>{latestVersion ? `Latest release ${latestVersion.version} is ${latestVersion.state}.` : "No package version has been uploaded yet."}</p>
+                                        <div class="actions"><a class="button button--secondary" href={`/publisher/?product=${encodeURIComponent(product.id)}#new-release`}>{latestVersion ? "Open release workflow" : "Upload first release"}</a></div>
+                                    </article>;
+                                })}
+                            </div> : <p class="notice-panel">No official Kéire catalog drafts are configured.</p>}
+                        </section>
+
+                        <section id="review-history" class="publisher-section">
+                            <div class="publisher-section__heading">
+                                <div><p class="eyebrow">Retained evidence</p><h2>Package review history</h2></div>
+                                <span class="status-badge">Not an active queue</span>
+                            </div>
+                            <p class="fine-print">Rejected and change-requested entries are removed from active work immediately. Their decision, reason, hashes, and actor remain available here and in the append-only audit trail.</p>
+                            {submissionHistory.length ? <div class="data-table-wrap"><table class="data-table"><thead><tr><th>Product</th><th>Version</th><th>Decision</th><th>Reason</th><th>Decided</th></tr></thead><tbody>
+                                {submissionHistory.map((submission: any) => {
+                                    const version = versionById.get(submission.version_id) as any;
+                                    const product = productById.get(version?.product_id) as any;
+                                    return <tr><td>{product?.display_name ?? "Unknown product"}</td><td><code>{version?.version ?? "—"}</code></td><td><span class="status-badge">{submission.state}</span></td><td>{submission.decision_note ?? "No note recorded"}</td><td>{submission.decided_at ? new Date(submission.decided_at).toLocaleString() : "—"}</td></tr>;
+                                })}
+                            </tbody></table></div> : <p class="notice-panel">No terminal package decisions have been recorded.</p>}
                         </section>
 
                         <section id="reports" class="publisher-section">
@@ -255,10 +369,29 @@ const activeStaff = staff.filter((member: any) => member.active).length;
                             </div>
                         </section>
 
+                        <section id="readiness" class="publisher-section">
+                            <div class="publisher-section__heading">
+                                <div><p class="eyebrow">Acceptance evidence</p><h2>Launch readiness</h2></div>
+                                <span class="status-badge status-badge--ready">Audited 12 Aug 2026</span>
+                            </div>
+                            <ReadinessProgress completed={completedLaunchChecks} total={totalLaunchChecks} label="Kéire 0.3.1 launch checklist" />
+                            <div class="staff-card-grid">
+                                {launchProgressTracks.map((track) => <article class="staff-review-card staff-flag-card">
+                                    <div class="staff-review-card__header">
+                                        <div><h3>{track.title}</h3><p>{track.delivered}</p></div>
+                                        <span class="status-badge">{track.status}</span>
+                                    </div>
+                                    <ReadinessProgress completed={track.completed} total={track.total} label={track.title} compact />
+                                    <p class="fine-print"><strong>Remaining:</strong> {track.remaining}</p>
+                                </article>)}
+                            </div>
+                            <div class="actions"><a class="button button--secondary" href="/roadmap/">Open public roadmap</a><a class="button button--quiet" href="/docs/reference/marketplace-launch/">Review launch runbook</a></div>
+                        </section>
+
                         <section id="audit" class="publisher-section">
                             <div class="publisher-section__heading"><div><p class="eyebrow">Append-only evidence</p><h2>Recent audit trail</h2></div></div>
                             {audits.length ? <div class="data-table-wrap"><table class="data-table"><thead><tr><th>Time</th><th>Action</th><th>Target</th><th>Actor</th></tr></thead><tbody>
-                                {audits.map((event: any) => <tr><td>{new Date(event.created_at).toLocaleString()}</td><td>{event.action}</td><td>{event.target_type}<small>{event.target_id}</small></td><td><code>{event.actor_user_id ?? "service"}</code></td></tr>)}
+                                {audits.map((event: any) => <tr><td>{new Date(event.occurred_at).toLocaleString()}</td><td>{event.action}</td><td>{event.target_type}<small>{event.target_id}</small></td><td><code>{event.actor_user_id ?? "service"}</code></td></tr>)}
                             </tbody></table></div> : <p class="notice-panel">No audit events are visible.</p>}
                         </section>
                     </div>
@@ -300,6 +433,37 @@ const activeStaff = staff.filter((member: any) => member.active).length;
                 window.setTimeout(() => window.location.reload(), 700);
             } catch (error) {
                 if (message) { message.textContent = error instanceof Error ? error.message : "The staff operation failed."; message.dataset.kind = "error"; }
+                controls.forEach((control) => control.disabled = false);
+            }
+        });
+    });
+
+    document.querySelectorAll<HTMLFormElement>("[data-publication-form]").forEach((form) => {
+        form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const submitter = (event as SubmitEvent).submitter as HTMLButtonElement | null;
+            if (submitter?.dataset.confirm && !window.confirm(submitter.dataset.confirm)) return;
+            const message = form.querySelector<HTMLElement>(".form-message");
+            const file = form.querySelector<HTMLInputElement>('input[type="file"]')?.files?.[0];
+            const versionId = new FormData(form).get("versionId");
+            if (!file || file.size < 2 || file.size > 64 * 1024 || typeof versionId !== "string") {
+                if (message) { message.textContent = "Select a bounded signed publication JSON file."; message.dataset.kind = "error"; }
+                return;
+            }
+            const controls = form.querySelectorAll<HTMLButtonElement | HTMLInputElement>("button,input");
+            controls.forEach((control) => control.disabled = true);
+            if (message) { message.textContent = "Verifying the offline signature and promoting exact bytes…"; message.dataset.kind = ""; }
+            try {
+                await responseData(await fetch("/admin/marketplace/v1/publications/", {
+                    method: "POST",
+                    credentials: "same-origin",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ versionId, signedManifest: await file.text() }),
+                }));
+                if (message) { message.textContent = "Signed release published immutably."; message.dataset.kind = "success"; }
+                window.setTimeout(() => window.location.reload(), 900);
+            } catch (error) {
+                if (message) { message.textContent = error instanceof Error ? error.message : "Publication failed."; message.dataset.kind = "error"; }
                 controls.forEach((control) => control.disabled = false);
             }
         });

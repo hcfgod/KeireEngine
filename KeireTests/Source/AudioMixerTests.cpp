@@ -108,6 +108,24 @@ namespace
     }
 } // namespace
 
+TEST_CASE("Audio effect descriptors provide stable typed parameters and defaults")
+{
+    CHECK(Keire::AudioEffectName(Keire::AudioGraphNodeType::AlgorithmicReverb) == "Algorithmic Reverb");
+    const auto compressor = Keire::AudioEffectParameters(Keire::AudioGraphNodeType::Compressor);
+    REQUIRE(compressor.size() == 2);
+    CHECK(compressor[0].Id == "threshold");
+    CHECK(compressor[0].Minimum == doctest::Approx(0.001F));
+    CHECK(compressor[1].Id == "ratio");
+    CHECK(compressor[1].Unit == Keire::AudioParameterUnit::Ratio);
+
+    const auto defaults = Keire::DefaultAudioEffectParameters(Keire::AudioGraphNodeType::Delay);
+    REQUIRE(defaults.size() == 3);
+    CHECK(defaults[0] == doctest::Approx(80.0F));
+    CHECK(defaults[1] == doctest::Approx(0.25F));
+    CHECK(defaults[2] == doctest::Approx(0.25F));
+    CHECK(Keire::AudioEffectParameters(Keire::AudioGraphNodeType::ConvolutionReverb).empty());
+}
+
 TEST_CASE("Audio mixer schema round trips deterministically and stable IDs survive renames")
 {
     auto definition = MixerDefinition();

@@ -19,10 +19,10 @@ public sealed class FirstPersonCamera : Behaviour
     private float _movementSharpness = 14.0f;
 
     [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000035")]
-    private bool _invertHorizontal;
+    private bool _invertHorizontal = false;
 
     [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000036")]
-    private bool _invertVertical;
+    private bool _invertVertical = false;
 
     [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000037")]
     private float _lookSharpness = 30.0f;

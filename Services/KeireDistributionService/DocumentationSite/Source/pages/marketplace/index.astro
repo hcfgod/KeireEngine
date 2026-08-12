@@ -11,6 +11,13 @@ const search = (Astro.url.searchParams.get("q") ?? "").trim().slice(0, 100);
 const category = (Astro.url.searchParams.get("category") ?? "").trim().slice(0, 64);
 let products: any[] = [];
 let categories: any[] = [];
+const releaseQueue = [
+    { title: "Kéire Sandbox Content Pack", category: "Samples", summary: "The maintained Sandbox project content, organized for selective import and learning." },
+    { title: "Shader and Material Graph Showcase", category: "Rendering", summary: "Production examples showing custom Shader Graphs driving reusable Material Graphs." },
+    { title: "VFX Starter Pack", category: "VFX", summary: "Authoring-ready effects and examples built against the current VFX capability set." },
+    { title: "Gameplay and C# Samples", category: "Code", summary: "Managed gameplay patterns, data assets, lifecycle examples, and diagnostics." },
+    { title: "Starter UI and Input Assets", category: "UI", summary: "Portable input and interface foundations for new Kéire projects." },
+] as const;
 if (supabase && enabled) {
     let query = supabase.from("marketplace_catalog")
         .select("id,slug,display_name,short_description,license_spdx,featured,publisher_slug,publisher_name,publisher_verified,category_slug,category_name,rating_average,rating_count,published_at")
@@ -38,8 +45,17 @@ Astro.response.headers.set("cache-control", Astro.locals.user ? "private, no-sto
             <button class="button" type="submit">Search</button>
         </form>
         {!enabled ? <div class="empty-state"><p class="eyebrow">Private staging</p><h2>The catalog is behind its release gate.</h2><p>Marketplace schema, package contracts, and workflows are installed behind <code>marketplace_enabled</code>. Public browsing remains disabled until identity, moderation, restore, legal, and platform-validation gates pass.</p></div>
-        : products.length === 0 ? <div class="empty-state"><h2>No products matched.</h2><p>Try a broader search or remove the category filter.</p></div>
+        : products.length === 0 && (search || category) ? <div class="empty-state"><h2>No products matched.</h2><p>Try a broader search or remove the category filter.</p></div>
+        : products.length === 0 ? <div class="marketplace-release-queue">
+            <div class="notice-panel"><p class="eyebrow">Catalog preview online</p><h2>The first signed releases are in final preparation.</h2><p>Browsing is live. Download and claim controls appear only after the exact validated bytes receive the dedicated offline marketplace signature and immutable publication record.</p><a class="text-action" href="/roadmap/">Inspect launch evidence →</a></div>
+            <div class="market-grid" aria-label="Official products preparing for release">
+                {releaseQueue.map((item) => <article class="market-card market-card--preview">
+                    <div class="market-card__media"><span class="status-badge">Signing queue</span></div>
+                    <div class="market-card__body"><span class="eyebrow">{item.category}</span><h3>{item.title}</h3><p>{item.summary}</p><span class="fine-print">Not claimable until signed publication completes</span></div>
+                </article>)}
+            </div>
+        </div>
         : <div class="market-grid">{products.map((product) => <MarketplaceCard product={product} />)}</div>}
     </div></section>
-    <section class="platform-section platform-section--line platform-section--compact"><div class="platform-shell cta-band"><div><p class="eyebrow">Build for Kéire</p><h2>Publish free content through a reviewable pipeline.</h2></div><div class="actions"><a class="button" href="/publisher/">Publisher portal</a><a class="button button--secondary" href="/docs/reference/asset-packages/">Package documentation</a></div></div></section>
+    <section class="platform-section platform-section--line platform-section--compact"><div class="platform-shell cta-band"><div><p class="eyebrow">Build for Kéire</p><h2>Publish free content through a reviewable pipeline.</h2></div><div class="actions"><a class="button" href="/publisher/">Publisher portal</a><a class="button button--secondary" href="/docs/reference/asset-packages/">Package documentation</a><a class="button button--quiet" href="/roadmap/">Launch roadmap</a></div></div></section>
 </PlatformLayout>

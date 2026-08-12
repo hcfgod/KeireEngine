@@ -21,6 +21,10 @@ MIGRATIONS = [
     ROOT / "supabase/migrations/20260812190001_add_marketplace_publisher_upload_boundary.sql",
     ROOT / "supabase/migrations/20260812190002_fix_marketplace_service_rate_limit_subject.sql",
     ROOT / "supabase/migrations/20260812170807_index_marketplace_staff_appointed_by.sql",
+    ROOT / "supabase/migrations/20260812195000_marketplace_offline_publication.sql",
+    ROOT / "supabase/migrations/20260812200000_fix_marketplace_moderation_queues.sql",
+    ROOT / "supabase/migrations/20260812202000_fix_public_marketplace_publisher_policy.sql",
+    ROOT / "supabase/migrations/20260812185825_fix_marketplace_claim_and_submission_visibility.sql",
 ]
 
 
@@ -42,7 +46,23 @@ validator_leases = sources[MIGRATIONS[8].name]
 publisher_uploads = sources[MIGRATIONS[9].name]
 rate_limit_subject = sources[MIGRATIONS[10].name]
 staff_indexes = sources[MIGRATIONS[11].name]
+offline_publication = sources[MIGRATIONS[12].name]
+moderation_queues = sources[MIGRATIONS[13].name]
+public_catalog_policy = sources[MIGRATIONS[14].name]
+claim_fix = sources[MIGRATIONS[15].name]
 combined = "\n".join(sources.values())
+
+require("selected_order_id uuid;" in claim_fix,
+        "The free-claim transaction must use an unambiguous order identifier local.")
+require(not re.search(r"^\s*order_id\s+uuid;", claim_fix, flags=re.MULTILINE),
+        "The free-claim transaction must not shadow marketplace_order_items.order_id.")
+require("to service_role;" in claim_fix,
+        "The repaired free-claim transaction must remain behind the service-role boundary.")
+
+require("private.can_manage_publisher(id)" in public_catalog_policy,
+        "The public publisher policy must delegate protected membership checks to the SECURITY DEFINER boundary.")
+require("from public.organization_memberships" not in public_catalog_policy,
+        "Anonymous catalog reads must not require direct organization membership access.")
 
 public_tables = sorted(set(re.findall(r"create table public\.([a-z0-9_]+)\s*\(", combined)))
 require(public_tables, "Marketplace migrations contain no public tables.")
@@ -177,6 +197,20 @@ require("staff_last_administrator_required" in staff_moderation,
         "Staff administration must preserve at least one active administrator.")
 require("approved_pending_signature" in staff_moderation and "marketplace_publications" not in staff_moderation,
         "Staff approval must stop before the offline signing and publication boundary.")
+require("create table public.marketplace_signature_keys" in offline_publication and
+        "force row level security" in offline_publication,
+        "Marketplace signing trust roots must be explicit, public-only records protected by forced RLS.")
+require("service_publish_marketplace_version" in offline_publication and
+        "to service_role;" in offline_publication,
+        "The immutable publication commit must be callable only through the service boundary.")
+for evidence in (
+    "selected_validation.package_sha256 is distinct from p_artifact_sha256",
+    "selected_validation.manifest_sha256 is distinct from p_manifest_sha256",
+    "marketplace-quarantine",
+    "marketplace-releases",
+    "marketplace.version_published",
+):
+    require(evidence in offline_publication, f"Offline publication is missing evidence binding: {evidence}.")
 require("p_key = 'paid_checkout_enabled' and p_enabled" in staff_moderation,
         "The staff gate boundary must refuse premature paid checkout enablement.")
 for policy in (
@@ -260,5 +294,13 @@ require("drop function private.consume_marketplace_rate_limit(text, integer, int
         "The auth.uid()-only throttle implementation must be removed.")
 require("idx_platform_staff_members_appointed_by" in staff_indexes,
         "The staff appointer foreign key must keep its covering index.")
+require("submission.state in ('submitted', 'in_review', 'approved_pending_signature')" in moderation_queues,
+        "Pre-publication signing approval must have an audited withdrawal path.")
+require("private.service_actor_is_staff(p_actor_user_id, 'administrator')" in moderation_queues and
+        "marketplace.signing_approval_withdrawn" in moderation_queues,
+        "Only an administrator may withdraw signing approval, and the transition must be audited.")
+require("revoke all on function public.service_decide_marketplace_submission" in moderation_queues and
+        "to service_role;" in moderation_queues,
+        "The replacement moderation transition must remain service-only.")
 
 print(f"Marketplace migration validation passed for {len(public_tables)} forced-RLS public tables.")

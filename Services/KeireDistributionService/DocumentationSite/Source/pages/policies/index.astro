@@ -1,0 +1,36 @@
+---
+import PlatformLayout from "../../layouts/PlatformLayout.astro";
+
+export const prerender = true;
+
+const policies = [
+    { href: "/policies/terms/", title: "Platform terms", summary: "Terms for the website, accounts, Hub, Editor, and pre-1.0 services." },
+    { href: "/policies/privacy/", title: "Privacy", summary: "What Kéire stores, why it is needed, and how account data is controlled." },
+    { href: "/policies/marketplace/", title: "Marketplace terms", summary: "Ownership, licenses, immutable releases, entitlements, and security withdrawals." },
+    { href: "/policies/publisher/", title: "Publisher terms", summary: "Application, package provenance, moderation, signing, and release obligations." },
+    { href: "/policies/acceptable-use/", title: "Acceptable use", summary: "Rules protecting accounts, community surfaces, packages, and infrastructure." },
+    { href: "/security/", title: "Security reporting", summary: "Report vulnerabilities and package emergencies through the private disclosure path." },
+] as const;
+---
+
+<PlatformLayout title="Policies" description="Review the Kéire platform, privacy, marketplace, publisher, acceptable-use, and security policies.">
+    <section class="platform-section">
+        <div class="platform-shell">
+            <div class="section-heading">
+                <div><p class="eyebrow">Trust center</p><h1>Clear rules for a connected engine ecosystem.</h1></div>
+                <p>These documents define the current staging contracts. Marketplace and publisher drafts still require formal legal approval before a general public launch.</p>
+            </div>
+            <div class="editorial-grid editorial-grid--three">
+                {policies.map((policy, index) => (
+                    <a class="editorial-panel" href={policy.href}>
+                        <span class="editorial-panel__index">{String(index + 1).padStart(2, "0")}</span>
+                        <h2>{policy.title}</h2>
+                        <p>{policy.summary}</p>
+                        <span class="text-action">Read policy →</span>
+                    </a>
+                ))}
+            </div>
+        </div>
+    </section>
+</PlatformLayout>
+

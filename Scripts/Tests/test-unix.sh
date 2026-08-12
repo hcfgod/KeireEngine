@@ -43,7 +43,7 @@ if command -v node >/dev/null 2>&1; then
 fi
 python3 "$ROOT/Scripts/Tests/test-marketplace-migrations.py"
 python3 "$ROOT/Scripts/Tests/test-marketplace-edge.py"
-python3 "$ROOT/Scripts/Tests/test-marketplace-package-fixture.py"
+python3 "$ROOT/Scripts/Tests/test-marketplace-upload-sample.py"
 assert_true grep -Fq 'mkdir -p -- "$package_directory/Web"' \
   "$ROOT/Services/KeireDistributionService/scripts/package-service.sh"
 assert_true grep -Fq '"$npm_command" --prefix "$documentation_site" run build' \
