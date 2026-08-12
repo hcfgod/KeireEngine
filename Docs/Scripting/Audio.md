@@ -184,6 +184,34 @@ routes to that mixer's Master bus. Until a referenced mixer is loaded, playback 
 asset revisions replace the routing snapshot transactionally, so voices already playing observe a valid hot reload.
 Runtime diagnostics and legacy string controls use the bus's currently resolved authored name after a rename.
 
+## Listener And Reverb Zone Control
+
+Audio components expose typed stateful handles. Check `IsValid` before using a handle; access never creates a missing
+component.
+
+```csharp
+AudioListenerHandle listener = Entity.AudioListener;
+if (listener.IsValid)
+{
+    listener.Primary = true;
+    listener.VolumeDecibels = -3.0f;
+}
+
+AudioReverbZoneHandle zone = Entity.AudioReverbZone;
+if (zone.IsValid)
+{
+    zone.Shape = AudioReverbZoneShape.Box;
+    zone.BoxHalfExtent = new Vector3(8.0f, 4.0f, 8.0f);
+    zone.BlendDistance = 3.0f;
+    zone.Priority = 100;
+    zone.ReverbSend = 0.75f;
+}
+```
+
+`AudioSourceHandle` additionally exposes `VolumeDecibels`, `Mixer`, `BusId`, `Priority`, `MinimumDistance`,
+`MaximumDistance`, and `PlayOnAwake`. `Audio.DecibelsToLinear` and `Audio.LinearToDecibels` use the same bounded
+conversion as the native runtime and Inspector.
+
 ## Animation-Driven Audio
 
 Use animation events for footsteps and similar synchronized sounds:

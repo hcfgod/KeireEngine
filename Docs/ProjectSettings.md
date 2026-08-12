@@ -18,6 +18,18 @@ source in the Project panel. The same picker implementation backs typed componen
 Project-owned settings live below `<Project>/ProjectSettings` and are suitable for source control. They are distinct
 from per-user editor state under `Library`, such as dock layouts, Scene-camera navigation, and Scene-tool preferences.
 
+## Audio Runtime
+
+`Authoring.keiresettings` schema 2 stores the mix sample rate, period size, mono/stereo/5.1/7.1 speaker layout,
+resident voice budget, virtual voice budget, and optional playback-device identity. Project Settings discovers current
+playback devices and provides **Rescan Devices** plus a safe **System Default** selection. Device and format changes
+take effect after restarting the editor; malformed or missing device identities fall back to the system default and
+surface that state in the Profiler.
+
+The project's **Default Mixer** is inherited by Audio Sources and Audio Reverb Zones whose Mixer override is empty.
+Cooked players receive portable format and voice-budget values but never inherit the workstation-specific device ID.
+Schema-1 projects migrate to 48 kHz stereo, a 256-frame period, 256 resident voices, and 1024 virtual voices.
+
 ## External Script Editor
 
 `Authoring.keiresettings` stores the project's external-editor profile and optional executable override. Project

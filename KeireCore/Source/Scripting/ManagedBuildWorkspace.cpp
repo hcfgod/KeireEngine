@@ -149,7 +149,9 @@ namespace Keire
                                "    <AllowUnsafeBlocks>" +
                                std::string(assembly.Definition.AllowUnsafe ? "true" : "false") +
                                "</AllowUnsafeBlocks>\n"
-                               "    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>\n    <AssemblyName>" +
+                               "    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>\n"
+                               "    <DefaultItemExcludes>$(DefaultItemExcludes);Library/**;Logs/**;Temp/**;Build/**"
+                               "</DefaultItemExcludes>\n    <AssemblyName>" +
                                XmlEscape(assembly.Definition.Name) + "</AssemblyName>\n    <RootNamespace>" +
                                XmlEscape(assembly.Definition.RootNamespace) + "</RootNamespace>\n";
             if (!assembly.Definition.DefineSymbols.empty())

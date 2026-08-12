@@ -151,6 +151,10 @@ TEST_CASE("Managed IDE workspace mirrors assembly source roots and references")
     CHECK(projectText.find("<Reference Include=\"Keire.Managed\">") != std::string::npos);
     CHECK(projectText.find("<TargetFramework>net8.0</TargetFramework>") != std::string::npos);
     CHECK(projectText.find("<LangVersion>12.0</LangVersion>") != std::string::npos);
+    CHECK(
+        projectText.find(
+            "<DefaultItemExcludes>$(DefaultItemExcludes);Library/**;Logs/**;Temp/**;Build/**</DefaultItemExcludes>") !=
+        std::string::npos);
     CHECK(projectText.find(
               "<WarningsNotAsErrors>$(WarningsNotAsErrors);CS0168;CS0169;CS0219;CS0414</WarningsNotAsErrors>") !=
           std::string::npos);

@@ -19,10 +19,16 @@ then the strongest blend as a tie-break. Box and sphere boundaries blend outward
 mixer snapshot and reverb-send scale apply together. Leaving the zone restores the immutable base mixer definition.
 Invalid or unavailable mixer content never partially replaces the last registered routing snapshot.
 
-The Audio Mixer editor publishes unsaved routing/fader changes transiently for live device preview. Its effect rack
-uses named, bounded controls instead of anonymous parameter numbers, convolution IR selection uses the AudioClip picker,
-and the header reports bus/effect/send counts against the active-effect target. Headless previews and tests exercise the
-complete phase-1 DSP path and automatic meters.
+The Audio Mixer editor publishes unsaved routing/fader changes transiently for live device preview. Its **Mix Console**
+provides channel faders, mute/solo state, and live peak meters, while **Channel Inspector** owns graph routing, ordered
+effects, sends, snapshots, and ducking. Effect racks use named, bounded controls with unit-aware presentation instead
+of anonymous parameter numbers. The Inspector resolves inherited Default Mixer routing and presents named bus and
+snapshot selectors rather than stable-ID text fields. Headless previews and tests exercise the DSP path and meters.
+
+Project Settings owns the playback device, mix sample rate, period size, mono/stereo/5.1/7.1 layout, and resident and
+virtual voice budgets. A missing saved device falls back safely to the system default and reports that fallback in the
+Profiler. Cooked players receive the portable audio format and voice settings but deliberately exclude the authoring
+workstation's hardware device ID.
 
 ## Phase 1 Migration
 
@@ -48,17 +54,16 @@ These are acceptance targets, not promises about unmeasured hardware:
 Track `AudioSystemStatistics` for voices, virtualized/audible counts, mixer registrations, bus/effect counts, meter
 readings, rendered frames, and underruns. Treat a rising underrun count or sustained budget breach as a release failure.
 
-## Remaining Phases
+## Remaining Work
 
-The enabled miniaudio device path currently applies routing/fader/solo/mute gain but does not yet host the complete
-authored effect/send graph. Convolution needs decoded IR resource binding and persistent partitioned state; delay,
-chorus, reverb, ducking attack/hold/release, and all device effects need state that survives callback blocks. Device
-hot-plug, output selection, platform latency tuning, accessibility review, and long-run Windows/Linux/macOS packaged
-matrices also remain.
+The device path now hosts compiled bus routing, ordered effects, sends, ducking, reverb, and meters with
+generation-safe graph replacement. Convolution topology and dependencies are validated, but decoded impulse-response
+binding and partitioned convolution state are not yet production-ready. Device hot-plug while the editor is already
+running, platform-specific latency tuning, effect-specific visualization, snapshot transition controls, accessibility
+review, and long-run Windows/Linux/macOS packaged matrices also remain acceptance work.
 
-Phase 2 should install an allocation-free compiled DSP graph on the device thread with generation-safe state swaps and
-IR streaming. Phase 3 should add device/latency UX, effect-specific visualization, snapshot transition controls, and
-reference-hardware gates. Public API changes require source migration notes and both SDK consumers to pass.
+Future work must preserve callback-thread constraints: no game callback, asset load, file I/O, locks, or unbounded
+allocation. Public API changes require source migration notes and both SDK consumers to pass.
 
 ## Validation Scenarios
 

@@ -7,6 +7,9 @@ versions.
 
 ### Changed
 
+- Prevented generated C# IDE projects from scanning `Library`, `Logs`, `Temp`, and `Build` as candidate assembly
+  inputs, which could make Visual Studio silently bind scripts to a stale `Keire.Managed` generation instead of the
+  current 0.3.1 API reference.
 - Fixed first-time free Marketplace claims failing while inserting an order item because a PL/pgSQL local shadowed the
   `order_id` table column. The repaired transaction remains service-role-only and preserves entitlement idempotency,
   exact-license acceptance, organization authorization, and audit recording. Publisher uploads now present a prominent
