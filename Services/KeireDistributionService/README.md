@@ -140,7 +140,8 @@ python Scripts/Packaging/prepare-distribution-snapshot.py `
 
 Both release-package commands reject dirty or development manifests, symlinks/reparse points, existing outputs,
 mismatched host extensions, unsafe identities, invalid sizes/digests, and a manifest that does not round-trip through
-the catalog parser. Do not publish an unsigned Windows executable, an unnotarized macOS DMG, or a non-native Linux DEB.
+the catalog parser. Linux Hub manifests accept native DEB and RPM installers. Do not publish an unsigned Windows
+executable, an unnotarized macOS DMG, or a Linux package not built and validated on its claimed distribution baseline.
 
 Use a future expiry appropriate to the release rather than copying the example date. The preparer refuses an existing
 output, draft manifest fields, unsafe input files, key mismatches, expired metadata, and archive size or SHA-256
@@ -262,8 +263,9 @@ policy; external scripts, external fonts, and inline script/style execution rema
    set `KEIRE_PREVIEW_DOWNLOAD_ROOT`, and keep their exact size and SHA-256 synchronized with
    `Website/assets/preview-downloads.json`. Use a digest-suffixed filename for every rebuild so immutable browser and
    proxy caches cannot alias different bytes. Publish a schema-2 record containing a unique release ID, Hub version,
-   editor version, UTC publication time, platform, architecture, exact size, and digest. Retain one verified preview
-   per Hub version, platform, and architecture. Once its replacement is available, remove a superseded preview record
+   editor version, UTC publication time, platform, architecture, native `packageFormat`, exact size, and digest. Retain
+   one verified preview per Hub version, platform, architecture, and package format. Once its replacement is available,
+   remove a superseded preview record
    and artifact together so the manifest never advertises a missing or ambiguous file. `/downloads/previous/` renders
    this bounded retained set and hides any record whose file is missing or has the wrong size. Signed stable releases
    remain immutable and are never pruned through the preview-retention workflow. Preview builds never belong in a

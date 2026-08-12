@@ -18,6 +18,14 @@ const fileNames = {
     macos: ".dmg",
     linux: ".deb",
 };
+const installerFormats = {
+    windows: { exe: { suffix: ".exe", label: "EXE", audience: "Windows" } },
+    macos: { dmg: { suffix: ".dmg", label: "DMG", audience: "macOS" } },
+    linux: {
+        deb: { suffix: ".deb", label: "DEB", audience: "Ubuntu/Debian" },
+        rpm: { suffix: ".rpm", label: "RPM", audience: "Rocky/Fedora" },
+    },
+};
 const compactInstallerNames = {
     windows: "KeireHubSetup.exe",
     macos: "KeireHub.dmg",
@@ -84,7 +92,28 @@ function comparePreviewCandidates(left, right) {
     if (versionOrder !== 0) {
         return versionOrder;
     }
-    return Date.parse(right.packageRecord.publishedAt) - Date.parse(left.packageRecord.publishedAt);
+    const publicationOrder = Date.parse(right.packageRecord.publishedAt) - Date.parse(left.packageRecord.publishedAt);
+    if (publicationOrder !== 0) {
+        return publicationOrder;
+    }
+    return left.installerFormat.localeCompare(right.installerFormat);
+}
+
+function previewInstallerFormat(packageRecord) {
+    const formats = installerFormats[packageRecord?.platform];
+    if (!formats || typeof packageRecord?.fileName !== "string") {
+        return null;
+    }
+    let format = packageRecord.packageFormat;
+    if (format !== undefined && typeof format !== "string") {
+        return null;
+    }
+    if (format === undefined) {
+        format = Object.keys(formats).find((candidate) =>
+            packageRecord.fileName.toLowerCase().endsWith(formats[candidate].suffix));
+    }
+    const descriptor = formats[format];
+    return descriptor && packageRecord.fileName.toLowerCase().endsWith(descriptor.suffix) ? format : null;
 }
 
 function safeInstallerName(packageRecord, platform, artifact, catalogSchema) {
@@ -150,7 +179,7 @@ function validatePreviewMetadata(metadata) {
     for (const packageRecord of metadata.packages) {
         const version = semanticVersion(packageRecord?.version);
         const editorVersion = semanticVersion(packageRecord?.editorVersion);
-        const expectedSuffix = fileNames[packageRecord?.platform];
+        const installerFormat = previewInstallerFormat(packageRecord);
         const expectedUrl = `/preview-downloads/${packageRecord?.fileName}`;
         if (packageRecord?.type !== "hubInstallerPreview" || !version || !editorVersion ||
             typeof packageRecord.releaseId !== "string" || !identityPattern.test(packageRecord.releaseId) ||
@@ -159,19 +188,18 @@ function validatePreviewMetadata(metadata) {
             packageRecord.developmentArtifact !== true || !hosts.some(([platform, architecture]) =>
                 platform === packageRecord.platform && architecture === packageRecord.architecture) ||
             typeof packageRecord.fileName !== "string" || !installerNamePattern.test(packageRecord.fileName) ||
-            packageRecord.fileName.includes("..") || !expectedSuffix ||
-            !packageRecord.fileName.toLowerCase().endsWith(expectedSuffix) || packageRecord.url !== expectedUrl ||
+            packageRecord.fileName.includes("..") || !installerFormat || packageRecord.url !== expectedUrl ||
             !Number.isSafeInteger(packageRecord.sizeBytes) || packageRecord.sizeBytes < 1 ||
             typeof packageRecord.sha256 !== "string" || !sha256Pattern.test(packageRecord.sha256) ||
             !packageRecord.fileName.includes(packageRecord.sha256.slice(0, 8))) {
             continue;
         }
-        candidates.push({ packageRecord, version, editorVersion });
+        candidates.push({ packageRecord, version, editorVersion, installerFormat });
     }
     candidates.sort(comparePreviewCandidates);
     const retainedIdentities = new Set();
-    return candidates.filter(({ packageRecord }) => {
-        const identity = `${packageRecord.platform}/${packageRecord.architecture}/${packageRecord.version}`;
+    return candidates.filter(({ packageRecord, installerFormat }) => {
+        const identity = `${packageRecord.platform}/${packageRecord.architecture}/${packageRecord.version}/${installerFormat}`;
         if (retainedIdentities.has(identity)) {
             return false;
         }
@@ -260,21 +288,22 @@ function renderVariant(target, platform, architecture, candidate) {
 
 function renderPreviewVariant(target, candidate) {
     const record = candidate.packageRecord;
+    const format = installerFormats[record.platform][candidate.installerFormat];
     const variant = element("section", "download-variant preview-variant");
     variant.append(element("span", "preview-label", "Unsigned development preview"));
     const header = element("div", "variant-row");
-    header.append(element("strong", "", architectureLabel(record.architecture)));
+    header.append(element("strong", "", `${architectureLabel(record.architecture)} · ${format.label}`));
     header.append(element("span", "", bytes(record.sizeBytes)));
     variant.append(header);
     const versionDetail = element("p", "version-detail");
-    versionDetail.append(`Hub v${candidate.version.raw} · Editor v${candidate.editorVersion.raw} · Published `);
+    versionDetail.append(`Hub v${candidate.version.raw} · Editor v${candidate.editorVersion.raw} · ${format.audience} · Published `);
     versionDetail.append(publishedTimestamp(record.publishedAt));
     variant.append(versionDetail);
 
-    const download = element("a", "button button-primary", `Download ${architectureLabel(record.architecture)} preview`);
+    const download = element("a", "button button-primary", `Download ${format.label} preview`);
     download.href = record.url;
     download.download = record.fileName;
-    download.setAttribute("aria-label", `Download unsigned Kéire Hub ${candidate.version.raw} development preview for ${platformLabel(record.platform)} ${architectureLabel(record.architecture)} with editor ${candidate.editorVersion.raw}`);
+    download.setAttribute("aria-label", `Download unsigned Kéire Hub ${candidate.version.raw} ${format.label} development preview for ${platformLabel(record.platform)} ${architectureLabel(record.architecture)} with editor ${candidate.editorVersion.raw}`);
     variant.append(download);
     const warning = record.platform === "windows" ?
         "Unsigned preview: verify the SHA-256 below and expect a Windows publisher warning." :
@@ -387,9 +416,13 @@ async function loadDownloads() {
                 renderVariant(variants, hostPlatform, result.value.architecture, candidate);
             }
         }
-        const preview = previews.find((candidate) => candidate.packageRecord.platform === hostPlatform);
-        if (variants.children.length === 0 && preview) {
-            renderPreviewVariant(variants, preview);
+        const platformPreviews = previews.filter((candidate) => candidate.packageRecord.platform === hostPlatform);
+        const latestPreviewVersion = platformPreviews[0]?.version.raw;
+        const currentPreviews = platformPreviews.filter((candidate) => candidate.version.raw === latestPreviewVersion);
+        if (variants.children.length === 0 && currentPreviews.length > 0) {
+            for (const preview of currentPreviews) {
+                renderPreviewVariant(variants, preview);
+            }
             state.textContent = platform === hostPlatform ?
                 "Recommended for this device. Development preview available:" :
                 "Development preview available:";

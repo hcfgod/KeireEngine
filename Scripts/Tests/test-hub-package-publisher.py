@@ -136,6 +136,26 @@ class HubPackagePublisherTests(unittest.TestCase):
         self.assertNotEqual(self.run_publisher("malformed.json").returncode, 0)
         self.assertFalse((self.root / "malformed.json").exists())
 
+    def test_accepts_native_deb_and_rpm_linux_installers(self) -> None:
+        self.document["platform"] = "Linux"
+        self.write_manifest()
+        for extension in (".deb", ".rpm"):
+            installer = self.root / f"keire-hub{extension}"
+            installer.write_bytes(self.installer.read_bytes())
+            output = f"linux-{extension[1:]}.json"
+            result = self.run_publisher(output, installer)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            published = json.loads((self.root / output).read_bytes())
+            self.assertEqual(published["platform"], "linux")
+            self.assertEqual(published["files"][0]["path"], installer.name)
+
+        mismatched = self.root / "KeireHubSetup.exe"
+        mismatched.write_bytes(self.installer.read_bytes())
+        self.assertNotEqual(
+            self.run_publisher("linux-mismatched.json", mismatched).returncode, 0
+        )
+        self.assertFalse((self.root / "linux-mismatched.json").exists())
+
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:

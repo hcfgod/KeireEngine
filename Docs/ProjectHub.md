@@ -280,7 +280,7 @@ content bytes, immutable packages with conditional and range requests, and liven
 signs offline, validates a complete staging snapshot, and atomically advances `current`; an invalid replacement does not
 displace the last valid snapshot. `KeireHubPackagePublisher create-editor` converts a validated schema-2 editor
 distribution into the generic archive/catalog manifest. `create-hub-installer` creates the corresponding catalog
-manifest only for a clean Hub package and platform-native `.exe`, `.dmg`, or `.deb`; native signing/notarization remains
+manifest only for a clean Hub package and platform-native `.exe`, `.dmg`, `.deb`, or `.rpm`; native signing/notarization remains
 a release prerequisite. `prepare-distribution-snapshot.py` accepts repeated manifest/artifact pairs, rechecks every
 length and digest, rejects duplicate identities, and groups records into their host catalog before offline signing. A
 new Editor release carries every retained Editor manifest and its original content-addressed package into that input;
@@ -337,6 +337,10 @@ bash Scripts/project.sh run --smoke-project
 bash Scripts/project.sh package-hub
 bash Scripts/project.sh package-hub-installer
 ```
+
+On Linux, the standalone Hub installer selects DEB for Ubuntu/Debian and RPM for Rocky/Fedora. Release builders can
+make that choice explicit with `--linux-installer-format deb` or `--linux-installer-format rpm`; the two formats remain
+separate native artifacts with independent checksums and website identities.
 
 `--smoke-ui` validates bounded Hub startup and rendering. `--smoke-project` opens the sample through the real project,
 asset, input, scene, workspace, and editor lifecycle before exiting cleanly. The focused private runtime suite is the

@@ -38,6 +38,7 @@ SMOKE_PROJECT=0
 SMOKE_WINDOW=0
 EDITOR=0
 PROJECT_PATH=""
+LINUX_INSTALLER_FORMAT="auto"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -62,9 +63,18 @@ while [[ $# -gt 0 ]]; do
         --smoke-window) SMOKE_WINDOW=1; shift ;;
         --editor) EDITOR=1; shift ;;
         --project) PROJECT_PATH="$2"; shift 2 ;;
+        --linux-installer-format) LINUX_INSTALLER_FORMAT="${2,,}"; shift 2 ;;
         *) printf "Unknown argument '%s'.\n" "$1" >&2; exit 1 ;;
     esac
 done
+case "$LINUX_INSTALLER_FORMAT" in
+    auto|deb|rpm) ;;
+    *) printf "Unsupported Linux installer format '%s'. Use auto, deb, or rpm.\n" "$LINUX_INSTALLER_FORMAT" >&2; exit 1 ;;
+esac
+if [[ "$PLATFORM_NAME" != Linux && "$LINUX_INSTALLER_FORMAT" != auto ]]; then
+    printf '%s\n' '--linux-installer-format is supported only on Linux.' >&2
+    exit 1
+fi
 [[ "$COMMAND" == package && $CONFIGURATION_SET -eq 0 ]] && CONFIGURATION=Release
 [[ "$COMMAND" == package-editor || "$COMMAND" == package-hub || "$COMMAND" == package-installer || \
    "$COMMAND" == package-hub-installer ]] && \
@@ -107,7 +117,8 @@ run_command() {
             ;;
         package-hub-installer)
             [[ $ALLOW_DIRTY -eq 0 ]] || common+=(--allow-dirty)
-            bash "$SCRIPT_DIR/Unix/package-hub-installer.sh" "$PLATFORM_NAME" "${common[@]}"
+            KEIRE_LINUX_INSTALLER_FORMAT="$LINUX_INSTALLER_FORMAT" \
+              bash "$SCRIPT_DIR/Unix/package-hub-installer.sh" "$PLATFORM_NAME" "${common[@]}"
             ;;
         doctor) bash "$SCRIPT_DIR/Unix/doctor.sh" "$PLATFORM_NAME" "${common[@]}" ;;
         rename)
@@ -141,6 +152,7 @@ Common options:
   --smoke-project (run the sample project editor and exit after several frames)
   --smoke-window (run the client with SDL's dummy video backend and exit after startup)
   --editor --project <path> (open the editor directly instead of the project hub)
+  --linux-installer-format <auto|deb|rpm> (Hub installer only; auto detects the Linux distribution family)
   --clean-scope <full|build|generated> (clean only; full removes the complete Build directory)
   package-editor writes a ready-to-run Dist editor under Build/Distributions and an archive under Artifacts
   package-hub writes a standalone Dist Hub under Build/Distributions and an archive under Artifacts
@@ -170,6 +182,7 @@ show_menu() {
                 [[ "$choice" =~ ^[345]$ ]] && CONFIGURATION="$(normalize_configuration "$(read_setting 'Configuration' "$CONFIGURATION")")"
                 [[ "$choice" == 1 ]] && { optional_choice="$(read_setting 'Install optional toolchains (yes, no)' no)"; [[ "$optional_choice" =~ ^([Yy]|[Yy][Ee][Ss])$ ]] && INSTALL_OPTIONAL=1 || INSTALL_OPTIONAL=0; }
                 [[ "$choice" == 2 ]] && { force_choice="$(read_setting 'Force regeneration (yes, no)' no)"; [[ "$force_choice" =~ ^([Yy]|[Yy][Ee][Ss])$ ]] && FORCE=1 || FORCE=0; }
+                [[ "$choice" == 11 && "$PLATFORM_NAME" == Linux ]] && LINUX_INSTALLER_FORMAT="$(read_setting 'Linux installer format (auto, deb, rpm)' "$LINUX_INSTALLER_FORMAT")"
                 case "$choice" in 1) run_command bootstrap;; 2) run_command generate;; 3) run_command build;; 4) run_command test;; 5) run_command run;; 8) run_command package-editor;; 9) run_command package-hub;; 10) run_command package-installer;; 11) run_command package-hub-installer;; esac || printf '\nCommand failed.\n' >&2
                 ;;
             6) run_command coverage || printf '\nCommand failed.\n' >&2 ;;

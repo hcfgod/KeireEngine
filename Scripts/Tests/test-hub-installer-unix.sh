@@ -8,6 +8,8 @@ packager="$ROOT/Scripts/Unix/package-hub-installer.sh"
 bash -n "$launcher" "$packager"
 grep -q 'package-hub-installer)' "$launcher"
 grep -Fq '$SCRIPT_DIR/Unix/package-hub-installer.sh' "$launcher"
+grep -Fq -- '--linux-installer-format' "$launcher"
+grep -Fq 'KEIRE_LINUX_INSTALLER_FORMAT="$LINUX_INSTALLER_FORMAT"' "$launcher"
 grep -q 'Scripts/Unix/package-hub.sh' "$packager"
 grep -q -- '--stage-only' "$packager"
 grep -q 'validate_hub_package_stage' "$packager"
@@ -27,15 +29,32 @@ grep -Fq 'KEIRE_MACOS_NOTARY_PROFILE' "$packager"
 grep -Fq 'notarytool submit' "$packager"
 grep -Fq 'hdiutil create' "$packager"
 grep -Fq 'install_relative="opt/$ARTIFACT_PREFIX-hub"' "$packager"
-grep -Fq 'cat > "$package_root/usr/bin/$ARTIFACT_PREFIX-hub"' "$packager"
+grep -Fq 'cat > "$linux_root/usr/bin/$ARTIFACT_PREFIX-hub"' "$packager"
 grep -Fq 'exec "/$install_relative/bin/$HUB_TARGET" "\$@"' "$packager"
 grep -Fq 'expected_hub_exec=' "$packager"
+grep -Fq 'KEIRE_LINUX_INSTALLER_FORMAT:-auto' "$packager"
+grep -Eq 'debian\|ubuntu' "$packager"
+grep -Eq 'fedora\|rhel\|centos\|rocky' "$packager"
+grep -Fq 'SOURCE_DATE_EPOCH' "$packager"
 grep -Fq 'dpkg-deb --field "$artifact" Depends' "$packager"
 grep -Fq 'Exec=/usr/bin/$ARTIFACT_PREFIX-hub' "$packager"
 grep -Fq 'Package: $ARTIFACT_PREFIX-hub' "$packager"
 grep -Fq 'Depends: libc6, libstdc++6, libgcc-s1, libcurl4t64 | libcurl4, zenity' "$packager"
 grep -Fq 'StartupWMClass=$HUB_TARGET' "$packager"
 grep -Fq 'dpkg-deb --build' "$packager"
+grep -Fq 'for tool in rpmbuild rpm rpm2cpio cpio' "$packager"
+grep -Fq 'Requires:       glibc' "$packager"
+grep -Fq 'Requires:       libstdc++' "$packager"
+grep -Fq 'Requires:       libgcc' "$packager"
+grep -Fq 'Requires:       libcurl' "$packager"
+grep -Fq 'Requires:       zenity' "$packager"
+grep -Fq 'rpmbuild -bb' "$packager"
+grep -Fq -- "--define '__os_install_post %{nil}'" "$packager"
+grep -Fq -- "--define '_buildhost keire-release'" "$packager"
+grep -Fq -- "--define 'use_source_date_epoch_as_buildtime 1'" "$packager"
+grep -Fq "rpm -qp --queryformat '%{NAME}'" "$packager"
+grep -Fq 'rpm2cpio "$artifact" | cpio' "$packager"
+grep -Fq '${ARTIFACT_PREFIX}-hub-${PROJECT_VERSION}-1.${rpm_architecture}.rpm' "$packager"
 grep -Fq 'usr/share/applications' "$packager"
 grep -Fq 'preferences, caches, and editor roots are preserved' "$packager"
 if grep -Fq -- '--force --deep' "$packager"; then
@@ -50,7 +69,7 @@ if grep -Fq 'ln -s "/$install_relative/launch-hub.sh"' "$packager"; then
   printf 'The standalone Unix Hub command must not symlink to a dirname-relative package launcher.\n' >&2
   exit 1
 fi
-if grep -Eq 'rm -rf.*(\$HOME|XDG_CONFIG_HOME|XDG_CACHE_HOME)|DEBIAN/(pre|post)rm' "$packager"; then
+if grep -Eq 'rm -rf.*(\$HOME|XDG_CONFIG_HOME|XDG_CACHE_HOME)|DEBIAN/(pre|post)rm|%(pre|post)un' "$packager"; then
   printf 'The standalone Unix Hub installer must not remove per-user Hub or editor data.\n' >&2
   exit 1
 fi

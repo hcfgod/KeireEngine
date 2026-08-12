@@ -7,6 +7,10 @@ versions.
 
 ### Changed
 
+- Added native standalone Hub RPM packaging for Rocky Linux and Fedora alongside the existing Ubuntu/Debian DEB.
+  Linux release builds now select the package family from the host or an explicit launcher option, validate RPM
+  identity, dependencies, extracted payload, desktop integration, and checksum, and allow signed RPM manifests. The
+  downloads site retains and renders DEB and RPM previews as distinct format-aware release identities.
 - Fixed Hub journal reads intermittently failing while workers atomically published status and result replacements on
   Linux. Text readers now determine size from the opened file version, preventing mixed metadata and content reads.
 - Made Shader Graph preview evaluation stack-safe for deep expression chains, prevented invalid replay controls from

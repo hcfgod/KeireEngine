@@ -322,7 +322,7 @@ namespace
         const auto extension = Lower(Text(arguments.Installer.extension()));
         const bool expectedExtension = (result.Platform == "windows" && extension == ".exe") ||
                                        (result.Platform == "macos" && extension == ".dmg") ||
-                                       (result.Platform == "linux" && extension == ".deb");
+                                       (result.Platform == "linux" && (extension == ".deb" || extension == ".rpm"));
         if (!expectedExtension || (result.Architecture != "x86_64" && result.Architecture != "arm64"))
             throw std::invalid_argument("The native Hub installer does not match a supported host identity.");
 

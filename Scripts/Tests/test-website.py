@@ -202,6 +202,7 @@ def main() -> int:
         "editorVersion",
         "publishedAt",
         "publishedTimestamp",
+        "packageFormat",
         "timeZoneName: \"short\"",
         "data-download-history",
     ):
@@ -235,16 +236,27 @@ def main() -> int:
         )
     release_ids = set()
     retained_previews = set()
+    installer_formats = {
+        "windows": {"exe": ".exe"},
+        "macos": {"dmg": ".dmg"},
+        "linux": {"deb": ".deb", "rpm": ".rpm"},
+    }
     for preview in packages:
         release_id = str(preview.get("releaseId", ""))
+        platform = str(preview.get("platform", ""))
+        package_format = str(preview.get("packageFormat", ""))
+        expected_suffix = installer_formats.get(platform, {}).get(package_format)
         retained_preview = (
-            str(preview.get("platform", "")),
+            platform,
             str(preview.get("architecture", "")),
             str(preview.get("version", "")),
+            package_format,
         )
         if (
             preview.get("type") != "hubInstallerPreview"
             or preview.get("platform") not in {"windows", "macos", "linux"}
+            or expected_suffix is None
+            or not str(preview.get("fileName", "")).lower().endswith(expected_suffix)
             or preview.get("signed") is not False
             or preview.get("developmentArtifact") is not True
             or not str(preview.get("editorVersion", ""))

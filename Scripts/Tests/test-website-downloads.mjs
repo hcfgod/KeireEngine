@@ -44,6 +44,7 @@ function packageRecord(version, overrides = {}) {
         channel: "stable",
         platform: "windows",
         architecture: "x86_64",
+        packageFormat: "exe",
         signatureKeyId: keyId,
         artifact: { sizeBytes: 4096, sha256: digest },
         installedSizeBytes: 4096,
@@ -129,6 +130,32 @@ assert.equal(validatePreview({ ...preview, packages: [{ ...preview.packages[0], 
 assert.equal(validatePreview({ ...preview, packages: [{ ...preview.packages[0], releaseId: "../preview" }] }).length, 0);
 assert.equal(validatePreview({ ...preview, packages: [{ ...preview.packages[0], url: "https://example.com/setup.exe" }] }).length, 0);
 assert.equal(validatePreview({ ...preview, packages: [{ ...preview.packages[0], fileName: "../setup.exe" }] }).length, 0);
+assert.equal(validatePreview({ ...preview, packages: [{ ...preview.packages[0], packageFormat: "rpm" }] }).length, 0);
+const linuxDeb = {
+    ...preview.packages[0],
+    releaseId: "linux-x86_64-0.1.0-deb-20260808.1",
+    platform: "linux",
+    packageFormat: "deb",
+    fileName: "keire-hub-linux-x86_64-0.1.0-preview-bbbbbbbb.deb",
+    url: "/preview-downloads/keire-hub-linux-x86_64-0.1.0-preview-bbbbbbbb.deb",
+    sha256: "b".repeat(64),
+};
+const linuxRpm = {
+    ...linuxDeb,
+    releaseId: "linux-x86_64-0.1.0-rpm-20260808.1",
+    packageFormat: "rpm",
+    fileName: "keire-hub-linux-x86_64-0.1.0-preview-cccccccc.rpm",
+    url: "/preview-downloads/keire-hub-linux-x86_64-0.1.0-preview-cccccccc.rpm",
+    sha256: "c".repeat(64),
+};
+const multiFormatPreview = { ...preview, packages: [preview.packages[0], linuxDeb, linuxRpm] };
+const multiFormatCandidates = validatePreview(multiFormatPreview);
+assert.equal(multiFormatCandidates.length, 3);
+assert.deepEqual(
+    Array.from(multiFormatCandidates.filter((candidate) => candidate.packageRecord.platform === "linux"),
+        (candidate) => candidate.installerFormat),
+    ["deb", "rpm"],
+);
 const olderDuplicate = {
     ...preview.packages[0],
     releaseId: "windows-x86_64-0.1.0-20260807.1",
@@ -191,9 +218,9 @@ const renderContext = vm.createContext({
     },
     fetch: async (url, options = {}) => {
         if (url === "/assets/preview-downloads.json") {
-            return { ok: true, status: 200, json: async () => preview };
+            return { ok: true, status: 200, json: async () => multiFormatPreview };
         }
-        if (url === preview.packages[0].url && options.method === "HEAD") {
+        if (multiFormatPreview.packages.some((record) => record.url === url) && options.method === "HEAD") {
             return { ok: true, status: 200, headers: { get: () => "4096" } };
         }
         return { ok: false, status: 404 };
@@ -207,7 +234,7 @@ for (let index = 0; index < 10 && cards.get("windows").variants.children.length 
 const renderedVariant = cards.get("windows").variants.children[0];
 assert.ok(renderedVariant);
 assert.equal(renderedVariant.className, "download-variant preview-variant");
-assert.equal(renderedVariant.children[2].children[0], "Hub v0.1.0 · Editor v0.1.0 · Published ");
+assert.equal(renderedVariant.children[2].children[0], "Hub v0.1.0 · Editor v0.1.0 · Windows · Published ");
 const renderedTimestamp = renderedVariant.children[2].children[1];
 assert.equal(renderedTimestamp.name, "time");
 const canonicalPublishedAt = new Date(preview.packages[0].publishedAt).toISOString();
@@ -228,8 +255,14 @@ assert.doesNotMatch(renderedTimestamp.textContent, /^Aug 8, 2026$/);
 assert.equal(renderedVariant.children[3].name, "a");
 assert.equal(renderedVariant.children[3].href, preview.packages[0].url);
 assert.equal(renderedVariant.children[3].download, preview.packages[0].fileName);
+assert.equal(renderedVariant.children[3].textContent, "Download EXE preview");
 assert.equal(cards.get("windows").addedClass, "recommended");
 assert.match(cards.get("windows").state.textContent, /Development preview available/);
+assert.equal(cards.get("linux").variants.children.length, 2);
+assert.deepEqual(
+    cards.get("linux").variants.children.map((variant) => variant.children[3].textContent),
+    ["Download DEB preview", "Download RPM preview"],
+);
 
 const historyTargets = new Map();
 const historyStates = new Map();
@@ -264,9 +297,9 @@ const historyContext = vm.createContext({
     },
     fetch: async (url, options = {}) => {
         if (url === "/assets/preview-downloads.json") {
-            return { ok: true, status: 200, json: async () => preview };
+            return { ok: true, status: 200, json: async () => multiFormatPreview };
         }
-        if (url === preview.packages[0].url && options.method === "HEAD") {
+        if (multiFormatPreview.packages.some((record) => record.url === url) && options.method === "HEAD") {
             return { ok: true, status: 200, headers: { get: () => "4096" } };
         }
         return { ok: false, status: 404 };
@@ -279,6 +312,7 @@ for (let index = 0; index < 10 && historyTargets.get("windows").children.length 
 }
 assert.equal(historyTargets.get("windows").children.length, 1);
 assert.match(historyStates.get("windows").textContent, /1 retained release/);
-assert.match(historyStates.get("linux").textContent, /No retained releases/);
+assert.equal(historyTargets.get("linux").children.length, 2);
+assert.match(historyStates.get("linux").textContent, /2 retained releases/);
 
 console.log("Website download catalog validation passed.");

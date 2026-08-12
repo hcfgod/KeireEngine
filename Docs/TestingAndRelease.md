@@ -378,7 +378,11 @@ bash Scripts/project.sh package-hub-installer --generator ninja --toolset clang
 Windows compiles `Installer/Windows/KeireHub.nsi` into a per-user Hub setup executable. macOS wraps the exact Hub stage
 inside a self-contained Hub `.app` and drag-to-Applications DMG. Linux installs that stage beneath `/opt/keire-hub`
 with a `keire-hub` command, desktop entry, and icon. Its `/usr/bin` wrapper executes the explicit `/opt` Hub binary so
-the package-relative launcher cannot resolve beside `/usr/bin`. All three update or remove only the application
+the package-relative launcher cannot resolve beside `/usr/bin`. On Linux, `auto` selects DEB for Ubuntu/Debian and RPM
+for Rocky/Fedora; release automation can pass `--linux-installer-format deb` or `--linux-installer-format rpm`.
+The RPM path requires `rpm-build`, `rpm`, and `cpio`, records the native runtime dependencies, validates its identity and
+file inventory after extraction, and uses the source commit timestamp for deterministic payload metadata. All three
+platform workflows update or remove only the application
 payload; Hub preferences, package caches, project metadata, and managed or externally located editor roots remain
 untouched by default.
 
@@ -404,8 +408,9 @@ modifying this contract.
 Unsigned website previews remain separate from stable catalogs. Publishing a preview copies the validated installer
 under an immutable digest-suffixed filename and appends a schema-2 entry to
 `Website/assets/preview-downloads.json`; it never reuses a filename or silently replaces an earlier record. Each entry
-binds a unique release ID, Hub version, editor version, UTC publication time, platform, architecture, byte size, and
-SHA-256. The current Downloads page selects the newest available preview per platform, while
+binds a unique release ID, Hub version, editor version, UTC publication time, platform, architecture, native package
+format, byte size, and SHA-256. The current Downloads page selects every verified native format for the newest
+available preview version per platform, while
 `/downloads/previous/` lists every retained artifact that still passes a same-origin availability and size check.
 
 When the native release builder and distribution host are different machines, transfer the installer and its checksum

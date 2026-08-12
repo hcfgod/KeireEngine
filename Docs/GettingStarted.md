@@ -148,7 +148,8 @@ bash Scripts/project.sh run --generator ninja --configuration Debug --toolset gc
 ### Linux Hub and editor packages
 
 Packaging requires a clean checkout and always builds the `Dist` configuration. The distribution commands create
-portable archives, while the installer commands create Debian packages under `Artifacts/`:
+portable archives. The Hub installer command auto-selects DEB on Ubuntu/Debian and RPM on Rocky/Fedora; the editor
+installer remains DEB-based. Every installer is written under `Artifacts/`:
 
 ```sh
 git status --short
@@ -172,9 +173,29 @@ dpkg-deb --contents "$hub_installer"
 cd ..
 ```
 
+On Rocky Linux or Fedora, install the native packaging tools and build or verify the RPM explicitly:
+
+```sh
+sudo dnf install -y rpm-build rpm cpio
+bash Scripts/project.sh package-hub-installer --generator ninja --toolset gcc \
+  --linux-installer-format rpm
+cd Artifacts
+project_version="$(sed -n 's/^PROJECT_VERSION=//p' ../Config/Project.conf)"
+hub_installer="keire-hub-${project_version}-1.$(uname -m).rpm"
+sha256sum --check "${hub_installer}.sha256"
+rpm -qpi "$hub_installer"
+rpm -qpl "$hub_installer"
+sudo dnf install "./$hub_installer"
+cd ..
+```
+
+Pass `--linux-installer-format deb` on a Debian-family release builder or
+`--linux-installer-format rpm` on an RPM-family builder when automation must not depend on host detection. Do not
+convert one native format into the other; each release package is produced and validated on its claimed baseline.
+
 A source build on a current Fedora, Arch, openSUSE, or new Ubuntu host validates that host; it does not make its linked
-binaries universal. Build a public Debian/Ubuntu preview on the declared Debian/Ubuntu release baseline, and use the
-oldest claimed Ubuntu baseline when the same artifact is intended to run on every newer supported Ubuntu version.
+binaries universal. Build a public DEB on the declared Ubuntu baseline and a public RPM on the declared Rocky Linux
+baseline. Use the oldest claimed baseline when the same artifact is intended to run on every newer supported release.
 Never relabel a binary built against a newer glibc as an older-baseline or distribution-independent artifact.
 
 ## First macOS Build

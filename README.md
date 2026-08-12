@@ -99,7 +99,7 @@ Tumbleweed, and Rocky Linux 9. Ubuntu 26.04 is a setup and container-matrix targ
 gate as one command. The bootstrap supports the `apt`, `dnf`, `pacman`, and `zypper` package families and
 installs verified project-private fallbacks when a distribution's Premake, CMake, Ninja, NASM, patchelf, .NET SDK, or
 GCC is missing or too old. It also installs the native dialog backend used when a desktop portal is unavailable; the
-Debian/Ubuntu Hub installer declares the same runtime dependency. On WSL2, keep the clone in the Linux filesystem (for
+DEB and RPM Hub installers declare the same runtime dependency. On WSL2, keep the clone in the Linux filesystem (for
 example `~/src/KeireEngine`) rather than under `/mnt/c` for correct case-sensitive behavior and substantially better
 dependency-build performance.
 
@@ -113,9 +113,9 @@ Set `KEIRE_BUILD_JOBS` to a positive integer when the machine can safely support
 
 Windows and Linux x86-64 are the currently tested public-preview platforms. Download records show the Hub version and
 the corresponding editor version separately, retain complete artifact identity, and link to an append-only previous
-versions page. Linux preview installers are DEB packages for Debian/Ubuntu; Fedora, Arch, openSUSE, and Rocky are
-validated source-build targets. Linux ARM64, Alpine/musl, native macOS, and Metal are not yet claimed as tested
-download targets.
+versions page. Linux Hub packaging emits native DEB packages for Ubuntu/Debian and RPM packages for Rocky/Fedora;
+the download page presents each verified format independently. Arch and openSUSE remain validated source-build
+targets. Linux ARM64, Alpine/musl, native macOS, and Metal are not yet claimed as tested download targets.
 
 macOS with Ninja and Clang:
 
@@ -153,7 +153,7 @@ Both platform launchers expose the same top-level workflow:
 | `package-editor` | Create a ready-to-run native editor distribution and archive. |
 | `package-hub` | Create a standalone Hub distribution and archive. |
 | `package-installer` | Create the platform-native editor installer. |
-| `package-hub-installer` | Create the platform-native standalone Hub installer. |
+| `package-hub-installer` | Create the platform-native standalone Hub installer; Linux auto-selects DEB or RPM. |
 | `doctor` | Report toolchain, identity, dependency, and environment diagnostics. |
 | `clean` | Remove selected disposable build or generated outputs. |
 | `vendor-update` | Intentionally advance one locked dependency. |
