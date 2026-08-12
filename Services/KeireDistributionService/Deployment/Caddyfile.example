@@ -52,7 +52,12 @@
 	handle {
 		reverse_proxy 127.0.0.1:4321 {
 			health_uri /health/
+			health_method HEAD
 			health_status 2xx
+			health_interval 10s
+			health_timeout 2s
+			health_fails 3
+			health_passes 2
 		}
 	}
 

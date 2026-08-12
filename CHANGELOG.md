@@ -7,6 +7,12 @@ versions.
 
 ### Changed
 
+- Fixed free Marketplace claims remaining permanently on “Checking your account and license” after an interrupted
+  reverse-proxy response. Claims now use bounded Edge and browser requests, retain one idempotency key across safe
+  retries, restore controls on every failure path, link directly to My Assets when completion is uncertain, and render
+  existing personal ownership as `In My Assets`. Caddy now probes a dependency-free Astro liveness endpoint with
+  consecutive failure/recovery thresholds, so transient Supabase or validator readiness cannot remove the only web
+  upstream and turn otherwise healthy asset requests into `502`/`503` failures.
 - Prevented generated C# IDE projects from scanning `Library`, `Logs`, `Temp`, and `Build` as candidate assembly
   inputs, which could make Visual Studio silently bind scripts to a stale `Keire.Managed` generation instead of the
   current 0.3.1 API reference.

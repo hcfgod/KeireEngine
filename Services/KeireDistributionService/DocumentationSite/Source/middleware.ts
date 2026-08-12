@@ -56,6 +56,16 @@ export const onRequest = defineMiddleware(async (context, next) => {
     context.locals.correlationId = crypto.randomUUID();
     context.locals.assurance = { currentLevel: null, nextLevel: null };
     context.locals.user = null;
+    if (context.request.method === "HEAD" && context.url.pathname.replace(/\/+$/, "") === "/health") {
+        return new Response(null, {
+            status: 204,
+            headers: {
+                "cache-control": "no-store",
+                "x-content-type-options": "nosniff",
+                "x-correlation-id": context.locals.correlationId,
+            },
+        });
+    }
     const supabaseUrl = runtimeEnvironment("PUBLIC_SUPABASE_URL");
     const publishableKey = runtimeEnvironment("PUBLIC_SUPABASE_PUBLISHABLE_KEY");
     const authorization = context.isPrerendered ? null : context.request.headers.get("authorization");

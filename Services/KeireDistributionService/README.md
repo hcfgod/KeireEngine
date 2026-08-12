@@ -7,6 +7,12 @@ accounts, marketplace, publisher, administration, and `/marketplace/v1` routes f
 `/v1`, `/v2`, `/health/live`, and `/health/ready` for the unchanged distribution origin and routes every other product
 surface to Astro.
 
+Astro exposes two distinct website health contracts. `HEAD /health/` is dependency-free process liveness and is the
+only probe Caddy uses to decide whether the Node upstream can accept requests. `GET /health/` is the deeper public
+readiness report for Supabase, distribution, and validator connectivity; degraded dependencies remain observable there
+without incorrectly removing a healthy web renderer from service. Caddy requires three consecutive failed liveness
+checks before marking the sole Node upstream unavailable and two consecutive passes before restoring it.
+
 The service has no upload, publishing, account, entitlement, administration, or directory-listing API. Publishing is
 an offline filesystem operation performed by `KeireDistributionPublisher`; the online process never receives a
 private signing key.

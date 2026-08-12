@@ -253,6 +253,8 @@ for (const source of [middleware, healthRoute, contactRoute]) {
     assert(source.includes("runtimeEnvironment("), "SSR routes must read deploy-time settings from the Node process.");
     assert(!/import\.meta\.env\.(?:PUBLIC_SUPABASE|KEIRE_)/.test(source), "SSR routes contain a build-time deployment setting.");
 }
+assert(healthRoute.includes("export const HEAD") && healthRoute.includes("status: 204"),
+    "The web process must expose a dependency-free liveness probe for Caddy.");
 assert(middleware.includes('"x-forwarded-proto"') && middleware.includes('"x-forwarded-host"'),
     "Same-origin checks must account for the trusted loopback reverse proxy.");
 assert(middleware.includes('runtimeEnvironment("PUBLIC_SITE_URL")') &&
@@ -264,6 +266,10 @@ assert(middleware.includes('new Set(["POST", "PUT", "PATCH", "DELETE"])') &&
     "Every cookie-authenticated mutation method must pass the same-origin guard.");
 assert(middleware.includes('parseCookieHeader(context.request.headers.get("cookie")'),
     "Astro SSR must parse request cookies through the supported request-header adapter.");
+assert(middleware.includes('context.request.method === "HEAD"') &&
+    middleware.includes('context.url.pathname.replace(/\\/+$/, "") === "/health"') &&
+    middleware.indexOf('context.request.method === "HEAD"') < middleware.indexOf("createServerClient("),
+    "Caddy's exact Astro liveness probe must return before authentication or external dependency work.");
 assert(middleware.includes("setAll: (cookies, headers)") && middleware.includes("authResponseHeaders.set") &&
     middleware.includes("for (const [name, value] of authResponseHeaders)"),
     "Astro SSR must preserve Supabase auth cache headers alongside refreshed cookies.");
@@ -408,6 +414,9 @@ const caddyConfig = await readFile(path.join(repositoryRoot, "Services", "KeireD
 assert(caddyConfig.includes("connect-src 'self' https://khjduyjamzwumhducmou.supabase.co " +
     "https://khjduyjamzwumhducmou.storage.supabase.co"),
     "Publisher uploads must allow the exact Supabase API and direct-Storage origins through the website CSP.");
+for (const contract of ["health_method HEAD", "health_fails 3", "health_passes 2"]) {
+    assert(caddyConfig.includes(contract), `Caddy website liveness is missing ${contract}.`);
+}
 const publisherUploadRoutes = (await Promise.all([
     "Source/pages/publisher/v1/uploads/index.ts",
     "Source/pages/publisher/v1/uploads/[id]/index.ts",

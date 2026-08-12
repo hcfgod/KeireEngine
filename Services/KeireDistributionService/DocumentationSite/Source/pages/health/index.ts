@@ -27,3 +27,11 @@ export const GET: APIRoute = async (context) => {
     const degraded = Object.values(checks).some(({ status }) => status === "degraded");
     return apiResponse(context, { status: degraded ? "degraded" : "healthy", service: "keire-web", version: "0.3.1", checks, correlationId: context.locals.correlationId }, degraded ? 503 : 200, "no-store");
 };
+
+export const HEAD: APIRoute = (context) => new Response(null, {
+    status: 204,
+    headers: {
+        "cache-control": "no-store",
+        "x-correlation-id": context.locals.correlationId,
+    },
+});
