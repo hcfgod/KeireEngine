@@ -705,8 +705,7 @@ namespace KeireHub
             return HubResult<TemplateCreationResult>::Failure(TemplateError(
                 HubErrorCode::DestinationConflict, "The project destination was created by another operation.",
                 request.ProjectName, error.message()));
-        std::filesystem::rename(staging, plan.Destination, error);
-        if (error)
+        if (!Detail::TryRenamePathWithRetry(staging, plan.Destination, error))
             return HubResult<TemplateCreationResult>::Failure(
                 TemplateError(HubErrorCode::IoWrite, "The staged project could not be published.", request.ProjectName,
                               error.message()));
