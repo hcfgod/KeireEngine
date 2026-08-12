@@ -53,6 +53,7 @@ grep -Fq -- "--define '__os_install_post %{nil}'" "$packager"
 grep -Fq -- "--define '_buildhost keire-release'" "$packager"
 grep -Fq -- "--define 'use_source_date_epoch_as_buildtime 1'" "$packager"
 grep -Fq "rpm -qp --queryformat '%{NAME}'" "$packager"
+grep -Fq 'grep -Fqx "$requirement" <<< "$rpm_requirements"' "$packager"
 grep -Fq 'rpm2cpio "$artifact" | cpio' "$packager"
 grep -Fq '${ARTIFACT_PREFIX}-hub-${PROJECT_VERSION}-1.${rpm_architecture}.rpm' "$packager"
 grep -Fq 'usr/share/applications' "$packager"
@@ -73,5 +74,13 @@ if grep -Eq 'rm -rf.*(\$HOME|XDG_CONFIG_HOME|XDG_CACHE_HOME)|DEBIAN/(pre|post)rm
   printf 'The standalone Unix Hub installer must not remove per-user Hub or editor data.\n' >&2
   exit 1
 fi
+
+rpm_requirements=$'glibc\nlibstdc++\nlibgcc\nlibcurl\nzenity'
+for requirement in glibc libstdc++ libgcc libcurl zenity; do
+  grep -Fqx "$requirement" <<< "$rpm_requirements" || {
+    printf "The RPM dependency validator rejected the literal '%s' package name.\n" "$requirement" >&2
+    exit 1
+  }
+done
 
 printf 'Unix standalone Hub installer checks passed.\n'

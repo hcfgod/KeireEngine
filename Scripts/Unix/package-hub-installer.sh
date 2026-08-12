@@ -366,7 +366,7 @@ EOF
     }
     rpm_requirements="$(rpm -qp --requires "$artifact")"
     for requirement in glibc libstdc++ libgcc libcurl zenity; do
-        grep -Eq "^${requirement}([[:space:](]|$)" <<< "$rpm_requirements" || {
+        grep -Fqx "$requirement" <<< "$rpm_requirements" || {
           printf "RPM Hub installer is missing its '%s' runtime dependency.\n" "$requirement" >&2
           exit 1
         }
