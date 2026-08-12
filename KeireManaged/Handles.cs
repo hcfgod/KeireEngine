@@ -51,6 +51,7 @@ public readonly record struct Entity(ulong World, EntityId Id)
     public TransformHandle Transform => new(this);
     public AnimatorHandle Animator => new(this);
     public CharacterControllerHandle CharacterController => new(this);
+    public RigidBodyHandle RigidBody => new(this);
     public ComponentHandle GetComponent(ComponentTypeId type) =>
         NativeRuntime.ComponentExists(this, type) ? new ComponentHandle(this, type) : default;
     public ComponentHandle GetComponent<T>() => GetComponent(ComponentType.Of<T>());
@@ -138,11 +139,53 @@ public readonly record struct TransformHandle(Entity Entity)
         set => NativeRuntime.SetLocalScale(Entity, value);
     }
 
-    public Vector3 Position => NativeRuntime.GetWorldPosition(Entity);
-    public Quaternion Rotation => NativeRuntime.GetWorldRotation(Entity);
+    public Vector3 Position
+    {
+        get => NativeRuntime.GetWorldPosition(Entity);
+        set
+        {
+            ValidateFinite(value, nameof(value));
+            NativeRuntime.SetWorldPosition(Entity, value);
+        }
+    }
+    public Quaternion Rotation
+    {
+        get => NativeRuntime.GetWorldRotation(Entity);
+        set
+        {
+            ValidateRotation(value, nameof(value));
+            NativeRuntime.SetWorldRotation(Entity, value.Normalized);
+        }
+    }
     public Vector3 Forward => Rotation * Vector3.Forward;
     public Vector3 Right => Rotation * Vector3.Right;
     public Vector3 Up => Rotation * Vector3.Up;
+
+    public void Translate(Vector3 translation,
+                          bool worldSpace = false) => Position = worldSpace ? Position + translation
+                                                                            : Position + (Rotation * translation);
+
+    public void Rotate(Quaternion rotation, bool worldSpace = false)
+    {
+        ValidateRotation(rotation, nameof(rotation));
+        Rotation = (worldSpace ? rotation * Rotation : Rotation * rotation).Normalized;
+    }
+
+    private static void ValidateFinite(Vector3 value, string parameter)
+    {
+        if (!float.IsFinite(value.X) || !float.IsFinite(value.Y) || !float.IsFinite(value.Z))
+            throw new ArgumentException("Transform vectors must be finite.", parameter);
+    }
+
+    private static void ValidateRotation(Quaternion value, string parameter)
+    {
+        if (!float.IsFinite(value.X) || !float.IsFinite(value.Y) || !float.IsFinite(value.Z) ||
+            !float.IsFinite(value.W) ||
+            ((value.X * value.X) + (value.Y * value.Y) + (value.Z * value.Z) + (value.W * value.W)) <= 0.000000000001f)
+        {
+            throw new ArgumentException("Transform rotations must be finite and nonzero.", parameter);
+        }
+    }
 }
 
 public static class ComponentType
@@ -156,11 +199,11 @@ public static class ComponentType
         ArgumentNullException.ThrowIfNull(type);
         return Types.GetOrAdd(type, static managedType =>
         {
-        var id = managedType.GetCustomAttributes(typeof(StableComponentIdAttribute), false)
-            .Cast<StableComponentIdAttribute>().SingleOrDefault() ??
-            throw new InvalidOperationException(
-                $"Managed component '{managedType.FullName}' does not declare StableComponentId.");
-        return new ComponentTypeId(id.High, id.Low);
+            var id = managedType.GetCustomAttributes(typeof(StableComponentIdAttribute), false)
+                .Cast<StableComponentIdAttribute>().SingleOrDefault() ??
+                throw new InvalidOperationException(
+                    $"Managed component '{managedType.FullName}' does not declare StableComponentId.");
+            return new ComponentTypeId(id.High, id.Low);
         });
     }
 }

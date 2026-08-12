@@ -10,8 +10,9 @@ This index is a discovery map, not a replacement for the workflow guides or sour
 | `Entity`, `EntityId` | Runtime scene object identity and operations | [Entities](EntitiesComponentsAndTransforms.md) |
 | `ComponentTypeId` | Stable component type identity | [Entities](EntitiesComponentsAndTransforms.md) |
 | `ComponentHandle`, `ComponentHandle<T>` | Presence, enabled-state, and removal views | [Entities](EntitiesComponentsAndTransforms.md) |
-| `TransformHandle` | Local transform mutation and world-position read | [Entities](EntitiesComponentsAndTransforms.md) |
+| `TransformHandle` | Local and world transform mutation plus direction vectors | [Entities](EntitiesComponentsAndTransforms.md) |
 | `CharacterControllerHandle`, `CharacterControllerState` | Collision-resolved movement and grounded-state access | [Gameplay Services](GameplayServices.md) |
+| `RigidBodyHandle`, `RigidBodyProperties` | Runtime body state, forces, and impulses | [Gameplay Services](GameplayServices.md) |
 | `AssetId` | Stable untyped asset identity | [Assets](AssetsAndScriptableObjects.md) |
 | `AssetReference<T>` | Typed serialized asset identity | [Assets](AssetsAndScriptableObjects.md) |
 | `ScriptableObject` | Managed data base type and transient clone API | [Assets](AssetsAndScriptableObjects.md) |
@@ -92,6 +93,7 @@ Transform
 Animator
 AudioSource
 CharacterController
+RigidBody
 ```
 
 Methods:
@@ -105,6 +107,13 @@ FindChild / Find
 Instantiate
 Destroy
 ```
+
+## Coroutines
+
+`Behaviour` exposes `StartCoroutine`, `StopCoroutine`, and `StopAllCoroutines`. Routines may yield `null`, nested
+enumerators, `Task`, `ValueTask`, `WaitForSeconds`, `WaitForSecondsRealtime`, `WaitForFixedUpdate`, `WaitForEndOfFrame`,
+`WaitUntil`, `WaitWhile`, or a custom `CustomYieldInstruction`. `Coroutine.IsRunning` and `Coroutine.Stop()` provide a
+value-handle view without exposing scheduler ownership.
 
 ## Built-In Component Markers
 

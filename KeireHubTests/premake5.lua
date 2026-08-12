@@ -31,6 +31,7 @@ project(HubTestsTarget)
         "../KeireHub/Source/HubProjectUiState.cpp",
         "../KeireHub/Source/HubProjectMutationWorkflow.cpp",
         "../KeireHub/Source/HubProjectUpgradeWorkflow.cpp",
+        "../KeireHub/Source/HubRuntimeUiBridge.cpp",
         "../KeireHub/Source/HubTemplateBrowser.cpp",
         "../KeireHub/Source/HubUpdateHandoffWorkflow.cpp"
     }

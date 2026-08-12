@@ -316,6 +316,8 @@ TEST_CASE("Task transition table preserves deterministic lifecycle rules")
     CHECK(IsValidTaskTransition(HubTaskState::Downloading, HubTaskState::Paused));
     CHECK(IsValidTaskTransition(HubTaskState::Paused, HubTaskState::Queued));
     CHECK(IsValidTaskTransition(HubTaskState::Verifying, HubTaskState::Completed));
+    CHECK(IsValidTaskTransition(HubTaskState::Queued, HubTaskState::Removing));
+    CHECK(IsValidTaskTransition(HubTaskState::Removing, HubTaskState::Completed));
     CHECK(IsValidTaskTransition(HubTaskState::Cancelling, HubTaskState::Completed));
     CHECK(IsValidTaskTransition(HubTaskState::Cancelling, HubTaskState::Cancelled));
     CHECK_FALSE(IsValidTaskTransition(HubTaskState::Queued, HubTaskState::Completed));

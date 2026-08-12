@@ -97,6 +97,10 @@ Upgrade-and-reopen dispatch skips a pre-launch metadata scan that could race the
 exit requests a coalesced follow-up scan, ensuring the persisted lock state is refreshed without performing filesystem
 work on the UI thread. Hub modal styling is centralized around semantic appearance tokens, including frame, button,
 header, border, text, and status colors, so every project and recovery dialog follows the selected Hub appearance.
+Editor discovery, installed versions, and installation configuration are separate views rather than one unbounded
+page. Task and notification centers are anchored overlay popovers; their open state never changes surrounding layout.
+Every progress and completion label is derived from the persisted task kind, so removal cannot be presented as an
+installation operation.
 
 Package transfer runs in `KeireHubWorker`, not in UI components. The Hub creates one confined operation directory with
 atomic request, status, result, and control documents; the worker rejects aliased or escaping protocol paths. The
@@ -688,7 +692,10 @@ variant pressure without weakening compile success. Built-in nodes are validated
 when disconnected, while legacy Master nodes accept neutral defaults for later surface and attributes inputs. Graph
 compilation is revisioned, debounced, and performed away from the owner thread; stale completions are discarded and only
 the newest valid result can replace the last-good preview. The workspace supplies confined include reads, nonblocking
-custom-mesh resolution through the asset system, and persistence.
+custom-mesh resolution through the asset system, and persistence. Both graph editors reserve the canvas as the dominant
+region and place a bounded, collapsible square preview on the right when space permits. Material Graph composes its
+selected shader template before preview; Shader Graph expands reusable calls first. Preview evaluation failures remain
+visible diagnostics rather than being converted into an indistinguishable checkerboard result.
 
 Reusable Material Function, Shader Function, Material Layer, and Material Layer Blend assets wrap the same typed graph
 model behind distinct immutable asset types. Their editor document runs in purpose-aware reusable mode: it validates
@@ -1075,7 +1082,10 @@ crosses the scripting boundary.
 instances, and the native call bridge. Private `ManagedSdk` support owns persisted SDK selection and cross-platform
 dotnet discovery, keeping filesystem and process-environment policy out of the runtime implementation. Configuration
 writes preserve unrelated scripting settings, and custom SDK resolution requires a .NET 10 SDK before it can become an
-active build dependency.
+active build dependency. Managed Behaviours own a phase-aware coroutine scheduler. Coroutine handles are
+generation-local values, nested iterators are disposed in LIFO order, and disable, destruction, or reload stops all
+pending routines. Transform handles support parent-aware world setters, while the Rigid Body handle maps validated value
+properties and force modes through internal calls; neither API exposes an ECS component pointer or physics body handle.
 
 ## Managed Data Assets
 
@@ -1103,8 +1113,11 @@ the last snapshot active. Headless rendering executes ordered effects, sends, pa
 automatic meters. Reverb Zones select against the primary listener, blend one priority-resolved mixer snapshot and
 send scale, and restore the immutable source definition after exit. Legacy string gain and stop controls forward
 through the currently resolved authored bus name, while voice diagnostics report the resolved mixer, bus ID, and
-registration. The editor's typed `AudioMixerDocument` publishes transient live routing/fader previews; complete
-stateful device-callback DSP and decoded convolution IR binding remain an explicit later phase.
+registration. Device playback builds a private miniaudio node graph per immutable mixer revision, including hierarchy,
+effect racks, pre/post sends, faders, mute, solo, and sidechain ducking, then reattaches live voices transactionally.
+Reverb Zones scale return sends when a conventional effect-return bus exists and scale wet parameters only for
+direct-insert reverbs, preventing a return from being attenuated twice. The editor's typed `AudioMixerDocument` publishes
+transient live routing/fader previews. Decoded convolution IR binding remains an explicit later phase.
 
 `VfxWorld` owns fixed-capacity effect and particle storage. Activation is transactional, handles include generations,
 and revision-aware replacement preserves bounded lifecycle behavior. Non-looping GPU effects advance through their

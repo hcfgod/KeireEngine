@@ -32,6 +32,7 @@ namespace KeireHub
         Extracting,
         Installing,
         Configuring,
+        Removing,
         Cancelling,
         Completed,
         Failed,

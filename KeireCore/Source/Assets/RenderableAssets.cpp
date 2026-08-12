@@ -1743,34 +1743,60 @@ namespace Keire
                 const auto* mesh = scene->mMeshes[meshIndex];
                 if (!mesh)
                     continue;
-                const auto primitives = mesh->mPrimitiveTypes;
-                ShaderPrimitiveTopology topology;
-                if (primitives == static_cast<unsigned int>(aiPrimitiveType_TRIANGLE))
-                    topology = ShaderPrimitiveTopology::TriangleList;
-                else if (primitives == static_cast<unsigned int>(aiPrimitiveType_LINE))
+                std::array<bool, 3> topologies{};
+                bool triangulatedPolygon = false;
+                for (unsigned int faceIndex = 0; faceIndex < mesh->mNumFaces; ++faceIndex)
                 {
-                    topology = ShaderPrimitiveTopology::LineList;
+                    const auto count = mesh->mFaces[faceIndex].mNumIndices;
+                    if (count == 1)
+                        topologies[2] = true;
+                    else if (count == 2)
+                        topologies[1] = true;
+                    else if (count >= 3)
+                    {
+                        topologies[0] = true;
+                        triangulatedPolygon |= count > 3;
+                    }
+                }
+                const auto lod = MeshLodIndex(mesh->mName.C_Str());
+                if (topologies[0])
+                    orderedMeshes.push_back({meshIndex, lod, ShaderPrimitiveTopology::TriangleList});
+                if (topologies[1])
+                    orderedMeshes.push_back({meshIndex, lod, ShaderPrimitiveTopology::LineList});
+                if (topologies[2])
+                    orderedMeshes.push_back({meshIndex, lod, ShaderPrimitiveTopology::PointList});
+                if (topologies[1])
                     output.Diagnostics.push_back({AssetDiagnosticSeverity::Information, context.RelativePath, 0, 0,
-                                                  "Imported line-list primitive '" + std::string(mesh->mName.C_Str()) +
-                                                      "'; assign a shader whose renderState.topology is LineList."});
-                }
-                else if (primitives == static_cast<unsigned int>(aiPrimitiveType_POINT))
-                {
-                    topology = ShaderPrimitiveTopology::PointList;
+                                                  "Imported line primitives in mesh '" +
+                                                      std::string(mesh->mName.C_Str()) + "' as a LineList submesh."});
+                if (topologies[2])
                     output.Diagnostics.push_back({AssetDiagnosticSeverity::Information, context.RelativePath, 0, 0,
-                                                  "Imported point-list primitive '" + std::string(mesh->mName.C_Str()) +
-                                                      "'; assign a shader whose renderState.topology is PointList."});
-                }
-                else
-                {
-                    throw std::invalid_argument("Mesh primitive '" + std::string(mesh->mName.C_Str()) +
-                                                "' contains a mixed or unsupported topology after conversion.");
-                }
-                orderedMeshes.push_back({meshIndex, MeshLodIndex(mesh->mName.C_Str()), topology});
+                                                  "Imported point primitives in mesh '" +
+                                                      std::string(mesh->mName.C_Str()) + "' as a PointList submesh."});
+                if (std::ranges::count(topologies, true) > 1U)
+                    output.Diagnostics.push_back({AssetDiagnosticSeverity::Information, context.RelativePath, 0, 0,
+                                                  "Partitioned mixed topology mesh '" +
+                                                      std::string(mesh->mName.C_Str()) +
+                                                      "' into independent triangle, line, and point submeshes."});
+                if (triangulatedPolygon)
+                    output.Diagnostics.push_back({AssetDiagnosticSeverity::Information, context.RelativePath, 0, 0,
+                                                  "Triangulated polygon faces in mesh '" +
+                                                      std::string(mesh->mName.C_Str()) + "' during import."});
             }
             if (orderedMeshes.empty())
                 throw std::invalid_argument(
                     "Mesh source contains no supported triangle-list, line-list, or point-list primitives.");
+            if (generateRig)
+            {
+                const auto removed = std::erase_if(orderedMeshes, [](const OrderedMesh& mesh)
+                                                   { return mesh.Topology != ShaderPrimitiveTopology::TriangleList; });
+                if (removed > 0)
+                    output.Diagnostics.push_back(
+                        {AssetDiagnosticSeverity::Warning, context.RelativePath, 0, 0,
+                         "Auto-rigging ignored line and point submeshes because skin deformation requires triangles."});
+                if (orderedMeshes.empty())
+                    throw std::invalid_argument("Automatic rig generation requires at least one triangle surface.");
+            }
             std::ranges::stable_sort(orderedMeshes, {}, &OrderedMesh::Lod);
             std::vector<std::uint32_t> lodValues;
             for (const auto ordered : orderedMeshes)
@@ -1790,8 +1816,6 @@ namespace Keire
                     const auto orderedMesh = orderedMeshes[orderedOffset++];
                     const auto meshIndex = orderedMesh.Index;
                     const auto* mesh = scene->mMeshes[meshIndex];
-                    if (generateRig && orderedMesh.Topology != ShaderPrimitiveTopology::TriangleList)
-                        throw std::invalid_argument("Automatic rig generation requires triangle-list primitives.");
                     if (vertices.size() > std::numeric_limits<std::uint32_t>::max() - mesh->mNumVertices)
                         throw std::overflow_error("Merged mesh vertex count exceeds 32-bit indices.");
                     const auto base = static_cast<std::uint32_t>(vertices.size());
@@ -1878,11 +1902,24 @@ namespace Keire
                         const auto expectedIndices = orderedMesh.Topology == ShaderPrimitiveTopology::TriangleList ? 3U
                                                      : orderedMesh.Topology == ShaderPrimitiveTopology::LineList   ? 2U
                                                                                                                    : 1U;
-                        if (face.mNumIndices != expectedIndices)
-                            throw std::invalid_argument("Assimp emitted a face that does not match its converted "
-                                                        "primitive topology.");
-                        for (unsigned int corner = 0; corner < expectedIndices; ++corner)
-                            indices.push_back(base + face.mIndices[corner]);
+                        if ((expectedIndices < 3U && face.mNumIndices != expectedIndices) ||
+                            (expectedIndices == 3U && face.mNumIndices < 3U))
+                            continue;
+                        for (unsigned int corner = 0; corner < face.mNumIndices; ++corner)
+                            if (face.mIndices[corner] >= mesh->mNumVertices)
+                                throw std::invalid_argument("Mesh face references a vertex outside the mesh.");
+                        if (expectedIndices == 3U)
+                        {
+                            for (unsigned int corner = 1; corner + 1 < face.mNumIndices; ++corner)
+                            {
+                                indices.push_back(base + face.mIndices[0]);
+                                indices.push_back(base + face.mIndices[corner]);
+                                indices.push_back(base + face.mIndices[corner + 1]);
+                            }
+                        }
+                        else
+                            for (unsigned int corner = 0; corner < expectedIndices; ++corner)
+                                indices.push_back(base + face.mIndices[corner]);
                     }
                     const auto meshBounds = CalculateBounds(
                         std::span(vertices).subspan(firstVertex, static_cast<std::size_t>(mesh->mNumVertices)));

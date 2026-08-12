@@ -19,6 +19,8 @@ namespace Keire
     {
         std::uint32_t SchemaVersion = ProjectAuthoringSettingsSchemaVersion;
         AssetId DefaultMixer;
+        std::string ExternalEditorId = "system";
+        std::filesystem::path ExternalEditorExecutable;
         std::array<std::string, PhysicsCollisionLayerCount> PhysicsLayerNames;
         std::array<std::uint32_t, PhysicsCollisionLayerCount> PhysicsCollisionMatrix;
 

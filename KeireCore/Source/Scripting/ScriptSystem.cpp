@@ -6,6 +6,7 @@
 #include "Keire/ECS/Components/AnimatorComponent.h"
 #include "Keire/ECS/Components/AudioComponents.h"
 #include "Keire/ECS/Components/CharacterControllerComponent.h"
+#include "Keire/ECS/Components/RigidBodyComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/ECS/Entity.h"
 #include "Keire/Jobs/JobSystem.h"
@@ -1518,13 +1519,37 @@ namespace Keire
         {
             const auto entity = ResolveRuntimeEntity(world, high, low);
             const auto transform = entity ? entity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
-            if (!transform)
-                return Quaternion{};
-            Vector3 position;
-            Quaternion rotation;
-            Vector3 scale;
-            return Math::DecomposeTransform(transform->WorldMatrix(), position, rotation, scale) ? rotation
-                                                                                                 : Quaternion{};
+            return transform ? transform->WorldRotation() : Quaternion{};
+        }
+
+        static void RuntimeSetWorldPosition(const std::uint64_t world, const std::uint64_t high,
+                                            const std::uint64_t low, const Vector3 value) noexcept
+        {
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, high, low);
+                if (const auto transform =
+                        entity ? entity.GetComponent<TransformComponent>() : Ref<TransformComponent>{})
+                    transform->SetWorldPosition(value);
+            }
+            catch (...)
+            {
+            }
+        }
+
+        static void RuntimeSetWorldRotation(const std::uint64_t world, const std::uint64_t high,
+                                            const std::uint64_t low, const Quaternion value) noexcept
+        {
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, high, low);
+                if (const auto transform =
+                        entity ? entity.GetComponent<TransformComponent>() : Ref<TransformComponent>{})
+                    transform->SetWorldRotation(value);
+            }
+            catch (...)
+            {
+            }
         }
 
         [[nodiscard]] static Ref<CharacterControllerComponent>
@@ -1563,6 +1588,126 @@ namespace Keire
             *normal = state.GroundNormal;
             *velocity = state.Velocity;
             return 1;
+        }
+
+        [[nodiscard]] static Ref<RigidBodyComponent>
+        RuntimeRigidBody(const std::uint64_t world, const std::uint64_t high, const std::uint64_t low) noexcept
+        {
+            const auto entity = ResolveRuntimeEntity(world, high, low);
+            return entity ? entity.GetComponent<RigidBodyComponent>() : Ref<RigidBodyComponent>{};
+        }
+
+        [[nodiscard]] static std::uint8_t
+        RuntimeGetRigidBodyProperties(const std::uint64_t world, const std::uint64_t high, const std::uint64_t low,
+                                      std::uint8_t* motion, float* mass, Vector3* velocity, std::uint8_t* continuous,
+                                      std::uint8_t* gravity) noexcept
+        {
+            const auto body = RuntimeRigidBody(world, high, low);
+            if (!body || !motion || !mass || !velocity || !continuous || !gravity)
+                return 0;
+            *motion = static_cast<std::uint8_t>(body->Motion());
+            *mass = body->Mass();
+            *velocity = body->LinearVelocity();
+            *continuous = body->Continuous() ? 1 : 0;
+            *gravity = body->UseGravity() ? 1 : 0;
+            return 1;
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeSetRigidBodyMotion(const std::uint64_t world, const std::uint64_t high,
+                                                                    const std::uint64_t low,
+                                                                    const std::uint8_t motion) noexcept
+        {
+            try
+            {
+                const auto body = RuntimeRigidBody(world, high, low);
+                if (!body || motion > static_cast<std::uint8_t>(PhysicsMotionType::Kinematic))
+                    return 0;
+                body->SetMotion(static_cast<PhysicsMotionType>(motion));
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeSetRigidBodyMass(const std::uint64_t world, const std::uint64_t high,
+                                                                  const std::uint64_t low, const float mass) noexcept
+        {
+            try
+            {
+                const auto body = RuntimeRigidBody(world, high, low);
+                if (!body)
+                    return 0;
+                body->SetMass(mass);
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeSetRigidBodyVelocity(const std::uint64_t world,
+                                                                      const std::uint64_t high, const std::uint64_t low,
+                                                                      const Vector3 velocity) noexcept
+        {
+            try
+            {
+                const auto body = RuntimeRigidBody(world, high, low);
+                if (!body)
+                    return 0;
+                body->SetLinearVelocity(velocity);
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeSetRigidBodyFlag(const std::uint64_t world, const std::uint64_t high,
+                                                                  const std::uint64_t low, const std::uint8_t property,
+                                                                  const std::uint8_t value) noexcept
+        {
+            const auto body = RuntimeRigidBody(world, high, low);
+            if (!body)
+                return 0;
+            if (property == 0)
+                body->SetContinuous(value != 0);
+            else if (property == 1)
+                body->SetUseGravity(value != 0);
+            else
+                return 0;
+            return 1;
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeAddRigidBodyForce(const std::uint64_t world, const std::uint64_t high,
+                                                                   const std::uint64_t low, const Vector3 force,
+                                                                   const std::uint8_t mode) noexcept
+        {
+            try
+            {
+                const auto body = RuntimeRigidBody(world, high, low);
+                if (!body || body->Motion() != PhysicsMotionType::Dynamic || mode > 3)
+                    return 0;
+                const auto timeStep = RuntimeFixedDeltaTime();
+                auto scale = 1.0F;
+                if (mode == 0)
+                    scale = timeStep / body->Mass();
+                else if (mode == 1)
+                    scale = timeStep;
+                else if (mode == 2)
+                    scale = 1.0F / body->Mass();
+                const auto current = body->LinearVelocity();
+                body->SetLinearVelocity(
+                    {current.X + force.X * scale, current.Y + force.Y * scale, current.Z + force.Z * scale});
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
         }
 
         [[nodiscard]] static Ref<AnimatorComponent> RuntimeAnimator(const std::uint64_t world, const std::uint64_t high,
@@ -3811,6 +3956,18 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimeMoveCharacterController));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "GetCharacterControllerStateIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeGetCharacterControllerState));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "GetRigidBodyPropertiesIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeGetRigidBodyProperties));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetRigidBodyMotionIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetRigidBodyMotion));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetRigidBodyMassIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetRigidBodyMass));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetRigidBodyVelocityIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetRigidBodyVelocity));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetRigidBodyFlagIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetRigidBodyFlag));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "AddRigidBodyForceIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeAddRigidBodyForce));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetAnimatorFloatIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeSetAnimatorFloat));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetAnimatorIntegerIcall",
@@ -3891,6 +4048,10 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimeGetWorldPosition));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "GetWorldRotationIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeGetWorldRotation));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetWorldPositionIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetWorldPosition));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetWorldRotationIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetWorldRotation));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "CloneEntityIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeCloneEntity));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "DestroyEntityIcall",

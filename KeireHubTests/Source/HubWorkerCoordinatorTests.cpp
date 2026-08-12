@@ -277,7 +277,7 @@ namespace
                                        .Message = "The fake worker expected an editor-removal request."});
         }
         const auto& removal = *request.Value().EditorRemoval;
-        if (auto status = PublishStatus(launch, processId, HubTaskState::Installing,
+        if (auto status = PublishStatus(launch, processId, HubTaskState::Removing,
                                         {.CurrentPackage = removal.InstallationId, .Phase = "Removing editor"});
             !status)
         {
@@ -738,7 +738,7 @@ TEST_CASE("Worker coordinator resumes the removal task that owns a retryable edi
             auto status = HubStatus::Success();
             if (index == 0)
             {
-                status = PublishStatus(launch, processId, HubTaskState::Installing,
+                status = PublishStatus(launch, processId, HubTaskState::Removing,
                                        {.CurrentPackage = "editor-1", .Phase = "Removal authorized"});
                 if (status)
                 {

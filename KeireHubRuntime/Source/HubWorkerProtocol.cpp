@@ -71,6 +71,8 @@ namespace KeireHub
                 return "installing";
             case HubTaskState::Configuring:
                 return "configuring";
+            case HubTaskState::Removing:
+                return "removing";
             case HubTaskState::Completed:
                 return "completed";
             case HubTaskState::Failed:
@@ -86,7 +88,8 @@ namespace KeireHub
         {
             constexpr std::array values{HubTaskState::Downloading, HubTaskState::Paused,     HubTaskState::Verifying,
                                         HubTaskState::Extracting,  HubTaskState::Installing, HubTaskState::Configuring,
-                                        HubTaskState::Completed,   HubTaskState::Failed,     HubTaskState::Cancelled};
+                                        HubTaskState::Removing,    HubTaskState::Completed,  HubTaskState::Failed,
+                                        HubTaskState::Cancelled};
             for (const auto state : values)
             {
                 if (StateName(state) == value)

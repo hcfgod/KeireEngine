@@ -58,6 +58,7 @@ internal static class BehaviourRegistry
 public abstract class Behaviour
 {
     private BehaviourSynchronizationContext _synchronizationContext = new();
+    private readonly CoroutineScheduler _coroutines = new();
     private bool _enabled = true;
 
     public Entity Entity { get; private set; }
@@ -82,6 +83,10 @@ public abstract class Behaviour
         }
     }
     public CancellationToken LifetimeToken => _synchronizationContext.LifetimeToken;
+
+    protected Coroutine StartCoroutine(System.Collections.IEnumerator routine) => _coroutines.Start(routine);
+    protected bool StopCoroutine(Coroutine coroutine) => coroutine.Stop();
+    protected void StopAllCoroutines() => _coroutines.StopAll();
 
     [NonSerialized, HideInInspector]
     public string RuntimeSerializedState = "{\"version\":1,\"fields\":[]}";
@@ -120,6 +125,7 @@ public abstract class Behaviour
     {
         Entity = entity;
         _synchronizationContext = new BehaviourSynchronizationContext();
+        _coroutines.UnhandledException = Debug.LogException;
         RuntimeCallbackMask = DetectRuntimeCallbacks();
         BehaviourRegistry.Register(this);
     }
@@ -146,7 +152,7 @@ public abstract class Behaviour
                     result |= LateUpdateCallback;
             }
         }
-        return result;
+        return result | UpdateCallback;
     }
 
     private void InvokeWithContext(Action callback, bool pump = false)
@@ -178,14 +184,28 @@ public abstract class Behaviour
         InvokeWithContext(OnEnable);
     }
     public void RuntimeStart() => InvokeWithContext(Start);
-    public void RuntimeFixedUpdate(float deltaSeconds) => InvokeWithContext(FixedUpdate, true);
+    public void RuntimeFixedUpdate(float deltaSeconds) => InvokeWithContext(
+        () =>
+        {
+            _coroutines.Pump(CoroutinePhase.FixedUpdate, deltaSeconds, deltaSeconds);
+            FixedUpdate();
+        }, true);
     public void RuntimeUpdate(float deltaSeconds)
     {
         UiButton.DispatchNativeClicks();
-        if ((RuntimeCallbackMask & UpdateCallback) != 0)
-            InvokeWithContext(Update, true);
+        InvokeWithContext(
+            () =>
+            {
+                _coroutines.Pump(CoroutinePhase.Update, deltaSeconds, NativeRuntime.UnscaledDeltaTime);
+                Update();
+            }, true);
     }
-    public void RuntimeLateUpdate() => InvokeWithContext(LateUpdate, true);
+    public void RuntimeLateUpdate() => InvokeWithContext(
+        () =>
+        {
+            _coroutines.Pump(CoroutinePhase.LateUpdate, 0.0f, 0.0f);
+            LateUpdate();
+        }, true);
     public void RuntimeAnimationEvent(string name, float normalizedTime, int integer, float scalar, string text) =>
         InvokeWithContext(() => OnAnimationEvent(new AnimationEvent(name, normalizedTime, integer, scalar, text)),
             true);
@@ -218,11 +238,13 @@ public abstract class Behaviour
     public void RuntimeDisable()
     {
         _enabled = false;
+        _coroutines.StopAll();
         _synchronizationContext.Cancel();
         InvokeWithContext(OnDisable);
     }
     public void RuntimeDestroy()
     {
+        _coroutines.StopAll();
         _synchronizationContext.Cancel();
         try
         {
@@ -235,6 +257,7 @@ public abstract class Behaviour
     }
     public void RuntimeBeforeReload()
     {
+        _coroutines.StopAll();
         _synchronizationContext.Cancel();
         try
         {

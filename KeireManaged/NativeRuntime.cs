@@ -260,6 +260,13 @@ internal static unsafe class NativeRuntime
     internal static delegate* unmanaged<ulong, ulong, ulong, Vector3, byte> MoveCharacterControllerIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte*, Vector3*, Vector3*, byte>
         GetCharacterControllerStateIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, byte*, float*, Vector3*, byte*, byte*, byte>
+        GetRigidBodyPropertiesIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, byte, byte> SetRigidBodyMotionIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, float, byte> SetRigidBodyMassIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, Vector3, byte> SetRigidBodyVelocityIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, byte, byte, byte> SetRigidBodyFlagIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, Vector3, byte, byte> AddRigidBodyForceIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, float, byte> SetAnimatorFloatIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, int, byte> SetAnimatorIntegerIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, byte, byte> SetAnimatorBooleanIcall;
@@ -286,6 +293,8 @@ internal static unsafe class NativeRuntime
     internal static delegate* unmanaged<ulong, ulong, ulong, Vector3, void> SetLocalScaleIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Vector3> GetWorldPositionIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Quaternion> GetWorldRotationIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, Vector3, void> SetWorldPositionIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, Quaternion, void> SetWorldRotationIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte> EntityExistsIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte> GetEntityActiveIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte> GetEntityActiveInHierarchyIcall;
@@ -496,6 +505,9 @@ internal static unsafe class NativeRuntime
         SetLocalRotationIcall(entity.World, entity.Id.High, entity.Id.Low, value);
     internal static Quaternion GetWorldRotation(Entity entity) =>
         GetWorldRotationIcall(entity.World, entity.Id.High, entity.Id.Low);
+    internal static void SetWorldRotation(Entity entity,
+                                          Quaternion value) => SetWorldRotationIcall(entity.World, entity.Id.High,
+                                                                                     entity.Id.Low, value);
     internal static bool MoveCharacterController(Entity entity, Vector3 displacement) =>
         MoveCharacterControllerIcall(entity.World, entity.Id.High, entity.Id.Low, displacement) != 0;
     internal static bool TryGetCharacterControllerState(Entity entity, out CharacterControllerState state)
@@ -511,6 +523,40 @@ internal static unsafe class NativeRuntime
         }
         state = new CharacterControllerState(grounded != 0, normal, velocity);
         return true;
+    }
+
+    internal static bool TryGetRigidBodyProperties(Entity entity, out RigidBodyProperties properties)
+    {
+        byte motion = default;
+        float mass = default;
+        Vector3 velocity = default;
+        byte continuous = default;
+        byte gravity = default;
+        if (GetRigidBodyPropertiesIcall(entity.World, entity.Id.High, entity.Id.Low, &motion, &mass, &velocity,
+                                        &continuous, &gravity) == 0)
+        {
+            properties = default;
+            return false;
+        }
+        properties = new RigidBodyProperties((RigidBodyMotion)motion, mass, velocity, continuous != 0, gravity != 0);
+        return true;
+    }
+
+    internal static void SetRigidBodyMotion(Entity entity, RigidBodyMotion motion) =>
+        RequireRigidBodyResult(SetRigidBodyMotionIcall(entity.World, entity.Id.High, entity.Id.Low, (byte)motion));
+    internal static void SetRigidBodyMass(Entity entity, float mass) =>
+        RequireRigidBodyResult(SetRigidBodyMassIcall(entity.World, entity.Id.High, entity.Id.Low, mass));
+    internal static void SetRigidBodyVelocity(Entity entity, Vector3 velocity) =>
+        RequireRigidBodyResult(SetRigidBodyVelocityIcall(entity.World, entity.Id.High, entity.Id.Low, velocity));
+    internal static void SetRigidBodyFlag(Entity entity, byte property, bool value) => RequireRigidBodyResult(
+        SetRigidBodyFlagIcall(entity.World, entity.Id.High, entity.Id.Low, property, value ? (byte)1 : (byte)0));
+    internal static void AddRigidBodyForce(Entity entity, Vector3 force, ForceMode mode) =>
+        RequireRigidBodyResult(AddRigidBodyForceIcall(entity.World, entity.Id.High, entity.Id.Low, force, (byte)mode));
+
+    private static void RequireRigidBodyResult(byte result)
+    {
+        if (result == 0)
+            throw new InvalidOperationException("The Rigid Body command could not be applied.");
     }
 
     private static void RequireAnimatorResult(byte result)
@@ -683,6 +729,9 @@ internal static unsafe class NativeRuntime
         SetLocalScaleIcall(entity.World, entity.Id.High, entity.Id.Low, value);
     internal static Vector3 GetWorldPosition(Entity entity) =>
         GetWorldPositionIcall(entity.World, entity.Id.High, entity.Id.Low);
+    internal static void SetWorldPosition(Entity entity, Vector3 value) => SetWorldPositionIcall(entity.World,
+                                                                                                 entity.Id.High,
+                                                                                                 entity.Id.Low, value);
 
     internal static Entity CloneEntity(Entity entity)
     {

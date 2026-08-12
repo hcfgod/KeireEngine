@@ -15,6 +15,7 @@
 #include "KeireClient/Editor/EditorAssetFileService.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
 #include "KeireClient/Editor/ExternalAssetImportController.h"
+#include "KeireClient/Editor/ExternalEditorProfiles.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/MaterialDocument.h"
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
@@ -145,6 +146,27 @@ std::vector<Keire::ManagedAssetTypeDescriptor> EditorWorkspaceLayer::AssetBrowse
     const auto scripts = Owner().Scripts();
     return scripts && scripts->RuntimeHostAvailable() ? scripts->ManagedAssetTypes()
                                                       : std::vector<Keire::ManagedAssetTypeDescriptor>{};
+}
+
+std::filesystem::path EditorWorkspaceLayer::AssetBrowserExternalEditor() const
+{
+    if (!m_ProjectSettingsDocument)
+        return {};
+    const auto& settings = m_ProjectSettingsDocument->AuthoringSettings();
+    if (settings.ExternalEditorId == "custom")
+        return settings.ExternalEditorExecutable;
+    if (settings.ExternalEditorId == "system")
+        return {};
+    const auto profiles = KeireEditor::DiscoverExternalEditorProfiles();
+    const auto selected =
+        std::ranges::find(profiles, settings.ExternalEditorId, &KeireEditor::ExternalEditorProfile::Id);
+    return selected != profiles.end() && selected->Installed ? selected->Executable : std::filesystem::path{};
+}
+
+void EditorWorkspaceLayer::ConfigureAssetBrowserExternalEditor()
+{
+    if (m_ProjectSettingsPanel)
+        m_ProjectSettingsPanel->Registration().SetVisible(true);
 }
 
 void EditorWorkspaceLayer::RefreshAssetBrowserRecords()

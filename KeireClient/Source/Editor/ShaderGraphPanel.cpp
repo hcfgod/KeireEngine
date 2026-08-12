@@ -213,13 +213,21 @@ namespace KeireEditor
                 return;
             }
             DrawHeader(ui);
-            if (!document.ReusableGraph())
-            {
-                ui.Separator();
-                DrawPreview(ui);
-            }
             ui.Separator();
-            DrawCanvas(ui);
+            const auto available = ui.ContentAvailable();
+            const float authoringHeight = std::max(360.0F, available.Height * 0.72F);
+            const float previewPaneWidth =
+                m_ShowPreview && !document.ReusableGraph() && available.Width >= 620.0F ? 248.0F : 0.0F;
+            const float graphPaneWidth = std::max(320.0F, available.Width - previewPaneWidth - 8.0F);
+            if (auto graph = ui.BeginChild("ShaderGraphAuthoring", {graphPaneWidth, authoringHeight}, false); graph)
+                DrawCanvas(ui);
+            if (previewPaneWidth > 0.0F)
+            {
+                ui.SameLine();
+                if (auto preview = ui.BeginChild("ShaderGraphPreviewPane", {previewPaneWidth, authoringHeight}, true);
+                    preview)
+                    DrawPreview(ui);
+            }
             ui.Separator();
             DrawInspector(ui);
             ui.Separator();
@@ -288,6 +296,10 @@ namespace KeireEditor
                                                 std::to_string(statistics.ConnectionCount) + " connections");
             return;
         }
+
+        ui.SameLine();
+        if (ui.Button(m_ShowPreview ? "Hide Preview" : "Show Preview"))
+            m_ShowPreview = !m_ShowPreview;
 
         auto preview = document.PreviewSettings();
         auto previewIndex = static_cast<std::size_t>(preview.Mesh);
@@ -396,9 +408,8 @@ namespace KeireEditor
             ui.TextColored(theme.MutedText, "A preview appears after the graph compiles successfully.");
             return;
         }
-        const auto availableWidth = std::clamp(ui.ContentAvailable().Width, 280.0F, 640.0F);
-        const auto previewWidth = static_cast<std::uint32_t>(std::floor(availableWidth));
-        const auto previewHeight = static_cast<std::uint32_t>(std::floor(availableWidth * 0.625F));
+        constexpr std::uint32_t previewWidth = 216;
+        constexpr std::uint32_t previewHeight = 216;
         if (previewWidth != m_PreviewWidth || previewHeight != m_PreviewHeight)
         {
             m_PreviewWidth = previewWidth;
@@ -431,7 +442,9 @@ namespace KeireEditor
                 const bool finalQuality = m_PreviewRefinement;
                 const auto width = finalQuality ? m_PreviewWidth : std::max(96U, m_PreviewWidth / 2U);
                 const auto height = finalQuality ? m_PreviewHeight : std::max(64U, m_PreviewHeight / 2U);
-                auto definition = *lastGoodDefinition;
+                auto definition =
+                    Keire::ExpandShaderGraphFunctions(*lastGoodDefinition, [this](const Keire::AssetId asset)
+                                                      { return m_Controller.ResolveShaderGraphFunction(asset); });
                 auto properties = m_PreviewProperties;
                 auto settings = m_PreviewSettings;
                 auto cancellation = m_PreviewCancellation;

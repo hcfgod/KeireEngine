@@ -37,8 +37,9 @@ namespace KeireHub
         constexpr auto MaximumPollInterval = std::chrono::seconds(5);
         constexpr auto MaximumStartupTimeout = std::chrono::minutes(2);
         constexpr std::size_t MaximumCommandQueue = 1024;
-        constexpr std::array WorkerPhases{HubTaskState::Downloading, HubTaskState::Verifying, HubTaskState::Extracting,
-                                          HubTaskState::Installing, HubTaskState::Configuring};
+        constexpr std::array WorkerPhases{HubTaskState::Downloading, HubTaskState::Verifying,
+                                          HubTaskState::Extracting,  HubTaskState::Installing,
+                                          HubTaskState::Configuring, HubTaskState::Removing};
 
         [[nodiscard]] bool IsEditorPackageTask(const HubTaskKind kind) noexcept
         {
@@ -817,7 +818,8 @@ namespace KeireHub
             }
             const bool phaseAllowed =
                 IsEditorPackageTask(task->Kind) ||
-                (task->Kind == HubTaskKind::Remove && status.State == HubTaskState::Installing) ||
+                (task->Kind == HubTaskKind::Remove &&
+                 (status.State == HubTaskState::Removing || status.State == HubTaskState::Installing)) ||
                 ((task->Kind == HubTaskKind::Download || task->Kind == HubTaskKind::HubUpdate) && *targetPhase <= 1);
             if (!phaseAllowed)
             {
@@ -966,7 +968,7 @@ namespace KeireHub
                     }
 
                     const auto targetPhase = completedRequest->EditorInstall   ? HubTaskState::Configuring
-                                             : completedRequest->EditorRemoval ? HubTaskState::Installing
+                                             : completedRequest->EditorRemoval ? HubTaskState::Removing
                                                                                : HubTaskState::Verifying;
                     const auto currentPhase = WorkerPhaseIndex(task->State);
                     const auto targetPhaseIndex = WorkerPhaseIndex(targetPhase);

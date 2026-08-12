@@ -19,6 +19,20 @@ namespace Keire
                 return *value;
             throw std::invalid_argument("Transform component property has an incompatible type.");
         }
+
+        [[nodiscard]] Quaternion MultiplyRotation(const Quaternion left, const Quaternion right)
+        {
+            return Math::Normalize({left.W * right.X + left.X * right.W + left.Y * right.Z - left.Z * right.Y,
+                                    left.W * right.Y - left.X * right.Z + left.Y * right.W + left.Z * right.X,
+                                    left.W * right.Z + left.X * right.Y - left.Y * right.X + left.Z * right.W,
+                                    left.W * right.W - left.X * right.X - left.Y * right.Y - left.Z * right.Z});
+        }
+
+        [[nodiscard]] Quaternion InverseRotation(const Quaternion value)
+        {
+            const auto rotation = Math::Normalize(value);
+            return {-rotation.X, -rotation.Y, -rotation.Z, rotation.W};
+        }
     } // namespace
 
     TransformComponent::TransformComponent() : Component(StaticType()) {}
@@ -71,6 +85,36 @@ namespace Keire
     {
         const auto& values = WorldMatrix().Elements;
         return {values[12], values[13], values[14]};
+    }
+
+    Quaternion TransformComponent::WorldRotation() const
+    {
+        const auto parent = Parent();
+        const auto parentTransform = parent ? parent.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
+        return parentTransform ? MultiplyRotation(parentTransform->WorldRotation(), m_LocalRotation) : m_LocalRotation;
+    }
+
+    void TransformComponent::SetWorldPosition(const Vector3 value)
+    {
+        if (!Math::IsFinite(value))
+            throw std::invalid_argument("Transform world position must be finite.");
+        const auto parent = Parent();
+        const auto parentTransform = parent ? parent.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
+        SetLocalPosition(parentTransform ? Math::TransformPoint(Math::Inverse(parentTransform->WorldMatrix()), value)
+                                         : value);
+    }
+
+    void TransformComponent::SetWorldRotation(const Quaternion value)
+    {
+        const auto rotation = Math::Normalize(value);
+        const auto parent = Parent();
+        const auto parentTransform = parent ? parent.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
+        if (!parentTransform)
+        {
+            SetLocalRotation(rotation);
+            return;
+        }
+        SetLocalRotation(MultiplyRotation(InverseRotation(parentTransform->WorldRotation()), rotation));
     }
 
     Entity TransformComponent::Parent() const noexcept

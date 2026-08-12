@@ -379,6 +379,8 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
             if (playActive)
                 if (const auto vfx = document.PlaySession()->Vfx())
                     renderRequest.Vfx = vfx->CaptureRenderSnapshot();
+            if (!playActive)
+                renderRequest.Vfx = m_Controller.SceneViewportEditVfx();
             renderer->Submit(std::move(renderRequest));
             ui.DrawFilledRectangle(cameraPreviewRect, {0.025F, 0.03F, 0.045F, 0.96F}, 5.0F);
             ui.DrawImage(m_CameraPreviewView->Surface(), cameraPreviewRect);

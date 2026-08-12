@@ -211,6 +211,8 @@ namespace KeireHub
             return HubTaskState::Downloading;
         if (task.Kind == HubTaskKind::Verify || task.Kind == HubTaskKind::ImportPackage)
             return HubTaskState::Verifying;
+        if (task.Kind == HubTaskKind::Remove)
+            return HubTaskState::Removing;
         return HubTaskState::Installing;
     }
 

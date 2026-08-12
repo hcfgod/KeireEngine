@@ -207,6 +207,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] Keire::AssetId AssetBrowserSceneAsset() const noexcept override;
     [[nodiscard]] bool AssetBrowserSceneDirty() const noexcept override;
     [[nodiscard]] std::vector<Keire::ManagedAssetTypeDescriptor> AssetBrowserManagedAssetTypes() const override;
+    [[nodiscard]] std::filesystem::path AssetBrowserExternalEditor() const override;
+    void ConfigureAssetBrowserExternalEditor() override;
     [[nodiscard]] static bool FileIsNewerThan(const std::filesystem::path& path,
                                               std::filesystem::file_time_type reference) noexcept;
     [[nodiscard]] static bool AssetSourcesAreNewerThanCatalog(const std::filesystem::path& assetsRoot,
@@ -293,6 +295,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] std::span<const Keire::AssetSourceRecord> MaterialGraphAssetRecords() const noexcept override;
     [[nodiscard]] std::optional<Keire::ShaderGraphDefinition>
     ResolveMaterialGraphFunction(Keire::AssetId asset) const override;
+    [[nodiscard]] std::optional<Keire::ShaderGraphDefinition>
+    ResolveMaterialGraphTemplate(const Keire::MaterialShaderReference& shader) const override;
     void SaveMaterialGraphDocument() override;
     void UndoMaterialGraphEdit() override;
     void RedoMaterialGraphEdit() override;
@@ -448,8 +452,6 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void SaveMaterialGraph();
     [[nodiscard]] std::optional<Keire::ShaderInterfaceDefinition>
     ResolveMaterialGraphInterface(const Keire::MaterialShaderReference& shader) const;
-    [[nodiscard]] std::optional<Keire::ShaderGraphDefinition>
-    ResolveMaterialGraphTemplate(const Keire::MaterialShaderReference& shader) const;
     [[nodiscard]] std::optional<Keire::ShaderGraphDefinition> ResolveReusableGraph(Keire::AssetId asset) const;
     [[nodiscard]] Keire::AssetId ResolveMaterialGraphShader(const Keire::MaterialShaderReference& shader) const;
     void ApplyMaterialGraphDevelopmentRevision(Keire::AssetId asset,

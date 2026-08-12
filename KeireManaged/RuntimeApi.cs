@@ -168,6 +168,92 @@ public readonly record struct AnimatorStateInfo(string State, float NormalizedTi
 
 public readonly record struct CharacterControllerState(bool Grounded, Vector3 GroundNormal, Vector3 Velocity);
 
+public enum RigidBodyMotion : byte
+{
+    Static,
+    Dynamic,
+    Kinematic
+}
+
+public enum ForceMode : byte
+{
+    Force,
+    Acceleration,
+    Impulse,
+    VelocityChange
+}
+
+public readonly record struct RigidBodyProperties(RigidBodyMotion Motion, float Mass, Vector3 Velocity, bool Continuous,
+                                                  bool UseGravity);
+
+public readonly record struct RigidBodyHandle(Entity Entity)
+{
+    public bool IsValid => Entity.IsValid && Entity.HasComponent<RigidBodyComponent>();
+    private RigidBodyProperties Properties =>
+        IsValid && NativeRuntime.TryGetRigidBodyProperties(Entity, out RigidBodyProperties properties) ? properties
+                                                                                                       : default;
+
+    public RigidBodyMotion Motion
+    {
+        get => Properties.Motion;
+        set
+        {
+            if (!Enum.IsDefined(value))
+                throw new ArgumentOutOfRangeException(nameof(value));
+            NativeRuntime.SetRigidBodyMotion(Entity, value);
+        }
+    }
+
+    public float Mass
+    {
+        get => Properties.Mass;
+        set
+        {
+            if (!float.IsFinite(value) || value <= 0.0f)
+                throw new ArgumentOutOfRangeException(nameof(value), "Rigid Body mass must be finite and positive.");
+            NativeRuntime.SetRigidBodyMass(Entity, value);
+        }
+    }
+
+    public Vector3 Velocity
+    {
+        get => Properties.Velocity;
+        set
+        {
+            ValidateFinite(value, nameof(value));
+            NativeRuntime.SetRigidBodyVelocity(Entity, value);
+        }
+    }
+
+    public bool Continuous
+    {
+        get => Properties.Continuous;
+        set => NativeRuntime.SetRigidBodyFlag(Entity, 0, value);
+    }
+
+    public bool UseGravity
+    {
+        get => Properties.UseGravity;
+        set => NativeRuntime.SetRigidBodyFlag(Entity, 1, value);
+    }
+
+    public void AddForce(Vector3 force, ForceMode mode = ForceMode.Force)
+    {
+        ValidateFinite(force, nameof(force));
+        if (!Enum.IsDefined(mode))
+            throw new ArgumentOutOfRangeException(nameof(mode));
+        NativeRuntime.AddRigidBodyForce(Entity, force, mode);
+    }
+
+    public void AddImpulse(Vector3 impulse) => AddForce(impulse, ForceMode.Impulse);
+
+    private static void ValidateFinite(Vector3 value, string parameter)
+    {
+        if (!float.IsFinite(value.X) || !float.IsFinite(value.Y) || !float.IsFinite(value.Z))
+            throw new ArgumentException("Rigid Body vectors must be finite.", parameter);
+    }
+}
+
 public readonly record struct CharacterControllerHandle(Entity Entity)
 {
     public bool IsValid => Entity.IsValid && Entity.HasComponent<CharacterControllerComponent>();

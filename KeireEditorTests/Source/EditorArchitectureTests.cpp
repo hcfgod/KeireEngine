@@ -4,6 +4,7 @@
 #include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
 #include "KeireClient/Editor/EditorWindowPlacement.h"
+#include "KeireClient/Editor/ExternalEditorProfiles.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/MaterialDocument.h"
 #include "KeireClient/Editor/MaterialGraphCreationPicker.h"
@@ -39,6 +40,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -884,6 +886,8 @@ TEST_CASE("project settings document validates saves and owns one-step edit hist
     CHECK(Keire::LoadProjectAuthoringSettings(root) == document.AuthoringSettings());
     auto authoring = document.AuthoringSettings();
     authoring.DefaultMixer = Keire::AssetId::Parse("18000000-0000-4000-8000-000000000001");
+    authoring.ExternalEditorId = "custom";
+    authoring.ExternalEditorExecutable = "Tools/Editors/cursor";
     authoring.PhysicsLayerNames[7] = "Effects";
     authoring.PhysicsCollisionMatrix[1] &= ~(1U << 7U);
     authoring.PhysicsCollisionMatrix[7] &= ~(1U << 1U);
@@ -904,6 +908,20 @@ TEST_CASE("project settings document validates saves and owns one-step edit hist
     undo->Close();
     undoService->Close();
     std::filesystem::remove_all(root);
+}
+
+TEST_CASE("external editor discovery is cross-platform stable and duplicate free")
+{
+    const auto profiles = KeireEditor::DiscoverExternalEditorProfiles();
+    REQUIRE_FALSE(profiles.empty());
+    CHECK(profiles.front().Id == "system");
+    CHECK(profiles.front().SystemDefault);
+    CHECK(profiles.front().Installed);
+    for (auto first = profiles.begin(); first != profiles.end(); ++first)
+        for (auto second = std::next(first); second != profiles.end(); ++second)
+            CHECK(first->Id != second->Id);
+    CHECK(std::ranges::any_of(profiles, [](const auto& profile) { return profile.Id == "vscode"; }));
+    CHECK(std::ranges::any_of(profiles, [](const auto& profile) { return profile.Id == "neovim"; }));
 }
 
 TEST_CASE("custom registered component properties edit transactionally and restore")
@@ -1801,9 +1819,12 @@ TEST_CASE("content previews use immutable loaded assets without blocking shutdow
     const auto materialInstanceFallback =
         KeireEditor::MakeAssetFallbackThumbnail(Keire::MaterialInstanceAsset::StaticType(), 96, 96);
     const auto vfxFallback = KeireEditor::MakeAssetFallbackThumbnail(Keire::VfxEffectAsset::StaticType(), 96, 96);
+    const auto mixerFallback = KeireEditor::MakeAssetFallbackThumbnail(Keire::AudioMixerAsset::StaticType(), 96, 96);
     CHECK(materialGraphFallback != materialInstanceFallback);
     CHECK(materialGraphFallback != vfxFallback);
     CHECK(materialInstanceFallback != vfxFallback);
+    CHECK(mixerFallback != materialGraphFallback);
+    CHECK(mixerFallback != vfxFallback);
 
     const auto meshId = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000072");
     REQUIRE(thumbnails.Request({.Asset = meshId,

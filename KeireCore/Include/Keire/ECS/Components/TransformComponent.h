@@ -31,6 +31,9 @@ namespace Keire
         [[nodiscard]] Matrix4 LocalMatrix() const;
         [[nodiscard]] Matrix4 WorldMatrix() const;
         [[nodiscard]] Vector3 WorldPosition() const;
+        [[nodiscard]] Quaternion WorldRotation() const;
+        void SetWorldPosition(Vector3 value);
+        void SetWorldRotation(Quaternion value);
         [[nodiscard]] Entity Parent() const noexcept;
         [[nodiscard]] std::vector<Entity> Children() const;
         void SetParent(Entity parent = {}, bool preserveWorldTransform = true);

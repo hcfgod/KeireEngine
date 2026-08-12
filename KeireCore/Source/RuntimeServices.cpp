@@ -171,6 +171,52 @@ namespace Keire
             MixerRoutingSnapshot Routing;
         };
 
+        struct NativeEffectNode final
+        {
+            ma_node_base Base{};
+            AudioGraphNodeType Type = AudioGraphNodeType::Gain;
+            std::array<float, 64> Parameters{};
+            std::size_t ParameterCount = 0;
+            std::array<float, 16> FilterState{};
+            std::vector<float> Delay;
+            std::size_t DelayCursor = 0;
+            double Phase = 0.0;
+        };
+
+        struct NativeDuckingNode final
+        {
+            ma_node_base Base{};
+            float ThresholdDb = -24.0F;
+            float Ratio = 4.0F;
+            float AttackSeconds = 0.01F;
+            float HoldSeconds = 0.0F;
+            float ReleaseSeconds = 0.1F;
+            float MaximumAttenuationDb = 12.0F;
+            float Gain = 1.0F;
+            std::uint32_t HoldFrames = 0;
+        };
+
+        struct NativeMixerGraph final
+        {
+            ma_node_graph* Graph = nullptr;
+            std::map<AssetId, std::unique_ptr<ma_sound_group>> Groups;
+            std::vector<std::unique_ptr<NativeEffectNode>> Effects;
+            std::vector<std::unique_ptr<NativeDuckingNode>> Ducking;
+            std::vector<std::unique_ptr<ma_splitter_node>> Splitters;
+
+            ~NativeMixerGraph()
+            {
+                for (auto iterator = Splitters.rbegin(); iterator != Splitters.rend(); ++iterator)
+                    ma_splitter_node_uninit(iterator->get(), nullptr);
+                for (auto iterator = Ducking.rbegin(); iterator != Ducking.rend(); ++iterator)
+                    ma_node_uninit(reinterpret_cast<ma_node*>(iterator->get()), nullptr);
+                for (auto iterator = Effects.rbegin(); iterator != Effects.rend(); ++iterator)
+                    ma_node_uninit(reinterpret_cast<ma_node*>(iterator->get()), nullptr);
+                for (auto iterator = Groups.rbegin(); iterator != Groups.rend(); ++iterator)
+                    ma_sound_group_uninit(iterator->second.get());
+            }
+        };
+
         struct MixerRegistrationView final
         {
             AssetId Mixer;
@@ -227,6 +273,7 @@ namespace Keire
                 (void)id;
                 DestroyVoice(voice);
             }
+            NativeMixerRoutings.clear();
             if (EngineOpen)
                 ma_engine_uninit(&Engine);
         }
@@ -302,6 +349,334 @@ namespace Keire
                 if (!soloed.empty() && !audibleWhenSoloed.contains(id))
                     gain = 0.0;
                 result.BusGains.emplace(id, static_cast<float>(gain));
+            }
+            return result;
+        }
+
+        static void ProcessNativeEffect(ma_node* base, const float** inputs, ma_uint32* inputFrames, float** outputs,
+                                        ma_uint32* outputFrames)
+        {
+            auto& node = *reinterpret_cast<NativeEffectNode*>(base);
+            const auto frames = std::min(*inputFrames, *outputFrames);
+            constexpr std::size_t channels = 2;
+            const auto parameter = [&](const std::size_t index, const float fallback)
+            { return index < node.ParameterCount ? node.Parameters[index] : fallback; };
+            const auto cutoffCoefficient = [&](const float cutoff)
+            {
+                constexpr float pi = 3.14159265358979323846F;
+                return std::exp(-2.0F * pi * std::clamp(cutoff, 10.0F, 23'520.0F) / 48'000.0F);
+            };
+            for (std::size_t frame = 0; frame < frames; ++frame)
+            {
+                for (std::size_t channel = 0; channel < channels; ++channel)
+                {
+                    const auto index = frame * channels + channel;
+                    const float input = inputs[0][index];
+                    float value = input;
+                    switch (node.Type)
+                    {
+                    case AudioGraphNodeType::Gain:
+                    case AudioGraphNodeType::Equalizer:
+                        value *= parameter(0, 1.0F);
+                        break;
+                    case AudioGraphNodeType::LowPass:
+                    case AudioGraphNodeType::HighPass:
+                    {
+                        const float coefficient = cutoffCoefficient(parameter(0, 1000.0F));
+                        const float low = (1.0F - coefficient) * input + coefficient * node.FilterState[channel];
+                        node.FilterState[channel] = low;
+                        value = node.Type == AudioGraphNodeType::HighPass ? input - low : low;
+                        break;
+                    }
+                    case AudioGraphNodeType::Compressor:
+                    {
+                        const float threshold = std::clamp(parameter(0, 0.5F), 0.001F, 1.0F);
+                        const float ratio = std::clamp(parameter(1, 4.0F), 1.0F, 100.0F);
+                        if (std::abs(value) > threshold)
+                            value = std::copysign(threshold + (std::abs(value) - threshold) / ratio, value);
+                        break;
+                    }
+                    case AudioGraphNodeType::Limiter:
+                    {
+                        const float ceiling = std::clamp(parameter(0, 0.98F), 0.001F, 1.0F);
+                        value = std::clamp(value, -ceiling, ceiling);
+                        break;
+                    }
+                    case AudioGraphNodeType::Gate:
+                        if (std::abs(value) < std::clamp(parameter(0, 0.01F), 0.0F, 1.0F))
+                            value = 0.0F;
+                        break;
+                    case AudioGraphNodeType::Distortion:
+                    {
+                        const float drive = std::clamp(parameter(0, 1.0F), 0.0F, 100.0F);
+                        value = std::tanh(value * drive) / std::tanh(std::max(drive, 1.0F));
+                        break;
+                    }
+                    case AudioGraphNodeType::Delay:
+                    case AudioGraphNodeType::Chorus:
+                    case AudioGraphNodeType::AlgorithmicReverb:
+                    case AudioGraphNodeType::ConvolutionReverb:
+                    {
+                        if (node.Type == AudioGraphNodeType::ConvolutionReverb && node.ParameterCount == 0)
+                            break;
+                        if (!node.Delay.empty())
+                        {
+                            const float milliseconds = node.Type == AudioGraphNodeType::AlgorithmicReverb
+                                                           ? parameter(0, 68.0F)
+                                                           : parameter(0, 80.0F);
+                            const float modulation = node.Type == AudioGraphNodeType::Chorus
+                                                         ? 1.0F + 0.1F * static_cast<float>(std::sin(node.Phase))
+                                                         : 1.0F;
+                            const auto delayFrames =
+                                std::clamp<std::size_t>(static_cast<std::size_t>(milliseconds * 48.0F * modulation), 1,
+                                                        node.Delay.size() / channels - 1U);
+                            const auto delayedFrame = (node.DelayCursor + node.Delay.size() / channels - delayFrames) %
+                                                      (node.Delay.size() / channels);
+                            const float delayed = node.Delay[delayedFrame * channels + channel];
+                            const float feedback = node.Type == AudioGraphNodeType::AlgorithmicReverb
+                                                       ? std::clamp(parameter(1, 0.55F), 0.0F, 0.97F)
+                                                       : std::clamp(parameter(1, 0.25F), 0.0F, 0.99F);
+                            const float wet = node.Type == AudioGraphNodeType::AlgorithmicReverb
+                                                  ? std::clamp(parameter(2, 0.3F), 0.0F, 1.0F)
+                                                  : std::clamp(parameter(2, 0.25F), 0.0F, 1.0F);
+                            node.Delay[node.DelayCursor * channels + channel] = input + delayed * feedback;
+                            value = input * (1.0F - wet) + delayed * wet;
+                        }
+                        break;
+                    }
+                    case AudioGraphNodeType::Meter:
+                    case AudioGraphNodeType::Capture:
+                        break;
+                    case AudioGraphNodeType::Input:
+                    case AudioGraphNodeType::Output:
+                        value = 0.0F;
+                        break;
+                    }
+                    outputs[0][index] = value;
+                }
+                if (!node.Delay.empty())
+                    node.DelayCursor = (node.DelayCursor + 1U) % (node.Delay.size() / channels);
+                node.Phase += 5.0265482457 / 48'000.0;
+            }
+            *inputFrames = frames;
+            *outputFrames = frames;
+        }
+
+        static void ProcessNativeDucking(ma_node* base, const float** inputs, ma_uint32* inputFrames, float** outputs,
+                                         ma_uint32* outputFrames)
+        {
+            auto& node = *reinterpret_cast<NativeDuckingNode*>(base);
+            const auto frames = std::min({inputFrames[0], inputFrames[1], *outputFrames});
+            constexpr std::size_t channels = 2;
+            constexpr float sampleRate = 48'000.0F;
+            const float threshold = std::pow(10.0F, node.ThresholdDb / 20.0F);
+            const auto smoothing = [](const float seconds)
+            { return seconds <= 0.0F ? 0.0F : std::exp(-1.0F / (seconds * sampleRate)); };
+            const float attack = smoothing(node.AttackSeconds);
+            const float release = smoothing(node.ReleaseSeconds);
+            const auto holdFrames = static_cast<std::uint32_t>(node.HoldSeconds * sampleRate);
+            for (std::size_t frame = 0; frame < frames; ++frame)
+            {
+                const auto index = frame * channels;
+                const float sidechain = std::max(std::abs(inputs[1][index]), std::abs(inputs[1][index + 1U]));
+                float desired = 1.0F;
+                if (sidechain > threshold && threshold > 0.0F)
+                {
+                    const float overDb = 20.0F * std::log10(sidechain / threshold);
+                    const float reduction = std::min(node.MaximumAttenuationDb, overDb * (1.0F - 1.0F / node.Ratio));
+                    desired = std::pow(10.0F, -reduction / 20.0F);
+                }
+                if (desired < node.Gain)
+                {
+                    node.Gain = desired + attack * (node.Gain - desired);
+                    node.HoldFrames = holdFrames;
+                }
+                else if (node.HoldFrames > 0)
+                {
+                    --node.HoldFrames;
+                }
+                else
+                {
+                    node.Gain = desired + release * (node.Gain - desired);
+                }
+                outputs[0][index] = inputs[0][index] * node.Gain;
+                outputs[0][index + 1U] = inputs[0][index + 1U] * node.Gain;
+            }
+            inputFrames[0] = frames;
+            inputFrames[1] = frames;
+            *outputFrames = frames;
+        }
+
+        [[nodiscard]] std::shared_ptr<NativeMixerGraph> BuildNativeMixer(const AudioMixerDefinition& definition)
+        {
+            if (!EngineOpen || Mode == AudioMode::Headless)
+                return {};
+            static const ma_node_vtable effectVtable{ProcessNativeEffect, nullptr, 1, 1, 0};
+            static const ma_node_vtable duckingVtable{ProcessNativeDucking, nullptr, 2, 1, 0};
+            auto result = std::make_shared<NativeMixerGraph>();
+            result->Graph = ma_engine_get_node_graph(&Engine);
+            for (const auto& bus : definition.Buses)
+            {
+                auto group = std::make_unique<ma_sound_group>();
+                if (ma_sound_group_init(&Engine, MA_SOUND_FLAG_NO_DEFAULT_ATTACHMENT, nullptr, group.get()) !=
+                    MA_SUCCESS)
+                    throw std::runtime_error("Audio mixer bus node initialization failed.");
+                result->Groups.emplace(bus.Id, std::move(group));
+            }
+            const auto makeEffect = [&](const AudioGraphNodeType type, const std::span<const float> parameters)
+            {
+                auto node = std::make_unique<NativeEffectNode>();
+                node->Type = type;
+                node->ParameterCount = std::min(parameters.size(), node->Parameters.size());
+                std::ranges::copy(parameters.first(node->ParameterCount), node->Parameters.begin());
+                if (type == AudioGraphNodeType::Delay || type == AudioGraphNodeType::Chorus ||
+                    type == AudioGraphNodeType::AlgorithmicReverb || type == AudioGraphNodeType::ConvolutionReverb)
+                    node->Delay.resize(48'000U * 2U * 2U);
+                constexpr ma_uint32 channels = 2;
+                auto configuration = ma_node_config_init();
+                configuration.vtable = &effectVtable;
+                configuration.pInputChannels = &channels;
+                configuration.pOutputChannels = &channels;
+                if (ma_node_init(result->Graph, &configuration, nullptr, reinterpret_cast<ma_node*>(node.get())) !=
+                    MA_SUCCESS)
+                    throw std::runtime_error("Audio mixer effect node initialization failed.");
+                auto* base = reinterpret_cast<ma_node*>(node.get());
+                result->Effects.push_back(std::move(node));
+                return base;
+            };
+            const auto makeSplitter = [&]
+            {
+                auto splitter = std::make_unique<ma_splitter_node>();
+                const auto configuration = ma_splitter_node_config_init(2);
+                if (ma_splitter_node_init(result->Graph, &configuration, nullptr, splitter.get()) != MA_SUCCESS)
+                    throw std::runtime_error("Audio mixer send splitter initialization failed.");
+                auto* base = reinterpret_cast<ma_node*>(splitter.get());
+                result->Splitters.push_back(std::move(splitter));
+                return base;
+            };
+            const auto makeDucking = [&](const AudioMixerDuckingDefinition& definition)
+            {
+                auto node = std::make_unique<NativeDuckingNode>();
+                node->ThresholdDb = definition.ThresholdDb;
+                node->Ratio = definition.Ratio;
+                node->AttackSeconds = definition.AttackSeconds;
+                node->HoldSeconds = definition.HoldSeconds;
+                node->ReleaseSeconds = definition.ReleaseSeconds;
+                node->MaximumAttenuationDb = definition.MaximumAttenuationDb;
+                constexpr std::array<ma_uint32, 2> inputChannels{2, 2};
+                constexpr ma_uint32 outputChannels = 2;
+                auto configuration = ma_node_config_init();
+                configuration.vtable = &duckingVtable;
+                configuration.pInputChannels = inputChannels.data();
+                configuration.pOutputChannels = &outputChannels;
+                if (ma_node_init(result->Graph, &configuration, nullptr, reinterpret_cast<ma_node*>(node.get())) !=
+                    MA_SUCCESS)
+                    throw std::runtime_error("Audio mixer ducking node initialization failed.");
+                auto* base = reinterpret_cast<ma_node*>(node.get());
+                result->Ducking.push_back(std::move(node));
+                return base;
+            };
+            const auto attach =
+                [](ma_node* source, const ma_uint32 output, ma_node* destination, const ma_uint32 input = 0)
+            {
+                if (ma_node_attach_output_bus(source, output, destination, input) != MA_SUCCESS)
+                    throw std::runtime_error("Audio mixer graph connection failed.");
+            };
+            std::set<AssetId> soloed;
+            for (const auto& bus : definition.Buses)
+                if (bus.Solo)
+                    soloed.insert(bus.Id);
+            std::set<AssetId> audibleWhenSoloed;
+            for (const auto solo : soloed)
+            {
+                auto current = solo;
+                while (current)
+                {
+                    audibleWhenSoloed.insert(current);
+                    const auto found = std::ranges::find(definition.Buses, current, &AudioMixerBusDefinition::Id);
+                    current = found == definition.Buses.end() ? AssetId{} : found->Parent;
+                }
+            }
+            struct DuckingConnection final
+            {
+                AssetId Sidechain;
+                ma_node* Node = nullptr;
+            };
+            std::vector<DuckingConnection> duckingConnections;
+            std::map<AssetId, ma_node*> busOutputs;
+            for (const auto& bus : definition.Buses)
+            {
+                auto current = bus.Id;
+                while (current)
+                {
+                    if (soloed.contains(current))
+                    {
+                        audibleWhenSoloed.insert(bus.Id);
+                        break;
+                    }
+                    const auto found = std::ranges::find(definition.Buses, current, &AudioMixerBusDefinition::Id);
+                    current = found == definition.Buses.end() ? AssetId{} : found->Parent;
+                }
+            }
+            for (const auto& bus : definition.Buses)
+            {
+                auto* current = reinterpret_cast<ma_node*>(result->Groups.at(bus.Id).get());
+                for (const auto& effect : bus.Effects)
+                {
+                    if (effect.Bypassed)
+                        continue;
+                    auto* next = makeEffect(effect.Type, effect.Parameters);
+                    attach(current, 0, next);
+                    current = next;
+                }
+                for (const auto& send : bus.Sends)
+                {
+                    if (send.Stage != AudioMixerSendStage::PreFader)
+                        continue;
+                    auto* splitter = makeSplitter();
+                    attach(current, 0, splitter);
+                    attach(splitter, 1, reinterpret_cast<ma_node*>(result->Groups.at(send.DestinationBus).get()));
+                    (void)ma_node_set_output_bus_volume(splitter, 1, send.Gain);
+                    current = splitter;
+                }
+                const std::array fader{bus.Mute || (!soloed.empty() && !audibleWhenSoloed.contains(bus.Id)) ? 0.0F
+                                                                                                            : bus.Gain};
+                auto* faderNode = makeEffect(AudioGraphNodeType::Gain, fader);
+                attach(current, 0, faderNode);
+                current = faderNode;
+                for (const auto& ducking : definition.Ducking)
+                {
+                    if (ducking.TargetBus != bus.Id)
+                        continue;
+                    auto* duckingNode = makeDucking(ducking);
+                    attach(current, 0, duckingNode);
+                    current = duckingNode;
+                    duckingConnections.push_back({ducking.SidechainBus, duckingNode});
+                }
+                for (const auto& send : bus.Sends)
+                {
+                    if (send.Stage != AudioMixerSendStage::PostFader)
+                        continue;
+                    auto* splitter = makeSplitter();
+                    attach(current, 0, splitter);
+                    attach(splitter, 1, reinterpret_cast<ma_node*>(result->Groups.at(send.DestinationBus).get()));
+                    (void)ma_node_set_output_bus_volume(splitter, 1, send.Gain);
+                    current = splitter;
+                }
+                busOutputs.emplace(bus.Id, current);
+            }
+            for (const auto& connection : duckingConnections)
+            {
+                auto* splitter = makeSplitter();
+                attach(busOutputs.at(connection.Sidechain), 0, splitter);
+                attach(splitter, 1, connection.Node, 1);
+                busOutputs.at(connection.Sidechain) = splitter;
+            }
+            for (const auto& bus : definition.Buses)
+            {
+                auto* destination = bus.Parent ? reinterpret_cast<ma_node*>(result->Groups.at(bus.Parent).get())
+                                               : ma_node_graph_get_endpoint(result->Graph);
+                attach(busOutputs.at(bus.Id), 0, destination);
             }
             return result;
         }
@@ -390,6 +765,30 @@ namespace Keire
             return static_cast<float>(std::min(gain, static_cast<double>(std::numeric_limits<float>::max())));
         }
 
+        [[nodiscard]] float DeviceVoiceGain(const AudioVoiceSpecification& specification) const noexcept
+        {
+            const auto resolved = ResolveVoiceBus(specification);
+            if (resolved.Authored && specification.MixerRouting &&
+                NativeMixerRoutings.contains(specification.MixerRouting))
+                return AuthoredVoiceSourceGain(specification, resolved);
+            return VoiceGain(specification);
+        }
+
+        void AttachDeviceMixer(Voice& voice)
+        {
+            if (!voice.Device || !voice.Device->SoundOpen || !voice.Specification.MixerRouting)
+                return;
+            const auto native = NativeMixerRoutings.find(voice.Specification.MixerRouting);
+            if (native == NativeMixerRoutings.end() || !native->second)
+                return;
+            const auto resolved = ResolveVoiceBus(voice.Specification);
+            const auto group = native->second->Groups.find(resolved.Bus);
+            if (group == native->second->Groups.end() ||
+                ma_node_attach_output_bus(reinterpret_cast<ma_node*>(&voice.Device->Sound), 0,
+                                          reinterpret_cast<ma_node*>(group->second.get()), 0) != MA_SUCCESS)
+                throw std::runtime_error("Audio voice could not attach to its mixer bus.");
+        }
+
         void DestroyVoice(Voice& voice) noexcept
         {
             if (!voice.Device)
@@ -438,7 +837,7 @@ namespace Keire
                 voice.Virtualized = index >= MaximumVoices;
                 if (voice.Device && voice.Device->SoundOpen)
                 {
-                    const auto gain = voice.Virtualized ? 0.0F : VoiceGain(voice.Specification);
+                    const auto gain = voice.Virtualized ? 0.0F : DeviceVoiceGain(voice.Specification);
                     ma_sound_set_volume(&voice.Device->Sound, gain);
                 }
             }
@@ -458,7 +857,7 @@ namespace Keire
                                   specification.Velocity.Z);
             ma_sound_set_min_distance(&voice.Device->Sound, specification.MinimumDistance);
             ma_sound_set_max_distance(&voice.Device->Sound, specification.MaximumDistance);
-            ma_sound_set_volume(&voice.Device->Sound, voice.Virtualized ? 0.0F : VoiceGain(specification));
+            ma_sound_set_volume(&voice.Device->Sound, voice.Virtualized ? 0.0F : DeviceVoiceGain(specification));
         }
 
         RuntimeServiceState State{"AudioSystem"};
@@ -475,6 +874,7 @@ namespace Keire
         AudioListenerState Listener;
         std::map<AssetId, MixerRoutingSnapshot> Mixers;
         std::map<AudioMixerRoutingId, RegisteredMixer> MixerRoutings;
+        std::map<AudioMixerRoutingId, std::shared_ptr<NativeMixerGraph>> NativeMixerRoutings;
         std::map<std::string, float, std::less<>> BusGains{{"Master", 1.0F}};
         std::map<std::string, float, std::less<>> SnapshotStart;
         std::map<std::string, float, std::less<>> SnapshotTarget;
@@ -785,6 +1185,7 @@ namespace Keire
                 if (soundResult != MA_SUCCESS)
                     throw std::runtime_error("miniaudio voice initialization failed.");
                 voice.Device->SoundOpen = true;
+                m_Impl->AttachDeviceMixer(voice);
                 m_Impl->ApplyDeviceProperties(voice);
                 if (ma_sound_start(&voice.Device->Sound) != MA_SUCCESS)
                     throw std::runtime_error("miniaudio voice start failed.");
@@ -885,7 +1286,28 @@ namespace Keire
             throw std::invalid_argument("Audio mixer asset ID is empty.");
         auto routing = AudioSystem::Impl::CompileMixer(definition);
         std::scoped_lock lock(m_Impl->Mutex);
-        m_Impl->Mixers.insert_or_assign(mixer, std::move(routing));
+        m_Impl->Mixers.insert_or_assign(mixer, routing);
+        for (auto& [id, registered] : m_Impl->MixerRoutings)
+        {
+            if (registered.Mixer == mixer)
+            {
+                registered.Routing = routing;
+                const auto previous = m_Impl->NativeMixerRoutings.find(id);
+                const auto previousNative = previous == m_Impl->NativeMixerRoutings.end() ? nullptr : previous->second;
+                const auto replacementNative = m_Impl->BuildNativeMixer(definition);
+                if (replacementNative)
+                    m_Impl->NativeMixerRoutings.insert_or_assign(id, replacementNative);
+                else
+                    m_Impl->NativeMixerRoutings.erase(id);
+                for (auto& [voiceId, voice] : m_Impl->Voices)
+                {
+                    (void)voiceId;
+                    if (voice.Specification.MixerRouting == id)
+                        m_Impl->AttachDeviceMixer(voice);
+                }
+                (void)previousNative;
+            }
+        }
         m_Impl->UpdateVirtualization();
     }
 
@@ -907,12 +1329,15 @@ namespace Keire
         if (!mixer)
             throw std::invalid_argument("Audio mixer asset ID is empty.");
         auto routing = AudioSystem::Impl::CompileMixer(definition);
+        auto native = m_Impl->BuildNativeMixer(definition);
         std::scoped_lock lock(m_Impl->Mutex);
         auto id = AudioMixerRoutingId(m_Impl->NextMixerRouting++);
         while (!id || m_Impl->MixerRoutings.contains(id))
             id = AudioMixerRoutingId(m_Impl->NextMixerRouting++);
         m_Impl->MixerRoutings.emplace(
             id, AudioSystem::Impl::RegisteredMixer{.Mixer = mixer, .Routing = std::move(routing)});
+        if (native)
+            m_Impl->NativeMixerRoutings.emplace(id, std::move(native));
         return id;
     }
 
@@ -922,11 +1347,25 @@ namespace Keire
         if (!routing)
             return false;
         auto replacement = AudioSystem::Impl::CompileMixer(definition);
+        auto native = m_Impl->BuildNativeMixer(definition);
         std::scoped_lock lock(m_Impl->Mutex);
         const auto found = m_Impl->MixerRoutings.find(routing);
         if (found == m_Impl->MixerRoutings.end())
             return false;
         found->second.Routing = std::move(replacement);
+        const auto previous = m_Impl->NativeMixerRoutings.find(routing);
+        const auto previousNative = previous == m_Impl->NativeMixerRoutings.end() ? nullptr : previous->second;
+        if (native)
+            m_Impl->NativeMixerRoutings.insert_or_assign(routing, std::move(native));
+        else
+            m_Impl->NativeMixerRoutings.erase(routing);
+        for (auto& [id, voice] : m_Impl->Voices)
+        {
+            (void)id;
+            if (voice.Specification.MixerRouting == routing)
+                m_Impl->AttachDeviceMixer(voice);
+        }
+        (void)previousNative;
         m_Impl->UpdateVirtualization();
         return true;
     }
@@ -937,6 +1376,15 @@ namespace Keire
         if (!routing)
             return false;
         std::scoped_lock lock(m_Impl->Mutex);
+        for (auto& [id, voice] : m_Impl->Voices)
+        {
+            (void)id;
+            if (voice.Specification.MixerRouting == routing && voice.Device && voice.Device->SoundOpen)
+                (void)ma_node_attach_output_bus(reinterpret_cast<ma_node*>(&voice.Device->Sound), 0,
+                                                ma_node_graph_get_endpoint(ma_engine_get_node_graph(&m_Impl->Engine)),
+                                                0);
+        }
+        m_Impl->NativeMixerRoutings.erase(routing);
         const auto removed = m_Impl->MixerRoutings.erase(routing) != 0;
         if (removed)
             m_Impl->UpdateVirtualization();

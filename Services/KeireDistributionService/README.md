@@ -264,9 +264,11 @@ policy; external scripts, external fonts, and inline script/style execution rema
    `Website/assets/preview-downloads.json`. Use a digest-suffixed filename for every rebuild so immutable browser and
    proxy caches cannot alias different bytes. Publish a schema-2 record containing a unique release ID, Hub version,
    editor version, UTC publication time, platform, architecture, native `packageFormat`, exact size, and digest. Retain
-   one verified preview per Hub version, platform, architecture, and package format. Once its replacement is available,
-   remove a superseded preview record
-   and artifact together so the manifest never advertises a missing or ambiguous file. `/downloads/previous/` renders
+   one verified preview per Hub version, platform, architecture, and package format. A complete preview withdrawal uses
+   an empty package collection plus a validated `releaseStatus` containing the pending semantic version and public
+   message. Deploy that metadata and the matching status UI before moving the retired bytes from the served preview
+   root into private recovery storage. For an ordinary replacement, remove the superseded preview record and artifact
+   together so the manifest never advertises a missing or ambiguous file. `/downloads/previous/` renders
    this bounded retained set and hides any record whose file is missing or has the wrong size. Signed stable releases
    remain immutable and are never pruned through the preview-retention workflow. Preview builds never belong in a
    signed stable catalog.

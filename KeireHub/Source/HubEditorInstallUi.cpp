@@ -217,53 +217,102 @@ namespace KeireHub
 
     void HubProductUi::DrawAvailableEditors(Keire::UiFrame& ui, const HubProductSnapshot& snapshot)
     {
-        if (snapshot.PopulatedEditorChannels.empty())
-        {
-            if (snapshot.EditorCatalogRefreshing)
-                ui.TextColored(m_Tokens.SecondaryText, "Loading verified editor catalogs...");
-            else if (!snapshot.EditorCatalogMessage.empty())
-                ui.TextColoredWrapped(m_Tokens.Danger, snapshot.EditorCatalogMessage);
-            else if (snapshot.Editors.empty())
-                ui.TextColored(m_Tokens.MutedText, "No compatible editor versions are currently available.");
+        if (std::exchange(m_RequestEditorCatalog, false))
+            ui.OpenPopup("Install Editor Catalog");
+        PrepareHubModal(ui, {840.0F, 650.0F});
+        HubModalStyleScope catalogStyle(ui, m_Tokens);
+        auto catalog = ui.BeginPopupModal("Install Editor Catalog", nullptr, HubModalWindowOptions(), false);
+        if (!catalog)
             return;
-        }
 
-        for (const auto& channel : snapshot.PopulatedEditorChannels)
+        DrawHubModalHeader(ui, m_Tokens, "Install Kéire Editor",
+                           "Choose a verified editor release, then configure its location and components.",
+                           "INSTALLS  •  VERSION CATALOG");
+        if (!snapshot.EditorCatalogMessage.empty())
+            ui.TextColoredWrapped(m_Tokens.Warning, snapshot.EditorCatalogMessage);
+
+        ui.SetNextItemWidth(std::max(ui.ContentAvailable().Width - 206.0F, 120.0F));
+        (void)ui.InputTextWithHint("##EditorCatalogSearch", "Search versions, channels, or platforms",
+                                   m_EditorCatalogSearch);
+        ui.SameLine();
+        const auto selectedChannel =
+            m_EditorCatalogChannel.empty() ? std::string_view("All channels") : ChannelLabel(m_EditorCatalogChannel);
+        ui.SetNextItemWidth(190.0F);
+        if (auto channelPicker = ui.BeginCombo("##EditorCatalogChannel", selectedChannel); channelPicker)
         {
-            ui.Spacing();
-            ui.Separator();
-            ui.TextColored(m_Tokens.PrimaryText, ChannelLabel(channel));
-            if (!snapshot.AvailableEditors)
-                continue;
-            for (const auto& editor : *snapshot.AvailableEditors)
+            if (ui.Selectable("All channels", m_EditorCatalogChannel.empty()))
+                m_EditorCatalogChannel.clear();
+            for (const auto& channel : snapshot.PopulatedEditorChannels)
             {
-                if (editor.Channel != channel)
-                    continue;
-                auto id = ui.PushId(editor.PackageId + "@" + editor.Version);
-                if (auto card = ui.BeginChild("AvailableEditor", {0.0F, 166.0F}, true); card)
-                {
-                    const bool activeInstall = HasActiveEditorInstall(snapshot.Tasks, editor.PackageId, editor.Version);
-                    ui.TextColored(m_Tokens.PrimaryText,
-                                   editor.DisplayName.empty() ? "Kéire Editor " + editor.Version : editor.DisplayName);
-                    ui.TextColored(m_Tokens.SecondaryText,
-                                   editor.Version + "  ·  " + editor.Platform + " / " + editor.Architecture);
-                    ui.TextColored(m_Tokens.MutedText, "Editor package " + HumanBytes(editor.DownloadBytes) +
-                                                           "  ·  Installed " + HumanBytes(editor.InstalledBytes));
-                    if (!editor.AvailabilityMessage.empty())
-                        ui.TextColoredWrapped(m_Tokens.Danger, editor.AvailabilityMessage);
-                    else if (!editor.InstalledInstallationIds.empty())
-                        ui.TextColored(m_Tokens.Success, "Installed");
-                    else if (auto disabled = ui.BeginDisabled(snapshot.EditorManagementBusy); disabled)
-                    {
-                        if (activeInstall)
-                            ui.TextColored(m_Tokens.Warning, "Download or installation already in progress");
-                        if (ui.Button(activeInstall ? "Install again..." : "Install...", {116.0F, 30.0F}))
-                            (void)RequestEditorInstall(editor.PackageId, snapshot);
-                    }
-                }
-                ui.Spacing();
+                if (ui.Selectable(ChannelLabel(channel), m_EditorCatalogChannel == channel))
+                    m_EditorCatalogChannel = channel;
             }
         }
+        if (!m_EditorCatalogChannel.empty() &&
+            std::ranges::find(snapshot.PopulatedEditorChannels, m_EditorCatalogChannel) ==
+                snapshot.PopulatedEditorChannels.end())
+        {
+            m_EditorCatalogChannel.clear();
+        }
+
+        if (auto list = ui.BeginChild("EditorVersionCatalog", {0.0F, 490.0F}, true); list)
+        {
+            std::size_t visibleEditors = 0;
+            if (snapshot.AvailableEditors)
+            {
+                for (const auto& editor : *snapshot.AvailableEditors)
+                {
+                    if ((!m_EditorCatalogChannel.empty() && editor.Channel != m_EditorCatalogChannel) ||
+                        (!ContainsInsensitive(editor.DisplayName, m_EditorCatalogSearch) &&
+                         !ContainsInsensitive(editor.Version, m_EditorCatalogSearch) &&
+                         !ContainsInsensitive(editor.Channel, m_EditorCatalogSearch) &&
+                         !ContainsInsensitive(editor.Platform, m_EditorCatalogSearch) &&
+                         !ContainsInsensitive(editor.Architecture, m_EditorCatalogSearch)))
+                    {
+                        continue;
+                    }
+                    ++visibleEditors;
+                    auto id = ui.PushId(editor.PackageId + "@" + editor.Version);
+                    if (auto card = ui.BeginChild("AvailableEditor", {0.0F, 126.0F}, true); card)
+                    {
+                        const bool activeInstall =
+                            HasActiveEditorInstall(snapshot.Tasks, editor.PackageId, editor.Version);
+                        ui.TextColored(m_Tokens.Accent, std::string(ChannelLabel(editor.Channel)));
+                        ui.TextColored(m_Tokens.PrimaryText, editor.DisplayName.empty()
+                                                                 ? "Kéire Editor " + editor.Version
+                                                                 : editor.DisplayName);
+                        ui.TextColored(m_Tokens.SecondaryText,
+                                       editor.Version + "  •  " + editor.Platform + " / " + editor.Architecture);
+                        ui.TextColored(m_Tokens.MutedText, "Download " + HumanBytes(editor.DownloadBytes) +
+                                                               "  •  Installed " + HumanBytes(editor.InstalledBytes));
+                        if (!editor.AvailabilityMessage.empty())
+                            ui.TextColoredWrapped(m_Tokens.Danger, editor.AvailabilityMessage);
+                        else if (!editor.InstalledInstallationIds.empty())
+                            ui.TextColored(m_Tokens.Success, "Installed and registered");
+                        else if (auto disabled = ui.BeginDisabled(snapshot.EditorManagementBusy); disabled)
+                        {
+                            if (activeInstall)
+                                ui.TextColored(m_Tokens.Warning, "Installation already in progress");
+                            if (HubPrimaryButton(ui, m_Tokens, activeInstall ? "Install another" : "Select version",
+                                                 {128.0F, 30.0F}))
+                            {
+                                (void)RequestEditorInstall(editor.PackageId, snapshot);
+                                ui.CloseCurrentPopup();
+                            }
+                        }
+                    }
+                    ui.Spacing();
+                }
+            }
+
+            if (visibleEditors == 0)
+                ui.TextColored(m_Tokens.SecondaryText, snapshot.EditorCatalogRefreshing
+                                                           ? "Loading verified editor catalogs..."
+                                                           : "No verified editor release matches these filters.");
+        }
+        ui.Spacing();
+        if (HubSecondaryButton(ui, m_Tokens, "Close", {88.0F, 36.0F}))
+            ui.CloseCurrentPopup();
     }
 
     void HubProductUi::DrawEditorInstallDialog(Keire::UiFrame& ui, const HubProductSnapshot& snapshot,

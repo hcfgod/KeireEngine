@@ -278,14 +278,7 @@ namespace KeireEditor
                 const auto pin = std::ranges::find(m_Master->Pins, name, &Keire::ShaderGraphPin::Name);
                 if (pin == m_Master->Pins.end())
                     return std::nullopt;
-                try
-                {
-                    return Coerce(Input(*m_Master, *pin), type).Data;
-                }
-                catch (const std::exception&)
-                {
-                    return std::nullopt;
-                }
+                return Coerce(Input(*m_Master, *pin), type).Data;
             }
 
             [[nodiscard]] std::optional<PreviewMaterialSurface> MasterAttributes()
@@ -295,15 +288,8 @@ namespace KeireEditor
                 const auto pin = std::ranges::find(m_Master->Pins, "MaterialAttributes", &Keire::ShaderGraphPin::Name);
                 if (pin == m_Master->Pins.end() || !m_Incoming.contains({m_Master->Id, pin->Id}))
                     return std::nullopt;
-                try
-                {
-                    const auto value = Coerce(Input(*m_Master, *pin), Keire::ShaderGraphValueType::MaterialAttributes);
-                    return value.Surface;
-                }
-                catch (const std::exception&)
-                {
-                    return std::nullopt;
-                }
+                const auto value = Coerce(Input(*m_Master, *pin), Keire::ShaderGraphValueType::MaterialAttributes);
+                return value.Surface;
             }
 
           private:

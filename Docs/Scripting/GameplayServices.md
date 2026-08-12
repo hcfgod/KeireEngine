@@ -106,6 +106,26 @@ gravity and jumping explicitly, as demonstrated by `FirstPersonCamera.cs` in Kei
 `TransformHandle.Rotation`, `Forward`, `Right`, and `Up` are world-space. This matters for a camera parented under a
 yawing FPS root; `LocalRotation` remains available for pitch and recoil.
 
+## Rigid Bodies
+
+`Entity.RigidBody` exposes validated runtime body state without exposing a native physics pointer:
+
+```csharp
+RigidBodyHandle body = Entity.RigidBody;
+if (body.IsValid)
+{
+    body.UseGravity = true;
+    body.Continuous = true;
+    body.AddForce(Entity.Transform.Forward * 12.0f);
+    body.AddImpulse(Vector3.Up * 3.5f);
+}
+```
+
+`Motion`, `Mass`, `Velocity`, `Continuous`, and `UseGravity` are readable and writable. `AddForce` accepts `Force`,
+`Acceleration`, `Impulse`, and `VelocityChange` modes; the first two use the current fixed time step. Commands reject
+non-finite vectors, invalid modes, non-positive mass, missing components, and forces on non-dynamic bodies. Component
+changes enter the native physics world at its next safe scene synchronization boundary.
+
 ## Collision And Trigger Callbacks
 
 Override the matching callbacks:

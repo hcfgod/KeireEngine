@@ -45,6 +45,7 @@ namespace KeireHub
             case HubTaskState::Extracting:
             case HubTaskState::Installing:
             case HubTaskState::Configuring:
+            case HubTaskState::Removing:
             case HubTaskState::Cancelling:
                 return HubUpdateDownloadState::Downloading;
             }

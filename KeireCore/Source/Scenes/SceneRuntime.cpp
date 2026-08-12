@@ -1485,8 +1485,14 @@ namespace Keire
                     throw std::runtime_error("Dynamic physics body produced a non-decomposable Transform.");
                 transform->SetLocalPosition(localPosition);
                 transform->SetLocalRotation(localRotation);
+                if (const auto rigidBody = entity.GetComponent<RigidBodyComponent>();
+                    rigidBody && rigidBody->LinearVelocity() != body->LinearVelocity)
+                {
+                    rigidBody->SetLinearVelocity(body->LinearVelocity);
+                }
                 runtime.Definition.Position = body->Position;
                 runtime.Definition.Rotation = body->Rotation;
+                runtime.Definition.LinearVelocity = body->LinearVelocity;
             }
         }
 

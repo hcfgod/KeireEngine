@@ -45,8 +45,8 @@ namespace KeireHub
         [[nodiscard]] std::string_view ToString(const HubTaskState value) noexcept
         {
             constexpr std::array names{"queued",     "downloading", "paused",      "verifying",
-                                       "extracting", "installing",  "configuring", "cancelling",
-                                       "completed",  "failed",      "cancelled"};
+                                       "extracting", "installing",  "configuring", "removing",
+                                       "cancelling", "completed",   "failed",      "cancelled"};
             return names[static_cast<std::size_t>(value)];
         }
 
@@ -193,8 +193,8 @@ namespace KeireHub
                 constexpr std::array states{
                     HubTaskState::Queued,      HubTaskState::Downloading, HubTaskState::Paused,
                     HubTaskState::Verifying,   HubTaskState::Extracting,  HubTaskState::Installing,
-                    HubTaskState::Configuring, HubTaskState::Cancelling,  HubTaskState::Completed,
-                    HubTaskState::Failed,      HubTaskState::Cancelled};
+                    HubTaskState::Configuring, HubTaskState::Removing,    HubTaskState::Cancelling,
+                    HubTaskState::Completed,   HubTaskState::Failed,      HubTaskState::Cancelled};
                 std::vector<HubTask> result;
                 result.reserve(values.size());
                 for (const auto& value : values)
@@ -209,6 +209,8 @@ namespace KeireHub
                         throw std::invalid_argument("Unknown task kind or state.");
                     task.Kind = *kind;
                     task.State = *state;
+                    if (task.Kind == HubTaskKind::Remove && task.State == HubTaskState::Installing)
+                        task.State = HubTaskState::Removing;
                     task.DisplayName = value.at("displayName").get<std::string>();
                     task.PackageIds = value.at("packageIds").get<std::vector<std::string>>();
                     if (value.contains("targetInstallationId"))
@@ -267,8 +269,8 @@ namespace KeireHub
         {
         case HubTaskState::Queued:
             return to == HubTaskState::Downloading || to == HubTaskState::Verifying || to == HubTaskState::Extracting ||
-                   to == HubTaskState::Installing || to == HubTaskState::Cancelling || to == HubTaskState::Cancelled ||
-                   to == HubTaskState::Failed;
+                   to == HubTaskState::Installing || to == HubTaskState::Removing || to == HubTaskState::Cancelling ||
+                   to == HubTaskState::Cancelled || to == HubTaskState::Failed;
         case HubTaskState::Downloading:
             return to == HubTaskState::Paused || to == HubTaskState::Verifying || to == HubTaskState::Cancelling ||
                    to == HubTaskState::Queued || to == HubTaskState::Failed;
@@ -281,9 +283,11 @@ namespace KeireHub
         case HubTaskState::Extracting:
             return to == HubTaskState::Installing || to == HubTaskState::Cancelling || to == HubTaskState::Failed;
         case HubTaskState::Installing:
-            return to == HubTaskState::Configuring || to == HubTaskState::Completed || to == HubTaskState::Cancelling ||
-                   to == HubTaskState::Failed;
+            return to == HubTaskState::Configuring || to == HubTaskState::Removing || to == HubTaskState::Completed ||
+                   to == HubTaskState::Cancelling || to == HubTaskState::Failed;
         case HubTaskState::Configuring:
+            return to == HubTaskState::Completed || to == HubTaskState::Cancelling || to == HubTaskState::Failed;
+        case HubTaskState::Removing:
             return to == HubTaskState::Completed || to == HubTaskState::Cancelling || to == HubTaskState::Failed;
         case HubTaskState::Cancelling:
             // Publication may win the narrow race after cancellation was requested. Once the worker reports an

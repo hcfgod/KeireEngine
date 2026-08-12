@@ -2,11 +2,13 @@
 
 #include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
+#include "KeireInternal/FileSystem.h"
 
 #include <bit>
 #include <cstdint>
 #include <exception>
 #include <memory>
+#include <ranges>
 
 namespace KeireEditor
 {
@@ -81,6 +83,76 @@ namespace KeireEditor
         }
         if (!m_Error.empty())
             ui.TextColored(theme.Warning, m_Error);
+        ui.Spacing();
+        ui.Text("Code Editor");
+        ui.TextColored(theme.MutedText, "Choose the project-wide editor used for C#, C++, shaders, and text assets.");
+        if (!m_EditorsInitialized)
+        {
+            m_ExternalEditorProfiles = DiscoverExternalEditorProfiles();
+            m_SelectedExternalEditorId = m_Document.AuthoringSettings().ExternalEditorId;
+            m_CustomEditorPath = Keire::Detail::PathToUtf8(m_Document.AuthoringSettings().ExternalEditorExecutable);
+            m_EditorsInitialized = true;
+        }
+        auto editorSettings = m_Document.AuthoringSettings();
+        const auto activeProfile =
+            std::ranges::find(m_ExternalEditorProfiles, m_SelectedExternalEditorId, &ExternalEditorProfile::Id);
+        const auto activeName = activeProfile != m_ExternalEditorProfiles.end() ? activeProfile->DisplayName
+                                : m_SelectedExternalEditorId == "custom"        ? "Custom Executable"
+                                                                                : "System Default";
+        bool editorChanged = false;
+        if (auto combo = ui.BeginCombo("External Editor", activeName); combo)
+        {
+            for (const auto& profile : m_ExternalEditorProfiles)
+            {
+                const auto label = profile.DisplayName + (profile.Installed ? "" : " (not detected)");
+                if (auto disabled = ui.BeginDisabled(!profile.Installed); disabled)
+                    if (ui.Selectable(label, profile.Id == m_SelectedExternalEditorId))
+                    {
+                        m_SelectedExternalEditorId = profile.Id;
+                        editorSettings.ExternalEditorId = profile.Id;
+                        editorSettings.ExternalEditorExecutable.clear();
+                        editorChanged = true;
+                    }
+            }
+            if (ui.Selectable("Custom Executable", m_SelectedExternalEditorId == "custom"))
+            {
+                m_SelectedExternalEditorId = "custom";
+            }
+        }
+        if (m_SelectedExternalEditorId == "custom")
+        {
+            (void)ui.InputText("Editor Executable", m_CustomEditorPath);
+            ui.TextColored(theme.MutedText, "The custom selection is saved after its executable is validated.");
+            if (ui.LastItemState().DeactivatedAfterEdit)
+            {
+                std::error_code error;
+                const auto candidate = Keire::Detail::PathFromUtf8(m_CustomEditorPath);
+                if (!std::filesystem::is_regular_file(candidate, error) || error)
+                    m_Error = "The custom external editor executable does not exist.";
+                else
+                {
+                    editorSettings.ExternalEditorId = "custom";
+                    editorSettings.ExternalEditorExecutable = std::filesystem::absolute(candidate).lexically_normal();
+                    editorChanged = true;
+                }
+            }
+        }
+        if (ui.Button("Rescan Editors"))
+            m_ExternalEditorProfiles = DiscoverExternalEditorProfiles();
+        if (editorChanged)
+        {
+            try
+            {
+                m_Document.UpdateAuthoring(std::move(editorSettings));
+                m_Document.CommitEdit("Change External Editor");
+                m_Document.Save();
+                m_Error.clear();
+            }
+            catch (const std::exception& error)
+            {
+                m_Error = error.what();
+            }
+        }
         ui.Spacing();
         ui.Separator();
         ui.Text("Audio / Physics Authoring");

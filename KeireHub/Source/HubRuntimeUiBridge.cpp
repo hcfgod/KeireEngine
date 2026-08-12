@@ -11,36 +11,6 @@ namespace KeireHub
 {
     namespace
     {
-        [[nodiscard]] std::string_view TaskPhase(const HubTaskState state) noexcept
-        {
-            switch (state)
-            {
-            case HubTaskState::Queued:
-                return "Queued";
-            case HubTaskState::Downloading:
-                return "Downloading";
-            case HubTaskState::Paused:
-                return "Paused";
-            case HubTaskState::Verifying:
-                return "Verifying";
-            case HubTaskState::Extracting:
-                return "Extracting";
-            case HubTaskState::Installing:
-                return "Installing";
-            case HubTaskState::Configuring:
-                return "Configuring";
-            case HubTaskState::Cancelling:
-                return "Cancelling";
-            case HubTaskState::Completed:
-                return "Completed";
-            case HubTaskState::Failed:
-                return "Failed";
-            case HubTaskState::Cancelled:
-                return "Cancelled";
-            }
-            return "Unknown";
-        }
-
         [[nodiscard]] std::string_view NotificationLabel(const NotificationSeverity severity) noexcept
         {
             switch (severity)
@@ -81,6 +51,84 @@ namespace KeireHub
         return static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch())
                 .count());
+    }
+
+    std::string_view HubTaskPhaseLabel(const HubTaskKind kind, const HubTaskState state) noexcept
+    {
+        if (kind == HubTaskKind::Remove)
+        {
+            switch (state)
+            {
+            case HubTaskState::Queued:
+                return "Queued for uninstall";
+            case HubTaskState::Installing:
+            case HubTaskState::Extracting:
+            case HubTaskState::Removing:
+                return "Uninstalling";
+            case HubTaskState::Configuring:
+                return "Finalizing uninstall";
+            case HubTaskState::Cancelling:
+                return "Cancelling uninstall";
+            case HubTaskState::Completed:
+                return "Uninstalled";
+            case HubTaskState::Failed:
+                return "Uninstall failed";
+            case HubTaskState::Cancelled:
+                return "Uninstall cancelled";
+            case HubTaskState::Downloading:
+            case HubTaskState::Paused:
+            case HubTaskState::Verifying:
+                break;
+            }
+        }
+
+        switch (state)
+        {
+        case HubTaskState::Queued:
+            return "Queued";
+        case HubTaskState::Downloading:
+            return "Downloading";
+        case HubTaskState::Paused:
+            return "Paused";
+        case HubTaskState::Verifying:
+            return "Verifying";
+        case HubTaskState::Extracting:
+            return "Extracting";
+        case HubTaskState::Installing:
+            return kind == HubTaskKind::Repair ? "Repairing" : "Installing";
+        case HubTaskState::Configuring:
+            return "Configuring";
+        case HubTaskState::Removing:
+            return "Removing";
+        case HubTaskState::Cancelling:
+            return "Cancelling";
+        case HubTaskState::Completed:
+            switch (kind)
+            {
+            case HubTaskKind::Install:
+                return "Installed";
+            case HubTaskKind::Verify:
+                return "Verified";
+            case HubTaskKind::Repair:
+                return "Repaired";
+            case HubTaskKind::ImportPackage:
+                return "Imported";
+            case HubTaskKind::HubUpdate:
+                return "Updated";
+            case HubTaskKind::CreateProject:
+                return "Created";
+            case HubTaskKind::Download:
+                return "Downloaded";
+            case HubTaskKind::Remove:
+                return "Uninstalled";
+            }
+            break;
+        case HubTaskState::Failed:
+            return "Failed";
+        case HubTaskState::Cancelled:
+            return "Cancelled";
+        }
+        return "Unknown";
     }
 
     void ApplyRuntimeSnapshot(const HubControllerSnapshot& runtime, HubProductSnapshot& product)
@@ -153,7 +201,7 @@ namespace KeireHub
             product.Tasks.push_back(
                 {.Id = task.Id,
                  .Title = task.DisplayName,
-                 .Phase = std::string(TaskPhase(task.State)),
+                 .Phase = std::string(HubTaskPhaseLabel(task.Kind, task.State)),
                  .Message = std::move(message),
                  .CurrentPackage = task.Progress.CurrentPackage,
                  .Progress = progress,

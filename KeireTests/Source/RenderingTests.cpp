@@ -620,6 +620,34 @@ TEST_CASE("Assimp imports OBJ points with actionable topology diagnostics")
                               { return diagnostic.Message.find("PointList") != std::string::npos; }));
 }
 
+TEST_CASE("Assimp partitions mixed OBJ primitives without rejecting the model")
+{
+    TemporaryDirectory directory("MeshMixedTopologyImportTests");
+    const auto sourcePath = directory.Path / "mixed.obj";
+    {
+        std::ofstream source(sourcePath);
+        source << "o Mixed\n"
+                  "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 1 1 0\n"
+                  "f 1 2 3\n"
+                  "l 1 4\n"
+                  "p 2\n";
+    }
+    const auto importer = Keire::CreateMeshAssetImporter();
+    Keire::AssetImportContext context;
+    context.ProjectRoot = directory.Path;
+    context.SourceRoot = directory.Path;
+    context.SourcePath = sourcePath;
+    context.RelativePath = sourcePath.filename();
+    const auto output = importer.ContextualImport(context, ReadTestBytes(sourcePath));
+    const auto mesh = Keire::MeshAsset::Decode(output.Bytes);
+    CHECK(std::ranges::any_of(mesh->Submeshes(), [](const auto& submesh)
+                              { return submesh.Topology == Keire::ShaderPrimitiveTopology::TriangleList; }));
+    CHECK(std::ranges::any_of(mesh->Submeshes(), [](const auto& submesh)
+                              { return submesh.Topology == Keire::ShaderPrimitiveTopology::LineList; }));
+    CHECK(std::ranges::any_of(mesh->Submeshes(), [](const auto& submesh)
+                              { return submesh.Topology == Keire::ShaderPrimitiveTopology::PointList; }));
+}
+
 TEST_CASE("Sandbox pyramid triangle winding agrees with its authored outward normals")
 {
     const auto projectRoot = std::filesystem::current_path() / "Samples/KeireSandbox";

@@ -301,10 +301,49 @@ namespace Keire
                 auto definition = zone.SnapshotId()
                                       ? BlendAudioMixerSnapshot(loaded->Definition(), zone.SnapshotId(), weight)
                                       : loaded->Definition();
-                const float sendScale = 1.0F + (zone.ReverbSend() - 1.0F) * weight;
+                std::set<AssetId> reverbBuses;
+                for (const auto& bus : definition.Buses)
+                    if (std::ranges::any_of(bus.Effects,
+                                            [](const AudioMixerEffectDefinition& effect)
+                                            {
+                                                return !effect.Bypassed &&
+                                                       (effect.Type == AudioGraphNodeType::AlgorithmicReverb ||
+                                                        effect.Type == AudioGraphNodeType::ConvolutionReverb);
+                                            }))
+                        reverbBuses.insert(bus.Id);
+                std::set<AssetId> sendReturnBuses;
+                for (const auto& bus : definition.Buses)
+                    for (const auto& send : bus.Sends)
+                        if (reverbBuses.contains(send.DestinationBus))
+                            sendReturnBuses.insert(send.DestinationBus);
+                for (auto& bus : definition.Buses)
+                {
+                    for (auto& effect : bus.Effects)
+                    {
+                        if (effect.Bypassed || (effect.Type != AudioGraphNodeType::AlgorithmicReverb &&
+                                                effect.Type != AudioGraphNodeType::ConvolutionReverb))
+                            continue;
+                        if (sendReturnBuses.contains(bus.Id))
+                            continue;
+                        if (effect.Type == AudioGraphNodeType::AlgorithmicReverb)
+                        {
+                            if (effect.Parameters.size() < 3U)
+                            {
+                                const std::array defaults{68.0F, 0.55F, 0.3F};
+                                while (effect.Parameters.size() < defaults.size())
+                                    effect.Parameters.push_back(defaults[effect.Parameters.size()]);
+                            }
+                            effect.Parameters[2] *= zone.ReverbSend() * weight;
+                        }
+                        else
+                            for (auto& tap : effect.Parameters)
+                                tap *= zone.ReverbSend() * weight;
+                    }
+                }
                 for (auto& bus : definition.Buses)
                     for (auto& send : bus.Sends)
-                        send.Gain *= sendScale;
+                        if (reverbBuses.contains(send.DestinationBus))
+                            send.Gain *= zone.ReverbSend() * weight;
                 if (!Audio->UpdateMixer(routing, definition))
                     return false;
             }
@@ -583,8 +622,7 @@ namespace Keire
                 break;
             }
 
-            const AudioReverbZoneComponent* activeZone = nullptr;
-            float activeWeight = 0.0F;
+            std::map<AssetId, std::pair<Ref<AudioReverbZoneComponent>, float>> activeZones;
             if (listenerFound)
             {
                 for (const auto& entity : scene->Query<AudioReverbZoneComponent>())
@@ -614,22 +652,20 @@ namespace Keire
                     const float weight = zone->BlendDistance() == 0.0F
                                              ? (outsideDistance == 0.0F ? 1.0F : 0.0F)
                                              : std::clamp(1.0F - outsideDistance / zone->BlendDistance(), 0.0F, 1.0F);
-                    if (weight <= 0.0F)
-                        continue;
-                    if (!activeZone || zone->Priority() > activeZone->Priority() ||
-                        (zone->Priority() == activeZone->Priority() && weight > activeWeight))
+                    auto found = activeZones.find(zone->Mixer());
+                    if (found == activeZones.end() || zone->Priority() > found->second.first->Priority() ||
+                        (zone->Priority() == found->second.first->Priority() && weight > found->second.second))
                     {
-                        activeZone = zone.Get();
-                        activeWeight = weight;
+                        activeZones.insert_or_assign(zone->Mixer(), std::pair{zone, weight});
                     }
                 }
             }
             std::set<AssetId> activeReverbMixers;
-            if (activeZone)
+            for (const auto& [mixer, active] : activeZones)
             {
-                SeenMixers.insert(activeZone->Mixer());
-                if (ApplyReverbZone(*activeZone, activeWeight))
-                    activeReverbMixers.insert(activeZone->Mixer());
+                SeenMixers.insert(mixer);
+                if (ApplyReverbZone(*active.first, active.second))
+                    activeReverbMixers.insert(mixer);
                 else
                     ++PendingAudio;
             }

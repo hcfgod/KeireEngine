@@ -50,6 +50,11 @@ namespace Keire
     {
         if (settings.SchemaVersion != ProjectAuthoringSettingsSchemaVersion)
             throw std::invalid_argument("Project authoring settings use an unsupported schema.");
+        if (settings.ExternalEditorId.empty() || settings.ExternalEditorId.size() > 64 ||
+            settings.ExternalEditorId.find_first_of("\r\n\t") != std::string::npos)
+            throw std::invalid_argument("External editor profile identifiers must be non-empty and safe.");
+        if (settings.ExternalEditorExecutable.native().size() > 4096)
+            throw std::invalid_argument("External editor executable path is too long.");
 
         std::unordered_set<std::string> names;
         for (const auto& name : settings.PhysicsLayerNames)
@@ -83,6 +88,9 @@ namespace Keire
         result.SchemaVersion = document.at("schemaVersion").get<std::uint32_t>();
         if (const auto mixer = document.find("defaultMixer"); mixer != document.end() && !mixer->is_null())
             result.DefaultMixer = AssetId::Parse(mixer->get<std::string>());
+        result.ExternalEditorId = document.value("externalEditorId", "system");
+        result.ExternalEditorExecutable =
+            Detail::PathFromUtf8(document.value("externalEditorExecutable", std::string{}));
 
         const auto& names = document.at("physicsLayerNames");
         const auto& matrix = document.at("physicsCollisionMatrix");
@@ -111,12 +119,14 @@ namespace Keire
             names.push_back(settings.PhysicsLayerNames[index]);
             matrix.push_back(settings.PhysicsCollisionMatrix[index]);
         }
-        const nlohmann::json document{{"schemaVersion", settings.SchemaVersion},
-                                      {"defaultMixer", settings.DefaultMixer
-                                                           ? nlohmann::json(settings.DefaultMixer.ToString())
-                                                           : nlohmann::json(nullptr)},
-                                      {"physicsLayerNames", std::move(names)},
-                                      {"physicsCollisionMatrix", std::move(matrix)}};
+        const nlohmann::json document{
+            {"schemaVersion", settings.SchemaVersion},
+            {"defaultMixer",
+             settings.DefaultMixer ? nlohmann::json(settings.DefaultMixer.ToString()) : nlohmann::json(nullptr)},
+            {"externalEditorId", settings.ExternalEditorId},
+            {"externalEditorExecutable", Detail::PathToUtf8(settings.ExternalEditorExecutable)},
+            {"physicsLayerNames", std::move(names)},
+            {"physicsCollisionMatrix", std::move(matrix)}};
         Detail::WriteTextFileAtomically(SettingsPath(projectRoot), document.dump(2) + '\n');
     }
 } // namespace Keire

@@ -476,6 +476,43 @@ TEST_CASE("Audio voices use stable authored mixer buses and retain the last vali
     audio->Close();
 }
 
+TEST_CASE("Submitting a mixer revision updates every live scene routing for that asset")
+{
+    Keire::AudioSystemSpecification specification;
+    specification.Mode = Keire::AudioMode::Headless;
+    auto audio = Keire::CreateRef<Keire::AudioSystem>(specification);
+    constexpr auto mixer = Id(925);
+    auto definition = Keire::AudioMixerAsset::DefaultDefinition();
+    const auto routing = audio->RegisterMixer(mixer, definition);
+    REQUIRE(routing);
+
+    auto clip = std::make_shared<Keire::AudioClipData>();
+    clip->SampleRate = 48'000;
+    clip->Channels = 1;
+    clip->Frames = 4;
+    clip->Samples.assign(4, 0.5F);
+    Keire::AudioPlaybackRequest request;
+    request.Clip = clip;
+    request.Mixer = mixer;
+    request.MixerRouting = routing;
+    request.BusId = definition.MasterBus;
+    request.Loop = true;
+    request.Spatial = false;
+    REQUIRE(audio->Play(std::move(request)));
+    const auto initial = audio->RenderVoicesOffline(1);
+    REQUIRE(initial.size() == 2);
+    CHECK(initial[0] == doctest::Approx(0.5F));
+
+    definition.Buses.front().Gain = 0.25F;
+    audio->SubmitMixer(mixer, definition);
+    const auto updated = audio->RenderVoicesOffline(1);
+    REQUIRE(updated.size() == 2);
+    CHECK(updated[0] == doctest::Approx(0.125F));
+    CHECK(updated[1] == doctest::Approx(0.125F));
+    CHECK(audio->UnregisterMixer(routing));
+    audio->Close();
+}
+
 TEST_CASE("Headless voices process mixer effect racks, sends, hierarchy, and automatic meters")
 {
     Keire::AudioSystemSpecification specification;

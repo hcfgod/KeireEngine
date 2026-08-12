@@ -5,7 +5,32 @@ versions.
 
 ## Unreleased
 
+## 0.3.1 - 2026-08-11
+
 ### Changed
+
+- Withdrew all pre-0.3.1 public Hub previews while the consolidated 0.3.1 release completes validation. The downloads
+  site now exposes an explicit pending-release state without dead or known-broken links; retired binaries remain only
+  in private, recoverable release storage.
+- Promoted the Kéire Editor and Project Hub product line to 0.3.1. The Hub now presents installation discovery and
+  installed editors as separate focused workflows, labels install, repair, and removal tasks by their actual operation,
+  and displays task and notification centers as non-disruptive anchored popovers.
+- Stabilized Inspector Euler editing across the +/-180-degree boundary, included edit-mode VFX in the Scene camera
+  preview, restored compact collapsible Material Graph previews, and made Shader Graph previews expand reusable graph
+  assets and surface evaluation failures instead of silently falling back to a checkerboard.
+- Added project-owned, cross-platform external-editor selection for Visual Studio Code, VSCodium, Cursor, Zed, Rider,
+  CLion, Visual Studio, Xcode, Sublime Text, Neovim, and Emacs where available, plus a validated custom executable path.
+  Added distinct Audio Mixer and semantic asset thumbnails.
+- Upgraded model import to partition mixed triangle, line, and point primitives into supported submeshes and fan-
+  triangulate polygon faces, while retaining actionable diagnostics and safe auto-rig filtering.
+- Fixed Audio Mixer effect-name editing from collapsing after each character. Live mixer revisions now update every
+  registered scene routing, device playback applies bus hierarchy, effects, sends, faders, mute, solo, and sidechain
+  ducking, and Reverb Zones drive direct-insert wet levels or reverb-return sends without double-scaling return effects.
+  The Inspector and
+  mixer editor now diagnose incomplete routes and can create a conventional reverb return in one action.
+- Extended the managed gameplay API with writable world transforms, deterministic Unity-style coroutines and yield
+  instructions, and a strongly typed Rigid Body handle with runtime properties and force modes. Disable, teardown, and
+  reload dispose all coroutine iterators and cancel pending work deterministically.
 
 - Added native standalone Hub RPM packaging for Rocky Linux and Fedora alongside the existing Ubuntu/Debian DEB.
   Linux release builds now select the package family from the host or an explicit launcher option, validate RPM

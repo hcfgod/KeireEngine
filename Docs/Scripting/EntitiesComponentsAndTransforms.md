@@ -81,6 +81,9 @@ transform.LocalRotation = Quaternion.Euler(0.0f, 90.0f);
 transform.LocalScale = new Vector3(2.0f, 2.0f, 2.0f);
 
 Vector3 worldPosition = transform.Position;
+transform.Position = new Vector3(4.0f, 2.0f, -1.0f);
+transform.Rotation = Quaternion.Euler(0.0f, 180.0f);
+transform.Translate(Vector3.Forward * Time.DeltaTime, worldSpace: false);
 Vector3 forward = transform.Forward;
 ```
 
@@ -91,8 +94,12 @@ Available properties:
 | `LocalPosition` | Read/write | Parent-local |
 | `LocalRotation` | Read/write | Parent-local |
 | `LocalScale` | Read/write | Parent-local |
-| `Position` | Read | World |
-| `Forward`, `Right`, `Up` | Read | Derived from the handle's local rotation |
+| `Position` | Read/write | World |
+| `Rotation` | Read/write | World |
+| `Forward`, `Right`, `Up` | Read | Derived from world rotation |
+
+`Translate` and `Rotate` accept an optional `worldSpace` flag. World setters preserve the authored parent relation by
+converting the requested value through the parent's inverse world transform.
 
 Use `Time.DeltaTime` or `Time.FixedDeltaTime` when applying rates:
 

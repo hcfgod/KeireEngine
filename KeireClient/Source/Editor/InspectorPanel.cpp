@@ -1,6 +1,7 @@
 #include "KeireClient/Editor/EditorPanels.h"
 
 #include "KeireClient/Editor/AssetPicker.h"
+#include "KeireClient/Editor/EulerEditContinuity.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/InspectorPropertyEditor.h"
 #include "KeireClient/Editor/ManagedDataInspectorPanel.h"
@@ -333,7 +334,17 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                     ui.Separator();
                     const auto transform = entity.GetComponent<Keire::TransformComponent>();
                     auto position = transform->LocalPosition();
-                    auto rotation = transform->LocalEulerAngles();
+                    const auto currentOrientation = transform->LocalRotation();
+                    if (m_RotationTarget != entity.Id().Value() ||
+                        (!m_RotationEditing && !SameRotation(currentOrientation, m_RotationOrientation)))
+                    {
+                        const auto reference =
+                            m_RotationTarget == entity.Id().Value() ? m_RotationEuler : transform->LocalEulerAngles();
+                        m_RotationEuler = ContinuousEulerAngles(currentOrientation, reference);
+                        m_RotationOrientation = currentOrientation;
+                        m_RotationTarget = entity.Id().Value();
+                    }
+                    auto rotation = m_RotationEuler;
                     auto scale = transform->LocalScale();
                     const bool positionChanged = ui.DragVector3("Position", position, 0.05F);
                     const auto positionState = ui.LastItemState();
@@ -380,6 +391,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                                                                 entity.Id().ToString() + "." +
                                                                                 std::to_string(m_EditSerial));
                         sceneDocument.SetTransform(entity.Id(), {.EulerDegrees = rotation});
+                        m_RotationEuler = rotation;
+                        m_RotationOrientation = Keire::Math::EulerDegreesToQuaternion(rotation);
                     }
                     if (scaleChanged && validScale)
                     {
@@ -390,6 +403,12 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                     if (scaleState.Active && !validScale)
                         ui.TextColored(theme.Error,
                                        "Scale axes need magnitude 0.000001 or greater. Finish typing to apply.");
+                    m_RotationEditing = rotationState.Active;
+                    if (rotationState.DeactivatedAfterEdit)
+                    {
+                        m_RotationEditing = false;
+                        m_RotationOrientation = transform->LocalRotation();
+                    }
                     if (positionState.DeactivatedAfterEdit || rotationState.DeactivatedAfterEdit ||
                         scaleState.DeactivatedAfterEdit)
                         ++m_EditSerial;
@@ -402,6 +421,10 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                         sceneDocument.SetTransform(entity.Id(), {.Position = Keire::Vector3{},
                                                                  .EulerDegrees = Keire::Vector3{},
                                                                  .Scale = Keire::Vector3{1.0F, 1.0F, 1.0F}});
+                        m_RotationTarget = entity.Id().Value();
+                        m_RotationEuler = {};
+                        m_RotationOrientation = {};
+                        m_RotationEditing = false;
                     }
                     if (ui.LastItemState().Hovered)
                         ui.SetTooltip("Reset local position, rotation, and scale.");
@@ -825,10 +848,16 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                     vfxEmitter
                         ? std::min(720.0F, 26.0F + static_cast<float>(std::max<std::size_t>(vfxEntries, 1U)) * 48.0F)
                         : 0.0F;
+                const float audioSetupHeight =
+                    registration->Type == Keire::AudioSourceComponent::StaticType() ||
+                            registration->Type == Keire::AudioReverbZoneComponent::StaticType()
+                        ? 72.0F
+                        : 0.0F;
                 const float cardHeight =
                     expanded ? std::max(115.0F, 80.0F + anchorPickerHeight +
                                                     static_cast<float>(registration->Properties.size()) * 34.0F +
-                                                    static_cast<float>(groupRows) * 22.0F + vfxInspectorHeight)
+                                                    static_cast<float>(groupRows) * 22.0F + vfxInspectorHeight +
+                                                    audioSetupHeight)
                              : 38.0F;
                 if (auto card = ui.BeginChild(cardId, {0.0F, cardHeight}, true); card)
                 {
@@ -1009,6 +1038,67 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                         catch (const std::exception& error)
                         {
                             ui.TextColored(theme.Error, error.what());
+                        }
+                    }
+                    if (registration->Type == Keire::AudioReverbZoneComponent::StaticType())
+                    {
+                        const auto zone = Keire::DynamicRefCast<Keire::AudioReverbZoneComponent>(component);
+                        if (!zone || !zone->Mixer())
+                            ui.TextColored(theme.Warning, "Assign a Mixer containing a reverb effect or return bus.");
+                        else if (!assets)
+                            ui.TextColored(theme.Warning, "Audio assets are unavailable for setup validation.");
+                        else if (const auto mixer =
+                                     assets->Load<Keire::AudioMixerAsset>(zone->Mixer(), Keire::AssetPriority::High)
+                                         .TryGetLoaded())
+                        {
+                            const auto& definition = mixer->Definition();
+                            const bool hasReverb = std::ranges::any_of(
+                                definition.Buses,
+                                [](const Keire::AudioMixerBusDefinition& bus)
+                                {
+                                    return std::ranges::any_of(
+                                        bus.Effects,
+                                        [](const Keire::AudioMixerEffectDefinition& effect)
+                                        {
+                                            return effect.Type == Keire::AudioGraphNodeType::AlgorithmicReverb ||
+                                                   effect.Type == Keire::AudioGraphNodeType::ConvolutionReverb;
+                                        });
+                                });
+                            const bool snapshotValid =
+                                !zone->SnapshotId() ||
+                                std::ranges::any_of(definition.Snapshots,
+                                                    [&](const Keire::AudioMixerSnapshotDefinition& snapshot)
+                                                    { return snapshot.Id == zone->SnapshotId(); });
+                            ui.TextColored(hasReverb && snapshotValid ? theme.Success : theme.Warning,
+                                           !hasReverb       ? "Mixer has no reverb effect. Use Create Reverb Return."
+                                           : !snapshotValid ? "Snapshot Stable ID is not present in this mixer."
+                                                            : "Zone setup valid: wet level follows listener overlap.");
+                            ui.TextColored(theme.MutedText,
+                                           "Snapshot is optional; Reverb Send controls wet intensity inside the zone.");
+                        }
+                        else
+                            ui.TextColored(theme.MutedText, "Loading mixer setup validation...");
+                    }
+                    else if (registration->Type == Keire::AudioSourceComponent::StaticType())
+                    {
+                        const auto source = Keire::DynamicRefCast<Keire::AudioSourceComponent>(component);
+                        if (source && source->Mixer() && assets)
+                        {
+                            if (const auto mixer =
+                                    assets->Load<Keire::AudioMixerAsset>(source->Mixer(), Keire::AssetPriority::High)
+                                        .TryGetLoaded())
+                            {
+                                const auto& buses = mixer->Definition().Buses;
+                                const bool busValid =
+                                    source->BusId()
+                                        ? std::ranges::any_of(buses, [&](const Keire::AudioMixerBusDefinition& bus)
+                                                              { return bus.Id == source->BusId(); })
+                                        : std::ranges::any_of(buses, [&](const Keire::AudioMixerBusDefinition& bus)
+                                                              { return bus.Name == source->Bus(); });
+                                ui.TextColored(busValid ? theme.Success : theme.Warning,
+                                               busValid ? "Mixer route is valid and active."
+                                                        : "Selected bus is missing; audio will fall back to Master.");
+                            }
                         }
                     }
                     if (registration->Removable && ui.Button("Remove " + registration->Name))

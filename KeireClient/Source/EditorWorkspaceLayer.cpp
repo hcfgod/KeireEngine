@@ -681,6 +681,7 @@ void EditorWorkspaceLayer::OnAttach()
     m_AssetBrowserPanel->SetJobSystem(Owner().Jobs());
     m_ShaderGraphDocument->SetJobSystem(Owner().Jobs());
     m_ShaderGraphPanel->SetJobSystem(Owner().Jobs());
+    m_MaterialGraphPanel->SetJobSystem(Owner().Jobs());
     m_SceneViewportPanel->Attach(workspace);
     m_Game = workspace.RegisterPanel({"editor.game", "Game"});
     m_HierarchyPanel->Attach(workspace);

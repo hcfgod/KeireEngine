@@ -31,6 +31,7 @@ const compactInstallerNames = {
     macos: "KeireHub.dmg",
     linux: "keire-hub.deb",
 };
+let previewReleaseStatus = null;
 
 function semanticVersion(value) {
     const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(value);
@@ -208,6 +209,12 @@ function validatePreviewMetadata(metadata) {
     });
 }
 
+function validatePreviewReleaseStatus(metadata) {
+    const status = metadata?.releaseStatus;
+    return status?.state === "preparing" && semanticVersion(status.version) &&
+        typeof status.message === "string" && status.message.length >= 20 && status.message.length <= 240 ? status : null;
+}
+
 function bytes(value) {
     const units = ["B", "KB", "MB", "GB"];
     let amount = value;
@@ -365,7 +372,9 @@ async function loadPreviewDownloads() {
     if (!response.ok) {
         return [];
     }
-    const candidates = validatePreviewMetadata(await response.json());
+    const metadata = await response.json();
+    previewReleaseStatus = validatePreviewReleaseStatus(metadata);
+    const candidates = validatePreviewMetadata(metadata);
     const available = [];
     let next = 0;
     async function validateNext() {
@@ -428,6 +437,8 @@ async function loadDownloads() {
                 "Development preview available:";
         } else if (variants.children.length > 0) {
             state.textContent = platform === hostPlatform ? "Recommended for this device. Signed stable releases:" : "Signed stable releases:";
+        } else if (previewReleaseStatus) {
+            state.textContent = previewReleaseStatus.message;
         } else if (matching.length < 2) {
             state.textContent = "Catalog service is temporarily unavailable. No download link is being shown.";
         } else {
@@ -468,7 +479,7 @@ async function loadHistory() {
             ++count;
         }
         state.textContent = count === 0 ?
-            "No retained releases are available for this platform yet." :
+            (previewReleaseStatus?.message ?? "No retained releases are available for this platform yet.") :
             `${count} retained ${count === 1 ? "release" : "releases"}`;
     }
 }

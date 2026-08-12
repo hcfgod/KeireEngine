@@ -305,15 +305,17 @@ namespace KeireHub
         const auto activeTasks = std::ranges::count_if(snapshot.Tasks, &HubTaskUiRecord::Active);
         if (ui.Button("Tasks " + std::to_string(activeTasks) + "##HubTasks", {76.0F, buttonHeight}))
         {
-            m_TaskCenterOpen = !m_TaskCenterOpen;
+            m_TaskCenterOpen = true;
             m_NotificationCenterOpen = false;
+            m_CloseNotificationCenter = true;
         }
         ui.SameLine();
         if (ui.Button("Notifications " + std::to_string(snapshot.UnreadNotifications) + "##HubNotifications",
                       {126.0F, buttonHeight}))
         {
-            m_NotificationCenterOpen = !m_NotificationCenterOpen;
+            m_NotificationCenterOpen = true;
             m_TaskCenterOpen = false;
+            m_CloseTaskCenter = true;
         }
 
 #if !defined(__APPLE__)
@@ -586,7 +588,10 @@ namespace KeireHub
             else if (update.DownloadActive)
             {
                 if (ui.Button(update.DownloadPaused ? "Open paused task" : "View download", {132.0F, 34.0F}))
+                {
                     m_TaskCenterOpen = true;
+                    m_CloseNotificationCenter = true;
+                }
             }
             else if (update.CanDownload)
             {
@@ -617,11 +622,14 @@ namespace KeireHub
     {
         PageHeader(ui, m_Tokens, "Installs",
                    "Manage versioned editor installations and their compatible Build Support components.");
+        if (HubPrimaryButton(ui, m_Tokens, "Install Editor", {126.0F, 36.0F}))
+            m_RequestEditorCatalog = true;
+        ui.SameLine();
         if (snapshot.EditorManagementRefreshing)
             ui.TextColored(m_Tokens.Accent, "Checking installed editor manifests and file inventories...");
         if (auto disabled = ui.BeginDisabled(snapshot.EditorManagementBusy); disabled)
         {
-            if (ui.Button("Locate existing editor", {166.0F, 36.0F}))
+            if (HubSecondaryButton(ui, m_Tokens, "Locate existing", {142.0F, 36.0F}))
                 command.Type = HubUiCommandType::LocateEditor;
         }
         ui.Spacing();
@@ -636,7 +644,7 @@ namespace KeireHub
         {
             auto id = ui.PushId(editor.Id);
             const auto shownIssues = std::min<std::size_t>(editor.HealthIssues.size(), 2);
-            const float cardHeight = 180.0F + static_cast<float>(shownIssues) * 34.0F +
+            const float cardHeight = 160.0F + static_cast<float>(shownIssues) * 34.0F +
                                      (editor.Running || editor.HasActiveTask || editor.ManagementBusy ? 20.0F : 0.0F);
             const bool editorBusy =
                 snapshot.EditorManagementBusy || editor.Running || editor.HasActiveTask || snapshot.BuildSupportBusy;
@@ -1370,12 +1378,24 @@ namespace KeireHub
 
     void HubProductUi::DrawTaskCenter(Keire::UiFrame& ui, const HubProductSnapshot& snapshot, HubUiCommand& command)
     {
-        if (!m_TaskCenterOpen)
-            return;
-        [[maybe_unused]] const auto centerBackground =
-            ui.PushStyleColor(Keire::UiStyleColorRole::ChildBackground, m_Tokens.Surface);
-        if (auto center = ui.BeginChild("HubTaskCenter", {0.0F, 360.0F}, true); center)
+        const bool closeRequested = std::exchange(m_CloseTaskCenter, false);
+        if (std::exchange(m_TaskCenterOpen, false))
+            ui.OpenPopup("HubTaskPopover");
+        const auto bounds = ui.ContentRect();
+        constexpr float popoverWidth = 460.0F;
+        ui.SetNextWindowPosition(
+            {std::max(bounds.Maximum.X - popoverWidth - 12.0F, bounds.Minimum.X + 8.0F), bounds.Minimum.Y + 8.0F},
+            false);
+        ui.SetNextWindowSize({popoverWidth, 420.0F}, false);
+        [[maybe_unused]] const auto popoverBackground =
+            ui.PushStyleColor(Keire::UiStyleColorRole::PopupBackground, m_Tokens.Surface);
+        if (auto center = ui.BeginPopup("HubTaskPopover"); center)
         {
+            if (closeRequested)
+            {
+                ui.CloseCurrentPopup();
+                return;
+            }
             {
                 const auto heading = ui.PushFont(Keire::UiFontRole::Heading);
                 ui.TextColored(m_Tokens.PrimaryText, "Tasks and downloads");
@@ -1389,7 +1409,7 @@ namespace KeireHub
             }
             ui.SameLine();
             if (ui.Button("Close##TaskCenter", {64.0F, 26.0F}))
-                m_TaskCenterOpen = false;
+                ui.CloseCurrentPopup();
             if (snapshot.Tasks.empty())
             {
                 ui.TextColored(m_Tokens.SecondaryText, "No current or recent tasks.");
@@ -1407,12 +1427,24 @@ namespace KeireHub
     void HubProductUi::DrawNotificationCenter(Keire::UiFrame& ui, const HubProductSnapshot& snapshot,
                                               HubUiCommand& command)
     {
-        if (!m_NotificationCenterOpen)
-            return;
-        [[maybe_unused]] const auto centerBackground =
-            ui.PushStyleColor(Keire::UiStyleColorRole::ChildBackground, m_Tokens.Surface);
-        if (auto center = ui.BeginChild("HubNotificationCenter", {0.0F, 420.0F}, true); center)
+        const bool closeRequested = std::exchange(m_CloseNotificationCenter, false);
+        if (std::exchange(m_NotificationCenterOpen, false))
+            ui.OpenPopup("HubNotificationPopover");
+        const auto bounds = ui.ContentRect();
+        constexpr float popoverWidth = 480.0F;
+        ui.SetNextWindowPosition(
+            {std::max(bounds.Maximum.X - popoverWidth - 12.0F, bounds.Minimum.X + 8.0F), bounds.Minimum.Y + 8.0F},
+            false);
+        ui.SetNextWindowSize({popoverWidth, 520.0F}, false);
+        [[maybe_unused]] const auto popoverBackground =
+            ui.PushStyleColor(Keire::UiStyleColorRole::PopupBackground, m_Tokens.Surface);
+        if (auto center = ui.BeginPopup("HubNotificationPopover"); center)
         {
+            if (closeRequested)
+            {
+                ui.CloseCurrentPopup();
+                return;
+            }
             {
                 const auto heading = ui.PushFont(Keire::UiFontRole::Heading);
                 ui.TextColored(m_Tokens.PrimaryText, "Activity and notifications");
@@ -1423,7 +1455,7 @@ namespace KeireHub
                 command.Type = HubUiCommandType::ClearNotifications;
             ui.SameLine();
             if (ui.Button("Close##Notifications", {64.0F, 26.0F}))
-                m_NotificationCenterOpen = false;
+                ui.CloseCurrentPopup();
             const auto activeTasks = std::ranges::count_if(snapshot.Tasks, &HubTaskUiRecord::Active);
             if (activeTasks != 0)
             {

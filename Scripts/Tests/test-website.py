@@ -230,10 +230,19 @@ def main() -> int:
         (WEBSITE / "assets" / "preview-downloads.json").read_text(encoding="utf-8")
     )
     packages = previews.get("packages", [])
-    if previews.get("schemaVersion") != 2 or len(packages) < 1:
+    release_status = previews.get("releaseStatus")
+    valid_release_status = (
+        isinstance(release_status, dict)
+        and release_status.get("state") == "preparing"
+        and str(release_status.get("version", "")) == "0.3.1"
+        and 20 <= len(str(release_status.get("message", ""))) <= 240
+    )
+    if previews.get("schemaVersion") != 2 or not isinstance(packages, list):
         raise ValueError(
-            "Preview download metadata must retain at least one explicit preview."
+            "Preview download metadata must expose its schema and package collection."
         )
+    if not packages and not valid_release_status:
+        raise ValueError("An empty preview catalog must explain the pending release state.")
     release_ids = set()
     retained_previews = set()
     installer_formats = {

@@ -18,6 +18,14 @@ source in the Project panel. The same picker implementation backs typed componen
 Project-owned settings live below `<Project>/ProjectSettings` and are suitable for source control. They are distinct
 from per-user editor state under `Library`, such as dock layouts, Scene-camera navigation, and Scene-tool preferences.
 
+## External Script Editor
+
+`Authoring.keiresettings` stores the project's external-editor profile and optional executable override. Project
+Settings discovers platform-appropriate installations and presents one active selection: System Default, Visual Studio
+Code/Insiders, VSCodium, Cursor, Zed, Rider, CLion, Visual Studio, Xcode, Sublime Text, Neovim, or Emacs where
+available. **Rescan** refreshes discovery after installing an editor. **Custom Executable** accepts an explicit path for
+portable or nonstandard installations. Opening a script or generated solution always uses this project setting.
+
 ## Scripting SDK
 
 `Scripting.keiresettings` selects the .NET 10 SDK used for managed gameplay builds. New Empty and Starter projects

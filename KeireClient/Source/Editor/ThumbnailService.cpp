@@ -888,6 +888,24 @@ namespace KeireEditor
             }
             return result;
         }
+
+        [[nodiscard]] std::vector<std::byte> MakeMixerPreview(const ThumbnailRequest& request,
+                                                              const std::uint32_t width, const std::uint32_t height)
+        {
+            auto result = MakeIcon(width, height, {24, 35, 44}, {70, 214, 177}, 'M', request.Missing);
+            const auto top = static_cast<int>(height / 4U);
+            const auto bottom = static_cast<int>(height - height / 4U);
+            for (int channel = 0; channel < 4; ++channel)
+            {
+                const auto x = static_cast<int>(width / 4U) + channel * static_cast<int>(width / 7U);
+                DrawLine(result, width, height, x, top, x, bottom, {85, 111, 124});
+                const auto knob = top + (channel % 2 == 0 ? (bottom - top) / 3 : (bottom - top) * 2 / 3);
+                DrawLine(result, width, height, x - 6, knob, x + 6, knob, {89, 235, 194});
+                DrawLine(result, width, height, x - 6, knob + 1, x + 6, knob + 1, {89, 235, 194});
+            }
+            ApplyBadge(result, width, height, "MX");
+            return result;
+        }
     } // namespace
 
     std::vector<std::byte> MakeFolderThumbnail(const std::uint32_t width, const std::uint32_t height,
@@ -933,6 +951,8 @@ namespace KeireEditor
             ApplyBadge(result, width, height, "FX");
             return result;
         }
+        if (type == Keire::AudioMixerAsset::StaticType())
+            return MakeMixerPreview({.Missing = missing}, width, height);
         return MakeIcon(width, height, {40, 44, 52}, {130, 142, 162}, 'X', missing);
     }
 
@@ -1154,6 +1174,7 @@ namespace KeireEditor
                          [](const ThumbnailRequest& request, const auto width, const auto height)
                          { return MakeShaderGraphPreview(request, width, height, "MI"); });
         RegisterProvider(".keirevfx", 1, MakeVfxPreview);
+        RegisterProvider(".keiremixer", 1, MakeMixerPreview);
         RegisterProvider(".png", 4, MakeTexturePreview);
         RegisterProvider(".jpg", 4, MakeTexturePreview);
         RegisterProvider(".jpeg", 4, MakeTexturePreview);
@@ -1173,6 +1194,19 @@ namespace KeireEditor
         RegisterProvider(".wav", 1, MakeAudioPreview);
         RegisterProvider(".ogg", 1, MakeAudioPreview);
         RegisterProvider(".flac", 1, MakeAudioPreview);
+        RegisterProvider(".keireanim", 1, icon({43, 34, 54}, {199, 116, 236}, 'A'));
+        RegisterProvider(".keireanimgraph", 1, icon({39, 31, 54}, {165, 126, 248}, 'A'));
+        RegisterProvider(".keireavatarmask", 1, icon({46, 37, 44}, {232, 150, 110}, 'A'));
+        RegisterProvider(".keirerig", 1, icon({37, 43, 52}, {121, 187, 238}, 'R'));
+        RegisterProvider(".keirephysicsmaterial", 1, icon({39, 43, 35}, {159, 206, 92}, 'P'));
+        RegisterProvider(".keireasm", 1, icon({36, 39, 52}, {110, 166, 235}, 'C'));
+        RegisterProvider(".cs", 1, icon({33, 45, 57}, {83, 169, 232}, 'C'));
+        RegisterProvider(".keiredata", 1, icon({43, 38, 52}, {191, 128, 224}, 'D'));
+        RegisterProvider(".keirematerialfunction", 1, icon({46, 31, 48}, {213, 94, 199}, 'F'));
+        RegisterProvider(".keireshaderfunction", 1, icon({34, 35, 57}, {105, 151, 255}, 'F'));
+        RegisterProvider(".keiremateriallayer", 1, icon({46, 31, 48}, {213, 94, 199}, 'L'));
+        RegisterProvider(".keirematerialblend", 1, icon({46, 31, 48}, {213, 94, 199}, 'B'));
+        RegisterProvider(".keirematerialcollection", 1, icon({46, 31, 48}, {213, 94, 199}, 'C'));
         RegisterProvider("*", 2, icon({40, 44, 52}, {130, 142, 162}, 'X'));
     }
 

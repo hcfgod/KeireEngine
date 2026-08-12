@@ -106,6 +106,11 @@ function validatePreview(document) {
     return vm.runInContext("validatePreviewMetadata(fixture)", context);
 }
 
+function validateReleaseStatus(document) {
+    context.fixture = document;
+    return vm.runInContext("validatePreviewReleaseStatus(fixture)", context);
+}
+
 const preview = {
     schemaVersion: 2,
     packages: [{
@@ -125,6 +130,21 @@ const preview = {
     }],
 };
 assert.equal(validatePreview(preview).length, 1);
+const pendingRelease = {
+    schemaVersion: 2,
+    releaseStatus: {
+        state: "preparing",
+        version: "0.3.1",
+        message: "Kéire Hub 0.3.1 is being prepared while release validation completes.",
+    },
+    packages: [],
+};
+assert.equal(validatePreview(pendingRelease).length, 0);
+assert.equal(validateReleaseStatus(pendingRelease).version, "0.3.1");
+assert.equal(validateReleaseStatus({ ...pendingRelease, releaseStatus: { ...pendingRelease.releaseStatus,
+    state: "published" } }), null);
+assert.equal(validateReleaseStatus({ ...pendingRelease, releaseStatus: { ...pendingRelease.releaseStatus,
+    version: "next" } }), null);
 assert.equal(validatePreview({ ...preview, packages: [{ ...preview.packages[0], signed: true }] }).length, 0);
 assert.equal(validatePreview({ ...preview, packages: [{ ...preview.packages[0], editorVersion: "latest" }] }).length, 0);
 assert.equal(validatePreview({ ...preview, packages: [{ ...preview.packages[0], releaseId: "../preview" }] }).length, 0);

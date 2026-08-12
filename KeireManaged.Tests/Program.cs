@@ -15,6 +15,8 @@ var tests = new (string Name, Action Run)[]
     ("Character Controller uses the native stable component contract", CharacterControllerStableContract),
     ("Entity exposes the production layer contract", EntityLayerContract),
     ("Behaviour lifecycle contracts are synchronized", BehaviourLifecycleContract),
+    ("Coroutines schedule phases and dispose deterministically", CoroutineContract),
+    ("Transform and rigid body gameplay handles expose writable runtime state", GameplayHandleContract),
     ("Native UI button dispatch advances with the player clock", NativeUiButtonDispatchClockContract),
     ("Managed jobs execute delegates and publish terminal states", ManagedJobExecutionContract),
     ("Managed jobs preserve terminal dependency semantics", ManagedJobDependencyContract),
@@ -135,6 +137,98 @@ static void BehaviourLifecycleContract()
     Keire.ComponentTypeId expected = Keire.ComponentType.Of<Keire.CharacterControllerComponent>();
     Assert(dependency.High == expected.High && dependency.Low == expected.Low,
         "RequireComponent metadata must expose the dependency's stable native component ID.");
+}
+
+static void CoroutineContract()
+{
+    var scheduler = new Keire.CoroutineScheduler();
+    var events = new List<string>();
+    int disposed = 0;
+    Exception? failure = null;
+    scheduler.UnhandledException = exception => failure = exception;
+
+    System.Collections.IEnumerator Routine()
+    {
+        try
+        {
+            events.Add("start");
+            yield return null;
+            events.Add("update");
+            yield return new Keire.WaitForFixedUpdate();
+            events.Add("fixed");
+            yield return new Keire.WaitForEndOfFrame();
+            events.Add("late");
+        }
+        finally
+        {
+            ++disposed;
+        }
+    }
+
+    Keire.Coroutine coroutine = scheduler.Start(Routine());
+    Assert(coroutine.IsRunning && events.SequenceEqual(["start"]),
+           "Starting a coroutine must advance it to its first yield.");
+    scheduler.Pump(Keire.CoroutinePhase.FixedUpdate, 0.02f, 0.02f);
+    Assert(events.Count == 1, "A null yield must wait for the next Update phase.");
+    scheduler.Pump(Keire.CoroutinePhase.Update, 0.1f, 0.2f);
+    Assert(events.SequenceEqual(["start", "update"]), "The next Update must resume a null yield.");
+    scheduler.Pump(Keire.CoroutinePhase.Update, 0.1f, 0.2f);
+    Assert(events.Count == 2, "WaitForFixedUpdate must not resume during Update.");
+    scheduler.Pump(Keire.CoroutinePhase.FixedUpdate, 0.02f, 0.02f);
+    Assert(events.SequenceEqual(["start", "update", "fixed"]), "WaitForFixedUpdate must resume during FixedUpdate.");
+    scheduler.Pump(Keire.CoroutinePhase.LateUpdate, 0.0f, 0.0f);
+    Assert(events.SequenceEqual(["start", "update", "fixed", "late"]) && !coroutine.IsRunning && disposed == 1,
+           "WaitForEndOfFrame must resume during LateUpdate and completed iterators must be disposed.");
+
+    Keire.Coroutine stopped = scheduler.Start(Routine());
+    Assert(stopped.Stop() && !stopped.IsRunning && disposed == 2,
+           "Stopping a coroutine must dispose its iterator exactly once.");
+
+    System.Collections.IEnumerator FailingRoutine()
+    {
+        try
+        {
+            throw new InvalidOperationException("expected coroutine failure");
+#pragma warning disable CS0162
+            yield break;
+#pragma warning restore CS0162
+        }
+        finally
+        {
+            ++disposed;
+        }
+    }
+
+    Keire.Coroutine failed = scheduler.Start(FailingRoutine());
+    Assert(!failed.IsRunning && failure is InvalidOperationException && disposed == 3 && scheduler.Count == 0,
+           "A coroutine that fails during its first move must be removed, disposed, and reported.");
+}
+
+static void GameplayHandleContract()
+{
+    System.Reflection.PropertyInfo? position =
+        typeof(Keire.TransformHandle).GetProperty(nameof(Keire.TransformHandle.Position));
+    System.Reflection.PropertyInfo? rotation =
+        typeof(Keire.TransformHandle).GetProperty(nameof(Keire.TransformHandle.Rotation));
+    Assert(position is { CanRead: true, CanWrite: true } && rotation is { CanRead: true, CanWrite: true },
+           "World transform properties must remain writable for gameplay scripts.");
+
+    System.Reflection.PropertyInfo? rigidBody = typeof(Keire.Entity).GetProperty(nameof(Keire.Entity.RigidBody));
+    System.Reflection.MethodInfo? addForce =
+        typeof(Keire.RigidBodyHandle).GetMethod(nameof(Keire.RigidBodyHandle.AddForce));
+    Assert(rigidBody?.PropertyType == typeof(Keire.RigidBodyHandle) && addForce is not null,
+           "Entity must expose the strongly typed rigid body gameplay API.");
+    Assert(Enum.GetValues<Keire.ForceMode>().Length == 4,
+           "Rigid body force modes must retain force, acceleration, impulse, and velocity-change semantics.");
+    Keire.TransformHandle invalidTransform = default;
+    AssertThrows<ArgumentException>(() => invalidTransform.Position = new(float.NaN, 0.0f, 0.0f),
+                                    "World transform setters must reject non-finite values before crossing native code.");
+    AssertThrows<ArgumentException>(() => invalidTransform.Rotation = default,
+                                    "World rotation setters must reject zero quaternions before crossing native code.");
+    Keire.RigidBodyHandle invalidBody = default;
+    AssertThrows<ArgumentOutOfRangeException>(
+        () => invalidBody.Motion = (Keire.RigidBodyMotion)byte.MaxValue,
+        "Rigid body motion setters must reject undefined modes before crossing native code.");
 }
 
 static void EntityLayerContract()

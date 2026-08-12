@@ -382,6 +382,57 @@ namespace KeireEditor
         ui.TextColored(theme.MutedText, std::to_string(document.Definition().Buses.size()) + " buses  |  " +
                                             std::to_string(effectCount) + " effects  |  " + std::to_string(sendCount) +
                                             " sends  |  target: <= 64 active effects");
+        const bool hasReverb = std::ranges::any_of(
+            document.Definition().Buses,
+            [](const Keire::AudioMixerBusDefinition& bus)
+            {
+                return std::ranges::any_of(bus.Effects,
+                                           [](const Keire::AudioMixerEffectDefinition& effect)
+                                           {
+                                               return effect.Type == Keire::AudioGraphNodeType::AlgorithmicReverb ||
+                                                      effect.Type == Keire::AudioGraphNodeType::ConvolutionReverb;
+                                           });
+            });
+        if (auto disabled = ui.BeginDisabled(hasReverb); disabled)
+            if (ui.Button("Create Reverb Return"))
+            {
+                try
+                {
+                    (void)document.Edit(
+                        "Create Reverb Return",
+                        [](Keire::AudioMixerDefinition& mixer)
+                        {
+                            const auto returnId = Keire::AssetId::Generate();
+                            Keire::AudioMixerBusDefinition reverb{
+                                .Id = returnId,
+                                .Name = UniqueName(mixer.Buses, "Reverb Return", &Keire::AudioMixerBusDefinition::Name),
+                                .Parent = mixer.MasterBus,
+                            };
+                            reverb.Effects.push_back({.Id = Keire::AssetId::Generate(),
+                                                      .Name = "Room Reverb",
+                                                      .Type = Keire::AudioGraphNodeType::AlgorithmicReverb,
+                                                      .Parameters = {90.0F, 0.58F, 1.0F}});
+                            for (auto& bus : mixer.Buses)
+                                if (bus.Id != mixer.MasterBus)
+                                    bus.Sends.push_back({.Id = Keire::AssetId::Generate(),
+                                                         .DestinationBus = returnId,
+                                                         .Stage = Keire::AudioMixerSendStage::PostFader,
+                                                         .Gain = 1.0F});
+                            mixer.Buses.push_back(std::move(reverb));
+                        });
+                    m_Message = "Created a Reverb Return, post-fader sends, and zone-ready wet effect.";
+                }
+                catch (const std::exception& error)
+                {
+                    m_Message = error.what();
+                    m_Controller.ReportAudioMixerError(m_Message);
+                }
+            }
+        if (!hasReverb)
+        {
+            ui.SameLine();
+            ui.TextColored(theme.Warning, "Reverb Zones need a reverb effect or return bus.");
+        }
         ui.Separator();
 
         if (auto tabs = ui.BeginTabBar("AudioMixerTabs"); tabs)
@@ -519,7 +570,9 @@ namespace KeireEditor
         {
             const auto effect = bus.Effects[index];
             auto id = ui.PushId(effect.Id.ToString());
-            if (auto tree = ui.BeginTreeNode(std::to_string(index + 1) + ". " + effect.Name); tree)
+            if (auto tree = ui.BeginTreeNode(std::to_string(index + 1) + ". " + effect.Name + "###Effect" +
+                                             effect.Id.ToString());
+                tree)
             {
                 std::string effectName = effect.Name;
                 if (ui.InputText("Name", effectName))

@@ -334,6 +334,13 @@ TEST_CASE("Task dispatch bounds downloads and serializes installation mutations"
     CHECK(ready[1].TaskId == "install-b");
     CHECK(ready[0].InitialState == HubTaskState::Installing);
 
+    HubTaskStore removalStore(temporary.Path() / "removals.json");
+    HubTaskManager removals(removalStore);
+    REQUIRE(removals.Enqueue(Task("remove-a", HubTaskKind::Remove, 1, "editor-a", false)));
+    ready = removals.Dispatchable();
+    REQUIRE(ready.size() == 1);
+    CHECK(ready.front().InitialState == HubTaskState::Removing);
+
     HubTaskStore packageStore(temporary.Path() / "shared-package.json");
     HubTaskManager packages(packageStore);
     auto firstPackage = Task("package-first", HubTaskKind::Download, 1);

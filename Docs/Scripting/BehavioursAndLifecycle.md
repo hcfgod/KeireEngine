@@ -68,8 +68,35 @@ protected override void Update()
 ```
 
 Use `Time.DeltaTime` for frame-rate-independent variable updates. Use `Time.UnscaledDeltaTime` for behavior that must
-continue independently of scaled simulation time, such as some pause-menu animation. Avoid overriding an update
-callback with an empty method; Kéire detects overridden update methods so it can skip unused managed calls.
+continue independently of scaled simulation time, such as some pause-menu animation. Kéire detects overridden fixed-
+and late-update methods so it can skip unused managed calls. The variable-update boundary remains active for every
+Behaviour because it also pumps its coroutine scheduler.
+
+## Coroutines
+
+Coroutines provide deterministic phase-aware sequencing without creating a native thread:
+
+```csharp
+private Coroutine _pulse;
+
+protected override void OnEnable() => _pulse = StartCoroutine(Pulse());
+
+private IEnumerator Pulse()
+{
+    while (Enabled)
+    {
+        Flash();
+        yield return new WaitForSeconds(0.25f);
+        yield return new WaitForEndOfFrame();
+    }
+}
+```
+
+A routine may yield `null` for the next variable update; a nested `IEnumerator`; `Task` or `ValueTask`; the built-in
+time, fixed-update, end-of-frame, and predicate instructions; or a custom `CustomYieldInstruction`. Disable, destroy, and
+reload stop all routines, dispose the full nested iterator stack, and report unhandled routine exceptions through the
+managed logger. Use `Coroutine.Stop()` or `StopCoroutine` for one routine and `StopAllCoroutines` for explicit owner-wide
+cancellation.
 
 ## Execution Order
 

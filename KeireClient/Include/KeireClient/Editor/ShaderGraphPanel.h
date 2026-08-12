@@ -124,5 +124,6 @@ namespace KeireEditor
         bool m_PreviewDirty = false;
         bool m_OwnJobSystem = false;
         bool m_NodeMenuOpen = false;
+        bool m_ShowPreview = true;
     };
 } // namespace KeireEditor

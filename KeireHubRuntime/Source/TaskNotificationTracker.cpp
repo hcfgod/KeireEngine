@@ -14,19 +14,65 @@ namespace KeireHub
 
         [[nodiscard]] HubNotification Started(const HubTask& task, const std::uint64_t now)
         {
+            const auto title = [kind = task.Kind]
+            {
+                switch (kind)
+                {
+                case HubTaskKind::Install:
+                    return "Editor installation started";
+                case HubTaskKind::Remove:
+                    return "Editor uninstall started";
+                case HubTaskKind::Verify:
+                    return "Verification started";
+                case HubTaskKind::Repair:
+                    return "Editor repair started";
+                case HubTaskKind::ImportPackage:
+                    return "Package import started";
+                case HubTaskKind::HubUpdate:
+                    return "Hub update started";
+                case HubTaskKind::CreateProject:
+                    return "Project creation started";
+                case HubTaskKind::Download:
+                    return "Download started";
+                }
+                return "Task started";
+            }();
             return {.Id = EventId(task, "started"),
                     .Severity = NotificationSeverity::Info,
-                    .Title = "Task started",
-                    .Message = task.DisplayName + " is now available in Activity with live progress and controls.",
+                    .Title = title,
+                    .Message = task.DisplayName + " is now available in Tasks with live progress and controls.",
                     .CreatedUnixSeconds = now,
                     .RelatedTaskId = task.Id};
         }
 
         [[nodiscard]] HubNotification Completed(const HubTask& task, const std::uint64_t now)
         {
+            const auto title = [kind = task.Kind]
+            {
+                switch (kind)
+                {
+                case HubTaskKind::Install:
+                    return "Editor installation complete";
+                case HubTaskKind::Remove:
+                    return "Editor uninstall complete";
+                case HubTaskKind::Verify:
+                    return "Verification complete";
+                case HubTaskKind::Repair:
+                    return "Editor repair complete";
+                case HubTaskKind::ImportPackage:
+                    return "Package import complete";
+                case HubTaskKind::HubUpdate:
+                    return "Hub update complete";
+                case HubTaskKind::CreateProject:
+                    return "Project creation complete";
+                case HubTaskKind::Download:
+                    return "Download complete";
+                }
+                return "Task complete";
+            }();
             return {.Id = EventId(task, "completed"),
                     .Severity = NotificationSeverity::Success,
-                    .Title = task.Kind == HubTaskKind::Install ? "Editor installation complete" : "Task complete",
+                    .Title = title,
                     .Message = task.DisplayName + " completed successfully.",
                     .CreatedUnixSeconds = now,
                     .RelatedTaskId = task.Id};

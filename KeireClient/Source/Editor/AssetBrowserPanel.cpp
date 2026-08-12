@@ -108,10 +108,12 @@ namespace KeireEditor
             Images.clear();
             ImageDigests.clear();
             FolderImage.Reset();
+            AssetFallbackImage.Reset();
             ShaderGraphFallbackImage.Reset();
             MaterialGraphFallbackImage.Reset();
             MaterialInstanceFallbackImage.Reset();
             VfxFallbackImage.Reset();
+            AudioMixerFallbackImage.Reset();
             Selection.clear();
             VisibleSelectionOrder.clear();
             SelectionAnchor = {};
@@ -126,8 +128,6 @@ namespace KeireEditor
             PendingManagedType = {};
             PendingInputActions.reset();
             PendingCreateKind = NamedCreateKind::None;
-            ExternalEditorBuffer.clear();
-            ExternalEditor.clear();
             CurrentFolder.clear();
             ProjectRoot.clear();
             AssetRoot.clear();
@@ -156,8 +156,6 @@ namespace KeireEditor
                     {
                     }
                 }
-                else if (line.starts_with("editor="))
-                    ExternalEditor = Keire::Detail::PathFromUtf8(line.substr(7));
             }
         }
 
@@ -168,8 +166,7 @@ namespace KeireEditor
             try
             {
                 const auto text = std::string("view=") + (Mode == ViewMode::Grid ? "grid\n" : "list\n") +
-                                  "size=" + std::to_string(ThumbnailSize) +
-                                  "\neditor=" + Keire::Detail::PathToUtf8(ExternalEditor) + "\n";
+                                  "size=" + std::to_string(ThumbnailSize) + "\n";
                 Keire::Detail::WriteTextFileAtomically(PreferencePath, text);
             }
             catch (...)
@@ -308,8 +305,9 @@ namespace KeireEditor
                 {
                     editor.PrepareAssetBrowserExternalOpen(record.Id);
                     std::string diagnostic;
-                    if (!Keire::Detail::OpenInExternalEditor(AssetRoot / record.RelativePath, ExternalEditor,
-                                                             ProjectRoot, diagnostic))
+                    if (!Keire::Detail::OpenInExternalEditor(AssetRoot / record.RelativePath,
+                                                             editor.AssetBrowserExternalEditor(), ProjectRoot,
+                                                             diagnostic))
                         throw std::runtime_error(diagnostic);
                     editor.SetAssetBrowserStatus("Opened " + record.RelativePath.filename().string() +
                                                  " in an external editor.");
@@ -850,44 +848,6 @@ namespace KeireEditor
                 }
             }
 
-            if (OpenExternalEditorPopup)
-            {
-                ExternalEditorBuffer = Keire::Detail::PathToUtf8(ExternalEditor);
-                ui.OpenPopup("External Editor");
-                OpenExternalEditorPopup = false;
-            }
-            if (auto editorPopup = ui.BeginPopupModal("External Editor"); editorPopup)
-            {
-                ui.Text("Executable path (leave empty to use the operating-system default)");
-                (void)ui.InputText("Editor", ExternalEditorBuffer);
-                if (ui.Button("Save"))
-                {
-                    const auto candidate = ExternalEditorBuffer.empty()
-                                               ? std::filesystem::path{}
-                                               : Keire::Detail::PathFromUtf8(ExternalEditorBuffer);
-                    if (!candidate.empty() && !std::filesystem::is_regular_file(candidate))
-                        editor.ReportAssetBrowserError("External editor executable does not exist.");
-                    else
-                    {
-                        ExternalEditor =
-                            candidate.empty() ? candidate : std::filesystem::absolute(candidate).lexically_normal();
-                        SavePreferences();
-                        ui.CloseCurrentPopup();
-                    }
-                }
-                ui.SameLine();
-                if (ui.Button("Use System Default"))
-                {
-                    ExternalEditor.clear();
-                    ExternalEditorBuffer.clear();
-                    SavePreferences();
-                    ui.CloseCurrentPopup();
-                }
-                ui.SameLine();
-                if (ui.Button("Cancel"))
-                    ui.CloseCurrentPopup();
-            }
-
             if (OpenRenamePopup)
             {
                 ui.OpenPopup("Rename Asset");
@@ -1018,7 +978,7 @@ namespace KeireEditor
                     RequestNamedCreate(NamedCreateKind::PrefabVariant, record.RelativePath.stem().string() + "Variant");
                 }
                 if (ui.MenuItem("Configure External Editor..."))
-                    OpenExternalEditorPopup = true;
+                    editor.ConfigureAssetBrowserExternalEditor();
                 if (ui.MenuItem("Rename", false, Selection.size() == 1))
                     BeginAssetRename(record);
                 if (ui.MenuItem("Duplicate"))
@@ -1129,7 +1089,7 @@ namespace KeireEditor
                        const bool grid)
         {
             auto id = ui.PushId(record.Id.ToString());
-            auto image = Images.contains(record.Id) ? Images.at(record.Id) : FolderImage;
+            auto image = Images.contains(record.Id) ? Images.at(record.Id) : AssetFallbackImage;
             if (!Images.contains(record.Id))
             {
                 if (record.Type == Keire::ShaderGraphAsset::StaticType())
@@ -1141,6 +1101,8 @@ namespace KeireEditor
                     image = MaterialInstanceFallbackImage;
                 else if (record.Type == Keire::VfxEffectAsset::StaticType())
                     image = VfxFallbackImage;
+                else if (record.Type == Keire::AudioMixerAsset::StaticType())
+                    image = AudioMixerFallbackImage;
             }
             const bool selected = std::ranges::find(Selection, record.Id) != Selection.end();
             bool open = false;
@@ -1526,6 +1488,7 @@ namespace KeireEditor
                 }
                 if (!ShaderGraphFallbackImage)
                 {
+                    AssetFallbackImage = ui.CreateImage(96, 96, MakeAssetFallbackThumbnail({}, 96, 96));
                     ShaderGraphFallbackImage = ui.CreateImage(
                         96, 96, MakeAssetFallbackThumbnail(Keire::ShaderGraphAsset::StaticType(), 96, 96));
                     MaterialGraphFallbackImage = ui.CreateImage(
@@ -1534,6 +1497,8 @@ namespace KeireEditor
                         96, 96, MakeAssetFallbackThumbnail(Keire::MaterialInstanceAsset::StaticType(), 96, 96));
                     VfxFallbackImage =
                         ui.CreateImage(96, 96, MakeAssetFallbackThumbnail(Keire::VfxEffectAsset::StaticType(), 96, 96));
+                    AudioMixerFallbackImage = ui.CreateImage(
+                        96, 96, MakeAssetFallbackThumbnail(Keire::AudioMixerAsset::StaticType(), 96, 96));
                 }
                 for (auto& completed : Thumbnails->DrainCompleted())
                     Images[completed.Asset] = ui.CreateImage(completed.Width, completed.Height, completed.Pixels);
@@ -1746,10 +1711,12 @@ namespace KeireEditor
         std::unordered_map<Keire::AssetId, std::string> ImageDigests;
         std::uint64_t ObservedRecordRevision = 0;
         Keire::Ref<Keire::UiImage> FolderImage;
+        Keire::Ref<Keire::UiImage> AssetFallbackImage;
         Keire::Ref<Keire::UiImage> ShaderGraphFallbackImage;
         Keire::Ref<Keire::UiImage> MaterialGraphFallbackImage;
         Keire::Ref<Keire::UiImage> MaterialInstanceFallbackImage;
         Keire::Ref<Keire::UiImage> VfxFallbackImage;
+        Keire::Ref<Keire::UiImage> AudioMixerFallbackImage;
         Keire::Ref<Keire::UndoContext> Undo;
         std::vector<Keire::AssetId> Selection;
         std::vector<Keire::AssetId> VisibleSelectionOrder;
@@ -1765,9 +1732,7 @@ namespace KeireEditor
         std::string Search;
         std::string RenameBuffer;
         std::string CreateNameBuffer;
-        std::string ExternalEditorBuffer;
         std::string TrashError;
-        std::filesystem::path ExternalEditor;
         std::filesystem::path PendingCreateFolder;
         NamedCreateKind PendingCreateKind = NamedCreateKind::None;
         Keire::ShaderGraphTemplate PendingShaderGraphTemplate = Keire::ShaderGraphTemplate::Lit;
@@ -1780,7 +1745,6 @@ namespace KeireEditor
         bool OpenRenamePopup = false;
         bool OpenNamedCreatePopup = false;
         bool FocusCreateName = false;
-        bool OpenExternalEditorPopup = false;
         bool OpenFolderRenamePopup = false;
         bool OpenDeletePopup = false;
         bool OpenTrashPopup = false;

@@ -726,7 +726,7 @@ namespace
                                                         .PackageReceiptSha256 = removal.PackageReceiptSha256,
                                                         .MarkerNonce = removal.MarkerNonce,
                                                         .CurrentHealth = KeireHub::InstallationHealth::Healthy};
-        reporter.Publish(KeireHub::HubTaskState::Installing,
+        reporter.Publish(KeireHub::HubTaskState::Removing,
                          {.CurrentPackage = removal.InstallationId, .Phase = "Authorizing removal"});
         auto removed = KeireHub::RemoveManagedEditorInstallation(
             plan, request.TaskId,
@@ -735,8 +735,8 @@ namespace
              .ContinueAfterPhase =
                  [&](const KeireHub::ManagedEditorRemovalPhase phase)
              {
-                 reporter.Publish(KeireHub::HubTaskState::Installing, {.CurrentPackage = removal.InstallationId,
-                                                                       .Phase = std::string(RemovalPhase(phase))});
+                 reporter.Publish(KeireHub::HubTaskState::Removing, {.CurrentPackage = removal.InstallationId,
+                                                                     .Phase = std::string(RemovalPhase(phase))});
                  return !reporter.Failure();
              },
              .PrepareForCommit = [&]() { ShutdownManagedBuildServers(removal.Root); }});

@@ -388,6 +388,8 @@ namespace KeireHub
         std::optional<HubEditorInstallUiRequest> m_LastEditorInstallRequest;
         std::string m_EditorInstallDestination;
         std::string m_EditorComponentSearch;
+        std::string m_EditorCatalogSearch;
+        std::string m_EditorCatalogChannel;
         std::string m_AccountEmail;
         std::string m_AccountPassword;
         std::string m_AccountDisplayName;
@@ -395,11 +397,14 @@ namespace KeireHub
         std::vector<TemplateArtworkTexture> m_TemplateArtworkTextures;
         bool m_TaskCenterOpen = false;
         bool m_NotificationCenterOpen = false;
+        bool m_CloseTaskCenter = false;
+        bool m_CloseNotificationCenter = false;
         bool m_RequestAccountDialog = false;
         bool m_AccountProfileSynchronized = false;
         bool m_RequestEditorRemoval = false;
         bool m_ConfirmManagedEditorRemoval = false;
         bool m_RequestEditorInstall = false;
+        bool m_RequestEditorCatalog = false;
         bool m_ConfirmDuplicateEditorInstall = false;
         bool m_RequestResetSettings = false;
         bool m_RequestClearCache = false;

@@ -37,3 +37,25 @@ TEST_CASE("Task activity creates durable start and completion notifications with
     REQUIRE(notifications.Snapshot()->size() == 2);
     CHECK(notifications.Snapshot()->front().Severity == NotificationSeverity::Info);
 }
+
+TEST_CASE("Removal notifications use uninstall language")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    NotificationStore notifications(temporary.Path() / "notifications.json");
+    REQUIRE(notifications.Load());
+    TaskNotificationTracker tracker;
+    std::vector<HubTask> tasks{{.Id = "editor-remove",
+                                .Kind = HubTaskKind::Remove,
+                                .DisplayName = "Uninstall Kéire Editor 0.3.1",
+                                .State = HubTaskState::Installing,
+                                .UpdatedUnixSeconds = 10}};
+
+    REQUIRE(tracker.Observe(tasks, notifications, 10));
+    tasks.front().State = HubTaskState::Completed;
+    tasks.front().UpdatedUnixSeconds = 20;
+    REQUIRE(tracker.Observe(tasks, notifications, 20));
+
+    REQUIRE(notifications.Snapshot()->size() == 1);
+    CHECK(notifications.Snapshot()->front().Title == "Editor uninstall complete");
+    CHECK(notifications.Snapshot()->front().Message.find("Uninstall") != std::string::npos);
+}

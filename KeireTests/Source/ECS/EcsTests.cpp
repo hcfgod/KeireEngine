@@ -204,6 +204,17 @@ TEST_CASE("Entities own required Transforms and stale handles become inert after
     child.GetComponent<Keire::TransformComponent>()->SetLocalPosition({2.0F, 0.0F, 0.0F});
     root.GetComponent<Keire::TransformComponent>()->SetLocalPosition({3.0F, 0.0F, 0.0F});
     CHECK(child.GetComponent<Keire::TransformComponent>()->WorldPosition().X == doctest::Approx(5.0F));
+    const auto rootTransform = root.GetComponent<Keire::TransformComponent>();
+    const auto childTransform = child.GetComponent<Keire::TransformComponent>();
+    rootTransform->SetLocalEulerAngles({0.0F, 90.0F, 0.0F});
+    rootTransform->SetLocalScale({2.0F, 3.0F, 4.0F});
+    childTransform->SetWorldPosition({8.0F, 5.0F, -2.0F});
+    CHECK(childTransform->WorldPosition().X == doctest::Approx(8.0F).epsilon(0.0001));
+    CHECK(childTransform->WorldPosition().Y == doctest::Approx(5.0F).epsilon(0.0001));
+    CHECK(childTransform->WorldPosition().Z == doctest::Approx(-2.0F).epsilon(0.0001));
+    childTransform->SetWorldRotation(Keire::Math::EulerDegreesToQuaternion({0.0F, 30.0F, 0.0F}));
+    CHECK(Keire::Math::QuaternionToEulerDegrees(childTransform->WorldRotation()).Y ==
+          doctest::Approx(30.0F).epsilon(0.0001));
     CHECK_THROWS_AS(root.SetParent(child), std::invalid_argument);
     REQUIRE(root.AddComponent<Keire::DirectionalLightComponent>());
     CHECK_THROWS_AS((void)root.AddComponent<Keire::DirectionalLightComponent>(), std::invalid_argument);
@@ -307,7 +318,11 @@ TEST_CASE("Play session eagerly owns physics and runs gameplay sync step pullbac
                                                                 Keire::Ref<Keire::AudioSystem>{}, physics);
     session->Play();
     REQUIRE(session->Physics());
-    for (int step = 0; step < 180 && session->State() == Keire::ScenePlayState::Playing; ++step)
+    session->FixedUpdate(1.0F / 60.0F);
+    const auto liveBody = session->RuntimeScene()->FindEntity(falling.Id()).GetComponent<Keire::RigidBodyComponent>();
+    REQUIRE(liveBody);
+    CHECK(liveBody->LinearVelocity().Y < 0.0F);
+    for (int step = 1; step < 180 && session->State() == Keire::ScenePlayState::Playing; ++step)
         session->FixedUpdate(1.0F / 60.0F);
     REQUIRE(session->State() == Keire::ScenePlayState::Playing);
 
