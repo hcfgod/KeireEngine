@@ -1,22 +1,307 @@
 ---
 import PlatformLayout from "../../../layouts/PlatformLayout.astro";
 import { mfaChallengePath } from "../../../lib/auth";
+
 export const prerender = false;
-const role = Astro.locals.user?.app_metadata?.platform_role;
-if (!Astro.locals.user || !new Set(["moderator", "administrator"]).has(role)) { Astro.response.status = 404; }
-const allowed = Astro.response.status !== 404;
-if (allowed && Astro.locals.assurance.currentLevel !== "aal2") return Astro.redirect(mfaChallengePath(Astro.url.pathname), 303);
+
 const supabase = Astro.locals.supabase;
+const user = Astro.locals.user;
+let staffRole: "moderator" | "administrator" | null = null;
+if (supabase && user) {
+    const staffResult = await supabase.from("platform_staff_members")
+        .select("role,active").eq("user_id", user.id).eq("active", true).maybeSingle();
+    if (staffResult.data?.role === "moderator" || staffResult.data?.role === "administrator") {
+        staffRole = staffResult.data.role;
+    }
+}
+const allowed = Boolean(user && staffRole);
+if (!allowed) Astro.response.status = 404;
+if (allowed && Astro.locals.assurance.currentLevel !== "aal2") {
+    return Astro.redirect(mfaChallengePath(Astro.url.pathname), 303);
+}
+
+let applications: any[] = [];
 let submissions: any[] = [];
 let reports: any[] = [];
+let staff: any[] = [];
+let flags: any[] = [];
+let audits: any[] = [];
+let versions: any[] = [];
+let products: any[] = [];
+let validationReports: any[] = [];
+
 if (allowed && supabase) {
-    const [submissionResult, reportResult] = await Promise.all([
-        supabase.from("marketplace_submissions").select("id,state,submitted_at,version_id,submitted_by,assigned_to").in("state", ["submitted", "in_review", "changes_requested", "approved_pending_signature"]).order("submitted_at"),
-        supabase.from("marketplace_reports").select("id,reason,state,created_at,product_id,review_id,assigned_to").in("state", ["open", "triaged"]).order("created_at"),
+    const [applicationResult, submissionResult, reportResult, staffResult, flagResult, auditResult] = await Promise.all([
+        supabase.from("publisher_applications")
+            .select("id,applicant_user_id,organization_id,public_name,website_url,portfolio_url,statement,state,submitted_at,updated_at")
+            .in("state", ["submitted"]).order("submitted_at"),
+        supabase.from("marketplace_submissions")
+            .select("id,version_id,validation_report_id,submitted_by,state,assigned_to,decision_note,submitted_at,decided_at")
+            .in("state", ["submitted", "in_review", "changes_requested", "approved_pending_signature"])
+            .order("submitted_at"),
+        supabase.from("marketplace_reports")
+            .select("id,reporter_user_id,product_id,review_id,reason,details,state,assigned_to,resolution_note,created_at")
+            .in("state", ["open", "triaged"]).order("created_at"),
+        supabase.from("platform_staff_members")
+            .select("user_id,role,active,appointed_by,appointed_at,updated_at,revoked_at").order("appointed_at"),
+        supabase.from("platform_feature_flags")
+            .select("key,enabled,description,updated_at,updated_by").order("key"),
+        supabase.from("platform_audit_events")
+            .select("id,actor_user_id,action,target_type,target_id,created_at,metadata")
+            .order("created_at", { ascending: false }).limit(30),
     ]);
-    submissions = submissionResult.data ?? []; reports = reportResult.data ?? [];
+    applications = applicationResult.data ?? [];
+    submissions = submissionResult.data ?? [];
+    reports = reportResult.data ?? [];
+    staff = staffResult.data ?? [];
+    flags = flagResult.data ?? [];
+    audits = auditResult.data ?? [];
+
+    const versionIds = submissions.map((submission: any) => submission.version_id);
+    const reportIds = submissions.map((submission: any) => submission.validation_report_id);
+    if (versionIds.length) {
+        const versionResult = await supabase.from("marketplace_product_versions")
+            .select("id,product_id,version,state,install_kind,platforms,architectures,archive_sha256,archive_size_bytes,manifest_sha256,validator_version,updated_at")
+            .in("id", versionIds);
+        versions = versionResult.data ?? [];
+    }
+    const productIds = versions.map((version: any) => version.product_id);
+    if (productIds.length) {
+        const productResult = await supabase.from("marketplace_products")
+            .select("id,publisher_id,slug,display_name,state,license_spdx,license_revision,updated_at")
+            .in("id", productIds);
+        products = productResult.data ?? [];
+    }
+    if (reportIds.length) {
+        const validationResult = await supabase.from("marketplace_validation_reports")
+            .select("id,upload_id,passed,diagnostics,malware_scan_result,secret_scan_result,managed_validation_result,validator_version,validator_fingerprint_sha256,policy_version,package_sha256,manifest_sha256,completed_at")
+            .in("id", reportIds);
+        validationReports = validationResult.data ?? [];
+    }
 }
+
+const versionById = new Map(versions.map((version: any) => [version.id, version]));
+const productById = new Map(products.map((product: any) => [product.id, product]));
+const validationById = new Map(validationReports.map((report: any) => [report.id, report]));
+const slugify = (value: string) => value.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "").slice(0, 63) || "publisher";
+const activeStaff = staff.filter((member: any) => member.active).length;
 ---
-<PlatformLayout title={allowed ? "Marketplace moderation" : "Page not found"} description="Kéire Marketplace staff moderation queue." robots="noindex">
-    {allowed ? <section class="platform-section"><div class="platform-shell"><p class="eyebrow">Staff · audited operations</p><h1>Marketplace moderation</h1><div class="dashboard-grid"><nav class="dashboard-nav"><a href="#submissions" aria-current="page">Submissions</a><a href="#reports">Reports</a><a href="#security">Security revocations</a></nav><div><section id="submissions"><h2>Active submissions</h2>{submissions.length ? <table class="data-table"><thead><tr><th>ID</th><th>State</th><th>Submitted</th></tr></thead><tbody>{submissions.map((item: any) => <tr><td>{item.id}</td><td>{item.state}</td><td>{new Date(item.submitted_at).toLocaleString()}</td></tr>)}</tbody></table> : <p class="notice-panel">No active submissions.</p>}</section><section id="reports" class="platform-section"><h2>Open reports</h2>{reports.length ? <table class="data-table"><thead><tr><th>ID</th><th>Reason</th><th>State</th></tr></thead><tbody>{reports.map((item: any) => <tr><td>{item.id}</td><td>{item.reason}</td><td>{item.state}</td></tr>)}</tbody></table> : <p class="notice-panel">No open reports.</p>}</section></div></div></div></section> : <section class="platform-section"><div class="platform-shell empty-state"><h1>Page not found.</h1></div></section>}
+
+<PlatformLayout title={allowed ? "Staff operations" : "Page not found"} active="marketplace"
+    description="Kéire staff identity, marketplace validation, moderation, and launch controls." robots="noindex">
+    {allowed ? (
+        <section class="platform-section staff-console">
+            <div class="platform-shell">
+                <div class="section-heading staff-console__heading">
+                    <div>
+                        <p class="eyebrow">Staff · MFA verified · audited</p>
+                        <h1>Operations center</h1>
+                    </div>
+                    <div class="staff-console__identity">
+                        <span class="status-badge status-badge--ready">{staffRole}</span>
+                        <small>{user?.email}</small>
+                    </div>
+                </div>
+
+                <div class="staff-metrics" aria-label="Moderation queue summary">
+                    <article><strong>{applications.length}</strong><span>Publisher applications</span></article>
+                    <article><strong>{submissions.length}</strong><span>Package submissions</span></article>
+                    <article><strong>{reports.length}</strong><span>Open reports</span></article>
+                    <article><strong>{activeStaff}</strong><span>Active staff</span></article>
+                </div>
+
+                <div class="dashboard-grid publisher-dashboard">
+                    <nav class="dashboard-nav" aria-label="Staff operations">
+                        <a href="#applications" aria-current="page">Applications</a>
+                        <a href="#packages">Packages</a>
+                        <a href="#reports">Reports</a>
+                        <a href="#staff">Staff</a>
+                        <a href="#gates">Feature gates</a>
+                        <a href="#audit">Audit trail</a>
+                    </nav>
+
+                    <div class="publisher-workspace">
+                        <section id="applications" class="publisher-section">
+                            <div class="publisher-section__heading">
+                                <div><p class="eyebrow">Identity review</p><h2>Publisher applications</h2></div>
+                                <span class="status-badge">{applications.length} waiting</span>
+                            </div>
+                            {applications.length ? <div class="staff-card-grid">
+                                {applications.map((application: any) => <article class="staff-review-card">
+                                    <div class="staff-review-card__header">
+                                        <div><h3>{application.public_name}</h3><code>{application.id}</code></div>
+                                        <span class="status-badge">{application.state}</span>
+                                    </div>
+                                    <dl class="staff-detail-grid">
+                                        <div><dt>Applicant</dt><dd><code>{application.applicant_user_id}</code></dd></div>
+                                        <div><dt>Organization</dt><dd><code>{application.organization_id}</code></dd></div>
+                                        <div><dt>Submitted</dt><dd>{new Date(application.submitted_at).toLocaleString()}</dd></div>
+                                        <div><dt>Website</dt><dd>{application.website_url ? <a href={application.website_url} rel="noreferrer">Open website</a> : "Not provided"}</dd></div>
+                                    </dl>
+                                    <div class="staff-statement"><strong>Publishing statement</strong><p>{application.statement}</p></div>
+                                    <form class="staff-action-form" data-moderation-form>
+                                        <input type="hidden" name="operation" value="application.decide" />
+                                        <input type="hidden" name="applicationId" value={application.id} />
+                                        <label class="field"><span>Publisher URL slug</span><input name="publisherSlug" value={slugify(application.public_name)} minlength="3" maxlength="63" pattern="[a-z0-9][a-z0-9-]{2,62}" required /></label>
+                                        <label class="field"><span>Decision note</span><textarea name="decisionNote" minlength="3" maxlength="5000" placeholder="Record the evidence and reasoning for this decision." required></textarea></label>
+                                        <div class="actions staff-decision-actions">
+                                            <button class="button button--secondary" type="submit" name="decision" value="changes_requested">Request changes</button>
+                                            <button class="button button--quiet" type="submit" name="decision" value="rejected" data-confirm="Reject this publisher application?">Reject</button>
+                                            <button class="button" type="submit" name="decision" value="approved" data-confirm="Approve this publisher and activate its organization?">Approve publisher</button>
+                                        </div>
+                                        <p class="form-message" role="status" aria-live="polite"></p>
+                                    </form>
+                                </article>)}
+                            </div> : <p class="notice-panel">No publisher applications are waiting for review.</p>}
+                        </section>
+
+                        <section id="packages" class="publisher-section">
+                            <div class="publisher-section__heading">
+                                <div><p class="eyebrow">Validated evidence</p><h2>Package submissions</h2></div>
+                                <span class="status-badge">Offline signing remains separate</span>
+                            </div>
+                            {submissions.length ? <div class="staff-card-grid">
+                                {submissions.map((submission: any) => {
+                                    const version = versionById.get(submission.version_id) as any;
+                                    const product = productById.get(version?.product_id) as any;
+                                    const validation = validationById.get(submission.validation_report_id) as any;
+                                    const diagnostics = Array.isArray(validation?.diagnostics) ? validation.diagnostics : [];
+                                    return <article class="staff-review-card">
+                                        <div class="staff-review-card__header">
+                                            <div><h3>{product?.display_name ?? "Unknown product"} <small>{version?.version}</small></h3><code>{submission.id}</code></div>
+                                            <span class:list={["status-badge", validation?.passed && "status-badge--ready"]}>{submission.state}</span>
+                                        </div>
+                                        <dl class="staff-detail-grid">
+                                            <div><dt>Package SHA-256</dt><dd><code>{validation?.package_sha256 ?? "Unavailable"}</code></dd></div>
+                                            <div><dt>Manifest SHA-256</dt><dd><code>{validation?.manifest_sha256 ?? "Unavailable"}</code></dd></div>
+                                            <div><dt>Malware scan</dt><dd>{validation?.malware_scan_result ?? "Unavailable"}</dd></div>
+                                            <div><dt>Secret scan</dt><dd>{validation?.secret_scan_result ?? "Unavailable"}</dd></div>
+                                            <div><dt>Managed validation</dt><dd>{validation?.managed_validation_result ?? "Unavailable"}</dd></div>
+                                            <div><dt>Validator</dt><dd>{validation?.validator_version ?? "Unavailable"}</dd></div>
+                                        </dl>
+                                        <div class="staff-statement"><strong>Diagnostics</strong><p>{diagnostics.length ? `${diagnostics.length} issue(s) reported.` : "No validator diagnostics."}</p></div>
+                                        <form class="staff-action-form" data-moderation-form>
+                                            <input type="hidden" name="operation" value="submission.decide" />
+                                            <input type="hidden" name="submissionId" value={submission.id} />
+                                            <label class="field"><span>Decision note</span><textarea name="decisionNote" maxlength="10000" placeholder="Required for changes or rejection; recommended for approval."></textarea></label>
+                                            <div class="actions staff-decision-actions">
+                                                <button class="button button--quiet" type="submit" name="decision" value="in_review">Claim review</button>
+                                                <button class="button button--secondary" type="submit" name="decision" value="changes_requested">Request changes</button>
+                                                <button class="button button--quiet" type="submit" name="decision" value="rejected" data-confirm="Reject this package submission?">Reject</button>
+                                                <button class="button" type="submit" name="decision" value="approved_pending_signature" data-confirm="Approve these exact validated bytes for offline signing?">Approve for signing</button>
+                                            </div>
+                                            <p class="form-message" role="status" aria-live="polite"></p>
+                                        </form>
+                                    </article>;
+                                })}
+                            </div> : <p class="notice-panel">No validated package submissions are waiting for staff review.</p>}
+                        </section>
+
+                        <section id="reports" class="publisher-section">
+                            <div class="publisher-section__heading"><div><p class="eyebrow">Trust and safety</p><h2>Marketplace reports</h2></div></div>
+                            {reports.length ? <div class="staff-card-grid">
+                                {reports.map((report: any) => <article class="staff-review-card">
+                                    <div class="staff-review-card__header"><div><h3>{report.reason}</h3><code>{report.id}</code></div><span class="status-badge">{report.state}</span></div>
+                                    <p>{report.details || "No additional details were supplied."}</p>
+                                    <form class="staff-action-form" data-moderation-form>
+                                        <input type="hidden" name="operation" value="report.decide" />
+                                        <input type="hidden" name="reportId" value={report.id} />
+                                        <label class="field"><span>Resolution note</span><textarea name="resolutionNote" maxlength="5000" placeholder="Record investigation evidence and resulting action."></textarea></label>
+                                        <div class="actions">
+                                            <button class="button button--secondary" type="submit" name="state" value="triaged">Assign to me</button>
+                                            <button class="button button--quiet" type="submit" name="state" value="dismissed" data-confirm="Dismiss this report?">Dismiss</button>
+                                            <button class="button" type="submit" name="state" value="resolved">Resolve</button>
+                                        </div>
+                                        <p class="form-message" role="status" aria-live="polite"></p>
+                                    </form>
+                                </article>)}
+                            </div> : <p class="notice-panel">No marketplace reports require action.</p>}
+                        </section>
+
+                        <section id="staff" class="publisher-section">
+                            <div class="publisher-section__heading"><div><p class="eyebrow">Least privilege</p><h2>Staff roles</h2></div><span class="status-badge">{staffRole}</span></div>
+                            <p class="notice-panel">Moderators review identity, packages, and reports. Administrators additionally manage staff and feature gates. Every change requires MFA and an audit reason.</p>
+                            <div class="data-table-wrap"><table class="data-table"><thead><tr><th>Account ID</th><th>Role</th><th>Status</th><th>Updated</th></tr></thead><tbody>
+                                {staff.map((member: any) => <tr><td><code>{member.user_id}</code></td><td>{member.role}</td><td><span class:list={["status-badge", member.active && "status-badge--ready"]}>{member.active ? "active" : "revoked"}</span></td><td>{new Date(member.updated_at).toLocaleString()}</td></tr>)}
+                            </tbody></table></div>
+                            {staffRole === "administrator" && <form class="publisher-upload staff-role-form" data-moderation-form>
+                                <input type="hidden" name="operation" value="staff.set" />
+                                <div class="publisher-upload__grid">
+                                    <label class="field"><span>Existing account ID</span><input name="targetUserId" pattern="[0-9a-fA-F-]{36}" maxlength="36" required /></label>
+                                    <label class="field"><span>Role</span><select name="role"><option value="moderator">Moderator</option><option value="administrator">Administrator</option></select></label>
+                                    <label class="field"><span>Status</span><select name="active"><option value="true">Active</option><option value="false">Revoked</option></select></label>
+                                    <label class="field publisher-upload__wide"><span>Audit reason</span><textarea name="reason" minlength="3" maxlength="1000" required></textarea></label>
+                                </div>
+                                <div class="actions"><button class="button" type="submit">Apply staff assignment</button></div>
+                                <p class="form-message" role="status" aria-live="polite"></p>
+                            </form>}
+                        </section>
+
+                        <section id="gates" class="publisher-section">
+                            <div class="publisher-section__heading"><div><p class="eyebrow">Controlled rollout</p><h2>Feature gates</h2></div></div>
+                            <div class="staff-card-grid">
+                                {flags.map((flag: any) => <article class="staff-review-card staff-flag-card">
+                                    <div class="staff-review-card__header"><div><h3>{flag.key}</h3><p>{flag.description}</p></div><span class:list={["status-badge", flag.enabled && "status-badge--ready"]}>{flag.enabled ? "enabled" : "disabled"}</span></div>
+                                    {staffRole === "administrator" && <form class="staff-action-form" data-moderation-form>
+                                        <input type="hidden" name="operation" value="feature.set" />
+                                        <input type="hidden" name="key" value={flag.key} />
+                                        <label class="field"><span>Desired state</span><select name="enabled" disabled={flag.key === "paid_checkout_enabled"}><option value="false" selected={!flag.enabled}>Disabled</option><option value="true" selected={flag.enabled}>Enabled</option></select></label>
+                                        <label class="field"><span>Audit reason</span><input name="reason" minlength="3" maxlength="1000" required /></label>
+                                        <div class="actions"><button class="button button--secondary" type="submit" disabled={flag.key === "paid_checkout_enabled"}>Update gate</button></div>
+                                        <p class="form-message" role="status" aria-live="polite"></p>
+                                    </form>}
+                                </article>)}
+                            </div>
+                        </section>
+
+                        <section id="audit" class="publisher-section">
+                            <div class="publisher-section__heading"><div><p class="eyebrow">Append-only evidence</p><h2>Recent audit trail</h2></div></div>
+                            {audits.length ? <div class="data-table-wrap"><table class="data-table"><thead><tr><th>Time</th><th>Action</th><th>Target</th><th>Actor</th></tr></thead><tbody>
+                                {audits.map((event: any) => <tr><td>{new Date(event.created_at).toLocaleString()}</td><td>{event.action}</td><td>{event.target_type}<small>{event.target_id}</small></td><td><code>{event.actor_user_id ?? "service"}</code></td></tr>)}
+                            </tbody></table></div> : <p class="notice-panel">No audit events are visible.</p>}
+                        </section>
+                    </div>
+                </div>
+            </div>
+        </section>
+    ) : <section class="platform-section"><div class="platform-shell empty-state"><h1>Page not found.</h1></div></section>}
 </PlatformLayout>
+
+<script>
+    async function responseData(response: Response) {
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(payload?.error?.message ?? "The staff operation failed.");
+        return payload?.data;
+    }
+
+    document.querySelectorAll<HTMLFormElement>("[data-moderation-form]").forEach((form) => {
+        form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const submitter = (event as SubmitEvent).submitter as HTMLButtonElement | null;
+            if (submitter?.dataset.confirm && !window.confirm(submitter.dataset.confirm)) return;
+            const message = form.querySelector<HTMLElement>(".form-message");
+            const controls = form.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>("button,input,select,textarea");
+            const values = new FormData(form);
+            const payload: Record<string, unknown> = Object.fromEntries(values.entries());
+            if (submitter?.name) payload[submitter.name] = submitter.value;
+            if (typeof payload.active === "string") payload.active = payload.active === "true";
+            if (typeof payload.enabled === "string") payload.enabled = payload.enabled === "true";
+            controls.forEach((control) => control.disabled = true);
+            if (message) { message.textContent = "Applying audited operation…"; message.dataset.kind = ""; }
+            try {
+                await responseData(await fetch("/admin/marketplace/v1/actions/", {
+                    method: "POST",
+                    credentials: "same-origin",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                }));
+                if (message) { message.textContent = "Operation completed and recorded in the audit trail."; message.dataset.kind = "success"; }
+                window.setTimeout(() => window.location.reload(), 700);
+            } catch (error) {
+                if (message) { message.textContent = error instanceof Error ? error.message : "The staff operation failed."; message.dataset.kind = "error"; }
+                controls.forEach((control) => control.disabled = false);
+            }
+        });
+    });
+</script>

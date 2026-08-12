@@ -3,7 +3,7 @@
   "releaseStatus": {
     "state": "preparing",
     "version": "0.3.1",
-    "message": "Kéire Hub 0.3.1 is being prepared. Downloads are temporarily unavailable while release validation completes."
+    "message": "Windows x86-64 Hub 0.3.1 is available through the catalog-verified release. Linux and macOS downloads remain gated."
   },
   "packages": []
 }

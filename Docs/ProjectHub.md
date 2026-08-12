@@ -227,6 +227,8 @@ can independently enable the public-client browser OAuth adapter with a register
 website callback. The recommended flow uses authorization-code PKCE, state, and nonce; the browser forwards only the
 single-use code through `keirehub://oauth/callback`, and the Hub performs the token exchange. Email authentication
 remains available as a staged fallback. The Hub never accepts or packages a client secret or Supabase service-role key.
+OAuth refresh tokens are treated as opaque, non-empty, bounded values; the Hub does not assume a provider-specific
+minimum length and rotates every accepted token through the platform secure store.
 The Windows installer owns the current user's `keirehub` protocol registration and removes it only when it still points
 to that exact installation. Linux packages declare `x-scheme-handler/keirehub` and pass a single `%u` activation to the
 verified Hub wrapper. The callback page never displays or copies the authorization code: it offers a user-initiated app

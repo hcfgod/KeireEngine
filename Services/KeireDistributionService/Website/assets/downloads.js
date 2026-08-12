@@ -266,7 +266,7 @@ function renderVariant(target, platform, architecture, candidate) {
     header.append(element("strong", "", architectureLabel(architecture)));
     header.append(element("span", "", `${bytes(candidate.packageRecord.artifact.sizeBytes)}`));
     variant.append(header);
-    variant.append(element("p", "version-detail", `Hub v${candidate.version.raw} · Editor versions from signed catalog`));
+    variant.append(element("p", "version-detail", `Hub v${candidate.version.raw} · Verified by signed Kéire catalog`));
 
     const download = element("a", "button button-primary", `Download ${architectureLabel(architecture)}`);
     download.href = `/v1/packages/${candidate.packageRecord.artifact.sha256}`;
@@ -436,7 +436,8 @@ async function loadDownloads() {
                 "Recommended for this device. Development preview available:" :
                 "Development preview available:";
         } else if (variants.children.length > 0) {
-            state.textContent = platform === hostPlatform ? "Recommended for this device. Signed stable releases:" : "Signed stable releases:";
+            state.textContent = platform === hostPlatform ?
+                "Recommended for this device. Catalog-verified releases:" : "Catalog-verified releases:";
         } else if (previewReleaseStatus) {
             state.textContent = previewReleaseStatus.message;
         } else if (matching.length < 2) {

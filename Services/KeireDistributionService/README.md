@@ -258,6 +258,8 @@ from `dist/server/entry.mjs` with `dist/client/` beside it. Do not hand-edit gen
 `.astro`, `dist`, or synchronized content.
 The deployed Pagefind WebAssembly requires the narrowly scoped CSP token `'wasm-unsafe-eval'` plus the self/blob worker
 policy; external scripts, external fonts, and inline script/style execution remain disallowed.
+Publisher uploads use Supabase's direct Storage TUS origin, so the Caddy `connect-src` policy must retain both the
+project API origin and its exact `<project-ref>.storage.supabase.co` origin. Do not replace that host with a wildcard.
 
 ## Deployment
 
@@ -307,12 +309,19 @@ cd supabase/functions/website-contact
 deno check --frozen --lock=deno.lock index.ts
 ```
 
-Marketplace mutations use separate JWT-protected Edge Functions. `marketplace-library`, `marketplace-hub`, and
-`marketplace-publisher` verify the caller with Supabase Auth before decoding claims, accept only the production browser
+Marketplace mutations use separate JWT-protected Edge Functions. `marketplace-library`, `marketplace-hub`,
+`marketplace-publisher`, and `marketplace-moderation` verify the caller with Supabase Auth before decoding claims, accept only the production browser
 origin when an Origin header is present, stream bounded JSON, and call service-role-only database transitions. The
-publisher transition independently requires an `aal2` token. Direct authenticated execution of those privileged
+publisher and moderation transitions independently require an `aal2` token. Direct authenticated execution of those privileged
 database functions is revoked, and all corresponding feature flags default to false. Do not enable any flag until its
 identity, legal, validator, offline-signing, backup/restore, and cross-platform acceptance gates pass.
+
+Staff roles live in `public.platform_staff_members`, not mutable browser token metadata. Moderators review submitted
+publisher identities, passing package-validation evidence, and marketplace reports. Administrators additionally manage
+staff assignments and launch gates. The database prevents removal of the final active administrator, rejects paid
+checkout enablement for 0.3.1, and records each staff decision in `public.platform_audit_events`. Browser staff sessions
+have read-only queue access; all changes cross the MFA-protected moderation boundary. Package approval ends at
+`approved_pending_signature`, preserving the offline signing key as a separate operational trust domain.
 
 ### Marketplace package validator
 

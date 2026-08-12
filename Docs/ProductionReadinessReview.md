@@ -2,11 +2,31 @@
 
 Review date: 2026-08-12
 
-Review scope: Kéire 0.3.1 at commit `7619442`, the clean Windows packages published in signed distribution snapshot
-sequence 9, the 58-guide documentation library, and the current feature-gated online platform.
+Revision: current-source and Windows-candidate refresh
+
+Review scope: Kéire 0.3.1 source at commit `6f27aaa`, the newly rebuilt clean Windows Editor candidate, the Windows
+packages published from commit `7619442` in signed distribution snapshot sequence 9, the 58-guide documentation
+library, and the current feature-gated online platform. Candidate evidence and public-release evidence are kept
+separate throughout this review.
 
 Review target: sustained commercial and AAA-team production use. A feature existing in source is not equivalent to a
 validated workflow, and a validated local workflow is not equivalent to a supported public release.
+
+## What Changed In This Refresh
+
+- The clean Windows Editor package was rebuilt from `6f27aaa`. Its Dist runtime reports that exact commit and its
+  package gate includes the current Hub/process launch hardening, rendered-test backend normalization, marketplace
+  service-boundary fixes, and documentation corrections.
+- Current Dist suites pass 591 Core tests with 47,736 assertions, 133 Editor tests with 2,230 assertions, and 347 Hub
+  tests with 3,604 assertions. The D3D12 and Vulkan rendered-output suites remain green at 21/21 cases each.
+- Windows Hub and Editor now diagnose elevated launch sessions that cannot accept Explorer file drops, while the Hub
+  avoids starting another elevated Editor. The browser-to-Hub URL-protocol handoff and package ownership contracts are
+  represented in the current source baseline.
+- The active public catalog remains sequence 9 until a matching replacement Hub installer completes the release gates.
+  Its Ed25519 catalog and SHA-256 identities are verified, but the native Windows installer is not Authenticode-signed.
+  The Downloads UI now describes that distinction instead of calling the executable itself signed.
+- Linux source and package contracts remain maintained, but no Linux artifact is advertised while exact-release native
+  installation and Vulkan acceptance are pending. This is intentionally unaffected by the unavailable local WSL run.
 
 ## Executive Assessment
 
@@ -16,9 +36,9 @@ Windows technology preview and development platform. It is not yet justified as 
 generally available cross-platform marketplace.
 
 The current overall grade is **B (84/100)**. The engineering foundation is stronger than the release-evidence score:
-Windows packages and graphics paths are current and reproducible, while native validation of this exact commit on Linux
-and macOS, named-hardware performance gates, Authenticode/notarization, marketplace acceptance, and shipped-project soak
-evidence remain incomplete.
+the Windows Editor candidate and graphics paths are current and reproducible, while the public Hub still trails that
+candidate and native validation of this exact commit on Linux and macOS, named-hardware performance gates,
+Authenticode/notarization, marketplace acceptance, and shipped-project soak evidence remain incomplete.
 
 | Assessment | Grade | Score | Current judgment |
 | --- | ---: | ---: | --- |
@@ -38,22 +58,24 @@ Scores are review shorthand, not release gates. The release gates below are auth
 
 ## Current Reproducible Evidence
 
-### Windows 0.3.1 release path
+### Windows 0.3.1 candidate and public release paths
 
-The clean `package-editor` workflow completed from commit `7619442` and produced a schema-2 Dist editor package with a
-clean-worktree identity. Its package gate passed:
+The clean `package-editor` workflow completed from commit `6f27aaa` and produced a schema-2 Dist editor candidate with
+a clean-worktree identity. Its package gate passed:
 
-- 590/590 Core tests with 47,732 assertions;
+- 591/591 Core tests with 47,736 assertions;
 - 133/133 Editor tests with 2,230 assertions;
-- 346/346 Hub tests with 3,602 assertions;
+- 347/347 Hub tests with 3,604 assertions;
 - the complete Client compile gate, Dist Client smoke, packaged Sandbox smoke, and extracted package validation;
 - direct, managed, and source-module SDK consumer checks owned by the editor packaging workflow.
 
-The clean 0.3.1 Hub native installer was also built from the same commit. The release publisher created Editor and Hub
+The currently public Editor and Hub artifacts were built from commit `7619442`. The release publisher created their
 package records, signed both v1 and v2 catalogs with the rotated Ed25519 release key, verified every signed document,
 and atomically activated immutable snapshot `release-0.3.1-sequence-9-08e10a7`. The live Windows catalog exposes only
 `keire.editor@0.3.1` and `keire.hub@0.3.1`; both content-addressed artifacts respond over HTTPS with exact lengths and
-byte-range support. Catalog signing does not replace Authenticode signing of the native installer.
+byte-range support. The Hub installer is 55,834,101 bytes with SHA-256
+`29096f0d837294cd79bfe2b099d67f75e7441b0ef791567a964af50d15795384`. Catalog signing does not replace Authenticode
+signing of the native installer, and the `6f27aaa` Editor candidate is not relabeled as public sequence-9 evidence.
 
 ### Rendered output
 

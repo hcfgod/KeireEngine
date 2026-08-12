@@ -11,8 +11,16 @@ only public TCP 80/443; Astro (`127.0.0.1:4321`) and the distribution service (`
 marketplace schema, private Storage buckets, RLS policies, official draft products, MFA account surfaces, and
 JWT-protected marketplace Edge Functions are deployed. GitHub sign-in is configured through Supabase, the Kéire Hub
 public OAuth client is registered, and `hub_oauth_sso_enabled=true` is intentionally active for private staging tests.
-The other five feature flags remain disabled. Leaked-password protection and custom SMTP are deferred until the paid
+The publisher portal is also enabled for the single internal staging account; marketplace, asset-package, community,
+and paid-checkout gates remain disabled. Leaked-password protection and custom SMTP are deferred until the paid
 Supabase plan and branded production domain are available.
+
+Staff authorization is database-authoritative in `public.platform_staff_members`; browser JWT metadata is not an
+authorization source. Moderators can review publisher applications, validated packages, and marketplace reports.
+Administrators can additionally appoint or revoke staff and change launch gates, except that paid checkout is blocked
+for 0.3.1. Every staff action requires AAL2 and crosses `marketplace-moderation` into a service-role-only, transactional
+RPC that writes an audit event. Direct authenticated moderation writes are revoked, and the final active administrator
+cannot be removed. The initial staging account is the bootstrapped administrator.
 
 The live signed software-distribution snapshot is sequence 9. Its Windows x86-64 catalog contains the clean
 `keire.editor@0.3.1` and `keire.hub@0.3.1` artifacts only. This proves software distribution, not marketplace product
@@ -47,6 +55,8 @@ Complete the gates in this order. If a gate fails, keep its feature flag disable
    - Obtain owner or qualified legal review of privacy, terms, marketplace, publisher, acceptable-use, copyright, and
      reporting policies.
    - Validate organization ownership and MFA-protected publisher application/moderation transitions with staging users.
+   - Review submitted applications at `/admin/marketplace/`; approval transactionally activates the publisher, while
+     changes and rejection preserve the recorded decision reason.
    - Keep `paid_checkout_enabled=false`; 0.3.1 products are free only.
 3. **Package validation and signing**
    - Deploy the isolated validator worker under a dedicated unprivileged identity and private temporary root.
@@ -55,6 +65,9 @@ Complete the gates in this order. If a gate fails, keep its feature flag disable
    - Create a dedicated offline marketplace signing key, backup its private material securely, publish only the public
      trust root, and rehearse key rotation and security revocation. Never place the private key in Astro, Supabase, the
      repository, or Hub.
+   - After a package has a passing validation report, submit its exact digest from the publisher portal, review the
+     validator evidence in `/admin/marketplace/`, and approve it only to `approved_pending_signature`. Staff approval
+     never creates a publication or accesses the offline private key.
 4. **Official staging products**
    - Build deterministic `.keireassetpackage` artifacts for the five seeded official drafts.
    - Validate the exact quarantined bytes, moderate them, sign their canonical manifests offline, publish immutable

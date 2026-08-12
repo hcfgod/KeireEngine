@@ -162,14 +162,19 @@ export function requiredUuid(input: Record<string, unknown>, name: string): stri
     return value;
 }
 
-export function databaseFailure(error: { message: string }): RequestError {
+export function databaseFailure(error: { message: string; code?: string }): RequestError {
     const mappings = new Map<string, readonly [number, string, string]>([
         ["marketplace_disabled", [503, "marketplace.disabled", "The marketplace is not available yet."]],
         ["hub_oauth_disabled", [503, "account.hub_oauth_disabled", "Hub account sign-in is not available yet."]],
         ["publisher_portal_disabled", [503, "publisher.disabled", "Publisher tools are not available yet."]],
         ["publisher_application_not_editable", [409, "publisher.application_not_editable", "This publisher application can no longer be edited."]],
+        ["publisher_application_decision_invalid", [400, "staff.application_decision_invalid", "The publisher decision is incomplete or invalid."]],
+        ["publisher_application_not_reviewable", [409, "staff.application_not_reviewable", "This publisher application is no longer awaiting review."]],
         ["publisher_product_not_editable", [403, "publisher.product_not_editable", "This product can no longer be edited."]],
         ["publisher_version_not_editable", [409, "publisher.version_not_editable", "This package version can no longer be edited."]],
+        ["publisher_version_not_submittable", [409, "publisher.version_not_submittable", "Only a validated package version can be submitted for staff review."]],
+        ["publisher_validation_required", [409, "publisher.validation_required", "A passing validation report is required before submission."]],
+        ["publisher_submission_already_active", [409, "publisher.submission_active", "This package version already has an active staff submission."]],
         ["publisher_upload_invalid", [400, "publisher.upload_invalid", "The package upload request is invalid."]],
         ["publisher_upload_already_active", [409, "publisher.upload_already_active", "This version already has an active package upload."]],
         ["publisher_upload_not_completable", [409, "publisher.upload_not_completable", "The package upload cannot be completed in its current state."]],
@@ -184,8 +189,22 @@ export function databaseFailure(error: { message: string }): RequestError {
         ["entitlement_required", [403, "marketplace.entitlement_required", "Add this product to your library before downloading it."]],
         ["version_unavailable", [404, "marketplace.version_unavailable", "This package version is not available."]],
         ["marketplace_rate_limited", [429, "marketplace.rate_limited", "Too many marketplace changes were requested. Wait a few minutes, then try again."]],
+        ["staff_authorization_required", [403, "staff.authorization_required", "An active staff role is required."]],
+        ["staff_moderator_required", [403, "staff.moderator_required", "An active moderator role is required."]],
+        ["staff_administrator_required", [403, "staff.administrator_required", "An active administrator role is required."]],
+        ["staff_assignment_invalid", [400, "staff.assignment_invalid", "The staff assignment is invalid."]],
+        ["staff_last_administrator_required", [409, "staff.last_administrator_required", "At least one active administrator must remain."]],
+        ["marketplace_submission_decision_invalid", [400, "staff.submission_decision_invalid", "The package decision is incomplete or invalid."]],
+        ["marketplace_submission_not_reviewable", [409, "staff.submission_not_reviewable", "This package submission is no longer awaiting review."]],
+        ["marketplace_submission_validation_failed", [409, "staff.submission_validation_required", "This package does not have a passing validation report."]],
+        ["marketplace_report_decision_invalid", [400, "staff.report_decision_invalid", "The report decision is incomplete or invalid."]],
+        ["marketplace_report_not_reviewable", [409, "staff.report_not_reviewable", "This report is no longer awaiting review."]],
+        ["platform_feature_flag_change_invalid", [400, "staff.feature_flag_invalid", "The feature-gate change is not allowed."]],
     ]);
     const mapped = mappings.get(error.message);
+    if (!mapped && error.code === "23505") {
+        return new RequestError(409, "marketplace.conflict", "That identifier is already in use. Choose another one.");
+    }
     return mapped
         ? new RequestError(mapped[0], mapped[1], mapped[2])
         : new RequestError(503, "marketplace.transition_failed", "The marketplace operation could not be completed.");

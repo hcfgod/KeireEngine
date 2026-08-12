@@ -11,11 +11,13 @@ SHARED = ROOT / "supabase/functions/_shared/marketplace.ts"
 LIBRARY = ROOT / "supabase/functions/marketplace-library/index.ts"
 HUB = ROOT / "supabase/functions/marketplace-hub/index.ts"
 PUBLISHER = ROOT / "supabase/functions/marketplace-publisher/index.ts"
+MODERATION = ROOT / "supabase/functions/marketplace-moderation/index.ts"
 VALIDATOR_QUEUE = ROOT / "supabase/functions/marketplace-validator-queue/index.ts"
 SUPABASE_CONFIG = ROOT / "supabase/config.toml"
 MIDDLEWARE = ROOT / "Services/KeireDistributionService/DocumentationSite/Source/middleware.ts"
 API_ROOT = ROOT / "Services/KeireDistributionService/DocumentationSite/Source/pages/marketplace/v1"
 PUBLISHER_API_ROOT = ROOT / "Services/KeireDistributionService/DocumentationSite/Source/pages/publisher/v1"
+STAFF_API_ROOT = ROOT / "Services/KeireDistributionService/DocumentationSite/Source/pages/admin/marketplace/v1"
 
 
 def require(condition: bool, message: str) -> None:
@@ -27,12 +29,13 @@ shared = SHARED.read_text(encoding="utf-8")
 library = LIBRARY.read_text(encoding="utf-8")
 hub = HUB.read_text(encoding="utf-8")
 publisher = PUBLISHER.read_text(encoding="utf-8")
+moderation = MODERATION.read_text(encoding="utf-8")
 validator_queue = VALIDATOR_QUEUE.read_text(encoding="utf-8")
 supabase_config = SUPABASE_CONFIG.read_text(encoding="utf-8")
 middleware = MIDDLEWARE.read_text(encoding="utf-8")
 routes = "\n".join(
     path.read_text(encoding="utf-8")
-    for api_root in (API_ROOT, PUBLISHER_API_ROOT)
+    for api_root in (API_ROOT, PUBLISHER_API_ROOT, STAFF_API_ROOT)
     for path in api_root.rglob("*.ts")
 )
 
@@ -68,12 +71,28 @@ for upload_rpc in (
 require('.createSignedUploadUrl(reservation.storage_path, { upsert: false })' in publisher,
         "Publisher uploads must receive only a non-overwriting path-scoped storage grant.")
 require('bucket: "marketplace-quarantine"' in publisher and
-        'storage.supabase.co/storage/v1/upload/resumable' in publisher,
-        "Publisher upload reservations must target the private direct-storage TUS endpoint.")
+        'storage.supabase.co/storage/v1/upload/resumable/sign' in publisher,
+        "Signed publisher grants must target Supabase Storage's signed TUS endpoint.")
 require('expectedSha256' in publisher and 'expectedSizeBytes' in publisher,
         "Publisher reservations must bind the expected package digest and byte count.")
+require('operation === "version.submit"' in publisher and
+        "service_submit_marketplace_version" in publisher,
+        "Validated package submission must use its service-only state transition.")
 require('functions.invoke("marketplace-publisher"' in routes,
         "The website publisher API must invoke the MFA-protected Edge transition.")
+require('caller.assuranceLevel !== "aal2"' in moderation and
+        "service_get_platform_staff_role" in moderation,
+        "Every moderation operation must require MFA and a current database staff role.")
+for moderation_rpc in (
+    "service_decide_publisher_application",
+    "service_decide_marketplace_submission",
+    "service_decide_marketplace_report",
+    "service_set_platform_staff",
+    "service_set_platform_feature_flag",
+):
+    require(moderation_rpc in moderation, f"Moderation boundary does not call {moderation_rpc}.")
+require('functions.invoke("marketplace-moderation"' in routes,
+        "The staff website adapter must use the audited moderation Edge boundary.")
 for rpc in (
     "service_create_marketplace_organization",
     "service_claim_free_marketplace_product",

@@ -22,6 +22,14 @@ const {
 } = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site);
 const fullTitle = title === "Kéire Engine" ? title : `${title} — Kéire Engine`;
+let staffRole: "moderator" | "administrator" | null = null;
+if (Astro.locals.user && Astro.locals.supabase) {
+    const staffResult = await Astro.locals.supabase.from("platform_staff_members")
+        .select("role").eq("user_id", Astro.locals.user.id).eq("active", true).maybeSingle();
+    if (staffResult.data?.role === "moderator" || staffResult.data?.role === "administrator") {
+        staffRole = staffResult.data.role;
+    }
+}
 ---
 
 <!doctype html>
@@ -45,7 +53,7 @@ const fullTitle = title === "Kéire Engine" ? title : `${title} — Kéire Engin
         {structuredData && <script type="application/ld+json" set:html={JSON.stringify(structuredData)} />}
     </head>
     <body>
-        <PlatformHeader active={active} signedIn={Boolean(Astro.locals.user)} />
+        <PlatformHeader active={active} signedIn={Boolean(Astro.locals.user)} staffRole={staffRole} />
         <main id="main"><slot /></main>
         <PlatformFooter />
     </body>

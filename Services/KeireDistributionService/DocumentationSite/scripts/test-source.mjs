@@ -190,6 +190,20 @@ for (const [sourcePath, contract] of versionContracts) {
 
 const rootReadme = await readFile(path.join(repositoryRoot, "README.md"), "utf8");
 await validateLocalLinks("README.md", path.join(repositoryRoot, "README.md"), rootReadme);
+const downloadsPage = await readFile(path.join(siteRoot, "Source", "pages", "downloads", "index.astro"), "utf8");
+for (const contract of [
+    `Windows x86-64 is available now through the catalog-verified ${projectVersion} release`,
+    "The catalog and artifact hash are verified",
+    "No Linux link is shown until install, upgrade, removal, Hub, Editor, and Vulkan acceptance pass",
+]) {
+    assert(downloadsPage.includes(contract), `Downloads page is missing current platform contract: ${contract}`);
+}
+const previewDownloadMetadata = JSON.parse(await readFile(path.join(repositoryRoot, "Services",
+    "KeireDistributionService", "Website", "assets", "preview-downloads.json"), "utf8"));
+assert(previewDownloadMetadata?.releaseStatus?.version === projectVersion &&
+    previewDownloadMetadata.releaseStatus.message.includes(`Windows x86-64 Hub ${projectVersion} is available`) &&
+    previewDownloadMetadata.releaseStatus.message.includes("Linux and macOS downloads remain gated"),
+"Download fallback metadata must describe the current Windows release and gated platforms.");
 for (const [displayPath, source] of [
     ["README.md", rootReadme],
     ["Docs/README.md", documentationOverview],
@@ -373,9 +387,16 @@ for (const contract of [
     'headers: { "x-signature": reservation.uploadToken }',
     'contentType: "application/vnd.keire.asset-package"',
     "cancelReservation",
+    "data-submit-version",
+    "/publisher/v1/versions/",
 ]) {
     assert(publisherPage.includes(contract), `Publisher package upload is missing ${contract}.`);
 }
+const caddyConfig = await readFile(path.join(repositoryRoot, "Services", "KeireDistributionService", "Deployment",
+    "Caddyfile.example"), "utf8");
+assert(caddyConfig.includes("connect-src 'self' https://khjduyjamzwumhducmou.supabase.co " +
+    "https://khjduyjamzwumhducmou.storage.supabase.co"),
+    "Publisher uploads must allow the exact Supabase API and direct-Storage origins through the website CSP.");
 const publisherUploadRoutes = (await Promise.all([
     "Source/pages/publisher/v1/uploads/index.ts",
     "Source/pages/publisher/v1/uploads/[id]/index.ts",
@@ -385,5 +406,37 @@ assert(publisherUploadRoutes.includes("requireAal2") && publisherUploadRoutes.in
     "Publisher upload adapters must require MFA and the private authoring feature flag.");
 assert(publisherUploadRoutes.includes('functions.invoke("marketplace-publisher"'),
     "Publisher upload adapters must use the hardened Edge transition boundary.");
+const publisherSubmitRoute = await readFile(path.join(siteRoot, "Source", "pages", "publisher", "v1", "versions",
+    "[id]", "submit.ts"), "utf8");
+assert(publisherSubmitRoute.includes("requireAal2") &&
+    publisherSubmitRoute.includes('functions.invoke("marketplace-publisher"'),
+    "Validated package submission must use the MFA-protected publisher transition boundary.");
+const staffPage = await readFile(path.join(siteRoot, "Source", "pages", "admin", "marketplace", "index.astro"), "utf8");
+for (const contract of [
+    'from("platform_staff_members")',
+    "application.decide",
+    "submission.decide",
+    "report.decide",
+    "staff.set",
+    "feature.set",
+    "data-moderation-form",
+]) {
+    assert(staffPage.includes(contract), `Staff operations center is missing ${contract}.`);
+}
+assert(!staffPage.includes("app_metadata"),
+    "Staff page authorization must use current database roles instead of browser JWT metadata.");
+const platformLayout = await readFile(path.join(siteRoot, "Source", "layouts", "PlatformLayout.astro"), "utf8");
+const staffAwareHeader = await readFile(path.join(siteRoot, "Source", "components", "PlatformHeader.astro"), "utf8");
+assert(platformLayout.includes('from("platform_staff_members")') &&
+    staffAwareHeader.includes('href="/admin/marketplace/"'),
+    "Active staff must receive a discoverable, database-authorized operations link.");
+const staffActionRoute = await readFile(path.join(siteRoot, "Source", "pages", "admin", "marketplace", "v1",
+    "actions", "index.ts"), "utf8");
+assert(staffActionRoute.includes("requireAal2") &&
+    staffActionRoute.includes('functions.invoke("marketplace-moderation"'),
+    "Staff actions must use the MFA-protected moderation transition boundary.");
+for (const style of [".staff-console", ".staff-metrics", ".staff-review-card", ".staff-detail-grid"]) {
+    assert(platformStyles.includes(style), `Staff operations styling is missing ${style}.`);
+}
 
 console.log(`Documentation source validation passed for ${allDocSources.length} canonical guides, ${docGroups.length} navigation groups, ${mermaidCount} Mermaid diagrams, local links, and ${versionContracts.length} schema contracts.`);

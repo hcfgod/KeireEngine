@@ -249,7 +249,7 @@ namespace KeireHub
                 result.TokenType = document.at("token_type").get<std::string>();
                 result.ExpiresInSeconds = document.at("expires_in").get<std::uint64_t>();
                 if (!IsSafeToken(result.AccessToken, 16U, std::size_t{16U} * 1024U) ||
-                    !IsSafeToken(result.RefreshToken, 16U, 4096U) ||
+                    !IsSafeToken(result.RefreshToken, 1U, 4096U) ||
                     (!result.IdToken.empty() && !IsSafeToken(result.IdToken, 16U, std::size_t{16U} * 1024U)) ||
                     !IsBearerTokenType(result.TokenType) || result.ExpiresInSeconds == 0U ||
                     result.ExpiresInSeconds > 7ULL * 24ULL * 60ULL * 60ULL)
@@ -408,7 +408,7 @@ namespace KeireHub
 
     HubResult<DesktopOAuthTokens> DesktopOAuthClient::Refresh(const std::string_view refreshToken) const
     {
-        if (!IsSafeToken(refreshToken, 16U, 4096U))
+        if (!IsSafeToken(refreshToken, 1U, 4096U))
         {
             return HubResult<DesktopOAuthTokens>::Failure(
                 OAuthError(HubErrorCode::InvalidArgument, "The Hub OAuth refresh token is invalid."));

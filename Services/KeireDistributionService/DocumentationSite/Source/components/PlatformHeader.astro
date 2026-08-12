@@ -4,9 +4,10 @@ import SessionAwareAccountLink from "./SessionAwareAccountLink.astro";
 interface Props {
     active?: "product" | "marketplace" | "downloads" | "docs" | "community";
     signedIn?: boolean;
+    staffRole?: "moderator" | "administrator" | null;
 }
 
-const { active, signedIn = false } = Astro.props;
+const { active, signedIn = false, staffRole = null } = Astro.props;
 ---
 
 <a class="skip-link" href="#main">Skip to content</a>
@@ -28,6 +29,7 @@ const { active, signedIn = false } = Astro.props;
             <a href="/community/" aria-current={active === "community" ? "page" : undefined}>Community</a>
         </nav>
         <div class="platform-header__actions">
+            {staffRole && <a class="text-action" href="/admin/marketplace/">Staff</a>}
             <SessionAwareAccountLink class="text-action" signedIn={signedIn} sessionKnown={false} />
             <a class="compact-button" href="/downloads/">Get Kéire Hub</a>
         </div>

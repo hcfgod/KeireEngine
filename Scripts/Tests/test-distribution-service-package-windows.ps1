@@ -144,6 +144,7 @@ foreach ($contract in @(
         'reverse_proxy 127.0.0.1:4321',
         'health_uri /health/',
         'Content-Security-Policy',
+        "connect-src 'self' https://khjduyjamzwumhducmou.supabase.co https://khjduyjamzwumhducmou.storage.supabase.co",
         '@immutable_web_assets path /_astro/* /docs/_astro/*',
         "script-src 'self' 'wasm-unsafe-eval'"
     )) {

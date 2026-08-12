@@ -988,6 +988,14 @@ the transaction so existing RLS membership and entitlement helpers remain author
 requires AAL2, and direct PostgREST policies allow applicants to save or withdraw drafts but not self-submit or
 self-approve. Feature flags remain the final operational gate and default to disabled.
 
+Marketplace staff authority is held in the forced-RLS `platform_staff_members` relation and is evaluated on each read
+or mutation, so revocation does not wait for a JWT refresh. Browser staff sessions can read their authorized queues but
+cannot write moderation states directly. AAL2-protected website adapters invoke `marketplace-moderation`, which verifies
+the caller again and delegates to service-role-only transactional functions for publisher, package, report, staff, and
+feature-gate decisions. Those functions validate allowed state transitions, preserve a final administrator, and append
+audit evidence. Package moderation deliberately stops at `approved_pending_signature`; the offline signing and
+publication process remains a distinct trust boundary.
+
 macOS release binaries share the deployment target pinned by `MACOS_DEPLOYMENT_TARGET` in the dependency lock. The
 package boundary verifies each non-.NET Mach-O load command against that target before publication. Native installers
 sign individual Mach-O files and nested code bundles from the inside out, then seal the outer application. The bundled

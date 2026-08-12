@@ -35,7 +35,7 @@ function resumableEndpoint(): string {
     try {
         const projectUrl = new URL(Deno.env.get("SUPABASE_URL") ?? "");
         const match = projectUrl.hostname.match(/^([a-z0-9]{20})\.supabase\.co$/);
-        if (match) return `https://${match[1]}.storage.supabase.co/storage/v1/upload/resumable`;
+        if (match) return `https://${match[1]}.storage.supabase.co/storage/v1/upload/resumable/sign`;
     } catch {
         // A missing or malformed hosted URL is reported through the bounded public error below.
     }
@@ -61,6 +61,22 @@ Deno.serve(async (request: Request) => {
             });
             if (error) throw databaseFailure(error);
             return json(origin, 200, { data: { applicationId: data, state: "submitted" } });
+        }
+        if (operation === "version.submit") {
+            const { data, error } = await caller.admin.rpc("service_submit_marketplace_version", {
+                p_actor_user_id: caller.user.id,
+                p_version_id: requiredUuid(input, "versionId"),
+            });
+            if (error) throw databaseFailure(error);
+            const submission = Array.isArray(data) ? data[0] : data;
+            if (!submission || typeof submission.submission_id !== "string" ||
+                submission.submission_state !== "submitted") {
+                throw new RequestError(503, "publisher.submission_failed",
+                    "The validated package could not be submitted for staff review.");
+            }
+            return json(origin, 201, {
+                data: { submissionId: submission.submission_id, state: submission.submission_state },
+            });
         }
         if (operation === "upload.reserve") {
             const version = stringField(input, "version", 5, 128);

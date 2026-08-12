@@ -11,7 +11,7 @@
 		X-Frame-Options "DENY"
 		Referrer-Policy "strict-origin-when-cross-origin"
 		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
-		Content-Security-Policy "default-src 'self'; base-uri 'self'; connect-src 'self' https://khjduyjamzwumhducmou.supabase.co; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: https://khjduyjamzwumhducmou.supabase.co; media-src 'self' https://khjduyjamzwumhducmou.supabase.co; object-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; worker-src 'self' blob:; upgrade-insecure-requests"
+		Content-Security-Policy "default-src 'self'; base-uri 'self'; connect-src 'self' https://khjduyjamzwumhducmou.supabase.co https://khjduyjamzwumhducmou.storage.supabase.co; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: https://khjduyjamzwumhducmou.supabase.co; media-src 'self' https://khjduyjamzwumhducmou.supabase.co; object-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; worker-src 'self' blob:; upgrade-insecure-requests"
 		-Server
 	}
 }

@@ -227,7 +227,7 @@ const recentUploads = uploads.slice(0, 12);
                             {recentUploads.length ? (
                                 <div class="data-table-wrap">
                                     <table class="data-table">
-                                        <thead><tr><th>Product</th><th>Version</th><th>Upload</th><th>Validation</th><th>Created</th></tr></thead>
+                                        <thead><tr><th>Product</th><th>Version</th><th>Upload</th><th>Validation</th><th>Created</th><th>Review</th></tr></thead>
                                         <tbody>
                                             {recentUploads.map((upload: any) => {
                                                 const version = versionById.get(upload.version_id) as any;
@@ -239,6 +239,9 @@ const recentUploads = uploads.slice(0, 12);
                                                     <td><span class="status-badge">{upload.state}</span><small>{Number(upload.expected_size_bytes).toLocaleString()} bytes</small></td>
                                                     <td>{report ? <><span class:list={["status-badge", report.passed && "status-badge--ready"]}>{report.passed ? "passed" : "failed"}</span><small>{report.validator_version}</small></> : <span class="status-badge">pending</span>}</td>
                                                     <td>{new Date(upload.created_at).toLocaleString()}</td>
+                                                    <td>{report?.passed && upload.state === "validated" && version?.state === "validated"
+                                                        ? <button class="button button--compact" type="button" data-submit-version={version.id}>Submit to staff</button>
+                                                        : <small>{version?.state === "submitted" ? "In staff review" : "Available after validation"}</small>}</td>
                                                 </tr>;
                                             })}
                                         </tbody>
@@ -470,6 +473,29 @@ const recentUploads = uploads.slice(0, 12);
             }
         });
     }
+
+    document.querySelectorAll<HTMLButtonElement>("[data-submit-version]").forEach((button) => {
+        button.addEventListener("click", async () => {
+            const versionId = button.dataset.submitVersion;
+            if (!versionId || !window.confirm("Submit these exact validated package bytes for staff review?")) return;
+            button.disabled = true;
+            button.textContent = "Submitting...";
+            try {
+                await responseData(await fetch(`/publisher/v1/versions/${encodeURIComponent(versionId)}/submit/`, {
+                    method: "POST",
+                    credentials: "same-origin",
+                    headers: { "Content-Type": "application/json" },
+                    body: "{}",
+                }));
+                button.textContent = "Submitted";
+                window.setTimeout(() => window.location.reload(), 650);
+            } catch (error) {
+                button.disabled = false;
+                button.textContent = "Submit to staff";
+                window.alert(error instanceof Error ? error.message : "The package could not be submitted.");
+            }
+        });
+    });
 
     const applicationForm = document.querySelector<HTMLFormElement>("[data-publisher-application]");
     applicationForm?.addEventListener("submit", async (event) => {

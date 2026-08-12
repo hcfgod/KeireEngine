@@ -16,9 +16,11 @@ MIGRATIONS = [
     ROOT / "supabase/migrations/20260812114500_marketplace_policy_consolidation.sql",
     ROOT / "supabase/migrations/20260812123000_marketplace_edge_transition_boundary.sql",
     ROOT / "supabase/migrations/20260812124500_marketplace_publisher_transition_boundary.sql",
+    ROOT / "supabase/migrations/20260812165208_marketplace_staff_moderation.sql",
     ROOT / "supabase/migrations/20260812190000_marketplace_validator_leases.sql",
     ROOT / "supabase/migrations/20260812190001_add_marketplace_publisher_upload_boundary.sql",
     ROOT / "supabase/migrations/20260812190002_fix_marketplace_service_rate_limit_subject.sql",
+    ROOT / "supabase/migrations/20260812170807_index_marketplace_staff_appointed_by.sql",
 ]
 
 
@@ -35,9 +37,11 @@ hardening = sources[MIGRATIONS[3].name]
 policy_consolidation = sources[MIGRATIONS[4].name]
 edge_boundary = sources[MIGRATIONS[5].name]
 publisher_boundary = sources[MIGRATIONS[6].name]
-validator_leases = sources[MIGRATIONS[7].name]
-publisher_uploads = sources[MIGRATIONS[8].name]
-rate_limit_subject = sources[MIGRATIONS[9].name]
+staff_moderation = sources[MIGRATIONS[7].name]
+validator_leases = sources[MIGRATIONS[8].name]
+publisher_uploads = sources[MIGRATIONS[9].name]
+rate_limit_subject = sources[MIGRATIONS[10].name]
+staff_indexes = sources[MIGRATIONS[11].name]
 combined = "\n".join(sources.values())
 
 public_tables = sorted(set(re.findall(r"create table public\.([a-z0-9_]+)\s*\(", combined)))
@@ -134,6 +138,47 @@ require("drop policy if exists publisher_applications_owner_update" in publisher
         "The original direct publisher-submission policy must be replaced.")
 require("state in ('draft', 'withdrawn')" in publisher_boundary,
         "Applicants must not bypass the MFA-protected submission transition through PostgREST.")
+require("create table public.platform_staff_members" in staff_moderation and
+        "force row level security" in staff_moderation,
+        "Staff roles must be database-authoritative and protected by forced RLS.")
+require("from public.platform_staff_members staff" in staff_moderation and
+        "auth.jwt() -> 'app_metadata'" not in staff_moderation,
+        "Marketplace authorization must not depend on stale browser JWT role metadata.")
+require("revoke insert on public.marketplace_submissions from authenticated" in staff_moderation and
+        "drop policy if exists submissions_publisher_insert" in staff_moderation,
+        "Package submission must not bypass the MFA-protected service transition.")
+require("private.is_platform_staff('moderator') or exists" not in
+        staff_moderation.split("create or replace function private.can_manage_publisher", 1)[1]
+        .split("$$;", 1)[0],
+        "Staff status must not silently grant direct publisher write authority.")
+require("select coalesce((select auth.jwt() ->> 'role'), '') = 'service_role'" in staff_moderation,
+        "Only the service boundary may bypass protected product and version transitions.")
+for direct_staff_policy in (
+    "publisher_applications_owner_or_staff_update",
+    "reviews_author_publisher_or_staff_update",
+):
+    require(f"drop policy if exists {direct_staff_policy}" in staff_moderation,
+            f"Audited staff actions must replace the direct write policy: {direct_staff_policy}.")
+for staff_function in (
+    "service_get_platform_staff_role",
+    "service_set_platform_staff",
+    "service_decide_publisher_application",
+    "service_submit_marketplace_version",
+    "service_decide_marketplace_submission",
+    "service_decide_marketplace_report",
+    "service_set_platform_feature_flag",
+):
+    require(staff_function in staff_moderation, f"Staff transition is missing {staff_function}.")
+    require(
+        re.search(rf"grant execute on function public\.{staff_function}\([^;]+\) to service_role;", staff_moderation),
+        f"Staff transition is not restricted to service_role: {staff_function}.",
+    )
+require("staff_last_administrator_required" in staff_moderation,
+        "Staff administration must preserve at least one active administrator.")
+require("approved_pending_signature" in staff_moderation and "marketplace_publications" not in staff_moderation,
+        "Staff approval must stop before the offline signing and publication boundary.")
+require("p_key = 'paid_checkout_enabled' and p_enabled" in staff_moderation,
+        "The staff gate boundary must refuse premature paid checkout enablement.")
 for policy in (
     "validation_reports_publisher_or_staff_read",
     "publications_publisher_or_staff_read",
@@ -213,5 +258,7 @@ require("when 'marketplace_uploads' then nullif(to_jsonb(new) ->> 'created_by', 
         "Service-role publisher uploads must be throttled by their authenticated creator.")
 require("drop function private.consume_marketplace_rate_limit(text, integer, interval)" in rate_limit_subject,
         "The auth.uid()-only throttle implementation must be removed.")
+require("idx_platform_staff_members_appointed_by" in staff_indexes,
+        "The staff appointer foreign key must keep its covering index.")
 
 print(f"Marketplace migration validation passed for {len(public_tables)} forced-RLS public tables.")

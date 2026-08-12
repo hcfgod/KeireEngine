@@ -7,6 +7,13 @@ versions.
 
 ### Changed
 
+- Fixed browser sign-in discarding valid Supabase OAuth sessions when the service issued its compact refresh-token
+  format. Hub refresh tokens are now validated as opaque, non-empty, bounded values during exchange and rotation,
+  while access-token, token-type, expiry, PKCE, state, and ID-token nonce checks remain enforced.
+- Refreshed the public Windows 0.3.1 download experience with explicit availability, catalog-versus-Authenticode trust
+  language, exact Linux/macOS gating, current fallback status, and source validation. The production-readiness review
+  now separates the `6f27aaa` Windows Editor candidate from the older sequence-9 public binaries and records the
+  current 591/133/347 Dist suite evidence.
 - Replaced the layered historical production-readiness review with a current 0.3.1 assessment tied to the clean
   Windows package, signed sequence-9 distribution, current test suites, capability ledgers, schemas, and feature-gated
   marketplace state. Corrected guide inventory, mesh-schema, download archive, active-platform, and documentation-build
@@ -18,6 +25,14 @@ versions.
 - Fixed trusted publisher upload reservations being rejected by the database write throttle as rate limited. Marketplace
   throttles now use the authenticated actor persisted by each service-only transition, while keeping counters private
   and returning bounded, actionable errors to publisher surfaces.
+- Fixed signed resumable package grants being sent to Supabase Storage's authenticated TUS route, which rejected the
+  path-scoped token as an invalid compact JWS. Publisher uploads now use the dedicated signed TUS endpoint.
+- Added database-authoritative moderator and administrator roles, an MFA-protected staff operations center, audited
+  publisher/application/report decisions, administrator-only staff and feature-gate controls, and a publisher action
+  for submitting passing validator evidence to staff. Direct browser moderation writes are revoked, the last active
+  administrator is protected, and package approval still stops before the dedicated offline-signing boundary.
+- Allowed the publisher portal's path-scoped resumable uploads through the production Content Security Policy by
+  permitting the exact Supabase direct-Storage origin, while retaining the existing closed origin allowlist.
 - Prevented Windows Hub sessions running as administrator from launching an Editor that silently cannot receive files
   from Explorer. The Hub now explains how to relaunch at normal integrity, and a directly elevated Editor exposes the
   same diagnosis without changing or partially importing project files.
