@@ -296,7 +296,7 @@ namespace
     };
 } // namespace
 
-EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initializeProject,
+EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initializeProject, const bool smokePlay,
                                            std::filesystem::path executable)
     : Layer("EditorWorkspaceLayer"), m_AssetBrowserPanel(std::make_unique<KeireEditor::AssetBrowserPanel>(
                                          static_cast<KeireEditor::IAssetBrowserController&>(*this))),
@@ -391,7 +391,8 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
       m_PlayChangesPanel(std::make_unique<KeireEditor::ScenePlayChangesPanel>()),
       m_SceneTransitions(std::make_unique<KeireEditor::SceneTransitionCoordinator>()),
       m_ExternalAssetImport(std::make_unique<KeireEditor::ExternalAssetImportController>()),
-      m_ExecutablePath(std::move(executable)), m_Smoke(smoke), m_InitializeProject(initializeProject)
+      m_ExecutablePath(std::move(executable)), m_Smoke(smoke), m_InitializeProject(initializeProject),
+      m_SmokePlay(smokePlay)
 {
     m_PropertyDrawers->RegisterOverride(
         Keire::TransformComponent::StaticType(), "rotation",
@@ -1041,8 +1042,29 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
             FinishPlayMode(transition == PendingPlayTransition::Apply);
         }
     }
-    if (m_Smoke && ++m_FrameCount >= 8)
-        Owner().RequestExit();
+    if (m_Smoke)
+    {
+        ++m_FrameCount;
+        if (m_SmokePlay)
+        {
+            if (!m_SmokePlayRequested && m_SceneDocument->EditingScene())
+            {
+                m_SmokePlayRequested = true;
+                BeginPlayMode();
+            }
+            if (m_SceneDocument->PlaySession())
+            {
+                if (++m_SmokePlayFrameCount >= 120)
+                    Owner().RequestExit();
+            }
+            else if (m_FrameCount >= 3600)
+            {
+                throw std::runtime_error("Play Mode smoke timed out before a runtime scene became active.");
+            }
+        }
+        else if (m_FrameCount >= 8)
+            Owner().RequestExit();
+    }
     if (m_SceneDocument->PlaySession())
     {
         Keire::ProfileScope playUpdate(Owner().GetProfiler(), Keire::ProfileCategory::Scripting, "Play update");

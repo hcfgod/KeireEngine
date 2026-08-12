@@ -115,6 +115,14 @@ versions.
 
 ## 0.3.1 - 2026-08-11
 
+- Removed the duplicate legacy Audio Source bus text field from the Inspector. The stable mixer-bus dropdown is now
+  the single authoring control and keeps the legacy name fallback synchronized for compatible scene loading.
+- Added a bounded `--smoke-play` editor diagnostic that opens the startup scene, waits for managed scripts, enters
+  Play Mode with production services enabled, and exits after exercising runtime callbacks.
+- Fixed native sidechain ducking corrupting the audio thread stack by honoring miniaudio's shared input-frame-count
+  callback contract for multi-input nodes. Debug builds now fail fast with a module-relative stack when MSVC runtime
+  checks detect native memory corruption.
+
 ### Changed
 
 - Made editor removals report durable step-based progress from authorization through cleanup, and hardened the task

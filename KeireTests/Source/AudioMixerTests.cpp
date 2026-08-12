@@ -1,5 +1,7 @@
 #include "Keire/Core.h"
 
+#include "KeireInternal/Audio/NativeAudioNodeContract.h"
+
 #include <doctest/doctest.h>
 
 #include <algorithm>
@@ -107,6 +109,21 @@ namespace
         return definition;
     }
 } // namespace
+
+TEST_CASE("Native multi-input audio nodes preserve the shared frame-count boundary")
+{
+    constexpr std::uint32_t guard = 0xd15ea5eU;
+    std::array<std::uint32_t, 2> inputMemory{96, guard};
+    std::uint32_t outputFrames = 64;
+
+    Keire::Detail::NativeAudioNodeFrameCounts counts(inputMemory.data(), &outputFrames);
+    CHECK(counts.Capacity() == 64);
+    counts.Commit(48);
+
+    CHECK(inputMemory[0] == 48);
+    CHECK(inputMemory[1] == guard);
+    CHECK(outputFrames == 48);
+}
 
 TEST_CASE("Audio effect descriptors provide stable typed parameters and defaults")
 {

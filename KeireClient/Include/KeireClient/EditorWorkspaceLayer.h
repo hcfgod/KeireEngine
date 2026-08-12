@@ -83,7 +83,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
                                    private Keire::IScriptRuntimeServices
 {
   public:
-    explicit EditorWorkspaceLayer(bool smoke, bool initializeProject = false, std::filesystem::path executable = {});
+    explicit EditorWorkspaceLayer(bool smoke, bool initializeProject = false, bool smokePlay = false,
+                                  std::filesystem::path executable = {});
     ~EditorWorkspaceLayer() override;
 
   protected:
@@ -712,6 +713,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     Keire::AssetId m_PendingSceneAsset;
     Keire::UiColor m_NoticeColor;
     std::uint32_t m_FrameCount = 0;
+    std::uint32_t m_SmokePlayFrameCount = 0;
     std::uint64_t m_AudioMixerDocumentRevision = 0;
     std::uint64_t m_VfxEffectDocumentRevision = 0;
     std::uint64_t m_MaterialGraphDocumentRevision = 0;
@@ -778,5 +780,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     bool m_OpenDialog = false;
     bool m_Smoke = false;
     bool m_InitializeProject = false;
+    bool m_SmokePlay = false;
+    bool m_SmokePlayRequested = false;
     int m_GameAspect = 0;
 };
