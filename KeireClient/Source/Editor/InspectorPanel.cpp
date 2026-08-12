@@ -4,6 +4,7 @@
 #include "KeireClient/Editor/EulerEditContinuity.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/InspectorPropertyEditor.h"
+#include "KeireClient/Editor/InspectorPropertyVisibility.h"
 #include "KeireClient/Editor/ManagedDataInspectorPanel.h"
 #include "KeireClient/Editor/MaterialDocument.h"
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
@@ -55,7 +56,8 @@ namespace
         if (query.empty())
             return true;
         const auto found = std::ranges::search(value, query,
-                                               [](const char left, const char right) {
+                                               [](const char left, const char right)
+                                               {
                                                    return std::tolower(static_cast<unsigned char>(left)) ==
                                                           std::tolower(static_cast<unsigned char>(right));
                                                });
@@ -858,6 +860,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                 std::string_view previousGroup;
                 for (const auto& property : registration->Properties)
                 {
+                    if (!IsInspectorPropertyVisible(registration->Type, property.Key))
+                        continue;
                     if (!property.Group.empty() && property.Group != previousGroup)
                     {
                         ++groupRows;
@@ -951,6 +955,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                     {
                         if (!serialized)
                             break;
+                        if (!IsInspectorPropertyVisible(registration->Type, property.Key))
+                            continue;
                         if (!property.Group.empty() && property.Group != activeGroup)
                         {
                             activeGroup = property.Group;
@@ -962,6 +968,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                             if (found == values.end())
                                 throw std::invalid_argument("The component omitted a declared property.");
                             auto candidate = found->second;
+                            std::optional<std::string> audioBusFallback;
                             bool changed = false;
                             bool editBoundary = false;
                             const bool localLight = registration->Type == Keire::PointLightComponent::StaticType() ||
@@ -994,6 +1001,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                             if (ui.Selectable(bus.Name, bus.Id == current))
                                             {
                                                 candidate = bus.Id.ToString();
+                                                audioBusFallback = bus.Name;
                                                 changed = true;
                                                 editBoundary = true;
                                             }
@@ -1126,6 +1134,11 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                                                      std::to_string(m_EditSerial));
                                 sceneDocument.SetComponentProperty(entity.Id(), registration->Type, property.Key,
                                                                    std::move(candidate));
+                                if (audioBusFallback)
+                                {
+                                    sceneDocument.SetComponentProperty(entity.Id(), registration->Type, "bus",
+                                                                       std::move(*audioBusFallback));
+                                }
                             }
                             if (changed && (editBoundary || ui.LastItemState().DeactivatedAfterEdit))
                                 ++m_EditSerial;
@@ -1468,7 +1481,8 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
                 authoring.Properties.insert_or_assign(name, value);
             KeireEditor::MaterialDocument editorDocument;
             editorDocument.Open(Keire::MaterialAsset::EncodeAuthoringSource(authoring),
-                                [&](const Keire::AssetId candidate) -> std::optional<Keire::ShaderAssetDefinition> {
+                                [&](const Keire::AssetId candidate) -> std::optional<Keire::ShaderAssetDefinition>
+                                {
                                     return candidate == parent->Definition().Shader
                                                ? std::optional(shader->Definition())
                                                : std::nullopt;

@@ -2,6 +2,7 @@
 
 #include "Keire/Audio/AudioAssets.h"
 #include "KeireInternal/Audio/AudioMixerRuntime.h"
+#include "KeireInternal/Audio/NativeAudioNodeContract.h"
 
 #include <miniaudio.h>
 
@@ -627,7 +628,8 @@ namespace Keire
                                          ma_uint32* outputFrames)
         {
             auto& node = *reinterpret_cast<NativeDuckingNode*>(base);
-            const auto frames = std::min({inputFrames[0], inputFrames[1], *outputFrames});
+            Detail::NativeAudioNodeFrameCounts frameCounts(inputFrames, outputFrames);
+            const auto frames = frameCounts.Capacity();
             const auto channels = static_cast<std::size_t>(node.Channels);
             const auto sampleRate = static_cast<float>(node.SampleRate);
             const float threshold = std::pow(10.0F, node.ThresholdDb / 20.0F);
@@ -665,9 +667,7 @@ namespace Keire
                 for (std::size_t channel = 0; channel < channels; ++channel)
                     outputs[0][index + channel] = inputs[0][index + channel] * node.Gain;
             }
-            inputFrames[0] = frames;
-            inputFrames[1] = frames;
-            *outputFrames = frames;
+            frameCounts.Commit(frames);
         }
 
         [[nodiscard]] std::shared_ptr<NativeMixerGraph> BuildNativeMixer(const AudioMixerDefinition& definition)

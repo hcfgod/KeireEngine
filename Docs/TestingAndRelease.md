@@ -121,6 +121,7 @@ unobserved and must not be presented as tested download targets.
 | Window or application behavior | SDL dummy-driver tests and explicit shutdown |
 | Rendered UI | Headless focused tests plus graphics-capable `--smoke-ui` |
 | Project/scene/ECS lifecycle | Focused component/play tests plus graphics-capable `--smoke-project` |
+| Startup-scene Play Mode | Graphics-capable `--project <path> --smoke-play` with native audio and scripting enabled |
 | Asset Browser or thumbnails | Focused queue/cache tests plus rendered project smoke |
 | Hub tray behavior | Injected lifecycle tests plus conditional native smoke |
 | Script changes | Matching Windows and Unix regression harnesses |

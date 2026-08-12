@@ -5,8 +5,12 @@
 
 #include "KeireInternal/Process.h"
 
+#include <cstdarg>
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
+#include <iterator>
 #include <optional>
 #include <stdexcept>
 #include <string_view>
@@ -15,10 +19,59 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <Windows.h>
+#if defined(_MSC_VER) && !defined(__clang__) && !defined(NDEBUG)
+#include <rtcapi.h>
+#endif
 #endif
 
 namespace
 {
+#if defined(_WIN32) && defined(_MSC_VER) && !defined(__clang__) && !defined(NDEBUG)
+    int RuntimeCheckFailure(const int error, const char* file, const int line, const char* module, const char* format,
+                            ...)
+    {
+        std::fprintf(stderr, "MSVC runtime check %d at %s:%d in %s: ", error, file ? file : "<unknown>", line,
+                     module ? module : "<unknown>");
+        std::va_list arguments;
+        va_start(arguments, format);
+        std::vfprintf(stderr, format ? format : "<no diagnostic>", arguments);
+        va_end(arguments);
+        std::fputc('\n', stderr);
+
+        void* frames[64]{};
+        const auto count = CaptureStackBackTrace(0, static_cast<DWORD>(std::size(frames)), frames, nullptr);
+        for (USHORT index = 0; index < count; ++index)
+        {
+            HMODULE image = nullptr;
+            if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                       GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                   reinterpret_cast<LPCWSTR>(frames[index]), &image))
+            {
+                wchar_t path[MAX_PATH]{};
+                const auto length = GetModuleFileNameW(image, path, static_cast<DWORD>(std::size(path)));
+                const auto offset =
+                    reinterpret_cast<std::uintptr_t>(frames[index]) - reinterpret_cast<std::uintptr_t>(image);
+                char utf8Path[MAX_PATH * 4]{};
+                const auto utf8Length =
+                    WideCharToMultiByte(CP_UTF8, 0, path, static_cast<int>(length), utf8Path,
+                                        static_cast<int>(std::size(utf8Path) - 1), nullptr, nullptr);
+                if (utf8Length > 0)
+                    std::fprintf(stderr, "  #%hu %.*s+0x%zx\n", index, utf8Length, utf8Path, offset);
+                else
+                    std::fprintf(stderr, "  #%hu %p+0x%zx\n", index, static_cast<void*>(image), offset);
+            }
+            else
+                std::fprintf(stderr, "  #%hu %p\n", index, frames[index]);
+        }
+        std::fflush(stderr);
+        std::_Exit(3);
+    }
+
+    void ConfigureRuntimeCheckDiagnostics() noexcept { (void)_RTC_SetErrorFunc(RuntimeCheckFailure); }
+#else
+    void ConfigureRuntimeCheckDiagnostics() noexcept {}
+#endif
+
     void ConfigureConsoleEncoding(const Keire::ApplicationCommandLineArguments& arguments) noexcept
     {
 #if defined(_WIN32)
@@ -180,6 +233,7 @@ namespace Keire
 
 int main(const int argc, char* argv[])
 {
+    ConfigureRuntimeCheckDiagnostics();
     try
     {
         Keire::Detail::Utf8CommandLine commandLine(argc, argv);
