@@ -622,10 +622,10 @@ namespace Keire::Detail
             Report(callbacks, 0.93F, "Publishing Build Support");
             const bool replacing = std::filesystem::exists(destination);
             if (replacing)
-                std::filesystem::rename(destination, backup);
+                RenamePathWithRetry(destination, backup);
             try
             {
-                std::filesystem::rename(staging, destination);
+                RenamePathWithRetry(staging, destination);
                 WriteRegistry(versionRoot);
             }
             catch (...)
@@ -633,7 +633,7 @@ namespace Keire::Detail
                 std::error_code ignored;
                 std::filesystem::remove_all(destination, ignored);
                 if (replacing && std::filesystem::exists(backup))
-                    std::filesystem::rename(backup, destination);
+                    RenamePathWithRetry(backup, destination);
                 throw;
             }
             if (replacing)
@@ -647,7 +647,7 @@ namespace Keire::Detail
             std::error_code ignored;
             std::filesystem::remove_all(staging, ignored);
             if (std::filesystem::exists(backup) && !std::filesystem::exists(destination))
-                std::filesystem::rename(backup, destination, ignored);
+                (void)TryRenamePathWithRetry(backup, destination, ignored);
             throw;
         }
         Report(callbacks, 1.0F, "Build Support installed");
@@ -765,7 +765,7 @@ namespace Keire::Detail
                                               {"tombstone", operationId}}
                                                  .dump(2) +
                                              '\n');
-        std::filesystem::rename(installation, removed);
+        RenamePathWithRetry(installation, removed);
         try
         {
             WriteRegistry(versionRoot);
@@ -774,7 +774,7 @@ namespace Keire::Detail
         {
             const auto original = std::current_exception();
             std::error_code rollbackError;
-            std::filesystem::rename(removed, installation, rollbackError);
+            (void)TryRenamePathWithRetry(removed, installation, rollbackError);
             if (!rollbackError)
             {
                 std::error_code ignored;

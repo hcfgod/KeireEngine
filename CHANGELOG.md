@@ -122,6 +122,8 @@ versions.
 - Fixed native sidechain ducking corrupting the audio thread stack by honoring miniaudio's shared input-frame-count
   callback contract for multi-input nodes. Debug builds now fail fast with a module-relative stack when MSVC runtime
   checks detect native memory corruption.
+- Hardened Build Support and project-package directory publication against transient Windows file-indexer and virus-
+  scanner locks by routing transactional renames through the bounded native retry policy.
 
 ### Changed
 

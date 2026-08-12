@@ -842,8 +842,7 @@ namespace Keire
                                   .VerifySignature = m_Impl->Specification.VerifyMarketplaceSignature}}));
             SetReadOnly(staging, true);
             std::error_code error;
-            std::filesystem::rename(staging, finalRoot, error);
-            if (error)
+            if (!Detail::TryRenamePathWithRetry(staging, finalRoot, error))
             {
                 if (!std::filesystem::is_directory(finalRoot))
                 {
@@ -925,7 +924,7 @@ namespace Keire
         {
             std::filesystem::copy(source, staging, std::filesystem::copy_options::recursive);
             SetReadOnly(staging, false);
-            std::filesystem::rename(staging, destination);
+            Detail::RenamePathWithRetry(staging, destination);
             entry->Embedded = true;
             entry->Source = "embedded";
             PublishProjectState(m_Impl->Specification, manifest, lock, {destination});
