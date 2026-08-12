@@ -6,6 +6,7 @@
 #include <cstring>
 #include <iostream>
 #include <string>
+#include <string_view>
 
 namespace KeireRenderTests
 {
@@ -15,6 +16,19 @@ namespace KeireRenderTests
 namespace
 {
     constexpr int SkippedExitCode = 77;
+
+    [[nodiscard]] constexpr std::string_view NormalizeGpuBackend(const std::string_view backend) noexcept
+    {
+        return backend == "d3d12" ? std::string_view{"direct3d12"} : backend;
+    }
+
+    TEST_CASE("render test GPU backend aliases use canonical SDL driver names")
+    {
+        CHECK(NormalizeGpuBackend("d3d12") == "direct3d12");
+        CHECK(NormalizeGpuBackend("direct3d12") == "direct3d12");
+        CHECK(NormalizeGpuBackend("vulkan") == "vulkan");
+        CHECK(NormalizeGpuBackend("metal") == "metal");
+    }
 
     [[nodiscard]] bool BackendAvailable(const char* backend)
     {
@@ -43,11 +57,19 @@ namespace
 int main(const int argc, char** argv)
 {
     const char* configuredBackend = SDL_getenv("KEIRE_GPU_TEST_BACKEND");
-    const std::string backend = configuredBackend ? configuredBackend : "";
+    const std::string backend{NormalizeGpuBackend(configuredBackend ? configuredBackend : "")};
     if (backend.empty())
     {
         std::cout << "GPU render tests skipped: KEIRE_GPU_TEST_BACKEND is not set.\n";
         return SkippedExitCode;
+    }
+    // This runs before SDL or any test worker starts. The process-level update is intentional because SDL recreates
+    // its environment after each application shutdown, and every recreation must inherit the canonical driver name.
+    if (SDL_setenv_unsafe("KEIRE_GPU_TEST_BACKEND", backend.c_str(), 1) != 0)
+    {
+        std::cout << "GPU render tests failed: could not publish canonical backend '" << backend
+                  << "' to the test environment.\n";
+        return 1;
     }
     if (argc == 2 && std::strcmp(argv[1], "--probe") == 0)
     {

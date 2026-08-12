@@ -98,6 +98,17 @@ assert(new Set(slugs).size === slugs.length, "Documentation routes are not uniqu
 assert(docGroups.every(({ label, files }) => label && files.length > 0), "Every documentation group must be named and non-empty.");
 assert(Object.keys(docAuthorities).length === expected.length && expected.every((sourcePath) => sourcePath in docAuthorities), "Documentation authority inventory must exactly cover every published guide.");
 
+const documentationOverview = await readMarkdown(path.join(docsRoot, "README.md"));
+const documentedGuideCount = /All (\d+) published guides/.exec(documentationOverview);
+assert(documentedGuideCount && Number.parseInt(documentedGuideCount[1], 10) === allDocSources.length,
+    "Documentation overview guide count does not match the canonical inventory.");
+const projectConfiguration = await readFile(path.join(repositoryRoot, "Config", "Project.conf"), "utf8");
+const projectVersion = /^PROJECT_VERSION=(\S+)$/m.exec(projectConfiguration)?.[1];
+assert(projectVersion && documentationOverview.includes(`currently version ${projectVersion}`),
+    "Documentation overview version does not match Config/Project.conf.");
+assert(!documentationOverview.includes("npm run test:search"),
+    "Documentation overview references the removed standalone search-test script.");
+
 const fallbackLanding = await readFile(fallbackLandingPath, "utf8");
 const fallbackRoutes = new Map();
 for (const match of fallbackLanding.matchAll(/<a\b[^>]*\bdata-doc-path="Docs\/([^"]+)"[^>]*>/g)) {
@@ -179,6 +190,14 @@ for (const [sourcePath, contract] of versionContracts) {
 
 const rootReadme = await readFile(path.join(repositoryRoot, "README.md"), "utf8");
 await validateLocalLinks("README.md", path.join(repositoryRoot, "README.md"), rootReadme);
+for (const [displayPath, source] of [
+    ["README.md", rootReadme],
+    ["Docs/README.md", documentationOverview],
+    ["Docs/GettingStarted.md", await readMarkdown(path.join(docsRoot, "GettingStarted.md"))],
+    ["Docs/TestingAndRelease.md", await readMarkdown(path.join(docsRoot, "TestingAndRelease.md"))],
+]) {
+    assert(!source.includes("/downloads/previous/"), `${displayPath} references the retired download archive route.`);
+}
 for (const [label, version] of [
     ["Project descriptor", projectSchema],
     ["Scene source", sceneSchema],

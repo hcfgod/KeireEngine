@@ -63,6 +63,10 @@ when installed; otherwise the least newer compatible version is recommended and 
 preferred installation never bypasses these checks. Projects whose exact editor is unavailable link to the real
 Installs/Locate flow rather than a placeholder action.
 
+On Windows, project launch also rejects an elevated Hub process. Explorer cannot deliver file-drop messages to an
+Editor at a higher integrity level, so launching anyway would make Project-panel asset imports fail silently. Reopen
+the Hub normally and launch the same project; no project migration or repair is required.
+
 An older project schema is not itself a reason to force an upgrade. When the exact previous Editor or another
 schema-compatible Editor remains installed, **Open** launches it directly and leaves the project unchanged until that
 Editor performs an ordinary save. Upgrade review is used only when no installed Editor can open the older schema;
@@ -315,6 +319,11 @@ private key remains outside both, and any cloud backup must be independently enc
 separately. After the replacement Hub has been distributed and the transition policy is complete, retiring an old
 public key is a separate release decision. Packaging overrides may supply an operating-system path-separated
 `KEIRE_DISTRIBUTION_TRUSTED_KEYS` list during an overlap; the legacy singular key variable remains supported.
+
+The active Windows stable snapshot reviewed on 2026-08-12 is sequence 9 and intentionally contains only
+`keire.editor@0.3.1` and `keire.hub@0.3.1`. Earlier versions were retired as an explicit release decision because they
+contain known major defects; ordinary future publication remains additive unless another documented retirement is
+approved.
 
 ## Launch and activation
 

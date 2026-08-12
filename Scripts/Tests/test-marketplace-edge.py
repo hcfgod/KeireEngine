@@ -44,6 +44,8 @@ require("auth.getUser(token)" in shared,
         "Edge Functions must verify the bearer token with Supabase Auth before decoding claims.")
 require("SUPABASE_SECRET_KEYS" in shared and "SUPABASE_SERVICE_ROLE_KEY" in shared,
         "Edge Functions must use the hosted secret-key contract with a legacy service-role fallback.")
+require('"marketplace_rate_limited", [429, "marketplace.rate_limited", "Too many marketplace changes were requested.' in shared,
+        "Rate-limit failures must provide a bounded, actionable publisher message.")
 require('requiredUuid(input, "productId")' in library,
         "Product claims must reject missing product identifiers before reaching Postgres.")
 require('caller.assuranceLevel !== "aal2"' in library,

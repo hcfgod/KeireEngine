@@ -5,6 +5,10 @@ over the Scene viewport imports into the current Project folder and then perform
 internal drag. Meshes create entities, materials assign to the entity under the pointer, and Scene/Input Actions assets
 use their guarded open workflows. Texture and shader drops import and reveal the asset without guessing an assignment.
 
+On Windows, launch Kéire Hub and the Editor normally, not with **Run as administrator**. Windows intentionally blocks
+Explorer drag-and-drop into a higher-integrity application. The Hub refuses to create that broken launch state, and a
+directly elevated Editor reports the limitation in the Project panel before any import is attempted.
+
 A single unambiguous asset imports directly. Texture files, batches, directories, and destination conflicts open the
 **Import Assets** dialog. Texture settings include semantic, color space, environment layout, mip policy, maximum size,
 normal green-channel flip, filters, address modes, and anisotropy. Radiance HDR files default to linear equirectangular

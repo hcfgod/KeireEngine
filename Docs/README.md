@@ -23,7 +23,7 @@ release work honestly. Roadmap material is labeled as roadmap material and does 
 
 ## Complete Guide Library
 
-All 55 published guides are listed below in the same groups used by the documentation website.
+All 58 published guides are listed below in the same groups used by the documentation website.
 
 ### Start Here
 
@@ -103,6 +103,8 @@ All 55 published guides are listed below in the same groups used by the document
 | [Performance Gates](PerformanceGates.md) | Reference hardware, capture provenance, CPU/GPU requirements, budgets, and automated validation. |
 | [Testing and Release](TestingAndRelease.md) | Test matrix, sanitizers, smoke modes, regression scripts, packages, and final handoff checks. |
 | [Package Archives](PackageArchives.md) | Deterministic archives, manifest validation, extraction safety, package identities, and publisher workflows. |
+| [Asset Packages and Project Package Manager](AssetPackages.md) | Deterministic project-content packages, registry mounts, selective imports, executable-code consent, and recovery. |
+| [Marketplace Launch Runbook](MarketplaceLaunch.md) | Staging state, feature flags, ordered public-launch gates, and required go/no-go evidence. |
 | [Production Readiness Review](ProductionReadinessReview.md) | Evidence-based subsystem grades, known gaps, release blockers, and closure criteria. |
 | [Maintainability Boundaries](Maintainability.md) | First-party source budgets, exclusions, decomposition seams, and enforcement. |
 
@@ -189,7 +191,6 @@ Run the documentation-site checks after editing repository guides:
 Set-Location Services/KeireDistributionService/DocumentationSite
 npm test
 npm run build
-npm run test:search
 ```
 
 The complete release-facing validation matrix is maintained in [Testing and Release](TestingAndRelease.md).

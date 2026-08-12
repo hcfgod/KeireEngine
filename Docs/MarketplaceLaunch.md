@@ -14,6 +14,10 @@ public OAuth client is registered, and `hub_oauth_sso_enabled=true` is intention
 The other five feature flags remain disabled. Leaked-password protection and custom SMTP are deferred until the paid
 Supabase plan and branded production domain are available.
 
+The live signed software-distribution snapshot is sequence 9. Its Windows x86-64 catalog contains the clean
+`keire.editor@0.3.1` and `keire.hub@0.3.1` artifacts only. This proves software distribution, not marketplace product
+publication: `.keireassetpackage` products use a separate trust root and remain behind their launch gates.
+
 The repository now contains the 0.3.1 isolated package validator, network broker, atomic lease/report migration,
 ClamAV adapter, secret scanner, generated no-network C# compilation, Windows firewall launcher, and hardened Linux
 units. The validator lease migration is applied to the staging project and `marketplace-validator-queue` version 2 is

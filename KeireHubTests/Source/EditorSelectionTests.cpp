@@ -1,3 +1,5 @@
+#include "KeireHub/HubEditorLaunch.h"
+
 #include "KeireHubRuntime/EditorSelection.h"
 
 #include <doctest/doctest.h>
@@ -71,4 +73,10 @@ TEST_CASE("Editor selection accepts a project schema newer than this Hub when th
         SelectCompatibleEditor(editors, {.LastSavedVersion = "2.1.0", .MinimumVersion = "2.0.0", .ProjectSchema = 4});
     REQUIRE(selected);
     CHECK(selected.Value().Id == "future-capable");
+}
+
+TEST_CASE("Editor launch rejects elevated desktop sessions that cannot receive Explorer drops")
+{
+    CHECK(EditorLaunchSupportsExternalFileDrop(false));
+    CHECK_FALSE(EditorLaunchSupportsExternalFileDrop(true));
 }

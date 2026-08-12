@@ -18,6 +18,7 @@ MIGRATIONS = [
     ROOT / "supabase/migrations/20260812124500_marketplace_publisher_transition_boundary.sql",
     ROOT / "supabase/migrations/20260812190000_marketplace_validator_leases.sql",
     ROOT / "supabase/migrations/20260812190001_add_marketplace_publisher_upload_boundary.sql",
+    ROOT / "supabase/migrations/20260812190002_fix_marketplace_service_rate_limit_subject.sql",
 ]
 
 
@@ -36,6 +37,7 @@ edge_boundary = sources[MIGRATIONS[5].name]
 publisher_boundary = sources[MIGRATIONS[6].name]
 validator_leases = sources[MIGRATIONS[7].name]
 publisher_uploads = sources[MIGRATIONS[8].name]
+rate_limit_subject = sources[MIGRATIONS[9].name]
 combined = "\n".join(sources.values())
 
 public_tables = sorted(set(re.findall(r"create table public\.([a-z0-9_]+)\s*\(", combined)))
@@ -201,5 +203,15 @@ require("object.bucket_id = 'marketplace-quarantine'" in publisher_uploads and
         "Publisher completion must verify the exact private quarantine object size.")
 require("p_expected_sha256 !~ '^[0-9a-f]{64}$'" in publisher_uploads,
         "Publisher reservations must reject malformed expected package hashes.")
+require("p_subject uuid" in rate_limit_subject and
+        "values (p_bucket, p_subject, now(), 1)" in rate_limit_subject,
+        "Marketplace throttles must accept an explicitly trusted actor subject.")
+for actor_field in ("user_id", "author_user_id", "reporter_user_id", "created_by", "session_id"):
+    require(actor_field in rate_limit_subject,
+            f"Marketplace throttle does not derive its actor from {actor_field}.")
+require("when 'marketplace_uploads' then nullif(to_jsonb(new) ->> 'created_by', '')::uuid" in rate_limit_subject,
+        "Service-role publisher uploads must be throttled by their authenticated creator.")
+require("drop function private.consume_marketplace_rate_limit(text, integer, interval)" in rate_limit_subject,
+        "The auth.uid()-only throttle implementation must be removed.")
 
 print(f"Marketplace migration validation passed for {len(public_tables)} forced-RLS public tables.")

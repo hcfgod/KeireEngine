@@ -38,6 +38,7 @@
 #include "KeireInternal/Assets/AssetDatabaseWorkerAccess.h"
 #include "KeireInternal/EditorCameraController.h"
 #include "KeireInternal/FileSystem.h"
+#include "KeireInternal/Process.h"
 
 #include <algorithm>
 #include <array>
@@ -872,6 +873,13 @@ void EditorWorkspaceLayer::OnAttach()
         scripts->SetRuntimeServices(this);
     if (Owner().Scripts() && m_AssetDatabase)
         m_ManagedBuildDebounceSeconds = 0.0;
+    if (Keire::Detail::IsCurrentProcessElevated())
+    {
+        m_AssetStatus = "External asset drag-and-drop is unavailable while the Editor is running as administrator.";
+        m_Notice = "Windows blocks files dragged from Explorer into an elevated application. Close the Editor and "
+                   "Kéire Hub, then reopen Kéire Hub normally. Your project and assets are unchanged.";
+        m_NoticeColor = m_Theme.Warning;
+    }
 }
 
 void EditorWorkspaceLayer::OnDetach() noexcept

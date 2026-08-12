@@ -42,6 +42,27 @@ TEST_CASE("detached process launch reports a trackable process identity")
     CHECK_FALSE(Keire::Detail::IsProcessAlive(processId));
 }
 
+TEST_CASE("current process elevation matches the Windows access token")
+{
+#if defined(_WIN32)
+    HANDLE rawToken = nullptr;
+    REQUIRE(OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &rawToken));
+    const auto closeToken = [](void* token)
+    {
+        if (token)
+            CloseHandle(token);
+    };
+    const std::unique_ptr<void, decltype(closeToken)> token(rawToken, closeToken);
+    TOKEN_ELEVATION elevation{};
+    DWORD bytesWritten = 0;
+    REQUIRE(GetTokenInformation(token.get(), TokenElevation, &elevation, sizeof(elevation), &bytesWritten));
+    REQUIRE(bytesWritten == static_cast<DWORD>(sizeof(elevation)));
+    CHECK(Keire::Detail::IsCurrentProcessElevated() == (elevation.TokenIsElevated != 0));
+#else
+    CHECK_FALSE(Keire::Detail::IsCurrentProcessElevated());
+#endif
+}
+
 TEST_CASE("Child process captures output and preserves a nonzero exit code")
 {
     const std::array arguments{std::string("--child-process-probe")};

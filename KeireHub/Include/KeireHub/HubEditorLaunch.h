@@ -16,6 +16,13 @@
 
 namespace KeireHub
 {
+    // Windows blocks Explorer drag-and-drop into a higher-integrity process. An Editor inherited from an elevated Hub
+    // would appear healthy while silently losing external asset drops, so the desktop launch must remain unelevated.
+    [[nodiscard]] constexpr bool EditorLaunchSupportsExternalFileDrop(const bool processElevated) noexcept
+    {
+        return !processElevated;
+    }
+
     struct HubSelectedEditor final
     {
         std::string InstallationId;

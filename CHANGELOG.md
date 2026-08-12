@@ -7,6 +7,20 @@ versions.
 
 ### Changed
 
+- Replaced the layered historical production-readiness review with a current 0.3.1 assessment tied to the clean
+  Windows package, signed sequence-9 distribution, current test suites, capability ledgers, schemas, and feature-gated
+  marketplace state. Corrected guide inventory, mesh-schema, download archive, active-platform, and documentation-build
+  drift across the maintained library, and strengthened source validation so current version/count contracts cannot
+  silently become stale.
+- Normalized the common `d3d12` rendered-test selector to SDL's canonical `direct3d12` driver name, including the
+  environment seen by tests that recreate SDL after shutdown, with focused alias coverage.
+
+- Fixed trusted publisher upload reservations being rejected by the database write throttle as rate limited. Marketplace
+  throttles now use the authenticated actor persisted by each service-only transition, while keeping counters private
+  and returning bounded, actionable errors to publisher surfaces.
+- Prevented Windows Hub sessions running as administrator from launching an Editor that silently cannot receive files
+  from Explorer. The Hub now explains how to relaunch at normal integrity, and a directly elevated Editor exposes the
+  same diagnosis without changing or partially importing project files.
 - Completed the browser-to-Hub OAuth handoff contract for packaged desktop installations. Windows Hub installers now
   own the per-user `keirehub` URL protocol without deleting a replacement handler during uninstall, and Linux desktop
   packages register the same scheme while forwarding exactly one activation URL. The website callback now reports

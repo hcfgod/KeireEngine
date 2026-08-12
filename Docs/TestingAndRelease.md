@@ -104,8 +104,10 @@ Stable Linux editor catalog packages are produced from a clean detached release 
 baseline container (glibc 2.34 and GCC Toolset 12). Headless release validation uses Xvfb with Mesa Vulkan for the
 packaged runtime GPU smoke. Do not relabel an artifact built against a newer glibc as a general Linux release.
 
-The current public-download support claim is Windows x86-64 and mainstream glibc Linux x86-64. Linux ARM64,
-Alpine/musl, native macOS, and Metal remain unobserved and must not be presented as tested download targets.
+The active 0.3.1 stable catalog currently publishes Windows x86-64 only. Linux x86-64 source and packaging contracts
+remain maintained, but a Linux download must not be advertised until clean exact-release artifacts pass the native
+baseline, installer, Vulkan, Hub, and Editor acceptance gates. Linux ARM64, Alpine/musl, native macOS, and Metal remain
+unobserved and must not be presented as tested download targets.
 
 ## Risk-Based Matrix
 
@@ -137,7 +139,8 @@ behavior or concurrency. A missing host capability must be reported; it is not e
 
 KeireTests uses doctest and remains independent of KeireClient. `KeireEditorTests` owns editor document and worker
 coverage, while `KeireHubTests` owns the private Hub runtime and Hub-product integration boundary, including
-secondary-process activation. The normal test launcher builds and runs all three suites. Tests should cover the
+secondary-process activation. The normal test launcher builds and runs those three headless suites, then conditionally
+runs `KeireRenderTests` for each available platform backend. Tests should cover the
 successful contract, invalid input, failure rollback, lifecycle edges, and retained-object behavior where relevant.
 
 Window and application tests use SDL's dummy video driver, drain events, and shut services down explicitly. UI tests
@@ -223,6 +226,10 @@ Normal Debug and Release test commands also build `KeireRenderTests`. Windows at
 Vulkan, and macOS attempts Metal. An unavailable local driver is reported as a skip; set `KEIRE_REQUIRE_GPU_TESTS=all`
 or a comma-separated backend list to turn a missing configured backend into a failure. Pixel tests use central image
 regions and tolerant color/behavior deltas rather than exact screenshots.
+
+SDL's canonical Windows backend identifier is `direct3d12`. The render-test executable also accepts the common
+`d3d12` shorthand and normalizes the environment before any case recreates SDL, so probes and full runs select the same
+driver. Release scripts use the canonical identifier.
 
 The required self-hosted GPU workflow runs Windows D3D12/Vulkan and Linux Vulkan/macOS Metal in Debug and Release.
 Release Windows requires 25 consecutive D3D12 runs, five D3D12 validation-layer runs, and five Vulkan runs. Release
@@ -411,7 +418,8 @@ under an immutable digest-suffixed filename and appends a schema-2 entry to
 binds a unique release ID, Hub version, editor version, UTC publication time, platform, architecture, native package
 format, byte size, and SHA-256. The current Downloads page selects every verified native format for the newest
 available preview version per platform, while
-`/downloads/previous/` lists every retained artifact that still passes a same-origin availability and size check.
+`/downloads/archive/` lists the retained release metadata while the primary download surface stays focused on the
+current supported release.
 
 When the native release builder and distribution host are different machines, transfer the installer and its checksum
 through a private authenticated channel or a hypervisor shared folder into a non-served incoming directory. Do not add

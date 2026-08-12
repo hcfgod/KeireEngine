@@ -17,7 +17,7 @@ capabilities and remaining production-readiness work directly rather than presen
 [Website](https://keireengine.duckdns.org/) ·
 [Documentation](https://keireengine.duckdns.org/docs/) ·
 [Download Hub](https://keireengine.duckdns.org/downloads/) ·
-[Previous versions](https://keireengine.duckdns.org/downloads/previous/) ·
+[Release archive](https://keireengine.duckdns.org/downloads/archive/) ·
 [Roadmap](https://keireengine.duckdns.org/roadmap/) ·
 [Report an issue](https://github.com/hcfgod/KeireEngine/issues/new/choose)
 

@@ -755,6 +755,27 @@ namespace Keire::Detail
         }
     }
 
+    bool IsCurrentProcessElevated() noexcept
+    {
+#if defined(_WIN32)
+        HANDLE rawToken = nullptr;
+        if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &rawToken))
+            return false;
+        const auto closeToken = [](void* token)
+        {
+            if (token)
+                CloseHandle(token);
+        };
+        const std::unique_ptr<void, decltype(closeToken)> token(rawToken, closeToken);
+        TOKEN_ELEVATION elevation{};
+        DWORD bytesWritten = 0;
+        return GetTokenInformation(token.get(), TokenElevation, &elevation, sizeof(elevation), &bytesWritten) &&
+               bytesWritten == static_cast<DWORD>(sizeof(elevation)) && elevation.TokenIsElevated != 0;
+#else
+        return false;
+#endif
+    }
+
     bool IsProcessAlive(const std::uint64_t processId) noexcept
     {
         if (processId == 0)

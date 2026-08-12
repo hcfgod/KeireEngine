@@ -284,8 +284,8 @@ policy; external scripts, external fonts, and inline script/style execution rema
    an empty package collection plus a validated `releaseStatus` containing the pending semantic version and public
    message. Deploy that metadata and the matching status UI before moving the retired bytes from the served preview
    root into private recovery storage. For an ordinary replacement, remove the superseded preview record and artifact
-   together so the manifest never advertises a missing or ambiguous file. `/downloads/previous/` renders
-   this bounded retained set and hides any record whose file is missing or has the wrong size. Signed stable releases
+   together so the manifest never advertises a missing or ambiguous file. `/downloads/archive/` renders retained
+   release metadata without crowding the primary download surface. Signed stable releases
    remain immutable and are never pruned through the preview-retention workflow. Preview builds never belong in a
    signed stable catalog.
 5. Confirm `/`, `/marketplace/`, `/docs/`, a deep guide route, `/docs/pagefind/pagefind.js`, `/health/`, and a missing
@@ -493,6 +493,11 @@ quarterly down/recovery drill. A monitor running only on the origin does not cov
 The metadata rate limiter is fixed-window and deliberately conservative; package streams use a bounded global
 concurrency limiter and queue. Kestrel request headers and timeouts are bounded. Application logs use the JSON console
 formatter, and the Caddy example writes structured access logs with rotation.
+
+Marketplace database write throttles key each counter to the trusted actor stored by its service-only transaction.
+This is intentional: authenticated browser requests enter Postgres through a service-role Edge adapter, where
+`auth.uid()` is not the end-user identity. The row actor remains constrained by the JWT-verifying transition before the
+trigger runs; anonymous subjects fail closed, and the private counter table is never exposed through the Data API.
 
 ## Backup, restore, and migration
 

@@ -25,15 +25,15 @@ pointers or stage Git changes.
 
 | Platform | Current evidence | Public preview |
 | --- | --- | --- |
-| Windows x86-64 | Debug, Release, AddressSanitizer, complete Core/editor/Hub suites, SDK/package consumers, Direct3D 12, and Vulkan | Unsigned native Hub installer |
-| Linux x86-64 (glibc) | Ubuntu 22.04/24.04, Debian 12, Fedora, Arch, openSUSE Tumbleweed, and Rocky Linux 9; Ubuntu 26.04 setup/matrix target pending native validation; GCC warnings-as-errors, Debug/Release, sanitizers, packages, and WSLg Vulkan | Unsigned Hub DEB for Debian/Ubuntu; source builds on the other validated families |
+| Windows x86-64 | Clean 0.3.1 Dist package; complete Core/editor/Hub suites, SDK/package consumers, Direct3D 12, and Vulkan | Signed sequence-9 catalog; native installer is not yet Authenticode-signed |
+| Linux x86-64 (glibc) | Earlier 0.3.1-line validation covers Ubuntu 22.04/24.04, Debian 12, Fedora, Arch, openSUSE Tumbleweed, and Rocky Linux 9; the exact current release commit still needs native package acceptance | Not present in the active 0.3.1 catalog |
 | Linux ARM64 or Alpine/musl | Build contracts retained but not validated in this audit | Not published |
 | macOS x86-64/ARM64 | Build and packaging contracts retained; native macOS and Metal evidence remains outstanding | Not published |
 
-The [Downloads page](https://keireengine.duckdns.org/downloads/) shows the exact Hub and editor version, architecture,
-signing state, byte size, publication date, and SHA-256 for every preview. Its
-[previous-versions archive](https://keireengine.duckdns.org/downloads/previous/) retains immutable earlier uploads.
-Unsigned development previews are not stable releases and remain outside the signed catalog trust path.
+The [Downloads page](https://keireengine.duckdns.org/downloads/) shows the current Hub release. The
+[release archive](https://keireengine.duckdns.org/downloads/archive/) preserves historical metadata without crowding
+the primary download. The Hub's Installs page consumes the independently signed distribution catalog; catalog
+signatures and SHA-256 identities do not imply native Authenticode signing.
 
 ## First Windows Build
 

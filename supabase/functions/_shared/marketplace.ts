@@ -163,31 +163,31 @@ export function requiredUuid(input: Record<string, unknown>, name: string): stri
 }
 
 export function databaseFailure(error: { message: string }): RequestError {
-    const mappings = new Map<string, readonly [number, string]>([
-        ["marketplace_disabled", [503, "marketplace.disabled"]],
-        ["hub_oauth_disabled", [503, "account.hub_oauth_disabled"]],
-        ["publisher_portal_disabled", [503, "publisher.disabled"]],
-        ["publisher_application_not_editable", [409, "publisher.application_not_editable"]],
-        ["publisher_product_not_editable", [403, "publisher.product_not_editable"]],
-        ["publisher_version_not_editable", [409, "publisher.version_not_editable"]],
-        ["publisher_upload_invalid", [400, "publisher.upload_invalid"]],
-        ["publisher_upload_already_active", [409, "publisher.upload_already_active"]],
-        ["publisher_upload_not_completable", [409, "publisher.upload_not_completable"]],
-        ["publisher_upload_not_cancellable", [409, "publisher.upload_not_cancellable"]],
-        ["publisher_upload_size_mismatch", [409, "publisher.upload_size_mismatch"]],
-        ["asset_packages_disabled", [503, "marketplace.asset_packages_disabled"]],
-        ["organization_authorization_required", [403, "marketplace.organization_forbidden"]],
-        ["license_revision_changed", [409, "marketplace.license_changed"]],
-        ["product_not_found", [404, "marketplace.product_not_found"]],
-        ["device_session_revoked", [401, "account.session_revoked"]],
-        ["device_session_invalid", [401, "account.session_revoked"]],
-        ["entitlement_required", [403, "marketplace.entitlement_required"]],
-        ["version_unavailable", [404, "marketplace.version_unavailable"]],
-        ["marketplace_rate_limited", [429, "marketplace.rate_limited"]],
+    const mappings = new Map<string, readonly [number, string, string]>([
+        ["marketplace_disabled", [503, "marketplace.disabled", "The marketplace is not available yet."]],
+        ["hub_oauth_disabled", [503, "account.hub_oauth_disabled", "Hub account sign-in is not available yet."]],
+        ["publisher_portal_disabled", [503, "publisher.disabled", "Publisher tools are not available yet."]],
+        ["publisher_application_not_editable", [409, "publisher.application_not_editable", "This publisher application can no longer be edited."]],
+        ["publisher_product_not_editable", [403, "publisher.product_not_editable", "This product can no longer be edited."]],
+        ["publisher_version_not_editable", [409, "publisher.version_not_editable", "This package version can no longer be edited."]],
+        ["publisher_upload_invalid", [400, "publisher.upload_invalid", "The package upload request is invalid."]],
+        ["publisher_upload_already_active", [409, "publisher.upload_already_active", "This version already has an active package upload."]],
+        ["publisher_upload_not_completable", [409, "publisher.upload_not_completable", "The package upload cannot be completed in its current state."]],
+        ["publisher_upload_not_cancellable", [409, "publisher.upload_not_cancellable", "The package upload can no longer be cancelled."]],
+        ["publisher_upload_size_mismatch", [409, "publisher.upload_size_mismatch", "The uploaded package size does not match the selected file."]],
+        ["asset_packages_disabled", [503, "marketplace.asset_packages_disabled", "Asset package delivery is not available yet."]],
+        ["organization_authorization_required", [403, "marketplace.organization_forbidden", "Your account cannot perform this action for the organization."]],
+        ["license_revision_changed", [409, "marketplace.license_changed", "The package license changed. Review it before continuing."]],
+        ["product_not_found", [404, "marketplace.product_not_found", "The marketplace product was not found."]],
+        ["device_session_revoked", [401, "account.session_revoked", "This device session is no longer active."]],
+        ["device_session_invalid", [401, "account.session_revoked", "This device session is no longer active."]],
+        ["entitlement_required", [403, "marketplace.entitlement_required", "Add this product to your library before downloading it."]],
+        ["version_unavailable", [404, "marketplace.version_unavailable", "This package version is not available."]],
+        ["marketplace_rate_limited", [429, "marketplace.rate_limited", "Too many marketplace changes were requested. Wait a few minutes, then try again."]],
     ]);
     const mapped = mappings.get(error.message);
     return mapped
-        ? new RequestError(mapped[0], mapped[1], error.message.replaceAll("_", " "))
+        ? new RequestError(mapped[0], mapped[1], mapped[2])
         : new RequestError(503, "marketplace.transition_failed", "The marketplace operation could not be completed.");
 }
 
