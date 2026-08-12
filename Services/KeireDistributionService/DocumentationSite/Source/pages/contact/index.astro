@@ -1,0 +1,19 @@
+---
+import PlatformLayout from "../../layouts/PlatformLayout.astro";
+export const prerender = true;
+---
+<PlatformLayout title="Contact" description="Contact the Kéire Engine project about support, partnerships, press, feedback, or general questions.">
+    <section class="platform-section"><div class="platform-shell account-shell"><div><p class="eyebrow">Talk to the project</p><h1 class="display-title">Useful context.<br /><span>Human response.</span></h1><p class="lead">For product questions, partnerships, press, and feedback. Use the private security process for vulnerabilities.</p></div><div class="auth-card"><h1>Send a message</h1><form class="form-stack" data-contact-form>
+        <input type="text" name="company" tabindex="-1" autocomplete="off" aria-hidden="true" class="honeypot" />
+        <label class="field"><span>Name</span><input name="name" minlength="2" maxlength="80" required /></label>
+        <label class="field"><span>Email</span><input name="email" type="email" maxlength="254" required /></label>
+        <label class="field"><span>Topic</span><select name="category"><option value="general">General</option><option value="support">Support</option><option value="partnership">Partnership</option><option value="press">Press</option><option value="feedback">Feedback</option></select></label>
+        <label class="field"><span>Subject</span><input name="subject" minlength="3" maxlength="120" required /></label>
+        <label class="field"><span>Message</span><textarea name="message" minlength="10" maxlength="5000" required></textarea></label>
+        <button class="button" type="submit">Send message</button><p class="form-message" aria-live="polite" data-contact-message></p>
+    </form></div></div></section>
+</PlatformLayout>
+<script>
+    const form = document.querySelector("[data-contact-form]");
+    form?.addEventListener("submit", async (event) => { event.preventDefault(); if (!(form instanceof HTMLFormElement)) return; const values = Object.fromEntries(new FormData(form)); const message = form.querySelector("[data-contact-message]"); const response = await fetch("/contact/submit/", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(values) }); const result = await response.json(); if (message instanceof HTMLElement) { message.dataset.kind = response.ok ? "success" : "error"; message.textContent = result.message ?? result.error?.message; } if (response.ok) form.reset(); });
+</script>

@@ -21,6 +21,7 @@ namespace KeireHub
         virtual void Open(const std::filesystem::path& path) = 0;
         virtual void StartBuildSupportInstall(const std::filesystem::path& package) = 0;
         virtual void RequestEditorInstall(std::string_view packageOrVersion) = 0;
+        [[nodiscard]] virtual HubStatus CompleteOAuthCallback(std::string_view callbackUrl) = 0;
         [[nodiscard]] virtual HubStatus FocusBuildSupport(std::string_view platform, std::string_view architecture) = 0;
     };
 

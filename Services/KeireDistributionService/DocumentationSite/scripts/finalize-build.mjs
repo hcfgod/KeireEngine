@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const siteRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const outputRoot = path.join(siteRoot, "dist");
+const outputRoot = path.join(siteRoot, "dist", "client");
 const assetRoot = path.join(outputRoot, "_astro");
 
 async function collectHtml(directory) {
@@ -44,18 +44,21 @@ for (const htmlPath of await collectHtml(outputRoot)) {
         ++extractedStyles;
         return `<link rel="stylesheet" href="/docs/_astro/${name}">`;
     });
-    html = html.replace(/<script(?![^>]*\bsrc=)([^>]*)>([\s\S]*?)<\/script>/gi, (_match, attributes, content) => {
+    html = html.replace(/<script(?![^>]*\bsrc=)([^>]*)>([\s\S]*?)<\/script>/gi, (match, attributes, content) => {
         if (!content.trim()) {
             return "";
         }
         const type = /\btype=["']([^"']+)["']/i.exec(attributes)?.[1] ?? "text/javascript";
+        if (type === "application/ld+json") {
+            return match;
+        }
         if (!new Set(["text/javascript", "application/javascript", "module"]).has(type)) {
             throw new Error(`Unsupported inline script type '${type}' in ${htmlPath}.`);
         }
         const name = assetName("js", content);
         pending.push({ name, content });
         ++extractedScripts;
-        return `<script${attributes} src="/docs/_astro/${name}"></script>`;
+        return `<script${attributes} src="/_astro/${name}"></script>`;
     });
     html = html.replace(/\sstyle=(?:"([^"]*)"|'([^']*)')/gi, (_match, doubleQuoted, singleQuoted) => {
         const declarations = (doubleQuoted ?? singleQuoted)
@@ -86,7 +89,7 @@ if (extractedAttributeStyles.size > 0) {
     await writeFile(path.join(assetRoot, name), `${css}\n`, "utf8");
     written.add(name);
     for (const document of documents) {
-        document.html = document.html.replace("</head>", `<link rel="stylesheet" href="/docs/_astro/${name}"></head>`);
+        document.html = document.html.replace("</head>", `<link rel="stylesheet" href="/_astro/${name}"></head>`);
     }
 }
 

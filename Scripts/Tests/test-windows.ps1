@@ -46,6 +46,12 @@ if ($node) {
 }
 & $python (Join-Path $PSScriptRoot "test-supabase-config.py")
 if ($LASTEXITCODE -ne 0) { throw "Supabase desktop configuration checks failed." }
+& $python (Join-Path $PSScriptRoot "test-marketplace-migrations.py")
+if ($LASTEXITCODE -ne 0) { throw "Marketplace migration security-contract checks failed." }
+& $python (Join-Path $PSScriptRoot "test-marketplace-edge.py")
+if ($LASTEXITCODE -ne 0) { throw "Marketplace Edge trust-boundary checks failed." }
+& $python (Join-Path $PSScriptRoot "test-marketplace-package-fixture.py")
+if ($LASTEXITCODE -ne 0) { throw "Marketplace package-fixture checks failed." }
 & $python (Join-Path $PSScriptRoot "test-patch-ninja-depfiles.py")
 if ($LASTEXITCODE -ne 0) { throw "Ninja dependency-file rule checks failed." }
 & (Join-Path $PSScriptRoot "test-installer-windows.ps1")
@@ -319,6 +325,10 @@ Assert-True ($premakePolicy.Contains('function GeneratorRootPath(path)') -and
     "Toolset-aware root-relative Ninja and GNU Make dependency links"
 Assert-True ($assetToolSource.Contains("--worker-timeout-seconds") -and
              $assetToolSource.Contains("commandLine.WorkerTimeout")) "Configurable asset-worker CLI timeout"
+Assert-True ($assetToolSource.Contains("extract-asset-package") -and
+             $assetToolSource.Contains("ExtractAssetPackageToStaging") -and
+             $assetToolSource.Contains('"manifestSha256"')) `
+    "Marketplace automation uses the authoritative asset-package extraction boundary"
 Assert-True ($assetWorkerPremake.Contains('filter { "system:linux"') -and
              $assetWorkerPremake.Contains('"-Wl,-rpath,''$$ORIGIN''"') -and
              $assetWorkerPremake.Contains('filter { "system:macosx"') -and

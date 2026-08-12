@@ -190,11 +190,15 @@ namespace KeireHub
         {
             if (task.HiddenFromHistory)
                 continue;
-            const auto progress = task.Progress.TotalBytes == 0
-                                      ? 0.0F
-                                      : std::clamp(static_cast<float>(task.Progress.BytesTransferred) /
-                                                       static_cast<float>(task.Progress.TotalBytes),
-                                                   0.0F, 1.0F);
+            const auto progress =
+                task.Progress.TotalBytes != 0   ? std::clamp(static_cast<float>(task.Progress.BytesTransferred) /
+                                                                 static_cast<float>(task.Progress.TotalBytes),
+                                                             0.0F, 1.0F)
+                : task.Progress.TotalSteps != 0 ? std::clamp(static_cast<float>(task.Progress.StepsCompleted) /
+                                                                 static_cast<float>(task.Progress.TotalSteps),
+                                                             0.0F, 1.0F)
+                : task.State == HubTaskState::Completed ? 1.0F
+                                                        : 0.0F;
             std::string message = task.Progress.Phase;
             if (task.Failure)
                 message = task.Failure->Message;

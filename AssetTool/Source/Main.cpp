@@ -1,3 +1,4 @@
+#include "Keire/Assets/AssetPackage.h"
 #include "Keire/Assets/AssetPipeline.h"
 #include "Keire/Assets/BuiltinAssetRegistry.h"
 #include "Keire/Assets/RenderingAssets.h"
@@ -54,6 +55,7 @@ namespace
         std::filesystem::path Project = ".";
         std::filesystem::path Output = "Build/Assets";
         std::filesystem::path Catalog;
+        std::filesystem::path Manifest;
         std::filesystem::path Input;
         std::filesystem::path Status;
         std::filesystem::path Cancel;
@@ -124,6 +126,8 @@ namespace
                 result.Output = Keire::Detail::PathFromUtf8(requireValue());
             else if (option == "--catalog")
                 result.Catalog = Keire::Detail::PathFromUtf8(requireValue());
+            else if (option == "--manifest")
+                result.Manifest = Keire::Detail::PathFromUtf8(requireValue());
             else if (option == "--input")
                 result.Input = Keire::Detail::PathFromUtf8(requireValue());
             else if (option == "--status")
@@ -224,6 +228,15 @@ namespace
                      "  KeireAssetTool validate-project --project <path>\n"
                      "  KeireAssetTool upgrade-project [--project <path>] [--apply|--recover|--rollback]\n"
                      "  KeireAssetTool migrate-shader-graphs --project <path> [--check]\n"
+                     "  KeireAssetTool create-asset-package --manifest <manifest.json> --input <payload>\n"
+                     "                                      --output <package.keireassetpackage>\n"
+                     "                                      [--compression-level <level>]\n"
+                     "  KeireAssetTool inspect-asset-package --input <package.keireassetpackage>\n"
+                     "  KeireAssetTool verify-asset-package --input <package.keireassetpackage>\n"
+                     "                                      [--size <bytes>] [--sha256 <digest>]\n"
+                     "  KeireAssetTool extract-asset-package --input <package.keireassetpackage>\n"
+                     "                                       --output <new-staging-directory>\n"
+                     "                                       [--size <bytes>] [--sha256 <digest>]\n"
                      "  KeireAssetTool validate --catalog <path>\n";
         std::cout << "  KeireAssetTool bake-lighting [--project <path>] [--input <scene.keirescene>] [--force]\n";
         std::cout << "  KeireAssetTool convert-mesh --input <model> [--output <file.keiremesh>]\n";
@@ -600,6 +613,90 @@ namespace
                     throw std::invalid_argument("validate requires --catalog <path>.");
                 Keire::AssetCooker::Validate(commandLine.Catalog);
                 std::cout << "Validated " << commandLine.Catalog.string() << '\n';
+                return 0;
+            }
+            if (commandLine.Command == "create-asset-package")
+            {
+                if (commandLine.Manifest.empty() || commandLine.Input.empty() ||
+                    commandLine.Output == std::filesystem::path("Build/Assets"))
+                {
+                    throw std::invalid_argument(
+                        "create-asset-package requires --manifest <manifest.json>, --input <payload>, and --output "
+                        "<package.keireassetpackage>.");
+                }
+                if (commandLine.Output.extension() != ".keireassetpackage")
+                    throw std::invalid_argument("Asset packages must use the .keireassetpackage extension.");
+                const auto manifestBytes = ReadBytes(commandLine.Manifest);
+                const auto* manifestText = reinterpret_cast<const char*>(manifestBytes.data());
+                auto manifest = Keire::DecodeAssetPackageManifest(std::string_view(manifestText, manifestBytes.size()));
+                manifest = Keire::InventoryAssetPackagePayload(std::move(manifest), commandLine.Input);
+                const auto result =
+                    Keire::WriteAssetPackageArchive({.Manifest = std::move(manifest),
+                                                     .PayloadRoot = commandLine.Input,
+                                                     .Output = commandLine.Output,
+                                                     .CompressionLevel = commandLine.Profile.CompressionLevel});
+                std::cout << "Created " << Keire::Detail::PathToUtf8(commandLine.Output) << " ("
+                          << result.ArchiveSizeBytes << " bytes, sha256 " << result.ArchiveSha256 << ")\n";
+                return 0;
+            }
+            if (commandLine.Command == "inspect-asset-package" || commandLine.Command == "verify-asset-package")
+            {
+                if (commandLine.Input.empty())
+                {
+                    throw std::invalid_argument(commandLine.Command + " requires --input <package.keireassetpackage>.");
+                }
+                Keire::AssetPackageVerification verification;
+                if (commandLine.ExpectedSize != 0U)
+                    verification.ExpectedArchiveSizeBytes = commandLine.ExpectedSize;
+                verification.ExpectedArchiveSha256 = commandLine.Sha256;
+                const auto result = Keire::InspectAssetPackageArchive(commandLine.Input, verification);
+                if (commandLine.Command == "verify-asset-package")
+                {
+                    std::cout << "Verified " << result.Manifest.PackageId << '@' << result.Manifest.Version << " ("
+                              << result.ArchiveSizeBytes << " bytes, sha256 " << result.ArchiveSha256 << ")\n";
+                    return 0;
+                }
+                auto report = nlohmann::json::parse(Keire::EncodeAssetPackageManifest(result.Manifest));
+                report["archive"] = {{"sizeBytes", result.ArchiveSizeBytes},
+                                     {"sha256", result.ArchiveSha256},
+                                     {"manifestSha256", Keire::Detail::DigestToString(Keire::Detail::Sha256(
+                                                            std::span(result.ExactManifestBytes)))}};
+                if (result.Signature)
+                {
+                    report["detachedSignature"] = {{"algorithm", result.Signature->Algorithm},
+                                                   {"keyId", result.Signature->KeyId},
+                                                   {"sizeBytes", result.Signature->Bytes.size()}};
+                }
+                else
+                    report["detachedSignature"] = nullptr;
+                std::cout << report.dump(2) << '\n';
+                return 0;
+            }
+            if (commandLine.Command == "extract-asset-package")
+            {
+                if (commandLine.Input.empty() || commandLine.Output == std::filesystem::path("Build/Assets"))
+                {
+                    throw std::invalid_argument(
+                        "extract-asset-package requires --input <package.keireassetpackage> and "
+                        "--output <new-staging-directory>.");
+                }
+                Keire::AssetPackageVerification verification;
+                if (commandLine.ExpectedSize != 0U)
+                    verification.ExpectedArchiveSizeBytes = commandLine.ExpectedSize;
+                verification.ExpectedArchiveSha256 = commandLine.Sha256;
+                const auto staging = std::filesystem::absolute(commandLine.Output).lexically_normal();
+                const auto parent = staging.parent_path();
+                const auto result = Keire::ExtractAssetPackageToStaging({.Archive = commandLine.Input,
+                                                                         .AllowedStagingParent = parent,
+                                                                         .StagingRoot = staging,
+                                                                         .Verification = std::move(verification)});
+                auto report = nlohmann::json::parse(Keire::EncodeAssetPackageManifest(result.Metadata.Manifest));
+                report["archive"] = {{"sizeBytes", result.Metadata.ArchiveSizeBytes},
+                                     {"sha256", result.Metadata.ArchiveSha256},
+                                     {"manifestSha256", Keire::Detail::DigestToString(Keire::Detail::Sha256(
+                                                            std::span(result.Metadata.ExactManifestBytes)))}};
+                report["stagingRoot"] = Keire::Detail::PathToUtf8(result.StagingRoot);
+                std::cout << report.dump(2) << '\n';
                 return 0;
             }
             if (commandLine.Command == "pack-player-support")

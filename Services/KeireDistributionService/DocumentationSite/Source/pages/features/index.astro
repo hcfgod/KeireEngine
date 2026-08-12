@@ -1,0 +1,16 @@
+---
+import PlatformLayout from "../../layouts/PlatformLayout.astro";
+export const prerender = true;
+---
+<PlatformLayout title="Engine and Editor" description="Explore implemented Kéire Engine, Editor, Hub, rendering, scripting, VFX, and content-pipeline capabilities." active="product">
+    <section class="platform-section"><div class="platform-shell">
+        <div class="section-heading"><div><p class="eyebrow">Engine + Editor</p><h1>Production-minded systems with visible contracts.</h1></div><p>Kéire 0.3.1 is a pre-1.0 release. These are implemented workflows, while the production-readiness review documents remaining gates.</p></div>
+        <div class="editorial-grid">
+            <article class="editorial-panel"><span class="editorial-panel__index">01</span><h3>Scene and prefab authoring</h3><p>Typed components, hierarchy operations, nested prefab overrides, transactional edits, recovery state, and deterministic serialization.</p></article>
+            <article class="editorial-panel"><span class="editorial-panel__index">02</span><h3>Shader and Material Graphs</h3><p>Custom shader graphs expose a deliberate interface to material graphs, direct materials, and lightweight inherited instances.</p></article>
+            <article class="editorial-panel"><span class="editorial-panel__index">03</span><h3>GPU VFX and diagnostics</h3><p>Context-aware authoring, event flows, live preview, profiling, capability validation, and last-good generated programs.</p></article>
+            <article class="editorial-panel"><span class="editorial-panel__index">04</span><h3>C# gameplay assemblies</h3><p>Managed behaviors, reload generations, editor/runtime assembly boundaries, exposed fields, and build-time API validation.</p></article>
+        </div>
+    </div></section>
+    <section class="platform-section platform-section--line"><div class="platform-shell cta-band"><div><p class="eyebrow">Evidence, not slogans</p><h2>Read the architecture and release gates.</h2></div><div class="actions"><a class="button" href="/docs/reference/overview/">Architecture overview</a><a class="button button--secondary" href="/docs/reference/production-readiness-review/">Readiness review</a></div></div></section>
+</PlatformLayout>

@@ -12,8 +12,11 @@ $packager = Get-Content -LiteralPath `
     (Join-Path $Root "Services\KeireDistributionService\scripts\package-service.ps1") -Raw
 foreach ($contract in @(
         "write-deterministic-tar.py",
+        "Build\Dependencies\dotnet-sdk\dotnet.exe",
         "--executable 'KeireDistributionService'",
         "--executable 'tools/publisher/KeireDistributionPublisher'",
+        "--executable 'tools/marketplace-validator/worker/KeireMarketplaceValidator'",
+        "--executable 'tools/marketplace-validator/broker/KeireMarketplaceValidatorBroker'",
         "--executable 'scripts/health-check.sh'",
         "--executable 'scripts/monitor-distribution.sh'",
         "--executable 'scripts/backup-distribution.sh'",
@@ -23,12 +26,24 @@ foreach ($contract in @(
         "--executable 'scripts/publish-snapshot.sh'",
         "--executable 'scripts/start-wsl2-host-bridge.sh'",
         "--executable 'scripts/install-wsl2-host-bridge.sh'",
+        "--executable 'scripts/install-web-runtime.sh'",
+        "install-web-runtime.ps1",
         "start-windows-host.ps1",
         "install-windows-startup-task.ps1",
         "install-windows-backup-task.ps1",
         "migrate-windows-host.ps1",
-        "Website",
+        "deploy-windows-web.ps1",
+        "'Web'",
         "DocumentationSite",
+        "keire-web.service.example",
+        "keire-marketplace-validator.service.example",
+        "keire-marketplace-validator-broker.service.example",
+        "marketplace-validator-broker.env.example",
+        "configure-windows-validator-firewall.ps1",
+        "install-windows-marketplace-validator-tasks.ps1",
+        "protect-windows-validator-broker-secret.ps1",
+        "start-windows-marketplace-validator.ps1",
+        "start-windows-marketplace-validator-broker.ps1",
         "BeautifulMermaid.txt",
         "Documentation production build failed"
     )) {
@@ -36,19 +51,101 @@ foreach ($contract in @(
         throw "The Windows service packager is missing '$contract'."
     }
 }
+$unixPackager = Get-Content -LiteralPath `
+    (Join-Path $Root "Services\KeireDistributionService\scripts\package-service.sh") -Raw
+if (-not $unixPackager.Contains('install-windows-marketplace-validator-tasks.ps1')) {
+    throw "The Unix service packager does not include the Windows validator task installer in Windows packages."
+}
+$validatorTaskInstaller = Get-Content -LiteralPath `
+    (Join-Path $Root "Services\KeireDistributionService\Deployment\install-windows-marketplace-validator-tasks.ps1") -Raw
+foreach ($contract in @(
+        'NT AUTHORITY\LOCAL SERVICE',
+        'NT AUTHORITY\NETWORK SERVICE',
+        'FirewallAttestation',
+        'New-ScheduledTaskTrigger -AtStartup',
+        '-AllowStartIfOnBatteries',
+        '-DontStopIfGoingOnBatteries',
+        '-RestartCount 999',
+        '-ExecutionTimeLimit ([TimeSpan]::Zero)',
+        'Start-ScheduledTask -TaskName $WorkerTaskName',
+        'Start-ScheduledTask -TaskName $BrokerTaskName'
+    )) {
+    if (-not $validatorTaskInstaller.Contains($contract)) {
+        throw "The Windows validator task installer is missing '$contract'."
+    }
+}
+$firewallConfigurator = Get-Content -LiteralPath `
+    (Join-Path $Root "Services\KeireDistributionService\Deployment\configure-windows-validator-firewall.ps1") -Raw
+foreach ($contract in @(
+        'Attestation',
+        'Get-FileHash -LiteralPath $resolved -Algorithm SHA256',
+        'SetAccessRuleProtection($true, $false)',
+        'WellKnownSidType]::LocalServiceSid'
+    )) {
+    if (-not $firewallConfigurator.Contains($contract)) {
+        throw "The Windows validator firewall configurator is missing '$contract'."
+    }
+}
+$brokerSecretProtector = Get-Content -LiteralPath `
+    (Join-Path $Root "Services\KeireDistributionService\Deployment\protect-windows-validator-broker-secret.ps1") -Raw
+foreach ($contract in @(
+        'Read-Host "Enter VALIDATOR_BROKER_SECRET" -AsSecureString',
+        'Add-Type -AssemblyName System.Security',
+        '[System.Security.Cryptography.ProtectedData]::Protect',
+        '[System.Security.Cryptography.DataProtectionScope]::LocalMachine',
+        'SetAccessRuleProtection($true, $false)',
+        'NT AUTHORITY\NETWORK SERVICE'
+    )) {
+    if (-not $brokerSecretProtector.Contains($contract)) {
+        throw "The Windows validator secret protector is missing '$contract'."
+    }
+}
+$brokerLauncher = Get-Content -LiteralPath `
+    (Join-Path $Root "Services\KeireDistributionService\Deployment\start-windows-marketplace-validator-broker.ps1") -Raw
+foreach ($contract in @(
+        'Add-Type -AssemblyName System.Security',
+        'ValidateOnly',
+        'Get-FileHash -LiteralPath $Validator -Algorithm SHA256',
+        'AreAccessRulesProtected',
+        'exact least-privilege contract',
+        '[System.Security.Cryptography.ProtectedData]::Unprotect',
+        'KEIRE_VALIDATOR_BROKER_SECRET',
+        'Remove-Item Env:KEIRE_VALIDATOR_BROKER_SECRET'
+    )) {
+    if (-not $brokerLauncher.Contains($contract)) {
+        throw "The Windows validator broker launcher is missing '$contract'."
+    }
+}
 if ($packager.Contains('& tar -czf')) {
     throw "The Windows service packager must not inherit unusable Linux modes from NTFS."
+}
+$validatorLauncher = Get-Content -LiteralPath `
+    (Join-Path $Root "Services\KeireDistributionService\Deployment\start-windows-marketplace-validator.ps1") -Raw
+foreach ($contract in @(
+        'KEIRE_VALIDATOR_NETWORK_ISOLATED',
+        'ValidateOnly',
+        'FirewallAttestation',
+        'Get-FileHash -LiteralPath $entry.Value -Algorithm SHA256',
+        'exact least-privilege contract',
+        'Get-NetFirewallApplicationFilter',
+        'Keire Marketplace Validator - Offline Worker',
+        'Keire Marketplace Validator - Asset Tool',
+        'Keire Marketplace Validator - Malware Scanner',
+        'Keire Marketplace Validator - Managed Compiler'
+    )) {
+    if (-not $validatorLauncher.Contains($contract)) {
+        throw "The Windows offline validator launcher is missing '$contract'."
+    }
 }
 $caddyTemplate = Get-Content -LiteralPath `
     (Join-Path $Root "Services\KeireDistributionService\Deployment\Caddyfile.example") -Raw
 foreach ($contract in @(
-        '@distribution_api path /v1 /v1/* /v2 /v2/* /health /health/*',
-        'root * "{$KEIRE_WEBSITE_ROOT:Website}"',
-        'try_files {path} {path}/index.html',
+        '@distribution_api path /v1 /v1/* /v2 /v2/* /health/live /health/ready',
+        'reverse_proxy 127.0.0.1:4321',
+        'health_uri /health/',
         'Content-Security-Policy',
-        '@docs_immutable path /docs/_astro/*',
-        "script-src 'self' 'wasm-unsafe-eval'",
-        'handle_errors'
+        '@immutable_web_assets path /_astro/* /docs/_astro/*',
+        "script-src 'self' 'wasm-unsafe-eval'"
     )) {
     if (-not $caddyTemplate.Contains($contract)) {
         throw "The Caddy website boundary is missing '$contract'."
@@ -84,6 +181,41 @@ try {
     Invoke-CheckedWindowsCommand {
         & $windowsHost -SettingsPath $settingsPath -ValidateOnly
     } "Windows distribution host settings validation"
+    New-Item -ItemType Directory -Force (Join-Path $hostFixture "Web\dist\server") | Out-Null
+    [IO.File]::WriteAllText((Join-Path $hostFixture "Web\dist\server\entry.mjs"), "export {};`n",
+        [Text.UTF8Encoding]::new($false))
+    $webSettingsPath = Join-Path $hostFixture "host-settings-web.json"
+    @{
+        schemaVersion = 2
+        host = "distribution.example.test"
+        storageRoot = "distribution"
+        httpPort = 50254
+        httpsPort = 50255
+        serviceExecutable = "KeireDistributionService.exe"
+        caddyExecutable = "caddy.exe"
+        caddyConfig = "Caddyfile"
+        logDirectory = "logs"
+        webRoot = "Web"
+        nodeExecutable = (Get-Command node -ErrorAction Stop).Source
+        supabaseUrl = "https://example.supabase.co"
+        supabasePublishableKey = "sb_publishable_0123456789abcdef"
+    } | ConvertTo-Json | Set-Content -LiteralPath $webSettingsPath -Encoding UTF8
+    Invoke-CheckedWindowsCommand {
+        & $windowsHost -SettingsPath $webSettingsPath -ValidateOnly
+    } "Windows unified web host settings validation"
+    $hostScript = Get-Content -LiteralPath $windowsHost -Raw
+    foreach ($ownershipContract in @(
+            '[switch] $ProbeOnly',
+            'Test-PortOwnedByExecutable',
+            'Test-PortOwnedByCommandLine',
+            'Assert-ConfiguredHostReady',
+            '$webEntry',
+            'PUBLIC_SITE_URL'
+        )) {
+        if (-not $hostScript.Contains($ownershipContract)) {
+            throw "The Windows host supervisor is missing ownership contract '$ownershipContract'."
+        }
+    }
     $startupTask = Join-Path $Root `
         "Services\KeireDistributionService\scripts\install-windows-startup-task.ps1"
     Invoke-CheckedWindowsCommand {
@@ -93,10 +225,39 @@ try {
         -Destination (Join-Path $hostFixture "scripts\install-windows-startup-task.ps1")
     $migration = Join-Path $Root `
         "Services\KeireDistributionService\scripts\migrate-windows-host.ps1"
+    $migrationScript = Get-Content -LiteralPath $migration -Raw
+    foreach ($cutoverContract in @(
+            'Get-TaskSettingsPath',
+            'Stop-ConfiguredHostProcesses',
+            '-ProbeOnly'
+        )) {
+        if (-not $migrationScript.Contains($cutoverContract)) {
+            throw "The Windows host migration is missing cutover contract '$cutoverContract'."
+        }
+    }
     Invoke-CheckedWindowsCommand {
         & $migration -SourceHostRoot $hostFixture -SourceDistributionRoot (Join-Path $hostFixture "distribution") `
             -DestinationRoot (Join-Path $env:ProgramData "Keire Distribution Host Test") -ValidateOnly
     } "Windows protected host migration validation"
+    $webDeployment = Join-Path $Root `
+        "Services\KeireDistributionService\scripts\deploy-windows-web.ps1"
+    $webDeploymentScript = Get-Content -LiteralPath $webDeployment -Raw
+    foreach ($deploymentContract in @(
+            'dist.rollback-',
+            'Stop-ExpectedWebProcess',
+            'Stop-ConfiguredHost',
+            'Start-ConfiguredHost',
+            'Get-ScheduledTask',
+            'The dependency lock changed',
+            'AllowRuntimeUpdate',
+            'npm.cmd',
+            'locked web runtime deployment completed',
+            '-ProbeOnly'
+        )) {
+        if (-not $webDeploymentScript.Contains($deploymentContract)) {
+            throw "The Windows web deployment is missing '$deploymentContract'."
+        }
+    }
 
     $invalidSettings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
     $invalidSettings.host = "https://not-a-host.example"
@@ -127,18 +288,17 @@ $archiveB = Join-Path $fixture "package-b.tar.gz"
 try {
     New-Item -ItemType Directory -Force (Join-Path $source "Deployment"), `
         (Join-Path $source "scripts"), (Join-Path $source "tools\publisher"), `
-        (Join-Path $source "Website\assets"), (Join-Path $source "Website\docs\_astro"), `
-        (Join-Path $source "Website\docs\assets"), (Join-Path $source "Website\docs\pagefind") | Out-Null
+        (Join-Path $source "Web\dist\client\_astro"), `
+        (Join-Path $source "Web\dist\client\pagefind"), (Join-Path $source "Web\dist\server") | Out-Null
     foreach ($relative in @(
             "Deployment\Caddyfile.example",
             "KeireDistributionService",
             "README.md",
-            "Website\assets\site.css",
-            "Website\docs\_astro\docs.css",
-            "Website\docs\assets\inter-variable.ttf",
-            "Website\docs\index.html",
-            "Website\docs\pagefind\pagefind.js",
-            "Website\index.html",
+            "Web\dist\client\_astro\site.css",
+            "Web\dist\client\pagefind\pagefind.js",
+            "Web\dist\server\entry.mjs",
+            "Web\package-lock.json",
+            "Web\package.json",
             "scripts\backup-distribution.sh",
             "scripts\backup-distribution-rclone.sh",
             "scripts\health-check.sh",
@@ -187,18 +347,17 @@ try {
         "keire-distribution-linux-x64/Deployment/Caddyfile.example",
         "keire-distribution-linux-x64/KeireDistributionService",
         "keire-distribution-linux-x64/README.md",
-        "keire-distribution-linux-x64/Website/",
-        "keire-distribution-linux-x64/Website/assets/",
-        "keire-distribution-linux-x64/Website/assets/site.css",
-        "keire-distribution-linux-x64/Website/docs/",
-        "keire-distribution-linux-x64/Website/docs/_astro/",
-        "keire-distribution-linux-x64/Website/docs/_astro/docs.css",
-        "keire-distribution-linux-x64/Website/docs/assets/",
-        "keire-distribution-linux-x64/Website/docs/assets/inter-variable.ttf",
-        "keire-distribution-linux-x64/Website/docs/index.html",
-        "keire-distribution-linux-x64/Website/docs/pagefind/",
-        "keire-distribution-linux-x64/Website/docs/pagefind/pagefind.js",
-        "keire-distribution-linux-x64/Website/index.html",
+        "keire-distribution-linux-x64/Web/",
+        "keire-distribution-linux-x64/Web/dist/",
+        "keire-distribution-linux-x64/Web/dist/client/",
+        "keire-distribution-linux-x64/Web/dist/client/_astro/",
+        "keire-distribution-linux-x64/Web/dist/client/_astro/site.css",
+        "keire-distribution-linux-x64/Web/dist/client/pagefind/",
+        "keire-distribution-linux-x64/Web/dist/client/pagefind/pagefind.js",
+        "keire-distribution-linux-x64/Web/dist/server/",
+        "keire-distribution-linux-x64/Web/dist/server/entry.mjs",
+        "keire-distribution-linux-x64/Web/package-lock.json",
+        "keire-distribution-linux-x64/Web/package.json",
         "keire-distribution-linux-x64/scripts/",
         "keire-distribution-linux-x64/scripts/backup-distribution-rclone.sh",
         "keire-distribution-linux-x64/scripts/backup-distribution.sh",
@@ -229,18 +388,17 @@ try {
         "keire-distribution-linux-x64/Deployment/Caddyfile.example" = "-rw-r--r--"
         "keire-distribution-linux-x64/KeireDistributionService" = "-rwxr-xr-x"
         "keire-distribution-linux-x64/README.md" = "-rw-r--r--"
-        "keire-distribution-linux-x64/Website/" = "drwxr-xr-x"
-        "keire-distribution-linux-x64/Website/assets/" = "drwxr-xr-x"
-        "keire-distribution-linux-x64/Website/assets/site.css" = "-rw-r--r--"
-        "keire-distribution-linux-x64/Website/docs/" = "drwxr-xr-x"
-        "keire-distribution-linux-x64/Website/docs/_astro/" = "drwxr-xr-x"
-        "keire-distribution-linux-x64/Website/docs/_astro/docs.css" = "-rw-r--r--"
-        "keire-distribution-linux-x64/Website/docs/assets/" = "drwxr-xr-x"
-        "keire-distribution-linux-x64/Website/docs/assets/inter-variable.ttf" = "-rw-r--r--"
-        "keire-distribution-linux-x64/Website/docs/index.html" = "-rw-r--r--"
-        "keire-distribution-linux-x64/Website/docs/pagefind/" = "drwxr-xr-x"
-        "keire-distribution-linux-x64/Website/docs/pagefind/pagefind.js" = "-rw-r--r--"
-        "keire-distribution-linux-x64/Website/index.html" = "-rw-r--r--"
+        "keire-distribution-linux-x64/Web/" = "drwxr-xr-x"
+        "keire-distribution-linux-x64/Web/dist/" = "drwxr-xr-x"
+        "keire-distribution-linux-x64/Web/dist/client/" = "drwxr-xr-x"
+        "keire-distribution-linux-x64/Web/dist/client/_astro/" = "drwxr-xr-x"
+        "keire-distribution-linux-x64/Web/dist/client/_astro/site.css" = "-rw-r--r--"
+        "keire-distribution-linux-x64/Web/dist/client/pagefind/" = "drwxr-xr-x"
+        "keire-distribution-linux-x64/Web/dist/client/pagefind/pagefind.js" = "-rw-r--r--"
+        "keire-distribution-linux-x64/Web/dist/server/" = "drwxr-xr-x"
+        "keire-distribution-linux-x64/Web/dist/server/entry.mjs" = "-rw-r--r--"
+        "keire-distribution-linux-x64/Web/package-lock.json" = "-rw-r--r--"
+        "keire-distribution-linux-x64/Web/package.json" = "-rw-r--r--"
         "keire-distribution-linux-x64/scripts/" = "drwxr-xr-x"
         "keire-distribution-linux-x64/scripts/backup-distribution-rclone.sh" = "-rwxr-xr-x"
         "keire-distribution-linux-x64/scripts/backup-distribution.sh" = "-rwxr-xr-x"

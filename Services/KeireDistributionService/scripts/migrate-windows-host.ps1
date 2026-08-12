@@ -42,7 +42,17 @@ function Get-RequiredDirectory([string] $Root, [string] $RelativePath) {
     return $path
 }
 
-function Stop-SourceProcess([string] $ExecutablePath) {
+function Resolve-ConfiguredPath([string] $Value, [string] $BaseDirectory) {
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        throw 'A configured path cannot be empty.'
+    }
+    if ([IO.Path]::IsPathRooted($Value)) {
+        return [IO.Path]::GetFullPath($Value)
+    }
+    return [IO.Path]::GetFullPath((Join-Path $BaseDirectory $Value))
+}
+
+function Stop-ExecutableProcess([string] $ExecutablePath) {
     $resolvedExecutable = [IO.Path]::GetFullPath($ExecutablePath)
     foreach ($process in Get-Process -ErrorAction SilentlyContinue) {
         try {
@@ -55,6 +65,58 @@ function Stop-SourceProcess([string] $ExecutablePath) {
             continue
         }
     }
+}
+
+function Stop-CommandLineProcess([string] $RequiredFragment) {
+    if ([string]::IsNullOrWhiteSpace($RequiredFragment)) {
+        return
+    }
+    foreach ($process in Get-CimInstance Win32_Process -ErrorAction SilentlyContinue) {
+        if ($null -eq $process.CommandLine -or
+            $process.CommandLine.IndexOf($RequiredFragment, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            continue
+        }
+        Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Get-TaskSettingsPath([object] $Task) {
+    if ($null -eq $Task) {
+        return ''
+    }
+    foreach ($action in $Task.Actions) {
+        $arguments = [string] $action.Arguments
+        $match = [regex]::Match($arguments, '(?i)-SettingsPath\s+(?:"([^"]+)"|''([^'']+)''|(\S+))')
+        if ($match.Success) {
+            foreach ($groupIndex in @(1, 2, 3)) {
+                if ($match.Groups[$groupIndex].Success) {
+                    return [IO.Path]::GetFullPath($match.Groups[$groupIndex].Value)
+                }
+            }
+        }
+    }
+    return ''
+}
+
+function Stop-ConfiguredHostProcesses([string] $ConfiguredSettingsPath) {
+    if ([string]::IsNullOrWhiteSpace($ConfiguredSettingsPath) -or
+        -not (Test-Path -LiteralPath $ConfiguredSettingsPath -PathType Leaf)) {
+        return
+    }
+    $configuredSettings = Get-Content -LiteralPath $ConfiguredSettingsPath -Raw | ConvertFrom-Json
+    $configuredRoot = Split-Path -Parent $ConfiguredSettingsPath
+    foreach ($settingName in @('caddyExecutable', 'serviceExecutable')) {
+        $property = $configuredSettings.PSObject.Properties[$settingName]
+        if ($null -ne $property -and -not [string]::IsNullOrWhiteSpace([string] $property.Value)) {
+            Stop-ExecutableProcess (Resolve-ConfiguredPath ([string] $property.Value) $configuredRoot)
+        }
+    }
+    $webRootProperty = $configuredSettings.PSObject.Properties['webRoot']
+    if ($null -ne $webRootProperty -and -not [string]::IsNullOrWhiteSpace([string] $webRootProperty.Value)) {
+        $configuredWebRoot = Resolve-ConfiguredPath ([string] $webRootProperty.Value) $configuredRoot
+        Stop-CommandLineProcess (Join-Path $configuredWebRoot 'dist\server\entry.mjs')
+    }
+    Stop-CommandLineProcess $ConfiguredSettingsPath
 }
 
 function Set-ProtectedHostAcl([string] $Root) {
@@ -92,23 +154,44 @@ $settingsPath = Get-RequiredFile $sourceHost 'host-settings.json'
 $serviceExecutable = Get-RequiredFile $sourceHost 'KeireDistributionService.exe'
 $caddyExecutable = Get-RequiredFile $sourceHost 'caddy.exe'
 Get-RequiredFile $sourceHost 'Caddyfile' | Out-Null
-foreach ($relativePath in @('Website', 'scripts', 'tools')) {
-    Get-RequiredDirectory $sourceHost $relativePath | Out-Null
-}
-Get-RequiredFile $sourceHost 'scripts\start-windows-host.ps1' | Out-Null
-Get-RequiredFile $sourceHost 'scripts\install-windows-startup-task.ps1' | Out-Null
-Get-RequiredDirectory $sourceDistribution 'snapshots' | Out-Null
-Get-RequiredFile $sourceDistribution 'current' | Out-Null
-
 $sourceSettings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
 foreach ($requiredSetting in @('schemaVersion', 'host', 'httpPort', 'httpsPort')) {
     if ($null -eq $sourceSettings.PSObject.Properties[$requiredSetting]) {
         throw "The source host settings are missing '$requiredSetting'."
     }
 }
-if ([int] $sourceSettings.schemaVersion -ne 1) {
+$sourceSchemaVersion = [int] $sourceSettings.schemaVersion
+if ($sourceSchemaVersion -notin @(1, 2)) {
     throw "Unsupported Windows host settings schema '$($sourceSettings.schemaVersion)'."
 }
+
+$hostPayloadDirectories = @('scripts', 'tools')
+$sourceWebRoot = ''
+$sourceNodeExecutable = ''
+if ($sourceSchemaVersion -eq 1) {
+    $hostPayloadDirectories += 'Website'
+} else {
+    foreach ($requiredSetting in @('webRoot', 'nodeExecutable', 'supabaseUrl', 'supabasePublishableKey')) {
+        if ($null -eq $sourceSettings.PSObject.Properties[$requiredSetting]) {
+            throw "The source host settings are missing '$requiredSetting'."
+        }
+    }
+    $sourceWebRoot = Resolve-ConfiguredPath ([string] $sourceSettings.webRoot) $sourceHost
+    $sourceNodeExecutable = Resolve-ConfiguredPath ([string] $sourceSettings.nodeExecutable) $sourceHost
+    if (-not (Test-Path -LiteralPath $sourceWebRoot -PathType Container)) {
+        throw "The source web root does not exist: '$sourceWebRoot'."
+    }
+    if (-not (Test-Path -LiteralPath $sourceNodeExecutable -PathType Leaf)) {
+        throw "The configured Node.js executable does not exist: '$sourceNodeExecutable'."
+    }
+}
+foreach ($relativePath in $hostPayloadDirectories) {
+    Get-RequiredDirectory $sourceHost $relativePath | Out-Null
+}
+Get-RequiredFile $sourceHost 'scripts\start-windows-host.ps1' | Out-Null
+Get-RequiredFile $sourceHost 'scripts\install-windows-startup-task.ps1' | Out-Null
+Get-RequiredDirectory $sourceDistribution 'snapshots' | Out-Null
+Get-RequiredFile $sourceDistribution 'current' | Out-Null
 
 if ($ValidateOnly) {
     Write-Host "Windows host migration inputs are valid for '$destination'."
@@ -132,6 +215,7 @@ $staging = Join-Path $destinationParent ('.{0}.staging-{1}' -f (Split-Path -Leaf
     [Guid]::NewGuid().ToString('N'))
 $oldTaskXml = $null
 $oldTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+$oldTaskSettingsPath = Get-TaskSettingsPath $oldTask
 if ($oldTask) {
     $oldTaskXml = Export-ScheduledTask -TaskName $TaskName
 }
@@ -139,8 +223,13 @@ if ($oldTask) {
 try {
     if (-not $Resume) {
         [IO.Directory]::CreateDirectory($staging) | Out-Null
-        foreach ($directoryName in @('Website', 'scripts', 'tools')) {
+        foreach ($directoryName in @('scripts', 'tools')) {
             Copy-Item -LiteralPath (Join-Path $sourceHost $directoryName) -Destination $staging -Recurse
+        }
+        if ($sourceSchemaVersion -eq 1) {
+            Copy-Item -LiteralPath (Join-Path $sourceHost 'Website') -Destination $staging -Recurse
+        } else {
+            Copy-Item -LiteralPath $sourceWebRoot -Destination (Join-Path $staging 'Web') -Recurse
         }
         $previewDownloads = Join-Path $sourceHost 'PreviewDownloads'
         if (Test-Path -LiteralPath $previewDownloads -PathType Container) {
@@ -163,7 +252,7 @@ try {
         [IO.Directory]::CreateDirectory((Join-Path $staging 'Logs')) | Out-Null
 
         $newSettings = [ordered]@{
-            schemaVersion = 1
+            schemaVersion = $sourceSchemaVersion
             host = [string] $sourceSettings.host
             storageRoot = 'DistributionRoot'
             httpPort = [int] $sourceSettings.httpPort
@@ -172,6 +261,12 @@ try {
             caddyExecutable = 'caddy.exe'
             caddyConfig = 'Caddyfile'
             logDirectory = 'Logs'
+        }
+        if ($sourceSchemaVersion -eq 2) {
+            $newSettings.Add('webRoot', 'Web')
+            $newSettings.Add('nodeExecutable', $sourceNodeExecutable)
+            $newSettings.Add('supabaseUrl', [string] $sourceSettings.supabaseUrl)
+            $newSettings.Add('supabasePublishableKey', [string] $sourceSettings.supabasePublishableKey)
         }
         [IO.File]::WriteAllText(
             (Join-Path $staging 'host-settings.json'),
@@ -223,9 +318,10 @@ try {
 
     if ($oldTask) {
         Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        Stop-ConfiguredHostProcesses $oldTaskSettingsPath
     }
-    Stop-SourceProcess $caddyExecutable
-    Stop-SourceProcess $serviceExecutable
+    Stop-ExecutableProcess $caddyExecutable
+    Stop-ExecutableProcess $serviceExecutable
 
     $installer = Join-Path $destination 'scripts\install-windows-startup-task.ps1'
     & $installer -SettingsPath $destinationSettings -TaskName $TaskName
@@ -239,6 +335,10 @@ try {
         try {
             & $healthCheck -BaseUrl ("https://{0}" -f $sourceSettings.host) -TimeoutSeconds 5
             if ($LASTEXITCODE -eq 0) {
+                & (Join-Path $destination 'scripts\start-windows-host.ps1') `
+                    -SettingsPath $destinationSettings -ProbeOnly
+            }
+            if ($LASTEXITCODE -eq 0) {
                 Write-Host "Windows distribution host migrated to '$destination' and is publicly ready."
                 exit 0
             }
@@ -250,8 +350,10 @@ try {
     throw 'The migrated Windows host did not become publicly ready within 90 seconds.'
 }
 catch {
-    Stop-SourceProcess (Join-Path $destination 'caddy.exe')
-    Stop-SourceProcess (Join-Path $destination 'KeireDistributionService.exe')
+    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    Stop-ConfiguredHostProcesses (Join-Path $destination 'host-settings.json')
+    Stop-ExecutableProcess (Join-Path $destination 'caddy.exe')
+    Stop-ExecutableProcess (Join-Path $destination 'KeireDistributionService.exe')
     if ($oldTaskXml) {
         try {
             Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue

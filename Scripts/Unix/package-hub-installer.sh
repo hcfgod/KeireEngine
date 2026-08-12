@@ -171,10 +171,11 @@ Type=Application
 Version=1.0
 Name=$PROJECT_DISPLAY_NAME Hub
 Comment=Manage $PROJECT_DISPLAY_NAME projects, editors, templates, and components
-Exec=/usr/bin/$ARTIFACT_PREFIX-hub
+Exec=/usr/bin/$ARTIFACT_PREFIX-hub %u
 Icon=$ARTIFACT_PREFIX-hub
 Terminal=false
 Categories=Development;IDE;
+MimeType=x-scheme-handler/keirehub;
 StartupNotify=true
 StartupWMClass=$HUB_TARGET
 EOF
@@ -237,9 +238,14 @@ validate_linux_installer_tree() {
       printf 'Linux Hub installer is missing its desktop entry.\n' >&2
       return 1
     }
-    grep -Fqx "Exec=/usr/bin/$ARTIFACT_PREFIX-hub" \
+    grep -Fqx "Exec=/usr/bin/$ARTIFACT_PREFIX-hub %u" \
       "$extracted/usr/share/applications/$ARTIFACT_PREFIX-hub.desktop" || {
-      printf 'Linux Hub desktop entry does not use the verified command wrapper.\n' >&2
+      printf 'Linux Hub desktop entry does not forward one activation URL through the verified command wrapper.\n' >&2
+      return 1
+    }
+    grep -Fqx 'MimeType=x-scheme-handler/keirehub;' \
+      "$extracted/usr/share/applications/$ARTIFACT_PREFIX-hub.desktop" || {
+      printf 'Linux Hub desktop entry does not register the keirehub URL scheme.\n' >&2
       return 1
     }
 }

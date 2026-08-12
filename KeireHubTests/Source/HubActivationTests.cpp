@@ -69,6 +69,14 @@ TEST_CASE("Hub activation protocol round-trips every typed product action")
     CHECK(support.RequestsBuildSupport());
     CHECK(support.Platform == "windows");
     CHECK(support.Architecture == "x86_64");
+
+    const auto oauth = RoundTrip(
+        {.Action = HubActivationAction::OAuthCallback,
+         .Url =
+             "keirehub://oauth/callback?code=single-use-code-value&state=abcdefghijklmnopqrstuvwxyz0123456789_ABCD"});
+    CHECK(oauth.Action == HubActivationAction::OAuthCallback);
+    CHECK(oauth.Url ==
+          "keirehub://oauth/callback?code=single-use-code-value&state=abcdefghijklmnopqrstuvwxyz0123456789_ABCD");
 }
 
 TEST_CASE("Hub activation command parsing is singular and strict")
@@ -95,6 +103,10 @@ TEST_CASE("Hub activation command parsing is singular and strict")
 
     CHECK(Parse({"--install-version", "keire.editor.preview@2.0.0"}));
     CHECK(Parse({"--build-support", "macos", "arm64"}));
+    auto oauth =
+        Parse({"keirehub://oauth/callback?code=single-use-code-value&state=abcdefghijklmnopqrstuvwxyz0123456789_ABCD"});
+    REQUIRE(oauth);
+    CHECK(oauth.Value().Action == HubActivationAction::OAuthCallback);
 
     CHECK_FALSE(Parse({"--navigate"}));
     CHECK_FALSE(Parse({"--navigate", "account"}));
@@ -103,6 +115,7 @@ TEST_CASE("Hub activation command parsing is singular and strict")
     CHECK_FALSE(Parse({"--build-support", "android", "arm64"}));
     CHECK_FALSE(Parse({"--show", "--navigate", "home"}));
     CHECK_FALSE(Parse({"--unknown"}));
+    CHECK_FALSE(Parse({"keirehub://oauth/callback?code=value#fragment"}));
     const std::string oversizedArgument(MaximumHubActivationFrameBytes + 1, 'a');
     CHECK_FALSE(Parse({"--install-version", oversizedArgument}));
 }

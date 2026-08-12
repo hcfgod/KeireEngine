@@ -1,0 +1,26 @@
+---
+import type { MarketplaceCard as Card } from "../lib/marketplace";
+
+interface Props {
+    product: Card;
+}
+
+const { product } = Astro.props;
+---
+
+<article class="market-card">
+    <a class="market-card__media" href={`/marketplace/${product.publisher_slug}/${product.slug}/`} tabindex="-1">
+        <span class="market-card__monogram" aria-hidden="true">{product.display_name.slice(0, 2).toUpperCase()}</span>
+        {product.featured && <span class="market-card__featured">Featured</span>}
+    </a>
+    <div class="market-card__body">
+        <p class="market-card__category">{product.category_name}</p>
+        <h3><a href={`/marketplace/${product.publisher_slug}/${product.slug}/`}>{product.display_name}</a></h3>
+        <p>{product.short_description}</p>
+        <div class="market-card__meta">
+            <span>{product.publisher_name}{product.publisher_verified ? " · Verified" : ""}</span>
+            <span>{Number(product.rating_average).toFixed(1)} / 5 · {product.rating_count}</span>
+        </div>
+        <div class="market-card__footer"><span>{product.license_spdx}</span><strong>Free</strong></div>
+    </div>
+</article>

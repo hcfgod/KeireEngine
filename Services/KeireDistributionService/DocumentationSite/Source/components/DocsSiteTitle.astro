@@ -1,0 +1,56 @@
+---
+const { siteTitleHref } = Astro.locals.starlightRoute;
+---
+
+<a href={siteTitleHref} class="site-title keire-doc-title" aria-label="Kéire Engine documentation home">
+    <img src="/assets/keire.png" width="32" height="32" alt="" />
+    <span class="keire-doc-title__product" translate="no">Kéire Engine</span>
+    <span class="keire-doc-title__section" translate="no">Docs</span>
+</a>
+
+<style>
+    @layer starlight.core {
+        .keire-doc-title {
+            display: inline-flex;
+            min-width: 0;
+            align-items: center;
+            gap: 0.65rem;
+            color: var(--sl-color-text-accent);
+            font-size: var(--sl-text-h4);
+            font-weight: 720;
+            text-decoration: none;
+            white-space: nowrap;
+        }
+
+        .keire-doc-title img {
+            width: 2rem;
+            height: 2rem;
+            flex: 0 0 auto;
+            border-radius: 0.55rem;
+            filter: drop-shadow(0 0 0.8rem rgba(48, 127, 255, 0.42));
+        }
+
+        .keire-doc-title__product {
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .keire-doc-title__section {
+            padding: 0.2rem 0.46rem;
+            border: 1px solid color-mix(in srgb, var(--sl-color-accent) 32%, var(--sl-color-gray-5));
+            border-radius: 99rem;
+            color: var(--sl-color-gray-2);
+            background: color-mix(in srgb, var(--sl-color-accent-low) 42%, transparent);
+            font-size: 0.62rem;
+            font-weight: 760;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        @media (max-width: 30rem) {
+            .keire-doc-title__product {
+                max-width: 7.8rem;
+            }
+        }
+    }
+</style>

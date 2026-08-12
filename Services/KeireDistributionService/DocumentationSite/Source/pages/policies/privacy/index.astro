@@ -1,0 +1,11 @@
+---
+import PolicyPage from "../../../components/PolicyPage.astro";
+export const prerender = true;
+const sections = [
+    { title: "Data Kéire processes", paragraphs: ["Kéire processes authentication identifiers, profile fields, connected identities, organization membership, device sessions, Marketplace entitlements, accepted license revisions, reviews, reports, publisher submissions, support messages, and bounded operational logs when those features are used.", "Publisher uploads and quarantine validation reports may contain package metadata, source assets, managed code, diagnostics, hashes, and malware or secret-scanning results."] },
+    { title: "Purpose and access", paragraphs: ["Data is used to operate accounts, secure sessions, deliver entitled packages, moderate publication, recover transactions, investigate abuse, and improve reliability. Role-based access and row-level policies limit users, organization members, publishers, moderators, and administrators to their authorized records."] },
+    { title: "Retention and control", paragraphs: ["Account export and deletion requests are tracked explicitly. Security, financial-integrity, license-acceptance, publication, and audit records may require longer retention than editable profile content. Exact periods require legal approval before public launch."] },
+    { title: "Infrastructure", paragraphs: ["Supabase provides authentication, database, and private object storage. DuckDNS is a private staging endpoint. Production deployment requires a branded domain, custom SMTP, approved processors, documented backup restoration, and finalized regional disclosures."] },
+];
+---
+<PolicyPage title="Privacy notice" description="How Kéire processes account, organization, Marketplace, package, support, and operational data." sections={sections} />

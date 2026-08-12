@@ -17,6 +17,8 @@ namespace KeireHub
         [[nodiscard]] HubStatus Tick(const HubSettings& settings, std::uint64_t nowUnixSeconds);
         void ApplySnapshot(HubProductSnapshot& product) const;
         [[nodiscard]] HubStatus Execute(const HubUiCommand& command);
+        [[nodiscard]] HubResult<std::string> BeginBrowserSignIn();
+        [[nodiscard]] HubStatus CompleteBrowserSignIn(std::string callbackUrl);
 
       private:
         HubAccountWorkflow m_Workflow;

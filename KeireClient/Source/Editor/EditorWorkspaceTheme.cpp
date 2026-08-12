@@ -11,6 +11,7 @@
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/MaterialDocument.h"
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
+#include "KeireClient/Editor/PackageManagerPanel.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
 #include "KeireClient/Editor/PropertyDrawerRegistry.h"
 #include "KeireClient/Editor/SceneCameraController.h"
@@ -312,6 +313,12 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
         }
         if (auto window = ui.BeginMenu("Window"); window)
         {
+            if (auto packageManagement = ui.BeginMenu("Package Management"); packageManagement)
+            {
+                if (ui.MenuItem("Package Manager", m_PackageManagerPanel->Registration().Visible()))
+                    m_PackageManagerPanel->Registration().SetVisible(!m_PackageManagerPanel->Registration().Visible());
+            }
+            ui.Separator();
             DrawPanelMenuItem(ui, m_SceneViewportPanel->Registration());
             DrawPanelMenuItem(ui, m_Game);
             DrawPanelMenuItem(ui, m_HierarchyPanel->Registration());

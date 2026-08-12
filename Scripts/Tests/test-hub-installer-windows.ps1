@@ -26,7 +26,9 @@ foreach ($contract in @('RequestExecutionLevel user', 'MUI_PAGE_LICENSE', 'MUI_P
         '.keire-hub-install', 'Software\${PRODUCT_IDENTIFIER}\HubInstaller', 'UnsafeUninstall',
         'MUI_FINISHPAGE_RUN', 'intentionally preserved', '/KEIRE_HUB_UPDATE=', '/INSTALL_ROOT=',
         '/RESUME_TOKEN=', '/WAIT_PROCESS=', 'WaitForSingleObject', 'SkipUpdateDirectoryPage',
-        'UnsafeUpdate', 'No application files were changed')) {
+        'UnsafeUpdate', 'No application files were changed', 'Software\Classes\keirehub', 'URL Protocol',
+        '${HUB_PROTOCOL_KEY}\shell\open\command', '"$INSTDIR\bin\${HUB_TARGET}.exe" "%1"',
+        'KeepHubProtocolRegistration')) {
     if (-not $template.Contains($contract)) {
         throw "The standalone Hub NSIS template is missing '$contract'."
     }
@@ -48,6 +50,12 @@ if ($uninstallVerification -lt 0 -or $uninstallRemoval -lt 0 -or $uninstallVerif
 }
 if ([regex]::IsMatch($template, '(?m)^\s*RMDir /r "\$INSTDIR"\s*$')) {
     throw "The standalone Hub uninstaller must not recursively remove unknown files or colocated user data."
+}
+$protocolOwnershipCheck = $template.LastIndexOf(
+    'ReadRegStr $2 HKCU "${HUB_PROTOCOL_KEY}\shell\open\command" ""', [StringComparison]::Ordinal)
+$protocolRemoval = $template.LastIndexOf('DeleteRegKey HKCU "${HUB_PROTOCOL_KEY}"', [StringComparison]::Ordinal)
+if ($protocolOwnershipCheck -lt 0 -or $protocolRemoval -lt 0 -or $protocolOwnershipCheck -gt $protocolRemoval) {
+    throw "The Hub protocol handler must verify installation ownership before unregistration."
 }
 
 Write-Host "Windows standalone Hub installer checks passed."

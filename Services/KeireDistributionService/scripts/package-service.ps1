@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string] $Dotnet = 'dotnet',
+    [string] $Dotnet = '',
     [string] $Npm = 'npm',
     [ValidateSet('Debug', 'Release')]
     [string] $Configuration = 'Release',
@@ -12,6 +12,15 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $serviceRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$repositoryRoot = [IO.Path]::GetFullPath((Join-Path $serviceRoot '..\..'))
+if ([string]::IsNullOrWhiteSpace($Dotnet)) {
+    $workspaceDotnet = Join-Path $repositoryRoot 'Build\Dependencies\dotnet-sdk\dotnet.exe'
+    $Dotnet = if (Test-Path -LiteralPath $workspaceDotnet -PathType Leaf) {
+        $workspaceDotnet
+    } else {
+        (Get-Command dotnet -ErrorAction Stop).Source
+    }
+}
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = Join-Path $serviceRoot '..\..\Build\Distributions\KeireDistributionService'
 }
@@ -20,6 +29,8 @@ $outputRoot = [IO.Path]::GetFullPath($OutputDirectory)
 
 $serviceProject = Join-Path $serviceRoot 'Source\KeireDistributionService\KeireDistributionService.csproj'
 $publisherProject = Join-Path $serviceRoot 'Source\KeireDistributionPublisher\KeireDistributionPublisher.csproj'
+$validatorProject = Join-Path $serviceRoot 'Source\KeireMarketplaceValidator\KeireMarketplaceValidator.csproj'
+$validatorBrokerProject = Join-Path $serviceRoot 'Source\KeireMarketplaceValidatorBroker\KeireMarketplaceValidatorBroker.csproj'
 $documentationSite = Join-Path $serviceRoot 'DocumentationSite'
 $documentationOutput = Join-Path $documentationSite 'dist'
 
@@ -59,23 +70,45 @@ foreach ($runtimeIdentifier in $RuntimeIdentifiers) {
         throw "Publisher publish failed for '$runtimeIdentifier'."
     }
 
+    $validatorDirectory = Join-Path $packageDirectory 'tools\marketplace-validator\worker'
+    & $Dotnet publish $validatorProject --configuration $Configuration --runtime $runtimeIdentifier `
+        --self-contained true --output $validatorDirectory `
+        -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+    if ($LASTEXITCODE -ne 0) {
+        throw "Marketplace validator publish failed for '$runtimeIdentifier'."
+    }
+
+    $validatorBrokerDirectory = Join-Path $packageDirectory 'tools\marketplace-validator\broker'
+    & $Dotnet publish $validatorBrokerProject --configuration $Configuration --runtime $runtimeIdentifier `
+        --self-contained true --output $validatorBrokerDirectory `
+        -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+    if ($LASTEXITCODE -ne 0) {
+        throw "Marketplace validator broker publish failed for '$runtimeIdentifier'."
+    }
+
     Copy-Item -LiteralPath (Join-Path $serviceRoot 'README.md') -Destination $packageDirectory
     Copy-Item -LiteralPath (Join-Path $serviceRoot 'THIRD_PARTY_NOTICES.md') -Destination $packageDirectory
     Copy-Item -LiteralPath (Join-Path $serviceRoot 'Licenses') -Destination $packageDirectory -Recurse
     $packagedLicenses = Join-Path $packageDirectory 'Licenses'
     $documentationLicenses = @{
         'Astro.txt' = Join-Path $documentationSite 'node_modules\astro\LICENSE'
+        'AstroNode.txt' = Join-Path $documentationSite 'node_modules\@astrojs\node\LICENSE'
+        'AstroSitemap.txt' = Join-Path $documentationSite 'node_modules\@astrojs\sitemap\LICENSE'
         'Starlight.txt' = Join-Path $documentationSite 'node_modules\@astrojs\starlight\LICENSE'
         'ExpressiveCode.txt' = Join-Path $documentationSite 'node_modules\expressive-code\LICENSE'
         'BeautifulMermaid.txt' = Join-Path $documentationSite 'node_modules\beautiful-mermaid\LICENSE'
+        'SupabaseSsr.txt' = Join-Path $documentationSite 'node_modules\@supabase\ssr\LICENSE'
+        'SupabaseJavaScript.txt' = Join-Path $documentationSite 'node_modules\@supabase\supabase-js\LICENSE'
+        'Sharp.txt' = Join-Path $documentationSite 'node_modules\sharp\LICENSE'
     }
     foreach ($license in $documentationLicenses.GetEnumerator()) {
         Copy-Item -LiteralPath $license.Value -Destination (Join-Path $packagedLicenses $license.Key)
     }
-    Copy-Item -LiteralPath (Join-Path $serviceRoot 'Website') -Destination $packageDirectory -Recurse
-    $packagedDocumentation = Join-Path $packageDirectory 'Website\docs'
-    [IO.Directory]::CreateDirectory($packagedDocumentation) | Out-Null
-    Get-ChildItem -LiteralPath $documentationOutput | Copy-Item -Destination $packagedDocumentation -Recurse -Force
+    $packagedWeb = Join-Path $packageDirectory 'Web'
+    [IO.Directory]::CreateDirectory($packagedWeb) | Out-Null
+    Copy-Item -LiteralPath $documentationOutput -Destination $packagedWeb -Recurse
+    Copy-Item -LiteralPath (Join-Path $documentationSite 'package.json') -Destination $packagedWeb
+    Copy-Item -LiteralPath (Join-Path $documentationSite 'package-lock.json') -Destination $packagedWeb
     $deploymentDirectory = Join-Path $packageDirectory 'Deployment'
     $scriptsDirectory = Join-Path $packageDirectory 'scripts'
     [IO.Directory]::CreateDirectory($deploymentDirectory) | Out-Null
@@ -86,17 +119,30 @@ foreach ($runtimeIdentifier in $RuntimeIdentifiers) {
         -Destination $deploymentDirectory
     Copy-Item -LiteralPath (Join-Path $serviceRoot 'Deployment\keire-distribution.service.example') `
         -Destination $deploymentDirectory
+    Copy-Item -LiteralPath (Join-Path $serviceRoot 'Deployment\keire-web.service.example') `
+        -Destination $deploymentDirectory
+    foreach ($deploymentName in @('keire-marketplace-validator.service.example',
+            'keire-marketplace-validator-broker.service.example', 'marketplace-validator-broker.env.example')) {
+        Copy-Item -LiteralPath (Join-Path $serviceRoot "Deployment\$deploymentName") -Destination $deploymentDirectory
+    }
     foreach ($scriptName in @('health-check.ps1', 'health-check.sh', 'monitor-distribution.ps1',
             'monitor-distribution.sh', 'backup-distribution.ps1', 'backup-distribution.sh',
             'backup-distribution-rclone.ps1', 'backup-distribution-rclone.sh', 'restore-distribution.ps1',
             'restore-distribution.sh', 'restore-distribution-rclone.ps1', 'restore-distribution-rclone.sh',
             'publish-snapshot.ps1', 'publish-snapshot.sh', 'start-wsl2-host-bridge.sh',
-            'install-wsl2-host-bridge.sh')) {
+            'install-wsl2-host-bridge.sh', 'install-web-runtime.ps1', 'install-web-runtime.sh')) {
         Copy-Item -LiteralPath (Join-Path $serviceRoot "scripts\$scriptName") -Destination $scriptsDirectory
     }
     if ($runtimeIdentifier.StartsWith('win-', [StringComparison]::Ordinal)) {
+        foreach ($deploymentName in @('configure-windows-validator-firewall.ps1',
+                'install-windows-marketplace-validator-tasks.ps1',
+                'protect-windows-validator-broker-secret.ps1',
+                'start-windows-marketplace-validator.ps1',
+                'start-windows-marketplace-validator-broker.ps1')) {
+            Copy-Item -LiteralPath (Join-Path $serviceRoot "Deployment\$deploymentName") -Destination $deploymentDirectory
+        }
         foreach ($scriptName in @('start-windows-host.ps1', 'install-windows-startup-task.ps1',
-                'install-windows-backup-task.ps1', 'migrate-windows-host.ps1')) {
+                'install-windows-backup-task.ps1', 'migrate-windows-host.ps1', 'deploy-windows-web.ps1')) {
             Copy-Item -LiteralPath (Join-Path $serviceRoot "scripts\$scriptName") -Destination $scriptsDirectory
         }
     }
@@ -111,6 +157,8 @@ foreach ($runtimeIdentifier in $RuntimeIdentifiers) {
         & $python $archiveWriter --source $packageDirectory --output $archive `
             --executable 'KeireDistributionService' `
             --executable 'tools/publisher/KeireDistributionPublisher' `
+            --executable 'tools/marketplace-validator/worker/KeireMarketplaceValidator' `
+            --executable 'tools/marketplace-validator/broker/KeireMarketplaceValidatorBroker' `
             --executable 'scripts/health-check.sh' `
             --executable 'scripts/monitor-distribution.sh' `
             --executable 'scripts/backup-distribution.sh' `
@@ -119,7 +167,8 @@ foreach ($runtimeIdentifier in $RuntimeIdentifiers) {
             --executable 'scripts/restore-distribution-rclone.sh' `
             --executable 'scripts/publish-snapshot.sh' `
             --executable 'scripts/start-wsl2-host-bridge.sh' `
-            --executable 'scripts/install-wsl2-host-bridge.sh'
+            --executable 'scripts/install-wsl2-host-bridge.sh' `
+            --executable 'scripts/install-web-runtime.sh'
         if ($LASTEXITCODE -ne 0) {
             throw "Archive creation failed for '$runtimeIdentifier'."
         }

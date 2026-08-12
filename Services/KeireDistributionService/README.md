@@ -1,13 +1,20 @@
 # Kéire Distribution Service
 
 `KeireDistributionService` is the stateless, read-only origin for Kéire Hub catalogs, learning/resource catalogs, and
-content-addressed packages. It targets the repository's pinned .NET 10 toolchain, binds to `127.0.0.1:5088` by default,
-and runs behind Caddy on public HTTPS port 443. The same package includes the static Kéire website; Caddy serves human
-routes locally and reserves `/v1`, `/v1/*`, `/v2`, `/v2/*`, `/health`, and `/health/*` for the unchanged origin.
+content-addressed Editor packages. It targets the repository's pinned .NET 10 toolchain, binds to `127.0.0.1:5088` by
+default, and runs behind Caddy on public HTTPS port 443. The unified Astro application serves marketing, documentation,
+accounts, marketplace, publisher, administration, and `/marketplace/v1` routes from `127.0.0.1:4321`. Caddy reserves
+`/v1`, `/v2`, `/health/live`, and `/health/ready` for the unchanged distribution origin and routes every other product
+surface to Astro.
 
 The service has no upload, publishing, account, entitlement, administration, or directory-listing API. Publishing is
 an offline filesystem operation performed by `KeireDistributionPublisher`; the online process never receives a
 private signing key.
+
+The public router requires no additional forwarding rule for Astro: continue forwarding public TCP 80/443 only to
+Caddy. Caddy owns TLS and routes product pages to loopback Node on `127.0.0.1:4321`; that port, Kestrel `5088`, and all
+Supabase credentials remain private. On the current Windows staging host, the router-facing Caddy high ports are an
+implementation detail of the existing 80/443 NAT rule and must not be advertised as public application ports.
 
 ## HTTP contract
 
@@ -220,15 +227,17 @@ KEIRE_DOTNET=dotnet ./scripts/publish-snapshot.sh \
 `package-service.ps1` produces self-contained `win-x64` and `linux-x64` service/publisher packages by default. The shell
 variant defaults to the current Linux architecture. Both refuse to overwrite an existing package directory and include
 the publisher dependency licenses and notices, package-local publish and health-check wrappers, the Caddy and production
-settings examples, the complete `Website/` tree, the generated Starlight documentation site, and the sample systemd
-service unit. Packaging requires Node.js 22.12 or newer and npm 10.8.2 or newer; the PowerShell packager also requires
-Python 3 when producing a Linux target. Linux archives created on Windows use deterministic tar metadata: directories,
-service/publisher entrypoints,
-and shell wrappers use mode `0755`, while every other regular file uses mode `0644`.
+settings examples, the locked Astro server/client bundle under `Web/`, target-host runtime installers, and separate
+distribution and web systemd units. Packaging requires Node.js 22.12 or newer and npm 10.8.2 or newer; the PowerShell
+packager also requires Python 3 when producing a Linux target. Linux archives created on Windows use deterministic tar
+metadata: directories, service/publisher entrypoints, and shell wrappers use mode `0755`, while every other regular
+file uses mode `0644`.
 
 ### Documentation site
 
-`DocumentationSite/` is the source for the public `/docs/` experience. Its source audit requires the navigation
+`DocumentationSite/` is the source for the complete website, including the public `/docs/` experience. Astro uses
+static-first rendering for marketing, policy, release, and documentation content and on-demand server rendering for
+account, marketplace, OAuth consent, publisher, moderation, and versioned API routes. Its source audit requires the navigation
 inventory to cover every `Docs/**/*.md` file exactly once, maps every guide to a current implementation/configuration
 authority, resolves local files and heading fragments, and checks key content-schema statements against code. The sync
 step adds website metadata without modifying the canonical files, rewrites repository-document links to stable native
@@ -244,21 +253,28 @@ npm test
 npm run build
 ```
 
-The service packagers run the locked restore and production build once, copy the marketing site, and overlay `dist/`
-at `Website/docs/`. Do not hand-edit generated pages or commit `node_modules`, `.astro`, `dist`, or synchronized content.
+The service packagers must run the locked restore and production build once and deploy the standalone Node entrypoint
+from `dist/server/entry.mjs` with `dist/client/` beside it. Do not hand-edit generated pages or commit `node_modules`,
+`.astro`, `dist`, or synchronized content.
 The deployed Pagefind WebAssembly requires the narrowly scoped CSP token `'wasm-unsafe-eval'` plus the self/blob worker
 policy; external scripts, external fonts, and inline script/style execution remain disallowed.
 
 ## Deployment
 
-1. Create a dedicated unprivileged service account. The service needs read-only access to the distribution root.
-2. Place a self-contained package under `/opt/keire-distribution` or a protected Windows application directory.
-3. Copy `appsettings.Production.example.json` to `appsettings.Production.json` and set an absolute storage root.
-4. Keep Kestrel on loopback. Configure Caddy with `Deployment/Caddyfile.example`, set the real DNS name, and expose only
+1. Create separate unprivileged `keire-distribution` and `keire-web` service accounts. Distribution needs read-only
+   access to its immutable root; the web process receives only publishable Supabase configuration and narrowly scoped
+   runtime secrets through an external environment file.
+2. Place the self-contained package under `/opt/keire-distribution`, install Node.js 22.12 or newer, and run
+   `scripts/install-web-runtime.sh`. The installer restores the exact production dependency lock for the target host,
+   disables dependency lifecycle scripts, and validates the packaged Node entry point.
+3. Copy `appsettings.Production.example.json` to `appsettings.Production.json`, set an absolute storage root, and install
+   the example distribution and web systemd units. Keep SMTP, GitHub OAuth, service-role, validator, and signing secrets
+   outside the application tree.
+4. Keep Kestrel and Node on loopback. Configure Caddy with `Deployment/Caddyfile.example`, set the real DNS name, and expose only
    Caddy on port 443. Do not expose Kestrel directly or add certificate-bypass behavior.
    Routers may translate public ports 80/443 to different internal ports by setting `KEIRE_CADDY_HTTP_PORT` and
-   `KEIRE_CADDY_HTTPS_PORT` for Caddy; clients still use ordinary public HTTPS on port 443. Keep `Website/` beside the
-   Caddyfile, or set `KEIRE_WEBSITE_ROOT` to its absolute path. Development-preview installers are intentionally not
+   `KEIRE_CADDY_HTTPS_PORT` for Caddy; clients still use ordinary public HTTPS on port 443. Development-preview
+   installers are intentionally not
    repository or service-package payloads. Stage them beneath a separate read-only `PreviewDownloads/` directory, or
    set `KEIRE_PREVIEW_DOWNLOAD_ROOT`, and keep their exact size and SHA-256 synchronized with
    `Website/assets/preview-downloads.json`. Use a digest-suffixed filename for every rebuild so immutable browser and
@@ -272,7 +288,8 @@ policy; external scripts, external fonts, and inline script/style execution rema
    this bounded retained set and hides any record whose file is missing or has the wrong size. Signed stable releases
    remain immutable and are never pruned through the preview-retention workflow. Preview builds never belong in a
    signed stable catalog.
-5. Confirm `/docs/`, a deep guide route, `/docs/pagefind/pagefind.js`, and a missing `/docs/` route before running
+5. Confirm `/`, `/marketplace/`, `/docs/`, a deep guide route, `/docs/pagefind/pagefind.js`, `/health/`, and a missing
+   route before running
    `scripts/health-check.sh https://distribution.example` or the PowerShell equivalent after deployment.
 
 The public Contact form submits directly to the project-owned Supabase `website-contact` Edge Function. Its database
@@ -290,13 +307,91 @@ cd supabase/functions/website-contact
 deno check --frozen --lock=deno.lock index.ts
 ```
 
+Marketplace mutations use separate JWT-protected Edge Functions. `marketplace-library`, `marketplace-hub`, and
+`marketplace-publisher` verify the caller with Supabase Auth before decoding claims, accept only the production browser
+origin when an Origin header is present, stream bounded JSON, and call service-role-only database transitions. The
+publisher transition independently requires an `aal2` token. Direct authenticated execution of those privileged
+database functions is revoked, and all corresponding feature flags default to false. Do not enable any flag until its
+identity, legal, validator, offline-signing, backup/restore, and cross-platform acceptance gates pass.
+
+### Marketplace package validator
+
+Marketplace validation uses two processes with different trust levels:
+
+- `KeireMarketplaceValidatorBroker` is the only networked component. It holds one dedicated, independently rotatable
+  validator-queue secret—not a Supabase API key—atomically leases an uploaded quarantine object, streams it from a
+  short-lived object-specific URL with an exact size/SHA-256 bound, renews long-running leases, and commits the worker's
+  bounded JSON report. It never loads or executes package content.
+- `KeireMarketplaceValidator` has no HTTP or Supabase dependency. It consumes immutable jobs from a private filesystem
+  exchange, calls the authoritative `KeireAssetTool extract-asset-package` command, requires ClamAV to succeed, scans
+  text for credential indicators without recording matched values, rejects executable/native/install/build-control
+  payloads, and compiles declared C# only from generated projects with the pinned SDK and an empty NuGet source list.
+
+Apply `supabase/migrations/20260812190000_marketplace_validator_leases.sql` and deploy the
+`marketplace-validator-queue` Edge Function before starting either process. Store the same random 32-or-more-character
+`VALIDATOR_BROKER_SECRET` in the Edge Function secret store and the broker's protected environment file. The broker
+never receives `SUPABASE_SECRET_KEYS` or `SUPABASE_SERVICE_ROLE_KEY`; those remain inside Supabase's function runtime.
+The migration's three
+RPCs are executable only by `service_role`: one atomic `FOR UPDATE SKIP LOCKED` lease, one renewal, and one report
+commit. Expired leases return to `uploaded`; a successful report moves both upload and version to `validated`, while a
+failed report moves them to `failed`/`validation_failed`. A repeatedly interrupted poison job becomes terminal after
+five leased attempts instead of blocking the queue forever. Every lease, exhausted retry, and completion creates an
+audit event. Do not give
+the server secret, database access, or a network namespace to the worker.
+
+```sh
+supabase db push
+supabase functions deploy marketplace-validator-queue --no-verify-jwt
+```
+
+Before deploying the function, set `VALIDATOR_BROKER_SECRET` through the Supabase Dashboard secret UI or a protected
+deployment secret file. Generate it in a trusted password manager or operating-system cryptographic RNG. Do not paste
+its value into shell history, logs, chat, or source control. The no-JWT function setting is intentional: the function
+rejects browser origins and performs its own fixed-length digest comparison against this scoped service credential
+before touching a lease.
+
+The service package includes self-contained worker and broker binaries under `tools/marketplace-validator/`. The worker
+also requires the matching 0.3.1 `KeireAssetTool`, `Keire.Managed.dll`, pinned .NET 10.0.302 SDK, and a current ClamAV
+installation. Malware definitions are updated by the trusted host outside the offline worker.
+
+For Linux, create separate `keire-validator` and `keire-validator-broker` users plus a shared
+`keire-validator-exchange` group. Make the exchange root group-owned and setgid with mode `2770`; make the worker's
+temporary root owned only by `keire-validator` with mode `0700`. Install the example units from `Deployment/`, install
+`marketplace-validator-broker.env.example` as `/etc/keire/marketplace-validator-broker.env` with mode `0640`, and place
+only the scoped validator-queue secret there. Pin the reviewed worker executable's lowercase SHA-256 in
+`KEIRE_VALIDATOR_EXPECTED_FINGERPRINT_SHA256`. The worker unit uses `PrivateNetwork=true`, permits only `AF_UNIX` for the local
+ClamAV socket, and grants write access only to its exchange and work roots. Confirm the worker log says it is ready for
+offline jobs before starting the broker.
+
+For Windows, use separate restricted service identities and ACL the exchange directory to both while granting the work
+directory only to the worker identity. Run `Deployment/configure-windows-validator-firewall.ps1` from an elevated
+session for the exact worker, Asset Tool, ClamAV scanner, and pinned `dotnet.exe` paths, and provide `-Attestation`
+under the administrator-owned release directory. The script verifies all four rules, records the exact executable
+paths and SHA-256 hashes, and protects that evidence for read-only access by `LOCAL SERVICE`. Start the worker only
+through `Deployment/start-windows-marketplace-validator.ps1`; it refuses to launch unless Windows Defender Firewall
+is running and either the live rules or that protected attestation match every executable. Use
+`Deployment/protect-windows-validator-broker-secret.ps1` from an elevated interactive session to capture
+the scoped queue secret without command-line or transcript exposure and store it as machine-DPAPI ciphertext with an
+inheritance-disabled ACL for `NETWORK SERVICE`. Start the broker through
+`Deployment/start-windows-marketplace-validator-broker.ps1`; it verifies that ACL and the reviewed worker fingerprint
+before decrypting the secret into the broker process environment. Do not give that process a Supabase publishable,
+secret, or legacy service-role key. Install both durable pre-login tasks with
+`Deployment/install-windows-marketplace-validator-tasks.ps1`; it validates the complete configuration before
+registering the worker as `LOCAL SERVICE` and the broker as `NETWORK SERVICE`, with bounded startup ordering and
+automatic restart on failure.
+
+Keep the validator path dark until a harmless fixture and an EICAR test fixture have respectively produced a clean
+report and a blocked report, a killed worker has demonstrated stale-lease recovery, and the report's validator binary
+fingerprint, policy version, package digest, and manifest digest match the reviewed release evidence. Do not use real
+malware for acceptance.
+
 On Windows, an extracted self-contained package can be supervised at user sign-in without an administrator-owned
 service. Copy Caddy beside the service, copy `Deployment/Caddyfile.example` to `Caddyfile`, and create
 `host-settings.json` beside `scripts/start-windows-host.ps1`:
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "host": "distribution.example.org",
   "storageRoot": "C:\\srv\\keire-distribution",
   "httpPort": 80,
@@ -304,11 +399,26 @@ service. Copy Caddy beside the service, copy `Deployment/Caddyfile.example` to `
   "serviceExecutable": "..\\KeireDistributionService.exe",
   "caddyExecutable": "..\\caddy.exe",
   "caddyConfig": "..\\Caddyfile",
-  "logDirectory": "..\\Logs"
+  "logDirectory": "..\\Logs",
+  "webRoot": "..\\Web",
+  "nodeExecutable": "C:\\Program Files\\nodejs\\node.exe",
+  "supabaseUrl": "https://project-ref.supabase.co",
+  "supabasePublishableKey": "sb_publishable_replace_with_project_key"
 }
 ```
 
-Validate it with `./scripts/start-windows-host.ps1 -ValidateOnly`. For an unattended host, open an elevated PowerShell
+The Supabase value in this file is the intentionally public browser key. Never place a secret key, service-role key,
+OAuth provider secret, SMTP credential, or signing private key in host settings.
+
+For a verified website update, use `scripts/deploy-windows-web.ps1`. With an unchanged lockfile it verifies exact Node
+process ownership and swaps only `Web/dist`. When reviewed runtime dependencies change, pass `-AllowRuntimeUpdate`; the
+script performs a locked production-only install in sibling staging, swaps the complete `Web` root transactionally,
+retains a timestamped rollback, and requires the schema-2 ownership/readiness probe to pass. Never use the runtime-update
+switch for an unreviewed lockfile.
+
+Run `./scripts/install-web-runtime.ps1`, then validate the host with
+`./scripts/start-windows-host.ps1 -ValidateOnly`. The supervisor starts Kestrel, the loopback Astro Node service, and
+Caddy in dependency order and checks each service independently. For an unattended host, open an elevated PowerShell
 session and install the repository-owned startup task:
 
 ```powershell
@@ -316,7 +426,8 @@ session and install the repository-owned startup task:
 ```
 
 To move an already-running interactive-user deployment into a protected machine location, use the transactional
-migration helper from an elevated PowerShell session. It copies only the active host payload and immutable distribution
+migration helper from an elevated PowerShell session. It accepts legacy static schema 1 hosts and unified web schema 2
+hosts, copies only the active host payload and immutable distribution
 root, validates the staged copy, replaces the existing task with the Local System startup task, verifies public
 readiness, and restores the previous task definition if activation fails:
 

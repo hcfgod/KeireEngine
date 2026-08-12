@@ -247,8 +247,11 @@ namespace KeireHub
         std::string ProjectCreationMessage;
         bool VerifiedCacheClearRunning = false;
         bool AccountConfigured = false;
+        bool AccountBrowserSignInAvailable = false;
+        bool AccountBrowserSignInPending = false;
         bool AccountBusy = false;
         bool AccountSignedIn = false;
+        bool AccountHasError = false;
         bool AccountPersistentSessionAvailable = false;
         bool AccountConfirmationRequired = false;
         std::string AccountEmail;
@@ -293,6 +296,8 @@ namespace KeireHub
         InstallHubUpdate,
         AccountSignIn,
         AccountSignUp,
+        AccountBeginBrowserSignIn,
+        AccountCancelBrowserSignIn,
         AccountSignOut,
         SaveAccountProfile,
         MarkNotificationRead,

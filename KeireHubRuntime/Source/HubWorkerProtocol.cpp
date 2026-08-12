@@ -577,12 +577,15 @@ namespace KeireHub
                                                 .Attempt = progress.value("attempt", 0U),
                                                 .CurrentPackage = progress.value("currentPackage", std::string{}),
                                                 .RemainingComponents = progress.value("remainingComponents", 0U),
+                                                .StepsCompleted = progress.value("stepsCompleted", 0U),
+                                                .TotalSteps = progress.value("totalSteps", 0U),
                                                 .Phase = progress.value("phase", std::string{})},
                                    .WorkerProcessId = value.at("workerProcessId").get<std::uint64_t>(),
                                    .UpdatedUnixSeconds = value.at("updated").get<std::uint64_t>()};
             if (!Detail::IsBoundedIdentifier(result.TaskId) || result.WorkerProcessId == 0 ||
                 result.Progress.Attempt > 1'000'000U || result.Progress.CurrentPackage.size() > 256 ||
-                result.Progress.Phase.size() > 256 ||
+                result.Progress.Phase.size() > 256 || result.Progress.TotalSteps > 1'000'000U ||
+                result.Progress.StepsCompleted > result.Progress.TotalSteps ||
                 (result.Progress.TotalBytes != 0 && result.Progress.BytesTransferred > result.Progress.TotalBytes))
             {
                 throw std::invalid_argument("Invalid worker status fields.");
@@ -600,6 +603,7 @@ namespace KeireHub
         if (!Detail::IsBoundedIdentifier(status.TaskId) || status.WorkerProcessId == 0 ||
             StateName(status.State) == "invalid" || status.Progress.Attempt > 1'000'000U ||
             status.Progress.CurrentPackage.size() > 256 || status.Progress.Phase.size() > 256 ||
+            status.Progress.TotalSteps > 1'000'000U || status.Progress.StepsCompleted > status.Progress.TotalSteps ||
             (status.Progress.TotalBytes != 0 && status.Progress.BytesTransferred > status.Progress.TotalBytes))
         {
             return HubStatus::Failure(ProtocolError(path, "Invalid worker status fields."));
@@ -616,6 +620,8 @@ namespace KeireHub
                                                         {"attempt", status.Progress.Attempt},
                                                         {"currentPackage", status.Progress.CurrentPackage},
                                                         {"remainingComponents", status.Progress.RemainingComponents},
+                                                        {"stepsCompleted", status.Progress.StepsCompleted},
+                                                        {"totalSteps", status.Progress.TotalSteps},
                                                         {"phase", status.Progress.Phase}}}});
     }
 

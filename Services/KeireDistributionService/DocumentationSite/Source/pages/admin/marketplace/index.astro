@@ -1,0 +1,22 @@
+---
+import PlatformLayout from "../../../layouts/PlatformLayout.astro";
+import { mfaChallengePath } from "../../../lib/auth";
+export const prerender = false;
+const role = Astro.locals.user?.app_metadata?.platform_role;
+if (!Astro.locals.user || !new Set(["moderator", "administrator"]).has(role)) { Astro.response.status = 404; }
+const allowed = Astro.response.status !== 404;
+if (allowed && Astro.locals.assurance.currentLevel !== "aal2") return Astro.redirect(mfaChallengePath(Astro.url.pathname), 303);
+const supabase = Astro.locals.supabase;
+let submissions: any[] = [];
+let reports: any[] = [];
+if (allowed && supabase) {
+    const [submissionResult, reportResult] = await Promise.all([
+        supabase.from("marketplace_submissions").select("id,state,submitted_at,version_id,submitted_by,assigned_to").in("state", ["submitted", "in_review", "changes_requested", "approved_pending_signature"]).order("submitted_at"),
+        supabase.from("marketplace_reports").select("id,reason,state,created_at,product_id,review_id,assigned_to").in("state", ["open", "triaged"]).order("created_at"),
+    ]);
+    submissions = submissionResult.data ?? []; reports = reportResult.data ?? [];
+}
+---
+<PlatformLayout title={allowed ? "Marketplace moderation" : "Page not found"} description="Kéire Marketplace staff moderation queue." robots="noindex">
+    {allowed ? <section class="platform-section"><div class="platform-shell"><p class="eyebrow">Staff · audited operations</p><h1>Marketplace moderation</h1><div class="dashboard-grid"><nav class="dashboard-nav"><a href="#submissions" aria-current="page">Submissions</a><a href="#reports">Reports</a><a href="#security">Security revocations</a></nav><div><section id="submissions"><h2>Active submissions</h2>{submissions.length ? <table class="data-table"><thead><tr><th>ID</th><th>State</th><th>Submitted</th></tr></thead><tbody>{submissions.map((item: any) => <tr><td>{item.id}</td><td>{item.state}</td><td>{new Date(item.submitted_at).toLocaleString()}</td></tr>)}</tbody></table> : <p class="notice-panel">No active submissions.</p>}</section><section id="reports" class="platform-section"><h2>Open reports</h2>{reports.length ? <table class="data-table"><thead><tr><th>ID</th><th>Reason</th><th>State</th></tr></thead><tbody>{reports.map((item: any) => <tr><td>{item.id}</td><td>{item.reason}</td><td>{item.state}</td></tr>)}</tbody></table> : <p class="notice-panel">No open reports.</p>}</section></div></div></div></section> : <section class="platform-section"><div class="platform-shell empty-state"><h1>Page not found.</h1></div></section>}
+</PlatformLayout>

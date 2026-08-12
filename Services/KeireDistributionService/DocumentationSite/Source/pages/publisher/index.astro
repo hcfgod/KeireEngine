@@ -1,0 +1,507 @@
+---
+import PlatformLayout from "../../layouts/PlatformLayout.astro";
+import { mfaChallengePath } from "../../lib/auth";
+
+export const prerender = false;
+
+const supabase = Astro.locals.supabase;
+const user = Astro.locals.user;
+let enabled = false;
+let applications: any[] = [];
+let organizations: any[] = [];
+let publishers: any[] = [];
+let products: any[] = [];
+let versions: any[] = [];
+let uploads: any[] = [];
+let validationReports: any[] = [];
+
+if (supabase) {
+    const flag = await supabase.from("platform_feature_flags").select("enabled")
+        .eq("key", "publisher_portal_enabled").maybeSingle();
+    enabled = flag.data?.enabled === true;
+    if (user) {
+        const applicationResult = await supabase.from("publisher_applications")
+            .select("id,public_name,state,submitted_at,decision_note,updated_at")
+            .eq("applicant_user_id", user.id).order("updated_at", { ascending: false });
+        applications = applicationResult.data ?? [];
+
+        const organizationResult = await supabase.from("organization_memberships")
+            .select("role,organizations(id,display_name,slug)").eq("user_id", user.id)
+            .in("role", ["owner", "admin"]);
+        organizations = organizationResult.data ?? [];
+        const organizationIds = organizations
+            .map((membership: any) => membership.organizations?.id)
+            .filter((id: unknown): id is string => typeof id === "string");
+
+        if (organizationIds.length) {
+            const publisherResult = await supabase.from("publishers")
+                .select("id,organization_id,display_name,slug,verified,suspended_at")
+                .in("organization_id", organizationIds).is("suspended_at", null);
+            publishers = publisherResult.data ?? [];
+        }
+        const publisherIds = publishers.map((publisher: any) => publisher.id);
+        if (publisherIds.length) {
+            const productResult = await supabase.from("marketplace_products")
+                .select("id,publisher_id,slug,display_name,state,updated_at")
+                .in("publisher_id", publisherIds).order("display_name");
+            products = productResult.data ?? [];
+        }
+        const productIds = products.map((product: any) => product.id);
+        if (productIds.length) {
+            const versionResult = await supabase.from("marketplace_product_versions")
+                .select("id,product_id,version,state,install_kind,minimum_engine_version,maximum_engine_version,platforms,architectures,renderer_capabilities,managed_api_version,updated_at")
+                .in("product_id", productIds).order("updated_at", { ascending: false }).limit(100);
+            versions = versionResult.data ?? [];
+        }
+        const versionIds = versions.map((version: any) => version.id);
+        if (versionIds.length) {
+            const uploadResult = await supabase.from("marketplace_uploads")
+                .select("id,version_id,state,expected_size_bytes,expected_sha256,uploaded_at,expires_at,created_at")
+                .in("version_id", versionIds).order("created_at", { ascending: false }).limit(100);
+            uploads = uploadResult.data ?? [];
+        }
+        const uploadIds = uploads.map((upload: any) => upload.id);
+        if (uploadIds.length) {
+            const reportResult = await supabase.from("marketplace_validation_reports")
+                .select("id,upload_id,passed,diagnostics,malware_scan_result,secret_scan_result,managed_validation_result,validator_version,completed_at")
+                .in("upload_id", uploadIds).order("completed_at", { ascending: false });
+            validationReports = reportResult.data ?? [];
+        }
+    }
+}
+
+if (enabled && user && Astro.locals.assurance.currentLevel !== "aal2") {
+    return Astro.redirect(mfaChallengePath(Astro.url.pathname), 303);
+}
+
+const productById = new Map(products.map((product: any) => [product.id, product]));
+const versionById = new Map(versions.map((version: any) => [version.id, version]));
+const reportByUploadId = new Map(validationReports.map((report: any) => [report.upload_id, report]));
+const recentUploads = uploads.slice(0, 12);
+---
+
+<PlatformLayout title="Publisher portal" description="Create private package releases, upload exact bytes to quarantine, review validation, and submit immutable Kéire Marketplace releases." active="marketplace" robots="noindex">
+    <section class="platform-section">
+        <div class="platform-shell">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">Approved publishing</p>
+                    <h1>From exact package bytes to a trusted release.</h1>
+                </div>
+                <p>Draft metadata, resumable private uploads, automated validation, staff moderation, and offline signing are explicit states. Published versions are immutable.</p>
+            </div>
+
+            {!enabled ? (
+                <div class="empty-state">
+                    <h2>Publisher workflows are staged privately.</h2>
+                    <p>The portal remains behind <code>publisher_portal_enabled</code>. No package can be submitted while the staging gate is disabled.</p>
+                </div>
+            ) : !user ? (
+                <div class="empty-state">
+                    <h2>Sign in to publish.</h2>
+                    <p>Publisher actions are bound to a verified account, an owned organization, and a current MFA challenge.</p>
+                    <a class="button" href="/account/sign-in/?next=/publisher/">Sign in</a>
+                </div>
+            ) : (
+                <div class="dashboard-grid publisher-dashboard">
+                    <nav class="dashboard-nav" aria-label="Publisher sections">
+                        <a href="#overview" aria-current="page">Overview</a>
+                        <a href="#new-release">New release</a>
+                        <a href="#activity">Validation activity</a>
+                        <a href="#products">Products</a>
+                        <a href="#application">Application</a>
+                        <a href="/docs/reference/asset-packages/">Package guide</a>
+                    </nav>
+
+                    <div class="publisher-workspace">
+                        <section id="overview" class="publisher-section">
+                            <div class="publisher-section__heading">
+                                <div><p class="eyebrow">Release pipeline</p><h2>Private until every gate passes.</h2></div>
+                                <span class="status-badge status-badge--ready">MFA verified</span>
+                            </div>
+                            <div class="workflow-line">
+                                <article><small>01</small><h3>Draft</h3><p>Bind exact version, compatibility, license, and release notes.</p></article>
+                                <article><small>02</small><h3>Validate</h3><p>Upload immutable bytes to quarantine and receive structured diagnostics.</p></article>
+                                <article><small>03</small><h3>Moderate</h3><p>Review provenance, content quality, safety, and store presentation.</p></article>
+                                <article><small>04</small><h3>Sign</h3><p>Sign the same validated manifest offline before a release can become visible.</p></article>
+                            </div>
+                        </section>
+
+                        <section id="new-release" class="publisher-section">
+                            <div class="publisher-section__heading">
+                                <div><p class="eyebrow">Private quarantine</p><h2>Upload a package for validation</h2></div>
+                                <span class="status-badge">Unsigned draft</span>
+                            </div>
+                            {products.length ? (
+                                <form class="publisher-upload" data-publisher-upload>
+                                    <div class="publisher-upload__grid">
+                                        <label class="field publisher-upload__wide">
+                                            <span>Product</span>
+                                            <select name="productId" required>
+                                                {products.map((product: any) => (
+                                                    <option value={product.id}>{product.display_name} · {product.state}</option>
+                                                ))}
+                                            </select>
+                                        </label>
+                                        <label class="field">
+                                            <span>Package version</span>
+                                            <input name="version" value="0.0.1" inputmode="text" maxlength="128" required />
+                                        </label>
+                                        <label class="field">
+                                            <span>Installation kind</span>
+                                            <select name="installKind" required>
+                                                <option value="asset_import">Asset import</option>
+                                                <option value="registry">Registry package</option>
+                                                <option value="complete_project">Complete project</option>
+                                            </select>
+                                        </label>
+                                        <label class="field">
+                                            <span>Minimum Kéire version</span>
+                                            <input name="minimumEngineVersion" value="0.3.1" maxlength="128" required />
+                                        </label>
+                                        <label class="field">
+                                            <span>Maximum Kéire version (optional)</span>
+                                            <input name="maximumEngineVersion" maxlength="128" placeholder="No maximum" />
+                                        </label>
+                                        <fieldset class="publisher-choice-group">
+                                            <legend>Platforms</legend>
+                                            <label><input type="checkbox" name="platforms" value="windows" checked /> Windows</label>
+                                            <label><input type="checkbox" name="platforms" value="linux" checked /> Linux</label>
+                                            <label><input type="checkbox" name="platforms" value="macos" /> macOS</label>
+                                        </fieldset>
+                                        <fieldset class="publisher-choice-group">
+                                            <legend>Architectures</legend>
+                                            <label><input type="checkbox" name="architectures" value="x86_64" checked /> x86_64</label>
+                                            <label><input type="checkbox" name="architectures" value="arm64" /> ARM64</label>
+                                        </fieldset>
+                                        <label class="field">
+                                            <span>Renderer capabilities</span>
+                                            <input name="rendererCapabilities" value="pbr" maxlength="512" aria-describedby="renderer-help" />
+                                            <small id="renderer-help">Comma-separated portable tokens.</small>
+                                        </label>
+                                        <label class="field">
+                                            <span>Managed API version (optional)</span>
+                                            <input name="managedApiVersion" value="0.3.1" maxlength="128" />
+                                        </label>
+                                        <label class="field publisher-upload__wide">
+                                            <span>Release notes</span>
+                                            <textarea name="releaseNotes" maxlength="50000" placeholder="Describe the exact contents and intended validation scope."></textarea>
+                                        </label>
+                                    </div>
+
+                                    <label class="publisher-dropzone" data-upload-dropzone>
+                                        <input type="file" name="package" accept=".keireassetpackage,application/vnd.keire.asset-package" required />
+                                        <span class="publisher-dropzone__icon" aria-hidden="true">↑</span>
+                                        <strong>Choose a .keireassetpackage</strong>
+                                        <small>The browser hashes the exact file in bounded chunks before reserving a private resumable upload.</small>
+                                    </label>
+
+                                    <div class="publisher-file-summary" data-file-summary hidden>
+                                        <div><span>File</span><strong data-file-name>—</strong></div>
+                                        <div><span>Size</span><strong data-file-size>—</strong></div>
+                                        <div class="publisher-file-summary__hash"><span>SHA-256</span><code data-file-hash>Calculated before upload</code></div>
+                                    </div>
+
+                                    <div class="publisher-upload__progress" data-upload-progress hidden>
+                                        <div><strong data-upload-phase>Preparing package…</strong><span data-upload-percent>0%</span></div>
+                                        <progress max="100" value="0" aria-label="Package upload progress"></progress>
+                                    </div>
+
+                                    <div class="actions">
+                                        <button class="button" type="submit" data-upload-submit>Hash and upload privately</button>
+                                        <button class="button button--secondary" type="button" data-upload-cancel hidden>Cancel upload</button>
+                                    </div>
+                                    <p class="form-message" data-upload-message role="status" aria-live="polite"></p>
+                                    <p class="publisher-security-note">The grant is path-scoped, expires after two hours, cannot overwrite an existing object, and never exposes a service credential to this browser.</p>
+                                </form>
+                            ) : (
+                                <div class="notice-panel">
+                                    <h3>No managed draft product is available.</h3>
+                                    <p>An approved publisher and an editable product draft are required before package bytes can enter quarantine.</p>
+                                </div>
+                            )}
+                        </section>
+
+                        <section id="activity" class="publisher-section">
+                            <div class="publisher-section__heading"><div><p class="eyebrow">Evidence</p><h2>Validation activity</h2></div></div>
+                            {recentUploads.length ? (
+                                <div class="data-table-wrap">
+                                    <table class="data-table">
+                                        <thead><tr><th>Product</th><th>Version</th><th>Upload</th><th>Validation</th><th>Created</th></tr></thead>
+                                        <tbody>
+                                            {recentUploads.map((upload: any) => {
+                                                const version = versionById.get(upload.version_id) as any;
+                                                const product = productById.get(version?.product_id) as any;
+                                                const report = reportByUploadId.get(upload.id) as any;
+                                                return <tr>
+                                                    <td>{product?.display_name ?? "Unknown product"}</td>
+                                                    <td><code>{version?.version ?? "—"}</code></td>
+                                                    <td><span class="status-badge">{upload.state}</span><small>{Number(upload.expected_size_bytes).toLocaleString()} bytes</small></td>
+                                                    <td>{report ? <><span class:list={["status-badge", report.passed && "status-badge--ready"]}>{report.passed ? "passed" : "failed"}</span><small>{report.validator_version}</small></> : <span class="status-badge">pending</span>}</td>
+                                                    <td>{new Date(upload.created_at).toLocaleString()}</td>
+                                                </tr>;
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            ) : <p class="notice-panel">No packages have entered quarantine for this publisher.</p>}
+                        </section>
+
+                        <section id="products" class="publisher-section">
+                            <div class="publisher-section__heading"><div><p class="eyebrow">Catalog drafts</p><h2>Products</h2></div></div>
+                            {products.length ? (
+                                <div class="data-table-wrap"><table class="data-table"><thead><tr><th>Product</th><th>State</th><th>Updated</th></tr></thead><tbody>
+                                    {products.map((product: any) => <tr><td>{product.display_name}<small>{product.slug}</small></td><td><span class="status-badge">{product.state}</span></td><td>{new Date(product.updated_at).toLocaleDateString()}</td></tr>)}
+                                </tbody></table></div>
+                            ) : <p class="notice-panel">No publisher products are available for this account.</p>}
+                        </section>
+
+                        <section id="application" class="publisher-section">
+                            <div class="publisher-section__heading"><div><p class="eyebrow">Publisher identity</p><h2>Application</h2></div></div>
+                            {applications.length ? <div class="data-table-wrap"><table class="data-table"><thead><tr><th>Public name</th><th>State</th><th>Updated</th></tr></thead><tbody>{applications.map((application: any) => <tr><td>{application.public_name}</td><td><span class="status-badge">{application.state}</span></td><td>{new Date(application.updated_at).toLocaleDateString()}</td></tr>)}</tbody></table></div> : <p class="notice-panel">No publisher application has been started.</p>}
+                            {organizations.length ? (
+                                <form class="form-stack notice-panel publisher-application" data-publisher-application data-application-id={applications.find((item: any) => ["draft", "changes_requested"].includes(item.state))?.id ?? ""}>
+                                    <h3>Publisher application</h3>
+                                    <label class="field"><span>Publishing organization</span><select name="organizationId" required><option value="">Choose an organization</option>{organizations.map((membership: any) => <option value={membership.organizations?.id}>{membership.organizations?.display_name}</option>)}</select></label>
+                                    <label class="field"><span>Public publisher name</span><input name="publicName" minlength="2" maxlength="96" required /></label>
+                                    <label class="field"><span>Website (optional)</span><input name="websiteUrl" type="url" maxlength="2048" placeholder="https://" /></label>
+                                    <label class="field"><span>Portfolio (optional)</span><input name="portfolioUrl" type="url" maxlength="2048" placeholder="https://" /></label>
+                                    <label class="field"><span>Publishing statement</span><textarea name="statement" minlength="20" maxlength="5000" required></textarea></label>
+                                    <div class="actions"><button class="button button--secondary" type="submit" name="intent" value="save">Save draft</button><button class="button" type="submit" name="intent" value="submit">Submit for review</button></div>
+                                    <p class="form-message" role="status" aria-live="polite"></p>
+                                </form>
+                            ) : <div class="notice-panel"><h3>An organization is required.</h3><p>Create an organization from your account before applying to publish.</p><a class="button button--secondary" href="/account/#organizations">Manage organizations</a></div>}
+                        </section>
+                    </div>
+                </div>
+            )}
+        </div>
+    </section>
+</PlatformLayout>
+
+<script>
+    import { sha256 } from "@noble/hashes/sha2.js";
+    import { bytesToHex } from "@noble/hashes/utils.js";
+    import { Upload } from "tus-js-client";
+
+    const maximumPackageBytes = 64 * 1024 * 1024 * 1024;
+    const hashChunkBytes = 4 * 1024 * 1024;
+
+    async function responseData(response: Response) {
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(payload?.error?.message ?? "The publisher request failed.");
+        return payload?.data;
+    }
+
+    function commaTokens(value: FormDataEntryValue | null): string[] {
+        return String(value ?? "").split(",").map((item) => item.trim()).filter(Boolean);
+    }
+
+    function formatBytes(value: number): string {
+        if (value < 1024) return `${value} B`;
+        const units = ["KiB", "MiB", "GiB"];
+        let amount = value;
+        let unit = -1;
+        do { amount /= 1024; unit += 1; } while (amount >= 1024 && unit < units.length - 1);
+        return `${amount.toFixed(amount >= 10 ? 1 : 2)} ${units[unit]}`;
+    }
+
+    async function hashFile(file: File, onProgress: (percent: number) => void): Promise<string> {
+        const hash = sha256.create();
+        for (let offset = 0; offset < file.size; offset += hashChunkBytes) {
+            const bytes = new Uint8Array(await file.slice(offset, offset + hashChunkBytes).arrayBuffer());
+            hash.update(bytes);
+            onProgress(Math.min(100, ((offset + bytes.byteLength) / file.size) * 100));
+            await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+        }
+        return bytesToHex(hash.digest());
+    }
+
+    const uploadForm = document.querySelector<HTMLFormElement>("[data-publisher-upload]");
+    if (uploadForm) {
+        const fileInput = uploadForm.elements.namedItem("package") as HTMLInputElement;
+        const summary = uploadForm.querySelector<HTMLElement>("[data-file-summary]");
+        const fileName = uploadForm.querySelector<HTMLElement>("[data-file-name]");
+        const fileSize = uploadForm.querySelector<HTMLElement>("[data-file-size]");
+        const fileHash = uploadForm.querySelector<HTMLElement>("[data-file-hash]");
+        const progressPanel = uploadForm.querySelector<HTMLElement>("[data-upload-progress]");
+        const progress = uploadForm.querySelector<HTMLProgressElement>("progress");
+        const phase = uploadForm.querySelector<HTMLElement>("[data-upload-phase]");
+        const percent = uploadForm.querySelector<HTMLElement>("[data-upload-percent]");
+        const message = uploadForm.querySelector<HTMLElement>("[data-upload-message]");
+        const submit = uploadForm.querySelector<HTMLButtonElement>("[data-upload-submit]");
+        const cancel = uploadForm.querySelector<HTMLButtonElement>("[data-upload-cancel]");
+        let activeUpload: Upload | null = null;
+        let activeUploadId: string | null = null;
+        let userCancelled = false;
+
+        const setProgress = (label: string, value: number) => {
+            if (progressPanel) progressPanel.hidden = false;
+            if (phase) phase.textContent = label;
+            if (progress) progress.value = value;
+            if (percent) percent.textContent = `${Math.round(value)}%`;
+        };
+        const setBusy = (busy: boolean, cancellable = false) => {
+            if (submit) submit.disabled = busy;
+            fileInput.disabled = busy;
+            if (cancel) cancel.hidden = !busy || !cancellable;
+        };
+        const cancelReservation = async (uploadId: string) => {
+            await responseData(await fetch(`/publisher/v1/uploads/${encodeURIComponent(uploadId)}/`, {
+                method: "DELETE",
+                credentials: "same-origin",
+            }));
+        };
+
+        fileInput.addEventListener("change", () => {
+            const file = fileInput.files?.[0];
+            if (summary) summary.hidden = !file;
+            if (fileName) fileName.textContent = file?.name ?? "—";
+            if (fileSize) fileSize.textContent = file ? formatBytes(file.size) : "—";
+            if (fileHash) fileHash.textContent = "Calculated before upload";
+            if (message) { message.textContent = ""; message.dataset.kind = ""; }
+        });
+
+        cancel?.addEventListener("click", async () => {
+            cancel.disabled = true;
+            userCancelled = true;
+            const uploadId = activeUploadId;
+            try {
+                await activeUpload?.abort(true);
+                if (uploadId) await cancelReservation(uploadId);
+                if (message) { message.textContent = "Upload cancelled. No package was queued."; message.dataset.kind = ""; }
+            } catch (error) {
+                if (message) {
+                    message.textContent = error instanceof Error ? error.message : "The upload could not be cancelled.";
+                    message.dataset.kind = "error";
+                }
+            } finally {
+                activeUpload = null;
+                activeUploadId = null;
+                cancel.disabled = false;
+                setBusy(false);
+            }
+        });
+
+        uploadForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const file = fileInput.files?.[0];
+            if (!file || !file.name.toLowerCase().endsWith(".keireassetpackage") ||
+                file.size < 1 || file.size > maximumPackageBytes) {
+                if (message) { message.textContent = "Choose a valid .keireassetpackage within the 64 GiB limit."; message.dataset.kind = "error"; }
+                return;
+            }
+            userCancelled = false;
+            setBusy(true, false);
+            if (message) { message.textContent = "Hashing the exact package bytes…"; message.dataset.kind = ""; }
+            try {
+                const expectedSha256 = await hashFile(file, (value) => setProgress("Hashing exact bytes…", value));
+                if (fileHash) fileHash.textContent = expectedSha256;
+                const values = new FormData(uploadForm);
+                const reservation = await responseData(await fetch("/publisher/v1/uploads/", {
+                    method: "POST",
+                    credentials: "same-origin",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        productId: values.get("productId"),
+                        version: values.get("version"),
+                        installKind: values.get("installKind"),
+                        minimumEngineVersion: values.get("minimumEngineVersion"),
+                        maximumEngineVersion: values.get("maximumEngineVersion") || null,
+                        platforms: values.getAll("platforms"),
+                        architectures: values.getAll("architectures"),
+                        rendererCapabilities: commaTokens(values.get("rendererCapabilities")),
+                        managedApiVersion: values.get("managedApiVersion") || null,
+                        releaseNotes: values.get("releaseNotes") || "",
+                        expectedSizeBytes: file.size,
+                        expectedSha256,
+                    }),
+                }));
+                activeUploadId = reservation.uploadId;
+                setBusy(true, true);
+                setProgress("Uploading to private quarantine…", 0);
+                if (message) message.textContent = "A path-scoped grant was created. Uploading securely…";
+                await new Promise<void>((resolve, reject) => {
+                    activeUpload = new Upload(file, {
+                        endpoint: reservation.resumableEndpoint,
+                        headers: { "x-signature": reservation.uploadToken },
+                        retryDelays: [0, 3_000, 5_000, 10_000, 20_000],
+                        chunkSize: 6 * 1024 * 1024,
+                        uploadDataDuringCreation: true,
+                        removeFingerprintOnSuccess: true,
+                        metadata: {
+                            bucketName: reservation.bucket,
+                            objectName: reservation.storagePath,
+                            contentType: "application/vnd.keire.asset-package",
+                            cacheControl: "no-store",
+                        },
+                        onError: reject,
+                        onProgress: (uploaded, total) => setProgress("Uploading to private quarantine…", (uploaded / total) * 100),
+                        onSuccess: resolve,
+                    });
+                    activeUpload.start();
+                });
+                setProgress("Queuing validation…", 100);
+                const completedUploadId = activeUploadId;
+                if (!completedUploadId) throw new Error("The upload reservation was lost before completion.");
+                await responseData(await fetch(`/publisher/v1/uploads/${encodeURIComponent(completedUploadId)}/complete/`, {
+                    method: "POST",
+                    credentials: "same-origin",
+                    headers: { "Content-Type": "application/json" },
+                    body: "{}",
+                }));
+                if (message) { message.textContent = "Upload complete. The exact package is queued for isolated validation."; message.dataset.kind = "success"; }
+                activeUpload = null;
+                activeUploadId = null;
+                setBusy(true, false);
+                window.setTimeout(() => window.location.reload(), 1_250);
+            } catch (error) {
+                const failedUploadId = activeUploadId;
+                activeUpload = null;
+                activeUploadId = null;
+                if (failedUploadId && !userCancelled) {
+                    try { await cancelReservation(failedUploadId); } catch { /* The two-hour reservation expiry is the fallback. */ }
+                }
+                if (message && !userCancelled) {
+                    message.textContent = error instanceof Error ? error.message : "The package upload failed.";
+                    message.dataset.kind = "error";
+                }
+                setBusy(false);
+            }
+        });
+    }
+
+    const applicationForm = document.querySelector<HTMLFormElement>("[data-publisher-application]");
+    applicationForm?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const submitter = (event as SubmitEvent).submitter as HTMLButtonElement | null;
+        const message = applicationForm.querySelector<HTMLElement>(".form-message");
+        const buttons = applicationForm.querySelectorAll<HTMLButtonElement>("button");
+        const values = new FormData(applicationForm);
+        buttons.forEach((button) => button.disabled = true);
+        if (message) { message.textContent = submitter?.value === "submit" ? "Submitting application…" : "Saving draft…"; message.dataset.kind = ""; }
+        try {
+            const response = await fetch("/publisher/v1/applications/", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    action: submitter?.value === "submit" ? "submit" : "save",
+                    applicationId: applicationForm.dataset.applicationId || null,
+                    organizationId: values.get("organizationId"),
+                    publicName: values.get("publicName"),
+                    websiteUrl: values.get("websiteUrl"),
+                    portfolioUrl: values.get("portfolioUrl"),
+                    statement: values.get("statement"),
+                }),
+            });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error?.message ?? "The application could not be saved.");
+            if (message) { message.textContent = result.data?.state === "submitted" ? "Application submitted." : "Draft saved."; message.dataset.kind = "success"; }
+            window.setTimeout(() => window.location.reload(), 650);
+        } catch (error) {
+            if (message) { message.textContent = error instanceof Error ? error.message : "The application could not be saved."; message.dataset.kind = "error"; }
+            buttons.forEach((button) => button.disabled = false);
+        }
+    });
+</script>

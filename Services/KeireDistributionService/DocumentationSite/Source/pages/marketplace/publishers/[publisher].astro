@@ -1,0 +1,17 @@
+---
+import MarketplaceCard from "../../../components/MarketplaceCard.astro";
+import PlatformLayout from "../../../layouts/PlatformLayout.astro";
+import { marketplaceEnabled } from "../../../lib/marketplace";
+export const prerender = false;
+const supabase = Astro.locals.supabase;
+let publisher: any = null; let products: any[] = [];
+if (supabase && await marketplaceEnabled(supabase)) {
+    const result = await supabase.from("publishers").select("id,slug,display_name,summary,website_url,verified,created_at").eq("slug", Astro.params.publisher).maybeSingle();
+    publisher = result.data;
+    if (publisher) { const productResult = await supabase.from("marketplace_catalog").select("*").eq("publisher_id", publisher.id).order("published_at", { ascending: false }); products = productResult.data ?? []; }
+}
+if (!publisher) Astro.response.status = 404;
+---
+<PlatformLayout title={publisher?.display_name ?? "Publisher not found"} description={publisher?.summary ?? "The requested Kéire Marketplace publisher is unavailable."} active="marketplace" robots={publisher ? "index,follow" : "noindex"}>
+    {publisher ? <section class="platform-section"><div class="platform-shell"><div class="section-heading"><div><p class="eyebrow">{publisher.verified ? "Verified publisher" : "Publisher"}</p><h1>{publisher.display_name}</h1></div><p>{publisher.summary || "This publisher has not added a public biography."}</p></div>{products.length ? <div class="market-grid">{products.map((product) => <MarketplaceCard product={product} />)}</div> : <p class="empty-state">No published products.</p>}</div></section> : <section class="platform-section"><div class="platform-shell empty-state"><h1>Publisher unavailable.</h1><a class="button" href="/marketplace/">Return to Marketplace</a></div></section>}
+</PlatformLayout>

@@ -1,0 +1,23 @@
+---
+import PlatformLayout from "../../../../layouts/PlatformLayout.astro";
+import { safeLocalPath } from "../../../../lib/auth";
+export const prerender = false;
+if (!Astro.locals.user) return Astro.redirect(`/account/sign-in/?next=${encodeURIComponent(Astro.url.pathname + Astro.url.search)}`, 303);
+const next = safeLocalPath(Astro.url.searchParams.get("next"));
+if (Astro.locals.assurance.currentLevel === "aal2") return Astro.redirect(next, 303);
+const result = await Astro.locals.supabase!.auth.mfa.listFactors();
+const factors = (result.data?.totp ?? []).filter((factor) => factor.status === "verified");
+if (!factors.length) return Astro.redirect("/account/mfa/", 303);
+---
+<PlatformLayout title="Verify your identity" description="Complete multi-factor verification for this protected Kéire session." robots="noindex,nofollow">
+    <section class="platform-shell account-shell"><div><p class="eyebrow">Protected operation</p><h1 class="display-title">Verify it is <span>really you.</span></h1><p class="lead">Enter the current code from one of your enrolled authenticator apps. This upgrades only the active browser session to AAL2.</p></div><div class="auth-card"><h2>Authenticator challenge</h2><form class="form-stack" data-challenge data-next={next}><label class="field"><span>Authenticator</span><select name="factorId" required>{factors.map((factor) => <option value={factor.id}>{factor.friendly_name ?? "Authenticator app"}</option>)}</select></label><label class="field"><span>Six-digit code</span><input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" autofocus required /></label><button class="button" type="submit">Verify session</button><p class="form-message" aria-live="polite" data-challenge-message></p></form><p><a href="/account/mfa/">Manage authenticators</a></p></div></section>
+</PlatformLayout>
+<script>
+    document.querySelector("[data-challenge]")?.addEventListener("submit", async (event) => {
+        event.preventDefault(); const form = event.currentTarget; if (!(form instanceof HTMLFormElement)) return;
+        const message = form.querySelector("[data-challenge-message]"); const values = new FormData(form);
+        const response = await fetch("/account/mfa/challenge/verify/", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ factorId: values.get("factorId"), code: values.get("code") }) });
+        const result = await response.json(); if (message instanceof HTMLElement) { message.dataset.kind = response.ok ? "success" : "error"; message.textContent = response.ok ? "Verified. Continuing…" : result.error?.message ?? "Verification failed."; }
+        if (response.ok) location.href = form.dataset.next || "/account/";
+    });
+</script>

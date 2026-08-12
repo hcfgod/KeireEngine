@@ -340,6 +340,30 @@ TEST_CASE("Task store rejects regressing progress without mutating its snapshot"
     CHECK(store.Snapshot()->front().Progress.BytesTransferred == 50);
 }
 
+TEST_CASE("Task store persists step progress and rejects regression")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    HubTaskStore store(temporary.Path() / "tasks.json");
+    auto removal = QueuedTask();
+    removal.Kind = HubTaskKind::Remove;
+    REQUIRE(store.Add(std::move(removal)));
+    REQUIRE(store.Transition("task-a", HubTaskState::Removing, 11));
+    REQUIRE(store.UpdateProgress("task-a", {.StepsCompleted = 2, .TotalSteps = 4, .Phase = "Removing files"}, 12));
+
+    const auto before = store.Snapshot();
+    const auto rejected =
+        store.UpdateProgress("task-a", {.StepsCompleted = 1, .TotalSteps = 4, .Phase = "Removing files"}, 13);
+    REQUIRE_FALSE(rejected);
+    CHECK(rejected.Error().Code == HubErrorCode::InvalidArgument);
+    CHECK(store.Snapshot() == before);
+
+    HubTaskStore reloaded(store.Path());
+    REQUIRE(reloaded.Load());
+    REQUIRE(reloaded.Snapshot()->size() == 1);
+    CHECK(reloaded.Snapshot()->front().Progress.StepsCompleted == 2);
+    CHECK(reloaded.Snapshot()->front().Progress.TotalSteps == 4);
+}
+
 TEST_CASE("Failed tasks require a typed error and can be retried")
 {
     KeireHubTests::TemporaryDirectory temporary;

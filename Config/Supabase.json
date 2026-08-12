@@ -1,6 +1,9 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "enabled": true,
+  "hubOAuthEnabled": true,
   "projectUrl": "https://khjduyjamzwumhducmou.supabase.co",
-  "publishableKey": "sb_publishable_ULD9rGixCgViUHWaHjPuVg_Y0RR3Hjw"
+  "publishableKey": "sb_publishable_ULD9rGixCgViUHWaHjPuVg_Y0RR3Hjw",
+  "hubOAuthClientId": "e48aacbe-3636-43b2-9043-7f4e641b207f",
+  "hubOAuthWebsiteCallbackUrl": "https://keireengine.duckdns.org/oauth/hub/callback/"
 }

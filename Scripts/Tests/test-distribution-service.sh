@@ -14,3 +14,8 @@ fi
     --project "$root/Services/KeireDistributionService/tests/KeireDistributionService.Tests/KeireDistributionService.Tests.csproj" \
     --configuration "$configuration" \
     --nologo
+
+"$dotnet" run \
+    --project "$root/Services/KeireDistributionService/tests/KeireMarketplaceValidator.Tests/KeireMarketplaceValidator.Tests.csproj" \
+    --configuration "$configuration" \
+    --nologo

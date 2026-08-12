@@ -22,7 +22,8 @@ namespace KeireHub
         OpenProject,
         ImportPackage,
         InstallVersion,
-        BuildSupport
+        BuildSupport,
+        OAuthCallback
     };
 
     struct HubActivationRequest final
@@ -33,6 +34,7 @@ namespace KeireHub
         std::optional<std::string> VersionId;
         std::optional<std::string> Platform;
         std::optional<std::string> Architecture;
+        std::optional<std::string> Url;
 
         [[nodiscard]] bool RequestsBuildSupport() const noexcept { return Action == HubActivationAction::BuildSupport; }
     };

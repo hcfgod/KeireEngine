@@ -37,6 +37,7 @@ Unicode True
 !define PRODUCT_NAME "${PRODUCT_DISPLAY_NAME} Hub"
 !define INSTALL_FOLDER_NAME "${PRODUCT_IDENTIFIER} Hub"
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_IDENTIFIER}Hub"
+!define HUB_PROTOCOL_KEY "Software\Classes\keirehub"
 !define INSTALL_MARKER "{B2499023-1E3C-4F87-A8D5-E8DFA0470B97}"
 
 Var KeireHubUpdateMode
@@ -186,6 +187,11 @@ InstallPayload:
     WriteRegStr HKCU "${UNINSTALL_KEY}" "QuietUninstallString" '"$INSTDIR\Uninstall.exe" /S'
     WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoModify" 1
     WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoRepair" 1
+    WriteRegStr HKCU "${HUB_PROTOCOL_KEY}" "" "URL:${PRODUCT_NAME} Protocol"
+    WriteRegStr HKCU "${HUB_PROTOCOL_KEY}" "URL Protocol" ""
+    WriteRegStr HKCU "${HUB_PROTOCOL_KEY}\DefaultIcon" "" "$INSTDIR\bin\${HUB_TARGET}.exe,0"
+    WriteRegStr HKCU "${HUB_PROTOCOL_KEY}\shell\open\command" "" \
+        '"$INSTDIR\bin\${HUB_TARGET}.exe" "%1"'
 SectionEnd
 
 Section "Start Menu shortcuts" StartMenuSection
@@ -222,6 +228,11 @@ Section "Uninstall"
     IfFileExists "$INSTDIR\.keire-hub-install" 0 UnsafeUninstall
     ${GetFileName} "$INSTDIR" $1
     StrCmp $1 "${INSTALL_FOLDER_NAME}" 0 UnsafeUninstall
+
+    ReadRegStr $2 HKCU "${HUB_PROTOCOL_KEY}\shell\open\command" ""
+    StrCmp $2 '"$INSTDIR\bin\${HUB_TARGET}.exe" "%1"' 0 KeepHubProtocolRegistration
+    DeleteRegKey HKCU "${HUB_PROTOCOL_KEY}"
+KeepHubProtocolRegistration:
 
     !insertmacro RemoveHubPayload
     Delete "$DESKTOP\${PRODUCT_DISPLAY_NAME} Hub.lnk"

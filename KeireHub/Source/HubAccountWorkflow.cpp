@@ -2,6 +2,7 @@
 
 #include "KeireHubRuntime/NativeHttpTransport.h"
 
+#include <chrono>
 #include <exception>
 #include <functional>
 #include <utility>
@@ -27,8 +28,10 @@ namespace KeireHub
         }
     } // namespace
 
-    HubAccountWorkflow::HubAccountWorkflow(HubAccountClientFactory clientFactory)
-        : m_Snapshot(std::make_shared<const HubAccountWorkflowSnapshot>()), m_ClientFactory(std::move(clientFactory))
+    HubAccountWorkflow::HubAccountWorkflow(HubAccountClientFactory clientFactory,
+                                           HubOAuthClientFactory oauthClientFactory)
+        : m_Snapshot(std::make_shared<const HubAccountWorkflowSnapshot>()), m_ClientFactory(std::move(clientFactory)),
+          m_OAuthClientFactory(std::move(oauthClientFactory))
     {
     }
 
@@ -42,6 +45,7 @@ namespace KeireHub
             std::scoped_lock lock(m_Mutex);
             m_Configuration.reset();
             m_Session.reset();
+            m_PendingOAuthAuthorization.reset();
             m_NextRefreshAttemptUnixSeconds = 0;
             m_SessionPath = sessionPath;
             m_Settings = settings;
@@ -201,6 +205,136 @@ namespace KeireHub
                 }
                 PublishSession(std::move(session), {}, "Account created and signed in.");
             });
+    }
+
+    HubResult<std::string> HubAccountWorkflow::BeginBrowserSignIn(const DesktopOAuthEntropy& entropy)
+    {
+        {
+            std::scoped_lock lock(m_Mutex);
+            if (m_Snapshot->Busy)
+                return HubResult<std::string>::Failure(BusyError());
+            if (!m_Configuration || !m_Configuration->HubOAuthEnabled)
+            {
+                return HubResult<std::string>::Failure(
+                    {.Code = HubErrorCode::AccountConfigurationInvalid,
+                     .Message = "Browser sign-in is not enabled in this Hub package.",
+                     .AffectedItem = "hub-oauth"});
+            }
+        }
+        auto client = CreateOAuthClient();
+        if (!client)
+            return HubResult<std::string>::Failure(client.Error());
+        auto authorization = client.Value().BeginAuthorization(entropy);
+        if (!authorization)
+            return HubResult<std::string>::Failure(authorization.Error());
+        auto url = authorization.Value().AuthorizationUrl;
+        {
+            std::scoped_lock lock(m_Mutex);
+            m_PendingOAuthAuthorization = std::move(authorization).Value();
+            auto snapshot = *m_Snapshot;
+            snapshot.BrowserSignInPending = true;
+            snapshot.Message = "Complete sign-in in your browser, then return to the Hub.";
+            snapshot.Failure.reset();
+            m_Snapshot = std::make_shared<const HubAccountWorkflowSnapshot>(std::move(snapshot));
+        }
+        return HubResult<std::string>::Success(std::move(url));
+    }
+
+    HubStatus HubAccountWorkflow::CancelBrowserSignIn()
+    {
+        std::scoped_lock lock(m_Mutex);
+        if (m_Snapshot->Busy)
+            return HubStatus::Failure(BusyError());
+        if (!m_PendingOAuthAuthorization)
+        {
+            return HubStatus::Failure({.Code = HubErrorCode::InvalidTransition,
+                                       .Message = "No browser sign-in is waiting to be completed.",
+                                       .AffectedItem = "hub-oauth"});
+        }
+
+        m_PendingOAuthAuthorization.reset();
+        auto snapshot = *m_Snapshot;
+        snapshot.BrowserSignInPending = false;
+        snapshot.Message = "Browser sign-in cancelled. No Hub session was created.";
+        snapshot.Failure.reset();
+        m_Snapshot = std::make_shared<const HubAccountWorkflowSnapshot>(std::move(snapshot));
+        return HubStatus::Success();
+    }
+
+    HubStatus HubAccountWorkflow::CompleteBrowserSignIn(std::string callbackUrl)
+    {
+        std::optional<DesktopOAuthAuthorization> authorization;
+        {
+            std::scoped_lock lock(m_Mutex);
+            if (!m_PendingOAuthAuthorization)
+            {
+                return HubStatus::Failure({.Code = HubErrorCode::InvalidTransition,
+                                           .Message = "Start browser sign-in from this Hub before using a callback.",
+                                           .AffectedItem = "hub-oauth"});
+            }
+            authorization = m_PendingOAuthAuthorization;
+        }
+        auto oauth = CreateOAuthClient();
+        if (!oauth)
+            return HubStatus::Failure(oauth.Error());
+        auto callback = oauth.Value().ValidateCallback(callbackUrl, authorization->State);
+        if (!callback)
+            return HubStatus::Failure(callback.Error());
+
+        auto status = Begin(
+            [this, oauth = std::move(oauth).Value(), authorization = std::move(*authorization),
+             callback = std::move(callback).Value()]() mutable
+            {
+                auto tokens = oauth.Exchange(authorization, callback);
+                if (!tokens)
+                {
+                    Publish(FailureSnapshot(tokens.Error(), true,
+                                            AccountSessionStore(m_SessionPath).PersistentStorageAvailable()));
+                    return;
+                }
+                auto account = CreateClient();
+                if (!account)
+                {
+                    Publish(FailureSnapshot(account.Error(), true,
+                                            AccountSessionStore(m_SessionPath).PersistentStorageAvailable()));
+                    return;
+                }
+                auto user = account.Value().FetchUser(tokens.Value().AccessToken);
+                if (!user)
+                {
+                    Publish(FailureSnapshot(user.Error(), true,
+                                            AccountSessionStore(m_SessionPath).PersistentStorageAvailable()));
+                    return;
+                }
+                const auto now = std::chrono::duration_cast<std::chrono::seconds>(
+                                     std::chrono::system_clock::now().time_since_epoch())
+                                     .count();
+                AccountSession session{.AccessToken = std::move(tokens.Value().AccessToken),
+                                       .RefreshToken = std::move(tokens.Value().RefreshToken),
+                                       .ExpiresAtUnixSeconds =
+                                           static_cast<std::uint64_t>(now) + tokens.Value().ExpiresInSeconds,
+                                       .User = std::move(user).Value()};
+                AccountSessionStore store(m_SessionPath);
+                auto persisted = store.SaveRefreshToken(session.RefreshToken);
+                if (!persisted)
+                {
+                    Publish(FailureSnapshot(persisted.Error(), true, store.PersistentStorageAvailable()));
+                    return;
+                }
+                auto profile = account.Value().FetchProfile(session);
+                PublishSession(std::move(session), profile ? std::move(profile).Value() : AccountProfile{},
+                               "Signed in through your browser.");
+            });
+        if (!status)
+            return status;
+        {
+            std::scoped_lock lock(m_Mutex);
+            m_PendingOAuthAuthorization.reset();
+            auto snapshot = *m_Snapshot;
+            snapshot.BrowserSignInPending = false;
+            m_Snapshot = std::make_shared<const HubAccountWorkflowSnapshot>(std::move(snapshot));
+        }
+        return HubStatus::Success();
     }
 
     HubStatus HubAccountWorkflow::SignOut()
@@ -399,9 +533,50 @@ namespace KeireHub
                                              { return sharedTransport->Send(request); });
     }
 
+    HubResult<DesktopOAuthClient> HubAccountWorkflow::CreateOAuthClient() const
+    {
+        SupabaseConfiguration configuration;
+        HubSettings settings;
+        {
+            std::scoped_lock lock(m_Mutex);
+            if (!m_Configuration || !m_Configuration->HubOAuthEnabled)
+            {
+                return HubResult<DesktopOAuthClient>::Failure(
+                    {.Code = HubErrorCode::AccountConfigurationInvalid,
+                     .Message = "Browser sign-in is not configured in this Hub package.",
+                     .AffectedItem = "hub-oauth"});
+            }
+            configuration = *m_Configuration;
+            settings = m_Settings;
+        }
+        if (settings.OfflineMode)
+        {
+            return HubResult<DesktopOAuthClient>::Failure(
+                {.Code = HubErrorCode::AccountTransportFailed,
+                 .Message = "Browser sign-in is unavailable while the Hub is offline.",
+                 .AffectedItem = "hub-oauth"});
+        }
+        if (m_OAuthClientFactory)
+            return m_OAuthClientFactory(configuration, settings);
+        NativeHttpTransportOptions options;
+        if (settings.NetworkProxyMode == ProxyMode::Custom && !settings.CustomProxyUrl.empty())
+            options.CustomProxyUrl = settings.CustomProxyUrl;
+        auto transport = NativeHttpTransport::Create(std::move(options));
+        if (!transport)
+            return HubResult<DesktopOAuthClient>::Failure(transport.Error());
+        auto sharedTransport = std::make_shared<NativeHttpTransport>(std::move(transport).Value());
+        return DesktopOAuthClient::Create({.SupabaseProjectUrl = configuration.ProjectUrl,
+                                           .ClientId = configuration.HubOAuthClientId,
+                                           .WebsiteCallbackUrl = configuration.HubOAuthWebsiteCallbackUrl},
+                                          [sharedTransport](const NativeHttpRequest& request)
+                                          { return sharedTransport->Send(request); });
+    }
+
     void HubAccountWorkflow::Publish(HubAccountWorkflowSnapshot snapshot)
     {
         std::scoped_lock lock(m_Mutex);
+        snapshot.BrowserSignInAvailable = m_Configuration && m_Configuration->HubOAuthEnabled;
+        snapshot.BrowserSignInPending = m_PendingOAuthAuthorization.has_value();
         m_Snapshot = std::make_shared<const HubAccountWorkflowSnapshot>(std::move(snapshot));
     }
 
@@ -419,16 +594,17 @@ namespace KeireHub
 
     void HubAccountWorkflow::PublishSession(AccountSession session, AccountProfile profile, std::string message)
     {
-        HubAccountWorkflowSnapshot snapshot{.Configured = true,
-                                            .SignedIn = true,
-                                            .PersistentSessionAvailable =
-                                                AccountSessionStore(m_SessionPath).PersistentStorageAvailable(),
-                                            .UserId = session.User.Id,
-                                            .Email = session.User.Email,
-                                            .DisplayName = std::move(profile.DisplayName),
-                                            .AvatarUrl = std::move(profile.AvatarUrl),
-                                            .Message = std::move(message),
-                                            .ExpiresAtUnixSeconds = session.ExpiresAtUnixSeconds};
+        HubAccountWorkflowSnapshot snapshot{
+            .Configured = true,
+            .BrowserSignInAvailable = m_Configuration && m_Configuration->HubOAuthEnabled,
+            .SignedIn = true,
+            .PersistentSessionAvailable = AccountSessionStore(m_SessionPath).PersistentStorageAvailable(),
+            .UserId = session.User.Id,
+            .Email = session.User.Email,
+            .DisplayName = std::move(profile.DisplayName),
+            .AvatarUrl = std::move(profile.AvatarUrl),
+            .Message = std::move(message),
+            .ExpiresAtUnixSeconds = session.ExpiresAtUnixSeconds};
         {
             std::scoped_lock lock(m_Mutex);
             m_Session = std::move(session);
@@ -440,8 +616,11 @@ namespace KeireHub
     void ApplyHubAccountSnapshot(const HubAccountWorkflowSnapshot& account, HubProductSnapshot& product)
     {
         product.AccountConfigured = account.Configured;
+        product.AccountBrowserSignInAvailable = account.BrowserSignInAvailable;
+        product.AccountBrowserSignInPending = account.BrowserSignInPending;
         product.AccountBusy = account.Busy;
         product.AccountSignedIn = account.SignedIn;
+        product.AccountHasError = account.Failure.has_value();
         product.AccountPersistentSessionAvailable = account.PersistentSessionAvailable;
         product.AccountConfirmationRequired = account.ConfirmationRequired;
         product.AccountEmail = account.Email;

@@ -1,0 +1,10 @@
+---
+import PlatformLayout from "../../../layouts/PlatformLayout.astro";
+export const prerender = false;
+---
+<PlatformLayout title="Recover account" description="Request a secure Kéire account password recovery email." robots="noindex">
+    <section class="platform-shell account-shell"><div><p class="eyebrow">Account recovery</p><h1 class="display-title">Recover access.<br /><span>Keep sessions separate.</span></h1><p class="lead">Resetting the website password does not silently reactivate revoked Hub device sessions.</p></div><div class="auth-card"><h1>Reset password</h1><form class="form-stack" data-recovery-form><label class="field"><span>Email address</span><input type="email" name="email" maxlength="254" autocomplete="email" required /></label><button class="button" type="submit">Send recovery email</button><p class="form-message" aria-live="polite" data-recovery-message></p></form></div></section>
+</PlatformLayout>
+<script>
+    const form = document.querySelector("[data-recovery-form]"); form?.addEventListener("submit", async (event) => { event.preventDefault(); if (!(form instanceof HTMLFormElement)) return; const data = new FormData(form); const message = form.querySelector("[data-recovery-message]"); const response = await fetch("/account/recovery/", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: data.get("email") }) }); const result = await response.json(); if (message instanceof HTMLElement) { message.dataset.kind = response.ok ? "success" : "error"; message.textContent = result.message ?? result.error?.message; } });
+</script>

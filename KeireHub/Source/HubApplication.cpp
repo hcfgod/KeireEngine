@@ -1,5 +1,4 @@
 #include "Keire/Core.h"
-
 #include "KeireHub/HubAccountIntegration.h"
 #include "KeireHub/HubActivationWorkflow.h"
 #include "KeireHub/HubApplicationFactory.h"
@@ -14,6 +13,7 @@
 #include "KeireHub/HubEditorManagementWorkflow.h"
 #include "KeireHub/HubFirstRunIntegration.h"
 #include "KeireHub/HubInstance.h"
+#include "KeireHub/HubLayerFactory.h"
 #include "KeireHub/HubLocalContent.h"
 #include "KeireHub/HubMaintenanceIntegration.h"
 #include "KeireHub/HubModalUi.h"
@@ -37,16 +37,11 @@
 #include "KeireHub/HubUpdateIntegration.h"
 #include "KeireHub/HubWorkflowError.h"
 #include "KeireHubInternal/HubNoticeUi.h"
-
 #include "KeireHubRuntime/EditorProcessTracker.h"
 #include "KeireHubRuntime/HubUpdateManager.h"
 #include "KeireHubRuntime/TaskNotificationTracker.h"
-
-#include "KeireHub/HubLayerFactory.h"
-
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
-
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -66,7 +61,6 @@ namespace
     using PendingStartupActivation = KeireHub::HubActivationRequest;
     using KeireHub::RequireWorkflowSuccess;
     using KeireHub::Utf8Path;
-
     class HubLayer final : public Keire::Layer, private KeireHub::HubActivationCallbacks
     {
       public:
@@ -1058,10 +1052,21 @@ namespace
                     break;
                 case KeireHub::HubUiCommandType::AccountSignIn:
                 case KeireHub::HubUiCommandType::AccountSignUp:
+                case KeireHub::HubUiCommandType::AccountCancelBrowserSignIn:
                 case KeireHub::HubUiCommandType::AccountSignOut:
                 case KeireHub::HubUiCommandType::SaveAccountProfile:
                     RequireWorkflowSuccess(m_Account.Execute(command));
                     break;
+                case KeireHub::HubUiCommandType::AccountBeginBrowserSignIn:
+                {
+                    auto authorization = m_Account.BeginBrowserSignIn();
+                    if (!authorization)
+                        RequireWorkflowSuccess(KeireHub::HubStatus::Failure(authorization.Error()));
+                    Owner().Windows()->OpenUrl(authorization.Value());
+                    m_Notice = "Complete Kéire Hub sign-in in your browser.";
+                    m_NoticeError = false;
+                    break;
+                }
                 case KeireHub::HubUiCommandType::None:
                     break;
                 case KeireHub::HubUiCommandType::PauseTask:
@@ -1115,7 +1120,6 @@ namespace
             KEIRE_CLIENT_ERROR("[Project Hub] {} {}", userMessage, error.what());
             SetError(std::string(userMessage) + " See Hub logs for details.");
         }
-
         [[nodiscard]] bool PackageTaskReconfigurationSafe() const noexcept
         {
             if (!m_PackageTasks)
@@ -1125,13 +1129,11 @@ namespace
                    std::ranges::none_of(*snapshot->Tasks, [](const KeireHub::HubTask& task)
                                         { return !KeireHub::IsTerminal(task.State); });
         }
-
         void RememberPackageTaskSettings()
         {
             m_PackageTaskTemporaryRoot = m_ProductSnapshot.Settings.TemporaryRoot;
             m_PackageTaskConcurrentDownloads = m_ProductSnapshot.Settings.ConcurrentDownloads;
         }
-
         void SetError(const std::string& message) noexcept
         {
             try
@@ -1171,7 +1173,6 @@ namespace
                 std::fprintf(stderr, "[Project Hub] %s\n", message.c_str());
             }
         }
-
         void HideHub(const bool hiddenForEditorLaunch = false)
         {
             const auto window = Owner().MainWindow();
@@ -1188,7 +1189,6 @@ namespace
                 m_HiddenForEditorLaunch = false;
             }
         }
-
         void ShowHub() override
         {
             m_HiddenForEditorLaunch = false;
@@ -1209,12 +1209,14 @@ namespace
             window->SetVisible(true);
             window->Raise();
         }
-
         void RequestEditorInstall(const std::string_view packageOrVersion) override
         {
             m_PendingEditorInstallVersion = packageOrVersion;
         }
-
+        [[nodiscard]] KeireHub::HubStatus CompleteOAuthCallback(const std::string_view callbackUrl) override
+        {
+            return m_Account.CompleteBrowserSignIn(std::string(callbackUrl));
+        }
         [[nodiscard]] KeireHub::HubStatus FocusBuildSupport(const std::string_view platform,
                                                             const std::string_view architecture) override
         {
@@ -1227,7 +1229,6 @@ namespace
             }
             return m_BuildSupport->FocusTarget(platform, architecture);
         }
-
         void Refresh()
         {
             try

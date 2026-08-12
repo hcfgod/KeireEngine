@@ -1,0 +1,12 @@
+---
+import PlatformLayout from "../../layouts/PlatformLayout.astro";
+export const prerender = true;
+---
+<PlatformLayout title="Community" description="Follow Kéire development, contribute code and documentation, and prepare for community marketplace features." active="community">
+    <section class="platform-section"><div class="platform-shell"><div class="section-heading"><div><p class="eyebrow">Build in the open</p><h1>A technical community grounded in evidence.</h1></div><p>Community profiles, reviews, wishlists, and publisher replies are implemented behind a staged feature flag. Source development and security reporting remain open now.</p></div><div class="editorial-grid">
+        <article class="editorial-panel"><span class="editorial-panel__index">01</span><h3>Contribute on GitHub</h3><p>Review architecture, reproduce issues, improve platform coverage, and propose changes against explicit repository contracts.</p><a class="button" href="https://github.com/hcfgod/KeireEngine">Open GitHub ↗</a></article>
+        <article class="editorial-panel"><span class="editorial-panel__index">02</span><h3>Share production scenarios</h3><p>Useful reports include the exact project, Editor version, platform, logs, expected result, and a minimal reproducible path.</p><a class="button button--secondary" href="/contact/">Contact the project</a></article>
+        <article class="editorial-panel"><span class="editorial-panel__index">03</span><h3>Publish verified assets</h3><p>Approved publishers will submit immutable free packages through automated validation and staff moderation.</p><a class="button button--secondary" href="/publisher/">Publisher portal</a></article>
+        <article class="editorial-panel"><span class="editorial-panel__index">04</span><h3>Report security issues privately</h3><p>Do not disclose exploitable package, authentication, or engine vulnerabilities in public issues.</p><a class="button button--secondary" href="/security/">Security reporting</a></article>
+    </div></div></section>
+</PlatformLayout>

@@ -76,7 +76,8 @@ namespace KeireHub
                 (task.TargetInstallationId && !Detail::IsBoundedIdentifier(*task.TargetInstallationId)) ||
                 invalidEditorInstall || (task.HiddenFromHistory && !IsTerminal(task.State)) ||
                 task.Progress.Attempt > 1'000'000U || task.Progress.CurrentPackage.size() > 256 ||
-                task.Progress.Phase.size() > 256 ||
+                task.Progress.Phase.size() > 256 || task.Progress.TotalSteps > 1'000'000U ||
+                task.Progress.StepsCompleted > task.Progress.TotalSteps ||
                 (task.Progress.TotalBytes != 0 && task.Progress.BytesTransferred > task.Progress.TotalBytes))
             {
                 return HubStatus::Failure({.Code = HubErrorCode::InvalidArgument,
@@ -137,6 +138,8 @@ namespace KeireHub
                                      {"attempt", task.Progress.Attempt},
                                      {"currentPackage", task.Progress.CurrentPackage},
                                      {"remainingComponents", task.Progress.RemainingComponents},
+                                     {"stepsCompleted", task.Progress.StepsCompleted},
+                                     {"totalSteps", task.Progress.TotalSteps},
                                      {"phase", task.Progress.Phase}}},
                                    {"created", task.CreatedUnixSeconds},
                                    {"updated", task.UpdatedUnixSeconds}};
@@ -231,6 +234,8 @@ namespace KeireHub
                     task.Progress.Attempt = progress.value("attempt", 0U);
                     task.Progress.CurrentPackage = progress.value("currentPackage", std::string{});
                     task.Progress.RemainingComponents = progress.value("remainingComponents", 0U);
+                    task.Progress.StepsCompleted = progress.value("stepsCompleted", 0U);
+                    task.Progress.TotalSteps = progress.value("totalSteps", 0U);
                     task.Progress.Phase = progress.value("phase", std::string{});
                     task.CreatedUnixSeconds = value.at("created").get<std::uint64_t>();
                     task.UpdatedUnixSeconds = value.at("updated").get<std::uint64_t>();
@@ -337,7 +342,8 @@ namespace KeireHub
         if (task.State != HubTaskState::Queued || task.WorkerProcessId || task.Failure ||
             task.Progress.BytesTransferred != 0 || task.Progress.TotalBytes != 0 || task.Progress.BytesPerSecond != 0 ||
             task.Progress.Attempt != 0 || !task.Progress.CurrentPackage.empty() ||
-            task.Progress.RemainingComponents != 0 || !task.Progress.Phase.empty())
+            task.Progress.RemainingComponents != 0 || task.Progress.StepsCompleted != 0 ||
+            task.Progress.TotalSteps != 0 || !task.Progress.Phase.empty())
             return HubStatus::Failure({.Code = HubErrorCode::InvalidTransition,
                                        .Message = "New Hub tasks must start in an unclaimed queue state.",
                                        .AffectedItem = task.Id});
@@ -430,10 +436,14 @@ namespace KeireHub
             return HubStatus::Failure({.Code = HubErrorCode::InvalidTransition,
                                        .Message = "This task can no longer report progress.",
                                        .AffectedItem = taskId});
+        const bool sameAttempt = progress.Attempt == found->Progress.Attempt;
+        const bool regressedSteps = sameAttempt && found->Progress.TotalSteps != 0 &&
+                                    (progress.TotalSteps != found->Progress.TotalSteps ||
+                                     progress.StepsCompleted < found->Progress.StepsCompleted);
         if (updatedUnixSeconds < found->UpdatedUnixSeconds || progress.Attempt < found->Progress.Attempt ||
             (progress.TotalBytes != 0 && progress.BytesTransferred > progress.TotalBytes) ||
-            (progress.Attempt == found->Progress.Attempt &&
-             progress.BytesTransferred < found->Progress.BytesTransferred))
+            progress.TotalSteps > 1'000'000U || progress.StepsCompleted > progress.TotalSteps || regressedSteps ||
+            (sameAttempt && progress.BytesTransferred < found->Progress.BytesTransferred))
         {
             return HubStatus::Failure({.Code = HubErrorCode::InvalidArgument,
                                        .Message = "The task reported invalid or regressing progress.",

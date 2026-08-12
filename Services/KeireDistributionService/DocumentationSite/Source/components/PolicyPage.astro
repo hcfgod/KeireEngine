@@ -1,0 +1,9 @@
+---
+import PlatformLayout from "../layouts/PlatformLayout.astro";
+interface Section { title: string; paragraphs: string[]; }
+interface Props { title: string; description: string; reviewNotice?: string; sections: Section[]; }
+const { title, description, reviewNotice = "Draft for owner and qualified legal review before public launch.", sections } = Astro.props;
+---
+<PlatformLayout title={title} description={description}>
+    <section class="platform-section"><div class="platform-shell product-details"><article class="prose"><p class="eyebrow">Policy · Last updated August 11, 2026</p><h1>{title}</h1><div class="notice-panel"><strong>Review status</strong><p>{reviewNotice}</p></div>{sections.map((section) => <section><h2>{section.title}</h2>{section.paragraphs.map((paragraph) => <p>{paragraph}</p>)}</section>)}</article><aside><nav class="dashboard-nav" aria-label="Policies"><a href="/policies/privacy/">Privacy</a><a href="/policies/terms/">Terms</a><a href="/policies/marketplace/">Marketplace terms</a><a href="/policies/publisher/">Publisher terms</a><a href="/policies/acceptable-use/">Acceptable use</a><a href="/security/">Security</a></nav></aside></div></section>
+</PlatformLayout>

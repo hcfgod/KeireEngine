@@ -35,9 +35,14 @@ paused work, requeues resumable downloads, and turns interrupted mutation phases
 
 Optional Hub identity is a separate adapter boundary. `SupabaseAccountClient` owns bounded Auth/PostgREST request and
 response contracts over the private native HTTP transport; `HubAccountWorkflow` owns asynchronous session rotation and
-publishes immutable account snapshots. Only publishable desktop configuration enters packages. Refresh-token
-persistence is delegated to a platform secure store (DPAPI on Windows, session-only fallback elsewhere), and no account
-state participates in package trust, editor ownership, task authorization, or project locking.
+publishes immutable account snapshots. `DesktopOAuthClient` is a provider adapter for a public authorization-code PKCE
+client: the website consent callback forwards only a single-use code and state through a typed Hub activation, the Hub
+verifies state and ID-token nonce, and the Hub exchanges the code itself. Website cookies, passwords, browser refresh
+tokens, and service-role credentials never enter the desktop process. Browser SSO is configuration- and feature-gated,
+with the existing email flow retained as a staged fallback. Only publishable desktop configuration enters packages.
+Refresh-token persistence is delegated to DPAPI/Credential Manager semantics on Windows, Secret Service on Linux, and
+Keychain on macOS; an unavailable Linux secret store produces a visible memory-only session instead of plaintext disk
+storage. No account state participates in package trust, editor ownership, task authorization, or project locking.
 
 `EditorInstallationManager` verifies schema-2 editor manifests, their canonical fingerprints, host identity, complete
 declared file inventory, and confined entrypoints outside the UI layer, then publishes immutable health snapshots.
@@ -446,6 +451,20 @@ IDE/Ninja metadata automatically.
 
 ## Project Ownership
 
+`.keireassetpackage` is a project-content boundary separate from the signed Editor/Build Support `.keirepackage`
+distribution format. Kéire Core owns the deterministic `KEIRASPK1` parser, canonical manifest, bounded extraction, and
+project transaction engines without owning marketplace HTTP, credentials, or signing keys. `ProjectPackageManager`
+resolves registry dependency closure into an exact source-controlled lockfile, verifies immutable content in the Hub-
+owned global cache, mounts it read-only, and supports transactional embed/revert/remove. `ProjectAssetPackageImporter`
+owns dependency-aware selective imports, three-way update decisions, executable-code consent fingerprints,
+source-controlled receipts, safe removal, rollback journals, and interrupted-operation recovery.
+
+The Editor Package Manager is a presentation/controller layer over those public contracts. It never receives Hub OAuth
+tokens. A separate current-user Hub broker protocol uses a one-time nonce handshake and returns token-free catalog,
+library, task, and verified-cache records. Entitlement authorizes download access; expected archive size/SHA-256 and the
+dedicated marketplace signature establish integrity independently. Projects without package files remain valid, while
+the first successful package transaction raises `minimumEngineVersion` to 0.3.1 atomically.
+
 Project identity is separate from repository/template identity. `Project` validates the fixed marker, owns the canonical
 root and exclusive editor lock, and supplies derived paths for Assets, catalogs, workspace state, input overrides, scene
 recovery, logs, and builds. `Application` opens a project before logging and all project-backed services, then releases it
@@ -457,8 +476,9 @@ assets or the exclusive lock. Each detached KeireClient process revalidates and 
 KeireClient keeps native window placement below project-local `Library/UserSettings`: normal bounds remain separate from
 maximized/fullscreen state, restore occurs before the window becomes visible, and minimized state is never persisted.
 The Hub coordinates one primary process per canonical executable identity. Secondary launches send one typed Show,
-Navigate, Open Project, Import Package, Install Version, or Build Support action and exit without creating a window or
-tray handle. The binary activation frame has an explicit magic value, protocol version, total length, action, field
+Navigate, Open Project, Import Package, Install Version, Build Support, or OAuth Callback action and exit without
+creating a window or tray handle. The binary activation frame has an explicit magic value, protocol version, total
+length, action, field
 count, and length-prefixed UTF-8 fields, with a 512-byte limit chosen to preserve atomic FIFO writes on Unix. Windows
 shares the explicit frame length under the existing named-mutex channel. Decoding rejects unknown versions/actions,
 truncation, trailing bytes, invalid UTF-8/control text, relative or traversing paths, invalid identifiers, and surplus
@@ -950,6 +970,20 @@ streamed input, strict UTF-8/object JSON, a honeypot, and a keyed-IP-hash rate l
 credentials. Only the edge-provided Cloudflare client-address header participates in the rate key; caller-controlled
 forwarding headers are ignored. Anonymous and authenticated browser roles have explicit deny policies and no table
 privileges. The function's npm graph is committed in `deno.lock` and checked with frozen restore semantics.
+
+The current deployment replaces the legacy static routing surface with one Astro Node application on loopback while
+preserving the signed distribution boundary. Caddy remains the only public listener and routes distribution API and
+health paths to Kestrel; marketing, documentation, accounts, OAuth consent, marketplace, publisher, moderation, and
+their versioned application APIs route to Astro. A website-only release swaps the complete `dist` directory
+transactionally, verifies the exact Node executable and entry point that owns port 4321, retains a rollback directory,
+and passes public readiness before completion. The router still exposes only ordinary public HTTP/HTTPS through Caddy.
+
+Supabase is the identity and marketplace data authority. Browser sessions and Hub OAuth sessions remain independently
+revocable. Authenticated marketplace writes cross JWT-verifying Edge Functions into service-role-only transaction
+adapters; they never expose the service credential to Astro or Hub. The adapters bind the already verified actor into
+the transaction so existing RLS membership and entitlement helpers remain authoritative. Publisher submission also
+requires AAL2, and direct PostgREST policies allow applicants to save or withdraw drafts but not self-submit or
+self-approve. Feature flags remain the final operational gate and default to disabled.
 
 macOS release binaries share the deployment target pinned by `MACOS_DEPLOYMENT_TARGET` in the dependency lock. The
 package boundary verifies each non-.NET Mach-O load command against that target before publication. Native installers

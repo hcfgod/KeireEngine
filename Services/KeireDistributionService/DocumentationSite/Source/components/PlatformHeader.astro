@@ -1,0 +1,64 @@
+---
+import SessionAwareAccountLink from "./SessionAwareAccountLink.astro";
+
+interface Props {
+    active?: "product" | "marketplace" | "downloads" | "docs" | "community";
+    signedIn?: boolean;
+}
+
+const { active, signedIn = false } = Astro.props;
+---
+
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="platform-header" data-platform-header>
+    <div class="platform-shell platform-header__inner">
+        <a class="platform-brand" href="/" aria-label="Kéire Engine home">
+            <img src="/assets/keire.png" width="36" height="36" alt="" />
+            <span><strong>Kéire</strong><small>ENGINE</small></span>
+        </a>
+        <button class="platform-nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false"
+                aria-controls="platform-navigation" data-platform-nav-toggle>
+            <span></span><span></span>
+        </button>
+        <nav id="platform-navigation" class="platform-nav" aria-label="Primary navigation" data-platform-nav>
+            <a href="/features/" aria-current={active === "product" ? "page" : undefined}>Product</a>
+            <a href="/marketplace/" aria-current={active === "marketplace" ? "page" : undefined}>Marketplace</a>
+            <a href="/downloads/" aria-current={active === "downloads" ? "page" : undefined}>Downloads</a>
+            <a href="/docs/" aria-current={active === "docs" ? "page" : undefined}>Documentation</a>
+            <a href="/community/" aria-current={active === "community" ? "page" : undefined}>Community</a>
+        </nav>
+        <div class="platform-header__actions">
+            <SessionAwareAccountLink class="text-action" signedIn={signedIn} sessionKnown={false} />
+            <a class="compact-button" href="/downloads/">Get Kéire Hub</a>
+        </div>
+    </div>
+</header>
+
+<script>
+    const toggle = document.querySelector("[data-platform-nav-toggle]");
+    const navigation = document.querySelector("[data-platform-nav]");
+
+    function setNavigationOpen(open: boolean): void {
+        toggle?.setAttribute("aria-expanded", String(open));
+        toggle?.setAttribute("aria-label", open ? "Close navigation" : "Open navigation");
+        navigation?.toggleAttribute("data-open", open);
+    }
+
+    toggle?.addEventListener("click", () => {
+        const expanded = toggle.getAttribute("aria-expanded") === "true";
+        setNavigationOpen(!expanded);
+    });
+    navigation?.addEventListener("click", (event) => {
+        if (event.target instanceof HTMLAnchorElement) setNavigationOpen(false);
+    });
+    document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") setNavigationOpen(false);
+    });
+    document.addEventListener("click", (event) => {
+        if (!(event.target instanceof Node)) return;
+        if (!toggle?.contains(event.target) && !navigation?.contains(event.target)) setNavigationOpen(false);
+    });
+    window.matchMedia("(min-width: 60.001rem)").addEventListener("change", (event) => {
+        if (event.matches) setNavigationOpen(false);
+    });
+</script>

@@ -47,6 +47,8 @@ namespace KeireHub
         std::uint32_t Attempt = 0;
         std::string CurrentPackage;
         std::uint32_t RemainingComponents = 0;
+        std::uint32_t StepsCompleted = 0;
+        std::uint32_t TotalSteps = 0;
         std::string Phase;
     };
 

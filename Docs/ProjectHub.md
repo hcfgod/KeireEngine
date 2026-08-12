@@ -218,22 +218,40 @@ and sensitive user-path segments are excluded.
 
 ## Accounts and identity
 
-`Config/Supabase.json` enables optional email/password identity with a project HTTPS URL and modern
-`sb_publishable_...` key. The Hub never accepts or packages a Supabase secret/service-role key. Sign-up correctly
+`Config/Supabase.json` enables optional identity with a project HTTPS URL and modern `sb_publishable_...` key. Schema 2
+can independently enable the public-client browser OAuth adapter with a registered client ID and the exact HTTPS
+website callback. The recommended flow uses authorization-code PKCE, state, and nonce; the browser forwards only the
+single-use code through `keirehub://oauth/callback`, and the Hub performs the token exchange. Email authentication
+remains available as a staged fallback. The Hub never accepts or packages a client secret or Supabase service-role key.
+The Windows installer owns the current user's `keirehub` protocol registration and removes it only when it still points
+to that exact installation. Linux packages declare `x-scheme-handler/keirehub` and pass a single `%u` activation to the
+verified Hub wrapper. The callback page never displays or copies the authorization code: it offers a user-initiated app
+handoff, reports focus/visibility feedback, and directs a missing handler to the signed Hub installer. A pending request
+can be cancelled in Hub before starting another flow; callbacks from cancelled or unrelated flows remain rejected by
+the state check.
+Sign-up correctly
 accepts both direct user and user-envelope response forms, represents email-confirmation-required responses without
 inventing a session, and reports confirmation-email cooldowns directly. Sign-in, refresh-token rotation, local sign-out,
 and profile display-name updates run on the account worker rather than the UI thread. Retryable refresh and profile
 failures preserve the authenticated UI snapshot and refresh attempts use bounded backoff.
 
-The only application table is `public.profiles`. It is protected by row-level security and explicit authenticated-only
-`SELECT`, `INSERT`, and `UPDATE` grants; every policy requires `auth.uid() = user_id`. Anonymous clients have no table
-grant. Windows refresh tokens are encrypted at rest with DPAPI and written atomically. Platforms without an implemented
-native secure store keep the session in memory only instead of writing plaintext credentials. Account tokens, proxy
-credentials, signing material, and unredacted user paths never enter diagnostics.
+Marketplace profiles, organizations, publisher membership, entitlements, reviews, and device sessions are protected by
+forced row-level security and protected membership tables. Platform roles come only from immutable `app_metadata`.
+Windows refresh tokens use DPAPI, Linux uses Secret Service when `secret-tool` is available, and macOS uses Keychain.
+When secure persistence is unavailable, the Hub keeps the session in memory and shows a warning instead of writing a
+plaintext credential. Website cookies and browser refresh tokens never transfer to Hub; Hub sessions can be revoked
+independently. Account tokens, proxy credentials, signing material, and unredacted user paths never enter diagnostics.
 
 Identity and software distribution are separate trust domains. A Supabase session is not an editor-package
 entitlement, cannot authorize an install or uninstall, and is never used to bypass Ed25519 catalog signatures,
 SHA-256 package identity, managed-install ownership markers, or editor project locks.
+
+Marketplace HTTP uses canonical trailing-slash `/marketplace/v1/.../` routes because the unified Astro deployment
+enforces trailing-slash routing. Catalog, library, claims, OAuth device registration, and download-grant calls remain
+bounded and versioned. The first verified Hub OAuth token may reach only the device-registration route before its
+session record exists; every later Hub bearer request must match an active, non-revoked device session. Marketplace
+feature flags remain disabled until the OAuth client, secure store, validator, signature trust root, and complete
+Windows/Linux acceptance flow have passed.
 
 ## Distribution and trust
 

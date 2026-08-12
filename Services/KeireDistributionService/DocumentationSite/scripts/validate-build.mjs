@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { allDocSources, sourcePathToSlug } from "../doc-library.mjs";
 
 const siteRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const outputRoot = path.join(siteRoot, "dist");
+const outputRoot = path.join(siteRoot, "dist", "client");
 
 function assert(condition, message) {
     if (!condition) {
@@ -28,12 +28,13 @@ async function collectFiles(directory) {
 
 await access(path.join(outputRoot, "index.html"));
 for (const sourcePath of allDocSources) {
-    await access(path.join(outputRoot, ...sourcePathToSlug(sourcePath).split("/"), "index.html"));
+    await access(path.join(outputRoot, "docs", ...sourcePathToSlug(sourcePath).split("/"), "index.html"));
 }
 
 const files = await collectFiles(outputRoot);
 const outputFiles = new Set(files.map((file) => path.resolve(file)));
 const htmlFiles = files.filter((file) => file.endsWith(".html"));
+const serverRoutePrefixes = ["account/", "health/", "marketplace/", "publisher/"];
 let mermaidDiagramCount = 0;
 assert(htmlFiles.length >= allDocSources.length + 2, "Documentation output is missing a landing page, guide page, or branded 404 page.");
 
@@ -45,7 +46,13 @@ for (const htmlPath of htmlFiles) {
     assert(/<main\b/i.test(html), `Missing main landmark in ${htmlPath}.`);
     assert(/<h1\b/i.test(html), `Missing level-one heading in ${htmlPath}.`);
     assert(!/<style(?:\s|>)/i.test(html), `Inline style block violates the production CSP in ${htmlPath}.`);
-    assert(!/<script(?![^>]*\bsrc=)[^>]*>\s*\S/i.test(html), `Inline script violates the production CSP in ${htmlPath}.`);
+    for (const script of html.matchAll(/<script(?![^>]*\bsrc=)([^>]*)>([\s\S]*?)<\/script>/gi)) {
+        const type = /\btype=["']([^"']+)["']/i.exec(script[1])?.[1] ?? "text/javascript";
+        assert(type === "application/ld+json" || !script[2].trim(), `Inline script violates the production CSP in ${htmlPath}.`);
+        if (type === "application/ld+json" && script[2].trim()) {
+            JSON.parse(script[2]);
+        }
+    }
     assert(!/\son[a-z]+\s*=/i.test(html), `Inline event handler violates the production CSP in ${htmlPath}.`);
     assert(!/\sstyle\s*=/i.test(html), `Inline style attribute violates the production CSP in ${htmlPath}.`);
     assert(!/<script\b[^>]*\bsrc=["']https?:\/\//i.test(html), `External script resource found in ${htmlPath}.`);
@@ -59,16 +66,19 @@ for (const htmlPath of htmlFiles) {
     }
     for (const match of html.matchAll(/\b(?:href|src)=["']([^"']+)["']/gi)) {
         const value = match[1];
-        if (!value.startsWith("/docs/")) {
+        if (!value.startsWith("/")) {
             continue;
         }
         const url = new URL(value, "https://keireengine.duckdns.org");
-        let relative = decodeURIComponent(url.pathname.slice("/docs/".length));
+        let relative = decodeURIComponent(url.pathname.slice(1));
         if (!relative || relative.endsWith("/")) {
             relative = `${relative}index.html`;
         }
         const target = path.resolve(outputRoot, ...relative.split("/"));
         assert(target.startsWith(`${path.resolve(outputRoot)}${path.sep}`), `Documentation link escapes the output root in ${htmlPath}: ${value}`);
+        if (!outputFiles.has(target) && serverRoutePrefixes.some((prefix) => relative.startsWith(prefix))) {
+            continue;
+        }
         assert(outputFiles.has(target), `Broken documentation link in ${htmlPath}: ${value}`);
     }
 }
@@ -84,6 +94,6 @@ assert(inventory.schemaVersion === 1 && inventory.documents?.length === allDocSo
 assert(new Set(inventory.documents.map(({ source }) => source)).size === allDocSources.length, "Built documentation inventory contains duplicate sources.");
 
 assert(files.some((file) => /[\\/]pagefind[\\/]pagefind\.js$/.test(file)), "Local Pagefind search output is missing.");
-assert(files.some((file) => /[\\/]sitemap-(?:index|0)\.xml$/.test(file)), "Documentation sitemap output is missing.");
+assert(files.some((file) => /[\\/]sitemap-(?:index|0)\.xml$/.test(file)), "Platform sitemap output is missing.");
 
 console.log(`Documentation build validation passed for ${htmlFiles.length} pages, ${allDocSources.length} canonical guides, and ${mermaidDiagramCount} rendered diagrams.`);

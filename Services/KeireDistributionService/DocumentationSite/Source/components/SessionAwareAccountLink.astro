@@ -1,0 +1,146 @@
+---
+interface Props {
+    class?: string;
+    signedIn?: boolean;
+    sessionKnown?: boolean;
+}
+
+const {
+    class: className,
+    signedIn = false,
+    sessionKnown = true,
+} = Astro.props;
+const label = signedIn ? "My account" : sessionKnown ? "Sign in" : "Account";
+const destination = signedIn || !sessionKnown ? "/account/" : "/account/sign-in/";
+---
+
+<a class:list={[className, "session-account-link", { "session-account-link--signed-in": signedIn }]}
+   href={destination}
+   data-session-account-link
+   data-session-server-signed-in={String(signedIn)}
+   data-session-known={String(sessionKnown)}>
+    <span class="session-account-link__indicator" aria-hidden="true"></span>
+    <span data-session-account-label>{label}</span>
+</a>
+
+<script is:inline>
+    (() => {
+        const key = "keire.account-state.v1";
+        const currentScript = document.currentScript;
+        const currentLink = currentScript?.previousElementSibling;
+        let state = null;
+        if (currentLink instanceof HTMLAnchorElement && currentLink.dataset.sessionServerSignedIn === "true") {
+            state = "signed-in";
+            try { localStorage.setItem(key, state); } catch {}
+        } else {
+            try { state = localStorage.getItem(key); } catch {}
+        }
+        if (state !== "signed-in" && state !== "signed-out") return;
+        const signedIn = state === "signed-in";
+        for (const element of document.querySelectorAll("[data-session-account-link]")) {
+            if (!(element instanceof HTMLAnchorElement)) continue;
+            element.href = signedIn ? "/account/" : "/account/sign-in/";
+            element.classList.toggle("session-account-link--signed-in", signedIn);
+            const label = element.querySelector("[data-session-account-label]");
+            if (label) label.textContent = signedIn ? "My account" : "Sign in";
+        }
+    })();
+</script>
+
+<style>
+    .session-account-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.48rem;
+        white-space: nowrap;
+    }
+
+    .session-account-link__indicator {
+        width: 0.44rem;
+        height: 0.44rem;
+        flex: 0 0 auto;
+        border: 1px solid currentColor;
+        border-radius: 50%;
+        opacity: 0.52;
+    }
+
+    .session-account-link--signed-in .session-account-link__indicator {
+        border-color: #68d6a7;
+        background: #68d6a7;
+        box-shadow: 0 0 0.7rem rgba(104, 214, 167, 0.58);
+        opacity: 1;
+    }
+</style>
+
+<script>
+    const accountStateStorageKey = "keire.account-state.v1";
+
+    interface SessionStatus {
+        data?: {
+            signedIn?: boolean;
+        };
+    }
+
+    let activeSessionRequest: Promise<boolean> | null = null;
+
+    function updateAccountLinks(signedIn: boolean): void {
+        try {
+            localStorage.setItem(accountStateStorageKey, signedIn ? "signed-in" : "signed-out");
+        } catch {
+            // Storage is an optional presentation hint. The server remains authoritative.
+        }
+        for (const element of document.querySelectorAll("[data-session-account-link]")) {
+            if (!(element instanceof HTMLAnchorElement)) continue;
+            element.href = signedIn ? "/account/" : "/account/sign-in/";
+            element.classList.toggle("session-account-link--signed-in", signedIn);
+            element.dataset.sessionKnown = "true";
+            const label = element.querySelector("[data-session-account-label]");
+            if (label) label.textContent = signedIn ? "My account" : "Sign in";
+        }
+    }
+
+    function restoreAccountLinks(): void {
+        if (document.querySelector('[data-session-account-link][data-session-server-signed-in="true"]')) {
+            updateAccountLinks(true);
+            return;
+        }
+        try {
+            const storedState = localStorage.getItem(accountStateStorageKey);
+            if (storedState === "signed-in") updateAccountLinks(true);
+            else if (storedState === "signed-out") updateAccountLinks(false);
+        } catch {
+            // Private browsing may reject storage; the live session check still runs.
+        }
+    }
+
+    async function refreshAccountLinks(): Promise<boolean> {
+        if (activeSessionRequest) return activeSessionRequest;
+        activeSessionRequest = (async () => {
+            try {
+                const response = await fetch("/account/session/", {
+                    credentials: "same-origin",
+                    cache: "no-store",
+                    headers: { accept: "application/json" },
+                });
+                if (!response.ok) return false;
+                const payload = await response.json() as SessionStatus;
+                updateAccountLinks(payload.data?.signedIn === true);
+                return true;
+            } catch {
+                return false;
+            } finally {
+                activeSessionRequest = null;
+            }
+        })();
+        return activeSessionRequest;
+    }
+
+    restoreAccountLinks();
+    void refreshAccountLinks();
+    window.addEventListener("pageshow", (event) => {
+        if (event.persisted) {
+            restoreAccountLinks();
+            void refreshAccountLinks();
+        }
+    });
+</script>

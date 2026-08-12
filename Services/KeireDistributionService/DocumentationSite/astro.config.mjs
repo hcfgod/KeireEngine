@@ -1,4 +1,5 @@
 import { defineConfig } from "astro/config";
+import node from "@astrojs/node";
 import sitemap from "@astrojs/sitemap";
 import starlight from "@astrojs/starlight";
 
@@ -7,15 +8,21 @@ import { docGroups, sourcePathToSlug } from "./doc-library.mjs";
 const documentationSidebar = docGroups.map(({ label, files }) => ({
     label,
     collapsed: label !== "Start here",
-    items: files.map((sourcePath) => ({ slug: sourcePathToSlug(sourcePath) })),
+    items: files.map((sourcePath) => ({ slug: `docs/${sourcePathToSlug(sourcePath)}` })),
 }));
 
 export default defineConfig({
     site: "https://keireengine.duckdns.org",
-    base: "/docs",
     srcDir: "./Source",
-    output: "static",
+    output: "server",
+    adapter: node({ mode: "standalone" }),
     trailingSlash: "always",
+    security: {
+        // Astro compares Origin with the loopback request URL before middleware can
+        // account for Caddy's trusted forwarding headers. Every mutation is instead
+        // protected by the stricter canonical-origin check in Source/middleware.ts.
+        checkOrigin: false,
+    },
     build: {
         inlineStylesheets: "never",
     },
@@ -51,7 +58,7 @@ export default defineConfig({
                 {
                     label: "Kéire Engine",
                     items: [
-                        { label: "Documentation home", slug: "index" },
+                        { label: "Documentation home", slug: "docs" },
                     ],
                 },
                 ...documentationSidebar,
@@ -61,6 +68,11 @@ export default defineConfig({
             lastUpdated: false,
             credits: false,
             customCss: ["./Source/styles/keire.css"],
+            components: {
+                Header: "./Source/components/DocsHeader.astro",
+                SiteTitle: "./Source/components/DocsSiteTitle.astro",
+                MobileMenuFooter: "./Source/components/DocsMobileMenuFooter.astro",
+            },
             head: [
                 {
                     tag: "meta",

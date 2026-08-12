@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 
 
 PUBLISHABLE_KEY = re.compile(r"^sb_publishable_[A-Za-z0-9_-]{16,192}$")
+OAUTH_CLIENT_ID = re.compile(r"^[\x21-\x7e]{8,128}$")
 
 
 def validate(path: Path) -> None:
@@ -21,17 +22,28 @@ def validate(path: Path) -> None:
     value = json.loads(path.read_text(encoding="utf-8"))
     if (
         not isinstance(value, dict)
-        or value.get("schemaVersion") != 1
+        or value.get("schemaVersion") not in (1, 2)
         or not isinstance(value.get("enabled"), bool)
     ):
         raise ValueError("Supabase configuration has an invalid schema header.")
+    schema_version = value["schemaVersion"]
     if not value["enabled"]:
-        if set(value) != {"schemaVersion", "enabled"}:
+        allowed = {"schemaVersion", "enabled"}
+        if schema_version == 2:
+            allowed.add("hubOAuthEnabled")
+        if set(value) != allowed or value.get("hubOAuthEnabled", False) is not False:
             raise ValueError(
                 "Disabled Supabase configuration contains unexpected fields."
             )
         return
-    if set(value) != {"schemaVersion", "enabled", "projectUrl", "publishableKey"}:
+    required = {"schemaVersion", "enabled", "projectUrl", "publishableKey"}
+    if schema_version == 2:
+        required.add("hubOAuthEnabled")
+        if value.get("hubOAuthEnabled") is True:
+            required.update({"hubOAuthClientId", "hubOAuthWebsiteCallbackUrl"})
+        elif value.get("hubOAuthEnabled") is not False:
+            raise ValueError("Hub OAuth enablement must be a boolean.")
+    if set(value) != required:
         raise ValueError("Enabled Supabase configuration has unexpected fields.")
     project_url = value["projectUrl"]
     publishable_key = value["publishableKey"]
@@ -62,6 +74,24 @@ def validate(path: Path) -> None:
         raise ValueError(
             "Supabase desktop configuration must contain a modern publishable key."
         )
+    if schema_version == 2 and value["hubOAuthEnabled"]:
+        client_id = value["hubOAuthClientId"]
+        callback_url = value["hubOAuthWebsiteCallbackUrl"]
+        callback = urlsplit(callback_url) if isinstance(callback_url, str) else None
+        if not isinstance(client_id, str) or not OAUTH_CLIENT_ID.fullmatch(client_id):
+            raise ValueError("Hub OAuth requires a bounded public client ID.")
+        if (
+            callback is None
+            or callback.scheme != "https"
+            or not callback.hostname
+            or callback.username
+            or callback.password
+            or callback.port not in (None, 443)
+            or callback.path != "/oauth/hub/callback/"
+            or callback.query
+            or callback.fragment
+        ):
+            raise ValueError("Hub OAuth requires the canonical HTTPS website callback.")
 
 
 def main() -> int:

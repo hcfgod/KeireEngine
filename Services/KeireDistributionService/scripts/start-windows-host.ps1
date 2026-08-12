@@ -2,6 +2,7 @@
 param(
     [string] $SettingsPath = '',
     [switch] $KeepAlive,
+    [switch] $ProbeOnly,
     [switch] $ValidateOnly
 )
 
@@ -67,6 +68,37 @@ function Test-ListeningPort([int] $Port) {
         Select-Object -First 1)
 }
 
+function Test-PortOwnedByExecutable([int] $Port, [string] $ExecutablePath) {
+    $resolvedExecutable = [IO.Path]::GetFullPath($ExecutablePath)
+    foreach ($connection in Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue) {
+        try {
+            $process = Get-Process -Id $connection.OwningProcess -ErrorAction Stop
+            if ([string]::Equals($process.Path, $resolvedExecutable, [StringComparison]::OrdinalIgnoreCase)) {
+                return $true
+            }
+        }
+        catch [System.ComponentModel.Win32Exception] {
+            continue
+        }
+        catch [Microsoft.PowerShell.Commands.ProcessCommandException] {
+            continue
+        }
+    }
+    return $false
+}
+
+function Test-PortOwnedByCommandLine([int] $Port, [string] $RequiredFragment) {
+    foreach ($connection in Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue) {
+        $process = Get-CimInstance Win32_Process -Filter "ProcessId = $($connection.OwningProcess)" `
+            -ErrorAction SilentlyContinue
+        if ($null -ne $process -and -not [string]::IsNullOrWhiteSpace($process.CommandLine) -and
+            $process.CommandLine.IndexOf($RequiredFragment, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+            return $true
+        }
+    }
+    return $false
+}
+
 if ([string]::IsNullOrWhiteSpace($SettingsPath)) {
     $SettingsPath = Join-Path $PSScriptRoot 'host-settings.json'
 }
@@ -78,7 +110,7 @@ if (-not (Test-Path -LiteralPath $SettingsPath -PathType Leaf)) {
 $settingsDirectory = Split-Path -Parent $SettingsPath
 $settings = Get-Content -LiteralPath $SettingsPath -Raw | ConvertFrom-Json
 $schemaVersion = [int] (Get-RequiredSetting $settings 'schemaVersion')
-if ($schemaVersion -ne 1) {
+if ($schemaVersion -notin @(1, 2)) {
     throw "Unsupported Windows distribution host settings schema '$schemaVersion'."
 }
 
@@ -104,10 +136,36 @@ $caddyExecutable = Resolve-ConfiguredPath `
     ([string] (Get-RequiredSetting $settings 'caddyExecutable')) $settingsDirectory
 $caddyConfig = Resolve-ConfiguredPath ([string] (Get-RequiredSetting $settings 'caddyConfig')) $settingsDirectory
 $logDirectory = Resolve-ConfiguredPath ([string] (Get-RequiredSetting $settings 'logDirectory')) $settingsDirectory
+$webRoot = ''
+$nodeExecutable = ''
+$webEntry = ''
+$supabaseUrl = ''
+$supabasePublishableKey = ''
+if ($schemaVersion -ge 2) {
+    $webRoot = Resolve-ConfiguredPath ([string] (Get-RequiredSetting $settings 'webRoot')) $settingsDirectory
+    $nodeExecutable = Resolve-ConfiguredPath `
+        ([string] (Get-RequiredSetting $settings 'nodeExecutable')) $settingsDirectory
+    $webEntry = Join-Path $webRoot 'dist\server\entry.mjs'
+    $supabaseUrl = [string] (Get-RequiredSetting $settings 'supabaseUrl')
+    $supabasePublishableKey = [string] (Get-RequiredSetting $settings 'supabasePublishableKey')
+    if ($supabaseUrl -notmatch '^https://[A-Za-z0-9.-]+/?$') {
+        throw "The configured Supabase URL must be an HTTPS origin: '$supabaseUrl'."
+    }
+    if ($supabasePublishableKey -notmatch '^sb_publishable_[A-Za-z0-9_-]{16,}$') {
+        throw 'The configured Supabase publishable key is invalid.'
+    }
+}
 
 foreach ($requiredFile in @($serviceExecutable, $caddyExecutable, $caddyConfig)) {
     if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
         throw "A required Windows distribution host file does not exist: '$requiredFile'."
+    }
+}
+if ($schemaVersion -ge 2) {
+    foreach ($requiredFile in @($nodeExecutable, $webEntry)) {
+        if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
+            throw "A required Windows web platform file does not exist: '$requiredFile'."
+        }
     }
 }
 if (-not (Test-Path -LiteralPath $storageRoot -PathType Container)) {
@@ -125,7 +183,8 @@ $handler.UseProxy = $false
 $httpClient = [Net.Http.HttpClient]::new($handler)
 $httpClient.Timeout = [TimeSpan]::FromSeconds(2)
 $localReadyUri = 'http://127.0.0.1:5088/health/ready'
-$publicReadyUri = "https://$hostName/health/ready"
+$localWebReadyUri = 'http://127.0.0.1:4321/health/'
+$publicReadyUri = if ($schemaVersion -ge 2) { "https://$hostName/health/" } else { "https://$hostName/health/ready" }
 $startupTimeoutSeconds = 45
 
 function Write-HostEvent([string] $Message) {
@@ -138,8 +197,11 @@ function Write-HostEvent([string] $Message) {
 
 function Start-DistributionService {
     if (Test-ListeningPort 5088) {
+        if (-not (Test-PortOwnedByExecutable 5088 $serviceExecutable)) {
+            throw "Port 5088 is owned by a different distribution service executable."
+        }
         if (-not (Test-HttpEndpoint $httpClient $localReadyUri)) {
-            Write-HostEvent 'Port 5088 is listening, but the distribution service is not ready; leaving it untouched.'
+            throw 'The configured distribution service owns port 5088 but is not ready.'
         }
         return
     }
@@ -154,17 +216,49 @@ function Start-DistributionService {
     Wait-HttpEndpoint $httpClient $localReadyUri $process $startupTimeoutSeconds
 }
 
+function Start-WebPlatform {
+    if ($schemaVersion -lt 2) {
+        return
+    }
+    if (Test-ListeningPort 4321) {
+        if (-not (Test-PortOwnedByCommandLine 4321 $webEntry)) {
+            throw "Port 4321 is owned by a web renderer from a different deployment root."
+        }
+        if (-not (Test-HttpEndpoint $httpClient $localWebReadyUri)) {
+            throw 'The configured web renderer owns port 4321 but is not healthy.'
+        }
+        return
+    }
+
+    $env:NODE_ENV = 'production'
+    $env:HOST = '127.0.0.1'
+    $env:PORT = '4321'
+    $env:KEIRE_DISTRIBUTION_HEALTH_URL = $localReadyUri
+    $env:PUBLIC_SUPABASE_URL = $supabaseUrl.TrimEnd('/')
+    $env:PUBLIC_SUPABASE_PUBLISHABLE_KEY = $supabasePublishableKey
+    $env:PUBLIC_SITE_URL = "https://$hostName/"
+    $nodeArguments = "`"$webEntry`""
+    $process = Start-Process -FilePath $nodeExecutable -ArgumentList $nodeArguments `
+        -WorkingDirectory $webRoot -WindowStyle Hidden -PassThru `
+        -RedirectStandardOutput (Join-Path $logDirectory 'web-stdout.log') `
+        -RedirectStandardError (Join-Path $logDirectory 'web-stderr.log')
+    Write-HostEvent "Started the web platform as process $($process.Id)."
+    Wait-HttpEndpoint $httpClient $localWebReadyUri $process $startupTimeoutSeconds
+}
+
 function Start-CaddyProxy {
     $httpListening = Test-ListeningPort $httpPort
     $httpsListening = Test-ListeningPort $httpsPort
     if ($httpListening -or $httpsListening) {
         if (-not ($httpListening -and $httpsListening)) {
-            Write-HostEvent `
-                "Only one configured Caddy port is listening; leaving ports $httpPort and $httpsPort untouched."
-            return
+            throw "Only one configured Caddy port is listening; refusing to accept a partial proxy deployment."
+        }
+        if (-not (Test-PortOwnedByExecutable $httpPort $caddyExecutable) -or
+            -not (Test-PortOwnedByExecutable $httpsPort $caddyExecutable)) {
+            throw "The configured Caddy executable does not own both public proxy ports."
         }
         if (-not (Test-HttpEndpoint $httpClient $publicReadyUri)) {
-            Write-HostEvent "Port $httpsPort is listening, but the public HTTPS endpoint is not ready; leaving it untouched."
+            throw 'The configured Caddy proxy owns its ports but the public platform is not ready.'
         }
         return
     }
@@ -182,6 +276,35 @@ function Start-CaddyProxy {
     Wait-HttpEndpoint $httpClient $publicReadyUri $process $startupTimeoutSeconds
 }
 
+function Assert-ConfiguredHostReady {
+    if (-not (Test-PortOwnedByExecutable 5088 $serviceExecutable) -or
+        -not (Test-HttpEndpoint $httpClient $localReadyUri)) {
+        throw 'The configured distribution service is not the healthy owner of port 5088.'
+    }
+    if ($schemaVersion -ge 2 -and
+        (-not (Test-PortOwnedByCommandLine 4321 $webEntry) -or
+            -not (Test-HttpEndpoint $httpClient $localWebReadyUri))) {
+        throw 'The configured web deployment is not the healthy owner of port 4321.'
+    }
+    if (-not (Test-PortOwnedByExecutable $httpPort $caddyExecutable) -or
+        -not (Test-PortOwnedByExecutable $httpsPort $caddyExecutable) -or
+        -not (Test-HttpEndpoint $httpClient $publicReadyUri)) {
+        throw 'The configured Caddy deployment does not exclusively own a healthy public proxy.'
+    }
+}
+
+if ($ProbeOnly) {
+    try {
+        Assert-ConfiguredHostReady
+        Write-Host "Windows distribution host ownership and readiness are valid for https://$hostName/."
+        exit 0
+    }
+    finally {
+        $httpClient.Dispose()
+        $handler.Dispose()
+    }
+}
+
 $mutex = [Threading.Mutex]::new($false, 'Local\KeireDistributionHostSupervisor')
 $ownsMutex = $false
 try {
@@ -194,6 +317,7 @@ try {
     do {
         try {
             Start-DistributionService
+            Start-WebPlatform
             Start-CaddyProxy
         }
         catch {

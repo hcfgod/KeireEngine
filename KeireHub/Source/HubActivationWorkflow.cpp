@@ -132,6 +132,20 @@ namespace KeireHub
             noticeError = false;
             break;
         }
+        case HubActivationAction::OAuthCallback:
+        {
+            const auto completed = callbacks.CompleteOAuthCallback(*request.Url);
+            if (!completed)
+            {
+                NotifyActivation(controller, NotificationSeverity::Error, "Hub sign-in not completed",
+                                 completed.Error().Message, notice, noticeError);
+                break;
+            }
+            NotifyActivation(controller, NotificationSeverity::Info, "Hub sign-in continuing",
+                             "The authorization code was accepted and is being exchanged securely.", notice,
+                             noticeError);
+            break;
+        }
         default:
             NotifyActivation(controller, NotificationSeverity::Error, "Activation request rejected",
                              "The Hub ignored an unsupported activation request.", notice, noticeError);

@@ -11,7 +11,7 @@
 		X-Frame-Options "DENY"
 		Referrer-Policy "strict-origin-when-cross-origin"
 		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
-		Content-Security-Policy "default-src 'self'; base-uri 'self'; connect-src 'self' https://khjduyjamzwumhducmou.supabase.co; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; worker-src 'self' blob:; upgrade-insecure-requests"
+		Content-Security-Policy "default-src 'self'; base-uri 'self'; connect-src 'self' https://khjduyjamzwumhducmou.supabase.co; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: https://khjduyjamzwumhducmou.supabase.co; media-src 'self' https://khjduyjamzwumhducmou.supabase.co; object-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; worker-src 'self' blob:; upgrade-insecure-requests"
 		-Server
 	}
 }
@@ -21,15 +21,20 @@
 		not path /preview-downloads/*
 	}
 	encode @compressible zstd gzip
-	root * "{$KEIRE_WEBSITE_ROOT:Website}"
+	request_body {
+		max_size 2MB
+	}
 
-	@unsupported_method not method GET HEAD
-	respond @unsupported_method 405
-
-	@distribution_api path /v1 /v1/* /v2 /v2/* /health /health/*
+	@distribution_api path /v1 /v1/* /v2 /v2/* /health/live /health/ready
 	handle @distribution_api {
 		reverse_proxy 127.0.0.1:5088
 	}
+
+	@preview_unsupported {
+		path /preview-downloads/*
+		not method GET HEAD
+	}
+	respond @preview_unsupported 405
 
 	handle_path /preview-downloads/* {
 		root * "{$KEIRE_PREVIEW_DOWNLOAD_ROOT:PreviewDownloads}"
@@ -38,44 +43,16 @@
 		file_server
 	}
 
-	@mutable_assets path /assets/*.css /assets/*.js /assets/*.json
-	header @mutable_assets Cache-Control "no-cache"
+	@immutable_web_assets path /_astro/* /docs/_astro/*
+	header @immutable_web_assets Cache-Control "public, max-age=31536000, immutable"
 
-	@static_assets path /assets/*.png /assets/*.jpg /assets/*.jpeg /assets/*.webp /assets/*.svg /assets/*.ttf /assets/*.woff /assets/*.woff2
-	header @static_assets Cache-Control "public, max-age=86400, must-revalidate"
-
-	@docs_immutable path /docs/_astro/*
-	header @docs_immutable Cache-Control "public, max-age=31536000, immutable"
-
-	@docs_runtime path /docs/assets/* /docs/pagefind/*
-	header @docs_runtime Cache-Control "public, max-age=86400, must-revalidate"
-
-	@site_documents {
-		path / /index.html /features/* /docs/* /downloads/* /roadmap/* /contact/* /privacy/* /404.html
-		not path /docs/_astro/* /docs/assets/* /docs/pagefind/*
-	}
-	header @site_documents Cache-Control "no-cache"
+	@search_assets path /pagefind/* /docs/pagefind/*
+	header @search_assets Cache-Control "public, max-age=86400, must-revalidate"
 
 	handle {
-		try_files {path} {path}/index.html
-		file_server
-	}
-
-	handle_errors {
-		import security_headers
-
-		@docs_not_found {
-			expression {http.error.status_code} == 404
-			path /docs/*
-		}
-		handle @docs_not_found {
-			rewrite * /docs/404.html
-			file_server
-		}
-		handle {
-			@not_found expression {http.error.status_code} == 404
-			rewrite @not_found /404.html
-			file_server
+		reverse_proxy 127.0.0.1:4321 {
+			health_uri /health/
+			health_status 2xx
 		}
 	}
 

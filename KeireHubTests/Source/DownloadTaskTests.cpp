@@ -398,6 +398,8 @@ TEST_CASE("Hub worker request status result and control journals round trip atom
                                               .TotalBytes = request.Download.SizeBytes,
                                               .BytesPerSecond = 200,
                                               .CurrentPackage = request.Download.PackageId,
+                                              .StepsCompleted = 2,
+                                              .TotalSteps = 4,
                                               .Phase = "Downloading"},
                                  .WorkerProcessId = 42,
                                  .UpdatedUnixSeconds = 100};
@@ -406,6 +408,8 @@ TEST_CASE("Hub worker request status result and control journals round trip atom
     REQUIRE(decodedStatus);
     CHECK(decodedStatus.Value().WorkerProcessId == 42);
     CHECK(decodedStatus.Value().Progress.BytesTransferred == 4);
+    CHECK(decodedStatus.Value().Progress.StepsCompleted == 2);
+    CHECK(decodedStatus.Value().Progress.TotalSteps == 4);
 
     REQUIRE(WriteHubWorkerControl(operation / "control.json", DownloadControl::Pause));
     auto control = ReadHubWorkerControl(operation / "control.json");

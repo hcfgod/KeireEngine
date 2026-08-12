@@ -41,14 +41,29 @@ if command -v node >/dev/null 2>&1; then
   node "$ROOT/Scripts/Tests/test-website-contact-function.mjs"
   node "$ROOT/Scripts/Tests/test-website-docs.mjs"
 fi
-assert_true grep -Fq 'cp -R -- "$service_root/Website"' \
+python3 "$ROOT/Scripts/Tests/test-marketplace-migrations.py"
+python3 "$ROOT/Scripts/Tests/test-marketplace-edge.py"
+python3 "$ROOT/Scripts/Tests/test-marketplace-package-fixture.py"
+assert_true grep -Fq 'mkdir -p -- "$package_directory/Web"' \
   "$ROOT/Services/KeireDistributionService/scripts/package-service.sh"
 assert_true grep -Fq '"$npm_command" --prefix "$documentation_site" run build' \
   "$ROOT/Services/KeireDistributionService/scripts/package-service.sh"
-assert_true grep -Fq 'cp -R -- "$documentation_output/." "$package_directory/Website/docs/"' \
+assert_true grep -Fq 'cp -R -- "$documentation_output" "$package_directory/Web/"' \
+  "$ROOT/Services/KeireDistributionService/scripts/package-service.sh"
+assert_true grep -Fq 'install-web-runtime.sh' \
   "$ROOT/Services/KeireDistributionService/scripts/package-service.sh"
 assert_true grep -Fq 'node_modules/beautiful-mermaid/LICENSE' \
   "$ROOT/Services/KeireDistributionService/scripts/package-service.sh"
+assert_true grep -Fq 'KeireMarketplaceValidator/KeireMarketplaceValidator.csproj' \
+  "$ROOT/Services/KeireDistributionService/scripts/package-service.sh"
+assert_true grep -Fq 'KeireMarketplaceValidatorBroker/KeireMarketplaceValidatorBroker.csproj' \
+  "$ROOT/Services/KeireDistributionService/scripts/package-service.sh"
+assert_true grep -Fq 'keire-marketplace-validator.service.example' \
+  "$ROOT/Services/KeireDistributionService/scripts/package-service.sh"
+assert_true grep -Fq 'PrivateNetwork=true' \
+  "$ROOT/Services/KeireDistributionService/Deployment/keire-marketplace-validator.service.example"
+assert_true grep -Fq 'RestrictAddressFamilies=AF_UNIX' \
+  "$ROOT/Services/KeireDistributionService/Deployment/keire-marketplace-validator.service.example"
 for script in monitor-distribution backup-distribution backup-distribution-rclone restore-distribution \
   restore-distribution-rclone; do
   assert_true grep -Fq "$script.sh" "$ROOT/Services/KeireDistributionService/scripts/package-service.sh"
@@ -615,6 +630,8 @@ assert_true grep -q -- '--hub-instance-secondary' "$ROOT/KeireHubTests/Source/Ma
 assert_true grep -q 'class KEIRE_API UiWorkspace' "$ROOT/KeireCore/Include/Keire/UiWorkspace.h"
 assert_true grep -q 'BuildFactoryLayout' "$ROOT/KeireClient/Source/ClientApplication.cpp"
 assert_true grep -q -- '--worker-timeout-seconds' "$ROOT/AssetTool/Source/Main.cpp"
+assert_true grep -q -- 'extract-asset-package' "$ROOT/AssetTool/Source/Main.cpp"
+assert_true grep -q -- 'ExtractAssetPackageToStaging' "$ROOT/AssetTool/Source/Main.cpp"
 for exported_type in \
   Application ApplicationCommandLineArguments CommandLineError EventView EventSubscription EventBus Layer LayerStack \
   LoggerHandle Log Time UiError UiScope UiWindowScope UiChildScope UiMenuBarScope UiMenuScope UiTabBarScope \

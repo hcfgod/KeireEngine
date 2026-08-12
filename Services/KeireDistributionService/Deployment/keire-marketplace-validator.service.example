@@ -1,0 +1,45 @@
+[Unit]
+Description=Kéire Marketplace Offline Package Validator
+After=clamav-daemon.service
+Requires=clamav-daemon.service
+
+[Service]
+Type=simple
+User=keire-validator
+Group=keire-validator
+SupplementaryGroups=keire-validator-exchange clamav
+UMask=0007
+Environment=KEIRE_VALIDATOR_NETWORK_ISOLATED=1
+ExecStart=/opt/keire-marketplace-validator/KeireMarketplaceValidator watch --exchange-root /var/lib/keire-marketplace-validator/exchange --work-root /var/lib/keire-marketplace-validator/work --asset-tool /opt/keire-marketplace-validator/KeireAssetTool --malware-scanner /usr/bin/clamdscan --dotnet /opt/keire-marketplace-validator/dotnet/dotnet --managed-api /opt/keire-marketplace-validator/Managed/Keire.Managed.dll
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+NoNewPrivileges=true
+PrivateNetwork=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+ReadWritePaths=/var/lib/keire-marketplace-validator/exchange /var/lib/keire-marketplace-validator/work
+RuntimeDirectory=keire-marketplace-validator
+StateDirectory=keire-marketplace-validator
+TasksMax=256
+MemoryMax=8G
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target

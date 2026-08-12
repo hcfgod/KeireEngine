@@ -1,0 +1,89 @@
+---
+import PlatformLayout from "../../../layouts/PlatformLayout.astro";
+export const prerender = false;
+if (!Astro.locals.user) return Astro.redirect("/account/sign-in/?next=/account/mfa/", 303);
+const result = await Astro.locals.supabase!.auth.mfa.listFactors();
+const factors = result.data?.all ?? [];
+const verified = factors.filter((factor) => factor.status === "verified");
+---
+<PlatformLayout title="Multi-factor authentication" description="Protect your Kéire account with an authenticator app." robots="noindex">
+    <section class="platform-shell account-shell">
+        <div class="account-shell__intro">
+            <p class="eyebrow">Account security</p>
+            <h1 class="display-title">Secure your account. <span>Protect every release.</span></h1>
+            <p class="lead">Authenticator-app verification is required for publishers, moderators, and administrators. It is strongly recommended for every Kéire account.</p>
+        </div>
+        <div class="auth-card auth-card--security">
+            <div class="auth-card__heading">
+                <div>
+                    <p class="auth-card__kicker">Current browser session</p>
+                    <h2>Authenticator factors</h2>
+                </div>
+                <span class={`status-badge ${Astro.locals.assurance.currentLevel === "aal2" ? "status-badge--ready" : ""}`}>{Astro.locals.assurance.currentLevel ?? "AAL unavailable"}</span>
+            </div>
+            {verified.length ? <div class="factor-list" role="list" aria-label="Verified authenticators">
+                {verified.map((factor) => <article class="factor-list__item" role="listitem">
+                    <div>
+                        <strong>{factor.friendly_name ?? "Authenticator app"}</strong>
+                        <span class="factor-list__status"><i aria-hidden="true"></i>Verified</span>
+                    </div>
+                    <button class="button button--quiet button--small" type="button" data-remove-factor={factor.id}>Remove</button>
+                </article>)}
+                {Astro.locals.assurance.currentLevel !== "aal2" && <a class="button button--secondary" href="/account/mfa/challenge/?next=/account/mfa/">Verify this session</a>}
+            </div> : <p class="notice-panel">No verified authenticator is enrolled.</p>}
+            <div class="actions auth-card__actions">
+                <button class="button" type="button" data-start-enrollment>Add authenticator app</button>
+                <a class="button button--quiet" href="/account/">Back to account</a>
+            </div>
+            <section class="enrollment-panel" data-enrollment hidden>
+                <h3>Scan the QR code</h3>
+                <p>Use any standards-compatible authenticator app, then enter its current six-digit code.</p>
+                <img class="mfa-qr" data-mfa-qr width="220" height="220" alt="Authenticator enrollment QR code" />
+                <p class="fine-print">Manual setup secret</p>
+                <code class="secret-value" data-mfa-secret></code>
+                <form class="form-stack" data-verify-enrollment>
+                    <input type="hidden" name="factorId" />
+                    <label class="field"><span>Verification code</span><input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required /></label>
+                    <div class="actions"><button class="button" type="submit">Verify and enable</button><button class="button button--quiet" type="button" data-cancel-enrollment>Cancel</button></div>
+                </form>
+            </section>
+            <p class="form-message" aria-live="polite" data-mfa-message></p>
+        </div>
+    </section>
+</PlatformLayout>
+<script>
+    const message = document.querySelector("[data-mfa-message]");
+    const enrollment = document.querySelector("[data-enrollment]");
+    const showMessage = (text, kind = "") => { if (message instanceof HTMLElement) { message.textContent = text; message.dataset.kind = kind; } };
+    document.querySelector("[data-start-enrollment]")?.addEventListener("click", async (event) => {
+        const button = event.currentTarget;
+        if (button instanceof HTMLButtonElement) button.disabled = true;
+        showMessage("Creating a protected enrollment…");
+        const response = await fetch("/account/mfa/enroll/", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ friendlyName: "Kéire authenticator" }) });
+        const result = await response.json();
+        if (!response.ok) {
+            if (button instanceof HTMLButtonElement) button.disabled = false;
+            return showMessage(result.error?.message ?? "Enrollment could not start.", "error");
+        }
+        if (enrollment instanceof HTMLElement) enrollment.hidden = false;
+        const qr = document.querySelector("[data-mfa-qr]"); if (qr instanceof HTMLImageElement) qr.src = result.data.qrCode;
+        const secret = document.querySelector("[data-mfa-secret]"); if (secret instanceof HTMLElement) secret.textContent = result.data.secret;
+        const factor = document.querySelector('[data-verify-enrollment] input[name="factorId"]'); if (factor instanceof HTMLInputElement) factor.value = result.data.factorId;
+        showMessage("Scan the code and verify the first token.");
+    });
+    document.querySelector("[data-verify-enrollment]")?.addEventListener("submit", async (event) => {
+        event.preventDefault(); const form = event.currentTarget; if (!(form instanceof HTMLFormElement)) return;
+        const values = new FormData(form); const response = await fetch("/account/mfa/verify/", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ factorId: values.get("factorId"), code: values.get("code") }) });
+        const result = await response.json(); if (!response.ok) return showMessage(result.error?.message ?? "The code was not accepted.", "error");
+        showMessage("Authenticator enabled. Reloading your protected session…", "success"); location.reload();
+    });
+    document.querySelector("[data-cancel-enrollment]")?.addEventListener("click", async () => {
+        const factor = document.querySelector('[data-verify-enrollment] input[name="factorId"]'); if (!(factor instanceof HTMLInputElement) || !factor.value) return;
+        await fetch("/account/mfa/remove/", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ factorId: factor.value }) }); location.reload();
+    });
+    document.querySelectorAll("[data-remove-factor]").forEach((button) => button.addEventListener("click", async () => {
+        if (!(button instanceof HTMLButtonElement)) return; button.disabled = true;
+        const response = await fetch("/account/mfa/remove/", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ factorId: button.dataset.removeFactor }) });
+        const result = await response.json(); if (!response.ok) { button.disabled = false; return showMessage(result.error?.message ?? "The factor could not be removed.", "error"); } location.reload();
+    }));
+</script>

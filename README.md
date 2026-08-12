@@ -44,7 +44,8 @@ Kéire already includes substantial, integrated engine and authoring foundations
 - Project identity, locking, templates, recent-project state, compatibility checks, and transactional upgrades.
 - Versioned scenes, entities, components, prefabs, undo/redo, hierarchy and Inspector editing, recovery, and Play Mode.
 - Stable asset identities, metadata sidecars, dependency tracking, deterministic imports, asynchronous runtime loading,
-  hot reload, cooked packs, and native player packaging.
+  hot reload, cooked packs, native player packaging, deterministic `.keireassetpackage` archives, transactional
+  project package resolution, selective asset imports, receipts, rollback, and recovery.
 - SDL3 multi-window and SDL_GPU rendering, Scene and Game views, cameras, picking, separate Shader and Material Graphs,
   Direct Materials, inherited and dynamic Material Instances, reusable material/shader functions and layers,
   Material Parameter Collections, tagged custom-shader materials, LODs,
@@ -211,6 +212,8 @@ Current authoring and runtime contracts include:
 | Static mesh | 5 | Earlier payloads remain readable; schema 5 preserves triangle-, line-, and point-list submeshes. |
 | VFX source | 4 | Graph and compatibility payloads are validated as related, distinct execution sources. |
 | Cooked runtime manifest | 4 | Older builds require a recook; newer unsupported schemas fail before partial startup. |
+| Asset package archive | 1 | `KEIRASPK1` archives are deterministic, bounded, inventoried, hashed, and signature-verifiable. |
+| Project package lock | 1 | Exact versions, hashes, dependency edges, sources, and signature identities publish atomically. |
 
 These numbers are implementation contracts, not marketing versions. The docs website is generated from the repository
 Markdown, and its source validation checks these values against the corresponding code so schema drift fails the build.
@@ -238,7 +241,8 @@ activation, ETags, conditional requests, and range requests. Public release cata
 completed the platform’s release-signing requirements. Development previews are labeled separately and do not weaken
 the signed stable catalog path.
 
-See [Desktop Player Builds](Docs/PlayerBuilds.md), [Package Archives](Docs/PackageArchives.md), and
+See [Asset Packages](Docs/AssetPackages.md), [Desktop Player Builds](Docs/PlayerBuilds.md),
+[Package Archives](Docs/PackageArchives.md), and
 [Testing and Release](Docs/TestingAndRelease.md) before producing or publishing an artifact.
 
 ## Repository Layout
@@ -270,15 +274,16 @@ documentation authorities.
 
 ## Documentation
 
-The [documentation library](Docs/README.md) contains 56 maintained guides grouped around real tasks:
+The [documentation library](Docs/README.md) contains 57 maintained guides grouped around real tasks:
 
 - [Getting Started](Docs/GettingStarted.md) and [Project Hub](Docs/ProjectHub.md)
 - [Architecture](Docs/Architecture.md), [Runtime Lifecycle](Docs/RuntimeLifecycle.md), and
   [ECS and Components](Docs/ECSAndComponents.md)
 - [Scene Authoring](Docs/SceneAuthoring.md), [Asset Browser](Docs/AssetBrowser.md), and
   [Undo and Redo](Docs/UndoRedo.md)
-- [Asset Pipeline](Docs/AssetPipeline.md), [Rendering](Docs/Rendering.md),
+- [Asset Pipeline](Docs/AssetPipeline.md), [Asset Packages](Docs/AssetPackages.md), [Rendering](Docs/Rendering.md),
   [Shaders and Materials](Docs/ShadersAndMaterials.md), and [VFX](Docs/Vfx.md)
+- [Marketplace Launch Runbook](Docs/MarketplaceLaunch.md)
 - [C# Scripting](Docs/Scripting/README.md), [Profiling](Docs/Profiling.md),
   [Performance Gates](Docs/PerformanceGates.md), and [Testing and Release](Docs/TestingAndRelease.md)
 

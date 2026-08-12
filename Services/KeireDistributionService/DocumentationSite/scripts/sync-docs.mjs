@@ -91,7 +91,7 @@ function extractDocument(source, sourcePath) {
     return { title, description, body: lines.join("\n").replace(/^\n+/, "") };
 }
 
-const sourceToSlug = new Map(allDocSources.map((sourcePath) => [sourcePath, sourcePathToSlug(sourcePath)]));
+const sourceToSlug = new Map(allDocSources.map((sourcePath) => [sourcePath, `docs/${sourcePathToSlug(sourcePath)}`]));
 
 function rewriteTarget(target, sourcePath) {
     const trimmed = target.trim();
@@ -109,7 +109,7 @@ function rewriteTarget(target, sourcePath) {
     const resolvedFromDocs = path.posix.normalize(path.posix.join(sourceDirectory, decodedPath));
 
     if (decodedPath.toLowerCase().endsWith(".md") && sourceToSlug.has(resolvedFromDocs)) {
-        return `/docs/${sourceToSlug.get(resolvedFromDocs)}/${fragment}${title}`;
+        return `/${sourceToSlug.get(resolvedFromDocs)}/${fragment}${title}`;
     }
 
     const repositoryRelative = path.posix.normalize(path.posix.join("Docs", sourceDirectory, decodedPath));
@@ -216,12 +216,22 @@ async function main() {
     await mkdir(destinationRoot, { recursive: true });
     await mkdir(path.dirname(inventoryPath), { recursive: true });
     await mkdir(publicAssetRoot, { recursive: true });
-    for (const assetName of ["inter-variable.ttf", "keire.png"]) {
+    for (const assetName of ["inter-variable.ttf", "keire.png", "hero-cinematic.png"]) {
         await copyFile(
             path.join(siteRoot, "..", "Website", "assets", assetName),
             path.join(publicAssetRoot, assetName),
         );
     }
+    for (const assetName of ["downloads.js", "preview-downloads.json"]) {
+        await copyFile(
+            path.join(siteRoot, "..", "Website", "assets", assetName),
+            path.join(publicAssetRoot, assetName),
+        );
+    }
+    await copyFile(
+        path.join(siteRoot, "..", "Website", "site.webmanifest"),
+        path.join(siteRoot, "public", "site.webmanifest"),
+    );
 
     const inventory = [];
     let diagramCount = 0;
@@ -233,7 +243,7 @@ async function main() {
             const { title, description, body } = extractDocument(source, sourcePath);
             const rendered = renderMermaidDiagrams(body, title, sourcePath);
             diagramCount += rendered.diagramCount;
-            const slug = sourcePathToSlug(sourcePath);
+            const slug = `docs/${sourcePathToSlug(sourcePath)}`;
             const destination = destinationFor(sourcePath);
             await mkdir(path.dirname(destination), { recursive: true });
             const frontmatter = [

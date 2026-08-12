@@ -1,0 +1,12 @@
+---
+import PlatformLayout from "../../layouts/PlatformLayout.astro";
+export const prerender = true;
+---
+<PlatformLayout title="Showcase" description="See the Kéire Sandbox, shader and material graphs, VFX, gameplay, and production sample projects.">
+    <section class="platform-section"><div class="platform-shell"><div class="section-heading"><div><p class="eyebrow">Built with current systems</p><h1>Samples that explain the pipeline.</h1></div><p>The shipped Sandbox is both a visual test scene and an honest reference project: basic assets first, advanced graphs and effects after the foundations are clear.</p></div><div class="editorial-grid">
+        <article class="editorial-panel"><span class="editorial-panel__index">S</span><h3>Kéire Sandbox</h3><p>A complete project with organized scenes, prefabs, scripts, input, audio, materials, shaders, VFX, and reproducible validation content.</p></article>
+        <article class="editorial-panel"><span class="editorial-panel__index">G</span><h3>Shader + Material Lab</h3><p>Custom shader graphs define reusable shading interfaces; material graphs bind textures, values, functions, and instances to them.</p></article>
+        <article class="editorial-panel"><span class="editorial-panel__index">V</span><h3>VFX Starter Effects</h3><p>CPU and GPU effects demonstrate spawn contexts, events, attributes, outputs, bounds, diagnostics, and performance budgets.</p></article>
+        <article class="editorial-panel"><span class="editorial-panel__index">C#</span><h3>Gameplay foundations</h3><p>Small managed behaviours show lifecycle, serialized fields, component access, input, events, reloading, and player builds.</p></article>
+    </div></div></section>
+</PlatformLayout>

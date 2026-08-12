@@ -1,0 +1,11 @@
+---
+import PolicyPage from "../../../components/PolicyPage.astro";
+export const prerender = true;
+const sections = [
+    { title: "Pre-1.0 software", paragraphs: ["Kéire is under active development. Features, formats, compatibility, and availability may change. Production-readiness claims are limited to the documented validation evidence for a specific release."] },
+    { title: "Accounts and security", paragraphs: ["Users are responsible for their credentials, linked identities, devices, and organization membership actions. Publisher, moderator, and administrator access requires multi-factor authentication before public launch."] },
+    { title: "Content and licenses", paragraphs: ["Engine source is provided under its repository license. Marketplace products use their selected SPDX, Creative Commons, or approved custom license; claiming a product stores the exact accepted revision."] },
+    { title: "Availability", paragraphs: ["Kéire may block malicious artifacts, security-revoked versions, abusive accounts, or unsafe access. Delisted products may remain available to entitled owners unless a security revocation requires blocking them."] },
+];
+---
+<PolicyPage title="Platform terms" description="Draft terms for Kéire accounts, services, downloads, and pre-1.0 software." sections={sections} />

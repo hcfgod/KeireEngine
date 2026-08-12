@@ -18,3 +18,11 @@ if (-not (Test-Path -LiteralPath $dotnet)) {
 if ($LASTEXITCODE -ne 0) {
     throw "Distribution service tests failed with exit code $LASTEXITCODE."
 }
+
+& $dotnet run `
+    --project (Join-Path $root "Services\KeireDistributionService\tests\KeireMarketplaceValidator.Tests\KeireMarketplaceValidator.Tests.csproj") `
+    --configuration $Configuration `
+    --nologo
+if ($LASTEXITCODE -ne 0) {
+    throw "Marketplace validator tests failed with exit code $LASTEXITCODE."
+}

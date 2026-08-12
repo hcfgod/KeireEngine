@@ -1,0 +1,52 @@
+---
+import PlatformFooter from "../components/PlatformFooter.astro";
+import PlatformHeader from "../components/PlatformHeader.astro";
+import "../styles/platform.css";
+
+interface Props {
+    title: string;
+    description: string;
+    active?: "product" | "marketplace" | "downloads" | "docs" | "community";
+    image?: string;
+    robots?: string;
+    structuredData?: Record<string, unknown> | Record<string, unknown>[];
+}
+
+const {
+    title,
+    description,
+    active,
+    image = "/assets/hero-cinematic.png",
+    robots = "index,follow",
+    structuredData,
+} = Astro.props;
+const canonical = new URL(Astro.url.pathname, Astro.site);
+const fullTitle = title === "Kéire Engine" ? title : `${title} — Kéire Engine`;
+---
+
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="theme-color" content="#07101e" />
+        <meta name="description" content={description} />
+        <meta name="robots" content={robots} />
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content={fullTitle} />
+        <meta property="og:description" content={description} />
+        <meta property="og:image" content={new URL(image, Astro.site)} />
+        <meta property="og:url" content={canonical} />
+        <meta name="twitter:card" content="summary_large_image" />
+        <link rel="canonical" href={canonical} />
+        <link rel="icon" href="/assets/keire.png" />
+        <link rel="manifest" href="/site.webmanifest" />
+        <title>{fullTitle}</title>
+        {structuredData && <script type="application/ld+json" set:html={JSON.stringify(structuredData)} />}
+    </head>
+    <body>
+        <PlatformHeader active={active} signedIn={Boolean(Astro.locals.user)} />
+        <main id="main"><slot /></main>
+        <PlatformFooter />
+    </body>
+</html>

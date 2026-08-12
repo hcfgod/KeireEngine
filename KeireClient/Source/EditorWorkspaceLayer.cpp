@@ -18,6 +18,7 @@
 #include "KeireClient/Editor/MaterialGraphDocument.h"
 #include "KeireClient/Editor/MaterialGraphPanel.h"
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
+#include "KeireClient/Editor/PackageManagerPanel.h"
 #include "KeireClient/Editor/PlayerBuildService.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
 #include "KeireClient/Editor/PropertyDrawerRegistry.h"
@@ -382,6 +383,7 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
           *m_ProjectSettingsDocument, static_cast<KeireEditor::IProjectSettingsController&>(*this))),
       m_LightingPanel(
           std::make_unique<KeireEditor::LightingPanel>(static_cast<KeireEditor::ILightingPanelController&>(*this))),
+      m_PackageManagerPanel(std::make_unique<KeireEditor::PackageManagerPanel>()),
       m_PropertyDrawers(std::make_unique<KeireEditor::PropertyDrawerRegistry>()),
       m_ViewportAssetDropRouter(std::make_unique<KeireEditor::ViewportAssetDropRouter>()),
       m_PlayChangesPanel(std::make_unique<KeireEditor::ScenePlayChangesPanel>()),
@@ -700,6 +702,7 @@ void EditorWorkspaceLayer::OnAttach()
     m_InputDebugger = workspace.RegisterPanel({"editor.input-debugger", "Input Debugger", false});
     m_ProjectSettingsPanel->Attach(workspace);
     m_LightingPanel->Attach(workspace);
+    m_PackageManagerPanel->Attach(workspace);
     m_PrefabOverrides = workspace.RegisterPanel({"editor.prefab-overrides", "Prefab Overrides", false});
     m_BuildSettings = workspace.RegisterPanel({"editor.build-settings", "Build Settings", false});
     m_Profiler = workspace.RegisterPanel({"editor.profiler", "Profiler", false});
@@ -719,6 +722,8 @@ void EditorWorkspaceLayer::OnAttach()
         renderer->RequestGpuVfxPipelineWarmup();
     }
     m_SceneViewportPanel->Initialize(Owner().GetProject() ? Owner().GetProject()->Root() : std::filesystem::path{});
+    if (const auto project = Owner().GetProject())
+        m_PackageManagerPanel->Initialize(project->Root());
     LoadTheme(workspace, workspace.ActiveTheme());
     m_ConsolePanel->CaptureEngineLogs(Owner().GetTime().FrameCount(), m_Theme);
     if (!m_Smoke || m_InitializeProject)
@@ -872,6 +877,7 @@ void EditorWorkspaceLayer::OnAttach()
 void EditorWorkspaceLayer::OnDetach() noexcept
 {
     ShutdownPlayerBuild();
+    m_PackageManagerPanel->Shutdown();
     if (m_AssetOperations)
         m_AssetOperations->Shutdown();
     try
@@ -1358,6 +1364,7 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
         DrawInputDebugger(ui);
         m_ProjectSettingsPanel->Draw(ui, m_Theme);
         m_LightingPanel->Draw(ui, m_Theme);
+        m_PackageManagerPanel->Draw(ui, m_Theme);
     }
     {
         Keire::ProfileScope production(profiler, Keire::ProfileCategory::User, "Editor UI / Production");

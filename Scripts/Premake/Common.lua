@@ -123,7 +123,8 @@ function LinkKeireHubNativeHttp()
         links
         {
             "CFNetwork.framework",
-            "Foundation.framework"
+            "Foundation.framework",
+            "Security.framework"
         }
 
     filter {}

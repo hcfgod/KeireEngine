@@ -662,6 +662,22 @@ namespace
         return "Removing";
     }
 
+    [[nodiscard]] std::uint32_t RemovalStepsCompleted(const KeireHub::ManagedEditorRemovalPhase phase) noexcept
+    {
+        switch (phase)
+        {
+        case KeireHub::ManagedEditorRemovalPhase::Prepared:
+            return 1;
+        case KeireHub::ManagedEditorRemovalPhase::RootRenamed:
+            return 2;
+        case KeireHub::ManagedEditorRemovalPhase::Purging:
+            return 2;
+        case KeireHub::ManagedEditorRemovalPhase::RemovingAnchors:
+            return 3;
+        }
+        return 0;
+    }
+
     void ShutdownManagedBuildServers(const std::filesystem::path& root) noexcept
     {
 #if defined(_WIN32)
@@ -726,8 +742,11 @@ namespace
                                                         .PackageReceiptSha256 = removal.PackageReceiptSha256,
                                                         .MarkerNonce = removal.MarkerNonce,
                                                         .CurrentHealth = KeireHub::InstallationHealth::Healthy};
-        reporter.Publish(KeireHub::HubTaskState::Removing,
-                         {.CurrentPackage = removal.InstallationId, .Phase = "Authorizing removal"});
+        constexpr std::uint32_t TotalRemovalSteps = 4;
+        reporter.Publish(KeireHub::HubTaskState::Removing, {.CurrentPackage = removal.InstallationId,
+                                                            .StepsCompleted = 0,
+                                                            .TotalSteps = TotalRemovalSteps,
+                                                            .Phase = "Authorizing removal"});
         auto removed = KeireHub::RemoveManagedEditorInstallation(
             plan, request.TaskId,
             {.CancelBeforeCommit = [&]()
@@ -736,6 +755,8 @@ namespace
                  [&](const KeireHub::ManagedEditorRemovalPhase phase)
              {
                  reporter.Publish(KeireHub::HubTaskState::Removing, {.CurrentPackage = removal.InstallationId,
+                                                                     .StepsCompleted = RemovalStepsCompleted(phase),
+                                                                     .TotalSteps = TotalRemovalSteps,
                                                                      .Phase = std::string(RemovalPhase(phase))});
                  return !reporter.Failure();
              },
@@ -758,8 +779,10 @@ namespace
                                               removal.InstallationId, {}, true),
                                 {.CurrentPackage = removal.InstallationId, .Phase = "Removal interrupted"});
         }
-        reporter.Publish(KeireHub::HubTaskState::Completed,
-                         {.CurrentPackage = removal.InstallationId, .Phase = "Completed"});
+        reporter.Publish(KeireHub::HubTaskState::Completed, {.CurrentPackage = removal.InstallationId,
+                                                             .StepsCompleted = TotalRemovalSteps,
+                                                             .TotalSteps = TotalRemovalSteps,
+                                                             .Phase = "Completed"});
         const auto result =
             KeireHub::WriteHubWorkerResult(commandLine.Result, {.TaskId = request.TaskId,
                                                                 .Outcome = KeireHub::DownloadOutcome::Completed,

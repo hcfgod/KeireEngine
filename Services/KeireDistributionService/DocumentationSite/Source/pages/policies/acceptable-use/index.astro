@@ -1,0 +1,10 @@
+---
+import PolicyPage from "../../../components/PolicyPage.astro";
+export const prerender = true;
+const sections = [
+    { title: "Safe participation", paragraphs: ["Do not use Kéire services for malware, credential theft, harassment, fraud, impersonation, spam, unauthorized access, privacy violations, or infringement."] },
+    { title: "Package safety", paragraphs: ["Packages may not contain traversal paths, links, device files, undeclared payloads, decompression bombs, hidden executables, install scripts, private keys, or content designed to bypass validation."] },
+    { title: "Moderation", paragraphs: ["Reports are rate-limited and audited. Staff may request changes, hide reviews, reject submissions, delist content, suspend access, or revoke unsafe versions. Appeals and copyright workflows require finalized operational policy before launch."] },
+];
+---
+<PolicyPage title="Acceptable use" description="Draft safety and participation rules for Kéire accounts, community, and Marketplace packages." sections={sections} />

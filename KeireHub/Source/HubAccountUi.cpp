@@ -7,6 +7,108 @@
 
 namespace KeireHub
 {
+    namespace
+    {
+        void DrawAccountMessage(Keire::UiFrame& ui, const HubDesignTokens& tokens, const Keire::UiColor color,
+                                const std::string_view eyebrow, const std::string_view message)
+        {
+            [[maybe_unused]] const auto background =
+                ui.PushStyleColor(Keire::UiStyleColorRole::ChildBackground, tokens.Elevated);
+            if (auto notice = ui.BeginChild("AccountMessage", {0.0F, 72.0F}, true); notice)
+            {
+                ui.TextColored(color, eyebrow);
+                ui.TextColoredWrapped(tokens.SecondaryText, message);
+            }
+        }
+
+        void DrawBrowserSignInCard(Keire::UiFrame& ui, const HubDesignTokens& tokens,
+                                   const HubProductSnapshot& snapshot, HubUiCommand& command)
+        {
+            [[maybe_unused]] const auto background =
+                ui.PushStyleColor(Keire::UiStyleColorRole::ChildBackground, tokens.Elevated);
+            const auto height = snapshot.AccountBrowserSignInPending ? 224.0F : 190.0F;
+            if (auto browser = ui.BeginChild("BrowserAccountSignIn", {0.0F, height}, true); browser)
+            {
+                ui.TextColored(snapshot.AccountBrowserSignInPending ? tokens.Success : tokens.Accent,
+                               snapshot.AccountBrowserSignInPending ? "BROWSER CHECKPOINT" : "RECOMMENDED");
+                {
+                    [[maybe_unused]] const auto heading = ui.PushFont(Keire::UiFontRole::Heading);
+                    ui.TextColored(tokens.PrimaryText, snapshot.AccountBrowserSignInPending
+                                                           ? "Finish in your browser"
+                                                           : "Continue securely in browser");
+                }
+                ui.TextColoredWrapped(
+                    tokens.SecondaryText,
+                    snapshot.AccountBrowserSignInPending
+                        ? "Approve access on the Kéire website, then choose Open Kéire Hub. The Hub will validate the "
+                          "state and exchange the single-use code itself."
+                        : "Sign in with GitHub or your Kéire account on the website. Your browser password and cookies "
+                          "never enter the Hub.");
+                ui.Spacing();
+
+                if (snapshot.AccountBrowserSignInPending)
+                {
+                    ui.TextColored(tokens.Success, "1  Secure authorization request created");
+                    ui.TextColored(tokens.SecondaryText, "2  Approve access in the browser");
+                    ui.TextColored(tokens.SecondaryText, "3  Choose Open Kéire Hub on the return page");
+                    ui.Spacing();
+                    if (HubSecondaryButton(ui, tokens, "Cancel browser sign-in", {174.0F, 36.0F}))
+                        command.Type = HubUiCommandType::AccountCancelBrowserSignIn;
+                }
+                else if (auto disabled = ui.BeginDisabled(snapshot.AccountBusy); disabled)
+                {
+                    if (HubPrimaryButton(ui, tokens,
+                                         snapshot.AccountBusy ? "Preparing secure sign-in..." : "Continue in browser",
+                                         {ui.ContentAvailable().Width, 44.0F}))
+                    {
+                        command.Type = HubUiCommandType::AccountBeginBrowserSignIn;
+                    }
+                    ui.TextColored(tokens.MutedText, "PKCE protected  ·  Independent session  ·  Remotely revocable");
+                }
+            }
+        }
+
+        void DrawEmailFallback(Keire::UiFrame& ui, const HubDesignTokens& tokens, const HubProductSnapshot& snapshot,
+                               std::string& email, std::string& password, HubUiCommand& command)
+        {
+            if (auto fallback = ui.BeginTreeNode("Use email and password instead"); fallback)
+            {
+                ui.TextColoredWrapped(tokens.MutedText,
+                                      "Fallback access for staged environments and browser troubleshooting.");
+                ui.Spacing();
+                ui.TextColored(tokens.SecondaryText, "Email address");
+                ui.SetNextItemWidth(ui.ContentAvailable().Width);
+                (void)ui.InputText("##AccountEmail", email);
+                ui.TextColored(tokens.SecondaryText, "Password");
+                ui.SetNextItemWidth(ui.ContentAvailable().Width);
+                (void)ui.InputPassword("##AccountPassword", password);
+                if (snapshot.AccountConfirmationRequired)
+                {
+                    ui.TextColoredWrapped(tokens.Warning,
+                                          "Email confirmation is required before this account can sign in.");
+                }
+                ui.Spacing();
+                if (auto disabled = ui.BeginDisabled(snapshot.AccountBusy || !snapshot.AccountConfigured); disabled)
+                {
+                    const auto issueCommand = [&](const HubUiCommandType type)
+                    {
+                        command = {.Type = type, .AccountEmail = email, .AccountPassword = password};
+                        std::ranges::fill(password, '\0');
+                        password.clear();
+                    };
+                    if (HubPrimaryButton(ui, tokens, snapshot.AccountBusy ? "Signing in..." : "Sign in",
+                                         {120.0F, 38.0F}))
+                    {
+                        issueCommand(HubUiCommandType::AccountSignIn);
+                    }
+                    ui.SameLine();
+                    if (HubSecondaryButton(ui, tokens, "Create account", {142.0F, 38.0F}))
+                        issueCommand(HubUiCommandType::AccountSignUp);
+                }
+            }
+        }
+    } // namespace
+
     void HubProductUi::DrawAccountDialog(Keire::UiFrame& ui, const HubProductSnapshot& snapshot, HubUiCommand& command)
     {
         if (!snapshot.AccountSignedIn)
@@ -18,39 +120,30 @@ namespace KeireHub
                 m_AccountEmail = snapshot.AccountEmail;
             ui.OpenPopup("Kéire Account");
         }
-        PrepareHubModal(ui, snapshot.AccountSignedIn ? Keire::UiSize{560.0F, 410.0F} : Keire::UiSize{560.0F, 480.0F});
+
+        const auto modalSize = snapshot.AccountSignedIn               ? Keire::UiSize{620.0F, 490.0F}
+                               : snapshot.AccountBrowserSignInPending ? Keire::UiSize{640.0F, 570.0F}
+                                                                      : Keire::UiSize{640.0F, 680.0F};
+        PrepareHubModal(ui, modalSize);
         HubModalStyleScope modalStyle(ui, m_Tokens);
         auto dialog = ui.BeginPopupModal("Kéire Account", nullptr, HubModalWindowOptions(), false);
         if (!dialog)
             return;
 
-        DrawHubModalHeader(ui, m_Tokens, snapshot.AccountSignedIn ? "Your Kéire profile" : "Sign in to Kéire",
+        DrawHubModalHeader(ui, m_Tokens, snapshot.AccountSignedIn ? "Your Kéire profile" : "Connect your Kéire account",
                            snapshot.AccountSignedIn
-                               ? "Manage the profile used by this Hub. Projects and installs remain local."
-                               : "Use your Kéire account across Hub sessions. An account is optional.",
-                           "KÉIRE ACCOUNT");
-
-        const auto statusColor = !snapshot.AccountConfigured            ? m_Tokens.Warning
-                                 : snapshot.AccountConfirmationRequired ? m_Tokens.Warning
-                                 : snapshot.AccountSignedIn             ? m_Tokens.Success
-                                                                        : m_Tokens.Accent;
-        [[maybe_unused]] const auto statusBackground =
-            ui.PushStyleColor(Keire::UiStyleColorRole::ChildBackground, m_Tokens.Elevated);
-        if (auto status = ui.BeginChild("AccountStatus", {0.0F, 68.0F}, true); status)
-        {
-            ui.TextColored(statusColor, snapshot.AccountSignedIn ? "Signed in" : "Account status");
-            ui.TextColoredWrapped(m_Tokens.SecondaryText,
-                                  snapshot.AccountMessage.empty()
-                                      ? "Authentication is ready. Your editor installations are never account-locked."
-                                      : snapshot.AccountMessage);
-        }
-        ui.Spacing();
+                               ? "Manage the identity used by this Hub. Projects and editor installations remain local."
+                               : "Use one identity for your profile, library, organizations, and publisher access.",
+                           "IDENTITY & ACCESS");
 
         if (!snapshot.AccountConfigured)
         {
-            ui.TextColoredWrapped(m_Tokens.Warning,
-                                  "Accounts are unavailable in this Hub package. Projects and editor installs "
-                                  "continue to work without an account.");
+            DrawAccountMessage(
+                ui, m_Tokens, m_Tokens.Warning, "ACCOUNT SERVICE UNAVAILABLE",
+                snapshot.AccountMessage.empty()
+                    ? "Accounts are unavailable in this Hub package. Local projects and editors continue "
+                      "to work normally."
+                    : snapshot.AccountMessage);
         }
         else if (snapshot.AccountSignedIn)
         {
@@ -60,8 +153,20 @@ namespace KeireHub
                 m_AccountDisplayName = snapshot.AccountDisplayName;
                 m_AccountProfileSynchronized = true;
             }
-            ui.TextColored(m_Tokens.MutedText, "EMAIL");
-            ui.TextColored(m_Tokens.PrimaryText, snapshot.AccountEmail);
+
+            {
+                [[maybe_unused]] const auto background =
+                    ui.PushStyleColor(Keire::UiStyleColorRole::ChildBackground, m_Tokens.Elevated);
+                if (auto identity = ui.BeginChild("SignedInIdentity", {0.0F, 96.0F}, true); identity)
+                {
+                    ui.TextColored(m_Tokens.Success, "SIGNED IN");
+                    {
+                        [[maybe_unused]] const auto heading = ui.PushFont(Keire::UiFontRole::Heading);
+                        ui.TextColored(m_Tokens.PrimaryText, snapshot.AccountEmail);
+                    }
+                    ui.TextColored(m_Tokens.MutedText, "Independent, revocable Kéire Hub session");
+                }
+            }
             ui.Spacing();
             ui.TextColored(m_Tokens.SecondaryText, "Display name");
             ui.SetNextItemWidth(ui.ContentAvailable().Width);
@@ -69,8 +174,8 @@ namespace KeireHub
             if (!snapshot.AccountPersistentSessionAvailable)
             {
                 ui.TextColoredWrapped(m_Tokens.Warning,
-                                      "Secure session persistence is unavailable on this platform. You will need "
-                                      "to sign in again after restarting the Hub.");
+                                      "Secure session persistence is unavailable on this platform. You will need to "
+                                      "sign in again after restarting the Hub.");
             }
             ui.Spacing();
             if (auto disabled = ui.BeginDisabled(snapshot.AccountBusy); disabled)
@@ -88,35 +193,36 @@ namespace KeireHub
         }
         else
         {
-            ui.TextColored(m_Tokens.SecondaryText, "Email address");
-            ui.SetNextItemWidth(ui.ContentAvailable().Width);
-            (void)ui.InputText("##AccountEmail", m_AccountEmail);
-            ui.TextColored(m_Tokens.SecondaryText, "Password");
-            ui.SetNextItemWidth(ui.ContentAvailable().Width);
-            (void)ui.InputPassword("##AccountPassword", m_AccountPassword);
-            if (snapshot.AccountConfirmationRequired)
+            if (snapshot.AccountHasError || snapshot.AccountConfirmationRequired)
             {
-                ui.TextColoredWrapped(m_Tokens.Warning,
-                                      "Email confirmation is required before this account can sign in.");
+                DrawAccountMessage(ui, m_Tokens, m_Tokens.Warning,
+                                   snapshot.AccountHasError ? "SIGN-IN NEEDS ATTENTION" : "CONFIRM YOUR EMAIL",
+                                   snapshot.AccountMessage);
+                ui.Spacing();
             }
-            ui.Spacing();
-            if (auto disabled = ui.BeginDisabled(snapshot.AccountBusy || !snapshot.AccountConfigured); disabled)
+
+            if (snapshot.AccountBrowserSignInAvailable)
             {
-                const auto issueCommand = [&](const HubUiCommandType type)
-                {
-                    command = {.Type = type, .AccountEmail = m_AccountEmail, .AccountPassword = m_AccountPassword};
-                    std::ranges::fill(m_AccountPassword, '\0');
-                    m_AccountPassword.clear();
-                };
-                if (HubPrimaryButton(ui, m_Tokens, snapshot.AccountBusy ? "Signing in..." : "Sign in", {120.0F, 38.0F}))
-                    issueCommand(HubUiCommandType::AccountSignIn);
-                ui.SameLine();
-                if (HubSecondaryButton(ui, m_Tokens, "Create account", {142.0F, 38.0F}))
-                    issueCommand(HubUiCommandType::AccountSignUp);
+                DrawBrowserSignInCard(ui, m_Tokens, snapshot, command);
+            }
+            else
+            {
+                DrawAccountMessage(ui, m_Tokens, m_Tokens.Warning, "BROWSER SIGN-IN UNAVAILABLE",
+                                   "This Hub package does not include the browser authentication adapter. Use the "
+                                   "email fallback or install a current Hub package.");
+            }
+
+            if (!snapshot.AccountBrowserSignInPending)
+            {
+                ui.Spacing();
+                DrawEmailFallback(ui, m_Tokens, snapshot, m_AccountEmail, m_AccountPassword, command);
             }
         }
+
         ui.Spacing();
         ui.Separator();
+        ui.TextColored(m_Tokens.MutedText,
+                       "Signing in is optional. Local project and editor access is never account-locked.");
         if (HubSecondaryButton(ui, m_Tokens, "Close", {88.0F, 36.0F}))
             ui.CloseCurrentPopup();
     }

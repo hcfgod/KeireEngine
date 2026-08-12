@@ -3,11 +3,11 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const siteRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const pagefindRoot = path.join(siteRoot, "dist", "pagefind");
+const pagefindRoot = path.join(siteRoot, "dist", "client", "pagefind");
 const moduleUrl = pathToFileURL(path.join(pagefindRoot, "pagefind.js"));
 const remoteBaseUrl = process.env.KEIRE_DOCS_BASE_URL?.replace(/\/$/, "");
 const pagefindBaseUrl = remoteBaseUrl
-    ? `${remoteBaseUrl}/docs/pagefind/`
+    ? `${remoteBaseUrl}/pagefind/`
     : pathToFileURL(`${pagefindRoot}${path.sep}`).href;
 const nativeFetch = globalThis.fetch;
 
@@ -32,7 +32,7 @@ try {
     const pagefind = await import(`${moduleUrl.href}?validation=1`);
     const search = pagefind.createInstance({
         basePath: pagefindBaseUrl,
-        baseUrl: "/docs",
+        baseUrl: "/",
         language: "en",
         noWorker: true,
     });

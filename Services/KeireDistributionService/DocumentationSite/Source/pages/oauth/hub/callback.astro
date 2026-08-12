@@ -1,0 +1,88 @@
+---
+import PlatformLayout from "../../../layouts/PlatformLayout.astro";
+
+export const prerender = false;
+const code = Astro.url.searchParams.get("code") ?? "";
+const state = Astro.url.searchParams.get("state") ?? "";
+const oauthError = Astro.url.searchParams.get("error") ?? "";
+const errorDescription = (Astro.url.searchParams.get("error_description") ?? "Authorization was denied.").slice(0, 300);
+const validCode = /^[\x21-\x7e]{16,2048}$/.test(code);
+const validState = /^[A-Za-z0-9_-]{32,128}$/.test(state);
+const validError = oauthError && /^[A-Za-z0-9_.-]{1,64}$/.test(oauthError);
+const parameters = new URLSearchParams();
+if (validCode && validState) { parameters.set("code", code); parameters.set("state", state); }
+else if (validError && validState) { parameters.set("error", oauthError); parameters.set("state", state); }
+const hubUrl = parameters.size ? `keirehub://oauth/callback?${parameters.toString()}` : "";
+const success = Boolean(validCode && validState);
+---
+<PlatformLayout title={success ? "Continue in Kéire Hub" : "Hub authorization stopped"} description="Complete Kéire Hub browser authorization." robots="noindex,nofollow">
+    <section class="platform-shell narrow-shell">
+        <div class="auth-card">
+            <span class={`status-badge ${success ? "status-badge--ready" : ""}`}>{success ? "Authorization approved" : "Authorization not completed"}</span>
+            <h1>{success ? "Return securely to Kéire Hub" : "Kéire Hub was not authorized"}</h1>
+            <p>{success ? "The single-use authorization code is ready. Kéire Hub will exchange it with Supabase using the PKCE verifier that never left the app." : errorDescription}</p>
+            {hubUrl && (
+                <div class="hub-handoff">
+                    <ol class="hub-handoff__steps" aria-label="Complete Hub sign-in">
+                        <li><span>1</span><strong>Keep Kéire Hub running</strong></li>
+                        <li><span>2</span><strong>Open the secure app link</strong></li>
+                        <li><span>3</span><strong>Finish inside the Hub</strong></li>
+                    </ol>
+                    <a class="button hub-handoff__primary" href={hubUrl} rel="noreferrer" data-hub-handoff>Open Kéire Hub</a>
+                    <p class="form-message" role="status" aria-live="polite" data-hub-handoff-status>
+                        Your browser may ask for permission to open Kéire Hub.
+                    </p>
+                    <div class="hub-handoff__recovery" data-hub-handoff-recovery hidden>
+                        <strong>Kéire Hub did not open?</strong>
+                        <p>A current Hub installation registers the secure <code>keirehub</code> app link. Repair or reinstall the Hub, keep it open, and retry this handoff before the authorization code expires.</p>
+                        <div class="actions">
+                            <a class="button button--secondary" href={hubUrl} rel="noreferrer" data-hub-handoff>Try again</a>
+                            <a class="button button--secondary" href="/downloads/">Repair or reinstall Hub</a>
+                        </div>
+                    </div>
+                </div>
+            )}
+            <p class="fine-print">This page forwards only the bounded authorization response. It never exchanges the code, receives Hub tokens, or transfers browser cookies.</p>
+        </div>
+    </section>
+</PlatformLayout>
+
+<script>
+    const handoffLinks = [...document.querySelectorAll("[data-hub-handoff]")];
+    const handoffStatus = document.querySelector("[data-hub-handoff-status]");
+    const handoffRecovery = document.querySelector("[data-hub-handoff-recovery]");
+    let handoffAttempt = 0;
+
+    const reportBrowserHandoff = () => {
+        if (!handoffAttempt || !(handoffStatus instanceof HTMLElement)) return;
+        handoffStatus.textContent = "The browser handed off the request. Return to Kéire Hub to finish signing in.";
+        handoffStatus.dataset.kind = "success";
+    };
+
+    for (const link of handoffLinks) {
+        link.addEventListener("click", () => {
+            handoffAttempt += 1;
+            if (handoffStatus instanceof HTMLElement) {
+                handoffStatus.textContent = "Opening Kéire Hub… Approve the browser prompt if one appears.";
+                handoffStatus.dataset.kind = "success";
+            }
+            if (handoffRecovery instanceof HTMLElement) handoffRecovery.hidden = true;
+            const attempt = handoffAttempt;
+            window.setTimeout(() => {
+                if (attempt === handoffAttempt && document.visibilityState === "visible" &&
+                    handoffRecovery instanceof HTMLElement) {
+                    handoffRecovery.hidden = false;
+                    if (handoffStatus instanceof HTMLElement) {
+                        handoffStatus.textContent = "No app handoff was detected. Use the recovery options below.";
+                        handoffStatus.dataset.kind = "error";
+                    }
+                }
+            }, 2200);
+        });
+    }
+
+    window.addEventListener("blur", reportBrowserHandoff);
+    document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden") reportBrowserHandoff();
+    });
+</script>

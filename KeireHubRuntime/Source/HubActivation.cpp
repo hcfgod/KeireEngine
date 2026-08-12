@@ -213,9 +213,22 @@ namespace KeireHub
             return platform && architecture;
         }
 
+        [[nodiscard]] bool ValidOAuthCallback(const HubActivationRequest& request) noexcept
+        {
+            if (!request.Url || !request.Url->starts_with("keirehub://oauth/callback?") ||
+                request.Url->size() > MaximumHubActivationFrameBytes - ActivationHeaderBytes - 2U ||
+                request.Url->find('#') != request.Url->npos || HasControlCharacter(*request.Url))
+            {
+                return false;
+            }
+            return std::ranges::all_of(*request.Url,
+                                       [](const unsigned char value) { return value >= 0x20U && value <= 0x7eU; });
+        }
+
         [[nodiscard]] bool HasNoPayload(const HubActivationRequest& request) noexcept
         {
-            return !request.Page && !request.Path && !request.VersionId && !request.Platform && !request.Architecture;
+            return !request.Page && !request.Path && !request.VersionId && !request.Platform && !request.Architecture &&
+                   !request.Url;
         }
 
         void AppendUint16(std::string& target, const std::size_t value)
@@ -250,30 +263,38 @@ namespace KeireHub
             break;
         case HubActivationAction::Navigate:
             if (!request.Page || !PageName(*request.Page) || request.Path || request.VersionId || request.Platform ||
-                request.Architecture)
+                request.Architecture || request.Url)
             {
                 return HubStatus::Failure(InvalidArgument("Navigate activation requires exactly one valid page."));
             }
             break;
         case HubActivationAction::OpenProject:
         case HubActivationAction::ImportPackage:
-            if (request.Page || request.VersionId || request.Platform || request.Architecture)
+            if (request.Page || request.VersionId || request.Platform || request.Architecture || request.Url)
                 return HubStatus::Failure(InvalidArgument("Path activation contains an unexpected field."));
             if (const auto pathStatus = ValidatePath(request.Path); !pathStatus)
                 return pathStatus;
             break;
         case HubActivationAction::InstallVersion:
-            if (request.Page || request.Path || request.Platform || request.Architecture || !request.VersionId ||
-                !IsValidVersionId(*request.VersionId))
+            if (request.Page || request.Path || request.Platform || request.Architecture || request.Url ||
+                !request.VersionId || !IsValidVersionId(*request.VersionId))
             {
                 return HubStatus::Failure(InvalidArgument("Install-version activation requires one valid ID."));
             }
             break;
         case HubActivationAction::BuildSupport:
-            if (request.Page || request.Path || request.VersionId || !ValidBuildSupport(request))
+            if (request.Page || request.Path || request.VersionId || request.Url || !ValidBuildSupport(request))
             {
                 return HubStatus::Failure(
                     InvalidArgument("Build Support activation requires a valid platform and architecture."));
+            }
+            break;
+        case HubActivationAction::OAuthCallback:
+            if (request.Page || request.Path || request.VersionId || request.Platform || request.Architecture ||
+                !ValidOAuthCallback(request))
+            {
+                return HubStatus::Failure(
+                    InvalidArgument("OAuth callback activation requires one valid callback URL."));
             }
             break;
         default:
@@ -311,6 +332,9 @@ namespace KeireHub
         case HubActivationAction::BuildSupport:
             fields.push_back(*request.Platform);
             fields.push_back(*request.Architecture);
+            break;
+        case HubActivationAction::OAuthCallback:
+            fields.push_back(*request.Url);
             break;
         default:
             return HubResult<std::string>::Failure(InvalidArgument("Activation action is invalid."));
@@ -352,7 +376,7 @@ namespace KeireHub
 
         const auto actionValue = static_cast<unsigned char>(frame[5]);
         if (actionValue < static_cast<unsigned char>(HubActivationAction::Show) ||
-            actionValue > static_cast<unsigned char>(HubActivationAction::BuildSupport))
+            actionValue > static_cast<unsigned char>(HubActivationAction::OAuthCallback))
         {
             return HubResult<HubActivationRequest>::Failure(InvalidFrame("Activation action is unknown."));
         }
@@ -409,6 +433,9 @@ namespace KeireHub
             request.Platform = fields[0];
             request.Architecture = fields[1];
             break;
+        case HubActivationAction::OAuthCallback:
+            request.Url = fields[0];
+            break;
         default:
             break;
         }
@@ -435,6 +462,10 @@ namespace KeireHub
         if (arguments.empty())
             return ParsedRequest({});
         const auto option = arguments.front();
+        if (arguments.size() == 1U && option.starts_with("keirehub://oauth/callback?"))
+        {
+            return ParsedRequest({.Action = HubActivationAction::OAuthCallback, .Url = std::string(option)});
+        }
         if (option == "--show" && arguments.size() == 1)
             return ParsedRequest({});
         if (option == "--navigate" && arguments.size() == 2)

@@ -3,6 +3,7 @@
 #include "KeireHub/HubProductUi.h"
 
 #include "KeireHubRuntime/AccountSessionStore.h"
+#include "KeireHubRuntime/DesktopOAuth.h"
 #include "KeireHubRuntime/SupabaseAccount.h"
 
 #include <filesystem>
@@ -17,10 +18,14 @@ namespace KeireHub
 {
     using HubAccountClientFactory =
         std::function<HubResult<SupabaseAccountClient>(const SupabaseConfiguration&, const HubSettings&)>;
+    using HubOAuthClientFactory =
+        std::function<HubResult<DesktopOAuthClient>(const SupabaseConfiguration&, const HubSettings&)>;
 
     struct HubAccountWorkflowSnapshot final
     {
         bool Configured = false;
+        bool BrowserSignInAvailable = false;
+        bool BrowserSignInPending = false;
         bool Busy = false;
         bool SignedIn = false;
         bool PersistentSessionAvailable = false;
@@ -37,7 +42,8 @@ namespace KeireHub
     class HubAccountWorkflow final
     {
       public:
-        explicit HubAccountWorkflow(HubAccountClientFactory clientFactory = {});
+        explicit HubAccountWorkflow(HubAccountClientFactory clientFactory = {},
+                                    HubOAuthClientFactory oauthClientFactory = {});
         ~HubAccountWorkflow();
 
         HubAccountWorkflow(const HubAccountWorkflow&) = delete;
@@ -47,6 +53,9 @@ namespace KeireHub
                                       const std::filesystem::path& sessionPath, const HubSettings& settings);
         [[nodiscard]] HubStatus SignIn(std::string email, std::string password);
         [[nodiscard]] HubStatus SignUp(std::string email, std::string password);
+        [[nodiscard]] HubResult<std::string> BeginBrowserSignIn(const DesktopOAuthEntropy& entropy);
+        [[nodiscard]] HubStatus CancelBrowserSignIn();
+        [[nodiscard]] HubStatus CompleteBrowserSignIn(std::string callbackUrl);
         [[nodiscard]] HubStatus SignOut();
         [[nodiscard]] HubStatus SaveProfile(std::string displayName);
         void RefreshIfNeeded(std::uint64_t nowUnixSeconds);
@@ -57,6 +66,7 @@ namespace KeireHub
       private:
         [[nodiscard]] HubStatus Begin(std::function<void()> operation);
         [[nodiscard]] HubResult<SupabaseAccountClient> CreateClient() const;
+        [[nodiscard]] HubResult<DesktopOAuthClient> CreateOAuthClient() const;
         void Publish(HubAccountWorkflowSnapshot snapshot);
         void PublishSessionFailure(HubError error);
         void PublishSession(AccountSession session, AccountProfile profile, std::string message);
@@ -68,6 +78,8 @@ namespace KeireHub
         std::filesystem::path m_SessionPath;
         HubSettings m_Settings;
         HubAccountClientFactory m_ClientFactory;
+        HubOAuthClientFactory m_OAuthClientFactory;
+        std::optional<DesktopOAuthAuthorization> m_PendingOAuthAuthorization;
         std::uint64_t m_NextRefreshAttemptUnixSeconds = 0;
         std::jthread m_Worker;
     };

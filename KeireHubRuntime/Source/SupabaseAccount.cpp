@@ -287,24 +287,51 @@ namespace KeireHub
             return HubResult<SupabaseConfiguration>::Failure(value.Error());
         try
         {
-            if (!value.Value().is_object() ||
-                value.Value().at("schemaVersion").get<std::uint32_t>() != SupabaseConfiguration::CurrentSchemaVersion ||
+            if (!value.Value().is_object() || !value.Value().at("schemaVersion").is_number_unsigned() ||
                 !value.Value().at("enabled").is_boolean())
             {
                 throw std::invalid_argument("invalid Supabase configuration header");
+            }
+            const auto schemaVersion = value.Value().at("schemaVersion").get<std::uint32_t>();
+            if (schemaVersion < SupabaseConfiguration::MinimumSchemaVersion ||
+                schemaVersion > SupabaseConfiguration::CurrentSchemaVersion)
+            {
+                throw std::invalid_argument("unsupported Supabase configuration schema");
             }
             SupabaseConfiguration result;
             result.Enabled = value.Value().at("enabled").get<bool>();
             if (!result.Enabled)
             {
-                if (value.Value().size() != 2U)
+                if (value.Value().size() != 2U && !(schemaVersion == 2U && value.Value().size() == 3U &&
+                                                    value.Value().value("hubOAuthEnabled", false) == false))
                     throw std::invalid_argument("disabled Supabase configuration contains account fields");
                 return HubResult<SupabaseConfiguration>::Success(std::move(result));
             }
-            if (value.Value().size() != 4U)
+            const auto expectedSize = schemaVersion == 1U ? 4U : 5U;
+            if (value.Value().size() < expectedSize)
                 throw std::invalid_argument("enabled Supabase configuration is incomplete");
             result.ProjectUrl = value.Value().at("projectUrl").get<std::string>();
             result.PublishableKey = value.Value().at("publishableKey").get<std::string>();
+            if (schemaVersion == 2U)
+            {
+                result.HubOAuthEnabled = value.Value().at("hubOAuthEnabled").get<bool>();
+                if (result.HubOAuthEnabled)
+                {
+                    if (value.Value().size() != expectedSize + 2U)
+                        throw std::invalid_argument("enabled Hub OAuth configuration is incomplete");
+                    result.HubOAuthClientId = value.Value().at("hubOAuthClientId").get<std::string>();
+                    result.HubOAuthWebsiteCallbackUrl =
+                        value.Value().at("hubOAuthWebsiteCallbackUrl").get<std::string>();
+                }
+                else if (value.Value().size() != expectedSize)
+                {
+                    throw std::invalid_argument("disabled Hub OAuth configuration contains OAuth fields");
+                }
+            }
+            else if (value.Value().size() != expectedSize)
+            {
+                throw std::invalid_argument("legacy Supabase configuration contains unsupported fields");
+            }
             auto parsed = Detail::ParseHttpUrl(result.ProjectUrl, false);
             if (!parsed || !parsed.Value().Secure || parsed.Value().Target != "/" || result.ProjectUrl.ends_with('/') ||
                 !parsed.Value().Host.ends_with(".supabase.co") ||
@@ -313,6 +340,17 @@ namespace KeireHub
                 !IsBoundedAscii(result.PublishableKey, 256U))
             {
                 throw std::invalid_argument("invalid Supabase project URL or publishable key");
+            }
+            if (result.HubOAuthEnabled)
+            {
+                const auto callback = Detail::ParseHttpUrl(result.HubOAuthWebsiteCallbackUrl, false);
+                if (!IsBoundedAscii(result.HubOAuthClientId, 128U) || result.HubOAuthClientId.size() < 8U ||
+                    !callback || !callback.Value().Secure || callback.Value().Target != "/oauth/hub/callback/" ||
+                    result.HubOAuthWebsiteCallbackUrl.ends_with('?') ||
+                    result.HubOAuthWebsiteCallbackUrl.find('#') != std::string::npos)
+                {
+                    throw std::invalid_argument("invalid Hub OAuth client or website callback");
+                }
             }
             return HubResult<SupabaseConfiguration>::Success(std::move(result));
         }
@@ -417,6 +455,23 @@ namespace KeireHub
         if (!value)
             return HubResult<AccountSession>::Failure(value.Error());
         return ParseSession(value.Value());
+    }
+
+    HubResult<AccountUser> SupabaseAccountClient::FetchUser(const std::string_view accessToken) const
+    {
+        if (!IsBoundedAscii(accessToken, std::size_t{16U} * 1024U))
+            return HubResult<AccountUser>::Failure(
+                AccountError(HubErrorCode::InvalidArgument, "The account session is invalid."));
+        auto response =
+            Send(m_Transport, Request(m_Configuration, NativeHttpMethod::Get, "/auth/v1/user", accessToken));
+        if (!response)
+            return HubResult<AccountUser>::Failure(response.Error());
+        if (response.Value().StatusCode < 200U || response.Value().StatusCode >= 300U)
+            return HubResult<AccountUser>::Failure(ResponseError(response.Value(), "session"));
+        auto value = ParseResponse(response.Value());
+        if (!value)
+            return HubResult<AccountUser>::Failure(value.Error());
+        return ParseUser(value.Value());
     }
 
     HubStatus SupabaseAccountClient::SignOut(const std::string_view accessToken) const

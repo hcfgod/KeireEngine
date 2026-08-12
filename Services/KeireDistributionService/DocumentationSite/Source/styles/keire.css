@@ -3,7 +3,7 @@
     font-style: normal;
     font-weight: 100 900;
     font-display: swap;
-    src: url("/docs/assets/inter-variable.ttf") format("truetype");
+    src: url("/assets/inter-variable.ttf") format("truetype");
 }
 
 :root {
@@ -51,7 +51,7 @@ body {
         radial-gradient(circle at 72% -12%, rgba(34, 111, 255, 0.16), transparent 34rem),
         radial-gradient(circle at 12% 34%, rgba(0, 174, 255, 0.055), transparent 27rem);
     background-attachment: fixed;
-    letter-spacing: -0.011em;
+    letter-spacing: -0.004em;
 }
 
 header.header {
@@ -61,15 +61,34 @@ header.header {
 }
 
 .site-title {
-    gap: 0.7rem;
+    column-gap: 0.7rem;
     font-weight: 760;
-    letter-spacing: -0.025em;
+    letter-spacing: -0.012em;
+    word-spacing: 0.08em;
 }
 
 .site-title img {
     width: 2rem;
     height: 2rem;
     filter: drop-shadow(0 0 0.8rem rgba(48, 127, 255, 0.42));
+}
+
+.keire-doc-account {
+    display: inline-flex;
+    min-height: 2.35rem;
+    padding: 0.42rem 0.72rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.58rem;
+    align-items: center;
+    color: var(--sl-color-gray-2);
+    font-size: 0.76rem;
+    font-weight: 680;
+    text-decoration: none;
+}
+
+.keire-doc-account:hover {
+    border-color: color-mix(in srgb, var(--sl-color-accent) 48%, var(--sl-color-gray-5));
+    color: var(--sl-color-white);
 }
 
 .sidebar-pane {
@@ -95,7 +114,8 @@ header.header {
 .sl-markdown-content h1,
 .sl-markdown-content h2,
 .sl-markdown-content h3 {
-    letter-spacing: -0.035em;
+    letter-spacing: -0.018em;
+    line-height: 1.12;
 }
 
 .sl-markdown-content h1 {
@@ -221,14 +241,18 @@ header.header {
 
 .hero {
     position: relative;
-    padding-block: clamp(5rem, 11vw, 9rem) clamp(4rem, 8vw, 7rem);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    min-height: clamp(30rem, 54vw, 36rem);
+    padding: clamp(2rem, 5vw, 4rem);
+    place-items: center;
     isolation: isolate;
 }
 
 .hero::before {
     position: absolute;
     z-index: -1;
-    inset: 9% 3% 5%;
+    inset: clamp(0.75rem, 2vw, 1.5rem);
     border: 1px solid color-mix(in srgb, var(--sl-color-accent) 18%, transparent);
     border-radius: 2rem;
     background:
@@ -239,29 +263,57 @@ header.header {
     mask-image: linear-gradient(to bottom, black 62%, transparent);
 }
 
+main .hero > .stack {
+    position: relative;
+    z-index: 1;
+    grid-column: 1 / -1;
+    width: min(100%, 52rem);
+    margin-inline: auto;
+    padding: clamp(2.5rem, 6vw, 4.5rem) clamp(1rem, 4vw, 3rem);
+    align-items: center;
+    justify-self: center;
+    text-align: center;
+}
+
+main .hero .copy {
+    width: 100%;
+    align-items: center;
+}
+
 .hero h1 {
-    max-width: 10ch;
+    max-width: 13ch;
+    margin-inline: auto;
     font-weight: 820;
-    letter-spacing: -0.075em;
-    line-height: 0.91;
+    letter-spacing: -0.032em;
+    line-height: 1;
 }
 
 .hero .tagline {
     max-width: 48rem;
+    margin-inline: auto;
     color: var(--sl-color-gray-2);
     font-size: clamp(1.04rem, 2vw, 1.28rem);
     line-height: 1.7;
+    text-wrap: balance;
 }
 
 .hero .actions a {
     min-height: 3rem;
     border-radius: 0.7rem;
     font-weight: 720;
+    white-space: normal;
+}
+
+.hero .actions {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.9rem;
 }
 
 .keire-doc-status {
     display: grid;
-    margin: -1.5rem 0 5rem;
+    margin: 1.5rem 0 5rem;
     border: 1px solid var(--sl-color-gray-5);
     border-radius: 0.9rem;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -304,8 +356,17 @@ header.header {
 }
 
 @media (max-width: 50rem) {
+    .hero {
+        min-height: 28rem;
+        padding: 1rem;
+    }
+
+    .hero h1 {
+        font-size: clamp(3rem, 14vw, 5.25rem);
+    }
+
     .hero::before {
-        inset-inline: 0;
+        inset: 0.5rem 0;
     }
 
     .keire-doc-status {
@@ -324,6 +385,20 @@ header.header {
 
     .keire-mermaid__pan-hint {
         display: inline;
+    }
+}
+
+@media (max-width: 30rem) {
+    .hero .actions,
+    .hero .actions a,
+    .keire-doc-actions,
+    .keire-doc-actions a {
+        width: 100%;
+    }
+
+    .hero .actions a,
+    .keire-doc-actions a {
+        justify-content: center;
     }
 }
 

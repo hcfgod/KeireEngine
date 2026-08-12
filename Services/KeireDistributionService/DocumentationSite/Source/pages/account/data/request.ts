@@ -1,0 +1,4 @@
+import type { APIRoute } from "astro";
+import { apiError, apiResponse, MarketplaceApiError, parseJsonObject, requireSupabase, requireUser } from "../../../lib/api";
+export const prerender = false;
+export const POST: APIRoute = async (context) => { try { const supabase = requireSupabase(context); const user = requireUser(context); const input = await parseJsonObject(context); if (input.kind !== "export" && input.kind !== "deletion") throw new MarketplaceApiError(400, "account.invalid_data_request", "Data request kind is invalid."); const field = input.kind === "export" ? "export_requested_at" : "deletion_requested_at"; const { error } = await supabase.from("profiles").update({ [field]: new Date().toISOString() }).eq("user_id", user.id); if (error) throw error; return apiResponse(context, { data: { kind: input.kind, requested: true } }, 202); } catch (error) { return apiError(context, error); } };

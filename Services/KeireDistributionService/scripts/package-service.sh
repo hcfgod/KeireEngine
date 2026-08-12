@@ -3,7 +3,14 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 service_root="$(cd -- "$script_dir/.." && pwd)"
-dotnet_command="${KEIRE_DOTNET:-dotnet}"
+repository_root="$(cd -- "$service_root/../.." && pwd)"
+if [[ -n "${KEIRE_DOTNET:-}" ]]; then
+  dotnet_command="$KEIRE_DOTNET"
+elif [[ -x "$repository_root/Build/Dependencies/dotnet-sdk/dotnet" ]]; then
+  dotnet_command="$repository_root/Build/Dependencies/dotnet-sdk/dotnet"
+else
+  dotnet_command=dotnet
+fi
 npm_command="${KEIRE_NPM:-npm}"
 configuration="${KEIRE_CONFIGURATION:-Release}"
 output_root="${1:-$service_root/../../Build/Distributions/KeireDistributionService}"
@@ -47,21 +54,49 @@ for runtime_identifier in "${runtime_identifiers[@]}"; do
     --configuration "$configuration" --runtime "$runtime_identifier" --self-contained true \
     --output "$package_directory/tools/publisher" -p:PublishSingleFile=true \
     -p:IncludeNativeLibrariesForSelfExtract=true
+  "$dotnet_command" publish "$service_root/Source/KeireMarketplaceValidator/KeireMarketplaceValidator.csproj" \
+    --configuration "$configuration" --runtime "$runtime_identifier" --self-contained true \
+    --output "$package_directory/tools/marketplace-validator/worker" -p:PublishSingleFile=true \
+    -p:IncludeNativeLibrariesForSelfExtract=true
+  "$dotnet_command" publish \
+    "$service_root/Source/KeireMarketplaceValidatorBroker/KeireMarketplaceValidatorBroker.csproj" \
+    --configuration "$configuration" --runtime "$runtime_identifier" --self-contained true \
+    --output "$package_directory/tools/marketplace-validator/broker" -p:PublishSingleFile=true \
+    -p:IncludeNativeLibrariesForSelfExtract=true
 
   cp -- "$service_root/README.md" "$package_directory/"
   cp -- "$service_root/THIRD_PARTY_NOTICES.md" "$package_directory/"
   cp -R -- "$service_root/Licenses" "$package_directory/"
   cp -- "$documentation_site/node_modules/astro/LICENSE" "$package_directory/Licenses/Astro.txt"
+  cp -- "$documentation_site/node_modules/@astrojs/node/LICENSE" "$package_directory/Licenses/AstroNode.txt"
+  cp -- "$documentation_site/node_modules/@astrojs/sitemap/LICENSE" "$package_directory/Licenses/AstroSitemap.txt"
   cp -- "$documentation_site/node_modules/@astrojs/starlight/LICENSE" "$package_directory/Licenses/Starlight.txt"
   cp -- "$documentation_site/node_modules/expressive-code/LICENSE" "$package_directory/Licenses/ExpressiveCode.txt"
   cp -- "$documentation_site/node_modules/beautiful-mermaid/LICENSE" "$package_directory/Licenses/BeautifulMermaid.txt"
-  cp -R -- "$service_root/Website" "$package_directory/"
-  mkdir -p -- "$package_directory/Website/docs"
-  cp -R -- "$documentation_output/." "$package_directory/Website/docs/"
+  cp -- "$documentation_site/node_modules/@supabase/ssr/LICENSE" "$package_directory/Licenses/SupabaseSsr.txt"
+  cp -- "$documentation_site/node_modules/@supabase/supabase-js/LICENSE" \
+    "$package_directory/Licenses/SupabaseJavaScript.txt"
+  cp -- "$documentation_site/node_modules/sharp/LICENSE" "$package_directory/Licenses/Sharp.txt"
+  mkdir -p -- "$package_directory/Web"
+  cp -R -- "$documentation_output" "$package_directory/Web/"
+  cp -- "$documentation_site/package.json" "$documentation_site/package-lock.json" "$package_directory/Web/"
   mkdir -p -- "$package_directory/Deployment" "$package_directory/scripts"
   cp -- "$service_root/Deployment/Caddyfile.example" "$package_directory/Deployment/"
   cp -- "$service_root/Deployment/appsettings.Production.example.json" "$package_directory/Deployment/"
   cp -- "$service_root/Deployment/keire-distribution.service.example" "$package_directory/Deployment/"
+  cp -- "$service_root/Deployment/keire-web.service.example" "$package_directory/Deployment/"
+  cp -- "$service_root/Deployment/keire-marketplace-validator.service.example" "$package_directory/Deployment/"
+  cp -- "$service_root/Deployment/keire-marketplace-validator-broker.service.example" \
+    "$package_directory/Deployment/"
+  cp -- "$service_root/Deployment/marketplace-validator-broker.env.example" "$package_directory/Deployment/"
+  if [[ "$runtime_identifier" == win-* ]]; then
+    cp -- "$service_root/Deployment/configure-windows-validator-firewall.ps1" "$package_directory/Deployment/"
+    cp -- "$service_root/Deployment/install-windows-marketplace-validator-tasks.ps1" \
+      "$package_directory/Deployment/"
+    cp -- "$service_root/Deployment/protect-windows-validator-broker-secret.ps1" "$package_directory/Deployment/"
+    cp -- "$service_root/Deployment/start-windows-marketplace-validator.ps1" "$package_directory/Deployment/"
+    cp -- "$service_root/Deployment/start-windows-marketplace-validator-broker.ps1" "$package_directory/Deployment/"
+  fi
   cp -- "$service_root/scripts/health-check.ps1" "$package_directory/scripts/"
   cp -- "$service_root/scripts/health-check.sh" "$package_directory/scripts/"
   cp -- "$service_root/scripts/monitor-distribution.ps1" "$package_directory/scripts/"
@@ -78,11 +113,13 @@ for runtime_identifier in "${runtime_identifiers[@]}"; do
   cp -- "$service_root/scripts/publish-snapshot.sh" "$package_directory/scripts/"
   cp -- "$service_root/scripts/start-wsl2-host-bridge.sh" "$package_directory/scripts/"
   cp -- "$service_root/scripts/install-wsl2-host-bridge.sh" "$package_directory/scripts/"
+  cp -- "$service_root/scripts/install-web-runtime.ps1" "$package_directory/scripts/"
+  cp -- "$service_root/scripts/install-web-runtime.sh" "$package_directory/scripts/"
   chmod +x -- "$package_directory/scripts/health-check.sh" "$package_directory/scripts/monitor-distribution.sh" \
     "$package_directory/scripts/backup-distribution.sh" "$package_directory/scripts/backup-distribution-rclone.sh" \
     "$package_directory/scripts/restore-distribution.sh" "$package_directory/scripts/restore-distribution-rclone.sh" \
     "$package_directory/scripts/publish-snapshot.sh" "$package_directory/scripts/start-wsl2-host-bridge.sh" \
-    "$package_directory/scripts/install-wsl2-host-bridge.sh"
+    "$package_directory/scripts/install-wsl2-host-bridge.sh" "$package_directory/scripts/install-web-runtime.sh"
 
   archive="$package_directory.tar.gz"
   tar -czf "$archive" -C "$output_root" "$(basename -- "$package_directory")"

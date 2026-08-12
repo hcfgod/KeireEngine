@@ -74,6 +74,21 @@ TEST_CASE("Supabase account configuration is explicit, HTTPS-only, and publishab
     REQUIRE(enabled);
     CHECK(enabled.Value().ProjectUrl == "https://fixture.supabase.co");
     CHECK(enabled.Value().PublishableKey == "sb_publishable_fixture_key_0000000000000000");
+    CHECK_FALSE(enabled.Value().HubOAuthEnabled);
+
+    KeireHubTests::WriteText(
+        path,
+        R"({"schemaVersion":2,"enabled":true,"projectUrl":"https://fixture.supabase.co","publishableKey":"sb_publishable_fixture_key_0000000000000000","hubOAuthEnabled":true,"hubOAuthClientId":"fixture-public-client","hubOAuthWebsiteCallbackUrl":"https://keire.example/oauth/hub/callback/"})");
+    auto oauth = LoadSupabaseConfiguration(path);
+    REQUIRE(oauth);
+    CHECK(oauth.Value().HubOAuthEnabled);
+    CHECK(oauth.Value().HubOAuthClientId == "fixture-public-client");
+    CHECK(oauth.Value().HubOAuthWebsiteCallbackUrl == "https://keire.example/oauth/hub/callback/");
+
+    KeireHubTests::WriteText(
+        path,
+        R"({"schemaVersion":2,"enabled":true,"projectUrl":"https://fixture.supabase.co","publishableKey":"sb_publishable_fixture_key_0000000000000000","hubOAuthEnabled":true,"hubOAuthClientId":"fixture-public-client","hubOAuthWebsiteCallbackUrl":"http://keire.example/oauth/hub/callback/"})");
+    CHECK_FALSE(LoadSupabaseConfiguration(path));
 
     KeireHubTests::WriteText(
         path,
@@ -185,6 +200,29 @@ TEST_CASE("Supabase profile requests carry the user JWT and preserve owner ident
     const std::string saveBody(reinterpret_cast<const char*>(captured.back().Body.data()), captured.back().Body.size());
     CHECK(saveBody.find("00112233-4455-6677-8899-aabbccddeeff") != std::string::npos);
     CHECK(saveBody.find("Kara") != std::string::npos);
+}
+
+TEST_CASE("Supabase session identity is resolved with the Hub bearer token")
+{
+    NativeHttpRequest captured;
+    auto client = SupabaseAccountClient::Create(
+        Configuration(),
+        [&](const NativeHttpRequest& request)
+        {
+            captured = request;
+            return HubResult<NativeHttpResponse>::Success(JsonResponse(
+                200,
+                R"({"id":"00112233-4455-6677-8899-aabbccddeeff","email":"oauth@example.com","email_confirmed_at":"2026-08-11T00:00:00Z"})"));
+        });
+    REQUIRE(client);
+    const auto user = client.Value().FetchUser("header.payload.signature");
+    REQUIRE(user);
+    CHECK(user.Value().Email == "oauth@example.com");
+    CHECK(user.Value().EmailConfirmed);
+    CHECK(captured.Method == NativeHttpMethod::Get);
+    CHECK(captured.Url == "https://fixture.supabase.co/auth/v1/user");
+    REQUIRE(Header(captured, "Authorization"));
+    CHECK(*Header(captured, "Authorization") == "Bearer header.payload.signature");
 }
 
 TEST_CASE("Account session storage never writes a Windows refresh token in plaintext")

@@ -42,6 +42,7 @@ namespace KeireEditor
     class ExternalAssetImportController;
     class InputActionsDocument;
     class MaterialDocument;
+    class PackageManagerPanel;
     class ShaderGraphDocument;
     class InputActionsPanel;
     class AudioMixerPanel;
@@ -589,6 +590,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::unique_ptr<KeireEditor::MaterialGraphPanel> m_MaterialGraphPanel;
     std::unique_ptr<KeireEditor::ProjectSettingsPanel> m_ProjectSettingsPanel;
     std::unique_ptr<KeireEditor::LightingPanel> m_LightingPanel;
+    std::unique_ptr<KeireEditor::PackageManagerPanel> m_PackageManagerPanel;
     std::unique_ptr<KeireEditor::PropertyDrawerRegistry> m_PropertyDrawers;
     std::unique_ptr<KeireEditor::ViewportAssetDropRouter> m_ViewportAssetDropRouter;
     std::unique_ptr<KeireEditor::ScenePlayChangesPanel> m_PlayChangesPanel;

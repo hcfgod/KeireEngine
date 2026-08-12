@@ -5,9 +5,61 @@ versions.
 
 ## Unreleased
 
+### Changed
+
+- Completed the browser-to-Hub OAuth handoff contract for packaged desktop installations. Windows Hub installers now
+  own the per-user `keirehub` URL protocol without deleting a replacement handler during uninstall, and Linux desktop
+  packages register the same scheme while forwarding exactly one activation URL. The website callback now reports
+  handoff progress and bounded repair guidance instead of failing silently, while the Hub account dialog presents
+  browser PKCE as the focused primary workflow, keeps password entry behind an explicit fallback, and allows a pending
+  browser request to be cancelled without creating a session.
+- Added the production marketplace-validation boundary: service-role-only atomic upload leases with stale recovery and
+  provenance-rich report commits, a scoped-secret Edge queue and networked quarantine broker, and a separate
+  outbound-blocked worker using
+  the authoritative asset-package parser. Validation now fails closed on malware-scanner errors, secrets, executable or
+  native payloads, publisher build hooks, undeclared managed code, unsafe code, NuGet restoration, or pinned-SDK
+  compilation failures; Linux systemd and Windows firewall deployment profiles keep credentials out of the worker,
+  and Windows outbound denial covers every untrusted-content child process, including the malware scanner. Windows
+  deployment now emits an ACL-protected path/hash firewall attestation for restricted runtime verification, stores the
+  scoped broker credential as machine-DPAPI ciphertext, and installs automatically restarting startup tasks under
+  separate `LOCAL SERVICE` and `NETWORK SERVICE` identities.
+
+- Kept website authentication visibly synchronized across reloads and browser back/forward restoration, propagated
+  Supabase refresh cache headers with session cookies, and added a shared account state to the documentation header.
+  Refined responsive navigation, account and MFA layouts, marketplace spacing, documentation branding and calls to
+  action, button states, and previously invalid MFA design tokens so labels and controls remain readable at supported
+  desktop and mobile widths. Public pages now treat prerendered account labels as provisional, immediately restore the
+  last verified presentation, and revalidate against the server. Documentation hero content is centered within its
+  visual panel without inheriting Starlight's empty media column, and shared display typography uses readable tracking
+  and line heights instead of compressed headlines.
+  Sign-out and other cookie-authenticated forms now validate against the canonical public HTTPS origin in Kéire's
+  proxy-aware middleware, preventing Astro's loopback origin comparison from rejecting legitimate requests while
+  continuing to reject missing or cross-site origins.
+- Replaced the website roadmap's ambiguous phase-only presentation with an audited 0.3.1 progress snapshot. Website,
+  identity, asset-package, marketplace, and validation workstreams now expose completed/total acceptance checks,
+  accessible progress values, delivered evidence, and explicit remaining gates without presenting percentages as
+  release dates or quality scores.
+- Fixed concurrent GitHub sign-in attempts overwriting the active PKCE verifier. Website authentication now carries a
+  per-flow identifier through Supabase callbacks, exchanges each authorization code against its matching verifier,
+  and returns failed or cancelled browser callbacks to an accessible recovery message instead of raw API JSON.
+- Deployed the unified Astro website behind the existing Caddy TLS boundary and added transactional website-only
+  updates with exact process-ownership and readiness checks. Added forced-RLS marketplace hardening, JWT-verified
+  service-only Edge transitions for organizations, free claims, Hub device sessions, download grants, and MFA-protected
+  publisher applications. Corrected Hub marketplace URLs for the canonical trailing-slash API contract while keeping
+  every marketplace, package, publisher, community, and Hub OAuth feature flag disabled until release acceptance.
+
 ## 0.3.1 - 2026-08-11
 
 ### Changed
+
+- Made editor removals report durable step-based progress from authorization through cleanup, and hardened the task
+  and notification popovers so wrapped content and first-row actions remain inside their cards at supported window
+  sizes.
+- Added the feature-gated 0.3.1 marketplace and asset-package foundation: a unified Astro website and documentation
+  service, Supabase account/organization/publisher/entitlement schemas with forced RLS, desktop OAuth PKCE and secure
+  session storage, bounded Hub marketplace contracts, deterministic `.keireassetpackage` archives, transactional
+  registry/import workflows, and the Editor Package Manager. Public marketplace publication remains disabled until
+  the documented identity, moderation, signing, legal, backup, and cross-platform launch gates pass.
 
 - Withdrew all pre-0.3.1 public Hub previews while the consolidated 0.3.1 release completes validation. The downloads
   site now exposes an explicit pending-release state without dead or known-broken links; retired binaries remain only

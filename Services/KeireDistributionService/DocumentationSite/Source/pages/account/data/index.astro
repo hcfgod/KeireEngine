@@ -1,0 +1,11 @@
+---
+import PlatformLayout from "../../../layouts/PlatformLayout.astro";
+export const prerender = false;
+if (!Astro.locals.user) return Astro.redirect("/account/sign-in/?next=/account/data/", 303);
+---
+<PlatformLayout title="Account data" description="Request Kéire account data export or deletion." robots="noindex">
+    <section class="platform-section"><div class="platform-shell product-details"><article class="prose"><p class="eyebrow">Data and privacy</p><h1>Export or delete your account.</h1><p>Requests are timestamped on your protected profile. Export and deletion fulfillment remains an administrative workflow until automated delivery passes release review.</p><div class="actions"><button class="button button--secondary" type="button" data-data-request="export">Request export</button><button class="button button--secondary" type="button" data-data-request="deletion">Request deletion</button></div><p class="form-message" aria-live="polite" data-data-message></p></article><aside class="notice-panel"><strong>Deletion consequences</strong><p>Active Hub sessions are revoked. Legal, security, license-acceptance, publication, and audit records may require limited retention.</p></aside></div></section>
+</PlatformLayout>
+<script>
+    for (const button of document.querySelectorAll("[data-data-request]")) button.addEventListener("click", async () => { if (!(button instanceof HTMLButtonElement)) return; const message = document.querySelector("[data-data-message]"); const response = await fetch("/account/data/request/", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: button.dataset.dataRequest }) }); const result = await response.json(); if (message instanceof HTMLElement) { message.dataset.kind = response.ok ? "success" : "error"; message.textContent = response.ok ? "Request recorded. Support will follow up through your verified email." : result.error?.message; } });
+</script>

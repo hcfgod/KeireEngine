@@ -1,0 +1,68 @@
+---
+import PlatformLayout from "../../../layouts/PlatformLayout.astro";
+import { marketplaceEnabled } from "../../../lib/marketplace";
+
+export const prerender = false;
+
+const { publisher, product } = Astro.params;
+const supabase = Astro.locals.supabase;
+let listing: any = null;
+let versions: any[] = [];
+if (supabase && await marketplaceEnabled(supabase)) {
+    const result = await supabase.from("marketplace_catalog").select("*")
+        .eq("publisher_slug", publisher).eq("slug", product).maybeSingle();
+    listing = result.data;
+    if (listing) {
+        const versionResult = await supabase.from("marketplace_product_versions")
+            .select("id,version,install_kind,minimum_engine_version,maximum_engine_version,platforms,architectures,release_notes_markdown,published_at,state")
+            .eq("product_id", listing.id).in("state", ["published", "withdrawn", "security_revoked"])
+            .order("published_at", { ascending: false });
+        versions = versionResult.data ?? [];
+    }
+}
+if (!listing) {
+    Astro.response.status = 404;
+}
+const structuredData = listing ? {
+    "@context": "https://schema.org", "@type": "Product", name: listing.display_name,
+    description: listing.short_description, brand: { "@type": "Organization", name: listing.publisher_name },
+    offers: { "@type": "Offer", price: "0", priceCurrency: "USD", availability: "https://schema.org/InStock" },
+    aggregateRating: listing.rating_count > 0 ? { "@type": "AggregateRating", ratingValue: listing.rating_average, reviewCount: listing.rating_count } : undefined,
+} : undefined;
+---
+
+<PlatformLayout title={listing?.display_name ?? "Product not found"} description={listing?.short_description ?? "The requested Kéire Marketplace product is unavailable."} active="marketplace" robots={listing ? "index,follow" : "noindex"} structuredData={structuredData}>
+    {listing ? <>
+        <section class="platform-shell product-hero">
+            <div><p class="eyebrow">{listing.category_name} · {listing.license_spdx}</p><h1>{listing.display_name}</h1><p class="lead">{listing.short_description}</p><p>By <a href={`/marketplace/publishers/${listing.publisher_slug}/`}>{listing.publisher_name}</a>{listing.publisher_verified ? " · Verified publisher" : ""}</p></div>
+            <aside class="product-buybox" aria-label="Get this asset"><span class="product-buybox__price">Free</span><button class="button" type="button" data-claim-product={listing.id}>Get asset</button><p class="form-message" aria-live="polite" data-claim-message>Choose personal or organization ownership after signing in.</p><a class="button button--secondary" href={`keirehub://marketplace/product/${listing.id}`}>Open in Hub</a></aside>
+        </section>
+        <section class="platform-shell product-details">
+            <article class="prose"><h2>About this asset</h2><p class="preserve-lines">{listing.description_markdown}</p><h2>Release history</h2>{versions.length ? versions.map((version) => <section><h3>{version.version}</h3><p>{version.release_notes_markdown || "No release notes were supplied."}</p><span class={`status-badge ${version.state === "published" ? "status-badge--ready" : ""}`}>{version.state}</span></section>) : <p>No compatible published version is currently available.</p>}</article>
+            <aside><dl class="fact-list"><div><dt>Publisher</dt><dd>{listing.publisher_name}</dd></div><div><dt>License</dt><dd>{listing.license_spdx} ({listing.license_revision})</dd></div><div><dt>Rating</dt><dd>{Number(listing.rating_average).toFixed(1)} / 5 ({listing.rating_count})</dd></div><div><dt>Ownership</dt><dd>Perpetual personal or organization entitlement</dd></div></dl></aside>
+        </section>
+    </> : <section class="platform-section"><div class="platform-shell empty-state"><p class="eyebrow">404</p><h1>Product unavailable.</h1><p>The listing may not exist, may still be in review, or may have been delisted.</p><a class="button" href="/marketplace/">Return to Marketplace</a></div></section>}
+</PlatformLayout>
+
+<script>
+    const button = document.querySelector("[data-claim-product]");
+    const message = document.querySelector("[data-claim-message]");
+    button?.addEventListener("click", async () => {
+        if (!(button instanceof HTMLButtonElement) || !(message instanceof HTMLElement)) return;
+        button.disabled = true;
+        message.textContent = "Checking your account and license…";
+        const response = await fetch("/marketplace/v1/claims/", {
+            method: "POST",
+            headers: { "content-type": "application/json", "idempotency-key": crypto.randomUUID() },
+            body: JSON.stringify({ productId: button.dataset.claimProduct, ownership: "personal" }),
+        });
+        const result = await response.json();
+        if (response.status === 401) {
+            location.href = `/account/sign-in/?next=${encodeURIComponent(location.pathname)}`;
+            return;
+        }
+        message.dataset.kind = response.ok ? "success" : "error";
+        message.textContent = response.ok ? "Added to your personal library. Open Hub to download it." : result.error?.message ?? "The asset could not be claimed.";
+        button.disabled = false;
+    });
+</script>

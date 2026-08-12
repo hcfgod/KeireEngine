@@ -138,7 +138,9 @@ namespace KeireHub
             return left.BytesTransferred == right.BytesTransferred && left.TotalBytes == right.TotalBytes &&
                    left.BytesPerSecond == right.BytesPerSecond && left.Attempt == right.Attempt &&
                    left.CurrentPackage == right.CurrentPackage &&
-                   left.RemainingComponents == right.RemainingComponents && left.Phase == right.Phase;
+                   left.RemainingComponents == right.RemainingComponents &&
+                   left.StepsCompleted == right.StepsCompleted && left.TotalSteps == right.TotalSteps &&
+                   left.Phase == right.Phase;
         }
 
         [[nodiscard]] std::optional<HubTask> FindTask(const HubTaskStore& store, const std::string_view taskId)
@@ -847,7 +849,11 @@ namespace KeireHub
         {
             if (SameProgress(task.Progress, progress))
                 return HubStatus::Success();
-            if (progress.Attempt < task.Progress.Attempt ||
+            const bool sameAttempt = progress.Attempt == task.Progress.Attempt;
+            const bool regressedSteps = sameAttempt && task.Progress.TotalSteps != 0 &&
+                                        (progress.TotalSteps != task.Progress.TotalSteps ||
+                                         progress.StepsCompleted < task.Progress.StepsCompleted);
+            if (progress.Attempt < task.Progress.Attempt || regressedSteps ||
                 (progress.Attempt == task.Progress.Attempt &&
                  progress.BytesTransferred < task.Progress.BytesTransferred))
             {
@@ -953,6 +959,8 @@ namespace KeireHub
                                  completedRequest->EditorInstall   ? completedRequest->EditorInstall->Package.Id
                                  : completedRequest->EditorRemoval ? completedRequest->EditorRemoval->InstallationId
                                                                    : completedRequest->Download.PackageId,
+                             .StepsCompleted = completedRequest->EditorRemoval ? 4U : 0U,
+                             .TotalSteps = completedRequest->EditorRemoval ? 4U : 0U,
                              .Phase = "Completed"},
                             Timestamp(store, task->Id));
                         if (!outcome)

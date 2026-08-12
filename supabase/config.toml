@@ -1,2 +1,5 @@
 [functions.website-contact]
 verify_jwt = false
+
+[functions.marketplace-validator-queue]
+verify_jwt = false

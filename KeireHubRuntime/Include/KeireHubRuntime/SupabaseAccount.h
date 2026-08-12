@@ -13,11 +13,15 @@ namespace KeireHub
 {
     struct SupabaseConfiguration final
     {
-        static constexpr std::uint32_t CurrentSchemaVersion = 1;
+        static constexpr std::uint32_t MinimumSchemaVersion = 1;
+        static constexpr std::uint32_t CurrentSchemaVersion = 2;
 
         bool Enabled = false;
+        bool HubOAuthEnabled = false;
         std::string ProjectUrl;
         std::string PublishableKey;
+        std::string HubOAuthClientId;
+        std::string HubOAuthWebsiteCallbackUrl;
     };
 
     struct AccountUser final
@@ -61,6 +65,7 @@ namespace KeireHub
         [[nodiscard]] HubResult<AccountSignUpResult> SignUp(std::string email, std::string password) const;
         [[nodiscard]] HubResult<AccountSession> SignIn(std::string email, std::string password) const;
         [[nodiscard]] HubResult<AccountSession> Refresh(std::string refreshToken) const;
+        [[nodiscard]] HubResult<AccountUser> FetchUser(std::string_view accessToken) const;
         [[nodiscard]] HubStatus SignOut(std::string_view accessToken) const;
         [[nodiscard]] HubResult<AccountProfile> FetchProfile(const AccountSession& session) const;
         [[nodiscard]] HubResult<AccountProfile> SaveProfile(const AccountSession& session,
