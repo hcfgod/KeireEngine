@@ -481,6 +481,26 @@ assert(staffPage.includes("data-publication-form") && staffPage.includes("Verify
     staffPublicationRoute.includes("requireAal2") &&
     staffPublicationRoute.includes('functions.invoke("marketplace-publication"'),
     "Offline-signed packages must cross the administrator-only publication boundary.");
+const marketplaceProductPage = await readFile(path.join(siteRoot, "Source", "pages", "marketplace", "[publisher]",
+    "[product].astro"), "utf8");
+const marketplaceClaimRoute = await readFile(path.join(siteRoot, "Source", "pages", "marketplace", "v1", "claims",
+    "index.ts"), "utf8");
+for (const contract of [
+    "claimAttemptKey",
+    "AbortController",
+    'cache: "no-store"',
+    'credentials: "same-origin"',
+    'button.removeAttribute("aria-busy")',
+    "Check My Assets; if it is not there, retry safely.",
+    'href="/account/#library"',
+]) {
+    assert(marketplaceProductPage.includes(contract), `Marketplace claim recovery is missing ${contract}.`);
+}
+assert(marketplaceProductPage.includes('from("marketplace_entitlements")') &&
+    marketplaceProductPage.includes('button.textContent = "In My Assets"'),
+    "Marketplace products must render and retain their personal-library ownership state.");
+assert(marketplaceClaimRoute.includes("timeout: 12_000"),
+    "Marketplace claims must bound the Edge Function request before the browser timeout.");
 for (const style of [".staff-console", ".staff-metrics", ".staff-review-card", ".staff-detail-grid",
     ".staff-subsection-heading", ".staff-withdrawal-form"]) {
     assert(platformStyles.includes(style), `Staff operations styling is missing ${style}.`);

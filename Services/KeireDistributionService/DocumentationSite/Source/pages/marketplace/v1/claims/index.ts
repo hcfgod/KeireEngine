@@ -18,11 +18,14 @@ export const POST: APIRoute = async (context) => {
         if (productError) throw productError;
         if (!product) throw new MarketplaceApiError(404, "marketplace.product_not_found", "Product was not found.");
         const licenseSnapshot = boundedString(product.license_acceptance_snapshot, "licenseAcceptanceSnapshot", 1, 100_000);
-        const { data, error } = await supabase.functions.invoke("marketplace-library", { body: {
-            operation: "claim.create", productId, organizationId, idempotencyKey,
-            licenseSpdx: product.license_spdx, licenseRevision: product.license_revision,
-            acceptedLicenseSnapshot: licenseSnapshot,
-        } });
+        const { data, error } = await supabase.functions.invoke("marketplace-library", {
+            body: {
+                operation: "claim.create", productId, organizationId, idempotencyKey,
+                licenseSpdx: product.license_spdx, licenseRevision: product.license_revision,
+                acceptedLicenseSnapshot: licenseSnapshot,
+            },
+            timeout: 12_000,
+        });
         if (error) {
             await throwEdgeFunctionError(error);
         }
