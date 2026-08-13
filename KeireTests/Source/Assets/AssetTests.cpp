@@ -19,15 +19,24 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <future>
 #include <iterator>
 #include <ranges>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <vector>
+
+#if defined(_WIN32)
+#include <Windows.h>
+#include <process.h>
+#else
+#include <pthread.h>
+#endif
 
 namespace
 {
@@ -75,6 +84,78 @@ namespace
         std::ifstream stream(path, std::ios::binary);
         return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
     }
+
+    struct ConstrainedStackHash final
+    {
+        std::filesystem::path Path;
+        std::uintmax_t MaximumBytes = 0;
+        Keire::Detail::Sha256Digest Digest{};
+        std::exception_ptr Failure;
+    };
+
+    void RunConstrainedStackHash(ConstrainedStackHash& invocation) noexcept
+    {
+        try
+        {
+            invocation.Digest = Keire::Detail::Sha256File(invocation.Path, invocation.MaximumBytes);
+        }
+        catch (...)
+        {
+            invocation.Failure = std::current_exception();
+        }
+    }
+
+#if defined(_WIN32)
+    unsigned int __stdcall ConstrainedStackHashEntry(void* context) noexcept
+    {
+        RunConstrainedStackHash(*static_cast<ConstrainedStackHash*>(context));
+        return 0U;
+    }
+#else
+    void* ConstrainedStackHashEntry(void* context) noexcept
+    {
+        RunConstrainedStackHash(*static_cast<ConstrainedStackHash*>(context));
+        return nullptr;
+    }
+#endif
+
+    [[nodiscard]] Keire::Detail::Sha256Digest HashOnConstrainedStack(const std::filesystem::path& path,
+                                                                     const std::uintmax_t maximumBytes)
+    {
+        constexpr std::size_t StackBytes = std::size_t{256U} * 1024U;
+        ConstrainedStackHash invocation{.Path = path, .MaximumBytes = maximumBytes};
+#if defined(_WIN32)
+        const auto nativeThread = _beginthreadex(nullptr, StackBytes, ConstrainedStackHashEntry, &invocation,
+                                                 STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
+        if (nativeThread == 0U)
+            throw std::runtime_error("Could not start the constrained-stack hashing test thread.");
+        const auto thread = reinterpret_cast<HANDLE>(nativeThread);
+        const auto waitResult = WaitForSingleObject(thread, INFINITE);
+        CloseHandle(thread);
+        if (waitResult != WAIT_OBJECT_0)
+            throw std::runtime_error("Could not join the constrained-stack hashing test thread.");
+#else
+        pthread_attr_t attributes;
+        if (pthread_attr_init(&attributes) != 0)
+            throw std::runtime_error("Could not initialize constrained-stack thread attributes.");
+        const auto stackBytes = std::max(StackBytes, static_cast<std::size_t>(PTHREAD_STACK_MIN));
+        if (pthread_attr_setstacksize(&attributes, stackBytes) != 0)
+        {
+            pthread_attr_destroy(&attributes);
+            throw std::runtime_error("Could not configure the constrained-stack hashing test thread.");
+        }
+        pthread_t thread;
+        const auto createResult = pthread_create(&thread, &attributes, ConstrainedStackHashEntry, &invocation);
+        pthread_attr_destroy(&attributes);
+        if (createResult != 0)
+            throw std::runtime_error("Could not start the constrained-stack hashing test thread.");
+        if (pthread_join(thread, nullptr) != 0)
+            throw std::runtime_error("Could not join the constrained-stack hashing test thread.");
+#endif
+        if (invocation.Failure)
+            std::rethrow_exception(invocation.Failure);
+        return invocation.Digest;
+    }
 } // namespace
 
 TEST_CASE("Asset identifiers are stable canonical 128-bit values")
@@ -83,6 +164,22 @@ TEST_CASE("Asset identifiers are stable canonical 128-bit values")
     CHECK(id);
     CHECK(Keire::AssetId::Parse(id.ToString()) == id);
     CHECK_THROWS_AS((void)Keire::AssetId::Parse("not-an-asset-id"), std::invalid_argument);
+}
+
+TEST_CASE("File SHA-256 hashing streams safely on an Editor-sized caller stack")
+{
+    TemporaryAssetProject project;
+    std::string contents(std::size_t{1024U} * 1024U + 257U, 'x');
+    for (std::size_t index = 0; index < contents.size(); index += 251U)
+        contents[index] = static_cast<char>('a' + index % 26U);
+    project.Write("LargeHashInput.bin", contents);
+
+    const auto bytes = std::as_bytes(std::span(contents));
+    CHECK(HashOnConstrainedStack(project.Root / "Assets/LargeHashInput.bin", contents.size()) ==
+          Keire::Detail::Sha256(bytes));
+    CHECK_THROWS_AS(
+        static_cast<void>(Keire::Detail::Sha256File(project.Root / "Assets/LargeHashInput.bin", contents.size() - 1U)),
+        std::runtime_error);
 }
 
 TEST_CASE("Asset worker protocol and published source index round trip without rescanning")

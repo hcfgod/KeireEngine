@@ -21,6 +21,8 @@ namespace KeireHub::Detail
     namespace
     {
 #if defined(_WIN32)
+        constexpr std::uint32_t FileReplacementAttempts = 64;
+
         [[nodiscard]] std::wstring ExtendedLengthPath(const std::filesystem::path& path)
         {
             auto value = std::filesystem::absolute(path).lexically_normal().native();
@@ -29,6 +31,30 @@ namespace KeireHub::Detail
             if (value.starts_with(LR"(\\)"))
                 return LR"(\\?\UNC\)" + value.substr(2);
             return LR"(\\?\)" + value;
+        }
+
+        [[nodiscard]] HANDLE OpenFileForRead(const std::filesystem::path& path, DWORD& error)
+        {
+            const auto nativePath = ExtendedLengthPath(path);
+            for (std::uint32_t attempt = 0; attempt < FileReplacementAttempts; ++attempt)
+            {
+                const auto handle = CreateFileW(nativePath.c_str(), GENERIC_READ,
+                                                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                                                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+                if (handle != INVALID_HANDLE_VALUE)
+                    return handle;
+
+                error = GetLastError();
+                const bool retryable = error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND ||
+                                       error == ERROR_ACCESS_DENIED || error == ERROR_SHARING_VIOLATION ||
+                                       error == ERROR_LOCK_VIOLATION || error == ERROR_DELETE_PENDING;
+                if (!retryable || attempt + 1 == FileReplacementAttempts)
+                    return INVALID_HANDLE_VALUE;
+
+                // A replace may briefly detach the destination name before the new file becomes visible.
+                Sleep(attempt < 4 ? 0U : 1U);
+            }
+            return INVALID_HANDLE_VALUE;
         }
 
         class WindowsFileHandle final
@@ -68,7 +94,7 @@ namespace KeireHub::Detail
 #if defined(_WIN32)
             const auto nativeSource = ExtendedLengthPath(source);
             const auto nativeDestination = ExtendedLengthPath(destination);
-            for (std::uint32_t attempt = 0; attempt < 16; ++attempt)
+            for (std::uint32_t attempt = 0; attempt < FileReplacementAttempts; ++attempt)
             {
                 if (MoveFileExW(nativeSource.c_str(), nativeDestination.c_str(),
                                 MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
@@ -78,7 +104,7 @@ namespace KeireHub::Detail
                 const auto code = GetLastError();
                 const bool retryable =
                     code == ERROR_ACCESS_DENIED || code == ERROR_SHARING_VIOLATION || code == ERROR_LOCK_VIOLATION;
-                if (!retryable || attempt == 15)
+                if (!retryable || attempt + 1 == FileReplacementAttempts)
                 {
                     error = std::error_code(static_cast<int>(code), std::system_category());
                     return false;
@@ -97,12 +123,11 @@ namespace KeireHub::Detail
     HubResult<std::string> ReadTextFile(const std::filesystem::path& path, const std::size_t maximumBytes)
     {
 #if defined(_WIN32)
-        const WindowsFileHandle file(CreateFileW(path.c_str(), GENERIC_READ,
-                                                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
-                                                 OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
+        DWORD openError = ERROR_SUCCESS;
+        const WindowsFileHandle file(OpenFileForRead(path, openError));
         if (file.Get() == INVALID_HANDLE_VALUE)
         {
-            const std::error_code error(static_cast<int>(GetLastError()), std::system_category());
+            const std::error_code error(static_cast<int>(openError), std::system_category());
             return HubResult<std::string>::Failure(IoError(HubErrorCode::IoRead, path, error.message()));
         }
         LARGE_INTEGER fileSize{};

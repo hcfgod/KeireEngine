@@ -1,0 +1,1067 @@
+#pragma once
+
+#include "Keire/Scenes/Scene.h"
+
+#include "Keire/Animation/AnimationSystem.h"
+#include "Keire/Animation/RiggingSystem.h"
+#include "Keire/Assets/AssetSystem.h"
+#include "Keire/Assets/PhysicsMaterialAsset.h"
+#include "Keire/Assets/RenderingAssets.h"
+#include "Keire/ECS/Components/AnimatorComponent.h"
+#include "Keire/ECS/Components/CharacterControllerComponent.h"
+#include "Keire/ECS/Components/ColliderComponent.h"
+#include "Keire/ECS/Components/RigidBodyComponent.h"
+#include "Keire/ECS/Components/TransformComponent.h"
+#include "Keire/ECS/Components/VfxEmitterComponent.h"
+#include "Keire/Log.h"
+#include "Keire/Scenes/ScenePresentationRuntime.h"
+#include "Keire/Vfx/VfxSystem.h"
+#include "Keire/Vfx/VfxVolumeAsset.h"
+
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cmath>
+#include <exception>
+#include <limits>
+#include <map>
+#include <memory>
+#include <optional>
+#include <ranges>
+#include <set>
+#include <span>
+#include <stdexcept>
+#include <thread>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+namespace Keire::Detail
+{
+    [[nodiscard]] inline bool HasCanonicalVfxRangeEndpoints(const VfxParameterValue& value) noexcept
+    {
+        return std::visit(
+            [](const auto& item) noexcept
+            {
+                using T = std::decay_t<decltype(item)>;
+                if constexpr (std::is_same_v<T, VfxScalarRange> || std::is_same_v<T, VfxIntegerRange> ||
+                              std::is_same_v<T, VfxUnsignedIntegerRange>)
+                {
+                    return item.Minimum <= item.Maximum;
+                }
+                else if constexpr (std::is_same_v<T, VfxVector2Range>)
+                {
+                    return item.Minimum.X <= item.Maximum.X && item.Minimum.Y <= item.Maximum.Y;
+                }
+                else if constexpr (std::is_same_v<T, VfxVector3Range>)
+                {
+                    return item.Minimum.X <= item.Maximum.X && item.Minimum.Y <= item.Maximum.Y &&
+                           item.Minimum.Z <= item.Maximum.Z;
+                }
+                else if constexpr (std::is_same_v<T, VfxVector4Range>)
+                {
+                    return item.Minimum.X <= item.Maximum.X && item.Minimum.Y <= item.Maximum.Y &&
+                           item.Minimum.Z <= item.Maximum.Z && item.Minimum.W <= item.Maximum.W;
+                }
+                else if constexpr (std::is_same_v<T, VfxColorRange>)
+                {
+                    return item.Minimum.Red <= item.Maximum.Red && item.Minimum.Green <= item.Maximum.Green &&
+                           item.Minimum.Blue <= item.Maximum.Blue && item.Minimum.Alpha <= item.Maximum.Alpha;
+                }
+                else
+                {
+                    return true;
+                }
+            },
+            value);
+    }
+
+    [[nodiscard]] inline bool VfxOverrideMatches(const VfxValueType type, const VfxParameterValue& value) noexcept
+    {
+        return VfxValueMatchesType(type, value) && IsFiniteVfxValue(value) && HasCanonicalVfxRangeEndpoints(value);
+    }
+
+    [[nodiscard]] inline std::vector<VfxParameterOverride>
+    CompatibleVfxOverrides(const VfxEffectDefinition& definition, const std::span<const VfxParameterOverride> authored)
+    {
+        std::vector<VfxParameterOverride> result;
+        result.reserve(authored.size());
+        for (const auto& overrideValue : authored)
+        {
+            const auto parameter =
+                std::ranges::find(definition.Blackboard, overrideValue.Parameter, &VfxBlackboardParameter::Id);
+            if (parameter != definition.Blackboard.end() && parameter->Exposed &&
+                VfxOverrideMatches(parameter->Type, overrideValue.Value))
+                result.push_back(overrideValue);
+        }
+        return result;
+    }
+} // namespace Keire::Detail
+
+namespace Keire
+{
+    using Detail::CompatibleVfxOverrides;
+    using Detail::VfxOverrideMatches;
+
+    class SceneRuntimeSession::Impl final
+    {
+      public:
+        struct AnimationRuntimeState final
+        {
+            struct RetargetedClip final
+            {
+                AssetId SourceSkeleton;
+                AssetHandle<SkeletonAsset> SourceSkeletonHandle;
+                Ref<AnimationClipAsset> Clip;
+                std::uint64_t ClipRevision = 0;
+                std::uint64_t SourceSkeletonRevision = 0;
+                std::uint64_t TargetSkeletonRevision = 0;
+            };
+
+            AssetId Graph;
+            AssetId Skeleton;
+            AssetId Skin;
+            AssetHandle<AnimationGraphAsset> GraphHandle;
+            AssetHandle<SkeletonAsset> SkeletonHandle;
+            std::map<AssetId, AssetHandle<AnimationClipAsset>> Clips;
+            std::map<AssetId, RetargetedClip> RetargetedClips;
+            std::map<AssetId, AssetHandle<AvatarMaskAsset>> Masks;
+            std::map<std::string, std::uint32_t, std::less<>> BoneIndices;
+            std::map<RigBoneSemantic, std::uint32_t> SemanticBoneIndices;
+            std::unique_ptr<AnimatorInstance> Instance;
+            std::uint64_t GraphRevision = 0;
+            std::uint64_t DependencyGraphRevision = 0;
+            std::uint64_t SkeletonRevision = 0;
+            std::string DependencyDiagnostic;
+        };
+
+        struct PhysicsRuntimeState final
+        {
+            PhysicsBodyId Body;
+            PhysicsBodyDefinition Definition;
+            bool HasDefinition = false;
+            AssetId Material;
+            AssetHandle<PhysicsMaterialAsset> MaterialHandle;
+            std::uint64_t MaterialRevision = 0;
+            AssetId Mesh;
+            AssetHandle<MeshAsset> MeshHandle;
+            std::uint64_t MeshRevision = 0;
+            Vector3 CookedScale;
+            std::shared_ptr<const CookedCollisionMesh> CookedCollision;
+            Vector3 ColliderCenter;
+            Vector3 WorldScale{1.0F, 1.0F, 1.0F};
+            Vector3 CharacterVelocity;
+            std::uint32_t Generation = 0;
+        };
+
+        struct VfxRuntimeState final
+        {
+            AssetId Effect;
+            AssetHandle<VfxEffectAsset> EffectHandle;
+            VfxHandle Handle;
+            std::uint64_t Revision = 0;
+            std::vector<VfxParameterOverride> Overrides;
+            std::uint64_t RejectedRevision = 0;
+            std::vector<VfxParameterOverride> RejectedOverrides;
+            std::string Diagnostic;
+        };
+
+        struct VfxMeshShapeState final
+        {
+            struct Triangle final
+            {
+                Vector3 A;
+                Vector3 B;
+                Vector3 C;
+                float CumulativeArea = 0.0F;
+            };
+
+            AssetHandle<MeshAsset> Handle;
+            std::vector<Triangle> Triangles;
+            std::uint64_t Revision = 0;
+            float TotalArea = 0.0F;
+        };
+
+        Impl(Ref<Scene> scene, Ref<AssetSystem> assets, Ref<AudioSystem> audio, Ref<PhysicsSystem> physics)
+            : Edit(std::move(scene)), Assets(std::move(assets)), PhysicsService(std::move(physics)),
+              OwnerThread(std::this_thread::get_id())
+        {
+            if (!Edit || !Edit->IsOpen())
+                throw std::invalid_argument("SceneRuntimeSession requires an open edit scene.");
+            if (Assets)
+                Presentation = CreateRef<ScenePresentationRuntime>(Assets, std::move(audio));
+        }
+
+        void RequireOwner(const char* operation) const
+        {
+            if (std::this_thread::get_id() != OwnerThread)
+                throw std::logic_error(std::string("SceneRuntimeSession::") + operation +
+                                       " must run on the owner thread.");
+        }
+
+        template <typename Callback> void Invoke(const char* callback, Callback&& operation)
+        {
+            try
+            {
+                std::forward<Callback>(operation)();
+            }
+            catch (const std::exception& exception)
+            {
+                PlayState = ScenePlayState::Faulted;
+                Failure = {callback, exception.what()};
+            }
+            catch (...)
+            {
+                PlayState = ScenePlayState::Faulted;
+                Failure = {callback, "Component callback threw a non-standard exception."};
+            }
+        }
+
+        [[nodiscard]] Ref<const AnimationClipAsset> ResolveClip(AnimationRuntimeState& state, const AssetId id)
+        {
+            if (!id)
+                return {};
+            auto [iterator, inserted] = state.Clips.try_emplace(id);
+            if (inserted)
+                iterator->second = Assets->Load<AnimationClipAsset>(id, AssetPriority::High);
+            auto clip = iterator->second.TryGetLoaded();
+            if (!clip || clip->Skeleton() == state.Skeleton)
+                return clip;
+
+            auto& retargeted = state.RetargetedClips[id];
+            if (retargeted.SourceSkeleton != clip->Skeleton())
+            {
+                retargeted = {};
+                retargeted.SourceSkeleton = clip->Skeleton();
+                retargeted.SourceSkeletonHandle =
+                    Assets->Load<SkeletonAsset>(retargeted.SourceSkeleton, AssetPriority::High);
+            }
+            const auto sourceSkeleton = retargeted.SourceSkeletonHandle.TryGetLoaded();
+            const auto targetSkeleton = state.SkeletonHandle.TryGetLoaded();
+            if (!sourceSkeleton || !targetSkeleton)
+                return {};
+
+            const auto clipRevision = iterator->second.Revision();
+            const auto sourceRevision = retargeted.SourceSkeletonHandle.Revision();
+            const auto targetRevision = state.SkeletonHandle.Revision();
+            if (!retargeted.Clip || retargeted.ClipRevision != clipRevision ||
+                retargeted.SourceSkeletonRevision != sourceRevision ||
+                retargeted.TargetSkeletonRevision != targetRevision)
+            {
+                try
+                {
+                    const auto sourceRig = BestRuntimeRig(*sourceSkeleton);
+                    const auto targetRig = BestRuntimeRig(*targetSkeleton);
+                    retargeted.Clip = RetargetAnimationClip(*sourceSkeleton, sourceRig, *clip, state.Skeleton,
+                                                            *targetSkeleton, targetRig);
+                    retargeted.ClipRevision = clipRevision;
+                    retargeted.SourceSkeletonRevision = sourceRevision;
+                    retargeted.TargetSkeletonRevision = targetRevision;
+                }
+                catch (const std::exception& error)
+                {
+                    state.DependencyDiagnostic =
+                        "Animation clip is incompatible with the Animator skeleton: " + std::string(error.what());
+                    retargeted.Clip = {};
+                    return {};
+                }
+            }
+            return retargeted.Clip;
+        }
+
+        [[nodiscard]] Ref<const AvatarMaskAsset> ResolveMask(AnimationRuntimeState& state, const AssetId id)
+        {
+            if (!id)
+                return {};
+            auto [iterator, inserted] = state.Masks.try_emplace(id);
+            if (inserted)
+                iterator->second = Assets->Load<AvatarMaskAsset>(id, AssetPriority::High);
+            return iterator->second.TryGetLoaded();
+        }
+
+        [[nodiscard]] bool DependenciesReady(AnimationRuntimeState& state, const AnimationGraphAsset& graph)
+        {
+            state.DependencyDiagnostic.clear();
+            bool ready = true;
+            for (const auto& layer : graph.Definition().Layers)
+            {
+                if (layer.AvatarMask && !ResolveMask(state, layer.AvatarMask))
+                    ready = false;
+                for (const auto& animationState : layer.States)
+                {
+                    const auto clip = animationState.Motion.Clip ? animationState.Motion.Clip : animationState.Clip;
+                    if (clip && !ResolveClip(state, clip))
+                        ready = false;
+                    for (const auto& child : animationState.Motion.Children)
+                        if (child.Clip && !ResolveClip(state, child.Clip))
+                            ready = false;
+                }
+            }
+            return ready;
+        }
+
+        [[nodiscard]] static RigDefinition BestRuntimeRig(const SkeletonAsset& skeleton)
+        {
+            auto humanoid = InferRigDefinition(skeleton, RigProfileType::Humanoid);
+            auto quadruped = InferRigDefinition(skeleton, RigProfileType::Quadruped);
+            const auto semanticCount = [](const RigDefinition& rig)
+            {
+                return std::ranges::count_if(rig.Bones,
+                                             [](const auto& bone) { return bone.Semantic != RigBoneSemantic::None; });
+            };
+            return semanticCount(quadruped) > semanticCount(humanoid) ? std::move(quadruped) : std::move(humanoid);
+        }
+
+        static void ApplyCommands(AnimatorInstance& instance, std::span<const AnimatorCommand> commands)
+        {
+            for (const auto& command : commands)
+            {
+                switch (command.Type)
+                {
+                case AnimatorCommandType::SetFloat:
+                    instance.SetFloat(command.Name, command.FloatValue);
+                    break;
+                case AnimatorCommandType::SetInteger:
+                    instance.SetInteger(command.Name, command.IntegerValue);
+                    break;
+                case AnimatorCommandType::SetBoolean:
+                    instance.SetBool(command.Name, command.BooleanValue);
+                    break;
+                case AnimatorCommandType::SetTrigger:
+                    instance.SetTrigger(command.Name);
+                    break;
+                case AnimatorCommandType::ResetTrigger:
+                    instance.ResetTrigger(command.Name);
+                    break;
+                case AnimatorCommandType::SetLayerWeight:
+                    instance.SetLayerWeight(command.Name, command.FloatValue);
+                    break;
+                case AnimatorCommandType::Play:
+                    instance.Play(command.Name, command.Layer, command.FloatValue);
+                    break;
+                case AnimatorCommandType::CrossFade:
+                    instance.CrossFade(command.Name, command.SecondaryFloatValue, command.Layer, command.FloatValue);
+                    break;
+                case AnimatorCommandType::Stop:
+                    instance.Stop();
+                    break;
+                }
+            }
+        }
+
+        [[nodiscard]] static std::vector<Matrix4> SkinPalette(const SkeletonAsset& skeleton,
+                                                              std::span<const BoneTransform> localPose)
+        {
+            if (localPose.size() != skeleton.Bones().size())
+                throw std::runtime_error("Animator pose does not match its skeleton.");
+            std::vector<Matrix4> world(localPose.size());
+            std::vector<Matrix4> palette(localPose.size());
+            for (std::size_t index = 0; index < localPose.size(); ++index)
+            {
+                const auto& transform = localPose[index];
+                const auto local = Math::ComposeTransform(transform.Translation, transform.Rotation, transform.Scale);
+                const auto parent = skeleton.Bones()[index].Parent;
+                world[index] = parent < 0 ? local : Math::Multiply(world[static_cast<std::size_t>(parent)], local);
+                palette[index] = Math::Multiply(world[index], skeleton.Bones()[index].InverseBindPose);
+            }
+            return palette;
+        }
+
+        [[nodiscard]] static std::vector<Matrix4> ModelBoneMatrices(const SkeletonAsset& skeleton,
+                                                                    std::span<const BoneTransform> localPose)
+        {
+            std::vector<Matrix4> world(localPose.size());
+            for (std::size_t index = 0; index < localPose.size(); ++index)
+            {
+                const auto& transform = localPose[index];
+                const auto local = Math::ComposeTransform(transform.Translation, transform.Rotation, transform.Scale);
+                const auto parent = skeleton.Bones()[index].Parent;
+                world[index] = parent < 0 ? local : Math::Multiply(world[static_cast<std::size_t>(parent)], local);
+            }
+            return world;
+        }
+
+        [[nodiscard]] static std::shared_ptr<const AnimatorDebugSnapshot>
+        FinalPoseDebugSnapshot(const SkeletonAsset& skeleton, const std::span<const BoneTransform> localPose,
+                               const std::shared_ptr<const AnimatorDebugSnapshot>& source)
+        {
+            if (!source || localPose.size() != skeleton.Bones().size())
+                return source;
+            auto result = std::make_shared<AnimatorDebugSnapshot>(*source);
+            const auto modelBones = ModelBoneMatrices(skeleton, localPose);
+            result->Pose.clear();
+            result->Pose.reserve(localPose.size());
+            for (std::size_t index = 0; index < localPose.size(); ++index)
+            {
+                const auto& bone = skeleton.Bones()[index];
+                result->Pose.push_back(
+                    {bone.Name, bone.Parent, localPose[index], Math::TransformPoint(modelBones[index], {})});
+            }
+            return result;
+        }
+
+        [[nodiscard]] static std::optional<std::uint32_t>
+        ResolveIkBone(const std::map<std::string, std::uint32_t, std::less<>>& names,
+                      const std::map<RigBoneSemantic, std::uint32_t>& semantics, const bool automatic,
+                      const std::string_view fallback, const RigBoneSemantic semantic)
+        {
+            if (automatic)
+            {
+                const auto inferred = semantics.find(semantic);
+                if (inferred != semantics.end())
+                    return inferred->second;
+            }
+            const auto named = names.find(fallback);
+            return named == names.end() ? std::nullopt : std::optional(named->second);
+        }
+
+        [[nodiscard]] std::string ApplyAuthoredArmIk(const Entity& entity, const SkeletonAsset& skeleton,
+                                                     const AnimatorComponent& animator,
+                                                     const std::span<BoneTransform> localPose,
+                                                     const std::map<std::string, std::uint32_t, std::less<>>& names,
+                                                     const std::map<RigBoneSemantic, std::uint32_t>& semantics)
+        {
+            const auto animatorTransform = entity.GetComponent<TransformComponent>();
+            if (!animatorTransform)
+                return "Authored arm IK requires an Animator world transform.";
+            Matrix4 worldToModel;
+            try
+            {
+                worldToModel = Math::Inverse(animatorTransform->WorldMatrix());
+            }
+            catch (const std::exception&)
+            {
+                return "Authored arm IK could not invert the Animator world transform.";
+            }
+
+            const auto solve = [&](const AnimatorLimbIkSettings& settings, const bool left) -> std::string
+            {
+                if (!settings.Enabled)
+                    return {};
+                const auto side = left ? std::string_view("Left") : std::string_view("Right");
+                if (!settings.Target)
+                    return std::string(side) + " arm IK is enabled but has no target entity.";
+                const auto targetEntity = Runtime->FindEntity(settings.Target);
+                const auto targetTransform =
+                    targetEntity ? targetEntity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
+                if (!targetTransform)
+                    return std::string(side) + " arm IK target is unavailable in the runtime scene.";
+
+                const auto root = ResolveIkBone(names, semantics, settings.AutomaticBoneMapping, settings.Root,
+                                                left ? RigBoneSemantic::LeftUpperArm : RigBoneSemantic::RightUpperArm);
+                const auto middle =
+                    ResolveIkBone(names, semantics, settings.AutomaticBoneMapping, settings.Middle,
+                                  left ? RigBoneSemantic::LeftLowerArm : RigBoneSemantic::RightLowerArm);
+                const auto end = ResolveIkBone(names, semantics, settings.AutomaticBoneMapping, settings.End,
+                                               left ? RigBoneSemantic::LeftHand : RigBoneSemantic::RightHand);
+                if (!root || !middle || !end)
+                    return std::string(side) +
+                           " arm IK could not resolve a contiguous upper-arm, lower-arm, and hand chain.";
+
+                const auto targetModelMatrix = Math::Multiply(worldToModel, targetTransform->WorldMatrix());
+                const auto target = Math::TransformPoint(targetModelMatrix, settings.TargetOffset);
+                Vector3 ignoredPosition;
+                Vector3 ignoredScale;
+                Quaternion targetRotation;
+                if (!Math::DecomposeTransform(targetModelMatrix, ignoredPosition, targetRotation, ignoredScale))
+                    return std::string(side) + " arm IK target has a non-decomposable transform.";
+
+                Vector3 pole;
+                if (settings.Pole)
+                {
+                    const auto poleEntity = Runtime->FindEntity(settings.Pole);
+                    const auto poleTransform =
+                        poleEntity ? poleEntity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
+                    if (!poleTransform)
+                        return std::string(side) + " arm IK pole override is unavailable in the runtime scene.";
+                    pole = Math::TransformPoint(worldToModel, poleTransform->WorldPosition());
+                }
+                else
+                {
+                    const auto modelBones = ModelBoneMatrices(skeleton, localPose);
+                    const auto rootPosition = Math::TransformPoint(modelBones[*root], {});
+                    const auto middlePosition = Math::TransformPoint(modelBones[*middle], {});
+                    const auto endPosition = Math::TransformPoint(modelBones[*end], {});
+                    const Vector3 forward{endPosition.X - rootPosition.X, endPosition.Y - rootPosition.Y,
+                                          endPosition.Z - rootPosition.Z};
+                    const auto lengthSquared = forward.X * forward.X + forward.Y * forward.Y + forward.Z * forward.Z;
+                    Vector3 bend{middlePosition.X - rootPosition.X, middlePosition.Y - rootPosition.Y,
+                                 middlePosition.Z - rootPosition.Z};
+                    if (lengthSquared > 0.000001F)
+                    {
+                        const auto projection =
+                            (bend.X * forward.X + bend.Y * forward.Y + bend.Z * forward.Z) / lengthSquared;
+                        bend = {bend.X - forward.X * projection, bend.Y - forward.Y * projection,
+                                bend.Z - forward.Z * projection};
+                    }
+                    const auto bendLength = std::sqrt(bend.X * bend.X + bend.Y * bend.Y + bend.Z * bend.Z);
+                    const auto reach = std::max(std::sqrt(lengthSquared), 0.25F);
+                    if (bendLength > 0.000001F)
+                    {
+                        pole = {middlePosition.X + bend.X / bendLength * reach,
+                                middlePosition.Y + bend.Y / bendLength * reach,
+                                middlePosition.Z + bend.Z / bendLength * reach};
+                    }
+                    else
+                    {
+                        pole = {middlePosition.X, middlePosition.Y, middlePosition.Z - reach};
+                    }
+                }
+
+                TwoBoneIkRequest request{*root, *middle, *end, target, pole, settings.PositionWeight};
+                request.EndRotation = targetRotation;
+                request.EndRotationWeight = settings.RotationWeight;
+                if (!SolveTwoBoneIk(skeleton, localPose, request))
+                    return std::string(side) + " arm IK could not solve the resolved skeleton chain.";
+                return {};
+            };
+
+            if (const auto diagnostic = solve(animator.LeftArmIk(), true); !diagnostic.empty())
+                return diagnostic;
+            return solve(animator.RightArmIk(), false);
+        }
+
+        [[nodiscard]] static std::string ApplyIkGoals(const Entity& entity, const SkeletonAsset& skeleton,
+                                                      const AnimatorComponent& animator,
+                                                      std::span<BoneTransform> localPose,
+                                                      const std::map<std::string, std::uint32_t, std::less<>>& indices)
+        {
+            if (animator.IkGoals().empty())
+                return {};
+
+            Matrix4 worldToModel;
+            bool hasWorldToModel = false;
+            if (const auto transform = entity.GetComponent<TransformComponent>())
+            {
+                try
+                {
+                    worldToModel = Math::Inverse(transform->WorldMatrix());
+                    hasWorldToModel = true;
+                }
+                catch (const std::exception&)
+                {
+                }
+            }
+
+            for (const auto& goal : animator.IkGoals())
+            {
+                std::vector<std::uint32_t> chain;
+                chain.reserve(goal.Bones.size());
+                for (const auto& name : goal.Bones)
+                {
+                    const auto found = indices.find(name);
+                    if (found == indices.end())
+                        return "IK goal '" + goal.Name + "' references missing bone '" + name + "'.";
+                    chain.push_back(found->second);
+                }
+
+                auto target = goal.Target;
+                auto pole = goal.Pole;
+                if (goal.Space == AnimatorIkSpace::World)
+                {
+                    if (!hasWorldToModel)
+                        return "IK goal '" + goal.Name + "' could not resolve the Animator world transform.";
+                    target = Math::TransformPoint(worldToModel, target);
+                    pole = Math::TransformPoint(worldToModel, pole);
+                }
+
+                bool solved = false;
+                if (goal.Solver == AnimatorIkSolver::TwoBone && chain.size() == 3)
+                {
+                    solved =
+                        SolveTwoBoneIk(skeleton, localPose, {chain[0], chain[1], chain[2], target, pole, goal.Weight});
+                }
+                else if (goal.Solver == AnimatorIkSolver::Fabrik)
+                {
+                    solved =
+                        SolveFabrikIk(skeleton, localPose,
+                                      {std::move(chain), target, goal.MaximumIterations, goal.Tolerance, goal.Weight});
+                }
+                if (!solved)
+                    return "IK goal '" + goal.Name + "' does not describe a valid contiguous skeleton chain.";
+            }
+            return {};
+        }
+
+        [[nodiscard]] std::string ApplyFootGrounding(const Entity& entity, const SkeletonAsset& skeleton,
+                                                     const AnimatorComponent& animator,
+                                                     std::span<BoneTransform> localPose,
+                                                     const std::map<std::string, std::uint32_t, std::less<>>& indices,
+                                                     const std::map<RigBoneSemantic, std::uint32_t>& semantics)
+        {
+            const auto& settings = animator.FootGrounding();
+            if (!settings.Enabled)
+                return {};
+            if (!PhysicsWorldService)
+                return "Foot grounding requires an active physics world.";
+            const auto transform = entity.GetComponent<TransformComponent>();
+            if (!transform)
+                return "Foot grounding requires an Animator world transform.";
+
+            const auto bone = [&](const std::string_view name, const RigBoneSemantic semantic)
+            { return ResolveIkBone(indices, semantics, settings.AutomaticBoneMapping, name, semantic); };
+            const auto pelvis = bone(settings.Pelvis, RigBoneSemantic::Pelvis);
+            const std::array chains{std::array{bone(settings.LeftUpperLeg, RigBoneSemantic::LeftUpperLeg),
+                                               bone(settings.LeftLowerLeg, RigBoneSemantic::LeftLowerLeg),
+                                               bone(settings.LeftFoot, RigBoneSemantic::LeftFoot)},
+                                    std::array{bone(settings.RightUpperLeg, RigBoneSemantic::RightUpperLeg),
+                                               bone(settings.RightLowerLeg, RigBoneSemantic::RightLowerLeg),
+                                               bone(settings.RightFoot, RigBoneSemantic::RightFoot)}};
+            if (!pelvis ||
+                std::ranges::any_of(
+                    chains, [](const auto& chain)
+                    { return std::ranges::any_of(chain, [](const auto value) { return !value.has_value(); }); }))
+                return "Foot grounding references one or more unavailable skeleton bones.";
+
+            Matrix4 worldToModel;
+            try
+            {
+                worldToModel = Math::Inverse(transform->WorldMatrix());
+            }
+            catch (const std::exception&)
+            {
+                return "Foot grounding could not invert the Animator world transform.";
+            }
+            const auto modelToWorld = transform->WorldMatrix();
+            const auto modelBones = ModelBoneMatrices(skeleton, localPose);
+            const auto ownPhysics = PhysicsBodies.find(entity.Id());
+            const auto ownBody = ownPhysics == PhysicsBodies.end() ? PhysicsBodyId{} : ownPhysics->second.Body;
+            const auto queryLayer = ownPhysics == PhysicsBodies.end() || !ownPhysics->second.HasDefinition
+                                        ? 1U
+                                        : ownPhysics->second.Definition.Layer;
+
+            FootGroundingRequest request;
+            request.Pelvis = *pelvis;
+            request.FootHeight = settings.FootOffset;
+            request.PelvisWeight = settings.Weight;
+            request.MaximumPelvisAdjustment = settings.MaximumPelvisAdjustment;
+            for (const auto& chain : chains)
+            {
+                const auto footPosition = Math::TransformPoint(modelBones[*chain[2]], {});
+                const auto footWorld = Math::TransformPoint(modelToWorld, footPosition);
+                const Vector3 origin{footWorld.X, footWorld.Y + settings.RaycastHeight, footWorld.Z};
+                auto raycastDistance = settings.RaycastDistance;
+                if (settings.AutomaticRaycastDistance)
+                {
+                    const auto upperWorld =
+                        Math::TransformPoint(modelToWorld, Math::TransformPoint(modelBones[*chain[0]], {}));
+                    const auto lowerWorld =
+                        Math::TransformPoint(modelToWorld, Math::TransformPoint(modelBones[*chain[1]], {}));
+                    const auto distance = [](const Vector3 left, const Vector3 right)
+                    {
+                        const auto x = right.X - left.X;
+                        const auto y = right.Y - left.Y;
+                        const auto z = right.Z - left.Z;
+                        return std::sqrt(x * x + y * y + z * z);
+                    };
+                    const auto legLength = distance(upperWorld, lowerWorld) + distance(lowerWorld, footWorld);
+                    raycastDistance = std::max(raycastDistance, legLength * 1.1F);
+                }
+                const auto hits =
+                    PhysicsWorldService->RayCast({.Origin = origin,
+                                                  .Direction = {0.0F, -1.0F, 0.0F},
+                                                  .MaximumDistance = settings.RaycastHeight + raycastDistance,
+                                                  .Mask = settings.CollisionMask,
+                                                  .IncludeTriggers = false,
+                                                  .Layer = queryLayer});
+                const auto hit = std::ranges::find_if(
+                    hits,
+                    [&](const auto& candidate)
+                    {
+                        if (ownBody && candidate.Body == ownBody)
+                            return false;
+                        const auto normalLength = std::sqrt(candidate.Normal.X * candidate.Normal.X +
+                                                            candidate.Normal.Y * candidate.Normal.Y +
+                                                            candidate.Normal.Z * candidate.Normal.Z);
+                        if (normalLength <= 0.000001F)
+                            return false;
+                        const auto normalY = std::clamp(candidate.Normal.Y / normalLength, -1.0F, 1.0F);
+                        const auto slope = std::acos(normalY) * 57.2957795131F;
+                        return slope <= settings.MaximumSlopeDegrees;
+                    });
+                if (hit == hits.end())
+                    continue;
+                const auto position = Math::TransformPoint(worldToModel, hit->Position);
+                const auto normal = Math::TransformDirection(worldToModel, hit->Normal);
+                const auto knee = Math::TransformPoint(modelBones[*chain[1]], {});
+                request.Contacts.push_back({*chain[0],
+                                            *chain[1],
+                                            *chain[2],
+                                            position,
+                                            normal,
+                                            {knee.X, knee.Y, knee.Z + 1.0F},
+                                            settings.Weight,
+                                            settings.RotationWeight});
+            }
+            if (request.Contacts.empty())
+                return {};
+            const auto solved = SolveFootGrounding(skeleton, localPose, request);
+            if (!solved)
+                return "Foot grounding could not solve the configured leg chains.";
+            if (solved->UnreachableFeet != 0)
+                return "Foot grounding reached the configured pelvis/leg limit for " +
+                       std::to_string(solved->UnreachableFeet) + " foot target(s).";
+            return {};
+        }
+
+        static void ApplyRootMotion(const Entity& entity, const AnimatorSample& sample, AnimatorComponent& animator)
+        {
+            if (!animator.ApplyRootMotion())
+                return;
+            const auto body = entity.GetComponent<RigidBodyComponent>();
+            if (body && body->Motion() == PhysicsMotionType::Dynamic)
+            {
+                animator.SetRuntimeDiagnostic(
+                    "Root motion is disabled because the Animator shares an entity with a dynamic rigid body.");
+                return;
+            }
+            bool routedToCharacter = false;
+            if (const auto character = entity.GetComponent<CharacterControllerComponent>();
+                character && character->Enabled())
+            {
+                (void)character->QueueDesiredMovement(sample.RootMotion);
+                routedToCharacter = true;
+            }
+            const auto transform = entity.GetComponent<TransformComponent>();
+            if (!transform)
+                return;
+            const auto position = transform->LocalPosition();
+            if (!routedToCharacter)
+            {
+                transform->SetLocalPosition({position.X + sample.RootMotion.X, position.Y + sample.RootMotion.Y,
+                                             position.Z + sample.RootMotion.Z});
+            }
+            if (sample.RootRotation != Quaternion{})
+            {
+                const auto current = Math::ComposeTransform({}, transform->LocalRotation(), {1.0F, 1.0F, 1.0F});
+                const auto delta = Math::ComposeTransform({}, sample.RootRotation, {1.0F, 1.0F, 1.0F});
+                Vector3 ignoredPosition;
+                Vector3 ignoredScale;
+                Quaternion rotation;
+                if (Math::DecomposeTransform(Math::Multiply(current, delta), ignoredPosition, rotation, ignoredScale))
+                    transform->SetLocalRotation(rotation);
+            }
+        }
+
+        void SynchronizeAnimation(const float deltaSeconds)
+        {
+            if (!Assets || !Runtime)
+                return;
+            std::set<EntityId> seen;
+            for (const auto& entity : Runtime->Query<AnimatorComponent>())
+            {
+                const auto animator = entity.GetComponent<AnimatorComponent>();
+                if (!animator)
+                    continue;
+                seen.emplace(entity.Id());
+                auto& state = Animators[entity.Id()];
+                if (!state)
+                    state = std::make_unique<AnimationRuntimeState>();
+
+                const auto skinId = animator->SkinnedMesh();
+                auto targetSkeleton = animator->Skeleton();
+                if (skinId)
+                {
+                    const auto skin = Assets->Load<SkinnedMeshAsset>(skinId, AssetPriority::High).TryGetLoaded();
+                    if (!skin)
+                    {
+                        animator->SetRuntimeDiagnostic("Animator is waiting for the assigned skinned mesh to load.");
+                        continue;
+                    }
+                    targetSkeleton = skin->Skeleton();
+                    if (!targetSkeleton)
+                    {
+                        animator->SetRuntimeDiagnostic("The assigned skinned mesh does not reference a skeleton.");
+                        continue;
+                    }
+                    if (animator->Skeleton() != targetSkeleton)
+                        animator->SetSkeleton(targetSkeleton);
+                }
+
+                if (state->Graph != animator->Graph() || state->Skeleton != targetSkeleton || state->Skin != skinId)
+                {
+                    *state = {};
+                    state->Graph = animator->Graph();
+                    state->Skeleton = targetSkeleton;
+                    state->Skin = skinId;
+                    if (state->Graph)
+                        state->GraphHandle = Assets->Load<AnimationGraphAsset>(state->Graph, AssetPriority::High);
+                    if (state->Skeleton)
+                        state->SkeletonHandle = Assets->Load<SkeletonAsset>(state->Skeleton, AssetPriority::High);
+                    animator->SetRuntimeDiagnostic({});
+                }
+                if (!entity.ActiveInHierarchy() || !animator->Enabled())
+                    continue;
+                if (!state->Graph || !state->Skeleton)
+                {
+                    animator->SetRuntimeDiagnostic("Animator requires both controller and skeleton assets.");
+                    continue;
+                }
+                const auto graph = state->GraphHandle.TryGetLoaded();
+                const auto skeleton = state->SkeletonHandle.TryGetLoaded();
+                if (!graph || !skeleton)
+                {
+                    animator->SetRuntimeDiagnostic("Animator is waiting for controller dependencies to load.");
+                    continue;
+                }
+
+                const auto graphRevision = state->GraphHandle.Revision();
+                if (state->DependencyGraphRevision != graphRevision)
+                {
+                    state->Clips.clear();
+                    state->RetargetedClips.clear();
+                    state->Masks.clear();
+                    state->DependencyDiagnostic.clear();
+                    state->DependencyGraphRevision = graphRevision;
+                }
+                if (!DependenciesReady(*state, *graph))
+                {
+                    animator->SetRuntimeDiagnostic(state->DependencyDiagnostic.empty()
+                                                       ? "Animator is waiting for controller dependencies to load."
+                                                       : state->DependencyDiagnostic);
+                    continue;
+                }
+
+                const auto skeletonRevision = state->SkeletonHandle.Revision();
+                if (!state->Instance || state->SkeletonRevision != skeletonRevision)
+                {
+                    auto* runtimeState = state.get();
+                    state->Instance = std::make_unique<AnimatorInstance>(
+                        skeleton, graph,
+                        [this, runtimeState](const AssetId id) { return ResolveClip(*runtimeState, id); },
+                        [this, runtimeState](const AssetId id) { return ResolveMask(*runtimeState, id); });
+                    state->GraphRevision = graphRevision;
+                    state->SkeletonRevision = skeletonRevision;
+                    state->BoneIndices.clear();
+                    state->SemanticBoneIndices.clear();
+                    for (std::uint32_t index = 0; index < skeleton->Bones().size(); ++index)
+                        state->BoneIndices.emplace(skeleton->Bones()[index].Name, index);
+                    try
+                    {
+                        const auto inferred = InferRigDefinition(*skeleton);
+                        for (std::uint32_t index = 0; index < inferred.Bones.size(); ++index)
+                        {
+                            if (inferred.Bones[index].Semantic != RigBoneSemantic::None)
+                                state->SemanticBoneIndices.emplace(inferred.Bones[index].Semantic, index);
+                        }
+                    }
+                    catch (const std::exception&)
+                    {
+                        state->SemanticBoneIndices.clear();
+                    }
+                    if (skeletonRevision > 1)
+                        animator->SetRuntimeDiagnostic("Skeleton reload restarted Animator state safely.");
+                }
+                else if (state->GraphRevision != graphRevision)
+                {
+                    const bool preserved = state->Instance->Reload(graph);
+                    state->GraphRevision = graphRevision;
+                    animator->SetRuntimeDiagnostic(
+                        preserved ? std::string{} : "Controller topology changed; Animator state restarted safely.");
+                }
+
+                ApplyCommands(*state->Instance, animator->ConsumeRuntimeCommands());
+                const float speed = std::max(animator->Speed(), 0.0F);
+                if (animator->Speed() < 0.0F)
+                    animator->SetRuntimeDiagnostic("Negative Animator speed is not supported and is treated as zero.");
+                auto sample = state->Instance->Update(animator->Paused() ? 0.0F : deltaSeconds * speed);
+                Runtime->DispatchAnimatorIk(entity.Id(), {.LayerWeight = 1.0F});
+                if (const auto ikDiagnostic =
+                        ApplyIkGoals(entity, *skeleton, *animator, sample.LocalPose, state->BoneIndices);
+                    !ikDiagnostic.empty())
+                {
+                    animator->SetRuntimeDiagnostic(ikDiagnostic);
+                }
+                else if (const auto armDiagnostic = ApplyAuthoredArmIk(entity, *skeleton, *animator, sample.LocalPose,
+                                                                       state->BoneIndices, state->SemanticBoneIndices);
+                         !armDiagnostic.empty())
+                {
+                    animator->SetRuntimeDiagnostic(armDiagnostic);
+                }
+                else if (const auto footDiagnostic = ApplyFootGrounding(entity, *skeleton, *animator, sample.LocalPose,
+                                                                        state->BoneIndices, state->SemanticBoneIndices);
+                         !footDiagnostic.empty())
+                {
+                    animator->SetRuntimeDiagnostic(footDiagnostic);
+                }
+                const auto palette = SkinPalette(*skeleton, sample.LocalPose);
+                animator->SetRuntimePose(sample.State, sample.NormalizedTime, state->Instance->Playing(), palette);
+                auto debugSnapshot = state->Instance->DebugSnapshot();
+                if (!animator->IkGoals().empty() || animator->LeftArmIk().Enabled || animator->RightArmIk().Enabled ||
+                    animator->FootGrounding().Enabled)
+                    debugSnapshot = FinalPoseDebugSnapshot(*skeleton, sample.LocalPose, debugSnapshot);
+                animator->SetRuntimeDebugSnapshot(std::move(debugSnapshot));
+                ApplyRootMotion(entity, sample, *animator);
+                for (const auto& event : sample.Events)
+                    Runtime->DispatchAnimationEvent(entity.Id(),
+                                                    {event.Name, sample.NormalizedTime, 0, 0.0F, event.Payload});
+            }
+            for (auto iterator = Animators.begin(); iterator != Animators.end();)
+            {
+                if (!seen.contains(iterator->first))
+                    iterator = Animators.erase(iterator);
+                else
+                    ++iterator;
+            }
+        }
+
+        void ClearAnimation() noexcept { Animators.clear(); }
+
+        [[nodiscard]] std::optional<VfxCollisionHit> QueryVfxCollision(const Vector3 start, const Vector3 end) const
+        {
+            if (!PhysicsWorldService)
+                return std::nullopt;
+            const Vector3 delta{end.X - start.X, end.Y - start.Y, end.Z - start.Z};
+            const auto distance = std::sqrt(delta.X * delta.X + delta.Y * delta.Y + delta.Z * delta.Z);
+            if (distance <= 0.000001F)
+                return std::nullopt;
+            const Vector3 direction{delta.X / distance, delta.Y / distance, delta.Z / distance};
+            const auto hits = PhysicsWorldService->RayCast({start, direction, distance, ~0U, true, 1});
+            if (hits.empty())
+                return std::nullopt;
+            return VfxCollisionHit{hits.front().Position, hits.front().Normal};
+        }
+
+        [[nodiscard]] static std::uint32_t HashVfxSample(std::uint32_t value) noexcept
+        {
+            value ^= value >> 16U;
+            value *= 0x7feb352dU;
+            value ^= value >> 15U;
+            value *= 0x846ca68bU;
+            value ^= value >> 16U;
+            return value;
+        }
+
+        [[nodiscard]] static float VfxSampleUnit(const std::uint32_t value) noexcept
+        {
+            return static_cast<float>(value >> 8U) * (1.0F / 16'777'216.0F);
+        }
+
+        [[nodiscard]] std::optional<Vector3> SampleVfxMesh(const AssetId asset, const std::uint32_t randomValue)
+        {
+            auto& state = VfxMeshShapes[asset];
+            Ref<const MeshAsset> mesh;
+            std::uint64_t revision = 1;
+            if (auto builtin = MeshAsset::ResolveBuiltin(asset))
+            {
+                mesh = std::move(builtin);
+            }
+            else
+            {
+                if (!Assets)
+                    return std::nullopt;
+                if (!state.Handle)
+                    state.Handle = Assets->Load<MeshAsset>(asset, AssetPriority::High);
+                mesh = state.Handle.TryGetLoaded();
+                revision = state.Handle.Revision();
+                if (!mesh)
+                    return std::nullopt;
+            }
+            if (state.Revision != revision)
+            {
+                std::vector<VfxMeshShapeState::Triangle> triangles;
+                triangles.reserve(mesh->Indices().size() / 3U);
+                double cumulativeArea = 0.0;
+                for (std::size_t index = 0; index + 2U < mesh->Indices().size(); index += 3U)
+                {
+                    const auto& a = mesh->Vertices()[mesh->Indices()[index]].Position;
+                    const auto& b = mesh->Vertices()[mesh->Indices()[index + 1U]].Position;
+                    const auto& c = mesh->Vertices()[mesh->Indices()[index + 2U]].Position;
+                    const auto edge0 = Vector3{b.X - a.X, b.Y - a.Y, b.Z - a.Z};
+                    const auto edge1 = Vector3{c.X - a.X, c.Y - a.Y, c.Z - a.Z};
+                    const auto cross =
+                        Vector3{edge0.Y * edge1.Z - edge0.Z * edge1.Y, edge0.Z * edge1.X - edge0.X * edge1.Z,
+                                edge0.X * edge1.Y - edge0.Y * edge1.X};
+                    const auto area = 0.5 * std::sqrt(static_cast<double>(cross.X) * cross.X +
+                                                      static_cast<double>(cross.Y) * cross.Y +
+                                                      static_cast<double>(cross.Z) * cross.Z);
+                    if (!std::isfinite(area) || area <= 0.0)
+                        continue;
+                    cumulativeArea += area;
+                    if (!std::isfinite(cumulativeArea) || cumulativeArea > std::numeric_limits<float>::max())
+                        return std::nullopt;
+                    triangles.push_back({a, b, c, static_cast<float>(cumulativeArea)});
+                }
+                if (triangles.empty())
+                    return std::nullopt;
+                state.Triangles = std::move(triangles);
+                state.TotalArea = static_cast<float>(cumulativeArea);
+                state.Revision = revision;
+            }
+            if (state.Triangles.empty() || state.TotalArea <= 0.0F)
+                return std::nullopt;
+            const auto selected = VfxSampleUnit(HashVfxSample(randomValue ^ 0x3c6ef372U)) * state.TotalArea;
+            const auto found = std::lower_bound(state.Triangles.begin(), state.Triangles.end(), selected,
+                                                [](const VfxMeshShapeState::Triangle& triangle, const float value)
+                                                { return triangle.CumulativeArea < value; });
+            const auto& triangle = found == state.Triangles.end() ? state.Triangles.back() : *found;
+            const auto root = std::sqrt(VfxSampleUnit(HashVfxSample(randomValue ^ 0xa54ff53aU)));
+            const auto barycentricA = 1.0F - root;
+            const auto barycentricB = root * (1.0F - VfxSampleUnit(HashVfxSample(randomValue ^ 0x510e527fU)));
+            const auto barycentricC = 1.0F - barycentricA - barycentricB;
+            return Vector3{triangle.A.X * barycentricA + triangle.B.X * barycentricB + triangle.C.X * barycentricC,
+                           triangle.A.Y * barycentricA + triangle.B.Y * barycentricB + triangle.C.Y * barycentricC,
+                           triangle.A.Z * barycentricA + triangle.B.Z * barycentricB + triangle.C.Z * barycentricC};
+        }
+
+        [[nodiscard]] std::optional<Vector3> SampleVfxShape(const AssetId asset, const std::uint32_t randomValue)
+        {
+            if (!asset || (!Assets && !MeshAsset::IsBuiltin(asset)))
+                return std::nullopt;
+            const auto type =
+                MeshAsset::IsBuiltin(asset) ? std::optional{MeshAsset::StaticType()} : Assets->TryGetType(asset);
+            if (type == MeshAsset::StaticType())
+                return SampleVfxMesh(asset, randomValue);
+            if (type != VfxVolumeAsset::StaticType())
+                return std::nullopt;
+            auto& handle = VfxVolumes[asset];
+            if (!handle)
+                handle = Assets->Load<VfxVolumeAsset>(asset, AssetPriority::High);
+            const auto volume = handle.TryGetLoaded();
+            return volume ? std::optional{volume->Sample(randomValue)} : std::nullopt;
+        }
+
+        void InitializeVfx(VfxBackend backend);
+        void InitializeVfx();
+        void SynchronizeVfx(float deltaSeconds);
+        void ClearVfx() noexcept;
+
+        [[nodiscard]] static bool SameCollision(const std::shared_ptr<const CookedCollisionMesh>& first,
+                                                const std::shared_ptr<const CookedCollisionMesh>& second) noexcept;
+        [[nodiscard]] static bool SamePhysicsDefinition(const PhysicsBodyDefinition& first,
+                                                        const PhysicsBodyDefinition& second) noexcept;
+        [[nodiscard]] std::optional<PhysicsBodyDefinition> BuildPhysicsDefinition(const Entity& entity,
+                                                                                  PhysicsRuntimeState& state);
+        void InitializePhysics();
+        void SynchronizePhysicsBodies();
+        static void MoveTransformInWorld(const Entity& entity, TransformComponent& transform, Vector3 displacement);
+        void ApplyCharacterMovement(float deltaSeconds);
+        void UpdateCharacterGrounding();
+        [[nodiscard]] std::optional<EntityId> EntityForBody(PhysicsBodyId body) const noexcept;
+        void PullDynamicBodies();
+        void DispatchPhysicsContacts();
+        void StepPhysics(float deltaSeconds);
+        void ClearPhysics() noexcept;
+
+        Ref<Scene> Edit;
+        Ref<Scene> Runtime;
+        Ref<AssetSystem> Assets;
+        Ref<PhysicsSystem> PhysicsService;
+        Ref<PhysicsWorld> PhysicsWorldService;
+        Ref<VfxWorld> VfxWorldService;
+        VfxBackend VfxBackendMode = VfxBackend::Cpu;
+        bool DeterministicSimulation = false;
+        std::thread::id OwnerThread;
+        ScenePlayState PlayState = ScenePlayState::Stopped;
+        SceneRuntimeDiagnostic Failure;
+        Ref<ScenePresentationRuntime> Presentation;
+        std::map<EntityId, std::unique_ptr<AnimationRuntimeState>> Animators;
+        std::map<EntityId, PhysicsRuntimeState> PhysicsBodies;
+        std::map<EntityId, VfxRuntimeState> VfxEmitters;
+        std::map<AssetId, VfxMeshShapeState> VfxMeshShapes;
+        std::map<AssetId, AssetHandle<VfxVolumeAsset>> VfxVolumes;
+        float PresentationWidth = 1920.0F;
+        float PresentationHeight = 1080.0F;
+        RuntimeUiInsets SafeArea;
+    };
+} // namespace Keire

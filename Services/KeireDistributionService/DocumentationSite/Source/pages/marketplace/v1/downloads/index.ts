@@ -35,6 +35,7 @@ export const POST: APIRoute = async (context) => {
                 expiresAt: data.expires_at,
                 archiveSha256: data.archive_sha256,
                 archiveSizeBytes: data.archive_size_bytes,
+                signedPublication: data.signed_publication,
             },
             meta: { apiVersion: "marketplace/v1", correlationId: context.locals.correlationId },
         }, 201);

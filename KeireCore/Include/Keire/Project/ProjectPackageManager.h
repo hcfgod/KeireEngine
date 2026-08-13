@@ -129,6 +129,7 @@ namespace Keire
         std::string CatalogSource;
         std::uint64_t ExpectedArchiveSizeBytes = 0;
         std::string ExpectedArchiveSha256;
+        std::string TrustedSignatureKeyId;
         bool RequireMarketplaceSignature = true;
     };
 

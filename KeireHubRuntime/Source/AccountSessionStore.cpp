@@ -3,6 +3,7 @@
 #include <KeireHubRuntimeInternal/Persistence.h>
 #include <KeireHubRuntimeInternal/Sha256.h>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cstddef>
@@ -40,7 +41,11 @@ namespace KeireHub
 {
     namespace
     {
-        constexpr std::array<std::byte, 4> Header{std::byte{'K'}, std::byte{'H'}, std::byte{'S'}, std::byte{'1'}};
+        constexpr std::array<std::byte, 4> ProtectedFileHeader{std::byte{'K'}, std::byte{'H'}, std::byte{'S'},
+                                                               std::byte{'1'}};
+        constexpr std::array<char, 4> SessionPayloadHeader{'K', 'H', 'S', '2'};
+        constexpr std::size_t MaximumRefreshTokenBytes = 4096U;
+        constexpr std::size_t MaximumSessionPayloadBytes = MaximumRefreshTokenBytes + SessionPayloadHeader.size() + 1U;
         constexpr std::size_t MaximumStoredBytes = std::size_t{64U} * 1024U;
 
         [[nodiscard]] HubError StorageError(const HubErrorCode code, const std::filesystem::path& path,
@@ -68,6 +73,53 @@ namespace KeireHub
                     StorageError(HubErrorCode::IoRead, path, "The saved account session is unsafe.", error.message()));
             }
             return HubStatus::Success();
+        }
+
+        [[nodiscard]] std::string EncodeSession(const AccountSessionKind kind, const std::string_view refreshToken)
+        {
+            std::string encoded;
+            encoded.reserve(SessionPayloadHeader.size() + 1U + refreshToken.size());
+            encoded.append(SessionPayloadHeader.data(), SessionPayloadHeader.size());
+            encoded.push_back(kind == AccountSessionKind::DesktopOAuth ? '\x02' : '\x01');
+            encoded.append(refreshToken);
+            return encoded;
+        }
+
+        [[nodiscard]] HubResult<StoredAccountSession> DecodeSession(std::string encoded,
+                                                                    const std::filesystem::path& path)
+        {
+            if (encoded.size() >= SessionPayloadHeader.size() &&
+                std::memcmp(encoded.data(), SessionPayloadHeader.data(), SessionPayloadHeader.size()) == 0)
+            {
+                if (encoded.size() <= SessionPayloadHeader.size() + 1U || encoded.size() > MaximumSessionPayloadBytes)
+                {
+                    return HubResult<StoredAccountSession>::Failure(
+                        StorageError(HubErrorCode::InvalidData, path, "The saved account session is invalid.",
+                                     "Invalid versioned session length."));
+                }
+                const auto kindByte = static_cast<unsigned char>(encoded[SessionPayloadHeader.size()]);
+                std::optional<AccountSessionKind> kind;
+                if (kindByte == 1U)
+                    kind = AccountSessionKind::SupabaseAuth;
+                else if (kindByte == 2U)
+                    kind = AccountSessionKind::DesktopOAuth;
+                else
+                {
+                    return HubResult<StoredAccountSession>::Failure(
+                        StorageError(HubErrorCode::InvalidData, path, "The saved account session is invalid.",
+                                     "Unknown account-session kind."));
+                }
+                auto refreshToken = encoded.substr(SessionPayloadHeader.size() + 1U);
+                std::fill(encoded.begin(), encoded.end(), '\0');
+                return HubResult<StoredAccountSession>::Success(
+                    {.RefreshToken = std::move(refreshToken), .Kind = kind});
+            }
+            if (encoded.empty() || encoded.size() > MaximumRefreshTokenBytes)
+            {
+                return HubResult<StoredAccountSession>::Failure(StorageError(
+                    HubErrorCode::InvalidData, path, "The saved account session is invalid.", "Invalid token length."));
+            }
+            return HubResult<StoredAccountSession>::Success({.RefreshToken = std::move(encoded), .Kind = std::nullopt});
         }
 
         [[nodiscard]] std::string SecretAccount(const std::filesystem::path& path)
@@ -288,7 +340,44 @@ namespace KeireHub
 #endif
     }
 
+    HubResult<std::optional<StoredAccountSession>> AccountSessionStore::LoadSession() const
+    {
+        auto loaded = LoadStoredPayload();
+        if (!loaded)
+            return HubResult<std::optional<StoredAccountSession>>::Failure(loaded.Error());
+        if (!loaded.Value())
+            return HubResult<std::optional<StoredAccountSession>>::Success(std::nullopt);
+        auto decoded = DecodeSession(std::move(*loaded.Value()), m_Path);
+        if (!decoded)
+            return HubResult<std::optional<StoredAccountSession>>::Failure(decoded.Error());
+        return HubResult<std::optional<StoredAccountSession>>::Success(std::move(decoded).Value());
+    }
+
+    HubStatus AccountSessionStore::SaveSession(const AccountSessionKind kind, const std::string_view refreshToken) const
+    {
+        if (refreshToken.empty() || refreshToken.size() > MaximumRefreshTokenBytes)
+        {
+            return HubStatus::Failure(StorageError(HubErrorCode::InvalidArgument, m_Path,
+                                                   "The account session cannot be saved.",
+                                                   "Invalid refresh-token length."));
+        }
+        auto encoded = EncodeSession(kind, refreshToken);
+        auto status = SaveStoredPayload(encoded);
+        std::fill(encoded.begin(), encoded.end(), '\0');
+        return status;
+    }
+
     HubResult<std::optional<std::string>> AccountSessionStore::LoadRefreshToken() const
+    {
+        auto loaded = LoadSession();
+        if (!loaded)
+            return HubResult<std::optional<std::string>>::Failure(loaded.Error());
+        if (!loaded.Value())
+            return HubResult<std::optional<std::string>>::Success(std::nullopt);
+        return HubResult<std::optional<std::string>>::Success(std::move(loaded.Value()->RefreshToken));
+    }
+
+    HubResult<std::optional<std::string>> AccountSessionStore::LoadStoredPayload() const
     {
         if (!PersistentStorageAvailable())
             return HubResult<std::optional<std::string>>::Success(std::nullopt);
@@ -312,7 +401,7 @@ namespace KeireHub
         while (!result.Value().Output.empty() &&
                (result.Value().Output.back() == '\n' || result.Value().Output.back() == '\r'))
             result.Value().Output.pop_back();
-        if (result.Value().Output.empty() || result.Value().Output.size() > 4096U)
+        if (result.Value().Output.empty() || result.Value().Output.size() > MaximumSessionPayloadBytes)
         {
             return HubResult<std::optional<std::string>>::Failure(StorageError(
                 HubErrorCode::InvalidData, m_Path, "The saved account session is invalid.", "Invalid token length."));
@@ -339,7 +428,7 @@ namespace KeireHub
         }
         const auto data = static_cast<CFDataRef>(value);
         const auto length = CFDataGetLength(data);
-        if (length <= 0 || static_cast<std::size_t>(length) > 4096U)
+        if (length <= 0 || static_cast<std::size_t>(length) > MaximumSessionPayloadBytes)
         {
             return HubResult<std::optional<std::string>>::Failure(StorageError(
                 HubErrorCode::InvalidData, m_Path, "The saved account session is invalid.", "Invalid token length."));
@@ -362,20 +451,20 @@ namespace KeireHub
         auto stored = Detail::ReadTextFile(m_Path, MaximumStoredBytes);
         if (!stored)
             return HubResult<std::optional<std::string>>::Failure(stored.Error());
-        if (stored.Value().size() <= Header.size() ||
-            std::memcmp(stored.Value().data(), Header.data(), Header.size()) != 0)
+        if (stored.Value().size() <= ProtectedFileHeader.size() ||
+            std::memcmp(stored.Value().data(), ProtectedFileHeader.data(), ProtectedFileHeader.size()) != 0)
         {
             return HubResult<std::optional<std::string>>::Failure(StorageError(
                 HubErrorCode::InvalidData, m_Path, "The saved account session is invalid.", "Invalid session header."));
         }
 #if defined(_WIN32)
-        if (stored.Value().size() - Header.size() > std::numeric_limits<DWORD>::max())
+        if (stored.Value().size() - ProtectedFileHeader.size() > std::numeric_limits<DWORD>::max())
         {
             return HubResult<std::optional<std::string>>::Failure(StorageError(
                 HubErrorCode::InvalidData, m_Path, "The saved account session is invalid.", "Session is too large."));
         }
-        DATA_BLOB input{.cbData = static_cast<DWORD>(stored.Value().size() - Header.size()),
-                        .pbData = reinterpret_cast<BYTE*>(stored.Value().data() + Header.size())};
+        DATA_BLOB input{.cbData = static_cast<DWORD>(stored.Value().size() - ProtectedFileHeader.size()),
+                        .pbData = reinterpret_cast<BYTE*>(stored.Value().data() + ProtectedFileHeader.size())};
         DATA_BLOB output{};
         if (!CryptUnprotectData(&input, nullptr, nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &output))
         {
@@ -390,7 +479,7 @@ namespace KeireHub
             SecureZeroMemory(output.pbData, output.cbData);
             LocalFree(output.pbData);
         }
-        if (token.empty() || token.size() > 4096U)
+        if (token.empty() || token.size() > MaximumSessionPayloadBytes)
         {
             SecureZeroMemory(token.data(), token.size());
             return HubResult<std::optional<std::string>>::Failure(StorageError(
@@ -405,9 +494,20 @@ namespace KeireHub
 
     HubStatus AccountSessionStore::SaveRefreshToken(const std::string_view refreshToken) const
     {
+        if (refreshToken.empty() || refreshToken.size() > MaximumRefreshTokenBytes)
+        {
+            return HubStatus::Failure(StorageError(HubErrorCode::InvalidArgument, m_Path,
+                                                   "The account session cannot be saved.",
+                                                   "Invalid refresh-token length."));
+        }
+        return SaveStoredPayload(refreshToken);
+    }
+
+    HubStatus AccountSessionStore::SaveStoredPayload(const std::string_view refreshToken) const
+    {
         if (!PersistentStorageAvailable())
             return HubStatus::Success();
-        if (refreshToken.empty() || refreshToken.size() > 4096U)
+        if (refreshToken.empty() || refreshToken.size() > MaximumSessionPayloadBytes)
         {
             return HubStatus::Failure(StorageError(HubErrorCode::InvalidArgument, m_Path,
                                                    "The account session cannot be saved.",
@@ -424,9 +524,9 @@ namespace KeireHub
             return HubStatus::Failure(StorageError(HubErrorCode::IoWrite, m_Path,
                                                    "The account session could not be secured.", failure.message()));
         }
-        std::string stored(Header.size() + output.cbData, '\0');
-        std::memcpy(stored.data(), Header.data(), Header.size());
-        std::memcpy(stored.data() + Header.size(), output.pbData, output.cbData);
+        std::string stored(ProtectedFileHeader.size() + output.cbData, '\0');
+        std::memcpy(stored.data(), ProtectedFileHeader.data(), ProtectedFileHeader.size());
+        std::memcpy(stored.data() + ProtectedFileHeader.size(), output.pbData, output.cbData);
         if (output.pbData)
         {
             SecureZeroMemory(output.pbData, output.cbData);

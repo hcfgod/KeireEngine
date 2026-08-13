@@ -122,6 +122,8 @@ TEST_CASE("Desktop OAuth refresh accepts compact opaque refresh tokens")
     const std::string form(reinterpret_cast<const char*>(captured.Body.data()), captured.Body.size());
     CHECK(form.find("grant_type=refresh_token") != std::string::npos);
     CHECK(form.find("refresh_token=a1B2c3D4e5F6") != std::string::npos);
+    CHECK(form.find("client_id=00112233-4455-6677-8899-aabbccddeeff") != std::string::npos);
+    CHECK(form.find("client_secret") == std::string::npos);
 }
 
 TEST_CASE("Desktop OAuth rejects an empty refresh token from the authorization service")

@@ -7,6 +7,24 @@ versions.
 
 ### Changed
 
+- Fixed Editor marketplace Asset Import terminating with a CoreCLR stack-overflow report. Archive and conflict hashing
+  now streams through bounded heap storage instead of placing a 1 MiB buffer on the Editor's 1 MiB Windows stack.
+- Hardened immutable distribution responses by hashing the exact opened file before honoring digest ETags or serving
+  bytes; same-size content with a restored timestamp is now withdrawn instead of inheriting year-long cache identity.
+- Made active layer insertion and event-listener registration transactional under allocation and callback failures, and
+  contained potentially throwing runtime-service close operations inside the application shutdown boundary. Hub atomic
+  persistence reads now tolerate transient Windows replacement gaps without accepting partial file contents.
+- Restored the source-file non-growth gate against the current tree, corrected first-party formatting drift, and
+  synchronized lifecycle, staff-authorization, and production-evidence documentation with their implementation.
+- Fixed Marketplace **Open in Editor** recovery for new or reauthorized Hub sessions. Hub now registers the current
+  OAuth device session before requesting **My Assets**, so valid website entitlements populate the token-free Editor
+  Package Manager cache instead of failing with `account.session_revoked`. Secure persisted sessions now retain their
+  authentication flow, so browser OAuth refreshes use the public-client OAuth endpoint and `client_id` while direct
+  email/password sessions continue using the Supabase Auth refresh endpoint. Marketplace downloads also retain the
+  canonical `.keireassetpackage` extension in the content-addressed cache so strict archive inspection can complete.
+  Download grants now include the immutable offline-signed publication envelope; Hub and Editor independently verify
+  its exact product, version, archive digest, size, manifest, storage path, sequence, expiry, and signature before a
+  package becomes usable. Cache schema 2 retains this token-free proof and safely reacquires legacy ready entries.
 - Added a first-party website changelog generated from the canonical repository release record, with curated 0.3.1
   highlights, complete subsystem-grouped notes, explicit public-package/live-platform/source availability, historical
   release pages, structured metadata, and an RSS feed. Replaced the public numeric readiness dashboard with an

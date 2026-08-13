@@ -5,12 +5,15 @@
 
 #include "KeireInternal/FileSystem.h"
 
+#include "KeireHubRuntime/MarketplaceClient.h"
+
 #include <algorithm>
 #include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <ranges>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -80,6 +83,22 @@ namespace KeireEditor
                     return document;
             }
             return std::nullopt;
+        }
+
+        [[nodiscard]] KeireHub::MarketplacePublication VerifyPublication(const KeireHub::MarketplaceCacheItem& item,
+                                                                         const KeireHub::CatalogTrustStore& trust)
+        {
+            auto publication = KeireHub::DecodeMarketplacePublication(item.SignedPublication);
+            if (!publication)
+                throw std::runtime_error(publication.Error().Message);
+            if (const auto verified =
+                    KeireHub::VerifyMarketplacePublication(publication.Value(), item.ProductId, item.VersionId,
+                                                           item.ArchiveSha256, item.ArchiveSizeBytes, trust);
+                !verified)
+            {
+                throw std::runtime_error(verified.Error().Message);
+            }
+            return std::move(publication).Value();
         }
     } // namespace
 
@@ -257,17 +276,11 @@ namespace KeireEditor
                 throw std::invalid_argument("This marketplace package is not ready for Registry installation.");
             }
             const auto archive = m_MarketplaceCache->ArchivePath(item);
-            const auto metadata = Keire::InspectAssetPackageArchive(
-                archive, {.RequireSignature = true,
-                          .ExpectedArchiveSizeBytes = item.ArchiveSizeBytes,
-                          .ExpectedArchiveSha256 = item.ArchiveSha256,
-                          .VerifySignature = [this](const std::string_view algorithm, const std::string_view keyId,
-                                                    const std::span<const std::byte> message,
-                                                    const std::span<const std::byte> signature)
-                          {
-                              return m_MarketplaceTrust &&
-                                     m_MarketplaceTrust->VerifySignature(algorithm, keyId, message, signature);
-                          }});
+            const auto publication = VerifyPublication(item, *m_MarketplaceTrust);
+            const auto metadata =
+                Keire::InspectAssetPackageArchive(archive, {.RequireSignature = false,
+                                                            .ExpectedArchiveSizeBytes = item.ArchiveSizeBytes,
+                                                            .ExpectedArchiveSha256 = item.ArchiveSha256});
             if (metadata.Manifest.PackageId != item.PackageId || metadata.Manifest.Version != item.Version ||
                 metadata.Manifest.InstallKind != Keire::AssetPackageInstallKind::Registry)
             {
@@ -287,7 +300,8 @@ namespace KeireEditor
                               .CatalogSource = "marketplace:" + item.ProductId + '/' + item.VersionId,
                               .ExpectedArchiveSizeBytes = item.ArchiveSizeBytes,
                               .ExpectedArchiveSha256 = item.ArchiveSha256,
-                              .RequireMarketplaceSignature = true}},
+                              .TrustedSignatureKeyId = publication.KeyId,
+                              .RequireMarketplaceSignature = false}},
                 .DirectDependencies = std::move(requirements)};
             const auto plan = m_Manager->PreflightInstall(request);
             if (!plan.Valid())
@@ -322,10 +336,11 @@ namespace KeireEditor
                 throw std::invalid_argument("This marketplace package is not ready for Asset Import.");
             }
             const auto archive = m_MarketplaceCache->ArchivePath(item);
+            static_cast<void>(VerifyPublication(item, *m_MarketplaceTrust));
             Keire::ProjectAssetImportRequest request{.Archive = archive,
                                                      .ExpectedArchiveSizeBytes = item.ArchiveSizeBytes,
                                                      .ExpectedArchiveSha256 = item.ArchiveSha256,
-                                                     .RequireMarketplaceSignature = true,
+                                                     .RequireMarketplaceSignature = false,
                                                      .AllowExecutableCode = m_AllowExecutableCode};
             auto plan = m_AssetImporter->Preflight(request);
             if (!plan.Valid() && m_KeepLocalConflicts)

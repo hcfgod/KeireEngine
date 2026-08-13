@@ -23,6 +23,8 @@ namespace
         std::atomic_bool FailProfile = false;
         std::atomic_bool FailRefresh = false;
         std::atomic_uint32_t RefreshRequests = 0;
+        std::atomic_uint32_t OAuthRefreshRequests = 0;
+        std::atomic_bool OAuthRefreshIncludesClientId = false;
     };
 
     [[nodiscard]] std::vector<std::byte> Body(const std::string_view text)
@@ -85,16 +87,24 @@ namespace
         };
     }
 
-    [[nodiscard]] HubOAuthClientFactory OAuthFactory()
+    [[nodiscard]] HubOAuthClientFactory OAuthFactory(const std::shared_ptr<Script>& script)
     {
-        return [](const SupabaseConfiguration& configuration, const HubSettings&)
+        return [script](const SupabaseConfiguration& configuration, const HubSettings&)
         {
             return DesktopOAuthClient::Create(
                 {.SupabaseProjectUrl = configuration.ProjectUrl,
                  .ClientId = configuration.HubOAuthClientId,
                  .WebsiteCallbackUrl = configuration.HubOAuthWebsiteCallbackUrl},
-                [](const NativeHttpRequest& request)
+                [script](const NativeHttpRequest& request)
                 {
+                    const std::string form(reinterpret_cast<const char*>(request.Body.data()), request.Body.size());
+                    if (form.find("grant_type=refresh_token") != std::string::npos)
+                    {
+                        script->OAuthRefreshRequests.fetch_add(1U, std::memory_order_relaxed);
+                        script->OAuthRefreshIncludesClientId.store(form.find("client_id=fixture-public-client") !=
+                                                                       std::string::npos,
+                                                                   std::memory_order_relaxed);
+                    }
                     return HubResult<NativeHttpResponse>::Success(Response(
                         request,
                         R"({"access_token":"header.payload.oauth-signature","refresh_token":"oauth-refresh-token","id_token":"e30.eyJub25jZSI6IkFRSURCQVVHQndnSkNnc01EUTRQRUJFU0V4UVZGaGNZR1JvYkhCMGVIeUEifQ.signature","token_type":"bearer","expires_in":3600})"));
@@ -189,8 +199,9 @@ TEST_CASE("Hub account workflow completes browser PKCE sign-in with a separate s
         configuration,
         R"({"schemaVersion":2,"enabled":true,"projectUrl":"https://fixture.supabase.co","publishableKey":"sb_publishable_fixture_key_0000000000000000","hubOAuthEnabled":true,"hubOAuthClientId":"fixture-public-client","hubOAuthWebsiteCallbackUrl":"https://keire.test/oauth/hub/callback/"})");
     auto script = std::make_shared<Script>();
-    HubAccountWorkflow workflow(ClientFactory(script), OAuthFactory());
-    REQUIRE(workflow.Start(configuration, temporary.Path() / "Account" / "oauth-session.dat", {}));
+    const auto sessionPath = temporary.Path() / "Account" / "oauth-session.dat";
+    HubAccountWorkflow workflow(ClientFactory(script), OAuthFactory(script));
+    REQUIRE(workflow.Start(configuration, sessionPath, {}));
     auto ready = WaitFor(workflow, [](const auto& snapshot) { return snapshot.Configured && !snapshot.Busy; });
     REQUIRE(ready->BrowserSignInAvailable);
     CHECK_FALSE(workflow.AccessToken(0U));
@@ -213,6 +224,39 @@ TEST_CASE("Hub account workflow completes browser PKCE sign-in with a separate s
     CHECK(token.Value() == "header.payload.oauth-signature");
     CHECK_FALSE(workflow.AccessToken(now + 3600U));
     workflow.Stop();
+
+    HubAccountWorkflow restarted(ClientFactory(script), OAuthFactory(script));
+    REQUIRE(restarted.Start(configuration, sessionPath, {}));
+    const auto restored = WaitFor(restarted, [](const auto& snapshot) { return snapshot.SignedIn && !snapshot.Busy; });
+    REQUIRE(restored->SignedIn);
+    CHECK(script->OAuthRefreshRequests.load(std::memory_order_relaxed) == 1U);
+    CHECK(script->OAuthRefreshIncludesClientId.load(std::memory_order_relaxed));
+    CHECK(script->RefreshRequests.load(std::memory_order_relaxed) == 0U);
+    restarted.Stop();
+}
+
+TEST_CASE("Hub account workflow restores direct-auth sessions through the Supabase Auth endpoint")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    const auto configuration = temporary.Path() / "Config" / "Supabase.json";
+    KeireHubTests::WriteText(
+        configuration,
+        R"({"schemaVersion":2,"enabled":true,"projectUrl":"https://fixture.supabase.co","publishableKey":"sb_publishable_fixture_key_0000000000000000","hubOAuthEnabled":true,"hubOAuthClientId":"fixture-public-client","hubOAuthWebsiteCallbackUrl":"https://keire.test/oauth/hub/callback/"})");
+    const auto sessionPath = temporary.Path() / "Account" / "direct-session.dat";
+    auto script = std::make_shared<Script>();
+    HubAccountWorkflow workflow(ClientFactory(script), OAuthFactory(script));
+    REQUIRE(workflow.Start(configuration, sessionPath, {}));
+    REQUIRE(WaitFor(workflow, [](const auto& snapshot) { return snapshot.Configured && !snapshot.Busy; })->Configured);
+    REQUIRE(workflow.SignIn("user@example.com", "correct-password"));
+    REQUIRE(WaitFor(workflow, [](const auto& snapshot) { return snapshot.SignedIn && !snapshot.Busy; })->SignedIn);
+    workflow.Stop();
+
+    HubAccountWorkflow restarted(ClientFactory(script), OAuthFactory(script));
+    REQUIRE(restarted.Start(configuration, sessionPath, {}));
+    REQUIRE(WaitFor(restarted, [](const auto& snapshot) { return snapshot.SignedIn && !snapshot.Busy; })->SignedIn);
+    CHECK(script->RefreshRequests.load(std::memory_order_relaxed) == 1U);
+    CHECK(script->OAuthRefreshRequests.load(std::memory_order_relaxed) == 0U);
+    restarted.Stop();
 }
 
 TEST_CASE("Hub account workflow can cancel a pending browser sign-in without creating a session")
@@ -223,7 +267,7 @@ TEST_CASE("Hub account workflow can cancel a pending browser sign-in without cre
         configuration,
         R"({"schemaVersion":2,"enabled":true,"projectUrl":"https://fixture.supabase.co","publishableKey":"sb_publishable_fixture_key_0000000000000000","hubOAuthEnabled":true,"hubOAuthClientId":"fixture-public-client","hubOAuthWebsiteCallbackUrl":"https://keire.test/oauth/hub/callback/"})");
     auto script = std::make_shared<Script>();
-    HubAccountWorkflow workflow(ClientFactory(script), OAuthFactory());
+    HubAccountWorkflow workflow(ClientFactory(script), OAuthFactory(script));
     REQUIRE(workflow.Start(configuration, temporary.Path() / "Account" / "cancelled-oauth-session.dat", {}));
     auto ready = WaitFor(workflow, [](const auto& snapshot) { return snapshot.Configured && !snapshot.Busy; });
     REQUIRE(ready->BrowserSignInAvailable);

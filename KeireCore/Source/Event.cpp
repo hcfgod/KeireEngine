@@ -51,10 +51,18 @@ namespace Keire::Detail
                     break;
                 }
             }
-            m_Listeners.insert(position, listener);
             {
                 std::scoped_lock lock(m_ListenerMutex);
-                m_ListenerLookup.emplace(listener->Id, listener);
+                const auto lookup = m_ListenerLookup.emplace(listener->Id, listener).first;
+                try
+                {
+                    m_Listeners.insert(position, listener);
+                }
+                catch (...)
+                {
+                    m_ListenerLookup.erase(lookup);
+                    throw;
+                }
             }
             return EventSubscription(WeakRef<EventBusState>(Self()), listener->Id);
         }

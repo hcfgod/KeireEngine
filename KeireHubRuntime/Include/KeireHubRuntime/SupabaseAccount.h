@@ -11,6 +11,12 @@
 
 namespace KeireHub
 {
+    enum class AccountSessionKind : std::uint8_t
+    {
+        SupabaseAuth,
+        DesktopOAuth
+    };
+
     struct SupabaseConfiguration final
     {
         static constexpr std::uint32_t MinimumSchemaVersion = 1;
@@ -37,6 +43,7 @@ namespace KeireHub
         std::string RefreshToken;
         std::uint64_t ExpiresAtUnixSeconds = 0;
         AccountUser User;
+        AccountSessionKind Kind = AccountSessionKind::SupabaseAuth;
     };
 
     struct AccountSignUpResult final

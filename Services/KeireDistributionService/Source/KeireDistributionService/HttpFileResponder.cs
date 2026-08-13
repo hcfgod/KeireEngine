@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Security.Cryptography;
 using Keire.Distribution;
 using Microsoft.Extensions.Primitives;
 
@@ -64,7 +65,8 @@ public static class HttpFileResponder
         int bufferSize,
         CancellationToken cancellationToken)
     {
-        if (!MatchesValidatedMetadata(file))
+        await using FileStream? stream = await OpenValidatedFileAsync(file, bufferSize, cancellationToken);
+        if (stream is null)
         {
             context.Response.Clear();
             await DistributionEndpoints.WriteErrorAsync(
@@ -122,23 +124,6 @@ public static class HttpFileResponder
         byte[] buffer = ArrayPool<byte>.Shared.Rent(bufferSize);
         try
         {
-            await using FileStream stream = new(file.AbsolutePath, new FileStreamOptions
-            {
-                Mode = FileMode.Open,
-                Access = FileAccess.Read,
-                Share = FileShare.Read,
-                BufferSize = bufferSize,
-                Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
-            });
-            if (stream.Length != file.Size)
-            {
-                throw new IOException("An immutable distribution file changed after snapshot validation.");
-            }
-            if (File.GetLastWriteTimeUtc(file.AbsolutePath) != file.LastWriteTimeUtc)
-            {
-                throw new IOException("An immutable distribution file timestamp changed after snapshot validation.");
-            }
-
             stream.Position = start;
             long remaining = responseLength;
             while (remaining > 0)
@@ -160,22 +145,67 @@ public static class HttpFileResponder
         }
     }
 
-    private static bool MatchesValidatedMetadata(DistributionFile file)
+    private static async Task<FileStream?> OpenValidatedFileAsync(
+        DistributionFile file,
+        int bufferSize,
+        CancellationToken cancellationToken)
     {
         try
         {
             FileInfo current = new(file.AbsolutePath);
             if (!current.Exists)
             {
-                return false;
+                return null;
             }
 
             FileSystemSafety.RejectLink(current);
-            return current.Length == file.Size && current.LastWriteTimeUtc == file.LastWriteTimeUtc;
+            if (current.Length != file.Size || current.LastWriteTimeUtc != file.LastWriteTimeUtc)
+            {
+                return null;
+            }
+
+            FileStream stream = new(file.AbsolutePath, new FileStreamOptions
+            {
+                Mode = FileMode.Open,
+                Access = FileAccess.Read,
+                Share = FileShare.Read,
+                BufferSize = bufferSize,
+                Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
+            });
+            try
+            {
+                if (stream.Length != file.Size)
+                {
+                    await stream.DisposeAsync();
+                    return null;
+                }
+
+                byte[] digest = await SHA256.HashDataAsync(stream, cancellationToken);
+                if (!string.Equals(Convert.ToHexStringLower(digest), file.Sha256, StringComparison.Ordinal))
+                {
+                    await stream.DisposeAsync();
+                    return null;
+                }
+
+                current.Refresh();
+                if (!current.Exists || current.Length != file.Size || current.LastWriteTimeUtc != file.LastWriteTimeUtc)
+                {
+                    await stream.DisposeAsync();
+                    return null;
+                }
+
+                stream.Position = 0;
+                return stream;
+            }
+            catch
+            {
+                await stream.DisposeAsync();
+                throw;
+            }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            return false;
+            return null;
         }
     }
 

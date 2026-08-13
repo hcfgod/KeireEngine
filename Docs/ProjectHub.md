@@ -242,7 +242,10 @@ and profile display-name updates run on the account worker rather than the UI th
 failures preserve the authenticated UI snapshot and refresh attempts use bounded backoff.
 
 Marketplace profiles, organizations, publisher membership, entitlements, reviews, and device sessions are protected by
-forced row-level security and protected membership tables. Platform roles come only from immutable `app_metadata`.
+forced row-level security and protected membership tables. Platform roles are evaluated from the database-authoritative
+`platform_staff_members` relation on every operation, so revocation does not wait for JWT refresh. Browser staff reads
+remain RLS-constrained; MFA-protected Edge Functions and service-role-only transactional functions own staff and
+moderation writes.
 Windows refresh tokens use DPAPI, Linux uses Secret Service when `secret-tool` is available, and macOS uses Keychain.
 When secure persistence is unavailable, the Hub keeps the session in memory and shows a warning instead of writing a
 plaintext credential. Website cookies and browser refresh tokens never transfer to Hub; Hub sessions can be revoked

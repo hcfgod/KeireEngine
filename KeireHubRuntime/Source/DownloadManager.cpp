@@ -525,7 +525,8 @@ namespace KeireHub
             request.Retry.MaximumAttempts > 10 || request.Retry.BaseDelay.count() < 0 ||
             request.Retry.MaximumDelay < request.Retry.BaseDelay ||
             request.Retry.MaximumDelay > std::chrono::minutes(5) || request.Retry.JitterPermille > 1000 ||
-            request.BandwidthLimitBytesPerSecond > MaximumBandwidthBytesPerSecond)
+            request.BandwidthLimitBytesPerSecond > MaximumBandwidthBytesPerSecond ||
+            (request.CacheKind != DownloadCacheKind::Package && request.CacheKind != DownloadCacheKind::AssetPackage))
         {
             return HubStatus::Failure(
                 DownloadError(HubErrorCode::InvalidArgument, request, "The package download request is invalid."));
@@ -541,7 +542,8 @@ namespace KeireHub
 
     std::filesystem::path DownloadManager::CachePath(const DownloadRequest& request)
     {
-        return request.CacheRoot / "sha256" / request.Sha256.substr(0, 2) / (request.Sha256 + ".package");
+        const auto extension = request.CacheKind == DownloadCacheKind::AssetPackage ? ".keireassetpackage" : ".package";
+        return request.CacheRoot / "sha256" / request.Sha256.substr(0, 2) / (request.Sha256 + extension);
     }
 
     std::filesystem::path DownloadManager::PartialPath(const DownloadRequest& request)

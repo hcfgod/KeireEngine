@@ -2,6 +2,7 @@
 
 #include "KeireHubRuntime/HubError.h"
 #include "KeireHubRuntime/HubSettingsStore.h"
+#include "KeireHubRuntime/MarketplaceClient.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -41,6 +42,7 @@ namespace KeireHub
     {
       public:
         HubMarketplaceIntegration();
+        explicit HubMarketplaceIntegration(MarketplaceTransport marketplaceTransport);
         ~HubMarketplaceIntegration();
 
         HubMarketplaceIntegration(const HubMarketplaceIntegration&) = delete;
@@ -55,6 +57,7 @@ namespace KeireHub
 
         mutable std::mutex m_Mutex;
         std::shared_ptr<const HubMarketplaceSnapshot> m_Snapshot;
+        MarketplaceTransport m_MarketplaceTransport;
         std::jthread m_Worker;
     };
 } // namespace KeireHub

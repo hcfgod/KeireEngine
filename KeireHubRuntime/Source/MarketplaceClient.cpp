@@ -1,5 +1,6 @@
 #include "KeireHubRuntime/MarketplaceClient.h"
 
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
 #include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <algorithm>
@@ -17,6 +18,7 @@ namespace KeireHub
     namespace
     {
         constexpr std::size_t MaximumTokenBytes = std::size_t{16U} * 1024U;
+        constexpr std::size_t MaximumPublicationBytes = std::size_t{64U} * 1024U;
 
         [[nodiscard]] HubError MarketplaceError(const HubErrorCode code, std::string message,
                                                 std::string technicalDetails = {}, const bool retryable = false,
@@ -233,6 +235,95 @@ namespace KeireHub
             return result;
         }
     } // namespace
+
+    HubResult<MarketplacePublication> DecodeMarketplacePublication(const std::string_view envelope)
+    {
+        try
+        {
+            if (envelope.empty() || envelope.size() > MaximumPublicationBytes)
+                throw std::invalid_argument("signed publication size is invalid");
+            const auto root = Detail::Json::parse(envelope);
+            if (!root.is_object() || root.size() != 3U || root.at("schemaVersion").get<std::uint32_t>() != 1U)
+                throw std::invalid_argument("signed publication envelope schema is invalid");
+            const auto& signature = root.at("signature");
+            if (!signature.is_object() || signature.size() != 5U)
+                throw std::invalid_argument("signed publication signature schema is invalid");
+
+            MarketplacePublication result{.Envelope = std::string(envelope),
+                                          .Document = root.at("document").get<std::string>(),
+                                          .Algorithm = signature.at("algorithm").get<std::string>(),
+                                          .KeyId = signature.at("keyId").get<std::string>(),
+                                          .Signature = signature.at("value").get<std::string>(),
+                                          .Sequence = signature.at("sequence").get<std::uint64_t>(),
+                                          .ExpiresAt = signature.at("expiresAt").get<std::string>()};
+            if (result.Document.empty() || result.Document.size() > MaximumPublicationBytes ||
+                result.Algorithm != "ed25519" || !Detail::IsDistributionKeyId(result.KeyId) || result.Sequence == 0U ||
+                result.Sequence > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) ||
+                !Detail::ParseUtcInstant(result.ExpiresAt))
+            {
+                throw std::invalid_argument("signed publication signature metadata is invalid");
+            }
+            const auto decodedSignature = Detail::DecodeCanonicalBase64(result.Signature, 64U);
+            if (!decodedSignature || decodedSignature->size() != 64U)
+                throw std::invalid_argument("signed publication signature encoding is invalid");
+
+            const auto document = Detail::Json::parse(result.Document);
+            if (!document.is_object() || document.size() != 10U ||
+                document.at("schemaVersion").get<std::uint32_t>() != 1U)
+            {
+                throw std::invalid_argument("signed publication document schema is invalid");
+            }
+            result.ProductId = document.at("productId").get<std::string>();
+            result.VersionId = document.at("versionId").get<std::string>();
+            result.ArtifactSha256 = document.at("artifactSha256").get<std::string>();
+            result.ArtifactSizeBytes = document.at("artifactSizeBytes").get<std::uint64_t>();
+            result.ManifestSha256 = document.at("manifestSha256").get<std::string>();
+            result.ReleaseStoragePath = document.at("releaseStoragePath").get<std::string>();
+            if (!IsUuid(result.ProductId) || !IsUuid(result.VersionId) || !IsSha256(result.ArtifactSha256) ||
+                result.ArtifactSizeBytes == 0U || !IsSha256(result.ManifestSha256) ||
+                document.at("keyId").get<std::string>() != result.KeyId ||
+                document.at("sequence").get<std::uint64_t>() != result.Sequence ||
+                document.at("expiresAt").get<std::string>() != result.ExpiresAt ||
+                result.ReleaseStoragePath !=
+                    result.ProductId + '/' + result.VersionId + '/' + result.ArtifactSha256 + ".keireassetpackage")
+            {
+                throw std::invalid_argument("signed publication identity is invalid");
+            }
+            return HubResult<MarketplacePublication>::Success(std::move(result));
+        }
+        catch (const std::exception& error)
+        {
+            return HubResult<MarketplacePublication>::Failure(MarketplaceError(
+                HubErrorCode::InvalidData, "The marketplace publication proof is invalid.", error.what()));
+        }
+    }
+
+    HubStatus VerifyMarketplacePublication(const MarketplacePublication& publication,
+                                           const std::string_view expectedProductId,
+                                           const std::string_view expectedVersionId,
+                                           const std::string_view expectedArchiveSha256,
+                                           const std::uint64_t expectedArchiveSizeBytes, const CatalogTrustStore& trust,
+                                           const std::chrono::system_clock::time_point now)
+    {
+        if (publication.ProductId != expectedProductId || publication.VersionId != expectedVersionId ||
+            publication.ArtifactSha256 != expectedArchiveSha256 ||
+            publication.ArtifactSizeBytes != expectedArchiveSizeBytes)
+        {
+            return HubStatus::Failure(
+                MarketplaceError(HubErrorCode::CatalogIdentityMismatch,
+                                 "The signed marketplace publication does not match the selected package."));
+        }
+        const auto expiry = Detail::ParseUtcInstant(publication.ExpiresAt);
+        if (!expiry || !Detail::HasMinimumValidity(*expiry, Detail::ToUtcInstant(now), std::chrono::seconds{0}))
+        {
+            return HubStatus::Failure(
+                MarketplaceError(HubErrorCode::CatalogExpired, "The signed marketplace publication has expired."));
+        }
+        const auto bytes = std::as_bytes(std::span(publication.Document.data(), publication.Document.size()));
+        return trust.VerifyDetached(
+            bytes, {.Algorithm = "Ed25519", .KeyId = publication.KeyId, .Signature = publication.Signature},
+            "marketplace-publication");
+    }
 
     MarketplaceClient::MarketplaceClient(MarketplaceClientOptions options, MarketplaceTransport transport)
         : m_Options(std::move(options)), m_Transport(std::move(transport))
@@ -531,14 +622,23 @@ namespace KeireHub
                                             .ExpiresAt = data.at("expiresAt").get<std::string>(),
                                             .ArchiveSha256 = data.at("archiveSha256").get<std::string>(),
                                             .ArchiveSizeBytes = data.at("archiveSizeBytes").get<std::uint64_t>(),
+                                            .SignedPublication = data.at("signedPublication").get<std::string>(),
                                             .CorrelationId =
                                                 document.Value().at("meta").at("correlationId").get<std::string>()};
             if (!IsUuid(result.GrantId) || !IsSafeBaseUrl(result.Url.substr(0U, result.Url.find('/', 8U))) ||
                 result.Url.find('?') == result.Url.npos || result.Url.size() > 4096U ||
                 !IsSha256(result.ArchiveSha256) || result.ArchiveSizeBytes == 0U || result.ExpiresAt.empty() ||
-                result.ExpiresAt.size() > 64U || result.CorrelationId.size() > 128U)
+                result.ExpiresAt.size() > 64U || result.SignedPublication.empty() ||
+                result.SignedPublication.size() > MaximumPublicationBytes || result.CorrelationId.size() > 128U)
             {
                 throw std::invalid_argument("invalid marketplace download grant response");
+            }
+            const auto publication = DecodeMarketplacePublication(result.SignedPublication);
+            if (!publication || publication.Value().VersionId != request.VersionId ||
+                publication.Value().ArtifactSha256 != result.ArchiveSha256 ||
+                publication.Value().ArtifactSizeBytes != result.ArchiveSizeBytes)
+            {
+                throw std::invalid_argument("marketplace download grant publication identity is invalid");
             }
             return HubResult<MarketplaceDownloadGrant>::Success(std::move(result));
         }

@@ -79,7 +79,7 @@ namespace KeireHub
                                  .Message = "Account sign-in is unavailable while the Hub is offline."});
                         return;
                     }
-                    auto saved = store.LoadRefreshToken();
+                    auto saved = store.LoadSession();
                     if (!saved)
                     {
                         Publish(FailureSnapshot(saved.Error(), true, store.PersistentStorageAvailable()));
@@ -95,13 +95,7 @@ namespace KeireHub
                                                   "available on this platform."});
                         return;
                     }
-                    auto client = CreateClient();
-                    if (!client)
-                    {
-                        Publish(FailureSnapshot(client.Error(), true, store.PersistentStorageAvailable()));
-                        return;
-                    }
-                    auto session = client.Value().Refresh(std::move(*saved.Value()));
+                    auto session = RefreshSession(*saved.Value());
                     if (!session)
                     {
                         if (!session.Error().Retryable)
@@ -109,10 +103,16 @@ namespace KeireHub
                         Publish(FailureSnapshot(session.Error(), true, store.PersistentStorageAvailable()));
                         return;
                     }
-                    auto persisted = store.SaveRefreshToken(session.Value().RefreshToken);
+                    auto persisted = store.SaveSession(session.Value().Kind, session.Value().RefreshToken);
                     if (!persisted)
                     {
                         Publish(FailureSnapshot(persisted.Error(), true, store.PersistentStorageAvailable()));
+                        return;
+                    }
+                    auto client = CreateClient();
+                    if (!client)
+                    {
+                        Publish(FailureSnapshot(client.Error(), true, store.PersistentStorageAvailable()));
                         return;
                     }
                     auto profile = client.Value().FetchProfile(session.Value());
@@ -153,7 +153,7 @@ namespace KeireHub
                     return;
                 }
                 AccountSessionStore store(m_SessionPath);
-                auto persisted = store.SaveRefreshToken(session.Value().RefreshToken);
+                auto persisted = store.SaveSession(session.Value().Kind, session.Value().RefreshToken);
                 if (!persisted)
                 {
                     Publish(FailureSnapshot(persisted.Error(), true, store.PersistentStorageAvailable()));
@@ -197,7 +197,7 @@ namespace KeireHub
                 }
                 AccountSessionStore store(m_SessionPath);
                 auto session = std::move(*result.Value().Session);
-                auto persisted = store.SaveRefreshToken(session.RefreshToken);
+                auto persisted = store.SaveSession(session.Kind, session.RefreshToken);
                 if (!persisted)
                 {
                     Publish(FailureSnapshot(persisted.Error(), true, store.PersistentStorageAvailable()));
@@ -313,9 +313,10 @@ namespace KeireHub
                                        .RefreshToken = std::move(tokens.Value().RefreshToken),
                                        .ExpiresAtUnixSeconds =
                                            static_cast<std::uint64_t>(now) + tokens.Value().ExpiresInSeconds,
-                                       .User = std::move(user).Value()};
+                                       .User = std::move(user).Value(),
+                                       .Kind = AccountSessionKind::DesktopOAuth};
                 AccountSessionStore store(m_SessionPath);
-                auto persisted = store.SaveRefreshToken(session.RefreshToken);
+                auto persisted = store.SaveSession(session.Kind, session.RefreshToken);
                 if (!persisted)
                 {
                     Publish(FailureSnapshot(persisted.Error(), true, store.PersistentStorageAvailable()));
@@ -425,13 +426,8 @@ namespace KeireHub
         (void)Begin(
             [this, session = std::move(*session)]() mutable
             {
-                auto client = CreateClient();
-                if (!client)
-                {
-                    PublishSessionFailure(client.Error());
-                    return;
-                }
-                auto refreshed = client.Value().Refresh(std::move(session.RefreshToken));
+                auto refreshed = RefreshSession({.RefreshToken = std::move(session.RefreshToken), .Kind = session.Kind},
+                                                session.User);
                 if (!refreshed)
                 {
                     if (refreshed.Error().Retryable)
@@ -451,7 +447,7 @@ namespace KeireHub
                     return;
                 }
                 AccountSessionStore store(m_SessionPath);
-                auto persisted = store.SaveRefreshToken(refreshed.Value().RefreshToken);
+                auto persisted = store.SaveSession(refreshed.Value().Kind, refreshed.Value().RefreshToken);
                 if (!persisted)
                 {
                     PublishSessionFailure(persisted.Error());
@@ -582,6 +578,71 @@ namespace KeireHub
                                            .WebsiteCallbackUrl = configuration.HubOAuthWebsiteCallbackUrl},
                                           [sharedTransport](const NativeHttpRequest& request)
                                           { return sharedTransport->Send(request); });
+    }
+
+    HubResult<AccountSession> HubAccountWorkflow::RefreshSession(const StoredAccountSession& stored,
+                                                                 std::optional<AccountUser> existingUser) const
+    {
+        const auto refreshSupabase = [this, &stored]() -> HubResult<AccountSession>
+        {
+            auto client = CreateClient();
+            if (!client)
+                return HubResult<AccountSession>::Failure(client.Error());
+            return client.Value().Refresh(stored.RefreshToken);
+        };
+        const auto refreshOAuth = [this, &stored, &existingUser]() -> HubResult<AccountSession>
+        {
+            auto oauth = CreateOAuthClient();
+            if (!oauth)
+                return HubResult<AccountSession>::Failure(oauth.Error());
+            auto tokens = oauth.Value().Refresh(stored.RefreshToken);
+            if (!tokens)
+                return HubResult<AccountSession>::Failure(tokens.Error());
+
+            AccountUser user;
+            if (existingUser && !existingUser->Id.empty())
+            {
+                user = *existingUser;
+            }
+            else
+            {
+                auto account = CreateClient();
+                if (!account)
+                    return HubResult<AccountSession>::Failure(account.Error());
+                auto fetchedUser = account.Value().FetchUser(tokens.Value().AccessToken);
+                if (!fetchedUser)
+                    return HubResult<AccountSession>::Failure(fetchedUser.Error());
+                user = std::move(fetchedUser).Value();
+            }
+
+            const auto now =
+                std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch())
+                    .count();
+            return HubResult<AccountSession>::Success(
+                {.AccessToken = std::move(tokens.Value().AccessToken),
+                 .RefreshToken = std::move(tokens.Value().RefreshToken),
+                 .ExpiresAtUnixSeconds = static_cast<std::uint64_t>(now) + tokens.Value().ExpiresInSeconds,
+                 .User = std::move(user),
+                 .Kind = AccountSessionKind::DesktopOAuth});
+        };
+
+        if (stored.Kind == AccountSessionKind::SupabaseAuth)
+            return refreshSupabase();
+        if (stored.Kind == AccountSessionKind::DesktopOAuth)
+            return refreshOAuth();
+
+        bool oauthEnabled = false;
+        {
+            std::scoped_lock lock(m_Mutex);
+            oauthEnabled = m_Configuration && m_Configuration->HubOAuthEnabled;
+        }
+        if (oauthEnabled)
+        {
+            auto refreshed = refreshOAuth();
+            if (refreshed || refreshed.Error().Retryable)
+                return refreshed;
+        }
+        return refreshSupabase();
     }
 
     void HubAccountWorkflow::Publish(HubAccountWorkflowSnapshot snapshot)

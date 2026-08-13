@@ -40,9 +40,12 @@ client: the website consent callback forwards only a single-use code and state t
 verifies state and ID-token nonce, and the Hub exchanges the code itself. Website cookies, passwords, browser refresh
 tokens, and service-role credentials never enter the desktop process. Browser SSO is configuration- and feature-gated,
 with the existing email flow retained as a staged fallback. Only publishable desktop configuration enters packages.
-Refresh-token persistence is delegated to DPAPI/Credential Manager semantics on Windows, Secret Service on Linux, and
-Keychain on macOS; an unavailable Linux secret store produces a visible memory-only session instead of plaintext disk
-storage. No account state participates in package trust, editor ownership, task authorization, or project locking.
+Refresh-token persistence records whether the session came from browser OAuth or direct Supabase Auth inside the
+protected payload. Rotation therefore returns browser sessions to the public-client OAuth token endpoint with the
+configured `client_id`, while direct email sessions retain the Auth endpoint. Persistence is delegated to DPAPI on
+Windows, Secret Service on Linux, and Keychain on macOS; an unavailable Linux secret store produces a visible
+memory-only session instead of plaintext disk storage. No account state participates in package trust, editor
+ownership, task authorization, or project locking.
 
 `EditorInstallationManager` verifies schema-2 editor manifests, their canonical fingerprints, host identity, complete
 declared file inventory, and confined entrypoints outside the UI layer, then publishes immutable health snapshots.
@@ -462,19 +465,23 @@ source-controlled receipts, safe removal, rollback journals, and interrupted-ope
 The Editor Package Manager is a presentation/controller layer over those public contracts. It never receives Hub OAuth
 tokens. Website product links use a strictly parsed `keirehub://marketplace/product/<UUID>` activation that is forwarded
 to the already-running primary Hub through the existing single-instance channel. Hub alone reads the account session,
-walks bounded catalog/library pages, registers the device session, obtains the short-lived grant, and downloads the
-content-addressed archive. Size, SHA-256, product/version/install-kind identity, and the Ed25519 asset-package signature
-must all agree before the item becomes ready.
+registers the current OAuth device session, walks bounded catalog/library pages, and obtains the short-lived grant. The
+grant carries the immutable offline-signed publication envelope already accepted at release publication. Hub verifies
+that envelope against the packaged Marketplace trust root and requires its product UUID, version UUID, archive size,
+archive SHA-256, manifest SHA-256, storage path, sequence, and expiry to agree before downloading the content-addressed
+archive. It then verifies the exact bytes and package identity before the item becomes ready.
 
 Hub publishes catalog, entitlement, requested-product, progress, failure, and verified-cache identity as one bounded,
-atomically replaced `marketplace-cache.json` document beneath the per-user Hub cache. The document contains no bearer
-token, refresh token, signed URL, proxy credential, service credential, or signing material. Editors poll this durable
-snapshot, derive the archive path from the trusted digest rather than accepting a stored arbitrary path, and repeat
-archive and signature verification before a project transaction. The nonce-authenticated live broker wire contract is
-retained for future richer coordination, but the durable snapshot is the production handoff and also works when the
-Editor starts after Hub finishes. Entitlement authorizes download access; expected archive size/SHA-256 and the
-dedicated marketplace signature establish integrity independently. Projects without package files remain valid, while
-the first successful package transaction raises `minimumEngineVersion` to 0.3.1 atomically.
+atomically replaced schema-2 `marketplace-cache.json` document beneath the per-user Hub cache. The document contains the
+public signed publication envelope but no bearer token, refresh token, signed URL, proxy credential, service credential,
+or private signing material. Editors poll this durable snapshot, derive the archive path from the trusted digest rather
+than accepting a stored arbitrary path, independently verify the exact signed publication document, and repeat archive
+size, SHA-256, manifest, and payload verification before a project transaction. Legacy schema-1 cache entries are read
+for compatibility but cannot remain ready without a publication proof. The nonce-authenticated live broker wire
+contract is retained for future richer coordination, but the durable snapshot is the production handoff and also works
+when the Editor starts after Hub finishes. Entitlement authorizes download access; the offline-signed publication and
+its bound archive digest establish integrity independently of the online grant service. Projects without package files
+remain valid, while the first successful package transaction raises `minimumEngineVersion` to 0.3.1 atomically.
 
 Project identity is separate from repository/template identity. `Project` validates the fixed marker, owns the canonical
 root and exclusive editor lock, and supplies derived paths for Assets, catalogs, workspace state, input overrides, scene

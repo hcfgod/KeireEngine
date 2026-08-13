@@ -17,18 +17,20 @@ entry points.
 
 Startup is transactional inside the top-level exception boundary:
 
-1. Open and exclusively lock an editor project when requested, rebasing all project-local service paths.
-2. Initialize managed logging when requested.
-3. Create the event bus.
-4. Create the optional asset system with the event bus as its completion sink.
-5. Create optional Scenes after Assets.
-6. Create the application-owned time service.
-7. Create the window system and primary window.
-8. Create optional RenderSystem after Windowing and claim the primary window when rendered.
-9. Create optional Input after Assets and Windowing.
-10. Create the optional UI system and workspace after Input, bridging presentation through RenderSystem.
-11. Connect the layer event listener.
-12. Activate the layer stack, call client `OnInitialize()`, and apply pending attachment operations.
+1. Open and exclusively lock an editor project when requested, rebasing all project-local service paths, then initialize
+   managed logging when requested.
+2. Create the event bus, optional profiler, diagnostic catalog and sink, memory domains, string interner, and job system.
+3. Create the module registry, validate project requirements, register module diagnostics and memory domains, then
+   freeze the diagnostic catalog.
+4. Create Undo before any layer can attach.
+5. Register built-in and module asset decoders, then create optional Assets and Streaming.
+6. Create optional Scripting, Physics, Navigation, Audio, and Scenes in dependency order.
+7. Create the application-owned time service, window system, and primary window.
+8. Resolve the render mode, create optional RenderSystem, then create optional Input.
+9. Create Replay and register module replay serializers.
+10. Create the optional UI system and workspace, bridging presentation through RenderSystem.
+11. Connect the layer event listener and activate the layer stack.
+12. Start modules, call client `OnInitialize()`, and apply pending layer operations.
 
 If any step fails, shutdown runs for the resources that were acquired. The original exception is rethrown after cleanup.
 
@@ -88,6 +90,8 @@ reverse order. The stack maintains a layer partition followed by an overlay part
 
 Traversal depth is RAII-managed. Push and remove requests made during attach, detach, event, fixed-update, update, or UI
 callbacks are queued until the next application safe boundary. Nested callbacks do not flush the queue early.
+Insertion reserves ownership in the stack before `OnAttach()` runs. If attachment fails, the provisional layer and any
+nested structural requests from that callback are rolled back before the original exception escapes.
 
 ## Events
 
@@ -132,13 +136,14 @@ Shutdown is deterministic and idempotent at service boundaries:
 3. Disconnect the application layer-event listener.
 4. Close the undo service after document panels have released their contexts.
 5. Shut down UI event forwarding, workspace, renderer bridge, and context.
-6. Close the render system, wait for its final fences, and release its window claim/device.
-7. Close Input and its native-event registration/gamepad handles.
-8. Close Scenes and invalidate loaded mutable scene instances.
-9. Close the event bus.
-10. Release the primary window and shut down the window system and tray.
-11. Close the asset system and join its workers.
-12. Release the project lock, time/event services, and managed logging.
+6. Close Replay, RenderSystem, Input, and Scenes.
+7. Close Audio, Navigation, Physics, and Scripting. Exceptions from these potentially throwing close operations are
+   contained because shutdown itself is `noexcept`.
+8. Close the event bus so retained subscriptions and event references become inert.
+9. Release the primary window, shut down WindowSystem and tray ownership, then release Time.
+10. Close Streaming before Assets, then close the module registry.
+11. Release the project lock, close the job system, and release strings, tracked memory, and diagnostics.
+12. Close the profiler, release the event bus, and shut down managed logging.
 
 Cleanup that is required to be `noexcept` contains secondary failures. A failure from application work remains the
 exception observed by the caller rather than being replaced by a teardown diagnostic.

@@ -238,6 +238,16 @@ TEST_CASE("Account session storage never writes a Windows refresh token in plain
     REQUIRE(loaded);
     REQUIRE(loaded.Value());
     CHECK(*loaded.Value() == "high-value-refresh-token");
+    REQUIRE(store.SaveSession(AccountSessionKind::DesktopOAuth, "oauth-refresh-token"));
+    const auto storedSession = store.LoadSession();
+    REQUIRE(storedSession);
+    REQUIRE(storedSession.Value());
+    CHECK(storedSession.Value()->RefreshToken == "oauth-refresh-token");
+    CHECK(storedSession.Value()->Kind == AccountSessionKind::DesktopOAuth);
+    const auto compatibleToken = store.LoadRefreshToken();
+    REQUIRE(compatibleToken);
+    REQUIRE(compatibleToken.Value());
+    CHECK(*compatibleToken.Value() == "oauth-refresh-token");
     REQUIRE(store.Clear());
     CHECK_FALSE(std::filesystem::exists(store.Path()));
 #else

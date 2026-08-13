@@ -91,16 +91,26 @@ namespace Keire
             return id;
         }
 
-        bool attached = false;
+        const auto index = m_Impl->OverlayStart;
+        m_Impl->Layers.insert(m_Impl->Layers.begin() + static_cast<std::ptrdiff_t>(index),
+                              {id, std::move(layer), false});
         if (m_Impl->IsActive)
         {
-            Impl::TraversalScope traversal(*m_Impl);
-            layer->Attach(*m_Impl->Owner);
-            attached = true;
+            const auto pendingSize = m_Impl->PendingOperations.size();
+            try
+            {
+                Impl::TraversalScope traversal(*m_Impl);
+                m_Impl->Layers[index].Instance->Attach(*m_Impl->Owner);
+                m_Impl->Layers[index].Attached = true;
+            }
+            catch (...)
+            {
+                m_Impl->PendingOperations.resize(pendingSize);
+                m_Impl->Layers.erase(m_Impl->Layers.begin() + static_cast<std::ptrdiff_t>(index));
+                throw;
+            }
         }
 
-        m_Impl->Layers.insert(m_Impl->Layers.begin() + static_cast<std::ptrdiff_t>(m_Impl->OverlayStart),
-                              {id, std::move(layer), attached});
         ++m_Impl->OverlayStart;
         return id;
     }
@@ -124,15 +134,24 @@ namespace Keire
             return id;
         }
 
-        bool attached = false;
+        m_Impl->Layers.push_back({id, std::move(overlay), false});
         if (m_Impl->IsActive)
         {
-            Impl::TraversalScope traversal(*m_Impl);
-            overlay->Attach(*m_Impl->Owner);
-            attached = true;
+            const auto pendingSize = m_Impl->PendingOperations.size();
+            try
+            {
+                Impl::TraversalScope traversal(*m_Impl);
+                m_Impl->Layers.back().Instance->Attach(*m_Impl->Owner);
+                m_Impl->Layers.back().Attached = true;
+            }
+            catch (...)
+            {
+                m_Impl->PendingOperations.resize(pendingSize);
+                m_Impl->Layers.pop_back();
+                throw;
+            }
         }
 
-        m_Impl->Layers.push_back({id, std::move(overlay), attached});
         return id;
     }
 
@@ -198,9 +217,18 @@ namespace Keire
         {
             if (!record.Attached && m_Impl->IsActive)
             {
-                Impl::TraversalScope traversal(*m_Impl);
-                record.Instance->Attach(*m_Impl->Owner);
-                record.Attached = true;
+                const auto pendingSize = m_Impl->PendingOperations.size();
+                try
+                {
+                    Impl::TraversalScope traversal(*m_Impl);
+                    record.Instance->Attach(*m_Impl->Owner);
+                    record.Attached = true;
+                }
+                catch (...)
+                {
+                    m_Impl->PendingOperations.resize(pendingSize);
+                    throw;
+                }
             }
         }
 
@@ -216,22 +244,39 @@ namespace Keire
                     continue;
                 }
 
-                auto layer = std::move(operation.Instance);
+                std::size_t index = 0;
+                if (operation.Kind == Impl::PendingKind::AddLayer)
+                {
+                    index = m_Impl->OverlayStart;
+                    m_Impl->Layers.insert(m_Impl->Layers.begin() + static_cast<std::ptrdiff_t>(m_Impl->OverlayStart),
+                                          {operation.Id, std::move(operation.Instance), false});
+                }
+                else
+                {
+                    index = m_Impl->Layers.size();
+                    m_Impl->Layers.push_back({operation.Id, std::move(operation.Instance), false});
+                }
+
                 if (m_Impl->IsActive)
                 {
-                    Impl::TraversalScope traversal(*m_Impl);
-                    layer->Attach(*m_Impl->Owner);
+                    const auto pendingSize = m_Impl->PendingOperations.size();
+                    try
+                    {
+                        Impl::TraversalScope traversal(*m_Impl);
+                        m_Impl->Layers[index].Instance->Attach(*m_Impl->Owner);
+                        m_Impl->Layers[index].Attached = true;
+                    }
+                    catch (...)
+                    {
+                        m_Impl->PendingOperations.resize(pendingSize);
+                        m_Impl->Layers.erase(m_Impl->Layers.begin() + static_cast<std::ptrdiff_t>(index));
+                        throw;
+                    }
                 }
 
                 if (operation.Kind == Impl::PendingKind::AddLayer)
                 {
-                    m_Impl->Layers.insert(m_Impl->Layers.begin() + static_cast<std::ptrdiff_t>(m_Impl->OverlayStart),
-                                          {operation.Id, std::move(layer), m_Impl->IsActive});
                     ++m_Impl->OverlayStart;
-                }
-                else
-                {
-                    m_Impl->Layers.push_back({operation.Id, std::move(layer), m_Impl->IsActive});
                 }
             }
         }

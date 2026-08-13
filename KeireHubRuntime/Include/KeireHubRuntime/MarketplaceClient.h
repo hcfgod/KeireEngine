@@ -1,8 +1,10 @@
 #pragma once
 
+#include "KeireHubRuntime/CatalogClient.h"
 #include "KeireHubRuntime/HubError.h"
 #include "KeireHubRuntime/NativeHttpTransport.h"
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -130,8 +132,33 @@ namespace KeireHub
         std::string ExpiresAt;
         std::string ArchiveSha256;
         std::uint64_t ArchiveSizeBytes = 0;
+        std::string SignedPublication;
         std::string CorrelationId;
     };
+
+    struct MarketplacePublication final
+    {
+        std::string Envelope;
+        std::string Document;
+        std::string ProductId;
+        std::string VersionId;
+        std::string ArtifactSha256;
+        std::uint64_t ArtifactSizeBytes = 0;
+        std::string ManifestSha256;
+        std::string ReleaseStoragePath;
+        std::string Algorithm;
+        std::string KeyId;
+        std::string Signature;
+        std::uint64_t Sequence = 0;
+        std::string ExpiresAt;
+    };
+
+    [[nodiscard]] HubResult<MarketplacePublication> DecodeMarketplacePublication(std::string_view envelope);
+    [[nodiscard]] HubStatus
+    VerifyMarketplacePublication(const MarketplacePublication& publication, std::string_view expectedProductId,
+                                 std::string_view expectedVersionId, std::string_view expectedArchiveSha256,
+                                 std::uint64_t expectedArchiveSizeBytes, const CatalogTrustStore& trust,
+                                 std::chrono::system_clock::time_point now = std::chrono::system_clock::now());
 
     struct MarketplaceClientOptions final
     {

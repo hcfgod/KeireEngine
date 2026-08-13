@@ -23,7 +23,7 @@ Deno.serve(async (request: Request) => {
             return json(origin, 201, { data: { deviceSessionId: data, oauthSessionId: caller.sessionId } });
         }
         if (operation === "download.issue") {
-            const { data, error } = await caller.admin.rpc("service_issue_marketplace_download_grant", {
+            const { data, error } = await caller.admin.rpc("service_issue_marketplace_download_grant_v2", {
                 p_actor_user_id: caller.user.id,
                 p_actor_session_id: caller.sessionId,
                 p_version_id: requiredUuid(input, "versionId"),

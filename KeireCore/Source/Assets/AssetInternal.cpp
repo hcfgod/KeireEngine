@@ -12,6 +12,7 @@
 #include <limits>
 #include <stdexcept>
 #include <system_error>
+#include <vector>
 
 namespace Keire::Detail
 {
@@ -184,7 +185,7 @@ namespace Keire::Detail
         if (!stream)
             throw std::runtime_error("Could not open file for hashing: " + PathToUtf8(path));
         Sha256Builder builder;
-        std::array<std::byte, 1024U * 1024U> buffer{};
+        std::vector<std::byte> buffer(std::size_t{64U} * 1024U);
         while (stream)
         {
             stream.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(buffer.size()));

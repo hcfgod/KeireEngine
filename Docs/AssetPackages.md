@@ -38,8 +38,11 @@ used. Output paths and timestamps do not enter the archive. Creation re-hashes e
 payload changed during publication cannot produce a mismatched artifact.
 
 Signature verification is injected through `AssetPackageSignatureVerifier`. Kéire Core does not own marketplace public
-keys or expose an implementation-specific cryptography type in its public API. Marketplace signing uses a trust root
-separate from Editor distribution signing. The current public trust document lives at
+keys or expose an implementation-specific cryptography type in its public API. A package can carry its detached
+signature inside the archive, or a public Marketplace release can authenticate the exact archive through an external
+offline-signed publication envelope. The envelope binds the product and version UUIDs, archive size and SHA-256,
+canonical manifest SHA-256, immutable release-storage path, signing key, sequence, and expiry. Marketplace signing uses
+a trust root separate from Editor distribution signing. The current public trust document lives at
 `Config/Marketplace/trusted-marketplace-key.json`; its private key remains outside the repository and online services.
 
 ## Project registry packages
@@ -76,8 +79,10 @@ operation. A failed publication restores the previous state. On startup, `Recove
 non-committed transaction and reports malformed journals without deleting their evidence.
 
 The global content cache is not source controlled and is safe to reuse offline only after its complete file inventory is
-revalidated. Entitlement controls access to a marketplace download; the catalog hash and detached signature establish
-the artifact's integrity independently.
+revalidated. Entitlement controls access to a marketplace download; the signed publication envelope and its bound
+archive hash establish the artifact's integrity independently. Cache schema 2 stores that public, token-free proof with
+each ready item. A schema-1 ready item is deliberately demoted to entitled and reacquired before use because it lacks
+the proof required for independent Editor verification.
 
 ## Asset imports and executable code
 
@@ -86,24 +91,30 @@ the artifact's integrity independently.
 classifies new, identical, locally modified, and conflicting paths before staging any bytes. An update uses the previous
 receipt as the common ancestor: unchanged local files update automatically, local-only changes remain, and divergent
 local/incoming changes require an explicit replace or keep-local decision. Removal deletes only receipt-owned files
-whose hashes remain unchanged and reports modified files that were retained.
+whose hashes remain unchanged and reports modified files that were retained. Archive and conflict hashes are computed
+with bounded heap-backed streaming so large packages and files do not consume the Editor thread's call stack.
 
 The Editor's **Window -> Package Manager** surface is visible in the default bottom dock and exposes My Assets, Kéire
 Registry, In Project, Updates, Local Packages, and Built-in views. Choosing **Open in Editor** on an entitled website
-listing launches or focuses Hub through `keirehub://marketplace/product/<product-id>`. Hub synchronizes the library,
-selects the newest compatible published version, creates a device-scoped grant, downloads into the content-addressed
-per-user cache, and verifies size, SHA-256, package identity, and Ed25519 signature. It then atomically publishes a
-token-free cache snapshot. Running Editors observe the snapshot within one second; an Editor opened later selects the
-same requested asset.
+listing launches or focuses Hub through `keirehub://marketplace/product/<product-id>`. Hub registers the current OAuth
+session before requesting the account library, selects the newest compatible published version, creates a device-scoped
+grant, verifies the offline-signed publication envelope, downloads into the content-addressed per-user cache, and
+verifies size, SHA-256, package identity, and archive structure. It then atomically publishes a token-free schema-2
+cache snapshot containing the same signed proof. Running Editors observe the snapshot within one second; an Editor
+opened later selects the same requested asset. Before installation or import, the Editor independently verifies the
+publication signature and identity, then asks Core to recheck the exact archive size, SHA-256, manifest, and payload.
 
 My Assets presents honest entitled, downloading, ready, unavailable, and failed states. A ready Registry package can be
 installed into the open project; a ready Asset Import package can be imported with explicit executable-code and
 conflict choices. Complete Project packages remain Hub-owned because project creation and registration precede Editor
 ownership. Local Packages remains a deliberate developer workflow and never claims marketplace trust.
 
-OAuth access tokens, refresh tokens, organization authorization, and signed Storage URLs remain in Hub memory and are
-never serialized into the cache or passed to the Editor. The packaged Hub and Editor both carry the public marketplace
-trust document and the pinned libsodium verifier; only the offline publication boundary has the private signing key.
+OAuth access tokens, organization authorization, and signed Storage URLs remain in Hub memory. Refresh tokens may be
+persisted only through the operating system's protected credential facility together with their authentication-flow
+identity. None of these credentials are serialized into the marketplace cache or passed to the Editor. The packaged
+Hub and Editor both carry the public marketplace trust document and the pinned libsodium verifier; only the offline
+publication boundary has the private signing key. Supabase stores and returns the immutable signed envelope, but the
+download-grant service cannot mint or alter a trusted publication proof.
 
 Package C# must be explicitly declared as runtime, Editor, or test code. Import requires explicit executable-code
 consent. The receipt binds that consent to the package's executable-code fingerprint, so a version that changes code
@@ -117,7 +128,8 @@ analyzers, source generators, native binaries, or install scripts. Native plugin
 `extract-asset-package` use the same Core parser and canonical encoder rather than implementing a second archive
 format. Inspection and extraction report the SHA-256 of the exact canonical manifest bytes. Extraction accepts only a
 new staging directory directly beneath an existing authorized parent. Automation must always provide a trusted
-expected archive size and SHA-256; marketplace artifacts also require an approved signature key and verifier.
+expected archive size and SHA-256; marketplace artifacts also require either a verified embedded archive signature or
+a verified external publication envelope from an approved signature key.
 
 Kéire's five first-party launch products are prepared with
 `python Scripts/Marketplace/create-official-marketplace-packages.py`. The builder copies only reviewed Sandbox source

@@ -1,3 +1,5 @@
+#include <KeireHubTests/TestSodium.h>
+
 #include "KeireHubRuntime/MarketplaceClient.h"
 
 #include <doctest/doctest.h>
@@ -35,6 +37,37 @@ namespace
                 return header.Value;
         }
         return std::nullopt;
+    }
+
+    [[nodiscard]] std::string JsonEscape(const std::string_view value)
+    {
+        std::string result;
+        for (const auto character : value)
+        {
+            if (character == '\\' || character == '"')
+                result.push_back('\\');
+            result.push_back(character);
+        }
+        return result;
+    }
+
+    [[nodiscard]] std::string PublicationEnvelope(const std::string_view versionId,
+                                                  const std::string_view archiveSha256,
+                                                  const std::uint64_t archiveSizeBytes)
+    {
+        const std::string productId = "00112233-4455-6677-8899-aabbccddeeff";
+        const std::string expiresAt = "2099-08-12T07:00:00Z";
+        const std::string keyId = "ed25519-test-key";
+        const auto document = "{\"schemaVersion\":1,\"keyId\":\"" + keyId + "\",\"sequence\":1,\"expiresAt\":\"" +
+                              expiresAt + "\",\"productId\":\"" + productId + "\",\"versionId\":\"" +
+                              std::string(versionId) + "\",\"artifactSha256\":\"" + std::string(archiveSha256) +
+                              "\",\"artifactSizeBytes\":" + std::to_string(archiveSizeBytes) +
+                              ",\"manifestSha256\":\"" + std::string(64U, 'b') + "\",\"releaseStoragePath\":\"" +
+                              productId + '/' + std::string(versionId) + '/' + std::string(archiveSha256) +
+                              ".keireassetpackage\"}";
+        return "{\"schemaVersion\":1,\"document\":\"" + JsonEscape(document) +
+               "\",\"signature\":{\"algorithm\":\"ed25519\",\"keyId\":\"" + keyId + "\",\"value\":\"" +
+               std::string(86U, 'A') + "==\",\"sequence\":1,\"expiresAt\":\"" + expiresAt + "\"}}";
     }
 
     [[nodiscard]] std::string ProductJson()
@@ -162,9 +195,13 @@ TEST_CASE("Marketplace device registration and package grant keep tokens in Hub"
                     201,
                     R"({"data":{"id":"30112233-4455-6677-8899-aabbccddeeff","sessionId":"oauth-session-001122334455","client":"hub"},"meta":{"apiVersion":"marketplace/v1","correlationId":"session-123"}})"));
             }
+            const auto publication =
+                PublicationEnvelope("50112233-4455-6677-8899-aabbccddeeff", std::string(64U, 'a'), 4096U);
             return HubResult<NativeHttpResponse>::Success(JsonResponse(
                 201,
-                R"({"data":{"grantId":"40112233-4455-6677-8899-aabbccddeeff","url":"https://storage.keire.test/object/sign/marketplace-releases/package?token=signed","expiresAt":"2026-08-12T07:00:00Z","archiveSha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","archiveSizeBytes":4096},"meta":{"apiVersion":"marketplace/v1","correlationId":"download-123"}})"));
+                R"({"data":{"grantId":"40112233-4455-6677-8899-aabbccddeeff","url":"https://storage.keire.test/object/sign/marketplace-releases/package?token=signed","expiresAt":"2026-08-12T07:00:00Z","archiveSha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","archiveSizeBytes":4096,"signedPublication":")" +
+                    JsonEscape(publication) +
+                    R"("},"meta":{"apiVersion":"marketplace/v1","correlationId":"download-123"}})"));
         });
     REQUIRE(client);
     const auto session = client.Value().RegisterDeviceSession("header.payload.signature", "Studio workstation");
@@ -173,6 +210,7 @@ TEST_CASE("Marketplace device registration and package grant keep tokens in Hub"
     const auto download =
         client.Value().RequestDownload("header.payload.signature", {.VersionId = "50112233-4455-6677-8899-aabbccddeeff",
                                                                     .DeviceSessionId = session.Value().Id});
+    INFO("Download failure: ", download ? std::string{} : download.Error().TechnicalDetails);
     REQUIRE(download);
     CHECK(download.Value().ArchiveSizeBytes == 4096U);
     CHECK(download.Value().ArchiveSha256 == std::string(64U, 'a'));
@@ -182,4 +220,37 @@ TEST_CASE("Marketplace device registration and package grant keep tokens in Hub"
     CHECK(Header(captured[0], "Authorization") == Header(captured[1], "Authorization"));
     const std::string body(reinterpret_cast<const char*>(captured[1].Body.data()), captured[1].Body.size());
     CHECK(body.find("header.payload.signature") == std::string::npos);
+}
+
+TEST_CASE("Marketplace publication proof verifies exact release identity and signature")
+{
+    KeireHubTests::TestSodiumSigner signer;
+    const std::string productId = "00112233-4455-6677-8899-aabbccddeeff";
+    const std::string versionId = "20112233-4455-6677-8899-aabbccddeeff";
+    const std::string digest(64U, 'a');
+    const std::string expiry = "2099-08-12T07:00:00Z";
+    const auto document = "{\"schemaVersion\":1,\"keyId\":\"" + signer.KeyId() + "\",\"sequence\":1,\"expiresAt\":\"" +
+                          expiry + "\",\"productId\":\"" + productId + "\",\"versionId\":\"" + versionId +
+                          "\",\"artifactSha256\":\"" + digest + "\",\"artifactSizeBytes\":4096,\"manifestSha256\":\"" +
+                          std::string(64U, 'b') + "\",\"releaseStoragePath\":\"" + productId + '/' + versionId + '/' +
+                          digest + ".keireassetpackage\"}";
+    const auto envelope = "{\"schemaVersion\":1,\"document\":\"" + JsonEscape(document) +
+                          "\",\"signature\":{\"algorithm\":\"ed25519\",\"keyId\":\"" + signer.KeyId() +
+                          "\",\"value\":\"" + signer.SignBase64(KeireHubTests::Bytes(document)) +
+                          "\",\"sequence\":1,\"expiresAt\":\"" + expiry + "\"}}";
+    const auto publication = DecodeMarketplacePublication(envelope);
+    REQUIRE(publication);
+    auto trust = CatalogTrustStore::Create(
+        {.TrustedPublicKeyDocuments = {signer.PublicKeyDocument()}, .NativeLibraryPath = signer.LibraryPath()});
+    REQUIRE(trust);
+    CHECK(VerifyMarketplacePublication(publication.Value(), productId, versionId, digest, 4096U, trust.Value()));
+    CHECK_FALSE(VerifyMarketplacePublication(publication.Value(), productId, versionId, std::string(64U, 'c'), 4096U,
+                                             trust.Value()));
+
+    auto tampered = envelope;
+    tampered[tampered.find("manifestSha256") + 20U] = 'c';
+    const auto tamperedPublication = DecodeMarketplacePublication(tampered);
+    REQUIRE(tamperedPublication);
+    CHECK_FALSE(
+        VerifyMarketplacePublication(tamperedPublication.Value(), productId, versionId, digest, 4096U, trust.Value()));
 }

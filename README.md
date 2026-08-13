@@ -251,8 +251,11 @@ See [Asset Packages](Docs/AssetPackages.md), [Desktop Player Builds](Docs/Player
 Marketplace assets follow an explicit ownership boundary: browse and claim on the website, authorize and verify the
 private download in Kéire Hub, then install or import into the open project from the Editor's **Window -> Package
 Manager** surface. **Open in Editor** links use the registered `keirehub` protocol, but Hub remains the secure account
-and download bridge. The Editor receives only an atomic token-free catalog/library/cache snapshot and independently
-rechecks the signed archive before changing project files. See [Asset Packages](Docs/AssetPackages.md) and
+and download bridge. The Editor receives only an atomic token-free catalog/library/cache snapshot with the public
+offline-signed publication proof, independently verifies that proof, and rechecks the exact archive bytes before
+changing project files. Browser OAuth sessions rotate through the public-client
+OAuth endpoint and survive restarts through the operating system's protected credential store; the direct
+email/password fallback retains its separate Auth refresh flow. See [Asset Packages](Docs/AssetPackages.md) and
 [Project Hub](Docs/ProjectHub.md) for the complete workflow and trust model.
 
 ## Repository Layout

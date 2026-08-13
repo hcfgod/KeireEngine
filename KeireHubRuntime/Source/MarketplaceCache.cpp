@@ -1,6 +1,7 @@
 #include "KeireHubRuntime/MarketplaceCache.h"
 
 #include "KeireHubRuntime/DownloadManager.h"
+#include "KeireHubRuntime/MarketplaceClient.h"
 
 #include <KeireHubRuntimeInternal\Persistence.h>
 
@@ -82,14 +83,15 @@ namespace KeireHub
             return value.empty() || value == "registry" || value == "asset_import" || value == "complete_project";
         }
 
-        void ValidateItem(const MarketplaceCacheItem& item)
+        void ValidateItem(const MarketplaceCacheItem& item, const bool requirePublication = true)
         {
             if (!IsUuid(item.ProductId) || (!item.EntitlementId.empty() && !IsUuid(item.EntitlementId)) ||
                 (!item.VersionId.empty() && !IsUuid(item.VersionId)) || item.Slug.size() > 64U ||
                 item.DisplayName.empty() || item.DisplayName.size() > 128U || item.ShortDescription.size() > 512U ||
                 item.PublisherName.size() > 128U || item.CategoryName.size() > 128U || item.LicenseSpdx.size() > 64U ||
                 item.PackageId.size() > 128U || item.Version.size() > 128U || !IsInstallKind(item.InstallKind) ||
-                item.FailureMessage.size() > 4096U || StateName(item.State) == "invalid")
+                item.FailureMessage.size() > 4096U || item.SignedPublication.size() > 64U * 1024U ||
+                StateName(item.State) == "invalid")
             {
                 throw std::invalid_argument("Marketplace cache item fields are invalid.");
             }
@@ -97,10 +99,13 @@ namespace KeireHub
                 throw std::invalid_argument("Marketplace cache entitlement identity is inconsistent.");
             if (item.State == MarketplaceCacheState::Ready &&
                 (item.PackageId.empty() || item.Version.empty() || item.VersionId.empty() ||
-                 !Detail::IsSha256(item.ArchiveSha256) || item.ArchiveSizeBytes == 0U))
+                 !Detail::IsSha256(item.ArchiveSha256) || item.ArchiveSizeBytes == 0U ||
+                 (requirePublication && item.SignedPublication.empty())))
             {
                 throw std::invalid_argument("Ready marketplace cache item is incomplete.");
             }
+            if (!item.SignedPublication.empty() && !DecodeMarketplacePublication(item.SignedPublication))
+                throw std::invalid_argument("Marketplace cache publication proof is invalid.");
             if (item.State != MarketplaceCacheState::Failed && !item.FailureMessage.empty())
                 throw std::invalid_argument("Marketplace cache failure message is unexpected.");
         }
@@ -122,14 +127,16 @@ namespace KeireHub
                     {"installKind", item.InstallKind},
                     {"archiveSha256", item.ArchiveSha256},
                     {"archiveSizeBytes", item.ArchiveSizeBytes},
+                    {"signedPublication", item.SignedPublication},
                     {"state", StateName(item.State)},
                     {"failureMessage", item.FailureMessage},
                     {"entitled", item.Entitled}};
         }
 
-        [[nodiscard]] MarketplaceCacheItem ParseItem(const Detail::Json& value)
+        [[nodiscard]] MarketplaceCacheItem ParseItem(const Detail::Json& value, const std::uint32_t schemaVersion)
         {
-            if (!value.is_object() || value.size() != 17U)
+            const auto expectedFields = schemaVersion == 1U ? 17U : 18U;
+            if (!value.is_object() || value.size() != expectedFields)
                 throw std::invalid_argument("Marketplace cache item schema is invalid.");
             MarketplaceCacheItem item{.ProductId = value.at("productId").get<std::string>(),
                                       .EntitlementId = value.at("entitlementId").get<std::string>(),
@@ -145,10 +152,15 @@ namespace KeireHub
                                       .InstallKind = value.at("installKind").get<std::string>(),
                                       .ArchiveSha256 = value.at("archiveSha256").get<std::string>(),
                                       .ArchiveSizeBytes = value.at("archiveSizeBytes").get<std::uint64_t>(),
+                                      .SignedPublication = schemaVersion == 1U
+                                                               ? std::string{}
+                                                               : value.at("signedPublication").get<std::string>(),
                                       .State = ParseState(value.at("state").get<std::string>()),
                                       .FailureMessage = value.at("failureMessage").get<std::string>(),
                                       .Entitled = value.at("entitled").get<bool>()};
-            ValidateItem(item);
+            ValidateItem(item, schemaVersion != 1U);
+            if (schemaVersion == 1U && item.State == MarketplaceCacheState::Ready)
+                item.State = MarketplaceCacheState::Entitled;
             return item;
         }
     } // namespace
@@ -175,11 +187,13 @@ namespace KeireHub
         try
         {
             const auto& value = document.Value();
-            if (!value.is_object() || value.size() != 4U ||
-                value.at("schemaVersion").get<std::uint32_t>() != MarketplaceCacheSnapshot::CurrentSchemaVersion)
+            if (!value.is_object() || value.size() != 4U)
             {
                 throw std::invalid_argument("Marketplace cache schema is unsupported.");
             }
+            const auto schemaVersion = value.at("schemaVersion").get<std::uint32_t>();
+            if (schemaVersion != 1U && schemaVersion != MarketplaceCacheSnapshot::CurrentSchemaVersion)
+                throw std::invalid_argument("Marketplace cache schema is unsupported.");
             MarketplaceCacheSnapshot result{.Revision = value.at("revision").get<std::uint64_t>(),
                                             .RequestedProductId = value.at("requestedProductId").get<std::string>()};
             if (!result.RequestedProductId.empty() && !IsUuid(result.RequestedProductId))
@@ -190,7 +204,7 @@ namespace KeireHub
             std::set<std::string, std::less<>> productIds;
             for (const auto& item : items)
             {
-                auto parsed = ParseItem(item);
+                auto parsed = ParseItem(item, schemaVersion);
                 if (!productIds.insert(parsed.ProductId).second)
                     throw std::invalid_argument("Marketplace cache product identities must be unique.");
                 result.Items.push_back(std::move(parsed));
@@ -241,7 +255,8 @@ namespace KeireHub
                                            .Url = "https://cache.invalid/package",
                                            .Sha256 = item.ArchiveSha256,
                                            .SizeBytes = item.ArchiveSizeBytes,
-                                           .CacheRoot = m_Root});
+                                           .CacheRoot = m_Root,
+                                           .CacheKind = DownloadCacheKind::AssetPackage});
     }
 
     std::filesystem::path MarketplaceCacheStore::IndexPath() const { return m_Root / "marketplace-cache.json"; }

@@ -24,6 +24,7 @@ project(HubTestsTarget)
         "../KeireHub/Source/HubFirstRunIntegration.cpp",
         "../KeireHub/Source/HubFirstRunWorkflow.cpp",
         "../KeireHub/Source/HubMaintenanceWorkflow.cpp",
+        "../KeireHub/Source/HubMarketplaceIntegration.cpp",
         "../KeireHub/Source/HubPathMigration.cpp",
         "../KeireHub/Source/HubProjectMetadataWorkflow.cpp",
         "../KeireHub/Source/HubProjectRegistrationWorkflow.cpp",

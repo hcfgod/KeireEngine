@@ -100,7 +100,13 @@ TEST_CASE("Atomic text reads stay bound to one published file version")
     }
     writer.join();
 
+    INFO("Write failure code: ", writerStatus ? 0 : static_cast<int>(writerStatus.Error().Code));
+    INFO("Write failure message: ", writerStatus ? std::string{} : writerStatus.Error().Message);
+    INFO("Write failure details: ", writerStatus ? std::string{} : writerStatus.Error().TechnicalDetails);
     REQUIRE(writerStatus);
+    INFO("Read failure code: ", readFailure ? static_cast<int>(readFailure->Code) : 0);
+    INFO("Read failure message: ", readFailure ? readFailure->Message : std::string{});
+    INFO("Read failure details: ", readFailure ? readFailure->TechnicalDetails : std::string{});
     CHECK_FALSE(readFailure);
 }
 

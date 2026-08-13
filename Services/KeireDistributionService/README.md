@@ -87,10 +87,12 @@ served file, type, byte length, SHA-256, and detached signature metadata. Snapsh
 service rejects path traversal, absolute paths, symbolic links/reparse points, undeclared files, case-colliding paths,
 digest or size mismatches, unsupported path layouts, malformed JSON, and invalid signed-document metadata. It validates
 a candidate fully before swapping its in-memory index. If a newly selected snapshot is invalid, requests continue using
-the last validated snapshot and readiness reports `ready-degraded`. Every request also verifies the indexed size,
-timestamp, and link status before emitting a digest-derived validator. The active snapshot is cryptographically
-revalidated every `SnapshotIntegrityPollSeconds` (300 seconds by default); a failure withdraws that snapshot and makes
-readiness fail until a different immutable snapshot ID is activated.
+the last validated snapshot and readiness reports `ready-degraded`. Every request opens the indexed file once, verifies
+its link status, size, timestamp, and SHA-256, and serves that same validated handle before emitting a digest-derived
+validator. This prevents same-length bytes with a restored timestamp from inheriting the original immutable cache
+identity. The active snapshot is also cryptographically revalidated every `SnapshotIntegrityPollSeconds` (300 seconds
+by default); a failure withdraws that snapshot and makes readiness fail until a different immutable snapshot ID is
+activated.
 
 Publisher input uses the same `catalogs/`, `catalogs-v2/`, `content/`, `manifests/`, and `packages/` layout plus an offline-generated
 `signatures.json`:
@@ -330,6 +332,13 @@ staff assignments and launch gates. The database prevents removal of the final a
 checkout enablement for 0.3.1, and records each staff decision in `public.platform_audit_events`. Browser staff sessions
 have read-only queue access; all changes cross the MFA-protected moderation boundary. Package approval ends at
 `approved_pending_signature`, preserving the offline signing key as a separate operational trust domain.
+
+An authorized Marketplace download grant returns both a short-lived private Storage URL and the immutable
+offline-signed publication envelope recorded when that exact release was promoted. The service-role-only v2 grant
+adapter requires the entitlement, device session, release storage path, archive size and SHA-256, manifest SHA-256, and
+signing-key identity to remain consistent before returning the envelope. Hub and Editor verify the exact inner document
+independently with their packaged Marketplace public key. The online website, Edge Functions, database, and Storage
+services never hold the private key and cannot manufacture a trusted replacement archive.
 
 ### Marketplace package validator
 

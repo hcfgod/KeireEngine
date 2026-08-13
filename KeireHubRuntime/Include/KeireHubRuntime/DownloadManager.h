@@ -22,6 +22,12 @@ namespace KeireHub
         std::uint32_t JitterPermille = 250;
     };
 
+    enum class DownloadCacheKind
+    {
+        Package,
+        AssetPackage
+    };
+
     struct DownloadRequest final
     {
         std::string PackageId;
@@ -33,6 +39,7 @@ namespace KeireHub
         bool AllowInsecureLoopbackDevelopment = false;
         std::optional<std::string> CustomProxyUrl;
         std::uint64_t BandwidthLimitBytesPerSecond = 0;
+        DownloadCacheKind CacheKind = DownloadCacheKind::Package;
     };
 
     struct DownloadTransportRequest final

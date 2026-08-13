@@ -689,7 +689,10 @@ namespace Keire
             try
             {
                 if (source.ExpectedArchiveSizeBytes == 0 || !IsSha256(source.ExpectedArchiveSha256) ||
-                    !IsSafeSource(source.CatalogSource))
+                    !IsSafeSource(source.CatalogSource) ||
+                    (!source.TrustedSignatureKeyId.empty() &&
+                     (source.TrustedSignatureKeyId.size() > 128U || !IsSafeSource(source.TrustedSignatureKeyId))) ||
+                    (source.RequireMarketplaceSignature && !source.TrustedSignatureKeyId.empty()))
                     throw std::invalid_argument("Registry packages require a trusted catalog size, hash, and source.");
                 auto metadata = InspectAssetPackageArchive(
                     source.Archive, {.RequireSignature = source.RequireMarketplaceSignature,
@@ -737,7 +740,9 @@ namespace Keire
                                    .ArchiveSha256 = metadata.ArchiveSha256,
                                    .ArchiveSizeBytes = metadata.ArchiveSizeBytes,
                                    .Source = source.CatalogSource,
-                                   .SignatureKeyId = metadata.Manifest.SignatureKeyId,
+                                   .SignatureKeyId = metadata.Manifest.SignatureKeyId.empty()
+                                                         ? source.TrustedSignatureKeyId
+                                                         : metadata.Manifest.SignatureKeyId,
                                    .InstallKind = AssetPackageInstallKind::Registry,
                                    .Dependencies = metadata.Manifest.Dependencies,
                                    .Embedded = existing != resolved.end() && existing->second.Embedded};

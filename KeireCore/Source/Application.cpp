@@ -977,6 +977,22 @@ namespace Keire
 
     void Application::ShutdownRuntime(const bool initialized) noexcept
     {
+        const auto closeService = []<typename T>(Ref<T>& service) noexcept
+        {
+            if (!service)
+            {
+                return;
+            }
+            try
+            {
+                service->Close();
+            }
+            catch (...)
+            {
+            }
+            service.Reset();
+        };
+
         m_Impl->LayerSystem->Deactivate();
         if (initialized)
         {
@@ -1021,29 +1037,10 @@ namespace Keire
             m_Impl->SceneService.Reset();
         }
 
-        if (m_Impl->AudioService)
-        {
-            m_Impl->AudioService->Close();
-            m_Impl->AudioService.Reset();
-        }
-
-        if (m_Impl->NavigationService)
-        {
-            m_Impl->NavigationService->Close();
-            m_Impl->NavigationService.Reset();
-        }
-
-        if (m_Impl->PhysicsService)
-        {
-            m_Impl->PhysicsService->Close();
-            m_Impl->PhysicsService.Reset();
-        }
-
-        if (m_Impl->ScriptService)
-        {
-            m_Impl->ScriptService->Close();
-            m_Impl->ScriptService.Reset();
-        }
+        closeService(m_Impl->AudioService);
+        closeService(m_Impl->NavigationService);
+        closeService(m_Impl->PhysicsService);
+        closeService(m_Impl->ScriptService);
 
         if (m_Impl->EventSystem && m_Impl->EventSystem->IsOpen())
         {
@@ -1104,11 +1101,7 @@ namespace Keire
         m_Impl->DiagnosticReportService.Reset();
         m_Impl->DiagnosticDefinitionService.Reset();
 
-        if (m_Impl->ProfilerService)
-        {
-            m_Impl->ProfilerService->Close();
-            m_Impl->ProfilerService.Reset();
-        }
+        closeService(m_Impl->ProfilerService);
 
         m_Impl->EventSystem.Reset();
 

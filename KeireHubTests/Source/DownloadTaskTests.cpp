@@ -128,6 +128,24 @@ TEST_CASE("Package downloads publish verified content-addressed cache files")
     CHECK(unused.Requests.empty());
 }
 
+TEST_CASE("Asset package downloads preserve the inspected archive extension")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    auto request = Request(temporary.Path() / "Cache");
+    request.CacheKind = DownloadCacheKind::AssetPackage;
+
+    CHECK(DownloadManager::CachePath(request).extension() == ".keireassetpackage");
+    CHECK(DownloadManager::PartialPath(request).extension() == ".partial");
+    CHECK(DownloadManager::ResumeMetadataPath(request).filename().string().ends_with(".partial.json"));
+
+    FakeTransport transport;
+    DownloadManager manager;
+    const auto acquired = manager.Acquire(request, transport);
+    REQUIRE(acquired);
+    CHECK(acquired.Value().CachePath.extension() == ".keireassetpackage");
+    CHECK(KeireHubTests::ReadText(acquired.Value().CachePath) == Payload);
+}
+
 TEST_CASE("Paused and cancelled downloads preserve resumable partial data")
 {
     KeireHubTests::TemporaryDirectory temporary;

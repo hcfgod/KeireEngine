@@ -29,8 +29,8 @@ coverage; line movement alone is not a useful refactor.
 The highest-value seams are:
 
 - `ScriptSystem.cpp`: runtime hosting, native-call adapters, reload transactions, and managed jobs. Managed build workspace
-  generation, diagnostics parsing, source fingerprinting, and atomic text publication now live behind the private
-  `ManagedBuildWorkspace` boundary.
+  generation, diagnostics parsing, source fingerprinting, and atomic text publication live behind the private
+  `ManagedBuildWorkspace` boundary; managed reflection state and metadata parsing live behind `ManagedReflection`.
 - `MaterialGraph.cpp`: schema/validation, lowering, shader emission, and asset import/publication. The immutable node
   descriptor catalog and its lookup/type-ID contract live in `MaterialGraphNodeCatalog.cpp`; deterministic generated
   shader manifest assembly lives in `MaterialGraphManifest.cpp`. Both use private boundaries behind the existing typed
@@ -39,9 +39,13 @@ The highest-value seams are:
 - `VfxAssets.cpp` and `VfxSystem.cpp`: encoding/import, compilation, CPU simulation, and GPU publication. Reusable JSON
   encoding and strict decoding of asset IDs, vectors, matrices, colors, curves, and gradients now live behind the
   private `VfxAssetValueCodec` boundary.
+- `RuntimeServices.cpp` and `SceneRuntime.cpp`: service orchestration and scene control stay readable by keeping audio
+  implementation state and scene implementation state in private internal headers, with scene VFX and physics work in
+  dedicated implementation units.
 - editor asset/VFX panels: document commands, background operations, canvas interaction, and presentation. Editor file
-  validation/diagnostics now use `EditorAssetFileService`, while VFX canvas node construction, stable IDs, colors, and
-  compatibility rules now use the typed `VfxEffectPanelModel` boundary.
+  validation/diagnostics use `EditorAssetFileService`; asset inspection, VFX workspace operations, and architecture
+  dashboard presentation have dedicated implementation units; VFX canvas node construction, stable IDs, colors, and
+  compatibility rules use the typed `VfxEffectPanelModel` boundary.
 
 When a unit falls below the default ceiling, remove its exception in the same change. Do not increase a ceiling to
 make a check pass.

@@ -990,12 +990,11 @@ namespace KeireEditor
                     {
                         for (const auto& candidate : definition.Buses)
                             if (ui.Selectable(candidate.Name, candidate.Id == parameter.Target))
-                                (void)ApplyEdit("Retarget Audio Mixer snapshot parameter",
-                                                [snapshotId = snapshot.Id, index,
-                                                 target = candidate.Id](Keire::AudioMixerDefinition& mixer) {
-                                                    RequireSnapshot(mixer, snapshotId).Parameters.at(index).Target =
-                                                        target;
-                                                });
+                                (void)ApplyEdit(
+                                    "Retarget Audio Mixer snapshot parameter",
+                                    [snapshotId = snapshot.Id, index,
+                                     target = candidate.Id](Keire::AudioMixerDefinition& mixer)
+                                    { RequireSnapshot(mixer, snapshotId).Parameters.at(index).Target = target; });
                     }
                 }
                 else if (parameter.Type == Keire::AudioMixerSnapshotParameterType::SendGain)
@@ -1020,12 +1019,11 @@ namespace KeireEditor
                                 const auto destination = FindBus(definition, send.DestinationBus);
                                 const auto label = bus.Name + " -> " + (destination ? destination->Name : "Missing");
                                 if (ui.Selectable(label, send.Id == parameter.Target))
-                                    (void)ApplyEdit("Retarget Audio Mixer snapshot parameter",
-                                                    [snapshotId = snapshot.Id, index,
-                                                     target = send.Id](Keire::AudioMixerDefinition& mixer) {
-                                                        RequireSnapshot(mixer, snapshotId).Parameters.at(index).Target =
-                                                            target;
-                                                    });
+                                    (void)ApplyEdit(
+                                        "Retarget Audio Mixer snapshot parameter",
+                                        [snapshotId = snapshot.Id, index,
+                                         target = send.Id](Keire::AudioMixerDefinition& mixer)
+                                        { RequireSnapshot(mixer, snapshotId).Parameters.at(index).Target = target; });
                             }
                     }
                 }
@@ -1073,7 +1071,8 @@ namespace KeireEditor
                             (void)ApplyEdit("Edit Audio Mixer snapshot parameter index",
                                             [snapshotId = snapshot.Id, index,
                                              parameterIndex = static_cast<std::uint32_t>(parameterIndex)](
-                                                Keire::AudioMixerDefinition& mixer) {
+                                                Keire::AudioMixerDefinition& mixer)
+                                            {
                                                 RequireSnapshot(mixer, snapshotId).Parameters.at(index).Parameter =
                                                     parameterIndex;
                                             });
@@ -1086,11 +1085,10 @@ namespace KeireEditor
                 {
                     bool value = parameter.Value != 0.0F;
                     if (ui.Checkbox("Value", value))
-                        (void)ApplyEdit("Edit Audio Mixer snapshot value",
-                                        [snapshotId = snapshot.Id, index, value](Keire::AudioMixerDefinition& mixer) {
-                                            RequireSnapshot(mixer, snapshotId).Parameters.at(index).Value =
-                                                value ? 1.0F : 0.0F;
-                                        });
+                        (void)ApplyEdit(
+                            "Edit Audio Mixer snapshot value",
+                            [snapshotId = snapshot.Id, index, value](Keire::AudioMixerDefinition& mixer)
+                            { RequireSnapshot(mixer, snapshotId).Parameters.at(index).Value = value ? 1.0F : 0.0F; });
                 }
                 else
                 {
@@ -1117,7 +1115,8 @@ namespace KeireEditor
                     [&](const Keire::AudioMixerBusDefinition& bus)
                     {
                         return std::ranges::none_of(snapshot.Parameters,
-                                                    [&](const Keire::AudioMixerSnapshotParameterDefinition& parameter) {
+                                                    [&](const Keire::AudioMixerSnapshotParameterDefinition& parameter)
+                                                    {
                                                         return parameter.Type ==
                                                                    Keire::AudioMixerSnapshotParameterType::BusGain &&
                                                                parameter.Target == bus.Id;

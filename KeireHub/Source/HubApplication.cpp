@@ -247,7 +247,6 @@ namespace
                 }
             }
         }
-
         void OnDetach() noexcept override
         {
             m_HubUpdateHandoff.Stop();
@@ -541,7 +540,6 @@ namespace
                 }
             }
         }
-
         void OnUi(Keire::UiFrame& ui) override
         {
             if (m_RuntimeStartupFailure)
@@ -735,12 +733,10 @@ namespace
             if (outcome.CloseRequested)
                 Owner().RequestExit();
         }
-
         void DrawNotice(Keire::UiFrame& ui, const KeireHub::HubDesignTokens& tokens)
         {
             KeireHub::Detail::DrawHubNotice(ui, tokens, m_Notice, m_NoticeError, m_ObservedNotice, m_NoticeStarted);
         }
-
         void SavePreferences()
         {
             if (!m_Controller)
@@ -751,7 +747,6 @@ namespace
             if (!status)
                 SetError(status.Error().Message);
         }
-
         void LocateProject(const std::filesystem::path& selected)
         {
             if (!m_ProjectWorkflow || m_PendingLocateProjectId.empty())
@@ -763,7 +758,6 @@ namespace
             m_Notice = "Moved project located.";
             m_NoticeError = false;
         }
-
         void ExecuteProjectCommand(const KeireHub::HubProjectUiCommand& command)
         {
             if (!command)
@@ -858,7 +852,6 @@ namespace
                 ReportUnexpected("The project action could not be completed.", error);
             }
         }
-
         void ExecuteProductCommand(const KeireHub::HubUiCommand& command)
         {
             if (!command)

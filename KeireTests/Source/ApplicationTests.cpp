@@ -9,6 +9,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -217,6 +218,71 @@ namespace
         {
             (void)PushLayer(std::make_unique<ThrowLayer>());
         }
+    };
+
+    class AttachProbeLayer final : public Keire::Layer
+    {
+      public:
+        explicit AttachProbeLayer(int& attachments) : Layer("AttachProbe"), m_Attachments(attachments) {}
+
+      protected:
+        void OnAttach() override { ++m_Attachments; }
+
+      private:
+        int& m_Attachments;
+    };
+
+    class FailingAttachLayer final : public Keire::Layer
+    {
+      public:
+        explicit FailingAttachLayer(int& nestedAttachments)
+            : Layer("FailingAttach"), m_NestedAttachments(nestedAttachments)
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            (void)Owner().PushOverlay(std::make_unique<AttachProbeLayer>(m_NestedAttachments));
+            throw std::runtime_error("attach failure");
+        }
+
+      private:
+        int& m_NestedAttachments;
+    };
+
+    class AttachFailureApplication final : public Keire::Application
+    {
+      public:
+        AttachFailureApplication(const bool overlay, bool& caught, std::size_t& retainedLayers, int& nestedAttachments)
+            : Application(HiddenApplicationSpecification("attach-failure")), m_Overlay(overlay), m_Caught(caught),
+              m_RetainedLayers(retainedLayers), m_NestedAttachments(nestedAttachments)
+        {
+        }
+
+      protected:
+        void OnInitialize() override
+        {
+            try
+            {
+                if (m_Overlay)
+                    (void)PushOverlay(std::make_unique<FailingAttachLayer>(m_NestedAttachments));
+                else
+                    (void)PushLayer(std::make_unique<FailingAttachLayer>(m_NestedAttachments));
+            }
+            catch (const std::runtime_error& exception)
+            {
+                m_Caught = std::string_view(exception.what()) == "attach failure";
+            }
+            m_RetainedLayers = Layers().Size();
+            RequestExit();
+        }
+
+      private:
+        bool m_Overlay = false;
+        bool& m_Caught;
+        std::size_t& m_RetainedLayers;
+        int& m_NestedAttachments;
     };
 
     class UndoLifecycleLayer final : public Keire::Layer
@@ -709,6 +775,23 @@ TEST_CASE("Application cleans up services before rethrowing callback failures")
 
     ThreadExitApplication replacement;
     CHECK(replacement.Run() == 4);
+}
+
+TEST_CASE("Failed active layer attachment rolls back the layer and nested mutations")
+{
+    UseApplicationDummyVideoDriver();
+    for (const bool overlay : {false, true})
+    {
+        CAPTURE(overlay);
+        bool caught = false;
+        std::size_t retainedLayers = 1;
+        int nestedAttachments = 0;
+        AttachFailureApplication application(overlay, caught, retainedLayers, nestedAttachments);
+        CHECK(application.Run() == 0);
+        CHECK(caught);
+        CHECK(retainedLayers == 0);
+        CHECK(nestedAttachments == 0);
+    }
 }
 
 TEST_CASE("Application owns undo before layers and closes it after layer teardown")

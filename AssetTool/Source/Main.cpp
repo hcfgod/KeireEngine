@@ -819,9 +819,9 @@ namespace
                                            "Downloading the Build Support catalog.");
                     const auto catalog = Keire::Detail::FetchPlayerSupportCatalog(
                         Keire::GetBuildInfo().RepositorySlug, Keire::GetBuildInfo().Version, commandLine.Output,
-                        {.Cancelled = cancelled, .Progress = [&](const float progress, const std::string_view message) {
-                             WritePlayerBuildStatus(commandLine.Status, "running", "download", progress, message);
-                         }});
+                        {.Cancelled = cancelled,
+                         .Progress = [&](const float progress, const std::string_view message)
+                         { WritePlayerBuildStatus(commandLine.Status, "running", "download", progress, message); }});
                     WritePlayerBuildStatus(commandLine.Status, "succeeded", "complete", 1.0F,
                                            "Build Support catalog downloaded (" +
                                                std::to_string(catalog.Packages.size()) + " modules).");
@@ -859,7 +859,9 @@ namespace
                         .Url = commandLine.Url, .Size = commandLine.ExpectedSize, .Sha256 = commandLine.Sha256};
                     Keire::Detail::DownloadPlayerSupportPackage(
                         entry, commandLine.Output,
-                        {.Cancelled = cancelled, .Progress = [&](const float progress, const std::string_view message) {
+                        {.Cancelled = cancelled,
+                         .Progress = [&](const float progress, const std::string_view message)
+                         {
                              WritePlayerBuildStatus(commandLine.Status, "running", "download", progress * 0.6F,
                                                     message);
                          }});
@@ -867,7 +869,9 @@ namespace
                         Keire::ModuleRegistrySpecification{KeireProjectModules::CreateSourceModules()});
                     const auto installed = Keire::Detail::InstallPlayerSupportPackage(
                         commandLine.Output, modules->Fingerprint(),
-                        {.Cancelled = cancelled, .Progress = [&](const float progress, const std::string_view message) {
+                        {.Cancelled = cancelled,
+                         .Progress = [&](const float progress, const std::string_view message)
+                         {
                              WritePlayerBuildStatus(commandLine.Status, "running", "install", 0.6F + progress * 0.4F,
                                                     message);
                          }});

@@ -1,27 +1,34 @@
 # Kéire Production Readiness Review
 
-Review date: 2026-08-12
+Review date: 2026-08-13
 
-Revision: current-source and Windows-candidate refresh
+Revision: source-audit and Windows-candidate evidence refresh
 
-Review scope: Kéire 0.3.1 source at commit `6f27aaa`, the newly rebuilt clean Windows Editor candidate, the Windows
-packages published from commit `7619442` in signed distribution snapshot sequence 9, the 58-guide documentation
-library, and the current feature-gated online platform. Candidate evidence and public-release evidence are kept
-separate throughout this review.
+Review scope: Kéire 0.3.1 source at commit `4a01072` plus the explicitly reviewed working-tree hardening recorded in the
+changelog, the clean Windows Editor candidate built from commit `6f27aaa`, the Windows packages published from commit
+`7619442` in signed distribution snapshot sequence 9, the canonical documentation library, and the current
+feature-gated online platform. Source-review, candidate, and public-release evidence are kept separate throughout this
+review; uncommitted source changes are not presented as package evidence.
 
 Review target: sustained commercial and AAA-team production use. A feature existing in source is not equivalent to a
 validated workflow, and a validated local workflow is not equivalent to a supported public release.
 
 ## What Changed In This Refresh
 
-- The clean Windows Editor package was rebuilt from `6f27aaa`. Its Dist runtime reports that exact commit and its
-  package gate includes the current Hub/process launch hardening, rendered-test backend normalization, marketplace
-  service-boundary fixes, and documentation corrections.
-- Current Dist suites pass 591 Core tests with 47,736 assertions, 133 Editor tests with 2,230 assertions, and 347 Hub
-  tests with 3,604 assertions. The D3D12 and Vulkan rendered-output suites remain green at 21/21 cases each.
+- The source review advanced to `4a01072` plus the reviewed worktree changes. Immutable-response verification,
+  transactional layer/listener registration, shutdown exception containment, source-budget enforcement, and the
+  corresponding focused regressions are source evidence until a clean candidate is rebuilt.
+- The clean Windows Editor candidate remains the package built from `6f27aaa`; its Dist runtime reports that exact
+  commit. That candidate's recorded package gate passed 591 Core tests with 47,736 assertions, 133 Editor tests with
+  2,230 assertions, and 347 Hub tests with 3,604 assertions. Its D3D12 and Vulkan rendered-output suites passed 21/21
+  cases each. These counts describe that candidate, not the advancing source tree.
+- The reviewed source working tree passed the complete Windows Debug gate with 603 Core tests/47,889 assertions, 134
+  Editor tests/2,234 assertions, and 355 Hub tests/3,680 assertions; Release passed 604/47,890, 134/2,234, and
+  355/3,680 respectively. Debug and Release also passed the complete client compile gate and both 21-case rendered
+  suites. DebugASan passed 603/47,889, 134/2,234, and 355/3,680 plus the instrumented client compile gate.
 - Windows Hub and Editor now diagnose elevated launch sessions that cannot accept Explorer file drops, while the Hub
   avoids starting another elevated Editor. The browser-to-Hub URL-protocol handoff and package ownership contracts are
-  represented in the current source baseline.
+  represented in the reviewed source baseline.
 - The active public catalog remains sequence 9 until a matching replacement Hub installer completes the release gates.
   Its Ed25519 catalog and SHA-256 identities are verified, but the native Windows installer is not Authenticode-signed.
   The Downloads UI now describes that distinction instead of calling the executable itself signed.

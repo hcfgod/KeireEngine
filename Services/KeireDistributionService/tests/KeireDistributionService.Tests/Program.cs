@@ -349,8 +349,9 @@ internal static class Program
                 "snapshot-a",
                 "packages",
                 fixture.PackageSha256);
+            DateTime validatedTimestamp = File.GetLastWriteTimeUtc(packagePath);
             File.WriteAllBytes(packagePath, Enumerable.Repeat((byte)'X', fixture.PackageBytes.Length).ToArray());
-            File.SetLastWriteTimeUtc(packagePath, DateTime.UtcNow.AddMinutes(1));
+            File.SetLastWriteTimeUtc(packagePath, validatedTimestamp);
 
             using HttpRequestMessage conditionalRequest = new(HttpMethod.Get, requestPath);
             conditionalRequest.Headers.TryAddWithoutValidation("If-None-Match", etag);

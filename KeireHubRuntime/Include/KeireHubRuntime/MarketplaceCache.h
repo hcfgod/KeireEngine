@@ -34,6 +34,7 @@ namespace KeireHub
         std::string InstallKind;
         std::string ArchiveSha256;
         std::uint64_t ArchiveSizeBytes = 0;
+        std::string SignedPublication;
         MarketplaceCacheState State = MarketplaceCacheState::Entitled;
         std::string FailureMessage;
         bool Entitled = false;
@@ -43,7 +44,7 @@ namespace KeireHub
 
     struct MarketplaceCacheSnapshot final
     {
-        static constexpr std::uint32_t CurrentSchemaVersion = 1;
+        static constexpr std::uint32_t CurrentSchemaVersion = 2;
 
         std::uint64_t Revision = 0;
         std::string RequestedProductId;

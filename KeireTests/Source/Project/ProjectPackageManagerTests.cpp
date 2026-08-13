@@ -5,9 +5,11 @@
 
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <system_error>
+#include <utility>
 
 namespace
 {
@@ -55,7 +57,8 @@ namespace
 
         [[nodiscard]] Keire::AssetPackageArchiveMetadata
         CreatePackage(const std::string& packageId, const std::string& version,
-                      const std::vector<Keire::AssetPackageDependency>& dependencies = {})
+                      const std::vector<Keire::AssetPackageDependency>& dependencies = {},
+                      const bool embeddedSignature = true)
         {
             const auto suffix = packageId + '-' + version;
             const auto payload = Root / (suffix + "-payload");
@@ -75,15 +78,18 @@ namespace
             manifest.Compatibility.Architectures = {"x86_64"};
             manifest.Compatibility.RendererCapabilities = {"pbr"};
             manifest.Dependencies = dependencies;
-            manifest.SignatureKeyId = "marketplace-test";
+            if (embeddedSignature)
+                manifest.SignatureKeyId = "marketplace-test";
             manifest = Keire::InventoryAssetPackagePayload(std::move(manifest), payload);
             const auto archive = Root / (suffix + ".keireassetpackage");
+            std::optional<Keire::AssetPackageSignature> signature;
+            if (embeddedSignature)
+            {
+                signature = Keire::AssetPackageSignature{.KeyId = manifest.SignatureKeyId,
+                                                         .Bytes = {std::byte{1}, std::byte{2}}};
+            }
             return Keire::WriteAssetPackageArchive(
-                {.Manifest = manifest,
-                 .PayloadRoot = payload,
-                 .Output = archive,
-                 .Signature = Keire::AssetPackageSignature{.KeyId = manifest.SignatureKeyId,
-                                                           .Bytes = {std::byte{1}, std::byte{2}}}});
+                {.Manifest = manifest, .PayloadRoot = payload, .Output = archive, .Signature = std::move(signature)});
         }
 
         [[nodiscard]] Keire::ProjectPackageArchiveSource
@@ -170,4 +176,25 @@ TEST_CASE("project package preflight reports missing transitive dependencies wit
     CHECK(plan.Conflicts.front().Kind == Keire::ProjectPackageConflictKind::MissingDependency);
     CHECK_FALSE(std::filesystem::exists(Keire::ProjectPackageManager::ManifestPath(fixture.Project->Root())));
     CHECK(Keire::Project::InspectMetadata(fixture.Project->Root()).MinimumEngineVersion == "0.1.0");
+}
+
+TEST_CASE("project package lock records an independently verified marketplace publication key")
+{
+    ProjectPackageFixture fixture;
+    const auto metadata = fixture.CreatePackage("com.keire.external-proof", "1.0.0", {}, false);
+    auto source = fixture.Source(metadata);
+    source.RequireMarketplaceSignature = false;
+    source.TrustedSignatureKeyId = "ed25519-release-key";
+    const Keire::ProjectPackageInstallRequest request{
+        .Archives = {source}, .DirectDependencies = {{metadata.Manifest.PackageId, metadata.Manifest.Version}}};
+    auto manager = fixture.Manager();
+
+    const auto plan = manager.PreflightInstall(request);
+    REQUIRE(plan.Valid());
+    const auto lock = manager.Install(request);
+    REQUIRE(lock.Packages.size() == 1U);
+    CHECK(lock.Packages.front().SignatureKeyId == source.TrustedSignatureKeyId);
+    const auto mounts = manager.Mounts();
+    REQUIRE(mounts.size() == 1U);
+    CHECK(mounts.front().Trust == Keire::ProjectPackageTrust::MarketplaceSignatureVerified);
 }

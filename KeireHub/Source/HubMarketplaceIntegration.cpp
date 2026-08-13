@@ -125,7 +125,9 @@ namespace KeireHub
             return "invalid";
         }
 
-        [[nodiscard]] HubStatus Synchronize(const HubMarketplaceRequest& request, const std::stop_token stop,
+        [[nodiscard]] HubStatus Synchronize(const HubMarketplaceRequest& request,
+                                            const MarketplaceTransport& marketplaceTransport,
+                                            const std::stop_token stop,
                                             const std::function<void(std::string)>& progress)
         {
             try
@@ -146,11 +148,18 @@ namespace KeireHub
                 if (!native)
                     return HubStatus::Failure(native.Error());
                 auto transport = std::move(native).Value();
-                auto client = MarketplaceClient::Create({.ServiceBaseUrl = request.ServiceBaseUrl},
-                                                        [&transport](const NativeHttpRequest& http)
-                                                        { return transport.Send(http); });
+                auto client = MarketplaceClient::Create(
+                    {.ServiceBaseUrl = request.ServiceBaseUrl},
+                    marketplaceTransport ? marketplaceTransport
+                                         : MarketplaceTransport([&transport](const NativeHttpRequest& http)
+                                                                { return transport.Send(http); }));
                 if (!client)
                     return HubStatus::Failure(client.Error());
+
+                progress("Registering this Hub session…");
+                auto session = client.Value().RegisterDeviceSession(request.AccessToken, "Kéire Hub");
+                if (!session)
+                    return HubStatus::Failure(session.Error());
 
                 progress("Synchronizing the Kéire Marketplace catalog…");
                 std::string cursor;
@@ -211,6 +220,7 @@ namespace KeireHub
                 item.InstallKind = version.InstallKind;
                 item.ArchiveSha256.clear();
                 item.ArchiveSizeBytes = 0;
+                item.SignedPublication.clear();
                 item.PackageId.clear();
                 item.State = MarketplaceCacheState::Downloading;
                 item.FailureMessage.clear();
@@ -219,14 +229,26 @@ namespace KeireHub
                     return saved;
 
                 progress("Authorizing a private marketplace download…");
-                auto session = client.Value().RegisterDeviceSession(request.AccessToken, "Kéire Hub");
-                if (!session)
-                    return HubStatus::Failure(session.Error());
                 auto grant = client.Value().RequestDownload(
                     request.AccessToken,
                     {.VersionId = version.Id, .DeviceSessionId = session.Value().Id, .OrganizationId = organizationId});
                 if (!grant)
                     return HubStatus::Failure(grant.Error());
+
+                auto trust = CatalogTrustStore::Create(
+                    {.TrustedPublicKeyDocuments = {request.TrustedPublicKeyDocument}, .NativeLibraryPath = {}});
+                if (!trust)
+                    return HubStatus::Failure(trust.Error());
+                auto publication = DecodeMarketplacePublication(grant.Value().SignedPublication);
+                if (!publication)
+                    return HubStatus::Failure(publication.Error());
+                if (const auto verified = VerifyMarketplacePublication(publication.Value(), request.ProductId,
+                                                                       version.Id, grant.Value().ArchiveSha256,
+                                                                       grant.Value().ArchiveSizeBytes, trust.Value());
+                    !verified)
+                {
+                    return verified;
+                }
 
                 progress("Downloading and verifying the marketplace package…");
                 DownloadRequest download{.PackageId = request.ProductId,
@@ -236,7 +258,8 @@ namespace KeireHub
                                          .CacheRoot = request.CacheRoot,
                                          .AllowInsecureLoopbackDevelopment = request.AllowInsecureLoopbackDevelopment,
                                          .CustomProxyUrl = request.CustomProxyUrl,
-                                         .BandwidthLimitBytesPerSecond = request.BandwidthLimitBytesPerSecond};
+                                         .BandwidthLimitBytesPerSecond = request.BandwidthLimitBytesPerSecond,
+                                         .CacheKind = DownloadCacheKind::AssetPackage};
                 DownloadManager manager;
                 auto acquired = manager.Acquire(
                     download, transport,
@@ -248,19 +271,10 @@ namespace KeireHub
                                                        : acquired.Error());
                 }
 
-                auto trust = CatalogTrustStore::Create(
-                    {.TrustedPublicKeyDocuments = {request.TrustedPublicKeyDocument}, .NativeLibraryPath = {}});
-                if (!trust)
-                    return HubStatus::Failure(trust.Error());
                 const auto metadata = Keire::InspectAssetPackageArchive(
-                    acquired.Value().CachePath,
-                    {.RequireSignature = true,
-                     .ExpectedArchiveSizeBytes = grant.Value().ArchiveSizeBytes,
-                     .ExpectedArchiveSha256 = grant.Value().ArchiveSha256,
-                     .VerifySignature = [&trust](const std::string_view algorithm, const std::string_view keyId,
-                                                 const std::span<const std::byte> message,
-                                                 const std::span<const std::byte> signature)
-                     { return trust.Value().VerifySignature(algorithm, keyId, message, signature); }});
+                    acquired.Value().CachePath, {.RequireSignature = false,
+                                                 .ExpectedArchiveSizeBytes = grant.Value().ArchiveSizeBytes,
+                                                 .ExpectedArchiveSha256 = grant.Value().ArchiveSha256});
                 if (metadata.Manifest.Version != version.Version ||
                     InstallKind(metadata.Manifest.InstallKind) != version.InstallKind)
                 {
@@ -269,6 +283,7 @@ namespace KeireHub
                 item.PackageId = metadata.Manifest.PackageId;
                 item.ArchiveSha256 = grant.Value().ArchiveSha256;
                 item.ArchiveSizeBytes = grant.Value().ArchiveSizeBytes;
+                item.SignedPublication = grant.Value().SignedPublication;
                 item.State = MarketplaceCacheState::Ready;
                 item.FailureMessage.clear();
                 ++snapshot.Revision;
@@ -282,8 +297,11 @@ namespace KeireHub
         }
     } // namespace
 
-    HubMarketplaceIntegration::HubMarketplaceIntegration()
-        : m_Snapshot(std::make_shared<const HubMarketplaceSnapshot>())
+    HubMarketplaceIntegration::HubMarketplaceIntegration() : HubMarketplaceIntegration(MarketplaceTransport{}) {}
+
+    HubMarketplaceIntegration::HubMarketplaceIntegration(MarketplaceTransport marketplaceTransport)
+        : m_Snapshot(std::make_shared<const HubMarketplaceSnapshot>()),
+          m_MarketplaceTransport(std::move(marketplaceTransport))
     {
     }
 
@@ -316,11 +334,12 @@ namespace KeireHub
                  .ProductId = request.ProductId,
                  .Message = "Preparing the marketplace asset…"});
         m_Worker = std::jthread(
-            [this, request = std::move(request), completion](const std::stop_token stop)
+            [this, request = std::move(request), marketplaceTransport = m_MarketplaceTransport,
+             completion](const std::stop_token stop)
             {
                 auto message = std::make_shared<std::string>("Preparing the marketplace asset…");
                 const auto status = Synchronize(
-                    request, stop,
+                    request, marketplaceTransport, stop,
                     [this, completion, productId = request.ProductId, message](std::string value)
                     {
                         *message = std::move(value);
