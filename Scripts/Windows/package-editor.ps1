@@ -47,7 +47,7 @@ foreach ($directory in @("bin", "samples", "Docs")) {
 Remove-Item -LiteralPath (Join-Path $stage "bin\$($Project.HUB_TARGET).exe"), `
     (Join-Path $stage "bin\$($Project.PROJECT_NAMESPACE)HubWorker.exe") -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force (Join-Path $stage "Config\Marketplace"), `
-    (Join-Path $stage "third-party\licenses") | Out-Null
+    (Join-Path $stage "third-party") | Out-Null
 Copy-Item -LiteralPath (Join-Path $sdkStage "Config\Client.json") -Destination (Join-Path $stage "Config")
 Copy-Item -LiteralPath (Join-Path $Root "Config\SourceModules.premake.lua") -Destination (Join-Path $stage "Config")
 New-Item -ItemType Directory -Force (Join-Path $stage "Config\Branding") | Out-Null

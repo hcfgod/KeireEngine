@@ -27,8 +27,11 @@ if (-not ($launcher.Contains('"package-editor"') -and $launcher.Contains('$Confi
 $packager = Get-Content (Join-Path $Windows "package-editor.ps1") -Raw
 foreach ($contract in @("-Configuration Dist", "-StageOnly", "Build\Dependencies\dotnet-sdk",
         "Build\Distributions", "Assert-WindowsEditorPackageStage", "write-package-manifest.py",
-        "editor-package.json", '$Project.CLIENT_TARGET')) {
+        "editor-package.json", '$Project.CLIENT_TARGET', '(Join-Path $stage "third-party")')) {
     if (-not $packager.Contains($contract)) { throw "The Windows editor packager is missing '$contract'." }
+}
+if ($packager.Contains('(Join-Path $stage "third-party\licenses") | Out-Null')) {
+    throw "The Windows editor packager must not pre-create the copied license directory."
 }
 $clientPremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireClient\premake5.lua") -Raw
 if (-not $clientPremake.Contains("AddKeireManagedHostStaging()")) {
