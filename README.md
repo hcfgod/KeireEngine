@@ -37,6 +37,8 @@ The Hub is the normal entry point. Direct editor launch remains available for au
 Its task and notification centers retain useful history across restarts; finished tasks and read notifications can be
 dismissed individually, and the task center can clear all finished work at once. Dismissing a retryable editor removal
 hides its recovery record durably while preserving the exact journal identity needed by a later Retry or Remove action.
+Marketplace Asset Import packages open a verified file-and-conflict review in the Editor before the user confirms any
+project writes; executable-code consent and keep-local conflict choices are applied during that preflight.
 
 ## What Is Implemented
 

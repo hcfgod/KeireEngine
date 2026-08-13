@@ -133,6 +133,15 @@ namespace KeireHub
                     {"entitled", item.Entitled}};
         }
 
+        [[nodiscard]] Detail::Json SerializeLegacyItem(const MarketplaceCacheItem& item)
+        {
+            auto value = SerializeItem(item);
+            value.erase("signedPublication");
+            if (item.State == MarketplaceCacheState::Ready)
+                value["state"] = StateName(MarketplaceCacheState::Entitled);
+            return value;
+        }
+
         [[nodiscard]] MarketplaceCacheItem ParseItem(const Detail::Json& value, const std::uint32_t schemaVersion)
         {
             const auto expectedFields = schemaVersion == 1U ? 17U : 18U;
@@ -175,13 +184,18 @@ namespace KeireHub
     HubResult<MarketplaceCacheSnapshot> MarketplaceCacheStore::Load() const
     {
         std::error_code error;
-        if (!std::filesystem::exists(IndexPath(), error))
+        const auto versionedIndex = VersionedIndexPath();
+        const bool hasVersionedIndex = std::filesystem::exists(versionedIndex, error);
+        if (error)
+            return HubResult<MarketplaceCacheSnapshot>::Failure(CacheError("The marketplace cache is unreadable."));
+        const auto index = hasVersionedIndex ? versionedIndex : IndexPath();
+        if (!std::filesystem::exists(index, error))
         {
             if (error)
                 return HubResult<MarketplaceCacheSnapshot>::Failure(CacheError("The marketplace cache is unreadable."));
             return HubResult<MarketplaceCacheSnapshot>::Success({});
         }
-        auto document = Detail::ReadJsonFile(IndexPath(), MaximumCacheBytes);
+        auto document = Detail::ReadJsonFile(index, MaximumCacheBytes);
         if (!document)
             return HubResult<MarketplaceCacheSnapshot>::Failure(document.Error());
         try
@@ -228,17 +242,27 @@ namespace KeireHub
                 throw std::invalid_argument("Marketplace cache item count is invalid.");
             std::set<std::string, std::less<>> productIds;
             Detail::Json items = Detail::Json::array();
+            Detail::Json legacyItems = Detail::Json::array();
             for (const auto& item : snapshot.Items)
             {
                 if (!productIds.insert(item.ProductId).second)
                     throw std::invalid_argument("Marketplace cache product identities must be unique.");
                 items.push_back(SerializeItem(item));
+                legacyItems.push_back(SerializeLegacyItem(item));
             }
-            return Detail::WriteJsonFileAtomically(IndexPath(),
-                                                   {{"schemaVersion", MarketplaceCacheSnapshot::CurrentSchemaVersion},
-                                                    {"revision", snapshot.Revision},
-                                                    {"requestedProductId", snapshot.RequestedProductId},
-                                                    {"items", std::move(items)}});
+            if (auto saved = Detail::WriteJsonFileAtomically(
+                    VersionedIndexPath(), {{"schemaVersion", MarketplaceCacheSnapshot::CurrentSchemaVersion},
+                                           {"revision", snapshot.Revision},
+                                           {"requestedProductId", snapshot.RequestedProductId},
+                                           {"items", std::move(items)}});
+                !saved)
+            {
+                return saved;
+            }
+            return Detail::WriteJsonFileAtomically(IndexPath(), {{"schemaVersion", 1U},
+                                                                 {"revision", snapshot.Revision},
+                                                                 {"requestedProductId", snapshot.RequestedProductId},
+                                                                 {"items", std::move(legacyItems)}});
         }
         catch (const std::exception& exception)
         {
@@ -260,4 +284,9 @@ namespace KeireHub
     }
 
     std::filesystem::path MarketplaceCacheStore::IndexPath() const { return m_Root / "marketplace-cache.json"; }
+
+    std::filesystem::path MarketplaceCacheStore::VersionedIndexPath() const
+    {
+        return m_Root / "marketplace-cache-v2.json";
+    }
 } // namespace KeireHub

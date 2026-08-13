@@ -7,8 +7,19 @@ versions.
 
 ### Changed
 
+- Fixed repeated Animator Inspector labels sharing ImGui identities across left/right arm groups. Every generic component
+  property now carries its stable serialized key as a hidden widget identity.
+- Fixed foot grounding on scaled imported characters. World-space sole offsets and pelvis-adjustment limits are now
+  converted into model space before the bilateral IK solve, so uneven terrain bends the legs and compensates the hips
+  consistently for rigs such as the 0.01-scale Vanguard.
+- Changed Marketplace **Import into Project** to open a verified preflight review before writing files. The modal lists
+  install, replace, reuse, keep-local, and unresolved-conflict actions and enables confirmation only for a valid plan.
 - Fixed Editor marketplace Asset Import terminating with a CoreCLR stack-overflow report. Archive and conflict hashing
   now streams through bounded heap storage instead of placing a 1 MiB buffer on the Editor's 1 MiB Windows stack.
+- Fixed newer Hubs making the shared Marketplace cache appear invalid to installed legacy Editors. Hub now publishes
+  signed schema-2 state in a versioned snapshot while maintaining a schema-1 compatibility projection that omits the
+  publication proof and downgrades ready items to entitled, so old Editors remain usable without accepting unsigned
+  imports. Current Editors prefer the signed snapshot and retain migration support for existing unversioned caches.
 - Hardened immutable distribution responses by hashing the exact opened file before honoring digest ETags or serving
   bytes; same-size content with a restored timestamp is now withdrawn instead of inheriting year-long cache identity.
 - Made active layer insertion and event-listener registration transactional under allocation and callback failures, and

@@ -462,8 +462,11 @@ owned global cache, mounts it read-only, and supports transactional embed/revert
 owns dependency-aware selective imports, three-way update decisions, executable-code consent fingerprints,
 source-controlled receipts, safe removal, rollback journals, and interrupted-operation recovery.
 
-The Editor Package Manager is a presentation/controller layer over those public contracts. It never receives Hub OAuth
-tokens. Website product links use a strictly parsed `keirehub://marketplace/product/<UUID>` activation that is forwarded
+The Editor Package Manager is a presentation/controller layer over those public contracts. Marketplace Asset Import
+first verifies the publication and archive, computes a complete preflight plan, and opens an explicit review modal. The
+modal exposes planned install/replace/reuse/keep-local actions and unresolved conflicts; project writes remain disabled
+until the plan is valid and the user confirms it. The Editor never receives Hub OAuth tokens. Website product links use
+a strictly parsed `keirehub://marketplace/product/<UUID>` activation that is forwarded
 to the already-running primary Hub through the existing single-instance channel. Hub alone reads the account session,
 registers the current OAuth device session, walks bounded catalog/library pages, and obtains the short-lived grant. The
 grant carries the immutable offline-signed publication envelope already accepted at release publication. Hub verifies
@@ -471,17 +474,20 @@ that envelope against the packaged Marketplace trust root and requires its produ
 archive SHA-256, manifest SHA-256, storage path, sequence, and expiry to agree before downloading the content-addressed
 archive. It then verifies the exact bytes and package identity before the item becomes ready.
 
-Hub publishes catalog, entitlement, requested-product, progress, failure, and verified-cache identity as one bounded,
-atomically replaced schema-2 `marketplace-cache.json` document beneath the per-user Hub cache. The document contains the
-public signed publication envelope but no bearer token, refresh token, signed URL, proxy credential, service credential,
-or private signing material. Editors poll this durable snapshot, derive the archive path from the trusted digest rather
-than accepting a stored arbitrary path, independently verify the exact signed publication document, and repeat archive
-size, SHA-256, manifest, and payload verification before a project transaction. Legacy schema-1 cache entries are read
-for compatibility but cannot remain ready without a publication proof. The nonce-authenticated live broker wire
-contract is retained for future richer coordination, but the durable snapshot is the production handoff and also works
-when the Editor starts after Hub finishes. Entitlement authorizes download access; the offline-signed publication and
-its bound archive digest establish integrity independently of the online grant service. Projects without package files
-remain valid, while the first successful package transaction raises `minimumEngineVersion` to 0.3.1 atomically.
+Hub publishes catalog, entitlement, requested-product, progress, failure, and verified-cache identity beneath the
+per-user Hub cache. Current Editors prefer the bounded, atomically replaced schema-2 `marketplace-cache-v2.json`
+snapshot. It contains the public signed publication envelope but no bearer token, refresh token, signed URL, proxy
+credential, service credential, or private signing material. Hub also atomically replaces `marketplace-cache.json` with
+a schema-1 compatibility projection for installed legacy Editors. That projection omits publication proofs and
+downgrades ready items to entitled, so a legacy Editor can read shared catalog state but cannot treat an unsigned cache
+entry as importable. Current Editors retain migration support for pre-split schema-1 and schema-2 files, derive the
+archive path from the trusted digest rather than accepting a stored arbitrary path, independently verify the exact
+signed publication document, and repeat archive size, SHA-256, manifest, and payload verification before a project
+transaction. The nonce-authenticated live broker wire contract is retained for future richer coordination, but the
+durable snapshot is the production handoff and also works when the Editor starts after Hub finishes. Entitlement
+authorizes download access; the offline-signed publication and its bound archive digest establish integrity
+independently of the online grant service. Projects without package files remain valid, while the first successful
+package transaction raises `minimumEngineVersion` to 0.3.1 atomically.
 
 Project identity is separate from repository/template identity. `Project` validates the fixed marker, owns the canonical
 root and exclusive editor lock, and supplies derived paths for Assets, catalogs, workspace state, input overrides, scene
@@ -1086,7 +1092,9 @@ and quadruped names participate in the same retargeting and IK contracts. Unknow
 unclassified rather than being discarded.
 
 The scene runtime samples animation into local bone transforms, applies named IK goals, optionally performs scene-owned
-ground raycasts and transactional foot grounding, computes the palette, and then submits deformation. The standalone
+world-space ground raycasts and transactional model-space foot grounding, computes the palette, and then submits
+deformation. World-authored sole offsets and pelvis limits are converted through the Animator transform before solving,
+so imported rigs keep the same physical grounding distances at non-unit model scales. The standalone
 ragdoll transition blends animation and physics-provided local poses but does not own physics bodies or constraints.
 Linear-blend skinning uses the SDL_GPU compute cache when available. Dual-quaternion skinning and
 unsupported compute paths use the deterministic CPU implementation; both paths produce an engine-owned transient

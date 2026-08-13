@@ -154,12 +154,14 @@ namespace KeireEditor
     {
         if (property.ReadOnly)
             return false;
+        auto scopedProperty = property;
+        scopedProperty.DisplayName += "##" + property.Key;
         if (const auto override = m_Overrides.find(OverrideKey(component, property.Key)); override != m_Overrides.end())
-            return override->second(editor, property, value);
+            return override->second(editor, scopedProperty, value);
         const auto drawer = m_Drawers.find(property.Kind);
         if (drawer == m_Drawers.end())
             throw std::logic_error("No drawer is registered for this component property kind.");
-        return drawer->second(editor, property, value);
+        return drawer->second(editor, scopedProperty, value);
     }
 
     bool PropertyDrawerRegistry::EditComponent(IPropertyEditor& editor,

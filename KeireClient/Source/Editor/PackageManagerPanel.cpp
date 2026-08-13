@@ -57,6 +57,24 @@ namespace KeireEditor
             return "Unknown";
         }
 
+        [[nodiscard]] std::string_view ImportDispositionLabel(const Keire::ProjectAssetImportDisposition disposition)
+        {
+            switch (disposition)
+            {
+            case Keire::ProjectAssetImportDisposition::Install:
+                return "Install";
+            case Keire::ProjectAssetImportDisposition::Replace:
+                return "Replace";
+            case Keire::ProjectAssetImportDisposition::ReuseIdentical:
+                return "Reuse identical";
+            case Keire::ProjectAssetImportDisposition::KeepLocal:
+                return "Keep local";
+            case Keire::ProjectAssetImportDisposition::Conflict:
+                return "Conflict";
+            }
+            return "Unknown";
+        }
+
         [[nodiscard]] std::optional<std::string> ReadTrustedKey(const std::filesystem::path& executable)
         {
             std::vector<std::filesystem::path> candidates{
@@ -191,6 +209,7 @@ namespace KeireEditor
         m_Error.clear();
         m_LastEvent = {};
         m_LocalMetadata.reset();
+        m_ImportReview.Cancel();
         m_AllowExecutableCode = false;
         m_KeepLocalConflicts = true;
         m_NextMarketplaceRefresh = {};
@@ -318,7 +337,7 @@ namespace KeireEditor
         }
     }
 
-    void PackageManagerPanel::ImportMarketplacePackage(const KeireHub::MarketplaceCacheItem& item)
+    void PackageManagerPanel::PrepareMarketplaceImport(const KeireHub::MarketplaceCacheItem& item)
     {
         if (!m_AssetImporter || !m_MarketplaceCache)
             return;
@@ -356,16 +375,82 @@ namespace KeireEditor
                 }
                 plan = m_AssetImporter->Preflight(request);
             }
-            if (!plan.Valid())
-                throw std::runtime_error("Asset import preflight failed: " + plan.Conflicts.front().Message);
-            const auto result = m_AssetImporter->Import(request);
-            m_Status = "Imported " + std::to_string(result.Written.size()) + " file(s) from " + item.DisplayName +
-                       "; retained " + std::to_string(result.Retained.size()) + " local file(s).";
+            m_ImportReview.Prepare(item.DisplayName, std::move(request), std::move(plan));
+            m_Status = "Review the verified import plan before changing project files.";
             m_Error.clear();
         }
         catch (const std::exception& error)
         {
             m_Error = error.what();
+        }
+    }
+
+    void PackageManagerPanel::ImportReviewedPackage(PackageImportConfirmation confirmation)
+    {
+        if (!m_AssetImporter)
+            return;
+        try
+        {
+            const auto result = m_AssetImporter->Import(confirmation.Request);
+            m_Status = "Imported " + std::to_string(result.Written.size()) + " file(s) from " +
+                       confirmation.DisplayName + "; retained " + std::to_string(result.Retained.size()) +
+                       " local file(s).";
+            m_Error.clear();
+        }
+        catch (const std::exception& error)
+        {
+            m_Error = error.what();
+        }
+    }
+
+    void PackageManagerPanel::DrawImportReview(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme)
+    {
+        if (m_ImportReview.ConsumeOpenRequest())
+            ui.OpenPopup("Import Asset Package");
+        if (auto popup = ui.BeginPopupModal("Import Asset Package"); popup)
+        {
+            if (!m_ImportReview.Active())
+            {
+                ui.CloseCurrentPopup();
+                return;
+            }
+            const auto& plan = m_ImportReview.Plan();
+            ui.TextColored(theme.Accent, m_ImportReview.DisplayName());
+            ui.Text(plan.Package.Manifest.PackageId + "  " + plan.Package.Manifest.Version);
+            ui.TextColored(theme.MutedText, std::to_string(plan.Entries.size()) +
+                                                " planned file(s); no project files change until you "
+                                                "confirm.");
+            if (plan.ContainsExecutableCode)
+                ui.TextColored(theme.Warning, "This package contains executable C# assemblies.");
+            ui.Separator();
+            if (auto files = ui.BeginChild("PackageImportReviewFiles", {620.0F, 260.0F}, true); files)
+            {
+                for (const auto& entry : plan.Entries)
+                {
+                    ui.Text(entry.ProjectPath.generic_string() + "  [" +
+                            std::string(ImportDispositionLabel(entry.Disposition)) + "]");
+                }
+                for (const auto& conflict : plan.Conflicts)
+                    ui.TextColored(theme.Error, conflict.Message);
+            }
+            if (!plan.Valid())
+                ui.TextColored(theme.Warning,
+                               "Resolve the listed conflict options in My Assets, then open this review again.");
+            if (auto disabled = ui.BeginDisabled(!plan.Valid()); disabled)
+            {
+                if (ui.Button("Import"))
+                {
+                    auto confirmation = m_ImportReview.Confirm();
+                    ui.CloseCurrentPopup();
+                    ImportReviewedPackage(std::move(confirmation));
+                }
+            }
+            ui.SameLine();
+            if (ui.Button("Cancel"))
+            {
+                m_ImportReview.Cancel();
+                ui.CloseCurrentPopup();
+            }
         }
     }
 
@@ -443,8 +528,8 @@ namespace KeireEditor
             {
                 static_cast<void>(ui.Checkbox("Allow package C# assemblies to compile", m_AllowExecutableCode));
                 static_cast<void>(ui.Checkbox("Keep locally modified files on conflicts", m_KeepLocalConflicts));
-                if (ui.Button("Import into Project"))
-                    ImportMarketplacePackage(*selected);
+                if (ui.Button("Import into Project..."))
+                    PrepareMarketplaceImport(*selected);
             }
             else
             {
@@ -791,5 +876,6 @@ namespace KeireEditor
             ui.TextColored(theme.Success, m_Status);
         if (!m_Error.empty())
             ui.TextColored(theme.Error, m_Error);
+        DrawImportReview(ui, theme);
     }
 } // namespace KeireEditor

@@ -3,6 +3,7 @@
 #include "KeireHubRuntime/MarketplaceCache.h"
 
 #include <doctest/doctest.h>
+#include <nlohmann/json.hpp>
 
 #include <filesystem>
 #include <string>
@@ -72,6 +73,19 @@ TEST_CASE("Marketplace cache atomically round-trips token-free entitled package 
     const auto saved = store.Save(snapshot);
     INFO("Cache save failure: ", saved ? std::string{} : saved.Error().TechnicalDetails);
     REQUIRE(saved);
+
+    const auto legacyDocument = nlohmann::json::parse(KeireHubTests::ReadText(store.IndexPath()));
+    const auto versionedPath = store.Root() / "marketplace-cache-v2.json";
+    const auto versionedDocument = nlohmann::json::parse(KeireHubTests::ReadText(versionedPath));
+    REQUIRE(legacyDocument.at("schemaVersion") == 1U);
+    REQUIRE(versionedDocument.at("schemaVersion") == MarketplaceCacheSnapshot::CurrentSchemaVersion);
+    REQUIRE(legacyDocument.at("items").size() == 1U);
+    REQUIRE(versionedDocument.at("items").size() == 1U);
+    CHECK(legacyDocument.at("items").front().at("state") == "entitled");
+    CHECK_FALSE(legacyDocument.at("items").front().contains("signedPublication"));
+    CHECK(versionedDocument.at("items").front().at("state") == "ready");
+    CHECK(versionedDocument.at("items").front().at("signedPublication") == PublicationEnvelope());
+
     const auto loaded = store.Load();
     REQUIRE(loaded);
     CHECK(loaded.Value() == snapshot);
@@ -79,6 +93,41 @@ TEST_CASE("Marketplace cache atomically round-trips token-free entitled package 
     CHECK(store.ArchivePath(loaded.Value().Items.front()).extension() == ".keireassetpackage");
     CHECK(store.ArchivePath(loaded.Value().Items.front()).string().find(snapshot.Items.front().ArchiveSha256) !=
           std::string::npos);
+
+    REQUIRE(std::filesystem::remove(versionedPath));
+    const auto legacyLoaded = store.Load();
+    REQUIRE(legacyLoaded);
+    REQUIRE(legacyLoaded.Value().Items.size() == 1U);
+    CHECK(legacyLoaded.Value().Items.front().State == MarketplaceCacheState::Entitled);
+    CHECK(legacyLoaded.Value().Items.front().SignedPublication.empty());
+}
+
+TEST_CASE("Marketplace cache loads an unversioned schema two snapshot during migration")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    MarketplaceCacheStore store(temporary.Path() / "MarketplacePackages");
+    const MarketplaceCacheSnapshot snapshot{
+        .Revision = 8U, .RequestedProductId = "00112233-4455-6677-8899-aabbccddeeff", .Items = {ReadyItem()}};
+    REQUIRE(store.Save(snapshot));
+
+    const auto versionedPath = store.Root() / "marketplace-cache-v2.json";
+    KeireHubTests::WriteText(store.IndexPath(), KeireHubTests::ReadText(versionedPath));
+    REQUIRE(std::filesystem::remove(versionedPath));
+
+    const auto loaded = store.Load();
+    REQUIRE(loaded);
+    CHECK(loaded.Value() == snapshot);
+}
+
+TEST_CASE("Marketplace cache does not fall back when the signed versioned snapshot is invalid")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    MarketplaceCacheStore store(temporary.Path() / "MarketplacePackages");
+    REQUIRE(store.Save({.Revision = 9U, .Items = {ReadyItem()}}));
+    KeireHubTests::WriteText(store.Root() / "marketplace-cache-v2.json", "{");
+
+    const auto loaded = store.Load();
+    REQUIRE_FALSE(loaded);
 }
 
 TEST_CASE("Marketplace cache rejects duplicate identities and incomplete ready entries")

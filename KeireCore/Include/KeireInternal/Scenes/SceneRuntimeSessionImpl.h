@@ -17,6 +17,7 @@
 #include "Keire/Scenes/ScenePresentationRuntime.h"
 #include "Keire/Vfx/VfxSystem.h"
 #include "Keire/Vfx/VfxVolumeAsset.h"
+#include "KeireInternal/Scenes/FootGroundingSpace.h"
 
 #include <algorithm>
 #include <array>
@@ -632,9 +633,10 @@ namespace Keire
 
             FootGroundingRequest request;
             request.Pelvis = *pelvis;
-            request.FootHeight = settings.FootOffset;
+            request.FootHeight = 0.0F;
             request.PelvisWeight = settings.Weight;
-            request.MaximumPelvisAdjustment = settings.MaximumPelvisAdjustment;
+            request.MaximumPelvisAdjustment =
+                Detail::WorldVerticalDistanceToModel(worldToModel, settings.MaximumPelvisAdjustment);
             for (const auto& chain : chains)
             {
                 const auto footPosition = Math::TransformPoint(modelBones[*chain[2]], {});
@@ -681,14 +683,16 @@ namespace Keire
                     });
                 if (hit == hits.end())
                     continue;
-                const auto position = Math::TransformPoint(worldToModel, hit->Position);
-                const auto normal = Math::TransformDirection(worldToModel, hit->Normal);
+                const auto contact =
+                    Detail::ToModelFootGroundContact(worldToModel, hit->Position, hit->Normal, settings.FootOffset);
+                if (!contact)
+                    continue;
                 const auto knee = Math::TransformPoint(modelBones[*chain[1]], {});
                 request.Contacts.push_back({*chain[0],
                                             *chain[1],
                                             *chain[2],
-                                            position,
-                                            normal,
+                                            contact->Position,
+                                            contact->Normal,
                                             {knee.X, knee.Y, knee.Z + 1.0F},
                                             settings.Weight,
                                             settings.RotationWeight});

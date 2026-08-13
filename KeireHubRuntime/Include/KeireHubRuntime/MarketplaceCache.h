@@ -65,6 +65,8 @@ namespace KeireHub
         [[nodiscard]] std::filesystem::path IndexPath() const;
 
       private:
+        [[nodiscard]] std::filesystem::path VersionedIndexPath() const;
+
         std::filesystem::path m_Root;
     };
 } // namespace KeireHub

@@ -11,6 +11,7 @@
 #include "KeireClient/Editor/MaterialGraphDocument.h"
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
 #include "KeireClient/Editor/NamedAssetCreation.h"
+#include "KeireClient/Editor/PackageImportReview.h"
 #include "KeireClient/Editor/PrefabAuthoring.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
 #include "KeireClient/Editor/PropertyDrawerRegistry.h"
@@ -26,6 +27,8 @@
 #include "KeireClient/Editor/VfxEmitterInspector.h"
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
 #include "KeireClient/Editor/ViewportInputRouting.h"
+
+#include "Keire/ECS/Components/AnimatorComponent.h"
 
 #include <doctest/doctest.h>
 
@@ -63,9 +66,10 @@ namespace
     class TestPropertyEditor : public KeireEditor::IPropertyEditor
     {
       public:
-        bool EditBoolean(std::string_view, bool& value) override
+        bool EditBoolean(const std::string_view label, bool& value) override
         {
             EditKinds.emplace_back("boolean");
+            Labels.emplace_back(label);
             value = !value;
             return true;
         }
@@ -149,6 +153,7 @@ namespace
         std::optional<Keire::AssetTypeId> ExpectedAssetType;
         std::vector<std::optional<Keire::AssetTypeId>> ExpectedAssetTypes;
         std::vector<std::string> EditKinds;
+        std::vector<std::string> Labels;
         std::vector<Keire::ShaderTextureSemantic> TextureSemantics;
     };
 
@@ -993,6 +998,50 @@ TEST_CASE("generic property drawers cover every component property kind")
     for (auto [property, value] : properties)
         CHECK(drawers.Draw(editor, CustomComponent::StaticType(), property, value));
     CHECK(editor.ExpectedAssetType == assetType);
+}
+
+TEST_CASE("component property drawers give repeated display names stable widget identities")
+{
+    KeireEditor::PropertyDrawerRegistry drawers;
+    TestPropertyEditor editor;
+    Keire::ComponentPropertyValue left = false;
+    Keire::ComponentPropertyValue right = false;
+    const Keire::ComponentProperty leftProperty{"leftArmIkEnabled", "Enabled", "Left Arm IK",
+                                                Keire::ComponentPropertyKind::Boolean};
+    const Keire::ComponentProperty rightProperty{"rightArmIkEnabled", "Enabled", "Right Arm IK",
+                                                 Keire::ComponentPropertyKind::Boolean};
+
+    CHECK(drawers.Draw(editor, Keire::AnimatorComponent::StaticType(), leftProperty, left));
+    CHECK(drawers.Draw(editor, Keire::AnimatorComponent::StaticType(), rightProperty, right));
+    REQUIRE(editor.Labels.size() == 2);
+    CHECK(editor.Labels[0] == "Enabled##leftArmIkEnabled");
+    CHECK(editor.Labels[1] == "Enabled##rightArmIkEnabled");
+}
+
+TEST_CASE("marketplace asset imports require an explicit valid review confirmation")
+{
+    KeireEditor::PackageImportReview review;
+    Keire::ProjectAssetImportRequest request{.Archive = "verified.keireassetpackage"};
+    Keire::ProjectAssetImportPlan blockedPlan;
+    blockedPlan.Conflicts.push_back(
+        {Keire::ProjectAssetImportConflictKind::ModifiedLocalFile, "Assets/local.asset", "Choose a resolution."});
+
+    review.Prepare("Creator Pack", request, blockedPlan);
+    CHECK(review.Active());
+    CHECK(review.ConsumeOpenRequest());
+    CHECK_FALSE(review.ConsumeOpenRequest());
+    CHECK_THROWS_AS((void)review.Confirm(), std::logic_error);
+    CHECK(review.Active());
+
+    Keire::ProjectAssetImportPlan validPlan;
+    validPlan.Entries.push_back({.PackagePath = "Assets/new.asset",
+                                 .ProjectPath = "Assets/new.asset",
+                                 .Disposition = Keire::ProjectAssetImportDisposition::Install});
+    review.Prepare("Creator Pack", request, validPlan);
+    const auto confirmation = review.Confirm();
+    CHECK(confirmation.DisplayName == "Creator Pack");
+    CHECK(confirmation.Request.Archive == request.Archive);
+    CHECK_FALSE(review.Active());
 }
 
 TEST_CASE("VFX Emitter inspector edits exposed typed parameters and removes stale overrides")

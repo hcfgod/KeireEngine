@@ -1,5 +1,7 @@
 #pragma once
 
+#include "KeireClient/Editor/PackageImportReview.h"
+
 #include "Keire/Core.h"
 
 #include "KeireHubRuntime/CatalogClient.h"
@@ -38,7 +40,9 @@ namespace KeireEditor
         void RevertSelected();
         void RefreshMarketplaceCache(bool focusRequestedProduct);
         void InstallMarketplacePackage(const KeireHub::MarketplaceCacheItem& item);
-        void ImportMarketplacePackage(const KeireHub::MarketplaceCacheItem& item);
+        void PrepareMarketplaceImport(const KeireHub::MarketplaceCacheItem& item);
+        void ImportReviewedPackage(PackageImportConfirmation confirmation);
+        void DrawImportReview(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme);
         void DrawMarketplaceLibrary(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme);
         void DrawInProject(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme);
         void DrawLocalPackages(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme);
@@ -59,6 +63,7 @@ namespace KeireEditor
         std::string m_Error;
         Keire::ProjectPackageEvent m_LastEvent;
         std::optional<Keire::AssetPackageArchiveMetadata> m_LocalMetadata;
+        PackageImportReview m_ImportReview;
         bool m_AllowExecutableCode = false;
         bool m_KeepLocalConflicts = true;
         std::chrono::steady_clock::time_point m_NextMarketplaceRefresh{};
