@@ -1,0 +1,39 @@
+---
+import { formatChangelogInline, type ReleaseGroup } from "../lib/changelog";
+
+interface Props {
+    groups: ReleaseGroup[];
+    showDescriptions?: boolean;
+}
+
+const { groups, showDescriptions = true } = Astro.props;
+const availabilityLabels = {
+    released: "Public package",
+    live: "Live platform",
+    source: "Source update",
+} as const;
+---
+
+<div class="release-groups">
+    {groups.map((group, index) => (
+        <section class="release-group" id={group.id} data-reveal style={`--reveal-index: ${Math.min(index, 8)}`}>
+            <header class="release-group__heading">
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                <div>
+                    <h2>{group.label}</h2>
+                    {showDescriptions && <p>{group.description}</p>}
+                </div>
+            </header>
+            <ul class="release-change-list">
+                {group.changes.map((change) => (
+                    <li>
+                        <span class:list={["availability-label", `availability-label--${change.availability}`]}>
+                            {availabilityLabels[change.availability]}
+                        </span>
+                        <p set:html={formatChangelogInline(change.text)} />
+                    </li>
+                ))}
+            </ul>
+        </section>
+    ))}
+</div>

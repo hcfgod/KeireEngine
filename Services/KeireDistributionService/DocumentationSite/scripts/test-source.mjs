@@ -376,24 +376,48 @@ assert(!/letter-spacing:\s*-0\.0[6-9]\d*em/.test(`${platformStyles}\n${documenta
     "Shared display typography must not use visually compressed negative tracking.");
 const roadmapPage = await readFile(path.join(siteRoot, "Source", "pages", "roadmap", "index.astro"), "utf8");
 const readinessProgress = await readFile(path.join(siteRoot, "Source", "components", "ReadinessProgress.astro"), "utf8");
-const launchProgress = await readFile(path.join(siteRoot, "Source", "lib", "launchProgress.ts"), "utf8");
+const roadmapModel = await readFile(path.join(siteRoot, "Source", "lib", "roadmap.ts"), "utf8");
+const launchReadiness = await readFile(path.join(siteRoot, "Source", "lib", "launchReadiness.ts"), "utf8");
 assert(readinessProgress.includes("<progress value={safeCompleted} max={safeTotal}") &&
     readinessProgress.includes("gates passed"),
-    "Shared launch progress must expose native bounded values and useful accessible text.");
-assert(roadmapPage.includes("completedLaunchChecks") && roadmapPage.includes("totalLaunchChecks") &&
-    roadmapPage.includes("it is not a release-date estimate or a quality score"),
-    "Roadmap totals must be derived from tracked checks and explain their limits.");
-const marketplaceProgress = launchProgress.split('id: "marketplace"', 2)[1]?.split('id: "operations"', 1)[0] ?? "";
-const operationsProgress = launchProgress.split('id: "operations"', 2)[1] ?? "";
+    "Internal readiness progress must expose native bounded values and useful accessible text.");
+assert(roadmapPage.includes("roadmapHorizons") && roadmapPage.includes("Direction, not a delivery guarantee.") &&
+    !roadmapPage.includes("ReadinessProgress") && !roadmapPage.includes("completedLaunchChecks") &&
+    !roadmapPage.includes("<progress"),
+    "The public roadmap must use editorial horizons without internal readiness meters or numeric completion.");
+for (const horizon of ['id: "now"', 'id: "next"', 'id: "later"']) {
+    assert(roadmapModel.includes(horizon), `The public roadmap is missing ${horizon}.`);
+}
+const marketplaceProgress = launchReadiness.split('id: "marketplace"', 2)[1]?.split('id: "operations"', 1)[0] ?? "";
+const operationsProgress = launchReadiness.split('id: "operations"', 2)[1] ?? "";
 assert(marketplaceProgress.includes("completed: 9") && operationsProgress.includes("completed: 11") &&
     platformStyles.includes(".readiness-progress progress::-webkit-progress-value") &&
     platformStyles.includes(".readiness-progress progress::-moz-progress-bar"),
-    "Roadmap, publisher, and staff progress must share current evidence and cross-browser native-meter styling.");
+    "Staff readiness must retain current evidence and cross-browser native-meter styling.");
 assert(platformHeader.includes('href="/roadmap/"') && platformHeader.includes('active === "roadmap"'),
     "Roadmap must be discoverable from primary navigation and expose current-page state.");
+assert(platformHeader.includes('href="/changelog/"') && platformHeader.includes('active === "changelog"') &&
+    !platformHeader.includes('href="/community/"'),
+    "Changelog must be primary navigation while Community moves to the footer.");
 const platformFooter = await readFile(path.join(siteRoot, "Source", "components", "PlatformFooter.astro"), "utf8");
-assert(platformFooter.includes('href="/roadmap/"') && platformFooter.includes('href="/policies/"'),
-    "Roadmap and the policy index must remain reachable from the global footer.");
+assert(platformFooter.includes('href="/roadmap/"') && platformFooter.includes('href="/changelog/"') &&
+    platformFooter.includes('href="/community/"') && platformFooter.includes('href="/policies/"'),
+    "Roadmap, changelog, Community, and policies must remain reachable from the global footer.");
+const changelogIndex = await readFile(path.join(siteRoot, "Source", "pages", "changelog", "index.astro"), "utf8");
+const changelogDetail = await readFile(path.join(siteRoot, "Source", "pages", "changelog", "[version].astro"), "utf8");
+const changelogModel = await readFile(path.join(siteRoot, "Source", "lib", "changelog.ts"), "utf8");
+const changelogFeed = await readFile(path.join(siteRoot, "Source", "pages", "changelog", "rss.xml.ts"), "utf8");
+assert(changelogModel.includes('CHANGELOG.md?raw') && changelogModel.includes('version === "Unreleased"') &&
+    changelogModel.includes("groupChanges(changes)"),
+    "The website changelog must derive its complete release train from the canonical repository changelog.");
+assert(changelogIndex.includes("currentRelease.highlights") && changelogIndex.includes("releaseNotes.map") &&
+    changelogDetail.includes("ReleaseChangeList") && changelogDetail.includes("availability-legend") &&
+    changelogDetail.includes('id="validation-known-limitations"') &&
+    changelogDetail.includes("release.evidence.limitations"),
+    "Changelog landing and release-detail pages must expose highlights, archive navigation, and availability evidence.");
+assert(changelogFeed.includes('Content-Type": "application/rss+xml; charset=utf-8"') &&
+    changelogFeed.includes("releaseNotes.map"),
+    "The changelog RSS endpoint must publish the canonical release archive.");
 
 const publisherPage = await readFile(path.join(siteRoot, "Source", "pages", "publisher", "index.astro"), "utf8");
 for (const contract of [
@@ -432,9 +456,10 @@ assert(publisherUploadRoutes.includes("export const GET") &&
 assert(publisherPage.includes("data-validation-upload") && publisherPage.includes("startValidationPolling") &&
     publisherPage.includes('cache: "no-store"') && publisherPage.includes("terminalUploadStates"),
     "Publisher validation activity must refresh asynchronous results without leaving stale pending labels.");
-assert(publisherPage.includes("publisherReleaseGates") && publisherPage.includes("completedPublisherGates") &&
-    publisherPage.includes("<ReadinessProgress"),
-    "Publisher release readiness must be derived from actual configured, validated, moderated, and published states.");
+assert(!publisherPage.includes("publisherReleaseGates") && !publisherPage.includes("completedPublisherGates") &&
+    !publisherPage.includes("<ReadinessProgress") && !publisherPage.includes('href="#overview"') &&
+    publisherPage.includes('href="#new-release" aria-current="page"'),
+    "Publisher authoring must begin with actionable release work instead of a decorative readiness overview.");
 assert(publisherPage.includes("readyForStaff") && publisherPage.includes('id="ready-for-review"') &&
     publisherPage.includes("Upload and Staff submission are separate safeguards.") &&
     publisherPage.includes("Submit to Staff review"),
@@ -456,9 +481,10 @@ for (const contract of [
 ]) {
     assert(staffPage.includes(contract), `Staff operations center is missing ${contract}.`);
 }
-assert(staffPage.includes("launchProgressTracks") && staffPage.includes('id="readiness"') &&
-    staffPage.includes('href="/roadmap/"'),
-    "Staff operations must expose the same launch evidence as the public roadmap.");
+assert(staffPage.includes("launchReadinessTracks") && staffPage.includes('id="readiness"') &&
+    staffPage.includes('href="/docs/reference/production-readiness-review/"') &&
+    !staffPage.includes('href="/roadmap/"'),
+    "Staff operations must retain detailed launch evidence independently of the public roadmap.");
 assert(staffPage.includes('activeSubmissions') && staffPage.includes('signingSubmissions') &&
     staffPage.includes('submissionHistory') && staffPage.includes('id="review-history"'),
     "Terminal package decisions must leave the active staff queue while remaining available as review history.");

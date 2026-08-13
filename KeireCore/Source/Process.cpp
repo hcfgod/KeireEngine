@@ -245,6 +245,88 @@ namespace Keire::Detail
             return {processHandle.Release(), threadHandle.Release(), readPipe.Release(),
                     static_cast<std::uint64_t>(process.dwProcessId)};
         }
+
+        [[nodiscard]] std::vector<std::byte> ReadTokenInformation(const HANDLE token,
+                                                                  const TOKEN_INFORMATION_CLASS informationClass)
+        {
+            DWORD requiredBytes = 0;
+            (void)GetTokenInformation(token, informationClass, nullptr, 0, &requiredBytes);
+            if (requiredBytes == 0 || GetLastError() != ERROR_INSUFFICIENT_BUFFER)
+                throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
+                                        "Windows token information sizing failed");
+            std::vector<std::byte> result(requiredBytes);
+            if (!GetTokenInformation(token, informationClass, result.data(), requiredBytes, &requiredBytes))
+                throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
+                                        "Windows token information query failed");
+            return result;
+        }
+
+        [[nodiscard]] DWORD ReadTokenSessionId(const HANDLE token)
+        {
+            DWORD sessionId = 0;
+            DWORD writtenBytes = 0;
+            if (!GetTokenInformation(token, TokenSessionId, &sessionId, sizeof(sessionId), &writtenBytes) ||
+                writtenBytes != sizeof(sessionId))
+                throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
+                                        "Windows token session query failed");
+            return sessionId;
+        }
+
+        [[nodiscard]] bool TokenIsElevated(const HANDLE token)
+        {
+            TOKEN_ELEVATION elevation{};
+            DWORD writtenBytes = 0;
+            if (!GetTokenInformation(token, TokenElevation, &elevation, sizeof(elevation), &writtenBytes) ||
+                writtenBytes != sizeof(elevation))
+                throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
+                                        "Windows token elevation query failed");
+            return elevation.TokenIsElevated != 0;
+        }
+
+        [[nodiscard]] UniqueHandle OpenDesktopUserToken()
+        {
+            const auto shellWindow = GetShellWindow();
+            if (!shellWindow)
+                throw std::runtime_error("The signed-in Windows desktop shell is unavailable.");
+            DWORD shellProcessId = 0;
+            (void)GetWindowThreadProcessId(shellWindow, &shellProcessId);
+            if (shellProcessId == 0)
+                throw std::runtime_error("The signed-in Windows desktop shell has no process identity.");
+
+            UniqueHandle shellProcess(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, shellProcessId));
+            if (!shellProcess.Get())
+                throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
+                                        "The Windows desktop shell could not be inspected");
+            HANDLE shellTokenValue = nullptr;
+            if (!OpenProcessToken(shellProcess.Get(), TOKEN_QUERY | TOKEN_DUPLICATE, &shellTokenValue))
+                throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
+                                        "The Windows desktop user token could not be opened");
+            UniqueHandle shellToken(shellTokenValue);
+
+            HANDLE currentTokenValue = nullptr;
+            if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &currentTokenValue))
+                throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
+                                        "The Hub user token could not be opened");
+            UniqueHandle currentToken(currentTokenValue);
+            const auto shellUser = ReadTokenInformation(shellToken.Get(), TokenUser);
+            const auto currentUser = ReadTokenInformation(currentToken.Get(), TokenUser);
+            const auto* shellIdentity = reinterpret_cast<const TOKEN_USER*>(shellUser.data());
+            const auto* currentIdentity = reinterpret_cast<const TOKEN_USER*>(currentUser.data());
+            if (!IsValidSid(shellIdentity->User.Sid) || !IsValidSid(currentIdentity->User.Sid) ||
+                !EqualSid(shellIdentity->User.Sid, currentIdentity->User.Sid))
+                throw std::runtime_error("The Windows desktop belongs to a different user.");
+            if (ReadTokenSessionId(shellToken.Get()) != ReadTokenSessionId(currentToken.Get()))
+                throw std::runtime_error("The Windows desktop belongs to a different session.");
+            if (TokenIsElevated(shellToken.Get()))
+                throw std::runtime_error("The Windows desktop shell is unexpectedly elevated.");
+
+            HANDLE primaryTokenValue = nullptr;
+            if (!DuplicateTokenEx(shellToken.Get(), TOKEN_QUERY | TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY, nullptr,
+                                  SecurityImpersonation, TokenPrimary, &primaryTokenValue))
+                throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
+                                        "The Windows desktop user token could not be duplicated");
+            return UniqueHandle(primaryTokenValue);
+        }
 #else
         struct PosixProcessArguments
         {
@@ -753,6 +835,53 @@ namespace Keire::Detail
             diagnostic = error.what();
             return false;
         }
+    }
+
+    bool LaunchDetachedProcessAtDesktopUserIntegrity(const std::filesystem::path& executable,
+                                                     const std::span<const std::string> arguments,
+                                                     const std::filesystem::path& workingDirectory,
+                                                     std::string& diagnostic, std::uint64_t* processId) noexcept
+    {
+#if defined(_WIN32)
+        if (!IsCurrentProcessElevated())
+            return LaunchDetachedProcess(executable, arguments, workingDirectory, diagnostic, processId);
+        try
+        {
+            if (processId)
+                *processId = 0;
+            if (!std::filesystem::is_regular_file(executable) || !std::filesystem::is_directory(workingDirectory))
+            {
+                diagnostic = "Executable or working directory does not exist.";
+                return false;
+            }
+            auto desktopToken = OpenDesktopUserToken();
+            auto command = BuildWindowsCommand(executable, arguments);
+            std::wstring desktop = L"winsta0\\default";
+            STARTUPINFOW startup{};
+            startup.cb = sizeof(startup);
+            startup.lpDesktop = desktop.data();
+            PROCESS_INFORMATION process{};
+            if (!CreateProcessAsUserW(desktopToken.Get(), executable.wstring().c_str(), command.data(), nullptr,
+                                      nullptr, FALSE, CREATE_NEW_PROCESS_GROUP, nullptr,
+                                      workingDirectory.wstring().c_str(), &startup, &process))
+            {
+                diagnostic = std::error_code(static_cast<int>(GetLastError()), std::system_category()).message();
+                return false;
+            }
+            if (processId)
+                *processId = static_cast<std::uint64_t>(process.dwProcessId);
+            CloseHandle(process.hThread);
+            CloseHandle(process.hProcess);
+            return true;
+        }
+        catch (const std::exception& error)
+        {
+            diagnostic = error.what();
+            return false;
+        }
+#else
+        return LaunchDetachedProcess(executable, arguments, workingDirectory, diagnostic, processId);
+#endif
     }
 
     std::uint64_t CurrentProcessId() noexcept

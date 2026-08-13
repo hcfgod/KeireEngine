@@ -98,6 +98,44 @@ TEST_CASE("captured child processes inherit only their declared standard handles
     CHECK(result.ExitCode == 0);
     CHECK(WaitForSingleObject(inheritedEvent.get(), 0) == WAIT_TIMEOUT);
 }
+
+TEST_CASE("desktop process launch does not inherit an elevated Windows token")
+{
+    if (Keire::Detail::IsCurrentProcessElevated() && !GetShellWindow())
+    {
+        MESSAGE("An elevated headless session has no signed-in desktop token to test.");
+        return;
+    }
+
+    const std::array arguments{std::string("--child-process-hang")};
+    std::string diagnostic;
+    std::uint64_t processId = 0;
+    const auto launched = Keire::Detail::LaunchDetachedProcessAtDesktopUserIntegrity(
+        KeireTests::TestExecutable, arguments, KeireTests::TestExecutable.parent_path(), diagnostic, &processId);
+    REQUIRE_MESSAGE(launched, diagnostic);
+    REQUIRE(processId != 0);
+
+    const auto closeHandle = [](void* handle)
+    {
+        if (handle)
+            CloseHandle(handle);
+    };
+    const std::unique_ptr<void, decltype(closeHandle)> process(
+        OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE, FALSE,
+                    static_cast<DWORD>(processId)),
+        closeHandle);
+    REQUIRE(process);
+    HANDLE rawToken = nullptr;
+    REQUIRE(OpenProcessToken(process.get(), TOKEN_QUERY, &rawToken));
+    const std::unique_ptr<void, decltype(closeHandle)> token(rawToken, closeHandle);
+    TOKEN_ELEVATION elevation{};
+    DWORD bytesWritten = 0;
+    REQUIRE(GetTokenInformation(token.get(), TokenElevation, &elevation, sizeof(elevation), &bytesWritten));
+    CHECK(bytesWritten == static_cast<DWORD>(sizeof(elevation)));
+    CHECK(elevation.TokenIsElevated == 0);
+    REQUIRE(TerminateProcess(process.get(), 91));
+    REQUIRE(WaitForSingleObject(process.get(), 5000) == WAIT_OBJECT_0);
+}
 #endif
 
 TEST_CASE("companion executable resolution supports build, package, and Unicode layouts")

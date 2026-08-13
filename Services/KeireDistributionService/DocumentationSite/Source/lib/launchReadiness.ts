@@ -1,4 +1,4 @@
-export interface LaunchProgressTrack {
+export interface LaunchReadinessTrack {
     id: string;
     status: string;
     title: string;
@@ -8,7 +8,7 @@ export interface LaunchProgressTrack {
     remaining: string;
 }
 
-export const launchProgressTracks: readonly LaunchProgressTrack[] = [
+export const launchReadinessTracks: readonly LaunchReadinessTrack[] = [
     {
         id: "web",
         status: "Substantial",
@@ -56,6 +56,5 @@ export const launchProgressTracks: readonly LaunchProgressTrack[] = [
     },
 ] as const;
 
-export const completedLaunchChecks = launchProgressTracks.reduce((sum, track) => sum + track.completed, 0);
-export const totalLaunchChecks = launchProgressTracks.reduce((sum, track) => sum + track.total, 0);
-export const overallLaunchProgress = Math.round((completedLaunchChecks / totalLaunchChecks) * 100);
+export const completedReadinessChecks = launchReadinessTracks.reduce((sum, track) => sum + track.completed, 0);
+export const totalReadinessChecks = launchReadinessTracks.reduce((sum, track) => sum + track.total, 0);

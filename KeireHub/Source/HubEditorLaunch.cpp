@@ -81,15 +81,6 @@ namespace KeireHub
                                                           const bool requirePreferred,
                                                           const std::uint64_t nowUnixSeconds)
     {
-        if (!EditorLaunchSupportsExternalFileDrop(Keire::Detail::IsCurrentProcessElevated()))
-        {
-            return HubResult<HubProjectLaunchResult>::Failure(
-                {.Code = HubErrorCode::ProcessLaunchFailed,
-                 .Message = "Kéire Hub is running as administrator. Close it and reopen it normally before "
-                            "launching the Editor so Windows file drag-and-drop remains available.",
-                 .Retryable = true,
-                 .TechnicalDetails = "Windows blocks Explorer drag-and-drop across integrity levels."});
-        }
         if (!inspection.HasIdentity() || inspection.Root.empty() ||
             (inspection.Status != Keire::ProjectStatus::Ready &&
              inspection.Status != Keire::ProjectStatus::UpgradeAvailable &&
@@ -127,8 +118,8 @@ namespace KeireHub
                                    std::string(reinterpret_cast<const char*>(pathBytes.data()), pathBytes.size())};
         std::string diagnostic;
         std::uint64_t processId = 0;
-        if (!Keire::Detail::LaunchDetachedProcess(editor.Value().Executable, arguments, inspection.Root, diagnostic,
-                                                  &processId))
+        if (!Keire::Detail::LaunchDetachedProcessAtDesktopUserIntegrity(editor.Value().Executable, arguments,
+                                                                        inspection.Root, diagnostic, &processId))
         {
             return HubResult<HubProjectLaunchResult>::Failure({.Code = HubErrorCode::ProcessLaunchFailed,
                                                                .Message = "The selected editor could not be started.",

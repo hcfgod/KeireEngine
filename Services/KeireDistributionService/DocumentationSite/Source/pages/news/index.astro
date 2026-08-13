@@ -1,12 +1,4 @@
 ---
-import PlatformLayout from "../../layouts/PlatformLayout.astro";
-export const prerender = true;
+export const prerender = false;
+return Astro.redirect("/changelog/", 308);
 ---
-<PlatformLayout title="News and release notes" description="Kéire Engine release notes, engineering updates, compatibility notices, and security advisories.">
-    <section class="platform-section"><div class="platform-shell"><div class="section-heading"><div><p class="eyebrow">Release evidence</p><h1>What changed, what passed, and what remains.</h1></div><p>Release notes stay version-controlled and distinguish completed validation from planned work.</p></div><div class="workflow-line">
-        <article><small>0.3.1 / Current</small><h3>Asset ecosystem foundation</h3><p>Separate asset-package contracts, project lockfiles, marketplace data boundaries, and a unified web platform.</p><a href="https://github.com/hcfgod/KeireEngine/blob/master/CHANGELOG.md">Read changelog ↗</a></article>
-        <article><small>0.3.0</small><h3>Visual authoring milestone</h3><p>Shader and Material Graph separation, production Sandbox examples, editor versioning, and Hub distribution work.</p></article>
-        <article><small>Security</small><h3>Advisories</h3><p>Security-revoked package versions remain blocked even for entitled owners, with actionable replacement guidance.</p><a href="/security/">Reporting process</a></article>
-        <article><small>Archive</small><h3>Older releases</h3><p>Historical metadata remains auditable while primary downloads focus on the current supported release.</p><a href="/downloads/archive/">Release archive</a></article>
-    </div></div></section>
-</PlatformLayout>

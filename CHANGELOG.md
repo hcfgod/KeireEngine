@@ -7,6 +7,15 @@ versions.
 
 ### Changed
 
+- Added a first-party website changelog generated from the canonical repository release record, with curated 0.3.1
+  highlights, complete subsystem-grouped notes, explicit public-package/live-platform/source availability, historical
+  release pages, structured metadata, and an RSS feed. Replaced the public numeric readiness dashboard with an
+  editorial Now/Next/Later roadmap, moved exact acceptance meters to Staff operations, and removed the Publisher
+  Portal's decorative gate summary while preserving actionable upload, validation, moderation, signing, and
+  publication states.
+- Fixed project launches from an elevated Windows Hub. The Hub now verifies and uses the signed-in desktop user's
+  normal-integrity token for the Editor, preserves process tracking and Explorer drag-and-drop, fails closed on user or
+  session mismatches, and displays the actionable launch error directly instead of replacing it with a generic banner.
 - Completed the website-to-Editor Marketplace workflow. Product pages now offer honest **Open in Editor** or **Create
   in Hub** actions only for published releases; Hub strictly parses and forwards marketplace activations, keeps
   Supabase sessions and signed URLs private, synchronizes entitlements, downloads and Ed25519-verifies the selected

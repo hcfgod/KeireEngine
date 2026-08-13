@@ -74,9 +74,3 @@ TEST_CASE("Editor selection accepts a project schema newer than this Hub when th
     REQUIRE(selected);
     CHECK(selected.Value().Id == "future-capable");
 }
-
-TEST_CASE("Editor launch rejects elevated desktop sessions that cannot receive Explorer drops")
-{
-    CHECK(EditorLaunchSupportsExternalFileDrop(false));
-    CHECK_FALSE(EditorLaunchSupportsExternalFileDrop(true));
-}

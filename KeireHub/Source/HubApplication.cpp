@@ -1301,7 +1301,8 @@ namespace
                 {
                     if (!launched.Error().TechnicalDetails.empty())
                         KEIRE_CLIENT_ERROR("[Project Hub] Editor launch failed: {}", launched.Error().TechnicalDetails);
-                    throw std::runtime_error(launched.Error().Message);
+                    SetError(launched.Error().Message);
+                    return;
                 }
                 const auto& result = launched.Value();
                 if (result.TrackingFailure)

@@ -527,99 +527,276 @@ button:disabled,
 }
 
 .roadmap-hero {
-    padding-bottom: clamp(3rem, 6vw, 5rem);
+    display: grid;
+    min-height: min(47rem, calc(100svh - 4.8rem));
+    align-items: center;
+    background:
+        radial-gradient(circle at 82% 18%, rgba(42, 139, 231, 0.18), transparent 28rem),
+        linear-gradient(180deg, rgba(4, 13, 24, 0.08), rgba(4, 13, 24, 0.62));
 }
 
-.roadmap-summary {
+.roadmap-hero__grid {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1.45fr) minmax(20rem, 0.65fr);
     align-items: end;
-    gap: 2rem;
-    padding: clamp(1.5rem, 4vw, 2.5rem);
-    border: 1px solid var(--line-bright);
-    border-radius: var(--radius-l);
-    background:
-        radial-gradient(circle at 12% 0%, rgba(71, 179, 245, 0.2), transparent 24rem),
-        rgba(8, 23, 39, 0.78);
+    gap: clamp(3rem, 8vw, 8rem);
+}
+
+.roadmap-hero__copy h1,
+.changelog-hero h1,
+.release-detail-hero h1 {
+    max-width: 13ch;
+    margin: 0;
+    color: var(--paper);
+    font-size: clamp(3.25rem, 7vw, 6.8rem);
+    font-weight: 780;
+    letter-spacing: -0.045em;
+    line-height: 0.98;
+}
+
+.roadmap-hero__copy .lead,
+.changelog-hero .lead,
+.release-detail-hero .lead {
+    margin-block: 2rem;
+}
+
+.roadmap-current {
+    padding: clamp(1.5rem, 4vw, 2.25rem);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-m);
+    background: rgba(8, 23, 39, 0.72);
     box-shadow: inset 0 1px rgba(255, 255, 255, 0.035);
 }
 
-.roadmap-summary__value {
+.roadmap-current > span,
+.release-kicker {
+    color: var(--cyan);
+    font-size: 0.68rem;
+    font-weight: 780;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+}
+
+.roadmap-current > strong {
     display: block;
+    margin: 1.2rem 0 2.6rem;
     color: var(--paper);
-    font-size: clamp(3.8rem, 9vw, 7.2rem);
-    font-weight: 790;
-    letter-spacing: -0.055em;
-    line-height: 0.9;
+    font-size: clamp(1.4rem, 3vw, 2rem);
+    letter-spacing: -0.028em;
+    line-height: 1.15;
 }
 
-.roadmap-summary > div:first-child > strong {
-    display: block;
-    max-width: 26rem;
-    margin-top: 1rem;
-    color: var(--ink-soft);
-    font-size: clamp(1rem, 2vw, 1.25rem);
+.roadmap-current dl,
+.current-release-card dl,
+.release-facts {
+    margin: 0;
 }
 
-.roadmap-summary__facts {
+.roadmap-current dl div,
+.current-release-card dl div,
+.release-facts div {
     display: grid;
-    grid-template-columns: repeat(3, auto);
-    gap: 0;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-s);
-    overflow: hidden;
+    padding-block: 0.75rem;
+    border-top: 1px solid var(--line);
+    grid-template-columns: 1fr auto;
+    gap: 1.25rem;
 }
 
-.roadmap-summary__facts span {
-    display: grid;
-    min-height: 4.5rem;
-    padding: 0.8rem 1rem;
-    align-content: center;
+.roadmap-current dt,
+.current-release-card dt,
+.release-facts dt {
     color: var(--ink-muted);
     font-size: 0.72rem;
 }
 
-.roadmap-summary__facts span + span {
+.roadmap-current dd,
+.current-release-card dd,
+.release-facts dd {
+    margin: 0;
+    color: var(--paper);
+    font-size: 0.78rem;
+    font-weight: 680;
+    text-align: right;
+}
+
+.roadmap-index > div {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+}
+
+.roadmap-index a {
+    display: grid;
+    min-height: 7.5rem;
+    padding: 1.35rem;
+    align-content: center;
+    grid-template-columns: auto 1fr;
+    column-gap: 1rem;
+    text-decoration: none;
+}
+
+.roadmap-index a + a {
     border-left: 1px solid var(--line);
 }
 
-.roadmap-summary__facts strong {
-    color: var(--paper);
-    font-size: 1rem;
+.roadmap-index span {
+    grid-row: span 2;
+    color: var(--cyan);
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
 }
 
-.roadmap-grid {
+.roadmap-index strong,
+.roadmap-index small {
+    display: block;
+}
+
+.roadmap-index strong {
+    color: var(--paper);
+    font-size: 1.2rem;
+}
+
+.roadmap-index small {
+    color: var(--ink-muted);
+}
+
+.roadmap-horizon {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(16rem, 0.5fr) minmax(0, 1.35fr);
+    gap: clamp(3rem, 8vw, 8rem);
+}
+
+.roadmap-horizon__intro {
+    position: sticky;
+    top: 8rem;
+    align-self: start;
+}
+
+.roadmap-horizon__number {
+    margin-bottom: clamp(4rem, 10vw, 8rem);
+    color: rgba(117, 195, 255, 0.2);
+    font-size: clamp(4rem, 9vw, 8rem);
+    font-weight: 780;
+    letter-spacing: -0.05em;
+    line-height: 0.8;
+}
+
+.roadmap-horizon__intro h2 {
+    margin: 0;
+    color: var(--paper);
+    font-size: clamp(3.2rem, 7vw, 6.5rem);
+    letter-spacing: -0.05em;
+    line-height: 0.9;
+}
+
+.roadmap-horizon__intro > p:last-child {
+    margin-top: 2rem;
+    color: var(--ink-soft);
+}
+
+.roadmap-initiatives {
+    border-top: 1px solid var(--line-bright);
+}
+
+.roadmap-initiatives article {
+    padding-block: clamp(2.5rem, 6vw, 4.5rem);
+    border-bottom: 1px solid var(--line);
+}
+
+.roadmap-initiatives article > header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     gap: 1rem;
 }
 
-.roadmap-track {
-    padding: clamp(1.35rem, 3vw, 2rem);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-m);
-    background: rgba(8, 22, 38, 0.76);
-    box-shadow: inset 0 1px rgba(255, 255, 255, 0.025);
+.roadmap-status,
+.availability-label {
+    display: inline-flex;
+    width: max-content;
+    padding: 0.34rem 0.58rem;
+    border: 1px solid var(--line-bright);
+    border-radius: 99rem;
+    color: var(--cyan);
+    background: rgba(25, 103, 174, 0.12);
+    font-size: 0.66rem;
+    font-weight: 760;
+    letter-spacing: 0.06em;
+    line-height: 1.1;
+    text-transform: uppercase;
 }
 
-.roadmap-track:last-child:nth-child(odd) {
-    grid-column: 1 / -1;
+.roadmap-status--available,
+.availability-label--released {
+    border-color: rgba(104, 214, 167, 0.4);
+    color: var(--mint);
+    background: rgba(39, 129, 94, 0.12);
 }
 
-.roadmap-track__header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 1.5rem;
+.roadmap-status--planned,
+.availability-label--source {
+    border-color: var(--line);
+    color: var(--ink-muted);
+    background: rgba(116, 137, 160, 0.08);
 }
 
-.roadmap-track__header h3 {
-    max-width: 24ch;
-    margin: 0.85rem 0 0;
+.roadmap-initiative__index {
+    color: var(--ink-muted);
+    font-size: 0.7rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.roadmap-initiatives h3 {
+    max-width: 18ch;
+    margin: 1.5rem 0 1rem;
     color: var(--paper);
-    font-size: clamp(1.35rem, 2.5vw, 1.8rem);
-    letter-spacing: -0.022em;
-    line-height: 1.12;
+    font-size: clamp(1.8rem, 4vw, 3rem);
+    letter-spacing: -0.035em;
+    line-height: 1.04;
+}
+
+.roadmap-initiatives article > p {
+    max-width: 43rem;
+    color: var(--ink-soft);
+    font-size: 1.02rem;
+}
+
+.roadmap-initiatives ul {
+    display: grid;
+    margin: 2rem 0;
+    padding: 0;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0;
+    list-style: none;
+}
+
+.roadmap-initiatives li {
+    padding: 0.8rem 1rem 0.8rem 0;
+    border-top: 1px solid var(--line);
+    color: var(--ink-soft);
+    font-size: 0.82rem;
+}
+
+.roadmap-initiatives li:nth-child(even) {
+    padding-left: 1rem;
+    border-left: 1px solid var(--line);
+}
+
+.roadmap-initiatives article > a,
+.feed-link,
+.release-archive a,
+.release-back {
+    color: var(--paper);
+    font-size: 0.82rem;
+    font-weight: 700;
+    text-decoration-color: var(--line-bright);
+}
+
+.roadmap-note .cta-band > div:first-child {
+    max-width: 44rem;
+}
+
+.roadmap-note .cta-band p:last-child {
+    color: var(--ink-soft);
 }
 
 .readiness-progress {
@@ -675,32 +852,312 @@ button:disabled,
     font-variant-numeric: tabular-nums;
 }
 
-.roadmap-track__detail {
+.changelog-hero {
+    min-height: min(47rem, calc(100svh - 4.8rem));
     display: grid;
-    gap: 1rem;
+    align-items: center;
+}
+
+.changelog-hero__grid,
+.release-detail-hero__grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(21rem, 0.65fr);
+    align-items: end;
+    gap: clamp(3rem, 8vw, 7rem);
+}
+
+.current-release-card {
+    padding: clamp(1.6rem, 4vw, 2.4rem);
+    border: 1px solid var(--line-bright);
+    border-radius: var(--radius-m);
+    background:
+        radial-gradient(circle at 90% 5%, rgba(57, 159, 239, 0.18), transparent 18rem),
+        rgba(8, 23, 39, 0.78);
+}
+
+.current-release-card > strong {
+    display: block;
+    margin-block: 1.2rem;
+    color: var(--paper);
+    font-size: clamp(4rem, 9vw, 7rem);
+    font-weight: 790;
+    letter-spacing: -0.05em;
+    line-height: 0.85;
+}
+
+.current-release-card > p {
+    margin-bottom: 2.5rem;
+    color: var(--ink-soft);
+    font-size: 0.86rem;
+}
+
+.section-heading--release h2 {
+    max-width: 12ch;
+}
+
+.release-highlights {
     margin: 0;
+    padding: 0;
+    border-top: 1px solid var(--line-bright);
+    list-style: none;
 }
 
-.roadmap-track__detail div {
+.release-highlights li {
     display: grid;
-    grid-template-columns: 7.5rem minmax(0, 1fr);
+    padding-block: clamp(1.6rem, 4vw, 2.5rem);
+    border-bottom: 1px solid var(--line);
+    grid-template-columns: 4rem minmax(0, 1fr);
     gap: 1rem;
-    padding-top: 1rem;
-    border-top: 1px solid var(--line);
 }
 
-.roadmap-track__detail dt {
+.release-highlights span {
+    color: var(--cyan);
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.release-highlights p {
+    max-width: 62rem;
+    margin: 0;
+    color: var(--ink);
+    font-size: clamp(1rem, 2vw, 1.18rem);
+}
+
+.release-highlights code,
+.release-change-list code {
+    padding: 0.12em 0.34em;
+    border: 1px solid var(--line);
+    border-radius: 0.3rem;
+    color: var(--cyan);
+    background: rgba(4, 13, 24, 0.72);
+    font-size: 0.86em;
+}
+
+.release-archive {
+    display: grid;
+    grid-template-columns: minmax(16rem, 0.55fr) minmax(0, 1.25fr);
+    gap: clamp(3rem, 8vw, 8rem);
+}
+
+.release-archive__intro {
+    align-self: start;
+}
+
+.release-archive__intro h2 {
+    margin: 0;
+    color: var(--paper);
+    font-size: clamp(2.4rem, 5vw, 4.2rem);
+    letter-spacing: -0.04em;
+    line-height: 1;
+}
+
+.release-archive__intro > p:last-of-type {
+    color: var(--ink-soft);
+}
+
+.release-archive__list {
+    border-top: 1px solid var(--line-bright);
+}
+
+.release-archive__list article {
+    display: grid;
+    padding-block: 2rem;
+    border-bottom: 1px solid var(--line);
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 2rem;
+}
+
+.release-archive__list article > div:first-child > span {
     color: var(--cyan);
     font-size: 0.68rem;
-    font-weight: 750;
-    letter-spacing: 0.09em;
+    font-weight: 760;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
 }
 
-.roadmap-track__detail dd {
+.release-archive__list h3 {
+    margin: 0.4rem 0;
+    color: var(--paper);
+    font-size: 1.65rem;
+    letter-spacing: -0.03em;
+}
+
+.release-archive__list p {
+    max-width: 42rem;
     margin: 0;
     color: var(--ink-soft);
     font-size: 0.86rem;
+}
+
+.release-archive__meta {
+    display: grid;
+    align-content: space-between;
+    justify-items: end;
+    gap: 1rem;
+    color: var(--ink-muted);
+    font-size: 0.75rem;
+}
+
+.release-detail-hero {
+    padding-bottom: clamp(4rem, 7vw, 6rem);
+}
+
+.release-detail-hero h1 {
+    max-width: none;
+}
+
+.release-back {
+    display: inline-block;
+    margin-bottom: clamp(3rem, 7vw, 6rem);
+}
+
+.release-facts {
+    border-top: 1px solid var(--line-bright);
+}
+
+.availability-legend {
+    display: grid;
+    margin-top: clamp(3rem, 7vw, 6rem);
+    border-block: 1px solid var(--line);
+    grid-template-columns: repeat(3, 1fr);
+}
+
+.availability-legend > div {
+    padding: 1.2rem 1.2rem 1.2rem 0;
+}
+
+.availability-legend > div + div {
+    padding-left: 1.2rem;
+    border-left: 1px solid var(--line);
+}
+
+.availability-legend p {
+    margin: 0.7rem 0 0;
+    color: var(--ink-muted);
+    font-size: 0.72rem;
+}
+
+.availability-label--live {
+    border-color: rgba(113, 222, 244, 0.42);
+}
+
+.release-detail-layout {
+    display: grid;
+    grid-template-columns: minmax(12rem, 0.32fr) minmax(0, 1fr);
+    align-items: start;
+    gap: clamp(3rem, 8vw, 7rem);
+}
+
+.release-toc {
+    position: sticky;
+    top: 7rem;
+    display: grid;
+    gap: 0.45rem;
+}
+
+.release-toc strong {
+    margin-bottom: 0.7rem;
+    color: var(--paper);
+}
+
+.release-toc a {
+    padding-block: 0.35rem;
+    color: var(--ink-muted);
+    font-size: 0.76rem;
+    text-decoration: none;
+}
+
+.release-toc a:hover {
+    color: var(--cyan);
+}
+
+.release-detail-content,
+.release-groups {
+    min-width: 0;
+}
+
+.release-group {
+    padding-bottom: clamp(4rem, 8vw, 7rem);
+    scroll-margin-top: 7rem;
+}
+
+.release-group__heading {
+    display: grid;
+    margin-bottom: 2rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--line-bright);
+    grid-template-columns: 3.5rem minmax(0, 1fr);
+    gap: 1rem;
+}
+
+.release-group__heading > span {
+    color: var(--cyan);
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.release-group__heading h2 {
+    max-width: 20ch;
+    margin: 0;
+    color: var(--paper);
+    font-size: clamp(2rem, 4vw, 3.35rem);
+    letter-spacing: -0.04em;
+    line-height: 1;
+}
+
+.release-group__heading p {
+    max-width: 48rem;
+    margin: 0.8rem 0 0;
+    color: var(--ink-soft);
+}
+
+.release-change-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.release-change-list li {
+    display: grid;
+    padding-block: 1.25rem;
+    border-bottom: 1px solid var(--line);
+    grid-template-columns: 8rem minmax(0, 1fr);
+    align-items: start;
+    gap: 1.5rem;
+}
+
+.release-change-list p {
+    margin: 0;
+    color: var(--ink-soft);
+    font-size: 0.9rem;
+}
+
+.release-evidence {
+    scroll-margin-top: 7rem;
+}
+
+.release-evidence__grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+}
+
+.release-evidence__grid article {
+    padding: clamp(1.4rem, 3vw, 2rem);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-m);
+    background: rgba(8, 22, 38, 0.62);
+}
+
+.release-evidence__grid ul {
+    margin: 1.4rem 0 0;
+    padding-left: 1.15rem;
+}
+
+.release-evidence__grid li {
+    padding-block: 0.55rem;
+    color: var(--ink-soft);
+    font-size: 0.82rem;
 }
 
 .market-grid {
@@ -1947,7 +2404,13 @@ button:disabled,
     .section-heading,
     .account-shell,
     .product-hero,
-    .product-details {
+    .product-details,
+    .roadmap-hero__grid,
+    .changelog-hero__grid,
+    .release-detail-hero__grid,
+    .roadmap-horizon,
+    .release-archive,
+    .release-detail-layout {
         grid-template-columns: 1fr;
         gap: 2rem;
     }
@@ -1984,13 +2447,26 @@ button:disabled,
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .roadmap-summary {
-        grid-template-columns: 1fr;
-        align-items: start;
+    .roadmap-current,
+    .current-release-card {
+        max-width: 38rem;
     }
 
-    .roadmap-summary__facts {
-        width: 100%;
+    .roadmap-horizon__intro,
+    .release-toc {
+        position: static;
+    }
+
+    .roadmap-horizon__number {
+        margin-bottom: 2rem;
+    }
+
+    .release-toc {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .release-toc strong {
+        grid-column: 1 / -1;
     }
 }
 
@@ -2055,8 +2531,7 @@ button:disabled,
     .workflow-line,
     .market-grid,
     .dashboard-grid,
-    .platform-footer__grid,
-    .roadmap-grid {
+    .platform-footer__grid {
         grid-template-columns: 1fr;
     }
 
@@ -2064,22 +2539,46 @@ button:disabled,
         position: static;
     }
 
-    .roadmap-track:last-child:nth-child(odd) {
-        grid-column: auto;
-    }
-
-    .roadmap-summary__facts {
+    .roadmap-index > div,
+    .roadmap-initiatives ul,
+    .availability-legend,
+    .release-evidence__grid,
+    .release-toc {
         grid-template-columns: 1fr;
     }
 
-    .roadmap-summary__facts span + span {
+    .roadmap-index a + a {
         border-top: 1px solid var(--line);
         border-left: 0;
     }
 
-    .roadmap-track__detail div {
+    .roadmap-initiatives li:nth-child(even) {
+        padding-left: 0;
+        border-left: 0;
+    }
+
+    .availability-legend > div + div {
+        padding-left: 0;
+        border-top: 1px solid var(--line);
+        border-left: 0;
+    }
+
+    .release-archive__list article,
+    .release-change-list li {
         grid-template-columns: 1fr;
-        gap: 0.45rem;
+        gap: 1rem;
+    }
+
+    .release-archive__meta {
+        justify-items: start;
+    }
+
+    .release-highlights li {
+        grid-template-columns: 2.5rem minmax(0, 1fr);
+    }
+
+    .release-group__heading {
+        grid-template-columns: 2.5rem minmax(0, 1fr);
     }
 
     .market-toolbar {

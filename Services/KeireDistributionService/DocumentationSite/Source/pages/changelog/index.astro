@@ -1,0 +1,88 @@
+---
+import PlatformLayout from "../../layouts/PlatformLayout.astro";
+import { currentRelease, formatChangelogInline, releaseNotes } from "../../lib/changelog";
+
+export const prerender = true;
+
+const releaseDate = currentRelease.releaseDate
+    ? new Intl.DateTimeFormat("en", { dateStyle: "long", timeZone: "UTC" }).format(new Date(`${currentRelease.releaseDate}T00:00:00Z`))
+    : "Release in progress";
+const structuredData = {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    name: "Kéire Engine",
+    applicationCategory: "DeveloperApplication",
+    operatingSystem: "Windows; Linux; macOS",
+    softwareVersion: currentRelease.version,
+    releaseNotes: new URL(`/changelog/${currentRelease.version}/`, Astro.site).toString(),
+};
+---
+
+<PlatformLayout title="Changelog" description="Kéire Engine release notes, platform updates, validation evidence, and known limitations." active="changelog" structuredData={structuredData}>
+    <section class="platform-section changelog-hero">
+        <div class="platform-shell changelog-hero__grid">
+            <div>
+                <p class="eyebrow">Release notes</p>
+                <h1>Every meaningful change. One accountable record.</h1>
+                <p class="lead">Kéire release notes separate downloadable product behavior, live platform work, and changes still moving through packaging and validation.</p>
+                <div class="actions">
+                    <a class="button" href={`/changelog/${currentRelease.version}/`}>Read the complete {currentRelease.version} notes</a>
+                    <a class="button button--secondary" href="/downloads/">Download Kéire Hub</a>
+                </div>
+            </div>
+            <aside class="current-release-card" aria-label={`Current release ${currentRelease.version}`}>
+                <span class="release-kicker">Current preview</span>
+                <strong>{currentRelease.version}</strong>
+                <p>{currentRelease.summary}</p>
+                <dl>
+                    <div><dt>Released</dt><dd><time datetime={currentRelease.releaseDate ?? undefined}>{releaseDate}</time></dd></div>
+                    <div><dt>Documented changes</dt><dd>{currentRelease.changeCount}</dd></div>
+                    <div><dt>Public package</dt><dd>Windows x86-64</dd></div>
+                </dl>
+            </aside>
+        </div>
+    </section>
+
+    <section class="platform-section platform-section--line" aria-labelledby="release-highlights">
+        <div class="platform-shell">
+            <div class="section-heading section-heading--release">
+                <div><p class="eyebrow">0.3.1 highlights</p><h2 id="release-highlights">The release train at a glance.</h2></div>
+                <p>The complete release page contains every notable entry. These are the changes with the broadest effect on day-to-day Kéire work.</p>
+            </div>
+            <ol class="release-highlights">
+                {currentRelease.highlights.map((highlight, index) => (
+                    <li>
+                        <span>{String(index + 1).padStart(2, "0")}</span>
+                        <p set:html={formatChangelogInline(highlight.text)} />
+                    </li>
+                ))}
+            </ol>
+        </div>
+    </section>
+
+    <section class="platform-section" aria-labelledby="release-archive">
+        <div class="platform-shell release-archive">
+            <div class="release-archive__intro">
+                <p class="eyebrow">Release archive</p>
+                <h2 id="release-archive">A versioned history, not a marketing rewrite.</h2>
+                <p>Older notes remain available as the product evolves. Historical availability does not imply current support.</p>
+                <a class="feed-link" href="/changelog/rss.xml">Subscribe to the release feed <span aria-hidden="true">↗</span></a>
+            </div>
+            <div class="release-archive__list">
+                {releaseNotes.map((release) => (
+                    <article>
+                        <div>
+                            <span>{release.current ? "Current preview" : "Archive"}</span>
+                            <h3>Kéire {release.version}</h3>
+                            <p>{release.summary}</p>
+                        </div>
+                        <div class="release-archive__meta">
+                            <time datetime={release.releaseDate ?? undefined}>{release.releaseDate ?? "Unscheduled"}</time>
+                            <a href={`/changelog/${release.version}/`}>View {release.changeCount} changes <span aria-hidden="true">→</span></a>
+                        </div>
+                    </article>
+                ))}
+            </div>
+        </div>
+    </section>
+</PlatformLayout>

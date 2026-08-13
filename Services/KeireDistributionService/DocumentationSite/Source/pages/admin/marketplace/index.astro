@@ -2,7 +2,7 @@
 import PlatformLayout from "../../../layouts/PlatformLayout.astro";
 import ReadinessProgress from "../../../components/ReadinessProgress.astro";
 import { mfaChallengePath } from "../../../lib/auth";
-import { completedLaunchChecks, launchProgressTracks, totalLaunchChecks } from "../../../lib/launchProgress";
+import { completedReadinessChecks, launchReadinessTracks, totalReadinessChecks } from "../../../lib/launchReadiness";
 
 export const prerender = false;
 
@@ -374,9 +374,9 @@ const actionableSubmissionCount = activeSubmissions.length + signingSubmissions.
                                 <div><p class="eyebrow">Acceptance evidence</p><h2>Launch readiness</h2></div>
                                 <span class="status-badge status-badge--ready">Audited 12 Aug 2026</span>
                             </div>
-                            <ReadinessProgress completed={completedLaunchChecks} total={totalLaunchChecks} label="Kéire 0.3.1 launch checklist" />
+                            <ReadinessProgress completed={completedReadinessChecks} total={totalReadinessChecks} label="Kéire 0.3.1 launch checklist" />
                             <div class="staff-card-grid">
-                                {launchProgressTracks.map((track) => <article class="staff-review-card staff-flag-card">
+                                {launchReadinessTracks.map((track) => <article class="staff-review-card staff-flag-card">
                                     <div class="staff-review-card__header">
                                         <div><h3>{track.title}</h3><p>{track.delivered}</p></div>
                                         <span class="status-badge">{track.status}</span>
@@ -385,7 +385,7 @@ const actionableSubmissionCount = activeSubmissions.length + signingSubmissions.
                                     <p class="fine-print"><strong>Remaining:</strong> {track.remaining}</p>
                                 </article>)}
                             </div>
-                            <div class="actions"><a class="button button--secondary" href="/roadmap/">Open public roadmap</a><a class="button button--quiet" href="/docs/reference/marketplace-launch/">Review launch runbook</a></div>
+                            <div class="actions"><a class="button button--secondary" href="/docs/reference/production-readiness-review/">Open production review</a><a class="button button--quiet" href="/docs/reference/marketplace-launch/">Review launch runbook</a></div>
                         </section>
 
                         <section id="audit" class="publisher-section">

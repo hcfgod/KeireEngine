@@ -242,8 +242,10 @@ file uses mode `0644`.
 ### Documentation site
 
 `DocumentationSite/` is the source for the complete website, including the public `/docs/` experience. Astro uses
-static-first rendering for marketing, policy, release, and documentation content and on-demand server rendering for
-account, marketplace, OAuth consent, publisher, moderation, and versioned API routes. Its source audit requires the navigation
+static-first rendering for marketing, policy, changelog, roadmap, release, and documentation content and on-demand
+server rendering for account, marketplace, OAuth consent, publisher, moderation, and versioned API routes. The
+changelog build parses the repository's canonical `CHANGELOG.md`, publishes versioned detail pages and an RSS feed,
+and distinguishes packaged, live-platform, and source-stage changes. Its source audit requires the navigation
 inventory to cover every `Docs/**/*.md` file exactly once, maps every guide to a current implementation/configuration
 authority, resolves local files and heading fragments, and checks key content-schema statements against code. The sync
 step adds website metadata without modifying the canonical files, rewrites repository-document links to stable native

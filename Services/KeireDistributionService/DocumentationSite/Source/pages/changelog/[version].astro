@@ -1,0 +1,87 @@
+---
+import PlatformLayout from "../../layouts/PlatformLayout.astro";
+import ReleaseChangeList from "../../components/ReleaseChangeList.astro";
+import { releaseNotes, type ReleaseNote } from "../../lib/changelog";
+
+export const prerender = true;
+
+export function getStaticPaths() {
+    return releaseNotes.map((release) => ({ params: { version: release.version }, props: { release } }));
+}
+
+interface Props {
+    release: ReleaseNote;
+}
+
+const { release } = Astro.props;
+const releaseDate = release.releaseDate
+    ? new Intl.DateTimeFormat("en", { dateStyle: "long", timeZone: "UTC" }).format(new Date(`${release.releaseDate}T00:00:00Z`))
+    : "Release in progress";
+const structuredData = {
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    headline: `Kéire ${release.version} release notes`,
+    datePublished: release.releaseDate,
+    description: release.summary,
+    mainEntityOfPage: new URL(Astro.url.pathname, Astro.site).toString(),
+    about: { "@type": "SoftwareApplication", name: "Kéire Engine", softwareVersion: release.version },
+};
+---
+
+<PlatformLayout title={`Kéire ${release.version} release notes`} description={release.summary} active="changelog" structuredData={structuredData}>
+    <section class="platform-section release-detail-hero">
+        <div class="platform-shell">
+            <a class="release-back" href="/changelog/"><span aria-hidden="true">←</span> All releases</a>
+            <div class="release-detail-hero__grid">
+                <div>
+                    <p class="eyebrow">{release.current ? "Current preview" : "Release archive"}</p>
+                    <h1>Kéire {release.version}</h1>
+                    <p class="lead">{release.summary}</p>
+                </div>
+                <dl class="release-facts">
+                    <div><dt>Release date</dt><dd><time datetime={release.releaseDate ?? undefined}>{releaseDate}</time></dd></div>
+                    <div><dt>Notable changes</dt><dd>{release.changeCount}</dd></div>
+                    <div><dt>Release channel</dt><dd>{release.current ? "Technology preview" : "Historical"}</dd></div>
+                </dl>
+            </div>
+            {release.current && (
+                <div class="availability-legend" aria-label="Change availability labels">
+                    <div><span class="availability-label availability-label--released">Public package</span><p>Included in the published 0.3.1 release record.</p></div>
+                    <div><span class="availability-label availability-label--live">Live platform</span><p>Deployed through the website or Marketplace service.</p></div>
+                    <div><span class="availability-label availability-label--source">Source update</span><p>Implemented for the next packaged 0.3.1 refresh.</p></div>
+                </div>
+            )}
+        </div>
+    </section>
+
+    <section class="platform-section platform-section--line">
+        <div class="platform-shell release-detail-layout">
+            <nav class="release-toc" aria-label={`${release.version} release sections`}>
+                <strong>In this release</strong>
+                {release.groups.map((group) => <a href={`#${group.id}`}>{group.label}</a>)}
+                <a href="#validation-known-limitations">Validation and limitations</a>
+                <a href="/downloads/">Downloads</a>
+                <a href="/docs/reference/production-readiness-review/">Production review</a>
+            </nav>
+            <div class="release-detail-content">
+                <ReleaseChangeList groups={release.groups} />
+                <section id="validation-known-limitations" class="release-evidence">
+                    <header class="release-group__heading">
+                        <span>{String(release.groups.length + 1).padStart(2, "0")}</span>
+                        <div><h2>Validation and known limitations</h2><p>Evidence is stated separately from implementation so a source change is never mistaken for a supported release claim.</p></div>
+                    </header>
+                    <div class="release-evidence__grid">
+                        <article>
+                            <span class="availability-label availability-label--released">Validation evidence</span>
+                            <ul>{release.evidence.validation.map((entry) => <li>{entry}</li>)}</ul>
+                        </article>
+                        <article>
+                            <span class="availability-label availability-label--source">Known limitations</span>
+                            <ul>{release.evidence.limitations.map((entry) => <li>{entry}</li>)}</ul>
+                        </article>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </section>
+</PlatformLayout>

@@ -848,8 +848,10 @@ position, and filesystem paths. Editor hit-test adapters resolve Project folders
 then moves to a worker, stages confined source/metadata pairs, validates with UI-independent importer option values,
 and publishes or rolls back the batch without exposing SDL, ImGui, or JSON through public headers.
 On Windows, the Hub prevents an elevated parent token from being inherited by the Editor because the operating system
-does not permit Explorer to send drag-and-drop data across that integrity boundary. Direct elevated launches remain
-diagnosable but never attempt a partial import.
+does not permit Explorer to send drag-and-drop data across that integrity boundary. An elevated Hub verifies that the
+interactive shell belongs to the same user and session, duplicates only that non-elevated primary token, and launches
+the Editor with a trackable process identity. Missing, mismatched, or unexpectedly elevated shell tokens fail closed.
+Direct elevated Editor launches remain diagnosable but never attempt a partial import.
 
 `RenderSystem` holds an owned `AssetSystem` reference and resolves renderable IDs only on the render owner thread.
 Revisioned mesh, material, shader, texture, sampler, and attachment-format pipeline caches publish complete GPU

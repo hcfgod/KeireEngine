@@ -1,6 +1,5 @@
 ---
 import PlatformLayout from "../../layouts/PlatformLayout.astro";
-import ReadinessProgress from "../../components/ReadinessProgress.astro";
 import { mfaChallengePath } from "../../lib/auth";
 
 export const prerender = false;
@@ -91,13 +90,6 @@ const requestedProductId = Astro.url.searchParams.get("product");
 const requestedProduct = requestedProductId ? productById.get(requestedProductId) : undefined;
 const isNeonForgeUploadSample = requestedProduct?.slug === "neon-forge-creator-pack";
 const activeValidationStates = new Set(["created", "uploading", "uploaded", "leased"]);
-const publisherReleaseGates = [
-    { label: "Release configured", passed: versions.length > 0 },
-    { label: "Exact bytes validated", passed: validationReports.some((report: any) => report.passed) },
-    { label: "Staff moderation passed", passed: versions.some((version: any) => ["approved_pending_signature", "published"].includes(version.state)) },
-    { label: "Offline signed and published", passed: versions.some((version: any) => version.state === "published") },
-];
-const completedPublisherGates = publisherReleaseGates.filter((gate) => gate.passed).length;
 ---
 
 <PlatformLayout title="Publisher portal" description="Create private package releases, upload exact bytes to quarantine, review validation, and submit immutable Kéire Marketplace releases." active="marketplace" robots="noindex">
@@ -125,8 +117,7 @@ const completedPublisherGates = publisherReleaseGates.filter((gate) => gate.pass
             ) : (
                 <div class="dashboard-grid publisher-dashboard">
                     <nav class="dashboard-nav" aria-label="Publisher sections">
-                        <a href="#overview" aria-current="page">Overview</a>
-                        <a href="#new-release">New release</a>
+                        <a href="#new-release" aria-current="page">New release</a>
                         {readyForStaff.length > 0 && <a href="#ready-for-review">Ready for review ({readyForStaff.length})</a>}
                         <a href="#activity">Validation activity</a>
                         <a href="#products">Products</a>
@@ -135,23 +126,6 @@ const completedPublisherGates = publisherReleaseGates.filter((gate) => gate.pass
                     </nav>
 
                     <div class="publisher-workspace">
-                        <section id="overview" class="publisher-section">
-                            <div class="publisher-section__heading">
-                                <div><p class="eyebrow">Release pipeline</p><h2>Private until every gate passes.</h2></div>
-                                <span class="status-badge status-badge--ready">MFA verified</span>
-                            </div>
-                            <div class="workflow-line">
-                                {publisherReleaseGates.map((gate, index) => (
-                                    <article class:list={[gate.passed && "workflow-line__complete"]}>
-                                        <small>{String(index + 1).padStart(2, "0")}</small>
-                                        <h3>{gate.label}</h3>
-                                        <p>{gate.passed ? "Evidence recorded for this publisher account." : "This release gate still requires evidence."}</p>
-                                    </article>
-                                ))}
-                            </div>
-                            <ReadinessProgress completed={completedPublisherGates} total={publisherReleaseGates.length} label="Latest publisher release path" />
-                        </section>
-
                         <section id="new-release" class="publisher-section">
                             <div class="publisher-section__heading">
                                 <div><p class="eyebrow">Private quarantine</p><h2>Upload a package for validation</h2></div>

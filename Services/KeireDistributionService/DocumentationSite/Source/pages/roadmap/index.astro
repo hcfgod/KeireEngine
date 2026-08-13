@@ -1,62 +1,89 @@
 ---
 import PlatformLayout from "../../layouts/PlatformLayout.astro";
-import ReadinessProgress from "../../components/ReadinessProgress.astro";
-import { completedLaunchChecks, launchProgressTracks, overallLaunchProgress, totalLaunchChecks } from "../../lib/launchProgress";
+import { roadmapHorizons } from "../../lib/roadmap";
 
 export const prerender = true;
 
+const structuredData = {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    name: "Kéire Engine roadmap",
+    description: "The current direction for Kéire Engine from the 0.3.1 technology preview toward a production-proven 1.0 release.",
+    dateModified: "2026-08-12",
+};
 ---
-<PlatformLayout title="Roadmap" description="Review Kéire Engine 0.3.1 implementation progress, validated foundations, active acceptance work, and public-launch gates." active="roadmap">
+
+<PlatformLayout title="Roadmap" description="Follow Kéire Engine's Now, Next, and Later product direction from the 0.3.1 technology preview toward a production-proven 1.0 release." active="roadmap" structuredData={structuredData}>
     <section class="platform-section roadmap-hero">
-        <div class="platform-shell">
-            <div class="section-heading">
-                <div><p class="eyebrow">0.3.1 evidence snapshot</p><h1>Substantial progress. Explicit gates.</h1></div>
-                <p>Progress is measured against a maintained acceptance checklist. It changes only when implementation or staging evidence exists; it is not a release-date estimate or a quality score.</p>
-            </div>
-            <div class="roadmap-summary" aria-label={`Overall roadmap progress: ${completedLaunchChecks} of ${totalLaunchChecks} tracked checks complete`}>
-                <div>
-                    <span class="roadmap-summary__value">{overallLaunchProgress}%</span>
-                    <strong>of the current 0.3.1 checklist is evidenced</strong>
-                </div>
-                <div class="roadmap-summary__facts">
-                    <span><strong>{completedLaunchChecks}</strong> checks closed</span>
-                    <span><strong>{totalLaunchChecks - completedLaunchChecks}</strong> checks remain</span>
-                    <span>Audited <time datetime="2026-08-12">12 Aug 2026</time></span>
+        <div class="platform-shell roadmap-hero__grid">
+            <div class="roadmap-hero__copy">
+                <p class="eyebrow">Product direction</p>
+                <h1>The path from 0.3.1 to a production-proven Kéire.</h1>
+                <p class="lead">Kéire is building outward from a reliable engine, Editor, and Hub foundation. This roadmap describes the outcomes we are pursuing—not fictional precision or a percentage masquerading as readiness.</p>
+                <div class="actions">
+                    <a class="button" href="/changelog/0.3.1/">See what shipped</a>
+                    <a class="button button--secondary" href="/docs/reference/production-readiness-review/">Read the production review</a>
                 </div>
             </div>
+            <aside class="roadmap-current" aria-label="Current Kéire release direction">
+                <span>Current focus</span>
+                <strong>Stabilize the complete 0.3.1 workflow.</strong>
+                <dl>
+                    <div><dt>Release</dt><dd>0.3.1 preview</dd></div>
+                    <div><dt>Public platform</dt><dd>Windows x86-64</dd></div>
+                    <div><dt>Priority</dt><dd>Reliability and evidence</dd></div>
+                </dl>
+            </aside>
         </div>
     </section>
 
-    <section class="platform-section platform-section--line" aria-labelledby="roadmap-workstreams">
+    <nav class="roadmap-index platform-section--line" aria-label="Roadmap horizons">
         <div class="platform-shell">
-            <div class="section-heading">
-                <div><p class="eyebrow">Tracked workstreams</p><h2 id="roadmap-workstreams">Progress you can inspect.</h2></div>
-                <p>Each bar is completed checks divided by the defined checks for that workstream. The delivered and remaining summaries explain what moved the number.</p>
-            </div>
-            <div class="roadmap-grid">
-                {launchProgressTracks.map((track, index) => {
-                    const titleId = `roadmap-track-${index + 1}`;
-                    return (
-                        <article class="roadmap-track">
-                            <header class="roadmap-track__header">
-                                <div><span class="status-badge">{track.status}</span><h3 id={titleId}>{track.title}</h3></div>
-                            </header>
-                            <ReadinessProgress completed={track.completed} total={track.total} label={track.title} compact />
-                            <dl class="roadmap-track__detail">
-                                <div><dt>Delivered</dt><dd>{track.delivered}</dd></div>
-                                <div><dt>Remaining gate</dt><dd>{track.remaining}</dd></div>
-                            </dl>
-                        </article>
-                    );
-                })}
-            </div>
+            {roadmapHorizons.map((horizon, index) => (
+                <a href={`#${horizon.id}`}>
+                    <span>{String(index + 1).padStart(2, "0")}</span>
+                    <strong>{horizon.label}</strong>
+                    <small>{horizon.timeframe}</small>
+                </a>
+            ))}
         </div>
-    </section>
+    </nav>
 
-    <section class="platform-section">
+    <div class="roadmap-horizons">
+        {roadmapHorizons.map((horizon, horizonIndex) => (
+            <section id={horizon.id} class:list={["platform-section", horizonIndex % 2 === 1 && "platform-section--line"]}>
+                <div class="platform-shell roadmap-horizon">
+                    <header class="roadmap-horizon__intro">
+                        <div class="roadmap-horizon__number">{String(horizonIndex + 1).padStart(2, "0")}</div>
+                        <p class="eyebrow">{horizon.timeframe}</p>
+                        <h2>{horizon.label}</h2>
+                        <p>{horizon.statement}</p>
+                    </header>
+                    <div class="roadmap-initiatives">
+                        {horizon.initiatives.map((initiative, initiativeIndex) => (
+                            <article data-reveal style={`--reveal-index: ${initiativeIndex}`}>
+                                <header>
+                                    <span class:list={["roadmap-status", `roadmap-status--${initiative.status.toLowerCase().replaceAll(" ", "-")}`]}>{initiative.status}</span>
+                                    <span class="roadmap-initiative__index">{horizon.label.slice(0, 1)}{initiativeIndex + 1}</span>
+                                </header>
+                                <h3>{initiative.title}</h3>
+                                <p>{initiative.outcome}</p>
+                                <ul>
+                                    {initiative.capabilities.map((capability) => <li>{capability}</li>)}
+                                </ul>
+                                {initiative.evidenceUrl && <a href={initiative.evidenceUrl}>Inspect current evidence <span aria-hidden="true">→</span></a>}
+                            </article>
+                        ))}
+                    </div>
+                </div>
+            </section>
+        ))}
+    </div>
+
+    <section class="platform-section roadmap-note">
         <div class="platform-shell cta-band">
-            <div><p class="eyebrow">Evidence authority</p><h2>Read the checks behind the bars.</h2></div>
-            <div class="actions"><a class="button" href="/docs/reference/marketplace-launch/">Launch runbook</a><a class="button button--secondary" href="/docs/reference/production-readiness-review/">Production review</a></div>
+            <div><p class="eyebrow">Roadmap policy</p><h2>Direction, not a delivery guarantee.</h2><p>Priorities can change as validation uncovers new risks. Work is considered shipped only when it appears in the changelog with the appropriate availability evidence.</p></div>
+            <div class="actions"><a class="button" href="/changelog/">Open changelog</a><a class="button button--secondary" href="/docs/reference/marketplace-launch/">Marketplace gates</a></div>
         </div>
     </section>
 </PlatformLayout>
