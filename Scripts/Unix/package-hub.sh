@@ -64,7 +64,8 @@ case "$stage" in "$distribution_root"/*) ;; *) printf 'Invalid Hub package stage
 case "$validation_root" in "$ROOT/Artifacts"/*) ;; *) printf 'Invalid Hub validation path: %s\n' "$validation_root" >&2; exit 1;; esac
 rm -rf "$stage" "$validation_root"
 rm -f "$archive" "$archive.sha256"
-mkdir -p "$stage/bin" "$stage/Config/Branding" "$stage/content" "$stage/third-party/licenses" \
+mkdir -p "$stage/bin" "$stage/Config/Branding" "$stage/Config/Marketplace" "$stage/content" \
+  "$stage/third-party/licenses" \
   "$ROOT/Artifacts"
 cp -R "$source_root/." "$stage/bin/"
 hub_worker_source="$ROOT/Build/Bin/Dist-$system-$output_arch/$hub_worker/$hub_worker"
@@ -77,6 +78,7 @@ cp -R "$ROOT/KeireHubContent/." "$stage/content/"
 copy_tracked_tree "$ROOT" Docs "$stage/Docs"
 copy_tracked_tree "$ROOT" Samples/KeireSandbox "$stage/Samples/KeireSandbox"
 cp "$ROOT/Config/Branding/Keire.png" "$stage/Config/Branding/"
+cp "$ROOT/Config/Marketplace/trusted-marketplace-key.json" "$stage/Config/Marketplace/"
 cp "$ROOT/Config/SourceModules.premake.lua" "$stage/Config/"
 command -v python3 >/dev/null 2>&1 || { printf 'Python 3 is required to generate package manifests.\n' >&2; exit 1; }
 python3 "$ROOT/Scripts/Packaging/validate-supabase-config.py" --config "$ROOT/Config/Supabase.json"

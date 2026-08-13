@@ -146,6 +146,21 @@ namespace KeireHub
                              noticeError);
             break;
         }
+        case HubActivationAction::MarketplaceProduct:
+        {
+            page = HubPage::Projects;
+            const auto opened = callbacks.OpenMarketplaceProduct(*request.ProductId);
+            if (!opened)
+            {
+                NotifyActivation(controller, NotificationSeverity::Error, "Marketplace asset unavailable",
+                                 opened.Error().Message, notice, noticeError, "projects");
+                break;
+            }
+            NotifyActivation(controller, NotificationSeverity::Info, "Marketplace asset requested",
+                             "Kéire Hub is synchronizing My Assets and preparing a verified package for the Editor.",
+                             notice, noticeError, "projects");
+            break;
+        }
         default:
             NotifyActivation(controller, NotificationSeverity::Error, "Activation request rejected",
                              "The Hub ignored an unsupported activation request.", notice, noticeError);

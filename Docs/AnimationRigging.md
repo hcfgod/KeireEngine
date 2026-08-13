@@ -127,14 +127,48 @@ IK goals persist by name until replaced or cleared. World-space goals are conver
 boundary. Invalid entities, missing Animator components, stale Play generations, missing bones, and invalid solver
 limits are rejected without exposing native pointers.
 
+### Inspector-authored arm IK
+
+For a character that needs to reach a weapon, steering wheel, ledge, control panel, or interaction point, use the
+Animator's **Left Arm IK** and **Right Arm IK** groups:
+
+1. Create or select a scene entity whose Transform represents the desired hand pose.
+2. Enable the corresponding arm and assign that entity as **Target**.
+3. Keep **Automatic Bone Mapping** enabled for a Humanoid or Biped rig. Kéire resolves the upper arm, lower arm, and
+   hand from the imported semantic rig; the text fields are explicit fallbacks for custom naming.
+4. Leave **Pole Override** empty to preserve the animated elbow bend automatically. Assign a pole entity when an
+   authored elbow direction is required.
+5. Use **Target Local Offset** for grip points without creating another scene object. Position and hand-rotation
+   weights blend independently, so a hand can reach a target without inheriting all of its rotation.
+
+The target and optional pole are ordinary scene references and are remapped with scene/prefab identity. The runtime
+converts their world transforms at the animation boundary, clamps unreachable goals to the physical chain length, and
+applies the result after managed named IK goals. A missing target, stale scene reference, incomplete semantic chain, or
+non-decomposable transform produces an Animator diagnostic and leaves the sampled pose safe. This workflow complements
+the generic managed two-bone/FABRIK API; it does not replace or serialize transient gameplay goals.
+
 ## Ground Adaptation And Ragdolls
 
-Enable **Ground Adaptation** on an Animator component and assign pelvis, upper-leg, lower-leg, and foot bone names for
-both legs. After graph sampling and explicit IK goals, the scene runtime raycasts below each foot, ignores the
-character's own physics body, lowers or raises the pelvis within the configured limit, solves both two-bone chains, and
-aligns the feet to the hit normals. Collision mask, ray height/range, foot offset, positional weight, and rotation
-weight are serialized settings. If either chain or contact is invalid, the operation rejects transactionally and the
-sampled pose remains unchanged.
+Enable **Ground Adaptation** on an Animator component. Automatic bone mapping resolves the pelvis and both leg chains
+from the Humanoid/Biped semantic rig; the visible bone names are deterministic fallbacks for custom imports. After graph
+sampling, managed IK, and authored arm IK, the scene runtime probes below each animated foot, ignores the character's
+own physics body, rejects surfaces over **Maximum Ground Slope**, shifts the pelvis once for the lowest valid contact,
+solves both leg chains, and aligns each planted foot to its hit normal.
+
+**Automatic Ray Distance** expands each downward query from the configured minimum to the evaluated leg length. This
+prevents a raised animation pose from silently losing one contact and leaving a foot hovering, while the collision mask
+and maximum slope keep walls and unrelated trigger geometry out of the solution. Disable it when a game deliberately
+needs a strict ledge/drop cutoff. Ray height/range, sole offset, pelvis limit, position/rotation weights, and collision
+mask are all serialized per Animator.
+
+New Animators enable semantic mapping and automatic ray distance by default. Schema-one and schema-two Animators retain
+their exact authored bone-name mapping during migration, while receiving the corrected solver and automatic ray range;
+authors can opt into semantic mapping after verifying a legacy custom rig.
+
+Two-bone and FABRIK rotations are solved in model space and converted back through the actual parent transform, so
+rotated parents and imported bind orientations do not corrupt local bone rotations. Targets beyond the physical limb
+length are clamped without scaling bones. Grounding reports feet that remain outside tolerance after the configured
+pelvis limit; malformed contacts still reject transactionally and preserve the sampled pose.
 
 `SolveFootGrounding` is also available to custom character runtimes that already own their contact queries.
 `RagdollPoseTransition` provides an interruptible animated-to-physics pose blend with finite duration validation,

@@ -42,16 +42,16 @@ case "$GENERATOR" in
     gmake) printf '==> Building %s %s for %s with GNU Make\n' "$TARGET" "$CONFIGURATION" "$ARCHITECTURE"; gmake -C "$ROOT" "config=$(printf '%s' "$CONFIGURATION" | tr '[:upper:]' '[:lower:]')" "$TARGET" ;;
 esac
 bash "$ROOT/Scripts/Unix/stage-managed-host.sh" "$ROOT" "$CONFIGURATION" macosx "$ARCHITECTURE" "$TARGET"
-if [[ "$TARGET" == "$HUB_TARGET" ]]; then
+if [[ "$TARGET" == "$HUB_TARGET" || "$TARGET" == "$CLIENT_TARGET" ]]; then
     output_architecture="$(architecture_output_name "$ARCHITECTURE")"
     dependency_configuration=Debug
     [[ "$CONFIGURATION" == Release || "$CONFIGURATION" == Dist ]] && dependency_configuration=Release
     sodium_runtime="$ROOT/Build/Dependencies/macosx-$output_architecture-$TOOLSET/$dependency_configuration/install/lib/libsodium.dylib"
-    hub_directory="$ROOT/Build/Bin/$CONFIGURATION-macosx-$output_architecture/$TARGET"
+    target_directory="$ROOT/Build/Bin/$CONFIGURATION-macosx-$output_architecture/$TARGET"
     [[ -f "$sodium_runtime" ]] || {
-        printf 'The pinned Hub signature verifier runtime is missing: %s\n' "$sodium_runtime" >&2
+        printf 'The pinned marketplace signature verifier runtime is missing: %s\n' "$sodium_runtime" >&2
         exit 1
     }
-    cp -f "$sodium_runtime" "$hub_directory/libsodium.dylib"
-    printf '==> Staged pinned Hub signature verifier for %s\n' "$TARGET"
+    cp -f "$sodium_runtime" "$target_directory/libsodium.dylib"
+    printf '==> Staged pinned marketplace signature verifier for %s\n' "$TARGET"
 fi

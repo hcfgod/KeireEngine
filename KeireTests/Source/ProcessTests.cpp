@@ -16,17 +16,12 @@
 
 #if defined(_WIN32)
 #include <Windows.h>
-#else
-#include <unistd.h>
 #endif
 
 TEST_CASE("detached process launch reports a trackable process identity")
 {
-#if defined(_WIN32)
-    const auto currentProcessId = static_cast<std::uint64_t>(GetCurrentProcessId());
-#else
-    const auto currentProcessId = static_cast<std::uint64_t>(getpid());
-#endif
+    const auto currentProcessId = Keire::Detail::CurrentProcessId();
+    CHECK(currentProcessId != 0);
     CHECK(Keire::Detail::IsProcessAlive(currentProcessId));
     CHECK_FALSE(Keire::Detail::IsProcessAlive(0));
 

@@ -33,16 +33,16 @@ case "$GENERATOR" in
     *) printf "Unsupported build generator '%s'.\n" "$GENERATOR" >&2; exit 1 ;;
 esac
 bash "$ROOT/Scripts/Unix/stage-managed-host.sh" "$ROOT" "$CONFIGURATION" linux "$ARCHITECTURE" "$TARGET"
-if [[ "$TARGET" == "$HUB_TARGET" ]]; then
+if [[ "$TARGET" == "$HUB_TARGET" || "$TARGET" == "$CLIENT_TARGET" ]]; then
     output_architecture="$(architecture_output_name "$ARCHITECTURE")"
     dependency_configuration=Debug
     [[ "$CONFIGURATION" == Release || "$CONFIGURATION" == Dist ]] && dependency_configuration=Release
     sodium_runtime="$ROOT/Build/Dependencies/linux-$output_architecture-$TOOLSET/$dependency_configuration/install/lib/libsodium.so"
-    hub_directory="$ROOT/Build/Bin/$CONFIGURATION-linux-$output_architecture/$TARGET"
+    target_directory="$ROOT/Build/Bin/$CONFIGURATION-linux-$output_architecture/$TARGET"
     [[ -f "$sodium_runtime" ]] || {
-        printf 'The pinned Hub signature verifier runtime is missing: %s\n' "$sodium_runtime" >&2
+        printf 'The pinned marketplace signature verifier runtime is missing: %s\n' "$sodium_runtime" >&2
         exit 1
     }
-    cp -f "$sodium_runtime" "$hub_directory/libsodium.so"
-    printf '==> Staged pinned Hub signature verifier for %s\n' "$TARGET"
+    cp -f "$sodium_runtime" "$target_directory/libsodium.so"
+    printf '==> Staged pinned marketplace signature verifier for %s\n' "$TARGET"
 fi

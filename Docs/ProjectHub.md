@@ -256,8 +256,20 @@ Marketplace HTTP uses canonical trailing-slash `/marketplace/v1/.../` routes bec
 enforces trailing-slash routing. Catalog, library, claims, OAuth device registration, and download-grant calls remain
 bounded and versioned. The first verified Hub OAuth token may reach only the device-registration route before its
 session record exists; every later Hub bearer request must match an active, non-revoked device session. Marketplace
-feature flags remain disabled until the OAuth client, secure store, validator, signature trust root, and complete
-Windows/Linux acceptance flow have passed.
+feature flags remain the operational kill switch: catalog, claims, downloads, reviews, and publishing can be disabled
+independently without weakening authorization or exposing unpublished content.
+
+Marketplace product activation uses the same per-user `keirehub` protocol registration as desktop OAuth but a distinct,
+strict action: `keirehub://marketplace/product/<UUID>`. Query strings, fragments, traversal, extra path segments, invalid
+UUIDs, oversized frames, and unexpected fields are rejected before dispatch. A secondary Hub process forwards the typed
+request to the existing primary process, so website clicks do not create competing account sessions or caches.
+
+If the user is signed out, Hub retains the requested product ID in memory and opens the account dialog. After sign-in,
+Hub synchronizes My Assets and prepares the package without exposing the access token to the Editor. If an Editor is
+already open, its Package Manager observes the atomic token-free cache update. Otherwise Hub remains on Projects so the
+user can choose the target project; the next Editor reads the same requested-product marker and focuses the Package
+Manager. Registry and Asset Import packages are project-scoped Editor operations. Complete Project packages remain Hub
+creation operations.
 
 ## Distribution and trust
 

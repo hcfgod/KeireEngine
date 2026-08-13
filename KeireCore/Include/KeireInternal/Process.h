@@ -72,6 +72,7 @@ namespace Keire::Detail
                                              std::span<const std::string> arguments,
                                              const std::filesystem::path& workingDirectory, std::string& diagnostic,
                                              std::uint64_t* processId = nullptr) noexcept;
+    [[nodiscard]] std::uint64_t CurrentProcessId() noexcept;
     [[nodiscard]] bool IsCurrentProcessElevated() noexcept;
     [[nodiscard]] bool IsProcessAlive(std::uint64_t processId) noexcept;
     [[nodiscard]] std::filesystem::path ResolveCompanionExecutable(const std::filesystem::path& executable,

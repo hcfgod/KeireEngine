@@ -138,6 +138,7 @@ namespace
         layout.Dock("editor.project", bottom.Near);
         layout.Dock("editor.console", bottom.Near);
         layout.Dock("editor.diagnostics", bottom.Near);
+        layout.Dock("editor.package-manager", bottom.Near);
         layout.Dock("editor.scene", bottom.Far);
         layout.Dock("editor.game", bottom.Far);
     }

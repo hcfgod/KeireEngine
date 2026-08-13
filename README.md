@@ -49,7 +49,8 @@ Kéire already includes substantial, integrated engine and authoring foundations
 - SDL3 multi-window and SDL_GPU rendering, Scene and Game views, cameras, picking, separate Shader and Material Graphs,
   Direct Materials, inherited and dynamic Material Instances, reusable material/shader functions and layers,
   Material Parameter Collections, tagged custom-shader materials, LODs,
-  spatial lighting data, animation, rigging, VFX authoring, and performance gates.
+  spatial lighting data, animation, semantic auto-rigging, target-driven arm IK, bilateral foot grounding, VFX
+  authoring, and performance gates.
 - Input actions and rebinding, physics, navigation, configurable mono/stereo/5.1/7.1 audio output, typed live Mix
   Console authoring, stable mixer routing, spatial sources, listener/camera fallback, priority-blended Reverb Zones,
   managed audio controls, replay/diagnostic foundations, and profiling.
@@ -245,6 +246,13 @@ the signed stable catalog path.
 See [Asset Packages](Docs/AssetPackages.md), [Desktop Player Builds](Docs/PlayerBuilds.md),
 [Package Archives](Docs/PackageArchives.md), and
 [Testing and Release](Docs/TestingAndRelease.md) before producing or publishing an artifact.
+
+Marketplace assets follow an explicit ownership boundary: browse and claim on the website, authorize and verify the
+private download in Kéire Hub, then install or import into the open project from the Editor's **Window -> Package
+Manager** surface. **Open in Editor** links use the registered `keirehub` protocol, but Hub remains the secure account
+and download bridge. The Editor receives only an atomic token-free catalog/library/cache snapshot and independently
+rechecks the signed archive before changing project files. See [Asset Packages](Docs/AssetPackages.md) and
+[Project Hub](Docs/ProjectHub.md) for the complete workflow and trust model.
 
 ## Repository Layout
 

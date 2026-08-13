@@ -36,6 +36,8 @@ const structuredData = listing ? {
     offers: { "@type": "Offer", price: "0", priceCurrency: "USD", availability: "https://schema.org/InStock" },
     aggregateRating: listing.rating_count > 0 ? { "@type": "AggregateRating", ratingValue: listing.rating_average, reviewCount: listing.rating_count } : undefined,
 } : undefined;
+const currentVersion = versions.find((version) => version.state === "published");
+const openActionLabel = currentVersion?.install_kind === "complete_project" ? "Create in Hub" : "Open in Editor";
 ---
 
 <PlatformLayout title={listing?.display_name ?? "Product not found"} description={listing?.short_description ?? "The requested Kéire Marketplace product is unavailable."} active="marketplace" robots={listing ? "index,follow" : "noindex"} structuredData={structuredData}>
@@ -55,7 +57,10 @@ const structuredData = listing ? {
                 <a class="button button--secondary" href="/account/#library" data-library-link hidden={!ownsPersonalCopy}>
                     View My Assets
                 </a>
-                <a class="button button--secondary" href={`keirehub://marketplace/product/${listing.id}`}>Open in Hub</a>
+                {currentVersion
+                    ? <a class="button button--secondary" href={`keirehub://marketplace/product/${listing.id}`} data-open-product hidden={!ownsPersonalCopy}>{openActionLabel}</a>
+                    : <span class="button button--secondary" aria-disabled="true">No published download</span>}
+                {currentVersion && <p class="form-message">Kéire Hub securely prepares the signed package; project installation and import happen in the Editor Package Manager.</p>}
             </aside>
         </section>
         <section class="platform-shell product-details">
@@ -69,6 +74,7 @@ const structuredData = listing ? {
     const button = document.querySelector("[data-claim-product]");
     const message = document.querySelector("[data-claim-message]");
     const libraryLink = document.querySelector("[data-library-link]");
+    const openProduct = document.querySelector("[data-open-product]");
     const claimAttemptKey = crypto.randomUUID();
     const claimTimeoutMilliseconds = 18_000;
 
@@ -124,8 +130,9 @@ const structuredData = listing ? {
             completed = true;
             button.textContent = "In My Assets";
             message.dataset.kind = "success";
-            message.textContent = "Added to your personal library. Open Hub to download it.";
+            message.textContent = "Added to your personal library. Open it in the Editor when you are ready.";
             if (libraryLink instanceof HTMLAnchorElement) libraryLink.hidden = false;
+            if (openProduct instanceof HTMLAnchorElement) openProduct.hidden = false;
         } catch (error) {
             message.dataset.kind = "error";
             message.textContent = error instanceof DOMException && error.name === "AbortError"

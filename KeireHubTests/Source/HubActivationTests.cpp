@@ -77,6 +77,11 @@ TEST_CASE("Hub activation protocol round-trips every typed product action")
     CHECK(oauth.Action == HubActivationAction::OAuthCallback);
     CHECK(oauth.Url ==
           "keirehub://oauth/callback?code=single-use-code-value&state=abcdefghijklmnopqrstuvwxyz0123456789_ABCD");
+
+    const auto marketplace = RoundTrip(
+        {.Action = HubActivationAction::MarketplaceProduct, .ProductId = "12345678-1234-4abc-8def-1234567890ab"});
+    CHECK(marketplace.Action == HubActivationAction::MarketplaceProduct);
+    CHECK(marketplace.ProductId == "12345678-1234-4abc-8def-1234567890ab");
 }
 
 TEST_CASE("Hub activation command parsing is singular and strict")
@@ -107,6 +112,11 @@ TEST_CASE("Hub activation command parsing is singular and strict")
         Parse({"keirehub://oauth/callback?code=single-use-code-value&state=abcdefghijklmnopqrstuvwxyz0123456789_ABCD"});
     REQUIRE(oauth);
     CHECK(oauth.Value().Action == HubActivationAction::OAuthCallback);
+    auto marketplace = Parse({"keirehub://marketplace/product/12345678-1234-4abc-8def-1234567890ab"});
+    REQUIRE(marketplace);
+    CHECK(marketplace.Value().Action == HubActivationAction::MarketplaceProduct);
+    CHECK(marketplace.Value().ProductId == "12345678-1234-4abc-8def-1234567890ab");
+    CHECK(Parse({"--marketplace-product", "12345678-1234-4abc-8def-1234567890ab"}));
 
     CHECK_FALSE(Parse({"--navigate"}));
     CHECK_FALSE(Parse({"--navigate", "account"}));
@@ -116,6 +126,9 @@ TEST_CASE("Hub activation command parsing is singular and strict")
     CHECK_FALSE(Parse({"--show", "--navigate", "home"}));
     CHECK_FALSE(Parse({"--unknown"}));
     CHECK_FALSE(Parse({"keirehub://oauth/callback?code=value#fragment"}));
+    CHECK_FALSE(Parse({"keirehub://marketplace/product/not-a-uuid"}));
+    CHECK_FALSE(Parse({"keirehub://marketplace/product/12345678-1234-4abc-8def-1234567890ab/extra"}));
+    CHECK_FALSE(Parse({"keirehub://marketplace/product/12345678-1234-4abc-8def-1234567890ab?query=bad"}));
     const std::string oversizedArgument(MaximumHubActivationFrameBytes + 1, 'a');
     CHECK_FALSE(Parse({"--install-version", oversizedArgument}));
 }

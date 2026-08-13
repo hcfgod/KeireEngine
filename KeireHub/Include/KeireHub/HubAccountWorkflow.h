@@ -62,6 +62,7 @@ namespace KeireHub
         void Stop() noexcept;
 
         [[nodiscard]] std::shared_ptr<const HubAccountWorkflowSnapshot> Snapshot() const;
+        [[nodiscard]] HubResult<std::string> AccessToken(std::uint64_t nowUnixSeconds) const;
 
       private:
         [[nodiscard]] HubStatus Begin(std::function<void()> operation);

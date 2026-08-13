@@ -74,6 +74,33 @@ TEST_CASE("Marketplace catalog requests are bounded and parse the versioned API 
     CHECK(invalid.Error().Code == HubErrorCode::InvalidArgument);
 }
 
+TEST_CASE("Marketplace product details expose published install versions without authentication")
+{
+    NativeHttpRequest captured;
+    auto productJson = ProductJson();
+    productJson.pop_back();
+    auto client = MarketplaceClient::Create(
+        {.ServiceBaseUrl = "https://keire.test"},
+        [&](const NativeHttpRequest& request)
+        {
+            captured = request;
+            return HubResult<NativeHttpResponse>::Success(JsonResponse(
+                200,
+                "{\"data\":" + productJson +
+                    R"(,"versions":[{"id":"20112233-4455-6677-8899-aabbccddeeff","version":"1.2.0","state":"published","install_kind":"asset_import","minimum_engine_version":"0.3.0","maximum_engine_version":null,"platforms":["windows","linux","macos"],"architectures":["x86_64","arm64"],"renderer_capabilities":[],"managed_api_version":null,"release_notes_markdown":"Initial release.","published_at":"2026-08-12T07:00:00Z"}],"media":[],"reviews":[]},"meta":{"apiVersion":"marketplace/v1","correlationId":"product-123"}})"));
+        });
+    REQUIRE(client);
+
+    const auto product = client.Value().Product("00112233-4455-6677-8899-aabbccddeeff");
+    REQUIRE(product);
+    REQUIRE(product.Value().Versions.size() == 1U);
+    CHECK(product.Value().Versions.front().InstallKind == "asset_import");
+    CHECK(product.Value().Versions.front().Version == "1.2.0");
+    CHECK(captured.Url == "https://keire.test/marketplace/v1/products/00112233-4455-6677-8899-aabbccddeeff/");
+    CHECK_FALSE(Header(captured, "Authorization"));
+    CHECK_FALSE(client.Value().Product("not-a-uuid"));
+}
+
 TEST_CASE("Marketplace claims carry an independent Hub bearer token and idempotency key")
 {
     NativeHttpRequest captured;

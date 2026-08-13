@@ -509,6 +509,50 @@ namespace Keire
             }
             return result;
         }
+
+        [[nodiscard]] bool MatrixRotation(const Matrix4& matrix, Quaternion& rotation) noexcept
+        {
+            Vector3 position;
+            Vector3 scale;
+            return Math::DecomposeTransform(matrix, position, rotation, scale);
+        }
+
+        [[nodiscard]] bool SetBoneModelRotation(const SkeletonAsset& skeleton, const std::span<BoneTransform> localPose,
+                                                const std::uint32_t bone, const Quaternion modelRotation,
+                                                const float weight)
+        {
+            const auto parent = skeleton.Bones()[bone].Parent;
+            Quaternion parentRotation;
+            if (parent >= 0)
+            {
+                const auto world = WorldMatrices(skeleton, localPose);
+                if (!MatrixRotation(world[static_cast<std::size_t>(parent)], parentRotation))
+                    return false;
+            }
+            const auto desiredLocal = parent >= 0
+                                          ? Multiply(Conjugate(Normalize(parentRotation)), Normalize(modelRotation))
+                                          : Normalize(modelRotation);
+            localPose[bone].Rotation = Nlerp(localPose[bone].Rotation, desiredLocal, weight);
+            return true;
+        }
+
+        [[nodiscard]] bool ApplyBoneModelRotationDelta(const SkeletonAsset& skeleton,
+                                                       const std::span<BoneTransform> localPose,
+                                                       const std::uint32_t bone, const Quaternion delta,
+                                                       const float weight)
+        {
+            const auto world = WorldMatrices(skeleton, localPose);
+            Quaternion currentRotation;
+            if (!MatrixRotation(world[bone], currentRotation))
+                return false;
+            return SetBoneModelRotation(skeleton, localPose, bone,
+                                        Multiply(Normalize(delta), Normalize(currentRotation)), weight);
+        }
+
+        [[nodiscard]] Vector3 ProjectOntoPlane(const Vector3 value, const Vector3 normal) noexcept
+        {
+            return Subtract(value, Multiply(normal, Dot(value, normal)));
+        }
     } // namespace
 
     RigDefinitionAsset::RigDefinitionAsset(RigDefinition definition) : m_Definition(std::move(definition)) {}
@@ -1133,13 +1177,21 @@ namespace Keire
             request.Middle >= localPose.size() || request.End >= localPose.size() ||
             skeleton.Bones()[request.Middle].Parent != static_cast<std::int32_t>(request.Root) ||
             skeleton.Bones()[request.End].Parent != static_cast<std::int32_t>(request.Middle) ||
-            !Math::IsFinite(request.Target) || !Math::IsFinite(request.Pole) || !std::isfinite(request.Weight))
+            !Math::IsFinite(request.Target) || !Math::IsFinite(request.Pole) || !std::isfinite(request.Weight) ||
+            (request.EndRotation &&
+             (!Math::IsFinite(*request.EndRotation) || Math::Length(*request.EndRotation) <= Epsilon)) ||
+            !std::isfinite(request.EndRotationWeight))
         {
             return false;
         }
         const auto weight = std::clamp(request.Weight, 0.0F, 1.0F);
+        const auto endRotationWeight = std::clamp(request.EndRotationWeight, 0.0F, 1.0F);
         if (weight <= 0.0F)
+        {
+            if (request.EndRotation && endRotationWeight > 0.0F)
+                return SetBoneModelRotation(skeleton, localPose, request.End, *request.EndRotation, endRotationWeight);
             return true;
+        }
 
         auto world = WorldMatrices(skeleton, localPose);
         auto rootPosition = Math::TransformPoint(world[request.Root], {});
@@ -1150,12 +1202,21 @@ namespace Keire
         if (upperLength <= Epsilon || lowerLength <= Epsilon)
             return false;
 
-        const auto targetDelta = Subtract(request.Target, rootPosition);
+        auto targetDelta = Subtract(request.Target, rootPosition);
+        if (Length(targetDelta) <= Epsilon)
+            targetDelta = Subtract(endPosition, rootPosition);
         const auto targetDistance = std::clamp(Length(targetDelta), std::abs(upperLength - lowerLength) + Epsilon,
                                                upperLength + lowerLength - Epsilon);
         const auto forward = Normalize(targetDelta);
-        auto planeNormal = Normalize(Cross(forward, Subtract(request.Pole, rootPosition)), {0.0F, 0.0F, 1.0F});
-        const auto bend = Normalize(Cross(planeNormal, forward), {0.0F, 1.0F, 0.0F});
+        auto bendVector = ProjectOntoPlane(Subtract(request.Pole, rootPosition), forward);
+        if (Length(bendVector) <= Epsilon)
+            bendVector = ProjectOntoPlane(Subtract(middlePosition, rootPosition), forward);
+        if (Length(bendVector) <= Epsilon)
+        {
+            const auto fallback = std::abs(forward.Y) < 0.95F ? Vector3{0.0F, 1.0F, 0.0F} : Vector3{0.0F, 0.0F, 1.0F};
+            bendVector = ProjectOntoPlane(fallback, forward);
+        }
+        const auto bend = Normalize(bendVector);
         const auto projected =
             (upperLength * upperLength + targetDistance * targetDistance - lowerLength * lowerLength) /
             (2.0F * targetDistance);
@@ -1163,16 +1224,22 @@ namespace Keire
         const auto desiredMiddle = Add(rootPosition, Add(Multiply(forward, projected), Multiply(bend, height)));
 
         const auto rootDelta = FromTo(Subtract(middlePosition, rootPosition), Subtract(desiredMiddle, rootPosition));
-        const auto rootRotation = Multiply(rootDelta, localPose[request.Root].Rotation);
-        localPose[request.Root].Rotation = Nlerp(localPose[request.Root].Rotation, rootRotation, weight);
+        if (!ApplyBoneModelRotationDelta(skeleton, localPose, request.Root, rootDelta, weight))
+            return false;
 
         world = WorldMatrices(skeleton, localPose);
         middlePosition = Math::TransformPoint(world[request.Middle], {});
         endPosition = Math::TransformPoint(world[request.End], {});
+        const auto reachableTarget = Add(rootPosition, Multiply(forward, targetDistance));
         const auto middleDelta =
-            FromTo(Subtract(endPosition, middlePosition), Subtract(request.Target, middlePosition));
-        const auto middleRotation = Multiply(middleDelta, localPose[request.Middle].Rotation);
-        localPose[request.Middle].Rotation = Nlerp(localPose[request.Middle].Rotation, middleRotation, weight);
+            FromTo(Subtract(endPosition, middlePosition), Subtract(reachableTarget, middlePosition));
+        if (!ApplyBoneModelRotationDelta(skeleton, localPose, request.Middle, middleDelta, weight))
+            return false;
+        if (request.EndRotation && endRotationWeight > 0.0F &&
+            !SetBoneModelRotation(skeleton, localPose, request.End, *request.EndRotation, endRotationWeight))
+        {
+            return false;
+        }
         return true;
     }
 
@@ -1195,14 +1262,12 @@ namespace Keire
         }
 
         const auto world = WorldMatrices(skeleton, localPose);
-        std::vector<Vector3> original(request.Chain.size());
         std::vector<Vector3> positions(request.Chain.size());
         std::vector<float> lengths(request.Chain.size() - 1);
         float totalLength = 0.0F;
         for (std::size_t index = 0; index < request.Chain.size(); ++index)
         {
             positions[index] = Math::TransformPoint(world[request.Chain[index]], {});
-            original[index] = positions[index];
             if (index > 0)
             {
                 lengths[index - 1] = Length(Subtract(positions[index], positions[index - 1]));
@@ -1243,11 +1308,13 @@ namespace Keire
         const auto weight = std::clamp(request.Weight, 0.0F, 1.0F);
         for (std::size_t index = 0; index + 1 < request.Chain.size(); ++index)
         {
-            const auto delta = FromTo(Subtract(original[index + 1], original[index]),
-                                      Subtract(positions[index + 1], positions[index]));
             const auto bone = request.Chain[index];
-            localPose[bone].Rotation =
-                Nlerp(localPose[bone].Rotation, Multiply(delta, localPose[bone].Rotation), weight);
+            const auto currentWorld = WorldMatrices(skeleton, localPose);
+            const auto current = Math::TransformPoint(currentWorld[bone], {});
+            const auto child = Math::TransformPoint(currentWorld[request.Chain[index + 1]], {});
+            const auto delta = FromTo(Subtract(child, current), Subtract(positions[index + 1], positions[index]));
+            if (!ApplyBoneModelRotationDelta(skeleton, localPose, bone, delta, weight))
+                return false;
         }
         return true;
     }
@@ -1293,7 +1360,21 @@ namespace Keire
             result.PelvisAdjustment =
                 std::clamp(requestedAdjustment, -request.MaximumPelvisAdjustment, request.MaximumPelvisAdjustment) *
                 request.PelvisWeight;
-            working[*request.Pelvis].Translation.Y += result.PelvisAdjustment;
+            Vector3 localAdjustment{0.0F, result.PelvisAdjustment, 0.0F};
+            const auto parent = skeleton.Bones()[*request.Pelvis].Parent;
+            if (parent >= 0)
+            {
+                try
+                {
+                    localAdjustment = Math::TransformDirection(Math::Inverse(world[static_cast<std::size_t>(parent)]),
+                                                               localAdjustment);
+                }
+                catch (const std::exception&)
+                {
+                    return std::nullopt;
+                }
+            }
+            working[*request.Pelvis].Translation = Add(working[*request.Pelvis].Translation, localAdjustment);
         }
 
         for (const auto& contact : request.Contacts)
@@ -1304,9 +1385,17 @@ namespace Keire
                     skeleton, working,
                     {contact.UpperLeg, contact.LowerLeg, contact.Foot, target, contact.Pole, contact.Weight}))
                 return std::nullopt;
-            const auto aligned = Multiply(FromTo({0.0F, 1.0F, 0.0F}, normal), working[contact.Foot].Rotation);
-            working[contact.Foot].Rotation =
-                Nlerp(working[contact.Foot].Rotation, aligned, contact.Weight * contact.RotationWeight);
+            const auto world = WorldMatrices(skeleton, working);
+            const auto currentUp = Math::TransformDirection(world[contact.Foot], {0.0F, 1.0F, 0.0F});
+            if (!ApplyBoneModelRotationDelta(skeleton, working, contact.Foot, FromTo(currentUp, normal),
+                                             contact.Weight * contact.RotationWeight))
+                return std::nullopt;
+            const auto solvedWorld = WorldMatrices(skeleton, working);
+            const auto solvedPosition = Math::TransformPoint(solvedWorld[contact.Foot], {});
+            const auto positionError = Length(Subtract(solvedPosition, target));
+            result.MaximumPositionError = std::max(result.MaximumPositionError, positionError);
+            if (positionError > 0.01F)
+                ++result.UnreachableFeet;
             ++result.SolvedFeet;
         }
 

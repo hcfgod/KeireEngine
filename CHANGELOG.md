@@ -7,6 +7,21 @@ versions.
 
 ### Changed
 
+- Completed the website-to-Editor Marketplace workflow. Product pages now offer honest **Open in Editor** or **Create
+  in Hub** actions only for published releases; Hub strictly parses and forwards marketplace activations, keeps
+  Supabase sessions and signed URLs private, synchronizes entitlements, downloads and Ed25519-verifies the selected
+  compatible package, and atomically publishes a token-free cache snapshot. The Editor Package Manager is now visible
+  in the default layout and supports signed Registry installation and Asset Import directly into the open project,
+  including explicit executable-code and conflict decisions. Hub and Editor packages now carry the dedicated public
+  marketplace key and pinned libsodium verifier on Windows, Linux, and macOS.
+- Upgraded full-body IK and ground adaptation with parent-correct model/local rotation solving, stable bend-plane
+  fallback, clamped unreachable targets, bilateral pelvis compensation, automatic humanoid bone mapping, leg-length
+  terrain probes, slope filtering, and actionable reach diagnostics. Animators can now author automatic left/right arm
+  IK directly in the Inspector using scene target entities, target-local offsets, optional elbow poles, and independent
+  hand position/rotation weights while the existing named two-bone and FABRIK scripting workflows remain supported.
+- Shader compiler imports now create process-aware leases and prune abandoned per-import scratch directories after a
+  conservative grace period. Cleanup is restricted to Kéire-owned UUID directories, preserves live and recent jobs,
+  and ignores links or unknown entries so interrupted Editor sessions no longer accumulate stale compiler workspaces.
 - Fixed free Marketplace claims remaining permanently on “Checking your account and license” after an interrupted
   reverse-proxy response. Claims now use bounded Edge and browser requests, retain one idempotency key across safe
   retries, restore controls on every failure path, link directly to My Assets when completion is uncertain, and render

@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <exception>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <ranges>
 #include <string>
 #include <utility>
@@ -51,27 +53,78 @@ namespace KeireEditor
             }
             return "Unknown";
         }
+
+        [[nodiscard]] std::optional<std::string> ReadTrustedKey(const std::filesystem::path& executable)
+        {
+            std::vector<std::filesystem::path> candidates{
+                executable.parent_path() / "Config" / "Marketplace" / "trusted-marketplace-key.json",
+                executable.parent_path().parent_path() / "Config" / "Marketplace" / "trusted-marketplace-key.json"};
+            std::error_code error;
+            auto root = std::filesystem::current_path(error);
+            for (std::size_t depth = 0; !error && depth < 8U && !root.empty(); ++depth)
+            {
+                candidates.push_back(root / "Config" / "Marketplace" / "trusted-marketplace-key.json");
+                const auto parent = root.parent_path();
+                if (parent == root)
+                    break;
+                root = parent;
+            }
+            for (const auto& candidate : candidates)
+            {
+                error.clear();
+                if (!std::filesystem::is_regular_file(candidate, error) || error)
+                    continue;
+                std::ifstream stream(candidate, std::ios::binary);
+                std::string document{std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+                if (stream && !document.empty() && document.size() <= 16U * 1024U)
+                    return document;
+            }
+            return std::nullopt;
+        }
     } // namespace
 
     PackageManagerPanel::~PackageManagerPanel() = default;
 
     void PackageManagerPanel::Attach(Keire::UiWorkspace& workspace)
     {
-        m_Registration = workspace.RegisterPanel({"editor.package-manager", "Package Manager", false});
+        m_Registration = workspace.RegisterPanel({"editor.package-manager", "Package Manager", true});
     }
 
-    void PackageManagerPanel::Initialize(const std::filesystem::path& projectRoot)
+    void PackageManagerPanel::Initialize(const std::filesystem::path& projectRoot,
+                                         const std::filesystem::path& executable)
     {
         Shutdown();
         try
         {
+            const auto cacheRoot = Keire::GetPreferenceDirectory() / "Hub" / "MarketplacePackages";
+            m_MarketplaceCache = std::make_unique<KeireHub::MarketplaceCacheStore>(cacheRoot);
+            const auto key = ReadTrustedKey(executable);
+            if (!key)
+            {
+                m_Error = "Marketplace downloads are unavailable because the trusted Kéire public key is missing. "
+                          "Local package workflows remain available.";
+            }
+            else
+            {
+                auto trust =
+                    KeireHub::CatalogTrustStore::Create({.TrustedPublicKeyDocuments = {*key}, .NativeLibraryPath = {}});
+                if (trust)
+                    m_MarketplaceTrust = std::make_unique<KeireHub::CatalogTrustStore>(std::move(trust).Value());
+                else
+                    m_Error = trust.Error().Message + " Local package workflows remain available.";
+            }
+            const auto verify = [this](const std::string_view algorithm, const std::string_view keyId,
+                                       const std::span<const std::byte> message,
+                                       const std::span<const std::byte> signature)
+            { return m_MarketplaceTrust && m_MarketplaceTrust->VerifySignature(algorithm, keyId, message, signature); };
             Keire::ProjectPackageManagerSpecification specification{
                 .ProjectRoot = projectRoot,
-                .GlobalCacheRoot = Keire::GetPreferenceDirectory() / "Hub" / "MarketplacePackages",
+                .GlobalCacheRoot = cacheRoot,
                 .EngineVersion = std::string(Keire::GetBuildInfo().Version),
                 .Platform = std::string(HostPlatform()),
                 .Architecture = std::string(HostArchitecture()),
                 .RendererCapabilities = {"surface", "compute"},
+                .VerifyMarketplaceSignature = verify,
                 .Events = [this](const Keire::ProjectPackageEvent& event) { m_LastEvent = event; }};
             m_Manager = std::make_unique<Keire::ProjectPackageManager>(std::move(specification));
             m_AssetImporter =
@@ -80,7 +133,8 @@ namespace KeireEditor
                     .EngineVersion = std::string(Keire::GetBuildInfo().Version),
                     .Platform = std::string(HostPlatform()),
                     .Architecture = std::string(HostArchitecture()),
-                    .RendererCapabilities = {"surface", "compute"}});
+                    .RendererCapabilities = {"surface", "compute"},
+                    .VerifyMarketplaceSignature = verify});
             const auto packageRecovery = m_Manager->RecoverInterruptedOperations();
             const auto importRecovery = m_AssetImporter->RecoverInterruptedOperations();
             const auto recovered = packageRecovery.RecoveredOperations + importRecovery.RecoveredOperations;
@@ -92,6 +146,7 @@ namespace KeireEditor
             else if (!importRecovery.Diagnostics.empty())
                 m_Error = importRecovery.Diagnostics.front();
             Refresh();
+            RefreshMarketplaceCache(true);
         }
         catch (const std::exception& error)
         {
@@ -104,17 +159,22 @@ namespace KeireEditor
     {
         m_Manager.reset();
         m_AssetImporter.reset();
+        m_MarketplaceCache.reset();
+        m_MarketplaceTrust.reset();
+        m_MarketplaceSnapshot = {};
         m_Manifest = {};
         m_Lock = {};
         m_SelectedPackage.clear();
         m_LocalArchive.clear();
         m_LocalSearch.clear();
+        m_SelectedMarketplaceProduct.clear();
         m_Status.clear();
         m_Error.clear();
         m_LastEvent = {};
         m_LocalMetadata.reset();
         m_AllowExecutableCode = false;
         m_KeepLocalConflicts = true;
+        m_NextMarketplaceRefresh = {};
     }
 
     void PackageManagerPanel::InspectLocalPackage()
@@ -148,6 +208,238 @@ namespace KeireEditor
                 m_Lock.Packages.end())
         {
             m_SelectedPackage.clear();
+        }
+    }
+
+    void PackageManagerPanel::RefreshMarketplaceCache(const bool focusRequestedProduct)
+    {
+        m_NextMarketplaceRefresh = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+        if (!m_MarketplaceCache)
+            return;
+        auto loaded = m_MarketplaceCache->Load();
+        if (!loaded)
+        {
+            m_Error = loaded.Error().Message;
+            return;
+        }
+        const auto previousRequest = m_MarketplaceSnapshot.RequestedProductId;
+        m_MarketplaceSnapshot = std::move(loaded).Value();
+        if (focusRequestedProduct && !m_MarketplaceSnapshot.RequestedProductId.empty() &&
+            (m_MarketplaceSnapshot.RequestedProductId != previousRequest || m_SelectedMarketplaceProduct.empty()))
+        {
+            m_SelectedMarketplaceProduct = m_MarketplaceSnapshot.RequestedProductId;
+            m_Registration.SetVisible(true);
+        }
+        if (m_SelectedMarketplaceProduct.empty())
+        {
+            const auto entitled =
+                std::ranges::find(m_MarketplaceSnapshot.Items, true, &KeireHub::MarketplaceCacheItem::Entitled);
+            if (entitled != m_MarketplaceSnapshot.Items.end())
+                m_SelectedMarketplaceProduct = entitled->ProductId;
+        }
+    }
+
+    void PackageManagerPanel::InstallMarketplacePackage(const KeireHub::MarketplaceCacheItem& item)
+    {
+        if (!m_Manager || !m_MarketplaceCache)
+            return;
+        if (!m_MarketplaceTrust)
+        {
+            m_Error = "Marketplace signature verification is unavailable. Reinstall this Editor package before "
+                      "installing marketplace content.";
+            return;
+        }
+        try
+        {
+            if (!item.Entitled || item.State != KeireHub::MarketplaceCacheState::Ready ||
+                item.InstallKind != "registry")
+            {
+                throw std::invalid_argument("This marketplace package is not ready for Registry installation.");
+            }
+            const auto archive = m_MarketplaceCache->ArchivePath(item);
+            const auto metadata = Keire::InspectAssetPackageArchive(
+                archive, {.RequireSignature = true,
+                          .ExpectedArchiveSizeBytes = item.ArchiveSizeBytes,
+                          .ExpectedArchiveSha256 = item.ArchiveSha256,
+                          .VerifySignature = [this](const std::string_view algorithm, const std::string_view keyId,
+                                                    const std::span<const std::byte> message,
+                                                    const std::span<const std::byte> signature)
+                          {
+                              return m_MarketplaceTrust &&
+                                     m_MarketplaceTrust->VerifySignature(algorithm, keyId, message, signature);
+                          }});
+            if (metadata.Manifest.PackageId != item.PackageId || metadata.Manifest.Version != item.Version ||
+                metadata.Manifest.InstallKind != Keire::AssetPackageInstallKind::Registry)
+            {
+                throw std::runtime_error("The verified archive does not match the selected marketplace version.");
+            }
+            auto requirements = m_Manifest.Dependencies;
+            const auto existing =
+                std::ranges::find(requirements, item.PackageId, &Keire::ProjectPackageRequirement::PackageId);
+            const Keire::ProjectPackageRequirement requirement{item.PackageId, item.Version};
+            if (existing == requirements.end())
+                requirements.push_back(requirement);
+            else
+                *existing = requirement;
+            std::ranges::sort(requirements, {}, &Keire::ProjectPackageRequirement::PackageId);
+            Keire::ProjectPackageInstallRequest request{
+                .Archives = {{.Archive = archive,
+                              .CatalogSource = "marketplace:" + item.ProductId + '/' + item.VersionId,
+                              .ExpectedArchiveSizeBytes = item.ArchiveSizeBytes,
+                              .ExpectedArchiveSha256 = item.ArchiveSha256,
+                              .RequireMarketplaceSignature = true}},
+                .DirectDependencies = std::move(requirements)};
+            const auto plan = m_Manager->PreflightInstall(request);
+            if (!plan.Valid())
+                throw std::runtime_error("Package preflight failed: " + plan.Conflicts.front().Message);
+            static_cast<void>(m_Manager->Install(request));
+            m_SelectedPackage = item.PackageId;
+            m_Status = "Installed " + item.DisplayName + " " + item.Version + " from My Assets.";
+            m_Error.clear();
+            Refresh();
+        }
+        catch (const std::exception& error)
+        {
+            m_Error = error.what();
+        }
+    }
+
+    void PackageManagerPanel::ImportMarketplacePackage(const KeireHub::MarketplaceCacheItem& item)
+    {
+        if (!m_AssetImporter || !m_MarketplaceCache)
+            return;
+        if (!m_MarketplaceTrust)
+        {
+            m_Error = "Marketplace signature verification is unavailable. Reinstall this Editor package before "
+                      "importing marketplace content.";
+            return;
+        }
+        try
+        {
+            if (!item.Entitled || item.State != KeireHub::MarketplaceCacheState::Ready ||
+                item.InstallKind != "asset_import")
+            {
+                throw std::invalid_argument("This marketplace package is not ready for Asset Import.");
+            }
+            const auto archive = m_MarketplaceCache->ArchivePath(item);
+            Keire::ProjectAssetImportRequest request{.Archive = archive,
+                                                     .ExpectedArchiveSizeBytes = item.ArchiveSizeBytes,
+                                                     .ExpectedArchiveSha256 = item.ArchiveSha256,
+                                                     .RequireMarketplaceSignature = true,
+                                                     .AllowExecutableCode = m_AllowExecutableCode};
+            auto plan = m_AssetImporter->Preflight(request);
+            if (!plan.Valid() && m_KeepLocalConflicts)
+            {
+                for (const auto& conflict : plan.Conflicts)
+                {
+                    if (!conflict.Path.empty() &&
+                        (conflict.Kind == Keire::ProjectAssetImportConflictKind::Path ||
+                         conflict.Kind == Keire::ProjectAssetImportConflictKind::ModifiedLocalFile))
+                    {
+                        request.Decisions.push_back({conflict.Path, Keire::ProjectAssetImportResolution::KeepLocal});
+                    }
+                }
+                plan = m_AssetImporter->Preflight(request);
+            }
+            if (!plan.Valid())
+                throw std::runtime_error("Asset import preflight failed: " + plan.Conflicts.front().Message);
+            const auto result = m_AssetImporter->Import(request);
+            m_Status = "Imported " + std::to_string(result.Written.size()) + " file(s) from " + item.DisplayName +
+                       "; retained " + std::to_string(result.Retained.size()) + " local file(s).";
+            m_Error.clear();
+        }
+        catch (const std::exception& error)
+        {
+            m_Error = error.what();
+        }
+    }
+
+    void PackageManagerPanel::DrawMarketplaceLibrary(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme)
+    {
+        if (ui.Button("Refresh Hub cache"))
+            RefreshMarketplaceCache(true);
+        ui.SameLine();
+        ui.TextColored(theme.MutedText, std::to_string(std::ranges::count(m_MarketplaceSnapshot.Items, true,
+                                                                          &KeireHub::MarketplaceCacheItem::Entitled)) +
+                                            " entitled asset(s)");
+        ui.Separator();
+        if (m_MarketplaceSnapshot.Items.empty())
+        {
+            ui.Text("No marketplace assets have been synchronized yet.");
+            ui.TextColored(theme.MutedText,
+                           "Claim an asset on the Kéire website, choose Open in Editor, and keep Kéire Hub signed in.");
+            return;
+        }
+        if (auto list = ui.BeginChild("MarketplaceLibraryList", {300.0F, 0.0F}, true); list)
+        {
+            for (const auto& item : m_MarketplaceSnapshot.Items)
+            {
+                if (!item.Entitled)
+                    continue;
+                auto label = item.DisplayName;
+                if (!item.Version.empty())
+                    label += "  " + item.Version;
+                if (item.State == KeireHub::MarketplaceCacheState::Downloading)
+                    label += "  [downloading]";
+                else if (item.State == KeireHub::MarketplaceCacheState::Failed)
+                    label += "  [attention]";
+                if (ui.Selectable(label, m_SelectedMarketplaceProduct == item.ProductId))
+                    m_SelectedMarketplaceProduct = item.ProductId;
+            }
+        }
+        ui.SameLine();
+        if (auto details = ui.BeginChild("MarketplaceLibraryDetails", {}, true); details)
+        {
+            const auto selected = std::ranges::find(m_MarketplaceSnapshot.Items, m_SelectedMarketplaceProduct,
+                                                    &KeireHub::MarketplaceCacheItem::ProductId);
+            if (selected == m_MarketplaceSnapshot.Items.end() || !selected->Entitled)
+            {
+                ui.TextColored(theme.MutedText, "Select an entitled asset to inspect it.");
+                return;
+            }
+            ui.TextColored(theme.Accent, selected->DisplayName);
+            if (!selected->PublisherName.empty())
+                ui.Text("By " + selected->PublisherName);
+            ui.Text(selected->ShortDescription);
+            if (!selected->Version.empty())
+                ui.Text("Version " + selected->Version);
+            if (!selected->LicenseSpdx.empty())
+                ui.Text("License: " + selected->LicenseSpdx);
+            ui.Spacing();
+            if (selected->State == KeireHub::MarketplaceCacheState::Downloading)
+            {
+                ui.TextColored(theme.MutedText, "Kéire Hub is downloading and verifying this package.");
+            }
+            else if (selected->State == KeireHub::MarketplaceCacheState::Failed)
+            {
+                ui.TextColored(theme.Error, selected->FailureMessage);
+                ui.TextColored(theme.MutedText, "Choose Open in Editor on the marketplace page to retry through Hub.");
+            }
+            else if (selected->State != KeireHub::MarketplaceCacheState::Ready)
+            {
+                ui.TextColored(theme.MutedText, "Open this asset from the website to prepare a verified local copy.");
+            }
+            else if (selected->InstallKind == "registry")
+            {
+                if (ui.Button("Install to Project"))
+                    InstallMarketplacePackage(*selected);
+            }
+            else if (selected->InstallKind == "asset_import")
+            {
+                static_cast<void>(ui.Checkbox("Allow package C# assemblies to compile", m_AllowExecutableCode));
+                static_cast<void>(ui.Checkbox("Keep locally modified files on conflicts", m_KeepLocalConflicts));
+                if (ui.Button("Import into Project"))
+                    ImportMarketplacePackage(*selected);
+            }
+            else
+            {
+                ui.TextColored(theme.Warning, "Complete projects are created and registered through Kéire Hub.");
+            }
+            if (selected->State == KeireHub::MarketplaceCacheState::Ready)
+            {
+                ui.TextColored(theme.MutedText, "SHA-256: " + selected->ArchiveSha256);
+                ui.TextColored(theme.MutedText, "Trust: marketplace signature verified");
+            }
         }
     }
 
@@ -426,6 +718,8 @@ namespace KeireEditor
 
     void PackageManagerPanel::Draw(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme)
     {
+        if (std::chrono::steady_clock::now() >= m_NextMarketplaceRefresh)
+            RefreshMarketplaceCache(true);
         auto panel = ui.BeginPanel(m_Registration);
         if (!panel)
             return;
@@ -442,15 +736,17 @@ namespace KeireEditor
         {
             if (auto assets = ui.BeginTabItem("My Assets"); assets)
             {
-                ui.Text("Your personal and organization libraries are delivered by Kéire Hub.");
-                ui.TextColored(theme.MutedText,
-                               "Hub authorization and the local broker keep OAuth tokens outside the Editor.");
+                DrawMarketplaceLibrary(ui, theme);
             }
             if (auto registry = ui.BeginTabItem("Kéire Registry"); registry)
             {
-                ui.Text("Registry discovery is connected through Kéire Hub's verified marketplace cache.");
+                ui.Text("Registry discovery is synchronized through Kéire Hub's token-free marketplace cache.");
                 ui.TextColored(theme.MutedText,
-                               "Only compatible, entitled, signed versions become installable project packages.");
+                               "Browse and claim packages on the Kéire Marketplace. Entitled, compatible, signed "
+                               "versions appear in My Assets for project installation.");
+                ui.TextColored(theme.MutedText,
+                               std::to_string(m_MarketplaceSnapshot.Items.size()) +
+                                   " cached catalog product(s); OAuth tokens and signed URLs remain in Hub.");
             }
             if (auto project = ui.BeginTabItem("In Project"); project)
                 DrawInProject(ui, theme);

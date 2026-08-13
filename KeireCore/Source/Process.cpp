@@ -755,6 +755,15 @@ namespace Keire::Detail
         }
     }
 
+    std::uint64_t CurrentProcessId() noexcept
+    {
+#if defined(_WIN32)
+        return static_cast<std::uint64_t>(GetCurrentProcessId());
+#else
+        return static_cast<std::uint64_t>(getpid());
+#endif
+    }
+
     bool IsCurrentProcessElevated() noexcept
     {
 #if defined(_WIN32)

@@ -44,6 +44,7 @@ done
 for path in libavcodec.so.62 libavformat.so.62 libavutil.so.60 libswresample.so.6; do
   : > "$stage/bin/$path"
 done
+touch "$stage/bin/libsodium.so" "$stage/bin/libsodium.dylib"
 mkdir -p "$stage/bin/Managed/Dotnet/sdk/10.0.100/Sdks/Fixture/build"
 : > "$stage/bin/Managed/Dotnet/sdk/10.0.100/Sdks/Fixture/build/Fixture.targets"
 
@@ -84,6 +85,7 @@ assert manifest["buildManifest"] == "build-manifest.json"
 assert manifest["compatibility"]["legacySchemaVersion"] == 1
 assert "content/Content/en-US.json" in {entry["path"] for entry in manifest["files"]}
 assert "content/Licenses/catalog.json" in {entry["path"] for entry in manifest["files"]}
+assert "Config/Marketplace/trusted-marketplace-key.json" in {entry["path"] for entry in manifest["files"]}
 assert "content/Fonts/Inter-OFL.txt" in manifest["licenseReferences"]
 assert "content/Fonts/Material-Symbols-Apache-2.0.txt" in manifest["licenseReferences"]
 PY

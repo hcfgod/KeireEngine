@@ -3,6 +3,7 @@
 #include "Keire/Rendering/ShaderGraph.h"
 
 #include "KeireInternal/Assets/AssetInternal.h"
+#include "KeireInternal/Assets/ShaderCompilerJobs.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
 
@@ -15,6 +16,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
+#include <mutex>
 #include <optional>
 #include <regex>
 #include <set>
@@ -606,8 +608,27 @@ namespace Keire
             {
                 m_Root = std::filesystem::absolute(std::filesystem::temp_directory_path() / "KeireShaderCompilerJobs")
                              .lexically_normal();
+                std::filesystem::create_directories(m_Root);
+                static std::once_flag cleanupOnce;
+                std::call_once(cleanupOnce,
+                               [this]
+                               {
+                                   constexpr auto staleAge = std::chrono::hours(1);
+                                   (void)Detail::CleanupStaleShaderCompilerJobs(
+                                       m_Root, std::filesystem::file_time_type::clock::now(), staleAge);
+                               });
                 m_Path = m_Root / AssetId::Generate().ToString();
                 std::filesystem::create_directories(m_Path);
+                try
+                {
+                    Detail::WriteShaderCompilerJobLease(m_Path, Detail::CurrentProcessId());
+                }
+                catch (...)
+                {
+                    std::error_code ignored;
+                    std::filesystem::remove_all(m_Path, ignored);
+                    throw;
+                }
             }
 
             ~TemporaryShaderDirectory()

@@ -460,8 +460,19 @@ owns dependency-aware selective imports, three-way update decisions, executable-
 source-controlled receipts, safe removal, rollback journals, and interrupted-operation recovery.
 
 The Editor Package Manager is a presentation/controller layer over those public contracts. It never receives Hub OAuth
-tokens. A separate current-user Hub broker protocol uses a one-time nonce handshake and returns token-free catalog,
-library, task, and verified-cache records. Entitlement authorizes download access; expected archive size/SHA-256 and the
+tokens. Website product links use a strictly parsed `keirehub://marketplace/product/<UUID>` activation that is forwarded
+to the already-running primary Hub through the existing single-instance channel. Hub alone reads the account session,
+walks bounded catalog/library pages, registers the device session, obtains the short-lived grant, and downloads the
+content-addressed archive. Size, SHA-256, product/version/install-kind identity, and the Ed25519 asset-package signature
+must all agree before the item becomes ready.
+
+Hub publishes catalog, entitlement, requested-product, progress, failure, and verified-cache identity as one bounded,
+atomically replaced `marketplace-cache.json` document beneath the per-user Hub cache. The document contains no bearer
+token, refresh token, signed URL, proxy credential, service credential, or signing material. Editors poll this durable
+snapshot, derive the archive path from the trusted digest rather than accepting a stored arbitrary path, and repeat
+archive and signature verification before a project transaction. The nonce-authenticated live broker wire contract is
+retained for future richer coordination, but the durable snapshot is the production handoff and also works when the
+Editor starts after Hub finishes. Entitlement authorizes download access; expected archive size/SHA-256 and the
 dedicated marketplace signature establish integrity independently. Projects without package files remain valid, while
 the first successful package transaction raises `minimumEngineVersion` to 0.3.1 atomically.
 

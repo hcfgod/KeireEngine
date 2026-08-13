@@ -266,7 +266,8 @@ editor_package_required_paths() {
       "bin/Managed/Coral.Managed.dll"
       "bin/Managed/Coral.Managed.deps.json" "bin/Managed/Coral.Managed.runtimeconfig.json"
       "bin/Managed/Keire.Managed.dll" "bin/Managed/Dotnet/dotnet" "Config/Client.json"
-      "Config/Branding/Keire.png"
+      "Config/Branding/Keire.png" "Config/Marketplace/trusted-marketplace-key.json"
+      "third-party/licenses/libsodium-LICENSE.txt"
       "samples/KeireSandbox/ProjectSettings/Project.keireproject"
       "samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene" "Docs/PlayerBuilds.md" "README.md"
       "CHANGELOG.md" "LICENSE.txt" "THIRD_PARTY_NOTICES.md" "build-manifest.json"
@@ -313,6 +314,12 @@ validate_editor_package_stage() {
             return 1
         }
     done
+    local sodium_runtime=bin/libsodium.so
+    [[ "$platform" == Mac ]] && sodium_runtime=bin/libsodium.dylib
+    [[ -f "$stage/$sodium_runtime" ]] || {
+        printf 'Editor package is missing its pinned marketplace signature verifier.\n' >&2
+        return 1
+    }
     for path in include lib examples; do
         [[ ! -e "$stage/$path" ]] || {
             printf 'Editor package contains SDK-only content: %s\n' "$path" >&2
@@ -339,6 +346,7 @@ hub_package_required_paths() {
     local hub="$1" namespace="$2"
     local required=(
       "bin/$hub" "bin/${namespace}HubWorker" "Config/Branding/Keire.png"
+      "Config/Marketplace/trusted-marketplace-key.json"
       "Config/SourceModules.premake.lua" "Config/Distribution.json" "Config/Supabase.json" "Docs/ProjectHub.md"
       "Samples/KeireSandbox/ProjectSettings/Project.keireproject" "README.md" "CHANGELOG.md" "LICENSE.txt"
       "THIRD_PARTY_NOTICES.md" "hub-package.json" "launch-hub.sh"

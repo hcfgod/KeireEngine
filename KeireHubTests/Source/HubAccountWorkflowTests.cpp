@@ -193,6 +193,7 @@ TEST_CASE("Hub account workflow completes browser PKCE sign-in with a separate s
     REQUIRE(workflow.Start(configuration, temporary.Path() / "Account" / "oauth-session.dat", {}));
     auto ready = WaitFor(workflow, [](const auto& snapshot) { return snapshot.Configured && !snapshot.Busy; });
     REQUIRE(ready->BrowserSignInAvailable);
+    CHECK_FALSE(workflow.AccessToken(0U));
 
     const auto authorization = workflow.BeginBrowserSignIn(DeterministicEntropy);
     REQUIRE(authorization);
@@ -205,6 +206,12 @@ TEST_CASE("Hub account workflow completes browser PKCE sign-in with a separate s
     REQUIRE(signedIn->SignedIn);
     CHECK(signedIn->Email == "user@example.com");
     CHECK_FALSE(signedIn->BrowserSignInPending);
+    const auto now = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count());
+    const auto token = workflow.AccessToken(now);
+    REQUIRE(token);
+    CHECK(token.Value() == "header.payload.oauth-signature");
+    CHECK_FALSE(workflow.AccessToken(now + 3600U));
     workflow.Stop();
 }
 

@@ -100,15 +100,15 @@ switch ($Generator) {
 & (Join-Path $PSScriptRoot "stage-managed-host.ps1") -Root $Root -Configuration $Configuration `
     -Architecture $Architecture -Target $Target -IfPresent
 
-if ($Target -eq $Project.HUB_TARGET) {
+if ($Target -in @($Project.HUB_TARGET, $Project.CLIENT_TARGET)) {
     $outputArchitecture = Get-ArchitectureOutputName $Architecture
     $dependencyConfiguration = if ($Configuration -in @("Release", "Dist")) { "Release" } else { "Debug" }
     $sodiumRuntime = Join-Path $Root `
         "Build\Dependencies\windows-$outputArchitecture-$Toolset\$dependencyConfiguration\install\bin\libsodium.dll"
-    $hubDirectory = Join-Path $Root "Build\Bin\$Configuration-windows-$outputArchitecture\$Target"
+    $targetDirectory = Join-Path $Root "Build\Bin\$Configuration-windows-$outputArchitecture\$Target"
     if (-not (Test-Path -LiteralPath $sodiumRuntime -PathType Leaf)) {
-        throw "The pinned Hub signature verifier runtime is missing: $sodiumRuntime"
+        throw "The pinned marketplace signature verifier runtime is missing: $sodiumRuntime"
     }
-    Copy-Item -LiteralPath $sodiumRuntime -Destination $hubDirectory -Force
-    Write-Host "==> Staged pinned Hub signature verifier for $Target"
+    Copy-Item -LiteralPath $sodiumRuntime -Destination $targetDirectory -Force
+    Write-Host "==> Staged pinned marketplace signature verifier for $Target"
 }

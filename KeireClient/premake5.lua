@@ -18,8 +18,11 @@ project(ProjectConfig.CLIENT_TARGET)
     includedirs
     {
         "Include",
+        "../KeireHubRuntime/Include",
         "../" .. ProjectConfig.CORE_DIRECTORY .. "/Include"
     }
+
+    links { HubRuntimeTarget }
 
     LinkKeireSourceModules()
     LinkKeireCore()
@@ -29,6 +32,26 @@ project(ProjectConfig.CLIENT_TARGET)
     AddKeireManagedHostStaging()
 
     LinkSDL3()
+
+    if _ACTION ~= "ninja" then
+        local postBuildPathPrefix = _ACTION == "gmake" and "KeireClient/" or ""
+
+        filter { "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
+            postbuildcommands
+            {
+                '{COPYFILE} "' .. postBuildPathPrefix .. DependencyManifest.SodiumDebugRuntime .. '" "' ..
+                    postBuildPathPrefix .. '%{cfg.targetdir}/' ..
+                    path.getname(DependencyManifest.SodiumDebugRuntime) .. '"'
+            }
+
+        filter { "configurations:Release or Dist" }
+            postbuildcommands
+            {
+                '{COPYFILE} "' .. postBuildPathPrefix .. DependencyManifest.SodiumReleaseRuntime .. '" "' ..
+                    postBuildPathPrefix .. '%{cfg.targetdir}/' ..
+                    path.getname(DependencyManifest.SodiumReleaseRuntime) .. '"'
+            }
+    end
 
     filter { "system:windows", "configurations:Dist" }
         kind "WindowedApp"

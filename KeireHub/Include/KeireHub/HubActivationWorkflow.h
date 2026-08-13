@@ -23,6 +23,7 @@ namespace KeireHub
         virtual void RequestEditorInstall(std::string_view packageOrVersion) = 0;
         [[nodiscard]] virtual HubStatus CompleteOAuthCallback(std::string_view callbackUrl) = 0;
         [[nodiscard]] virtual HubStatus FocusBuildSupport(std::string_view platform, std::string_view architecture) = 0;
+        [[nodiscard]] virtual HubStatus OpenMarketplaceProduct(std::string_view productId) = 0;
     };
 
     class HubActivationWorkflow final

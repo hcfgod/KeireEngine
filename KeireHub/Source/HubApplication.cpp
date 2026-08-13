@@ -54,7 +54,6 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-
 namespace
 {
     using FolderTarget = KeireHub::HubFolderTarget;
@@ -470,8 +469,11 @@ namespace
                 if (!status)
                     SetError("Distribution settings could not be applied: " + status.Error().Message);
             }
-            if (const auto status = m_Account.Tick(m_ProductSnapshot.Settings, KeireHub::HubNowUnixSeconds()); !status)
+            if (const auto status = m_Account.Tick(m_ProductSnapshot.Settings, KeireHub::HubNowUnixSeconds(),
+                                                   m_Executable, m_Distribution.get());
+                !status)
                 SetError("Account settings could not be applied: " + status.Error().Message);
+            m_Account.ApplyMarketplaceNotice(m_Notice, m_NoticeError);
             if (m_Instance)
             {
                 if (auto activation = m_Instance->PollActivation())
@@ -1229,6 +1231,13 @@ namespace
             }
             return m_BuildSupport->FocusTarget(platform, architecture);
         }
+        [[nodiscard]] KeireHub::HubStatus OpenMarketplaceProduct(const std::string_view productId) override
+        {
+            m_Page = KeireHub::HubPage::Projects;
+            return m_Account.OpenMarketplaceProduct(std::string(productId), m_ProductUi, m_Executable,
+                                                    m_Distribution.get(), m_ProductSnapshot.Settings,
+                                                    KeireHub::HubNowUnixSeconds());
+        }
         void Refresh()
         {
             try
@@ -1244,7 +1253,6 @@ namespace
                 ReportUnexpected("Project metadata refresh could not start.", error);
             }
         }
-
         [[nodiscard]] KeireHub::HubStatus StartPendingProjectMetadataRefresh()
         {
             if (!m_ProjectMetadataRefreshPending || !m_ProjectMetadata || !m_Controller)
@@ -1254,7 +1262,6 @@ namespace
             m_ProjectMetadataRefreshPending = false;
             return m_ProjectMetadata->Start(*m_Controller);
         }
-
         void LocateEditor(const std::filesystem::path& selected)
         {
             if (!m_Controller)
@@ -1269,14 +1276,12 @@ namespace
             m_Notice = "Located editor " + editor.Version + ". Verify it before use.";
             m_NoticeError = false;
         }
-
         void StartBuildSupportInstall(const std::filesystem::path& package) override
         {
             if (!m_BuildSupport)
                 throw std::logic_error("Build Support management is unavailable.");
             RequireWorkflowSuccess(m_BuildSupport->ImportPackage(package));
         }
-
         void Launch(const Keire::ProjectInspectionResult& inspection, std::string preferredEditorId = {},
                     const bool requirePreferred = false)
         {
@@ -1334,7 +1339,6 @@ namespace
                 ReportUnexpected("The editor could not be launched.", error);
             }
         }
-
         void BrowseForFolder(const FolderTarget target, const std::filesystem::path& initialPath)
         {
             try
@@ -1347,7 +1351,6 @@ namespace
                 ReportUnexpected("The folder picker could not be opened.", error);
             }
         }
-
         void Reveal(const std::filesystem::path& path)
         {
             std::string diagnostic;
@@ -1357,7 +1360,6 @@ namespace
                 SetError("The selected item could not be revealed. See Hub logs for details.");
             }
         }
-
         void Open(const std::filesystem::path& path) override
         {
             try
@@ -1396,7 +1398,6 @@ namespace
                 ReportUnexpected("The project could not be opened.", error);
             }
         }
-
         void DrawCreateDialog(Keire::UiFrame& ui)
         {
             const auto request = KeireHub::DrawHubCreateProjectDialog(
@@ -1421,7 +1422,6 @@ namespace
                 ReportUnexpected("The project could not be created.", error);
             }
         }
-
         void DrawOpenDialog(Keire::UiFrame& ui)
         {
             const auto action = KeireHub::DrawHubOpenProjectDialog(ui, m_ProductSnapshot, m_OpenPath,
@@ -1431,7 +1431,6 @@ namespace
             else if (action == KeireHub::HubOpenProjectAction::Open)
                 Open(Keire::Detail::PathFromUtf8(m_OpenPath));
         }
-
         std::filesystem::path m_Executable;
         bool m_Smoke = false;
         Keire::Ref<Keire::ProjectRegistry> m_Registry;

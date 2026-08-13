@@ -206,6 +206,12 @@ namespace KeireHub
             return result;
         }
 
+        [[nodiscard]] std::string OptionalString(const Detail::Json& value, const std::string_view field)
+        {
+            const auto found = value.find(field);
+            return found == value.end() || found->is_null() ? std::string{} : found->get<std::string>();
+        }
+
         void AppendPageMetadata(const Detail::Json& document, std::string& nextCursor, std::uint32_t& limit,
                                 std::string& correlationId)
         {
@@ -279,6 +285,69 @@ namespace KeireHub
         {
             return HubResult<MarketplaceCatalogPage>::Failure(MarketplaceError(
                 HubErrorCode::InvalidData, "The marketplace catalog response is invalid.", error.what()));
+        }
+    }
+
+    HubResult<MarketplaceProductDetails> MarketplaceClient::Product(const std::string_view productId) const
+    {
+        if (!IsUuid(productId))
+        {
+            return HubResult<MarketplaceProductDetails>::Failure(
+                MarketplaceError(HubErrorCode::InvalidArgument, "The marketplace product ID is invalid."));
+        }
+        auto document =
+            Send(m_Transport,
+                 GetRequest(m_Options.ServiceBaseUrl + "/marketplace/v1/products/" + std::string(productId) + '/',
+                            std::nullopt),
+                 m_Options.MaximumResponseBytes);
+        if (!document)
+            return HubResult<MarketplaceProductDetails>::Failure(document.Error());
+        try
+        {
+            const auto& data = document.Value().at("data");
+            MarketplaceProductDetails result;
+            result.Product = ParseProduct(data);
+            if (result.Product.Id != productId)
+                throw std::invalid_argument("marketplace product identity mismatch");
+            const auto& versions = data.at("versions");
+            if (!versions.is_array() || versions.size() > 256U)
+                throw std::invalid_argument("invalid marketplace product version length");
+            for (const auto& value : versions)
+            {
+                MarketplaceProductVersion version{
+                    .Id = value.at("id").get<std::string>(),
+                    .Version = value.at("version").get<std::string>(),
+                    .State = value.at("state").get<std::string>(),
+                    .InstallKind = value.at("install_kind").get<std::string>(),
+                    .MinimumEngineVersion = OptionalString(value, "minimum_engine_version"),
+                    .MaximumEngineVersion = OptionalString(value, "maximum_engine_version"),
+                    .Platforms = value.value("platforms", std::vector<std::string>{}),
+                    .Architectures = value.value("architectures", std::vector<std::string>{}),
+                    .RendererCapabilities = value.value("renderer_capabilities", std::vector<std::string>{}),
+                    .ManagedApiVersion = OptionalString(value, "managed_api_version"),
+                    .ReleaseNotesMarkdown = OptionalString(value, "release_notes_markdown"),
+                    .PublishedAt = OptionalString(value, "published_at")};
+                const auto validState =
+                    version.State == "published" || version.State == "withdrawn" || version.State == "security_revoked";
+                const auto validKind = version.InstallKind == "registry" || version.InstallKind == "asset_import" ||
+                                       version.InstallKind == "complete_project";
+                if (!IsUuid(version.Id) || version.Version.empty() || version.Version.size() > 128U || !validState ||
+                    !validKind || version.Platforms.size() > 16U || version.Architectures.size() > 16U ||
+                    version.RendererCapabilities.size() > 64U || version.ReleaseNotesMarkdown.size() > 100'000U)
+                {
+                    throw std::invalid_argument("invalid marketplace product version fields");
+                }
+                result.Versions.push_back(std::move(version));
+            }
+            result.CorrelationId = document.Value().at("meta").at("correlationId").get<std::string>();
+            if (result.CorrelationId.size() > 128U)
+                throw std::invalid_argument("invalid marketplace product correlation ID");
+            return HubResult<MarketplaceProductDetails>::Success(std::move(result));
+        }
+        catch (const std::exception& error)
+        {
+            return HubResult<MarketplaceProductDetails>::Failure(MarketplaceError(
+                HubErrorCode::InvalidData, "The marketplace product response is invalid.", error.what()));
         }
     }
 

@@ -66,6 +66,8 @@ namespace Keire
     struct AnimatorFootGroundingSettings
     {
         bool Enabled = false;
+        bool AutomaticBoneMapping = true;
+        bool AutomaticRaycastDistance = true;
         std::string Pelvis = "Hips";
         std::string LeftUpperLeg = "LeftUpLeg";
         std::string LeftLowerLeg = "LeftLeg";
@@ -79,7 +81,22 @@ namespace Keire
         float RaycastDistance = 0.75F;
         float FootOffset = 0.02F;
         float MaximumPelvisAdjustment = 0.5F;
+        float MaximumSlopeDegrees = 60.0F;
         std::uint32_t CollisionMask = ~0U;
+    };
+
+    struct AnimatorLimbIkSettings
+    {
+        bool Enabled = false;
+        bool AutomaticBoneMapping = true;
+        EntityId Target;
+        EntityId Pole;
+        std::string Root;
+        std::string Middle;
+        std::string End;
+        Vector3 TargetOffset;
+        float PositionWeight = 1.0F;
+        float RotationWeight = 1.0F;
     };
 
     class KEIRE_API AnimatorComponent final : public Component
@@ -133,6 +150,10 @@ namespace Keire
         [[nodiscard]] std::span<const AnimatorIkGoal> IkGoals() const noexcept { return m_IkGoals; }
         [[nodiscard]] const AnimatorFootGroundingSettings& FootGrounding() const noexcept { return m_FootGrounding; }
         void SetFootGrounding(AnimatorFootGroundingSettings settings);
+        [[nodiscard]] const AnimatorLimbIkSettings& LeftArmIk() const noexcept { return m_LeftArmIk; }
+        [[nodiscard]] const AnimatorLimbIkSettings& RightArmIk() const noexcept { return m_RightArmIk; }
+        void SetLeftArmIk(AnimatorLimbIkSettings settings);
+        void SetRightArmIk(AnimatorLimbIkSettings settings);
         [[nodiscard]] std::vector<AnimatorCommand> ConsumeRuntimeCommands();
         void SetRuntimePose(std::string state, float normalizedTime, bool playing,
                             std::span<const Matrix4> skinPalette);
@@ -157,6 +178,8 @@ namespace Keire
         std::vector<AnimatorCommand> m_RuntimeCommands;
         std::vector<AnimatorIkGoal> m_IkGoals;
         AnimatorFootGroundingSettings m_FootGrounding;
+        AnimatorLimbIkSettings m_LeftArmIk;
+        AnimatorLimbIkSettings m_RightArmIk;
         std::uint64_t m_NextRuntimeCommand = 1;
         std::shared_ptr<const AnimatorDebugSnapshot> m_DebugSnapshot;
         std::string m_RuntimeDiagnostic;

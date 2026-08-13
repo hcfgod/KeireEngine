@@ -479,6 +479,18 @@ namespace KeireHub
         return m_Snapshot;
     }
 
+    HubResult<std::string> HubAccountWorkflow::AccessToken(const std::uint64_t nowUnixSeconds) const
+    {
+        std::scoped_lock lock(m_Mutex);
+        if (!m_Session || m_Session->AccessToken.empty() || m_Session->ExpiresAtUnixSeconds <= nowUnixSeconds + 30U)
+        {
+            return HubResult<std::string>::Failure({.Code = HubErrorCode::AccountSessionInvalid,
+                                                    .Message = "Sign in to Kéire Hub before opening My Assets.",
+                                                    .AffectedItem = "marketplace"});
+        }
+        return HubResult<std::string>::Success(m_Session->AccessToken);
+    }
+
     HubStatus HubAccountWorkflow::Begin(std::function<void()> operation)
     {
         {

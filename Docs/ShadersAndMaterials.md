@@ -184,7 +184,10 @@ versioned contracts.
 
 Compiler libraries do not link into KeireCore or runtime applications. Bootstrap builds the pinned host
 `KeireShaderCompiler`; import invokes it with bounded input, time, and output and retains last-good assets after a
-failure. Compiler discovery is executable-relative, with `KEIRE_SHADER_COMPILER` as an intentional override.
+failure. Each import owns a UUID-named scratch directory below the operating system's temporary root and removes it on
+completion. Process-aware leases preserve work owned by another live Editor, while a later import prunes abandoned jobs
+after a one-hour grace period. Cleanup ignores links, files, and non-Kéire names. Compiler discovery is
+executable-relative, with `KEIRE_SHADER_COMPILER` as an intentional override.
 
 ```powershell
 ./Scripts/project.ps1 bootstrap -Generator ninja -Toolset msc

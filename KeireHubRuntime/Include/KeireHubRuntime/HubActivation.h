@@ -23,7 +23,8 @@ namespace KeireHub
         ImportPackage,
         InstallVersion,
         BuildSupport,
-        OAuthCallback
+        OAuthCallback,
+        MarketplaceProduct
     };
 
     struct HubActivationRequest final
@@ -35,6 +36,7 @@ namespace KeireHub
         std::optional<std::string> Platform;
         std::optional<std::string> Architecture;
         std::optional<std::string> Url;
+        std::optional<std::string> ProductId;
 
         [[nodiscard]] bool RequestsBuildSupport() const noexcept { return Action == HubActivationAction::BuildSupport; }
     };

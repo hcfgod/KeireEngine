@@ -769,7 +769,7 @@ void EditorWorkspaceLayer::OnAttach()
     }
     m_SceneViewportPanel->Initialize(Owner().GetProject() ? Owner().GetProject()->Root() : std::filesystem::path{});
     if (const auto project = Owner().GetProject())
-        m_PackageManagerPanel->Initialize(project->Root());
+        m_PackageManagerPanel->Initialize(project->Root(), m_ExecutablePath);
     LoadTheme(workspace, workspace.ActiveTheme());
     m_ConsolePanel->CaptureEngineLogs(Owner().GetTime().FrameCount(), m_Theme);
     if (!m_Smoke || m_InitializeProject)

@@ -60,6 +60,7 @@ Remove-Item -LiteralPath $stage, $validationRoot -Recurse -Force -ErrorAction Si
 Remove-Item -LiteralPath $archive, "$archive.sha256" -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $distributionRoot, (Join-Path $Root "Artifacts"), `
     (Join-Path $stage "bin"), (Join-Path $stage "Config\Branding"), `
+    (Join-Path $stage "Config\Marketplace"), `
     (Join-Path $stage "content"), (Join-Path $stage "third-party\licenses") | Out-Null
 Get-ChildItem -LiteralPath $source -Force | Copy-Item -Destination (Join-Path $stage "bin") -Recurse -Force
 Copy-Item -LiteralPath $hubWorkerSource -Destination (Join-Path $stage "bin")
@@ -69,6 +70,8 @@ Copy-WindowsTrackedTree $Root "Docs" (Join-Path $stage "Docs")
 Copy-WindowsTrackedTree $Root "Samples/KeireSandbox" (Join-Path $stage "Samples\KeireSandbox")
 Copy-Item -LiteralPath (Join-Path $Root "Config\Branding\Keire.png") `
     -Destination (Join-Path $stage "Config\Branding")
+Copy-Item -LiteralPath (Join-Path $Root "Config\Marketplace\trusted-marketplace-key.json") `
+    -Destination (Join-Path $stage "Config\Marketplace")
 Copy-Item -LiteralPath (Join-Path $Root "Config\SourceModules.premake.lua") `
     -Destination (Join-Path $stage "Config")
 $python = (Get-Command python -ErrorAction Stop).Source

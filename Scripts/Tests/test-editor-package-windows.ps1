@@ -82,6 +82,7 @@ try {
         $manifest.compatibility.legacyTopLevelFields -notcontains "launcher" -or
         $manifest.compatibility.legacyTopLevelFields -notcontains "bundledDotnetSdk" -or
         $manifest.compatibility.legacyTopLevelFields -notcontains "buildManifest" -or
+        $manifest.files.path -notcontains "Config/Marketplace/trusted-marketplace-key.json" -or
         $manifest.files.path -contains "content/Content/en-US.json" -or
         $manifest.files.path -contains "content/Licenses/catalog.json" -or
         $manifest.licenseReferences -contains "content/Fonts/Inter-OFL.txt" -or

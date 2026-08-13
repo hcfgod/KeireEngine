@@ -66,6 +66,8 @@ TEST_CASE("Animator foot grounding settings validate and migrate as authored com
     Keire::AnimatorComponent animator;
     Keire::AnimatorFootGroundingSettings settings;
     settings.Enabled = true;
+    settings.AutomaticBoneMapping = false;
+    settings.AutomaticRaycastDistance = false;
     settings.Pelvis = "pelvis";
     settings.LeftUpperLeg = "left-upper";
     settings.LeftLowerLeg = "left-lower";
@@ -85,7 +87,7 @@ TEST_CASE("Animator foot grounding settings validate and migrate as authored com
     CHECK(animator.FootGrounding().Weight == doctest::Approx(1.0F));
 
     const auto registration = Keire::CreateAnimatorComponentRegistration();
-    CHECK(registration.SchemaVersion == 2);
+    CHECK(registration.SchemaVersion == 3);
     const auto values = registration.Serialize(animator);
     auto restored = registration.Factory();
     registration.Deserialize(*restored, values, registration.SchemaVersion);
@@ -94,6 +96,7 @@ TEST_CASE("Animator foot grounding settings validate and migrate as authored com
     CHECK(restoredAnimator->FootGrounding().Enabled);
     CHECK(restoredAnimator->FootGrounding().RaycastDistance == doctest::Approx(1.25F));
     CHECK(restoredAnimator->FootGrounding().CollisionMask == 0x4U);
+    CHECK_FALSE(restoredAnimator->FootGrounding().AutomaticBoneMapping);
 
     auto invalidMask = values;
     invalidMask["footCollisionMask"] = std::int64_t{-1};
@@ -104,4 +107,49 @@ TEST_CASE("Animator foot grounding settings validate and migrate as authored com
     const auto migrated = registration.Migrate({}, 1);
     CHECK(std::get<bool>(migrated.at("footGrounding")) == false);
     CHECK(std::get<std::string>(migrated.at("leftFoot")) == "LeftFoot");
+    CHECK_FALSE(std::get<bool>(migrated.at("footAutomaticBoneMapping")));
+    CHECK(std::get<bool>(migrated.at("leftArmIkAutomaticBoneMapping")));
+
+    const auto migratedV2 = registration.Migrate(values, 2);
+    CHECK(std::get<double>(migratedV2.at("footMaximumSlope")) == doctest::Approx(60.0));
+    CHECK(std::get<std::string>(migratedV2.at("rightArmIkEnd")) == "RightHand");
+}
+
+TEST_CASE("Animator authored arm IK is automatic, serializable, and validates safe weights")
+{
+    Keire::AnimatorComponent animator;
+    Keire::AnimatorLimbIkSettings left;
+    left.Enabled = true;
+    left.Target = Keire::EntityId(Keire::AssetId::Generate());
+    left.Pole = Keire::EntityId(Keire::AssetId::Generate());
+    left.TargetOffset = {0.1F, -0.2F, 0.3F};
+    left.PositionWeight = 0.8F;
+    left.RotationWeight = 0.6F;
+    animator.SetLeftArmIk(left);
+
+    CHECK(animator.LeftArmIk().AutomaticBoneMapping);
+    CHECK(animator.LeftArmIk().Target == left.Target);
+    CHECK(animator.LeftArmIk().TargetOffset == left.TargetOffset);
+
+    const auto registration = Keire::CreateAnimatorComponentRegistration();
+    const auto values = registration.Serialize(animator);
+    auto restored = registration.Factory();
+    registration.Deserialize(*restored, values, registration.SchemaVersion);
+    const auto restoredAnimator = Keire::DynamicRefCast<Keire::AnimatorComponent>(restored);
+    REQUIRE(restoredAnimator);
+    CHECK(restoredAnimator->LeftArmIk().Enabled);
+    CHECK(restoredAnimator->LeftArmIk().Target == left.Target);
+    CHECK(restoredAnimator->LeftArmIk().Pole == left.Pole);
+    CHECK(restoredAnimator->LeftArmIk().PositionWeight == doctest::Approx(0.8F));
+    CHECK(restoredAnimator->LeftArmIk().RotationWeight == doctest::Approx(0.6F));
+
+    auto invalid = left;
+    invalid.PositionWeight = -0.1F;
+    CHECK_THROWS_AS(animator.SetLeftArmIk(invalid), std::invalid_argument);
+    CHECK(animator.LeftArmIk().PositionWeight == doctest::Approx(0.8F));
+
+    invalid = left;
+    invalid.AutomaticBoneMapping = false;
+    invalid.Root.clear();
+    CHECK_THROWS_AS(animator.SetLeftArmIk(invalid), std::invalid_argument);
 }

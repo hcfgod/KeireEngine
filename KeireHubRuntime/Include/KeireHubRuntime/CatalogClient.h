@@ -107,6 +107,9 @@ namespace KeireHub
         [[nodiscard]] HubStatus VerifyDetached(std::span<const std::byte> exactBytes,
                                                const DetachedSignatureMetadata& signature,
                                                std::string_view affectedItem) const;
+        [[nodiscard]] bool VerifySignature(std::string_view algorithm, std::string_view keyId,
+                                           std::span<const std::byte> exactBytes,
+                                           std::span<const std::byte> signature) const noexcept;
 
       private:
         struct Impl;

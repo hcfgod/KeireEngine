@@ -121,6 +121,7 @@ namespace Keire
             std::map<AssetId, RetargetedClip> RetargetedClips;
             std::map<AssetId, AssetHandle<AvatarMaskAsset>> Masks;
             std::map<std::string, std::uint32_t, std::less<>> BoneIndices;
+            std::map<RigBoneSemantic, std::uint32_t> SemanticBoneIndices;
             std::unique_ptr<AnimatorInstance> Instance;
             std::uint64_t GraphRevision = 0;
             std::uint64_t DependencyGraphRevision = 0;
@@ -393,6 +394,127 @@ namespace Keire
             return result;
         }
 
+        [[nodiscard]] static std::optional<std::uint32_t>
+        ResolveIkBone(const std::map<std::string, std::uint32_t, std::less<>>& names,
+                      const std::map<RigBoneSemantic, std::uint32_t>& semantics, const bool automatic,
+                      const std::string_view fallback, const RigBoneSemantic semantic)
+        {
+            if (automatic)
+            {
+                const auto inferred = semantics.find(semantic);
+                if (inferred != semantics.end())
+                    return inferred->second;
+            }
+            const auto named = names.find(fallback);
+            return named == names.end() ? std::nullopt : std::optional(named->second);
+        }
+
+        [[nodiscard]] std::string ApplyAuthoredArmIk(const Entity& entity, const SkeletonAsset& skeleton,
+                                                     const AnimatorComponent& animator,
+                                                     const std::span<BoneTransform> localPose,
+                                                     const std::map<std::string, std::uint32_t, std::less<>>& names,
+                                                     const std::map<RigBoneSemantic, std::uint32_t>& semantics)
+        {
+            const auto animatorTransform = entity.GetComponent<TransformComponent>();
+            if (!animatorTransform)
+                return "Authored arm IK requires an Animator world transform.";
+            Matrix4 worldToModel;
+            try
+            {
+                worldToModel = Math::Inverse(animatorTransform->WorldMatrix());
+            }
+            catch (const std::exception&)
+            {
+                return "Authored arm IK could not invert the Animator world transform.";
+            }
+
+            const auto solve = [&](const AnimatorLimbIkSettings& settings, const bool left) -> std::string
+            {
+                if (!settings.Enabled)
+                    return {};
+                const auto side = left ? std::string_view("Left") : std::string_view("Right");
+                if (!settings.Target)
+                    return std::string(side) + " arm IK is enabled but has no target entity.";
+                const auto targetEntity = Runtime->FindEntity(settings.Target);
+                const auto targetTransform =
+                    targetEntity ? targetEntity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
+                if (!targetTransform)
+                    return std::string(side) + " arm IK target is unavailable in the runtime scene.";
+
+                const auto root = ResolveIkBone(names, semantics, settings.AutomaticBoneMapping, settings.Root,
+                                                left ? RigBoneSemantic::LeftUpperArm : RigBoneSemantic::RightUpperArm);
+                const auto middle =
+                    ResolveIkBone(names, semantics, settings.AutomaticBoneMapping, settings.Middle,
+                                  left ? RigBoneSemantic::LeftLowerArm : RigBoneSemantic::RightLowerArm);
+                const auto end = ResolveIkBone(names, semantics, settings.AutomaticBoneMapping, settings.End,
+                                               left ? RigBoneSemantic::LeftHand : RigBoneSemantic::RightHand);
+                if (!root || !middle || !end)
+                    return std::string(side) +
+                           " arm IK could not resolve a contiguous upper-arm, lower-arm, and hand chain.";
+
+                const auto targetModelMatrix = Math::Multiply(worldToModel, targetTransform->WorldMatrix());
+                const auto target = Math::TransformPoint(targetModelMatrix, settings.TargetOffset);
+                Vector3 ignoredPosition;
+                Vector3 ignoredScale;
+                Quaternion targetRotation;
+                if (!Math::DecomposeTransform(targetModelMatrix, ignoredPosition, targetRotation, ignoredScale))
+                    return std::string(side) + " arm IK target has a non-decomposable transform.";
+
+                Vector3 pole;
+                if (settings.Pole)
+                {
+                    const auto poleEntity = Runtime->FindEntity(settings.Pole);
+                    const auto poleTransform =
+                        poleEntity ? poleEntity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
+                    if (!poleTransform)
+                        return std::string(side) + " arm IK pole override is unavailable in the runtime scene.";
+                    pole = Math::TransformPoint(worldToModel, poleTransform->WorldPosition());
+                }
+                else
+                {
+                    const auto modelBones = ModelBoneMatrices(skeleton, localPose);
+                    const auto rootPosition = Math::TransformPoint(modelBones[*root], {});
+                    const auto middlePosition = Math::TransformPoint(modelBones[*middle], {});
+                    const auto endPosition = Math::TransformPoint(modelBones[*end], {});
+                    const Vector3 forward{endPosition.X - rootPosition.X, endPosition.Y - rootPosition.Y,
+                                          endPosition.Z - rootPosition.Z};
+                    const auto lengthSquared = forward.X * forward.X + forward.Y * forward.Y + forward.Z * forward.Z;
+                    Vector3 bend{middlePosition.X - rootPosition.X, middlePosition.Y - rootPosition.Y,
+                                 middlePosition.Z - rootPosition.Z};
+                    if (lengthSquared > 0.000001F)
+                    {
+                        const auto projection =
+                            (bend.X * forward.X + bend.Y * forward.Y + bend.Z * forward.Z) / lengthSquared;
+                        bend = {bend.X - forward.X * projection, bend.Y - forward.Y * projection,
+                                bend.Z - forward.Z * projection};
+                    }
+                    const auto bendLength = std::sqrt(bend.X * bend.X + bend.Y * bend.Y + bend.Z * bend.Z);
+                    const auto reach = std::max(std::sqrt(lengthSquared), 0.25F);
+                    if (bendLength > 0.000001F)
+                    {
+                        pole = {middlePosition.X + bend.X / bendLength * reach,
+                                middlePosition.Y + bend.Y / bendLength * reach,
+                                middlePosition.Z + bend.Z / bendLength * reach};
+                    }
+                    else
+                    {
+                        pole = {middlePosition.X, middlePosition.Y, middlePosition.Z - reach};
+                    }
+                }
+
+                TwoBoneIkRequest request{*root, *middle, *end, target, pole, settings.PositionWeight};
+                request.EndRotation = targetRotation;
+                request.EndRotationWeight = settings.RotationWeight;
+                if (!SolveTwoBoneIk(skeleton, localPose, request))
+                    return std::string(side) + " arm IK could not solve the resolved skeleton chain.";
+                return {};
+            };
+
+            if (const auto diagnostic = solve(animator.LeftArmIk(), true); !diagnostic.empty())
+                return diagnostic;
+            return solve(animator.RightArmIk(), false);
+        }
+
         [[nodiscard]] static std::string ApplyIkGoals(const Entity& entity, const SkeletonAsset& skeleton,
                                                       const AnimatorComponent& animator,
                                                       std::span<BoneTransform> localPose,
@@ -458,7 +580,8 @@ namespace Keire
         [[nodiscard]] std::string ApplyFootGrounding(const Entity& entity, const SkeletonAsset& skeleton,
                                                      const AnimatorComponent& animator,
                                                      std::span<BoneTransform> localPose,
-                                                     const std::map<std::string, std::uint32_t, std::less<>>& indices)
+                                                     const std::map<std::string, std::uint32_t, std::less<>>& indices,
+                                                     const std::map<RigBoneSemantic, std::uint32_t>& semantics)
         {
             const auto& settings = animator.FootGrounding();
             if (!settings.Enabled)
@@ -469,15 +592,15 @@ namespace Keire
             if (!transform)
                 return "Foot grounding requires an Animator world transform.";
 
-            const auto bone = [&](const std::string_view name) -> std::optional<std::uint32_t>
-            {
-                const auto found = indices.find(name);
-                return found == indices.end() ? std::nullopt : std::optional(found->second);
-            };
-            const auto pelvis = bone(settings.Pelvis);
-            const std::array chains{
-                std::array{bone(settings.LeftUpperLeg), bone(settings.LeftLowerLeg), bone(settings.LeftFoot)},
-                std::array{bone(settings.RightUpperLeg), bone(settings.RightLowerLeg), bone(settings.RightFoot)}};
+            const auto bone = [&](const std::string_view name, const RigBoneSemantic semantic)
+            { return ResolveIkBone(indices, semantics, settings.AutomaticBoneMapping, name, semantic); };
+            const auto pelvis = bone(settings.Pelvis, RigBoneSemantic::Pelvis);
+            const std::array chains{std::array{bone(settings.LeftUpperLeg, RigBoneSemantic::LeftUpperLeg),
+                                               bone(settings.LeftLowerLeg, RigBoneSemantic::LeftLowerLeg),
+                                               bone(settings.LeftFoot, RigBoneSemantic::LeftFoot)},
+                                    std::array{bone(settings.RightUpperLeg, RigBoneSemantic::RightUpperLeg),
+                                               bone(settings.RightLowerLeg, RigBoneSemantic::RightLowerLeg),
+                                               bone(settings.RightFoot, RigBoneSemantic::RightFoot)}};
             if (!pelvis ||
                 std::ranges::any_of(
                     chains, [](const auto& chain)
@@ -511,22 +634,49 @@ namespace Keire
                 const auto footPosition = Math::TransformPoint(modelBones[*chain[2]], {});
                 const auto footWorld = Math::TransformPoint(modelToWorld, footPosition);
                 const Vector3 origin{footWorld.X, footWorld.Y + settings.RaycastHeight, footWorld.Z};
+                auto raycastDistance = settings.RaycastDistance;
+                if (settings.AutomaticRaycastDistance)
+                {
+                    const auto upperWorld =
+                        Math::TransformPoint(modelToWorld, Math::TransformPoint(modelBones[*chain[0]], {}));
+                    const auto lowerWorld =
+                        Math::TransformPoint(modelToWorld, Math::TransformPoint(modelBones[*chain[1]], {}));
+                    const auto distance = [](const Vector3 left, const Vector3 right)
+                    {
+                        const auto x = right.X - left.X;
+                        const auto y = right.Y - left.Y;
+                        const auto z = right.Z - left.Z;
+                        return std::sqrt(x * x + y * y + z * z);
+                    };
+                    const auto legLength = distance(upperWorld, lowerWorld) + distance(lowerWorld, footWorld);
+                    raycastDistance = std::max(raycastDistance, legLength * 1.1F);
+                }
                 const auto hits =
                     PhysicsWorldService->RayCast({.Origin = origin,
                                                   .Direction = {0.0F, -1.0F, 0.0F},
-                                                  .MaximumDistance = settings.RaycastHeight + settings.RaycastDistance,
+                                                  .MaximumDistance = settings.RaycastHeight + raycastDistance,
                                                   .Mask = settings.CollisionMask,
                                                   .IncludeTriggers = false,
                                                   .Layer = queryLayer});
-                const auto hit = std::ranges::find_if(hits, [&](const auto& candidate)
-                                                      { return !ownBody || candidate.Body != ownBody; });
+                const auto hit = std::ranges::find_if(
+                    hits,
+                    [&](const auto& candidate)
+                    {
+                        if (ownBody && candidate.Body == ownBody)
+                            return false;
+                        const auto normalLength = std::sqrt(candidate.Normal.X * candidate.Normal.X +
+                                                            candidate.Normal.Y * candidate.Normal.Y +
+                                                            candidate.Normal.Z * candidate.Normal.Z);
+                        if (normalLength <= 0.000001F)
+                            return false;
+                        const auto normalY = std::clamp(candidate.Normal.Y / normalLength, -1.0F, 1.0F);
+                        const auto slope = std::acos(normalY) * 57.2957795131F;
+                        return slope <= settings.MaximumSlopeDegrees;
+                    });
                 if (hit == hits.end())
                     continue;
                 const auto position = Math::TransformPoint(worldToModel, hit->Position);
-                const auto normalEnd = Math::TransformPoint(worldToModel, {hit->Position.X + hit->Normal.X,
-                                                                           hit->Position.Y + hit->Normal.Y,
-                                                                           hit->Position.Z + hit->Normal.Z});
-                const Vector3 normal{normalEnd.X - position.X, normalEnd.Y - position.Y, normalEnd.Z - position.Z};
+                const auto normal = Math::TransformDirection(worldToModel, hit->Normal);
                 const auto knee = Math::TransformPoint(modelBones[*chain[1]], {});
                 request.Contacts.push_back({*chain[0],
                                             *chain[1],
@@ -539,8 +689,12 @@ namespace Keire
             }
             if (request.Contacts.empty())
                 return {};
-            if (!SolveFootGrounding(skeleton, localPose, request))
+            const auto solved = SolveFootGrounding(skeleton, localPose, request);
+            if (!solved)
                 return "Foot grounding could not solve the configured leg chains.";
+            if (solved->UnreachableFeet != 0)
+                return "Foot grounding reached the configured pelvis/leg limit for " +
+                       std::to_string(solved->UnreachableFeet) + " foot target(s).";
             return {};
         }
 
@@ -673,8 +827,22 @@ namespace Keire
                     state->GraphRevision = graphRevision;
                     state->SkeletonRevision = skeletonRevision;
                     state->BoneIndices.clear();
+                    state->SemanticBoneIndices.clear();
                     for (std::uint32_t index = 0; index < skeleton->Bones().size(); ++index)
                         state->BoneIndices.emplace(skeleton->Bones()[index].Name, index);
+                    try
+                    {
+                        const auto inferred = InferRigDefinition(*skeleton);
+                        for (std::uint32_t index = 0; index < inferred.Bones.size(); ++index)
+                        {
+                            if (inferred.Bones[index].Semantic != RigBoneSemantic::None)
+                                state->SemanticBoneIndices.emplace(inferred.Bones[index].Semantic, index);
+                        }
+                    }
+                    catch (const std::exception&)
+                    {
+                        state->SemanticBoneIndices.clear();
+                    }
                     if (skeletonRevision > 1)
                         animator->SetRuntimeDiagnostic("Skeleton reload restarted Animator state safely.");
                 }
@@ -698,8 +866,14 @@ namespace Keire
                 {
                     animator->SetRuntimeDiagnostic(ikDiagnostic);
                 }
-                else if (const auto footDiagnostic =
-                             ApplyFootGrounding(entity, *skeleton, *animator, sample.LocalPose, state->BoneIndices);
+                else if (const auto armDiagnostic = ApplyAuthoredArmIk(entity, *skeleton, *animator, sample.LocalPose,
+                                                                       state->BoneIndices, state->SemanticBoneIndices);
+                         !armDiagnostic.empty())
+                {
+                    animator->SetRuntimeDiagnostic(armDiagnostic);
+                }
+                else if (const auto footDiagnostic = ApplyFootGrounding(entity, *skeleton, *animator, sample.LocalPose,
+                                                                        state->BoneIndices, state->SemanticBoneIndices);
                          !footDiagnostic.empty())
                 {
                     animator->SetRuntimeDiagnostic(footDiagnostic);
@@ -707,7 +881,8 @@ namespace Keire
                 const auto palette = SkinPalette(*skeleton, sample.LocalPose);
                 animator->SetRuntimePose(sample.State, sample.NormalizedTime, state->Instance->Playing(), palette);
                 auto debugSnapshot = state->Instance->DebugSnapshot();
-                if (!animator->IkGoals().empty() || animator->FootGrounding().Enabled)
+                if (!animator->IkGoals().empty() || animator->LeftArmIk().Enabled || animator->RightArmIk().Enabled ||
+                    animator->FootGrounding().Enabled)
                     debugSnapshot = FinalPoseDebugSnapshot(*skeleton, sample.LocalPose, debugSnapshot);
                 animator->SetRuntimeDebugSnapshot(std::move(debugSnapshot));
                 ApplyRootMotion(entity, sample, *animator);

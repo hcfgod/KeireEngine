@@ -266,6 +266,19 @@ namespace KeireHub
         return HubStatus::Success();
     }
 
+    bool CatalogTrustStore::VerifySignature(const std::string_view algorithm, const std::string_view keyId,
+                                            const std::span<const std::byte> exactBytes,
+                                            const std::span<const std::byte> signature) const noexcept
+    {
+        if (!m_Impl || algorithm != "ed25519" || exactBytes.empty() || exactBytes.size() > MaximumCatalogBytes ||
+            signature.size() != 64U || !Detail::IsDistributionKeyId(keyId))
+        {
+            return false;
+        }
+        const auto key = std::ranges::find(m_Impl->Keys, keyId, &TrustedKey::Id);
+        return key != m_Impl->Keys.end() && m_Impl->Verifier->Verify(signature, exactBytes, key->PublicKey);
+    }
+
     CatalogTrustStore::CatalogTrustStore(std::shared_ptr<const Impl> implementation) : m_Impl(std::move(implementation))
     {
     }

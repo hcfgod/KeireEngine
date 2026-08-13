@@ -304,17 +304,15 @@ def main() -> int:
         "handle_path /preview-downloads/*",
         "KEIRE_PREVIEW_DOWNLOAD_ROOT",
         "khjduyjamzwumhducmou.supabase.co",
-        "@docs_immutable path /docs/_astro/*",
+        "@immutable_web_assets path /_astro/* /docs/_astro/*",
         "'wasm-unsafe-eval'",
         "worker-src 'self' blob:",
     ):
         if contract not in caddy:
             raise ValueError(f"Caddy website contract is missing '{contract}'.")
-    if caddy.count("import security_headers") != 2 or (
-        "handle_errors {\n\t\timport security_headers" not in caddy
-    ):
+    if caddy.count("import security_headers") != 1 or "\n\timport security_headers" not in caddy:
         raise ValueError(
-            "Caddy normal and error routes must share the security-header policy."
+            "Caddy must apply the security-header policy to every proxied Astro response."
         )
 
     print(f"Website validation passed for {len(pages)} HTML pages.")

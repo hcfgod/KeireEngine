@@ -15,6 +15,7 @@ $Root = Get-RepositoryRoot
 $Project = Get-ProjectConfig
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
 $Toolset = Resolve-WindowsToolset $Generator $Toolset
+$outputArchitecture = Get-ArchitectureOutputName $Architecture
 
 Invoke-CheckedWindowsCommand {
     & (Join-Path $PSScriptRoot "package.ps1") -Generator $Generator -Configuration Dist `
@@ -45,18 +46,32 @@ foreach ($directory in @("bin", "samples", "Docs")) {
 }
 Remove-Item -LiteralPath (Join-Path $stage "bin\$($Project.HUB_TARGET).exe"), `
     (Join-Path $stage "bin\$($Project.PROJECT_NAMESPACE)HubWorker.exe") -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force (Join-Path $stage "Config"), (Join-Path $stage "third-party") | Out-Null
+New-Item -ItemType Directory -Force (Join-Path $stage "Config\Marketplace"), `
+    (Join-Path $stage "third-party\licenses") | Out-Null
 Copy-Item -LiteralPath (Join-Path $sdkStage "Config\Client.json") -Destination (Join-Path $stage "Config")
 Copy-Item -LiteralPath (Join-Path $Root "Config\SourceModules.premake.lua") -Destination (Join-Path $stage "Config")
 New-Item -ItemType Directory -Force (Join-Path $stage "Config\Branding") | Out-Null
 Copy-Item -LiteralPath (Join-Path $Root "Config\Branding\Keire.png") `
     -Destination (Join-Path $stage "Config\Branding")
+Copy-Item -LiteralPath (Join-Path $Root "Config\Marketplace\trusted-marketplace-key.json") `
+    -Destination (Join-Path $stage "Config\Marketplace")
 Copy-Item -LiteralPath (Join-Path $sdkStage "third-party\licenses") `
     -Destination (Join-Path $stage "third-party") -Recurse
 foreach ($file in @("README.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json")) {
     Copy-Item -LiteralPath (Join-Path $sdkStage $file) -Destination $stage
 }
 Copy-Item -LiteralPath (Join-Path $Root "CHANGELOG.md") -Destination $stage
+
+$dependencyInstall = Join-Path $Root "Build\Dependencies\windows-$outputArchitecture-$Toolset\Release\install"
+$sodiumRuntime = Join-Path $dependencyInstall "bin\libsodium.dll"
+$sodiumLicense = Join-Path $dependencyInstall "share\licenses\libsodium\LICENSE"
+if (-not (Test-Path -LiteralPath $sodiumRuntime -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $sodiumLicense -PathType Leaf)) {
+    throw "The Editor marketplace verifier runtime or license is missing. Run bootstrap first."
+}
+Copy-Item -LiteralPath $sodiumRuntime -Destination (Join-Path $stage "bin\libsodium.dll") -Force
+Copy-Item -LiteralPath $sodiumLicense `
+    -Destination (Join-Path $stage "third-party\licenses\libsodium-LICENSE.txt") -Force
 
 $dotnetSource = Join-Path $Root "Build\Dependencies\dotnet-sdk"
 $dotnetDestination = Join-Path $stage "bin\Managed\Dotnet"

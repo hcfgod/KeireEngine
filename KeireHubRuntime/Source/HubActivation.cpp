@@ -16,6 +16,7 @@ namespace KeireHub
         constexpr std::uint8_t ActivationProtocolVersion = 1;
         constexpr std::size_t ActivationHeaderBytes = 10;
         constexpr std::size_t MaximumVersionIdBytes = 128;
+        constexpr std::string_view MarketplaceProductUrlPrefix = "keirehub://marketplace/product/";
 
         [[nodiscard]] HubError InvalidArgument(std::string message)
         {
@@ -203,6 +204,25 @@ namespace KeireHub
             return true;
         }
 
+        [[nodiscard]] bool IsHexDigit(const char value) noexcept
+        {
+            return (value >= '0' && value <= '9') || (value >= 'a' && value <= 'f') || (value >= 'A' && value <= 'F');
+        }
+
+        [[nodiscard]] bool IsValidProductId(const std::string_view value) noexcept
+        {
+            if (value.size() != 36U || value[8] != '-' || value[13] != '-' || value[18] != '-' || value[23] != '-')
+                return false;
+            for (std::size_t index = 0; index < value.size(); ++index)
+            {
+                if (index == 8U || index == 13U || index == 18U || index == 23U)
+                    continue;
+                if (!IsHexDigit(value[index]))
+                    return false;
+            }
+            return true;
+        }
+
         [[nodiscard]] bool ValidBuildSupport(const HubActivationRequest& request) noexcept
         {
             if (!request.Platform || !request.Architecture)
@@ -228,7 +248,7 @@ namespace KeireHub
         [[nodiscard]] bool HasNoPayload(const HubActivationRequest& request) noexcept
         {
             return !request.Page && !request.Path && !request.VersionId && !request.Platform && !request.Architecture &&
-                   !request.Url;
+                   !request.Url && !request.ProductId;
         }
 
         void AppendUint16(std::string& target, const std::size_t value)
@@ -263,27 +283,29 @@ namespace KeireHub
             break;
         case HubActivationAction::Navigate:
             if (!request.Page || !PageName(*request.Page) || request.Path || request.VersionId || request.Platform ||
-                request.Architecture || request.Url)
+                request.Architecture || request.Url || request.ProductId)
             {
                 return HubStatus::Failure(InvalidArgument("Navigate activation requires exactly one valid page."));
             }
             break;
         case HubActivationAction::OpenProject:
         case HubActivationAction::ImportPackage:
-            if (request.Page || request.VersionId || request.Platform || request.Architecture || request.Url)
+            if (request.Page || request.VersionId || request.Platform || request.Architecture || request.Url ||
+                request.ProductId)
                 return HubStatus::Failure(InvalidArgument("Path activation contains an unexpected field."));
             if (const auto pathStatus = ValidatePath(request.Path); !pathStatus)
                 return pathStatus;
             break;
         case HubActivationAction::InstallVersion:
             if (request.Page || request.Path || request.Platform || request.Architecture || request.Url ||
-                !request.VersionId || !IsValidVersionId(*request.VersionId))
+                request.ProductId || !request.VersionId || !IsValidVersionId(*request.VersionId))
             {
                 return HubStatus::Failure(InvalidArgument("Install-version activation requires one valid ID."));
             }
             break;
         case HubActivationAction::BuildSupport:
-            if (request.Page || request.Path || request.VersionId || request.Url || !ValidBuildSupport(request))
+            if (request.Page || request.Path || request.VersionId || request.Url || request.ProductId ||
+                !ValidBuildSupport(request))
             {
                 return HubStatus::Failure(
                     InvalidArgument("Build Support activation requires a valid platform and architecture."));
@@ -291,10 +313,18 @@ namespace KeireHub
             break;
         case HubActivationAction::OAuthCallback:
             if (request.Page || request.Path || request.VersionId || request.Platform || request.Architecture ||
-                !ValidOAuthCallback(request))
+                request.ProductId || !ValidOAuthCallback(request))
             {
                 return HubStatus::Failure(
                     InvalidArgument("OAuth callback activation requires one valid callback URL."));
+            }
+            break;
+        case HubActivationAction::MarketplaceProduct:
+            if (request.Page || request.Path || request.VersionId || request.Platform || request.Architecture ||
+                request.Url || !request.ProductId || !IsValidProductId(*request.ProductId))
+            {
+                return HubStatus::Failure(
+                    InvalidArgument("Marketplace product activation requires one valid product ID."));
             }
             break;
         default:
@@ -336,6 +366,9 @@ namespace KeireHub
         case HubActivationAction::OAuthCallback:
             fields.push_back(*request.Url);
             break;
+        case HubActivationAction::MarketplaceProduct:
+            fields.push_back(*request.ProductId);
+            break;
         default:
             return HubResult<std::string>::Failure(InvalidArgument("Activation action is invalid."));
         }
@@ -376,7 +409,7 @@ namespace KeireHub
 
         const auto actionValue = static_cast<unsigned char>(frame[5]);
         if (actionValue < static_cast<unsigned char>(HubActivationAction::Show) ||
-            actionValue > static_cast<unsigned char>(HubActivationAction::OAuthCallback))
+            actionValue > static_cast<unsigned char>(HubActivationAction::MarketplaceProduct))
         {
             return HubResult<HubActivationRequest>::Failure(InvalidFrame("Activation action is unknown."));
         }
@@ -436,6 +469,9 @@ namespace KeireHub
         case HubActivationAction::OAuthCallback:
             request.Url = fields[0];
             break;
+        case HubActivationAction::MarketplaceProduct:
+            request.ProductId = fields[0];
+            break;
         default:
             break;
         }
@@ -466,6 +502,11 @@ namespace KeireHub
         {
             return ParsedRequest({.Action = HubActivationAction::OAuthCallback, .Url = std::string(option)});
         }
+        if (arguments.size() == 1U && option.starts_with(MarketplaceProductUrlPrefix))
+        {
+            return ParsedRequest({.Action = HubActivationAction::MarketplaceProduct,
+                                  .ProductId = std::string(option.substr(MarketplaceProductUrlPrefix.size()))});
+        }
         if (option == "--show" && arguments.size() == 1)
             return ParsedRequest({});
         if (option == "--navigate" && arguments.size() == 2)
@@ -494,6 +535,11 @@ namespace KeireHub
             return ParsedRequest({.Action = HubActivationAction::BuildSupport,
                                   .Platform = std::string(arguments[1]),
                                   .Architecture = std::string(arguments[2])});
+        }
+        if (option == "--marketplace-product" && arguments.size() == 2)
+        {
+            return ParsedRequest(
+                {.Action = HubActivationAction::MarketplaceProduct, .ProductId = std::string(arguments[1])});
         }
         return HubResult<HubActivationRequest>::Failure(
             InvalidArgument("Specify exactly one valid Hub activation action."));

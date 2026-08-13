@@ -70,6 +70,29 @@ namespace KeireHub
         std::string CorrelationId;
     };
 
+    struct MarketplaceProductVersion final
+    {
+        std::string Id;
+        std::string Version;
+        std::string State;
+        std::string InstallKind;
+        std::string MinimumEngineVersion;
+        std::string MaximumEngineVersion;
+        std::vector<std::string> Platforms;
+        std::vector<std::string> Architectures;
+        std::vector<std::string> RendererCapabilities;
+        std::string ManagedApiVersion;
+        std::string ReleaseNotesMarkdown;
+        std::string PublishedAt;
+    };
+
+    struct MarketplaceProductDetails final
+    {
+        MarketplaceProduct Product;
+        std::vector<MarketplaceProductVersion> Versions;
+        std::string CorrelationId;
+    };
+
     struct MarketplaceClaimRequest final
     {
         std::string ProductId;
@@ -125,6 +148,7 @@ namespace KeireHub
                                                                  MarketplaceTransport transport);
 
         [[nodiscard]] HubResult<MarketplaceCatalogPage> Catalog(const MarketplaceCatalogQuery& query = {}) const;
+        [[nodiscard]] HubResult<MarketplaceProductDetails> Product(std::string_view productId) const;
         [[nodiscard]] HubResult<MarketplaceLibraryPage> Library(std::string_view accessToken,
                                                                 std::optional<std::string_view> organizationId = {},
                                                                 std::string_view cursor = {}) const;

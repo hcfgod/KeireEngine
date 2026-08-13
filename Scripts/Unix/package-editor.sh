@@ -49,7 +49,7 @@ validation_root="$ROOT/Artifacts/$name-validation"
 rm -rf "$stage" "$legacy_stage" "$validation_root"
 rm -f "$archive" "$archive.sha256"
 mkdir -p "$distribution_root"
-mkdir -p "$stage/Config/Branding" "$stage/content" "$stage/third-party"
+mkdir -p "$stage/Config/Branding" "$stage/Config/Marketplace" "$stage/content" "$stage/third-party/licenses"
 cp -R "$sdk_stage/bin" "$sdk_stage/samples" "$sdk_stage/Docs" "$stage/"
 # The standalone Hub package owns the Hub executable and every native Hub launcher.
 rm -f "$stage/bin/$HUB_TARGET"
@@ -66,10 +66,23 @@ cp -R "$ROOT/KeireHubContent/." "$stage/content/"
 cp "$sdk_stage/Config/Client.json" "$stage/Config/"
 cp "$ROOT/Config/SourceModules.premake.lua" "$stage/Config/"
 cp "$ROOT/Config/Branding/Keire.png" "$stage/Config/Branding/"
+cp "$ROOT/Config/Marketplace/trusted-marketplace-key.json" "$stage/Config/Marketplace/"
 cp -R "$sdk_stage/third-party/licenses" "$stage/third-party/"
 cp "$sdk_stage/README.md" "$sdk_stage/LICENSE.txt" "$sdk_stage/THIRD_PARTY_NOTICES.md" \
   "$sdk_stage/build-manifest.json" "$stage/"
 cp "$ROOT/CHANGELOG.md" "$stage/"
+
+dependency_install="$ROOT/Build/Dependencies/$system-$output_arch-$TOOLSET/Release/install"
+sodium_runtime_name=libsodium.so
+[[ "$PLATFORM" == Mac ]] && sodium_runtime_name=libsodium.dylib
+[[ -f "$dependency_install/lib/$sodium_runtime_name" &&
+   -f "$dependency_install/share/licenses/libsodium/LICENSE" ]] || {
+  printf 'The Editor marketplace verifier runtime or license is missing. Run bootstrap first.\n' >&2
+  exit 1
+}
+cp -L "$dependency_install/lib/$sodium_runtime_name" "$stage/bin/$sodium_runtime_name"
+cp "$dependency_install/share/licenses/libsodium/LICENSE" \
+  "$stage/third-party/licenses/libsodium-LICENSE.txt"
 
 dotnet_source="$ROOT/Build/Dependencies/dotnet-sdk"
 dotnet_destination="$stage/bin/Managed/Dotnet"

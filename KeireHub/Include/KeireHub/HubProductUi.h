@@ -345,6 +345,7 @@ namespace KeireHub
         void ResetSettingsEditor() noexcept { m_EditedSettings.reset(); }
         [[nodiscard]] bool RequestEditorInstall(std::string_view packageOrVersion, const HubProductSnapshot& snapshot);
         void SetEditorInstallParent(const std::filesystem::path& parent);
+        void RequestAccountDialog() noexcept { m_RequestAccountDialog = true; }
 
         void DrawTitleBar(Keire::UiFrame& ui, Keire::Window& window, HubPage page, const HubProductSnapshot& snapshot,
                           HubUiCommand& command);

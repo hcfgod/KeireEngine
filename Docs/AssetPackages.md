@@ -3,9 +3,9 @@
 Kéire 0.3.1 introduces a project-content package boundary that is separate from Editor and Build Support
 distribution. Asset packages use `.keireassetpackage`; Hub and Editor software continues to use `.keirepackage`.
 
-The marketplace, Hub, and Editor workflow is feature-gated while the end-to-end signing, validation, legal, recovery,
-and native-platform launch gates are completed. The archive and project contracts described here are implemented engine
-foundations and can be tested locally without enabling the public marketplace.
+The public marketplace uses these same archive and project contracts. Browsing and claims happen on the website, Hub
+owns account authorization and private downloads, and project-specific installation or import happens in the Editor.
+Unpublished, withdrawn, revoked, unsigned, incompatible, or unentitled releases never become installable entries.
 
 ## Archive contract
 
@@ -88,11 +88,22 @@ receipt as the common ancestor: unchanged local files update automatically, loca
 local/incoming changes require an explicit replace or keep-local decision. Removal deletes only receipt-owned files
 whose hashes remain unchanged and reports modified files that were retained.
 
-The Editor's **Window -> Package Management -> Package Manager** surface exposes My Assets, Kéire Registry, In Project,
-Updates, Local Packages, and Built-in views. The local workflow can inspect Registry, Asset Import, and Complete Project
-archives, search their inventory, install registry content, import asset content, embed packages, and recover interrupted
-transactions. Catalog-backed library/download presentation, per-file selection controls, sample import, and complete-
-project creation remain gated until the authenticated Hub broker and production catalog are enabled.
+The Editor's **Window -> Package Manager** surface is visible in the default bottom dock and exposes My Assets, Kéire
+Registry, In Project, Updates, Local Packages, and Built-in views. Choosing **Open in Editor** on an entitled website
+listing launches or focuses Hub through `keirehub://marketplace/product/<product-id>`. Hub synchronizes the library,
+selects the newest compatible published version, creates a device-scoped grant, downloads into the content-addressed
+per-user cache, and verifies size, SHA-256, package identity, and Ed25519 signature. It then atomically publishes a
+token-free cache snapshot. Running Editors observe the snapshot within one second; an Editor opened later selects the
+same requested asset.
+
+My Assets presents honest entitled, downloading, ready, unavailable, and failed states. A ready Registry package can be
+installed into the open project; a ready Asset Import package can be imported with explicit executable-code and
+conflict choices. Complete Project packages remain Hub-owned because project creation and registration precede Editor
+ownership. Local Packages remains a deliberate developer workflow and never claims marketplace trust.
+
+OAuth access tokens, refresh tokens, organization authorization, and signed Storage URLs remain in Hub memory and are
+never serialized into the cache or passed to the Editor. The packaged Hub and Editor both carry the public marketplace
+trust document and the pinned libsodium verifier; only the offline publication boundary has the private signing key.
 
 Package C# must be explicitly declared as runtime, Editor, or test code. Import requires explicit executable-code
 consent. The receipt binds that consent to the package's executable-code fingerprint, so a version that changes code

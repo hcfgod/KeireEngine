@@ -196,6 +196,8 @@ namespace Keire
         Vector3 Target;
         Vector3 Pole{0.0F, 0.0F, 1.0F};
         float Weight = 1.0F;
+        std::optional<Quaternion> EndRotation;
+        float EndRotationWeight = 0.0F;
     };
 
     struct FabrikIkRequest
@@ -231,7 +233,9 @@ namespace Keire
     struct FootGroundingResult
     {
         std::size_t SolvedFeet = 0;
+        std::size_t UnreachableFeet = 0;
         float PelvisAdjustment = 0.0F;
+        float MaximumPositionError = 0.0F;
     };
 
     enum class RagdollPoseMode : std::uint8_t
