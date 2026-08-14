@@ -5,6 +5,10 @@ versions.
 
 ## Unreleased
 
+- Closed the repository-wide readiness review findings: Marketplace catalog and library APIs now use indexed keyset
+  cursors, every Edge Function has a frozen Deno dependency graph and CI type check, compile-database generation records
+  the shared Ninja artifact identity, and the automatic publication, Python-format, and current clang-tidy gates are
+  regression-covered and clean.
 - Reworked Marketplace package publication into an upload-once workflow. The isolated validator now emits bounded,
   SHA-256-bound review evidence and an Ed25519 attestation; staff can inspect the verified manifest inventory without
   downloading or possessing a publisher's private archive.

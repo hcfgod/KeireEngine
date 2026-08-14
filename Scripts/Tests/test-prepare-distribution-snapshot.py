@@ -62,7 +62,9 @@ class DistributionSnapshotPreparationTests(unittest.TestCase):
         self.manifest.write_text(json.dumps(self.document), encoding="utf-8")
 
     @staticmethod
-    def compact_descriptor(document: dict[str, object], manifest: Path) -> dict[str, object]:
+    def compact_descriptor(
+        document: dict[str, object], manifest: Path
+    ) -> dict[str, object]:
         descriptor = {key: value for key, value in document.items() if key != "files"}
         manifest_bytes = manifest.read_bytes()
         descriptor["manifest"] = {
@@ -141,7 +143,9 @@ class DistributionSnapshotPreparationTests(unittest.TestCase):
         )
         manifest_digest = hashlib.sha256(self.manifest.read_bytes()).hexdigest()
         self.assertEqual(
-            (self.root / "prepared" / "manifests" / f"{manifest_digest}.json").read_bytes(),
+            (
+                self.root / "prepared" / "manifests" / f"{manifest_digest}.json"
+            ).read_bytes(),
             self.manifest.read_bytes(),
         )
         digest = self.document["artifact"]["sha256"]

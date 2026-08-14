@@ -61,6 +61,10 @@ if ($LASTEXITCODE -ne 0) { throw "Ninja dependency-file rule checks failed." }
 $generateScript = Get-Content (Join-Path $Windows "generate.ps1") -Raw
 Assert-True ($generateScript.Contains('--file=premake5.lua')) "Unicode-safe relative Premake script path"
 Assert-True ($generateScript.Contains('Get-ProjectGenerationFingerprint')) "Source-inventory project regeneration"
+Assert-True ($generateScript.Contains('$Generator -eq "compilecommands"') -and
+             $generateScript.Contains('(Join-Path $stampDirectory "ninja.stamp")') -and
+             $generateScript.Contains('"ninja|$Architecture|$Toolset|$([bool]$CI)|$generationFingerprint"')) `
+    "Compile database generation records the shared Ninja artifact identity"
 $windowsCommonSource = Get-Content (Join-Path $Windows "common.ps1") -Raw
 Assert-True ($windowsCommonSource.Contains('$generationInfrastructureInputs') -and
              $windowsCommonSource.Contains('Scripts\Unix\dependencies.sh') -and
@@ -438,7 +442,7 @@ $documentHeaders = (Get-Content (Join-Path (Get-RepositoryRoot) "KeireClient\Inc
 Assert-True (-not ($documentHeaders -match 'Storage\(\)|friend\s+class\s+::EditorWorkspaceLayer')) "Editor documents expose commands rather than mutable storage"
 $panelSources = @(
     'HierarchyPanel.cpp', 'InspectorPanel.cpp', 'SceneViewportPanel.cpp', 'InputActionsPanel.cpp',
-    'ProjectSettingsPanel.cpp', 'AssetBrowserPanel.cpp'
+    'ProjectSettingsPanel.cpp', 'AssetBrowserPanel.cpp', 'AssetInspectorPanel.cpp'
 ) | ForEach-Object { Join-Path (Get-RepositoryRoot) ("KeireClient\Source\Editor\" + $_) }
 Assert-True (-not ($panelSources | Where-Object { -not (Test-Path $_) })) "Editor panels have independent implementation units"
 $panelText = ($panelSources | ForEach-Object { Get-Content $_ -Raw }) -join "`n"

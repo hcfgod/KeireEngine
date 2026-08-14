@@ -11,6 +11,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace
@@ -55,7 +56,7 @@ namespace
     {
       public:
         LifecycleLayer(std::string name, std::vector<std::string>& order, const bool exitOnUpdate = false)
-            : Layer(name), m_Order(order), m_ExitOnUpdate(exitOnUpdate)
+            : Layer(std::move(name)), m_Order(order), m_ExitOnUpdate(exitOnUpdate)
         {
         }
 
@@ -189,7 +190,7 @@ namespace
                     secondaryId = SDL_GetWindowID(windows[index]);
                 }
             }
-            SDL_free(windows);
+            SDL_free(static_cast<void*>(windows));
             REQUIRE(secondaryId != 0);
 
             SDL_Event close{};
@@ -603,7 +604,7 @@ namespace
             for (int index = 0; index < count; ++index)
                 if (std::string(SDL_GetWindowTitle(windows[index])) == "minimize-transition")
                     primaryId = SDL_GetWindowID(windows[index]);
-            SDL_free(windows);
+            SDL_free(static_cast<void*>(windows));
             REQUIRE(primaryId != 0);
 
             SDL_Event minimize{};
@@ -659,7 +660,7 @@ namespace
             for (int index = 0; index < count; ++index)
                 if (std::string(SDL_GetWindowTitle(windows[index])) == "minimized-background")
                     primaryId = SDL_GetWindowID(windows[index]);
-            SDL_free(windows);
+            SDL_free(static_cast<void*>(windows));
             REQUIRE(primaryId != 0);
 
             SDL_Event minimize{};

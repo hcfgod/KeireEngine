@@ -151,21 +151,73 @@ export function boundedString(value: unknown, name: string, minimum: number, max
     return value;
 }
 
-export function decodeCursor(value: string | null): number {
-    if (!value) {
-        return 0;
-    }
+export interface CatalogCursor {
+    featured: boolean;
+    publishedAt: string;
+    id: string;
+}
+
+export interface LibraryCursor {
+    grantedAt: string;
+    id: string;
+}
+
+const cursorUuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function cursorTimestamp(value: unknown): string {
+    if (typeof value !== "string" || value.length > 64) throw new Error("invalid timestamp");
+    const parsed = new Date(value);
+    if (!Number.isFinite(parsed.valueOf())) throw new Error("invalid timestamp");
+    return parsed.toISOString();
+}
+
+function cursorId(value: unknown): string {
+    if (typeof value !== "string" || !cursorUuidPattern.test(value)) throw new Error("invalid identity");
+    return value.toLowerCase();
+}
+
+function decodeCursor(value: string | null): Record<string, unknown> | null {
+    if (!value) return null;
     try {
-        const decoded = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
-        if (!Number.isSafeInteger(decoded.offset) || decoded.offset < 0 || decoded.offset > 100_000) {
-            throw new Error("invalid offset");
-        }
-        return decoded.offset;
+        if (value.length > 512) throw new Error("oversized cursor");
+        const decoded: unknown = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+        if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) throw new Error("invalid cursor");
+        return decoded as Record<string, unknown>;
     } catch {
         throw new MarketplaceApiError(400, "marketplace.invalid_cursor", "The pagination cursor is invalid.");
     }
 }
 
-export function encodeCursor(offset: number): string {
-    return Buffer.from(JSON.stringify({ offset }), "utf8").toString("base64url");
+export function decodeCatalogCursor(value: string | null): CatalogCursor | null {
+    const decoded = decodeCursor(value);
+    if (!decoded) return null;
+    try {
+        if (decoded.kind !== "catalog" || typeof decoded.featured !== "boolean") throw new Error("wrong cursor kind");
+        return {
+            featured: decoded.featured,
+            publishedAt: cursorTimestamp(decoded.publishedAt),
+            id: cursorId(decoded.id),
+        };
+    } catch {
+        throw new MarketplaceApiError(400, "marketplace.invalid_cursor", "The pagination cursor is invalid.");
+    }
+}
+
+export function encodeCatalogCursor(cursor: CatalogCursor): string {
+    return Buffer.from(JSON.stringify({ kind: "catalog", ...cursor }), "utf8").toString("base64url");
+}
+
+export function decodeLibraryCursor(value: string | null): LibraryCursor | null {
+    const decoded = decodeCursor(value);
+    if (!decoded) return null;
+    try {
+        if (decoded.kind !== "library") throw new Error("wrong cursor kind");
+        return { grantedAt: cursorTimestamp(decoded.grantedAt), id: cursorId(decoded.id) };
+    } catch {
+        throw new MarketplaceApiError(400, "marketplace.invalid_cursor", "The pagination cursor is invalid.");
+    }
+}
+
+export function encodeLibraryCursor(cursor: LibraryCursor): string {
+    return Buffer.from(JSON.stringify({ kind: "library", ...cursor }), "utf8").toString("base64url");
 }

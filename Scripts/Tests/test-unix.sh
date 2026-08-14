@@ -539,20 +539,22 @@ assert_false grep -E -q 'Storage\(\)|friend[[:space:]]+class[[:space:]]+::Editor
   "$ROOT/KeireClient/Include/KeireClient/Editor/SceneDocument.h" \
   "$ROOT/KeireClient/Include/KeireClient/Editor/InputActionsDocument.h"
 assert_true test -f "$ROOT/KeireClient/Source/Editor/HierarchyPanel.cpp"
-for panel in HierarchyPanel InspectorPanel SceneViewportPanel InputActionsPanel ProjectSettingsPanel AssetBrowserPanel; do
+for panel in HierarchyPanel InspectorPanel AssetInspectorPanel SceneViewportPanel InputActionsPanel ProjectSettingsPanel AssetBrowserPanel; do
   assert_true test -f "$ROOT/KeireClient/Source/Editor/${panel}.cpp"
 done
 assert_true grep -q 'class AssetInspectorPanel final' \
   "$ROOT/KeireClient/Include/KeireClient/Editor/EditorPanels.h"
-assert_true grep -q 'AssetInspectorPanel::Draw' "$ROOT/KeireClient/Source/Editor/InspectorPanel.cpp"
+assert_true grep -q 'AssetInspectorPanel::Draw' "$ROOT/KeireClient/Source/Editor/AssetInspectorPanel.cpp"
 assert_false grep -E -q 'if[[:space:]]*\(auto[[:space:]]+[[:alnum:]_]+[[:space:]]*=[[:space:]]*ui\.BeginPanel\([^;]+;[[:space:]]*![[:alnum:]_]+\)' \
   "$ROOT/KeireClient/Source/Editor/HierarchyPanel.cpp" \
   "$ROOT/KeireClient/Source/Editor/InspectorPanel.cpp" \
+  "$ROOT/KeireClient/Source/Editor/AssetInspectorPanel.cpp" \
   "$ROOT/KeireClient/Source/Editor/SceneViewportPanel.cpp" \
   "$ROOT/KeireClient/Source/Editor/InputActionsPanel.cpp"
 assert_false grep -R -q '#include "KeireClient/EditorWorkspaceLayer.h"' \
   "$ROOT/KeireClient/Source/Editor/HierarchyPanel.cpp" \
   "$ROOT/KeireClient/Source/Editor/InspectorPanel.cpp" \
+  "$ROOT/KeireClient/Source/Editor/AssetInspectorPanel.cpp" \
   "$ROOT/KeireClient/Source/Editor/SceneViewportPanel.cpp" \
   "$ROOT/KeireClient/Source/Editor/InputActionsPanel.cpp" \
   "$ROOT/KeireClient/Source/Editor/ProjectSettingsPanel.cpp" \

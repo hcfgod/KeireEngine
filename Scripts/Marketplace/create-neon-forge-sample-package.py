@@ -75,7 +75,9 @@ def locate_asset_tool(repository: pathlib.Path) -> pathlib.Path:
         )
         if candidates:
             return candidates[0]
-    raise RuntimeError("KeireAssetTool is not built. Build that target before creating the sample package.")
+    raise RuntimeError(
+        "KeireAssetTool is not built. Build that target before creating the sample package."
+    )
 
 
 def run(asset_tool: pathlib.Path, arguments: list[str]) -> str:
@@ -87,16 +89,24 @@ def run(asset_tool: pathlib.Path, arguments: list[str]) -> str:
         errors="strict",
     )
     if completed.returncode != 0:
-        diagnostic = completed.stderr.strip() or completed.stdout.strip() or "no diagnostic was produced"
+        diagnostic = (
+            completed.stderr.strip()
+            or completed.stdout.strip()
+            or "no diagnostic was produced"
+        )
         raise RuntimeError(f"KeireAssetTool {arguments[0]} failed: {diagnostic}")
     return completed.stdout.strip()
 
 
-def copy_reviewed_asset(project: pathlib.Path, source_relative: str, destination: pathlib.Path) -> None:
+def copy_reviewed_asset(
+    project: pathlib.Path, source_relative: str, destination: pathlib.Path
+) -> None:
     source = project / pathlib.PurePosixPath(source_relative)
     metadata = pathlib.Path(f"{source}.keiremeta")
     if not source.is_file() or not metadata.is_file():
-        raise FileNotFoundError(f"The reviewed sample asset or its metadata is missing: {source_relative}")
+        raise FileNotFoundError(
+            f"The reviewed sample asset or its metadata is missing: {source_relative}"
+        )
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source, destination)
     shutil.copyfile(metadata, pathlib.Path(f"{destination}.keiremeta"))
@@ -207,12 +217,19 @@ public sealed class NeonForgePulse : Behaviour
 def inventory(payload: pathlib.Path) -> tuple[list[dict[str, object]], int]:
     files: list[dict[str, object]] = []
     total = 0
-    for path in sorted((item for item in payload.rglob("*") if item.is_file()), key=lambda item: item.as_posix()):
+    for path in sorted(
+        (item for item in payload.rglob("*") if item.is_file()),
+        key=lambda item: item.as_posix(),
+    ):
         relative = path.relative_to(payload).as_posix()
         if not relative.isascii():
-            raise RuntimeError(f"Schema-1 package paths must be ASCII portable: {relative}")
+            raise RuntimeError(
+                f"Schema-1 package paths must be ASCII portable: {relative}"
+            )
         size = path.stat().st_size
-        files.append({"mode": 0o644, "path": relative, "sha256": sha256(path), "sizeBytes": size})
+        files.append(
+            {"mode": 0o644, "path": relative, "sha256": sha256(path), "sizeBytes": size}
+        )
         total += size
     return files, total
 
@@ -220,16 +237,24 @@ def inventory(payload: pathlib.Path) -> tuple[list[dict[str, object]], int]:
 def asset_inventory(payload: pathlib.Path) -> list[dict[str, object]]:
     assets: list[dict[str, object]] = []
     identities: set[str] = set()
-    for metadata in sorted(payload.rglob("*.keiremeta"), key=lambda path: path.as_posix()):
+    for metadata in sorted(
+        payload.rglob("*.keiremeta"), key=lambda path: path.as_posix()
+    ):
         source = pathlib.Path(str(metadata)[: -len(".keiremeta")])
         document = json.loads(metadata.read_text(encoding="utf-8"))
         identity = document.get("id")
         asset_type = document.get("type")
         dependencies = document.get("dependencies", [])
-        if not source.is_file() or not isinstance(identity, str) or not isinstance(asset_type, str):
+        if (
+            not source.is_file()
+            or not isinstance(identity, str)
+            or not isinstance(asset_type, str)
+        ):
             raise RuntimeError(f"Asset metadata is incomplete: {metadata}")
         if not isinstance(dependencies, list) or identity in identities:
-            raise RuntimeError(f"Asset metadata has invalid dependencies or a duplicate identity: {metadata}")
+            raise RuntimeError(
+                f"Asset metadata has invalid dependencies or a duplicate identity: {metadata}"
+            )
         identities.add(identity)
         assets.append(
             {
@@ -241,9 +266,15 @@ def asset_inventory(payload: pathlib.Path) -> list[dict[str, object]]:
             }
         )
     for asset in assets:
-        missing = [dependency for dependency in asset["dependencies"] if dependency not in identities]
+        missing = [
+            dependency
+            for dependency in asset["dependencies"]
+            if dependency not in identities
+        ]
         if missing:
-            raise RuntimeError(f"{asset['source']} has dependencies outside the sample package: {', '.join(missing)}")
+            raise RuntimeError(
+                f"{asset['source']} has dependencies outside the sample package: {', '.join(missing)}"
+            )
     return sorted(assets, key=lambda asset: str(asset["source"]))
 
 
@@ -258,7 +289,12 @@ def create_manifest(payload: pathlib.Path) -> dict[str, object]:
             "managedApiVersion": "0.3.1",
             "minimumEngineVersion": "0.3.1",
             "platforms": ["linux", "windows"],
-            "rendererCapabilities": ["material-graph", "pbr", "shader-graph", "vfx-graph"],
+            "rendererCapabilities": [
+                "material-graph",
+                "pbr",
+                "shader-graph",
+                "vfx-graph",
+            ],
         },
         "conflicts": [],
         "dependencies": [],
@@ -292,16 +328,22 @@ def create_package(
     asset_tool: pathlib.Path,
 ) -> pathlib.Path:
     if output_directory.exists():
-        raise FileExistsError(f"Refusing to replace existing sample-package output: {output_directory}")
+        raise FileExistsError(
+            f"Refusing to replace existing sample-package output: {output_directory}"
+        )
     output_directory.parent.mkdir(parents=True, exist_ok=True)
-    staging = output_directory.parent / f".{output_directory.name}-{uuid.uuid4().hex}.tmp"
+    staging = (
+        output_directory.parent / f".{output_directory.name}-{uuid.uuid4().hex}.tmp"
+    )
     payload = staging / "Payload"
     package = staging / f"neon-forge-creator-pack-{PACKAGE_VERSION}.keireassetpackage"
     manifest_path = staging / "manifest.json"
     try:
         payload.mkdir(parents=True)
         for source_relative, destination_relative in SAMPLE_ASSETS:
-            copy_reviewed_asset(project, source_relative, payload / destination_relative)
+            copy_reviewed_asset(
+                project, source_relative, payload / destination_relative
+            )
         write_managed_sample(payload)
         readme = payload / CONTENT_ROOT / "README.md"
         readme.write_text(
@@ -312,7 +354,9 @@ def create_package(
             newline="\n",
         )
         shutil.copyfile(repository / "LICENSE.txt", payload / "LICENSE.txt")
-        manifest_path.write_text(canonical_json(create_manifest(payload)), encoding="utf-8", newline="\n")
+        manifest_path.write_text(
+            canonical_json(create_manifest(payload)), encoding="utf-8", newline="\n"
+        )
         run(
             asset_tool,
             [
@@ -327,14 +371,25 @@ def create_package(
                 "9",
             ],
         )
-        inspected = json.loads(run(asset_tool, ["inspect-asset-package", "--input", str(package)]))
+        inspected = json.loads(
+            run(asset_tool, ["inspect-asset-package", "--input", str(package)])
+        )
         archive = inspected.get("archive")
-        if inspected.get("packageId") != PACKAGE_ID or inspected.get("version") != PACKAGE_VERSION:
-            raise RuntimeError("The generated package identity does not match the sample definition.")
+        if (
+            inspected.get("packageId") != PACKAGE_ID
+            or inspected.get("version") != PACKAGE_VERSION
+        ):
+            raise RuntimeError(
+                "The generated package identity does not match the sample definition."
+            )
         if inspected.get("detachedSignature") is not None:
-            raise RuntimeError("The upload sample must remain unsigned until Marketplace publication.")
+            raise RuntimeError(
+                "The upload sample must remain unsigned until Marketplace publication."
+            )
         if not isinstance(archive, dict) or archive.get("sha256") != sha256(package):
-            raise RuntimeError("The generated package hash did not survive independent verification.")
+            raise RuntimeError(
+                "The generated package hash did not survive independent verification."
+            )
         (staging / "artifact.json").write_text(
             json.dumps(
                 {
@@ -364,11 +419,18 @@ def parse_arguments() -> argparse.Namespace:
     repository = pathlib.Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--asset-tool", type=pathlib.Path)
-    parser.add_argument("--project", type=pathlib.Path, default=repository / "Samples" / "KeireSandbox")
+    parser.add_argument(
+        "--project", type=pathlib.Path, default=repository / "Samples" / "KeireSandbox"
+    )
     parser.add_argument(
         "--output-directory",
         type=pathlib.Path,
-        default=repository / "Build" / "Marketplace" / "UploadSamples" / "NeonForgeCreatorPack" / PACKAGE_VERSION,
+        default=repository
+        / "Build"
+        / "Marketplace"
+        / "UploadSamples"
+        / "NeonForgeCreatorPack"
+        / PACKAGE_VERSION,
     )
     return parser.parse_args()
 
@@ -376,9 +438,20 @@ def parse_arguments() -> argparse.Namespace:
 def main() -> int:
     arguments = parse_arguments()
     repository = pathlib.Path(__file__).resolve().parents[2]
-    asset_tool = arguments.asset_tool.resolve() if arguments.asset_tool else locate_asset_tool(repository)
-    package = create_package(repository, arguments.project.resolve(), arguments.output_directory.resolve(), asset_tool)
-    artifact = json.loads((package.parent / "artifact.json").read_text(encoding="utf-8"))
+    asset_tool = (
+        arguments.asset_tool.resolve()
+        if arguments.asset_tool
+        else locate_asset_tool(repository)
+    )
+    package = create_package(
+        repository,
+        arguments.project.resolve(),
+        arguments.output_directory.resolve(),
+        asset_tool,
+    )
+    artifact = json.loads(
+        (package.parent / "artifact.json").read_text(encoding="utf-8")
+    )
     print(json.dumps({"artifact": str(package), **artifact}, indent=2, sort_keys=True))
     return 0
 

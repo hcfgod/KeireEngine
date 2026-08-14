@@ -442,6 +442,8 @@ namespace Keire
         void InstallManagedComponents(const Ref<ComponentRegistry>& registry);
         void SetAssetSystem(Ref<AssetSystem> assets);
         void PumpManagedAssets();
+        // The caller retains ownership. The service must outlive every script callback and must be cleared before the
+        // owning layer or application begins detachment.
         void SetRuntimeServices(IScriptRuntimeServices* services);
         void Close();
 

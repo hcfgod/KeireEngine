@@ -46,9 +46,15 @@ jobs:
           python3 Scripts/Tests/check-text-integrity.py
           python3 Scripts/Tests/check-source-budgets.py
           python3 Scripts/Tests/validate-workflows.py
-      - name: Check Supabase Edge Function
-        working-directory: supabase/functions/website-contact
-        run: deno check --frozen --lock=deno.lock index.ts
+      - name: Check Supabase Edge Functions
+        run: |
+          functions=(
+            website-contact marketplace-hub marketplace-library marketplace-moderation marketplace-publication
+            marketplace-publication-queue marketplace-publisher marketplace-validator-queue
+          )
+          for function in "${functions[@]}"; do
+            (cd "supabase/functions/$function" && deno check --frozen --lock=deno.lock index.ts)
+          done
       - name: Check workflows and YAML
         run: |
           "$(go env GOPATH)/bin/actionlint"

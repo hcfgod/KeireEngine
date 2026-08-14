@@ -79,5 +79,12 @@ if ($Generator -eq "compilecommands") {
 
 $stampDirectory = Join-Path $Root "Build\Generated"
 New-Item -ItemType Directory -Force -Path $stampDirectory | Out-Null
+$generationFingerprint = Get-ProjectGenerationFingerprint $Root
 Set-Content -Path (Join-Path $stampDirectory "$Generator.stamp") `
-    -Value "$Generator|$Architecture|$Toolset|$([bool]$CI)|$(Get-ProjectGenerationFingerprint $Root)" -Encoding ASCII
+    -Value "$Generator|$Architecture|$Toolset|$([bool]$CI)|$generationFingerprint" -Encoding ASCII
+if ($Generator -eq "compilecommands") {
+    # Compile database generation produces the shared build.ninja too. Record its actual identity so a later Ninja
+    # build with a different toolset cannot accept a stale stamp left by an earlier generation.
+    Set-Content -Path (Join-Path $stampDirectory "ninja.stamp") `
+        -Value "ninja|$Architecture|$Toolset|$([bool]$CI)|$generationFingerprint" -Encoding ASCII
+}

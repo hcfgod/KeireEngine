@@ -217,11 +217,7 @@ def main() -> int:
                 catalogs.items()
             ):
                 catalog_path = (
-                    staging
-                    / catalog_root
-                    / channel
-                    / platform
-                    / f"{architecture}.json"
+                    staging / catalog_root / channel / platform / f"{architecture}.json"
                 )
                 manifests.sort(
                     key=lambda value: (

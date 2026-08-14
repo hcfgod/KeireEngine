@@ -42,7 +42,7 @@ namespace KeireEditor
         [[nodiscard]] bool HasAuthorizedMarketplaceSession(std::string& diagnostic) const;
         void InstallMarketplacePackage(const KeireHub::MarketplaceCacheItem& item);
         void PrepareMarketplaceImport(const KeireHub::MarketplaceCacheItem& item);
-        void ImportReviewedPackage(PackageImportConfirmation confirmation);
+        void ImportReviewedPackage(const PackageImportConfirmation& confirmation);
         void DrawImportReview(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme);
         void DrawMarketplaceLibrary(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme);
         void DrawInProject(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme);
@@ -70,6 +70,6 @@ namespace KeireEditor
         bool m_AllowExecutableCode = false;
         bool m_KeepLocalConflicts = true;
         bool m_MarketplaceSessionAuthorized = false;
-        std::chrono::steady_clock::time_point m_NextMarketplaceRefresh{};
+        std::chrono::steady_clock::time_point m_NextMarketplaceRefresh;
     };
 } // namespace KeireEditor

@@ -94,7 +94,7 @@ namespace KeireHub
         {
             std::ifstream stream(path, std::ios::binary);
             std::string value{std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
-            if (!stream || value.empty() || value.size() > 16U * 1024U)
+            if (!stream || value.empty() || value.size() > std::size_t{16U} * 1024U)
                 return std::nullopt;
             return value;
         }
@@ -292,7 +292,7 @@ namespace KeireHub
                                                             const std::uint64_t nowUnixSeconds)
     {
         m_PendingMarketplaceProduct = std::move(productId);
-        const auto status = StartMarketplaceProduct(executable, distribution, settings, nowUnixSeconds);
+        auto status = StartMarketplaceProduct(executable, distribution, settings, nowUnixSeconds);
         if (!status && status.Error().Code == HubErrorCode::AccountSessionInvalid)
         {
             productUi.RequestAccountDialog();

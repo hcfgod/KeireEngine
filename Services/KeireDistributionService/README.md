@@ -355,11 +355,13 @@ Marketplace validation uses two processes with different trust levels:
   payloads, and compiles declared C# only from generated projects with the pinned SDK and an empty NuGet source list.
   It signs the exact upload/version/bucket/path, package and evidence digests, scan outcomes, policy, and worker identity.
 
-Apply all migrations through `20260814034937_marketplace_automatic_publication.sql`, then deploy both server-only
-queues. Set `VALIDATOR_BROKER_SECRET` and `MARKETPLACE_PUBLICATION_SIGNER_SECRET` to different random values. Register
-only the two public keys in `marketplace_validator_attestation_keys` and `marketplace_signature_keys`; private keys stay
-on the worker host. Queue leases use `FOR UPDATE SKIP LOCKED`, recover expired workers, and stop poison jobs after five
+Apply all migrations through `20260814124354_add_marketplace_keyset_indexes.sql`, then deploy both server-only queues.
+Set `VALIDATOR_BROKER_SECRET` and `MARKETPLACE_PUBLICATION_SIGNER_SECRET` to different random values. Register only the
+two public keys in `marketplace_validator_attestation_keys` and `marketplace_signature_keys`; private keys stay on the
+worker host. Queue leases use `FOR UPDATE SKIP LOCKED`, recover expired workers, and stop poison jobs after five
 attempts. Validation success records the original immutable bucket/path and evidence; no later publication copy occurs.
+Every function owns a checked-in `deno.lock`; run the same frozen `deno check --lock=deno.lock index.ts` gate used by CI
+before deployment. Catalog and library pages use composite-index-backed keyset cursors instead of offset scans.
 
 ```sh
 supabase db push
