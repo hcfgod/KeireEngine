@@ -39,6 +39,7 @@ namespace KeireEditor
         void EmbedSelected();
         void RevertSelected();
         void RefreshMarketplaceCache(bool focusRequestedProduct);
+        [[nodiscard]] bool HasAuthorizedMarketplaceSession(std::string& diagnostic) const;
         void InstallMarketplacePackage(const KeireHub::MarketplaceCacheItem& item);
         void PrepareMarketplaceImport(const KeireHub::MarketplaceCacheItem& item);
         void ImportReviewedPackage(PackageImportConfirmation confirmation);
@@ -51,6 +52,7 @@ namespace KeireEditor
         std::unique_ptr<Keire::ProjectPackageManager> m_Manager;
         std::unique_ptr<Keire::ProjectAssetPackageImporter> m_AssetImporter;
         std::unique_ptr<KeireHub::MarketplaceCacheStore> m_MarketplaceCache;
+        std::unique_ptr<KeireHub::MarketplaceSessionLeaseStore> m_MarketplaceSession;
         std::unique_ptr<KeireHub::CatalogTrustStore> m_MarketplaceTrust;
         KeireHub::MarketplaceCacheSnapshot m_MarketplaceSnapshot;
         Keire::ProjectPackageManifest m_Manifest;
@@ -59,6 +61,7 @@ namespace KeireEditor
         std::string m_LocalArchive;
         std::string m_LocalSearch;
         std::string m_SelectedMarketplaceProduct;
+        std::string m_MarketplaceSessionMessage;
         std::string m_Status;
         std::string m_Error;
         Keire::ProjectPackageEvent m_LastEvent;
@@ -66,6 +69,7 @@ namespace KeireEditor
         PackageImportReview m_ImportReview;
         bool m_AllowExecutableCode = false;
         bool m_KeepLocalConflicts = true;
+        bool m_MarketplaceSessionAuthorized = false;
         std::chrono::steady_clock::time_point m_NextMarketplaceRefresh{};
     };
 } // namespace KeireEditor

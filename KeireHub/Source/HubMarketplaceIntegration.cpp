@@ -137,6 +137,16 @@ namespace KeireHub
                 if (!loaded)
                     return HubStatus::Failure(loaded.Error());
                 auto snapshot = std::move(loaded).Value();
+                if (snapshot.AccountId != request.AccountId)
+                    snapshot = {};
+                snapshot.AccountId = request.AccountId;
+                for (auto& item : snapshot.Items)
+                {
+                    item.EntitlementId.clear();
+                    item.Entitled = false;
+                    item.State = MarketplaceCacheState::Unavailable;
+                    item.FailureMessage.clear();
+                }
                 snapshot.RequestedProductId = request.ProductId;
                 ++snapshot.Revision;
                 if (const auto saved = cache.Save(snapshot); !saved)
@@ -191,8 +201,11 @@ namespace KeireHub
                         auto& item = Upsert(snapshot, libraryItem.Product);
                         item.EntitlementId = libraryItem.EntitlementId;
                         item.Entitled = true;
-                        if (item.State == MarketplaceCacheState::Unavailable)
-                            item.State = MarketplaceCacheState::Entitled;
+                        const auto cachedPackageReady = !item.PackageId.empty() && !item.Version.empty() &&
+                                                        !item.VersionId.empty() && !item.ArchiveSha256.empty() &&
+                                                        item.ArchiveSizeBytes != 0U && !item.SignedPublication.empty();
+                        item.State =
+                            cachedPackageReady ? MarketplaceCacheState::Ready : MarketplaceCacheState::Entitled;
                         if (libraryItem.ProductId == request.ProductId)
                         {
                             entitled = true;
@@ -207,6 +220,9 @@ namespace KeireHub
                 }
                 if (stop.stop_requested())
                     return HubStatus::Failure(MarketplaceError("The marketplace request was cancelled."));
+                ++snapshot.Revision;
+                if (const auto saved = cache.Save(snapshot); !saved)
+                    return saved;
                 if (!entitled)
                     throw std::runtime_error("This asset is not in the signed-in account's library. Claim it first.");
 
@@ -318,9 +334,10 @@ namespace KeireHub
                                            .AffectedItem = "marketplace"});
             }
         }
-        if (request.ProductId.empty() || request.AccessToken.empty() || request.ServiceBaseUrl.empty() ||
-            request.TrustedPublicKeyDocument.empty() || request.CacheRoot.empty() || !request.CacheRoot.is_absolute() ||
-            request.EngineVersion.empty() || request.Platform.empty() || request.Architecture.empty())
+        if (request.ProductId.empty() || request.AccountId.empty() || request.AccessToken.empty() ||
+            request.ServiceBaseUrl.empty() || request.TrustedPublicKeyDocument.empty() || request.CacheRoot.empty() ||
+            !request.CacheRoot.is_absolute() || request.EngineVersion.empty() || request.Platform.empty() ||
+            request.Architecture.empty())
         {
             return HubStatus::Failure({.Code = HubErrorCode::InvalidArgument,
                                        .Message = "The marketplace request is incomplete.",

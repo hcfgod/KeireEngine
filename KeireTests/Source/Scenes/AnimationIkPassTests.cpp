@@ -2,6 +2,7 @@
 
 #include <doctest/doctest.h>
 
+#include <array>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -69,6 +70,41 @@ TEST_CASE("Automatic leg IK preserves the sampled knee bend instead of forcing a
     CHECK(std::isfinite(straight.X));
     CHECK(std::isfinite(straight.Y));
     CHECK(std::isfinite(straight.Z));
+}
+
+TEST_CASE("Automatic leg IK derives a shared knee plane from rig geometry and resists slope sway")
+{
+    const Keire::Vector3 leftHip{-0.25F, 2.0F, 0.0F};
+    const Keire::Vector3 rightHip{0.25F, 2.0F, 0.0F};
+    const auto reference = Keire::Detail::AutomaticBipedKneeReference(leftHip, rightHip, {0.0F, 1.0F, 0.0F});
+    REQUIRE(reference.Z > 0.99F);
+    const auto oriented =
+        Keire::Detail::OrientBipedKneeReference(reference, leftHip, {-0.25F, 1.0F, -0.25F}, {-0.25F, 0.0F, 0.0F},
+                                                rightHip, {0.25F, 1.0F, -0.25F}, {0.25F, 0.0F, 0.0F});
+    CHECK(oriented.Z < -0.99F);
+
+    Keire::Detail::AutomaticLimbIkState leftState;
+    Keire::Detail::AutomaticLimbIkState rightState;
+    const auto solve = [&](const Keire::Vector3 target, const Keire::Vector3 leftKnee, const Keire::Vector3 rightKnee)
+    {
+        const auto left = Keire::Detail::StableAutomaticLimbPole(leftHip, leftKnee, {-0.25F, 0.0F, 0.0F}, target,
+                                                                 reference, 1.0F / 60.0F, 0.12F, 0.9F, leftState);
+        const auto right = Keire::Detail::StableAutomaticLimbPole(rightHip, rightKnee, {0.25F, 0.0F, 0.0F}, target,
+                                                                  reference, 1.0F / 60.0F, 0.12F, 0.9F, rightState);
+        return std::array{left, right};
+    };
+
+    const auto initial = solve({0.0F, 0.1F, 0.2F}, {-0.5F, 1.0F, 0.25F}, {0.5F, 1.0F, 0.25F});
+    const auto sloped = solve({0.4F, 0.65F, -0.15F}, {0.2F, 1.0F, -0.25F}, {-0.2F, 1.0F, -0.25F});
+    const auto leftInitialDirection = Keire::Detail::IkNormalize(Keire::Detail::IkSubtract(initial[0], leftHip));
+    const auto rightInitialDirection = Keire::Detail::IkNormalize(Keire::Detail::IkSubtract(initial[1], rightHip));
+    const auto leftSlopeDirection = Keire::Detail::IkNormalize(Keire::Detail::IkSubtract(sloped[0], leftHip));
+    const auto rightSlopeDirection = Keire::Detail::IkNormalize(Keire::Detail::IkSubtract(sloped[1], rightHip));
+
+    CHECK(Keire::Detail::IkDot(leftInitialDirection, rightInitialDirection) > 0.95F);
+    CHECK(Keire::Detail::IkDot(leftSlopeDirection, rightSlopeDirection) > 0.9F);
+    CHECK(Keire::Detail::IkDot(leftInitialDirection, leftSlopeDirection) > 0.8F);
+    CHECK(Keire::Detail::IkDot(rightInitialDirection, rightSlopeDirection) > 0.8F);
 }
 
 TEST_CASE("Automatic foot planting locks animation drift and releases on a deliberate lift")

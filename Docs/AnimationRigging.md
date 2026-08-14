@@ -177,7 +177,12 @@ soles rest above the hit surface even when their visible geometry extends below 
 The authored **Sole Offset** is a minimum/fallback clearance rather than an additional lift: automatic boot thickness
 replaces it when larger, preventing the two values from stacking into a visible hover. Each leg also preserves the
 sampled animation's knee bend plane while reaching its vertical contact, so grounding does not pull a knee toward a
-fixed model axis or distort the original forward/back stance.
+fixed model axis or distort the original forward/back stance. **Knee Stability** blends both legs toward one sagittal
+bend plane derived from the rig's hip spacing, gravity, and the current sampled pose. The pole direction is transported
+continuously as a contact moves across a slope, preventing a nearly straight knee from swaying, flipping, or crossing
+the opposite leg. Zero preserves the sampled animation as much as possible; one strongly favors the shared stable
+plane. The calculation uses semantic joints and measured transforms, not model-specific dimensions, bone names, or a
+hard-coded forward axis.
 
 **Lock Planted Feet** holds a near-ground sole target across animation samples. When the contact belongs to a scene
 entity, the target and normal are stored in that support's local space, so the planted foot and leg follow a platform
@@ -202,14 +207,15 @@ ankle-aligned sole instead of retaining an animated upward curl.
 **Automatic Ray Distance** expands each downward query from the configured minimum to the evaluated leg length. This
 prevents a raised animation pose from silently losing one contact and leaving a foot hovering, while the collision mask
 and maximum slope keep walls and unrelated trigger geometry out of the solution. Disable it when a game deliberately
-needs a strict ledge/drop cutoff. Ray height/range, sole offset, pelvis limit, plant/release distances,
+needs a strict ledge/drop cutoff. Ray height/range, sole offset, pelvis limit, plant/release distances, knee stability,
 response time, lean controls, position/rotation weights, and collision mask are all serialized per Animator.
 
 New Animators enable semantic mapping, automatic ray distance, and planted-foot locking by default. Schema-one and
 schema-two Animators retain their exact authored bone-name mapping during migration, while schema-three Animators
 preserve their existing semantic and limb settings; schema-four Animators retain their authored contact-lock values.
-All older schemas receive explicit defaults for response and lean correction. Authors can opt into semantic mapping
-after verifying a legacy custom rig.
+Schema-five Animators preserve their authored response and lean values and receive only the new knee-stability default.
+Earlier schemas receive the defaults introduced after their version. Authors can opt into semantic mapping after
+verifying a legacy custom rig.
 
 Two-bone and FABRIK rotations are solved in model space and converted back through the actual parent transform, so
 rotated parents and imported bind orientations do not corrupt local bone rotations. Two-bone chains may contain

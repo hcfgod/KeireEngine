@@ -270,13 +270,19 @@ Marketplace product activation uses the same per-user `keirehub` protocol regist
 strict action: `keirehub://marketplace/product/<UUID>`. Query strings, fragments, traversal, extra path segments, invalid
 UUIDs, oversized frames, and unexpected fields are rejected before dispatch. A secondary Hub process forwards the typed
 request to the existing primary process, so website clicks do not create competing account sessions or caches.
+On Windows, starting browser sign-in first refreshes the current-user protocol command to the exact running Hub
+executable. A Hub launched directly from a build or portable directory therefore receives its callback without an
+installer or administrator access. Registration is transactional: a failed update restores the previous values before
+the browser flow begins.
 
 If the user is signed out, Hub retains the requested product ID in memory and opens the account dialog. After sign-in,
 Hub synchronizes My Assets and prepares the package without exposing the access token to the Editor. If an Editor is
-already open, its Package Manager observes the atomic token-free cache update. Otherwise Hub remains on Projects so the
-user can choose the target project; the next Editor reads the same requested-product marker and focuses the Package
-Manager. Registry and Asset Import packages are project-scoped Editor operations. Complete Project packages remain Hub
-creation operations.
+already open, its Package Manager observes the atomic token-free cache update. Hub renews a short-lived, token-free
+account lease beside that cache; the Editor displays My Assets only when the lease is current and belongs to the same
+account. Signing out clears the lease immediately, while a crashed or closed Hub expires within 15 seconds. Otherwise
+Hub remains on Projects so the user can choose the target project; the next Editor reads the same requested-product
+marker and focuses the Package Manager after the matching Hub session is available. Registry and Asset Import packages
+are project-scoped Editor operations. Complete Project packages remain Hub creation operations.
 
 ## Distribution and trust
 

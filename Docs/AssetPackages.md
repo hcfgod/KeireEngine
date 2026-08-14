@@ -80,9 +80,10 @@ non-committed transaction and reports malformed journals without deleting their 
 
 The global content cache is not source controlled and is safe to reuse offline only after its complete file inventory is
 revalidated. Entitlement controls access to a marketplace download; the signed publication envelope and its bound
-archive hash establish the artifact's integrity independently. Cache schema 2 stores that public, token-free proof with
-each ready item. A schema-1 ready item is deliberately demoted to entitled and reacquired before use because it lacks
-the proof required for independent Editor verification.
+archive hash establish the artifact's integrity independently. Cache schema 3 stores that public, token-free proof with
+each ready item and binds the snapshot to its owning account. Schema-1 and schema-2 snapshots are migrated only as
+inputs to a fresh Hub synchronization; the live Editor does not disclose or consume them without a matching account
+lease and current schema-3 publication.
 
 ## Asset imports and executable code
 
@@ -99,10 +100,12 @@ Registry, In Project, Updates, Local Packages, and Built-in views. Choosing **Op
 listing launches or focuses Hub through `keirehub://marketplace/product/<product-id>`. Hub registers the current OAuth
 session before requesting the account library, selects the newest compatible published version, creates a device-scoped
 grant, verifies the offline-signed publication envelope, downloads into the content-addressed per-user cache, and
-verifies size, SHA-256, package identity, and archive structure. It then atomically publishes a token-free schema-2
-cache snapshot containing the same signed proof. Running Editors observe the snapshot within one second; an Editor
-opened later selects the same requested asset. Before installation or import, the Editor independently verifies the
-publication signature and identity, then asks Core to recheck the exact archive size, SHA-256, manifest, and payload.
+verifies size, SHA-256, package identity, and archive structure. It then atomically publishes a token-free schema-3
+cache snapshot containing the same signed proof and the owning account ID. Running Editors observe the snapshot within
+one second. Before displaying or consuming My Assets, the Editor requires a short-lived Hub session lease for that exact
+account; sign-out, Hub shutdown, lease expiry, cache corruption, or an account mismatch clears the visible library and
+blocks installation/import. Before installation or import, the Editor independently verifies the publication signature
+and identity, then asks Core to recheck the exact archive size, SHA-256, manifest, and payload.
 The Editor advertises its surface, compute, PBR, Shader Graph, Material Graph, and VFX Graph renderer capabilities to
 both Registry and Asset Import preflight, so official graph and VFX content is accepted by compatible projects.
 

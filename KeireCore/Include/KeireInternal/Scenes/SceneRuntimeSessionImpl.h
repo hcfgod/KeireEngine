@@ -644,6 +644,16 @@ namespace Keire
             }
             const auto modelToWorld = transform->WorldMatrix();
             const auto modelBones = ModelBoneMatrices(skeleton, localPose);
+            const auto leftHipPosition = Math::TransformPoint(modelBones[*chains[0][0]], {});
+            const auto rightHipPosition = Math::TransformPoint(modelBones[*chains[1][0]], {});
+            const auto gravityUpModel = Math::TransformDirection(worldToModel, {0.0F, 1.0F, 0.0F});
+            const auto leftKneePosition = Math::TransformPoint(modelBones[*chains[0][1]], {});
+            const auto leftFootPosition = Math::TransformPoint(modelBones[*chains[0][2]], {});
+            const auto rightKneePosition = Math::TransformPoint(modelBones[*chains[1][1]], {});
+            const auto rightFootPosition = Math::TransformPoint(modelBones[*chains[1][2]], {});
+            const auto kneeReference = Detail::OrientBipedKneeReference(
+                Detail::AutomaticBipedKneeReference(leftHipPosition, rightHipPosition, gravityUpModel), leftHipPosition,
+                leftKneePosition, leftFootPosition, rightHipPosition, rightKneePosition, rightFootPosition);
             const auto ownPhysics = PhysicsBodies.find(entity.Id());
             const auto ownBody = ownPhysics == PhysicsBodies.end() ? PhysicsBodyId{} : ownPhysics->second.Body;
             const auto queryLayer = ownPhysics == PhysicsBodies.end() || !ownPhysics->second.HasDefinition
@@ -935,7 +945,9 @@ namespace Keire
                 footTarget = Math::TransformPoint(worldToModel, smoothed->Position);
                 const auto upperLeg = Math::TransformPoint(modelBones[*chain[0]], {});
                 const auto knee = Math::TransformPoint(modelBones[*chain[1]], {});
-                const auto pole = Detail::StableAutomaticLimbPole(upperLeg, knee, footPosition, *footTarget, stability);
+                const auto pole = Detail::StableAutomaticLimbPole(upperLeg, knee, footPosition, *footTarget,
+                                                                  kneeReference, deltaSeconds, settings.ResponseTime,
+                                                                  settings.KneeStability, stability);
                 FootGroundContact grounded{*chain[0],
                                            *chain[1],
                                            *chain[2],

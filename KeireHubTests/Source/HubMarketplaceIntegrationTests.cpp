@@ -1,5 +1,7 @@
 #include "KeireHub/HubMarketplaceIntegration.h"
 
+#include "KeireHubRuntime/MarketplaceCache.h"
+
 #include <KeireHubTests/TestSupport.h>
 
 #include <doctest/doctest.h>
@@ -60,6 +62,7 @@ TEST_CASE("Marketplace synchronization registers the Hub session before reading 
         });
 
     REQUIRE(integration.Request({.ProductId = "00112233-4455-6677-8899-aabbccddeeff",
+                                 .AccountId = "40112233-4455-6677-8899-aabbccddeeff",
                                  .AccessToken = "header.payload.signature",
                                  .ServiceBaseUrl = "https://keire.test",
                                  .TrustedPublicKeyDocument = "{}",
@@ -78,4 +81,9 @@ TEST_CASE("Marketplace synchronization registers the Hub session before reading 
     CHECK(requests[0].ends_with("/marketplace/v1/sessions/"));
     CHECK(requests[1].find("/marketplace/v1/catalog/") != std::string::npos);
     CHECK(requests[2].find("/marketplace/v1/library/") != std::string::npos);
+
+    const MarketplaceCacheStore cache(temporary.Path() / "MarketplacePackages");
+    const auto cached = cache.Load();
+    REQUIRE(cached);
+    CHECK(cached.Value().AccountId == "40112233-4455-6677-8899-aabbccddeeff");
 }

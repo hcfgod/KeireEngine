@@ -18,12 +18,21 @@ namespace KeireHub
     {
         constexpr std::size_t MaximumCacheBytes = std::size_t{4U} * 1024U * 1024U;
         constexpr std::size_t MaximumCacheItems = 2048U;
+        constexpr std::size_t MaximumSessionLeaseBytes = 4096U;
 
         [[nodiscard]] HubError CacheError(std::string message, std::string details = {})
         {
             return {.Code = HubErrorCode::CatalogCacheInvalid,
                     .Message = std::move(message),
                     .AffectedItem = "marketplace-cache",
+                    .TechnicalDetails = std::move(details)};
+        }
+
+        [[nodiscard]] HubError SessionLeaseError(std::string message, std::string details = {})
+        {
+            return {.Code = HubErrorCode::CatalogCacheInvalid,
+                    .Message = std::move(message),
+                    .AffectedItem = "marketplace-session",
                     .TechnicalDetails = std::move(details)};
         }
 
@@ -133,15 +142,6 @@ namespace KeireHub
                     {"entitled", item.Entitled}};
         }
 
-        [[nodiscard]] Detail::Json SerializeLegacyItem(const MarketplaceCacheItem& item)
-        {
-            auto value = SerializeItem(item);
-            value.erase("signedPublication");
-            if (item.State == MarketplaceCacheState::Ready)
-                value["state"] = StateName(MarketplaceCacheState::Entitled);
-            return value;
-        }
-
         [[nodiscard]] MarketplaceCacheItem ParseItem(const Detail::Json& value, const std::uint32_t schemaVersion)
         {
             const auto expectedFields = schemaVersion == 1U ? 17U : 18U;
@@ -188,7 +188,14 @@ namespace KeireHub
         const bool hasVersionedIndex = std::filesystem::exists(versionedIndex, error);
         if (error)
             return HubResult<MarketplaceCacheSnapshot>::Failure(CacheError("The marketplace cache is unreadable."));
-        const auto index = hasVersionedIndex ? versionedIndex : IndexPath();
+        const auto previousVersionedIndex = PreviousVersionedIndexPath();
+        const bool hasPreviousVersionedIndex =
+            !hasVersionedIndex && std::filesystem::exists(previousVersionedIndex, error);
+        if (error)
+            return HubResult<MarketplaceCacheSnapshot>::Failure(CacheError("The marketplace cache is unreadable."));
+        const auto index = hasVersionedIndex           ? versionedIndex
+                           : hasPreviousVersionedIndex ? previousVersionedIndex
+                                                       : IndexPath();
         if (!std::filesystem::exists(index, error))
         {
             if (error)
@@ -201,15 +208,21 @@ namespace KeireHub
         try
         {
             const auto& value = document.Value();
-            if (!value.is_object() || value.size() != 4U)
-            {
+            if (!value.is_object())
                 throw std::invalid_argument("Marketplace cache schema is unsupported.");
-            }
             const auto schemaVersion = value.at("schemaVersion").get<std::uint32_t>();
-            if (schemaVersion != 1U && schemaVersion != MarketplaceCacheSnapshot::CurrentSchemaVersion)
+            if (schemaVersion != 1U && schemaVersion != 2U &&
+                schemaVersion != MarketplaceCacheSnapshot::CurrentSchemaVersion)
+                throw std::invalid_argument("Marketplace cache schema is unsupported.");
+            const auto expectedFields = schemaVersion >= 3U ? 5U : 4U;
+            if (value.size() != expectedFields)
                 throw std::invalid_argument("Marketplace cache schema is unsupported.");
             MarketplaceCacheSnapshot result{.Revision = value.at("revision").get<std::uint64_t>(),
+                                            .AccountId = schemaVersion >= 3U ? value.at("accountId").get<std::string>()
+                                                                             : std::string{},
                                             .RequestedProductId = value.at("requestedProductId").get<std::string>()};
+            if (!result.AccountId.empty() && !IsUuid(result.AccountId))
+                throw std::invalid_argument("Marketplace cache account identity is invalid.");
             if (!result.RequestedProductId.empty() && !IsUuid(result.RequestedProductId))
                 throw std::invalid_argument("Marketplace cache request identity is invalid.");
             const auto& items = value.at("items");
@@ -236,33 +249,43 @@ namespace KeireHub
     {
         try
         {
+            if ((!snapshot.AccountId.empty() && !IsUuid(snapshot.AccountId)) ||
+                (snapshot.AccountId.empty() && (!snapshot.RequestedProductId.empty() || !snapshot.Items.empty())))
+            {
+                throw std::invalid_argument("Marketplace cache account identity is invalid.");
+            }
             if (!snapshot.RequestedProductId.empty() && !IsUuid(snapshot.RequestedProductId))
                 throw std::invalid_argument("Marketplace cache request identity is invalid.");
             if (snapshot.Items.size() > MaximumCacheItems)
                 throw std::invalid_argument("Marketplace cache item count is invalid.");
             std::set<std::string, std::less<>> productIds;
             Detail::Json items = Detail::Json::array();
-            Detail::Json legacyItems = Detail::Json::array();
             for (const auto& item : snapshot.Items)
             {
                 if (!productIds.insert(item.ProductId).second)
                     throw std::invalid_argument("Marketplace cache product identities must be unique.");
                 items.push_back(SerializeItem(item));
-                legacyItems.push_back(SerializeLegacyItem(item));
             }
             if (auto saved = Detail::WriteJsonFileAtomically(
                     VersionedIndexPath(), {{"schemaVersion", MarketplaceCacheSnapshot::CurrentSchemaVersion},
                                            {"revision", snapshot.Revision},
+                                           {"accountId", snapshot.AccountId},
                                            {"requestedProductId", snapshot.RequestedProductId},
                                            {"items", std::move(items)}});
                 !saved)
             {
                 return saved;
             }
+            const Detail::Json sanitized{{"schemaVersion", 2U},
+                                         {"revision", snapshot.Revision},
+                                         {"requestedProductId", ""},
+                                         {"items", Detail::Json::array()}};
+            if (auto saved = Detail::WriteJsonFileAtomically(PreviousVersionedIndexPath(), sanitized); !saved)
+                return saved;
             return Detail::WriteJsonFileAtomically(IndexPath(), {{"schemaVersion", 1U},
                                                                  {"revision", snapshot.Revision},
-                                                                 {"requestedProductId", snapshot.RequestedProductId},
-                                                                 {"items", std::move(legacyItems)}});
+                                                                 {"requestedProductId", ""},
+                                                                 {"items", Detail::Json::array()}});
         }
         catch (const std::exception& exception)
         {
@@ -287,6 +310,88 @@ namespace KeireHub
 
     std::filesystem::path MarketplaceCacheStore::VersionedIndexPath() const
     {
+        return m_Root / "marketplace-cache-v3.json";
+    }
+
+    std::filesystem::path MarketplaceCacheStore::PreviousVersionedIndexPath() const
+    {
         return m_Root / "marketplace-cache-v2.json";
+    }
+
+    MarketplaceSessionLeaseStore::MarketplaceSessionLeaseStore(std::filesystem::path root) : m_Root(std::move(root))
+    {
+        if (m_Root.empty() || !m_Root.is_absolute())
+            throw std::invalid_argument("Marketplace session root must be absolute.");
+        m_Root = m_Root.lexically_normal();
+    }
+
+    HubResult<MarketplaceSessionLease> MarketplaceSessionLeaseStore::Load() const
+    {
+        std::error_code error;
+        if (!std::filesystem::exists(Path(), error))
+        {
+            if (error)
+                return HubResult<MarketplaceSessionLease>::Failure(
+                    SessionLeaseError("The marketplace account session is unreadable."));
+            return HubResult<MarketplaceSessionLease>::Success({});
+        }
+        auto document = Detail::ReadJsonFile(Path(), MaximumSessionLeaseBytes);
+        if (!document)
+            return HubResult<MarketplaceSessionLease>::Failure(document.Error());
+        try
+        {
+            const auto& value = document.Value();
+            if (!value.is_object() || value.size() != 4U ||
+                value.at("schemaVersion").get<std::uint32_t>() != MarketplaceSessionLease::CurrentSchemaVersion)
+            {
+                throw std::invalid_argument("Marketplace account session schema is unsupported.");
+            }
+            MarketplaceSessionLease result{.AccountId = value.at("accountId").get<std::string>(),
+                                           .ExpiresAtUnixSeconds =
+                                               value.at("expiresAtUnixSeconds").get<std::uint64_t>(),
+                                           .SignedIn = value.at("signedIn").get<bool>()};
+            if ((result.SignedIn && (!IsUuid(result.AccountId) || result.ExpiresAtUnixSeconds == 0U)) ||
+                (!result.SignedIn && (!result.AccountId.empty() || result.ExpiresAtUnixSeconds != 0U)))
+            {
+                throw std::invalid_argument("Marketplace account session fields are invalid.");
+            }
+            return HubResult<MarketplaceSessionLease>::Success(std::move(result));
+        }
+        catch (const std::exception& exception)
+        {
+            return HubResult<MarketplaceSessionLease>::Failure(
+                SessionLeaseError("The marketplace account session is invalid.", exception.what()));
+        }
+    }
+
+    HubStatus MarketplaceSessionLeaseStore::Save(const MarketplaceSessionLease& lease) const
+    {
+        try
+        {
+            if ((lease.SignedIn && (!IsUuid(lease.AccountId) || lease.ExpiresAtUnixSeconds == 0U)) ||
+                (!lease.SignedIn && (!lease.AccountId.empty() || lease.ExpiresAtUnixSeconds != 0U)))
+            {
+                throw std::invalid_argument("Marketplace account session fields are invalid.");
+            }
+            return Detail::WriteJsonFileAtomically(Path(),
+                                                   {{"schemaVersion", MarketplaceSessionLease::CurrentSchemaVersion},
+                                                    {"accountId", lease.AccountId},
+                                                    {"expiresAtUnixSeconds", lease.ExpiresAtUnixSeconds},
+                                                    {"signedIn", lease.SignedIn}});
+        }
+        catch (const std::exception& exception)
+        {
+            return HubStatus::Failure(
+                SessionLeaseError("The marketplace account session could not be saved.", exception.what()));
+        }
+    }
+
+    std::filesystem::path MarketplaceSessionLeaseStore::Path() const { return m_Root / "marketplace-session-v1.json"; }
+
+    bool MarketplaceSessionAuthorizes(const MarketplaceCacheSnapshot& snapshot, const MarketplaceSessionLease& lease,
+                                      const std::uint64_t nowUnixSeconds) noexcept
+    {
+        return lease.SignedIn && !snapshot.AccountId.empty() && snapshot.AccountId == lease.AccountId &&
+               nowUnixSeconds <= lease.ExpiresAtUnixSeconds;
     }
 } // namespace KeireHub

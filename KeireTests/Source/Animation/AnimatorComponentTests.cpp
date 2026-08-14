@@ -79,6 +79,7 @@ TEST_CASE("Animator foot grounding settings validate and migrate as authored com
     settings.PlantDistance = 0.1F;
     settings.ReleaseDistance = 0.25F;
     settings.ResponseTime = 0.2F;
+    settings.KneeStability = 0.75F;
     settings.LeanCorrectionWeight = 0.8F;
     settings.MaximumLeanCorrectionDegrees = 45.0F;
     settings.CollisionMask = 0x4U;
@@ -92,7 +93,7 @@ TEST_CASE("Animator foot grounding settings validate and migrate as authored com
     CHECK(animator.FootGrounding().Weight == doctest::Approx(1.0F));
 
     const auto registration = Keire::CreateAnimatorComponentRegistration();
-    CHECK(registration.SchemaVersion == 5);
+    CHECK(registration.SchemaVersion == 6);
     const auto values = registration.Serialize(animator);
     auto restored = registration.Factory();
     registration.Deserialize(*restored, values, registration.SchemaVersion);
@@ -106,6 +107,7 @@ TEST_CASE("Animator foot grounding settings validate and migrate as authored com
     CHECK(restoredAnimator->FootGrounding().PlantDistance == doctest::Approx(0.1F));
     CHECK(restoredAnimator->FootGrounding().ReleaseDistance == doctest::Approx(0.25F));
     CHECK(restoredAnimator->FootGrounding().ResponseTime == doctest::Approx(0.2F));
+    CHECK(restoredAnimator->FootGrounding().KneeStability == doctest::Approx(0.75F));
     CHECK(restoredAnimator->FootGrounding().LeanCorrectionWeight == doctest::Approx(0.8F));
     CHECK(restoredAnimator->FootGrounding().MaximumLeanCorrectionDegrees == doctest::Approx(45.0F));
 
@@ -114,6 +116,9 @@ TEST_CASE("Animator foot grounding settings validate and migrate as authored com
     CHECK_THROWS_AS(animator.SetFootGrounding(invalid), std::invalid_argument);
     invalid = settings;
     invalid.ResponseTime = -0.1F;
+    CHECK_THROWS_AS(animator.SetFootGrounding(invalid), std::invalid_argument);
+    invalid = settings;
+    invalid.KneeStability = 1.1F;
     CHECK_THROWS_AS(animator.SetFootGrounding(invalid), std::invalid_argument);
     invalid = settings;
     invalid.LeanCorrectionWeight = 1.1F;
@@ -149,6 +154,16 @@ TEST_CASE("Animator foot grounding settings validate and migrate as authored com
     CHECK(std::get<double>(migratedV4.at("footResponseTime")) == doctest::Approx(0.12));
     CHECK(std::get<double>(migratedV4.at("footLeanCorrectionWeight")) == doctest::Approx(1.0));
     CHECK(std::get<double>(migratedV4.at("footMaximumLeanCorrectionDegrees")) == doctest::Approx(35.0));
+    CHECK(std::get<double>(migratedV4.at("footKneeStability")) == doctest::Approx(0.9));
+
+    auto schemaFiveValues = values;
+    schemaFiveValues.erase("footKneeStability");
+    schemaFiveValues["footLockPlanted"] = false;
+    const auto migratedV5 = registration.Migrate(schemaFiveValues, 5);
+    CHECK_FALSE(std::get<bool>(migratedV5.at("footLockPlanted")));
+    CHECK(std::get<double>(migratedV5.at("footResponseTime")) == doctest::Approx(0.2));
+    CHECK(std::get<double>(migratedV5.at("footLeanCorrectionWeight")) == doctest::Approx(0.8));
+    CHECK(std::get<double>(migratedV5.at("footKneeStability")) == doctest::Approx(0.9));
 }
 
 TEST_CASE("Animator authored arm IK is automatic, serializable, and validates safe weights")

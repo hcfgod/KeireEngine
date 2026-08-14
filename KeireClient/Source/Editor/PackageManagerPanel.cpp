@@ -10,6 +10,8 @@
 #include "KeireHubRuntime/MarketplaceClient.h"
 
 #include <algorithm>
+#include <chrono>
+#include <cstdint>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -41,6 +43,12 @@ namespace KeireEditor
 #else
             return "x86_64";
 #endif
+        }
+
+        [[nodiscard]] std::uint64_t NowUnixSeconds() noexcept
+        {
+            const auto elapsed = std::chrono::system_clock::now().time_since_epoch();
+            return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(elapsed).count());
         }
 
         [[nodiscard]] std::string TrustLabel(const Keire::ProjectPackageTrust trust)
@@ -137,6 +145,7 @@ namespace KeireEditor
         {
             const auto cacheRoot = Keire::GetPreferenceDirectory() / "Hub" / "MarketplacePackages";
             m_MarketplaceCache = std::make_unique<KeireHub::MarketplaceCacheStore>(cacheRoot);
+            m_MarketplaceSession = std::make_unique<KeireHub::MarketplaceSessionLeaseStore>(cacheRoot);
             const auto key = ReadTrustedKey(executable);
             if (!key)
             {
@@ -199,6 +208,7 @@ namespace KeireEditor
         m_Manager.reset();
         m_AssetImporter.reset();
         m_MarketplaceCache.reset();
+        m_MarketplaceSession.reset();
         m_MarketplaceTrust.reset();
         m_MarketplaceSnapshot = {};
         m_Manifest = {};
@@ -207,6 +217,7 @@ namespace KeireEditor
         m_LocalArchive.clear();
         m_LocalSearch.clear();
         m_SelectedMarketplaceProduct.clear();
+        m_MarketplaceSessionMessage.clear();
         m_Status.clear();
         m_Error.clear();
         m_LastEvent = {};
@@ -214,6 +225,7 @@ namespace KeireEditor
         m_ImportReview.Cancel();
         m_AllowExecutableCode = false;
         m_KeepLocalConflicts = true;
+        m_MarketplaceSessionAuthorized = false;
         m_NextMarketplaceRefresh = {};
     }
 
@@ -254,16 +266,57 @@ namespace KeireEditor
     void PackageManagerPanel::RefreshMarketplaceCache(const bool focusRequestedProduct)
     {
         m_NextMarketplaceRefresh = std::chrono::steady_clock::now() + std::chrono::seconds(1);
-        if (!m_MarketplaceCache)
+        if (!m_MarketplaceCache || !m_MarketplaceSession)
             return;
+        const auto nowUnixSeconds = NowUnixSeconds();
+        auto lease = m_MarketplaceSession->Load();
+        if (!lease)
+        {
+            m_MarketplaceSessionAuthorized = false;
+            m_MarketplaceSessionMessage = lease.Error().Message;
+            m_MarketplaceSnapshot = {};
+            m_SelectedMarketplaceProduct.clear();
+            return;
+        }
+        if (!lease.Value().SignedIn || lease.Value().AccountId.empty())
+        {
+            m_MarketplaceSessionAuthorized = false;
+            m_MarketplaceSessionMessage = "Sign in to Kéire Hub to view My Assets.";
+            m_MarketplaceSnapshot = {};
+            m_SelectedMarketplaceProduct.clear();
+            return;
+        }
+        if (lease.Value().ExpiresAtUnixSeconds < nowUnixSeconds)
+        {
+            m_MarketplaceSessionAuthorized = false;
+            m_MarketplaceSessionMessage = "Keep Kéire Hub running and signed in to view My Assets.";
+            m_MarketplaceSnapshot = {};
+            m_SelectedMarketplaceProduct.clear();
+            return;
+        }
         auto loaded = m_MarketplaceCache->Load();
         if (!loaded)
         {
-            m_Error = loaded.Error().Message;
+            m_MarketplaceSessionAuthorized = false;
+            m_MarketplaceSessionMessage = loaded.Error().Message;
+            m_MarketplaceSnapshot = {};
+            m_SelectedMarketplaceProduct.clear();
+            return;
+        }
+        if (!KeireHub::MarketplaceSessionAuthorizes(loaded.Value(), lease.Value(), nowUnixSeconds))
+        {
+            m_MarketplaceSessionAuthorized = false;
+            m_MarketplaceSessionMessage =
+                "The marketplace cache belongs to a different account. Open an asset from the website to "
+                "synchronize this account.";
+            m_MarketplaceSnapshot = {};
+            m_SelectedMarketplaceProduct.clear();
             return;
         }
         const auto previousRequest = m_MarketplaceSnapshot.RequestedProductId;
         m_MarketplaceSnapshot = std::move(loaded).Value();
+        m_MarketplaceSessionAuthorized = true;
+        m_MarketplaceSessionMessage.clear();
         if (focusRequestedProduct && !m_MarketplaceSnapshot.RequestedProductId.empty() &&
             (m_MarketplaceSnapshot.RequestedProductId != previousRequest || m_SelectedMarketplaceProduct.empty()))
         {
@@ -279,10 +332,48 @@ namespace KeireEditor
         }
     }
 
+    bool PackageManagerPanel::HasAuthorizedMarketplaceSession(std::string& diagnostic) const
+    {
+        if (!m_MarketplaceSession)
+        {
+            diagnostic = "The Kéire Hub marketplace session is unavailable.";
+            return false;
+        }
+        const auto lease = m_MarketplaceSession->Load();
+        if (!lease)
+        {
+            diagnostic = lease.Error().Message;
+            return false;
+        }
+        if (!lease.Value().SignedIn || lease.Value().AccountId.empty())
+        {
+            diagnostic = "Sign in to Kéire Hub before using My Assets.";
+            return false;
+        }
+        const auto nowUnixSeconds = NowUnixSeconds();
+        if (lease.Value().ExpiresAtUnixSeconds < nowUnixSeconds)
+        {
+            diagnostic = "Keep Kéire Hub running and signed in before using My Assets.";
+            return false;
+        }
+        if (!KeireHub::MarketplaceSessionAuthorizes(m_MarketplaceSnapshot, lease.Value(), nowUnixSeconds))
+        {
+            diagnostic = "The marketplace cache does not belong to the signed-in Kéire Hub account.";
+            return false;
+        }
+        return true;
+    }
+
     void PackageManagerPanel::InstallMarketplacePackage(const KeireHub::MarketplaceCacheItem& item)
     {
         if (!m_Manager || !m_MarketplaceCache)
             return;
+        std::string sessionDiagnostic;
+        if (!HasAuthorizedMarketplaceSession(sessionDiagnostic))
+        {
+            m_Error = std::move(sessionDiagnostic);
+            return;
+        }
         if (!m_MarketplaceTrust)
         {
             m_Error = "Marketplace signature verification is unavailable. Reinstall this Editor package before "
@@ -343,6 +434,12 @@ namespace KeireEditor
     {
         if (!m_AssetImporter || !m_MarketplaceCache)
             return;
+        std::string sessionDiagnostic;
+        if (!HasAuthorizedMarketplaceSession(sessionDiagnostic))
+        {
+            m_Error = std::move(sessionDiagnostic);
+            return;
+        }
         if (!m_MarketplaceTrust)
         {
             m_Error = "Marketplace signature verification is unavailable. Reinstall this Editor package before "
@@ -465,6 +562,11 @@ namespace KeireEditor
                                                                           &KeireHub::MarketplaceCacheItem::Entitled)) +
                                             " entitled asset(s)");
         ui.Separator();
+        if (!m_MarketplaceSessionAuthorized)
+        {
+            ui.TextColored(theme.Warning, m_MarketplaceSessionMessage);
+            return;
+        }
         if (m_MarketplaceSnapshot.Items.empty())
         {
             ui.Text("No marketplace assets have been synchronized yet.");

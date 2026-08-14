@@ -7,7 +7,11 @@
 #include "KeireHub/HubLocalContent.h"
 #include "KeireHub/HubProductUi.h"
 
+#include "KeireHubRuntime/HubActivationProtocol.h"
+#include "KeireHubRuntime/MarketplaceCache.h"
+
 #include <cerrno>
+#include <exception>
 #include <fstream>
 #include <iterator>
 #include <limits>
@@ -98,12 +102,24 @@ namespace KeireHub
     {
         m_ConfigurationPath = configurationPath;
         m_SessionPath = sessionPath;
+        m_MarketplaceCacheRoot = Keire::GetPreferenceDirectory() / "Hub" / "MarketplacePackages";
+        m_LeasedAccountId.clear();
+        m_LeasedSignedIn.reset();
+        m_NextMarketplaceLeaseRefresh = 0;
         m_RefreshPending = false;
         return m_Workflow.Start(m_ConfigurationPath, m_SessionPath, settings);
     }
 
     void HubAccountIntegration::Stop() noexcept
     {
+        try
+        {
+            if (!m_MarketplaceCacheRoot.empty())
+                static_cast<void>(MarketplaceSessionLeaseStore(m_MarketplaceCacheRoot).Save({}));
+        }
+        catch (const std::exception&)
+        {
+        }
         m_Marketplace.Stop();
         m_Workflow.Stop();
     }
@@ -122,6 +138,8 @@ namespace KeireHub
                 return status;
         }
         m_Workflow.RefreshIfNeeded(nowUnixSeconds);
+        if (const auto lease = RefreshMarketplaceSessionLease(nowUnixSeconds); !lease)
+            return lease;
         if (!m_PendingMarketplaceProduct.empty())
         {
             const auto status = StartMarketplaceProduct(executable, distribution, settings, nowUnixSeconds);
@@ -131,6 +149,28 @@ namespace KeireHub
                 return status;
             }
         }
+        return HubStatus::Success();
+    }
+
+    HubStatus HubAccountIntegration::RefreshMarketplaceSessionLease(const std::uint64_t nowUnixSeconds)
+    {
+        const auto account = m_Workflow.Snapshot();
+        const bool signedIn = account->SignedIn && !account->UserId.empty();
+        const auto accountId = signedIn ? account->UserId : std::string{};
+        const bool stateChanged = !m_LeasedSignedIn || *m_LeasedSignedIn != signedIn || m_LeasedAccountId != accountId;
+        if (!stateChanged && nowUnixSeconds < m_NextMarketplaceLeaseRefresh)
+            return HubStatus::Success();
+
+        MarketplaceSessionLease lease;
+        lease.SignedIn = signedIn;
+        lease.AccountId = accountId;
+        lease.ExpiresAtUnixSeconds = signedIn ? nowUnixSeconds + MarketplaceSessionLeaseDurationSeconds : 0U;
+        MarketplaceSessionLeaseStore store(m_MarketplaceCacheRoot);
+        if (const auto saved = store.Save(lease); !saved)
+            return saved;
+        m_LeasedSignedIn = signedIn;
+        m_LeasedAccountId = accountId;
+        m_NextMarketplaceLeaseRefresh = nowUnixSeconds + MarketplaceSessionLeaseRefreshSeconds;
         return HubStatus::Success();
     }
 
@@ -163,7 +203,22 @@ namespace KeireHub
         case HubUiCommandType::AccountCancelBrowserSignIn:
             return m_Workflow.CancelBrowserSignIn();
         case HubUiCommandType::AccountSignOut:
-            return m_Workflow.SignOut();
+        {
+            auto status = m_Workflow.SignOut();
+            if (!status)
+                return status;
+            m_Marketplace.Stop();
+            if (!m_MarketplaceCacheRoot.empty())
+            {
+                status = MarketplaceSessionLeaseStore(m_MarketplaceCacheRoot).Save({});
+                if (!status)
+                    return status;
+            }
+            m_LeasedAccountId.clear();
+            m_LeasedSignedIn = false;
+            m_NextMarketplaceLeaseRefresh = 0;
+            return HubStatus::Success();
+        }
         case HubUiCommandType::SaveAccountProfile:
             return m_Workflow.SaveProfile(command.AccountDisplayName);
         default:
@@ -173,8 +228,10 @@ namespace KeireHub
         }
     }
 
-    HubResult<std::string> HubAccountIntegration::BeginBrowserSignIn()
+    HubResult<std::string> HubAccountIntegration::BeginBrowserSignIn(const std::filesystem::path& executable)
     {
+        if (const auto registered = EnsureHubActivationProtocolRegistration(executable); !registered)
+            return HubResult<std::string>::Failure(registered.Error());
         return m_Workflow.BeginBrowserSignIn(FillSecureRandom);
     }
 
@@ -216,6 +273,13 @@ namespace KeireHub
         auto token = m_Workflow.AccessToken(nowUnixSeconds);
         if (!token)
             return HubStatus::Failure(token.Error());
+        const auto account = m_Workflow.Snapshot();
+        if (!account->SignedIn || account->UserId.empty())
+        {
+            return HubStatus::Failure({.Code = HubErrorCode::AccountSessionInvalid,
+                                       .Message = "Sign in before opening a marketplace asset.",
+                                       .AffectedItem = "marketplace"});
+        }
         if (!distribution)
         {
             return HubStatus::Failure({.Code = HubErrorCode::InvalidTransition,
@@ -239,10 +303,11 @@ namespace KeireHub
         }
         const auto status = m_Marketplace.Request(
             {.ProductId = m_PendingMarketplaceProduct,
+             .AccountId = account->UserId,
              .AccessToken = std::move(token).Value(),
              .ServiceBaseUrl = service->ServiceBaseUrl,
              .TrustedPublicKeyDocument = *trustedKey,
-             .CacheRoot = Keire::GetPreferenceDirectory() / "Hub" / "MarketplacePackages",
+             .CacheRoot = m_MarketplaceCacheRoot,
              .EngineVersion = std::string(Keire::GetBuildInfo().Version),
              .Platform = std::string(HostPlatform()),
              .Architecture = std::string(HostArchitecture()),

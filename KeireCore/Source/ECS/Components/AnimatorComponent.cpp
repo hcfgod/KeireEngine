@@ -15,7 +15,7 @@ namespace Keire
 {
     namespace
     {
-        constexpr std::uint32_t AnimatorSchemaVersion = 5;
+        constexpr std::uint32_t AnimatorSchemaVersion = 6;
 
         template <typename T>
         [[nodiscard]] T ReadAnimatorProperty(const ComponentPropertyBag& values, const std::string_view key,
@@ -269,6 +269,7 @@ namespace Keire
             !std::isfinite(settings.PlantDistance) || settings.PlantDistance < 0.0F ||
             !std::isfinite(settings.ReleaseDistance) || settings.ReleaseDistance < settings.PlantDistance ||
             !std::isfinite(settings.ResponseTime) || settings.ResponseTime < 0.0F ||
+            !std::isfinite(settings.KneeStability) || settings.KneeStability < 0.0F || settings.KneeStability > 1.0F ||
             !std::isfinite(settings.LeanCorrectionWeight) || settings.LeanCorrectionWeight < 0.0F ||
             settings.LeanCorrectionWeight > 1.0F || !std::isfinite(settings.MaximumLeanCorrectionDegrees) ||
             settings.MaximumLeanCorrectionDegrees < 0.0F || settings.MaximumLeanCorrectionDegrees > 180.0F ||
@@ -417,6 +418,8 @@ namespace Keire
              1000.0, 0.005},
             {"footResponseTime", "Response Time (Seconds)", "Ground Adaptation", ComponentPropertyKind::Scalar, false,
              0.0, 10.0, 0.01},
+            {"footKneeStability", "Knee Stability", "Ground Adaptation", ComponentPropertyKind::Scalar, false, 0.0, 1.0,
+             0.01},
             {"footLeanCorrectionWeight", "Body Lean Correction", "Ground Adaptation", ComponentPropertyKind::Scalar,
              false, 0.0, 1.0, 0.01},
             {"footMaximumLeanCorrectionDegrees", "Maximum Lean Correction (Degrees)", "Ground Adaptation",
@@ -499,6 +502,7 @@ namespace Keire
                 {"footPlantDistance", static_cast<double>(foot.PlantDistance)},
                 {"footReleaseDistance", static_cast<double>(foot.ReleaseDistance)},
                 {"footResponseTime", static_cast<double>(foot.ResponseTime)},
+                {"footKneeStability", static_cast<double>(foot.KneeStability)},
                 {"footLeanCorrectionWeight", static_cast<double>(foot.LeanCorrectionWeight)},
                 {"footMaximumLeanCorrectionDegrees", static_cast<double>(foot.MaximumLeanCorrectionDegrees)},
                 {"footMaximumSlope", static_cast<double>(foot.MaximumSlopeDegrees)},
@@ -554,6 +558,7 @@ namespace Keire
             foot.PlantDistance = static_cast<float>(ReadAnimatorProperty(values, "footPlantDistance", 0.08));
             foot.ReleaseDistance = static_cast<float>(ReadAnimatorProperty(values, "footReleaseDistance", 0.18));
             foot.ResponseTime = static_cast<float>(ReadAnimatorProperty(values, "footResponseTime", 0.12));
+            foot.KneeStability = static_cast<float>(ReadAnimatorProperty(values, "footKneeStability", 0.9));
             foot.LeanCorrectionWeight =
                 static_cast<float>(ReadAnimatorProperty(values, "footLeanCorrectionWeight", 1.0));
             foot.MaximumLeanCorrectionDegrees =
@@ -589,7 +594,7 @@ namespace Keire
         };
         result.Migrate = [](const ComponentPropertyBag& values, const std::uint32_t version)
         {
-            if (version != 1 && version != 2 && version != 3 && version != 4)
+            if (version != 1 && version != 2 && version != 3 && version != 4 && version != 5)
                 throw std::invalid_argument("Unsupported Animator component schema migration.");
             auto migrated = values;
             if (version == 1)
@@ -616,15 +621,19 @@ namespace Keire
                 migrated.insert_or_assign("footAutomaticRaycastDistance", true);
                 migrated.insert_or_assign("footMaximumSlope", 60.0);
             }
-            if (version != 4)
+            if (version <= 3)
             {
                 migrated.insert_or_assign("footLockPlanted", true);
                 migrated.insert_or_assign("footPlantDistance", 0.08);
                 migrated.insert_or_assign("footReleaseDistance", 0.18);
             }
-            migrated.insert_or_assign("footResponseTime", 0.12);
-            migrated.insert_or_assign("footLeanCorrectionWeight", 1.0);
-            migrated.insert_or_assign("footMaximumLeanCorrectionDegrees", 35.0);
+            if (version <= 4)
+            {
+                migrated.insert_or_assign("footResponseTime", 0.12);
+                migrated.insert_or_assign("footLeanCorrectionWeight", 1.0);
+                migrated.insert_or_assign("footMaximumLeanCorrectionDegrees", 35.0);
+            }
+            migrated.insert_or_assign("footKneeStability", 0.9);
             if (version == 1 || version == 2)
             {
                 AddLimbDefaults(migrated, "leftArmIk", "LeftArm", "LeftForeArm", "LeftHand");

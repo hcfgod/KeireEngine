@@ -478,20 +478,24 @@ that envelope against the packaged Marketplace trust root and requires its produ
 archive SHA-256, manifest SHA-256, storage path, sequence, and expiry to agree before downloading the content-addressed
 archive. It then verifies the exact bytes and package identity before the item becomes ready.
 
-Hub publishes catalog, entitlement, requested-product, progress, failure, and verified-cache identity beneath the
-per-user Hub cache. Current Editors prefer the bounded, atomically replaced schema-2 `marketplace-cache-v2.json`
-snapshot. It contains the public signed publication envelope but no bearer token, refresh token, signed URL, proxy
-credential, service credential, or private signing material. Hub also atomically replaces `marketplace-cache.json` with
-a schema-1 compatibility projection for installed legacy Editors. That projection omits publication proofs and
-downgrades ready items to entitled, so a legacy Editor can read shared catalog state but cannot treat an unsigned cache
-entry as importable. Current Editors retain migration support for pre-split schema-1 and schema-2 files, derive the
-archive path from the trusted digest rather than accepting a stored arbitrary path, independently verify the exact
-signed publication document, and repeat archive size, SHA-256, manifest, and payload verification before a project
-transaction. The nonce-authenticated live broker wire contract is retained for future richer coordination, but the
-durable snapshot is the production handoff and also works when the Editor starts after Hub finishes. Entitlement
-authorizes download access; the offline-signed publication and its bound archive digest establish integrity
-independently of the online grant service. Projects without package files remain valid, while the first successful
-package transaction raises `minimumEngineVersion` to 0.3.1 atomically.
+Hub publishes catalog, entitlement, requested-product, progress, failure, verified-cache identity, and the owning
+account ID beneath the per-user Hub cache. Current Editors prefer the bounded, atomically replaced schema-3
+`marketplace-cache-v3.json` snapshot. It contains the public signed publication envelope but no bearer token, refresh
+token, signed URL, proxy credential, service credential, or private signing material. While Hub is running it also
+renews a token-free, 15-second account-session lease every five seconds and writes a signed-out lease immediately on
+sign-out or orderly shutdown. The Editor exposes or consumes My Assets only while that lease is current and its account
+ID exactly matches the cache. Missing, expired, signed-out, corrupt, and cross-account states fail closed.
+
+Hub atomically replaces the schema-1 and schema-2 compatibility files with empty projections whenever it publishes
+schema 3, preventing an older Editor from disclosing stale entitlement names after sign-out. Current Editors retain
+migration support for existing schema-1 and schema-2 files but require a new account-bound Hub synchronization before
+displaying them. They derive the archive path from the trusted digest rather than accepting a stored arbitrary path,
+independently verify the exact signed publication document, and repeat archive size, SHA-256, manifest, and payload
+verification before a project transaction. The durable snapshot remains the production package handoff; the short
+lease proves only that the matching local Hub session is live. Entitlement authorizes download access, while the
+offline-signed publication and its bound archive digest establish integrity independently of the online grant service.
+Projects without package files remain valid, while the first successful package transaction raises
+`minimumEngineVersion` to 0.3.1 atomically.
 
 Project identity is separate from repository/template identity. `Project` validates the fixed marker, owns the canonical
 root and exclusive editor lock, and supplies derived paths for Assets, catalogs, workspace state, input overrides, scene

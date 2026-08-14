@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 
 namespace KeireHub
 {
@@ -24,7 +25,7 @@ namespace KeireHub
         void ApplySnapshot(HubProductSnapshot& product) const;
         void ApplyMarketplaceNotice(std::string& notice, bool& noticeError);
         [[nodiscard]] HubStatus Execute(const HubUiCommand& command);
-        [[nodiscard]] HubResult<std::string> BeginBrowserSignIn();
+        [[nodiscard]] HubResult<std::string> BeginBrowserSignIn(const std::filesystem::path& executable);
         [[nodiscard]] HubStatus CompleteBrowserSignIn(std::string callbackUrl);
         [[nodiscard]] HubResult<std::string> AccessToken(std::uint64_t nowUnixSeconds) const;
         [[nodiscard]] HubStatus OpenMarketplaceProduct(std::string productId, HubProductUi& productUi,
@@ -36,13 +37,18 @@ namespace KeireHub
         [[nodiscard]] HubStatus StartMarketplaceProduct(const std::filesystem::path& executable,
                                                         const HubDistributionWorkflow* distribution,
                                                         const HubSettings& settings, std::uint64_t nowUnixSeconds);
+        [[nodiscard]] HubStatus RefreshMarketplaceSessionLease(std::uint64_t nowUnixSeconds);
 
         HubAccountWorkflow m_Workflow;
         HubMarketplaceIntegration m_Marketplace;
         std::filesystem::path m_ConfigurationPath;
         std::filesystem::path m_SessionPath;
+        std::filesystem::path m_MarketplaceCacheRoot;
         std::string m_PendingMarketplaceProduct;
+        std::string m_LeasedAccountId;
         std::uint64_t m_HandledMarketplaceCompletion = 0;
+        std::uint64_t m_NextMarketplaceLeaseRefresh = 0;
+        std::optional<bool> m_LeasedSignedIn;
         bool m_RefreshPending = false;
     };
 } // namespace KeireHub

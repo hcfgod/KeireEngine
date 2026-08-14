@@ -40,11 +40,19 @@ versions.
   collision-safe instead of smoothing through a sole. Replaced the fixed body-uprighting strength and angle with
   serialized **Body Lean Correction** and **Maximum Lean Correction** controls derived from each rig's semantic
   pelvis/torso chain and bind pose.
+- Stabilized terrain-adapted knees with a serialized **Knee Stability** control. Both legs now share a bend plane
+  inferred from semantic hip spacing, gravity, and their sampled pose, and transport that plane continuously as targets
+  move across slopes. This prevents pole sway, knee flips, and leg crossing without hard-coded model axes, dimensions,
+  or Mixamo/Vanguard names.
 - Expanded automatic humanoid mapping beyond Mixamo to common DCC suffix/side conventions, anatomical bone names, and
   an unnamed-biped bind-topology fallback. Explicit bone fallbacks remain available for ambiguous and non-humanoid
   skeletons.
 - Fixed official Marketplace package imports being rejected for `pbr`, Shader Graph, Material Graph, or VFX Graph by
   advertising the Editor renderer's complete supported capability set to both package workflows.
+- Fixed browser OAuth callbacks for a Windows Hub launched directly from a build or portable directory by
+  transactionally registering the exact running executable before opening the browser. Marketplace cache schema 3 now
+  binds My Assets to its account and a short-lived live Hub lease; signed-out, expired, corrupt, and cross-account
+  states clear the Editor library and block package operations, while legacy cache projections are scrubbed.
 
 ### Changed
 
@@ -57,10 +65,9 @@ versions.
   install, replace, reuse, keep-local, and unresolved-conflict actions and enables confirmation only for a valid plan.
 - Fixed Editor marketplace Asset Import terminating with a CoreCLR stack-overflow report. Archive and conflict hashing
   now streams through bounded heap storage instead of placing a 1 MiB buffer on the Editor's 1 MiB Windows stack.
-- Fixed newer Hubs making the shared Marketplace cache appear invalid to installed legacy Editors. Hub now publishes
-  signed schema-2 state in a versioned snapshot while maintaining a schema-1 compatibility projection that omits the
-  publication proof and downgrades ready items to entitled, so old Editors remain usable without accepting unsigned
-  imports. Current Editors prefer the signed snapshot and retain migration support for existing unversioned caches.
+- Advanced the shared Marketplace cache to account-bound schema 3. Hub retains migration reads for existing schema-1
+  and schema-2 snapshots but now empties those legacy projections when publishing, so older Editors cannot disclose
+  stale entitlement names after the account signs out.
 - Hardened immutable distribution responses by hashing the exact opened file before honoring digest ETags or serving
   bytes; same-size content with a restored timestamp is now withdrawn instead of inheriting year-long cache identity.
 - Made active layer insertion and event-listener registration transactional under allocation and callback failures, and
@@ -76,7 +83,8 @@ versions.
   canonical `.keireassetpackage` extension in the content-addressed cache so strict archive inspection can complete.
   Download grants now include the immutable offline-signed publication envelope; Hub and Editor independently verify
   its exact product, version, archive digest, size, manifest, storage path, sequence, expiry, and signature before a
-  package becomes usable. Cache schema 2 retains this token-free proof and safely reacquires legacy ready entries.
+  package becomes usable. Cache schema 3 retains this token-free proof, binds it to the owning account, and safely
+  reacquires legacy ready entries during a fresh authenticated synchronization.
 - Added a first-party website changelog generated from the canonical repository release record, with curated 0.3.1
   highlights, complete subsystem-grouped notes, explicit public-package/live-platform/source availability, historical
   release pages, structured metadata, and an RSS feed. Replaced the public numeric readiness dashboard with an

@@ -1055,7 +1055,7 @@ namespace
                     break;
                 case KeireHub::HubUiCommandType::AccountBeginBrowserSignIn:
                 {
-                    auto authorization = m_Account.BeginBrowserSignIn();
+                    auto authorization = m_Account.BeginBrowserSignIn(m_Executable);
                     if (!authorization)
                         RequireWorkflowSuccess(KeireHub::HubStatus::Failure(authorization.Error()));
                     Owner().Windows()->OpenUrl(authorization.Value());

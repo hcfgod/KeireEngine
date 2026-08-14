@@ -85,6 +85,7 @@ namespace Keire
         float PlantDistance = 0.08F;
         float ReleaseDistance = 0.18F;
         float ResponseTime = 0.12F;
+        float KneeStability = 0.9F;
         float LeanCorrectionWeight = 1.0F;
         float MaximumLeanCorrectionDegrees = 35.0F;
         float MaximumSlopeDegrees = 60.0F;

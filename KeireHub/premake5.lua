@@ -47,7 +47,7 @@ project(ProjectConfig.HUB_TARGET)
     ApplyLargeWindowsStack()
 
     filter "system:windows"
-        links { "Bcrypt", "Wintrust" }
+        links { "Advapi32", "Bcrypt", "Wintrust" }
 
     filter { "system:windows", "configurations:Dist" }
         kind "WindowedApp"

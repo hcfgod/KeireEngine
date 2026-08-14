@@ -13,6 +13,8 @@ using namespace KeireHub;
 
 namespace
 {
+    constexpr std::string_view AccountId = "40112233-4455-6677-8899-aabbccddeeff";
+
     [[nodiscard]] std::string JsonEscape(const std::string_view value)
     {
         std::string result;
@@ -67,22 +69,27 @@ TEST_CASE("Marketplace cache atomically round-trips token-free entitled package 
 {
     KeireHubTests::TemporaryDirectory temporary;
     MarketplaceCacheStore store(temporary.Path() / "MarketplacePackages");
-    MarketplaceCacheSnapshot snapshot{
-        .Revision = 7U, .RequestedProductId = "00112233-4455-6677-8899-aabbccddeeff", .Items = {ReadyItem()}};
+    MarketplaceCacheSnapshot snapshot{.Revision = 7U,
+                                      .AccountId = std::string(AccountId),
+                                      .RequestedProductId = "00112233-4455-6677-8899-aabbccddeeff",
+                                      .Items = {ReadyItem()}};
 
     const auto saved = store.Save(snapshot);
     INFO("Cache save failure: ", saved ? std::string{} : saved.Error().TechnicalDetails);
     REQUIRE(saved);
 
     const auto legacyDocument = nlohmann::json::parse(KeireHubTests::ReadText(store.IndexPath()));
-    const auto versionedPath = store.Root() / "marketplace-cache-v2.json";
+    const auto previousVersionedDocument =
+        nlohmann::json::parse(KeireHubTests::ReadText(store.Root() / "marketplace-cache-v2.json"));
+    const auto versionedPath = store.Root() / "marketplace-cache-v3.json";
     const auto versionedDocument = nlohmann::json::parse(KeireHubTests::ReadText(versionedPath));
     REQUIRE(legacyDocument.at("schemaVersion") == 1U);
+    REQUIRE(previousVersionedDocument.at("schemaVersion") == 2U);
     REQUIRE(versionedDocument.at("schemaVersion") == MarketplaceCacheSnapshot::CurrentSchemaVersion);
-    REQUIRE(legacyDocument.at("items").size() == 1U);
+    CHECK(legacyDocument.at("items").empty());
+    CHECK(previousVersionedDocument.at("items").empty());
     REQUIRE(versionedDocument.at("items").size() == 1U);
-    CHECK(legacyDocument.at("items").front().at("state") == "entitled");
-    CHECK_FALSE(legacyDocument.at("items").front().contains("signedPublication"));
+    CHECK(versionedDocument.at("accountId").get<std::string>() == AccountId);
     CHECK(versionedDocument.at("items").front().at("state") == "ready");
     CHECK(versionedDocument.at("items").front().at("signedPublication") == PublicationEnvelope());
 
@@ -97,34 +104,41 @@ TEST_CASE("Marketplace cache atomically round-trips token-free entitled package 
     REQUIRE(std::filesystem::remove(versionedPath));
     const auto legacyLoaded = store.Load();
     REQUIRE(legacyLoaded);
-    REQUIRE(legacyLoaded.Value().Items.size() == 1U);
-    CHECK(legacyLoaded.Value().Items.front().State == MarketplaceCacheState::Entitled);
-    CHECK(legacyLoaded.Value().Items.front().SignedPublication.empty());
+    CHECK(legacyLoaded.Value().AccountId.empty());
+    CHECK(legacyLoaded.Value().Items.empty());
 }
 
 TEST_CASE("Marketplace cache loads an unversioned schema two snapshot during migration")
 {
     KeireHubTests::TemporaryDirectory temporary;
     MarketplaceCacheStore store(temporary.Path() / "MarketplacePackages");
-    const MarketplaceCacheSnapshot snapshot{
-        .Revision = 8U, .RequestedProductId = "00112233-4455-6677-8899-aabbccddeeff", .Items = {ReadyItem()}};
+    const MarketplaceCacheSnapshot snapshot{.Revision = 8U,
+                                            .AccountId = std::string(AccountId),
+                                            .RequestedProductId = "00112233-4455-6677-8899-aabbccddeeff",
+                                            .Items = {ReadyItem()}};
     REQUIRE(store.Save(snapshot));
 
-    const auto versionedPath = store.Root() / "marketplace-cache-v2.json";
-    KeireHubTests::WriteText(store.IndexPath(), KeireHubTests::ReadText(versionedPath));
-    REQUIRE(std::filesystem::remove(versionedPath));
+    const auto currentPath = store.Root() / "marketplace-cache-v3.json";
+    const auto previousVersionedPath = store.Root() / "marketplace-cache-v2.json";
+    auto previousVersion = nlohmann::json::parse(KeireHubTests::ReadText(currentPath));
+    previousVersion["schemaVersion"] = 2U;
+    previousVersion.erase("accountId");
+    KeireHubTests::WriteText(previousVersionedPath, previousVersion.dump());
+    REQUIRE(std::filesystem::remove(currentPath));
 
     const auto loaded = store.Load();
     REQUIRE(loaded);
-    CHECK(loaded.Value() == snapshot);
+    auto expected = snapshot;
+    expected.AccountId.clear();
+    CHECK(loaded.Value() == expected);
 }
 
 TEST_CASE("Marketplace cache does not fall back when the signed versioned snapshot is invalid")
 {
     KeireHubTests::TemporaryDirectory temporary;
     MarketplaceCacheStore store(temporary.Path() / "MarketplacePackages");
-    REQUIRE(store.Save({.Revision = 9U, .Items = {ReadyItem()}}));
-    KeireHubTests::WriteText(store.Root() / "marketplace-cache-v2.json", "{");
+    REQUIRE(store.Save({.Revision = 9U, .AccountId = std::string(AccountId), .Items = {ReadyItem()}}));
+    KeireHubTests::WriteText(store.Root() / "marketplace-cache-v3.json", "{");
 
     const auto loaded = store.Load();
     REQUIRE_FALSE(loaded);
@@ -135,9 +149,36 @@ TEST_CASE("Marketplace cache rejects duplicate identities and incomplete ready e
     KeireHubTests::TemporaryDirectory temporary;
     MarketplaceCacheStore store(temporary.Path() / "MarketplacePackages");
     const auto item = ReadyItem();
-    CHECK_FALSE(store.Save({.Revision = 1U, .Items = {item, item}}));
+    CHECK_FALSE(store.Save({.Revision = 1U, .AccountId = std::string(AccountId), .Items = {item, item}}));
 
     auto incomplete = item;
     incomplete.ArchiveSha256.clear();
-    CHECK_FALSE(store.Save({.Revision = 1U, .Items = {incomplete}}));
+    CHECK_FALSE(store.Save({.Revision = 1U, .AccountId = std::string(AccountId), .Items = {incomplete}}));
+}
+
+TEST_CASE("Marketplace session leases authorize only the live matching account")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    MarketplaceSessionLeaseStore store(temporary.Path() / "MarketplacePackages");
+    const MarketplaceSessionLease lease{
+        .AccountId = std::string(AccountId), .ExpiresAtUnixSeconds = 115U, .SignedIn = true};
+    REQUIRE(store.Save(lease));
+
+    const auto loaded = store.Load();
+    REQUIRE(loaded);
+    CHECK(loaded.Value() == lease);
+
+    const MarketplaceCacheSnapshot matching{.AccountId = std::string(AccountId)};
+    CHECK(MarketplaceSessionAuthorizes(matching, loaded.Value(), 100U));
+    CHECK(MarketplaceSessionAuthorizes(matching, loaded.Value(), 115U));
+    CHECK_FALSE(MarketplaceSessionAuthorizes(matching, loaded.Value(), 116U));
+    CHECK_FALSE(
+        MarketplaceSessionAuthorizes({.AccountId = "50112233-4455-6677-8899-aabbccddeeff"}, loaded.Value(), 100U));
+
+    auto signedOut = lease;
+    signedOut.SignedIn = false;
+    signedOut.AccountId.clear();
+    signedOut.ExpiresAtUnixSeconds = 0U;
+    REQUIRE(store.Save(signedOut));
+    CHECK_FALSE(MarketplaceSessionAuthorizes(matching, signedOut, 100U));
 }

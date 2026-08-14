@@ -69,6 +69,31 @@ namespace Keire::Detail
         return left.X * right.X + left.Y * right.Y + left.Z * right.Z;
     }
 
+    [[nodiscard]] inline Vector3 IkCross(const Vector3 left, const Vector3 right) noexcept
+    {
+        return {left.Y * right.Z - left.Z * right.Y, left.Z * right.X - left.X * right.Z,
+                left.X * right.Y - left.Y * right.X};
+    }
+
+    [[nodiscard]] inline Vector3 IkTransportDirection(const Vector3 direction, const Vector3 previousNormal,
+                                                      const Vector3 currentNormal) noexcept
+    {
+        const auto from = IkNormalize(previousNormal);
+        const auto to = IkNormalize(currentNormal);
+        const auto axisVector = IkCross(from, to);
+        const auto sine = IkVectorLength(axisVector);
+        const auto cosine = std::clamp(IkDot(from, to), -1.0F, 1.0F);
+        if (sine <= 0.000001F)
+            return cosine >= 0.0F ? direction : IkProjectOntoPlane(direction, to);
+
+        const Vector3 axis{axisVector.X / sine, axisVector.Y / sine, axisVector.Z / sine};
+        const auto axisCrossDirection = IkCross(axis, direction);
+        const auto axisProjection = IkDot(axis, direction) * (1.0F - cosine);
+        return {direction.X * cosine + axisCrossDirection.X * sine + axis.X * axisProjection,
+                direction.Y * cosine + axisCrossDirection.Y * sine + axis.Y * axisProjection,
+                direction.Z * cosine + axisCrossDirection.Z * sine + axis.Z * axisProjection};
+    }
+
     [[nodiscard]] inline float AutomaticIkResponseBlend(const float deltaSeconds, const float responseTime) noexcept
     {
         if (!std::isfinite(deltaSeconds) || deltaSeconds <= 0.0F)
@@ -242,8 +267,37 @@ namespace Keire::Detail
         return candidatePosition;
     }
 
+    [[nodiscard]] inline Vector3 AutomaticBipedKneeReference(const Vector3 leftHip, const Vector3 rightHip,
+                                                             const Vector3 gravityUp) noexcept
+    {
+        return IkNormalize(IkCross(IkSubtract(rightHip, leftHip), IkNormalize(gravityUp)));
+    }
+
+    [[nodiscard]] inline Vector3 OrientBipedKneeReference(const Vector3 reference, const Vector3 leftHip,
+                                                          const Vector3 leftKnee, const Vector3 leftFoot,
+                                                          const Vector3 rightHip, const Vector3 rightKnee,
+                                                          const Vector3 rightFoot) noexcept
+    {
+        const auto sampledBend = [](const Vector3 hip, const Vector3 knee, const Vector3 foot)
+        {
+            const auto legDirection = IkNormalize(IkSubtract(foot, hip));
+            return IkNormalize(IkProjectOntoPlane(IkSubtract(knee, hip), legDirection));
+        };
+        const auto left = sampledBend(leftHip, leftKnee, leftFoot);
+        const auto right = sampledBend(rightHip, rightKnee, rightFoot);
+        const auto sampled = IkNormalize({left.X + right.X, left.Y + right.Y, left.Z + right.Z});
+        if (IkVectorLength(reference) <= 0.000001F || IkVectorLength(sampled) <= 0.000001F ||
+            IkDot(reference, sampled) >= 0.0F)
+        {
+            return reference;
+        }
+        return {-reference.X, -reference.Y, -reference.Z};
+    }
+
     [[nodiscard]] inline Vector3 StableAutomaticLimbPole(const Vector3 root, const Vector3 middle, const Vector3 end,
-                                                         const Vector3 target, AutomaticLimbIkState& state) noexcept
+                                                         const Vector3 target, const Vector3 preferredBendDirection,
+                                                         const float deltaSeconds, const float responseTime,
+                                                         const float stability, AutomaticLimbIkState& state) noexcept
     {
         const auto upperLength = IkVectorLength(IkSubtract(middle, root));
         const auto lowerLength = IkVectorLength(IkSubtract(end, middle));
@@ -267,35 +321,46 @@ namespace Keire::Detail
             if (IkVectorLength(forward) <= 0.000001F)
                 forward = {1.0F, 0.0F, 0.0F};
         }
-        state.ForwardDirection = forward;
-        state.HasForwardDirection = true;
-
         auto sampledBend = IkProjectOntoPlane(IkSubtract(middle, root), forward);
-        auto stableBend = state.HasBendDirection ? IkProjectOntoPlane(state.BendDirection, forward) : Vector3{};
+        auto stableBend = state.HasBendDirection && state.HasForwardDirection
+                              ? IkProjectOntoPlane(
+                                    IkTransportDirection(state.BendDirection, state.ForwardDirection, forward), forward)
+                              : Vector3{};
+        auto preferredBend = IkProjectOntoPlane(preferredBendDirection, forward);
         const auto bendThreshold = std::max(reach * 0.001F, 0.00001F);
         const auto hasSampledBend = IkVectorLength(sampledBend) > bendThreshold;
         const auto hasStableBend = IkVectorLength(stableBend) > bendThreshold;
-        Vector3 bend;
-        const auto nearingExtension = targetDistance > reach * 0.85F;
-        if (hasStableBend && nearingExtension)
+        const auto hasPreferredBend = IkVectorLength(preferredBend) > bendThreshold;
+        if (hasSampledBend)
+            sampledBend = IkNormalize(sampledBend);
+        if (hasStableBend)
+            stableBend = IkNormalize(stableBend);
+        if (hasPreferredBend)
+            preferredBend = IkNormalize(preferredBend);
+
+        const auto align = [](Vector3 candidate, const Vector3 reference)
         {
-            bend = IkNormalize(stableBend);
-        }
-        else if (hasSampledBend)
+            if (IkDot(candidate, reference) < 0.0F)
+                candidate = {-candidate.X, -candidate.Y, -candidate.Z};
+            return candidate;
+        };
+        if (hasPreferredBend)
         {
-            bend = IkNormalize(sampledBend);
             if (hasStableBend)
-            {
-                stableBend = IkNormalize(stableBend);
-                const auto alignment = bend.X * stableBend.X + bend.Y * stableBend.Y + bend.Z * stableBend.Z;
-                if (alignment < 0.0F)
-                    bend = {-bend.X, -bend.Y, -bend.Z};
-            }
+                stableBend = align(stableBend, preferredBend);
+            if (hasSampledBend)
+                sampledBend = align(sampledBend, preferredBend);
         }
+        else if (hasStableBend && hasSampledBend)
+            sampledBend = align(sampledBend, stableBend);
+
+        Vector3 bend;
+        if (hasSampledBend)
+            bend = sampledBend;
         else if (hasStableBend)
-        {
-            bend = IkNormalize(stableBend);
-        }
+            bend = stableBend;
+        else if (hasPreferredBend)
+            bend = preferredBend;
         else
         {
             const std::array references{Vector3{0.0F, 0.0F, -1.0F}, Vector3{0.0F, 1.0F, 0.0F},
@@ -308,9 +373,34 @@ namespace Keire::Detail
             }
             bend = IkNormalize(bend);
         }
+
+        const auto stabilityWeight = std::clamp(std::isfinite(stability) ? stability : 0.0F, 0.0F, 1.0F);
+        const auto reference = hasPreferredBend ? preferredBend : stableBend;
+        if ((hasPreferredBend || hasStableBend) && stabilityWeight > 0.0F)
+        {
+            bend = IkNormalize({bend.X + (reference.X - bend.X) * stabilityWeight,
+                                bend.Y + (reference.Y - bend.Y) * stabilityWeight,
+                                bend.Z + (reference.Z - bend.Z) * stabilityWeight});
+        }
+        if (hasStableBend)
+        {
+            bend = align(bend, stableBend);
+            const auto responseBlend = AutomaticIkResponseBlend(deltaSeconds, responseTime);
+            bend = IkNormalize({stableBend.X + (bend.X - stableBend.X) * responseBlend,
+                                stableBend.Y + (bend.Y - stableBend.Y) * responseBlend,
+                                stableBend.Z + (bend.Z - stableBend.Z) * responseBlend});
+        }
+        state.ForwardDirection = forward;
+        state.HasForwardDirection = true;
         state.BendDirection = bend;
         state.HasBendDirection = true;
         return {root.X + bend.X * reach, root.Y + bend.Y * reach, root.Z + bend.Z * reach};
+    }
+
+    [[nodiscard]] inline Vector3 StableAutomaticLimbPole(const Vector3 root, const Vector3 middle, const Vector3 end,
+                                                         const Vector3 target, AutomaticLimbIkState& state) noexcept
+    {
+        return StableAutomaticLimbPole(root, middle, end, target, {}, 1.0F, 0.0F, 0.0F, state);
     }
 
     inline void AppendAnimationIkDiagnostic(std::string& destination, const std::string_view diagnostic)

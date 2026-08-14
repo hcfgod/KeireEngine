@@ -17,6 +17,7 @@ namespace KeireHub
     struct HubMarketplaceRequest final
     {
         std::string ProductId;
+        std::string AccountId;
         std::string AccessToken;
         std::string ServiceBaseUrl;
         std::string TrustedPublicKeyDocument;
