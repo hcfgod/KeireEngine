@@ -9,6 +9,7 @@ project(ProjectConfig.PROJECT_NAMESPACE .. "EditorTests")
         "Include/**.h",
         "Source/**.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/AssetOperationService.cpp",
+        "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/AssetPackageAuthoring.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/AssetPicker.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/AssetBrowserFolderCache.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/AssetBrowserUtilities.cpp",

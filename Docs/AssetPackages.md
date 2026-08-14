@@ -33,6 +33,13 @@ hash mismatches, signature failures, and trailing compressed data fail before pu
 Use the public archive functions in `Keire/Assets/AssetPackage.h` to inventory a payload, encode or decode a canonical
 manifest, create an archive, inspect trusted metadata, and extract exact bytes to a new owned staging directory.
 
+In the Editor Asset Browser, select one or more assets and use **Create Asset Package...** from the context menu. The
+same command on a folder includes every asset below that folder. The authoring dialog controls the display name,
+package/publisher identifiers, semantic version, summary, and minimum Kéire version. Referenced dependencies are
+included automatically so the result remains self-contained. The Editor snapshots the asset inventory, stages source
+files and `.keiremeta` sidecars under the project `Library` directory, writes the archive in the background, and never
+overwrites an existing destination.
+
 Identical payload bytes and manifest input produce identical archive bytes when the same schema and compression level are
 used. Output paths and timestamps do not enter the archive. Creation re-hashes every source file after inventory so a
 payload changed during publication cannot produce a mismatched artifact.
@@ -142,6 +149,11 @@ roots, proves that selected asset dependencies remain closed, explicitly declare
 nonportable paths, refuses to overwrite an output release set, and inspects every generated archive through the
 authoritative Asset Tool. The resulting packages are still unsigned quarantine inputs: official content must pass the
 same Publisher upload, isolated validation, staff moderation, and offline publication boundary as any other product.
+
+The Publisher portal accepts the public product name, category, approved license, and card summary together with the
+first package upload. That reservation transaction creates a private draft product and version before issuing the
+path-scoped upload grant. **Upload new version** on an existing product pre-fills the same metadata while preserving the
+product identity; published product names are immutable.
 
 The marketplace validator is split into a networked broker and a local-only worker. A dedicated Edge boundary holds
 Supabase service privileges; the broker holds only a scoped queue secret and receives a short-lived URL for its one

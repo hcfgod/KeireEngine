@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <deque>
 #include <filesystem>
+#include <future>
 #include <memory>
 #include <optional>
 #include <span>
@@ -242,6 +243,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     bool CreateAssetBrowserInputActions(Keire::InputActionAssetDefinition definition,
                                         std::string_view baseName) override;
     void ExtractAssetBrowserMaterials(Keire::AssetId model) override;
+    void CreateAssetBrowserPackage(KeireEditor::AssetPackageSelection selection,
+                                   KeireEditor::AssetPackageDraft draft) override;
     void MutateAssetBrowser(Keire::Detail::AssetWorkerMutation mutation, Keire::Detail::AssetWorkerMutation reverse,
                             std::string name, bool revealResult) override;
     void OpenAssetBrowserInputActions(Keire::AssetId asset) override;
@@ -523,6 +526,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void SaveScene();
     void SaveSceneAs();
     void CompleteSaveSceneAs();
+    void CompleteAssetBrowserPackage();
     void RequestCloseScene();
     void CloseScene();
     void ExecutePendingSceneAction();
@@ -621,6 +625,15 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::vector<Keire::AssetSourceRecord> m_AssetRecords;
     std::uint64_t m_AssetRecordRevision = 0;
     Keire::AssetId m_SelectedAsset;
+    struct PendingAssetPackageDialog
+    {
+        KeireEditor::AssetPackageSelection Selection;
+        KeireEditor::AssetPackageDraft Draft;
+        Keire::Ref<Keire::SaveFileDialogOperation> Dialog;
+    };
+    std::optional<PendingAssetPackageDialog> m_PendingAssetPackageDialog;
+    std::future<Keire::AssetPackageArchiveMetadata> m_AssetPackageExport;
+    std::filesystem::path m_AssetPackageOutput;
     std::filesystem::path m_ExecutablePath;
     std::filesystem::path m_EditorSessionPath;
     Keire::AssetId m_PendingStartupScene;

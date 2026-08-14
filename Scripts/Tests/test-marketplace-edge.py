@@ -136,7 +136,7 @@ require(
     "Publisher submission must use its service-only database transition.",
 )
 for upload_rpc in (
-    "service_reserve_marketplace_upload",
+    "service_reserve_marketplace_named_upload",
     "service_complete_marketplace_upload",
     "service_cancel_marketplace_upload",
 ):
@@ -156,6 +156,19 @@ require(
 require(
     "expectedSha256" in publisher and "expectedSizeBytes" in publisher,
     "Publisher reservations must bind the expected package digest and byte count.",
+)
+require(
+    'optionalUuid(input, "productId")' in publisher
+    and 'requiredUuid(input, "publisherId")' in publisher
+    and 'requiredUuid(input, "categoryId")' in publisher
+    and 'stringField(input, "productName", 2, 128)' in publisher
+    and 'stringField(input, "productSummary", 20, 240)' in publisher,
+    "Publisher reservations must accept a named, categorized product while preserving existing-product releases.",
+)
+require(
+    "typeof reservation.product_id" in publisher
+    and "productId: reservation.product_id" in publisher,
+    "Publisher reservations must return the created or selected product identity.",
 )
 require(
     'operation === "version.submit"' in publisher

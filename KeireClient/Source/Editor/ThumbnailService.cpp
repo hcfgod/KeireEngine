@@ -84,6 +84,10 @@ namespace KeireEditor
                 return {0b111, 0b010, 0b010, 0b010, 0b111};
             case 'M':
                 return {0b101, 0b111, 0b111, 0b101, 0b101};
+            case 'A':
+                return {0b010, 0b101, 0b111, 0b101, 0b101};
+            case 'N':
+                return {0b101, 0b111, 0b111, 0b111, 0b101};
             case 'V':
                 return {0b101, 0b101, 0b101, 0b101, 0b010};
             case 'X':
@@ -906,6 +910,38 @@ namespace KeireEditor
             ApplyBadge(result, width, height, "MX");
             return result;
         }
+
+        [[nodiscard]] std::vector<std::byte> MakeAnimationPreview(const ThumbnailRequest& request,
+                                                                  const std::uint32_t width, const std::uint32_t height)
+        {
+            auto result = MakeIcon(width, height, {35, 28, 49}, {199, 116, 236}, 'A', request.Missing);
+            if (width < 40 || height < 40)
+                return result;
+
+            const auto centerX = static_cast<int>(width / 2U);
+            const auto centerY = static_cast<int>(height / 3U);
+            for (int row = -10; row <= 10; ++row)
+            {
+                const auto right = centerX + 10 - std::abs(row) * 18 / 10;
+                DrawLine(result, width, height, centerX - 8, centerY + row, right, centerY + row, {232, 190, 249});
+            }
+
+            const auto left = static_cast<int>(width / 7U);
+            const auto right = static_cast<int>(width - width / 7U);
+            const auto timeline = static_cast<int>(height * 3U / 4U);
+            DrawLine(result, width, height, left, timeline, right, timeline, {109, 85, 129});
+            for (const int key : {left + 5, centerX, right - 5})
+            {
+                DrawLine(result, width, height, key - 4, timeline, key, timeline - 4, {208, 136, 241});
+                DrawLine(result, width, height, key, timeline - 4, key + 4, timeline, {208, 136, 241});
+                DrawLine(result, width, height, key + 4, timeline, key, timeline + 4, {208, 136, 241});
+                DrawLine(result, width, height, key, timeline + 4, key - 4, timeline, {208, 136, 241});
+            }
+            DrawLine(result, width, height, left + 5, timeline - 1, centerX, timeline - 13, {157, 104, 199});
+            DrawLine(result, width, height, centerX, timeline - 13, right - 5, timeline - 1, {157, 104, 199});
+            ApplyBadge(result, width, height, "AN");
+            return result;
+        }
     } // namespace
 
     std::vector<std::byte> MakeFolderThumbnail(const std::uint32_t width, const std::uint32_t height,
@@ -953,6 +989,8 @@ namespace KeireEditor
         }
         if (type == Keire::AudioMixerAsset::StaticType())
             return MakeMixerPreview({.Missing = missing}, width, height);
+        if (type == Keire::AnimationSourceAsset::StaticType() || type == Keire::AnimationClipAsset::StaticType())
+            return MakeAnimationPreview({.Missing = missing}, width, height);
         return MakeIcon(width, height, {40, 44, 52}, {130, 142, 162}, 'X', missing);
     }
 
@@ -1194,7 +1232,7 @@ namespace KeireEditor
         RegisterProvider(".wav", 1, MakeAudioPreview);
         RegisterProvider(".ogg", 1, MakeAudioPreview);
         RegisterProvider(".flac", 1, MakeAudioPreview);
-        RegisterProvider(".keireanim", 1, icon({43, 34, 54}, {199, 116, 236}, 'A'));
+        RegisterProvider(".keireanim", 2, MakeAnimationPreview);
         RegisterProvider(".keireanimgraph", 1, icon({39, 31, 54}, {165, 126, 248}, 'A'));
         RegisterProvider(".keireavatarmask", 1, icon({46, 37, 44}, {232, 150, 110}, 'A'));
         RegisterProvider(".keirerig", 1, icon({37, 43, 52}, {121, 187, 238}, 'R'));
@@ -1232,7 +1270,9 @@ namespace KeireEditor
         m_Impl->RequireOwner("Request");
         if (!request.Asset || request.Digest.empty())
             return false;
-        const auto extension = Lower(request.RelativePath.extension().string());
+        const auto animation = request.Type == Keire::AnimationSourceAsset::StaticType() ||
+                               request.Type == Keire::AnimationClipAsset::StaticType();
+        const auto extension = animation ? std::string(".keireanim") : Lower(request.RelativePath.extension().string());
         const auto provider =
             m_Impl->Providers.contains(extension) ? m_Impl->Providers.at(extension) : m_Impl->Providers.at("*");
         std::scoped_lock lock(m_Impl->Mutex);

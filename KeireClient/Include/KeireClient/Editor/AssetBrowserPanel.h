@@ -2,6 +2,8 @@
 
 #include "Keire/Core.h"
 
+#include "KeireClient/Editor/AssetPackageAuthoring.h"
+
 #include "KeireInternal/Assets/AssetWorkerProtocol.h"
 
 #include <filesystem>
@@ -54,6 +56,7 @@ namespace KeireEditor
         virtual bool CreateAssetBrowserInputActions(Keire::InputActionAssetDefinition definition,
                                                     std::string_view baseName) = 0;
         virtual void ExtractAssetBrowserMaterials(Keire::AssetId model) = 0;
+        virtual void CreateAssetBrowserPackage(AssetPackageSelection selection, AssetPackageDraft draft) = 0;
         virtual void MutateAssetBrowser(Keire::Detail::AssetWorkerMutation mutation,
                                         Keire::Detail::AssetWorkerMutation reverse, std::string name,
                                         bool revealResult = false) = 0;

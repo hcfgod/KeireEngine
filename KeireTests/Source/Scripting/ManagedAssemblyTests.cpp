@@ -1,5 +1,6 @@
 #include "Keire/ECS/Component.h"
 #include "Keire/ECS/Components/AudioComponents.h"
+#include "Keire/Jobs/JobSystem.h"
 #include "Keire/Scenes/Scene.h"
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
 #include "Keire/Scripting/ScriptSystem.h"
@@ -9,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
@@ -252,8 +254,27 @@ TEST_CASE("Managed builds publish only successful replacements")
     Keire::ScriptSystemSpecification specification;
     specification.Mode = Keire::ScriptMode::Enabled;
     specification.ProjectRoot = root;
+    specification.SdkSelection = Keire::ManagedSdkSelection::Custom;
     specification.DotnetExecutable = dotnet;
-    auto scripts = Keire::CreateRef<Keire::ScriptSystem>(specification);
+    Keire::JobSystemSpecification jobSpecification;
+    jobSpecification.WorkerCount = 1;
+    jobSpecification.BlockingWorkerCount = 1;
+    auto jobs = Keire::CreateRef<Keire::JobSystem>(jobSpecification);
+    std::atomic<bool> blockerStarted = false;
+    std::atomic<bool> releaseBlocker = false;
+    Keire::JobDescription blockerDescription;
+    blockerDescription.Name = "Managed build test blocker";
+    blockerDescription.Class = Keire::JobClass::Blocking;
+    const auto blocker = jobs->Submit(std::move(blockerDescription),
+                                      [&](Keire::JobContext& context)
+                                      {
+                                          blockerStarted.store(true);
+                                          while (!releaseBlocker.load() && !context.StopRequested())
+                                              std::this_thread::yield();
+                                      });
+    while (!blockerStarted.load())
+        std::this_thread::yield();
+    auto scripts = Keire::CreateRef<Keire::ScriptSystem>(specification, jobs);
     Keire::ManagedAssemblyDefinition definition;
     definition.Name = "Gameplay";
     definition.RootNamespace = "Game";
@@ -262,6 +283,11 @@ TEST_CASE("Managed builds publish only successful replacements")
     request.Assemblies = {{TestAsset(1), definition}};
 
     const auto first = scripts->StartBuild(request);
+    const auto activeSdk = scripts->SdkConfiguration();
+    CHECK_NOTHROW(scripts->ConfigureManagedSdk(activeSdk.Selection, activeSdk.CustomExecutable));
+    CHECK_THROWS_WITH_AS(scripts->ConfigureManagedSdk(Keire::ManagedSdkSelection::SystemPath),
+                         "The managed SDK cannot be changed while a script build is active.", std::logic_error);
+    releaseBlocker.store(true);
     REQUIRE(scripts->WaitForBuild(first, std::chrono::seconds(60)));
     REQUIRE(scripts->BuildStatus().State == Keire::ManagedBuildState::Succeeded);
     const auto active = scripts->BuildStatus().ActiveAssemblyDirectory / "Gameplay.dll";
@@ -284,6 +310,8 @@ TEST_CASE("Managed builds publish only successful replacements")
     CHECK(std::filesystem::is_regular_file(active));
     CHECK(std::filesystem::last_write_time(active) == successfulWrite);
     scripts->Close();
+    REQUIRE(blocker.Wait(std::chrono::seconds(2)));
+    jobs->Close();
 }
 
 TEST_CASE("Managed assembly definitions reject paths outside the project")

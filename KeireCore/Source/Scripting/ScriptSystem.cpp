@@ -3345,15 +3345,15 @@ namespace Keire
     void ScriptSystem::ConfigureManagedSdk(const ManagedSdkSelection selection, std::filesystem::path customExecutable)
     {
         m_Impl->RequireOwner();
-        const auto state = BuildStatus().State;
-        if (state == ManagedBuildState::Generating || state == ManagedBuildState::Compiling ||
-            state == ManagedBuildState::Publishing)
-            throw std::logic_error("The managed SDK cannot be changed while a script build is active.");
         if (selection != ManagedSdkSelection::Custom)
             customExecutable.clear();
         if (m_Impl->Specification.SdkSelection == selection &&
             m_Impl->Specification.DotnetExecutable == customExecutable)
             return;
+        const auto state = BuildStatus().State;
+        if (state == ManagedBuildState::Generating || state == ManagedBuildState::Compiling ||
+            state == ManagedBuildState::Publishing)
+            throw std::logic_error("The managed SDK cannot be changed while a script build is active.");
         m_Impl->Specification.SdkSelection = selection;
         m_Impl->Specification.DotnetExecutable = std::move(customExecutable);
         m_Impl->Dotnet.clear();

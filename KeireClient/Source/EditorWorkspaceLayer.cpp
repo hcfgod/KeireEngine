@@ -1022,6 +1022,19 @@ void EditorWorkspaceLayer::OnDetach() noexcept
         m_PrefabReturnDocument->Close();
     m_PrefabReturnDocument.reset();
     m_PrefabEditingStage.reset();
+    m_PendingAssetPackageDialog.reset();
+    if (m_AssetPackageExport.valid())
+    {
+        try
+        {
+            static_cast<void>(m_AssetPackageExport.get());
+        }
+        catch (const std::exception& error)
+        {
+            KEIRE_CLIENT_ERROR("[Assets] Asset-package export failed during shutdown: {}", error.what());
+        }
+    }
+    m_AssetPackageOutput.clear();
     m_AssetBrowserPanel->Close();
     m_AssetDatabase.Reset();
 }
@@ -1117,6 +1130,7 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
         }
     }
     CompleteSaveSceneAs();
+    CompleteAssetBrowserPackage();
     {
         Keire::ProfileScope managedBuild(Owner().GetProfiler(), Keire::ProfileCategory::Scripting, "Managed build");
         UpdateManagedBuild(time);

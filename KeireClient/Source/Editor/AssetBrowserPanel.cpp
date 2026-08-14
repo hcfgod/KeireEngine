@@ -84,6 +84,22 @@ namespace KeireEditor
             CreateNameBuffer = defaultName;
             OpenNamedCreatePopup = true;
         }
+        void RequestPackageCreate(AssetPackageSelection selection, std::string displayName)
+        {
+            PendingPackageSelection = std::move(selection);
+            PendingPackageDraft = {.PackageId = SuggestedAssetPackageIdentifier(displayName),
+                                   .Version = "0.0.1",
+                                   .PublisherId = "local",
+                                   .DisplayName = std::move(displayName),
+                                   .Summary = "Assets exported from the current Kéire project.",
+                                   .MinimumEngineVersion = std::string(Keire::GetBuildInfo().Version)};
+            OpenPackageCreatePopup = true;
+        }
+        void ResetPackageCreate() noexcept
+        {
+            PendingPackageSelection = {};
+            PendingPackageDraft = {};
+        }
         void RequestInputActionsCreate(Keire::InputActionAssetDefinition definition, const std::string_view defaultName)
         {
             PendingInputActions = std::move(definition);
@@ -114,6 +130,7 @@ namespace KeireEditor
             MaterialInstanceFallbackImage.Reset();
             VfxFallbackImage.Reset();
             AudioMixerFallbackImage.Reset();
+            AnimationFallbackImage.Reset();
             Selection.clear();
             VisibleSelectionOrder.clear();
             SelectionAnchor = {};
@@ -128,6 +145,8 @@ namespace KeireEditor
             PendingManagedType = {};
             PendingInputActions.reset();
             PendingCreateKind = NamedCreateKind::None;
+            ResetPackageCreate();
+            OpenPackageCreatePopup = false;
             CurrentFolder.clear();
             ProjectRoot.clear();
             AssetRoot.clear();
@@ -942,6 +961,45 @@ namespace KeireEditor
                     ui.CloseCurrentPopup();
                 }
             }
+
+            if (OpenPackageCreatePopup)
+            {
+                ui.OpenPopup("Create Asset Package");
+                OpenPackageCreatePopup = false;
+            }
+            if (auto package = ui.BeginPopupModal("Create Asset Package"); package)
+            {
+                ui.Text(PendingPackageSelection.Folder
+                            ? "Package folder: Assets/" + PendingPackageSelection.Folder->generic_string()
+                            : "Package " + std::to_string(PendingPackageSelection.Assets.size()) +
+                                  " selected asset(s)");
+                (void)ui.InputText("Display name", PendingPackageDraft.DisplayName);
+                (void)ui.InputText("Package ID", PendingPackageDraft.PackageId);
+                (void)ui.InputText("Version", PendingPackageDraft.Version);
+                (void)ui.InputText("Publisher ID", PendingPackageDraft.PublisherId);
+                (void)ui.InputText("Minimum Kéire version", PendingPackageDraft.MinimumEngineVersion);
+                (void)ui.InputText("Summary", PendingPackageDraft.Summary);
+                const bool complete = !PendingPackageDraft.DisplayName.empty() &&
+                                      !PendingPackageDraft.PackageId.empty() && !PendingPackageDraft.Version.empty() &&
+                                      !PendingPackageDraft.PublisherId.empty() &&
+                                      !PendingPackageDraft.MinimumEngineVersion.empty();
+                if (auto disabled = ui.BeginDisabled(!complete); disabled)
+                {
+                    if (ui.Button("Choose destination..."))
+                    {
+                        editor.CreateAssetBrowserPackage(std::move(PendingPackageSelection),
+                                                         std::move(PendingPackageDraft));
+                        ResetPackageCreate();
+                        ui.CloseCurrentPopup();
+                    }
+                }
+                ui.SameLine();
+                if (ui.Button("Cancel"))
+                {
+                    ResetPackageCreate();
+                    ui.CloseCurrentPopup();
+                }
+            }
         }
 
         void CopyText(IAssetBrowserController& editor, const std::string_view value)
@@ -987,6 +1045,12 @@ namespace KeireEditor
                     SetClipboard(ClipboardMode::Cut, Selection);
                 if (ui.MenuItem("Copy"))
                     SetClipboard(ClipboardMode::Copy, Selection);
+                if (ui.MenuItem("Create Asset Package..."))
+                {
+                    const auto displayName =
+                        Selection.size() == 1 ? DisplayName(record.RelativePath) : "Selected Assets";
+                    RequestPackageCreate({.Assets = Selection}, displayName);
+                }
                 if (ui.MenuItem("Delete"))
                     RequestDeleteAssets(editor);
                 ui.Separator();
@@ -1040,6 +1104,8 @@ namespace KeireEditor
                     SetFolderClipboard(ClipboardMode::Cut, folder);
                 if (ui.MenuItem("Copy"))
                     SetFolderClipboard(ClipboardMode::Copy, folder);
+                if (ui.MenuItem("Create Asset Package..."))
+                    RequestPackageCreate({.Folder = folder}, folder.filename().string());
                 if (ui.MenuItem("Paste Into", false, ClipboardModeValue != ClipboardMode::Empty))
                     Paste(folder, editor);
                 if (ui.MenuItem("Delete"))
@@ -1103,6 +1169,9 @@ namespace KeireEditor
                     image = VfxFallbackImage;
                 else if (record.Type == Keire::AudioMixerAsset::StaticType())
                     image = AudioMixerFallbackImage;
+                else if (record.Type == Keire::AnimationSourceAsset::StaticType() ||
+                         record.Type == Keire::AnimationClipAsset::StaticType())
+                    image = AnimationFallbackImage;
             }
             const bool selected = std::ranges::find(Selection, record.Id) != Selection.end();
             bool open = false;
@@ -1499,6 +1568,8 @@ namespace KeireEditor
                         ui.CreateImage(96, 96, MakeAssetFallbackThumbnail(Keire::VfxEffectAsset::StaticType(), 96, 96));
                     AudioMixerFallbackImage = ui.CreateImage(
                         96, 96, MakeAssetFallbackThumbnail(Keire::AudioMixerAsset::StaticType(), 96, 96));
+                    AnimationFallbackImage = ui.CreateImage(
+                        96, 96, MakeAssetFallbackThumbnail(Keire::AnimationSourceAsset::StaticType(), 96, 96));
                 }
                 for (auto& completed : Thumbnails->DrainCompleted())
                     Images[completed.Asset] = ui.CreateImage(completed.Width, completed.Height, completed.Pixels);
@@ -1717,6 +1788,7 @@ namespace KeireEditor
         Keire::Ref<Keire::UiImage> MaterialInstanceFallbackImage;
         Keire::Ref<Keire::UiImage> VfxFallbackImage;
         Keire::Ref<Keire::UiImage> AudioMixerFallbackImage;
+        Keire::Ref<Keire::UiImage> AnimationFallbackImage;
         Keire::Ref<Keire::UndoContext> Undo;
         std::vector<Keire::AssetId> Selection;
         std::vector<Keire::AssetId> VisibleSelectionOrder;
@@ -1738,6 +1810,8 @@ namespace KeireEditor
         Keire::ShaderGraphTemplate PendingShaderGraphTemplate = Keire::ShaderGraphTemplate::Lit;
         Keire::ManagedTypeId PendingManagedType;
         std::optional<Keire::InputActionAssetDefinition> PendingInputActions;
+        AssetPackageSelection PendingPackageSelection;
+        AssetPackageDraft PendingPackageDraft;
         ViewMode Mode = ViewMode::Grid;
         ClipboardMode ClipboardModeValue = ClipboardMode::Empty;
         float ThumbnailSize = 88.0F;
@@ -1746,6 +1820,7 @@ namespace KeireEditor
         bool OpenNamedCreatePopup = false;
         bool FocusCreateName = false;
         bool OpenFolderRenamePopup = false;
+        bool OpenPackageCreatePopup = false;
         bool OpenDeletePopup = false;
         bool OpenTrashPopup = false;
         bool Focused = false;

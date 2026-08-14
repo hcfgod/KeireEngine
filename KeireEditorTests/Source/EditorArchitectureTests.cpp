@@ -1876,11 +1876,23 @@ TEST_CASE("content previews use immutable loaded assets without blocking shutdow
         KeireEditor::MakeAssetFallbackThumbnail(Keire::MaterialInstanceAsset::StaticType(), 96, 96);
     const auto vfxFallback = KeireEditor::MakeAssetFallbackThumbnail(Keire::VfxEffectAsset::StaticType(), 96, 96);
     const auto mixerFallback = KeireEditor::MakeAssetFallbackThumbnail(Keire::AudioMixerAsset::StaticType(), 96, 96);
+    const auto animationFallback =
+        KeireEditor::MakeAssetFallbackThumbnail(Keire::AnimationSourceAsset::StaticType(), 96, 96);
+    const auto genericFallback = KeireEditor::MakeAssetFallbackThumbnail({}, 96, 96);
     CHECK(materialGraphFallback != materialInstanceFallback);
     CHECK(materialGraphFallback != vfxFallback);
     CHECK(materialInstanceFallback != vfxFallback);
     CHECK(mixerFallback != materialGraphFallback);
     CHECK(mixerFallback != vfxFallback);
+    CHECK(animationFallback != genericFallback);
+
+    const auto animationId = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000078");
+    REQUIRE(thumbnails.Request({.Asset = animationId,
+                                .Type = Keire::AnimationSourceAsset::StaticType(),
+                                .RelativePath = "Walk.fbx",
+                                .Digest = "animation-source-preview"}));
+    const auto animationResult = await();
+    CHECK(animationResult.Pixels == animationFallback);
 
     const auto meshId = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000072");
     REQUIRE(thumbnails.Request({.Asset = meshId,
