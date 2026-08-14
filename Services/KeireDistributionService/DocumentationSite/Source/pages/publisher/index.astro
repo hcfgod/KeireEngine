@@ -11,6 +11,8 @@ let applications: any[] = [];
 let organizations: any[] = [];
 let publishers: any[] = [];
 let products: any[] = [];
+let categories: any[] = [];
+let licenses: any[] = [];
 let versions: any[] = [];
 let uploads: any[] = [];
 let validationReports: any[] = [];
@@ -20,6 +22,12 @@ if (supabase) {
         .eq("key", "publisher_portal_enabled").maybeSingle();
     enabled = flag.data?.enabled === true;
     if (user) {
+        const categoryResult = await supabase.from("marketplace_categories")
+            .select("id,slug,display_name,description,sort_order").eq("active", true).order("sort_order");
+        categories = categoryResult.data ?? [];
+        const licenseResult = await supabase.from("marketplace_license_revisions")
+            .select("license_id,revision,display_name,license_kind").order("display_name");
+        licenses = licenseResult.data ?? [];
         const applicationResult = await supabase.from("publisher_applications")
             .select("id,public_name,state,submitted_at,decision_note,updated_at")
             .eq("applicant_user_id", user.id).order("updated_at", { ascending: false });
@@ -42,7 +50,7 @@ if (supabase) {
         const publisherIds = publishers.map((publisher: any) => publisher.id);
         if (publisherIds.length) {
             const productResult = await supabase.from("marketplace_products")
-                .select("id,publisher_id,slug,display_name,state,updated_at")
+                .select("id,publisher_id,category_id,slug,display_name,short_description,state,license_spdx,license_revision,updated_at")
                 .in("publisher_id", publisherIds).order("display_name");
             products = productResult.data ?? [];
         }
@@ -88,6 +96,9 @@ const readyForStaff = versions.flatMap((version: any) => {
 });
 const requestedProductId = Astro.url.searchParams.get("product");
 const requestedProduct = requestedProductId ? productById.get(requestedProductId) : undefined;
+const requestedPublisherId = requestedProduct?.publisher_id ?? publishers[0]?.id;
+const requestedPublisher = publishers.find((publisher: any) => publisher.id === requestedPublisherId);
+const requestedProductPublished = requestedProduct?.state === "published";
 const isNeonForgeUploadSample = requestedProduct?.slug === "neon-forge-creator-pack";
 const activeValidationStates = new Set(["created", "uploading", "uploaded", "leased"]);
 ---
@@ -135,16 +146,61 @@ const activeValidationStates = new Set(["created", "uploading", "uploaded", "lea
                                 <strong>Upload and Staff submission are separate safeguards.</strong>
                                 <p>After validation passes, use <strong>Submit to Staff review</strong> below. Until then, the exact package remains private to your publisher and will not appear in the Staff moderation queue.</p>
                             </div>
-                            {products.length ? (
+                            {publishers.length && categories.length && licenses.length ? (
                                 <form class="publisher-upload" data-publisher-upload>
+                                    <input type="hidden" name="productId" value={requestedProduct?.id ?? ""} />
                                     <div class="publisher-upload__grid">
-                                        <label class="field publisher-upload__wide">
-                                            <span>Product</span>
-                                            <select name="productId" required>
-                                                {products.map((product: any) => (
-                                                    <option value={product.id} selected={requestedProductId === product.id}>{product.display_name} · {product.state}</option>
+                                        {requestedProduct ? (
+                                            <div class="field">
+                                                <span>Publisher</span>
+                                                <strong>{requestedPublisher?.display_name}</strong>
+                                                <input type="hidden" name="publisherId" value={requestedPublisherId} />
+                                                <small>An existing product cannot move to another publisher.</small>
+                                            </div>
+                                        ) : (
+                                            <label class="field">
+                                                <span>Publisher</span>
+                                                <select name="publisherId" required>
+                                                    {publishers.map((publisher: any) => (
+                                                        <option value={publisher.id} selected={requestedPublisherId === publisher.id}>{publisher.display_name}</option>
+                                                    ))}
+                                                </select>
+                                            </label>
+                                        )}
+                                        <label class="field">
+                                            <span>Product name</span>
+                                            <input name="productName" value={requestedProduct?.display_name ?? ""} minlength="2" maxlength="128" readonly={requestedProductPublished}
+                                                placeholder="Stylized Forest Materials" required />
+                                        </label>
+                                        <label class="field">
+                                            <span>Category</span>
+                                            <select name="categoryId" required disabled={requestedProductPublished}>
+                                                {categories.map((category: any) => (
+                                                    <option value={category.id} selected={requestedProduct?.category_id === category.id}>{category.display_name}</option>
                                                 ))}
                                             </select>
+                                            <input type="hidden" name="categoryId" value={requestedProduct?.category_id} disabled={!requestedProductPublished} />
+                                        </label>
+                                        <label class="field">
+                                            <span>License</span>
+                                            <select name="license" required disabled={requestedProductPublished}>
+                                                {licenses.map((license: any) => (
+                                                    <option value={`${license.license_id}|${license.revision}`}
+                                                        selected={requestedProduct?.license_spdx === license.license_id && requestedProduct?.license_revision === license.revision}>
+                                                        {license.display_name}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            <input type="hidden" name="license"
+                                                value={requestedProduct ? `${requestedProduct.license_spdx}|${requestedProduct.license_revision}` : ""}
+                                                disabled={!requestedProductPublished} />
+                                        </label>
+                                        <label class="field publisher-upload__wide">
+                                            <span>Short description</span>
+                                            <input name="productSummary" value={requestedProduct?.short_description ?? ""} minlength="20" maxlength="240"
+                                                readonly={requestedProductPublished}
+                                                placeholder="A concise description shown on marketplace cards." required />
+                                            <small>Name and category create a new private draft. Opening an existing product pre-fills the same fields for another release; published listing metadata remains immutable.</small>
                                         </label>
                                         <label class="field">
                                             <span>Package version</span>
@@ -219,8 +275,8 @@ const activeValidationStates = new Set(["created", "uploading", "uploaded", "lea
                                 </form>
                             ) : (
                                 <div class="notice-panel">
-                                    <h3>No managed draft product is available.</h3>
-                                    <p>An approved publisher and an editable product draft are required before package bytes can enter quarantine.</p>
+                                    <h3>Publisher setup is incomplete.</h3>
+                                    <p>An approved publisher, an active marketplace category, and an approved license are required before package bytes can enter quarantine.</p>
                                 </div>
                             )}
                         </section>
@@ -285,8 +341,8 @@ const activeValidationStates = new Set(["created", "uploading", "uploaded", "lea
                         <section id="products" class="publisher-section">
                             <div class="publisher-section__heading"><div><p class="eyebrow">Catalog drafts</p><h2>Products</h2></div></div>
                             {products.length ? (
-                                <div class="data-table-wrap"><table class="data-table"><thead><tr><th>Product</th><th>State</th><th>Updated</th></tr></thead><tbody>
-                                    {products.map((product: any) => <tr><td>{product.display_name}<small>{product.slug}</small></td><td><span class="status-badge">{product.state}</span></td><td>{new Date(product.updated_at).toLocaleDateString()}</td></tr>)}
+                                <div class="data-table-wrap"><table class="data-table"><thead><tr><th>Product</th><th>State</th><th>Updated</th><th>Release</th></tr></thead><tbody>
+                                    {products.map((product: any) => <tr><td>{product.display_name}<small>{product.slug}</small></td><td><span class="status-badge">{product.state}</span></td><td>{new Date(product.updated_at).toLocaleDateString()}</td><td><a href={`/publisher/?product=${encodeURIComponent(product.id)}#new-release`}>Upload new version</a></td></tr>)}
                                 </tbody></table></div>
                             ) : <p class="notice-panel">No publisher products are available for this account.</p>}
                         </section>
@@ -514,12 +570,20 @@ const activeValidationStates = new Set(["created", "uploading", "uploaded", "lea
                 const expectedSha256 = await hashFile(file, (value) => setProgress("Hashing exact bytes…", value));
                 if (fileHash) fileHash.textContent = expectedSha256;
                 const values = new FormData(uploadForm);
+                const [licenseSpdx, licenseRevision] = String(values.get("license") ?? "").split("|", 2);
+                if (!licenseSpdx || !licenseRevision) throw new Error("Choose an approved marketplace license.");
                 const reservation = await responseData(await fetch("/publisher/v1/uploads/", {
                     method: "POST",
                     credentials: "same-origin",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        productId: values.get("productId"),
+                        productId: values.get("productId") || null,
+                        publisherId: values.get("publisherId"),
+                        categoryId: values.get("categoryId"),
+                        productName: values.get("productName"),
+                        productSummary: values.get("productSummary"),
+                        licenseSpdx,
+                        licenseRevision,
                         version: values.get("version"),
                         installKind: values.get("installKind"),
                         minimumEngineVersion: values.get("minimumEngineVersion"),

@@ -104,6 +104,9 @@ Complete the gates in this order. If a gate fails, keep its feature flag disable
    - Add the new publication public key to `trusted-marketplace-keys.json`, release that bundle to supported Hub and
      Editor clients, and verify adoption before registering/activating the key or starting its signer. Retain the old
      public key through the complete overlap window.
+   - For a new product, enter its public name, active category, approved license, and card summary in the publisher
+     portal while reserving its first package upload. For another release, use **Upload new version** on the existing
+     product so its identity is preserved.
    - After a package has a passing validation report, submit its exact digest from the publisher portal, review the
      signed validator evidence in `/admin/marketplace/`, confirm the browser digest check and inventory, and approve it
      only to `approved_pending_signature`. Approval creates one queued job but never gives staff a private key or raw

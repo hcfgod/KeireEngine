@@ -5,6 +5,16 @@ versions.
 
 ## Unreleased
 
+- Fixed Play Mode starting with a silent gameplay-input dead zone when the Game panel was focused programmatically but
+  the pointer had not entered its image yet. Game-panel focus or managed cursor capture now establishes viewport
+  ownership while the application is active, and switching to another panel still releases it.
+- Fixed Play Mode's automatic managed rebuild reporting that the SDK changed when it merely reapplied the project's
+  already-active SDK selection while a previous script build was finishing.
+- Fixed valid imported animation sources showing the error thumbnail. Animation clips and animation-source FBX files
+  now use a dedicated timeline/play preview and matching loading fallback.
+- Added asset-package authoring to the Editor Asset Browser. A selection or complete folder can now be exported through
+  its context menu as a deterministic `.keireassetpackage`, with dependency closure and editable package
+  metadata. Publisher uploads now create a named, categorized draft product or add a version to an existing product.
 - Closed the repository-wide readiness review findings: Marketplace catalog and library APIs now use indexed keyset
   cursors, every Edge Function has a frozen Deno dependency graph and CI type check, compile-database generation records
   the shared Ninja artifact identity, and the automatic publication, Python-format, and current clang-tidy gates are
