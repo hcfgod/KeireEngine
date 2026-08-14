@@ -6,3 +6,6 @@ verify_jwt = false
 
 [functions.marketplace-publication]
 verify_jwt = true
+
+[functions.marketplace-publication-queue]
+verify_jwt = false

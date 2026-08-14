@@ -113,7 +113,7 @@ Deno.serve(async (request: Request) => {
                 throw new RequestError(503, "publisher.upload_reservation_failed",
                     "The upload reservation could not be created.");
             }
-            const signed = await caller.admin.storage.from("marketplace-quarantine")
+            const signed = await caller.admin.storage.from("marketplace-packages")
                 .createSignedUploadUrl(reservation.storage_path, { upsert: false });
             if (signed.error || !signed.data?.token) {
                 await caller.admin.rpc("service_cancel_marketplace_upload", {
@@ -127,7 +127,7 @@ Deno.serve(async (request: Request) => {
                 data: {
                     uploadId: reservation.upload_id,
                     versionId: reservation.version_id,
-                    bucket: "marketplace-quarantine",
+                    bucket: "marketplace-packages",
                     storagePath: reservation.storage_path,
                     uploadToken: signed.data.token,
                     resumableEndpoint: resumableEndpoint(),
@@ -153,13 +153,16 @@ Deno.serve(async (request: Request) => {
         }
         if (operation === "upload.cancel") {
             const uploadId = requiredUuid(input, "uploadId");
-            const { data: storagePath, error } = await caller.admin.rpc("service_cancel_marketplace_upload", {
+            const { data: cancelled, error } = await caller.admin.rpc("service_cancel_marketplace_upload_v2", {
                 p_actor_user_id: caller.user.id,
                 p_upload_id: uploadId,
-            });
+            }).single();
             if (error) throw databaseFailure(error);
-            if (typeof storagePath === "string" && storagePath) {
-                const removal = await caller.admin.storage.from("marketplace-quarantine").remove([storagePath]);
+            const cancelledUpload = cancelled as Record<string, unknown> | null;
+            if (cancelledUpload && typeof cancelledUpload.storage_bucket === "string" &&
+                typeof cancelledUpload.storage_path === "string") {
+                const removal = await caller.admin.storage.from(cancelledUpload.storage_bucket)
+                    .remove([cancelledUpload.storage_path]);
                 if (removal.error) console.error("cancelled marketplace upload cleanup failed", uploadId);
             }
             return json(origin, 200, { data: { uploadId, state: "expired" } });

@@ -14,6 +14,7 @@ namespace Keire
 {
     inline constexpr std::uint32_t PlayerSettingsSchemaVersion = 1;
     inline constexpr std::uint32_t PlayerBuildProfilesSchemaVersion = 1;
+    inline constexpr std::uint32_t PlayerBuildScenesSchemaVersion = 1;
 
     enum class PlayerPlatform : std::uint8_t
     {
@@ -90,6 +91,22 @@ namespace Keire
         [[nodiscard]] bool operator==(const PlayerBuildProfiles&) const = default;
     };
 
+    struct PlayerBuildScene
+    {
+        AssetId Scene;
+        bool Enabled = true;
+
+        [[nodiscard]] bool operator==(const PlayerBuildScene&) const = default;
+    };
+
+    struct PlayerBuildScenes
+    {
+        std::uint32_t SchemaVersion = PlayerBuildScenesSchemaVersion;
+        std::vector<PlayerBuildScene> Scenes;
+
+        [[nodiscard]] bool operator==(const PlayerBuildScenes&) const = default;
+    };
+
     [[nodiscard]] KEIRE_API PlayerPlatform HostPlayerPlatform() noexcept;
     [[nodiscard]] KEIRE_API PlayerArchitecture HostPlayerArchitecture() noexcept;
     [[nodiscard]] KEIRE_API std::string_view ToString(PlayerPlatform platform) noexcept;
@@ -98,14 +115,21 @@ namespace Keire
     [[nodiscard]] KEIRE_API std::string_view ToString(PlayerSigningPolicy policy) noexcept;
     [[nodiscard]] KEIRE_API PlayerSettings DefaultPlayerSettings(const ProjectDescriptor& project);
     [[nodiscard]] KEIRE_API PlayerBuildProfiles DefaultPlayerBuildProfiles();
+    [[nodiscard]] KEIRE_API PlayerBuildScenes DefaultPlayerBuildScenes(const ProjectDescriptor& project);
     KEIRE_API void ValidatePlayerSettings(const PlayerSettings& settings);
     KEIRE_API void ValidatePlayerBuildProfiles(const PlayerBuildProfiles& profiles);
+    KEIRE_API void ValidatePlayerBuildScenes(const PlayerBuildScenes& scenes);
     [[nodiscard]] KEIRE_API PlayerSettings LoadPlayerSettings(const std::filesystem::path& projectRoot,
                                                               const ProjectDescriptor& project);
     KEIRE_API void SavePlayerSettings(const std::filesystem::path& projectRoot, const PlayerSettings& settings);
     [[nodiscard]] KEIRE_API PlayerBuildProfiles LoadPlayerBuildProfiles(const std::filesystem::path& projectRoot);
     KEIRE_API void SavePlayerBuildProfiles(const std::filesystem::path& projectRoot,
                                            const PlayerBuildProfiles& profiles);
+    [[nodiscard]] KEIRE_API PlayerBuildScenes LoadPlayerBuildScenes(const std::filesystem::path& projectRoot,
+                                                                    const ProjectDescriptor& project);
+    KEIRE_API void SavePlayerBuildScenes(const std::filesystem::path& projectRoot, const PlayerBuildScenes& scenes);
+    [[nodiscard]] KEIRE_API std::vector<AssetId> EnabledPlayerBuildScenes(const PlayerBuildScenes& scenes);
+    [[nodiscard]] KEIRE_API AssetId PlayerBuildStartupScene(const PlayerBuildScenes& scenes);
     [[nodiscard]] KEIRE_API const PlayerBuildProfile& FindPlayerBuildProfile(const PlayerBuildProfiles& profiles,
                                                                              AssetId id);
     [[nodiscard]] KEIRE_API const PlayerBuildProfile& FindPlayerBuildProfile(const PlayerBuildProfiles& profiles,

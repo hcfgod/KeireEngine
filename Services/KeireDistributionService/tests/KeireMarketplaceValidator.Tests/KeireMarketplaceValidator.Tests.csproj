@@ -15,5 +15,6 @@
   <ItemGroup>
     <ProjectReference Include="../../Source/KeireMarketplace.Validation/KeireMarketplace.Validation.csproj" />
     <ProjectReference Include="../../Source/KeireMarketplaceValidatorBroker/KeireMarketplaceValidatorBroker.csproj" />
+    <ProjectReference Include="../../Source/KeireMarketplacePublicationSigner/KeireMarketplacePublicationSigner.csproj" />
   </ItemGroup>
 </Project>

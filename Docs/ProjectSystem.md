@@ -11,6 +11,9 @@ MyGame/
   Assets/                         Source assets and adjacent .keiremeta identities
   ProjectSettings/
     Project.keireproject          Versioned project identity and startup references
+    Player.keiresettings          Player identity, window, and platform icon settings
+    BuildProfiles.keiresettings   Named target, configuration, output, and signing profiles
+    BuildScenes.keiresettings     Ordered enabled player scenes; first enabled scene starts
   Library/                        Ignored import cache and per-project editor state
   Logs/                           Ignored Core and Client logs
   Build/                          Ignored project-local cooked output
@@ -24,6 +27,11 @@ and a sorted source-module requirement catalog. Asset and scene references use s
 `KeireAssetTool upgrade-project` must complete the transactional upgrade before the editor opens them for mutation.
 `Project::Save` preserves the immutable project ID and schema, advances the last-saved engine version, and replaces the
 descriptor atomically.
+
+The descriptor startup scene remains the initial Editor fallback and the migration source for projects that do not yet
+have `BuildScenes.keiresettings`. Player builds use the ordered build-scene file instead: all enabled scenes are cooked
+and the first enabled scene is the runtime startup scene. The last successfully opened Editor scene is a per-user,
+ignored record at `Library/UserSettings/Workspace/EditorSession.state`; it never changes shared project settings.
 
 Project upgrades are explicit dry-run plans followed by a journaled transaction. The built-in v1 → v2 and v2 → v3
 steps are composed in order, snapshot every affected file, validate staged metadata before publication, retain a

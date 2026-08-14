@@ -50,3 +50,7 @@ menu, in the focused document context.
 Project asset operations, scene edits, Input Actions authoring, and theme previews use this shared service. Continuous
 Transform and Mesh Renderer tint drags merge into one history entry. Docking geometry remains layout state rather than
 document history.
+
+Scene snapshot commands preserve the current selection by stable entity ID when applying Undo or Redo. IDs absent from
+the restored snapshot are removed, while surviving selections and the primary selection remain available to the next
+Hierarchy, Inspector, gizmo, or shortcut command.

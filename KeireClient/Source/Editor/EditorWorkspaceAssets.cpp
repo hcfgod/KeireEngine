@@ -913,6 +913,7 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
                         if (const auto scenes = Owner().Scenes())
                             m_SceneDocument->SetLoadOperation(scenes->Load(created, Keire::SceneLoadMode::Single));
                         m_SceneDocument->SetStatus("Saved a new scene asset with a new stable identity.");
+                        PersistEditorSessionScene(created);
                         AddConsoleMessage("Scene",
                                           "Saved As " + Keire::Detail::PathToUtf8(completion->Context.SceneSource),
                                           m_Theme.Success);
@@ -925,11 +926,7 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
             }
             if (completion->Context.Generation > 0)
                 m_MaterialDocument->MarkCatalogRefreshApplied(completion->Context.Generation);
-            if (m_PendingStartupScene)
-            {
-                const auto startup = std::exchange(m_PendingStartupScene, {});
-                RequestOpenScene(startup);
-            }
+            OpenPendingStartupScene();
         }
         catch (const std::exception& error)
         {
@@ -1132,7 +1129,10 @@ void EditorWorkspaceLayer::CookAssets()
         const auto project = Owner().GetProject();
         if (project)
         {
-            profile.Roots.push_back(project->Descriptor().StartupScene);
+            const auto buildScenes = Keire::EnabledPlayerBuildScenes(m_PlayerBuildScenes);
+            if (buildScenes.empty())
+                throw std::runtime_error("Enable at least one scene in Build Settings before cooking assets.");
+            profile.Roots.insert(profile.Roots.end(), buildScenes.begin(), buildScenes.end());
             if (project->Descriptor().DefaultInput)
                 profile.Roots.push_back(project->Descriptor().DefaultInput);
             const auto authoring = Keire::LoadProjectAuthoringSettings(project->Root());

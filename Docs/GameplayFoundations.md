@@ -95,7 +95,8 @@ base/variant prefab sources, and its deterministic cook/runtime route validates 
 
 ## Cooked runtime manifests
 
-Runtime manifests use schema 4 and include build identity, required source modules, managed assembly roots, default
-input and mixer identities, subsystem flags, the 32-layer physics configuration, rendering environment values, and
-streaming settings. Older content fails with a direct recook diagnostic; manifests from a newer schema fail without
-partially starting runtime services.
+Runtime manifests use schema 4 and include build identity, the ordered enabled build-scene IDs and matching startup
+scene, required source modules, managed assembly roots, default input and mixer identities, subsystem flags, the
+32-layer physics configuration, rendering environment values, and streaming settings. Duplicate, empty, oversized, or
+startup-mismatched scene lists fail before assets mount. Older content fails with a direct recook diagnostic; manifests
+from a newer schema fail without partially starting runtime services.

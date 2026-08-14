@@ -75,7 +75,7 @@ All 58 published guides are listed below in the same groups used by the document
 | [VFX Beyond-Parity Roadmap](VfxBeyondParityRoadmap.md) | Explicit future VFX milestones and acceptance evidence; not a current capability contract. |
 | [Generated VFX Capabilities](generated/VfxCapabilities.md) | Generated feature/evidence matrix derived from the reviewed VFX parity manifest. |
 | [VFX and Shader Graph Initiatives](VisualAuthoringInitiatives.md) | Prioritized capability matrix, production scenarios, and phased acceptance for the VFX and Shader Graph initiatives. |
-| [Desktop Player Builds](PlayerBuilds.md) | Build profiles, platform support, output layouts, automation, branding, signing hooks, and launch. |
+| [Desktop Player Builds](PlayerBuilds.md) | Ordered scenes, startup selection, build profiles, platform support, output layouts, automation, branding, signing hooks, and launch. |
 
 ### C# Scripting
 

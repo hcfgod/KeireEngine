@@ -3,6 +3,7 @@
 #include <doctest/doctest.h>
 
 #include <filesystem>
+#include <vector>
 
 namespace
 {
@@ -32,6 +33,7 @@ namespace
         result.Name = "Example Game";
         result.CreatedWithEngineVersion = "0.1.0";
         result.MinimumEngineVersion = "0.1.0";
+        result.StartupScene = Keire::AssetId::Parse("40000000-0000-4000-8000-000000000004");
         return result;
     }
 } // namespace
@@ -100,4 +102,34 @@ TEST_CASE("Player build profiles reject collisions traversal and missing require
     profiles = Keire::DefaultPlayerBuildProfiles();
     profiles.Profiles.front().Signing.Policy = Keire::PlayerSigningPolicy::Required;
     CHECK_THROWS_AS(Keire::ValidatePlayerBuildProfiles(profiles), std::invalid_argument);
+}
+
+TEST_CASE("Player build scenes migrate the project startup scene and round trip ordered enabled state")
+{
+    TemporaryDirectory directory;
+    const auto project = Project();
+    auto scenes = Keire::LoadPlayerBuildScenes(directory.Path, project);
+    REQUIRE(scenes.Scenes.size() == 1);
+    CHECK(scenes.Scenes.front().Scene == project.StartupScene);
+    CHECK(scenes.Scenes.front().Enabled);
+
+    const auto second = Keire::AssetId::Parse("50000000-0000-4000-8000-000000000005");
+    scenes.Scenes.insert(scenes.Scenes.begin(), {second, false});
+    Keire::SavePlayerBuildScenes(directory.Path, scenes);
+    CHECK(Keire::LoadPlayerBuildScenes(directory.Path, project) == scenes);
+    CHECK(Keire::PlayerBuildStartupScene(scenes) == project.StartupScene);
+    CHECK(Keire::EnabledPlayerBuildScenes(scenes) == std::vector{project.StartupScene});
+}
+
+TEST_CASE("Player build scenes reject duplicates and require an enabled startup scene when building")
+{
+    auto scenes = Keire::DefaultPlayerBuildScenes(Project());
+    scenes.Scenes.push_back(scenes.Scenes.front());
+    CHECK_THROWS_AS(Keire::ValidatePlayerBuildScenes(scenes), std::invalid_argument);
+
+    scenes = Keire::DefaultPlayerBuildScenes(Project());
+    scenes.Scenes.front().Enabled = false;
+    CHECK_NOTHROW(Keire::ValidatePlayerBuildScenes(scenes));
+    CHECK(Keire::EnabledPlayerBuildScenes(scenes).empty());
+    CHECK_THROWS_AS((void)Keire::PlayerBuildStartupScene(scenes), std::invalid_argument);
 }

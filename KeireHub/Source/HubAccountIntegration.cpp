@@ -10,6 +10,8 @@
 #include "KeireHubRuntime/HubActivationProtocol.h"
 #include "KeireHubRuntime/MarketplaceCache.h"
 
+#include <nlohmann/json.hpp>
+
 #include <cerrno>
 #include <exception>
 #include <fstream>
@@ -19,6 +21,7 @@
 #include <span>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -94,6 +97,43 @@ namespace KeireHub
             if (!stream || value.empty() || value.size() > 16U * 1024U)
                 return std::nullopt;
             return value;
+        }
+
+        [[nodiscard]] std::optional<std::vector<std::string>>
+        ReadMarketplaceTrustBundle(const std::filesystem::path& marketplaceConfiguration)
+        {
+            const auto bundlePath = marketplaceConfiguration / "trusted-marketplace-keys.json";
+            if (!std::filesystem::is_regular_file(bundlePath))
+            {
+                const auto legacy = ReadBoundedText(marketplaceConfiguration / "trusted-marketplace-key.json");
+                return legacy ? std::optional(std::vector<std::string>{*legacy}) : std::nullopt;
+            }
+
+            const auto text = ReadBoundedText(bundlePath);
+            if (!text)
+                return std::nullopt;
+            try
+            {
+                const auto document = nlohmann::json::parse(*text);
+                if (!document.is_object() || document.size() != 2U || document.at("schemaVersion") != 1 ||
+                    !document.at("keys").is_array() || document.at("keys").empty() || document.at("keys").size() > 8U)
+                {
+                    return std::nullopt;
+                }
+                std::vector<std::string> keys;
+                keys.reserve(document.at("keys").size());
+                for (const auto& key : document.at("keys"))
+                {
+                    if (!key.is_object())
+                        return std::nullopt;
+                    keys.push_back(key.dump());
+                }
+                return keys;
+            }
+            catch (const nlohmann::json::exception&)
+            {
+                return std::nullopt;
+            }
         }
     } // namespace
 
@@ -293,9 +333,9 @@ namespace KeireHub
                                        .Message = "The marketplace service endpoint is unavailable.",
                                        .AffectedItem = "marketplace"});
         }
-        const auto trustedKey = ReadBoundedText(ResolveHubDistributionRoot(executable) / "Config" / "Marketplace" /
-                                                "trusted-marketplace-key.json");
-        if (!trustedKey)
+        const auto trustedKeys =
+            ReadMarketplaceTrustBundle(ResolveHubDistributionRoot(executable) / "Config" / "Marketplace");
+        if (!trustedKeys)
         {
             return HubStatus::Failure({.Code = HubErrorCode::CatalogUntrustedKey,
                                        .Message = "The trusted Kéire Marketplace key is unavailable.",
@@ -306,7 +346,7 @@ namespace KeireHub
              .AccountId = account->UserId,
              .AccessToken = std::move(token).Value(),
              .ServiceBaseUrl = service->ServiceBaseUrl,
-             .TrustedPublicKeyDocument = *trustedKey,
+             .TrustedPublicKeyDocuments = *trustedKeys,
              .CacheRoot = m_MarketplaceCacheRoot,
              .EngineVersion = std::string(Keire::GetBuildInfo().Version),
              .Platform = std::string(HostPlatform()),

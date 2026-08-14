@@ -2,6 +2,9 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Net;
 using System.Text.Json;
+using Keire.Distribution;
+using Keire.Marketplace.Security;
+using Keire.Marketplace.PublicationSigner;
 using Keire.Marketplace.Validation;
 using Keire.Marketplace.Validator.Broker;
 
@@ -21,6 +24,9 @@ internal static class Program
             ("validation failures remove private staging", ValidationFailureRemovesStagingAsync),
             ("broker keeps its scoped secret out of Supabase API auth", BrokerUsesScopedSecretHeaderAsync),
             ("broker verifies quarantine bytes and commits reports", BrokerVerifiesAndCommitsAsync),
+            ("broker rejects tampered validator evidence attestations", BrokerRejectsTamperedAttestationAsync),
+            ("publication signer verifies evidence and signs immutable metadata", PublicationSignerSignsMetadataAsync),
+            ("publication signer rejects a tampered lease", PublicationSignerRejectsTamperedLeaseAsync),
         ];
         int failures = 0;
         foreach ((string name, Func<Task> test) in tests)
@@ -215,8 +221,9 @@ internal static class Program
     private static async Task BrokerUsesScopedSecretHeaderAsync()
     {
         using TemporaryDirectory fixture = new();
+        using MarketplaceSigningKey attestationKey = MarketplaceSigningKey.Create();
         RecordingHandler handler = new(_ => JsonResponse("{\"data\":{\"lease\":null}}"));
-        using SupabaseValidatorApi api = new(CreateBrokerOptions(fixture.Path), handler);
+        using SupabaseValidatorApi api = new(CreateBrokerOptions(fixture.Path, attestationKey), handler);
         ValidationLease? lease = await api.LeaseAsync(default);
         Assert.True(lease is null, "An empty validator queue returned a lease.");
         HttpRequestMessage request = handler.Requests.Single();
@@ -231,8 +238,14 @@ internal static class Program
     {
         using TemporaryDirectory fixture = new();
         byte[] packageBytes = Encoding.ASCII.GetBytes("immutable-package");
+        byte[] evidenceBytes = Encoding.UTF8.GetBytes("{\"schemaVersion\":1,\"files\":[]}");
         Guid uploadId = Guid.Parse("11111111-1111-4111-8111-111111111111");
+        Guid versionId = Guid.Parse("22222222-2222-4222-8222-222222222222");
+        const string storageBucket = "marketplace-packages";
+        const string storagePath = "publisher/upload.keireassetpackage";
+        string evidencePath = $"{uploadId:D}/report.json";
         string digest = Sha256(packageBytes);
+        using MarketplaceSigningKey attestationKey = MarketplaceSigningKey.Create();
         int queueCalls = 0;
         RecordingHandler handler = new(request =>
         {
@@ -246,20 +259,28 @@ internal static class Program
                         lease = new
                         {
                             uploadId,
-                            versionId = Guid.Parse("22222222-2222-4222-8222-222222222222"),
-                            storagePath = "publisher/upload.keireassetpackage",
+                            versionId,
+                            storageBucket,
+                            storagePath,
+                            evidenceStoragePath = evidencePath,
+                            evidenceUploadUrl = $"https://example.supabase.co/storage/v1/object/upload/sign/marketplace-validation-evidence/{evidencePath}?token=fixture",
                             expectedSizeBytes = packageBytes.Length,
                             expectedSha256 = digest,
                             leaseExpiresAt = DateTimeOffset.UtcNow.AddMinutes(15),
-                            downloadUrl = "https://example.supabase.co/storage/v1/object/sign/marketplace-quarantine/file?token=fixture",
+                            downloadUrl = "https://example.supabase.co/storage/v1/object/sign/marketplace-packages/file?token=fixture",
                         },
                     },
                 }));
             }
 
-            if (path.Contains("/storage/v1/object/sign/", StringComparison.Ordinal))
+            if (request.Method == HttpMethod.Get && path.Contains("/storage/v1/object/sign/", StringComparison.Ordinal))
             {
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(packageBytes) };
+            }
+
+            if (request.Method == HttpMethod.Put && path.Contains("/storage/v1/object/upload/sign/", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") };
             }
 
             if (path.EndsWith("marketplace-validator-queue", StringComparison.Ordinal))
@@ -269,13 +290,13 @@ internal static class Program
 
             throw new InvalidOperationException("Unexpected broker request.");
         });
-        using SupabaseValidatorApi api = new(CreateBrokerOptions(fixture.Path), handler);
+        using SupabaseValidatorApi api = new(CreateBrokerOptions(fixture.Path, attestationKey), handler);
         ValidationLease lease = await api.LeaseAsync(default)
             ?? throw new InvalidOperationException("The fixture lease was not returned.");
         string destination = Path.Combine(fixture.Path, "download.keireassetpackage");
         await api.DownloadAsync(lease, destination, default);
         Assert.True(File.ReadAllBytes(destination).SequenceEqual(packageBytes), "The verified quarantine bytes changed.");
-        MarketplaceValidationReport report = new()
+        MarketplaceValidationReport unsignedReport = new()
         {
             ValidatorFingerprintSha256 = new string('a', 64),
             PackageSha256 = digest,
@@ -284,14 +305,204 @@ internal static class Program
             MalwareScanResult = ValidationStatuses.Clean,
             SecretScanResult = ValidationStatuses.Clean,
             ManagedValidationResult = ValidationStatuses.NotApplicable,
+            EvidenceStoragePath = evidencePath,
+            EvidenceSha256 = Sha256(evidenceBytes),
+            EvidenceSizeBytes = evidenceBytes.Length,
             Diagnostics = [],
             CompletedAt = DateTimeOffset.UtcNow,
         };
-        await api.CompleteAsync(lease, Keire.Distribution.DistributionJson.Serialize(report), default);
+        PackageValidationRequest validationRequest = new(
+            uploadId,
+            versionId,
+            storageBucket,
+            storagePath,
+            destination,
+            Path.Combine(fixture.Path, "work"),
+            "asset-tool",
+            "dotnet",
+            null,
+            "malware-scanner",
+            packageBytes.Length,
+            digest,
+            new string('a', 64));
+        MarketplaceValidationReport report = unsignedReport with
+        {
+            Attestation = ValidatorAttestation.Sign(validationRequest, unsignedReport, attestationKey),
+        };
+        await api.UploadEvidenceAsync(lease, evidenceBytes, default);
+        await api.CompleteAsync(lease, DistributionJson.Serialize(report), default);
         Assert.True(
             handler.Requests.Any(request => request.RequestUri!.AbsolutePath.EndsWith(
                 "marketplace-validator-queue", StringComparison.Ordinal)) && queueCalls == 2,
             "The verified report was not committed through the completion transition.");
+        Assert.True(
+            handler.Requests.Any(request => request.Method == HttpMethod.Put && request.RequestUri!.AbsolutePath.Contains(
+                "/storage/v1/object/upload/sign/", StringComparison.Ordinal)),
+            "The signed review evidence was not uploaded before completion.");
+    }
+
+    private static Task BrokerRejectsTamperedAttestationAsync()
+    {
+        using MarketplaceSigningKey signingKey = MarketplaceSigningKey.Create();
+        MarketplaceVerificationKey verificationKey = MarketplaceVerificationKey.FromDocument(signingKey.PublicDocument);
+        PackageValidationRequest request = new(
+            Guid.Parse("11111111-1111-4111-8111-111111111111"),
+            Guid.Parse("22222222-2222-4222-8222-222222222222"),
+            "marketplace-packages",
+            "publisher/package.keireassetpackage",
+            "package.keireassetpackage",
+            "work",
+            "asset-tool",
+            "dotnet",
+            null,
+            "malware-scanner",
+            17,
+            new string('a', 64),
+            new string('b', 64));
+        MarketplaceValidationReport unsignedReport = new()
+        {
+            ValidatorFingerprintSha256 = new string('b', 64),
+            PackageSha256 = new string('a', 64),
+            ManifestSha256 = new string('c', 64),
+            Passed = true,
+            MalwareScanResult = ValidationStatuses.Clean,
+            SecretScanResult = ValidationStatuses.Clean,
+            ManagedValidationResult = ValidationStatuses.NotApplicable,
+            EvidenceStoragePath = $"{request.UploadId:D}/report.json",
+            EvidenceSha256 = new string('d', 64),
+            EvidenceSizeBytes = 128,
+            Diagnostics = [],
+            CompletedAt = DateTimeOffset.Parse("2026-08-13T12:00:00Z"),
+        };
+        MarketplaceValidationReport signedReport = unsignedReport with
+        {
+            Attestation = ValidatorAttestation.Sign(request, unsignedReport, signingKey),
+        };
+        MarketplaceValidationReport tampered = signedReport with { EvidenceSha256 = new string('e', 64) };
+
+        Assert.Throws<InvalidDataException>(() => ValidatorAttestation.Verify(
+            request.UploadId,
+            request.VersionId,
+            request.StorageBucket,
+            request.StoragePath,
+            request.ExpectedPackageBytes,
+            request.ExpectedPackageSha256,
+            tampered,
+            verificationKey));
+        return Task.CompletedTask;
+    }
+
+    private static Task PublicationSignerSignsMetadataAsync()
+    {
+        using MarketplaceSigningKey attestationKey = MarketplaceSigningKey.Create();
+        using MarketplaceSigningKey publicationKey = MarketplaceSigningKey.Create();
+        PublicationLease lease = CreatePublicationLease(attestationKey);
+
+        PublicationSignerProgram.VerifyValidatorAttestation(
+            lease,
+            MarketplaceVerificationKey.FromDocument(attestationKey.PublicDocument));
+        string envelopeText = PublicationSignerProgram.SignPublication(lease, publicationKey);
+        SignedPublicationEnvelope envelope = DistributionJson.DeserializeStrict<SignedPublicationEnvelope>(
+            Encoding.UTF8.GetBytes(envelopeText));
+        MarketplaceVerificationKey verificationKey = MarketplaceVerificationKey.FromDocument(publicationKey.PublicDocument);
+        Assert.True(
+            verificationKey.VerifyBase64(Encoding.UTF8.GetBytes(envelope.Document), envelope.Signature.Value),
+            "The automatic publication envelope signature did not verify.");
+        PublicationDocument document = DistributionJson.DeserializeStrict<PublicationDocument>(
+            Encoding.UTF8.GetBytes(envelope.Document));
+        Assert.Equal(lease.VersionId.ToString("D"), document.VersionId,
+            "The signed publication changed the approved version identity.");
+        Assert.Equal(lease.StoragePath, document.ReleaseStoragePath,
+            "The signed publication changed the immutable upload-once object path.");
+        return Task.CompletedTask;
+    }
+
+    private static Task PublicationSignerRejectsTamperedLeaseAsync()
+    {
+        using MarketplaceSigningKey attestationKey = MarketplaceSigningKey.Create();
+        PublicationLease original = CreatePublicationLease(attestationKey);
+        PublicationLease tampered = CopyPublicationLease(original, artifactSha256: new string('f', 64));
+        Assert.Throws<InvalidDataException>(() => PublicationSignerProgram.VerifyValidatorAttestation(
+            tampered,
+            MarketplaceVerificationKey.FromDocument(attestationKey.PublicDocument)));
+        return Task.CompletedTask;
+    }
+
+    private static PublicationLease CreatePublicationLease(MarketplaceSigningKey attestationKey)
+    {
+        Guid uploadId = Guid.Parse("11111111-1111-4111-8111-111111111111");
+        Guid versionId = Guid.Parse("22222222-2222-4222-8222-222222222222");
+        string packageSha256 = new string('a', 64);
+        MarketplaceValidationReport unsignedReport = new()
+        {
+            ValidatorFingerprintSha256 = new string('b', 64),
+            PackageSha256 = packageSha256,
+            ManifestSha256 = new string('c', 64),
+            Passed = true,
+            MalwareScanResult = ValidationStatuses.Clean,
+            SecretScanResult = ValidationStatuses.Clean,
+            ManagedValidationResult = ValidationStatuses.NotApplicable,
+            EvidenceStoragePath = $"{uploadId:D}/review-evidence-{new string('d', 64)}.json",
+            EvidenceSha256 = new string('d', 64),
+            EvidenceSizeBytes = 128,
+            Diagnostics = [],
+            CompletedAt = DateTimeOffset.Parse("2026-08-13T12:00:00Z"),
+        };
+        PackageValidationRequest request = new(
+            uploadId,
+            versionId,
+            "marketplace-packages",
+            $"product/{versionId:D}/{packageSha256}.keireassetpackage",
+            "package.keireassetpackage",
+            "work",
+            "asset-tool",
+            "dotnet",
+            null,
+            "malware-scanner",
+            17,
+            packageSha256,
+            unsignedReport.ValidatorFingerprintSha256);
+        SignedValidatorAttestation signed = ValidatorAttestation.Sign(request, unsignedReport, attestationKey);
+        return new PublicationLease
+        {
+            JobId = Guid.Parse("33333333-3333-4333-8333-333333333333"),
+            VersionId = versionId,
+            ProductId = Guid.Parse("44444444-4444-4444-8444-444444444444"),
+            StorageBucket = request.StorageBucket,
+            StoragePath = request.StoragePath,
+            ArtifactSha256 = packageSha256,
+            ArtifactSizeBytes = request.ExpectedPackageBytes,
+            ManifestSha256 = unsignedReport.ManifestSha256!,
+            PublicationSequence = 42,
+            PublicationExpiresAt = DateTimeOffset.UtcNow.AddYears(1),
+            ValidationAttestation = Encoding.UTF8.GetString(DistributionJson.Serialize(signed)),
+            AttestationKeyId = attestationKey.PublicDocument.KeyId,
+            EvidenceStoragePath = unsignedReport.EvidenceStoragePath,
+            EvidenceSha256 = unsignedReport.EvidenceSha256,
+            EvidenceSizeBytes = unsignedReport.EvidenceSizeBytes,
+        };
+    }
+
+    private static PublicationLease CopyPublicationLease(PublicationLease source, string artifactSha256)
+    {
+        return new PublicationLease
+        {
+            JobId = source.JobId,
+            VersionId = source.VersionId,
+            ProductId = source.ProductId,
+            StorageBucket = source.StorageBucket,
+            StoragePath = source.StoragePath,
+            ArtifactSha256 = artifactSha256,
+            ArtifactSizeBytes = source.ArtifactSizeBytes,
+            ManifestSha256 = source.ManifestSha256,
+            PublicationSequence = source.PublicationSequence,
+            PublicationExpiresAt = source.PublicationExpiresAt,
+            ValidationAttestation = source.ValidationAttestation,
+            AttestationKeyId = source.AttestationKeyId,
+            EvidenceStoragePath = source.EvidenceStoragePath,
+            EvidenceSha256 = source.EvidenceSha256,
+            EvidenceSizeBytes = source.EvidenceSizeBytes,
+        };
     }
 
     private static async Task<string> CreatePackagePlaceholderAsync(string root)
@@ -306,6 +517,10 @@ internal static class Program
     {
         FileInfo file = new(package);
         return new PackageValidationRequest(
+            Guid.Parse("11111111-1111-4111-8111-111111111111"),
+            Guid.Parse("22222222-2222-4222-8222-222222222222"),
+            "marketplace-packages",
+            "fixture/package.keireassetpackage",
             package,
             Path.Combine(root, "work"),
             Path.Combine(root, "missing-asset-tool"),
@@ -317,13 +532,14 @@ internal static class Program
             new string('a', 64));
     }
 
-    private static BrokerOptions CreateBrokerOptions(string exchangeRoot)
+    private static BrokerOptions CreateBrokerOptions(string exchangeRoot, MarketplaceSigningKey attestationKey)
     {
         return new BrokerOptions
         {
             SupabaseUrl = new Uri("https://example.supabase.co/"),
             BrokerSecret = "validator_fixture_secret_12345678901234567890",
             ExpectedValidatorFingerprintSha256 = new string('a', 64),
+            AttestationVerificationKey = MarketplaceVerificationKey.FromDocument(attestationKey.PublicDocument),
             ExchangeRoot = exchangeRoot,
             WorkerId = "validator-fixture",
             LeaseSeconds = 900,
@@ -491,6 +707,20 @@ internal static class Program
             {
                 throw new InvalidOperationException(message);
             }
+        }
+
+        public static void Throws<TException>(Action action) where TException : Exception
+        {
+            try
+            {
+                action();
+            }
+            catch (TException)
+            {
+                return;
+            }
+
+            throw new InvalidOperationException($"Expected {typeof(TException).Name} was not thrown.");
         }
     }
 }

@@ -252,7 +252,7 @@ namespace KeireHub
                     return HubStatus::Failure(grant.Error());
 
                 auto trust = CatalogTrustStore::Create(
-                    {.TrustedPublicKeyDocuments = {request.TrustedPublicKeyDocument}, .NativeLibraryPath = {}});
+                    {.TrustedPublicKeyDocuments = request.TrustedPublicKeyDocuments, .NativeLibraryPath = {}});
                 if (!trust)
                     return HubStatus::Failure(trust.Error());
                 auto publication = DecodeMarketplacePublication(grant.Value().SignedPublication);
@@ -335,7 +335,7 @@ namespace KeireHub
             }
         }
         if (request.ProductId.empty() || request.AccountId.empty() || request.AccessToken.empty() ||
-            request.ServiceBaseUrl.empty() || request.TrustedPublicKeyDocument.empty() || request.CacheRoot.empty() ||
+            request.ServiceBaseUrl.empty() || request.TrustedPublicKeyDocuments.empty() || request.CacheRoot.empty() ||
             !request.CacheRoot.is_absolute() || request.EngineVersion.empty() || request.Platform.empty() ||
             request.Architecture.empty())
         {

@@ -24,9 +24,13 @@ param(
 
     [string]$ManagedApi,
 
+    [string]$ProtectedAttestationKey,
+
     [string]$FirewallAttestation,
 
     [string]$SecretFile,
+
+    [string]$AttestationPublicKey,
 
     [uri]$SupabaseUrl,
 
@@ -102,8 +106,10 @@ $requiredFiles = [ordered]@{
     "Malware scanner" = $MalwareScanner
     ".NET host" = $Dotnet
     "Managed API" = $ManagedApi
+    "Protected validator attestation key" = $ProtectedAttestationKey
     "Firewall attestation" = $FirewallAttestation
     "Protected broker secret" = $SecretFile
+    "Validator attestation public key" = $AttestationPublicKey
 }
 foreach ($file in $requiredFiles.GetEnumerator()) {
     Assert-File $file.Value $file.Key
@@ -127,14 +133,14 @@ if ($WorkerId -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$') {
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $WorkerLauncher `
     -Validator $Validator -ExchangeRoot $ExchangeRoot -WorkRoot $WorkRoot -AssetTool $AssetTool `
     -MalwareScanner $MalwareScanner -Dotnet $Dotnet -ManagedApi $ManagedApi `
-    -FirewallAttestation $FirewallAttestation -ValidateOnly
+    -ProtectedAttestationKey $ProtectedAttestationKey -FirewallAttestation $FirewallAttestation -ValidateOnly
 if ($LASTEXITCODE -ne 0) {
     throw "The offline marketplace validator configuration failed validation."
 }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $BrokerLauncher `
     -Broker $Broker -Validator $Validator -ExchangeRoot $ExchangeRoot -SecretFile $SecretFile `
     -SupabaseUrl $SupabaseUrl.AbsoluteUri -ExpectedValidatorFingerprint $ExpectedValidatorFingerprint `
-    -WorkerId $WorkerId -ValidateOnly
+    -WorkerId $WorkerId -AttestationPublicKey $AttestationPublicKey -ValidateOnly
 if ($LASTEXITCODE -ne 0) {
     throw "The marketplace validator broker configuration failed validation."
 }
@@ -157,6 +163,7 @@ $workerArguments = @(
     "-MalwareScanner", (Quote-TaskArgument ([IO.Path]::GetFullPath($MalwareScanner))),
     "-Dotnet", (Quote-TaskArgument ([IO.Path]::GetFullPath($Dotnet))),
     "-ManagedApi", (Quote-TaskArgument ([IO.Path]::GetFullPath($ManagedApi))),
+    "-ProtectedAttestationKey", (Quote-TaskArgument ([IO.Path]::GetFullPath($ProtectedAttestationKey))),
     "-FirewallAttestation", (Quote-TaskArgument ([IO.Path]::GetFullPath($FirewallAttestation)))
 ) -join " "
 $brokerArguments = @(
@@ -170,7 +177,8 @@ $brokerArguments = @(
     "-SecretFile", (Quote-TaskArgument ([IO.Path]::GetFullPath($SecretFile))),
     "-SupabaseUrl", (Quote-TaskArgument $SupabaseUrl.GetLeftPart([UriPartial]::Authority)),
     "-ExpectedValidatorFingerprint", (Quote-TaskArgument $ExpectedValidatorFingerprint),
-    "-WorkerId", (Quote-TaskArgument $WorkerId)
+    "-WorkerId", (Quote-TaskArgument $WorkerId),
+    "-AttestationPublicKey", (Quote-TaskArgument ([IO.Path]::GetFullPath($AttestationPublicKey)))
 ) -join " "
 
 $workerAction = New-ScheduledTaskAction -Execute $powerShell -Argument $workerArguments `

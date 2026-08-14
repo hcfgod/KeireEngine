@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -15,6 +16,20 @@
 
 namespace KeireEditor
 {
+    class ConsoleSelection final
+    {
+      public:
+        void Select(std::span<const std::uint64_t> visibleOrder, std::uint64_t serial, bool range, bool additive);
+        void Retain(std::span<const std::uint64_t> available);
+        void Clear() noexcept;
+        [[nodiscard]] bool Contains(std::uint64_t serial) const noexcept;
+        [[nodiscard]] std::span<const std::uint64_t> Selected() const noexcept { return m_Selected; }
+
+      private:
+        std::vector<std::uint64_t> m_Selected;
+        std::uint64_t m_Anchor = 0;
+    };
+
     class ConsolePanel final
     {
       public:
@@ -49,7 +64,7 @@ namespace KeireEditor
         std::string m_Search;
         std::uint64_t m_LogSequence = 0;
         std::uint64_t m_NextSerial = 1;
-        std::uint64_t m_SelectedSerial = 0;
+        ConsoleSelection m_Selection;
         bool m_Paused = false;
         bool m_ShowInfo = true;
         bool m_ShowWarnings = true;

@@ -5,6 +5,25 @@ versions.
 
 ## Unreleased
 
+- Reworked Marketplace package publication into an upload-once workflow. The isolated validator now emits bounded,
+  SHA-256-bound review evidence and an Ed25519 attestation; staff can inspect the verified manifest inventory without
+  downloading or possessing a publisher's private archive.
+- Replaced the administrator's signed-envelope upload with a durable, leased automatic publication queue. A
+  least-privileged signer receives approved metadata only, verifies the validator attestation, signs the existing
+  immutable object, and uses bounded retry/audit transitions. Added Windows DPAPI and hardened Linux service examples.
+- Added a bounded multi-key Marketplace trust bundle to Hub and Editor packages so signer keys can rotate through an
+  overlap release without invalidating existing publications.
+- Added Unity-style **Scenes In Build** authoring to Build Settings with enabled rows, drag and button reordering, an
+  explicit startup action, persistent schema-1 project settings, multi-scene strict cooking, and runtime manifest
+  validation. Existing projects migrate their descriptor startup scene without mutating it implicitly.
+- Added per-project last-scene restoration. The Editor records only a validated stable scene ID in ignored workspace
+  state, reopens it on the next launch, falls back safely when stale, and adopts Save As identities.
+- Upgraded the Editor Console with theme-colored info, warning, and error entries; anchored Shift range selection;
+  Ctrl/Cmd additive selection; and chronological multi-entry clipboard copy.
+- Fixed scene Undo/Redo clearing otherwise valid entity selections, which caused a following Duplicate shortcut to act
+  as though nothing were selected.
+- Fixed the Editor Marketplace lease expiring when a signed-in Hub was minimized or closed to its tray. Hub now opts
+  into low-rate background layer updates while rendering, UI, and fixed simulation remain suspended.
 - Added an explicit external-editor registration refresh to the Hub's Installs page. When an intentionally rebuilt or
   replaced package no longer matches its saved manifest metadata, the Hub can adopt the new self-consistent manifest
   and verify its complete declared inventory without removing and locating the editor again. Packaged-editor discovery

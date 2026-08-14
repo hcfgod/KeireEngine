@@ -31,6 +31,7 @@ $serviceProject = Join-Path $serviceRoot 'Source\KeireDistributionService\KeireD
 $publisherProject = Join-Path $serviceRoot 'Source\KeireDistributionPublisher\KeireDistributionPublisher.csproj'
 $validatorProject = Join-Path $serviceRoot 'Source\KeireMarketplaceValidator\KeireMarketplaceValidator.csproj'
 $validatorBrokerProject = Join-Path $serviceRoot 'Source\KeireMarketplaceValidatorBroker\KeireMarketplaceValidatorBroker.csproj'
+$publicationSignerProject = Join-Path $serviceRoot 'Source\KeireMarketplacePublicationSigner\KeireMarketplacePublicationSigner.csproj'
 $documentationSite = Join-Path $serviceRoot 'DocumentationSite'
 $documentationOutput = Join-Path $documentationSite 'dist'
 
@@ -86,6 +87,14 @@ foreach ($runtimeIdentifier in $RuntimeIdentifiers) {
         throw "Marketplace validator broker publish failed for '$runtimeIdentifier'."
     }
 
+    $publicationSignerDirectory = Join-Path $packageDirectory 'tools\marketplace-publication-signer'
+    & $Dotnet publish $publicationSignerProject --configuration $Configuration --runtime $runtimeIdentifier `
+        --self-contained true --output $publicationSignerDirectory `
+        -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+    if ($LASTEXITCODE -ne 0) {
+        throw "Marketplace publication signer publish failed for '$runtimeIdentifier'."
+    }
+
     Copy-Item -LiteralPath (Join-Path $serviceRoot 'README.md') -Destination $packageDirectory
     Copy-Item -LiteralPath (Join-Path $serviceRoot 'THIRD_PARTY_NOTICES.md') -Destination $packageDirectory
     Copy-Item -LiteralPath (Join-Path $serviceRoot 'Licenses') -Destination $packageDirectory -Recurse
@@ -122,7 +131,10 @@ foreach ($runtimeIdentifier in $RuntimeIdentifiers) {
     Copy-Item -LiteralPath (Join-Path $serviceRoot 'Deployment\keire-web.service.example') `
         -Destination $deploymentDirectory
     foreach ($deploymentName in @('keire-marketplace-validator.service.example',
-            'keire-marketplace-validator-broker.service.example', 'marketplace-validator-broker.env.example')) {
+            'keire-marketplace-validator-broker.service.example',
+            'keire-marketplace-publication-signer.service.example',
+            'marketplace-validator.env.example', 'marketplace-validator-broker.env.example',
+            'marketplace-publication-signer.env.example')) {
         Copy-Item -LiteralPath (Join-Path $serviceRoot "Deployment\$deploymentName") -Destination $deploymentDirectory
     }
     foreach ($scriptName in @('health-check.ps1', 'health-check.sh', 'monitor-distribution.ps1',
@@ -136,7 +148,11 @@ foreach ($runtimeIdentifier in $RuntimeIdentifiers) {
     if ($runtimeIdentifier.StartsWith('win-', [StringComparison]::Ordinal)) {
         foreach ($deploymentName in @('configure-windows-validator-firewall.ps1',
                 'install-windows-marketplace-validator-tasks.ps1',
+                'install-windows-marketplace-publication-signer-task.ps1',
+                'protect-windows-marketplace-secret.ps1',
+                'provision-windows-marketplace-signing-keys.ps1',
                 'protect-windows-validator-broker-secret.ps1',
+                'start-windows-marketplace-publication-signer.ps1',
                 'start-windows-marketplace-validator.ps1',
                 'start-windows-marketplace-validator-broker.ps1')) {
             Copy-Item -LiteralPath (Join-Path $serviceRoot "Deployment\$deploymentName") -Destination $deploymentDirectory
@@ -159,6 +175,7 @@ foreach ($runtimeIdentifier in $RuntimeIdentifiers) {
             --executable 'tools/publisher/KeireDistributionPublisher' `
             --executable 'tools/marketplace-validator/worker/KeireMarketplaceValidator' `
             --executable 'tools/marketplace-validator/broker/KeireMarketplaceValidatorBroker' `
+            --executable 'tools/marketplace-publication-signer/KeireMarketplacePublicationSigner' `
             --executable 'scripts/health-check.sh' `
             --executable 'scripts/monitor-distribution.sh' `
             --executable 'scripts/backup-distribution.sh' `

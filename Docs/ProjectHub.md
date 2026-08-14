@@ -284,6 +284,10 @@ Hub remains on Projects so the user can choose the target project; the next Edit
 marker and focuses the Package Manager after the matching Hub session is available. Registry and Asset Import packages
 are project-scoped Editor operations. Complete Project packages remain Hub creation operations.
 
+Minimizing or manually closing the Hub to its tray suspends rendering and fixed simulation but keeps its low-rate
+background layer update active. Account refresh and the short-lived Marketplace lease therefore continue while the Hub
+window is hidden, so the Editor Package Manager does not mistake a running, signed-in tray Hub for a closed process.
+
 ## Distribution and trust
 
 The checked-in `Config/Distribution.json` is the shared Windows, Linux, and macOS release-trust authority. Hub packaging

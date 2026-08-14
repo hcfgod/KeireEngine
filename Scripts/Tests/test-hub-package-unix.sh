@@ -87,6 +87,7 @@ assert "content/Licenses/catalog.json" in {entry["path"] for entry in manifest["
 assert "Config/Distribution.json" in {entry["path"] for entry in manifest["files"]}
 assert "Config/Supabase.json" in {entry["path"] for entry in manifest["files"]}
 assert "Config/Marketplace/trusted-marketplace-key.json" in {entry["path"] for entry in manifest["files"]}
+assert "Config/Marketplace/trusted-marketplace-keys.json" in {entry["path"] for entry in manifest["files"]}
 assert "content/Fonts/Inter-OFL.txt" in manifest["licenseReferences"]
 assert manifest["files"]
 PY

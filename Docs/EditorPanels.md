@@ -8,8 +8,10 @@ continuous gesture into one undo command, and performs the atomic save. Console 
 snapshot, search state, and registration; Diagnostics receives immutable frame/window/capture snapshots. These panels
 do not reach through workspace friendship.
 
-Console entries are individually selectable. Double-clicking an entry or choosing **Copy** from its context menu writes
-the complete frame, category, and message text through the workspace-provided clipboard callback.
+Console entries use distinct theme colors for informational, warning, and error severity. Click selects one entry,
+Ctrl/Cmd-click toggles entries, and Shift-click selects the complete visible range from the prior anchor;
+Ctrl/Cmd+Shift-click adds that range. `Ctrl/Cmd+C`, double-click, and the **Copy** context action write every selected
+entry in chronological order, including its frame, category, and message, through the workspace clipboard callback.
 
 KeireClient is a composition of dockable tools built exclusively on Kéire's public UI façade. Dear ImGui and SDL remain
 inside KeireCore. `SceneDocument` and `InputActionsDocument` own their respective authoring state and undo contexts;
@@ -51,6 +53,10 @@ The File menu and keyboard routing share the same scene operations:
   and switches the editor to the new asset.
 - `Ctrl+D`, `F2`, and `Delete` duplicate, rename, and delete the selected entity.
 - `Ctrl/Cmd+Z` undoes; `Ctrl/Cmd+R`, `Ctrl/Cmd+Shift+Z`, and `Ctrl+Y` redo the active document.
+
+Scene undo and redo rebuild validated scene state while retaining every selected stable entity ID that still exists.
+Undoing a Transform edit therefore does not clear the Hierarchy, Inspector, or gizmo selection before a following
+Duplicate, Rename, or Delete command.
 
 Hierarchy provides a compact Create action, entity search, active-scene summary, and the existing row/blank-space
 context commands. Create Empty, Create Child, Directional Light, Duplicate, Rename, Delete, and ordered drag/drop

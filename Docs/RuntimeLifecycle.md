@@ -59,12 +59,17 @@ flowchart TD
 
 Window events are pumped before simulation. Queued events drain a fixed snapshot, so events enqueued during that drain
 wait for the next frame. Fixed simulation consumes scaled time before variable update. UI runs after simulation and is
-skipped when the application is suspended by a minimized primary window.
+skipped when the application is suspended by a minimized primary window. Rendering and fixed simulation always remain
+suspended; an application may explicitly keep low-rate variable layer updates active for essential background services.
 
 Minimized suspension is sampled with the time advance at the outer-frame boundary. If a minimize event arrives while
 that frame is being pumped, the fixed and variable work already produced for the frame completes, rendering is skipped,
 and suspension begins on the next frame. This guarantees that no pending fixed tick can be abandoned across a minimize
 transition. A restore event similarly resumes simulation at the following frame boundary.
+
+`UpdateLayersWhenMainWindowMinimized` defaults off, preserving full suspension for games and ordinary clients. Hub opts
+in so its owner-thread account refresh, marketplace lease, editor tracking, and task reconciliation continue at
+`MinimizedPumpRate` while its window is hidden in the tray. This opt-in does not submit UI or rendering work.
 
 An editor `SceneRuntimeSession` receives fixed and variable updates from its owning layer. Playing dispatches component
 lifecycle callbacks against a private scene clone. Paused sessions receive neither update phase unless Step explicitly

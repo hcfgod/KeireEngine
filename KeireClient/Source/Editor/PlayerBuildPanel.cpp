@@ -10,6 +10,7 @@
 #include "KeireInternal/Process.h"
 
 #include <filesystem>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -55,6 +56,7 @@ void EditorWorkspaceLayer::InitializePlayerBuild()
     {
         m_PlayerSettings = Keire::LoadPlayerSettings(project->Root(), project->Descriptor());
         m_PlayerBuildProfiles = Keire::LoadPlayerBuildProfiles(project->Root());
+        m_PlayerBuildScenes = Keire::LoadPlayerBuildScenes(project->Root(), project->Descriptor());
         m_PlayerBuildSettingsLoaded = true;
     }
     catch (const std::exception& error)
@@ -84,6 +86,7 @@ void EditorWorkspaceLayer::SavePlayerBuildConfiguration()
         throw std::logic_error("Player build settings are not available.");
     Keire::SavePlayerSettings(project->Root(), m_PlayerSettings);
     Keire::SavePlayerBuildProfiles(project->Root(), m_PlayerBuildProfiles);
+    Keire::SavePlayerBuildScenes(project->Root(), m_PlayerBuildScenes);
 }
 
 bool EditorWorkspaceLayer::CanBuildPlayer(const bool runAfterBuild) const noexcept
@@ -93,6 +96,15 @@ bool EditorWorkspaceLayer::CanBuildPlayer(const bool runAfterBuild) const noexce
     try
     {
         const auto& profile = Keire::FindPlayerBuildProfile(m_PlayerBuildProfiles, m_PlayerBuildProfiles.ActiveProfile);
+        (void)Keire::PlayerBuildStartupScene(m_PlayerBuildScenes);
+        if (!m_AssetDatabase || std::ranges::any_of(Keire::EnabledPlayerBuildScenes(m_PlayerBuildScenes),
+                                                    [this](const Keire::AssetId scene)
+                                                    {
+                                                        const auto record = m_AssetDatabase->Find(scene);
+                                                        return !record ||
+                                                               record->Type != Keire::SceneAsset::StaticType();
+                                                    }))
+            return false;
         return !runAfterBuild || (profile.Platform == Keire::HostPlayerPlatform() &&
                                   profile.Architecture == Keire::HostPlayerArchitecture());
     }

@@ -11,6 +11,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace KeireHub
 {
@@ -20,7 +21,7 @@ namespace KeireHub
         std::string AccountId;
         std::string AccessToken;
         std::string ServiceBaseUrl;
-        std::string TrustedPublicKeyDocument;
+        std::vector<std::string> TrustedPublicKeyDocuments;
         std::filesystem::path CacheRoot;
         std::string EngineVersion;
         std::string Platform;

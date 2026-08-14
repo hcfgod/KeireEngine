@@ -79,6 +79,7 @@ copy_tracked_tree "$ROOT" Docs "$stage/Docs"
 copy_tracked_tree "$ROOT" Samples/KeireSandbox "$stage/Samples/KeireSandbox"
 cp "$ROOT/Config/Branding/Keire.png" "$stage/Config/Branding/"
 cp "$ROOT/Config/Marketplace/trusted-marketplace-key.json" "$stage/Config/Marketplace/"
+cp "$ROOT/Config/Marketplace/trusted-marketplace-keys.json" "$stage/Config/Marketplace/"
 cp "$ROOT/Config/SourceModules.premake.lua" "$stage/Config/"
 command -v python3 >/dev/null 2>&1 || { printf 'Python 3 is required to generate package manifests.\n' >&2; exit 1; }
 python3 "$ROOT/Scripts/Packaging/validate-supabase-config.py" --config "$ROOT/Config/Supabase.json"

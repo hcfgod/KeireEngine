@@ -10,6 +10,13 @@ public sealed class MarketplacePackageValidator(IMalwareScanner malwareScanner)
         PackageValidationRequest request,
         CancellationToken cancellationToken = default)
     {
+        return (await ValidateWithEvidenceAsync(request, cancellationToken)).Report;
+    }
+
+    public async Task<MarketplaceValidationOutput> ValidateWithEvidenceAsync(
+        PackageValidationRequest request,
+        CancellationToken cancellationToken = default)
+    {
         ValidateRequest(request);
         List<ValidationDiagnostic> diagnostics = [];
         string malwareStatus = ValidationStatuses.Failed;
@@ -17,6 +24,8 @@ public sealed class MarketplacePackageValidator(IMalwareScanner malwareScanner)
         string managedStatus = ValidationStatuses.Failed;
         string? manifestSha256 = null;
         string? codeFingerprint = null;
+        string? malwareEngineVersion = null;
+        ExtractedPackageDocument? packageDocument = null;
         string jobRoot = CreateJobRoot(request.WorkRoot);
         string stagingRoot = Path.Combine(jobRoot, "payload");
         string managedBuildRoot = Path.Combine(jobRoot, "managed-build");
@@ -26,9 +35,10 @@ public sealed class MarketplacePackageValidator(IMalwareScanner malwareScanner)
             MalwareScanResult archiveScan = await m_MalwareScanner.ScanFileAsync(verifiedInput.Path, cancellationToken);
             diagnostics.AddRange(archiveScan.Diagnostics);
             malwareStatus = archiveScan.Status;
+            malwareEngineVersion = archiveScan.EngineVersion;
             if (malwareStatus != ValidationStatuses.Clean)
             {
-                return CreateReport();
+                return CreateOutput();
             }
 
             (ExtractedPackageDocument document, string packageSha256) = await PackageExtractor.ExtractAsync(
@@ -41,18 +51,20 @@ public sealed class MarketplacePackageValidator(IMalwareScanner malwareScanner)
             }
 
             manifestSha256 = document.Archive.ManifestSha256;
+            packageDocument = document;
             diagnostics.AddRange(PayloadPolicy.Validate(stagingRoot, document, cancellationToken));
             if (HasErrors(diagnostics))
             {
-                return CreateReport();
+                return CreateOutput();
             }
 
             MalwareScanResult payloadScan = await m_MalwareScanner.ScanDirectoryAsync(stagingRoot, cancellationToken);
             diagnostics.AddRange(payloadScan.Diagnostics);
             malwareStatus = payloadScan.Status;
+            malwareEngineVersion = payloadScan.EngineVersion ?? malwareEngineVersion;
             if (malwareStatus != ValidationStatuses.Clean)
             {
-                return CreateReport();
+                return CreateOutput();
             }
 
             IReadOnlyList<ValidationDiagnostic> secretDiagnostics =
@@ -61,7 +73,7 @@ public sealed class MarketplacePackageValidator(IMalwareScanner malwareScanner)
             secretStatus = secretDiagnostics.Count == 0 ? ValidationStatuses.Clean : ValidationStatuses.Failed;
             if (secretStatus != ValidationStatuses.Clean)
             {
-                return CreateReport();
+                return CreateOutput();
             }
 
             ManagedValidationResult managed = await ManagedAssemblyValidator.ValidateAsync(
@@ -74,7 +86,7 @@ public sealed class MarketplacePackageValidator(IMalwareScanner malwareScanner)
             diagnostics.AddRange(managed.Diagnostics);
             managedStatus = managed.Status;
             codeFingerprint = managed.CodeFingerprintSha256;
-            return CreateReport();
+            return CreateOutput();
         }
         catch (OperationCanceledException)
         {
@@ -88,18 +100,33 @@ public sealed class MarketplacePackageValidator(IMalwareScanner malwareScanner)
                 Severity = ValidationSeverities.Error,
                 Message = SafeFailureMessage(exception),
             });
-            return CreateReport();
+            return CreateOutput();
         }
         finally
         {
             DeleteJobRoot(request.WorkRoot, jobRoot);
         }
 
-        MarketplaceValidationReport CreateReport()
+        MarketplaceValidationOutput CreateOutput()
         {
             bool passed = malwareStatus == ValidationStatuses.Clean && secretStatus == ValidationStatuses.Clean &&
                 managedStatus is ValidationStatuses.Passed or ValidationStatuses.NotApplicable && !HasErrors(diagnostics);
-            return new MarketplaceValidationReport
+            DateTimeOffset completedAt = DateTimeOffset.UtcNow;
+            byte[] evidence = CreateEvidence(passed, completedAt, packageDocument);
+            if (evidence.Length > MarketplaceValidationContract.MaximumEvidenceBytes)
+            {
+                diagnostics.Add(new ValidationDiagnostic
+                {
+                    Code = "REVIEW_EVIDENCE_TOO_LARGE",
+                    Severity = ValidationSeverities.Error,
+                    Message = "The safe review inventory exceeds the Marketplace evidence limit.",
+                });
+                passed = false;
+                evidence = CreateEvidence(passed, completedAt, null);
+            }
+
+            string evidenceSha256 = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(evidence));
+            MarketplaceValidationReport report = new()
             {
                 ValidatorFingerprintSha256 = request.ValidatorFingerprintSha256,
                 PackageSha256 = request.ExpectedPackageSha256,
@@ -109,9 +136,60 @@ public sealed class MarketplacePackageValidator(IMalwareScanner malwareScanner)
                 SecretScanResult = secretStatus,
                 ManagedValidationResult = managedStatus,
                 CodeFingerprintSha256 = codeFingerprint,
+                EvidenceStoragePath = $"{request.UploadId:D}/review-evidence-{request.ExpectedPackageSha256}.json",
+                EvidenceSha256 = evidenceSha256,
+                EvidenceSizeBytes = evidence.LongLength,
                 Diagnostics = diagnostics,
-                CompletedAt = DateTimeOffset.UtcNow,
+                CompletedAt = completedAt,
             };
+            return new MarketplaceValidationOutput(report, evidence);
+
+            byte[] CreateEvidence(bool evidencePassed, DateTimeOffset evidenceCompletedAt, ExtractedPackageDocument? document)
+            {
+                MarketplaceReviewInventory? inventory = document is null ? null : new MarketplaceReviewInventory
+                {
+                    PackageId = document.PackageId,
+                    Version = document.Version,
+                    PublisherId = document.PublisherId,
+                    DisplayName = document.DisplayName,
+                    Summary = document.Summary,
+                    Channel = document.Channel,
+                    InstallKind = document.InstallKind,
+                    Compatibility = document.Compatibility,
+                    Dependencies = document.Dependencies,
+                    Conflicts = document.Conflicts,
+                    Files = document.Files,
+                    Assets = document.Assets,
+                    Samples = document.Samples,
+                    ManagedAssemblies = document.ManagedAssemblies,
+                    Licenses = document.Licenses,
+                    EntryPoints = document.EntryPoints,
+                    InstalledSizeBytes = document.InstalledSizeBytes,
+                };
+                MarketplaceReviewCounts counts = new(
+                    document?.Files.Count ?? 0,
+                    document?.Assets.Count ?? 0,
+                    document?.Samples.Count ?? 0,
+                    document?.ManagedAssemblies.Count ?? 0,
+                    document?.Licenses.Count ?? 0,
+                    document?.EntryPoints.Count ?? 0);
+                return DistributionJson.Serialize(new MarketplaceReviewEvidence
+                {
+                    PackageSha256 = request.ExpectedPackageSha256,
+                    ManifestSha256 = manifestSha256,
+                    ValidatorFingerprintSha256 = request.ValidatorFingerprintSha256,
+                    MalwareScanResult = malwareStatus,
+                    MalwareEngineVersion = malwareEngineVersion,
+                    SecretScanResult = secretStatus,
+                    ManagedValidationResult = managedStatus,
+                    CodeFingerprintSha256 = codeFingerprint,
+                    Passed = evidencePassed,
+                    CompletedAt = evidenceCompletedAt,
+                    Diagnostics = diagnostics,
+                    Inventory = inventory,
+                    Counts = counts,
+                });
+            }
         }
     }
 
@@ -119,7 +197,10 @@ public sealed class MarketplacePackageValidator(IMalwareScanner malwareScanner)
     {
         if (request.ExpectedPackageBytes is <= 0 or > MarketplaceValidationContract.MaximumPackageBytes ||
             !DistributionPaths.IsSha256(request.ExpectedPackageSha256) ||
-            !DistributionPaths.IsSha256(request.ValidatorFingerprintSha256))
+            !DistributionPaths.IsSha256(request.ValidatorFingerprintSha256) || request.UploadId == Guid.Empty ||
+            request.VersionId == Guid.Empty || request.StorageBucket is not ("marketplace-packages" or "marketplace-quarantine") ||
+            !string.Equals(request.StoragePath, DistributionPaths.NormalizeRelativePath(request.StoragePath),
+                StringComparison.Ordinal))
         {
             throw new ArgumentException("Package validation requires canonical immutable size, digest, and validator identity.");
         }

@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Keire.Distribution;
+using Keire.Marketplace.Security;
 
 namespace Keire.Marketplace.Validator.Broker;
 
@@ -10,6 +11,8 @@ internal sealed partial class BrokerOptions
     public required string BrokerSecret { get; init; }
 
     public required string ExpectedValidatorFingerprintSha256 { get; init; }
+
+    public required MarketplaceVerificationKey AttestationVerificationKey { get; init; }
 
     public required string ExchangeRoot { get; init; }
 
@@ -44,6 +47,9 @@ internal sealed partial class BrokerOptions
             throw new InvalidOperationException("KEIRE_VALIDATOR_EXPECTED_FINGERPRINT_SHA256 must be a lowercase SHA-256 digest.");
         }
 
+        MarketplaceVerificationKey attestationKey = MarketplaceVerificationKey.FromFile(
+            Require("KEIRE_VALIDATOR_ATTESTATION_PUBLIC_KEY"));
+
         string exchangeRoot = Path.GetFullPath(Require("KEIRE_VALIDATOR_EXCHANGE_ROOT"));
         DirectoryInfo exchange = new(exchangeRoot);
         if (!exchange.Exists)
@@ -68,6 +74,7 @@ internal sealed partial class BrokerOptions
             SupabaseUrl = new Uri(url.GetLeftPart(UriPartial.Authority) + "/", UriKind.Absolute),
             BrokerSecret = secret,
             ExpectedValidatorFingerprintSha256 = expectedFingerprint,
+            AttestationVerificationKey = attestationKey,
             ExchangeRoot = exchangeRoot,
             WorkerId = worker,
             LeaseSeconds = leaseSeconds,

@@ -1,4 +1,5 @@
 using Keire.Distribution;
+using Keire.Marketplace.Validation;
 using Keire.Marketplace.Validator.Broker;
 
 return await BrokerProgram.RunAsync();
@@ -6,6 +7,7 @@ return await BrokerProgram.RunAsync();
 internal static class BrokerProgram
 {
     private const int MaximumReportBytes = 1024 * 1024;
+    private const int MaximumEvidenceBytes = MarketplaceValidationContract.MaximumEvidenceBytes;
 
     public static async Task<int> RunAsync()
     {
@@ -75,7 +77,8 @@ internal static class BrokerProgram
         string downloading = package + ".downloading";
         string request = Path.Combine(exchange.Requests, uploadId + ".json");
         string report = Path.Combine(exchange.Reports, uploadId + ".json");
-        DeleteJobFiles(exchange.Root, downloading, package, request, report);
+        string evidence = Path.Combine(exchange.Evidence, uploadId + ".json");
+        DeleteJobFiles(exchange.Root, downloading, package, request, report, evidence);
         using CancellationTokenSource leaseLost = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         Task renewal = RenewLeaseAsync(api, options, lease.UploadId, leaseLost);
         bool renewalStopped = false;
@@ -95,6 +98,11 @@ internal static class BrokerProgram
                 await Task.Delay(options.ReportPollInterval, leaseLost.Token);
             }
 
+            if (!File.Exists(evidence))
+            {
+                throw new InvalidDataException("The offline validator did not produce review evidence.");
+            }
+
             FileInfo reportInfo = new(report);
             reportInfo.Refresh();
             FileSystemSafety.RejectLink(reportInfo);
@@ -104,6 +112,26 @@ internal static class BrokerProgram
             }
 
             byte[] reportBytes = await File.ReadAllBytesAsync(report, leaseLost.Token);
+            FileInfo evidenceInfo = new(evidence);
+            evidenceInfo.Refresh();
+            FileSystemSafety.RejectLink(evidenceInfo);
+            if (evidenceInfo.Length is < 2 or > MaximumEvidenceBytes)
+            {
+                throw new InvalidDataException("The offline validator evidence exceeds its size limit.");
+            }
+            byte[] evidenceBytes = await File.ReadAllBytesAsync(evidence, leaseLost.Token);
+            MarketplaceValidationReport parsedReport = DistributionJson.DeserializeStrict<MarketplaceValidationReport>(
+                reportBytes);
+            string evidenceSha256 = Convert.ToHexStringLower(
+                System.Security.Cryptography.SHA256.HashData(evidenceBytes));
+            if (parsedReport.EvidenceSizeBytes != evidenceBytes.LongLength ||
+                !string.Equals(parsedReport.EvidenceSha256, evidenceSha256, StringComparison.Ordinal) ||
+                !string.Equals(parsedReport.EvidenceStoragePath, lease.EvidenceStoragePath, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException("The review evidence does not match the signed validator report.");
+            }
+
+            await api.UploadEvidenceAsync(lease, evidenceBytes, leaseLost.Token);
             leaseLost.Cancel();
             await AwaitRenewalAsync(renewal);
             renewalStopped = true;
@@ -118,7 +146,7 @@ internal static class BrokerProgram
                 await AwaitRenewalAsync(renewal);
             }
 
-            DeleteJobFiles(exchange.Root, downloading, package, request, report);
+            DeleteJobFiles(exchange.Root, downloading, package, request, report, evidence);
         }
     }
 
@@ -164,6 +192,9 @@ internal static class BrokerProgram
             File.WriteAllBytes(temporary, DistributionJson.Serialize(new BrokerJobRequest
             {
                 UploadId = lease.UploadId.ToString("D"),
+                VersionId = lease.VersionId.ToString("D"),
+                StorageBucket = lease.StorageBucket,
+                StoragePath = lease.StoragePath,
                 ExpectedSizeBytes = lease.ExpectedSizeBytes,
                 ExpectedSha256 = lease.ExpectedSha256,
             }));
@@ -200,16 +231,22 @@ internal static class BrokerProgram
 
 internal sealed class BrokerJobRequest
 {
-    public int SchemaVersion { get; init; } = 1;
+    public int SchemaVersion { get; init; } = 2;
 
     public required string UploadId { get; init; }
+
+    public required string VersionId { get; init; }
+
+    public required string StorageBucket { get; init; }
+
+    public required string StoragePath { get; init; }
 
     public required long ExpectedSizeBytes { get; init; }
 
     public required string ExpectedSha256 { get; init; }
 }
 
-internal sealed record ExchangePaths(string Root, string Packages, string Requests, string Reports)
+internal sealed record ExchangePaths(string Root, string Packages, string Requests, string Reports, string Evidence)
 {
     public static ExchangePaths Create(string root)
     {
@@ -218,7 +255,8 @@ internal sealed record ExchangePaths(string Root, string Packages, string Reques
             fullRoot,
             EnsureChild(fullRoot, "packages"),
             EnsureChild(fullRoot, "requests"),
-            EnsureChild(fullRoot, "reports"));
+            EnsureChild(fullRoot, "reports"),
+            EnsureChild(fullRoot, "evidence"));
     }
 
     private static string EnsureChild(string root, string name)

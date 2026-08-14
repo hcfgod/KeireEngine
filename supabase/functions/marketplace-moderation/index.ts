@@ -27,6 +27,113 @@ function requireAdministrator(role: string): void {
     }
 }
 
+function canonicalBase64(value: unknown, expectedBytes: number, label: string): ArrayBuffer {
+    if (typeof value !== "string" || value.length > 4096 || /\s/.test(value)) {
+        throw new RequestError(409, "evidence.attestation_invalid", `${label} is malformed.`);
+    }
+    let decoded: Uint8Array;
+    try {
+        decoded = Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
+    } catch {
+        throw new RequestError(409, "evidence.attestation_invalid", `${label} is malformed.`);
+    }
+    let roundTrip = "";
+    for (let offset = 0; offset < decoded.length; offset += 0x8000) {
+        roundTrip += String.fromCharCode(...decoded.subarray(offset, offset + 0x8000));
+    }
+    if (decoded.length !== expectedBytes || btoa(roundTrip) !== value) {
+        throw new RequestError(409, "evidence.attestation_invalid", `${label} is malformed.`);
+    }
+    const result = new ArrayBuffer(decoded.byteLength);
+    new Uint8Array(result).set(decoded);
+    return result;
+}
+
+async function issueEvidence(
+    caller: Awaited<ReturnType<typeof authenticate>>,
+    reportId: string,
+): Promise<Record<string, unknown>> {
+    const { data: report, error: reportError } = await caller.admin.from("marketplace_validation_reports")
+        .select("id,passed,malware_scan_result,secret_scan_result,managed_validation_result,validator_version,validator_fingerprint_sha256,policy_version,package_sha256,manifest_sha256,evidence_storage_path,evidence_sha256,evidence_size_bytes,attestation_key_id,signed_attestation")
+        .eq("id", reportId).maybeSingle();
+    if (reportError) throw databaseFailure(reportError);
+    if (!report?.evidence_storage_path || !report.evidence_sha256 || !report.evidence_size_bytes ||
+        !report.attestation_key_id || !report.signed_attestation) {
+        throw new RequestError(409, "evidence.unavailable", "This report has no signed review evidence.");
+    }
+
+    const { data: key, error: keyError } = await caller.admin.from("marketplace_validator_attestation_keys")
+        .select("key_id,algorithm,public_key_base64,fingerprint")
+        .eq("key_id", report.attestation_key_id).maybeSingle();
+    if (keyError) throw databaseFailure(keyError);
+    if (!key || key.algorithm !== "ed25519") {
+        throw new RequestError(409, "evidence.attestation_key_missing", "The validator attestation key is unavailable.");
+    }
+
+    let attestation: Record<string, unknown>;
+    let document: Record<string, unknown>;
+    try {
+        const parsedAttestation: unknown = JSON.parse(report.signed_attestation);
+        if (!parsedAttestation || typeof parsedAttestation !== "object" || Array.isArray(parsedAttestation)) {
+            throw new Error("attestation");
+        }
+        attestation = parsedAttestation as Record<string, unknown>;
+        if (typeof attestation.document !== "string") throw new Error("document text");
+        const parsedDocument: unknown = JSON.parse(attestation.document);
+        if (!parsedDocument || typeof parsedDocument !== "object" || Array.isArray(parsedDocument)) {
+            throw new Error("document");
+        }
+        document = parsedDocument as Record<string, unknown>;
+    } catch {
+        throw new RequestError(409, "evidence.attestation_invalid", "The validator attestation is malformed.");
+    }
+    const signatureValue = attestation.signature;
+    if (!signatureValue || typeof signatureValue !== "object" || Array.isArray(signatureValue)) {
+        throw new RequestError(409, "evidence.attestation_invalid", "The validator signature is malformed.");
+    }
+    const signatureDocument = signatureValue as Record<string, unknown>;
+    const publicKey = canonicalBase64(key.public_key_base64, 32, "The validator public key");
+    const signature = canonicalBase64(signatureDocument.value, 64, "The validator signature");
+    if (attestation.schemaVersion !== 1 || signatureDocument.algorithm !== "ed25519" ||
+        signatureDocument.keyId !== key.key_id || document.schemaVersion !== 1 ||
+        document.keyId !== key.key_id || document.packageSha256 !== report.package_sha256 ||
+        document.manifestSha256 !== report.manifest_sha256 ||
+        document.evidenceStoragePath !== report.evidence_storage_path ||
+        document.evidenceSha256 !== report.evidence_sha256 ||
+        document.evidenceSizeBytes !== report.evidence_size_bytes || document.passed !== report.passed ||
+        document.malwareScanResult !== report.malware_scan_result ||
+        document.secretScanResult !== report.secret_scan_result ||
+        document.managedValidationResult !== report.managed_validation_result ||
+        document.validatorVersion !== report.validator_version ||
+        document.validatorFingerprintSha256 !== report.validator_fingerprint_sha256 ||
+        document.policyVersion !== report.policy_version) {
+        throw new RequestError(409, "evidence.attestation_invalid", "The validator attestation does not match this report.");
+    }
+    const imported = await crypto.subtle.importKey("raw", publicKey, { name: "Ed25519" }, false, ["verify"]);
+    if (!await crypto.subtle.verify(
+        { name: "Ed25519" }, imported, signature, new TextEncoder().encode(attestation.document as string)
+    )) {
+        throw new RequestError(409, "evidence.attestation_invalid", "The validator attestation signature is invalid.");
+    }
+
+    const { data: signed, error: signedError } = await caller.admin.storage
+        .from("marketplace-validation-evidence").createSignedUrl(report.evidence_storage_path, 300, {
+            download: `marketplace-review-${report.id}.json`,
+        });
+    if (signedError || !signed?.signedUrl) {
+        throw new RequestError(503, "evidence.signing_failed", "The verified review evidence is temporarily unavailable.");
+    }
+    return {
+        reportId: report.id,
+        url: signed.signedUrl,
+        sha256: report.evidence_sha256,
+        sizeBytes: report.evidence_size_bytes,
+        expiresInSeconds: 300,
+        attestationKeyId: key.key_id,
+        attestationFingerprint: key.fingerprint,
+    };
+}
+
 Deno.serve(async (request: Request) => {
     let origin = "";
     try {
@@ -63,6 +170,9 @@ Deno.serve(async (request: Request) => {
             if (error) throw databaseFailure(error);
             const decision = Array.isArray(data) ? data[0] : data;
             return json(origin, 200, { data: decision });
+        }
+        if (operation === "evidence.issue") {
+            return json(origin, 200, { data: await issueEvidence(caller, requiredUuid(input, "reportId")) });
         }
         if (operation === "report.decide") {
             const { data, error } = await caller.admin.rpc("service_decide_marketplace_report", {

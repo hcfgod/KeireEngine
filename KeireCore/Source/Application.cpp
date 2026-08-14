@@ -484,11 +484,11 @@ namespace Keire
                                 }
                             }
                         }
-                        if (!ExitRequested())
-                        {
-                            ProfileScope update(m_Impl->ProfilerService, ProfileCategory::Application, "Update");
-                            m_Impl->LayerSystem->Update(*m_Impl->Clock);
-                        }
+                    }
+                    if (!ExitRequested() && (!suspended || m_Impl->Specification.UpdateLayersWhenMainWindowMinimized))
+                    {
+                        ProfileScope update(m_Impl->ProfilerService, ProfileCategory::Application, "Update");
+                        m_Impl->LayerSystem->Update(*m_Impl->Clock);
                     }
 
                     if (!ExitRequested() && !nowSuspended && m_Impl->UserInterface)

@@ -33,6 +33,7 @@ let audits: any[] = [];
 let versions: any[] = [];
 let products: any[] = [];
 let validationReports: any[] = [];
+let publicationJobs: any[] = [];
 let officialProducts: any[] = [];
 let officialVersions: any[] = [];
 
@@ -78,10 +79,16 @@ if (allowed && supabase) {
     const versionIds = submissions.map((submission: any) => submission.version_id);
     const reportIds = submissions.map((submission: any) => submission.validation_report_id);
     if (versionIds.length) {
-        const versionResult = await supabase.from("marketplace_product_versions")
-            .select("id,product_id,version,state,install_kind,platforms,architectures,archive_sha256,archive_size_bytes,manifest_sha256,validator_version,updated_at")
-            .in("id", versionIds);
+        const [versionResult, publicationJobResult] = await Promise.all([
+            supabase.from("marketplace_product_versions")
+                .select("id,product_id,version,state,install_kind,platforms,architectures,archive_sha256,archive_size_bytes,manifest_sha256,validator_version,updated_at")
+                .in("id", versionIds),
+            supabase.from("marketplace_publication_jobs")
+                .select("id,version_id,state,attempt_count,last_error_code,created_at,updated_at,published_at")
+                .in("version_id", versionIds),
+        ]);
         versions = versionResult.data ?? [];
+        publicationJobs = publicationJobResult.data ?? [];
     }
     const productIds = versions.map((version: any) => version.product_id);
     if (productIds.length) {
@@ -92,7 +99,7 @@ if (allowed && supabase) {
     }
     if (reportIds.length) {
         const validationResult = await supabase.from("marketplace_validation_reports")
-            .select("id,upload_id,passed,diagnostics,malware_scan_result,secret_scan_result,managed_validation_result,validator_version,validator_fingerprint_sha256,policy_version,package_sha256,manifest_sha256,completed_at")
+            .select("id,upload_id,passed,diagnostics,malware_scan_result,secret_scan_result,managed_validation_result,validator_version,validator_fingerprint_sha256,policy_version,package_sha256,manifest_sha256,evidence_storage_path,evidence_sha256,evidence_size_bytes,attestation_key_id,completed_at")
             .in("id", reportIds);
         validationReports = validationResult.data ?? [];
     }
@@ -114,6 +121,7 @@ if (allowed && supabase) {
 const versionById = new Map(versions.map((version: any) => [version.id, version]));
 const productById = new Map(products.map((product: any) => [product.id, product]));
 const validationById = new Map(validationReports.map((report: any) => [report.id, report]));
+const publicationJobByVersionId = new Map(publicationJobs.map((job: any) => [job.version_id, job]));
 const latestOfficialVersionByProduct = new Map<string, any>();
 for (const version of officialVersions) {
     if (!latestOfficialVersionByProduct.has(version.product_id)) latestOfficialVersionByProduct.set(version.product_id, version);
@@ -220,6 +228,15 @@ const actionableSubmissionCount = activeSubmissions.length + signingSubmissions.
                                             <div><dt>Validator</dt><dd>{validation?.validator_version ?? "Unavailable"}</dd></div>
                                         </dl>
                                         <div class="staff-statement"><strong>Diagnostics</strong><p>{diagnostics.length ? `${diagnostics.length} issue(s) reported.` : "No validator diagnostics."}</p></div>
+                                        {validation?.evidence_sha256 && validation?.attestation_key_id ? <section class="staff-evidence" aria-label="Signed package review evidence">
+                                            <div class="staff-evidence__heading">
+                                                <div><strong>Signed review evidence</strong><small>Attested by <code>{validation.attestation_key_id}</code></small></div>
+                                                <span class="status-badge status-badge--ready">verified metadata</span>
+                                            </div>
+                                            <p>Load the validator’s bounded report to inspect the exact manifest inventory without receiving the publisher’s private package archive.</p>
+                                            <button class="button button--secondary" type="button" data-evidence-button data-report-id={validation.id}>Load verified report</button>
+                                            <div class="staff-evidence__panel" data-evidence-panel hidden aria-live="polite"></div>
+                                        </section> : <p class="notice-panel">Signed review evidence is unavailable for this legacy validation report.</p>}
                                         <form class="staff-action-form" data-moderation-form>
                                             <input type="hidden" name="operation" value="submission.decide" />
                                             <input type="hidden" name="submissionId" value={submission.id} />
@@ -228,7 +245,7 @@ const actionableSubmissionCount = activeSubmissions.length + signingSubmissions.
                                                 <button class="button button--quiet" type="submit" name="decision" value="in_review">Claim review</button>
                                                 <button class="button button--secondary" type="submit" name="decision" value="changes_requested">Request changes</button>
                                                 <button class="button button--quiet" type="submit" name="decision" value="rejected" data-confirm="Reject this package submission?">Reject</button>
-                                                <button class="button" type="submit" name="decision" value="approved_pending_signature" data-confirm="Approve these exact validated bytes for offline signing?">Approve for signing</button>
+                                                <button class="button" type="submit" name="decision" value="approved_pending_signature" data-confirm="Approve this signed validator evidence and queue automatic publication?">Approve and queue publication</button>
                                             </div>
                                             <p class="form-message" role="status" aria-live="polite"></p>
                                         </form>
@@ -237,7 +254,7 @@ const actionableSubmissionCount = activeSubmissions.length + signingSubmissions.
                             </div> : <p class="notice-panel">No validated package submissions are waiting for staff review.</p>}
 
                             <div class="publisher-section__heading staff-subsection-heading">
-                                <div><p class="eyebrow">Administrator boundary</p><h2>Offline signing queue</h2></div>
+                                <div><p class="eyebrow">Administrator boundary</p><h2>Automatic publication queue</h2></div>
                                 <span class="status-badge">{signingSubmissions.length} approved</span>
                             </div>
                             {signingSubmissions.length ? <div class="staff-card-grid">
@@ -245,24 +262,23 @@ const actionableSubmissionCount = activeSubmissions.length + signingSubmissions.
                                     const version = versionById.get(submission.version_id) as any;
                                     const product = productById.get(version?.product_id) as any;
                                     const validation = validationById.get(submission.validation_report_id) as any;
+                                    const publicationJob = publicationJobByVersionId.get(submission.version_id) as any;
                                     return <article class="staff-review-card">
                                         <div class="staff-review-card__header">
                                             <div><h3>{product?.display_name ?? "Unknown product"} <small>{version?.version}</small></h3><code>{submission.id}</code></div>
-                                            <span class="status-badge status-badge--ready">approved for signing</span>
+                                            <span class:list={["status-badge", publicationJob?.state !== "failed" && "status-badge--ready"]}>{publicationJob?.state ?? "queued"}</span>
                                         </div>
                                         <dl class="staff-detail-grid">
                                             <div><dt>Package SHA-256</dt><dd><code>{validation?.package_sha256 ?? "Unavailable"}</code></dd></div>
                                             <div><dt>Manifest SHA-256</dt><dd><code>{validation?.manifest_sha256 ?? "Unavailable"}</code></dd></div>
                                             <div><dt>Archive size</dt><dd>{Number(version?.archive_size_bytes ?? 0).toLocaleString()} bytes</dd></div>
                                             <div><dt>Approved</dt><dd>{submission.decided_at ? new Date(submission.decided_at).toLocaleString() : "Unavailable"}</dd></div>
+                                            <div><dt>Publication attempts</dt><dd>{publicationJob?.attempt_count ?? 0}</dd></div>
+                                            <div><dt>Last transition</dt><dd>{publicationJob?.updated_at ? new Date(publicationJob.updated_at).toLocaleString() : "Waiting for signer"}</dd></div>
                                         </dl>
                                         {staffRole === "administrator" ? <>
-                                            <form class="staff-action-form staff-publication-form" data-publication-form>
-                                                <input type="hidden" name="versionId" value={version?.id} />
-                                                <label class="field"><span>Offline-signed publication envelope</span><input type="file" name="signedManifest" accept="application/json,.json" required /><small>Generated and verified on the offline signing workstation. The private key never enters this page or Supabase.</small></label>
-                                                <div class="actions"><button class="button" type="submit" data-confirm="Cryptographically verify and immutably publish these exact validated bytes?">Verify signature and publish</button></div>
-                                                <p class="form-message" role="status" aria-live="polite"></p>
-                                            </form>
+                                            <p class="notice-panel">The least-privileged publication signer processes this approval automatically. It receives signed metadata only, verifies the isolated validator’s attestation, and cannot download or alter the package.</p>
+                                            {publicationJob?.last_error_code && <p class="form-message" data-kind="error">Last safe failure: <code>{publicationJob.last_error_code}</code>. Retry policy remains bounded.</p>}
                                             <form class="staff-action-form staff-withdrawal-form" data-moderation-form>
                                                 <input type="hidden" name="operation" value="submission.decide" />
                                                 <input type="hidden" name="submissionId" value={submission.id} />
@@ -273,7 +289,7 @@ const actionableSubmissionCount = activeSubmissions.length + signingSubmissions.
                                         </> : <p class="notice-panel">An administrator must publish or withdraw this signing approval.</p>}
                                     </article>;
                                 })}
-                            </div> : <p class="notice-panel">No package release is waiting for an offline signature.</p>}
+                            </div> : <p class="notice-panel">No package release is waiting for automatic publication.</p>}
                         </section>
 
                         <section id="official-releases" class="publisher-section">
@@ -281,7 +297,7 @@ const actionableSubmissionCount = activeSubmissions.length + signingSubmissions.
                                 <div><p class="eyebrow">Kéire first-party content</p><h2>Official release drafts</h2></div>
                                 <span class="status-badge">Same trust pipeline</span>
                             </div>
-                            <p class="notice-panel">Built-in catalog cards are product drafts, not packages. Prepare a deterministic <code>.keireassetpackage</code>, upload it through the Publisher portal, pass validation and moderation, then return here with the offline-signed envelope. Official assets never bypass package evidence or signature verification.</p>
+                            <p class="notice-panel">Built-in catalog cards are product drafts, not packages. Prepare a deterministic <code>.keireassetpackage</code>, upload it once through the Publisher portal, then pass isolated validation and evidence-based moderation. Approved official assets use the same automatic signature and immutable publication path as every other publisher.</p>
                             {officialProducts.length ? <div class="staff-card-grid">
                                 {officialProducts.map((product: any) => {
                                     const latestVersion = latestOfficialVersionByProduct.get(product.id);
@@ -438,33 +454,102 @@ const actionableSubmissionCount = activeSubmissions.length + signingSubmissions.
         });
     });
 
-    document.querySelectorAll<HTMLFormElement>("[data-publication-form]").forEach((form) => {
-        form.addEventListener("submit", async (event) => {
-            event.preventDefault();
-            const submitter = (event as SubmitEvent).submitter as HTMLButtonElement | null;
-            if (submitter?.dataset.confirm && !window.confirm(submitter.dataset.confirm)) return;
-            const message = form.querySelector<HTMLElement>(".form-message");
-            const file = form.querySelector<HTMLInputElement>('input[type="file"]')?.files?.[0];
-            const versionId = new FormData(form).get("versionId");
-            if (!file || file.size < 2 || file.size > 64 * 1024 || typeof versionId !== "string") {
-                if (message) { message.textContent = "Select a bounded signed publication JSON file."; message.dataset.kind = "error"; }
-                return;
-            }
-            const controls = form.querySelectorAll<HTMLButtonElement | HTMLInputElement>("button,input");
-            controls.forEach((control) => control.disabled = true);
-            if (message) { message.textContent = "Verifying the offline signature and promoting exact bytes…"; message.dataset.kind = ""; }
+    function hex(bytes: Uint8Array) {
+        return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+    }
+
+    function element<K extends keyof HTMLElementTagNameMap>(name: K, text?: string) {
+        const node = document.createElement(name);
+        if (text !== undefined) node.textContent = text;
+        return node;
+    }
+
+    function renderEvidence(panel: HTMLElement, evidence: any, fingerprint: string) {
+        panel.replaceChildren();
+        const inventory = evidence?.inventory;
+        const files = Array.isArray(inventory?.files) ? inventory.files : [];
+        const heading = element("div");
+        heading.className = "staff-evidence__summary";
+        heading.append(
+            element("strong", inventory ? `${inventory.displayName} ${inventory.version}` : "Validation evidence"),
+            element("small", `${files.length.toLocaleString()} files · key ${fingerprint}`),
+        );
+        panel.append(heading);
+        if (!inventory) {
+            panel.append(element("p", "The validator failed before a safe package inventory could be produced."));
+            return;
+        }
+
+        const controls = element("div");
+        controls.className = "staff-evidence__controls";
+        const search = element("input") as HTMLInputElement;
+        search.type = "search";
+        search.placeholder = "Filter manifest paths";
+        search.setAttribute("aria-label", "Filter manifest paths");
+        const previous = element("button", "Previous") as HTMLButtonElement;
+        const next = element("button", "Next") as HTMLButtonElement;
+        previous.type = next.type = "button";
+        previous.className = next.className = "button button--quiet";
+        const pageStatus = element("span");
+        controls.append(search, previous, pageStatus, next);
+        const list = element("ol");
+        list.className = "staff-evidence__files";
+        panel.append(controls, list);
+
+        let page = 0;
+        const pageSize = 50;
+        const draw = () => {
+            const query = search.value.trim().toLocaleLowerCase();
+            const filtered = query ? files.filter((file: any) => String(file?.path ?? "").toLocaleLowerCase().includes(query)) : files;
+            const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
+            page = Math.min(page, pages - 1);
+            list.replaceChildren(...filtered.slice(page * pageSize, (page + 1) * pageSize).map((file: any) => {
+                const item = element("li");
+                item.append(element("code", String(file?.path ?? "Unknown path")), element("span", `${Number(file?.sizeBytes ?? 0).toLocaleString()} bytes`));
+                return item;
+            }));
+            if (!filtered.length) list.append(element("li", "No manifest paths match this filter."));
+            pageStatus.textContent = `${filtered.length.toLocaleString()} files · page ${page + 1} of ${pages}`;
+            previous.disabled = page === 0;
+            next.disabled = page >= pages - 1;
+        };
+        search.addEventListener("input", () => { page = 0; draw(); });
+        previous.addEventListener("click", () => { page -= 1; draw(); });
+        next.addEventListener("click", () => { page += 1; draw(); });
+        draw();
+    }
+
+    document.querySelectorAll<HTMLButtonElement>("[data-evidence-button]").forEach((button) => {
+        button.addEventListener("click", async () => {
+            const panel = button.parentElement?.querySelector<HTMLElement>("[data-evidence-panel]");
+            const reportId = button.dataset.reportId;
+            if (!panel || !reportId) return;
+            button.disabled = true;
+            panel.hidden = false;
+            panel.textContent = "Verifying attestation and loading bounded review evidence…";
             try {
-                await responseData(await fetch("/admin/marketplace/v1/publications/", {
+                const grant = await responseData(await fetch("/admin/marketplace/v1/actions/", {
                     method: "POST",
                     credentials: "same-origin",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ versionId, signedManifest: await file.text() }),
+                    body: JSON.stringify({ operation: "evidence.issue", reportId }),
                 }));
-                if (message) { message.textContent = "Signed release published immutably."; message.dataset.kind = "success"; }
-                window.setTimeout(() => window.location.reload(), 900);
+                const response = await fetch(grant.url, { credentials: "omit", cache: "no-store" });
+                if (!response.ok) throw new Error("The signed evidence download expired or was rejected.");
+                const bytes = new Uint8Array(await response.arrayBuffer());
+                const digest = hex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
+                if (bytes.byteLength !== grant.sizeBytes || digest !== grant.sha256) {
+                    throw new Error("The review evidence failed its SHA-256 or size check.");
+                }
+                const evidence = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+                if (evidence?.schemaVersion !== 1) throw new Error("The review evidence schema is unsupported.");
+                renderEvidence(panel, evidence, grant.attestationFingerprint);
+                button.textContent = "Reload verified report";
             } catch (error) {
-                if (message) { message.textContent = error instanceof Error ? error.message : "Publication failed."; message.dataset.kind = "error"; }
-                controls.forEach((control) => control.disabled = false);
+                panel.textContent = error instanceof Error ? error.message : "The review evidence could not be verified.";
+                panel.dataset.kind = "error";
+            } finally {
+                button.disabled = false;
             }
         });
     });

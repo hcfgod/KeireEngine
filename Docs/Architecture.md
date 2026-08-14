@@ -473,8 +473,9 @@ until the plan is valid and the user confirms it. The Editor never receives Hub 
 a strictly parsed `keirehub://marketplace/product/<UUID>` activation that is forwarded
 to the already-running primary Hub through the existing single-instance channel. Hub alone reads the account session,
 registers the current OAuth device session, walks bounded catalog/library pages, and obtains the short-lived grant. The
-grant carries the immutable offline-signed publication envelope already accepted at release publication. Hub verifies
-that envelope against the packaged Marketplace trust root and requires its product UUID, version UUID, archive size,
+  grant carries the immutable signed publication envelope already accepted at release publication. Hub verifies
+  that envelope against every key in the packaged, bounded Marketplace trust bundle and requires its product UUID,
+  version UUID, archive size,
 archive SHA-256, manifest SHA-256, storage path, sequence, and expiry to agree before downloading the content-addressed
 archive. It then verifies the exact bytes and package identity before the item becomes ready.
 
@@ -493,7 +494,8 @@ displaying them. They derive the archive path from the trusted digest rather tha
 independently verify the exact signed publication document, and repeat archive size, SHA-256, manifest, and payload
 verification before a project transaction. The durable snapshot remains the production package handoff; the short
 lease proves only that the matching local Hub session is live. Entitlement authorizes download access, while the
-offline-signed publication and its bound archive digest establish integrity independently of the online grant service.
+independently Ed25519-signed publication and its bound archive digest establish integrity independently of the online
+grant service.
 Projects without package files remain valid, while the first successful package transaction raises
 `minimumEngineVersion` to 0.3.1 atomically.
 
@@ -827,6 +829,14 @@ initialize or frame Dear ImGui. Windows assembly patches the copied PE template 
 the low-level console runtime used by tests and SDK consumers. Windows-host assembly also replaces the executable icon
 resource with the selected or generated multi-resolution ICO; the template's linked resource supplies the fallback on
 other assembly hosts. See [Desktop Player Builds](PlayerBuilds.md).
+
+Player build scene policy is a separate schema-1 value document under `ProjectSettings/BuildScenes.keiresettings`.
+Rows retain stable Scene asset IDs, enablement, and user-authored order; the first enabled row is startup. AssetTool
+validates every enabled ID after import, roots strict cooking at all of them, and writes the same order into schema-4
+`runtime-manifest.json`. Runtime validates uniqueness, bounds, and agreement between the startup field and first build
+scene before mounting content. Projects without the new file derive a non-mutating default from the descriptor startup
+scene for compatibility.
+
 Contextual importers may publish typed generated sub-assets. Their IDs are derived from the parent identity plus a
 semantic importer key, reconciled into the parent's metadata, validated with their own dependencies, and flattened into
 the same transactional catalog as the parent. Model materials and embedded texture variants use this path. Material
@@ -902,7 +912,7 @@ documents and uses the public Kéire UI facade. Details live in [Input Actions E
 
 `EventBus` uses exact C++ payload types without a base-event hierarchy. Typed and generic listeners share one priority/registration order; inactive tombstones allow safe unsubscribe and nested dispatch without allocating on the immediate path. Owner-thread dispatch and subscription keep callback mutation deterministic. A bounded mutex-protected queue accepts owned events from any thread, rejects overflow without blocking, and drains a fixed snapshot so producers cannot starve a frame. Closing a bus makes retained references and subscription tokens safely inert.
 
-`Time` is application-owned rather than process-global. A monotonic frame sample feeds raw, clamped unscaled, scaled, smoothed, and elapsed clocks. Scaled time feeds a 60 Hz accumulator with a fixed per-frame tick cap; excess whole ticks are recorded as dropped simulation time while the fractional interpolation remainder is retained. Pause and minimized suspension stop scaled simulation without losing real/unscaled time.
+`Time` is application-owned rather than process-global. A monotonic frame sample feeds raw, clamped unscaled, scaled, smoothed, and elapsed clocks. Scaled time feeds a 60 Hz accumulator with a fixed per-frame tick cap; excess whole ticks are recorded as dropped simulation time while the fractional interpolation remainder is retained. Pause and minimized suspension stop scaled simulation without losing real/unscaled time. Rendering, UI, and fixed simulation remain suspended for a minimized main window; applications that own essential background workflows may opt into low-rate variable layer updates. Hub uses that explicit policy to renew account and Marketplace leases while hidden in the tray.
 
 ## Dependency Build Boundary
 
@@ -1027,8 +1037,19 @@ or mutation, so revocation does not wait for a JWT refresh. Browser staff sessio
 cannot write moderation states directly. AAL2-protected website adapters invoke `marketplace-moderation`, which verifies
 the caller again and delegates to service-role-only transactional functions for publisher, package, report, staff, and
 feature-gate decisions. Those functions validate allowed state transitions, preserve a final administrator, and append
-audit evidence. Package moderation deliberately stops at `approved_pending_signature`; the offline signing and
-publication process remains a distinct trust boundary.
+audit evidence. New packages are uploaded exactly once to a private immutable object identity. The isolated validator
+has no network namespace; it signs a canonical attestation binding upload, version, bucket, path, package digest,
+manifest digest, scan results, and a separately hashed bounded evidence document. Staff receive only a short-lived URL
+for that sanitized evidence, and the browser verifies its size and SHA-256 before rendering the manifest inventory.
+
+Administrator approval stops at `approved_pending_signature` and atomically creates one durable publication job. A
+separate least-privileged online signer authenticates with a dedicated scoped queue secret, receives only approved
+metadata and the signed validator attestation, and cannot obtain a package download URL. It verifies the pinned
+validator key, signs the existing publication schema, and commits through a leased service-role transition. No package
+copy or administrator file handoff occurs. Publication metadata records the original bucket/path, while Hub and Editor
+accept a bounded multi-key trust bundle so a new signer key can ship to clients before it becomes active. Private keys
+remain operating-system protected on the worker host and are never stored in Supabase, Astro, packages, or the
+repository.
 
 macOS release binaries share the deployment target pinned by `MACOS_DEPLOYMENT_TARGET` in the dependency lock. The
 package boundary verifies each non-.NET Mach-O load command against that target before publication. Native installers

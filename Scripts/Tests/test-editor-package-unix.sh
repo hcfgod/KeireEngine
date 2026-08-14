@@ -86,6 +86,7 @@ assert manifest["compatibility"]["legacySchemaVersion"] == 1
 assert "content/Content/en-US.json" in {entry["path"] for entry in manifest["files"]}
 assert "content/Licenses/catalog.json" in {entry["path"] for entry in manifest["files"]}
 assert "Config/Marketplace/trusted-marketplace-key.json" in {entry["path"] for entry in manifest["files"]}
+assert "Config/Marketplace/trusted-marketplace-keys.json" in {entry["path"] for entry in manifest["files"]}
 assert "content/Fonts/Inter-OFL.txt" in manifest["licenseReferences"]
 assert "content/Fonts/Material-Symbols-Apache-2.0.txt" in manifest["licenseReferences"]
 PY

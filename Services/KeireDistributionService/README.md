@@ -319,75 +319,77 @@ cd supabase/functions/website-contact
 deno check --frozen --lock=deno.lock index.ts
 ```
 
-Marketplace mutations use separate JWT-protected Edge Functions. `marketplace-library`, `marketplace-hub`,
-`marketplace-publisher`, and `marketplace-moderation` verify the caller with Supabase Auth before decoding claims, accept only the production browser
-origin when an Origin header is present, stream bounded JSON, and call service-role-only database transitions. The
-publisher and moderation transitions independently require an `aal2` token. Direct authenticated execution of those privileged
-database functions is revoked, and all corresponding feature flags default to false. Do not enable any flag until its
-identity, legal, validator, offline-signing, backup/restore, and cross-platform acceptance gates pass.
+Marketplace mutations use separate Edge Functions. Browser functions verify the Supabase user before decoding claims,
+accept only the production browser origin, stream bounded JSON, and call service-role-only transactions. Publisher and
+moderation transitions independently require AAL2. The validator and publication queues reject browser origins and use
+different, independently rotatable 32-or-more-character credentials; neither worker receives a Supabase secret or
+service-role key. Direct authenticated execution of privileged database functions is revoked, and every feature flag
+defaults to false.
 
-Staff roles live in `public.platform_staff_members`, not mutable browser token metadata. Moderators review submitted
-publisher identities, passing package-validation evidence, and marketplace reports. Administrators additionally manage
-staff assignments and launch gates. The database prevents removal of the final active administrator, rejects paid
-checkout enablement for 0.3.1, and records each staff decision in `public.platform_audit_events`. Browser staff sessions
-have read-only queue access; all changes cross the MFA-protected moderation boundary. Package approval ends at
-`approved_pending_signature`, preserving the offline signing key as a separate operational trust domain.
+Staff roles live in `public.platform_staff_members`, not browser token metadata. Moderators inspect publisher identity,
+signed package evidence, and reports. Administrators additionally approve package publication, manage staff, and change
+launch gates. The database preserves a final active administrator, keeps paid checkout disabled for 0.3.1, and appends
+every decision to `public.platform_audit_events`. The staff console requests a five-minute URL for sanitized validation
+evidence only after the Edge boundary verifies its Ed25519 attestation. The browser then verifies the evidence size and
+SHA-256 before rendering a searchable manifest inventory. Staff never need the publisher's package archive.
 
-An authorized Marketplace download grant returns both a short-lived private Storage URL and the immutable
-offline-signed publication envelope recorded when that exact release was promoted. The service-role-only v2 grant
-adapter requires the entitlement, device session, release storage path, archive size and SHA-256, manifest SHA-256, and
-signing-key identity to remain consistent before returning the envelope. Hub and Editor verify the exact inner document
-independently with their packaged Marketplace public key. The online website, Edge Functions, database, and Storage
-services never hold the private key and cannot manufacture a trusted replacement archive.
+An authorized Marketplace download grant returns a short-lived private Storage URL and the immutable publication
+envelope. The v3 service adapter requires entitlement, OAuth device session, recorded bucket/path, archive size and
+SHA-256, manifest SHA-256, and signing-key identity to remain consistent. Hub and Editor verify the inner document with
+the bounded `Config/Marketplace/trusted-marketplace-keys.json` bundle, then independently hash the archive. Keep the
+legacy single-key document in packages during the overlap release. Add a new public key to the bundle and release it to
+clients before activating that key in Supabase or starting its signer.
 
 ### Marketplace package validator
 
 Marketplace validation uses two processes with different trust levels:
 
 - `KeireMarketplaceValidatorBroker` is the only networked component. It holds one dedicated, independently rotatable
-  validator-queue secret—not a Supabase API key—atomically leases an uploaded quarantine object, streams it from a
+  validator-queue secret—not a Supabase API key—atomically leases an upload-once private object, streams it from a
   short-lived object-specific URL with an exact size/SHA-256 bound, renews long-running leases, and commits the worker's
-  bounded JSON report. It never loads or executes package content.
+  bounded JSON report and separately hashed review evidence. Before committing, it verifies the worker's signed
+  attestation against a pinned public key. It never loads or executes package content.
 - `KeireMarketplaceValidator` has no HTTP or Supabase dependency. It consumes immutable jobs from a private filesystem
   exchange, calls the authoritative `KeireAssetTool extract-asset-package` command, requires ClamAV to succeed, scans
   text for credential indicators without recording matched values, rejects executable/native/install/build-control
   payloads, and compiles declared C# only from generated projects with the pinned SDK and an empty NuGet source list.
+  It signs the exact upload/version/bucket/path, package and evidence digests, scan outcomes, policy, and worker identity.
 
-Apply `supabase/migrations/20260812190000_marketplace_validator_leases.sql` and deploy the
-`marketplace-validator-queue` Edge Function before starting either process. Store the same random 32-or-more-character
-`VALIDATOR_BROKER_SECRET` in the Edge Function secret store and the broker's protected environment file. The broker
-never receives `SUPABASE_SECRET_KEYS` or `SUPABASE_SERVICE_ROLE_KEY`; those remain inside Supabase's function runtime.
-The migration's three
-RPCs are executable only by `service_role`: one atomic `FOR UPDATE SKIP LOCKED` lease, one renewal, and one report
-commit. Expired leases return to `uploaded`; a successful report moves both upload and version to `validated`, while a
-failed report moves them to `failed`/`validation_failed`. A repeatedly interrupted poison job becomes terminal after
-five leased attempts instead of blocking the queue forever. Every lease, exhausted retry, and completion creates an
-audit event. Do not give
-the server secret, database access, or a network namespace to the worker.
+Apply all migrations through `20260814034937_marketplace_automatic_publication.sql`, then deploy both server-only
+queues. Set `VALIDATOR_BROKER_SECRET` and `MARKETPLACE_PUBLICATION_SIGNER_SECRET` to different random values. Register
+only the two public keys in `marketplace_validator_attestation_keys` and `marketplace_signature_keys`; private keys stay
+on the worker host. Queue leases use `FOR UPDATE SKIP LOCKED`, recover expired workers, and stop poison jobs after five
+attempts. Validation success records the original immutable bucket/path and evidence; no later publication copy occurs.
 
 ```sh
 supabase db push
 supabase functions deploy marketplace-validator-queue --no-verify-jwt
+supabase functions deploy marketplace-publication-queue --no-verify-jwt
 ```
 
-Before deploying the function, set `VALIDATOR_BROKER_SECRET` through the Supabase Dashboard secret UI or a protected
-deployment secret file. Generate it in a trusted password manager or operating-system cryptographic RNG. Do not paste
-its value into shell history, logs, chat, or source control. The no-JWT function setting is intentional: the function
-rejects browser origins and performs its own fixed-length digest comparison against this scoped service credential
-before touching a lease.
+Set both scoped secrets through the Supabase Dashboard secret UI or a protected deployment secret file. Do not place
+them in shell history, logs, chat, or source control. The no-JWT settings are intentional: each function rejects browser
+origins and performs a fixed-length digest comparison before touching its own queue.
 
-The service package includes self-contained worker and broker binaries under `tools/marketplace-validator/`. The worker
+The service package includes self-contained worker and broker binaries under `tools/marketplace-validator/` plus the
+metadata-only signer under `tools/marketplace-publication-signer/`. The worker
 also requires the matching 0.3.1 `KeireAssetTool`, `Keire.Managed.dll`, pinned .NET 10.0.302 SDK, and a current ClamAV
 installation. Malware definitions are updated by the trusted host outside the offline worker.
 
 For Linux, create separate `keire-validator` and `keire-validator-broker` users plus a shared
 `keire-validator-exchange` group. Make the exchange root group-owned and setgid with mode `2770`; make the worker's
 temporary root owned only by `keire-validator` with mode `0700`. Install the example units from `Deployment/`, install
-`marketplace-validator-broker.env.example` as `/etc/keire/marketplace-validator-broker.env` with mode `0640`, and place
-only the scoped validator-queue secret there. Pin the reviewed worker executable's lowercase SHA-256 in
+`marketplace-validator.env.example` and `marketplace-validator-broker.env.example` beneath `/etc/keire/` with mode
+`0640`. The worker file contains only its attestation private key; the broker file contains the scoped queue secret,
+pinned worker digest, and attestation public-key path. Pin the reviewed worker executable's lowercase SHA-256 in
 `KEIRE_VALIDATOR_EXPECTED_FINGERPRINT_SHA256`. The worker unit uses `PrivateNetwork=true`, permits only `AF_UNIX` for the local
 ClamAV socket, and grants write access only to its exchange and work roots. Confirm the worker log says it is ready for
 offline jobs before starting the broker.
+
+Install `marketplace-publication-signer.env.example` with mode `0640` for a dedicated `keire-publication` identity and
+install `keire-marketplace-publication-signer.service.example`. This signer has network access but receives only leased
+metadata and the validator attestation. It has no Storage grant, package path credential, or database key. Its private
+publication key and the two public-key paths are the only key material it needs.
 
 For Windows, use separate restricted service identities and ACL the exchange directory to both while granting the work
 directory only to the worker identity. Run `Deployment/configure-windows-validator-firewall.ps1` from an elevated
@@ -395,7 +397,10 @@ session for the exact worker, Asset Tool, ClamAV scanner, and pinned `dotnet.exe
 under the administrator-owned release directory. The script verifies all four rules, records the exact executable
 paths and SHA-256 hashes, and protects that evidence for read-only access by `LOCAL SERVICE`. Start the worker only
 through `Deployment/start-windows-marketplace-validator.ps1`; it refuses to launch unless Windows Defender Firewall
-is running and either the live rules or that protected attestation match every executable. Use
+is running and either the live rules or that protected attestation match every executable. Generate independent
+attestation and publication keys with `Deployment/provision-windows-marketplace-signing-keys.ps1`; it emits public-key
+registration SQL and an optional client trust-bundle candidate, while protecting the online private-key copies with
+machine DPAPI. Archive the ACL-protected PEM originals offline. Use
 `Deployment/protect-windows-validator-broker-secret.ps1` from an elevated interactive session to capture
 the scoped queue secret without command-line or transcript exposure and store it as machine-DPAPI ciphertext with an
 inheritance-disabled ACL for `NETWORK SERVICE`. Start the broker through
@@ -405,6 +410,12 @@ secret, or legacy service-role key. Install both durable pre-login tasks with
 `Deployment/install-windows-marketplace-validator-tasks.ps1`; it validates the complete configuration before
 registering the worker as `LOCAL SERVICE` and the broker as `NETWORK SERVICE`, with bounded startup ordering and
 automatic restart on failure.
+
+Protect the publication queue credential with `Deployment/protect-windows-marketplace-secret.ps1 -Purpose
+PublicationQueueSecret`. Start and register the metadata-only signer with
+`start-windows-marketplace-publication-signer.ps1` and
+`install-windows-marketplace-publication-signer-task.ps1`. Both launchers validate inheritance-disabled ACLs before
+decrypting machine-DPAPI ciphertext into process environment variables, and clear those variables after exit.
 
 Keep the validator path dark until a harmless fixture and an EICAR test fixture have respectively produced a clean
 report and a blocked report, a killed worker has demonstrated stale-lease recovery, and the report's validator binary

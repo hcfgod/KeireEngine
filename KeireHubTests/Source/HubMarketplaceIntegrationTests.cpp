@@ -65,7 +65,7 @@ TEST_CASE("Marketplace synchronization registers the Hub session before reading 
                                  .AccountId = "40112233-4455-6677-8899-aabbccddeeff",
                                  .AccessToken = "header.payload.signature",
                                  .ServiceBaseUrl = "https://keire.test",
-                                 .TrustedPublicKeyDocument = "{}",
+                                 .TrustedPublicKeyDocuments = {"{}"},
                                  .CacheRoot = temporary.Path() / "MarketplacePackages",
                                  .EngineVersion = "0.3.1",
                                  .Platform = "windows",

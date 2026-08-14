@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using Keire.Distribution;
 using Keire.Marketplace.Validation;
+using Keire.Marketplace.Security;
 
 return await ValidatorProgram.RunAsync(args);
 
@@ -37,12 +38,18 @@ internal static class ValidatorProgram
             string processPath = Environment.ProcessPath
                 ?? throw new InvalidOperationException("The validator executable path is unavailable.");
             string fingerprint = await ValidatorFiles.ComputeSha256Async(processPath, cancellation.Token);
+            using MarketplaceSigningKey attestationKey =
+                MarketplaceSigningKey.FromEnvironment("KEIRE_VALIDATOR_ATTESTATION_PRIVATE_KEY");
             if (commandLine.Command == "watch")
             {
-                return await ValidatorExchange.RunAsync(commandLine, fingerprint, cancellation.Token);
+                return await ValidatorExchange.RunAsync(commandLine, fingerprint, attestationKey, cancellation.Token);
             }
 
             PackageValidationRequest request = new(
+                Guid.Parse(commandLine.Require("--upload-id")),
+                Guid.Parse(commandLine.Require("--version-id")),
+                commandLine.Require("--storage-bucket"),
+                commandLine.Require("--storage-path"),
                 commandLine.Require("--package"),
                 commandLine.Require("--work-root"),
                 commandLine.Require("--asset-tool"),
@@ -53,7 +60,12 @@ internal static class ValidatorProgram
                 ParseSha256(commandLine.Require("--expected-sha256")),
                 fingerprint);
             MarketplacePackageValidator validator = new(new ClamAvScanner(request.MalwareScannerPath));
-            MarketplaceValidationReport report = await validator.ValidateAsync(request, cancellation.Token);
+            MarketplaceValidationOutput output = await validator.ValidateWithEvidenceAsync(request, cancellation.Token);
+            MarketplaceValidationReport report = output.Report with
+            {
+                Attestation = ValidatorAttestation.Sign(request, output.Report, attestationKey),
+            };
+            ValidatorFiles.WriteNewFile(commandLine.Require("--evidence"), output.ReviewEvidence);
             ValidatorFiles.WriteNewReport(commandLine.Require("--report"), report);
             Console.WriteLine(report.Passed ? "Marketplace package validation passed." : "Marketplace package validation failed.");
             return report.Passed ? 0 : 3;
@@ -91,8 +103,11 @@ internal static class ValidatorProgram
             Kéire Marketplace Validator 0.3.1
 
             validate-local --package <quarantined.keireassetpackage>
+                           --upload-id <uuid> --version-id <uuid>
+                           --storage-bucket <marketplace-packages-or-quarantine> --storage-path <relative-path>
                            --expected-size <bytes> --expected-sha256 <digest>
                            --work-root <private-existing-directory> --report <new-report.json>
+                           --evidence <new-review-evidence.json>
                            --asset-tool <KeireAssetTool> --malware-scanner <clamscan-or-clamdscan>
                            --dotnet <pinned-dotnet> [--managed-api <Keire.Managed.dll>]
 
@@ -101,7 +116,8 @@ internal static class ValidatorProgram
                            --dotnet <pinned-dotnet> [--managed-api <Keire.Managed.dll>] [--poll-ms <100-5000>]
 
             The process accepts local immutable input only. Launch it with OS-level outbound-network denial and set
-            KEIRE_VALIDATOR_NETWORK_ISOLATED=1. The networked lease/download broker is a separate process.
+            KEIRE_VALIDATOR_NETWORK_ISOLATED=1 and KEIRE_VALIDATOR_ATTESTATION_PRIVATE_KEY to a protected PKCS#8
+            base64 value. The networked lease/download broker is a separate process.
             """);
     }
 }
@@ -137,10 +153,15 @@ internal sealed class ValidatorCommandLine
             ?
             [
                 "--package",
+                "--upload-id",
+                "--version-id",
+                "--storage-bucket",
+                "--storage-path",
                 "--expected-size",
                 "--expected-sha256",
                 "--work-root",
                 "--report",
+                "--evidence",
                 "--asset-tool",
                 "--malware-scanner",
                 "--dotnet",

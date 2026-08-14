@@ -517,6 +517,9 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void RequestCreateScene();
     void OpenScene(Keire::AssetId asset);
     void RequestOpenScene(Keire::AssetId asset);
+    void RequestInitialScene(Keire::AssetId candidate);
+    void OpenPendingStartupScene();
+    void PersistEditorSessionScene(Keire::AssetId asset) noexcept;
     void SaveScene();
     void SaveSceneAs();
     void CompleteSaveSceneAs();
@@ -619,6 +622,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::uint64_t m_AssetRecordRevision = 0;
     Keire::AssetId m_SelectedAsset;
     std::filesystem::path m_ExecutablePath;
+    std::filesystem::path m_EditorSessionPath;
     Keire::AssetId m_PendingStartupScene;
     struct PendingPrefabCreation
     {
@@ -642,7 +646,11 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     Keire::ManagedBuildOperationId m_LastManagedBuildReport;
     Keire::PlayerSettings m_PlayerSettings;
     Keire::PlayerBuildProfiles m_PlayerBuildProfiles;
+    Keire::PlayerBuildScenes m_PlayerBuildScenes;
+    Keire::AssetId m_SelectedPlayerBuildScene;
+    Keire::AssetId m_PlayerBuildSceneCandidate;
     Keire::AssetId m_PlayerSigningEditProfile;
+    KeireEditor::AssetPicker m_PlayerBuildScenePicker;
     KeireEditor::AssetPicker m_WindowsPlayerIconPicker;
     KeireEditor::AssetPicker m_LinuxPlayerIconPicker;
     KeireEditor::AssetPicker m_MacOSPlayerIconPicker;

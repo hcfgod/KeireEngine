@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text.Json.Serialization;
 using Keire.Distribution;
 using Keire.Marketplace.Validation;
+using Keire.Marketplace.Security;
 
 internal static class ValidatorExchange
 {
@@ -11,6 +12,7 @@ internal static class ValidatorExchange
     public static async Task<int> RunAsync(
         ValidatorCommandLine commandLine,
         string fingerprint,
+        MarketplaceSigningKey attestationKey,
         CancellationToken cancellationToken)
     {
         string exchangeRoot = RequireSafeDirectory(commandLine.Require("--exchange-root"));
@@ -18,6 +20,7 @@ internal static class ValidatorExchange
         string packagesRoot = EnsureChild(exchangeRoot, "packages");
         string requestsRoot = EnsureChild(exchangeRoot, "requests");
         string reportsRoot = EnsureChild(exchangeRoot, "reports");
+        string evidenceRoot = EnsureChild(exchangeRoot, "evidence");
         RecoverInterruptedRequests(requestsRoot);
         int pollMilliseconds = ParsePollMilliseconds(commandLine.Optional("--poll-ms"));
         MarketplacePackageValidator validator = new(new ClamAvScanner(commandLine.Require("--malware-scanner")));
@@ -35,9 +38,11 @@ internal static class ValidatorExchange
                         requestPath,
                         packagesRoot,
                         reportsRoot,
+                        evidenceRoot,
                         workRoot,
                         commandLine,
                         fingerprint,
+                        attestationKey,
                         validator,
                         cancellationToken) || handled;
                 }
@@ -61,9 +66,11 @@ internal static class ValidatorExchange
         string requestPath,
         string packagesRoot,
         string reportsRoot,
+        string evidenceRoot,
         string workRoot,
         ValidatorCommandLine commandLine,
         string fingerprint,
+        MarketplaceSigningKey attestationKey,
         MarketplacePackageValidator validator,
         CancellationToken cancellationToken)
     {
@@ -90,7 +97,10 @@ internal static class ValidatorExchange
             ValidatorJobRequest job = DistributionJson.DeserializeStrict<ValidatorJobRequest>(
                 await File.ReadAllBytesAsync(processingPath, cancellationToken));
             string uploadId = Guid.ParseExact(job.UploadId, "D").ToString("D");
-            if (job.SchemaVersion != 1 ||
+            if (job.SchemaVersion != 2 || job.UploadId != uploadId || Guid.Parse(job.VersionId) == Guid.Empty ||
+                job.StorageBucket is not ("marketplace-packages" or "marketplace-quarantine") ||
+                !string.Equals(job.StoragePath, DistributionPaths.NormalizeRelativePath(job.StoragePath),
+                    StringComparison.Ordinal) ||
                 job.ExpectedSizeBytes is <= 0 or > MarketplaceValidationContract.MaximumPackageBytes ||
                 !DistributionPaths.IsSha256(job.ExpectedSha256))
             {
@@ -99,12 +109,17 @@ internal static class ValidatorExchange
 
             string packagePath = Path.Combine(packagesRoot, uploadId + ".keireassetpackage");
             string reportPath = Path.Combine(reportsRoot, uploadId + ".json");
+            string evidencePath = Path.Combine(evidenceRoot, uploadId + ".json");
             if (File.Exists(reportPath))
             {
                 return true;
             }
 
             PackageValidationRequest request = new(
+                Guid.Parse(job.UploadId),
+                Guid.Parse(job.VersionId),
+                job.StorageBucket,
+                job.StoragePath,
                 packagePath,
                 workRoot,
                 commandLine.Require("--asset-tool"),
@@ -114,7 +129,12 @@ internal static class ValidatorExchange
                 job.ExpectedSizeBytes,
                 job.ExpectedSha256,
                 fingerprint);
-            MarketplaceValidationReport report = await validator.ValidateAsync(request, cancellationToken);
+            MarketplaceValidationOutput output = await validator.ValidateWithEvidenceAsync(request, cancellationToken);
+            MarketplaceValidationReport report = output.Report with
+            {
+                Attestation = ValidatorAttestation.Sign(request, output.Report, attestationKey),
+            };
+            ValidatorFiles.WriteNewFile(evidencePath, output.ReviewEvidence);
             ValidatorFiles.WriteNewReport(reportPath, report);
             return true;
         }
@@ -178,10 +198,19 @@ internal static class ValidatorExchange
 internal sealed class ValidatorJobRequest
 {
     [JsonPropertyName("schemaVersion")]
-    public int SchemaVersion { get; init; } = 1;
+    public int SchemaVersion { get; init; } = 2;
 
     [JsonPropertyName("uploadId")]
     public required string UploadId { get; init; }
+
+    [JsonPropertyName("versionId")]
+    public required string VersionId { get; init; }
+
+    [JsonPropertyName("storageBucket")]
+    public required string StorageBucket { get; init; }
+
+    [JsonPropertyName("storagePath")]
+    public required string StoragePath { get; init; }
 
     [JsonPropertyName("expectedSizeBytes")]
     public required long ExpectedSizeBytes { get; init; }
@@ -206,6 +235,11 @@ internal static class ValidatorFiles
 
     public static void WriteNewReport(string path, MarketplaceValidationReport report)
     {
+        WriteNewFile(path, DistributionJson.Serialize(report));
+    }
+
+    public static void WriteNewFile(string path, ReadOnlySpan<byte> contents)
+    {
         string fullPath = Path.GetFullPath(path);
         string parent = Path.GetDirectoryName(fullPath)
             ?? throw new ArgumentException("The report path requires a parent directory.");
@@ -224,7 +258,7 @@ internal static class ValidatorFiles
         string temporary = Path.Combine(parent, $".{Path.GetFileName(fullPath)}.{Guid.NewGuid():N}.tmp");
         try
         {
-            File.WriteAllBytes(temporary, DistributionJson.Serialize(report));
+            File.WriteAllBytes(temporary, contents);
             if (!OperatingSystem.IsWindows())
             {
                 File.SetUnixFileMode(temporary, UnixFileMode.UserRead | UnixFileMode.UserWrite);

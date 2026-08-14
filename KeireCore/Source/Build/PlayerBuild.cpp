@@ -34,6 +34,13 @@ namespace Keire
             return projectRoot / "ProjectSettings" / "BuildProfiles.keiresettings";
         }
 
+        [[nodiscard]] std::filesystem::path BuildScenesPath(const std::filesystem::path& projectRoot)
+        {
+            if (projectRoot.empty())
+                throw std::invalid_argument("Player build scenes require a project root.");
+            return projectRoot / "ProjectSettings" / "BuildScenes.keiresettings";
+        }
+
         [[nodiscard]] std::string Lowercase(std::string value)
         {
             std::ranges::transform(value, value.begin(), [](const unsigned char character)
@@ -275,6 +282,14 @@ namespace Keire
         return {.ActiveProfile = profile.Id, .Profiles = {std::move(profile)}};
     }
 
+    PlayerBuildScenes DefaultPlayerBuildScenes(const ProjectDescriptor& project)
+    {
+        PlayerBuildScenes result;
+        if (project.StartupScene)
+            result.Scenes.push_back({project.StartupScene, true});
+        return result;
+    }
+
     void ValidatePlayerSettings(const PlayerSettings& settings)
     {
         if (settings.SchemaVersion != PlayerSettingsSchemaVersion)
@@ -321,6 +336,19 @@ namespace Keire
         }
         if (!activeFound)
             throw std::invalid_argument("The active player build profile does not exist.");
+    }
+
+    void ValidatePlayerBuildScenes(const PlayerBuildScenes& scenes)
+    {
+        constexpr std::size_t maximumScenes = 1024;
+        if (scenes.SchemaVersion != PlayerBuildScenesSchemaVersion || scenes.Scenes.size() > maximumScenes)
+            throw std::invalid_argument("Player build scenes use an unsupported schema or exceed the scene limit.");
+        std::unordered_set<std::string> ids;
+        for (const auto& entry : scenes.Scenes)
+        {
+            if (!entry.Scene || !ids.emplace(entry.Scene.ToString()).second)
+                throw std::invalid_argument("Player build scenes require unique, valid scene asset IDs.");
+        }
     }
 
     PlayerSettings LoadPlayerSettings(const std::filesystem::path& projectRoot, const ProjectDescriptor& project)
@@ -432,6 +460,54 @@ namespace Keire
                             {"activeProfile", profiles.ActiveProfile.ToString()},
                             {"profiles", std::move(encodedProfiles)}};
         Detail::WriteTextFileAtomically(BuildProfilesPath(projectRoot), document.dump(2) + '\n');
+    }
+
+    PlayerBuildScenes LoadPlayerBuildScenes(const std::filesystem::path& projectRoot, const ProjectDescriptor& project)
+    {
+        const auto path = BuildScenesPath(projectRoot);
+        if (!std::filesystem::is_regular_file(path))
+            return DefaultPlayerBuildScenes(project);
+        const auto document = Json::parse(Detail::ReadTextFile(path, MaximumSettingsBytes));
+        if (!document.is_object() || !document.at("scenes").is_array())
+            throw std::runtime_error("Player build scenes root is invalid.");
+        PlayerBuildScenes result;
+        result.SchemaVersion = document.at("schemaVersion").get<std::uint32_t>();
+        for (const auto& encoded : document.at("scenes"))
+        {
+            result.Scenes.push_back({.Scene = AssetId::Parse(encoded.at("scene").get<std::string>()),
+                                     .Enabled = encoded.value("enabled", true)});
+        }
+        ValidatePlayerBuildScenes(result);
+        return result;
+    }
+
+    void SavePlayerBuildScenes(const std::filesystem::path& projectRoot, const PlayerBuildScenes& scenes)
+    {
+        ValidatePlayerBuildScenes(scenes);
+        Json encodedScenes = Json::array();
+        for (const auto& entry : scenes.Scenes)
+            encodedScenes.push_back({{"scene", entry.Scene.ToString()}, {"enabled", entry.Enabled}});
+        const Json document{{"schemaVersion", scenes.SchemaVersion}, {"scenes", std::move(encodedScenes)}};
+        Detail::WriteTextFileAtomically(BuildScenesPath(projectRoot), document.dump(2) + '\n');
+    }
+
+    std::vector<AssetId> EnabledPlayerBuildScenes(const PlayerBuildScenes& scenes)
+    {
+        ValidatePlayerBuildScenes(scenes);
+        std::vector<AssetId> result;
+        result.reserve(scenes.Scenes.size());
+        for (const auto& entry : scenes.Scenes)
+            if (entry.Enabled)
+                result.push_back(entry.Scene);
+        return result;
+    }
+
+    AssetId PlayerBuildStartupScene(const PlayerBuildScenes& scenes)
+    {
+        const auto enabled = EnabledPlayerBuildScenes(scenes);
+        if (enabled.empty())
+            throw std::invalid_argument("Player builds require at least one enabled scene.");
+        return enabled.front();
     }
 
     const PlayerBuildProfile& FindPlayerBuildProfile(const PlayerBuildProfiles& profiles, const AssetId id)

@@ -59,6 +59,7 @@ namespace Keire
         std::uint32_t TargetFrameRate = 0;
         std::uint32_t MinimizedPumpRate = 30;
         bool SuspendWhenMainWindowMinimized = true;
+        bool UpdateLayersWhenMainWindowMinimized = false;
         bool ManageLogging = true;
     };
 

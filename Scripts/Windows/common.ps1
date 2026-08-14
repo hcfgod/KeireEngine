@@ -424,6 +424,7 @@ function Get-WindowsRequiredEditorPackagePaths {
         "bin\Managed\Coral.Managed.deps.json", "bin\Managed\Coral.Managed.runtimeconfig.json",
         "bin\Managed\Keire.Managed.dll", "bin\Managed\Dotnet\dotnet.exe", "Config\Client.json",
         "Config\Branding\Keire.png", "Config\Marketplace\trusted-marketplace-key.json",
+        "Config\Marketplace\trusted-marketplace-keys.json",
         "bin\libsodium.dll", "third-party\licenses\libsodium-LICENSE.txt",
         "samples\KeireSandbox\ProjectSettings\Project.keireproject",
         "samples\KeireSandbox\Assets\Scenes\SampleScene.keirescene", "Docs\PlayerBuilds.md", "README.md",
@@ -499,7 +500,7 @@ function Get-WindowsRequiredHubPackagePaths {
 
     @(
         "bin\$HubTarget.exe", "bin\$($Namespace)HubWorker.exe", "Config\Branding\Keire.png",
-        "Config\Marketplace\trusted-marketplace-key.json",
+        "Config\Marketplace\trusted-marketplace-key.json", "Config\Marketplace\trusted-marketplace-keys.json",
         "Config\SourceModules.premake.lua", "Config\Distribution.json", "Config\Supabase.json",
         "Docs\ProjectHub.md", "Samples\KeireSandbox\ProjectSettings\Project.keireproject", "README.md",
         "CHANGELOG.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "hub-package.json", "Launch-KeireHub.cmd",

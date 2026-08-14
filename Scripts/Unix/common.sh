@@ -266,7 +266,8 @@ editor_package_required_paths() {
       "bin/Managed/Coral.Managed.dll"
       "bin/Managed/Coral.Managed.deps.json" "bin/Managed/Coral.Managed.runtimeconfig.json"
       "bin/Managed/Keire.Managed.dll" "bin/Managed/Dotnet/dotnet" "Config/Client.json"
-      "Config/Branding/Keire.png" "Config/Marketplace/trusted-marketplace-key.json"
+      "Config/Branding/Keire.png" "Config/Marketplace/trusted-marketplace-key.json" \
+      "Config/Marketplace/trusted-marketplace-keys.json"
       "third-party/licenses/libsodium-LICENSE.txt"
       "samples/KeireSandbox/ProjectSettings/Project.keireproject"
       "samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene" "Docs/PlayerBuilds.md" "README.md"
@@ -346,7 +347,7 @@ hub_package_required_paths() {
     local hub="$1" namespace="$2"
     local required=(
       "bin/$hub" "bin/${namespace}HubWorker" "Config/Branding/Keire.png"
-      "Config/Marketplace/trusted-marketplace-key.json"
+      "Config/Marketplace/trusted-marketplace-key.json" "Config/Marketplace/trusted-marketplace-keys.json"
       "Config/SourceModules.premake.lua" "Config/Distribution.json" "Config/Supabase.json" "Docs/ProjectHub.md"
       "Samples/KeireSandbox/ProjectSettings/Project.keireproject" "README.md" "CHANGELOG.md" "LICENSE.txt"
       "THIRD_PARTY_NOTICES.md" "hub-package.json" "launch-hub.sh"

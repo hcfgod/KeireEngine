@@ -2032,6 +2032,105 @@ button:disabled,
     gap: 1rem;
 }
 
+.staff-evidence {
+    display: grid;
+    gap: 0.9rem;
+    margin: 0 0 1.2rem;
+    padding: 1rem;
+    border: 1px solid rgba(83, 173, 255, 0.28);
+    border-radius: var(--radius-s);
+    background: linear-gradient(145deg, rgba(24, 86, 139, 0.14), rgba(3, 11, 20, 0.46));
+}
+
+.staff-evidence p,
+.staff-evidence__heading small,
+.staff-evidence__summary small {
+    margin: 0;
+    color: var(--ink-muted);
+}
+
+.staff-evidence__heading,
+.staff-evidence__summary,
+.staff-evidence__controls,
+.staff-evidence__files li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.8rem;
+}
+
+.staff-evidence__heading > div,
+.staff-evidence__summary {
+    min-width: 0;
+}
+
+.staff-evidence__heading small,
+.staff-evidence__summary small {
+    display: block;
+    margin-top: 0.25rem;
+    overflow-wrap: anywhere;
+}
+
+.staff-evidence__panel {
+    display: grid;
+    gap: 0.8rem;
+    min-width: 0;
+    padding-top: 0.9rem;
+    border-top: 1px solid var(--line);
+}
+
+.staff-evidence__panel[hidden] {
+    display: none;
+}
+
+.staff-evidence__controls {
+    flex-wrap: wrap;
+}
+
+.staff-evidence__controls input {
+    min-width: min(100%, 18rem);
+    flex: 1 1 18rem;
+    padding: 0.7rem 0.8rem;
+    border: 1px solid var(--line-strong);
+    border-radius: 0.55rem;
+    color: var(--paper);
+    background: rgba(3, 11, 20, 0.72);
+}
+
+.staff-evidence__controls span {
+    color: var(--ink-muted);
+    font-size: 0.76rem;
+}
+
+.staff-evidence__files {
+    display: grid;
+    gap: 0.35rem;
+    max-height: 28rem;
+    margin: 0;
+    padding: 0;
+    overflow: auto;
+    list-style: none;
+}
+
+.staff-evidence__files li {
+    min-width: 0;
+    padding: 0.55rem 0.65rem;
+    border-radius: 0.4rem;
+    color: var(--ink-soft);
+    background: rgba(2, 10, 19, 0.48);
+}
+
+.staff-evidence__files code {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.staff-evidence__files span {
+    flex: 0 0 auto;
+    color: var(--ink-muted);
+    font-size: 0.72rem;
+}
+
 .staff-review-card {
     min-width: 0;
     padding: clamp(1rem, 2.5vw, 1.5rem);
@@ -2626,6 +2725,13 @@ button:disabled,
 
     .staff-console__identity {
         align-items: flex-start;
+    }
+
+    .staff-evidence__heading,
+    .staff-evidence__summary,
+    .staff-evidence__files li {
+        align-items: flex-start;
+        flex-direction: column;
     }
 
     .staff-metrics {

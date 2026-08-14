@@ -41,6 +41,7 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -466,13 +467,31 @@ namespace
             throw std::filesystem::filesystem_error("Could not remove previous cooked output.", backup, error);
     }
 
+    [[nodiscard]] std::vector<Keire::AssetId> ResolvePlayerBuildScenes(const Keire::Project& project,
+                                                                       const Keire::AssetDatabase& database)
+    {
+        auto scenes =
+            Keire::EnabledPlayerBuildScenes(Keire::LoadPlayerBuildScenes(project.Root(), project.Descriptor()));
+        if (scenes.empty())
+            throw std::runtime_error("Player builds require at least one enabled scene in Build Settings.");
+        for (const auto scene : scenes)
+        {
+            const auto record = database.Find(scene);
+            if (!record || record->Type != Keire::SceneAsset::StaticType())
+                throw std::runtime_error("Build Settings references a missing or invalid scene asset: " +
+                                         scene.ToString());
+        }
+        return scenes;
+    }
+
     void WriteRuntimeManifest(const Keire::Project& project, const std::filesystem::path& output,
                               const Keire::ModuleRegistry& modules, const bool scripting,
+                              const std::span<const Keire::AssetId> buildScenes,
                               const Keire::PlayerBuildProfile* playerProfile = nullptr)
     {
+        if (buildScenes.empty())
+            throw std::runtime_error("Runtime cooking requires at least one enabled build scene.");
         const auto& descriptor = project.Descriptor();
-        if (!descriptor.StartupScene)
-            throw std::runtime_error("Runtime cooking requires a configured startup scene.");
         const auto rendering = Keire::LoadRenderEnvironmentSettings(project.Root());
         const auto authoring = Keire::LoadProjectAuthoringSettings(project.Root());
         const auto& build = Keire::GetBuildInfo();
@@ -486,6 +505,9 @@ namespace
         nlohmann::json moduleCatalog = nlohmann::json::array();
         for (const auto& module : modules.OrderedCatalog())
             moduleCatalog.push_back({{"id", module.Id}, {"version", module.Version.ToString()}});
+        nlohmann::json encodedBuildScenes = nlohmann::json::array();
+        for (const auto scene : buildScenes)
+            encodedBuildScenes.push_back(scene.ToString());
         const auto audioLayout = [&]
         {
             switch (authoring.Audio.OutputLayout)
@@ -503,7 +525,8 @@ namespace
         }();
         nlohmann::json manifest{
             {"schemaVersion", 4},
-            {"startupScene", descriptor.StartupScene.ToString()},
+            {"startupScene", buildScenes.front().ToString()},
+            {"buildScenes", std::move(encodedBuildScenes)},
             {"defaultInput",
              descriptor.DefaultInput ? nlohmann::json(descriptor.DefaultInput.ToString()) : nlohmann::json(nullptr)},
             {"defaultMixer",
@@ -1151,6 +1174,7 @@ namespace
                                            "Importing project assets in the isolated worker.", output);
                     (void)ImportAssetsWithWorker(project->Root(), executable, commandLine.WorkerTimeout);
                     (void)database->Refresh();
+                    const auto buildScenes = ResolvePlayerBuildScenes(*project, *database);
 
                     const auto iconId = profile.Platform == Keire::PlayerPlatform::Windows ? settings.WindowsIcon
                                         : profile.Platform == Keire::PlayerPlatform::Linux ? settings.LinuxIcon
@@ -1179,7 +1203,7 @@ namespace
                     cookProfile.Strict = true;
                     cookProfile.CompressionLevel =
                         profile.Configuration == Keire::PlayerBuildConfiguration::Development ? 3 : 9;
-                    cookProfile.Roots = {project->Descriptor().StartupScene};
+                    cookProfile.Roots = buildScenes;
                     if (project->Descriptor().DefaultInput)
                         cookProfile.Roots.push_back(project->Descriptor().DefaultInput);
                     const auto authoring = Keire::LoadProjectAuthoringSettings(project->Root());
@@ -1204,7 +1228,7 @@ namespace
                     const auto cooked = Keire::AssetCooker::Cook(*database, cookProfile, layout.Content);
                     Keire::AssetCooker::Validate(cooked.CatalogPath);
                     CopyManagedAssemblies(managed, layout.Content);
-                    WriteRuntimeManifest(*project, layout.Content, *modules, managed.Scripting, &profile);
+                    WriteRuntimeManifest(*project, layout.Content, *modules, managed.Scripting, buildScenes, &profile);
 
                     WritePlayerBuildStatus(statusPath, "running", "sign", 0.82F,
                                            "Applying the configured signing policy.", output);
@@ -1251,7 +1275,8 @@ namespace
             {
                 (void)ImportAssetsWithWorker(project->Root(), executable, commandLine.WorkerTimeout);
                 (void)database->Refresh();
-                commandLine.Profile.Roots = {project->Descriptor().StartupScene};
+                const auto buildScenes = ResolvePlayerBuildScenes(*project, *database);
+                commandLine.Profile.Roots = buildScenes;
                 if (project->Descriptor().DefaultInput)
                     commandLine.Profile.Roots.push_back(project->Descriptor().DefaultInput);
                 const auto authoring = Keire::LoadProjectAuthoringSettings(project->Root());
@@ -1287,7 +1312,7 @@ namespace
                     result = Keire::AssetCooker::Cook(*database, commandLine.Profile, staging);
                     Keire::AssetCooker::Validate(result.CatalogPath);
                     CopyManagedAssemblies(managed, staging);
-                    WriteRuntimeManifest(*project, staging, *modules, managed.Scripting);
+                    WriteRuntimeManifest(*project, staging, *modules, managed.Scripting, buildScenes);
                     PublishCookOutput(staging, output);
                 }
                 catch (...)

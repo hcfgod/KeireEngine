@@ -25,6 +25,7 @@ MIGRATIONS = [
     ROOT / "supabase/migrations/20260812200000_fix_marketplace_moderation_queues.sql",
     ROOT / "supabase/migrations/20260812202000_fix_public_marketplace_publisher_policy.sql",
     ROOT / "supabase/migrations/20260812185825_fix_marketplace_claim_and_submission_visibility.sql",
+    ROOT / "supabase/migrations/20260814034937_marketplace_automatic_publication.sql",
 ]
 
 
@@ -50,6 +51,7 @@ offline_publication = sources[MIGRATIONS[12].name]
 moderation_queues = sources[MIGRATIONS[13].name]
 public_catalog_policy = sources[MIGRATIONS[14].name]
 claim_fix = sources[MIGRATIONS[15].name]
+automatic_publication = sources[MIGRATIONS[16].name]
 combined = "\n".join(sources.values())
 
 require("selected_order_id uuid;" in claim_fix,
@@ -95,6 +97,9 @@ for flag in (
 
 for bucket in ("marketplace-quarantine", "marketplace-releases"):
     require(re.search(rf"\('{bucket}',\s*'{bucket}',\s*false", storage), f"{bucket} must remain private.")
+for bucket in ("marketplace-packages", "marketplace-validation-evidence"):
+    require(re.search(rf"\('{bucket}',\s*'{bucket}',\s*false", automatic_publication),
+            f"{bucket} must remain private.")
 
 for contract in (
     "marketplace_products_protect_transitions",
@@ -302,5 +307,43 @@ require("private.service_actor_is_staff(p_actor_user_id, 'administrator')" in mo
 require("revoke all on function public.service_decide_marketplace_submission" in moderation_queues and
         "to service_role;" in moderation_queues,
         "The replacement moderation transition must remain service-only.")
+
+require("create table public.marketplace_validator_attestation_keys" in automatic_publication and
+        "force row level security" in automatic_publication,
+        "Validator attestation trust roots must be explicit and protected by forced RLS.")
+require("create table public.marketplace_publication_jobs" in automatic_publication and
+        "marketplace_publication_jobs_staff_read" in automatic_publication,
+        "Automatic publication jobs must be durable and visible only through staff RLS.")
+require("drop policy if exists marketplace_quarantine_owner_read" in automatic_publication,
+        "Staff must not need direct access to publisher package bytes during review.")
+require("'marketplace-packages'" in automatic_publication and
+        "v_storage_path := p_product_id::text || '/' || v_version_id::text || '/' ||" in
+        automatic_publication,
+        "New packages must use one immutable upload-once object identity.")
+for service_function in (
+    "service_lease_marketplace_upload_v2",
+    "service_cancel_marketplace_upload_v2",
+    "service_complete_marketplace_validation_v2",
+    "service_lease_marketplace_publication",
+    "service_renew_marketplace_publication_lease",
+    "service_fail_marketplace_publication",
+    "service_publish_marketplace_version_v2",
+    "service_issue_marketplace_download_grant_v3",
+):
+    require(service_function in automatic_publication,
+            f"Automatic Marketplace publication is missing {service_function}.")
+    require(re.search(rf"grant execute on function public\.{service_function}\([^;]+\) to service_role;",
+                      automatic_publication),
+            f"Automatic Marketplace transition is not restricted to service_role: {service_function}.")
+require("private.service_actor_is_staff(p_actor_user_id, 'administrator')" in automatic_publication and
+        "insert into public.marketplace_publication_jobs" in automatic_publication,
+        "Administrator approval must atomically enqueue automatic publication.")
+require("signed_attestation" in automatic_publication and "evidence_storage_path" in automatic_publication and
+        "validator_attestation_invalid" in automatic_publication,
+        "Publication approval must bind signed validator attestation and bounded evidence metadata.")
+require("from storage.objects" in automatic_publication and
+        "marketplace-releases" not in automatic_publication.split(
+            "create or replace function public.service_publish_marketplace_version_v2", 1)[1].split("$$;", 1)[0],
+        "Automatic publication must commit the existing immutable object without copying package bytes.")
 
 print(f"Marketplace migration validation passed for {len(public_tables)} forced-RLS public tables.")

@@ -6,10 +6,16 @@ Kéire builds standalone desktop players from persistent project settings. The e
 
 ## Editor Workflow
 
-Open **Build > Build Profiles** to create, duplicate, rename, delete, or select a profile. Each profile chooses Windows,
+Open **Build > Build Settings** to create, duplicate, rename, delete, or select a profile. Each profile chooses Windows,
 Linux, or macOS; x86_64 or ARM64; and Development, Release, or Dist. Development uses the Debug player template and
 includes symbols by default. Release uses the optimized Release template. Dist uses the windowed production template
 and omits symbols by default. Strict target-specific asset validation applies to every configuration.
+
+**Scenes In Build** is the ordered player-scene authority. Add the open scene or choose any Scene asset, enable or
+disable rows without losing their position, and reorder rows by dragging or with **Move Up** and **Move Down**. The first
+enabled row is the startup scene and enabled rows receive deterministic build indices in displayed order. **Set as
+Startup** enables the selected row and moves it first. A missing scene is shown as an error and a player build requires
+at least one valid enabled scene.
 
 The same panel edits the product name, semantic version, reverse-DNS application identifier, window title, optional
 platform icons, and signing policy. Each icon field is a searchable Texture2D asset picker that also accepts compatible
@@ -17,9 +23,11 @@ Project-panel drag and drop. Selecting **Kéire default icon** uses the embedded
 
 - `ProjectSettings/Player.keiresettings`
 - `ProjectSettings/BuildProfiles.keiresettings`
+- `ProjectSettings/BuildScenes.keiresettings`
 
 Projects without these files receive in-memory defaults: the project name, version `0.1.0`, a project-ID-derived
-identifier, and one host Development profile. The project descriptor schema does not change.
+identifier, one host Development profile, and a scene list migrated from the descriptor's legacy startup scene. The
+project descriptor schema does not change; once saved, `BuildScenes.keiresettings` is the player-build authority.
 
 **Build** assembles any target with installed Build Support. **Build & Run** is available only when the target platform
 and architecture match the editor host. **Cancel** requests cooperative cancellation, and **Reveal Build** opens the
@@ -37,8 +45,9 @@ failure. When `--status` is supplied it atomically replaces a schema-versioned J
 document contains `state`, `phase`, `progress`, `message`, `output`, and `executable`. The editor runs this command in an
 isolated child process.
 
-The pipeline validates saved settings, the startup scene, source modules, and Build Support; compiles runtime-classified
-C# assemblies; cooks strict content; copies an immutable native template and managed runtime into
+The pipeline validates saved settings, every enabled build scene, source modules, and Build Support; compiles
+runtime-classified C# assemblies; cooks the dependency closures of all enabled scenes plus the project default input
+and mixer; copies an immutable native template and managed runtime into
 `Build/.staging/<build-id>`; applies branding and signing; validates the complete player; and atomically replaces the
 profile output. Failure and cancellation remove staging while preserving the previous successful build. A locked
 previous build fails explicitly.
@@ -55,7 +64,8 @@ entry, hicolor PNG icons, and optional symbols. macOS players use `<Product>.app
 
 `KeireRuntime --content <path>` remains available for tests and low-level consumers. With no `--content`, a packaged
 runtime locates `PlayerBuild.json` beside the executable or in its macOS Resources directory, validates its target and
-relative paths, and applies player identity, content, managed-runtime, and window settings. An explicit `--content`
+relative paths, and applies player identity, content, managed-runtime, and window settings. The cooked runtime manifest
+records the ordered enabled scene IDs and requires its first entry to match the startup scene. An explicit `--content`
 always takes precedence. The player presents the game surface directly to the native swapchain and composites authored
 Game UI draw commands with its dedicated SDL_GPU pipeline. Dear ImGui is neither initialized nor framed by the player;
 it remains an editor-only presentation backend. Managed gameplay uses the same scene-runtime presentation services as

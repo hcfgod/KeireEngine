@@ -72,6 +72,8 @@ Copy-Item -LiteralPath (Join-Path $Root "Config\Branding\Keire.png") `
     -Destination (Join-Path $stage "Config\Branding")
 Copy-Item -LiteralPath (Join-Path $Root "Config\Marketplace\trusted-marketplace-key.json") `
     -Destination (Join-Path $stage "Config\Marketplace")
+Copy-Item -LiteralPath (Join-Path $Root "Config\Marketplace\trusted-marketplace-keys.json") `
+    -Destination (Join-Path $stage "Config\Marketplace")
 Copy-Item -LiteralPath (Join-Path $Root "Config\SourceModules.premake.lua") `
     -Destination (Join-Path $stage "Config")
 $python = (Get-Command python -ErrorAction Stop).Source

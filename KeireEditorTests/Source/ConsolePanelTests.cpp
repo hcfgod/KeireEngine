@@ -4,7 +4,9 @@
 
 #include <chrono>
 #include <filesystem>
+#include <ranges>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -52,4 +54,26 @@ TEST_CASE("Editor Console captures native Core and Client records exactly once")
 
     panel.CaptureEngineLogs(3, theme);
     CHECK(panel.MessageCount() == 3);
+}
+
+TEST_CASE("Editor Console selection supports range additive and retained message behavior")
+{
+    KeireEditor::ConsoleSelection selection;
+    const std::vector<std::uint64_t> visible{10, 20, 30, 40, 50};
+
+    selection.Select(visible, 20, false, false);
+    selection.Select(visible, 40, true, false);
+    CHECK(std::ranges::equal(selection.Selected(), std::vector<std::uint64_t>{20, 30, 40}));
+
+    selection.Select(visible, 50, false, true);
+    CHECK(selection.Contains(50));
+    selection.Select(visible, 30, false, true);
+    CHECK_FALSE(selection.Contains(30));
+
+    const std::vector<std::uint64_t> retained{10, 20, 40};
+    selection.Retain(retained);
+    CHECK(std::ranges::equal(selection.Selected(), std::vector<std::uint64_t>{20, 40}));
+
+    selection.Clear();
+    CHECK(selection.Selected().empty());
 }

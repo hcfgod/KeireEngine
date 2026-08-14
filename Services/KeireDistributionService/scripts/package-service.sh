@@ -63,6 +63,11 @@ for runtime_identifier in "${runtime_identifiers[@]}"; do
     --configuration "$configuration" --runtime "$runtime_identifier" --self-contained true \
     --output "$package_directory/tools/marketplace-validator/broker" -p:PublishSingleFile=true \
     -p:IncludeNativeLibrariesForSelfExtract=true
+  "$dotnet_command" publish \
+    "$service_root/Source/KeireMarketplacePublicationSigner/KeireMarketplacePublicationSigner.csproj" \
+    --configuration "$configuration" --runtime "$runtime_identifier" --self-contained true \
+    --output "$package_directory/tools/marketplace-publication-signer" -p:PublishSingleFile=true \
+    -p:IncludeNativeLibrariesForSelfExtract=true
 
   cp -- "$service_root/README.md" "$package_directory/"
   cp -- "$service_root/THIRD_PARTY_NOTICES.md" "$package_directory/"
@@ -88,12 +93,24 @@ for runtime_identifier in "${runtime_identifiers[@]}"; do
   cp -- "$service_root/Deployment/keire-marketplace-validator.service.example" "$package_directory/Deployment/"
   cp -- "$service_root/Deployment/keire-marketplace-validator-broker.service.example" \
     "$package_directory/Deployment/"
+  cp -- "$service_root/Deployment/keire-marketplace-publication-signer.service.example" \
+    "$package_directory/Deployment/"
+  cp -- "$service_root/Deployment/marketplace-validator.env.example" "$package_directory/Deployment/"
   cp -- "$service_root/Deployment/marketplace-validator-broker.env.example" "$package_directory/Deployment/"
+  cp -- "$service_root/Deployment/marketplace-publication-signer.env.example" \
+    "$package_directory/Deployment/"
   if [[ "$runtime_identifier" == win-* ]]; then
     cp -- "$service_root/Deployment/configure-windows-validator-firewall.ps1" "$package_directory/Deployment/"
     cp -- "$service_root/Deployment/install-windows-marketplace-validator-tasks.ps1" \
       "$package_directory/Deployment/"
+    cp -- "$service_root/Deployment/install-windows-marketplace-publication-signer-task.ps1" \
+      "$package_directory/Deployment/"
+    cp -- "$service_root/Deployment/protect-windows-marketplace-secret.ps1" "$package_directory/Deployment/"
+    cp -- "$service_root/Deployment/provision-windows-marketplace-signing-keys.ps1" \
+      "$package_directory/Deployment/"
     cp -- "$service_root/Deployment/protect-windows-validator-broker-secret.ps1" "$package_directory/Deployment/"
+    cp -- "$service_root/Deployment/start-windows-marketplace-publication-signer.ps1" \
+      "$package_directory/Deployment/"
     cp -- "$service_root/Deployment/start-windows-marketplace-validator.ps1" "$package_directory/Deployment/"
     cp -- "$service_root/Deployment/start-windows-marketplace-validator-broker.ps1" "$package_directory/Deployment/"
   fi

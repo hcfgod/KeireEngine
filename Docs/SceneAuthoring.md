@@ -70,6 +70,10 @@ drags are one undo entry. `Ctrl+Shift+S` uses an asynchronous native dialog,
 requires a new `.keirescene` inside project Assets, assigns a new asset identity, and switches to the copy.
 `Ctrl/Cmd+S` is routed globally so a focused Inspector or text field cannot consume it. Saving an existing scene writes
 its source atomically and returns immediately; runtime catalog rebuilding and handle reload happen in the background.
+After a scene opens successfully, the editor records its stable asset ID beneath
+`Library/UserSettings/Workspace/EditorSession.state`. The next launch reopens that scene after catalog validation; if
+it was deleted, changed to another asset type, or the session record is malformed, startup falls back to the project
+descriptor's default scene without rewriting project content. Save As adopts and records the new scene identity.
 
 The centered main editor bar controls Play, Pause, Step, and Stop from either the Scene or Game tab. Play clones the
 current authored scene while retaining entity IDs. Pause freezes lifecycle updates, Step performs one fixed tick, and

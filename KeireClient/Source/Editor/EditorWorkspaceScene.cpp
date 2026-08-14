@@ -5,6 +5,7 @@
 #include "KeireClient/Editor/ConsolePanel.h"
 #include "KeireClient/Editor/DiagnosticsPanel.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
+#include "KeireClient/Editor/EditorSessionState.h"
 #include "KeireClient/Editor/ExternalAssetImportController.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/MaterialDocument.h"
@@ -271,6 +272,39 @@ void EditorWorkspaceLayer::OpenScene(const Keire::AssetId asset)
     if (const auto scenes = Owner().Scenes())
         m_SceneDocument->SetLoadOperation(scenes->Load(asset, Keire::SceneLoadMode::Single));
     m_SceneDocument->SetStatus("Opening " + record->RelativePath.generic_string() + ".");
+    PersistEditorSessionScene(asset);
+}
+
+void EditorWorkspaceLayer::PersistEditorSessionScene(const Keire::AssetId asset) noexcept
+{
+    if (!asset || m_EditorSessionPath.empty())
+        return;
+    if (!KeireEditor::SaveEditorSessionState(m_EditorSessionPath, {.LastScene = asset}))
+        KEIRE_CLIENT_WARN("[Scene] Could not persist the last open scene for this project.");
+}
+
+void EditorWorkspaceLayer::RequestInitialScene(const Keire::AssetId candidate)
+{
+    if (!m_AssetDatabase)
+        return;
+    const auto candidateRecord = m_AssetDatabase->Find(candidate);
+    if (candidateRecord && candidateRecord->RelativePath.extension() == ".keirescene")
+    {
+        RequestOpenScene(candidate);
+        return;
+    }
+    if (const auto project = Owner().GetProject(); project && candidate != project->Descriptor().StartupScene)
+    {
+        const auto fallback = m_AssetDatabase->Find(project->Descriptor().StartupScene);
+        if (fallback && fallback->RelativePath.extension() == ".keirescene")
+            RequestOpenScene(project->Descriptor().StartupScene);
+    }
+}
+
+void EditorWorkspaceLayer::OpenPendingStartupScene()
+{
+    if (m_PendingStartupScene)
+        RequestInitialScene(std::exchange(m_PendingStartupScene, {}));
 }
 
 void EditorWorkspaceLayer::RequestOpenScene(const Keire::AssetId asset)
@@ -857,7 +891,7 @@ void EditorWorkspaceLayer::RecordSceneUndo(const std::string_view name, std::str
         }
         auto replacementScene = Keire::CreateRef<Keire::Scene>(asset, definition, components);
         replacementScene->MarkDirty();
-        m_SceneDocument->ReplaceEditingScene(std::move(replacementScene), false);
+        m_SceneDocument->ReplaceEditingScene(std::move(replacementScene), true);
     };
     const auto estimatedBytes = Keire::SceneAsset::Encode(before).size();
     Keire::UndoOperation redo = [after, apply]

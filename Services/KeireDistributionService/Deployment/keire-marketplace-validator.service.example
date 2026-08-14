@@ -10,6 +10,7 @@ Group=keire-validator
 SupplementaryGroups=keire-validator-exchange clamav
 UMask=0007
 Environment=KEIRE_VALIDATOR_NETWORK_ISOLATED=1
+EnvironmentFile=/etc/keire/marketplace-validator.env
 ExecStart=/opt/keire-marketplace-validator/KeireMarketplaceValidator watch --exchange-root /var/lib/keire-marketplace-validator/exchange --work-root /var/lib/keire-marketplace-validator/work --asset-tool /opt/keire-marketplace-validator/KeireAssetTool --malware-scanner /usr/bin/clamdscan --dotnet /opt/keire-marketplace-validator/dotnet/dotnet --managed-api /opt/keire-marketplace-validator/Managed/Keire.Managed.dll
 Restart=on-failure
 RestartSec=5s

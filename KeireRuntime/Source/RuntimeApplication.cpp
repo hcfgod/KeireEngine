@@ -21,6 +21,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace
 {
@@ -67,6 +68,7 @@ namespace
     {
         std::filesystem::path ContentRoot;
         Keire::AssetId StartupScene;
+        std::vector<Keire::AssetId> BuildScenes;
         Keire::AssetId DefaultInput;
         Keire::AssetId DefaultMixer;
         Keire::AudioProjectSettings AudioSettings;
@@ -295,6 +297,24 @@ namespace
             result.RequiredModules.push_back(
                 {module.at("id").get<std::string>(), module.at("version").get<std::string>()});
         result.StartupScene = Keire::AssetId::Parse(source.at("startupScene").get<std::string>());
+        if (const auto scenes = source.find("buildScenes"); scenes != source.end())
+        {
+            if (!scenes->is_array() || scenes->empty() || scenes->size() > 1024)
+                throw Keire::CommandLineError("Runtime manifest buildScenes must be a non-empty bounded array.");
+            for (const auto& encoded : *scenes)
+            {
+                const auto scene = Keire::AssetId::Parse(encoded.get<std::string>());
+                if (std::ranges::find(result.BuildScenes, scene) != result.BuildScenes.end())
+                    throw Keire::CommandLineError("Runtime manifest buildScenes contains a duplicate scene.");
+                result.BuildScenes.push_back(scene);
+            }
+            if (result.BuildScenes.front() != result.StartupScene)
+                throw Keire::CommandLineError("Runtime manifest startupScene must be the first enabled build scene.");
+        }
+        else
+        {
+            result.BuildScenes.push_back(result.StartupScene);
+        }
         if (source.contains("defaultInput") && !source.at("defaultInput").is_null())
             result.DefaultInput = Keire::AssetId::Parse(source.at("defaultInput").get<std::string>());
         if (source.contains("defaultMixer") && !source.at("defaultMixer").is_null())

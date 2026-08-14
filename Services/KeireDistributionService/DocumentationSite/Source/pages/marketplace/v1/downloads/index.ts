@@ -24,14 +24,14 @@ export const POST: APIRoute = async (context) => {
             await throwEdgeFunctionError(error);
         }
         if (!data) throw new MarketplaceApiError(500, "marketplace.download_grant_failed", "A download grant was not created.");
-        const signed = await supabase.storage.from("marketplace-releases").createSignedUrl(data.storage_path, 600, {
-            download: `keire-${versionId}.keireassetpackage`,
-        });
-        if (signed.error || !signed.data?.signedUrl) throw new MarketplaceApiError(503, "marketplace.download_unavailable", "The verified package is temporarily unavailable.");
+        if (typeof data.url !== "string" || !data.url.startsWith("https://")) {
+            throw new MarketplaceApiError(503, "marketplace.download_unavailable",
+                "The verified package is temporarily unavailable.");
+        }
         return apiResponse(context, {
             data: {
                 grantId: data.grant_id,
-                url: signed.data.signedUrl,
+                url: data.url,
                 expiresAt: data.expires_at,
                 archiveSha256: data.archive_sha256,
                 archiveSizeBytes: data.archive_size_bytes,

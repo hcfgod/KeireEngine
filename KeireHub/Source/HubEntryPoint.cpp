@@ -93,6 +93,8 @@ namespace Keire
                                       {UiFontRole::Icons, fontRoot / "MaterialSymbolsRounded-Subset.ttf", 20.0F}};
         }
         specification.TargetFrameRate = smoke ? 240 : 30;
+        specification.MinimizedPumpRate = 4;
+        specification.UpdateLayersWhenMainWindowMinimized = true;
         auto instance = std::make_shared<KeireHub::HubInstanceCoordinator>(executable, activation.Value(), !smoke);
         if (!instance->IsPrimary())
         {

@@ -21,6 +21,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ManagedApi,
 
+    [Parameter(Mandatory = $true)]
+    [string]$ProtectedAttestationKey,
+
     [string]$FirewallAttestation,
 
     [switch]$ValidateOnly
@@ -28,9 +31,40 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-foreach ($path in @($Validator, $AssetTool, $MalwareScanner, $Dotnet, $ManagedApi)) {
+Add-Type -AssemblyName System.Security
+
+foreach ($path in @($Validator, $AssetTool, $MalwareScanner, $Dotnet, $ManagedApi, $ProtectedAttestationKey)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Required validator file is missing: $path"
+    }
+}
+
+$attestationKeyPath = (Resolve-Path -LiteralPath $ProtectedAttestationKey).Path
+$attestationKeyAcl = Get-Acl -LiteralPath $attestationKeyPath
+$expectedKeyAccess = @{
+    ([Security.Principal.SecurityIdentifier]::new(
+            [Security.Principal.WellKnownSidType]::LocalSystemSid, $null).Value) =
+        [int][Security.AccessControl.FileSystemRights]::FullControl
+    ([Security.Principal.SecurityIdentifier]::new(
+            [Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid, $null).Value) =
+        [int][Security.AccessControl.FileSystemRights]::FullControl
+    ([Security.Principal.SecurityIdentifier]::new(
+            [Security.Principal.WellKnownSidType]::LocalServiceSid, $null).Value) =
+        [int]([Security.AccessControl.FileSystemRights]::Read -bor
+            [Security.AccessControl.FileSystemRights]::Synchronize)
+}
+if (-not $attestationKeyAcl.AreAccessRulesProtected -or
+    @($attestationKeyAcl.Access).Count -ne $expectedKeyAccess.Count) {
+    throw "The validator attestation key does not have its exact LOCAL SERVICE ACL."
+}
+foreach ($entry in $expectedKeyAccess.GetEnumerator()) {
+    $matches = @($attestationKeyAcl.Access | Where-Object {
+            $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -eq $entry.Key
+        })
+    if ($matches.Count -ne 1 -or $matches[0].IsInherited -or
+        $matches[0].AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or
+        [int]$matches[0].FileSystemRights -ne $entry.Value) {
+        throw "The validator attestation key does not have its exact LOCAL SERVICE ACL."
     }
 }
 foreach ($path in @($ExchangeRoot, $WorkRoot)) {
@@ -131,6 +165,25 @@ if ($ValidateOnly) {
 }
 
 $env:KEIRE_VALIDATOR_NETWORK_ISOLATED = "1"
-& $Validator watch --exchange-root $ExchangeRoot --work-root $WorkRoot --asset-tool $AssetTool `
-    --malware-scanner $MalwareScanner --dotnet $Dotnet --managed-api $ManagedApi
-exit $LASTEXITCODE
+$protectedBytes = [IO.File]::ReadAllBytes($attestationKeyPath)
+$privateBytes = $null
+try {
+    $privateBytes = [Security.Cryptography.ProtectedData]::Unprotect(
+        $protectedBytes,
+        [Text.Encoding]::UTF8.GetBytes("KeireMarketplaceValidatorAttestation/v1"),
+        [Security.Cryptography.DataProtectionScope]::LocalMachine)
+    $privateKey = [Text.Encoding]::UTF8.GetString($privateBytes)
+    if ($privateKey.Length -lt 40 -or $privateKey.Length -gt 32768 -or
+        $privateKey -cnotmatch '^[A-Za-z0-9+/]+={0,2}$') {
+        throw "The protected validator attestation private key has an invalid shape."
+    }
+    $env:KEIRE_VALIDATOR_ATTESTATION_PRIVATE_KEY = $privateKey
+    & $Validator watch --exchange-root $ExchangeRoot --work-root $WorkRoot --asset-tool $AssetTool `
+        --malware-scanner $MalwareScanner --dotnet $Dotnet --managed-api $ManagedApi
+    exit $LASTEXITCODE
+}
+finally {
+    Remove-Item Env:KEIRE_VALIDATOR_ATTESTATION_PRIVATE_KEY -ErrorAction SilentlyContinue
+    if ($null -ne $privateBytes) { [Array]::Clear($privateBytes, 0, $privateBytes.Length) }
+    [Array]::Clear($protectedBytes, 0, $protectedBytes.Length)
+}

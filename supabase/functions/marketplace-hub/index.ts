@@ -23,15 +23,27 @@ Deno.serve(async (request: Request) => {
             return json(origin, 201, { data: { deviceSessionId: data, oauthSessionId: caller.sessionId } });
         }
         if (operation === "download.issue") {
-            const { data, error } = await caller.admin.rpc("service_issue_marketplace_download_grant_v2", {
+            const versionId = requiredUuid(input, "versionId");
+            const { data, error } = await caller.admin.rpc("service_issue_marketplace_download_grant_v3", {
                 p_actor_user_id: caller.user.id,
                 p_actor_session_id: caller.sessionId,
-                p_version_id: requiredUuid(input, "versionId"),
+                p_version_id: versionId,
                 p_device_session_id: requiredUuid(input, "deviceSessionId"),
                 p_organization_id: optionalUuid(input, "organizationId"),
             }).single();
             if (error) throw databaseFailure(error);
-            return json(origin, 201, { data });
+            const grant = data as Record<string, unknown> | null;
+            if (!grant || typeof grant.storage_bucket !== "string" || typeof grant.storage_path !== "string") {
+                throw new RequestError(503, "marketplace.download_grant_failed", "The package location is unavailable.");
+            }
+            const signed = await caller.admin.storage.from(grant.storage_bucket).createSignedUrl(grant.storage_path, 600, {
+                download: `keire-${versionId}.keireassetpackage`,
+            });
+            if (signed.error || !signed.data?.signedUrl) {
+                throw new RequestError(503, "marketplace.download_unavailable",
+                    "The verified package is temporarily unavailable.");
+            }
+            return json(origin, 201, { data: { ...grant, url: signed.data.signedUrl } });
         }
         throw new RequestError(400, "request.operation_invalid", "The marketplace operation is invalid.");
     } catch (error) {

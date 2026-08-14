@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>14.0</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+    <DebugType>portable</DebugType>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <AssemblyName>Keire.Marketplace.Security</AssemblyName>
+    <RootNamespace>Keire.Marketplace.Security</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="libsodium" Version="1.0.22" />
+    <PackageReference Include="NSec.Cryptography" Version="26.4.0" />
+    <ProjectReference Include="../KeireDistribution.Contracts/KeireDistribution.Contracts.csproj" />
+  </ItemGroup>
+</Project>

@@ -14,11 +14,13 @@ PUBLISHER = ROOT / "supabase/functions/marketplace-publisher/index.ts"
 MODERATION = ROOT / "supabase/functions/marketplace-moderation/index.ts"
 VALIDATOR_QUEUE = ROOT / "supabase/functions/marketplace-validator-queue/index.ts"
 PUBLICATION = ROOT / "supabase/functions/marketplace-publication/index.ts"
+PUBLICATION_QUEUE = ROOT / "supabase/functions/marketplace-publication-queue/index.ts"
 SUPABASE_CONFIG = ROOT / "supabase/config.toml"
 MIDDLEWARE = ROOT / "Services/KeireDistributionService/DocumentationSite/Source/middleware.ts"
 API_ROOT = ROOT / "Services/KeireDistributionService/DocumentationSite/Source/pages/marketplace/v1"
 PUBLISHER_API_ROOT = ROOT / "Services/KeireDistributionService/DocumentationSite/Source/pages/publisher/v1"
 STAFF_API_ROOT = ROOT / "Services/KeireDistributionService/DocumentationSite/Source/pages/admin/marketplace/v1"
+STAFF_PAGE = ROOT / "Services/KeireDistributionService/DocumentationSite/Source/pages/admin/marketplace/index.astro"
 
 
 def require(condition: bool, message: str) -> None:
@@ -33,6 +35,8 @@ publisher = PUBLISHER.read_text(encoding="utf-8")
 moderation = MODERATION.read_text(encoding="utf-8")
 validator_queue = VALIDATOR_QUEUE.read_text(encoding="utf-8")
 publication = PUBLICATION.read_text(encoding="utf-8")
+publication_queue = PUBLICATION_QUEUE.read_text(encoding="utf-8")
+staff_page = STAFF_PAGE.read_text(encoding="utf-8")
 supabase_config = SUPABASE_CONFIG.read_text(encoding="utf-8")
 middleware = MIDDLEWARE.read_text(encoding="utf-8")
 routes = "\n".join(
@@ -74,7 +78,7 @@ for upload_rpc in (
     require(upload_rpc in publisher, f"Publisher upload boundary does not call {upload_rpc}.")
 require('.createSignedUploadUrl(reservation.storage_path, { upsert: false })' in publisher,
         "Publisher uploads must receive only a non-overwriting path-scoped storage grant.")
-require('bucket: "marketplace-quarantine"' in publisher and
+require('bucket: "marketplace-packages"' in publisher and
         'storage.supabase.co/storage/v1/upload/resumable/sign' in publisher,
         "Signed publisher grants must target Supabase Storage's signed TUS endpoint.")
 require('expectedSha256' in publisher and 'expectedSizeBytes' in publisher,
@@ -97,6 +101,14 @@ for moderation_rpc in (
     require(moderation_rpc in moderation, f"Moderation boundary does not call {moderation_rpc}.")
 require('functions.invoke("marketplace-moderation"' in routes,
         "The staff website adapter must use the audited moderation Edge boundary.")
+require('operation === "evidence.issue"' in moderation and
+        'from("marketplace-validation-evidence").createSignedUrl' in moderation and
+        'crypto.subtle.verify(' in moderation,
+        "Staff review evidence must receive a short-lived URL only after validator-attestation verification.")
+require('data-evidence-button' in staff_page and 'crypto.subtle.digest("SHA-256"' in staff_page,
+        "The staff console must verify evidence bytes before rendering the package inventory.")
+require('data-publication-form' not in staff_page and '/admin/marketplace/v1/publications/' not in staff_page,
+        "The staff console must not require an administrator to upload a signed publication envelope.")
 require('functions.invoke("marketplace-publication"' in routes,
         "The staff website adapter must use the signature-verifying publication Edge boundary.")
 require('caller.assuranceLevel !== "aal2"' in publication and
@@ -114,7 +126,7 @@ for rpc in (
     "service_create_marketplace_organization",
     "service_claim_free_marketplace_product",
     "service_register_marketplace_device_session",
-    "service_issue_marketplace_download_grant",
+    "service_issue_marketplace_download_grant_v3",
 ):
     require(rpc in library + hub, f"Edge Function does not call the service-only adapter {rpc}.")
 for revoked_rpc in (
@@ -138,14 +150,32 @@ require('crypto.subtle.digest("SHA-256"' in validator_queue,
 require('createSignedUrl(lease.storage_path, leaseSeconds' in validator_queue,
         "The validator broker must receive only a short-lived object-specific URL.")
 for rpc in (
-    "service_lease_marketplace_upload",
+    "service_lease_marketplace_upload_v2",
     "service_renew_marketplace_upload_lease",
-    "service_complete_marketplace_validation",
+    "service_complete_marketplace_validation_v2",
 ):
     require(rpc in validator_queue, f"Validator Edge boundary does not call {rpc}.")
 require("[functions.marketplace-validator-queue]" in supabase_config and
         "verify_jwt = false" in supabase_config.split("[functions.marketplace-validator-queue]", 1)[1],
         "The scoped-secret validator queue must bypass platform JWT parsing.")
+require('from("marketplace-validation-evidence")' in validator_queue and
+        "createSignedUploadUrl(lease.evidence_storage_path" in validator_queue and
+        'crypto.subtle.verify(' in validator_queue,
+        "The validator queue must bind signed attestations to separately hashed review evidence.")
+require('Deno.env.get("MARKETPLACE_PUBLICATION_SIGNER_SECRET")' in publication_queue and
+        'request.headers.has("origin")' in publication_queue and
+        'crypto.subtle.digest("SHA-256"' in publication_queue,
+        "The automatic signer queue must use a dedicated constant-time server credential boundary.")
+for rpc in (
+    "service_lease_marketplace_publication",
+    "service_renew_marketplace_publication_lease",
+    "service_publish_marketplace_version_v2",
+    "service_fail_marketplace_publication",
+):
+    require(rpc in publication_queue, f"Automatic publication Edge boundary does not call {rpc}.")
+require("[functions.marketplace-publication-queue]" in supabase_config and
+        "verify_jwt = false" in supabase_config.split("[functions.marketplace-publication-queue]", 1)[1],
+        "The scoped-secret publication queue must bypass platform JWT parsing.")
 require("[functions.marketplace-publication]" in supabase_config and
         "verify_jwt = true" in supabase_config.split("[functions.marketplace-publication]", 1)[1],
         "The administrator publication boundary must require a platform-verified JWT.")

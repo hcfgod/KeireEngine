@@ -125,6 +125,15 @@ internal sealed class SupabaseValidatorApi : IDisposable
         {
             throw new InvalidDataException("The offline validator report does not match its leased package or pinned worker.");
         }
+        _ = ValidatorAttestation.Verify(
+            lease.UploadId,
+            lease.VersionId,
+            lease.StorageBucket,
+            lease.StoragePath,
+            lease.ExpectedSizeBytes,
+            lease.ExpectedSha256,
+            report,
+            m_Options.AttestationVerificationKey);
 
         byte[] request = DistributionJson.Serialize(new QueueRequest
         {
@@ -135,6 +144,32 @@ internal sealed class SupabaseValidatorApi : IDisposable
             Report = reportDocument.RootElement.Clone(),
         });
         _ = await PostQueueAsync(request, cancellationToken);
+    }
+
+    public async Task UploadEvidenceAsync(
+        ValidationLease lease,
+        ReadOnlyMemory<byte> evidence,
+        CancellationToken cancellationToken)
+    {
+        if (evidence.Length is < 2 or > MarketplaceValidationContract.MaximumEvidenceBytes)
+        {
+            throw new InvalidDataException("The review evidence is outside its size limit.");
+        }
+
+        using HttpRequestMessage request = new(HttpMethod.Put, lease.EvidenceUploadUrl)
+        {
+            Content = new ReadOnlyMemoryContent(evidence),
+        };
+        request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+        request.Headers.Add("x-upsert", "false");
+        using HttpResponseMessage response = await m_Http.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException(
+                "Supabase Storage rejected the signed review-evidence upload.",
+                null,
+                response.StatusCode);
+        }
     }
 
     public void Dispose()
@@ -204,6 +239,15 @@ internal sealed class ValidationLease
     [JsonPropertyName("storagePath")]
     public required string StoragePath { get; init; }
 
+    [JsonPropertyName("storageBucket")]
+    public required string StorageBucket { get; init; }
+
+    [JsonPropertyName("evidenceStoragePath")]
+    public required string EvidenceStoragePath { get; init; }
+
+    [JsonPropertyName("evidenceUploadUrl")]
+    public required string EvidenceUploadUrl { get; init; }
+
     [JsonPropertyName("expectedSizeBytes")]
     public required long ExpectedSizeBytes { get; init; }
 
@@ -219,7 +263,9 @@ internal sealed class ValidationLease
     public void Validate(Uri supabaseUrl)
     {
         if (!Uri.TryCreate(DownloadUrl, UriKind.Absolute, out Uri? download) ||
-            download.Scheme != Uri.UriSchemeHttps || !SameOrigin(download, supabaseUrl))
+            !Uri.TryCreate(EvidenceUploadUrl, UriKind.Absolute, out Uri? evidenceUpload) ||
+            download.Scheme != Uri.UriSchemeHttps || evidenceUpload.Scheme != Uri.UriSchemeHttps ||
+            !SameOrigin(download, supabaseUrl) || !SameOrigin(evidenceUpload, supabaseUrl))
         {
             throw new InvalidDataException("The validator lease contains an untrusted download origin.");
         }
@@ -227,7 +273,10 @@ internal sealed class ValidationLease
         if (UploadId == Guid.Empty || VersionId == Guid.Empty ||
             ExpectedSizeBytes is <= 0 or > MarketplaceValidationContract.MaximumPackageBytes ||
             !DistributionPaths.IsSha256(ExpectedSha256) ||
+            StorageBucket is not ("marketplace-packages" or "marketplace-quarantine") ||
             !string.Equals(StoragePath, DistributionPaths.NormalizeRelativePath(StoragePath), StringComparison.Ordinal) ||
+            !string.Equals(EvidenceStoragePath, DistributionPaths.NormalizeRelativePath(EvidenceStoragePath),
+                StringComparison.Ordinal) ||
             LeaseExpiresAt <= DateTimeOffset.UtcNow)
         {
             throw new InvalidDataException("The validator lease response is invalid.");

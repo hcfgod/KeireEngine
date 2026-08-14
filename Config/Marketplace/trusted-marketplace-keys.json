@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "keys": [
+    {
+      "schemaVersion": 1,
+      "algorithm": "Ed25519",
+      "keyId": "ed25519-d474a0428cab75db2f4b7c82e2ae1df1",
+      "publicKey": "wMaIV66dLJsPm/91qX/d8a8KT6fVRsh/zZT9FlA00JI=",
+      "fingerprint": "sha256:d474a0428cab75db2f4b7c82e2ae1df1443b532fdd3cb70c48e19d253f636d45"
+    },
+    {
+      "schemaVersion": 1,
+      "algorithm": "Ed25519",
+      "keyId": "ed25519-05a7a3bc5f66d6764275a6684c827d24",
+      "publicKey": "3lPqW1wjH2Lb0Sy9tcVT3Yf7YkJN7nhsXxrcw2tvMgc=",
+      "fingerprint": "sha256:05a7a3bc5f66d6764275a6684c827d24a0d69e2ff2519564658b1f8fcc166569"
+    }
+  ]
+}

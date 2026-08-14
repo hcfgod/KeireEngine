@@ -103,6 +103,7 @@ try {
         $manifest.files.path -notcontains "Config/Distribution.json" -or
         $manifest.files.path -notcontains "Config/Supabase.json" -or
         $manifest.files.path -notcontains "Config/Marketplace/trusted-marketplace-key.json" -or
+        $manifest.files.path -notcontains "Config/Marketplace/trusted-marketplace-keys.json" -or
         $manifest.licenseReferences -notcontains "content/Fonts/Inter-OFL.txt" -or
         $manifest.files.Count -lt 1) {
         throw "The standalone Windows Hub schema-2 fixture is incomplete."

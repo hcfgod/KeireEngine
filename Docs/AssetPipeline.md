@@ -164,8 +164,10 @@ KeireAssetTool validate --catalog <path>
 
 Target values are `host`, `windows`, `linux`, and `macos`; contextual cook transforms use them to strip unused shader
 variants. Windows keeps DXIL and SPIR-V for its D3D12 and Vulkan backends, Linux keeps SPIR-V, and macOS keeps MSL. A
-project cook roots the graph at its startup scene and default input, and writes `runtime-manifest.json`
-beside the catalog with startup and rendering settings. Optional cook controls are `--compression-level` and
+project cook roots the graph at every enabled row in `ProjectSettings/BuildScenes.keiresettings`, the default input,
+and the default mixer. It writes `runtime-manifest.json` beside the catalog with the ordered build-scene list, startup,
+and rendering settings. The descriptor startup scene supplies the backward-compatible default until the build-scene
+file is saved. Optional cook controls are `--compression-level` and
 `--pack-mib`. The import and cook commands require the matching `KeireAssetWorker` beside the tool in a package or in
 the sibling configuration target directory of a source build. SDK archives include this tool and the asset public
 headers; they carry the private `KeireZstd` archive transitively through `Keire::Core` but do not redistribute Zstandard

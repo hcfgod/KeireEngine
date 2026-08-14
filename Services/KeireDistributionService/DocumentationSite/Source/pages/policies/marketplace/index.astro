@@ -4,7 +4,7 @@ export const prerender = true;
 const sections = [
     { title: "Free products in 0.3.1", paragraphs: ["All public offers have a zero minor-unit price in 0.3.1. Paid checkout, taxes, refunds, payouts, and payment providers are disabled even though provider-neutral records reserve a future boundary."] },
     { title: "Entitlements", paragraphs: ["An accepted free claim creates an idempotent order and a perpetual personal or organization entitlement. Entitlement authorizes download; package hashes and signatures separately establish integrity."] },
-    { title: "Publication and changes", paragraphs: ["Published versions are immutable. Corrections require a new version. Staff may delist a product, suspend a publisher, or security-revoke a version after review. Security revocations override download access."] },
+    { title: "Validation and publication", paragraphs: ["A publisher uploads each version once to private immutable storage. Automated validation produces a signed, bounded evidence report for staff review; reviewers do not need possession of the publisher's archive. Approval queues metadata-only signature and publication processing. A published version is immutable, and corrections require a new version.", "Staff may request changes, reject or delist a product, suspend a publisher, or security-revoke a version after review. Security revocations override download access."] },
     { title: "Reviews and reports", paragraphs: ["Only entitled owners may publish one editable review per ownership target. Reviews, replies, listings, and packages can be reported and moderated under the acceptable-use policy."] },
 ];
 ---

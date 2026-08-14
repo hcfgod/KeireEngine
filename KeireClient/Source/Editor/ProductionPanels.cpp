@@ -20,6 +20,7 @@
 #include <fstream>
 #include <functional>
 #include <iomanip>
+#include <optional>
 #include <ranges>
 #include <set>
 #include <sstream>
@@ -179,14 +180,180 @@ void EditorWorkspaceLayer::DrawBuildSettings(Keire::UiFrame& ui)
         if (!m_PlayerBuildSettingsLoaded)
         {
             ui.TextColored(m_Theme.Error, "Player build settings could not be loaded.");
-            ui.TextColored(m_Theme.MutedText,
-                           "Correct ProjectSettings/Player.keiresettings and BuildProfiles.keiresettings, then "
-                           "reopen the project.");
+            ui.TextColored(m_Theme.MutedText, "Correct Player.keiresettings, BuildProfiles.keiresettings, and "
+                                              "BuildScenes.keiresettings in ProjectSettings, then reopen the project.");
             return;
         }
 
         bool profileChanged = false;
         bool settingsChanged = false;
+        bool scenesChanged = false;
+
+        ui.TextColored(m_Theme.Accent, "SCENES IN BUILD");
+        ui.TextColored(m_Theme.MutedText,
+                       "The first enabled scene is the startup scene. Enabled scenes keep this order as their "
+                       "runtime build index.");
+        ui.TextColored(m_Theme.MutedText, "Drag scene rows to reorder them, or use the move controls below.");
+        std::size_t enabledBuildIndex = 0;
+        std::optional<std::pair<Keire::AssetId, Keire::AssetId>> requestedSceneReorder;
+        for (auto& entry : m_PlayerBuildScenes.Scenes)
+        {
+            const auto record = std::ranges::find(m_AssetRecords, entry.Scene, &Keire::AssetSourceRecord::Id);
+            const bool valid = record != m_AssetRecords.end() && record->Type == Keire::SceneAsset::StaticType();
+            const auto indexLabel = entry.Enabled ? std::to_string(enabledBuildIndex++) : std::string("-");
+            const auto sceneLabel =
+                valid ? record->RelativePath.generic_string() : std::string("Missing scene: ") + entry.Scene.ToString();
+            auto id = ui.PushId(entry.Scene.ToString());
+            if (ui.Checkbox("##BuildSceneEnabled", entry.Enabled))
+                scenesChanged = true;
+            ui.SameLine();
+            const auto color = !valid ? m_Theme.Error : entry.Enabled ? m_Theme.Text : m_Theme.MutedText;
+            auto textColor = ui.PushStyleColor(Keire::UiStyleColorRole::Text, color);
+            if (ui.Selectable(indexLabel + "  " + sceneLabel, m_SelectedPlayerBuildScene == entry.Scene))
+                m_SelectedPlayerBuildScene = entry.Scene;
+            const auto payloadText = entry.Scene.ToString();
+            ui.SetDragPayload("KEIRE_BUILD_SCENE", std::as_bytes(std::span(payloadText.data(), payloadText.size())));
+            std::vector<std::byte> payload;
+            if (ui.AcceptDragPayload("KEIRE_BUILD_SCENE", payload))
+            {
+                try
+                {
+                    const std::string dragged(reinterpret_cast<const char*>(payload.data()), payload.size());
+                    const auto source = Keire::AssetId::Parse(dragged);
+                    if (source != entry.Scene)
+                        requestedSceneReorder = std::pair{source, entry.Scene};
+                }
+                catch (...)
+                {
+                }
+            }
+        }
+        if (requestedSceneReorder)
+        {
+            const auto source = std::ranges::find(m_PlayerBuildScenes.Scenes, requestedSceneReorder->first,
+                                                  &Keire::PlayerBuildScene::Scene);
+            const auto target = std::ranges::find(m_PlayerBuildScenes.Scenes, requestedSceneReorder->second,
+                                                  &Keire::PlayerBuildScene::Scene);
+            if (source != m_PlayerBuildScenes.Scenes.end() && target != m_PlayerBuildScenes.Scenes.end())
+            {
+                if (source < target)
+                    std::rotate(source, source + 1, target + 1);
+                else
+                    std::rotate(target, source, source + 1);
+                scenesChanged = true;
+            }
+        }
+        if (m_PlayerBuildScenes.Scenes.empty())
+            ui.TextColored(m_Theme.Warning, "No scenes are in this build. Add a scene before building the player.");
+
+        const auto selectedBuildScene =
+            std::ranges::find(m_PlayerBuildScenes.Scenes, m_SelectedPlayerBuildScene, &Keire::PlayerBuildScene::Scene);
+        const auto selectedBuildSceneIndex =
+            selectedBuildScene == m_PlayerBuildScenes.Scenes.end()
+                ? m_PlayerBuildScenes.Scenes.size()
+                : static_cast<std::size_t>(selectedBuildScene - m_PlayerBuildScenes.Scenes.begin());
+        const auto openScene = m_SceneDocument ? m_SceneDocument->Asset() : Keire::AssetId{};
+        const bool openSceneAlreadyAdded =
+            openScene && std::ranges::find(m_PlayerBuildScenes.Scenes, openScene, &Keire::PlayerBuildScene::Scene) !=
+                             m_PlayerBuildScenes.Scenes.end();
+        if (auto disabled = ui.BeginDisabled(!openScene || openSceneAlreadyAdded); disabled)
+        {
+            if (ui.Button("Add Open Scene"))
+            {
+                m_PlayerBuildScenes.Scenes.push_back({openScene, true});
+                m_SelectedPlayerBuildScene = openScene;
+                scenesChanged = true;
+            }
+        }
+        ui.SameLine();
+        if (auto disabled = ui.BeginDisabled(selectedBuildSceneIndex >= m_PlayerBuildScenes.Scenes.size()); disabled)
+        {
+            if (ui.Button("Remove"))
+            {
+                m_PlayerBuildScenes.Scenes.erase(m_PlayerBuildScenes.Scenes.begin() +
+                                                 static_cast<std::ptrdiff_t>(selectedBuildSceneIndex));
+                m_SelectedPlayerBuildScene = {};
+                scenesChanged = true;
+            }
+        }
+        ui.SameLine();
+        if (auto disabled = ui.BeginDisabled(selectedBuildSceneIndex == 0 ||
+                                             selectedBuildSceneIndex >= m_PlayerBuildScenes.Scenes.size());
+            disabled)
+        {
+            if (ui.Button("Move Up"))
+            {
+                std::swap(m_PlayerBuildScenes.Scenes[selectedBuildSceneIndex],
+                          m_PlayerBuildScenes.Scenes[selectedBuildSceneIndex - 1]);
+                scenesChanged = true;
+            }
+        }
+        ui.SameLine();
+        if (auto disabled = ui.BeginDisabled(selectedBuildSceneIndex + 1 >= m_PlayerBuildScenes.Scenes.size());
+            disabled)
+        {
+            if (ui.Button("Move Down"))
+            {
+                std::swap(m_PlayerBuildScenes.Scenes[selectedBuildSceneIndex],
+                          m_PlayerBuildScenes.Scenes[selectedBuildSceneIndex + 1]);
+                scenesChanged = true;
+            }
+        }
+        ui.SameLine();
+        if (auto disabled = ui.BeginDisabled(selectedBuildSceneIndex >= m_PlayerBuildScenes.Scenes.size()); disabled)
+        {
+            if (ui.Button("Set as Startup"))
+            {
+                auto selected = m_PlayerBuildScenes.Scenes[selectedBuildSceneIndex];
+                selected.Enabled = true;
+                m_PlayerBuildScenes.Scenes.erase(m_PlayerBuildScenes.Scenes.begin() +
+                                                 static_cast<std::ptrdiff_t>(selectedBuildSceneIndex));
+                m_PlayerBuildScenes.Scenes.insert(m_PlayerBuildScenes.Scenes.begin(), selected);
+                scenesChanged = true;
+            }
+        }
+
+        KeireEditor::AssetPickerOptions sceneOptions;
+        sceneOptions.Label = "Scene Asset";
+        sceneOptions.EmptyLabel = "Choose a scene to add";
+        sceneOptions.ExpectedType = Keire::SceneAsset::StaticType();
+        sceneOptions.AllowNone = true;
+        (void)m_PlayerBuildScenePicker.Draw(ui, m_AssetRecords, m_PlayerBuildSceneCandidate, sceneOptions);
+        const bool candidateAlreadyAdded =
+            m_PlayerBuildSceneCandidate &&
+            std::ranges::find(m_PlayerBuildScenes.Scenes, m_PlayerBuildSceneCandidate,
+                              &Keire::PlayerBuildScene::Scene) != m_PlayerBuildScenes.Scenes.end();
+        if (auto disabled = ui.BeginDisabled(!m_PlayerBuildSceneCandidate || candidateAlreadyAdded); disabled)
+        {
+            if (ui.Button("Add Selected Scene"))
+            {
+                m_PlayerBuildScenes.Scenes.push_back({m_PlayerBuildSceneCandidate, true});
+                m_SelectedPlayerBuildScene = m_PlayerBuildSceneCandidate;
+                m_PlayerBuildSceneCandidate = {};
+                m_PlayerBuildScenePicker.Clear();
+                scenesChanged = true;
+            }
+        }
+        if (candidateAlreadyAdded)
+            ui.TextColored(m_Theme.Warning, "That scene is already in the build.");
+        if (!m_PlayerBuildScenePicker.Diagnostic().empty())
+            ui.TextColored(m_Theme.Warning, m_PlayerBuildScenePicker.Diagnostic());
+
+        const auto enabledScenes = Keire::EnabledPlayerBuildScenes(m_PlayerBuildScenes);
+        if (!enabledScenes.empty())
+        {
+            const auto startup =
+                std::ranges::find(m_AssetRecords, enabledScenes.front(), &Keire::AssetSourceRecord::Id);
+            ui.TextColored(m_Theme.Success,
+                           "Startup Scene: " + (startup != m_AssetRecords.end() ? startup->RelativePath.generic_string()
+                                                                                : enabledScenes.front().ToString()));
+        }
+        else
+        {
+            ui.TextColored(m_Theme.Error, "Player builds are disabled until at least one scene is enabled.");
+        }
+        ui.Separator();
+
         auto active = std::ranges::find(m_PlayerBuildProfiles.Profiles, m_PlayerBuildProfiles.ActiveProfile,
                                         &Keire::PlayerBuildProfile::Id);
         if (active == m_PlayerBuildProfiles.Profiles.end())
@@ -399,7 +566,7 @@ void EditorWorkspaceLayer::DrawBuildSettings(Keire::UiFrame& ui)
             ui.TextColored(m_Theme.MutedText, "Separate hook arguments and environment names with semicolons.");
         }
 
-        if (profileChanged || settingsChanged)
+        if (profileChanged || settingsChanged || scenesChanged)
         {
             try
             {

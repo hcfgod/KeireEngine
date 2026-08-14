@@ -18,6 +18,18 @@ source in the Project panel. The same picker implementation backs typed componen
 Project-owned settings live below `<Project>/ProjectSettings` and are suitable for source control. They are distinct
 from per-user editor state under `Library`, such as dock layouts, Scene-camera navigation, and Scene-tool preferences.
 
+## Player Build Settings
+
+The **Build Settings** panel owns `Player.keiresettings`, `BuildProfiles.keiresettings`, and
+`BuildScenes.keiresettings`. The first stores product/window identity and platform icons; the second stores named
+platform, architecture, configuration, output, symbol, and signing policies; the third stores the ordered enabled Scene
+assets included in the player. The first enabled scene starts the game. All three files are validated, atomically saved,
+and suitable for source control; unsaved scene or Project Settings state is never included silently in a build.
+
+`Project.keireproject` retains its startup scene as the Editor fallback and migration source for older projects. It
+does not override an existing build-scene list. The per-user last-open-scene record lives below `Library/UserSettings`
+and is intentionally excluded from shared Project Settings.
+
 ## Audio Runtime
 
 `Authoring.keiresettings` schema 2 stores the mix sample rate, period size, mono/stereo/5.1/7.1 speaker layout,

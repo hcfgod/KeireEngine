@@ -623,6 +623,61 @@ namespace
             return specification;
         }
     };
+
+    class MinimizedBackgroundLayer final : public Keire::Layer
+    {
+      public:
+        explicit MinimizedBackgroundLayer(int& updates) : Layer("minimized-background"), m_Updates(updates) {}
+
+      protected:
+        void OnUpdate(const Keire::Time&) override
+        {
+            ++m_Updates;
+            if (m_Updates == 2)
+                Owner().RequestExit(8);
+        }
+
+      private:
+        int& m_Updates;
+    };
+
+    class MinimizedBackgroundApplication final : public Keire::Application
+    {
+      public:
+        explicit MinimizedBackgroundApplication(int& updates) : Application(BuildSpecification())
+        {
+            (void)PushLayer(std::make_unique<MinimizedBackgroundLayer>(updates));
+        }
+
+      protected:
+        void OnInitialize() override
+        {
+            int count = 0;
+            SDL_Window** windows = SDL_GetWindows(&count);
+            REQUIRE(windows != nullptr);
+            SDL_WindowID primaryId = 0;
+            for (int index = 0; index < count; ++index)
+                if (std::string(SDL_GetWindowTitle(windows[index])) == "minimized-background")
+                    primaryId = SDL_GetWindowID(windows[index]);
+            SDL_free(windows);
+            REQUIRE(primaryId != 0);
+
+            SDL_Event minimize{};
+            minimize.type = SDL_EVENT_WINDOW_MINIMIZED;
+            minimize.window.windowID = primaryId;
+            REQUIRE(SDL_PushEvent(&minimize));
+        }
+
+      private:
+        static Keire::ApplicationSpecification BuildSpecification()
+        {
+            auto specification = HiddenApplicationSpecification("minimized-background");
+            specification.SuspendWhenMainWindowMinimized = true;
+            specification.UpdateLayersWhenMainWindowMinimized = true;
+            specification.MinimizedPumpRate = 1000;
+            return specification;
+        }
+    };
 } // namespace
 
 TEST_CASE("LayerStack owns deterministic layer lifecycle and traversal order")
@@ -814,4 +869,13 @@ TEST_CASE("Minimizing during a frame consumes the fixed work produced at that fr
     MinimizeTransitionApplication application(fixedUpdates);
     CHECK(application.Run() == 6);
     CHECK(fixedUpdates == 1);
+}
+
+TEST_CASE("Applications may keep background layer services alive while minimized")
+{
+    UseApplicationDummyVideoDriver();
+    int updates = 0;
+    MinimizedBackgroundApplication application(updates);
+    CHECK(application.Run() == 8);
+    CHECK(updates == 2);
 }

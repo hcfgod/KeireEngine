@@ -13,6 +13,7 @@
 #include "KeireClient/Editor/ConsolePanel.h"
 #include "KeireClient/Editor/DiagnosticsPanel.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
+#include "KeireClient/Editor/EditorSessionState.h"
 #include "KeireClient/Editor/ExternalAssetImportController.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/MaterialDocument.h"
@@ -815,6 +816,9 @@ void EditorWorkspaceLayer::OnAttach()
                 m_AssetBrowserPanel->SetUndoContext(undo->CreateContext({.Name = "Project Assets"}));
             ConfigureAssetImporters(databaseSpecification);
             m_AssetDatabase = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
+            m_EditorSessionPath = project->WorkspaceDirectory() / "EditorSession.state";
+            const auto restoredScene = KeireEditor::LoadEditorSessionState(m_EditorSessionPath).LastScene;
+            const auto startupCandidate = restoredScene ? restoredScene : project->Descriptor().StartupScene;
             m_AssetOperations = std::make_unique<KeireEditor::AssetOperationService>(
                 KeireEditor::AssetOperationService::ResolveWorkerExecutable(m_ExecutablePath), project->Root());
             InitializePlayerBuild();
@@ -834,9 +838,9 @@ void EditorWorkspaceLayer::OnAttach()
                                                    importer->Version > record.ImporterVersion;
                                         });
             }
-            if (!requiresSynchronousImport && project->Descriptor().StartupScene)
+            if (!requiresSynchronousImport && startupCandidate)
             {
-                const auto startup = m_AssetDatabase->Find(project->Descriptor().StartupScene);
+                const auto startup = m_AssetDatabase->Find(startupCandidate);
                 const auto catalogTime = std::filesystem::last_write_time(catalog, catalogError);
                 requiresSynchronousImport =
                     catalogError || !startup ||
@@ -845,7 +849,7 @@ void EditorWorkspaceLayer::OnAttach()
             }
             if (requiresSynchronousImport)
             {
-                m_PendingStartupScene = project->Descriptor().StartupScene;
+                m_PendingStartupScene = startupCandidate;
                 ImportAssets(KeireEditor::AssetOperationPriority::AutomaticRefresh);
             }
             else if (AssetSourcesAreNewerThanCatalog(project->AssetsDirectory(), catalog))
@@ -901,8 +905,8 @@ void EditorWorkspaceLayer::OnAttach()
                     }
                     return Keire::EventFlow::Handled;
                 });
-            if (project->Descriptor().StartupScene && !m_PendingStartupScene)
-                RequestOpenScene(project->Descriptor().StartupScene);
+            if (!m_PendingStartupScene)
+                RequestInitialScene(startupCandidate);
             if (project->Descriptor().DefaultInput)
             {
                 OpenInputActions(project->Descriptor().DefaultInput);
@@ -929,6 +933,8 @@ void EditorWorkspaceLayer::OnAttach()
 
 void EditorWorkspaceLayer::OnDetach() noexcept
 {
+    if (m_SceneDocument && m_SceneDocument->Asset())
+        PersistEditorSessionScene(m_SceneDocument->Asset());
     ShutdownPlayerBuild();
     m_PackageManagerPanel->Shutdown();
     if (m_AssetOperations)

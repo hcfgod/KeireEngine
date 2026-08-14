@@ -21,6 +21,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$WorkerId,
 
+    [Parameter(Mandatory = $true)]
+    [string]$AttestationPublicKey,
+
     [switch]$ValidateOnly
 )
 
@@ -28,7 +31,7 @@ $ErrorActionPreference = "Stop"
 
 Add-Type -AssemblyName System.Security
 
-foreach ($path in @($Broker, $Validator, $SecretFile)) {
+foreach ($path in @($Broker, $Validator, $SecretFile, $AttestationPublicKey)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Required validator broker file is missing: $path"
     }
@@ -109,6 +112,7 @@ try {
     $env:KEIRE_VALIDATOR_EXPECTED_FINGERPRINT_SHA256 = $ExpectedValidatorFingerprint
     $env:KEIRE_VALIDATOR_EXCHANGE_ROOT = (Resolve-Path -LiteralPath $ExchangeRoot).Path
     $env:KEIRE_VALIDATOR_WORKER_ID = $WorkerId
+    $env:KEIRE_VALIDATOR_ATTESTATION_PUBLIC_KEY = (Resolve-Path -LiteralPath $AttestationPublicKey).Path
     & $Broker
     exit $LASTEXITCODE
 }

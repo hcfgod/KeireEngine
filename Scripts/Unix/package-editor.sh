@@ -67,6 +67,7 @@ cp "$sdk_stage/Config/Client.json" "$stage/Config/"
 cp "$ROOT/Config/SourceModules.premake.lua" "$stage/Config/"
 cp "$ROOT/Config/Branding/Keire.png" "$stage/Config/Branding/"
 cp "$ROOT/Config/Marketplace/trusted-marketplace-key.json" "$stage/Config/Marketplace/"
+cp "$ROOT/Config/Marketplace/trusted-marketplace-keys.json" "$stage/Config/Marketplace/"
 cp -R "$sdk_stage/third-party/licenses" "$stage/third-party/"
 cp "$sdk_stage/README.md" "$sdk_stage/LICENSE.txt" "$sdk_stage/THIRD_PARTY_NOTICES.md" \
   "$sdk_stage/build-manifest.json" "$stage/"

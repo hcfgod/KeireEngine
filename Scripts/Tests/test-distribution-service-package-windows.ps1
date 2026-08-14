@@ -17,6 +17,7 @@ foreach ($contract in @(
         "--executable 'tools/publisher/KeireDistributionPublisher'",
         "--executable 'tools/marketplace-validator/worker/KeireMarketplaceValidator'",
         "--executable 'tools/marketplace-validator/broker/KeireMarketplaceValidatorBroker'",
+        "--executable 'tools/marketplace-publication-signer/KeireMarketplacePublicationSigner'",
         "--executable 'scripts/health-check.sh'",
         "--executable 'scripts/monitor-distribution.sh'",
         "--executable 'scripts/backup-distribution.sh'",
@@ -38,12 +39,19 @@ foreach ($contract in @(
         "keire-web.service.example",
         "keire-marketplace-validator.service.example",
         "keire-marketplace-validator-broker.service.example",
+        "keire-marketplace-publication-signer.service.example",
+        "marketplace-validator.env.example",
         "marketplace-validator-broker.env.example",
+        "marketplace-publication-signer.env.example",
         "configure-windows-validator-firewall.ps1",
         "install-windows-marketplace-validator-tasks.ps1",
+        "install-windows-marketplace-publication-signer-task.ps1",
+        "protect-windows-marketplace-secret.ps1",
+        "provision-windows-marketplace-signing-keys.ps1",
         "protect-windows-validator-broker-secret.ps1",
         "start-windows-marketplace-validator.ps1",
         "start-windows-marketplace-validator-broker.ps1",
+        "start-windows-marketplace-publication-signer.ps1",
         "BeautifulMermaid.txt",
         "Documentation production build failed"
     )) {
@@ -62,6 +70,8 @@ foreach ($contract in @(
         'NT AUTHORITY\LOCAL SERVICE',
         'NT AUTHORITY\NETWORK SERVICE',
         'FirewallAttestation',
+        'ProtectedAttestationKey',
+        'AttestationPublicKey',
         'New-ScheduledTaskTrigger -AtStartup',
         '-AllowStartIfOnBatteries',
         '-DontStopIfGoingOnBatteries',
@@ -110,7 +120,8 @@ foreach ($contract in @(
         'exact least-privilege contract',
         '[System.Security.Cryptography.ProtectedData]::Unprotect',
         'KEIRE_VALIDATOR_BROKER_SECRET',
-        'Remove-Item Env:KEIRE_VALIDATOR_BROKER_SECRET'
+        'Remove-Item Env:KEIRE_VALIDATOR_BROKER_SECRET',
+        'KEIRE_VALIDATOR_ATTESTATION_PUBLIC_KEY'
     )) {
     if (-not $brokerLauncher.Contains($contract)) {
         throw "The Windows validator broker launcher is missing '$contract'."
@@ -123,6 +134,8 @@ $validatorLauncher = Get-Content -LiteralPath `
     (Join-Path $Root "Services\KeireDistributionService\Deployment\start-windows-marketplace-validator.ps1") -Raw
 foreach ($contract in @(
         'KEIRE_VALIDATOR_NETWORK_ISOLATED',
+        'KEIRE_VALIDATOR_ATTESTATION_PRIVATE_KEY',
+        'ProtectedAttestationKey',
         'ValidateOnly',
         'FirewallAttestation',
         'Get-FileHash -LiteralPath $entry.Value -Algorithm SHA256',
@@ -135,6 +148,33 @@ foreach ($contract in @(
     )) {
     if (-not $validatorLauncher.Contains($contract)) {
         throw "The Windows offline validator launcher is missing '$contract'."
+    }
+}
+$publicationLauncher = Get-Content -LiteralPath `
+    (Join-Path $Root "Services\KeireDistributionService\Deployment\start-windows-marketplace-publication-signer.ps1") -Raw
+foreach ($contract in @(
+        'KeireMarketplacePublicationPrivateKey/v1',
+        'KeireMarketplacePublicationQueueSecret/v1',
+        'KEIRE_MARKETPLACE_PUBLICATION_PRIVATE_KEY',
+        'KEIRE_MARKETPLACE_PUBLICATION_SIGNER_SECRET',
+        'Remove-Item Env:KEIRE_MARKETPLACE_PUBLICATION_PRIVATE_KEY',
+        'exact NETWORK SERVICE ACL'
+    )) {
+    if (-not $publicationLauncher.Contains($contract)) {
+        throw "The Windows automatic publication signer launcher is missing '$contract'."
+    }
+}
+$marketplaceSecretProtector = Get-Content -LiteralPath `
+    (Join-Path $Root "Services\KeireDistributionService\Deployment\protect-windows-marketplace-secret.ps1") -Raw
+foreach ($contract in @(
+        'ValidatorAttestationPrivateKey',
+        'PublicationPrivateKey',
+        'PublicationQueueSecret',
+        'ProtectedData]::Protect',
+        'SetAccessRuleProtection($true, $false)'
+    )) {
+    if (-not $marketplaceSecretProtector.Contains($contract)) {
+        throw "The Windows Marketplace key protector is missing '$contract'."
     }
 }
 $caddyTemplate = Get-Content -LiteralPath `

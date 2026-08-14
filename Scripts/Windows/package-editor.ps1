@@ -55,6 +55,8 @@ Copy-Item -LiteralPath (Join-Path $Root "Config\Branding\Keire.png") `
     -Destination (Join-Path $stage "Config\Branding")
 Copy-Item -LiteralPath (Join-Path $Root "Config\Marketplace\trusted-marketplace-key.json") `
     -Destination (Join-Path $stage "Config\Marketplace")
+Copy-Item -LiteralPath (Join-Path $Root "Config\Marketplace\trusted-marketplace-keys.json") `
+    -Destination (Join-Path $stage "Config\Marketplace")
 Copy-Item -LiteralPath (Join-Path $sdkStage "third-party\licenses") `
     -Destination (Join-Path $stage "third-party") -Recurse
 foreach ($file in @("README.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json")) {

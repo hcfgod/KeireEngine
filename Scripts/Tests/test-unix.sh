@@ -58,12 +58,22 @@ assert_true grep -Fq 'KeireMarketplaceValidator/KeireMarketplaceValidator.csproj
   "$ROOT/Services/KeireDistributionService/scripts/package-service.sh"
 assert_true grep -Fq 'KeireMarketplaceValidatorBroker/KeireMarketplaceValidatorBroker.csproj' \
   "$ROOT/Services/KeireDistributionService/scripts/package-service.sh"
+assert_true grep -Fq 'KeireMarketplacePublicationSigner/KeireMarketplacePublicationSigner.csproj' \
+  "$ROOT/Services/KeireDistributionService/scripts/package-service.sh"
 assert_true grep -Fq 'keire-marketplace-validator.service.example' \
   "$ROOT/Services/KeireDistributionService/scripts/package-service.sh"
 assert_true grep -Fq 'PrivateNetwork=true' \
   "$ROOT/Services/KeireDistributionService/Deployment/keire-marketplace-validator.service.example"
 assert_true grep -Fq 'RestrictAddressFamilies=AF_UNIX' \
   "$ROOT/Services/KeireDistributionService/Deployment/keire-marketplace-validator.service.example"
+assert_true grep -Fq 'KEIRE_VALIDATOR_ATTESTATION_PRIVATE_KEY' \
+  "$ROOT/Services/KeireDistributionService/Deployment/marketplace-validator.env.example"
+assert_true grep -Fq 'KEIRE_VALIDATOR_ATTESTATION_PUBLIC_KEY' \
+  "$ROOT/Services/KeireDistributionService/Deployment/marketplace-validator-broker.env.example"
+assert_true grep -Fq 'KEIRE_MARKETPLACE_PUBLICATION_PRIVATE_KEY' \
+  "$ROOT/Services/KeireDistributionService/Deployment/marketplace-publication-signer.env.example"
+assert_true grep -Fq 'NoNewPrivileges=true' \
+  "$ROOT/Services/KeireDistributionService/Deployment/keire-marketplace-publication-signer.service.example"
 for script in monitor-distribution backup-distribution backup-distribution-rclone restore-distribution \
   restore-distribution-rclone; do
   assert_true grep -Fq "$script.sh" "$ROOT/Services/KeireDistributionService/scripts/package-service.sh"

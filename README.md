@@ -48,7 +48,8 @@ updated metadata; unrequested on-disk changes remain reported as damaged.
 Kéire already includes substantial, integrated engine and authoring foundations:
 
 - Project identity, locking, templates, recent-project state, compatibility checks, and transactional upgrades.
-- Versioned scenes, entities, components, prefabs, undo/redo, hierarchy and Inspector editing, recovery, and Play Mode.
+- Versioned scenes, entities, components, prefabs, selection-preserving undo/redo, hierarchy and Inspector editing,
+  last-scene restoration, recovery, and Play Mode.
 - Stable asset identities, metadata sidecars, dependency tracking, deterministic imports, asynchronous runtime loading,
   hot reload, cooked packs, native player packaging, deterministic `.keireassetpackage` archives, transactional
   project package resolution, selective asset imports, receipts, rollback, and recovery.
@@ -207,7 +208,8 @@ threading, startup, frame order, or shutdown behavior.
 
 ## Projects, Content, and Compatibility
 
-A Kéire project is a directory with one `.keireproj` descriptor and isolated project-local state. Source assets live
+A Kéire project is a directory with one `ProjectSettings/Project.keireproject` descriptor and isolated project-local
+state. Source assets live
 under `Assets/`; generated and imported state lives under `Library/`; build output follows the selected build profile.
 Stable asset IDs allow content to move inside `Assets/` without rewriting every reference.
 
@@ -257,8 +259,12 @@ Marketplace assets follow an explicit ownership boundary: browse and claim on th
 private download in Kéire Hub, then install or import into the open project from the Editor's **Window -> Package
 Manager** surface. **Open in Editor** links use the registered `keirehub` protocol, but Hub remains the secure account
 and download bridge. The Editor receives only an atomic token-free catalog/library/cache snapshot with the public
-offline-signed publication proof, independently verifies that proof, and rechecks the exact archive bytes before
-changing project files. Browser OAuth sessions rotate through the public-client
+signed publication proof, independently verifies that proof against the packaged rotating trust bundle, and rechecks
+the exact archive bytes before changing project files. Publishers upload each immutable archive once. A network-isolated
+validator produces bounded review evidence and signs its exact package/evidence identity; administrators inspect that
+sanitized evidence without needing the publisher's archive. Approval atomically queues a least-privileged signer that
+receives metadata only, verifies the validator attestation, and signs the existing object for publication. Browser OAuth
+sessions rotate through the public-client
 OAuth endpoint and survive restarts through the operating system's protected credential store; the direct
 email/password fallback retains its separate Auth refresh flow. See [Asset Packages](Docs/AssetPackages.md) and
 [Project Hub](Docs/ProjectHub.md) for the complete workflow and trust model.
