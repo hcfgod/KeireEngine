@@ -64,7 +64,11 @@ registry-generation, security-identity, root, tracked-process, or targeted-task 
 health or hands a still-current repair/removal plan to the package task system; UI components consume immutable busy,
 result, and failure snapshots and never hash an editor installation inside a frame.
 Refresh health is committed as one bounded registry update so installed cards and catalog availability share a single
-state generation. A separate missing-managed-registration operation checks the exact registered identity and root, then
+state generation. An explicit external-registration refresh captures the old ID, root, ownership, activity, and
+registry generation; a worker validates and inventories the replacement manifest, and the owner thread rejects the
+result if any captured identity or activity changed before atomically adopting the new external metadata. This keeps
+ordinary health refresh fail-closed while supporting intentional in-place development rebuilds. A separate
+missing-managed-registration operation checks the exact registered identity and root, then
 requires the filesystem object to be definitively absent before removing only the registry entry; it never authorizes
 or performs filesystem deletion.
 
@@ -1094,7 +1098,10 @@ unclassified rather than being discarded.
 The scene runtime samples animation into local bone transforms, applies named IK goals, optionally performs scene-owned
 world-space ground raycasts and transactional model-space foot grounding, computes the palette, and then submits
 deformation. World-authored sole offsets and pelvis limits are converted through the Animator transform before solving,
-so imported rigs keep the same physical grounding distances at non-unit model scales. The standalone
+so imported rigs keep the same physical grounding distances at non-unit model scales. Per-foot runtime state owns both
+the sole target and support-surface anchors in entity-local space. The current downward probe arbitrates support
+handoffs every frame, while bounded tangential travel re-anchors a moving support before the leg reaches a two-bone
+singularity. The standalone
 ragdoll transition blends animation and physics-provided local poses but does not own physics bodies or constraints.
 Linear-blend skinning uses the SDL_GPU compute cache when available. Dual-quaternion skinning and
 unsupported compute paths use the deterministic CPU implementation; both paths produce an engine-owned transient

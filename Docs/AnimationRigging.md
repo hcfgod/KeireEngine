@@ -147,28 +147,85 @@ applies the result after managed named IK goals. A missing target, stale scene r
 non-decomposable transform produces an Animator diagnostic and leaves the sampled pose safe. This workflow complements
 the generic managed two-bone/FABRIK API; it does not replace or serialize transient gameplay goals.
 
+Each authored limb and foot grounding is evaluated independently. A missing target or invalid chain on one arm is
+reported in the Animator runtime diagnostic, but it does not suppress the opposite arm, named gameplay IK goals, or
+foot grounding for that frame.
+
 ## Ground Adaptation And Ragdolls
 
 Enable **Ground Adaptation** on an Animator component. Automatic bone mapping resolves the pelvis and both leg chains
-from the Humanoid/Biped semantic rig; the visible bone names are deterministic fallbacks for custom imports. After graph
-sampling, managed IK, and authored arm IK, the scene runtime probes below each animated foot, ignores the character's
-own physics body, rejects surfaces over **Maximum Ground Slope**, shifts the pelvis once for the lowest valid contact,
-solves both leg chains, and aligns each planted foot to its hit normal.
+from the Humanoid/Biped semantic rig. It recognizes Mixamo, Unreal/Blender-style suffixes, 3ds Max-style side markers,
+and anatomical joint names such as femur, tibia, talus, humerus, radius, and carpal. When a biped uses opaque joint
+names, bind-pose topology supplies a final leg-chain fallback. The visible bone-name fields remain deterministic manual
+overrides for custom, asymmetric, non-humanoid, or ambiguous skeletons; no importer-specific name is required by the IK
+solver itself.
+
+After graph sampling, managed IK, and authored arm IK, the scene runtime probes below each animated foot, ignores the
+character's own physics body, rejects surfaces over **Maximum Ground Slope**, lowers the pelvis once for the lowest
+valid contact, and applies a bounded two-foot balance correction toward the skeleton's own bind-neutral
+pelvis-to-feet offset. It also removes a bounded amount of pitch/roll from the inferred pelvis-to-chest or
+pelvis-to-spine axis while preserving authored yaw. **Body Lean Correction** controls how strongly grounding removes
+pitch/roll already present in the animation, and **Maximum Lean Correction** bounds that change in degrees. A zero
+weight preserves the authored lean; a full weight restores the rig's bind-neutral torso direction up to the authored
+angle limit. These corrections use semantic inference, skeleton topology, and the imported bind pose rather than
+Mixamo names or hard-coded bone axes or strengths. The pelvis is never lifted merely to satisfy a positive sole offset.
+The solver preserves each bind-pose ankle-to-sole clearance, solves both leg chains, and aligns the sampled sole normal
+with the contact normal. The bind pose defines the rig's neutral sole independently of the imported foot bone's local
+axes, so imported feet flatten animated toe-up pitch without folding and retain the correct clearance after rotation.
+For skinned characters, clearance also includes foot- and toe-weighted bind-mesh vertices, so thick boots and armored
+soles rest above the hit surface even when their visible geometry extends below every foot joint.
+The authored **Sole Offset** is a minimum/fallback clearance rather than an additional lift: automatic boot thickness
+replaces it when larger, preventing the two values from stacking into a visible hover. Each leg also preserves the
+sampled animation's knee bend plane while reaching its vertical contact, so grounding does not pull a knee toward a
+fixed model axis or distort the original forward/back stance.
+
+**Lock Planted Feet** holds a near-ground sole target across animation samples. When the contact belongs to a scene
+entity, the target and normal are stored in that support's local space, so the planted foot and leg follow a platform
+that translates, rotates, scales, or recreates its static physics body. The animation-release reference remains
+independent of support motion, so moving a platform is not mistaken for a deliberate foot lift. Small horizontal motion
+in an idle/walk contact phase is therefore removed instead of becoming visible skating. **Plant Distance** controls
+contact acquisition; **Release Distance** releases a deliberately lifted foot, and a reach limit releases an
+overextended leg so the next step can proceed. A support that travels sideways is re-anchored beneath the sampled foot
+before it can pull the two-bone chain straight. If that surface leaves, the runtime immediately selects the valid
+surface below and blends the visible target according to the response setting; every locked foot continues checking
+the probe result, so a raised platform moved back underneath takes over from the ground lock instead of clipping
+through it. Deep penetrations are recovered in the same frame. This
+corrects contact-phase sliding, but it does not turn an animation without a usable gait into a complete procedural
+locomotion system. **Response Time (Seconds)** smooths contact acquisition, platform movement, lower-surface handoff,
+normal changes, IK weight, and release back to the sampled animation with an elapsed-time response that is independent
+of frame rate. Zero selects immediate response. Upward surface motion is clamped along the contact normal in the same
+frame so a smoother response cannot push the sole through an approaching platform; its lateral motion and rotation
+remain filtered. Automatic toe discovery uses semantic names when present and skin influence plus bind topology
+otherwise; while planted, the toe root blends back to its neutral bind rotation so the forefoot rests with the
+ankle-aligned sole instead of retaining an animated upward curl.
 
 **Automatic Ray Distance** expands each downward query from the configured minimum to the evaluated leg length. This
 prevents a raised animation pose from silently losing one contact and leaving a foot hovering, while the collision mask
 and maximum slope keep walls and unrelated trigger geometry out of the solution. Disable it when a game deliberately
-needs a strict ledge/drop cutoff. Ray height/range, sole offset, pelvis limit, position/rotation weights, and collision
-mask are all serialized per Animator.
+needs a strict ledge/drop cutoff. Ray height/range, sole offset, pelvis limit, plant/release distances,
+response time, lean controls, position/rotation weights, and collision mask are all serialized per Animator.
 
-New Animators enable semantic mapping and automatic ray distance by default. Schema-one and schema-two Animators retain
-their exact authored bone-name mapping during migration, while receiving the corrected solver and automatic ray range;
-authors can opt into semantic mapping after verifying a legacy custom rig.
+New Animators enable semantic mapping, automatic ray distance, and planted-foot locking by default. Schema-one and
+schema-two Animators retain their exact authored bone-name mapping during migration, while schema-three Animators
+preserve their existing semantic and limb settings; schema-four Animators retain their authored contact-lock values.
+All older schemas receive explicit defaults for response and lean correction. Authors can opt into semantic mapping
+after verifying a legacy custom rig.
 
 Two-bone and FABRIK rotations are solved in model space and converted back through the actual parent transform, so
-rotated parents and imported bind orientations do not corrupt local bone rotations. Targets beyond the physical limb
-length are clamped without scaling bones. Grounding reports feet that remain outside tolerance after the configured
-pelvis limit; malformed contacts still reject transactionally and preserve the sampled pose.
+rotated parents and imported bind orientations do not corrupt local bone rotations. Two-bone chains may contain
+translation, pre-rotation, and rotation helper nodes between their resolved joints, as commonly produced by FBX
+importers. Semantic inference prefers the authored joint on either side of those helpers and uses a helper as a fallback
+only when an authored joint is absent. Targets beyond the physical limb length are clamped without scaling bones. A
+small reach margin and the persisted sampled bend plane keep knees and elbows away from folded/straight singularities
+where an otherwise equivalent bend direction could flip for a frame.
+Grounding reports feet that remain outside tolerance after the configured pelvis limit; malformed contacts still reject
+transactionally and preserve the sampled pose.
+
+An authored arm target's transform controls both reach and wrist orientation: **Position Weight** blends the hand
+position and **Hand Rotation Weight** blends the hand bone toward the target entity's rotation. Automatic pole mapping
+keeps a persistent elbow side across nearly straight or fully folded animation frames to prevent brief bend-plane flips.
+Finger curl and individual finger joints are not part of limb IK; pose them in the animation/controller or with separate
+managed IK goals.
 
 `SolveFootGrounding` is also available to custom character runtimes that already own their contact queries.
 `RagdollPoseTransition` provides an interruptible animated-to-physics pose blend with finite duration validation,

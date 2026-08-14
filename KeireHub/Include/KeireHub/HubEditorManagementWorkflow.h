@@ -41,11 +41,14 @@ namespace KeireHub
             std::vector<HubEditorManagementWorkItem>, std::string, std::string)>;
         using VerifyService = std::function<HubResult<EditorInstallationHealthSnapshot>(HubEditorManagementWorkItem,
                                                                                         std::string, std::string)>;
+        using RegistrationRefreshService = std::function<HubResult<EditorInstallationHealthSnapshot>(
+            HubEditorManagementWorkItem, std::filesystem::path, std::string, std::string)>;
         using AuthorizationService = std::function<HubResult<EditorManagedOperationPlan>(
             HubEditorManagementWorkItem, std::filesystem::path, EditorManagedOperation, std::string, std::string)>;
 
         RefreshService Refresh;
         VerifyService Verify;
+        RegistrationRefreshService RefreshRegistration;
         AuthorizationService Authorize;
     };
 
@@ -54,6 +57,7 @@ namespace KeireHub
         None,
         Refresh,
         Verify,
+        RefreshRegistration,
         AuthorizeRepair,
         AuthorizeRemoval
     };
@@ -123,6 +127,7 @@ namespace KeireHub
         {
             std::optional<std::vector<EditorInstallationHealthSnapshot>> Installations;
             std::optional<EditorInstallationHealthSnapshot> Verification;
+            std::optional<EditorInstallationHealthSnapshot> RegistrationRefresh;
             std::optional<EditorManagedOperationPlan> Authorization;
             std::optional<HubError> Failure;
         };

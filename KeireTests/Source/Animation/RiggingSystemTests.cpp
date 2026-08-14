@@ -41,6 +41,19 @@ namespace
         const auto z = right.Z - left.Z;
         return std::sqrt(x * x + y * y + z * z);
     }
+
+    [[nodiscard]] Keire::Quaternion Multiply(const Keire::Quaternion left, const Keire::Quaternion right) noexcept
+    {
+        return {left.W * right.X + left.X * right.W + left.Y * right.Z - left.Z * right.Y,
+                left.W * right.Y - left.X * right.Z + left.Y * right.W + left.Z * right.X,
+                left.W * right.Z + left.X * right.Y - left.Y * right.X + left.Z * right.W,
+                left.W * right.W - left.X * right.X - left.Y * right.Y - left.Z * right.Z};
+    }
+
+    [[nodiscard]] float RotationDot(const Keire::Quaternion left, const Keire::Quaternion right) noexcept
+    {
+        return std::abs(left.X * right.X + left.Y * right.Y + left.Z * right.Z + left.W * right.W);
+    }
 } // namespace
 
 TEST_CASE("Auto rig generation is deterministic and emits normalized four or eight influence data")
@@ -320,6 +333,32 @@ TEST_CASE("Two bone IK preserves model-space targets under rotated parents and o
     CHECK(rotationOnlyDot > 0.999F);
 }
 
+TEST_CASE("Two bone IK stays finite and bent at its folded and extended reach limits")
+{
+    const std::vector<Keire::SkeletonBone> bones{{"UpperArm", -1, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                 {"LowerArm", 0, {{1.0F, 0.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                 {"Hand", 1, {{1.0F, 0.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}}};
+    const Keire::SkeletonAsset skeleton(bones);
+    const auto solve = [&](const Keire::Vector3 target)
+    {
+        std::vector<Keire::BoneTransform> pose;
+        for (const auto& bone : bones)
+            pose.push_back(bone.BindPose);
+        REQUIRE(Keire::SolveTwoBoneIk(skeleton, pose, {0, 1, 2, target, {0.0F, 0.0F, 1.0F}}));
+        return ModelMatrices(skeleton, pose);
+    };
+
+    const auto folded = solve({});
+    const auto extended = solve({3.0F, 0.0F, 0.0F});
+    for (const auto& matrix : {folded[0], folded[1], folded[2], extended[0], extended[1], extended[2]})
+    {
+        for (const auto element : matrix.Elements)
+            CHECK(std::isfinite(element));
+    }
+    CHECK(std::abs(Keire::Math::TransformPoint(folded[1], {}).Z) > 0.0001F);
+    CHECK(std::abs(Keire::Math::TransformPoint(extended[1], {}).Z) > 0.0001F);
+}
+
 TEST_CASE("Foot grounding adapts pelvis and legs transactionally to validated contacts")
 {
     const std::vector<Keire::SkeletonBone> bones{{"Pelvis", -1, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}},
@@ -379,6 +418,188 @@ TEST_CASE("Foot grounding lowers the pelvis once and plants both feet on uneven 
     const auto model = ModelMatrices(skeleton, pose);
     CHECK(Distance(Keire::Math::TransformPoint(model[3], {}), request.Contacts[0].Position) < 0.01F);
     CHECK(Distance(Keire::Math::TransformPoint(model[6], {}), request.Contacts[1].Position) < 0.01F);
+}
+
+TEST_CASE("Foot grounding solves imported FBX leg chains containing transform helper bones")
+{
+    const std::vector<Keire::SkeletonBone> bones{
+        {"mixamorig:Hips", -1, {{0.0F, 2.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+        {"mixamorig:LeftUpLeg_$AssimpFbx$_Translation", 0, {{-0.25F, 0.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+        {"mixamorig:LeftUpLeg_$AssimpFbx$_PreRotation", 1, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+        {"mixamorig:LeftUpLeg_$AssimpFbx$_Rotation", 2, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+        {"mixamorig:LeftUpLeg", 3, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+        {"mixamorig:LeftLeg_$AssimpFbx$_Translation", 4, {{0.0F, -1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+        {"mixamorig:LeftLeg_$AssimpFbx$_PreRotation", 5, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+        {"mixamorig:LeftLeg", 6, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+        {"mixamorig:LeftFoot_$AssimpFbx$_Translation", 7, {{0.0F, -1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+        {"mixamorig:LeftFoot_$AssimpFbx$_PreRotation", 8, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+        {"mixamorig:LeftFoot_$AssimpFbx$_Rotation", 9, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+        {"mixamorig:LeftFoot", 10, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}}};
+    const Keire::SkeletonAsset skeleton(bones);
+    const auto rig = Keire::InferRigDefinition(skeleton);
+    CHECK(rig.Bones[1].Semantic == Keire::RigBoneSemantic::None);
+    CHECK(rig.Bones[5].Semantic == Keire::RigBoneSemantic::None);
+    CHECK(rig.Bones[8].Semantic == Keire::RigBoneSemantic::None);
+    CHECK(rig.Bones[4].Semantic == Keire::RigBoneSemantic::LeftUpperLeg);
+    CHECK(rig.Bones[7].Semantic == Keire::RigBoneSemantic::LeftLowerLeg);
+    CHECK(rig.Bones[11].Semantic == Keire::RigBoneSemantic::LeftFoot);
+
+    std::vector<Keire::BoneTransform> pose;
+    for (const auto& bone : bones)
+        pose.push_back(bone.BindPose);
+
+    Keire::FootGroundingRequest request;
+    request.FootHeight = 0.0F;
+    request.Contacts.push_back({4, 7, 11, {0.15F, 0.25F, 0.15F}, {0.0F, 1.0F, 0.0F}, {-0.25F, 1.0F, 1.0F}});
+    const auto solved = Keire::SolveFootGrounding(skeleton, pose, request);
+    REQUIRE(solved);
+    CHECK(solved->SolvedFeet == 1);
+    CHECK(solved->UnreachableFeet == 0);
+    const auto model = ModelMatrices(skeleton, pose);
+    CHECK(Distance(Keire::Math::TransformPoint(model[11], {}), request.Contacts[0].Position) < 0.01F);
+    CHECK(pose[4].Rotation != Keire::Quaternion{});
+    CHECK(pose[7].Rotation != Keire::Quaternion{});
+}
+
+TEST_CASE("Foot grounding uses imported bind axes to flatten animated foot pitch onto the surface")
+{
+    const auto importedFootRotation = Keire::Math::EulerDegreesToQuaternion({90.0F, 15.0F, 0.0F});
+    const std::vector<Keire::SkeletonBone> bones{
+        {"Pelvis", -1, {{0.0F, 2.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+        {"UpperLeg", 0, {{-0.25F, 0.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+        {"LowerLeg", 1, {{0.0F, -1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+        {"Foot", 2, {{0.0F, -1.0F, 0.0F}, importedFootRotation, {1.0F, 1.0F, 1.0F}}, {}}};
+    const Keire::SkeletonAsset skeleton(bones);
+    auto sampledPose = [&]
+    {
+        std::vector<Keire::BoneTransform> result;
+        for (const auto& bone : bones)
+            result.push_back(bone.BindPose);
+        return result;
+    }();
+    const auto animatedPitch = Keire::Math::EulerDegreesToQuaternion({25.0F, 0.0F, 0.0F});
+    sampledPose[3].Rotation = Keire::Math::Normalize(Multiply(animatedPitch, importedFootRotation));
+    Keire::Vector3 ignoredPosition;
+    Keire::Vector3 ignoredScale;
+    Keire::Quaternion sampledRotation;
+    REQUIRE(Keire::Math::DecomposeTransform(ModelMatrices(skeleton, sampledPose)[3], ignoredPosition, sampledRotation,
+                                            ignoredScale));
+
+    auto flatPose = sampledPose;
+    Keire::FootGroundingRequest request;
+    request.FootHeight = 0.0F;
+    request.Contacts.push_back({1, 2, 3, {0.15F, 0.25F, 0.15F}, {0.0F, 1.0F, 0.0F}, {-0.25F, 1.0F, 1.0F}});
+    REQUIRE(Keire::SolveFootGrounding(skeleton, flatPose, request));
+    Keire::Quaternion flatRotation;
+    REQUIRE(Keire::Math::DecomposeTransform(ModelMatrices(skeleton, flatPose)[3], ignoredPosition, flatRotation,
+                                            ignoredScale));
+    CHECK(RotationDot(flatRotation, importedFootRotation) > 0.9999F);
+    CHECK(RotationDot(flatRotation, sampledRotation) < 0.999F);
+
+    auto slopePose = sampledPose;
+    const auto slopeRotation = Keire::Math::EulerDegreesToQuaternion({0.0F, 0.0F, 30.0F});
+    request.Contacts.front().Normal = Keire::Math::TransformDirection(
+        Keire::Math::ComposeTransform({}, slopeRotation, {1.0F, 1.0F, 1.0F}), {0.0F, 1.0F, 0.0F});
+    REQUIRE(Keire::SolveFootGrounding(skeleton, slopePose, request));
+    Keire::Quaternion groundedSlopeRotation;
+    REQUIRE(Keire::Math::DecomposeTransform(ModelMatrices(skeleton, slopePose)[3], ignoredPosition,
+                                            groundedSlopeRotation, ignoredScale));
+    const auto groundedFromBind = Keire::Math::Multiply(
+        Keire::Math::ComposeTransform({}, groundedSlopeRotation, {1.0F, 1.0F, 1.0F}),
+        Keire::Math::Inverse(Keire::Math::ComposeTransform({}, importedFootRotation, {1.0F, 1.0F, 1.0F})));
+    const auto groundedSoleNormal = Keire::Math::TransformDirection(groundedFromBind, {0.0F, 1.0F, 0.0F});
+    CHECK(Distance(groundedSoleNormal, request.Contacts.front().Normal) < 0.0001F);
+}
+
+TEST_CASE("Foot grounding restores a discovered toe control to its planted bind rotation")
+{
+    const std::vector<Keire::SkeletonBone> bones{{"Pelvis", -1, {{0.0F, 2.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                 {"Upper", 0, {{-0.2F, 0.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                 {"Lower", 1, {{0.0F, -1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                 {"Ankle", 2, {{0.0F, -1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                 {"ToeControl", 3, {{0.0F, -0.1F, 0.3F}, {}, {1.0F, 1.0F, 1.0F}}, {}}};
+    const Keire::SkeletonAsset skeleton(bones);
+    std::vector<Keire::BoneTransform> pose;
+    for (const auto& bone : bones)
+        pose.push_back(bone.BindPose);
+    pose[4].Rotation = Keire::Math::EulerDegreesToQuaternion({-35.0F, 0.0F, 0.0F});
+
+    Keire::FootGroundingRequest request;
+    request.FootHeight = 0.0F;
+    Keire::FootGroundContact contact{1, 2, 3, {-0.2F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F}, {-0.2F, 1.0F, 1.0F}};
+    contact.Toe = 4;
+    request.Contacts.push_back(contact);
+    REQUIRE(Keire::SolveFootGrounding(skeleton, pose, request));
+    CHECK(RotationDot(pose[4].Rotation, bones[4].BindPose.Rotation) > 0.9999F);
+}
+
+TEST_CASE("Foot grounding restores the rig's bind-neutral pelvis offset over two planted feet")
+{
+    const std::vector<Keire::SkeletonBone> bones{{"Pelvis", -1, {{0.0F, 2.0F, 0.5F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                 {"LeftUpper", 0, {{-0.2F, 0.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                 {"LeftLower", 1, {{0.0F, -1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                 {"LeftFoot", 2, {{0.0F, -1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                 {"RightUpper", 0, {{0.2F, 0.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                 {"RightLower", 4, {{0.0F, -1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                 {"RightFoot", 5, {{0.0F, -1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}}};
+    const Keire::SkeletonAsset skeleton(bones);
+    std::vector<Keire::BoneTransform> pose;
+    for (const auto& bone : bones)
+        pose.push_back(bone.BindPose);
+
+    Keire::FootGroundingRequest request;
+    request.Pelvis = 0;
+    request.FootHeight = 0.0F;
+    request.MaximumPelvisAdjustment = 0.5F;
+    request.MaximumHorizontalPelvisAdjustment = 0.2F;
+    request.PelvisSupportRadius = 0.1F;
+    request.Contacts.push_back({1, 2, 3, {-0.2F, 0.1F, 0.0F}, {0.0F, 1.0F, 0.0F}, {-0.2F, 1.0F, 1.0F}});
+    request.Contacts.push_back({4, 5, 6, {0.2F, 0.1F, 0.0F}, {0.0F, 1.0F, 0.0F}, {0.2F, 1.0F, 1.0F}});
+
+    const auto solved = Keire::SolveFootGrounding(skeleton, pose, request);
+    REQUIRE(solved);
+    CHECK(solved->PelvisAdjustment == doctest::Approx(0.0F));
+    CHECK(solved->HorizontalPelvisAdjustment.Z == doctest::Approx(-0.2F));
+    CHECK(pose[0].Translation.Y == doctest::Approx(2.0F));
+    CHECK(pose[0].Translation.Z == doctest::Approx(0.3F));
+}
+
+TEST_CASE("Foot grounding removes bounded pelvis pitch using the rig's own torso axis")
+{
+    const std::vector<Keire::SkeletonBone> bones{{"Pelvis", -1, {{0.0F, 2.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                 {"Spine", 0, {{0.0F, 1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                 {"LeftUpper", 0, {{-0.2F, 0.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                 {"LeftLower", 2, {{0.0F, -1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                 {"LeftFoot", 3, {{0.0F, -1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                 {"RightUpper", 0, {{0.2F, 0.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                 {"RightLower", 5, {{0.0F, -1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                 {"RightFoot", 6, {{0.0F, -1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}}};
+    const Keire::SkeletonAsset skeleton(bones);
+    std::vector<Keire::BoneTransform> pose;
+    for (const auto& bone : bones)
+        pose.push_back(bone.BindPose);
+    pose[0].Rotation = Keire::Math::EulerDegreesToQuaternion({25.0F, 0.0F, 0.0F});
+    const auto before = ModelMatrices(skeleton, pose);
+    const auto beforePelvis = Keire::Math::TransformPoint(before[0], {});
+    const auto beforeTorso = Keire::Math::TransformPoint(before[1], {});
+
+    Keire::FootGroundingRequest request;
+    request.Pelvis = 0;
+    request.Torso = 1;
+    request.FootHeight = 0.0F;
+    request.MaximumPelvisAdjustment = 0.0F;
+    request.PelvisRotationWeight = 1.0F;
+    request.MaximumPelvisRotationDegrees = 10.0F;
+    request.Contacts.push_back({2, 3, 4, {-0.2F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F}, {-0.2F, 1.0F, 1.0F}});
+    request.Contacts.push_back({5, 6, 7, {0.2F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F}, {0.2F, 1.0F, 1.0F}});
+
+    const auto solved = Keire::SolveFootGrounding(skeleton, pose, request);
+    REQUIRE(solved);
+    CHECK(solved->PelvisRotationAdjustmentDegrees == doctest::Approx(10.0F).epsilon(0.01));
+    const auto after = ModelMatrices(skeleton, pose);
+    const auto afterPelvis = Keire::Math::TransformPoint(after[0], {});
+    const auto afterTorso = Keire::Math::TransformPoint(after[1], {});
+    CHECK(std::abs(afterTorso.Z - afterPelvis.Z) < std::abs(beforeTorso.Z - beforePelvis.Z));
 }
 
 TEST_CASE("Ragdoll pose transitions blend deterministically and support interruption")

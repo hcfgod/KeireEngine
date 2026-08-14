@@ -3,6 +3,7 @@
 #include "KeireClient/Editor/AssetOperationService.h"
 #include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
+#include "KeireClient/Editor/EditorRendererCapabilities.h"
 #include "KeireClient/Editor/EditorWindowPlacement.h"
 #include "KeireClient/Editor/ExternalEditorProfiles.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
@@ -44,6 +45,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <ranges>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -1016,6 +1018,13 @@ TEST_CASE("component property drawers give repeated display names stable widget 
     REQUIRE(editor.Labels.size() == 2);
     CHECK(editor.Labels[0] == "Enabled##leftArmIkEnabled");
     CHECK(editor.Labels[1] == "Enabled##rightArmIkEnabled");
+}
+
+TEST_CASE("Editor package workflows advertise every supported renderer capability")
+{
+    const auto capabilities = KeireEditor::EditorRendererCapabilities();
+    for (const auto required : {"surface", "compute", "pbr", "shader-graph", "material-graph", "vfx-graph"})
+        CHECK(std::ranges::find(capabilities, required) != capabilities.end());
 }
 
 TEST_CASE("marketplace asset imports require an explicit valid review confirmation")

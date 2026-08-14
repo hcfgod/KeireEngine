@@ -1,5 +1,7 @@
 #include "KeireClient/Editor/PackageManagerPanel.h"
 
+#include "KeireClient/Editor/EditorRendererCapabilities.h"
+
 #include "Keire/BuildInfo.h"
 #include "Keire/PlatformDirectories.h"
 
@@ -160,7 +162,7 @@ namespace KeireEditor
                 .EngineVersion = std::string(Keire::GetBuildInfo().Version),
                 .Platform = std::string(HostPlatform()),
                 .Architecture = std::string(HostArchitecture()),
-                .RendererCapabilities = {"surface", "compute"},
+                .RendererCapabilities = EditorRendererCapabilities(),
                 .VerifyMarketplaceSignature = verify,
                 .Events = [this](const Keire::ProjectPackageEvent& event) { m_LastEvent = event; }};
             m_Manager = std::make_unique<Keire::ProjectPackageManager>(std::move(specification));
@@ -170,7 +172,7 @@ namespace KeireEditor
                     .EngineVersion = std::string(Keire::GetBuildInfo().Version),
                     .Platform = std::string(HostPlatform()),
                     .Architecture = std::string(HostArchitecture()),
-                    .RendererCapabilities = {"surface", "compute"},
+                    .RendererCapabilities = EditorRendererCapabilities(),
                     .VerifyMarketplaceSignature = verify});
             const auto packageRecovery = m_Manager->RecoverInterruptedOperations();
             const auto importRecovery = m_AssetImporter->RecoverInterruptedOperations();

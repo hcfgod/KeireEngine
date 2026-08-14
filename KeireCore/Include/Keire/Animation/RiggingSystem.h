@@ -219,15 +219,21 @@ namespace Keire
         Vector3 Pole{0.0F, 0.0F, 1.0F};
         float Weight = 1.0F;
         float RotationWeight = 1.0F;
+        std::optional<std::uint32_t> Toe;
     };
 
     struct FootGroundingRequest
     {
         std::optional<std::uint32_t> Pelvis;
+        std::optional<std::uint32_t> Torso;
         std::vector<FootGroundContact> Contacts;
         float FootHeight = 0.02F;
         float PelvisWeight = 1.0F;
         float MaximumPelvisAdjustment = 0.5F;
+        float MaximumHorizontalPelvisAdjustment = 0.0F;
+        float PelvisSupportRadius = 0.0F;
+        float PelvisRotationWeight = 0.0F;
+        float MaximumPelvisRotationDegrees = 0.0F;
     };
 
     struct FootGroundingResult
@@ -235,6 +241,8 @@ namespace Keire
         std::size_t SolvedFeet = 0;
         std::size_t UnreachableFeet = 0;
         float PelvisAdjustment = 0.0F;
+        Vector3 HorizontalPelvisAdjustment;
+        float PelvisRotationAdjustmentDegrees = 0.0F;
         float MaximumPositionError = 0.0F;
     };
 

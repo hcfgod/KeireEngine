@@ -39,6 +39,9 @@ dismissed individually, and the task center can clear all finished work at once.
 hides its recovery record durably while preserving the exact journal identity needed by a later Retry or Remove action.
 Marketplace Asset Import packages open a verified file-and-conflict review in the Editor before the user confirms any
 project writes; executable-code consent and keep-local conflict choices are applied during that preflight.
+When an externally managed Editor was intentionally rebuilt or replaced in place, its Installs card exposes **Refresh
+registration**. That action validates the new package manifest and complete file inventory before the Hub adopts the
+updated metadata; unrequested on-disk changes remain reported as damaged.
 
 ## What Is Implemented
 
@@ -52,8 +55,8 @@ Kéire already includes substantial, integrated engine and authoring foundations
 - SDL3 multi-window and SDL_GPU rendering, Scene and Game views, cameras, picking, separate Shader and Material Graphs,
   Direct Materials, inherited and dynamic Material Instances, reusable material/shader functions and layers,
   Material Parameter Collections, tagged custom-shader materials, LODs,
-  spatial lighting data, animation, semantic auto-rigging, target-driven arm IK, bilateral foot grounding, VFX
-  authoring, and performance gates.
+  spatial lighting data, animation, importer-independent semantic auto-rigging, target-driven arm IK, bilateral foot
+  grounding with planted-contact locking and toe/sole alignment, VFX authoring, and performance gates.
 - Input actions and rebinding, physics, navigation, configurable mono/stereo/5.1/7.1 audio output, typed live Mix
   Console authoring, stable mixer routing, spatial sources, listener/camera fallback, priority-blended Reverb Zones,
   managed audio controls, replay/diagnostic foundations, and profiling.

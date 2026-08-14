@@ -899,6 +899,7 @@ namespace
                     break;
                 case KeireHub::HubUiCommandType::RepairManagedEditor:
                 case KeireHub::HubUiCommandType::VerifyEditor:
+                case KeireHub::HubUiCommandType::RefreshExternalEditorRegistration:
                 case KeireHub::HubUiCommandType::RemoveExternalEditor:
                 case KeireHub::HubUiCommandType::RemoveMissingManagedEditor:
                 case KeireHub::HubUiCommandType::RemoveManagedEditor:

@@ -382,6 +382,78 @@ TEST_CASE("External editor removal stays owner-thread local and does not start a
     CHECK(workflow.OperationSnapshot()->State == HubEditorManagementState::Idle);
 }
 
+TEST_CASE("External editor registration refresh atomically adopts and verifies rebuilt package metadata")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    HubController controller({.PreferenceRoot = temporary.Path() / "Preferences"});
+    REQUIRE(controller.Load(1));
+    auto installation = TestInstallation(temporary.Path() / "External", "external-a", InstallationOwnership::External);
+    installation.Health = InstallationHealth::Damaged;
+    REQUIRE(controller.Installations().Upsert(installation));
+
+    HubEditorManagementServices services;
+    services.RefreshRegistration = [](HubEditorManagementWorkItem item, const std::filesystem::path& expectedRoot,
+                                      const std::string&, const std::string&)
+    {
+        CHECK(item.Installation.Root == expectedRoot);
+        item.Installation.Version = "1.0.1";
+        item.Installation.ManifestFingerprint = KeireHubTests::Digest('c');
+        return HubResult<EditorInstallationHealthSnapshot>::Success(
+            {.Installation = std::move(item.Installation), .Health = InstallationHealth::Healthy});
+    };
+    HubEditorManagementWorkflow workflow(controller,
+                                         {.HostPlatform = "windows",
+                                          .HostArchitecture = "x86_64",
+                                          .ProbeRunning = [](const EditorInstallation&) { return false; }},
+                                         std::move(services));
+
+    REQUIRE(workflow.Execute(Command(HubUiCommandType::RefreshExternalEditorRegistration, installation)));
+    REQUIRE(PollUntilTerminal(workflow));
+
+    const auto completion = workflow.TakeCompletion();
+    REQUIRE(completion);
+    CHECK(completion->Operation == HubEditorManagementOperation::RefreshRegistration);
+    CHECK(completion->VerifiedHealth == InstallationHealth::Healthy);
+    CHECK_FALSE(completion->Failure);
+    REQUIRE(controller.Installations().Snapshot()->size() == 1);
+    const auto& refreshed = controller.Installations().Snapshot()->front();
+    CHECK(refreshed.Id == installation.Id);
+    CHECK(refreshed.Root == installation.Root);
+    CHECK(refreshed.Version == "1.0.1");
+    CHECK(refreshed.ManifestFingerprint == KeireHubTests::Digest('c'));
+    CHECK(refreshed.Health == InstallationHealth::Healthy);
+    CHECK(refreshed.LastVerifiedUnixSeconds > 0);
+}
+
+TEST_CASE("Registration refresh is offered only for external manifest-registration mismatches")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    const auto external =
+        TestInstallation(temporary.Path() / "External", "external-a", InstallationOwnership::External);
+    const auto managed = TestInstallation(temporary.Path() / "Managed", "managed-a", InstallationOwnership::Managed);
+    const auto issue = EditorInstallationIssue{.Code = EditorInstallationIssueCode::RegistrationMismatch,
+                                               .Message = "The package manifest does not match its Hub registration."};
+    const std::vector<EditorInstallationHealthSnapshot> snapshots{
+        {.Installation = external, .Health = InstallationHealth::Damaged, .Issues = {issue}},
+        {.Installation = managed, .Health = InstallationHealth::Damaged, .Issues = {issue}}};
+
+    const auto records = BuildHubEditorUiRecords(snapshots, {});
+    REQUIRE(records.size() == 2);
+    CHECK(records[0].RegistrationRefreshAvailable);
+    CHECK_FALSE(records[1].RegistrationRefreshAvailable);
+
+    HubController controller({.PreferenceRoot = temporary.Path() / "Preferences"});
+    REQUIRE(controller.Load(1));
+    REQUIRE(controller.Installations().Upsert(managed));
+    HubEditorManagementWorkflow workflow(controller, {.HostPlatform = "windows",
+                                                      .HostArchitecture = "x86_64",
+                                                      .ProbeRunning = [](const EditorInstallation&) { return false; }});
+    const auto rejected = workflow.Execute(Command(HubUiCommandType::RefreshExternalEditorRegistration, managed));
+    REQUIRE_FALSE(rejected);
+    CHECK(rejected.Error().Code == HubErrorCode::UnsafeInstallRoot);
+    CHECK(controller.Installations().Snapshot()->front().ManifestFingerprint == managed.ManifestFingerprint);
+}
+
 TEST_CASE("Missing managed editor recovery removes only its stale registration")
 {
     KeireHubTests::TemporaryDirectory temporary;

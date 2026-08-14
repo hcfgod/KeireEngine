@@ -87,7 +87,11 @@ the selected Hub appearance instead of inheriting a conflicting operating-system
 Installs lists managed and externally located editor installations with version, channel, platform/architecture, path,
 installed size, bundled .NET SDK, project/component counts, activity, and verified health. Locating an editor validates
 its schema-2 `editor-package.json`, typed editor and Asset Tool entrypoints, host identity, file inventory, and manifest
-fingerprint. External removal deletes only the Hub registration. Managed repair or removal is never authorized without
+fingerprint. If an external package was intentionally rebuilt or replaced at the same location, a registration-mismatch
+card exposes **Refresh registration**. The single-flight worker validates the new manifest's self-fingerprint, host,
+entrypoints, and complete declared inventory before the owner thread atomically replaces the saved metadata while
+preserving the registration ID and root. Ordinary refresh and verification never accept changed metadata silently.
+External removal deletes only the Hub registration. Managed repair or removal is never authorized without
 the matching unforgeable install marker and manifest fingerprint. Managed uninstall is exposed only for a healthy,
 receipt-bound installation with a complete verified inventory. Verification, repair, and removal also require both the
 Hub process tracker and the native executable-path probe to report the editor inactive; relevant process-query failures

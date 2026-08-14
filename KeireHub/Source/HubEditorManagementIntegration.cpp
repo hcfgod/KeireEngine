@@ -29,6 +29,9 @@ namespace KeireHub
         case HubUiCommandType::VerifyEditor:
             notice = "Editor verification started. Progress is available in the task center.";
             break;
+        case HubUiCommandType::RefreshExternalEditorRegistration:
+            notice = "Validating the updated external editor package before refreshing its registration.";
+            break;
         case HubUiCommandType::RepairManagedEditor:
             notice = "Checking the managed editor before repair.";
             break;
@@ -104,6 +107,20 @@ namespace KeireHub
                 notice = "Editor verification completed without a conclusive health result.";
                 noticeError = true;
                 break;
+            }
+            return;
+        }
+        if (completion->Operation == HubEditorManagementOperation::RefreshRegistration)
+        {
+            if (completion->VerifiedHealth == InstallationHealth::Healthy)
+            {
+                notice = "External editor registration refreshed and all declared files verified.";
+                noticeError = false;
+            }
+            else
+            {
+                notice = "The external editor registration was refreshed, but file verification still found damage.";
+                noticeError = true;
             }
             return;
         }

@@ -5,6 +5,47 @@ versions.
 
 ## Unreleased
 
+- Added an explicit external-editor registration refresh to the Hub's Installs page. When an intentionally rebuilt or
+  replaced package no longer matches its saved manifest metadata, the Hub can adopt the new self-consistent manifest
+  and verify its complete declared inventory without removing and locating the editor again. Packaged-editor discovery
+  now preserves and refreshes an existing same-root external registration after an in-place rebuild.
+- Fixed Play Mode IK evaluation so a missing or invalid arm target reports its diagnostic without preventing the
+  opposite arm, managed IK goals, or foot grounding from solving that frame.
+- Fixed two-bone and foot-grounding IK on imported FBX skeletons whose resolved limb joints are separated by Assimp
+  transform helper nodes. Semantic inference now prefers the authored joints, allowing knees, elbows, feet, and hands
+  to reach and orient to their targets. Ground contacts also preserve animated ankle-to-sole clearance instead of
+  placing an elevated foot joint directly on the surface.
+- Fixed grounded FBX/Mixamo feet folding around the ankle when their local Y axis follows the toe direction. Grounding
+  now derives the neutral sole from each foot's model-space bind pose, removes animated toe-up pitch relative to that
+  reference, and aligns it to the contact slope without assuming a local bone axis. Ankle-to-sole clearance now also
+  comes from the stable bind pose, preventing a raised animation frame from sinking a boot into a platform.
+- Fixed thick skinned boots sinking below grounded surfaces by including foot-weighted bind-mesh vertices in sole
+  clearance, and stabilized automatic arm IK through folded/straight singularities so elbows no longer flip for a frame.
+- Fixed grounded boots hovering by treating the authored sole offset as a minimum instead of adding it to measured boot
+  thickness, and preserved each sampled knee bend plane so terrain adaptation no longer pulls a leg toward a fixed axis.
+- Fixed grounded toes retaining animated upward curl by discovering the toe root from semantic names or skin/bind
+  topology and restoring its neutral bind rotation during contact. A bounded two-foot correction now restores the
+  rig's own bind-neutral pelvis-to-feet offset and upright pelvis-to-torso axis, removing grounding-induced body lean
+  without assuming Mixamo names or bone-local axes.
+- Added planted-foot contact locking with serialized plant/release distances. Grounded feet now reject contact-phase
+  animation drift, follow moving and rotated support entities in support-local space, then release on a deliberate lift
+  or reach limit so walking steps can continue without permanent pinning. Static-body recreation no longer detaches a
+  planted foot because support identity is tracked by scene entity rather than transient physics body ID.
+- Fixed moving-platform foot locks dragging a leg through its straight-chain singularity, leaving the character
+  hovering after release, and ignoring a platform that returned beneath a ground-planted foot. Moving supports now
+  re-anchor before overextension, hand off immediately to the surface below, and yield to a newly occluding surface;
+  automatic limb poles and two-bone reach clamps retain a stable visible bend through the transition.
+- Smoothed automatic foot-grounding acquisition, moving-support handoffs, surface-normal changes, and release back to
+  the sampled animation with a frame-rate-independent per-Animator response time. Rising surfaces remain
+  collision-safe instead of smoothing through a sole. Replaced the fixed body-uprighting strength and angle with
+  serialized **Body Lean Correction** and **Maximum Lean Correction** controls derived from each rig's semantic
+  pelvis/torso chain and bind pose.
+- Expanded automatic humanoid mapping beyond Mixamo to common DCC suffix/side conventions, anatomical bone names, and
+  an unnamed-biped bind-topology fallback. Explicit bone fallbacks remain available for ambiguous and non-humanoid
+  skeletons.
+- Fixed official Marketplace package imports being rejected for `pbr`, Shader Graph, Material Graph, or VFX Graph by
+  advertising the Editor renderer's complete supported capability set to both package workflows.
+
 ### Changed
 
 - Fixed repeated Animator Inspector labels sharing ImGui identities across left/right arm groups. Every generic component

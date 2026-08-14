@@ -690,6 +690,7 @@ namespace KeireHub
             auto id = ui.PushId(editor.Id);
             const auto shownIssues = std::min<std::size_t>(editor.HealthIssues.size(), 2);
             const float cardHeight = 160.0F + static_cast<float>(shownIssues) * 34.0F +
+                                     (editor.RegistrationRefreshAvailable ? 34.0F : 0.0F) +
                                      (editor.Running || editor.HasActiveTask || editor.ManagementBusy ? 20.0F : 0.0F);
             const bool editorBusy =
                 snapshot.EditorManagementBusy || editor.Running || editor.HasActiveTask || snapshot.BuildSupportBusy;
@@ -720,6 +721,13 @@ namespace KeireHub
                     ui.TextColored(m_Tokens.MutedText, "+" + std::to_string(editor.HealthIssues.size() - shownIssues) +
                                                            " additional verification issue(s)");
                 }
+                if (editor.RegistrationRefreshAvailable)
+                {
+                    ui.TextColoredWrapped(
+                        m_Tokens.Warning,
+                        "This external package changed. Refresh its registration only if you intentionally rebuilt "
+                        "or replaced it.");
+                }
                 if (editor.ManagementBusy)
                     ui.TextColored(m_Tokens.Accent, editor.ManagementStatus);
                 else if (editor.Running)
@@ -728,8 +736,18 @@ namespace KeireHub
                     ui.TextColored(m_Tokens.Warning, "An installation task is active.");
                 if (auto disabled = ui.BeginDisabled(editorBusy); disabled)
                 {
-                    if (ui.Button(editor.ManagementBusy ? "Checking..." : "Verify", {82.0F, 30.0F}))
-                        command = {.Type = HubUiCommandType::VerifyEditor, .ItemId = editor.Id, .Path = editor.Root};
+                    const auto label = editor.ManagementBusy                 ? "Checking..."
+                                       : editor.RegistrationRefreshAvailable ? "Refresh registration"
+                                                                             : "Verify";
+                    const auto width = editor.RegistrationRefreshAvailable ? 152.0F : 82.0F;
+                    if (ui.Button(label, {width, 30.0F}))
+                    {
+                        command = {.Type = editor.RegistrationRefreshAvailable
+                                               ? HubUiCommandType::RefreshExternalEditorRegistration
+                                               : HubUiCommandType::VerifyEditor,
+                                   .ItemId = editor.Id,
+                                   .Path = editor.Root};
+                    }
                 }
                 if (editor.RepairAvailable)
                 {

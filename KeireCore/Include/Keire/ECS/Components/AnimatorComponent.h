@@ -68,6 +68,7 @@ namespace Keire
         bool Enabled = false;
         bool AutomaticBoneMapping = true;
         bool AutomaticRaycastDistance = true;
+        bool LockPlantedFeet = true;
         std::string Pelvis = "Hips";
         std::string LeftUpperLeg = "LeftUpLeg";
         std::string LeftLowerLeg = "LeftLeg";
@@ -81,6 +82,11 @@ namespace Keire
         float RaycastDistance = 0.75F;
         float FootOffset = 0.02F;
         float MaximumPelvisAdjustment = 0.5F;
+        float PlantDistance = 0.08F;
+        float ReleaseDistance = 0.18F;
+        float ResponseTime = 0.12F;
+        float LeanCorrectionWeight = 1.0F;
+        float MaximumLeanCorrectionDegrees = 35.0F;
         float MaximumSlopeDegrees = 60.0F;
         std::uint32_t CollisionMask = ~0U;
     };

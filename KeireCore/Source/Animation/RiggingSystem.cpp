@@ -86,6 +86,14 @@ namespace Keire
             return {value.X * inverse, value.Y * inverse, value.Z * inverse, value.W * inverse};
         }
 
+        [[nodiscard]] Vector3 Rotate(const Quaternion rotation, const Vector3 value) noexcept
+        {
+            const auto normalized = Normalize(rotation);
+            const auto rotated =
+                Multiply(Multiply(normalized, {value.X, value.Y, value.Z, 0.0F}), Conjugate(normalized));
+            return {rotated.X, rotated.Y, rotated.Z};
+        }
+
         [[nodiscard]] Quaternion FromTo(const Vector3 source, const Vector3 destination) noexcept
         {
             const auto from = Normalize(source);
@@ -351,9 +359,17 @@ namespace Keire
 
         [[nodiscard]] BoneSide DetectBoneSide(const std::string_view name) noexcept
         {
-            if (Contains(name, "left") || name.ends_with('l'))
+            constexpr std::array<std::string_view, 16> leftMarkers{
+                "lupper", "llower", "larm",   "lhand",  "lleg",   "lfoot", "lthigh", "lcalf",
+                "lshin",  "lwrist", "lfemur", "ltibia", "lankle", "lknee", "lhip",   "ltalus"};
+            constexpr std::array<std::string_view, 16> rightMarkers{
+                "rupper", "rlower", "rarm",   "rhand",  "rleg",   "rfoot", "rthigh", "rcalf",
+                "rshin",  "rwrist", "rfemur", "rtibia", "rankle", "rknee", "rhip",   "rtalus"};
+            if (Contains(name, "left") || name.ends_with('l') ||
+                std::ranges::any_of(leftMarkers, [name](const auto marker) { return Contains(name, marker); }))
                 return BoneSide::Left;
-            if (Contains(name, "right") || name.ends_with('r'))
+            if (Contains(name, "right") || name.ends_with('r') ||
+                std::ranges::any_of(rightMarkers, [name](const auto marker) { return Contains(name, marker); }))
                 return BoneSide::Right;
             constexpr std::array<std::string_view, 16> prefixedBones{"upper", "lower", "arm",  "hand",  "leg",   "foot",
                                                                      "thigh", "calf",  "shin", "wrist", "front", "rear",
@@ -401,11 +417,11 @@ namespace Keire
             }
             if (side != BoneSide::None && ContainsAny(name, {"clavicle", "shoulder"}))
                 return side == BoneSide::Left ? RigBoneSemantic::LeftShoulder : RigBoneSemantic::RightShoulder;
-            if (side != BoneSide::None && ContainsAny(name, {"hand", "wrist"}))
+            if (side != BoneSide::None && ContainsAny(name, {"hand", "wrist", "carpal"}))
                 return side == BoneSide::Left ? RigBoneSemantic::LeftHand : RigBoneSemantic::RightHand;
-            if (side != BoneSide::None && ContainsAny(name, {"forearm", "lowerarm", "elbow"}))
+            if (side != BoneSide::None && ContainsAny(name, {"forearm", "lowerarm", "elbow", "radius", "ulna"}))
                 return side == BoneSide::Left ? RigBoneSemantic::LeftLowerArm : RigBoneSemantic::RightLowerArm;
-            if (side != BoneSide::None && ContainsAny(name, {"upperarm", "uparm"}) &&
+            if (side != BoneSide::None && ContainsAny(name, {"upperarm", "uparm", "humerus"}) &&
                 !ContainsAny(name, {"forearm", "lowerarm"}))
             {
                 return side == BoneSide::Left ? RigBoneSemantic::LeftUpperArm : RigBoneSemantic::RightUpperArm;
@@ -415,11 +431,14 @@ namespace Keire
             {
                 return side == BoneSide::Left ? RigBoneSemantic::LeftUpperArm : RigBoneSemantic::RightUpperArm;
             }
-            if (side != BoneSide::None && ContainsAny(name, {"foot", "ankle"}) && !Contains(name, "toe"))
+            if (side != BoneSide::None && ContainsAny(name, {"foot", "ankle", "talus"}) &&
+                !ContainsAny(name, {"toe", "metatars"}))
                 return side == BoneSide::Left ? RigBoneSemantic::LeftFoot : RigBoneSemantic::RightFoot;
-            if (side != BoneSide::None && ContainsAny(name, {"calf", "shin", "lowerleg"}))
+            if (side != BoneSide::None && ContainsAny(name, {"calf", "shin", "lowerleg", "knee", "tibia", "fibula"}))
                 return side == BoneSide::Left ? RigBoneSemantic::LeftLowerLeg : RigBoneSemantic::RightLowerLeg;
-            if (side != BoneSide::None && ContainsAny(name, {"thigh", "upperleg", "upleg"}))
+            if (side != BoneSide::None && ContainsAny(name, {"thigh", "upperleg", "upleg", "femur"}))
+                return side == BoneSide::Left ? RigBoneSemantic::LeftUpperLeg : RigBoneSemantic::RightUpperLeg;
+            if (side != BoneSide::None && Contains(name, "hip") && !ContainsAny(name, {"hips", "hiproot"}))
                 return side == BoneSide::Left ? RigBoneSemantic::LeftUpperLeg : RigBoneSemantic::RightUpperLeg;
             if (side != BoneSide::None && Contains(name, "leg") && !Contains(name, "upleg"))
                 return side == BoneSide::Left ? RigBoneSemantic::LeftLowerLeg : RigBoneSemantic::RightLowerLeg;
@@ -553,6 +572,183 @@ namespace Keire
         {
             return Subtract(value, Multiply(normal, Dot(value, normal)));
         }
+
+        [[nodiscard]] bool IsDescendantOf(const SkeletonAsset& skeleton, const std::uint32_t descendant,
+                                          const std::uint32_t ancestor) noexcept
+        {
+            if (descendant >= skeleton.Bones().size() || ancestor >= skeleton.Bones().size() || descendant == ancestor)
+                return false;
+            auto current = skeleton.Bones()[descendant].Parent;
+            for (std::size_t depth = 0; current >= 0 && depth < skeleton.Bones().size(); ++depth)
+            {
+                if (current == static_cast<std::int32_t>(ancestor))
+                    return true;
+                if (static_cast<std::size_t>(current) >= skeleton.Bones().size())
+                    return false;
+                current = skeleton.Bones()[static_cast<std::size_t>(current)].Parent;
+            }
+            return false;
+        }
+
+        struct InferredLegChain final
+        {
+            std::uint32_t Upper = 0;
+            std::uint32_t Lower = 0;
+            std::uint32_t Foot = 0;
+            bool Valid = false;
+        };
+
+        [[nodiscard]] std::optional<std::uint32_t> MeaningfulAncestor(const SkeletonAsset& skeleton,
+                                                                      const std::span<const Matrix4> bindWorld,
+                                                                      std::uint32_t child) noexcept
+        {
+            const auto childPosition = Math::TransformPoint(bindWorld[child], {});
+            for (std::size_t depth = 0; depth < skeleton.Bones().size(); ++depth)
+            {
+                const auto parent = skeleton.Bones()[child].Parent;
+                if (parent < 0 || static_cast<std::size_t>(parent) >= skeleton.Bones().size())
+                    return std::nullopt;
+                child = static_cast<std::uint32_t>(parent);
+                if (Length(Subtract(Math::TransformPoint(bindWorld[child], {}), childPosition)) > 0.00001F)
+                    return child;
+            }
+            return std::nullopt;
+        }
+
+        [[nodiscard]] InferredLegChain InferLegFromEndpoint(const SkeletonAsset& skeleton,
+                                                            const std::span<const Matrix4> bindWorld,
+                                                            std::uint32_t endpoint) noexcept
+        {
+            auto foot = endpoint;
+            for (std::size_t depth = 0; depth < skeleton.Bones().size(); ++depth)
+            {
+                const auto parent = skeleton.Bones()[foot].Parent;
+                if (parent < 0 || static_cast<std::size_t>(parent) >= skeleton.Bones().size())
+                    break;
+                const auto footPosition = Math::TransformPoint(bindWorld[foot], {});
+                const auto parentPosition = Math::TransformPoint(bindWorld[static_cast<std::size_t>(parent)], {});
+                const auto delta = Subtract(footPosition, parentPosition);
+                const auto distance = Length(delta);
+                if (distance > 0.00001F && std::abs(delta.Y) >= distance * 0.55F)
+                    break;
+                foot = static_cast<std::uint32_t>(parent);
+            }
+
+            const auto lower = MeaningfulAncestor(skeleton, bindWorld, foot);
+            const auto upper = lower ? MeaningfulAncestor(skeleton, bindWorld, *lower) : std::nullopt;
+            if (!lower || !upper)
+                return {};
+            const auto upperPosition = Math::TransformPoint(bindWorld[*upper], {});
+            const auto lowerPosition = Math::TransformPoint(bindWorld[*lower], {});
+            const auto footPosition = Math::TransformPoint(bindWorld[foot], {});
+            if (upperPosition.Y <= lowerPosition.Y || lowerPosition.Y <= footPosition.Y)
+                return {};
+            return {*upper, *lower, foot, true};
+        }
+
+        void InferUnnamedHumanoidLegs(const SkeletonAsset& skeleton, RigDefinition& result,
+                                      std::unordered_set<RigBoneSemantic>& assigned)
+        {
+            const auto leftMissing = !assigned.contains(RigBoneSemantic::LeftUpperLeg) &&
+                                     !assigned.contains(RigBoneSemantic::LeftLowerLeg) &&
+                                     !assigned.contains(RigBoneSemantic::LeftFoot);
+            const auto rightMissing = !assigned.contains(RigBoneSemantic::RightUpperLeg) &&
+                                      !assigned.contains(RigBoneSemantic::RightLowerLeg) &&
+                                      !assigned.contains(RigBoneSemantic::RightFoot);
+            if (!leftMissing && !rightMissing)
+                return;
+
+            std::vector<BoneTransform> bindPose;
+            bindPose.reserve(skeleton.Bones().size());
+            std::ranges::transform(skeleton.Bones(), std::back_inserter(bindPose), &SkeletonBone::BindPose);
+            const auto bindWorld = WorldMatrices(skeleton, bindPose);
+            if (bindWorld.empty())
+                return;
+
+            auto minimumY = std::numeric_limits<float>::max();
+            auto maximumY = std::numeric_limits<float>::lowest();
+            auto centerX = 0.0F;
+            for (std::size_t index = 0; index < skeleton.Bones().size(); ++index)
+            {
+                const auto position = Math::TransformPoint(bindWorld[index], {});
+                minimumY = std::min(minimumY, position.Y);
+                maximumY = std::max(maximumY, position.Y);
+                if (skeleton.Bones()[index].Parent < 0)
+                    centerX = position.X;
+            }
+            const auto lowThreshold = minimumY + std::max((maximumY - minimumY) * 0.2F, 0.0001F);
+            const auto findEndpoint = [&](const bool left) -> std::optional<std::uint32_t>
+            {
+                std::optional<std::uint32_t> endpoint;
+                float bestHeight = std::numeric_limits<float>::max();
+                float bestLateral = 0.0F;
+                for (std::uint32_t index = 0; index < skeleton.Bones().size(); ++index)
+                {
+                    const auto position = Math::TransformPoint(bindWorld[index], {});
+                    const auto lateral = position.X - centerX;
+                    if (position.Y > lowThreshold || (left ? lateral >= -0.0001F : lateral <= 0.0001F))
+                        continue;
+                    if (!endpoint || position.Y < bestHeight - 0.00001F ||
+                        (std::abs(position.Y - bestHeight) <= 0.00001F && std::abs(lateral) > bestLateral))
+                    {
+                        endpoint = index;
+                        bestHeight = position.Y;
+                        bestLateral = std::abs(lateral);
+                    }
+                }
+                return endpoint;
+            };
+
+            const auto infer = [&](const bool left)
+            {
+                const auto endpoint = findEndpoint(left);
+                return endpoint ? InferLegFromEndpoint(skeleton, bindWorld, *endpoint) : InferredLegChain{};
+            };
+            const auto left = leftMissing ? infer(true) : InferredLegChain{};
+            const auto right = rightMissing ? infer(false) : InferredLegChain{};
+            const auto assign = [&](const std::uint32_t bone, const RigBoneSemantic semantic)
+            {
+                if (bone >= result.Bones.size() || result.Bones[bone].Semantic != RigBoneSemantic::None ||
+                    assigned.contains(semantic))
+                    return;
+                result.Bones[bone].Semantic = semantic;
+                result.Bones[bone].Required = true;
+                assigned.insert(semantic);
+            };
+            if (left.Valid)
+            {
+                assign(left.Upper, RigBoneSemantic::LeftUpperLeg);
+                assign(left.Lower, RigBoneSemantic::LeftLowerLeg);
+                assign(left.Foot, RigBoneSemantic::LeftFoot);
+            }
+            if (right.Valid)
+            {
+                assign(right.Upper, RigBoneSemantic::RightUpperLeg);
+                assign(right.Lower, RigBoneSemantic::RightLowerLeg);
+                assign(right.Foot, RigBoneSemantic::RightFoot);
+            }
+
+            if (!assigned.contains(RigBoneSemantic::Pelvis) && left.Valid && right.Valid)
+            {
+                std::set<std::uint32_t> leftAncestors;
+                auto current = static_cast<std::int32_t>(left.Upper);
+                while (current >= 0 && static_cast<std::size_t>(current) < skeleton.Bones().size())
+                {
+                    leftAncestors.insert(static_cast<std::uint32_t>(current));
+                    current = skeleton.Bones()[static_cast<std::size_t>(current)].Parent;
+                }
+                current = skeleton.Bones()[right.Upper].Parent;
+                while (current >= 0 && static_cast<std::size_t>(current) < skeleton.Bones().size())
+                {
+                    if (leftAncestors.contains(static_cast<std::uint32_t>(current)))
+                    {
+                        assign(static_cast<std::uint32_t>(current), RigBoneSemantic::Pelvis);
+                        break;
+                    }
+                    current = skeleton.Bones()[static_cast<std::size_t>(current)].Parent;
+                }
+            }
+        }
     } // namespace
 
     RigDefinitionAsset::RigDefinitionAsset(RigDefinition definition) : m_Definition(std::move(definition)) {}
@@ -619,19 +815,32 @@ namespace Keire
         result.Skinning = skinning;
         result.MaximumInfluences = maximumInfluences;
         result.Bones.reserve(skeleton.Bones().size());
-        std::unordered_set<RigBoneSemantic> assigned;
         for (const auto& bone : skeleton.Bones())
+            result.Bones.push_back({RigBoneSemantic::None, bone.Name, bone.Parent, bone.BindPose, false});
+
+        std::unordered_set<RigBoneSemantic> assigned;
+        const auto inferPass = [&](const bool helpers)
         {
-            const auto normalized = NormalizeBoneName(bone.Name);
-            auto semantic = profile == RigProfileType::Quadruped ? ClassifyQuadrupedBone(normalized, assigned)
-                                                                 : ClassifyHumanoidBone(normalized, assigned);
-            if (semantic != RigBoneSemantic::None && assigned.contains(semantic))
-                semantic = RigBoneSemantic::None;
-            if (semantic != RigBoneSemantic::None)
+            for (std::size_t index = 0; index < skeleton.Bones().size(); ++index)
+            {
+                const auto& bone = skeleton.Bones()[index];
+                if ((bone.Name.find("_$AssimpFbx$_") != std::string::npos) != helpers)
+                    continue;
+                const auto normalized = NormalizeBoneName(bone.Name);
+                const auto semantic = profile == RigProfileType::Quadruped ? ClassifyQuadrupedBone(normalized, assigned)
+                                                                           : ClassifyHumanoidBone(normalized, assigned);
+                if (semantic == RigBoneSemantic::None || assigned.contains(semantic))
+                    continue;
                 assigned.insert(semantic);
-            result.Bones.push_back(
-                {semantic, bone.Name, bone.Parent, bone.BindPose, semantic != RigBoneSemantic::None});
-        }
+                result.Bones[index].Semantic = semantic;
+                result.Bones[index].Required = true;
+            }
+        };
+        inferPass(false);
+        inferPass(true);
+
+        if (profile == RigProfileType::Humanoid)
+            InferUnnamedHumanoidLegs(skeleton, result, assigned);
 
         if (!assigned.contains(RigBoneSemantic::Root))
         {
@@ -1175,9 +1384,9 @@ namespace Keire
     {
         if (localPose.size() != skeleton.Bones().size() || request.Root >= localPose.size() ||
             request.Middle >= localPose.size() || request.End >= localPose.size() ||
-            skeleton.Bones()[request.Middle].Parent != static_cast<std::int32_t>(request.Root) ||
-            skeleton.Bones()[request.End].Parent != static_cast<std::int32_t>(request.Middle) ||
-            !Math::IsFinite(request.Target) || !Math::IsFinite(request.Pole) || !std::isfinite(request.Weight) ||
+            !IsDescendantOf(skeleton, request.Middle, request.Root) ||
+            !IsDescendantOf(skeleton, request.End, request.Middle) || !Math::IsFinite(request.Target) ||
+            !Math::IsFinite(request.Pole) || !std::isfinite(request.Weight) ||
             (request.EndRotation &&
              (!Math::IsFinite(*request.EndRotation) || Math::Length(*request.EndRotation) <= Epsilon)) ||
             !std::isfinite(request.EndRotationWeight))
@@ -1202,11 +1411,20 @@ namespace Keire
         if (upperLength <= Epsilon || lowerLength <= Epsilon)
             return false;
 
-        auto targetDelta = Subtract(request.Target, rootPosition);
-        if (Length(targetDelta) <= Epsilon)
+        const auto requestedDelta = Subtract(request.Target, rootPosition);
+        const auto requestedDistance = Length(requestedDelta);
+        auto targetDelta = requestedDelta;
+        if (requestedDistance <= Epsilon)
+        {
             targetDelta = Subtract(endPosition, rootPosition);
-        const auto targetDistance = std::clamp(Length(targetDelta), std::abs(upperLength - lowerLength) + Epsilon,
-                                               upperLength + lowerLength - Epsilon);
+            if (Length(targetDelta) <= Epsilon)
+                targetDelta = Subtract(middlePosition, rootPosition);
+        }
+        const auto singularityMargin = std::min(std::max((upperLength + lowerLength) * 0.0025F, Epsilon),
+                                                std::min(upperLength, lowerLength) * 0.25F);
+        const auto targetDistance =
+            std::clamp(requestedDistance, std::abs(upperLength - lowerLength) + singularityMargin,
+                       upperLength + lowerLength - singularityMargin);
         const auto forward = Normalize(targetDelta);
         auto bendVector = ProjectOntoPlane(Subtract(request.Pole, rootPosition), forward);
         if (Length(bendVector) <= Epsilon)
@@ -1327,30 +1545,91 @@ namespace Keire
             (request.Pelvis && *request.Pelvis >= localPose.size()) || !std::isfinite(request.FootHeight) ||
             request.FootHeight < 0.0F || !std::isfinite(request.PelvisWeight) || request.PelvisWeight < 0.0F ||
             request.PelvisWeight > 1.0F || !std::isfinite(request.MaximumPelvisAdjustment) ||
-            request.MaximumPelvisAdjustment < 0.0F)
+            request.MaximumPelvisAdjustment < 0.0F || !std::isfinite(request.MaximumHorizontalPelvisAdjustment) ||
+            request.MaximumHorizontalPelvisAdjustment < 0.0F || !std::isfinite(request.PelvisSupportRadius) ||
+            request.PelvisSupportRadius < 0.0F || (request.Torso && *request.Torso >= localPose.size()) ||
+            (request.Torso && !request.Pelvis) || !std::isfinite(request.PelvisRotationWeight) ||
+            request.PelvisRotationWeight < 0.0F || request.PelvisRotationWeight > 1.0F ||
+            !std::isfinite(request.MaximumPelvisRotationDegrees) || request.MaximumPelvisRotationDegrees < 0.0F ||
+            request.MaximumPelvisRotationDegrees > 180.0F)
+            return std::nullopt;
+        if (request.Torso && !IsDescendantOf(skeleton, *request.Torso, *request.Pelvis))
             return std::nullopt;
 
         std::set<std::uint32_t> feet;
+        std::set<std::uint32_t> toes;
         for (const auto& contact : request.Contacts)
         {
             if (contact.UpperLeg >= localPose.size() || contact.LowerLeg >= localPose.size() ||
-                contact.Foot >= localPose.size() ||
-                skeleton.Bones()[contact.LowerLeg].Parent != static_cast<std::int32_t>(contact.UpperLeg) ||
-                skeleton.Bones()[contact.Foot].Parent != static_cast<std::int32_t>(contact.LowerLeg) ||
-                !feet.insert(contact.Foot).second || !Math::IsFinite(contact.Position) ||
-                !Math::IsFinite(contact.Normal) || Length(contact.Normal) <= Epsilon || !Math::IsFinite(contact.Pole) ||
-                !std::isfinite(contact.Weight) || contact.Weight < 0.0F || contact.Weight > 1.0F ||
-                !std::isfinite(contact.RotationWeight) || contact.RotationWeight < 0.0F ||
-                contact.RotationWeight > 1.0F)
+                contact.Foot >= localPose.size() || !IsDescendantOf(skeleton, contact.LowerLeg, contact.UpperLeg) ||
+                !IsDescendantOf(skeleton, contact.Foot, contact.LowerLeg) || !feet.insert(contact.Foot).second ||
+                !Math::IsFinite(contact.Position) || !Math::IsFinite(contact.Normal) ||
+                Length(contact.Normal) <= Epsilon || !Math::IsFinite(contact.Pole) || !std::isfinite(contact.Weight) ||
+                contact.Weight < 0.0F || contact.Weight > 1.0F || !std::isfinite(contact.RotationWeight) ||
+                contact.RotationWeight < 0.0F || contact.RotationWeight > 1.0F ||
+                (contact.Toe &&
+                 (*contact.Toe >= localPose.size() || !IsDescendantOf(skeleton, *contact.Toe, contact.Foot) ||
+                  !toes.insert(*contact.Toe).second)))
                 return std::nullopt;
         }
 
         std::vector<BoneTransform> working(localPose.begin(), localPose.end());
+        const auto sampledWorld = WorldMatrices(skeleton, working);
+        std::vector<BoneTransform> bindPose;
+        bindPose.reserve(skeleton.Bones().size());
+        std::ranges::transform(skeleton.Bones(), std::back_inserter(bindPose), &SkeletonBone::BindPose);
+        const auto bindWorld = WorldMatrices(skeleton, bindPose);
+        std::vector<Quaternion> sampledFootRotations;
+        std::vector<Vector3> sampledSoleNormals;
+        sampledFootRotations.reserve(request.Contacts.size());
+        sampledSoleNormals.reserve(request.Contacts.size());
+        for (const auto& contact : request.Contacts)
+        {
+            Quaternion sampledRotation;
+            Quaternion bindRotation;
+            if (!MatrixRotation(sampledWorld[contact.Foot], sampledRotation) ||
+                !MatrixRotation(bindWorld[contact.Foot], bindRotation))
+                return std::nullopt;
+            sampledFootRotations.push_back(sampledRotation);
+            const auto bindToSampled = Multiply(Normalize(sampledRotation), Conjugate(Normalize(bindRotation)));
+            sampledSoleNormals.push_back(Normalize(Rotate(bindToSampled, {0.0F, 1.0F, 0.0F})));
+        }
+
         FootGroundingResult result;
         if (request.Pelvis && request.PelvisWeight > 0.0F)
         {
+            if (request.Torso && request.PelvisRotationWeight > 0.0F && request.MaximumPelvisRotationDegrees > 0.0F)
+            {
+                const auto sampledPelvis = Math::TransformPoint(sampledWorld[*request.Pelvis], {});
+                const auto sampledTorso = Math::TransformPoint(sampledWorld[*request.Torso], {});
+                const auto bindPelvis = Math::TransformPoint(bindWorld[*request.Pelvis], {});
+                const auto bindTorso = Math::TransformPoint(bindWorld[*request.Torso], {});
+                Vector3 averageNormal;
+                for (const auto& contact : request.Contacts)
+                    averageNormal = Add(averageNormal, Normalize(contact.Normal));
+                averageNormal = Normalize(averageNormal);
+                const auto slopeRotation = FromTo({0.0F, 1.0F, 0.0F}, averageNormal);
+                const auto desiredTorsoDirection = Rotate(slopeRotation, Normalize(Subtract(bindTorso, bindPelvis)));
+                auto correction = FromTo(Subtract(sampledTorso, sampledPelvis), desiredTorsoDirection);
+                correction = Normalize(correction);
+                const auto angleRadians = 2.0F * std::acos(std::clamp(std::abs(correction.W), 0.0F, 1.0F));
+                constexpr float RadiansPerDegree = 0.01745329251994329577F;
+                const auto maximumRadians = request.MaximumPelvisRotationDegrees * RadiansPerDegree;
+                if (angleRadians > Epsilon)
+                {
+                    correction = Nlerp({}, correction, std::min(1.0F, maximumRadians / angleRadians));
+                    if (!ApplyBoneModelRotationDelta(skeleton, working, *request.Pelvis, correction,
+                                                     request.PelvisRotationWeight))
+                    {
+                        return std::nullopt;
+                    }
+                    result.PelvisRotationAdjustmentDegrees =
+                        std::min(angleRadians, maximumRadians) / RadiansPerDegree * request.PelvisRotationWeight;
+                }
+            }
+
             const auto world = WorldMatrices(skeleton, working);
-            float requestedAdjustment = request.MaximumPelvisAdjustment;
+            float requestedAdjustment = 0.0F;
             for (const auto& contact : request.Contacts)
             {
                 const auto current = Math::TransformPoint(world[contact.Foot], {});
@@ -1358,9 +1637,38 @@ namespace Keire
                 requestedAdjustment = std::min(requestedAdjustment, target.Y - current.Y);
             }
             result.PelvisAdjustment =
-                std::clamp(requestedAdjustment, -request.MaximumPelvisAdjustment, request.MaximumPelvisAdjustment) *
-                request.PelvisWeight;
-            Vector3 localAdjustment{0.0F, result.PelvisAdjustment, 0.0F};
+                std::clamp(requestedAdjustment, -request.MaximumPelvisAdjustment, 0.0F) * request.PelvisWeight;
+
+            if (request.Contacts.size() >= 2 && request.MaximumHorizontalPelvisAdjustment > 0.0F)
+            {
+                Vector3 bindFootCenter;
+                Vector3 targetFootCenter;
+                for (const auto& contact : request.Contacts)
+                {
+                    bindFootCenter = Add(bindFootCenter, Math::TransformPoint(bindWorld[contact.Foot], {}));
+                    targetFootCenter =
+                        Add(targetFootCenter,
+                            Add(contact.Position, Multiply(Normalize(contact.Normal), request.FootHeight)));
+                }
+                const auto inverseContactCount = 1.0F / static_cast<float>(request.Contacts.size());
+                bindFootCenter = Multiply(bindFootCenter, inverseContactCount);
+                targetFootCenter = Multiply(targetFootCenter, inverseContactCount);
+                const auto bindPelvis = Math::TransformPoint(bindWorld[*request.Pelvis], {});
+                const auto currentPelvis = Math::TransformPoint(world[*request.Pelvis], {});
+                const auto desiredPelvis = Add(targetFootCenter, Subtract(bindPelvis, bindFootCenter));
+                const Vector3 towardBindNeutral{desiredPelvis.X - currentPelvis.X, 0.0F,
+                                                desiredPelvis.Z - currentPelvis.Z};
+                const auto distance = Length(towardBindNeutral);
+                if (distance > request.PelvisSupportRadius)
+                {
+                    const auto correction =
+                        std::min(distance - request.PelvisSupportRadius, request.MaximumHorizontalPelvisAdjustment) *
+                        request.PelvisWeight;
+                    result.HorizontalPelvisAdjustment = Multiply(Normalize(towardBindNeutral), correction);
+                }
+            }
+
+            auto localAdjustment = Add(result.HorizontalPelvisAdjustment, {0.0F, result.PelvisAdjustment, 0.0F});
             const auto parent = skeleton.Bones()[*request.Pelvis].Parent;
             if (parent >= 0)
             {
@@ -1377,19 +1685,25 @@ namespace Keire
             working[*request.Pelvis].Translation = Add(working[*request.Pelvis].Translation, localAdjustment);
         }
 
-        for (const auto& contact : request.Contacts)
+        for (std::size_t contactIndex = 0; contactIndex < request.Contacts.size(); ++contactIndex)
         {
+            const auto& contact = request.Contacts[contactIndex];
             const auto normal = Normalize(contact.Normal);
             const auto target = Add(contact.Position, Multiply(normal, request.FootHeight));
             if (!SolveTwoBoneIk(
                     skeleton, working,
                     {contact.UpperLeg, contact.LowerLeg, contact.Foot, target, contact.Pole, contact.Weight}))
                 return std::nullopt;
-            const auto world = WorldMatrices(skeleton, working);
-            const auto currentUp = Math::TransformDirection(world[contact.Foot], {0.0F, 1.0F, 0.0F});
-            if (!ApplyBoneModelRotationDelta(skeleton, working, contact.Foot, FromTo(currentUp, normal),
-                                             contact.Weight * contact.RotationWeight))
+            const auto surfaceAlignment = FromTo(sampledSoleNormals[contactIndex], normal);
+            const auto desiredFootRotation = Multiply(surfaceAlignment, sampledFootRotations[contactIndex]);
+            if (!SetBoneModelRotation(skeleton, working, contact.Foot, desiredFootRotation,
+                                      contact.Weight * contact.RotationWeight))
                 return std::nullopt;
+            if (contact.Toe)
+            {
+                working[*contact.Toe].Rotation = Nlerp(working[*contact.Toe].Rotation, bindPose[*contact.Toe].Rotation,
+                                                       contact.Weight * contact.RotationWeight);
+            }
             const auto solvedWorld = WorldMatrices(skeleton, working);
             const auto solvedPosition = Math::TransformPoint(solvedWorld[contact.Foot], {});
             const auto positionError = Length(Subtract(solvedPosition, target));

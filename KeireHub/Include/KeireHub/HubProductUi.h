@@ -38,6 +38,7 @@ namespace KeireHub
         bool Healthy = false;
         bool Missing = false;
         bool RepairAvailable = false;
+        bool RegistrationRefreshAvailable = false;
         std::string HealthLabel = "Unknown";
         std::vector<std::string> HealthIssues;
         bool Running = false;
@@ -272,6 +273,7 @@ namespace KeireHub
         InstallEditor,
         ManageBuildSupport,
         VerifyEditor,
+        RefreshExternalEditorRegistration,
         RepairManagedEditor,
         RemoveExternalEditor,
         RemoveMissingManagedEditor,

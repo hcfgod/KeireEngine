@@ -192,6 +192,20 @@ namespace KeireHub
         if (const auto found = std::ranges::find(*existing, installation.Root, &EditorInstallation::Root);
             found != existing->end())
         {
+            if (found->Ownership != InstallationOwnership::External)
+            {
+                return HubResult<std::optional<EditorInstallation>>::Failure(
+                    {.Code = HubErrorCode::UnsafeInstallRoot,
+                     .Message = "The packaged editor location belongs to a managed installation.",
+                     .AffectedItem = found->Id});
+            }
+            if (found->ManifestFingerprint != installation.ManifestFingerprint)
+            {
+                installation.Id = found->Id;
+                if (const auto status = controller.Installations().Upsert(installation); !status)
+                    return HubResult<std::optional<EditorInstallation>>::Failure(status.Error());
+                return HubResult<std::optional<EditorInstallation>>::Success(std::move(installation));
+            }
             return HubResult<std::optional<EditorInstallation>>::Success(*found);
         }
         if (const auto status = controller.Installations().Upsert(installation); !status)

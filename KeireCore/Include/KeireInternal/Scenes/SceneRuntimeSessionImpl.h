@@ -17,6 +17,7 @@
 #include "Keire/Scenes/ScenePresentationRuntime.h"
 #include "Keire/Vfx/VfxSystem.h"
 #include "Keire/Vfx/VfxVolumeAsset.h"
+#include "KeireInternal/Scenes/AnimationIkPasses.h"
 #include "KeireInternal/Scenes/FootGroundingSpace.h"
 
 #include <algorithm>
@@ -109,6 +110,18 @@ namespace Keire
       public:
         struct AnimationRuntimeState final
         {
+            struct FootPlantRuntimeState final
+            {
+                Detail::AutomaticFootPlantState Plant;
+                std::optional<EntityId> Support;
+                Detail::FootPlantSupportAnchor SupportAnchor;
+                Detail::FootPlantSupportAnchor SupportSurfaceAnchor;
+                Vector3 SurfacePosition;
+                Vector3 SurfaceNormal{0.0F, 1.0F, 0.0F};
+                Vector3 ReleasePosition;
+                Vector3 ReleaseNormal{0.0F, 1.0F, 0.0F};
+            };
+
             struct RetargetedClip final
             {
                 AssetId SourceSkeleton;
@@ -134,6 +147,19 @@ namespace Keire
             std::uint64_t DependencyGraphRevision = 0;
             std::uint64_t SkeletonRevision = 0;
             std::string DependencyDiagnostic;
+            Detail::AutomaticLimbIkState LeftArmIkState;
+            Detail::AutomaticLimbIkState RightArmIkState;
+            Detail::AutomaticLimbIkState LeftFootIkState;
+            Detail::AutomaticLimbIkState RightFootIkState;
+            Detail::AutomaticFootGroundingSmoothingState LeftFootGroundingSmoothingState;
+            Detail::AutomaticFootGroundingSmoothingState RightFootGroundingSmoothingState;
+            FootPlantRuntimeState LeftFootPlantState;
+            FootPlantRuntimeState RightFootPlantState;
+            AssetId FootClearanceMesh;
+            std::uint64_t FootClearanceSkinRevision = 0;
+            std::uint64_t FootClearanceMeshRevision = 0;
+            std::map<std::uint32_t, std::optional<float>> FootMeshClearances;
+            std::map<std::uint32_t, std::optional<std::uint32_t>> FootToeBones;
         };
 
         struct PhysicsRuntimeState final
@@ -420,7 +446,8 @@ namespace Keire
                                                      const AnimatorComponent& animator,
                                                      const std::span<BoneTransform> localPose,
                                                      const std::map<std::string, std::uint32_t, std::less<>>& names,
-                                                     const std::map<RigBoneSemantic, std::uint32_t>& semantics)
+                                                     const std::map<RigBoneSemantic, std::uint32_t>& semantics,
+                                                     AnimationRuntimeState& runtimeState)
         {
             const auto animatorTransform = entity.GetComponent<TransformComponent>();
             if (!animatorTransform)
@@ -435,10 +462,14 @@ namespace Keire
                 return "Authored arm IK could not invert the Animator world transform.";
             }
 
-            const auto solve = [&](const AnimatorLimbIkSettings& settings, const bool left) -> std::string
+            const auto solve = [&](const AnimatorLimbIkSettings& settings, const bool left,
+                                   Detail::AutomaticLimbIkState& stability) -> std::string
             {
                 if (!settings.Enabled)
+                {
+                    stability = {};
                     return {};
+                }
                 const auto side = left ? std::string_view("Left") : std::string_view("Right");
                 if (!settings.Target)
                     return std::string(side) + " arm IK is enabled but has no target entity.";
@@ -470,6 +501,7 @@ namespace Keire
                 Vector3 pole;
                 if (settings.Pole)
                 {
+                    stability = {};
                     const auto poleEntity = Runtime->FindEntity(settings.Pole);
                     const auto poleTransform =
                         poleEntity ? poleEntity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
@@ -483,30 +515,8 @@ namespace Keire
                     const auto rootPosition = Math::TransformPoint(modelBones[*root], {});
                     const auto middlePosition = Math::TransformPoint(modelBones[*middle], {});
                     const auto endPosition = Math::TransformPoint(modelBones[*end], {});
-                    const Vector3 forward{endPosition.X - rootPosition.X, endPosition.Y - rootPosition.Y,
-                                          endPosition.Z - rootPosition.Z};
-                    const auto lengthSquared = forward.X * forward.X + forward.Y * forward.Y + forward.Z * forward.Z;
-                    Vector3 bend{middlePosition.X - rootPosition.X, middlePosition.Y - rootPosition.Y,
-                                 middlePosition.Z - rootPosition.Z};
-                    if (lengthSquared > 0.000001F)
-                    {
-                        const auto projection =
-                            (bend.X * forward.X + bend.Y * forward.Y + bend.Z * forward.Z) / lengthSquared;
-                        bend = {bend.X - forward.X * projection, bend.Y - forward.Y * projection,
-                                bend.Z - forward.Z * projection};
-                    }
-                    const auto bendLength = std::sqrt(bend.X * bend.X + bend.Y * bend.Y + bend.Z * bend.Z);
-                    const auto reach = std::max(std::sqrt(lengthSquared), 0.25F);
-                    if (bendLength > 0.000001F)
-                    {
-                        pole = {middlePosition.X + bend.X / bendLength * reach,
-                                middlePosition.Y + bend.Y / bendLength * reach,
-                                middlePosition.Z + bend.Z / bendLength * reach};
-                    }
-                    else
-                    {
-                        pole = {middlePosition.X, middlePosition.Y, middlePosition.Z - reach};
-                    }
+                    pole =
+                        Detail::StableAutomaticLimbPole(rootPosition, middlePosition, endPosition, target, stability);
                 }
 
                 TwoBoneIkRequest request{*root, *middle, *end, target, pole, settings.PositionWeight};
@@ -517,9 +527,9 @@ namespace Keire
                 return {};
             };
 
-            if (const auto diagnostic = solve(animator.LeftArmIk(), true); !diagnostic.empty())
-                return diagnostic;
-            return solve(animator.RightArmIk(), false);
+            return Detail::EvaluateIndependentAnimationIkPasses(
+                [&] { return solve(animator.LeftArmIk(), true, runtimeState.LeftArmIkState); },
+                [&] { return solve(animator.RightArmIk(), false, runtimeState.RightArmIkState); });
         }
 
         [[nodiscard]] static std::string ApplyIkGoals(const Entity& entity, const SkeletonAsset& skeleton,
@@ -585,14 +595,23 @@ namespace Keire
         }
 
         [[nodiscard]] std::string ApplyFootGrounding(const Entity& entity, const SkeletonAsset& skeleton,
-                                                     const AnimatorComponent& animator,
+                                                     const AnimatorComponent& animator, const float deltaSeconds,
                                                      std::span<BoneTransform> localPose,
                                                      const std::map<std::string, std::uint32_t, std::less<>>& indices,
-                                                     const std::map<RigBoneSemantic, std::uint32_t>& semantics)
+                                                     const std::map<RigBoneSemantic, std::uint32_t>& semantics,
+                                                     AnimationRuntimeState& runtimeState)
         {
             const auto& settings = animator.FootGrounding();
             if (!settings.Enabled)
+            {
+                runtimeState.LeftFootIkState = {};
+                runtimeState.RightFootIkState = {};
+                runtimeState.LeftFootGroundingSmoothingState = {};
+                runtimeState.RightFootGroundingSmoothingState = {};
+                runtimeState.LeftFootPlantState = {};
+                runtimeState.RightFootPlantState = {};
                 return {};
+            }
             if (!PhysicsWorldService)
                 return "Foot grounding requires an active physics world.";
             const auto transform = entity.GetComponent<TransformComponent>();
@@ -637,26 +656,92 @@ namespace Keire
             request.PelvisWeight = settings.Weight;
             request.MaximumPelvisAdjustment =
                 Detail::WorldVerticalDistanceToModel(worldToModel, settings.MaximumPelvisAdjustment);
-            for (const auto& chain : chains)
+            float totalLegLength = 0.0F;
+            std::size_t legCount = 0;
+            float maximumGroundingBlend = 0.0F;
+            float minimumGroundingBlend = 1.0F;
+            Ref<const SkinnedMeshAsset> skin;
+            Ref<const MeshAsset> skinMesh;
+            if (Assets && animator.SkinnedMesh())
             {
+                const auto skinHandle = Assets->Load<SkinnedMeshAsset>(animator.SkinnedMesh(), AssetPriority::High);
+                skin = skinHandle.TryGetLoaded();
+                if (skin)
+                {
+                    const auto meshHandle = Assets->Load<MeshAsset>(skin->Mesh(), AssetPriority::High);
+                    skinMesh = meshHandle.TryGetLoaded();
+                    if (skinMesh && (runtimeState.FootClearanceMesh != skin->Mesh() ||
+                                     runtimeState.FootClearanceSkinRevision != skinHandle.Revision() ||
+                                     runtimeState.FootClearanceMeshRevision != meshHandle.Revision()))
+                    {
+                        runtimeState.FootClearanceMesh = skin->Mesh();
+                        runtimeState.FootClearanceSkinRevision = skinHandle.Revision();
+                        runtimeState.FootClearanceMeshRevision = meshHandle.Revision();
+                        runtimeState.FootMeshClearances.clear();
+                        runtimeState.FootToeBones.clear();
+                    }
+                }
+            }
+            for (std::size_t chainIndex = 0; chainIndex < chains.size(); ++chainIndex)
+            {
+                const auto& chain = chains[chainIndex];
                 const auto footPosition = Math::TransformPoint(modelBones[*chain[2]], {});
                 const auto footWorld = Math::TransformPoint(modelToWorld, footPosition);
+                const auto upperWorld =
+                    Math::TransformPoint(modelToWorld, Math::TransformPoint(modelBones[*chain[0]], {}));
+                const auto lowerWorld =
+                    Math::TransformPoint(modelToWorld, Math::TransformPoint(modelBones[*chain[1]], {}));
+                const auto distance = [](const Vector3 left, const Vector3 right)
+                {
+                    const auto x = right.X - left.X;
+                    const auto y = right.Y - left.Y;
+                    const auto z = right.Z - left.Z;
+                    return std::sqrt(x * x + y * y + z * z);
+                };
+                const auto legLength = distance(upperWorld, lowerWorld) + distance(lowerWorld, footWorld);
+                const auto upperModel = Math::TransformPoint(modelBones[*chain[0]], {});
+                const auto lowerModel = Math::TransformPoint(modelBones[*chain[1]], {});
+                totalLegLength += distance(upperModel, lowerModel) + distance(lowerModel, footPosition);
+                ++legCount;
+                auto& plantRuntime =
+                    chainIndex == 0 ? runtimeState.LeftFootPlantState : runtimeState.RightFootPlantState;
+                auto& plantState = plantRuntime.Plant;
+                auto& stability = chainIndex == 0 ? runtimeState.LeftFootIkState : runtimeState.RightFootIkState;
+                auto& smoothing = chainIndex == 0 ? runtimeState.LeftFootGroundingSmoothingState
+                                                  : runtimeState.RightFootGroundingSmoothingState;
+                bool forcePlantCandidate = false;
+                bool resolvedLockedSupport = settings.LockPlantedFeet && plantState.Locked;
+                if (resolvedLockedSupport && plantRuntime.Support)
+                {
+                    const auto supportEntity = Runtime->FindEntity(*plantRuntime.Support);
+                    const auto supportTransform =
+                        supportEntity ? supportEntity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
+                    const auto supportContact =
+                        supportTransform ? Detail::ResolveFootPlantSupportAnchor(supportTransform->WorldMatrix(),
+                                                                                 plantRuntime.SupportAnchor)
+                                         : std::nullopt;
+                    const auto supportSurface =
+                        supportTransform ? Detail::ResolveFootPlantSupportAnchor(supportTransform->WorldMatrix(),
+                                                                                 plantRuntime.SupportSurfaceAnchor)
+                                         : std::nullopt;
+                    if (supportContact && supportSurface)
+                    {
+                        plantState.Position = supportContact->Position;
+                        plantState.Normal = supportContact->Normal;
+                        plantRuntime.SurfacePosition = supportSurface->Position;
+                        plantRuntime.SurfaceNormal = supportSurface->Normal;
+                    }
+                    else
+                    {
+                        plantRuntime = {};
+                        resolvedLockedSupport = false;
+                        forcePlantCandidate = true;
+                    }
+                }
                 const Vector3 origin{footWorld.X, footWorld.Y + settings.RaycastHeight, footWorld.Z};
                 auto raycastDistance = settings.RaycastDistance;
                 if (settings.AutomaticRaycastDistance)
                 {
-                    const auto upperWorld =
-                        Math::TransformPoint(modelToWorld, Math::TransformPoint(modelBones[*chain[0]], {}));
-                    const auto lowerWorld =
-                        Math::TransformPoint(modelToWorld, Math::TransformPoint(modelBones[*chain[1]], {}));
-                    const auto distance = [](const Vector3 left, const Vector3 right)
-                    {
-                        const auto x = right.X - left.X;
-                        const auto y = right.Y - left.Y;
-                        const auto z = right.Z - left.Z;
-                        return std::sqrt(x * x + y * y + z * z);
-                    };
-                    const auto legLength = distance(upperWorld, lowerWorld) + distance(lowerWorld, footWorld);
                     raycastDistance = std::max(raycastDistance, legLength * 1.1F);
                 }
                 const auto hits =
@@ -681,24 +766,219 @@ namespace Keire
                         const auto slope = std::acos(normalY) * 57.2957795131F;
                         return slope <= settings.MaximumSlopeDegrees;
                     });
-                if (hit == hits.end())
+                std::optional<Detail::ModelFootGroundContact> contact;
+                std::optional<Vector3> footTarget;
+                std::optional<Vector3> targetNormalWorld;
+                if (resolvedLockedSupport && hit != hits.end() &&
+                    Detail::ShouldReplaceAutomaticFootSupport(plantRuntime.SurfacePosition, plantRuntime.SurfaceNormal,
+                                                              hit->Position))
+                {
+                    plantRuntime = {};
+                    resolvedLockedSupport = false;
+                    forcePlantCandidate = true;
+                }
+                if (resolvedLockedSupport)
+                {
+                    const auto animationReleased = Detail::ShouldReleaseAutomaticFootPlant(
+                        footWorld, plantRuntime.ReleasePosition, plantRuntime.ReleaseNormal, legLength,
+                        settings.ReleaseDistance);
+                    const auto supportNeedsReanchor =
+                        plantRuntime.Support && Detail::ShouldReanchorMovingFootSupport(
+                                                    plantState.Position, plantRuntime.ReleasePosition,
+                                                    plantRuntime.ReleaseNormal, legLength, settings.ReleaseDistance);
+                    const auto outsideReach =
+                        distance(upperWorld, plantState.Position) > legLength + settings.MaximumPelvisAdjustment;
+                    if (!animationReleased && !supportNeedsReanchor && !outsideReach)
+                    {
+                        contact = Detail::ToModelFootGroundContact(worldToModel, plantState.Position, plantState.Normal,
+                                                                   0.0F);
+                        footTarget = Math::TransformPoint(worldToModel, plantState.Position);
+                        targetNormalWorld = plantState.Normal;
+                        if (contact)
+                            contact->Normal = Math::TransformDirection(worldToModel, plantState.Normal);
+                    }
+                    else
+                    {
+                        forcePlantCandidate = !animationReleased && (supportNeedsReanchor || outsideReach);
+                        plantRuntime = {};
+                        resolvedLockedSupport = false;
+                    }
+                }
+
+                if (!footTarget)
+                {
+                    if (hit == hits.end())
+                    {
+                        plantRuntime = {};
+                    }
+                    else
+                    {
+                        contact = Detail::ToModelFootGroundContact(worldToModel, hit->Position, hit->Normal, 0.0F);
+                        if (!contact)
+                            continue;
+                        const auto minimumClearance =
+                            Detail::WorldSurfaceDistanceToModel(worldToModel, hit->Normal, settings.FootOffset);
+                        if (!minimumClearance)
+                            continue;
+                        auto soleClearance = Detail::FootBoneBindSurfaceClearance(skeleton, *chain[2]);
+                        if (!soleClearance)
+                            continue;
+                        auto cachedMeshClearance = runtimeState.FootMeshClearances.find(*chain[2]);
+                        if (cachedMeshClearance == runtimeState.FootMeshClearances.end() && skin && skinMesh)
+                        {
+                            cachedMeshClearance = runtimeState.FootMeshClearances
+                                                      .emplace(*chain[2], Detail::FootMeshBindSurfaceClearance(
+                                                                              skeleton, *skin, *skinMesh, *chain[2]))
+                                                      .first;
+                        }
+                        if (cachedMeshClearance != runtimeState.FootMeshClearances.end() && cachedMeshClearance->second)
+                            *soleClearance = std::max(*soleClearance, *cachedMeshClearance->second);
+                        footTarget = Detail::FootTargetAboveSurface(*contact, *soleClearance, *minimumClearance);
+                        if (!footTarget)
+                            continue;
+                        const auto candidateWorld = Math::TransformPoint(modelToWorld, *footTarget);
+                        const auto candidateNormal = Detail::IkNormalize(hit->Normal);
+                        targetNormalWorld = candidateNormal;
+                        if (settings.LockPlantedFeet)
+                        {
+                            const auto wasLocked = plantState.Locked;
+                            const auto separation =
+                                Detail::IkDot(Detail::IkSubtract(footWorld, candidateWorld), candidateNormal);
+                            if (forcePlantCandidate || separation < -settings.ReleaseDistance)
+                            {
+                                if (!Detail::ForceAutomaticFootPlant(candidateWorld, candidateNormal, plantState))
+                                    continue;
+                            }
+                            else
+                            {
+                                (void)Detail::UpdateAutomaticFootPlant(footWorld, candidateWorld, candidateNormal,
+                                                                       legLength, settings.PlantDistance,
+                                                                       settings.ReleaseDistance, plantState);
+                            }
+                            *footTarget = Math::TransformPoint(worldToModel, plantState.Locked ? plantState.Position
+                                                                                               : candidateWorld);
+                            if (plantState.Locked)
+                            {
+                                targetNormalWorld = plantState.Normal;
+                                contact->Normal = Math::TransformDirection(worldToModel, plantState.Normal);
+                                if (!wasLocked || forcePlantCandidate)
+                                {
+                                    plantRuntime.ReleasePosition = plantState.Position;
+                                    plantRuntime.ReleaseNormal = plantState.Normal;
+                                }
+                                plantRuntime.SurfacePosition = hit->Position;
+                                plantRuntime.SurfaceNormal = candidateNormal;
+                                if (const auto support = EntityForBody(hit->Body))
+                                {
+                                    const auto supportEntity = Runtime->FindEntity(*support);
+                                    const auto supportTransform = supportEntity
+                                                                      ? supportEntity.GetComponent<TransformComponent>()
+                                                                      : Ref<TransformComponent>{};
+                                    const auto supportAnchor = supportTransform
+                                                                   ? Detail::CaptureFootPlantSupportAnchor(
+                                                                         supportTransform->WorldMatrix(),
+                                                                         plantState.Position, plantState.Normal)
+                                                                   : std::nullopt;
+                                    const auto supportSurfaceAnchor =
+                                        supportTransform
+                                            ? Detail::CaptureFootPlantSupportAnchor(supportTransform->WorldMatrix(),
+                                                                                    hit->Position, candidateNormal)
+                                            : std::nullopt;
+                                    if (supportAnchor && supportSurfaceAnchor)
+                                    {
+                                        plantRuntime.Support = *support;
+                                        plantRuntime.SupportAnchor = *supportAnchor;
+                                        plantRuntime.SupportSurfaceAnchor = *supportSurfaceAnchor;
+                                    }
+                                    else
+                                    {
+                                        plantRuntime.Support.reset();
+                                    }
+                                }
+                                else
+                                {
+                                    plantRuntime.Support.reset();
+                                }
+                            }
+                            else
+                            {
+                                footTarget.reset();
+                                contact.reset();
+                                targetNormalWorld.reset();
+                            }
+                        }
+                        else
+                        {
+                            plantRuntime = {};
+                        }
+                    }
+                }
+
+                std::optional<Vector3> desiredWorldTarget;
+                if (footTarget && contact && targetNormalWorld)
+                    desiredWorldTarget = Math::TransformPoint(modelToWorld, *footTarget);
+                const auto smoothed = Detail::UpdateAutomaticFootGroundingSmoothing(
+                    desiredWorldTarget, desiredWorldTarget ? targetNormalWorld : std::nullopt, footWorld, deltaSeconds,
+                    settings.ResponseTime, smoothing);
+                if (!smoothed)
+                {
+                    stability = {};
                     continue;
-                const auto contact =
-                    Detail::ToModelFootGroundContact(worldToModel, hit->Position, hit->Normal, settings.FootOffset);
+                }
+                contact = Detail::ToModelFootGroundContact(worldToModel, smoothed->Position, smoothed->Normal, 0.0F);
                 if (!contact)
+                {
+                    smoothing = {};
+                    stability = {};
                     continue;
+                }
+                footTarget = Math::TransformPoint(worldToModel, smoothed->Position);
+                const auto upperLeg = Math::TransformPoint(modelBones[*chain[0]], {});
                 const auto knee = Math::TransformPoint(modelBones[*chain[1]], {});
-                request.Contacts.push_back({*chain[0],
-                                            *chain[1],
-                                            *chain[2],
-                                            contact->Position,
-                                            contact->Normal,
-                                            {knee.X, knee.Y, knee.Z + 1.0F},
-                                            settings.Weight,
-                                            settings.RotationWeight});
+                const auto pole = Detail::StableAutomaticLimbPole(upperLeg, knee, footPosition, *footTarget, stability);
+                FootGroundContact grounded{*chain[0],
+                                           *chain[1],
+                                           *chain[2],
+                                           *footTarget,
+                                           contact->Normal,
+                                           pole,
+                                           settings.Weight * smoothed->Blend,
+                                           settings.RotationWeight * smoothed->Blend};
+                auto toe = runtimeState.FootToeBones.find(*chain[2]);
+                if (toe == runtimeState.FootToeBones.end())
+                {
+                    toe = runtimeState.FootToeBones
+                              .emplace(*chain[2], Detail::AutomaticFootToeBone(skeleton, skin.Get(), *chain[2]))
+                              .first;
+                }
+                grounded.Toe = toe->second;
+                maximumGroundingBlend = std::max(maximumGroundingBlend, smoothed->Blend);
+                minimumGroundingBlend = std::min(minimumGroundingBlend, smoothed->Blend);
+                request.Contacts.push_back(std::move(grounded));
             }
             if (request.Contacts.empty())
                 return {};
+            request.PelvisWeight *= maximumGroundingBlend;
+            if (legCount != 0 && request.Contacts.size() >= 2 && settings.LockPlantedFeet)
+            {
+                const auto averageLegLength = totalLegLength / static_cast<float>(legCount);
+                request.MaximumHorizontalPelvisAdjustment = averageLegLength * 0.25F * minimumGroundingBlend;
+                request.PelvisSupportRadius = averageLegLength * 0.025F;
+                const auto chest = semantics.find(RigBoneSemantic::Chest);
+                const auto spine = semantics.find(RigBoneSemantic::Spine);
+                if (chest != semantics.end() && Detail::IsBoneInSubtree(skeleton, chest->second, *pelvis) &&
+                    chest->second != *pelvis)
+                    request.Torso = chest->second;
+                else if (spine != semantics.end() && Detail::IsBoneInSubtree(skeleton, spine->second, *pelvis) &&
+                         spine->second != *pelvis)
+                    request.Torso = spine->second;
+                if (request.Torso)
+                {
+                    request.PelvisRotationWeight =
+                        settings.Weight * settings.LeanCorrectionWeight * minimumGroundingBlend;
+                    request.MaximumPelvisRotationDegrees = settings.MaximumLeanCorrectionDegrees;
+                }
+            }
             const auto solved = SolveFootGrounding(skeleton, localPose, request);
             if (!solved)
                 return "Foot grounding could not solve the configured leg chains.";
@@ -870,24 +1150,20 @@ namespace Keire
                     animator->SetRuntimeDiagnostic("Negative Animator speed is not supported and is treated as zero.");
                 auto sample = state->Instance->Update(animator->Paused() ? 0.0F : deltaSeconds * speed);
                 Runtime->DispatchAnimatorIk(entity.Id(), {.LayerWeight = 1.0F});
-                if (const auto ikDiagnostic =
-                        ApplyIkGoals(entity, *skeleton, *animator, sample.LocalPose, state->BoneIndices);
-                    !ikDiagnostic.empty())
-                {
-                    animator->SetRuntimeDiagnostic(ikDiagnostic);
-                }
-                else if (const auto armDiagnostic = ApplyAuthoredArmIk(entity, *skeleton, *animator, sample.LocalPose,
-                                                                       state->BoneIndices, state->SemanticBoneIndices);
-                         !armDiagnostic.empty())
-                {
-                    animator->SetRuntimeDiagnostic(armDiagnostic);
-                }
-                else if (const auto footDiagnostic = ApplyFootGrounding(entity, *skeleton, *animator, sample.LocalPose,
-                                                                        state->BoneIndices, state->SemanticBoneIndices);
-                         !footDiagnostic.empty())
-                {
-                    animator->SetRuntimeDiagnostic(footDiagnostic);
-                }
+                const auto ikDiagnostics = Detail::EvaluateIndependentAnimationIkPasses(
+                    [&] { return ApplyIkGoals(entity, *skeleton, *animator, sample.LocalPose, state->BoneIndices); },
+                    [&]
+                    {
+                        return ApplyAuthoredArmIk(entity, *skeleton, *animator, sample.LocalPose, state->BoneIndices,
+                                                  state->SemanticBoneIndices, *state);
+                    },
+                    [&]
+                    {
+                        return ApplyFootGrounding(entity, *skeleton, *animator, deltaSeconds, sample.LocalPose,
+                                                  state->BoneIndices, state->SemanticBoneIndices, *state);
+                    });
+                if (!ikDiagnostics.empty())
+                    animator->SetRuntimeDiagnostic(ikDiagnostics);
                 const auto palette = SkinPalette(*skeleton, sample.LocalPose);
                 animator->SetRuntimePose(sample.State, sample.NormalizedTime, state->Instance->Playing(), palette);
                 auto debugSnapshot = state->Instance->DebugSnapshot();

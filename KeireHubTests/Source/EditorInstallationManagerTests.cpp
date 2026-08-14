@@ -620,6 +620,21 @@ TEST_CASE("Packaged editor discovery registers only a manifest-backed installati
     CHECK(repeated.Value()->Id == registered.Value()->Id);
     CHECK(controller.Installations().Snapshot()->size() == 1);
 
+    const auto originalFingerprint = registered.Value()->ManifestFingerprint;
+    manifest["version"] = "2.1.1";
+    const auto rebuilt = WriteManifest(root, manifest);
+    REQUIRE(rebuilt.Fingerprint != originalFingerprint);
+    const auto refreshed = RegisterPackagedEditorIfPresent(controller, root);
+    REQUIRE(refreshed);
+    REQUIRE(refreshed.Value());
+    CHECK(refreshed.Value()->Id == registered.Value()->Id);
+    CHECK(refreshed.Value()->Version == "2.1.1");
+    CHECK(refreshed.Value()->ManifestFingerprint == rebuilt.Fingerprint);
+    CHECK(refreshed.Value()->Health == InstallationHealth::VerificationRequired);
+    REQUIRE(controller.Installations().Snapshot()->size() == 1);
+    CHECK(controller.Installations().Snapshot()->front().Id == registered.Value()->Id);
+    CHECK(controller.Installations().Snapshot()->front().ManifestFingerprint == rebuilt.Fingerprint);
+
     EditorInstallationManager manager(controller.Installations(),
                                       {.HostPlatform = std::string(Keire::GetBuildInfo().Platform),
                                        .HostArchitecture = std::string(Keire::GetBuildInfo().Architecture)});

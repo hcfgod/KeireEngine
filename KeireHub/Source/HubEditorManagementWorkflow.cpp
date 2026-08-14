@@ -1,5 +1,7 @@
 #include "KeireHub/HubEditorManagementWorkflow.h"
 
+#include "KeireHub/HubEditorDiscovery.h"
+
 #include "KeireHubRuntime/LicenseCatalog.h"
 
 #include <algorithm>
@@ -118,6 +120,27 @@ namespace KeireHub
                 return VerifyEditorInstallationSnapshot(
                     item.Installation, WorkerSpecification(item, std::move(hostPlatform), std::move(hostArchitecture)));
             };
+            services.RefreshRegistration = [](const HubEditorManagementWorkItem& item,
+                                              std::filesystem::path expectedRoot, std::string hostPlatform,
+                                              std::string hostArchitecture)
+            {
+                auto inspected = InspectExternalEditor(expectedRoot, item.Installation.Id);
+                if (!inspected)
+                    return HubResult<EditorInstallationHealthSnapshot>::Failure(inspected.Error());
+                auto installation = std::move(inspected).Value();
+                if (installation.Root.lexically_normal() != item.Installation.Root.lexically_normal())
+                {
+                    return HubResult<EditorInstallationHealthSnapshot>::Failure(
+                        ManagementError(HubErrorCode::UnsafeInstallRoot,
+                                        "The refreshed package resolved outside the registered editor location.",
+                                        item.Installation.Id));
+                }
+                auto refreshedItem = item;
+                refreshedItem.Installation = installation;
+                return VerifyEditorInstallationSnapshot(
+                    installation,
+                    WorkerSpecification(refreshedItem, std::move(hostPlatform), std::move(hostArchitecture)));
+            };
             services.Authorize = [](const HubEditorManagementWorkItem& item, std::filesystem::path expectedRoot,
                                     const EditorManagedOperation operation, std::string hostPlatform,
                                     std::string hostArchitecture)
@@ -166,6 +189,8 @@ namespace KeireHub
                 return "Refresh editor installations";
             case HubEditorManagementOperation::Verify:
                 return "Verify editor installation";
+            case HubEditorManagementOperation::RefreshRegistration:
+                return "Refresh external editor registration";
             case HubEditorManagementOperation::AuthorizeRepair:
                 return "Prepare managed editor repair";
             case HubEditorManagementOperation::AuthorizeRemoval:
@@ -184,6 +209,8 @@ namespace KeireHub
                 return "Checking installed editor manifests and file inventories...";
             case HubEditorManagementOperation::Verify:
                 return "Verifying the selected editor's declared files...";
+            case HubEditorManagementOperation::RefreshRegistration:
+                return "Validating the updated package and refreshing its Hub registration...";
             case HubEditorManagementOperation::AuthorizeRepair:
                 return "Checking damaged files and managed-install ownership...";
             case HubEditorManagementOperation::AuthorizeRemoval:
@@ -208,6 +235,10 @@ namespace KeireHub
             issues.reserve(snapshot.Issues.size());
             for (const auto& issue : snapshot.Issues)
                 issues.push_back(issue.Message);
+            const bool registrationRefreshAvailable =
+                installation.Ownership == InstallationOwnership::External &&
+                std::ranges::any_of(snapshot.Issues, [](const EditorInstallationIssue& issue)
+                                    { return issue.Code == EditorInstallationIssueCode::RegistrationMismatch; });
             const auto projectCount =
                 std::ranges::count_if(projects,
                                       [&](const auto& project)
@@ -239,6 +270,7 @@ namespace KeireHub
                                                  !installation.PackageTreeIdentity.empty() &&
                                                  !installation.PackageReceiptSha256.empty() &&
                                                  !ResolveEditorEntrypoint(installation).empty(),
+                              .RegistrationRefreshAvailable = registrationRefreshAvailable,
                               .HealthLabel = std::string(HealthLabel(snapshot.Health)),
                               .HealthIssues = std::move(issues),
                               .Running = snapshot.Activity.Running,
@@ -262,6 +294,8 @@ namespace KeireHub
             m_Services.Refresh = std::move(defaults.Refresh);
         if (!m_Services.Verify)
             m_Services.Verify = std::move(defaults.Verify);
+        if (!m_Services.RefreshRegistration)
+            m_Services.RefreshRegistration = std::move(defaults.RefreshRegistration);
         if (!m_Services.Authorize)
             m_Services.Authorize = std::move(defaults.Authorize);
         ReloadRegistrations();
@@ -472,6 +506,54 @@ namespace KeireHub
                 }
             }
         }
+        else if (!result.Failure && operation->Operation == HubEditorManagementOperation::RefreshRegistration)
+        {
+            if (!result.RegistrationRefresh || !m_ActiveTarget ||
+                result.RegistrationRefresh->Installation.Id != m_ActiveTarget->Id ||
+                result.RegistrationRefresh->Installation.Root.lexically_normal() !=
+                    m_ActiveTarget->Root.lexically_normal() ||
+                result.RegistrationRefresh->Installation.Ownership != InstallationOwnership::External)
+            {
+                result.Failure = ManagementError(HubErrorCode::InvalidData,
+                                                 "The registration refresh returned a mismatched installation.",
+                                                 operation->InstallationId);
+            }
+            else
+            {
+                auto refreshed = std::move(*result.RegistrationRefresh);
+                refreshed.Activity = Activity(*m_ActiveTarget);
+                if (const auto inactive = GuardInactive(refreshed.Installation, refreshed.Activity); !inactive)
+                {
+                    result.Failure = inactive.Error();
+                }
+                else
+                {
+                    refreshed.Installation.Health = refreshed.Health;
+                    refreshed.Installation.LastVerifiedUnixSeconds =
+                        static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
+                                                       std::chrono::system_clock::now().time_since_epoch())
+                                                       .count());
+                    verifiedHealth = refreshed.Health;
+                    if (const auto saved = m_Controller.Installations().Upsert(refreshed.Installation); !saved)
+                    {
+                        result.Failure = saved.Error();
+                    }
+                    else
+                    {
+                        auto snapshots = *m_Snapshot;
+                        const auto found = std::ranges::find(snapshots, refreshed.Installation.Id,
+                                                             [](const auto& value) { return value.Installation.Id; });
+                        if (found == snapshots.end())
+                            snapshots.push_back(std::move(refreshed));
+                        else
+                            *found = std::move(refreshed);
+                        m_Snapshot =
+                            std::make_shared<const std::vector<EditorInstallationHealthSnapshot>>(std::move(snapshots));
+                        QueueLicenseRefresh(m_Controller.Installations().Snapshot());
+                    }
+                }
+            }
+        }
         else if (!result.Failure && (operation->Operation == HubEditorManagementOperation::AuthorizeRepair ||
                                      operation->Operation == HubEditorManagementOperation::AuthorizeRemoval))
         {
@@ -600,6 +682,8 @@ namespace KeireHub
         }
         if (command.Type == HubUiCommandType::VerifyEditor)
             return StartTargetOperation(command, HubEditorManagementOperation::Verify);
+        if (command.Type == HubUiCommandType::RefreshExternalEditorRegistration)
+            return StartTargetOperation(command, HubEditorManagementOperation::RefreshRegistration);
         if (command.Type == HubUiCommandType::RepairManagedEditor)
             return StartTargetOperation(command, HubEditorManagementOperation::AuthorizeRepair);
         if (command.Type == HubUiCommandType::RemoveManagedEditor)
@@ -666,6 +750,15 @@ namespace KeireHub
             return HubStatus::Failure(ManagementError(HubErrorCode::UnsafeInstallRoot,
                                                       "The editor is not a managed Hub installation.", command.ItemId));
         }
+        if (operation == HubEditorManagementOperation::RefreshRegistration &&
+            m_ActiveTarget->Ownership != InstallationOwnership::External)
+        {
+            m_ActiveRegistrations.reset();
+            m_ActiveTarget.reset();
+            return HubStatus::Failure(ManagementError(HubErrorCode::UnsafeInstallRoot,
+                                                      "Only an external editor registration can be refreshed.",
+                                                      command.ItemId));
+        }
 
         const auto operationId = m_NextOperationId;
         m_NextOperationId = m_NextOperationId == std::numeric_limits<std::uint64_t>::max() ? 1 : operationId + 1;
@@ -676,6 +769,7 @@ namespace KeireHub
         try
         {
             auto verify = m_Services.Verify;
+            auto refreshRegistration = m_Services.RefreshRegistration;
             auto authorize = m_Services.Authorize;
             auto item = HubEditorManagementWorkItem{.Installation = *m_ActiveTarget, .Activity = activity};
             auto installationId = item.Installation.Id;
@@ -684,7 +778,8 @@ namespace KeireHub
             auto hostArchitecture = m_HostArchitecture;
             m_WorkFuture = std::async(
                 std::launch::async,
-                [verify = std::move(verify), authorize = std::move(authorize), item = std::move(item), expectedRoot,
+                [verify = std::move(verify), refreshRegistration = std::move(refreshRegistration),
+                 authorize = std::move(authorize), item = std::move(item), expectedRoot,
                  installationId = std::move(installationId), hostPlatform = std::move(hostPlatform),
                  hostArchitecture = std::move(hostArchitecture), operation]() mutable
                 {
@@ -699,6 +794,15 @@ namespace KeireHub
                                 result.Verification = std::move(verified).Value();
                             else
                                 result.Failure = verified.Error();
+                        }
+                        else if (operation == HubEditorManagementOperation::RefreshRegistration)
+                        {
+                            auto refreshed = refreshRegistration(std::move(item), std::move(expectedRoot),
+                                                                 std::move(hostPlatform), std::move(hostArchitecture));
+                            if (refreshed)
+                                result.RegistrationRefresh = std::move(refreshed).Value();
+                            else
+                                result.Failure = refreshed.Error();
                         }
                         else
                         {

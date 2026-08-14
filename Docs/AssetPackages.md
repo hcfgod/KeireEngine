@@ -103,6 +103,8 @@ verifies size, SHA-256, package identity, and archive structure. It then atomica
 cache snapshot containing the same signed proof. Running Editors observe the snapshot within one second; an Editor
 opened later selects the same requested asset. Before installation or import, the Editor independently verifies the
 publication signature and identity, then asks Core to recheck the exact archive size, SHA-256, manifest, and payload.
+The Editor advertises its surface, compute, PBR, Shader Graph, Material Graph, and VFX Graph renderer capabilities to
+both Registry and Asset Import preflight, so official graph and VFX content is accepted by compatible projects.
 
 My Assets presents honest entitled, downloading, ready, unavailable, and failed states. A ready Registry package can be
 installed into the open project; a ready Asset Import package can be imported with explicit executable-code and
