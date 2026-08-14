@@ -1,31 +1,35 @@
 # Kéire Production Readiness Review
 
-Review date: 2026-08-13
+Review date: 2026-08-14
 
-Revision: source-audit and Windows-candidate evidence refresh
+Revision: repository-wide remediation and Windows source-evidence refresh
 
-Review scope: Kéire 0.3.1 source at commit `4a01072` plus the explicitly reviewed working-tree hardening recorded in the
-changelog, the clean Windows Editor candidate built from commit `6f27aaa`, the Windows packages published from commit
-`7619442` in signed distribution snapshot sequence 9, the canonical documentation library, and the current
-feature-gated online platform. Source-review, candidate, and public-release evidence are kept separate throughout this
-review; uncommitted source changes are not presented as package evidence.
+Review scope: Kéire 0.3.1 source remediation based on commit `6ca7bbf`, the clean Windows Editor candidate built from
+commit `6f27aaa`, the Windows packages published from commit `7619442` in signed distribution snapshot sequence 9, the
+canonical documentation library, and the current feature-gated online platform. Source-review, candidate, and
+public-release evidence are kept separate throughout this review; the remediated source is not presented as package
+evidence until its replacement artifacts complete the release gates.
 
 Review target: sustained commercial and AAA-team production use. A feature existing in source is not equivalent to a
 validated workflow, and a validated local workflow is not equivalent to a supported public release.
 
 ## What Changed In This Refresh
 
-- The source review advanced to `4a01072` plus the reviewed worktree changes. Immutable-response verification,
-  transactional layer/listener registration, shutdown exception containment, source-budget enforcement, and the
-  corresponding focused regressions are source evidence until a clean candidate is rebuilt.
+- The source review advanced from `6ca7bbf` through the repository-wide remediation. Automatic Marketplace publication
+  now has current primary-flow tests; all Edge Functions have frozen Deno dependency graphs and CI type checks; public
+  catalog and private library APIs use indexed keyset cursors; compile-database generation records the shared Ninja
+  artifact identity; and the current Python-format and clang-tidy findings are resolved.
 - The clean Windows Editor candidate remains the package built from `6f27aaa`; its Dist runtime reports that exact
   commit. That candidate's recorded package gate passed 591 Core tests with 47,736 assertions, 133 Editor tests with
   2,230 assertions, and 347 Hub tests with 3,604 assertions. Its D3D12 and Vulkan rendered-output suites passed 21/21
   cases each. These counts describe that candidate, not the advancing source tree.
-- The reviewed source working tree passed the complete Windows Debug gate with 603 Core tests/47,889 assertions, 134
-  Editor tests/2,234 assertions, and 355 Hub tests/3,680 assertions; Release passed 604/47,890, 134/2,234, and
-  355/3,680 respectively. Debug and Release also passed the complete client compile gate and both 21-case rendered
-  suites. DebugASan passed 603/47,889, 134/2,234, and 355/3,680 plus the instrumented client compile gate.
+- The remediated source passed the complete Windows Debug and Release gates with 630 Core tests/48,189 assertions, 140
+  Editor tests/2,262 assertions, and 362 Hub tests/3,752 assertions. Both configurations passed the complete client
+  compile gate and the 21-case D3D12 and Vulkan rendered suites. DebugASan passed the same 630/140/362 test inventory
+  plus the instrumented client compile gate with no sanitizer diagnostic.
+- The fast Windows script harness, documentation build and source suite, frozen checks for all eight Supabase Edge
+  Functions, migration/RLS contracts, compile-database coverage, Ruff, PSScriptAnalyzer, clang-format, and the changed
+  translation-unit clang-tidy sweep are current source evidence.
 - Windows Hub and Editor now diagnose elevated launch sessions that cannot accept Explorer file drops, while the Hub
   avoids starting another elevated Editor. The browser-to-Hub URL-protocol handoff and package ownership contracts are
   represented in the reviewed source baseline.
@@ -42,7 +46,7 @@ transactional assets and projects, strong failure isolation, and broad native te
 Windows technology preview and development platform. It is not yet justified as a finished AAA production engine or a
 generally available cross-platform marketplace.
 
-The current overall grade is **B (84/100)**. The engineering foundation is stronger than the release-evidence score:
+The current overall grade is **B+ (87/100)**. The engineering foundation is stronger than the release-evidence score:
 the Windows Editor candidate and graphics paths are current and reproducible, while the public Hub still trails that
 candidate and native validation of this exact commit on Linux and macOS, named-hardware performance gates,
 Authenticode/notarization, marketplace acceptance, and shipped-project soak evidence remain incomplete.
@@ -50,16 +54,16 @@ Authenticode/notarization, marketplace acceptance, and shipped-project soak evid
 | Assessment | Grade | Score | Current judgment |
 | --- | ---: | ---: | --- |
 | Architecture, ownership, and lifecycle | A | 95/100 | Coherent public/private boundaries and deterministic service lifetimes. |
-| Tests and local quality policy | A- | 92/100 | Large executable surface with sanitizers, package gates, and rendered tests. |
+| Tests and local quality policy | A | 96/100 | Debug, Release, ASan, package/script gates, and both rendered backends are current. |
 | Assets, projects, packaging, and recovery | A- | 92/100 | Transactional publication, migration, immutable content, and recovery are major strengths. |
 | Editor and authoring workflows | B+ | 88/100 | Broad and usable, with interaction, accessibility, and content-scale evidence still growing. |
 | Rendering, shaders, materials, and VFX | B | 85/100 | Modern production slices work; parity matrices and hardware evidence remain incomplete. |
 | Managed gameplay and runtime services | A- | 91/100 | Reload-safe handles, last-good retention, and broad gameplay APIs are implemented. |
-| Hub, distribution, and website | B+ | 88/100 | Signed immutable distribution and the unified site are live; native signing and full desktop SSO acceptance remain. |
-| Marketplace and package ecosystem | C | 75/100 | The signed-only staging catalog preview, real validation, and moderation path are open; signed official products and end-to-end package acceptance remain gated. |
+| Hub, distribution, and website | A- | 91/100 | Signed immutable distribution and the unified site are live; native signing and full desktop SSO acceptance remain. |
+| Marketplace and package ecosystem | B | 84/100 | Automatic publication, frozen Edge dependencies, indexed APIs, and signed validation are implemented; launch acceptance remains gated. |
 | Performance evidence | C+ | 78/100 | Useful profiling and machine-readable gates exist, but current reference captures cannot supply true portable GPU time. |
 | Cross-platform release evidence | C | 75/100 | Windows is current; exact-commit Linux and native macOS/Metal evidence are outstanding. |
-| Overall production readiness | **B** | **84/100** | Production-oriented preview, not finished AAA production readiness. |
+| Overall production readiness | **B+** | **87/100** | Release-clean source for a production-oriented preview, not finished AAA production readiness. |
 
 Scores are review shorthand, not release gates. The release gates below are authoritative.
 

@@ -17,7 +17,7 @@ namespace Keire
     {
         using Json = nlohmann::json;
 
-        constexpr std::size_t MaximumSettingsBytes = 1024U * 1024U;
+        constexpr std::size_t MaximumSettingsBytes = std::size_t{1024U} * 1024U;
         constexpr std::string_view DefaultProfileId = "10000000-0000-4000-8000-000000000001";
 
         [[nodiscard]] std::filesystem::path PlayerSettingsPath(const std::filesystem::path& projectRoot)

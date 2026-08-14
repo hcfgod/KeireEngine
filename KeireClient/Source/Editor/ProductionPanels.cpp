@@ -201,15 +201,17 @@ void EditorWorkspaceLayer::DrawBuildSettings(Keire::UiFrame& ui)
             const auto record = std::ranges::find(m_AssetRecords, entry.Scene, &Keire::AssetSourceRecord::Id);
             const bool valid = record != m_AssetRecords.end() && record->Type == Keire::SceneAsset::StaticType();
             const auto indexLabel = entry.Enabled ? std::to_string(enabledBuildIndex++) : std::string("-");
-            const auto sceneLabel =
-                valid ? record->RelativePath.generic_string() : std::string("Missing scene: ") + entry.Scene.ToString();
+            const auto sceneLabel = valid ? record->RelativePath.generic_string()
+                                          : std::string("Missing scene: ").append(entry.Scene.ToString());
             auto id = ui.PushId(entry.Scene.ToString());
             if (ui.Checkbox("##BuildSceneEnabled", entry.Enabled))
                 scenesChanged = true;
             ui.SameLine();
             const auto color = !valid ? m_Theme.Error : entry.Enabled ? m_Theme.Text : m_Theme.MutedText;
             auto textColor = ui.PushStyleColor(Keire::UiStyleColorRole::Text, color);
-            if (ui.Selectable(indexLabel + "  " + sceneLabel, m_SelectedPlayerBuildScene == entry.Scene))
+            auto displayLabel = indexLabel;
+            displayLabel.append("  ").append(sceneLabel);
+            if (ui.Selectable(displayLabel, m_SelectedPlayerBuildScene == entry.Scene))
                 m_SelectedPlayerBuildScene = entry.Scene;
             const auto payloadText = entry.Scene.ToString();
             ui.SetDragPayload("KEIRE_BUILD_SCENE", std::as_bytes(std::span(payloadText.data(), payloadText.size())));

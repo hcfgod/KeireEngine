@@ -512,10 +512,25 @@ assert(staffActionRoute.includes("requireAal2") &&
     "Staff actions must use the MFA-protected moderation transition boundary.");
 const staffPublicationRoute = await readFile(path.join(siteRoot, "Source", "pages", "admin", "marketplace", "v1",
     "publications", "index.ts"), "utf8");
-assert(staffPage.includes("data-publication-form") && staffPage.includes("Verify signature and publish") &&
+assert(!staffPage.includes("data-publication-form") && staffPage.includes("Automatic publication queue") &&
+    staffPage.includes("Approve and queue publication"),
+    "Approved packages must enter the automatic metadata-only publication queue without a browser-held envelope.");
+assert(!staffPage.includes('/admin/marketplace/v1/publications/') &&
     staffPublicationRoute.includes("requireAal2") &&
     staffPublicationRoute.includes('functions.invoke("marketplace-publication"'),
-    "Offline-signed packages must cross the administrator-only publication boundary.");
+    "The legacy offline recovery route must remain an administrator-only publication boundary, not a staff UI path.");
+const marketplaceApi = await readFile(path.join(siteRoot, "Source", "lib", "api.ts"), "utf8");
+const marketplaceCatalogRoute = await readFile(path.join(siteRoot, "Source", "pages", "marketplace", "v1", "catalog",
+    "index.ts"), "utf8");
+const marketplaceLibraryRoute = await readFile(path.join(siteRoot, "Source", "pages", "marketplace", "v1", "library",
+    "index.ts"), "utf8");
+assert(marketplaceApi.includes("decodeCatalogCursor") && marketplaceApi.includes("decodeLibraryCursor") &&
+    marketplaceApi.includes('kind: "catalog"') && marketplaceApi.includes('kind: "library"'),
+    "Marketplace cursors must be typed so catalog and library positions cannot be interchanged.");
+assert(!marketplaceCatalogRoute.includes(".range(") && !marketplaceLibraryRoute.includes(".range(") &&
+    marketplaceCatalogRoute.includes("published_at.lt") && marketplaceCatalogRoute.includes("id.gt") &&
+    marketplaceLibraryRoute.includes("granted_at.lt") && marketplaceLibraryRoute.includes("id.gt"),
+    "Marketplace catalog and library pagination must use stable keysets instead of deep database offsets.");
 const marketplaceProductPage = await readFile(path.join(siteRoot, "Source", "pages", "marketplace", "[publisher]",
     "[product].astro"), "utf8");
 const marketplaceClaimRoute = await readFile(path.join(siteRoot, "Source", "pages", "marketplace", "v1", "claims",

@@ -25,11 +25,25 @@ def require(condition: bool, message: str) -> None:
 
 
 definitions = module.PACKAGES
-require(len(definitions) == 5, "The official release set must contain exactly five launch products.")
-require(len({definition.slug for definition in definitions}) == len(definitions), "Product slugs must be unique.")
-require(len({definition.package_id for definition in definitions}) == len(definitions), "Package IDs must be unique.")
-require(all(definition.package_id.startswith("com.keire.official.") for definition in definitions),
-        "Official packages must use the first-party package namespace.")
+require(
+    len(definitions) == 5,
+    "The official release set must contain exactly five launch products.",
+)
+require(
+    len({definition.slug for definition in definitions}) == len(definitions),
+    "Product slugs must be unique.",
+)
+require(
+    len({definition.package_id for definition in definitions}) == len(definitions),
+    "Package IDs must be unique.",
+)
+require(
+    all(
+        definition.package_id.startswith("com.keire.official.")
+        for definition in definitions
+    ),
+    "Official packages must use the first-party package namespace.",
+)
 
 project = ROOT / "Samples/KeireSandbox"
 tracked_files = module.tracked_project_files(ROOT, project)
@@ -44,15 +58,28 @@ with tempfile.TemporaryDirectory(prefix="keire-official-package-test-") as tempo
         manifest = module.create_manifest(definition, payload)
         require(manifest["files"], f"{definition.slug} has no file inventory.")
         require(manifest["assets"], f"{definition.slug} has no asset inventory.")
-        require(manifest["entryPoints"] == list(definition.entry_points),
-                f"{definition.slug} changed its reviewed entry points.")
-        require(all((payload / entry).is_file() for entry in manifest["entryPoints"]),
-                f"{definition.slug} declares a missing entry point.")
+        require(
+            manifest["entryPoints"] == list(definition.entry_points),
+            f"{definition.slug} changed its reviewed entry points.",
+        )
+        require(
+            all((payload / entry).is_file() for entry in manifest["entryPoints"]),
+            f"{definition.slug} declares a missing entry point.",
+        )
         csharp = list(payload.rglob("*.cs"))
-        require(bool(csharp) == bool(manifest["managedAssemblies"]),
-                f"{definition.slug} must explicitly classify all managed code.")
-        require(not any(path.suffix.lower() in {".csproj", ".dll", ".exe", ".ps1", ".sh"}
-                        for path in payload.rglob("*") if path.is_file()),
-                f"{definition.slug} contains a prohibited marketplace payload type.")
+        require(
+            bool(csharp) == bool(manifest["managedAssemblies"]),
+            f"{definition.slug} must explicitly classify all managed code.",
+        )
+        require(
+            not any(
+                path.suffix.lower() in {".csproj", ".dll", ".exe", ".ps1", ".sh"}
+                for path in payload.rglob("*")
+                if path.is_file()
+            ),
+            f"{definition.slug} contains a prohibited marketplace payload type.",
+        )
 
-print("Official marketplace package selection validation passed for five deterministic products.")
+print(
+    "Official marketplace package selection validation passed for five deterministic products."
+)

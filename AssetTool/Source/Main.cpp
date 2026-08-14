@@ -1187,7 +1187,7 @@ namespace
                             throw std::runtime_error(
                                 "The selected player icon is missing or is not a Texture2D asset.");
                         const auto sourcePath = project->AssetsDirectory() / record->RelativePath;
-                        if (std::filesystem::file_size(sourcePath) > 64U * 1024U * 1024U)
+                        if (std::filesystem::file_size(sourcePath) > std::uintmax_t{64U} * 1024U * 1024U)
                             throw std::runtime_error("The selected player icon exceeds 64 MiB.");
                         iconSource = ReadBytes(sourcePath);
                     }

@@ -47,9 +47,16 @@ def _source_files() -> dict[Path, Path]:
         if not source.is_file() or source.is_symlink():
             continue
         relative = source.relative_to(SAMPLE_ROOT)
-        if relative in EXCLUDED_ROOT_FILES or relative in EXCLUDED_PROJECT_SETTINGS or _is_temporary(relative):
+        if (
+            relative in EXCLUDED_ROOT_FILES
+            or relative in EXCLUDED_PROJECT_SETTINGS
+            or _is_temporary(relative)
+        ):
             continue
-        if any(relative == prefix or prefix in relative.parents for prefix in EXCLUDED_ASSET_PREFIXES):
+        if any(
+            relative == prefix or prefix in relative.parents
+            for prefix in EXCLUDED_ASSET_PREFIXES
+        ):
             continue
         files[relative] = source
     return dict(sorted(files.items(), key=lambda item: item[0].as_posix()))
@@ -65,7 +72,11 @@ def _sha256(path: Path) -> str:
 
 def _payload_manifest(files: dict[Path, Path]) -> list[dict[str, object]]:
     return [
-        {"path": relative.as_posix(), "sizeBytes": source.stat().st_size, "sha256": _sha256(source)}
+        {
+            "path": relative.as_posix(),
+            "sizeBytes": source.stat().st_size,
+            "sha256": _sha256(source),
+        }
         for relative, source in files.items()
     ]
 
@@ -94,7 +105,14 @@ def _expected_manifest(files: dict[Path, Path]) -> dict[str, object]:
             "The complete Kéire production Sandbox with twelve paired Shader Graph and Material Graph examples, "
             "a curated VFX gallery, reusable gameplay scripts, rendering, physics, UI, audio, meshes, and textures."
         ),
-        "tags": ["Sample", "Learning", "Shader Graph", "Material Graph", "VFX", "Scripting"],
+        "tags": [
+            "Sample",
+            "Learning",
+            "Shader Graph",
+            "Material Graph",
+            "VFX",
+            "Scripting",
+        ],
         "estimatedSizeBytes": sum(int(entry["sizeBytes"]) for entry in payload_files),
         "payloadFiles": payload_files,
         "defaultProjectConfiguration": {
@@ -157,7 +175,9 @@ def _sync(files: dict[Path, Path]) -> None:
         destination = PAYLOAD_ROOT / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, destination)
-    for directory in sorted((path for path in PAYLOAD_ROOT.rglob("*") if path.is_dir()), reverse=True):
+    for directory in sorted(
+        (path for path in PAYLOAD_ROOT.rglob("*") if path.is_dir()), reverse=True
+    ):
         if not any(directory.iterdir()):
             directory.rmdir()
 
@@ -171,7 +191,11 @@ def _sync(files: dict[Path, Path]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--check", action="store_true", help="Report drift without modifying the repository.")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Report drift without modifying the repository.",
+    )
     arguments = parser.parse_args()
     files = _source_files()
     if not files:
@@ -188,7 +212,9 @@ def main() -> int:
     _sync(files)
     errors = _check(files)
     if errors:
-        raise RuntimeError("Sandbox template synchronization did not converge: " + "; ".join(errors))
+        raise RuntimeError(
+            "Sandbox template synchronization did not converge: " + "; ".join(errors)
+        )
     print(f"Synchronized Sandbox template ({len(files)} files).")
     return 0
 

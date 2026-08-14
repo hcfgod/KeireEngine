@@ -120,9 +120,8 @@ def validate_page(page: Path) -> None:
             continue
         if value.startswith("//"):
             raise ValueError(f"Protocol-relative resource in {page}: {value}")
-        if (
-            page == WEBSITE / "docs" / "index.html"
-            and parsed.path.startswith("/docs/reference/")
+        if page == WEBSITE / "docs" / "index.html" and parsed.path.startswith(
+            "/docs/reference/"
         ):
             # The production documentation build overlays these generated routes during packaging.
             continue
@@ -163,9 +162,7 @@ def main() -> int:
     docs_parser = PageParser()
     docs_parser.feed(docs_landing)
     native_doc_links = [
-        value
-        for _, value in docs_parser.links
-        if value.startswith("/docs/reference/")
+        value for _, value in docs_parser.links if value.startswith("/docs/reference/")
     ]
     if len(native_doc_links) < 55:
         raise ValueError(
@@ -203,7 +200,7 @@ def main() -> int:
         "publishedAt",
         "publishedTimestamp",
         "packageFormat",
-        "timeZoneName: \"short\"",
+        'timeZoneName: "short"',
         "data-download-history",
     ):
         if contract not in downloads:
@@ -211,7 +208,9 @@ def main() -> int:
     if "http://" in downloads or "https://" in downloads:
         raise ValueError("Downloads must not use a separate or untrusted origin.")
     if 'timeZone: "UTC"' in downloads:
-        raise ValueError("Download publication times must use the viewer's local timezone.")
+        raise ValueError(
+            "Download publication times must use the viewer's local timezone."
+        )
 
     styles = (WEBSITE / "assets" / "site.css").read_text(encoding="utf-8")
     for contract in (
@@ -242,7 +241,9 @@ def main() -> int:
             "Preview download metadata must expose its schema and package collection."
         )
     if not packages and not valid_release_status:
-        raise ValueError("An empty preview catalog must explain the pending release state.")
+        raise ValueError(
+            "An empty preview catalog must explain the pending release state."
+        )
     release_ids = set()
     retained_previews = set()
     installer_formats = {
@@ -274,7 +275,8 @@ def main() -> int:
             or release_id in release_ids
             or retained_preview in retained_previews
             or not str(preview.get("url", "")).startswith("/preview-downloads/")
-            or str(preview.get("sha256", ""))[:8] not in str(preview.get("fileName", ""))
+            or str(preview.get("sha256", ""))[:8]
+            not in str(preview.get("fileName", ""))
             or len(str(preview.get("sha256", ""))) != 64
             or int(preview.get("sizeBytes", 0)) < 1
         ):
@@ -310,7 +312,10 @@ def main() -> int:
     ):
         if contract not in caddy:
             raise ValueError(f"Caddy website contract is missing '{contract}'.")
-    if caddy.count("import security_headers") != 1 or "\n\timport security_headers" not in caddy:
+    if (
+        caddy.count("import security_headers") != 1
+        or "\n\timport security_headers" not in caddy
+    ):
         raise ValueError(
             "Caddy must apply the security-header policy to every proxied Astro response."
         )

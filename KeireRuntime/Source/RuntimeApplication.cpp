@@ -387,8 +387,8 @@ namespace
         const auto& streaming = source.at("streaming");
         const auto pageBytes = streaming.at("pageBytes").get<std::uint64_t>();
         const auto concurrentReads = streaming.at("maximumConcurrentReads").get<std::uint32_t>();
-        if (!source.at("buildIdentity").is_object() || pageBytes < 4096 || pageBytes > 16U * 1024U * 1024U ||
-            concurrentReads == 0 || concurrentReads > 256)
+        if (!source.at("buildIdentity").is_object() || pageBytes < 4096 ||
+            pageBytes > std::uint64_t{16U} * 1024U * 1024U || concurrentReads == 0 || concurrentReads > 256)
             throw Keire::CommandLineError("Runtime manifest contains invalid build or streaming settings.");
         if (!result.StartupScene || !Keire::Math::IsFinite(result.Rendering.AmbientColor) ||
             !std::isfinite(result.Rendering.AmbientIntensity) || !std::isfinite(result.Rendering.Exposure))

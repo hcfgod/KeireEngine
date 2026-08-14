@@ -107,7 +107,7 @@ namespace KeireEditor
                     continue;
                 std::ifstream stream(candidate, std::ios::binary);
                 std::string document{std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
-                if (stream && !document.empty() && document.size() <= 16U * 1024U)
+                if (stream && !document.empty() && document.size() <= std::size_t{16U} * 1024U)
                     return document;
             }
             return std::nullopt;
@@ -484,7 +484,7 @@ namespace KeireEditor
         }
     }
 
-    void PackageManagerPanel::ImportReviewedPackage(PackageImportConfirmation confirmation)
+    void PackageManagerPanel::ImportReviewedPackage(const PackageImportConfirmation& confirmation)
     {
         if (!m_AssetImporter)
             return;
@@ -541,7 +541,7 @@ namespace KeireEditor
                 {
                     auto confirmation = m_ImportReview.Confirm();
                     ui.CloseCurrentPopup();
-                    ImportReviewedPackage(std::move(confirmation));
+                    ImportReviewedPackage(confirmation);
                 }
             }
             ui.SameLine();

@@ -14,18 +14,26 @@ MIGRATIONS = [
     ROOT / "supabase/migrations/20260812081500_marketplace_staging_seed.sql",
     ROOT / "supabase/migrations/20260812113000_marketplace_security_hardening.sql",
     ROOT / "supabase/migrations/20260812114500_marketplace_policy_consolidation.sql",
-    ROOT / "supabase/migrations/20260812123000_marketplace_edge_transition_boundary.sql",
-    ROOT / "supabase/migrations/20260812124500_marketplace_publisher_transition_boundary.sql",
+    ROOT
+    / "supabase/migrations/20260812123000_marketplace_edge_transition_boundary.sql",
+    ROOT
+    / "supabase/migrations/20260812124500_marketplace_publisher_transition_boundary.sql",
     ROOT / "supabase/migrations/20260812165208_marketplace_staff_moderation.sql",
     ROOT / "supabase/migrations/20260812190000_marketplace_validator_leases.sql",
-    ROOT / "supabase/migrations/20260812190001_add_marketplace_publisher_upload_boundary.sql",
-    ROOT / "supabase/migrations/20260812190002_fix_marketplace_service_rate_limit_subject.sql",
-    ROOT / "supabase/migrations/20260812170807_index_marketplace_staff_appointed_by.sql",
+    ROOT
+    / "supabase/migrations/20260812190001_add_marketplace_publisher_upload_boundary.sql",
+    ROOT
+    / "supabase/migrations/20260812190002_fix_marketplace_service_rate_limit_subject.sql",
+    ROOT
+    / "supabase/migrations/20260812170807_index_marketplace_staff_appointed_by.sql",
     ROOT / "supabase/migrations/20260812195000_marketplace_offline_publication.sql",
     ROOT / "supabase/migrations/20260812200000_fix_marketplace_moderation_queues.sql",
-    ROOT / "supabase/migrations/20260812202000_fix_public_marketplace_publisher_policy.sql",
-    ROOT / "supabase/migrations/20260812185825_fix_marketplace_claim_and_submission_visibility.sql",
+    ROOT
+    / "supabase/migrations/20260812202000_fix_public_marketplace_publisher_policy.sql",
+    ROOT
+    / "supabase/migrations/20260812185825_fix_marketplace_claim_and_submission_visibility.sql",
     ROOT / "supabase/migrations/20260814034937_marketplace_automatic_publication.sql",
+    ROOT / "supabase/migrations/20260814124354_add_marketplace_keyset_indexes.sql",
 ]
 
 
@@ -52,21 +60,49 @@ moderation_queues = sources[MIGRATIONS[13].name]
 public_catalog_policy = sources[MIGRATIONS[14].name]
 claim_fix = sources[MIGRATIONS[15].name]
 automatic_publication = sources[MIGRATIONS[16].name]
+keyset_indexes = sources[MIGRATIONS[17].name]
 combined = "\n".join(sources.values())
 
-require("selected_order_id uuid;" in claim_fix,
-        "The free-claim transaction must use an unambiguous order identifier local.")
-require(not re.search(r"^\s*order_id\s+uuid;", claim_fix, flags=re.MULTILINE),
-        "The free-claim transaction must not shadow marketplace_order_items.order_id.")
-require("to service_role;" in claim_fix,
-        "The repaired free-claim transaction must remain behind the service-role boundary.")
+for keyset_index in (
+    "idx_marketplace_products_public_keyset",
+    "idx_marketplace_entitlements_personal_keyset",
+    "idx_marketplace_entitlements_organization_keyset",
+):
+    require(
+        keyset_index in keyset_indexes,
+        f"Marketplace pagination index is missing: {keyset_index}.",
+    )
+require(
+    "where state = 'published'" in keyset_indexes
+    and "where revoked_at is null and organization_id is null" in keyset_indexes,
+    "Marketplace keyset indexes must retain their selective public and personal-library predicates.",
+)
 
-require("private.can_manage_publisher(id)" in public_catalog_policy,
-        "The public publisher policy must delegate protected membership checks to the SECURITY DEFINER boundary.")
-require("from public.organization_memberships" not in public_catalog_policy,
-        "Anonymous catalog reads must not require direct organization membership access.")
+require(
+    "selected_order_id uuid;" in claim_fix,
+    "The free-claim transaction must use an unambiguous order identifier local.",
+)
+require(
+    not re.search(r"^\s*order_id\s+uuid;", claim_fix, flags=re.MULTILINE),
+    "The free-claim transaction must not shadow marketplace_order_items.order_id.",
+)
+require(
+    "to service_role;" in claim_fix,
+    "The repaired free-claim transaction must remain behind the service-role boundary.",
+)
 
-public_tables = sorted(set(re.findall(r"create table public\.([a-z0-9_]+)\s*\(", combined)))
+require(
+    "private.can_manage_publisher(id)" in public_catalog_policy,
+    "The public publisher policy must delegate protected membership checks to the SECURITY DEFINER boundary.",
+)
+require(
+    "from public.organization_memberships" not in public_catalog_policy,
+    "Anonymous catalog reads must not require direct organization membership access.",
+)
+
+public_tables = sorted(
+    set(re.findall(r"create table public\.([a-z0-9_]+)\s*\(", combined))
+)
 require(public_tables, "Marketplace migrations contain no public tables.")
 for table in public_tables:
     require(
@@ -83,7 +119,10 @@ for function_body in re.findall(
     combined,
     flags=re.IGNORECASE | re.DOTALL,
 ):
-    require("set search_path = ''" in function_body[:300], "A SECURITY DEFINER function has no empty search_path.")
+    require(
+        "set search_path = ''" in function_body[:300],
+        "A SECURITY DEFINER function has no empty search_path.",
+    )
 
 for flag in (
     "marketplace_enabled",
@@ -93,13 +132,21 @@ for flag in (
     "community_enabled",
     "paid_checkout_enabled",
 ):
-    require(re.search(rf"\('{flag}',\s*false", foundation), f"{flag} must default to disabled.")
+    require(
+        re.search(rf"\('{flag}',\s*false", foundation),
+        f"{flag} must default to disabled.",
+    )
 
 for bucket in ("marketplace-quarantine", "marketplace-releases"):
-    require(re.search(rf"\('{bucket}',\s*'{bucket}',\s*false", storage), f"{bucket} must remain private.")
+    require(
+        re.search(rf"\('{bucket}',\s*'{bucket}',\s*false", storage),
+        f"{bucket} must remain private.",
+    )
 for bucket in ("marketplace-packages", "marketplace-validation-evidence"):
-    require(re.search(rf"\('{bucket}',\s*'{bucket}',\s*false", automatic_publication),
-            f"{bucket} must remain private.")
+    require(
+        re.search(rf"\('{bucket}',\s*'{bucket}',\s*false", automatic_publication),
+        f"{bucket} must remain private.",
+    )
 
 for contract in (
     "marketplace_products_protect_transitions",
@@ -109,13 +156,27 @@ for contract in (
     "issue_marketplace_download_grant",
     "register_marketplace_device_session",
 ):
-    require(contract in combined, f"Marketplace security contract is missing: {contract}.")
+    require(
+        contract in combined, f"Marketplace security contract is missing: {contract}."
+    )
 
-require("paid_checkout_enabled', true" not in combined, "Paid checkout must remain disabled in 0.3.1.")
-require("state,\n         license_spdx" in seed, "Official staging products must be inserted as explicit drafts.")
-require("'draft', 'MIT', '1'" in seed, "Official staging products must be free, licensed drafts.")
+require(
+    "paid_checkout_enabled', true" not in combined,
+    "Paid checkout must remain disabled in 0.3.1.",
+)
+require(
+    "state,\n         license_spdx" in seed,
+    "Official staging products must be inserted as explicit drafts.",
+)
+require(
+    "'draft', 'MIT', '1'" in seed,
+    "Official staging products must be free, licensed drafts.",
+)
 require("'published'" not in seed, "The staging seed must never publish products.")
-require("private.seed_official_marketplace_drafts" in seed, "The official staging seed must remain private.")
+require(
+    "private.seed_official_marketplace_drafts" in seed,
+    "The official staging seed must remain private.",
+)
 for rpc_signature in (
     "public.create_marketplace_organization(text, text)",
     "public.claim_free_marketplace_product(uuid, uuid, text, text, text, text)",
@@ -140,7 +201,10 @@ for service_function in (
     "service_register_marketplace_device_session",
     "service_issue_marketplace_download_grant",
 ):
-    require(service_function in edge_boundary, f"Marketplace Edge boundary is missing {service_function}.")
+    require(
+        service_function in edge_boundary,
+        f"Marketplace Edge boundary is missing {service_function}.",
+    )
 require(
     edge_boundary.count("to service_role;") == 4,
     "Every marketplace Edge adapter must grant execution only to service_role.",
@@ -153,37 +217,63 @@ require(
     "key = 'hub_oauth_sso_enabled'" in edge_boundary,
     "Hub device registration must remain gated until Hub OAuth is enabled.",
 )
-require("service_submit_publisher_application" in publisher_boundary,
-        "The publisher application submission transition is missing.")
-require("publisher_portal_enabled" in publisher_boundary and "to service_role;" in publisher_boundary,
-        "Publisher submissions must be feature-gated and callable only by service_role.")
-require("membership.role in ('owner', 'admin')" in publisher_boundary,
-        "Publisher applications must be bound to a managed organization.")
-require("drop policy if exists publisher_applications_owner_update" in publisher_boundary,
-        "The original direct publisher-submission policy must be replaced.")
-require("state in ('draft', 'withdrawn')" in publisher_boundary,
-        "Applicants must not bypass the MFA-protected submission transition through PostgREST.")
-require("create table public.platform_staff_members" in staff_moderation and
-        "force row level security" in staff_moderation,
-        "Staff roles must be database-authoritative and protected by forced RLS.")
-require("from public.platform_staff_members staff" in staff_moderation and
-        "auth.jwt() -> 'app_metadata'" not in staff_moderation,
-        "Marketplace authorization must not depend on stale browser JWT role metadata.")
-require("revoke insert on public.marketplace_submissions from authenticated" in staff_moderation and
-        "drop policy if exists submissions_publisher_insert" in staff_moderation,
-        "Package submission must not bypass the MFA-protected service transition.")
-require("private.is_platform_staff('moderator') or exists" not in
-        staff_moderation.split("create or replace function private.can_manage_publisher", 1)[1]
-        .split("$$;", 1)[0],
-        "Staff status must not silently grant direct publisher write authority.")
-require("select coalesce((select auth.jwt() ->> 'role'), '') = 'service_role'" in staff_moderation,
-        "Only the service boundary may bypass protected product and version transitions.")
+require(
+    "service_submit_publisher_application" in publisher_boundary,
+    "The publisher application submission transition is missing.",
+)
+require(
+    "publisher_portal_enabled" in publisher_boundary
+    and "to service_role;" in publisher_boundary,
+    "Publisher submissions must be feature-gated and callable only by service_role.",
+)
+require(
+    "membership.role in ('owner', 'admin')" in publisher_boundary,
+    "Publisher applications must be bound to a managed organization.",
+)
+require(
+    "drop policy if exists publisher_applications_owner_update" in publisher_boundary,
+    "The original direct publisher-submission policy must be replaced.",
+)
+require(
+    "state in ('draft', 'withdrawn')" in publisher_boundary,
+    "Applicants must not bypass the MFA-protected submission transition through PostgREST.",
+)
+require(
+    "create table public.platform_staff_members" in staff_moderation
+    and "force row level security" in staff_moderation,
+    "Staff roles must be database-authoritative and protected by forced RLS.",
+)
+require(
+    "from public.platform_staff_members staff" in staff_moderation
+    and "auth.jwt() -> 'app_metadata'" not in staff_moderation,
+    "Marketplace authorization must not depend on stale browser JWT role metadata.",
+)
+require(
+    "revoke insert on public.marketplace_submissions from authenticated"
+    in staff_moderation
+    and "drop policy if exists submissions_publisher_insert" in staff_moderation,
+    "Package submission must not bypass the MFA-protected service transition.",
+)
+require(
+    "private.is_platform_staff('moderator') or exists"
+    not in staff_moderation.split(
+        "create or replace function private.can_manage_publisher", 1
+    )[1].split("$$;", 1)[0],
+    "Staff status must not silently grant direct publisher write authority.",
+)
+require(
+    "select coalesce((select auth.jwt() ->> 'role'), '') = 'service_role'"
+    in staff_moderation,
+    "Only the service boundary may bypass protected product and version transitions.",
+)
 for direct_staff_policy in (
     "publisher_applications_owner_or_staff_update",
     "reviews_author_publisher_or_staff_update",
 ):
-    require(f"drop policy if exists {direct_staff_policy}" in staff_moderation,
-            f"Audited staff actions must replace the direct write policy: {direct_staff_policy}.")
+    require(
+        f"drop policy if exists {direct_staff_policy}" in staff_moderation,
+        f"Audited staff actions must replace the direct write policy: {direct_staff_policy}.",
+    )
 for staff_function in (
     "service_get_platform_staff_role",
     "service_set_platform_staff",
@@ -193,21 +283,36 @@ for staff_function in (
     "service_decide_marketplace_report",
     "service_set_platform_feature_flag",
 ):
-    require(staff_function in staff_moderation, f"Staff transition is missing {staff_function}.")
     require(
-        re.search(rf"grant execute on function public\.{staff_function}\([^;]+\) to service_role;", staff_moderation),
+        staff_function in staff_moderation,
+        f"Staff transition is missing {staff_function}.",
+    )
+    require(
+        re.search(
+            rf"grant execute on function public\.{staff_function}\([^;]+\) to service_role;",
+            staff_moderation,
+        ),
         f"Staff transition is not restricted to service_role: {staff_function}.",
     )
-require("staff_last_administrator_required" in staff_moderation,
-        "Staff administration must preserve at least one active administrator.")
-require("approved_pending_signature" in staff_moderation and "marketplace_publications" not in staff_moderation,
-        "Staff approval must stop before the offline signing and publication boundary.")
-require("create table public.marketplace_signature_keys" in offline_publication and
-        "force row level security" in offline_publication,
-        "Marketplace signing trust roots must be explicit, public-only records protected by forced RLS.")
-require("service_publish_marketplace_version" in offline_publication and
-        "to service_role;" in offline_publication,
-        "The immutable publication commit must be callable only through the service boundary.")
+require(
+    "staff_last_administrator_required" in staff_moderation,
+    "Staff administration must preserve at least one active administrator.",
+)
+require(
+    "approved_pending_signature" in staff_moderation
+    and "marketplace_publications" not in staff_moderation,
+    "Staff approval must stop before the offline signing and publication boundary.",
+)
+require(
+    "create table public.marketplace_signature_keys" in offline_publication
+    and "force row level security" in offline_publication,
+    "Marketplace signing trust roots must be explicit, public-only records protected by forced RLS.",
+)
+require(
+    "service_publish_marketplace_version" in offline_publication
+    and "to service_role;" in offline_publication,
+    "The immutable publication commit must be callable only through the service boundary.",
+)
 for evidence in (
     "selected_validation.package_sha256 is distinct from p_artifact_sha256",
     "selected_validation.manifest_sha256 is distinct from p_manifest_sha256",
@@ -215,9 +320,14 @@ for evidence in (
     "marketplace-releases",
     "marketplace.version_published",
 ):
-    require(evidence in offline_publication, f"Offline publication is missing evidence binding: {evidence}.")
-require("p_key = 'paid_checkout_enabled' and p_enabled" in staff_moderation,
-        "The staff gate boundary must refuse premature paid checkout enablement.")
+    require(
+        evidence in offline_publication,
+        f"Offline publication is missing evidence binding: {evidence}.",
+    )
+require(
+    "p_key = 'paid_checkout_enabled' and p_enabled" in staff_moderation,
+    "The staff gate boundary must refuse premature paid checkout enablement.",
+)
 for policy in (
     "validation_reports_publisher_or_staff_read",
     "publications_publisher_or_staff_read",
@@ -249,77 +359,146 @@ for validator_function in (
     "service_renew_marketplace_upload_lease",
     "service_complete_marketplace_validation",
 ):
-    require(validator_function in validator_leases, f"Validator boundary is missing {validator_function}.")
     require(
-        re.search(rf"grant execute on function public\.{validator_function}\([^;]+\) to service_role;", validator_leases),
+        validator_function in validator_leases,
+        f"Validator boundary is missing {validator_function}.",
+    )
+    require(
+        re.search(
+            rf"grant execute on function public\.{validator_function}\([^;]+\) to service_role;",
+            validator_leases,
+        ),
         f"Validator transition is not restricted to service_role: {validator_function}.",
     )
-require("for update of upload skip locked" in validator_leases,
-        "Validator leasing must be atomic and skip jobs held by another worker.")
-require("lease_expires_at <= now()" in validator_leases,
-        "Validator leasing must recover stale jobs.")
-require("validation_attempts < 5" in validator_leases and "retry_exhausted" in validator_leases,
-        "Validator leasing must terminally bound poison-job retries.")
-require("validator_fingerprint_sha256" in validator_leases and "policy_version" in validator_leases,
-        "Validator reports must retain binary and policy provenance.")
-require("jsonb_array_length(report_diagnostics) > 1024" in validator_leases,
-        "Validator diagnostics must have a database-side bound.")
+require(
+    "for update of upload skip locked" in validator_leases,
+    "Validator leasing must be atomic and skip jobs held by another worker.",
+)
+require(
+    "lease_expires_at <= now()" in validator_leases,
+    "Validator leasing must recover stale jobs.",
+)
+require(
+    "validation_attempts < 5" in validator_leases
+    and "retry_exhausted" in validator_leases,
+    "Validator leasing must terminally bound poison-job retries.",
+)
+require(
+    "validator_fingerprint_sha256" in validator_leases
+    and "policy_version" in validator_leases,
+    "Validator reports must retain binary and policy provenance.",
+)
+require(
+    "jsonb_array_length(report_diagnostics) > 1024" in validator_leases,
+    "Validator diagnostics must have a database-side bound.",
+)
 for publisher_upload_function in (
     "service_reserve_marketplace_upload",
     "service_complete_marketplace_upload",
     "service_cancel_marketplace_upload",
 ):
-    require(publisher_upload_function in publisher_uploads,
-            f"Publisher upload boundary is missing {publisher_upload_function}.")
     require(
-        re.search(rf"grant execute on function public\.{publisher_upload_function}\([^;]+\) to service_role;",
-                  publisher_uploads),
+        publisher_upload_function in publisher_uploads,
+        f"Publisher upload boundary is missing {publisher_upload_function}.",
+    )
+    require(
+        re.search(
+            rf"grant execute on function public\.{publisher_upload_function}\([^;]+\) to service_role;",
+            publisher_uploads,
+        ),
         f"Publisher upload transition is not restricted to service_role: {publisher_upload_function}.",
     )
-require("coalesce((select auth.jwt() ->> 'role'), '') <> 'service_role'" in publisher_uploads,
-        "Publisher upload adapters must validate the service JWT without deprecated auth.role().")
-require("publisher_portal_enabled" in publisher_uploads,
-        "Publisher upload reservations and completion must remain feature-gated.")
-require("membership.role in ('owner', 'admin')" in publisher_uploads,
-        "Publisher uploads must require a managed publisher organization.")
-require("object.bucket_id = 'marketplace-quarantine'" in publisher_uploads and
-        "object_size <> selected_upload.expected_size_bytes" in publisher_uploads,
-        "Publisher completion must verify the exact private quarantine object size.")
-require("p_expected_sha256 !~ '^[0-9a-f]{64}$'" in publisher_uploads,
-        "Publisher reservations must reject malformed expected package hashes.")
-require("p_subject uuid" in rate_limit_subject and
-        "values (p_bucket, p_subject, now(), 1)" in rate_limit_subject,
-        "Marketplace throttles must accept an explicitly trusted actor subject.")
-for actor_field in ("user_id", "author_user_id", "reporter_user_id", "created_by", "session_id"):
-    require(actor_field in rate_limit_subject,
-            f"Marketplace throttle does not derive its actor from {actor_field}.")
-require("when 'marketplace_uploads' then nullif(to_jsonb(new) ->> 'created_by', '')::uuid" in rate_limit_subject,
-        "Service-role publisher uploads must be throttled by their authenticated creator.")
-require("drop function private.consume_marketplace_rate_limit(text, integer, interval)" in rate_limit_subject,
-        "The auth.uid()-only throttle implementation must be removed.")
-require("idx_platform_staff_members_appointed_by" in staff_indexes,
-        "The staff appointer foreign key must keep its covering index.")
-require("submission.state in ('submitted', 'in_review', 'approved_pending_signature')" in moderation_queues,
-        "Pre-publication signing approval must have an audited withdrawal path.")
-require("private.service_actor_is_staff(p_actor_user_id, 'administrator')" in moderation_queues and
-        "marketplace.signing_approval_withdrawn" in moderation_queues,
-        "Only an administrator may withdraw signing approval, and the transition must be audited.")
-require("revoke all on function public.service_decide_marketplace_submission" in moderation_queues and
-        "to service_role;" in moderation_queues,
-        "The replacement moderation transition must remain service-only.")
+require(
+    "coalesce((select auth.jwt() ->> 'role'), '') <> 'service_role'"
+    in publisher_uploads,
+    "Publisher upload adapters must validate the service JWT without deprecated auth.role().",
+)
+require(
+    "publisher_portal_enabled" in publisher_uploads,
+    "Publisher upload reservations and completion must remain feature-gated.",
+)
+require(
+    "membership.role in ('owner', 'admin')" in publisher_uploads,
+    "Publisher uploads must require a managed publisher organization.",
+)
+require(
+    "object.bucket_id = 'marketplace-quarantine'" in publisher_uploads
+    and "object_size <> selected_upload.expected_size_bytes" in publisher_uploads,
+    "Publisher completion must verify the exact private quarantine object size.",
+)
+require(
+    "p_expected_sha256 !~ '^[0-9a-f]{64}$'" in publisher_uploads,
+    "Publisher reservations must reject malformed expected package hashes.",
+)
+require(
+    "p_subject uuid" in rate_limit_subject
+    and "values (p_bucket, p_subject, now(), 1)" in rate_limit_subject,
+    "Marketplace throttles must accept an explicitly trusted actor subject.",
+)
+for actor_field in (
+    "user_id",
+    "author_user_id",
+    "reporter_user_id",
+    "created_by",
+    "session_id",
+):
+    require(
+        actor_field in rate_limit_subject,
+        f"Marketplace throttle does not derive its actor from {actor_field}.",
+    )
+require(
+    "when 'marketplace_uploads' then nullif(to_jsonb(new) ->> 'created_by', '')::uuid"
+    in rate_limit_subject,
+    "Service-role publisher uploads must be throttled by their authenticated creator.",
+)
+require(
+    "drop function private.consume_marketplace_rate_limit(text, integer, interval)"
+    in rate_limit_subject,
+    "The auth.uid()-only throttle implementation must be removed.",
+)
+require(
+    "idx_platform_staff_members_appointed_by" in staff_indexes,
+    "The staff appointer foreign key must keep its covering index.",
+)
+require(
+    "submission.state in ('submitted', 'in_review', 'approved_pending_signature')"
+    in moderation_queues,
+    "Pre-publication signing approval must have an audited withdrawal path.",
+)
+require(
+    "private.service_actor_is_staff(p_actor_user_id, 'administrator')"
+    in moderation_queues
+    and "marketplace.signing_approval_withdrawn" in moderation_queues,
+    "Only an administrator may withdraw signing approval, and the transition must be audited.",
+)
+require(
+    "revoke all on function public.service_decide_marketplace_submission"
+    in moderation_queues
+    and "to service_role;" in moderation_queues,
+    "The replacement moderation transition must remain service-only.",
+)
 
-require("create table public.marketplace_validator_attestation_keys" in automatic_publication and
-        "force row level security" in automatic_publication,
-        "Validator attestation trust roots must be explicit and protected by forced RLS.")
-require("create table public.marketplace_publication_jobs" in automatic_publication and
-        "marketplace_publication_jobs_staff_read" in automatic_publication,
-        "Automatic publication jobs must be durable and visible only through staff RLS.")
-require("drop policy if exists marketplace_quarantine_owner_read" in automatic_publication,
-        "Staff must not need direct access to publisher package bytes during review.")
-require("'marketplace-packages'" in automatic_publication and
-        "v_storage_path := p_product_id::text || '/' || v_version_id::text || '/' ||" in
-        automatic_publication,
-        "New packages must use one immutable upload-once object identity.")
+require(
+    "create table public.marketplace_validator_attestation_keys"
+    in automatic_publication
+    and "force row level security" in automatic_publication,
+    "Validator attestation trust roots must be explicit and protected by forced RLS.",
+)
+require(
+    "create table public.marketplace_publication_jobs" in automatic_publication
+    and "marketplace_publication_jobs_staff_read" in automatic_publication,
+    "Automatic publication jobs must be durable and visible only through staff RLS.",
+)
+require(
+    "drop policy if exists marketplace_quarantine_owner_read" in automatic_publication,
+    "Staff must not need direct access to publisher package bytes during review.",
+)
+require(
+    "'marketplace-packages'" in automatic_publication
+    and "v_storage_path := p_product_id::text || '/' || v_version_id::text || '/' ||"
+    in automatic_publication,
+    "New packages must use one immutable upload-once object identity.",
+)
 for service_function in (
     "service_lease_marketplace_upload_v2",
     "service_cancel_marketplace_upload_v2",
@@ -330,20 +509,38 @@ for service_function in (
     "service_publish_marketplace_version_v2",
     "service_issue_marketplace_download_grant_v3",
 ):
-    require(service_function in automatic_publication,
-            f"Automatic Marketplace publication is missing {service_function}.")
-    require(re.search(rf"grant execute on function public\.{service_function}\([^;]+\) to service_role;",
-                      automatic_publication),
-            f"Automatic Marketplace transition is not restricted to service_role: {service_function}.")
-require("private.service_actor_is_staff(p_actor_user_id, 'administrator')" in automatic_publication and
-        "insert into public.marketplace_publication_jobs" in automatic_publication,
-        "Administrator approval must atomically enqueue automatic publication.")
-require("signed_attestation" in automatic_publication and "evidence_storage_path" in automatic_publication and
-        "validator_attestation_invalid" in automatic_publication,
-        "Publication approval must bind signed validator attestation and bounded evidence metadata.")
-require("from storage.objects" in automatic_publication and
-        "marketplace-releases" not in automatic_publication.split(
-            "create or replace function public.service_publish_marketplace_version_v2", 1)[1].split("$$;", 1)[0],
-        "Automatic publication must commit the existing immutable object without copying package bytes.")
+    require(
+        service_function in automatic_publication,
+        f"Automatic Marketplace publication is missing {service_function}.",
+    )
+    require(
+        re.search(
+            rf"grant execute on function public\.{service_function}\([^;]+\) to service_role;",
+            automatic_publication,
+        ),
+        f"Automatic Marketplace transition is not restricted to service_role: {service_function}.",
+    )
+require(
+    "private.service_actor_is_staff(p_actor_user_id, 'administrator')"
+    in automatic_publication
+    and "insert into public.marketplace_publication_jobs" in automatic_publication,
+    "Administrator approval must atomically enqueue automatic publication.",
+)
+require(
+    "signed_attestation" in automatic_publication
+    and "evidence_storage_path" in automatic_publication
+    and "validator_attestation_invalid" in automatic_publication,
+    "Publication approval must bind signed validator attestation and bounded evidence metadata.",
+)
+require(
+    "from storage.objects" in automatic_publication
+    and "marketplace-releases"
+    not in automatic_publication.split(
+        "create or replace function public.service_publish_marketplace_version_v2", 1
+    )[1].split("$$;", 1)[0],
+    "Automatic publication must commit the existing immutable object without copying package bytes.",
+)
 
-print(f"Marketplace migration validation passed for {len(public_tables)} forced-RLS public tables.")
+print(
+    f"Marketplace migration validation passed for {len(public_tables)} forced-RLS public tables."
+)

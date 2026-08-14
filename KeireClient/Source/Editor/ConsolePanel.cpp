@@ -163,15 +163,15 @@ namespace KeireEditor
             const auto countWarnings = std::ranges::count(m_Messages, Keire::LogLevel::Warn, &Message::Level);
             const auto countErrors = std::ranges::count_if(m_Messages, [](const Message& message)
                                                            { return message.Level >= Keire::LogLevel::Error; });
-            if (ui.Checkbox(("Info " + std::to_string(countInfo)).c_str(), m_ShowInfo))
+            if (ui.Checkbox("Info " + std::to_string(countInfo), m_ShowInfo))
             {
             }
             ui.SameLine();
-            if (ui.Checkbox(("Warnings " + std::to_string(countWarnings)).c_str(), m_ShowWarnings))
+            if (ui.Checkbox("Warnings " + std::to_string(countWarnings), m_ShowWarnings))
             {
             }
             ui.SameLine();
-            if (ui.Checkbox(("Errors " + std::to_string(countErrors)).c_str(), m_ShowErrors))
+            if (ui.Checkbox("Errors " + std::to_string(countErrors), m_ShowErrors))
             {
             }
             ui.SameLine();
