@@ -98,6 +98,7 @@ internal static class ManagedStateSerializer
         var options = new JsonSerializerOptions
         {
             IncludeFields = true,
+            IgnoreReadOnlyProperties = true,
             MaxDepth = 16,
             PropertyNameCaseInsensitive = true,
             TypeInfoResolver = resolver,

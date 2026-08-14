@@ -15,6 +15,7 @@ var tests = new (string Name, Action Run)[]
     ("Character Controller uses the native stable component contract", CharacterControllerStableContract),
     ("Entity exposes the production layer contract", EntityLayerContract),
     ("Behaviour lifecycle contracts are synchronized", BehaviourLifecycleContract),
+    ("Managed state ignores computed math properties", ManagedStateMathContract),
     ("Coroutines schedule phases and dispose deterministically", CoroutineContract),
     ("Transform and rigid body gameplay handles expose writable runtime state", GameplayHandleContract),
     ("Native UI button dispatch advances with the player clock", NativeUiButtonDispatchClockContract),
@@ -137,6 +138,27 @@ static void BehaviourLifecycleContract()
     Keire.ComponentTypeId expected = Keire.ComponentType.Of<Keire.CharacterControllerComponent>();
     Assert(dependency.High == expected.High && dependency.Low == expected.Low,
         "RequireComponent metadata must expose the dependency's stable native component ID.");
+}
+
+static void ManagedStateMathContract()
+{
+    var source = new ManagedStateMathProbe
+    {
+        Position = new Keire.Vector3(1.25f, -2.5f, 3.75f),
+        Aim = new Keire.Vector2(-0.5f, 0.75f),
+        Rotation = Keire.Quaternion.Euler(12.0f, 34.0f, 56.0f),
+    };
+
+    string state = Keire.ManagedStateSerializer.Capture(source, string.Empty, false);
+    Assert(!state.Contains("Normalized", StringComparison.Ordinal) &&
+               !state.Contains("Length", StringComparison.Ordinal),
+           "Managed state must not traverse computed math properties.");
+
+    var restored = new ManagedStateMathProbe();
+    string warnings = Keire.ManagedStateSerializer.Restore(restored, state, false);
+    Assert(string.IsNullOrEmpty(warnings), "Stable managed math fields must restore without migration warnings.");
+    Assert(restored.Position == source.Position && restored.Aim == source.Aim && restored.Rotation == source.Rotation,
+           "Managed vector and quaternion fields must round-trip exactly.");
 }
 
 static void CoroutineContract()
@@ -602,6 +624,18 @@ file sealed class EmptyCollisionWorld : IBallisticCollisionWorld
 }
 
 file sealed class DetachedManagedContractProbe : Keire.Behaviour;
+
+file sealed class ManagedStateMathProbe : Keire.Behaviour
+{
+    [Keire.StableFieldId("73616e64-626f-4078-8000-00000000a001")]
+    public Keire.Vector3 Position;
+
+    [Keire.StableFieldId("73616e64-626f-4078-8000-00000000a002")]
+    public Keire.Vector2 Aim;
+
+    [Keire.StableFieldId("73616e64-626f-4078-8000-00000000a003")]
+    public Keire.Quaternion Rotation;
+}
 
 file sealed class RecordingImpactSink : IBallisticImpactSink
 {

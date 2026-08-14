@@ -5,6 +5,12 @@ versions.
 
 ## Unreleased
 
+- Fixed Play Mode failing to route keyboard/gamepad input until the pointer entered the Game panel. Focus established
+  when Play starts now owns gameplay input, while application focus, Escape suspension, and panel changes still release
+  it correctly.
+- Fixed Inspector edits and Play Mode teardown crashing when managed state contained Kéire vectors or quaternions.
+  Persistent state now serializes restorable data instead of recursively traversing computed properties such as
+  `Normalized`.
 - Closed the repository-wide readiness review findings: Marketplace catalog and library APIs now use indexed keyset
   cursors, every Edge Function has a frozen Deno dependency graph and CI type check, compile-database generation records
   the shared Ninja artifact identity, and the automatic publication, Python-format, and current clang-tidy gates are

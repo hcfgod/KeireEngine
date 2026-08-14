@@ -1648,14 +1648,12 @@ TEST_CASE("scene and game viewports keep camera and input ownership separate dur
         CHECK(renderCamera.Projection.Elements[index] == doctest::Approx(expectedProjection.Elements[index]));
     }
 
-    CHECK(KeireEditor::GameViewportOwnsRuntimeInput(true, true, true, true, false, false, false));
-    CHECK(KeireEditor::GameViewportOwnsRuntimeInput(true, true, true, false, true, false, false));
-    CHECK(KeireEditor::GameViewportOwnsRuntimeInput(true, true, false, false, false, true, false));
-    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(false, true, true, true, true, true, false));
-    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(true, false, true, true, true, true, false));
-    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(true, true, true, true, true, true, true));
-    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(true, true, false, true, false, false, false));
-    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(true, true, true, false, false, false, false));
+    CHECK(KeireEditor::GameViewportOwnsRuntimeInput(true, true, true, false, false));
+    CHECK(KeireEditor::GameViewportOwnsRuntimeInput(true, true, false, true, false));
+    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(false, true, true, true, false));
+    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(true, false, true, true, false));
+    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(true, true, true, true, true));
+    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(true, true, false, false, false));
 }
 
 TEST_CASE("scene camera single F frames and double F locks the selected entity")
