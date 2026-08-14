@@ -1243,6 +1243,25 @@ namespace Keire
             }
         }
 
+        [[nodiscard]] static std::uint8_t RuntimeSetAnimatorFootGroundingWeight(const std::uint64_t world,
+                                                                                const std::uint64_t high,
+                                                                                const std::uint64_t low,
+                                                                                const float weight) noexcept
+        {
+            try
+            {
+                const auto animator = RuntimeAnimator(world, high, low);
+                if (!animator)
+                    return 0;
+                animator->SetRuntimeFootGroundingWeight(weight);
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
         [[nodiscard]] static std::uint8_t RuntimeGetAnimatorState(const std::uint64_t world, const std::uint64_t high,
                                                                   const std::uint64_t low,
                                                                   NativeAnimatorState* state) noexcept
@@ -3498,6 +3517,8 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimeStopAnimator));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetAnimatorSpeedIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeSetAnimatorSpeed));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetAnimatorFootGroundingWeightIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetAnimatorFootGroundingWeight));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "GetAnimatorStateIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeGetAnimatorState));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "GetAnimatorStateNameIcall",

@@ -157,6 +157,8 @@ namespace Keire
         [[nodiscard]] std::span<const AnimatorIkGoal> IkGoals() const noexcept { return m_IkGoals; }
         [[nodiscard]] const AnimatorFootGroundingSettings& FootGrounding() const noexcept { return m_FootGrounding; }
         void SetFootGrounding(AnimatorFootGroundingSettings settings);
+        [[nodiscard]] float RuntimeFootGroundingWeight() const noexcept { return m_RuntimeFootGroundingWeight; }
+        void SetRuntimeFootGroundingWeight(float weight);
         [[nodiscard]] const AnimatorLimbIkSettings& LeftArmIk() const noexcept { return m_LeftArmIk; }
         [[nodiscard]] const AnimatorLimbIkSettings& RightArmIk() const noexcept { return m_RightArmIk; }
         void SetLeftArmIk(AnimatorLimbIkSettings settings);
@@ -185,6 +187,7 @@ namespace Keire
         std::vector<AnimatorCommand> m_RuntimeCommands;
         std::vector<AnimatorIkGoal> m_IkGoals;
         AnimatorFootGroundingSettings m_FootGrounding;
+        float m_RuntimeFootGroundingWeight = 1.0F;
         AnimatorLimbIkSettings m_LeftArmIk;
         AnimatorLimbIkSettings m_RightArmIk;
         std::uint64_t m_NextRuntimeCommand = 1;

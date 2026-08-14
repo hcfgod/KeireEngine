@@ -217,6 +217,12 @@ Schema-five Animators preserve their authored response and lean values and recei
 Earlier schemas receive the defaults introduced after their version. Authors can opt into semantic mapping after
 verifying a legacy custom rig.
 
+Gameplay code can call `Animator.SetFootGroundingWeight(entity, weight)` to apply a transient `0..1` multiplier over
+the authored position, rotation, and pelvis grounding weights. A zero multiplier also clears planted-foot state. Use
+this at locomotion boundaries so ground adaptation remains active on slopes and moving supports but releases during
+jumps, falls, swimming, climbing, or other airborne poses. This runtime value is independent of skeleton naming and is
+not serialized into the Animator component.
+
 Two-bone and FABRIK rotations are solved in model space and converted back through the actual parent transform, so
 rotated parents and imported bind orientations do not corrupt local bone rotations. Two-bone chains may contain
 translation, pre-rotation, and rotation helper nodes between their resolved joints, as commonly produced by FBX

@@ -5,6 +5,10 @@ versions.
 
 ## Unreleased
 
+- Added a transient managed Animator foot-grounding weight. Gameplay controllers can now blend authored terrain IK out
+  during jumps and falls without mutating scene data; zero weight clears planted-foot state so landing reacquires the
+  current surface cleanly.
+
 <<<<<<< HEAD
 - Fixed Play Mode failing to route keyboard/gamepad input until the pointer entered the Game panel. Focus established
   when Play starts now owns gameplay input, while application focus, Escape suspension, and panel changes still release

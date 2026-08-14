@@ -18,10 +18,20 @@ var tests = new (string Name, Action Run)[]
     ("Managed state ignores computed math properties", ManagedStateMathContract),
     ("Coroutines schedule phases and dispose deterministically", CoroutineContract),
     ("Transform and rigid body gameplay handles expose writable runtime state", GameplayHandleContract),
+    ("Animator exposes transient foot-grounding control", AnimatorFootGroundingContract),
     ("Native UI button dispatch advances with the player clock", NativeUiButtonDispatchClockContract),
     ("Managed jobs execute delegates and publish terminal states", ManagedJobExecutionContract),
     ("Managed jobs preserve terminal dependency semantics", ManagedJobDependencyContract),
 };
+
+static void AnimatorFootGroundingContract()
+{
+    System.Reflection.MethodInfo? method = typeof(Keire.Animator).GetMethod(
+        nameof(Keire.Animator.SetFootGroundingWeight),
+        [typeof(Keire.Entity), typeof(float)]);
+    Assert(method is not null && method.ReturnType == typeof(void),
+           "Animator must expose a model-agnostic runtime foot-grounding weight.");
+}
 
 static unsafe void NativeUiButtonDispatchClockContract()
 {

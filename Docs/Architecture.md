@@ -1143,6 +1143,9 @@ dependency types, mesh/influence cardinality, and influence bone bounds before p
 Runtime IK goals are persistent named `AnimatorComponent` state. They are resolved after graph sampling and before
 palette generation at the scene-safe animation boundary. Managed calls carry world/entity generations and value data;
 the bridge validates animator existence, goal space, solver limits, and stale scene state before mutating the component.
+The managed foot-grounding multiplier is runtime-only component state: it scales authored foot, rotation, and pelvis
+weights without notifying authoring observers or changing serialized data. A zero multiplier resets transient contact
+and support locks before the grounding pass, allowing controllers to disable terrain adaptation while airborne.
 
 Controller node positions are optional schema-v2 authoring metadata and never affect runtime evaluation. Project-panel
 clip drops resolve through typed asset records before creating states. Undo commands retain complete graph values but

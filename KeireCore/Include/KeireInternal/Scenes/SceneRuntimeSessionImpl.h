@@ -602,7 +602,8 @@ namespace Keire
                                                      AnimationRuntimeState& runtimeState)
         {
             const auto& settings = animator.FootGrounding();
-            if (!settings.Enabled)
+            const auto runtimeWeight = animator.RuntimeFootGroundingWeight();
+            if (!settings.Enabled || runtimeWeight <= std::numeric_limits<float>::epsilon())
             {
                 runtimeState.LeftFootIkState = {};
                 runtimeState.RightFootIkState = {};
@@ -663,7 +664,7 @@ namespace Keire
             FootGroundingRequest request;
             request.Pelvis = *pelvis;
             request.FootHeight = 0.0F;
-            request.PelvisWeight = settings.Weight;
+            request.PelvisWeight = settings.Weight * runtimeWeight;
             request.MaximumPelvisAdjustment =
                 Detail::WorldVerticalDistanceToModel(worldToModel, settings.MaximumPelvisAdjustment);
             float totalLegLength = 0.0F;
@@ -954,8 +955,8 @@ namespace Keire
                                            *footTarget,
                                            contact->Normal,
                                            pole,
-                                           settings.Weight * smoothed->Blend,
-                                           settings.RotationWeight * smoothed->Blend};
+                                           settings.Weight * runtimeWeight * smoothed->Blend,
+                                           settings.RotationWeight * runtimeWeight * smoothed->Blend};
                 auto toe = runtimeState.FootToeBones.find(*chain[2]);
                 if (toe == runtimeState.FootToeBones.end())
                 {

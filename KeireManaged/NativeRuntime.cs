@@ -319,6 +319,7 @@ internal static unsafe class NativeRuntime
     internal static delegate* unmanaged<ulong, ulong, ulong, byte, byte> PauseAnimatorIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte> StopAnimatorIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, float, byte> SetAnimatorSpeedIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, float, byte> SetAnimatorFootGroundingWeightIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, NativeAnimatorState*, byte> GetAnimatorStateIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte*, int, int> GetAnimatorStateNameIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, NativeString, NativeString, NativeString,
@@ -676,6 +677,9 @@ internal static unsafe class NativeRuntime
 
     internal static void SetAnimatorSpeed(Entity entity, float speed) =>
         RequireAnimatorResult(SetAnimatorSpeedIcall(entity.World, entity.Id.High, entity.Id.Low, speed));
+
+    internal static void SetAnimatorFootGroundingWeight(Entity entity, float weight) =>
+        RequireAnimatorResult(SetAnimatorFootGroundingWeightIcall(entity.World, entity.Id.High, entity.Id.Low, weight));
 
     internal static AnimatorStateInfo GetAnimatorState(Entity entity)
     {

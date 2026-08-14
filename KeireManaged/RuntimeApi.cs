@@ -323,6 +323,15 @@ public static class Animator
             throw new ArgumentOutOfRangeException(nameof(speed), "Animator speed must be between zero and eight.");
         NativeRuntime.SetAnimatorSpeed(entity, speed);
     }
+    public static void SetFootGroundingWeight(Entity entity, float weight)
+    {
+        if (!float.IsFinite(weight) || weight < 0.0f || weight > 1.0f)
+        {
+            throw new ArgumentOutOfRangeException(nameof(weight),
+                "Animator foot-grounding weight must be between zero and one.");
+        }
+        NativeRuntime.SetAnimatorFootGroundingWeight(entity, weight);
+    }
     public static AnimatorStateInfo GetStateInfo(Entity entity) => NativeRuntime.GetAnimatorState(entity);
 
     public static void SetFloat(Entity entity, string parameter, float value) =>

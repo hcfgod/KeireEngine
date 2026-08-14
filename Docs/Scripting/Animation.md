@@ -232,6 +232,21 @@ protected override void OnDisable()
 }
 ```
 
+## Runtime Foot Grounding Weight
+
+Automatic Ground Adaptation is authored on the Animator component, but gameplay can blend its influence without
+changing or serializing those authored settings:
+
+```csharp
+float groundingWeight = grounded && !jumping ? 1.0f : 0.0f;
+Animator.SetFootGroundingWeight(Entity, groundingWeight);
+```
+
+The runtime value is a `0..1` multiplier over the Animator's authored foot-position, foot-rotation, and pelvis
+grounding weights. Zero clears transient foot locks and restores the sampled animation, which prevents terrain IK from
+pulling an airborne character back toward the surface. The multiplier returns to one when runtime pose state is
+cleared and is never written into the scene or prefab.
+
 ## Complete Controller Pattern
 
 ```csharp

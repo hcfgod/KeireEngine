@@ -280,6 +280,13 @@ namespace Keire
         NotifyChanged();
     }
 
+    void AnimatorComponent::SetRuntimeFootGroundingWeight(const float weight)
+    {
+        if (!std::isfinite(weight) || weight < 0.0F || weight > 1.0F)
+            throw std::invalid_argument("Animator runtime foot-grounding weight must be finite and in the range 0..1.");
+        m_RuntimeFootGroundingWeight = weight;
+    }
+
     void AnimatorComponent::SetLeftArmIk(AnimatorLimbIkSettings settings)
     {
         ValidateLimbIk(settings);
@@ -348,6 +355,7 @@ namespace Keire
         m_SkinPalette.clear();
         m_DebugSnapshot.reset();
         m_RuntimeDiagnostic.clear();
+        m_RuntimeFootGroundingWeight = 1.0F;
     }
 
     ComponentRegistration CreateAnimatorComponentRegistration()

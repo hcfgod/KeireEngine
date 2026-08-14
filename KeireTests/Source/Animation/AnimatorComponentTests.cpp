@@ -166,6 +166,32 @@ TEST_CASE("Animator foot grounding settings validate and migrate as authored com
     CHECK(std::get<double>(migratedV5.at("footKneeStability")) == doctest::Approx(0.9));
 }
 
+TEST_CASE("Animator runtime foot grounding weight is transient and bounded")
+{
+    Keire::AnimatorComponent animator;
+    Keire::AnimatorFootGroundingSettings settings;
+    settings.Enabled = true;
+    settings.Weight = 0.75F;
+    animator.SetFootGrounding(settings);
+
+    animator.SetRuntimeFootGroundingWeight(0.25F);
+    CHECK(animator.RuntimeFootGroundingWeight() == doctest::Approx(0.25F));
+    CHECK(animator.FootGrounding().Weight == doctest::Approx(0.75F));
+    CHECK_THROWS_AS(animator.SetRuntimeFootGroundingWeight(-0.1F), std::invalid_argument);
+    CHECK_THROWS_AS(animator.SetRuntimeFootGroundingWeight(1.1F), std::invalid_argument);
+
+    const auto registration = Keire::CreateAnimatorComponentRegistration();
+    const auto values = registration.Serialize(animator);
+    auto restored = registration.Factory();
+    registration.Deserialize(*restored, values, registration.SchemaVersion);
+    const auto restoredAnimator = Keire::DynamicRefCast<Keire::AnimatorComponent>(restored);
+    REQUIRE(restoredAnimator);
+    CHECK(restoredAnimator->RuntimeFootGroundingWeight() == doctest::Approx(1.0F));
+
+    animator.ClearRuntimePose();
+    CHECK(animator.RuntimeFootGroundingWeight() == doctest::Approx(1.0F));
+}
+
 TEST_CASE("Animator authored arm IK is automatic, serializable, and validates safe weights")
 {
     Keire::AnimatorComponent animator;
