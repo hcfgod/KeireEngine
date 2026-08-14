@@ -34,6 +34,7 @@ MIGRATIONS = [
     / "supabase/migrations/20260812185825_fix_marketplace_claim_and_submission_visibility.sql",
     ROOT / "supabase/migrations/20260814034937_marketplace_automatic_publication.sql",
     ROOT / "supabase/migrations/20260814124354_add_marketplace_keyset_indexes.sql",
+    ROOT / "supabase/migrations/20260814135718_publisher_named_product_uploads.sql",
 ]
 
 
@@ -61,6 +62,7 @@ public_catalog_policy = sources[MIGRATIONS[14].name]
 claim_fix = sources[MIGRATIONS[15].name]
 automatic_publication = sources[MIGRATIONS[16].name]
 keyset_indexes = sources[MIGRATIONS[17].name]
+named_product_uploads = sources[MIGRATIONS[18].name]
 combined = "\n".join(sources.values())
 
 for keyset_index in (
@@ -429,6 +431,39 @@ require(
 require(
     "p_expected_sha256 !~ '^[0-9a-f]{64}$'" in publisher_uploads,
     "Publisher reservations must reject malformed expected package hashes.",
+)
+require(
+    "service_reserve_marketplace_named_upload" in named_product_uploads,
+    "Named publisher uploads must use a dedicated transactional reservation boundary.",
+)
+require(
+    "membership.role in ('owner', 'admin')" in named_product_uploads
+    and "category.id = p_category_id and category.active" in named_product_uploads
+    and "license.license_id = p_license_spdx" in named_product_uploads,
+    "Named publisher products must validate ownership, category, and license metadata.",
+)
+require(
+    "insert into public.marketplace_products" in named_product_uploads
+    and "insert into public.marketplace_product_versions" in named_product_uploads
+    and "insert into public.marketplace_uploads" in named_product_uploads,
+    "Named product creation and upload reservation must remain one database transaction.",
+)
+require(
+    "pg_advisory_xact_lock" in named_product_uploads,
+    "Concurrent named product creation must serialize before its unique publisher slug is reserved.",
+)
+require(
+    re.search(
+        r"revoke all on function public\.service_reserve_marketplace_named_upload\([^;]+\) "
+        r"from public, anon, authenticated;",
+        named_product_uploads,
+    )
+    and re.search(
+        r"grant execute on function public\.service_reserve_marketplace_named_upload\([^;]+\) "
+        r"to service_role;",
+        named_product_uploads,
+    ),
+    "Named publisher upload reservation must be restricted to service_role.",
 )
 require(
     "p_subject uuid" in rate_limit_subject

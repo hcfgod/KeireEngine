@@ -20,6 +20,7 @@ export const POST: APIRoute = async (context) => {
         if (transition.error) await throwEdgeFunctionError(transition.error);
         const data = transition.data?.data;
         if (!data || typeof data.uploadId !== "string" || typeof data.versionId !== "string" ||
+            typeof data.productId !== "string" ||
             typeof data.bucket !== "string" || typeof data.storagePath !== "string" ||
             typeof data.uploadToken !== "string" || typeof data.resumableEndpoint !== "string" ||
             typeof data.expiresAt !== "string") {

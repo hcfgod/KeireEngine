@@ -1320,8 +1320,8 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
             m_GameViewportCaptureSuspended = false;
         const auto mainWindow = Owner().MainWindow();
         SetGameViewportInputActive(KeireEditor::GameViewportOwnsRuntimeInput(
-            playActive, mainWindow && mainWindow->Focused(), ui.WindowFocused(), imageState.Hovered,
-            m_GameViewportInputActive, m_ManagedCursorLocked, m_GameViewportCaptureSuspended));
+            playActive, mainWindow && mainWindow->Focused(), ui.WindowFocused(), m_ManagedCursorLocked,
+            m_GameViewportCaptureSuspended));
         if (playActive)
         {
             playSession->SetPresentationViewport(size.Width, size.Height);

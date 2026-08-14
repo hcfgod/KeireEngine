@@ -1648,14 +1648,12 @@ TEST_CASE("scene and game viewports keep camera and input ownership separate dur
         CHECK(renderCamera.Projection.Elements[index] == doctest::Approx(expectedProjection.Elements[index]));
     }
 
-    CHECK(KeireEditor::GameViewportOwnsRuntimeInput(true, true, true, true, false, false, false));
-    CHECK(KeireEditor::GameViewportOwnsRuntimeInput(true, true, true, false, true, false, false));
-    CHECK(KeireEditor::GameViewportOwnsRuntimeInput(true, true, false, false, false, true, false));
-    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(false, true, true, true, true, true, false));
-    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(true, false, true, true, true, true, false));
-    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(true, true, true, true, true, true, true));
-    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(true, true, false, true, false, false, false));
-    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(true, true, true, false, false, false, false));
+    CHECK(KeireEditor::GameViewportOwnsRuntimeInput(true, true, true, false, false));
+    CHECK(KeireEditor::GameViewportOwnsRuntimeInput(true, true, false, true, false));
+    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(false, true, true, true, false));
+    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(true, false, true, true, false));
+    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(true, true, true, true, true));
+    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(true, true, false, false, false));
 }
 
 TEST_CASE("scene camera single F frames and double F locks the selected entity")
@@ -1878,11 +1876,23 @@ TEST_CASE("content previews use immutable loaded assets without blocking shutdow
         KeireEditor::MakeAssetFallbackThumbnail(Keire::MaterialInstanceAsset::StaticType(), 96, 96);
     const auto vfxFallback = KeireEditor::MakeAssetFallbackThumbnail(Keire::VfxEffectAsset::StaticType(), 96, 96);
     const auto mixerFallback = KeireEditor::MakeAssetFallbackThumbnail(Keire::AudioMixerAsset::StaticType(), 96, 96);
+    const auto animationFallback =
+        KeireEditor::MakeAssetFallbackThumbnail(Keire::AnimationSourceAsset::StaticType(), 96, 96);
+    const auto genericFallback = KeireEditor::MakeAssetFallbackThumbnail({}, 96, 96);
     CHECK(materialGraphFallback != materialInstanceFallback);
     CHECK(materialGraphFallback != vfxFallback);
     CHECK(materialInstanceFallback != vfxFallback);
     CHECK(mixerFallback != materialGraphFallback);
     CHECK(mixerFallback != vfxFallback);
+    CHECK(animationFallback != genericFallback);
+
+    const auto animationId = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000078");
+    REQUIRE(thumbnails.Request({.Asset = animationId,
+                                .Type = Keire::AnimationSourceAsset::StaticType(),
+                                .RelativePath = "Walk.fbx",
+                                .Digest = "animation-source-preview"}));
+    const auto animationResult = await();
+    CHECK(animationResult.Pixels == animationFallback);
 
     const auto meshId = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000072");
     REQUIRE(thumbnails.Request({.Asset = meshId,

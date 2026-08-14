@@ -1,5 +1,5 @@
 import {
-    authenticate, databaseFailure, handleError, json, preflight, readJson, RequestError, requiredUuid,
+    authenticate, databaseFailure, handleError, json, optionalUuid, preflight, readJson, RequestError, requiredUuid,
     stringField, validateOrigin,
 } from "../_shared/marketplace.ts";
 
@@ -79,6 +79,8 @@ Deno.serve(async (request: Request) => {
             });
         }
         if (operation === "upload.reserve") {
+            const productName = stringField(input, "productName", 2, 128).trim();
+            const productSummary = stringField(input, "productSummary", 20, 240).trim();
             const version = stringField(input, "version", 5, 128);
             const minimumEngineVersion = stringField(input, "minimumEngineVersion", 5, 128);
             const maximumEngineVersion = optionalString(input, "maximumEngineVersion", 128);
@@ -90,9 +92,15 @@ Deno.serve(async (request: Request) => {
                 !/^[0-9a-f]{64}$/.test(expectedSha256)) {
                 throw new RequestError(400, "publisher.upload_invalid", "The package release metadata is invalid.");
             }
-            const { data, error } = await caller.admin.rpc("service_reserve_marketplace_upload", {
+            const { data, error } = await caller.admin.rpc("service_reserve_marketplace_named_upload", {
                 p_actor_user_id: caller.user.id,
-                p_product_id: requiredUuid(input, "productId"),
+                p_product_id: optionalUuid(input, "productId"),
+                p_publisher_id: requiredUuid(input, "publisherId"),
+                p_category_id: requiredUuid(input, "categoryId"),
+                p_product_name: productName,
+                p_product_summary: productSummary,
+                p_license_spdx: stringField(input, "licenseSpdx", 2, 64),
+                p_license_revision: stringField(input, "licenseRevision", 1, 64),
                 p_version: version,
                 p_install_kind: installKind,
                 p_minimum_engine_version: minimumEngineVersion,
@@ -108,7 +116,8 @@ Deno.serve(async (request: Request) => {
             if (error) throw databaseFailure(error);
             const reservation = Array.isArray(data) ? data[0] : data;
             if (!reservation || typeof reservation.upload_id !== "string" ||
-                typeof reservation.version_id !== "string" || typeof reservation.storage_path !== "string" ||
+                typeof reservation.version_id !== "string" || typeof reservation.product_id !== "string" ||
+                typeof reservation.storage_path !== "string" ||
                 typeof reservation.expires_at !== "string") {
                 throw new RequestError(503, "publisher.upload_reservation_failed",
                     "The upload reservation could not be created.");
@@ -127,6 +136,7 @@ Deno.serve(async (request: Request) => {
                 data: {
                     uploadId: reservation.upload_id,
                     versionId: reservation.version_id,
+                    productId: reservation.product_id,
                     bucket: "marketplace-packages",
                     storagePath: reservation.storage_path,
                     uploadToken: signed.data.token,

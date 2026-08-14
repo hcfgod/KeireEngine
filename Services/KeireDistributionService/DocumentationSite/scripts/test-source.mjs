@@ -450,6 +450,8 @@ assert(publisherUploadRoutes.includes("requireAal2") && publisherUploadRoutes.in
     "Publisher upload adapters must require MFA and the private authoring feature flag.");
 assert(publisherUploadRoutes.includes('functions.invoke("marketplace-publisher"'),
     "Publisher upload adapters must use the hardened Edge transition boundary.");
+assert(publisherUploadRoutes.includes('typeof data.productId !== "string"'),
+    "Publisher upload adapters must return the product identity created by the reservation.");
 assert(publisherUploadRoutes.includes("export const GET") &&
     publisherUploadRoutes.includes('from("marketplace_validation_reports")'),
     "Publisher uploads must expose an authenticated, RLS-scoped validation status endpoint.");
@@ -490,8 +492,23 @@ assert(staffPage.includes('activeSubmissions') && staffPage.includes('signingSub
     "Terminal package decisions must leave the active staff queue while remaining available as review history.");
 assert(staffPage.includes('id="official-releases"') &&
     staffPage.includes('/publisher/?product=${encodeURIComponent(product.id)}#new-release') &&
-    publisherPage.includes('requestedProductId') && publisherPage.includes('selected={requestedProductId === product.id}'),
-    "Official catalog drafts must enter the standard publisher release pipeline with explicit product selection.");
+    publisherPage.includes('requestedProductId') &&
+    publisherPage.includes('name="productId" value={requestedProduct?.id ?? ""}') &&
+    publisherPage.includes("Upload new version"),
+    "Official catalog drafts must enter the standard publisher release pipeline through a prefilled product identity.");
+for (const contract of [
+    'name="publisherId"',
+    'name="productName"',
+    'name="categoryId"',
+    'name="license"',
+    'name="productSummary"',
+    "publisherId: values.get(\"publisherId\")",
+    "categoryId: values.get(\"categoryId\")",
+    "productName: values.get(\"productName\")",
+    "productSummary: values.get(\"productSummary\")",
+]) {
+    assert(publisherPage.includes(contract), `Named publisher product upload is missing ${contract}.`);
+}
 assert(publisherPage.includes('isNeonForgeUploadSample') &&
     publisherPage.includes('"1.0.0"') &&
     publisherPage.includes('"pbr, shader-graph, material-graph, vfx-graph"'),
