@@ -24,7 +24,11 @@ following portability and lifetime changes until they can be accepted upstream:
 10. assign load contexts and assemblies collision-safe opaque IDs, resolve dependency search paths with the native
     platform separator, and retain an explicit failure status for unclassified load exceptions;
 11. give memory-loaded assemblies the same owner-context and local-type caches as file-loaded assemblies;
-12. keep Windows, Linux, and macOS x64/ARM64 code paths buildable.
+12. assign process-wide reflection metadata collision-safe opaque IDs that cannot alias after an identity-hash
+    collision or cache retirement;
+13. make assembly, context, and reflected-method caches safe for concurrent Kéire runtime hosts, while keeping load
+    failure status local to the calling thread and synchronizing debug GC-handle diagnostics;
+14. keep Windows, Linux, and macOS x64/ARM64 code paths buildable.
 
 Do not modify a downloaded Coral tree in place. The dependency bootstrap must copy it into a commit-keyed build cache,
 apply this patch set there, and record both the upstream commit and patch-set digest in the dependency manifest.

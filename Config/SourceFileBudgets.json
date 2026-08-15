@@ -27,7 +27,7 @@
   "exceptions": {
     "KeireClient/Source/Editor/AnimatorControllerPanel.cpp": 1970,
     "KeireClient/Source/Editor/AssetBrowserPanel.cpp": 1796,
-    "KeireClient/Source/Editor/EditorWorkspaceAssets.cpp": 2512,
+    "KeireClient/Source/Editor/EditorWorkspaceAssets.cpp": 2491,
     "KeireClient/Source/Editor/ShaderGraphPreview.cpp": 1944,
     "KeireClient/Source/Editor/VfxEffectPanel.cpp": 2854,
     "KeireCore/Source/Animation/AnimationSystem.cpp": 2486,

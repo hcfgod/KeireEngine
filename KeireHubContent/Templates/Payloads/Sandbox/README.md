@@ -12,6 +12,11 @@ Open `Assets/Scenes/SandboxShowcase.keirescene`. It is the startup scene and con
 - four edit-mode VFX examples selected from the full effect library under `Assets/Vfx`;
 - a broader gameplay scene at `Assets/Scenes/SampleScene.keirescene` for input, UI, physics, audio, and animation.
 
+The gameplay scene uses a fixed-angle camera that detaches at runtime so player turning cannot orbit it, then smoothly
+follows a close third-person offset. Character movement uses the camera's actual `+Z` view basis on the fixed physics
+clock, slope grounding filters brief contact gaps, the animated visual is parented to the controller with root motion
+disabled, and foot grounding releases before takeoff before blending back after a stable landing.
+
 The paired assets live under `Assets/Examples/MaterialLab`. Shader Graphs define reusable custom shader behavior;
 Material Graphs select those shaders, expose their parameters as inputs, and author material-specific surface logic.
 They are deliberately separate workflows.

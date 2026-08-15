@@ -244,7 +244,8 @@ $dependencyScript = Get-Content (Join-Path $Windows "dependencies.ps1") -Raw
 Assert-True ($dependencyScript.Contains('$Lock.SDL_COMMIT') -and $dependencyScript.Contains('$compiler') -and $dependencyScript.Contains('keire-dependency.stamp')) "Dependency cache identity inputs"
 Assert-True ($dependencyScript.Contains('[string]::IsNullOrWhiteSpace($LinkTarget)') -and
              $dependencyScript.Contains('Dependency junction target is not an existing directory') -and
-             $dependencyScript.Contains('Remove-Item -LiteralPath $Path -Force')) `
+             $dependencyScript.Contains('[IO.Directory]::Delete($Item.FullName, $false)') -and
+             -not $dependencyScript.Contains('Remove-Item -LiteralPath $Path -Force')) `
     "Dependency bootstrap repairs dangling junctions without normalizing an empty target"
 Assert-True ($dependencyScript.Contains('"Debug", "Release"') -and $dependencyScript.Contains('SDL_DUMMYVIDEO=ON') -and $dependencyScript.Contains('SDL_OFFSCREEN=ON')) "SDL variants and headless drivers"
 Assert-True ($dependencyScript.Contains('SDL_GPU=ON') -and $dependencyScript.Contains('SDL_RENDER=OFF')) "SDL GPU renderer policy"

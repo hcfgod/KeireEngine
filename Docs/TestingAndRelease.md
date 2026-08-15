@@ -32,8 +32,13 @@ ECS changes additionally cover stale entity/component handles, registration reje
 components, typed queries, hierarchy world transforms, cycle rollback, activation, exact lifecycle order, deferred
 structural changes, Play/Pause/Step/Stop isolation, callback faults, v1 migration, and Missing Component round trips.
 Asset Browser changes cover bounded thumbnail requests, deterministic cache keys, cancellation, provider invalidation,
-owner-thread image upload, and project-local List/Grid preferences. Tray behavior is tested through backend-independent
-lifecycle checks where the native platform cannot expose a deterministic tray.
+owner-thread image upload, revision-keyed visible views across a 50,000-record catalog, and project-local List/Grid
+preferences. Tray behavior is tested through backend-independent lifecycle checks where the native platform cannot
+expose a deterministic tray.
+
+Asset-package parser changes run the canonical archive round trips, path and bound rejection cases, cancellation and
+cleanup tests, plus a deterministic mutation corpus spanning truncation, distributed bit flips, and trailing data.
+Rejected mutations must never leave a partial staging tree.
 
 Undo changes cover execution and record-applied paths, redo invalidation, merge behavior, isolated contexts, nested
 transaction rollback, bounded eviction, stale targets, shutdown inertness, and rejected worker calls. Scene-camera

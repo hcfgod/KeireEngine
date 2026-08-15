@@ -249,7 +249,10 @@ function Set-DependencyJunction {
             -not [IO.Path]::GetFullPath($Path).StartsWith($AllowedRoot, [StringComparison]::OrdinalIgnoreCase)) {
             throw "Dependency junction points somewhere unexpected: $Path"
         }
-        Remove-Item -LiteralPath $Path -Force
+        # Windows PowerShell 5 can throw an internal NullReferenceException while removing a directory junction with
+        # Remove-Item. The checks above prove this exact path is a reparse point inside Build\Dependencies; a
+        # non-recursive Directory.Delete removes the junction itself without traversing or deleting its target.
+        [IO.Directory]::Delete($Item.FullName, $false)
     }
     New-Item -ItemType Directory -Force (Split-Path $Path) | Out-Null
     New-Item -ItemType Junction -Path $Path -Target $Target | Out-Null

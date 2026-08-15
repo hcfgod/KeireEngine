@@ -57,14 +57,12 @@
 namespace
 {
     using FolderTarget = KeireHub::HubFolderTarget;
-    using PendingStartupActivation = KeireHub::HubActivationRequest;
     using KeireHub::RequireWorkflowSuccess;
-    using KeireHub::Utf8Path;
     class HubLayer final : public Keire::Layer, private KeireHub::HubActivationCallbacks
     {
       public:
         HubLayer(std::filesystem::path executable, const bool smoke,
-                 std::optional<PendingStartupActivation> pendingStartupActivation,
+                 std::optional<KeireHub::HubActivationRequest> pendingStartupActivation,
                  std::shared_ptr<KeireHub::HubInstanceCoordinator> instance)
             : Keire::Layer("ProjectHub"), m_Executable(std::move(executable)), m_Smoke(smoke),
               m_PendingStartupActivation(std::move(pendingStartupActivation)), m_Instance(std::move(instance)),
@@ -316,7 +314,7 @@ namespace
                     else if (mutation->Result)
                     {
                         KeireHub::ReloadProjectRegistry(m_Registry);
-                        m_Notice = "Duplicated project at " + Utf8Path(mutation->Result->Root) + ".";
+                        m_Notice = "Duplicated project at " + KeireHub::Utf8Path(mutation->Result->Root) + ".";
                         m_NoticeError = false;
                     }
                     else if (mutation->State == KeireHub::HubProjectMutationState::Cancelled)
@@ -399,7 +397,7 @@ namespace
                         else
                         {
                             KeireHub::ReloadProjectRegistry(m_Registry);
-                            m_Notice = "Project created at " + Utf8Path(creation->Result->Root) + ".";
+                            m_Notice = "Project created at " + KeireHub::Utf8Path(creation->Result->Root) + ".";
                             m_NoticeError = false;
                             if (m_ActiveCreationOpenAfter)
                                 Launch(Keire::Project::InspectMetadata(creation->Result->Root), creation->EditorId,
@@ -798,7 +796,7 @@ namespace
                     Reveal(command.Path);
                     break;
                 case KeireHub::HubProjectUiCommandType::CopyPath:
-                    Owner().Windows()->SetClipboardText(Utf8Path(command.Path));
+                    Owner().Windows()->SetClipboardText(KeireHub::Utf8Path(command.Path));
                     m_Notice = "Project path copied to the clipboard.";
                     m_NoticeError = false;
                     break;
@@ -1448,15 +1446,12 @@ namespace
         KeireHub::HubProjectUpgradeUi m_ProjectUpgradeUi;
         KeireHub::EditorProcessTracker m_EditorProcesses{
             [](const std::uint64_t processId, const std::filesystem::path& executable)
-            {
-                return KeireHub::ProbeEditorProcessActivity(processId, executable) !=
-                       KeireHub::EditorEntrypointActivity::NotRunning;
-            }};
+            { return KeireHub::ProbeEditorProcess(processId, executable); }};
         KeireHub::HubUpdateHandoffWorkflow m_HubUpdateHandoff;
         KeireHub::HubMaintenanceWorkflow m_Maintenance;
         KeireHub::TaskNotificationTracker m_TaskNotifications;
         KeireHub::HubProductSnapshot m_ProductSnapshot;
-        std::optional<PendingStartupActivation> m_PendingStartupActivation;
+        std::optional<KeireHub::HubActivationRequest> m_PendingStartupActivation;
         std::shared_ptr<KeireHub::HubInstanceCoordinator> m_Instance;
         bool m_DistributionRefreshPending = false;
         bool m_PackageTaskRefreshPending = false;

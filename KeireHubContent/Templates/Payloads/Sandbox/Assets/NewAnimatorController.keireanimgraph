@@ -26,6 +26,47 @@
       ]
     }
   ],
-  "parameters": [],
+  "parameters": [
+    {
+      "booleanDefault": false,
+      "floatDefault": 0.0,
+      "id": "73616e64-626f-4078-8000-000000000301",
+      "integerDefault": 0,
+      "name": "Speed",
+      "type": 0
+    },
+    {
+      "booleanDefault": false,
+      "floatDefault": 0.0,
+      "id": "73616e64-626f-4078-8000-000000000302",
+      "integerDefault": 0,
+      "name": "Moving",
+      "type": 2
+    },
+    {
+      "booleanDefault": true,
+      "floatDefault": 0.0,
+      "id": "73616e64-626f-4078-8000-000000000303",
+      "integerDefault": 0,
+      "name": "Grounded",
+      "type": 2
+    },
+    {
+      "booleanDefault": false,
+      "floatDefault": 0.0,
+      "id": "73616e64-626f-4078-8000-000000000304",
+      "integerDefault": 0,
+      "name": "Falling",
+      "type": 2
+    },
+    {
+      "booleanDefault": false,
+      "floatDefault": 0.0,
+      "id": "73616e64-626f-4078-8000-000000000305",
+      "integerDefault": 0,
+      "name": "VerticalSpeed",
+      "type": 0
+    }
+  ],
   "schemaVersion": 2
 }

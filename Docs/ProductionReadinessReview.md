@@ -39,6 +39,30 @@ validated workflow, and a validated local workflow is not equivalent to a suppor
 - Linux source and package contracts remain maintained, but no Linux artifact is advertised while exact-release native
   installation and Vulkan acceptance are pending. This is intentionally unaffected by the unavailable local WSL run.
 
+### Post-review source remediation
+
+The current source closes additional repository findings without relabeling them as public-release evidence:
+
+- Hub Editor tracking now binds a launch to the operating system's process-creation identity as well as its PID and
+  exact executable path, including same-executable PID-reuse and indeterminate-probe regressions.
+- Coral reflection metadata uses monotonic collision-safe identities; assembly, load-context, and reflected-method
+  caches support concurrent runtime hosts; and loader status is thread-local. The complete ordered Coral patch stack
+  builds cleanly on the reviewed Windows toolchain.
+- Asset-package validation has a deterministic mutation corpus for truncation, distributed bit flips, and trailing
+  data, with an invariant that rejection cannot leave a partial extraction tree. Sustained coverage-guided fuzzing on
+  a production corpus remains a release-evidence activity.
+- The Asset Browser no longer rescans, resorts, or prepares thumbnails for the complete project catalog every frame.
+  Its visible record slice is revision/folder/search keyed and regression-covered with 50,000 records. Broader
+  collaborative-depot and long-session interaction programs remain part of production acceptance.
+- Asset-package export, editor diagnostics, and native managed-runtime interop definitions now live in focused source
+  units; the existing file-size ceilings were preserved, and the Asset workspace ceiling was ratcheted downward.
+
+Keyboard navigation and automatic DPI font scaling are now asserted by the headless UI regression suite. That evidence
+does not by itself close the broader keyboard-only, screen-reader, localization, or user-controlled text-scale program.
+Authenticode, notarization, legal/policy acceptance, live protocol installation, exact Linux/macOS builds, Metal, and
+named-hardware GPU captures require external credentials, infrastructure, approvals, or hardware and remain explicit
+release gates below.
+
 ## Executive Assessment
 
 Kéire is a serious production-oriented pre-1.0 engine with unusually explicit ownership, deterministic serialization,
@@ -129,13 +153,13 @@ unclaimable, while asset-package and community flags remain disabled pending sig
 | --- | ---: | --- |
 | Application, layers, events, and time | A | Owner-thread rules, deferred structural mutation, bounded event queues, scaled/fixed time, exception containment, and shutdown have focused lifecycle coverage. Continued long-session and platform differential testing remains appropriate. |
 | ECS, scenes, prefabs, and undo | A- | Stable identities, missing-component retention, schema migration, Play isolation, nested prefabs, recovery, and transactional undo are mature. Larger collaborative scenes and merge-heavy production projects need sustained evidence. |
-| Editor workspace and authoring | B+ | Docking, documents, hierarchy/Inspector, asset browsing, previews, graph editors, settings, diagnostics, and package management are implemented. Accessibility, keyboard-only operation, localization, high-DPI/text scaling, and large-project interaction automation are incomplete. |
+| Editor workspace and authoring | B+ | Docking, documents, hierarchy/Inspector, asset browsing, previews, graph editors, settings, diagnostics, and package management are implemented. Revision-keyed Asset Browser views now have a 50,000-record regression, and keyboard/DPI configuration is asserted. Full accessibility, localization, user-controlled text scaling, and collaborative-depot automation remain incomplete. |
 | Rendering | B | SDL GPU isolation, D3D12/Vulkan shader formats, HDR/ACES, Forward+, shadows, lighting bake data, probes, LOD/submeshes, instancing, skinning, graph-generated pipelines, and last-good revision safety are substantial. Metal, multiple GPU vendors, true GPU timestamps, sustained device-loss/resize stress, and broader render-feature coverage remain. |
 | Shader and material ecosystem | B- | Shader Graph and Material Graph are distinct assets, materials consume reflected shader parameters, functions/layers/instances exist, and live revisions reach the renderer. The 90/145 Complete matrix and 48 Planned rows make a full Unreal-parity claim inaccurate. |
 | VFX | B+ | Typed schema-4 graphs, ordered contexts/blocks, CPU/GPU execution, events, strips, resource-backed operations, mesh/ribbon/volume output, diagnostics, and bounded pools cover 245/278 ledger rows. The 33 disabled rows and incomplete scalability/per-effect GPU attribution remain visible work. |
-| Managed scripting | A- | Collectible generations, generation-safe handles, serialized fields, ScriptableObjects, gameplay services, coroutines, last-good assembly retention, and explicit Play readiness are production-minded. Cross-platform reload soaks and larger gameplay-project evidence remain necessary. |
-| Assets and project packages | A- | Stable metadata, isolated workers, deterministic cooking, content-addressed packs, archive hardening, dependency resolution, lockfiles, embedding, selective import, executable-code consent, three-way conflict handling, journals, and recovery are implemented. Catalog-backed Hub/Editor acceptance and production package corpus fuzzing remain gated. |
-| Hub and software distribution | B+ | Independent Hub/editor products, version selection, compatibility checks, resumable task worker, signed catalogs, immutable snapshots, package verification, and safe activation are implemented. The 0.3.1 Windows catalog is current; automatic desktop SSO still requires an installed protocol handler and complete native acceptance. |
+| Managed scripting | A- | Collectible generations, generation-safe handles, collision-safe reflection identities, concurrent-host caches, serialized fields, ScriptableObjects, gameplay services, coroutines, last-good assembly retention, and explicit Play readiness are production-minded. Cross-platform reload soaks and larger gameplay-project evidence remain necessary. |
+| Assets and project packages | A- | Stable metadata, isolated workers, deterministic cooking, content-addressed packs, archive hardening, deterministic mutation coverage, dependency resolution, lockfiles, embedding, selective import, executable-code consent, three-way conflict handling, journals, and recovery are implemented. Catalog-backed Hub/Editor acceptance and sustained coverage-guided production corpus fuzzing remain gated. |
+| Hub and software distribution | B+ | Independent Hub/editor products, version selection, PID-reuse-safe Editor tracking, compatibility checks, resumable task worker, signed catalogs, immutable snapshots, package verification, and safe activation are implemented. The 0.3.1 Windows catalog is current; automatic desktop SSO still requires an installed protocol handler and complete native acceptance. |
 | Online platform and marketplace | C | Accounts, organizations, publisher schemas, RLS, private uploads, resumable publishing UI, bounded APIs, validator worker/broker, malware/secret checks, a real passing upload, staff moderation, and free-entitlement contracts exist. The catalog preview is open but cannot expose claim/download controls for unsigned drafts; signed products, legal review, backup restore, abuse controls, and Windows/Linux end-to-end scenarios remain launch gates. |
 | Audio, animation, physics, navigation, input, and UI | B+ | Each area has implemented runtime/authoring contracts and focused tests. Platform/device matrices, content diversity, dense UI/controller/IME workflows, physics/crowd stress, and long-running content scenarios are not yet equivalent to shipped AAA evidence. |
 | Build, package, and SDK | A- | Premake authority, supported launchers, clean-worktree manifests, deterministic inventories, SDK consumers, native installers, distribution signing, and regression harnesses are strong. Exact-current-commit Linux packages and native macOS signing/notarization remain release evidence, not design work. |

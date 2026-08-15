@@ -15,7 +15,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <fstream>
 #include <optional>
 #include <ranges>
 #include <set>
@@ -50,19 +49,6 @@ namespace KeireEditor
             std::filesystem::path Folder;
         };
 
-        struct ExternalDropTarget final
-        {
-            Keire::UiItemRect Rect;
-            std::filesystem::path Folder;
-        };
-        [[nodiscard]] std::filesystem::path ResolveExternalDropFolder(const Keire::UiPosition position) const
-        {
-            for (auto iterator = ExternalDropTargets.rbegin(); iterator != ExternalDropTargets.rend(); ++iterator)
-                if (position.X >= iterator->Rect.Minimum.X && position.X <= iterator->Rect.Maximum.X &&
-                    position.Y >= iterator->Rect.Minimum.Y && position.Y <= iterator->Rect.Maximum.Y)
-                    return iterator->Folder;
-            return CurrentFolder;
-        }
         void SetProjectRoot(const std::filesystem::path& root)
         {
             Close();
@@ -151,46 +137,21 @@ namespace KeireEditor
             ProjectRoot.clear();
             AssetRoot.clear();
             FolderCache.Clear();
+            VisibleRecords.Clear();
             ObservedRecordRevision = 0;
             NextFolderRefresh = {};
         }
 
         void LoadPreferences()
         {
-            std::ifstream input(PreferencePath);
-            std::string line;
-            while (std::getline(input, line))
-            {
-                if (line == "view=grid")
-                    Mode = ViewMode::Grid;
-                else if (line == "view=list")
-                    Mode = ViewMode::List;
-                else if (line.starts_with("size="))
-                {
-                    try
-                    {
-                        ThumbnailSize = std::clamp(std::stof(line.substr(5)), 48.0F, 160.0F);
-                    }
-                    catch (...)
-                    {
-                    }
-                }
-            }
+            const auto preferences = LoadAssetBrowserPreferences(PreferencePath);
+            Mode = preferences.GridView ? ViewMode::Grid : ViewMode::List;
+            ThumbnailSize = preferences.ThumbnailSize;
         }
-
         void SavePreferences() noexcept
         {
-            if (PreferencePath.empty())
-                return;
-            try
-            {
-                const auto text = std::string("view=") + (Mode == ViewMode::Grid ? "grid\n" : "list\n") +
-                                  "size=" + std::to_string(ThumbnailSize) + "\n";
-                Keire::Detail::WriteTextFileAtomically(PreferencePath, text);
-            }
-            catch (...)
-            {
-            }
+            SaveAssetBrowserPreferences(PreferencePath,
+                                        {.GridView = Mode == ViewMode::Grid, .ThumbnailSize = ThumbnailSize});
         }
 
         void RefreshFolderCache(const bool force)
@@ -200,42 +161,6 @@ namespace KeireEditor
                 return;
             NextFolderRefresh = now + std::chrono::seconds(1);
             (void)FolderCache.Refresh(AssetRoot);
-        }
-
-        [[nodiscard]] std::vector<std::filesystem::path> Folders(const std::filesystem::path& parent) const
-        {
-            std::vector<std::filesystem::path> result;
-            for (const auto& folder : FolderCache.Folders())
-                if (folder.parent_path() == parent)
-                    result.push_back(folder);
-            return result;
-        }
-
-        [[nodiscard]] std::filesystem::path UniqueFolder(std::filesystem::path desired) const
-        {
-            const auto parent = desired.parent_path();
-            const auto base = desired.filename().string();
-            for (std::size_t copy = 2; std::filesystem::exists(AssetRoot / desired); ++copy)
-                desired = parent / (base + " " + std::to_string(copy));
-            return desired;
-        }
-
-        [[nodiscard]] std::filesystem::path UniqueAsset(const Keire::AssetSourceRecord& source,
-                                                        const std::filesystem::path& folder,
-                                                        IAssetBrowserController& editor) const
-        {
-            const auto stem = source.RelativePath.stem().string();
-            const auto extension = source.RelativePath.extension().string();
-            auto copyName = stem;
-            copyName.append(" Copy").append(extension);
-            auto destination = folder / copyName;
-            for (std::size_t copy = 2; editor.AssetBrowserDatabase()->Find(destination); ++copy)
-            {
-                copyName = stem;
-                copyName.append(" Copy ").append(std::to_string(copy)).append(extension);
-                destination = folder / copyName;
-            }
-            return destination;
         }
 
         void Select(const Keire::AssetId asset, const bool additive, IAssetBrowserController& editor)
@@ -344,7 +269,7 @@ namespace KeireEditor
         {
             try
             {
-                const auto folder = UniqueFolder(CurrentFolder / "New Folder");
+                const auto folder = UniqueAssetBrowserFolder(AssetRoot, CurrentFolder / "New Folder");
                 editor.MutateAssetBrowser(
                     {.Kind = Keire::Detail::AssetWorkerMutationKind::CreateFolder, .Destination = folder}, {},
                     "Create Folder");
@@ -444,7 +369,8 @@ namespace KeireEditor
                     const auto record = editor.AssetBrowserDatabase()->Find(asset);
                     if (!record)
                         continue;
-                    const auto destination = UniqueAsset(*record, record->RelativePath.parent_path(), editor);
+                    const auto destination = UniqueAssetBrowserPath(*record, record->RelativePath.parent_path(),
+                                                                    *editor.AssetBrowserDatabase());
                     editor.MutateAssetBrowser({.Kind = Keire::Detail::AssetWorkerMutationKind::DuplicateAsset,
                                                .Asset = asset,
                                                .Destination = destination},
@@ -530,7 +456,8 @@ namespace KeireEditor
                         }
                         else
                         {
-                            const auto destination = UniqueAsset(*record, folder, editor);
+                            const auto destination =
+                                UniqueAssetBrowserPath(*record, folder, *editor.AssetBrowserDatabase());
                             editor.MutateAssetBrowser({.Kind = Keire::Detail::AssetWorkerMutationKind::DuplicateAsset,
                                                        .Asset = entry.Asset,
                                                        .Destination = destination},
@@ -552,7 +479,7 @@ namespace KeireEditor
                         }
                         else
                         {
-                            const auto destination = UniqueFolder(destinationBase);
+                            const auto destination = UniqueAssetBrowserFolder(AssetRoot, destinationBase);
                             editor.MutateAssetBrowser({.Kind = Keire::Detail::AssetWorkerMutationKind::DuplicateFolder,
                                                        .Source = entry.Folder,
                                                        .Destination = destination},
@@ -1087,8 +1014,8 @@ namespace KeireEditor
                 {
                     try
                     {
-                        const auto destination =
-                            UniqueFolder(folder.parent_path() / (folder.filename().string() + " Copy"));
+                        const auto destination = UniqueAssetBrowserFolder(
+                            AssetRoot, folder.parent_path() / (folder.filename().string() + " Copy"));
                         editor.MutateAssetBrowser({.Kind = Keire::Detail::AssetWorkerMutationKind::DuplicateFolder,
                                                    .Source = folder,
                                                    .Destination = destination},
@@ -1345,7 +1272,7 @@ namespace KeireEditor
 
         void DrawFolderTree(Keire::UiFrame& ui, const std::filesystem::path& relative, IAssetBrowserController& editor)
         {
-            const auto children = Folders(relative);
+            const auto children = DirectChildAssetFolders(FolderCache.Folders(), relative);
             for (const auto& child : children)
             {
                 auto id = ui.PushId(child.generic_string());
@@ -1454,13 +1381,10 @@ namespace KeireEditor
             const auto contentDropArea = ui.ContentRect();
             DrawBreadcrumbs(ui, editor);
 
-            const auto folders = Folders(CurrentFolder);
-            std::vector<const Keire::AssetSourceRecord*> assets;
-            for (const auto& record : editor.AssetBrowserRecords())
-                if (record.RelativePath.parent_path() == CurrentFolder &&
-                    (Search.empty() || record.RelativePath.filename().string().find(Search) != std::string::npos))
-                    assets.push_back(&record);
-            std::ranges::sort(assets, {}, [](const auto* record) { return record->RelativePath.filename(); });
+            const auto folders = DirectChildAssetFolders(FolderCache.Folders(), CurrentFolder);
+            (void)VisibleRecords.Refresh(editor.AssetBrowserRecords(), editor.AssetBrowserRecordRevision(),
+                                         CurrentFolder, Search);
+            const auto assets = VisibleRecords.Records();
             VisibleSelectionOrder.clear();
             VisibleSelectionOrder.reserve(assets.size());
             for (const auto* record : assets)
@@ -1574,17 +1498,17 @@ namespace KeireEditor
                 for (auto& completed : Thumbnails->DrainCompleted())
                     Images[completed.Asset] = ui.CreateImage(completed.Width, completed.Height, completed.Pixels);
                 const auto records = editor.AssetBrowserRecords();
-                for (const auto& record : records)
+                (void)VisibleRecords.Refresh(records, recordRevision, CurrentFolder, Search);
+                for (const auto* visibleRecord : VisibleRecords.Records())
                 {
+                    const auto& record = *visibleRecord;
                     if (!recordsChanged && (Images.contains(record.Id) || ImageDigests.contains(record.Id)))
                         continue;
                     std::string digest = record.SourceDigest + record.MetadataDigest;
                     for (const auto dependency : record.Dependencies)
                     {
                         digest += dependency.ToString();
-                        const auto dependencyRecord =
-                            std::ranges::find(records, dependency, &Keire::AssetSourceRecord::Id);
-                        if (dependencyRecord != records.end())
+                        if (const auto dependencyRecord = editor.AssetBrowserDatabase()->Find(dependency))
                             digest += dependencyRecord->SourceDigest + dependencyRecord->MetadataDigest;
                     }
                     if (const auto found = ImageDigests.find(record.Id);
@@ -1773,6 +1697,7 @@ namespace KeireEditor
         std::filesystem::path CurrentFolder;
         std::filesystem::path PreferencePath;
         AssetBrowserFolderCache FolderCache;
+        AssetBrowserRecordViewCache VisibleRecords;
         std::chrono::steady_clock::time_point NextFolderRefresh;
         std::filesystem::path RenamingFolder;
         std::filesystem::path PendingDeleteFolder;
@@ -1795,7 +1720,7 @@ namespace KeireEditor
         std::vector<Keire::AssetId> PendingDeleteAssets;
         std::vector<Keire::AssetTrashRecord> TrashEntries;
         std::vector<ClipboardEntry> Clipboard;
-        std::vector<ExternalDropTarget> ExternalDropTargets;
+        std::vector<AssetBrowserDropTarget> ExternalDropTargets;
         Keire::AssetId Renaming;
         Keire::AssetId RevealAsset;
         Keire::AssetId SelectionAnchor;
@@ -1842,7 +1767,7 @@ namespace KeireEditor
     std::filesystem::path AssetBrowserPanel::CurrentFolder() const { return m_Impl->CurrentFolder; }
     std::filesystem::path AssetBrowserPanel::ResolveExternalDropFolder(const Keire::UiPosition position) const
     {
-        return m_Impl->ResolveExternalDropFolder(position);
+        return ResolveAssetBrowserDropFolder(m_Impl->ExternalDropTargets, position, m_Impl->CurrentFolder);
     }
 
     std::vector<Keire::AssetId> AssetBrowserPanel::DecodeDragPayload(const std::span<const std::byte> bytes)

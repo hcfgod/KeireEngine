@@ -74,6 +74,24 @@ namespace KeireHub
         }
         process.ProjectRoot = process.ProjectRoot.lexically_normal();
         process.Executable = process.Executable.lexically_normal();
+        process.ProcessIdentity = 0;
+        EditorProcessObservation observation;
+        try
+        {
+            observation = m_ProcessProbe(process.ProcessId, process.Executable);
+        }
+        catch (...)
+        {
+            // A permissions or platform-probe failure must not turn a successfully launched Editor into a false exit.
+        }
+        if (observation.Activity == EditorEntrypointActivity::NotRunning)
+        {
+            return HubStatus::Failure({.Code = HubErrorCode::InvalidTransition,
+                                       .Message = "The launched editor process exited before it could be tracked.",
+                                       .AffectedItem = process.ProjectId});
+        }
+        if (observation.Activity == EditorEntrypointActivity::Running)
+            process.ProcessIdentity = observation.Identity;
         m_Processes.push_back(std::move(process));
         Publish();
         return HubStatus::Success();
@@ -87,7 +105,14 @@ namespace KeireHub
                       {
                           try
                           {
-                              return !m_ProcessProbe || !m_ProcessProbe(process.ProcessId, process.Executable);
+                              if (!m_ProcessProbe)
+                                  return true;
+                              const auto observation = m_ProcessProbe(process.ProcessId, process.Executable);
+                              if (observation.Activity == EditorEntrypointActivity::NotRunning)
+                                  return true;
+                              return observation.Activity == EditorEntrypointActivity::Running &&
+                                     process.ProcessIdentity != 0 && observation.Identity != 0 &&
+                                     process.ProcessIdentity != observation.Identity;
                           }
                           catch (...)
                           {

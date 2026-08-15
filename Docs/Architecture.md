@@ -51,8 +51,10 @@ ownership, task authorization, or project locking.
 declared file inventory, and confined entrypoints outside the UI layer, then publishes immutable health snapshots.
 Managed repair and removal remain two-phase: the manager checks the exact registered root and unforgeable marker,
 rejects running editors and installations with active tasks, and emits a typed plan that must be revalidated immediately
-before a worker mutation. Running state combines Hub-tracked processes with a bounded native executable-path probe on
-Windows, Linux, and macOS. An operating-system query failure for a process with the relevant executable name fails
+before a worker mutation. Running state combines Hub-tracked processes with a bounded native probe of the exact
+executable path and operating-system process-creation identity on Windows, Linux, and macOS. The creation identity
+prevents a recycled PID from retaining or transferring a tracked launch, even when the new process uses the same Editor
+binary. An operating-system query failure for a process with the relevant executable name fails
 closed, so an editor launched outside the current Hub session cannot be verified, repaired, or removed concurrently.
 Native process handles remain confined to the private probe. The manager never deletes an installation itself. External
 removal deletes only the atomic Hub registry entry and leaves every editor file untouched. A changed marker, health
@@ -329,6 +331,9 @@ not become build authority or expose runtime-host implementation state.
 Each collectible managed load context receives its own Coral internal-call table. Calls cross an application-owned
 `IScriptRuntimeServices` boundary, retain only value handles, validate the currently executing script generation, and
 route gameplay logging, frame time, input actions, and transform access back to owner-thread engine services.
+Coral's patched reflection registry assigns monotonic opaque IDs with reference-equality lookup, so hash collisions and
+retired metadata cannot alias a later type, method, field, property, or attribute. Context, assembly, and reflected-method
+caches are concurrent across independent runtime hosts; diagnostic load status is thread-local.
 Managed build generations contain both the engine API and gameplay outputs. Source checkouts incrementally compile the
 API project into generation-local storage, while packaged editors copy their bundled API; candidate reloads consume
 that immutable pair transactionally rather than resolving a process-global API artifact.
@@ -465,6 +470,8 @@ resolves registry dependency closure into an exact source-controlled lockfile, v
 owned global cache, mounts it read-only, and supports transactional embed/revert/remove. `ProjectAssetPackageImporter`
 owns dependency-aware selective imports, three-way update decisions, executable-code consent fingerprints,
 source-controlled receipts, safe removal, rollback journals, and interrupted-operation recovery.
+The parser's deterministic mutation corpus distributes truncations and bit flips across a valid archive and appends
+trailing-data cases; every rejection must leave the authorized staging parent without a partial extraction tree.
 
 The Editor Package Manager is a presentation/controller layer over those public contracts. Marketplace Asset Import
 first verifies the publication and archive, computes a complete preflight plan, and opens an explicit review modal. The
@@ -696,8 +703,10 @@ Themes cross the public boundary only as stable semantic tokens: canvas, panel s
 
 Opaque `UiImage` values extend that boundary for editor thumbnails. RGBA uploads happen only on the UI owner thread;
 GPU texture identity and release remain private. The client asset browser owns a bounded thumbnail worker and deterministic
-project-local cache, then transfers completed pixels through the façade. See [Asset Browser](AssetBrowser.md) and
-[Editor Panels And Commands](EditorPanels.md).
+project-local cache, then transfers completed pixels through the façade. Its non-owning visible-record view is valid
+only for the matching editor-published asset-record revision; a revision, folder, or search change rebuilds the sorted
+slice before use. Thumbnail preparation consumes that active slice, preventing whole-catalog work on ordinary frames.
+See [Asset Browser](AssetBrowser.md) and [Editor Panels And Commands](EditorPanels.md).
 
 Configuration examples, application-facing workflows, storage details, and troubleshooting live in the
 [UI Workspace Guide](UiWorkspace.md).

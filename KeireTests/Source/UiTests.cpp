@@ -96,6 +96,9 @@ namespace
             CHECK(Owner().UiEnabled());
             if (m_UiFrames == 0)
             {
+                const auto& io = ImGui::GetIO();
+                CHECK((io.ConfigFlags & ImGuiConfigFlags_NavEnableKeyboard) != 0);
+                CHECK(io.ConfigDpiScaleFonts);
                 CHECK(Owner().CurrentUiTheme() == Keire::UiTheme::Dark);
                 Owner().SetUiTheme(Keire::UiTheme::Light);
                 CHECK(Owner().CurrentUiTheme() == Keire::UiTheme::Light);

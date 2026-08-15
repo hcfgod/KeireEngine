@@ -3,6 +3,7 @@
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <filesystem>
@@ -215,4 +216,64 @@ TEST_CASE("asset-package extraction removes partial staging after cancellation o
                         {.Archive = archive, .AllowedStagingParent = stagingParent, .StagingRoot = corruptStaging})),
                     std::runtime_error);
     CHECK_FALSE(std::filesystem::exists(corruptStaging));
+}
+
+TEST_CASE("asset-package deterministic mutation corpus fails safely without partial extraction")
+{
+    AssetPackageFixture fixture;
+    const auto archive = fixture.Root / "source.keireassetpackage";
+    static_cast<void>(Keire::WriteAssetPackageArchive(
+        {.Manifest = fixture.Manifest(), .PayloadRoot = fixture.Payload, .Output = archive}));
+    const auto source = KeireTests::ReadFile(archive);
+    REQUIRE(source.size() > 32U);
+
+    std::vector<std::string> corpus;
+    for (const auto length : {std::size_t{0}, std::size_t{1}, std::size_t{8}, std::size_t{9}, std::size_t{12},
+                              std::size_t{13}, source.size() / 2U, source.size() - 1U})
+    {
+        corpus.push_back(source.substr(0, std::min(length, source.size())));
+    }
+    for (std::size_t index = 0; index < 24U; ++index)
+    {
+        auto mutated = source;
+        const auto offset = std::min(index * (source.size() - 1U) / 23U, source.size() - 1U);
+        mutated[offset] = static_cast<char>(static_cast<unsigned char>(mutated[offset]) ^
+                                            static_cast<unsigned char>(1U << (index % 8U)));
+        corpus.push_back(std::move(mutated));
+    }
+    corpus.push_back(source + std::string(1, '\0'));
+    corpus.push_back(source + "trailing-garbage");
+
+    const auto stagingParent = fixture.Root / "MutationStaging";
+    std::filesystem::create_directory(stagingParent);
+    for (std::size_t index = 0; index < corpus.size(); ++index)
+    {
+        const auto mutatedArchive = fixture.Root / ("mutated-" + std::to_string(index) + ".keireassetpackage");
+        AssetPackageFixture::Write(mutatedArchive, corpus[index]);
+        const auto staging = stagingParent / std::to_string(index);
+        bool extracted = false;
+        try
+        {
+            static_cast<void>(Keire::InspectAssetPackageArchive(mutatedArchive));
+            static_cast<void>(Keire::ExtractAssetPackageToStaging(
+                {.Archive = mutatedArchive, .AllowedStagingParent = stagingParent, .StagingRoot = staging}));
+            extracted = true;
+        }
+        catch (const std::exception&)
+        {
+        }
+
+        if (extracted)
+        {
+            CHECK(KeireTests::ReadFile(staging / "Assets" / "Material.keirematerial") == "material-bytes\n");
+            CHECK(KeireTests::ReadFile(staging / "Assets" / "Material.keiremeta") == "{\"schemaVersion\":1}\n");
+            CHECK(KeireTests::ReadFile(staging / "LICENSE") == "MIT test license\n");
+            std::error_code ignored;
+            std::filesystem::remove_all(staging, ignored);
+        }
+        else
+        {
+            CHECK_FALSE(std::filesystem::exists(staging));
+        }
+    }
 }

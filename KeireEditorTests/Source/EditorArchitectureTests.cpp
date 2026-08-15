@@ -226,6 +226,70 @@ TEST_CASE("asset browser folder snapshots avoid steady-state filesystem traversa
     CHECK(std::ranges::equal(cache.Folders(), afterRemoval));
 }
 
+TEST_CASE("asset browser record views cache a sorted 50000-asset project slice")
+{
+    std::vector<Keire::AssetSourceRecord> records;
+    records.reserve(50'000);
+    for (std::size_t index = 0; index < 50'000; ++index)
+    {
+        Keire::AssetSourceRecord record;
+        record.Id = Keire::AssetId::Generate();
+        const auto folder = index % 10 == 0 ? std::filesystem::path("Materials") : std::filesystem::path("Other");
+        record.RelativePath = folder / ("Asset-" + std::to_string(50'000 - index) + ".keirematerial");
+        records.push_back(std::move(record));
+    }
+
+    KeireEditor::AssetBrowserRecordViewCache cache;
+    REQUIRE(cache.Refresh(records, 1, "Materials", {}));
+    REQUIRE(cache.Records().size() == 5'000);
+    CHECK(std::ranges::is_sorted(cache.Records(), {},
+                                 [](const auto* record) { return record->RelativePath.filename(); }));
+    CHECK_FALSE(cache.Refresh(records, 1, "Materials", {}));
+
+    REQUIRE(cache.Refresh(records, 1, "Materials", "Asset-1"));
+    REQUIRE_FALSE(cache.Records().empty());
+    CHECK(
+        std::ranges::all_of(cache.Records(), [](const auto* record)
+                            { return record->RelativePath.filename().string().find("Asset-1") != std::string::npos; }));
+
+    cache.Clear();
+    CHECK(cache.Records().empty());
+}
+
+TEST_CASE("asset browser utilities preserve preferences and deterministic folder routing")
+{
+    const auto root = std::filesystem::temp_directory_path() /
+                      ("Keire-AssetBrowserUtilities-" + Keire::AssetId::Generate().ToString());
+    std::error_code error;
+    REQUIRE(std::filesystem::create_directories(root / "Assets"));
+    const auto preferencesPath = root / "Library" / "Editor" / "asset-browser.settings";
+
+    KeireEditor::SaveAssetBrowserPreferences(preferencesPath, {.GridView = false, .ThumbnailSize = 200.0F});
+    auto preferences = KeireEditor::LoadAssetBrowserPreferences(preferencesPath);
+    CHECK_FALSE(preferences.GridView);
+    CHECK(preferences.ThumbnailSize == doctest::Approx(160.0F));
+
+    Keire::Detail::WriteTextFileAtomically(preferencesPath, "size=invalid\nview=grid\nsize=32\n");
+    preferences = KeireEditor::LoadAssetBrowserPreferences(preferencesPath);
+    CHECK(preferences.GridView);
+    CHECK(preferences.ThumbnailSize == doctest::Approx(48.0F));
+
+    const std::array folders{std::filesystem::path("Models"), std::filesystem::path("Models/Characters"),
+                             std::filesystem::path("Textures")};
+    CHECK(KeireEditor::DirectChildAssetFolders(folders, {}).size() == 2);
+    REQUIRE(std::filesystem::create_directories(root / "Assets" / "Models"));
+    CHECK(KeireEditor::UniqueAssetBrowserFolder(root / "Assets", "Models") == "Models 2");
+
+    const std::array targets{
+        KeireEditor::AssetBrowserDropTarget{.Rect = {{0.0F, 0.0F}, {20.0F, 20.0F}}, .Folder = "Outer"},
+        KeireEditor::AssetBrowserDropTarget{.Rect = {{5.0F, 5.0F}, {15.0F, 15.0F}}, .Folder = "Inner"}};
+    CHECK(KeireEditor::ResolveAssetBrowserDropFolder(targets, {10.0F, 10.0F}, "Fallback") == "Inner");
+    CHECK(KeireEditor::ResolveAssetBrowserDropFolder(targets, {30.0F, 30.0F}, "Fallback") == "Fallback");
+
+    std::filesystem::remove_all(root, error);
+    CHECK_FALSE(error);
+}
+
 TEST_CASE("editor command router centralizes availability and execution")
 {
     KeireEditor::EditorCommandRouter router;

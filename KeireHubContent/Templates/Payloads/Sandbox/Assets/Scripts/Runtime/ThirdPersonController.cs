@@ -3,7 +3,7 @@ using Keire;
 namespace KeireSandbox;
 
 [StableComponentId("73616e64-626f-4078-8000-000000000010")]
-[ExecutionOrder(-100)]
+[ExecutionOrder(-300)]
 public sealed class ThirdPersonController : Behaviour
 {
     [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000011")]
@@ -17,13 +17,41 @@ public sealed class ThirdPersonController : Behaviour
     [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000013")]
     private AssetReference<object> _footstepClip = default;
 
-    protected override void Awake() => Log.Info($"Third-person controller attached to {Entity.Name}.");
+    [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000014")]
+    [Range(0.0, 40.0), Tooltip("How quickly locomotion parameters catch up with physical movement.")]
+    private float _animationSharpness = 14.0f;
+
+    [HotReloadState]
+    private float _animationSpeed;
+
+    [HotReloadState]
+    private bool _moving;
+
+    private Entity _motorEntity;
+
+    protected override void Awake()
+    {
+        ResolveMotor();
+        Log.Info($"Third-person animation controller attached to {Entity.Name}.");
+    }
+
+    protected override void OnEnable() => ResolveMotor();
 
     protected override void FixedUpdate()
     {
-        var speed = Math.Clamp(Math.Abs(Input.Axis("Move")), 0.0f, 1.0f) * _maximumSpeed;
-        Animator.SetFloat(Entity, "Speed", speed);
-        Animator.SetBool(Entity, "Moving", speed > 0.05f);
+        CharacterControllerState state = _motorEntity.CharacterController.State;
+        float targetSpeed = MathF.Sqrt(
+            (state.Velocity.X * state.Velocity.X) + (state.Velocity.Z * state.Velocity.Z));
+        targetSpeed = Math.Clamp(targetSpeed, 0.0f, MathF.Max(0.0f, _maximumSpeed));
+        float deltaTime = MathF.Min(MathF.Max(0.0f, Time.FixedDeltaTime), 0.05f);
+        float blend = 1.0f - MathF.Exp(-MathF.Max(0.0f, _animationSharpness) * deltaTime);
+        _animationSpeed += (targetSpeed - _animationSpeed) * blend;
+        _moving = _moving ? _animationSpeed > 0.12f : _animationSpeed > 0.22f;
+        Animator.SetFloat(Entity, "Speed", _animationSpeed);
+        Animator.SetBool(Entity, "Moving", _moving);
+        Animator.SetFloat(Entity, "VerticalSpeed", state.Velocity.Y);
+        Animator.SetBool(Entity, "Grounded", state.Grounded);
+        Animator.SetBool(Entity, "Falling", !state.Grounded && state.Velocity.Y < -0.5f);
     }
 
     protected override void OnAnimationEvent(AnimationEvent animationEvent)
@@ -36,5 +64,21 @@ public sealed class ThirdPersonController : Behaviour
         Debug.DrawLine(contact.Point, contact.Point + contact.Normal, new Color(1.0f, 0.6f, 0.1f), 0.25f);
 
     protected override void OnBeforeReload() => Log.Info("Saving controller state for managed reload.");
-    protected override void OnAfterReload() => Log.Info("Controller state restored after managed reload.");
+    protected override void OnAfterReload()
+    {
+        ResolveMotor();
+        Log.Info("Controller state restored after managed reload.");
+    }
+
+    private void ResolveMotor()
+    {
+        _motorEntity = Entity;
+        while (_motorEntity.IsValid && !_motorEntity.CharacterController.IsValid)
+            _motorEntity = _motorEntity.Parent;
+        if (!_motorEntity.IsValid)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(ThirdPersonController)} requires a Character Controller on its Entity or an ancestor.");
+        }
+    }
 }

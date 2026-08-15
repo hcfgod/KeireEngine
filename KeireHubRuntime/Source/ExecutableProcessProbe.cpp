@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <limits>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -107,6 +108,20 @@ namespace KeireHub::Detail
             return GetExitCodeProcess(process, &exitCode) && exitCode == STILL_ACTIVE;
         }
 
+        [[nodiscard]] std::uint64_t ProcessIdentity(const HANDLE process) noexcept
+        {
+            FILETIME creation{};
+            FILETIME exit{};
+            FILETIME kernel{};
+            FILETIME user{};
+            if (!GetProcessTimes(process, &creation, &exit, &kernel, &user))
+                return 0;
+            ULARGE_INTEGER value{};
+            value.LowPart = creation.dwLowDateTime;
+            value.HighPart = creation.dwHighDateTime;
+            return value.QuadPart;
+        }
+
         [[nodiscard]] EditorEntrypointActivity ProbePlatform(const std::filesystem::path& executable)
         {
             const auto targetName = executable.filename().native();
@@ -155,33 +170,34 @@ namespace KeireHub::Detail
                                                          : EditorEntrypointActivity::Indeterminate;
         }
 
-        [[nodiscard]] EditorEntrypointActivity ProbePlatformProcess(const std::uint64_t processId,
+        [[nodiscard]] EditorProcessObservation ProbePlatformProcess(const std::uint64_t processId,
                                                                     const std::filesystem::path& executable)
         {
             if (processId == 0 || processId > std::numeric_limits<DWORD>::max())
-                return EditorEntrypointActivity::NotRunning;
+                return {.Activity = EditorEntrypointActivity::NotRunning};
 
             UniqueHandle process(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, static_cast<DWORD>(processId)));
             if (!process.Valid())
             {
                 const auto error = GetLastError();
-                return error == ERROR_INVALID_PARAMETER || error == ERROR_NOT_FOUND
-                           ? EditorEntrypointActivity::NotRunning
-                           : EditorEntrypointActivity::Indeterminate;
+                return {.Activity = error == ERROR_INVALID_PARAMETER || error == ERROR_NOT_FOUND
+                                        ? EditorEntrypointActivity::NotRunning
+                                        : EditorEntrypointActivity::Indeterminate};
             }
             if (!ProcessStillActive(process.Get()))
-                return EditorEntrypointActivity::NotRunning;
+                return {.Activity = EditorEntrypointActivity::NotRunning};
 
             std::wstring image(32768U, L'\0');
             DWORD imageLength = static_cast<DWORD>(image.size());
             if (!QueryFullProcessImageNameW(process.Get(), 0, image.data(), &imageLength))
             {
-                return ProcessStillActive(process.Get()) ? EditorEntrypointActivity::Indeterminate
-                                                         : EditorEntrypointActivity::NotRunning;
+                return {.Activity = ProcessStillActive(process.Get()) ? EditorEntrypointActivity::Indeterminate
+                                                                      : EditorEntrypointActivity::NotRunning};
             }
             image.resize(imageLength);
-            return SameExecutablePath(executable, std::filesystem::path(image)) ? EditorEntrypointActivity::Running
-                                                                                : EditorEntrypointActivity::NotRunning;
+            if (!SameExecutablePath(executable, std::filesystem::path(image)))
+                return {.Activity = EditorEntrypointActivity::NotRunning};
+            return {.Activity = EditorEntrypointActivity::Running, .Identity = ProcessIdentity(process.Get())};
         }
 #elif defined(__APPLE__) || defined(__linux__)
         [[nodiscard]] std::string ProcessNameKey(std::string value)
@@ -257,20 +273,30 @@ namespace KeireHub::Detail
             return EditorEntrypointActivity::NotRunning;
         }
 
-        [[nodiscard]] EditorEntrypointActivity ProbePlatformProcess(const std::uint64_t processId,
+        [[nodiscard]] EditorProcessObservation ProbePlatformProcess(const std::uint64_t processId,
                                                                     const std::filesystem::path& executable)
         {
             if (processId == 0 || processId > static_cast<std::uint64_t>(std::numeric_limits<pid_t>::max()))
-                return EditorEntrypointActivity::NotRunning;
+                return {.Activity = EditorEntrypointActivity::NotRunning};
             std::array<char, PROC_PIDPATHINFO_MAXSIZE> image{};
             errno = 0;
             const auto imageLength =
                 proc_pidpath(static_cast<pid_t>(processId), image.data(), static_cast<uint32_t>(image.size()));
             if (imageLength <= 0)
-                return errno == ESRCH ? EditorEntrypointActivity::NotRunning : EditorEntrypointActivity::Indeterminate;
-            return SameExecutablePath(executable, std::filesystem::path(image.data()))
-                       ? EditorEntrypointActivity::Running
-                       : EditorEntrypointActivity::NotRunning;
+            {
+                return {.Activity = errno == ESRCH ? EditorEntrypointActivity::NotRunning
+                                                   : EditorEntrypointActivity::Indeterminate};
+            }
+            if (!SameExecutablePath(executable, std::filesystem::path(image.data())))
+                return {.Activity = EditorEntrypointActivity::NotRunning};
+
+            proc_bsdinfo information{};
+            const auto informationSize = proc_pidinfo(static_cast<pid_t>(processId), PROC_PIDTBSDINFO, 0, &information,
+                                                      static_cast<int>(sizeof(information)));
+            const auto identity = informationSize == static_cast<int>(sizeof(information))
+                                      ? information.pbi_start_tvsec * 1'000'000ULL + information.pbi_start_tvusec
+                                      : 0ULL;
+            return {.Activity = EditorEntrypointActivity::Running, .Identity = identity};
         }
 #elif defined(__linux__)
         [[nodiscard]] std::string ReadLinuxProcessName(const std::filesystem::path& processRoot)
@@ -287,6 +313,26 @@ namespace KeireHub::Detail
             const auto name = path.filename().string();
             return !name.empty() && std::ranges::all_of(name, [](const unsigned char character)
                                                         { return std::isdigit(character) != 0; });
+        }
+
+        [[nodiscard]] std::uint64_t ReadLinuxProcessIdentity(const std::filesystem::path& processRoot)
+        {
+            std::ifstream stream(processRoot / "stat", std::ios::binary);
+            std::string line;
+            if (!stream || !std::getline(stream, line))
+                return 0;
+            const auto commandEnd = line.rfind(')');
+            if (commandEnd == std::string::npos || commandEnd + 2U >= line.size())
+                return 0;
+            std::istringstream fields(line.substr(commandEnd + 2U));
+            std::string ignored;
+            for (std::size_t index = 0; index < 19U; ++index)
+            {
+                if (!(fields >> ignored))
+                    return 0;
+            }
+            std::uint64_t identity = 0;
+            return fields >> identity ? identity : 0;
         }
 
         [[nodiscard]] EditorEntrypointActivity ProbePlatform(const std::filesystem::path& executable)
@@ -333,24 +379,27 @@ namespace KeireHub::Detail
             return EditorEntrypointActivity::NotRunning;
         }
 
-        [[nodiscard]] EditorEntrypointActivity ProbePlatformProcess(const std::uint64_t processId,
+        [[nodiscard]] EditorProcessObservation ProbePlatformProcess(const std::uint64_t processId,
                                                                     const std::filesystem::path& executable)
         {
             if (processId == 0 || processId > static_cast<std::uint64_t>(std::numeric_limits<pid_t>::max()))
-                return EditorEntrypointActivity::NotRunning;
+                return {.Activity = EditorEntrypointActivity::NotRunning};
+            const auto processRoot = std::filesystem::path("/proc") / std::to_string(processId);
             std::error_code error;
-            auto image = std::filesystem::read_symlink("/proc/" + std::to_string(processId) + "/exe", error);
+            auto image = std::filesystem::read_symlink(processRoot / "exe", error);
             if (error)
             {
-                return error == std::errc::no_such_file_or_directory ? EditorEntrypointActivity::NotRunning
-                                                                     : EditorEntrypointActivity::Indeterminate;
+                return {.Activity = error == std::errc::no_such_file_or_directory
+                                        ? EditorEntrypointActivity::NotRunning
+                                        : EditorEntrypointActivity::Indeterminate};
             }
             constexpr std::string_view DeletedSuffix = " (deleted)";
             auto imageText = image.native();
             if (imageText.ends_with(DeletedSuffix))
                 image = imageText.substr(0, imageText.size() - DeletedSuffix.size());
-            return SameExecutablePath(executable, image) ? EditorEntrypointActivity::Running
-                                                         : EditorEntrypointActivity::NotRunning;
+            if (!SameExecutablePath(executable, image))
+                return {.Activity = EditorEntrypointActivity::NotRunning};
+            return {.Activity = EditorEntrypointActivity::Running, .Identity = ReadLinuxProcessIdentity(processRoot)};
         }
 #elif !defined(_WIN32)
         [[nodiscard]] EditorEntrypointActivity ProbePlatform(const std::filesystem::path&)
@@ -358,9 +407,9 @@ namespace KeireHub::Detail
             return EditorEntrypointActivity::Indeterminate;
         }
 
-        [[nodiscard]] EditorEntrypointActivity ProbePlatformProcess(const std::uint64_t, const std::filesystem::path&)
+        [[nodiscard]] EditorProcessObservation ProbePlatformProcess(const std::uint64_t, const std::filesystem::path&)
         {
-            return EditorEntrypointActivity::Indeterminate;
+            return {};
         }
 #endif
     } // namespace
@@ -379,18 +428,18 @@ namespace KeireHub::Detail
         }
     }
 
-    EditorEntrypointActivity ProbeEditorProcessActivity(const std::uint64_t processId,
-                                                        const std::filesystem::path& executable) noexcept
+    EditorProcessObservation ProbeEditorProcess(const std::uint64_t processId,
+                                                const std::filesystem::path& executable) noexcept
     {
         try
         {
             if (processId == 0 || !ValidExecutablePath(executable))
-                return EditorEntrypointActivity::Indeterminate;
+                return {};
             return ProbePlatformProcess(processId, NormalizeExecutablePath(executable));
         }
         catch (...)
         {
-            return EditorEntrypointActivity::Indeterminate;
+            return {};
         }
     }
 } // namespace KeireHub::Detail

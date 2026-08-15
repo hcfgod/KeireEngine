@@ -108,7 +108,7 @@
       "compatibleEditors": ">=0.3.0 <2.0.0",
       "projectSchema": 3,
       "platformTarget": "desktop",
-      "estimatedSizeBytes": 24782363,
+      "estimatedSizeBytes": 24794159,
       "payloadRoot": "Payloads/Sandbox",
       "payloadFiles": [
         {
@@ -478,8 +478,8 @@
         },
         {
           "path": "Assets/NewAnimatorController.keireanimgraph",
-          "sizeBytes": 684,
-          "sha256": "01f8ab1ece62b036225c12ac46996face35b7f96a48b6c7916b63ee35b6ba79f"
+          "sizeBytes": 1644,
+          "sha256": "98a8465eb025abd81c424d622bc6245f6f9e9c3cf64ab8baf67514abe34b4249"
         },
         {
           "path": "Assets/NewAnimatorController.keireanimgraph.keiremeta",
@@ -508,8 +508,8 @@
         },
         {
           "path": "Assets/Scenes/SampleScene.keirescene",
-          "sizeBytes": 39024,
-          "sha256": "c9c4b75f0c1bbfe0fcc5697b5f014988c03cafe0c5583f7830e3fd3c35ba1831"
+          "sizeBytes": 39808,
+          "sha256": "889fe5bfc2330f57f9fe605fcf930691abf2816a9080652d8a5b8840008550e6"
         },
         {
           "path": "Assets/Scenes/SampleScene.keirescene.keiremeta",
@@ -558,8 +558,8 @@
         },
         {
           "path": "Assets/Scripts/Runtime/FirstPersonCamera.cs",
-          "sizeBytes": 7997,
-          "sha256": "a871747f6fba08699ae9bc6277b71dd0b97ea98a82f852bb07967ef24cedf5dc"
+          "sizeBytes": 15900,
+          "sha256": "d15a94ca6edc9b5f45e50116d0371ba44726a60a6ac2fa5b049a3accf9341927"
         },
         {
           "path": "Assets/Scripts/Runtime/FirstPersonCamera.cs.keiremeta",
@@ -598,8 +598,8 @@
         },
         {
           "path": "Assets/Scripts/Runtime/ThirdPersonController.cs",
-          "sizeBytes": 1649,
-          "sha256": "f1a0b1e6d402ba5b79ac70b719bf42dc3821a503b65ae3184f25ae9041f77cb1"
+          "sizeBytes": 3344,
+          "sha256": "24c10101a0d93b9305edea6c021a953c533ca06f6a6d9c3862fdb36cf7827df2"
         },
         {
           "path": "Assets/Scripts/Runtime/ThirdPersonController.cs.keiremeta",
@@ -833,8 +833,8 @@
         },
         {
           "path": "README.md",
-          "sizeBytes": 1194,
-          "sha256": "f2218f6a3a2eda6b8a80dd76bd05ec17819c79402d3d72c585b1f7034a47142b"
+          "sizeBytes": 1648,
+          "sha256": "5483c1d5ffa96b268f8e0e415a824190a745f18cac68ae72de888291475edf79"
         }
       ],
       "defaultProjectConfiguration": {

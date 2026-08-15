@@ -30,7 +30,9 @@ breadcrumbs, search, List and Grid modes, adjustable thumbnail size, multi-selec
 rename, stable-identity duplicate, and recoverable Move to Trash operations.
 Published source-index changes advance an editor-owned record revision. The panel rebuilds thumbnail dependency digests
 and its transactional folder snapshot only when that revision changes; a one-second fallback scan discovers externally
-created empty folders. Ordinary frames perform no asset-record copy or filesystem traversal.
+created empty folders. The sorted visible record view is cached by revision, folder, and search query, and thumbnail
+preparation is limited to that view instead of walking the complete project. Ordinary frames perform no asset-record
+copy, catalog-wide resort, or filesystem traversal. A 50,000-record regression protects this large-project contract.
 Click establishes a selection anchor; Shift-click selects the inclusive visible asset range to the next item, while
 Ctrl/Cmd+Shift-click adds that range to the current selection.
 

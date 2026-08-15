@@ -3,62 +3,95 @@ using Keire;
 namespace KeireSandbox;
 
 [StableComponentId("73616e64-626f-4078-8000-000000000030")]
-[ExecutionOrder(10)]
+[ExecutionOrder(-200)]
 public sealed class FirstPersonCamera : Behaviour
 {
     [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000031")]
+    [Range(0.5, 12.0), Tooltip("Maximum character movement speed in metres per second.")]
     private float _movementSpeed = 6.5f;
 
-    [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000032")]
+    [SerializeField, HideInInspector, StableFieldId("73616e64-626f-4078-8000-000000000032")]
     private float _lookSensitivity = 2.12f;
 
-    [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000033")]
+    [SerializeField, HideInInspector, StableFieldId("73616e64-626f-4078-8000-000000000033")]
     private float _maximumPitch = 89.0f;
 
     [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000034")]
-    private float _movementSharpness = 14.0f;
+    [Range(0.0, 40.0), Tooltip("How quickly the motor accelerates toward requested movement.")]
+    private float _movementSharpness = 12.0f;
 
-    [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000035")]
-    private bool _invertHorizontal = false;
+    [SerializeField, HideInInspector, StableFieldId("73616e64-626f-4078-8000-000000000035")]
+    private bool _invertHorizontal;
 
-    [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000036")]
-    private bool _invertVertical = false;
+    [SerializeField, HideInInspector, StableFieldId("73616e64-626f-4078-8000-000000000036")]
+    private bool _invertVertical;
 
-    [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000037")]
+    [SerializeField, HideInInspector, StableFieldId("73616e64-626f-4078-8000-000000000037")]
     private float _lookSharpness = 30.0f;
 
     [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000038")]
+    [Range(1.0, 3.0)]
     private float _sprintMultiplier = 1.65f;
 
     [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000039")]
+    [Range(0.0, 1.0)]
     private float _airControl = 0.28f;
 
     [SerializeField, StableFieldId("73616e64-626f-4078-8000-00000000003a")]
+    [Range(0.0, 60.0)]
     private float _gravity = 24.0f;
 
     [SerializeField, StableFieldId("73616e64-626f-4078-8000-00000000003b")]
+    [Range(0.0, 4.0)]
     private float _jumpHeight = 1.15f;
 
     [SerializeField, StableFieldId("73616e64-626f-4078-8000-00000000003c")]
+    [Range(0.0, 0.5)]
     private float _coyoteTime = 0.12f;
 
     [SerializeField, StableFieldId("73616e64-626f-4078-8000-00000000003d")]
+    [Range(0.0, 0.5)]
     private float _jumpBufferTime = 0.12f;
 
     [SerializeField, StableFieldId("73616e64-626f-4078-8000-00000000003e")]
+    [Range(0.0, 10.0)]
     private float _groundStickSpeed = 2.0f;
 
-    [HotReloadState]
-    private float _yaw;
+    [SerializeField, StableFieldId("73616e64-626f-4078-8000-00000000003f")]
+    [Tooltip("Fixed world-space camera offset from the Character Controller.")]
+    private Vector3 _cameraOffset = new(0.0f, 1.5f, -3.25f);
 
-    [HotReloadState]
-    private float _pitch;
+    [SerializeField, HideInInspector, StableFieldId("73616e64-626f-4078-8000-000000000130")]
+    [Range(-89.0, 89.0)]
+    private float _cameraPitch = -20.0f;
 
-    [HotReloadState]
-    private float _targetYaw;
+    [SerializeField, HideInInspector, StableFieldId("73616e64-626f-4078-8000-000000000131")]
+    [Range(-180.0, 180.0)]
+    private float _cameraYaw = 180.0f;
 
-    [HotReloadState]
-    private float _targetPitch;
+    [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000132")]
+    [Range(0.0, 40.0), Tooltip("How quickly the fixed camera catches up with the player.")]
+    private float _cameraFollowSharpness = 18.0f;
+
+    [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000133")]
+    [Range(0.0, 40.0), Tooltip("How quickly the character faces its movement direction.")]
+    private float _turnSharpness = 14.0f;
+
+    [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000134")]
+    [Range(0.0, 40.0), Tooltip("How quickly movement comes to rest after input is released.")]
+    private float _decelerationSharpness = 18.0f;
+
+    [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000135")]
+    [Range(0.0, 0.5), Tooltip("Grounded time required before foot IK blends back in after landing.")]
+    private float _footIkLandingDelay = 0.12f;
+
+    [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000136")]
+    [Range(0.0, 40.0), Tooltip("How quickly foot IK blends back in after landing.")]
+    private float _footIkSharpness = 8.0f;
+
+    [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000137")]
+    [Tooltip("World-space point on the Character Controller that the fixed camera watches.")]
+    private Vector3 _cameraTargetOffset = new(0.0f, 0.6f, 0.0f);
 
     [HotReloadState]
     private Vector3 _horizontalVelocity;
@@ -73,29 +106,59 @@ public sealed class FirstPersonCamera : Behaviour
     private float _jumpBufferRemaining;
 
     [HotReloadState]
+    private float _motorYaw;
+
+    [HotReloadState]
+    private Vector3 _cameraPosition;
+
+    [HotReloadState]
+    private bool _cameraInitialized;
+
+    [HotReloadState]
+    private float _footGroundingWeight = 1.0f;
+
+    [HotReloadState]
+    private float _groundedDuration;
+
+    [HotReloadState]
     private bool _captureEnabled = true;
 
     private IDisposable? _cursorCapture;
     private bool _uiVisible;
+    private bool _acceptsInput;
+    private bool _sprinting;
+    private Vector2 _moveInput;
+
+    [HotReloadState]
     private Entity _motorEntity;
+
+    [HotReloadState]
+    private Entity _animatorEntity;
 
     protected override void Awake()
     {
-        ResolveMotor();
-        _targetYaw = _yaw;
-        _targetPitch = _pitch;
-        Debug.Log($"{nameof(FirstPersonCamera)} attached to Character Controller '{_motorEntity.Name}'.");
+        PreserveLegacyOrbitSettings();
+        ResolveCharacter();
+        DetachCameraFromMotor();
+        Vector3 forward = _motorEntity.Transform.Forward;
+        _motorYaw = RadiansToDegrees(MathF.Atan2(forward.X, forward.Z));
+        SnapCamera();
+        Debug.Log($"Static follow controller attached to Character Controller '{_motorEntity.Name}'.");
     }
 
     protected override void OnEnable()
     {
-        ResolveMotor();
+        ResolveCharacter();
+        DetachCameraFromMotor();
         SubscribeUiVisibility();
         SetCaptureEnabled(_captureEnabled);
+        if (!_cameraInitialized)
+            SnapCamera();
     }
 
     protected override void OnDisable()
     {
+        RestoreFootGrounding();
         UnsubscribeUiVisibility();
         ReleaseCapture();
         Cursor.Unlock();
@@ -104,15 +167,18 @@ public sealed class FirstPersonCamera : Behaviour
 
     protected override void OnBeforeReload()
     {
+        RestoreFootGrounding();
         UnsubscribeUiVisibility();
         ReleaseCapture();
     }
 
     protected override void OnAfterReload()
     {
-        ResolveMotor();
+        ResolveCharacter();
+        DetachCameraFromMotor();
         SubscribeUiVisibility();
         SetCaptureEnabled(_captureEnabled);
+        SnapCamera();
     }
 
     protected override void Update()
@@ -120,32 +186,49 @@ public sealed class FirstPersonCamera : Behaviour
         if (!_uiVisible && !Cursor.VisibilityRequested && Input.Pressed("Escape"))
             SetCaptureEnabled(!_captureEnabled);
 
-        float deltaTime = Time.DeltaTime;
+        _acceptsInput = _captureEnabled && !_uiVisible && !Cursor.VisibilityRequested;
+        _moveInput = _acceptsInput ? Input.Axis2D("Move") : default;
+        if (_moveInput.LengthSquared > 1.0f)
+            _moveInput = _moveInput.Normalized;
+        _sprinting = _acceptsInput && Input.Held("Sprint");
+        if (_acceptsInput && Input.Pressed("Jump"))
+        {
+            _jumpBufferRemaining = MathF.Max(0.0f, _jumpBufferTime);
+            BeginAirbornePresentation();
+        }
+    }
+
+    protected override void FixedUpdate()
+    {
+        float deltaTime = MathF.Min(MathF.Max(0.0f, Time.FixedDeltaTime), 0.05f);
         if (deltaTime <= 0.0f || !_motorEntity.IsValid)
             return;
 
-        bool acceptsInput = _captureEnabled && !_uiVisible && !Cursor.VisibilityRequested;
-        if (acceptsInput)
-            UpdateLook(deltaTime);
-
-        var motor = _motorEntity.CharacterController;
+        CharacterControllerHandle motor = _motorEntity.CharacterController;
         if (!motor.IsValid)
             return;
 
-        Vector2 move = acceptsInput ? Input.Axis2D("Move") : default;
-        if (move.LengthSquared > 1.0f)
-            move = move.Normalized;
-
-        float yawRadians = DegreesToRadians(_yaw);
-        Vector3 right = new(MathF.Cos(yawRadians), 0.0f, -MathF.Sin(yawRadians));
-        Vector3 forward = new(MathF.Sin(yawRadians), 0.0f, MathF.Cos(yawRadians));
-        float speed = _movementSpeed * (acceptsInput && Input.Held("Sprint") ? _sprintMultiplier : 1.0f);
-        Vector3 desiredVelocity = (right * move.X + forward * move.Y) * speed;
-        float control = motor.Grounded ? 1.0f : Math.Clamp(_airControl, 0.0f, 1.0f);
-        float movementBlend = 1.0f - MathF.Exp(-MathF.Max(0.0f, _movementSharpness) * control * deltaTime);
+        Vector2 move = _acceptsInput ? _moveInput : default;
+        float speed = _movementSpeed * (_sprinting ? _sprintMultiplier : 1.0f);
+        Vector3 cameraForward = CameraForward();
+        Vector3 cameraRight = Vector3.Cross(Vector3.Up, cameraForward).Normalized;
+        Vector3 desiredDirection = (cameraRight * move.X) + (cameraForward * move.Y);
+        Vector3 desiredVelocity = desiredDirection * speed;
+        bool grounded = motor.Grounded;
+        float control = grounded ? 1.0f : Math.Clamp(_airControl, 0.0f, 1.0f);
+        float sharpness = desiredDirection.LengthSquared > 0.0001f ? _movementSharpness : _decelerationSharpness;
+        float movementBlend = ExponentialBlend(sharpness * control, deltaTime);
         _horizontalVelocity += (desiredVelocity - _horizontalVelocity) * movementBlend;
 
-        if (motor.Grounded)
+        if (desiredDirection.LengthSquared > 0.0001f)
+        {
+            float targetYaw = RadiansToDegrees(MathF.Atan2(desiredDirection.X, desiredDirection.Z));
+            _motorYaw = SmoothAngle(_motorYaw, targetYaw, ExponentialBlend(_turnSharpness, deltaTime));
+            TransformHandle motorTransform = _motorEntity.Transform;
+            motorTransform.Rotation = Quaternion.Euler(0.0f, _motorYaw);
+        }
+
+        if (grounded)
         {
             _coyoteRemaining = MathF.Max(0.0f, _coyoteTime);
             if (_verticalVelocity < 0.0f)
@@ -156,48 +239,155 @@ public sealed class FirstPersonCamera : Behaviour
             _coyoteRemaining = MathF.Max(0.0f, _coyoteRemaining - deltaTime);
         }
 
-        if (acceptsInput && Input.Pressed("Jump"))
-            _jumpBufferRemaining = MathF.Max(0.0f, _jumpBufferTime);
-        else
-            _jumpBufferRemaining = MathF.Max(0.0f, _jumpBufferRemaining - deltaTime);
-
-        if (_jumpBufferRemaining > 0.0f && _coyoteRemaining > 0.0f)
+        bool jumped = _jumpBufferRemaining > 0.0f && _coyoteRemaining > 0.0f;
+        if (jumped)
         {
             _verticalVelocity = MathF.Sqrt(2.0f * MathF.Max(0.0f, _gravity) * MathF.Max(0.0f, _jumpHeight));
             _jumpBufferRemaining = 0.0f;
             _coyoteRemaining = 0.0f;
         }
+        else
+        {
+            _jumpBufferRemaining = MathF.Max(0.0f, _jumpBufferRemaining - deltaTime);
+        }
         _verticalVelocity -= MathF.Max(0.0f, _gravity) * deltaTime;
 
-        Vector3 frameVelocity = _horizontalVelocity + Vector3.Up * _verticalVelocity;
+        Vector3 frameVelocity = _horizontalVelocity + (Vector3.Up * _verticalVelocity);
         motor.Move(frameVelocity * deltaTime);
+        bool animationGrounded = grounded && !jumped && _verticalVelocity <= 0.0f;
+        UpdateAnimationState(animationGrounded, jumped);
+        UpdateFootGrounding(animationGrounded, jumped, deltaTime);
     }
 
-    private void UpdateLook(float deltaTime)
+    protected override void LateUpdate()
     {
-        Vector2 look = Input.Axis2D("Look");
-        float horizontalLook = look.X * (_invertHorizontal ? -1.0f : 1.0f);
-        float verticalLook = look.Y * (_invertVertical ? -1.0f : 1.0f);
-        _targetYaw += horizontalLook * _lookSensitivity;
-        _targetPitch =
-            Math.Clamp(_targetPitch + (verticalLook * _lookSensitivity), -_maximumPitch, _maximumPitch);
-        float lookBlend = 1.0f - MathF.Exp(-MathF.Max(0.0f, _lookSharpness) * deltaTime);
-        _yaw += (_targetYaw - _yaw) * lookBlend;
-        _pitch += (_targetPitch - _pitch) * lookBlend;
+        if (!_motorEntity.IsValid)
+            return;
 
-        TransformHandle motorTransform = _motorEntity.Transform;
-        motorTransform.LocalRotation = Quaternion.Euler(0.0f, _yaw);
-        Vector3 recoil = WeaponController.CameraRecoil;
+        Vector3 desiredPosition = _motorEntity.Transform.Position + _cameraOffset;
+        float deltaTime = MathF.Min(MathF.Max(0.0f, Time.DeltaTime), 0.1f);
+        if (!_cameraInitialized)
+        {
+            _cameraPosition = desiredPosition;
+            _cameraInitialized = true;
+        }
+        else
+        {
+            _cameraPosition = Vector3.Lerp(
+                _cameraPosition, desiredPosition, ExponentialBlend(_cameraFollowSharpness, deltaTime));
+        }
+
         TransformHandle cameraTransform = Entity.Transform;
-        cameraTransform.LocalRotation = Quaternion.Euler(_pitch + recoil.X, recoil.Y);
+        cameraTransform.Position = _cameraPosition;
+        cameraTransform.Rotation = CameraRotation();
     }
 
-    private void ResolveMotor()
+    private void ResolveCharacter()
     {
+        if (_motorEntity.IsValid && _motorEntity.CharacterController.IsValid)
+        {
+            _animatorEntity = FindAnimator(_motorEntity);
+            return;
+        }
         _motorEntity = Entity.Parent;
         if (!_motorEntity.IsValid || !_motorEntity.CharacterController.IsValid)
+        {
             throw new InvalidOperationException(
                 $"{nameof(FirstPersonCamera)} requires its camera Entity to be parented to an enabled Character Controller.");
+        }
+        _animatorEntity = FindAnimator(_motorEntity);
+    }
+
+    private void DetachCameraFromMotor()
+    {
+        if (Entity.Parent == _motorEntity)
+            Entity.SetParent(default, true);
+    }
+
+    private static Entity FindAnimator(Entity root)
+    {
+        if (root.HasComponent<AnimatorComponent>())
+            return root;
+        foreach (Entity child in root.Children)
+        {
+            Entity animator = FindAnimator(child);
+            if (animator.Id.IsValid)
+                return animator;
+        }
+        return default;
+    }
+
+    private void SnapCamera()
+    {
+        _cameraPosition = _motorEntity.Transform.Position + _cameraOffset;
+        _cameraInitialized = true;
+        TransformHandle cameraTransform = Entity.Transform;
+        cameraTransform.Position = _cameraPosition;
+        cameraTransform.Rotation = CameraRotation();
+    }
+
+    private Vector3 CameraForward()
+    {
+        Vector3 direction = _cameraTargetOffset - _cameraOffset;
+        direction = new Vector3(direction.X, 0.0f, direction.Z);
+        return direction.LengthSquared > 0.0001f ? direction.Normalized : Vector3.Forward;
+    }
+
+    private Quaternion CameraRotation()
+    {
+        Vector3 direction = (_cameraTargetOffset - _cameraOffset).Normalized;
+        float horizontalLength = MathF.Sqrt((direction.X * direction.X) + (direction.Z * direction.Z));
+        float pitch = RadiansToDegrees(MathF.Atan2(-direction.Y, horizontalLength));
+        float yaw = RadiansToDegrees(MathF.Atan2(direction.X, direction.Z));
+        return Quaternion.Euler(pitch, yaw);
+    }
+
+    private void BeginAirbornePresentation()
+    {
+        if (!_animatorEntity.IsValid)
+            return;
+        _groundedDuration = 0.0f;
+        _footGroundingWeight = 0.0f;
+        Animator.SetFootGroundingWeight(_animatorEntity, 0.0f);
+        Animator.SetBool(_animatorEntity, "Grounded", false);
+        Animator.SetBool(_animatorEntity, "Falling", false);
+    }
+
+    private void UpdateAnimationState(bool grounded, bool jumped)
+    {
+        if (!_animatorEntity.IsValid)
+            return;
+        Animator.SetFloat(_animatorEntity, "VerticalSpeed", _verticalVelocity);
+        Animator.SetBool(_animatorEntity, "Grounded", grounded);
+        Animator.SetBool(_animatorEntity, "Falling", !grounded && !jumped && _verticalVelocity < -0.5f);
+    }
+
+    private void UpdateFootGrounding(bool settledGrounded, bool jumped, float deltaTime)
+    {
+        if (!_animatorEntity.IsValid)
+            return;
+
+        if (!settledGrounded || jumped)
+        {
+            _groundedDuration = 0.0f;
+            _footGroundingWeight = 0.0f;
+        }
+        else
+        {
+            _groundedDuration += deltaTime;
+            float target = _groundedDuration >= MathF.Max(0.0f, _footIkLandingDelay) ? 1.0f : 0.0f;
+            _footGroundingWeight +=
+                (target - _footGroundingWeight) * ExponentialBlend(_footIkSharpness, deltaTime);
+        }
+        Animator.SetFootGroundingWeight(_animatorEntity, Math.Clamp(_footGroundingWeight, 0.0f, 1.0f));
+    }
+
+    private void RestoreFootGrounding()
+    {
+        if (_animatorEntity.IsValid)
+            Animator.SetFootGroundingWeight(_animatorEntity, 1.0f);
+        _footGroundingWeight = 1.0f;
+        _groundedDuration = 0.0f;
     }
 
     private void SubscribeUiVisibility()
@@ -216,8 +406,11 @@ public sealed class FirstPersonCamera : Behaviour
     private void HandleUiVisibilityChanged(bool visible)
     {
         _uiVisible = visible;
-        if (visible)
-            _horizontalVelocity = default;
+        if (!visible)
+            return;
+        _moveInput = default;
+        _sprinting = false;
+        _jumpBufferRemaining = 0.0f;
     }
 
     private void SetCaptureEnabled(bool enabled)
@@ -235,5 +428,25 @@ public sealed class FirstPersonCamera : Behaviour
         _cursorCapture = null;
     }
 
-    private static float DegreesToRadians(float degrees) => degrees * (MathF.PI / 180.0f);
+    private void PreserveLegacyOrbitSettings()
+    {
+        _ = _lookSensitivity;
+        _ = _maximumPitch;
+        _ = _invertHorizontal;
+        _ = _invertVertical;
+        _ = _lookSharpness;
+        _ = _cameraPitch;
+        _ = _cameraYaw;
+    }
+
+    private static float ExponentialBlend(float sharpness, float deltaTime) =>
+        1.0f - MathF.Exp(-MathF.Max(0.0f, sharpness) * deltaTime);
+
+    private static float SmoothAngle(float current, float target, float blend)
+    {
+        float delta = ((target - current + 540.0f) % 360.0f) - 180.0f;
+        return current + (delta * Math.Clamp(blend, 0.0f, 1.0f));
+    }
+
+    private static float RadiansToDegrees(float radians) => radians * (180.0f / MathF.PI);
 }

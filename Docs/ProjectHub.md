@@ -94,8 +94,10 @@ preserving the registration ID and root. Ordinary refresh and verification never
 External removal deletes only the Hub registration. Managed repair or removal is never authorized without
 the matching unforgeable install marker and manifest fingerprint. Managed uninstall is exposed only for a healthy,
 receipt-bound installation with a complete verified inventory. Verification, repair, and removal also require both the
-Hub process tracker and the native executable-path probe to report the editor inactive; relevant process-query failures
-fail closed. This covers editors launched outside the Hub or left running across a Hub restart. The worker revalidates
+Hub process tracker and the native executable-path probe to report the editor inactive. A tracked launch retains the
+operating system's process-creation identity, so PID reuse cannot keep the wrong process active even if it runs from the
+same Editor binary; relevant process-query failures fail closed. This covers editors launched outside the Hub or left
+running across a Hub restart. The worker revalidates
 the exact marker, receipt, manifest, declared bytes, and absence of undeclared files immediately before atomically
 renaming the root to a same-parent tombstone. A durable journal resumes an interrupted purge, and the Hub removes the
 registry entry only after the root is absent and every persisted identity field still matches. Repeating Remove after

@@ -1,13 +1,52 @@
 #include "KeireClient/Editor/AssetBrowserUtilities.h"
 
+#include "KeireInternal/FileSystem.h"
+
 #include <algorithm>
 #include <cctype>
+#include <fstream>
 #include <sstream>
 #include <stdexcept>
 #include <variant>
 
 namespace KeireEditor
 {
+    bool AssetBrowserRecordViewCache::Refresh(const std::span<const Keire::AssetSourceRecord> records,
+                                              const std::uint64_t revision, const std::filesystem::path& folder,
+                                              const std::string_view search)
+    {
+        if (m_Initialized && m_Revision == revision && m_Folder == folder && m_Search == search)
+            return false;
+
+        std::vector<const Keire::AssetSourceRecord*> visible;
+        visible.reserve(records.size());
+        for (const auto& record : records)
+        {
+            if (record.RelativePath.parent_path() == folder &&
+                (search.empty() || record.RelativePath.filename().string().find(search) != std::string::npos))
+            {
+                visible.push_back(&record);
+            }
+        }
+        std::ranges::sort(visible, {}, [](const auto* record) { return record->RelativePath.filename(); });
+
+        m_Revision = revision;
+        m_Folder = folder;
+        m_Search = search;
+        m_Records = std::move(visible);
+        m_Initialized = true;
+        return true;
+    }
+
+    void AssetBrowserRecordViewCache::Clear() noexcept
+    {
+        m_Revision = 0;
+        m_Folder.clear();
+        m_Search.clear();
+        m_Records.clear();
+        m_Initialized = false;
+    }
+
     std::string DisplayName(const std::filesystem::path& path)
     {
         const auto stem = path.stem().string();
@@ -22,6 +61,101 @@ namespace KeireEditor
             return true;
         const auto relative = normalizedCandidate.lexically_relative(normalizedParent);
         return !relative.empty() && !relative.is_absolute() && !relative.generic_string().starts_with("..");
+    }
+
+    AssetBrowserPreferences LoadAssetBrowserPreferences(const std::filesystem::path& path) noexcept
+    {
+        AssetBrowserPreferences preferences;
+        try
+        {
+            std::ifstream input(path);
+            std::string line;
+            while (std::getline(input, line))
+            {
+                if (line == "view=grid")
+                    preferences.GridView = true;
+                else if (line == "view=list")
+                    preferences.GridView = false;
+                else if (line.starts_with("size="))
+                {
+                    try
+                    {
+                        preferences.ThumbnailSize = std::clamp(std::stof(line.substr(5)), 48.0F, 160.0F);
+                    }
+                    catch (...)
+                    {
+                    }
+                }
+            }
+        }
+        catch (...)
+        {
+        }
+        return preferences;
+    }
+
+    void SaveAssetBrowserPreferences(const std::filesystem::path& path,
+                                     const AssetBrowserPreferences& preferences) noexcept
+    {
+        if (path.empty())
+            return;
+        try
+        {
+            const auto text = std::string("view=") + (preferences.GridView ? "grid\n" : "list\n") +
+                              "size=" + std::to_string(std::clamp(preferences.ThumbnailSize, 48.0F, 160.0F)) + "\n";
+            Keire::Detail::WriteTextFileAtomically(path, text);
+        }
+        catch (...)
+        {
+        }
+    }
+
+    std::vector<std::filesystem::path> DirectChildAssetFolders(const std::span<const std::filesystem::path> folders,
+                                                               const std::filesystem::path& parent)
+    {
+        std::vector<std::filesystem::path> result;
+        for (const auto& folder : folders)
+            if (folder.parent_path() == parent)
+                result.push_back(folder);
+        return result;
+    }
+
+    std::filesystem::path UniqueAssetBrowserFolder(const std::filesystem::path& assetRoot,
+                                                   std::filesystem::path desired)
+    {
+        const auto parent = desired.parent_path();
+        const auto base = desired.filename().string();
+        for (std::size_t copy = 2; std::filesystem::exists(assetRoot / desired); ++copy)
+            desired = parent / (base + " " + std::to_string(copy));
+        return desired;
+    }
+
+    std::filesystem::path UniqueAssetBrowserPath(const Keire::AssetSourceRecord& source,
+                                                 const std::filesystem::path& folder,
+                                                 const Keire::AssetDatabase& database)
+    {
+        const auto stem = source.RelativePath.stem().string();
+        const auto extension = source.RelativePath.extension().string();
+        auto copyName = stem;
+        copyName.append(" Copy").append(extension);
+        auto destination = folder / copyName;
+        for (std::size_t copy = 2; database.Find(destination); ++copy)
+        {
+            copyName = stem;
+            copyName.append(" Copy ").append(std::to_string(copy)).append(extension);
+            destination = folder / copyName;
+        }
+        return destination;
+    }
+
+    std::filesystem::path ResolveAssetBrowserDropFolder(const std::span<const AssetBrowserDropTarget> targets,
+                                                        const Keire::UiPosition position,
+                                                        const std::filesystem::path& fallback)
+    {
+        for (auto iterator = targets.rbegin(); iterator != targets.rend(); ++iterator)
+            if (iterator->Rect.Contains(position))
+                return iterator->Folder;
+        return fallback;
     }
 
     std::string AssetTypeName(const Keire::AssetSourceRecord& record)

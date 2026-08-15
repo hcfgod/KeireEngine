@@ -19,6 +19,10 @@ TEST_CASE("Executable process probes fail safely for invalid targets")
 {
     CHECK(Detail::ProbeEditorEntrypointActivity("relative/editor") == EditorEntrypointActivity::Indeterminate);
     CHECK(Detail::ProbeEditorEntrypointActivity({}) == EditorEntrypointActivity::Indeterminate);
+    CHECK(Detail::ProbeEditorProcess(0, std::filesystem::absolute("editor")).Activity ==
+          EditorEntrypointActivity::Indeterminate);
+    CHECK(Detail::ProbeEditorProcess(1, "relative/editor").Activity == EditorEntrypointActivity::Indeterminate);
+    CHECK(Detail::ProbeEditorProcess(1, {}).Identity == 0);
 }
 
 #if defined(_WIN32)
@@ -32,13 +36,15 @@ TEST_CASE("Windows executable process probe finds a live executable by exact pat
 
     CHECK(Detail::ProbeEditorEntrypointActivity(std::filesystem::path(executable)) ==
           EditorEntrypointActivity::Running);
-    CHECK(Detail::ProbeEditorProcessActivity(static_cast<std::uint64_t>(GetCurrentProcessId()),
-                                             std::filesystem::path(executable)) == EditorEntrypointActivity::Running);
+    const auto current = Detail::ProbeEditorProcess(static_cast<std::uint64_t>(GetCurrentProcessId()),
+                                                    std::filesystem::path(executable));
+    CHECK(current.Activity == EditorEntrypointActivity::Running);
+    CHECK(current.Identity != 0);
 
     KeireHubTests::TemporaryDirectory temporary;
     const auto absent = temporary.Path() / std::filesystem::path(executable).filename();
     CHECK(Detail::ProbeEditorEntrypointActivity(absent) == EditorEntrypointActivity::NotRunning);
-    CHECK(Detail::ProbeEditorProcessActivity(static_cast<std::uint64_t>(GetCurrentProcessId()), absent) ==
+    CHECK(Detail::ProbeEditorProcess(static_cast<std::uint64_t>(GetCurrentProcessId()), absent).Activity ==
           EditorEntrypointActivity::NotRunning);
 }
 #endif

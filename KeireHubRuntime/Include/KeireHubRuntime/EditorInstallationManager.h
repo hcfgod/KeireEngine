@@ -54,8 +54,16 @@ namespace KeireHub
         Indeterminate
     };
 
+    struct EditorProcessObservation final
+    {
+        EditorEntrypointActivity Activity = EditorEntrypointActivity::Indeterminate;
+        std::uint64_t Identity = 0;
+    };
+
     [[nodiscard]] EditorEntrypointActivity
     ProbeEditorEntrypointProcessActivity(const std::filesystem::path& executable) noexcept;
+    [[nodiscard]] EditorProcessObservation ProbeEditorProcess(std::uint64_t processId,
+                                                              const std::filesystem::path& executable) noexcept;
     [[nodiscard]] EditorEntrypointActivity ProbeEditorProcessActivity(std::uint64_t processId,
                                                                       const std::filesystem::path& executable) noexcept;
 

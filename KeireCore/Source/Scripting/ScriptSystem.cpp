@@ -17,6 +17,7 @@
 #include "KeireInternal/Scripting/ManagedBuildWorkspace.h"
 #include "KeireInternal/Scripting/ManagedGenerationSequence.h"
 #include "KeireInternal/Scripting/ManagedReflection.h"
+#include "KeireInternal/Scripting/ManagedRuntimeInterop.h"
 #include "KeireInternal/Scripting/ManagedSdk.h"
 
 #if defined(_MSC_VER)
@@ -69,54 +70,6 @@ namespace Keire
         using Detail::ReflectManagedProperties;
         using Detail::WriteText;
 
-        struct NativeAnimatorState
-        {
-            float Speed = 1.0F;
-            float NormalizedTime = 0.0F;
-            std::uint8_t Playing = 0;
-            std::uint8_t Paused = 0;
-        };
-
-        struct NativeAudioSourceProperties
-        {
-            std::uint64_t ClipHigh = 0;
-            std::uint64_t ClipLow = 0;
-            std::uint64_t MixerHigh = 0;
-            std::uint64_t MixerLow = 0;
-            std::uint64_t BusHigh = 0;
-            std::uint64_t BusLow = 0;
-            float Gain = 1.0F;
-            float Pitch = 1.0F;
-            float PositionSeconds = 0.0F;
-            float DurationSeconds = 0.0F;
-            float MinimumDistance = 1.0F;
-            float MaximumDistance = 100.0F;
-            std::uint32_t Priority = 128;
-            std::uint8_t Loop = 0;
-            std::uint8_t Spatial = 0;
-            std::uint8_t PlayOnAwake = 0;
-            std::uint8_t PlaybackState = 0;
-        };
-
-        struct NativeAudioListenerProperties
-        {
-            float Gain = 1.0F;
-            std::uint8_t Primary = 1;
-        };
-
-        struct NativeAudioReverbZoneProperties
-        {
-            std::uint64_t MixerHigh = 0;
-            std::uint64_t MixerLow = 0;
-            std::uint64_t SnapshotHigh = 0;
-            std::uint64_t SnapshotLow = 0;
-            Vector3 BoxHalfExtent{5.0F, 3.0F, 5.0F};
-            float SphereRadius = 5.0F;
-            float BlendDistance = 1.0F;
-            float ReverbSend = 1.0F;
-            std::int32_t Priority = 0;
-            std::uint8_t Shape = 0;
-        };
     } // namespace
 
     class ScriptSystem::Impl final
@@ -135,17 +88,6 @@ namespace Keire
             std::vector<ComponentTypeId> RequiredComponents;
         };
 
-        struct CallbackProfile final
-        {
-            std::uint64_t Invocations = 0;
-            std::uint64_t SkippedInvocations = 0;
-            double Milliseconds = 0.0;
-            double MaximumMilliseconds = 0.0;
-        };
-
-        static constexpr std::size_t CallbackProfileCount =
-            static_cast<std::size_t>(ManagedBehaviourCallback::AnimatorIk) + 1;
-
         struct BehaviourInstance final
         {
             std::string TypeName;
@@ -154,7 +96,7 @@ namespace Keire
             AssetId Entity;
             Coral::ManagedObject Object;
             std::string State = "{\"version\":1,\"fields\":[]}";
-            CallbackProfile CallbackProfiles[CallbackProfileCount]{};
+            Detail::ManagedCallbackProfile CallbackProfiles[Detail::ManagedCallbackProfileCount]{};
             bool Enabled = true;
             bool Faulted = false;
             Keire::Entity NativeEntity;
@@ -1264,7 +1206,7 @@ namespace Keire
 
         [[nodiscard]] static std::uint8_t RuntimeGetAnimatorState(const std::uint64_t world, const std::uint64_t high,
                                                                   const std::uint64_t low,
-                                                                  NativeAnimatorState* state) noexcept
+                                                                  Detail::NativeAnimatorState* state) noexcept
         {
             if (!state)
                 return 0;
@@ -1958,7 +1900,8 @@ namespace Keire
 
         [[nodiscard]] static std::uint8_t
         RuntimeGetAudioSourceProperties(const std::uint64_t world, const std::uint64_t entityHigh,
-                                        const std::uint64_t entityLow, NativeAudioSourceProperties* properties) noexcept
+                                        const std::uint64_t entityLow,
+                                        Detail::NativeAudioSourceProperties* properties) noexcept
         {
             if (!properties)
                 return 0;
@@ -2110,7 +2053,7 @@ namespace Keire
         [[nodiscard]] static std::uint8_t
         RuntimeGetAudioListenerProperties(const std::uint64_t world, const std::uint64_t entityHigh,
                                           const std::uint64_t entityLow,
-                                          NativeAudioListenerProperties* properties) noexcept
+                                          Detail::NativeAudioListenerProperties* properties) noexcept
         {
             if (!properties)
                 return 0;
@@ -2134,7 +2077,7 @@ namespace Keire
         [[nodiscard]] static std::uint8_t
         RuntimeSetAudioListenerProperties(const std::uint64_t world, const std::uint64_t entityHigh,
                                           const std::uint64_t entityLow,
-                                          const NativeAudioListenerProperties* properties) noexcept
+                                          const Detail::NativeAudioListenerProperties* properties) noexcept
         {
             if (!properties || !std::isfinite(properties->Gain) || properties->Gain < 0.0F || properties->Gain > 16.0F)
                 return 0;
@@ -2158,7 +2101,7 @@ namespace Keire
         [[nodiscard]] static std::uint8_t
         RuntimeGetAudioReverbZoneProperties(const std::uint64_t world, const std::uint64_t entityHigh,
                                             const std::uint64_t entityLow,
-                                            NativeAudioReverbZoneProperties* properties) noexcept
+                                            Detail::NativeAudioReverbZoneProperties* properties) noexcept
         {
             if (!properties)
                 return 0;
@@ -2192,7 +2135,7 @@ namespace Keire
         [[nodiscard]] static std::uint8_t
         RuntimeSetAudioReverbZoneProperties(const std::uint64_t world, const std::uint64_t entityHigh,
                                             const std::uint64_t entityLow,
-                                            const NativeAudioReverbZoneProperties* properties) noexcept
+                                            const Detail::NativeAudioReverbZoneProperties* properties) noexcept
         {
             if (!properties || properties->Shape > static_cast<std::uint8_t>(AudioReverbZoneShape::Sphere) ||
                 !Math::IsFinite(properties->BoxHalfExtent) || properties->BoxHalfExtent.X <= 0.0F ||
@@ -4300,7 +4243,7 @@ namespace Keire
         for (const auto& [id, instance] : m_Impl->Instances)
         {
             (void)id;
-            for (std::size_t callbackIndex = 0; callbackIndex < Impl::CallbackProfileCount; ++callbackIndex)
+            for (std::size_t callbackIndex = 0; callbackIndex < Detail::ManagedCallbackProfileCount; ++callbackIndex)
             {
                 const auto& source = instance.CallbackProfiles[callbackIndex];
                 if (source.Invocations == 0 && source.SkippedInvocations == 0)

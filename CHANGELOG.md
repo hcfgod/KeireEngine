@@ -5,6 +5,23 @@ versions.
 
 ## Unreleased
 
+- Hardened Coral for concurrent runtime hosts and long reload sessions. Reflection metadata now receives monotonic,
+  collision-safe identities; assembly, load-context, and reflected-method caches are concurrent; and loader failure
+  status is isolated per thread instead of being shared process-wide. Debug GC-handle diagnostics are synchronized
+  across independent hosts as well.
+- Hardened Hub Editor-process tracking against same-executable process-ID reuse by retaining the operating system's
+  process creation identity in addition to the exact executable path.
+- Added a deterministic asset-package mutation corpus covering truncation, bit flips, and trailing data while proving
+  rejected archives cannot leave a partial extraction behind.
+- Removed an Asset Browser large-project hot path that rescanned, resorted, and prepared thumbnails for the complete
+  project catalog every frame. Visible records are now cached by catalog revision, folder, and search query, while
+  thumbnail work is scoped to the active view.
+- Fixed Windows dependency refresh failing inside PowerShell while replacing a versioned Coral directory junction.
+  Junction replacement now removes only the already-validated reparse point and never traverses its target.
+- Resynchronized the Hub's Sandbox project template and catalog inventory with the canonical Sandbox gameplay scripts,
+  animation graph, sample scene, and documentation.
+- Split asset-package export, editor diagnostics, and managed-runtime interop definitions out of oversized legacy
+  implementation units, then tightened the Asset workspace's enforced non-growth ceiling to its new measured size.
 - Fixed Coral dependency resolution corrupting Windows drive-letter paths, hash collisions aliasing collectible load
   contexts or assemblies, unknown loader exceptions being reported as success, and memory-loaded assemblies missing
   their owner context and local type cache.

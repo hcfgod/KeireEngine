@@ -1,5 +1,6 @@
 #pragma once
 
+#include "KeireHubRuntime/EditorInstallationManager.h"
 #include "KeireHubRuntime/HubError.h"
 
 #include <cstdint>
@@ -20,12 +21,13 @@ namespace KeireHub
         std::filesystem::path ProjectRoot;
         std::filesystem::path Executable;
         std::uint64_t LaunchedUnixSeconds = 0;
+        std::uint64_t ProcessIdentity = 0;
     };
 
     class EditorProcessTracker final
     {
       public:
-        using ProcessProbe = std::function<bool(std::uint64_t, const std::filesystem::path&)>;
+        using ProcessProbe = std::function<EditorProcessObservation(std::uint64_t, const std::filesystem::path&)>;
 
         explicit EditorProcessTracker(ProcessProbe processProbe);
 
