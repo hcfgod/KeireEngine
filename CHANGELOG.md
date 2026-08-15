@@ -5,6 +5,9 @@ versions.
 
 ## Unreleased
 
+- Fixed Character Controller ground-stick motion generating downhill drift on walkable slopes and capsule edges.
+  Grounded controllers now snap across bounded walkable descents without catching upward jumps, while automatic foot
+  grounding can shift the pelvis toward a single supported foot at a ledge instead of requiring two contacts.
 - Hardened Coral for concurrent runtime hosts and long reload sessions. Reflection metadata now receives monotonic,
   collision-safe identities; assembly, load-context, and reflected-method caches are concurrent; and loader failure
   status is isolated per thread instead of being shared process-wide. Debug GC-handle diagnostics are synchronized

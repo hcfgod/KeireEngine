@@ -3,6 +3,26 @@
 
 #include <doctest/doctest.h>
 
+TEST_CASE("character vertical grounding stops instead of creating downhill motion")
+{
+    constexpr Keire::Vector3 downward{0.0F, -0.5F, 0.0F};
+    const Keire::Vector3 slopeNormal{0.0F, 0.8F, 0.6F};
+
+    const auto sliding = Keire::Detail::ResolveCharacterCollisionRemainder(downward, slopeNormal, true);
+    CHECK(sliding.Z == doctest::Approx(0.24F));
+    CHECK(sliding.Y == doctest::Approx(-0.18F));
+    CHECK(Keire::Detail::ResolveCharacterCollisionRemainder(downward, slopeNormal, false) == Keire::Vector3{});
+}
+
+TEST_CASE("ground snap follows walkable descents without catching jumps or walls")
+{
+    constexpr float minimumWalkableNormal = 0.6F;
+    CHECK(Keire::Detail::ShouldSnapCharacterToGround(true, -0.05F, {0.0F, 0.8F, 0.6F}, minimumWalkableNormal));
+    CHECK_FALSE(Keire::Detail::ShouldSnapCharacterToGround(true, 0.05F, {0.0F, 1.0F, 0.0F}, minimumWalkableNormal));
+    CHECK_FALSE(Keire::Detail::ShouldSnapCharacterToGround(false, -0.05F, {0.0F, 1.0F, 0.0F}, minimumWalkableNormal));
+    CHECK_FALSE(Keire::Detail::ShouldSnapCharacterToGround(true, -0.05F, {0.8F, 0.2F, 0.0F}, minimumWalkableNormal));
+}
+
 TEST_CASE("character grounding tolerates brief slope contact gaps without hiding jumps")
 {
     std::uint32_t missedWalkableFrames = 2;

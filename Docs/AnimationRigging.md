@@ -162,9 +162,9 @@ solver itself.
 
 After graph sampling, managed IK, and authored arm IK, the scene runtime probes below each animated foot, ignores the
 nearest Character Controller hierarchy (including a capsule on an Animator parent), rejects surfaces over
-**Maximum Ground Slope**, lowers the pelvis once for the lowest valid contact, and applies a bounded two-foot balance
-correction toward the skeleton's own bind-neutral
-pelvis-to-feet offset. It also removes a bounded amount of pitch/roll from the inferred pelvis-to-chest or
+**Maximum Ground Slope**, lowers the pelvis once for the lowest valid contact, and applies a bounded support-balance
+correction toward the skeleton's own bind-neutral pelvis-to-feet offset. It also removes a bounded amount of pitch/roll
+from the inferred pelvis-to-chest or
 pelvis-to-spine axis while preserving authored yaw. **Body Lean Correction** controls how strongly grounding removes
 pitch/roll already present in the animation, and **Maximum Lean Correction** bounds that change in degrees. A zero
 weight preserves the authored lean; a full weight restores the rig's bind-neutral torso direction up to the authored
@@ -211,6 +211,10 @@ frame so a smoother response cannot push the sole through an approaching platfor
 remain filtered. Automatic toe discovery uses semantic names when present and skin influence plus bind topology
 otherwise; while planted, the toe root blends back to its neutral bind rotation so the forefoot rests with the
 ankle-aligned sole instead of retaining an animated upward curl.
+
+At a ledge, one remaining planted contact also receives the bounded bind-neutral pelvis correction. This shifts the
+character's weight toward the supported leg while the unsupported foot releases, rather than leaving the hips centered
+between a valid foothold and empty space.
 
 **Automatic Ray Distance** expands each downward query from the configured minimum to the evaluated leg length. This
 prevents a raised animation pose from silently losing one contact and leaving a foot hovering, while the collision mask

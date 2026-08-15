@@ -99,7 +99,9 @@ motor.Move((horizontal + Vector3.Up * verticalSpeed) * Time.DeltaTime);
 
 `Move` queues a finite world-space displacement and returns false if the bounded command queue is full or the component
 is unavailable. During physics, Kéire capsule-casts that displacement, ignores the controller's own body, slides along
-blocking surfaces, climbs authored steps when grounded, and rejects slopes above **Maximum Slope**. `Grounded`,
+blocking surfaces, climbs authored steps when grounded, follows bounded walkable descents, and rejects slopes above
+**Maximum Slope**. Purely vertical ground-stick or gravity movement stops at the first blocking surface instead of
+being projected downhill along it. `Grounded`,
 `GroundNormal`, and `Velocity` report the last resolved physics state. The controller is kinematic: gameplay supplies
 gravity and jumping explicitly, as demonstrated by `FirstPersonCamera.cs` in KeireSandbox.
 

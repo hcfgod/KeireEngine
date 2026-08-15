@@ -288,7 +288,7 @@ namespace Keire
             result.PelvisAdjustment =
                 std::clamp(requestedAdjustment, -request.MaximumPelvisAdjustment, 0.0F) * request.PelvisWeight;
 
-            if (request.Contacts.size() >= 2 && request.MaximumHorizontalPelvisAdjustment > 0.0F)
+            if (!request.Contacts.empty() && request.MaximumHorizontalPelvisAdjustment > 0.0F)
             {
                 Vector3 bindFootCenter;
                 Vector3 targetFootCenter;

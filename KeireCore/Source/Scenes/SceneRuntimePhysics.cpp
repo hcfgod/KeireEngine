@@ -297,7 +297,7 @@ namespace Keire
                                                          .Layer = character->Layer(),
                                                          .IgnoreBody = state.Body});
             };
-            const auto moveAndSlide = [&](Vector3 movement)
+            const auto moveAndSlide = [&](Vector3 movement, const bool slideAlongSurface)
             {
                 for (std::size_t iteration = 0; iteration < 4; ++iteration)
                 {
@@ -314,9 +314,7 @@ namespace Keire
                     const auto safeFraction = std::clamp(safeDistance / movementLength, 0.0F, 1.0F);
                     current = add(current, multiply(movement, safeFraction));
                     movement = multiply(movement, 1.0F - safeFraction);
-                    const auto intoSurface = dot(movement, hit->Normal);
-                    if (intoSurface < 0.0F)
-                        movement = subtract(movement, multiply(hit->Normal, intoSurface));
+                    movement = Detail::ResolveCharacterCollisionRemainder(movement, hit->Normal, slideAlongSurface);
                 }
             };
 
@@ -348,8 +346,19 @@ namespace Keire
                 }
             }
             if (!stepped)
-                moveAndSlide(horizontal);
-            moveAndSlide({0.0F, displacement.Y, 0.0F});
+                moveAndSlide(horizontal, true);
+            moveAndSlide({0.0F, displacement.Y, 0.0F}, false);
+
+            if (character->Grounded() && displacement.Y <= 0.0F)
+            {
+                const auto snapDistance = character->StepHeight() + padding + 0.05F;
+                const auto landing = cast(current, {0.0F, -snapDistance, 0.0F});
+                if (landing && Detail::ShouldSnapCharacterToGround(true, displacement.Y, landing->Normal, slopeNormal))
+                {
+                    const auto downDistance = std::max(0.0F, landing->Distance - padding);
+                    current = add(current, {0.0F, -downDistance, 0.0F});
+                }
+            }
 
             const auto applied = subtract(current, start);
             state.CharacterVelocity = deltaSeconds > 0.0F ? multiply(applied, 1.0F / deltaSeconds) : Vector3{};

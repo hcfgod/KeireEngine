@@ -1000,7 +1000,7 @@ namespace Keire
             if (request.Contacts.empty())
                 return {};
             request.PelvisWeight *= maximumGroundingBlend;
-            if (legCount != 0 && request.Contacts.size() >= 2 && settings.LockPlantedFeet)
+            if (legCount != 0 && settings.LockPlantedFeet)
             {
                 const auto averageLegLength = totalLegLength / static_cast<float>(legCount);
                 request.MaximumHorizontalPelvisAdjustment = averageLegLength * 0.25F * minimumGroundingBlend;

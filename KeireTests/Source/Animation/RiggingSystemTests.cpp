@@ -564,6 +564,32 @@ TEST_CASE("Foot grounding restores the rig's bind-neutral pelvis offset over two
     CHECK(pose[0].Translation.Z == doctest::Approx(0.3F));
 }
 
+TEST_CASE("Foot grounding shifts the pelvis toward a single ledge support")
+{
+    const std::vector<Keire::SkeletonBone> bones{{"Pelvis", -1, {{0.0F, 2.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                 {"LeftUpper", 0, {{-0.2F, 0.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                 {"LeftLower", 1, {{0.0F, -1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                 {"LeftFoot", 2, {{0.0F, -1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}}};
+    const Keire::SkeletonAsset skeleton(bones);
+    std::vector<Keire::BoneTransform> pose;
+    for (const auto& bone : bones)
+        pose.push_back(bone.BindPose);
+
+    Keire::FootGroundingRequest request;
+    request.Pelvis = 0;
+    request.FootHeight = 0.0F;
+    request.MaximumPelvisAdjustment = 0.5F;
+    request.MaximumHorizontalPelvisAdjustment = 0.2F;
+    request.PelvisSupportRadius = 0.05F;
+    request.Contacts.push_back({1, 2, 3, {-0.45F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F}, {-0.45F, 1.0F, 1.0F}});
+
+    const auto solved = Keire::SolveFootGrounding(skeleton, pose, request);
+    REQUIRE(solved);
+    CHECK(solved->SolvedFeet == 1);
+    CHECK(solved->HorizontalPelvisAdjustment.X == doctest::Approx(-0.2F));
+    CHECK(pose[0].Translation.X == doctest::Approx(-0.2F));
+}
+
 TEST_CASE("Foot grounding removes bounded pelvis pitch using the rig's own torso axis")
 {
     const std::vector<Keire::SkeletonBone> bones{{"Pelvis", -1, {{0.0F, 2.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
