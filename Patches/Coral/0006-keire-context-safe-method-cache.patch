@@ -1,0 +1,59 @@
+warning: in the working copy of 'Coral.Managed/Source/ManagedObject.cs', LF will be replaced by CRLF the next time Git touches it
+diff --git a/Coral.Managed/Source/ManagedObject.cs b/Coral.Managed/Source/ManagedObject.cs
+index 67490c0..3d35744 100644
+--- a/Coral.Managed/Source/ManagedObject.cs
++++ b/Coral.Managed/Source/ManagedObject.cs
+@@ -5,6 +5,7 @@ using System.Collections.Generic;
+ using System.Diagnostics;
+ using System.Diagnostics.CodeAnalysis;
+ using System.Reflection;
++using System.Runtime.CompilerServices;
+ using System.Runtime.InteropServices;
+ 
+ namespace Coral.Managed;
+@@ -39,14 +40,14 @@ internal static class ManagedObject
+ 
+ 	public readonly struct MethodKey : IEquatable<MethodKey>
+ 	{
+-		public readonly string TypeName;
++		public readonly Type TargetType;
+ 		public readonly string Name;
+ 		public readonly ManagedType[] Types;
+ 		public readonly int ParameterCount;
+ 
+-		public MethodKey(string InTypeName, string InName, ManagedType[] InTypes, int InParameterCount)
++		public MethodKey(Type InTargetType, string InName, ManagedType[] InTypes, int InParameterCount)
+ 		{
+-			TypeName = InTypeName;
++			TargetType = InTargetType;
+ 			Name = InName;
+ 			Types = InTypes;
+ 			ParameterCount = InParameterCount;
+@@ -56,7 +57,8 @@ internal static class ManagedObject
+ 
+ 		bool IEquatable<MethodKey>.Equals(MethodKey other)
+ 		{
+-			if (TypeName != other.TypeName || Name != other.Name)
++			if (!ReferenceEquals(TargetType, other.TargetType) || Name != other.Name ||
++				Types.Length != other.Types.Length)
+ 				return false;
+ 
+ 			for (int i = 0; i < Types.Length; i++)
+@@ -75,7 +77,7 @@ internal static class ManagedObject
+ 			{
+ 				int hash = 17;
+ 
+-				hash = hash * 23 + TypeName.GetHashCode();
++				hash = hash * 23 + RuntimeHelpers.GetHashCode(TargetType);
+ 				hash = hash * 23 + Name.GetHashCode();
+ 				foreach (var type in Types)
+ 					hash = hash * 23 + type.GetHashCode();
+@@ -239,7 +241,7 @@ internal static class ManagedObject
+ 			}
+ 		}
+ 
+-		var methodKey = new MethodKey(TypeNameOrNull(InType), InMethodName, parameterTypes, InParameterCount);
++		var methodKey = new MethodKey(InType, InMethodName, parameterTypes, InParameterCount);
+ 
+ 		if (!s_CachedMethods.TryGetValue(methodKey, out methodInfo))
+ 		{

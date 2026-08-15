@@ -56,6 +56,8 @@ namespace KeireHub
 
     [[nodiscard]] EditorEntrypointActivity
     ProbeEditorEntrypointProcessActivity(const std::filesystem::path& executable) noexcept;
+    [[nodiscard]] EditorEntrypointActivity ProbeEditorProcessActivity(std::uint64_t processId,
+                                                                      const std::filesystem::path& executable) noexcept;
 
     struct EditorInstallationHealthSnapshot final
     {

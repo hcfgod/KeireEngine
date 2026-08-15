@@ -25,6 +25,12 @@ namespace KeireHub
         return Detail::ProbeEditorEntrypointActivity(executable);
     }
 
+    EditorEntrypointActivity ProbeEditorProcessActivity(const std::uint64_t processId,
+                                                        const std::filesystem::path& executable) noexcept
+    {
+        return Detail::ProbeEditorProcessActivity(processId, executable);
+    }
+
     namespace
     {
         [[nodiscard]] bool SamePath(const std::filesystem::path& left, const std::filesystem::path& right)

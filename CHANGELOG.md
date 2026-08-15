@@ -5,21 +5,34 @@ versions.
 
 ## Unreleased
 
+- Fixed Coral dependency resolution corrupting Windows drive-letter paths, hash collisions aliasing collectible load
+  contexts or assemblies, unknown loader exceptions being reported as success, and memory-loaded assemblies missing
+  their owner context and local type cache.
+- Made managed reload rollback cleanup best-effort and exception-safe. A failing retained `OnAfterReload` can no longer
+  strand the candidate context or replace the original migration failure.
+- Managed raycasts now reject non-finite origins, directions, and distances before entering native physics.
+- Automatic foot grounding now excludes the nearest Character Controller hierarchy without mistakenly excluding a
+  physics platform that parents the character.
+- Fixed consecutive successful managed reloads reusing reflection methods from the retiring assembly load context.
+  Method caches now distinguish equal type names from different collectible contexts, preventing transactional reload
+  migration from failing with `System.Reflection.TargetException`.
+- Reworked the Sandbox character into deterministic fixed-step locomotion with a detached fixed-angle smooth-follow
+  camera, screen-correct movement, smooth facing/deceleration, slope-contact grounding hysteresis, jump-safe foot IK
+  suppression, and hierarchy-aware grounding queries that ignore the player's Character Controller capsule.
+- Fixed failed managed hot reloads leaving the last-good gameplay generation without cursor capture, subscriptions, or
+  other resources released by `OnBeforeReload`. Retained instances now receive the matching `OnAfterReload` callback.
 - Added a transient managed Animator foot-grounding weight. Gameplay controllers can now blend authored terrain IK out
   during jumps and falls without mutating scene data; zero weight clears planted-foot state so landing reacquires the
   current surface cleanly.
+- Fixed the Hub retaining a closed Editor as running when Windows reused its former process ID. Tracked launches now
+  validate the live process against the exact Editor executable before disabling installation management.
 
-<<<<<<< HEAD
-- Fixed Play Mode failing to route keyboard/gamepad input until the pointer entered the Game panel. Focus established
-  when Play starts now owns gameplay input, while application focus, Escape suspension, and panel changes still release
-  it correctly.
+- Fixed Play Mode starting with a silent gameplay-input dead zone when the Game panel was focused programmatically but
+  the pointer had not entered its image yet. Focus established when Play starts or managed cursor capture is requested
+  now owns gameplay input while the application is active; Escape suspension and panel changes still release it.
 - Fixed Inspector edits and Play Mode teardown crashing when managed state contained Kéire vectors or quaternions.
   Persistent state now serializes restorable data instead of recursively traversing computed properties such as
   `Normalized`.
-=======
-- Fixed Play Mode starting with a silent gameplay-input dead zone when the Game panel was focused programmatically but
-  the pointer had not entered its image yet. Game-panel focus or managed cursor capture now establishes viewport
-  ownership while the application is active, and switching to another panel still releases it.
 - Fixed Play Mode's automatic managed rebuild reporting that the SDK changed when it merely reapplied the project's
   already-active SDK selection while a previous script build was finishing.
 - Fixed valid imported animation sources showing the error thumbnail. Animation clips and animation-source FBX files
@@ -27,7 +40,6 @@ versions.
 - Added asset-package authoring to the Editor Asset Browser. A selection or complete folder can now be exported through
   its context menu as a deterministic `.keireassetpackage`, with dependency closure and editable package
   metadata. Publisher uploads now create a named, categorized draft product or add a version to an existing product.
->>>>>>> 76f39694759a1360717732b98b735fbb61b0822e
 - Closed the repository-wide readiness review findings: Marketplace catalog and library APIs now use indexed keyset
   cursors, every Edge Function has a frozen Deno dependency graph and CI type check, compile-database generation records
   the shared Ninja artifact identity, and the automatic publication, Python-format, and current clang-tidy gates are

@@ -273,6 +273,7 @@ public abstract class Behaviour
     {
         _synchronizationContext = new BehaviourSynchronizationContext();
         BehaviourRegistry.Register(this);
+        InvokeWithContext(OnAfterReload);
     }
     public void RuntimeCaptureReloadState() =>
         RuntimeSerializedState = ManagedStateSerializer.Capture(this, RuntimeSerializedState, true);

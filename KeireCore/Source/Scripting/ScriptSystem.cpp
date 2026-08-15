@@ -3408,8 +3408,37 @@ namespace Keire
 
         try
         {
+            std::set<std::string, std::less<>> dependencyDirectories;
+            const auto addDependencyDirectory = [&](std::filesystem::path path)
+            {
+                if (path.empty())
+                    return;
+                if (path.is_relative())
+                    path = m_Impl->ProjectRoot / path;
+                path = std::filesystem::absolute(path).lexically_normal();
+                if (path.has_filename())
+                    path = path.parent_path();
+                if (!path.empty())
+                    dependencyDirectories.insert(PathText(path));
+            };
+            for (const auto& assembly : request.Assemblies)
+                addDependencyDirectory(assembly);
+            addDependencyDirectory(request.ManagedApiAssembly.empty() ? m_Impl->ManagedApi
+                                                                      : request.ManagedApiAssembly);
+            std::string dependencyPathList;
+#if defined(_WIN32)
+            constexpr char dependencyPathSeparator = ';';
+#else
+            constexpr char dependencyPathSeparator = ':';
+#endif
+            for (const auto& directory : dependencyDirectories)
+            {
+                if (!dependencyPathList.empty())
+                    dependencyPathList.push_back(dependencyPathSeparator);
+                dependencyPathList.append(directory);
+            }
             auto candidate = m_Impl->RuntimeHost.CreateAssemblyLoadContext(
-                "Keire.Reload." + std::to_string(m_Impl->NextReload++), PathText(m_Impl->OutputRoot));
+                "Keire.Reload." + std::to_string(m_Impl->NextReload++), dependencyPathList);
             m_Impl->CandidateContext = std::make_unique<Coral::AssemblyLoadContext>(candidate);
             Coral::Type* behaviourType = nullptr;
             Coral::Type* stableComponentIdType = nullptr;
@@ -3932,13 +3961,20 @@ namespace Keire
         }
         catch (...)
         {
+            const auto original = std::current_exception();
             for (auto& [id, state] : rollback)
             {
                 const auto found = m_Impl->Instances.find(id);
                 if (found != m_Impl->Instances.end() && found->second.Object.IsValid())
                 {
-                    m_Impl->RestoreState(found->second.Object, state, false);
-                    m_Impl->Invoke(found->second.Object, "RuntimeResumeAfterFailedReload");
+                    try
+                    {
+                        m_Impl->RestoreState(found->second.Object, state, false);
+                        m_Impl->Invoke(found->second.Object, "RuntimeResumeAfterFailedReload");
+                    }
+                    catch (...)
+                    {
+                    }
                 }
             }
             m_Impl->CandidateTypes.clear();
@@ -3951,7 +3987,7 @@ namespace Keire
             std::scoped_lock lock(m_Impl->Mutex);
             m_Impl->Reload.State = ManagedReloadState::Failed;
             m_Impl->Reload.Diagnostic = "Managed reload migration failed; the last-good generation remains active.";
-            throw;
+            std::rethrow_exception(original);
         }
 
         // Reverse-P/Invoke callbacks must finish while the old assembly load context is still alive.

@@ -18,6 +18,7 @@
 #include "Keire/Vfx/VfxSystem.h"
 #include "Keire/Vfx/VfxVolumeAsset.h"
 #include "KeireInternal/Scenes/AnimationIkPasses.h"
+#include "KeireInternal/Scenes/CharacterGrounding.h"
 #include "KeireInternal/Scenes/FootGroundingSpace.h"
 
 #include <algorithm>
@@ -178,6 +179,8 @@ namespace Keire
             Vector3 ColliderCenter;
             Vector3 WorldScale{1.0F, 1.0F, 1.0F};
             Vector3 CharacterVelocity;
+            float CharacterRequestedVerticalDisplacement = 0.0F;
+            std::uint32_t CharacterMissedWalkableFrames = 0;
             std::uint32_t Generation = 0;
         };
 
@@ -655,11 +658,36 @@ namespace Keire
             const auto kneeReference = Detail::OrientBipedKneeReference(
                 Detail::AutomaticBipedKneeReference(leftHipPosition, rightHipPosition, gravityUpModel), leftHipPosition,
                 leftKneePosition, leftFootPosition, rightHipPosition, rightKneePosition, rightFootPosition);
-            const auto ownPhysics = PhysicsBodies.find(entity.Id());
-            const auto ownBody = ownPhysics == PhysicsBodies.end() ? PhysicsBodyId{} : ownPhysics->second.Body;
-            const auto queryLayer = ownPhysics == PhysicsBodies.end() || !ownPhysics->second.HasDefinition
-                                        ? 1U
-                                        : ownPhysics->second.Definition.Layer;
+            auto characterPhysicsRoot = Detail::FindCharacterControllerRoot(entity);
+            if (!characterPhysicsRoot)
+            {
+                for (auto current = entity; current; current = current.Parent())
+                {
+                    if (PhysicsBodies.contains(current.Id()))
+                    {
+                        characterPhysicsRoot = current;
+                        break;
+                    }
+                }
+            }
+            if (!characterPhysicsRoot)
+                characterPhysicsRoot = entity;
+
+            std::set<PhysicsBodyId> characterBodies;
+            auto queryLayer = 1U;
+            bool hasQueryLayer = false;
+            for (const auto& [bodyEntityId, physics] : PhysicsBodies)
+            {
+                const auto bodyEntity = Runtime->FindEntity(bodyEntityId);
+                if (!Detail::IsSameOrDescendantOf(bodyEntity, characterPhysicsRoot))
+                    continue;
+                characterBodies.insert(physics.Body);
+                if (!hasQueryLayer && bodyEntity == characterPhysicsRoot && physics.HasDefinition)
+                {
+                    queryLayer = physics.Definition.Layer;
+                    hasQueryLayer = true;
+                }
+            }
 
             FootGroundingRequest request;
             request.Pelvis = *pelvis;
@@ -766,7 +794,7 @@ namespace Keire
                     hits,
                     [&](const auto& candidate)
                     {
-                        if (ownBody && candidate.Body == ownBody)
+                        if (characterBodies.contains(candidate.Body))
                             return false;
                         const auto normalLength = std::sqrt(candidate.Normal.X * candidate.Normal.X +
                                                             candidate.Normal.Y * candidate.Normal.Y +

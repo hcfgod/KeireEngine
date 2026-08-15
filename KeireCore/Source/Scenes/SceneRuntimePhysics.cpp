@@ -185,6 +185,8 @@ namespace Keire
                 if (state.Body)
                     PhysicsWorldService->DestroyBody(state.Body);
                 state.Body = PhysicsWorldService->CreateBody(*definition);
+                state.CharacterRequestedVerticalDisplacement = 0.0F;
+                state.CharacterMissedWalkableFrames = 0;
                 ++state.Generation;
                 if (state.Generation == 0)
                     state.Generation = 1;
@@ -251,6 +253,7 @@ namespace Keire
                 continue;
             }
             auto& state = runtimeState->second;
+            state.CharacterRequestedVerticalDisplacement = displacement.Y;
             if (displacement == Vector3{})
             {
                 state.CharacterVelocity = {};
@@ -379,7 +382,7 @@ namespace Keire
             Vector3 worldScale;
             if (!Math::DecomposeTransform(transform->WorldMatrix(), worldPosition, worldRotation, worldScale))
                 continue;
-            bool grounded = false;
+            bool hasWalkableHit = false;
             Vector3 normal{0.0F, 1.0F, 0.0F};
             const auto minimumNormal = std::cos(character->MaximumSlopeDegrees() * Pi / 180.0F);
             const auto& definition = state->second.Definition;
@@ -396,9 +399,15 @@ namespace Keire
                  .IgnoreBody = state->second.Body});
             if (hit && hit->Normal.Y >= minimumNormal)
             {
-                grounded = true;
+                hasWalkableHit = true;
                 normal = hit->Normal;
             }
+            const auto previous = character->RuntimeState();
+            const bool grounded = Detail::ResolveCharacterGrounded(hasWalkableHit, previous.Grounded,
+                                                                   state->second.CharacterRequestedVerticalDisplacement,
+                                                                   state->second.CharacterMissedWalkableFrames);
+            if (grounded && !hasWalkableHit)
+                normal = previous.GroundNormal;
             character->ApplyRuntimeState(state->second.Generation, grounded, normal, state->second.CharacterVelocity);
         }
     }

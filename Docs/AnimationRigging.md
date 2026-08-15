@@ -161,8 +161,9 @@ overrides for custom, asymmetric, non-humanoid, or ambiguous skeletons; no impor
 solver itself.
 
 After graph sampling, managed IK, and authored arm IK, the scene runtime probes below each animated foot, ignores the
-character's own physics body, rejects surfaces over **Maximum Ground Slope**, lowers the pelvis once for the lowest
-valid contact, and applies a bounded two-foot balance correction toward the skeleton's own bind-neutral
+nearest Character Controller hierarchy (including a capsule on an Animator parent), rejects surfaces over
+**Maximum Ground Slope**, lowers the pelvis once for the lowest valid contact, and applies a bounded two-foot balance
+correction toward the skeleton's own bind-neutral
 pelvis-to-feet offset. It also removes a bounded amount of pitch/roll from the inferred pelvis-to-chest or
 pelvis-to-spine axis while preserving authored yaw. **Body Lean Correction** controls how strongly grounding removes
 pitch/roll already present in the animation, and **Maximum Lean Correction** bounds that change in degrees. A zero
@@ -183,6 +184,13 @@ continuously as a contact moves across a slope, preventing a nearly straight kne
 the opposite leg. Zero preserves the sampled animation as much as possible; one strongly favors the shared stable
 plane. The calculation uses semantic joints and measured transforms, not model-specific dimensions, bone names, or a
 hard-coded forward axis.
+
+Only the nearest Character Controller root and its descendants are excluded. A moving platform or other physics parent
+above the character remains a valid grounding surface.
+
+Character Controller grounding tolerates three consecutive missed walkable probes while descending or moving across
+slope seams. Upward jump movement bypasses that grace immediately, so jump and fall animation state remains responsive
+without flickering on ordinary ramps.
 
 **Lock Planted Feet** holds a near-ground sole target across animation samples. When the contact belongs to a scene
 entity, the target and normal are stored in that support's local space, so the planted foot and leg follow a platform

@@ -115,7 +115,21 @@
         {
           "data": {
             "_airControl": 0.28,
+            "_cameraFollowSharpness": 18.0,
+            "_cameraOffset": [
+              0.0,
+              1.5,
+              -3.25
+            ],
+            "_cameraTargetOffset": [
+              0.0,
+              0.6,
+              0.0
+            ],
             "_coyoteTime": 0.12,
+            "_decelerationSharpness": 18.0,
+            "_footIkLandingDelay": 0.12,
+            "_footIkSharpness": 8.0,
             "_gravity": 24.0,
             "_groundStickSpeed": 2.0,
             "_invertHorizontal": false,
@@ -128,6 +142,7 @@
             "_movementSharpness": 14.0,
             "_movementSpeed": 6.5,
             "_sprintMultiplier": 1.65,
+            "_turnSharpness": 14.0,
             "managedState": "{\"fields\":[{\"Aliases\":[],\"Name\":\"_movementSpeed\",\"StableId\":\"\",\"Type\":\"\",\"Value\":6.5},{\"Aliases\":[],\"Name\":\"_lookSensitivity\",\"StableId\":\"\",\"Type\":\"\",\"Value\":1.0},{\"Aliases\":[],\"Name\":\"_maximumPitch\",\"StableId\":\"\",\"Type\":\"\",\"Value\":89.0},{\"Aliases\":[],\"Name\":\"_movementSharpness\",\"StableId\":\"\",\"Type\":\"\",\"Value\":14.0},{\"Aliases\":[],\"Name\":\"_invertHorizontal\",\"StableId\":\"\",\"Type\":\"\",\"Value\":false},{\"Aliases\":[],\"Name\":\"_invertVertical\",\"StableId\":\"\",\"Type\":\"\",\"Value\":false},{\"Aliases\":[],\"Name\":\"_lookSharpness\",\"StableId\":\"\",\"Type\":\"\",\"Value\":53.3},{\"Aliases\":[],\"Name\":\"_sprintMultiplier\",\"StableId\":\"\",\"Type\":\"\",\"Value\":1.65},{\"Aliases\":[],\"Name\":\"_airControl\",\"StableId\":\"\",\"Type\":\"\",\"Value\":0.28},{\"Aliases\":[],\"Name\":\"_gravity\",\"StableId\":\"\",\"Type\":\"\",\"Value\":24.0},{\"Aliases\":[],\"Name\":\"_jumpHeight\",\"StableId\":\"\",\"Type\":\"\",\"Value\":1.15},{\"Aliases\":[],\"Name\":\"_coyoteTime\",\"StableId\":\"\",\"Type\":\"\",\"Value\":0.12},{\"Aliases\":[],\"Name\":\"_jumpBufferTime\",\"StableId\":\"\",\"Type\":\"\",\"Value\":0.12},{\"Aliases\":[],\"Name\":\"_groundStickSpeed\",\"StableId\":\"\",\"Type\":\"\",\"Value\":2.0}],\"version\":1}"
           },
           "enabled": true,
@@ -1101,7 +1116,7 @@
           "data": {
             "position": [
               0.0,
-              0.5040000081062317,
+              -0.8560428023338318,
               0.0
             ],
             "rotation": [
@@ -1144,9 +1159,9 @@
         },
         {
           "data": {
-            "applyRootMotion": true,
+            "applyRootMotion": false,
             "footCollisionMask": 4294967295,
-            "footGrounding": false,
+            "footGrounding": true,
             "footIkWeight": 1.0,
             "footOffset": 0.019999999552965164,
             "footPelvis": "Hips",
@@ -1168,12 +1183,23 @@
           "enabled": true,
           "type": "4b454952-4541-4e49-4d41-544f52000001",
           "version": 2
+        },
+        {
+          "data": {
+            "_animationSharpness": 14.0,
+            "_footstepVolume": 0.65,
+            "_maximumSpeed": 12.0,
+            "managedState": "{\"fields\":[],\"version\":1}"
+          },
+          "enabled": true,
+          "type": "73616e64-626f-4078-8000-000000000010",
+          "version": 1
         }
       ],
       "id": "b814c702-6a84-47a1-90fb-777fadf4cb98",
       "layer": 0,
       "name": "T-Pose",
-      "parent": null
+      "parent": "d6e7aa06-b25a-4e19-a84c-00635691a83a"
     },
     {
       "active": true,

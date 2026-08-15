@@ -1,6 +1,23 @@
 #include "Keire/Core.h"
+#include "KeireInternal/Scenes/CharacterGrounding.h"
 
 #include <doctest/doctest.h>
+
+TEST_CASE("character grounding tolerates brief slope contact gaps without hiding jumps")
+{
+    std::uint32_t missedWalkableFrames = 2;
+    CHECK(Keire::Detail::ResolveCharacterGrounded(true, false, -0.1F, missedWalkableFrames));
+    CHECK(missedWalkableFrames == 0);
+
+    CHECK(Keire::Detail::ResolveCharacterGrounded(false, true, -0.1F, missedWalkableFrames));
+    CHECK(Keire::Detail::ResolveCharacterGrounded(false, true, -0.1F, missedWalkableFrames));
+    CHECK(Keire::Detail::ResolveCharacterGrounded(false, true, -0.1F, missedWalkableFrames));
+    CHECK_FALSE(Keire::Detail::ResolveCharacterGrounded(false, true, -0.1F, missedWalkableFrames));
+    CHECK(missedWalkableFrames == 0);
+
+    CHECK_FALSE(Keire::Detail::ResolveCharacterGrounded(false, true, 0.1F, missedWalkableFrames));
+    CHECK(missedWalkableFrames == 0);
+}
 
 TEST_CASE("default component registry exposes production physics components")
 {

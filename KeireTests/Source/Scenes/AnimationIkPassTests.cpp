@@ -1,11 +1,34 @@
 #include "KeireInternal/Scenes/AnimationIkPasses.h"
 
+#include "Keire/Scenes/Scene.h"
+
 #include <doctest/doctest.h>
 
 #include <array>
 #include <cmath>
 #include <string>
 #include <vector>
+
+TEST_CASE("Automatic foot grounding recognizes character hierarchy colliders")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
+    const auto movingPlatform = scene->CreateEntity("Moving platform");
+    auto player = scene->CreateEntity("Player", movingPlatform);
+    REQUIRE(player.AddComponent<Keire::CharacterControllerComponent>());
+    const auto visual = scene->CreateEntity("Visual", player);
+    const auto nestedCollider = scene->CreateEntity("Nested collider", visual);
+    const auto ground = scene->CreateEntity("Ground");
+
+    CHECK(Keire::Detail::IsSameOrDescendantOf(player, player));
+    CHECK(Keire::Detail::IsSameOrDescendantOf(visual, player));
+    CHECK(Keire::Detail::IsSameOrDescendantOf(nestedCollider, player));
+    CHECK_FALSE(Keire::Detail::IsSameOrDescendantOf(player, visual));
+    CHECK_FALSE(Keire::Detail::IsSameOrDescendantOf(ground, player));
+    CHECK_FALSE(Keire::Detail::IsSameOrDescendantOf({}, player));
+    CHECK(Keire::Detail::FindCharacterControllerRoot(visual) == player);
+    CHECK(Keire::Detail::FindCharacterControllerRoot(nestedCollider) == player);
+    CHECK_FALSE(Keire::Detail::FindCharacterControllerRoot(movingPlatform));
+}
 
 TEST_CASE("Animation IK passes remain independent when an earlier pass reports a diagnostic")
 {

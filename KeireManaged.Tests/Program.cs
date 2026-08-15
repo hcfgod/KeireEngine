@@ -19,6 +19,7 @@ var tests = new (string Name, Action Run)[]
     ("Coroutines schedule phases and dispose deterministically", CoroutineContract),
     ("Transform and rigid body gameplay handles expose writable runtime state", GameplayHandleContract),
     ("Animator exposes transient foot-grounding control", AnimatorFootGroundingContract),
+    ("Physics rejects non-finite raycasts before native dispatch", PhysicsRaycastValidationContract),
     ("Native UI button dispatch advances with the player clock", NativeUiButtonDispatchClockContract),
     ("Managed jobs execute delegates and publish terminal states", ManagedJobExecutionContract),
     ("Managed jobs preserve terminal dependency semantics", ManagedJobDependencyContract),
@@ -31,6 +32,21 @@ static void AnimatorFootGroundingContract()
         [typeof(Keire.Entity), typeof(float)]);
     Assert(method is not null && method.ReturnType == typeof(void),
            "Animator must expose a model-agnostic runtime foot-grounding weight.");
+}
+
+static void PhysicsRaycastValidationContract()
+{
+    AssertThrows<ArgumentException>(
+        () => Keire.Physics.TryRaycast(default, new Keire.Vector3(float.NaN, 0.0f, 0.0f),
+                                       new Keire.Vector3(0.0f, -1.0f, 0.0f), out _),
+        "Raycasts must reject non-finite origins before calling native code.");
+    AssertThrows<ArgumentException>(
+        () => Keire.Physics.TryRaycast(default, default, new Keire.Vector3(0.0f, float.PositiveInfinity, 0.0f),
+                                       out _),
+        "Raycasts must reject non-finite directions before calling native code.");
+    AssertThrows<ArgumentOutOfRangeException>(
+        () => Keire.Physics.TryRaycast(default, default, new Keire.Vector3(0.0f, -1.0f, 0.0f), out _, float.NaN),
+        "Raycasts must reject non-finite maximum distances before calling native code.");
 }
 
 static unsafe void NativeUiButtonDispatchClockContract()
@@ -148,6 +164,15 @@ static void BehaviourLifecycleContract()
     Keire.ComponentTypeId expected = Keire.ComponentType.Of<Keire.CharacterControllerComponent>();
     Assert(dependency.High == expected.High && dependency.Low == expected.Low,
         "RequireComponent metadata must expose the dependency's stable native component ID.");
+
+    var reloadProbe = new ReloadLifecycleProbe();
+    reloadProbe.RuntimeBeforeReload();
+    Assert(reloadProbe.BeforeReloadCount == 1 && reloadProbe.AfterReloadCount == 0,
+           "Preparing a managed reload must invoke only the before-reload callback.");
+    reloadProbe.RuntimeResumeAfterFailedReload();
+    Assert(reloadProbe.BeforeReloadCount == 1 && reloadProbe.AfterReloadCount == 1,
+           "A failed managed reload must pair cleanup with the after-reload callback on the retained instance.");
+    reloadProbe.RuntimeDestroy();
 }
 
 static void ManagedStateMathContract()
@@ -634,6 +659,16 @@ file sealed class EmptyCollisionWorld : IBallisticCollisionWorld
 }
 
 file sealed class DetachedManagedContractProbe : Keire.Behaviour;
+
+[Keire.StableComponentId("d3762027-3016-4ec9-b315-67d654f46442")]
+file sealed class ReloadLifecycleProbe : Keire.Behaviour
+{
+    public int BeforeReloadCount { get; private set; }
+    public int AfterReloadCount { get; private set; }
+
+    protected override void OnBeforeReload() => ++BeforeReloadCount;
+    protected override void OnAfterReload() => ++AfterReloadCount;
+}
 
 file sealed class ManagedStateMathProbe : Keire.Behaviour
 {

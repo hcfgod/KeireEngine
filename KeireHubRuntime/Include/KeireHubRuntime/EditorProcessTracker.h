@@ -18,13 +18,14 @@ namespace KeireHub
         std::string ProjectId;
         std::string InstallationId;
         std::filesystem::path ProjectRoot;
+        std::filesystem::path Executable;
         std::uint64_t LaunchedUnixSeconds = 0;
     };
 
     class EditorProcessTracker final
     {
       public:
-        using ProcessProbe = std::function<bool(std::uint64_t)>;
+        using ProcessProbe = std::function<bool(std::uint64_t, const std::filesystem::path&)>;
 
         explicit EditorProcessTracker(ProcessProbe processProbe);
 

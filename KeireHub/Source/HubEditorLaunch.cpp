@@ -131,6 +131,7 @@ namespace KeireHub
                                         .ProjectId = descriptor.Id.ToString(),
                                         .InstallationId = editor.Value().InstallationId,
                                         .ProjectRoot = std::filesystem::absolute(inspection.Root),
+                                        .Executable = std::filesystem::absolute(editor.Value().Executable),
                                         .LaunchedUnixSeconds = nowUnixSeconds});
         HubProjectLaunchResult result{.Descriptor = std::move(descriptor),
                                       .InstallationId = editor.Value().InstallationId,

@@ -128,13 +128,20 @@ public static class Physics
                                   float maximumDistance = 1000.0f, uint mask = uint.MaxValue,
                                   Entity ignoredEntity = default)
     {
-        if (maximumDistance <= 0.0f)
+        if (!IsFinite(origin))
+            throw new ArgumentException("Raycast origins must be finite.", nameof(origin));
+        if (!IsFinite(direction))
+            throw new ArgumentException("Raycast directions must be finite.", nameof(direction));
+        if (!float.IsFinite(maximumDistance) || maximumDistance <= 0.0f)
             throw new ArgumentOutOfRangeException(nameof(maximumDistance));
         Vector3 normalized = direction.Normalized;
         if (normalized.LengthSquared <= 0.0f)
             throw new ArgumentException("Raycast direction cannot be zero.", nameof(direction));
         return NativeRuntime.TryRaycast(context, origin, normalized, maximumDistance, mask, ignoredEntity, out hit);
     }
+
+    private static bool IsFinite(Vector3 value) =>
+        float.IsFinite(value.X) && float.IsFinite(value.Y) && float.IsFinite(value.Z);
 
     public static IReadOnlyList<RaycastHit> Raycast(Entity context, Vector3 origin, Vector3 direction,
                                                     float maximumDistance = 1000.0f,

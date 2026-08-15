@@ -386,14 +386,21 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
         }
     } cleanup{root};
     std::filesystem::create_directories(root / "Scripts");
+    std::filesystem::create_directories(root / "SupportScripts");
+    {
+        std::ofstream stream(root / "SupportScripts/ReloadBehaviourBase.cs", std::ios::binary | std::ios::trunc);
+        stream << "using Keire; namespace Game.Support; "
+                  "public abstract class ReloadBehaviourBase : Behaviour { "
+                  "protected float ReloadBonus => 1.0f; }\n";
+    }
     {
         std::ofstream stream(root / "Scripts/Player.cs", std::ios::binary | std::ios::trunc);
-        stream << "using Keire; namespace Game; "
+        stream << "using Keire; using Game.Support; namespace Game; "
                   "[StableComponentId(\"73616e64-626f-4078-8000-000000000097\")] "
                   "public sealed class PlayerDependency : Behaviour { } "
                   "[StableComponentId(\"73616e64-626f-4078-8000-000000000099\")] "
                   "[RequireComponent(typeof(PlayerDependency))] "
-                  "[ExecutionOrder(-50)] public sealed class Player : Behaviour { "
+                  "[ExecutionOrder(-50)] public sealed class Player : ReloadBehaviourBase { "
                   "[SerializeField, StableFieldId(\"73616e64-626f-4078-8000-000000000098\")] "
                   "public float Speed = 7.5f; "
                   "[SerializeField] public float ConsumedSpeed = -1.0f; "
@@ -411,7 +418,7 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                   "[SerializeField] public bool DisableObserved = false; "
                   "[SerializeField] public bool AnimatorIkObserved = false; "
                   "[SerializeField] public float AnimatorIkWeight = -1.0f; "
-                  "protected override void Awake() { Speed += 1.0f; } "
+                  "protected override void Awake() { Speed += ReloadBonus; } "
                   "protected override void FixedUpdate() { ConsumedSpeed = Speed; "
                   "if (DisableThroughProperty) { DisableThroughProperty = false; Enabled = false; } "
                   "try { var source = Entity.AudioSource; source.Time = 0.5f; } "
@@ -456,6 +463,12 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                   "AnimatorIkObserved = true; AnimatorIkWeight = context.LayerWeight; } "
                   "protected override void OnBeforeReload() { Speed += 1.0f; } "
                   "protected override void OnAfterReload() { Speed += 1.0f; } } "
+                  "[StableComponentId(\"73616e64-626f-4078-8000-000000000096\")] "
+                  "public sealed class ReloadFailureProbe : Behaviour { "
+                  "protected override void OnBeforeReload() { "
+                  "throw new System.InvalidOperationException(\"intentional before-reload failure\"); } "
+                  "protected override void OnAfterReload() { "
+                  "throw new System.InvalidOperationException(\"intentional after-reload failure\"); } } "
                   "[CreateAssetMenu(\"Gameplay/Player Tuning\", \"PlayerTuning\")] "
                   "[StableAssetTypeId(\"73616e64-626f-4078-8000-000000000190\")] "
                   "public sealed class PlayerTuning : ScriptableObject { "
@@ -481,13 +494,19 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     definition.Name = "ReloadGameplay";
     definition.RootNamespace = "Game";
     definition.SourceRoots = {"Scripts"};
+    definition.References = {TestAsset(100)};
+    Keire::ManagedAssemblyDefinition support;
+    support.Name = "ReloadSupport";
+    support.RootNamespace = "Game.Support";
+    support.SourceRoots = {"SupportScripts"};
     Keire::ManagedBuildRequest buildRequest;
-    buildRequest.Assemblies = {{TestAsset(101), definition}};
+    buildRequest.Assemblies = {{TestAsset(100), support}, {TestAsset(101), definition}};
     const auto build = scripts->StartBuild(std::move(buildRequest));
     REQUIRE(scripts->WaitForBuild(build, std::chrono::seconds(60)));
     REQUIRE(scripts->BuildStatus().State == Keire::ManagedBuildState::Succeeded);
     const auto assembly = scripts->BuildStatus().ActiveAssemblyDirectory / "ReloadGameplay.dll";
     REQUIRE(std::filesystem::is_regular_file(assembly));
+    REQUIRE(std::filesystem::is_regular_file(scripts->BuildStatus().ActiveAssemblyDirectory / "ReloadSupport.dll"));
 
     Keire::ManagedReloadRequest request;
     request.Assemblies = {assembly};
@@ -496,7 +515,8 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     INFO(scripts->ReloadStatus().Diagnostic);
     REQUIRE(prepared);
     CHECK(scripts->ReloadStatus().State == Keire::ManagedReloadState::Prepared);
-    CHECK(scripts->ReloadStatus().AvailableTypes == std::vector<std::string>{"Game.Player", "Game.PlayerDependency"});
+    CHECK(scripts->ReloadStatus().AvailableTypes ==
+          std::vector<std::string>{"Game.Player", "Game.PlayerDependency", "Game.ReloadFailureProbe"});
     CHECK(scripts->ReloadStatus().RetainedState == request.State);
     scripts->CommitReload();
     CHECK(scripts->ReloadStatus().State == Keire::ManagedReloadState::Active);
@@ -685,10 +705,17 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     CHECK(awakeMetric->SkippedInvocations == 0);
     CHECK(awakeMetric->Milliseconds >= 0.0);
 
+    // A successful reload must not reuse MethodInfo objects cached for an equal full name in the retiring load
+    // context. No failed/cancelled reload is allowed to clear that cache on the test's behalf.
+    request.Assemblies = {assembly};
+    REQUIRE(scripts->PrepareReload(request));
+    CHECK_NOTHROW(scripts->CommitReload());
+    CHECK(scripts->ReloadStatus().Generation == 2);
+
     request.Assemblies = {host / "Missing.dll"};
     CHECK_FALSE(scripts->PrepareReload(request));
     CHECK(scripts->ReloadStatus().State == Keire::ManagedReloadState::Failed);
-    CHECK(scripts->ReloadStatus().Generation == 1);
+    CHECK(scripts->ReloadStatus().Generation == 2);
     CHECK_FALSE(scripts->ReloadStatus().Diagnostic.empty());
 
     request.Assemblies = {assembly};
@@ -710,12 +737,34 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     CHECK(rejection == "ScriptSystem operation must run on the owner thread.");
     CHECK(scripts->ReloadStatus().State == Keire::ManagedReloadState::Prepared);
     CHECK_NOTHROW(scripts->CommitReload());
-    CHECK(scripts->ReloadStatus().Generation == 2);
+    CHECK(scripts->ReloadStatus().Generation == 3);
     CHECK(scripts->DestroyBehaviour(instance));
     CHECK_FALSE(scripts->DestroyBehaviour(instance));
     REQUIRE(scripts->PrepareReload(request));
     scripts->CancelReload();
     CHECK(scripts->ReloadStatus().State == Keire::ManagedReloadState::Cancelled);
+
+    const auto failureProbe = scripts->CreateBehaviour("Game.ReloadFailureProbe", 7,
+                                                       Keire::AssetId::Parse("00000000-0000-0000-0000-000000000043"));
+    REQUIRE(failureProbe);
+    request.Assemblies = {assembly};
+    REQUIRE(scripts->PrepareReload(request));
+    std::string migrationFailure;
+    try
+    {
+        scripts->CommitReload();
+    }
+    catch (const std::exception& error)
+    {
+        migrationFailure = error.what();
+    }
+    CHECK(migrationFailure.find("intentional before-reload failure") != std::string::npos);
+    CHECK(migrationFailure.find("intentional after-reload failure") == std::string::npos);
+    CHECK(scripts->ReloadStatus().State == Keire::ManagedReloadState::Failed);
+    CHECK(scripts->ReloadStatus().Generation == 3);
+    CHECK(scripts->DestroyBehaviour(failureProbe));
+    REQUIRE(scripts->PrepareReload(request));
+    scripts->CancelReload();
     scripts->Close();
     CHECK_FALSE(scripts->RuntimeHostAvailable());
     CHECK_NOTHROW(scripts->Close());

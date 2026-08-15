@@ -46,7 +46,7 @@ namespace KeireHub
         static_cast<void>(Refresh());
         if (!m_ProcessProbe || process.ProcessId == 0 || process.LaunchedUnixSeconds == 0 ||
             !ValidIdentifier(process.ProjectId) || !ValidIdentifier(process.InstallationId) ||
-            !ValidRoot(process.ProjectRoot))
+            !ValidRoot(process.ProjectRoot) || !ValidRoot(process.Executable))
         {
             return HubStatus::Failure({.Code = HubErrorCode::InvalidArgument,
                                        .Message = "The launched editor process identity is invalid.",
@@ -73,6 +73,7 @@ namespace KeireHub
                                        .AffectedItem = process.ProjectId});
         }
         process.ProjectRoot = process.ProjectRoot.lexically_normal();
+        process.Executable = process.Executable.lexically_normal();
         m_Processes.push_back(std::move(process));
         Publish();
         return HubStatus::Success();
@@ -86,7 +87,7 @@ namespace KeireHub
                       {
                           try
                           {
-                              return !m_ProcessProbe || !m_ProcessProbe(process.ProcessId);
+                              return !m_ProcessProbe || !m_ProcessProbe(process.ProcessId, process.Executable);
                           }
                           catch (...)
                           {

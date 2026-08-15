@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Keire/ECS/Components/CharacterControllerComponent.h"
+#include "Keire/ECS/Entity.h"
 #include "Keire/Math/Math.h"
 
 #include <algorithm>
@@ -12,6 +14,28 @@
 
 namespace Keire::Detail
 {
+    [[nodiscard]] inline bool IsSameOrDescendantOf(Entity entity, const Entity root) noexcept
+    {
+        if (!entity || !root)
+            return false;
+        for (auto current = entity; current; current = current.Parent())
+        {
+            if (current == root)
+                return true;
+        }
+        return false;
+    }
+
+    [[nodiscard]] inline Entity FindCharacterControllerRoot(Entity entity) noexcept
+    {
+        for (auto current = entity; current; current = current.Parent())
+        {
+            if (current.HasComponent<CharacterControllerComponent>())
+                return current;
+        }
+        return {};
+    }
+
     struct AutomaticLimbIkState final
     {
         Vector3 ForwardDirection;

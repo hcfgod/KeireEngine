@@ -191,8 +191,14 @@ Play Mode reload is transactional:
 6. The candidate becomes active and receives `OnAfterReload`.
 7. The old context is retired.
 
-If any candidate fails, Kéire abandons it and retains the last-good generation. The previous objects can resume without
-rerunning `Awake` or `Start`.
+If any candidate fails, Kéire abandons it and retains the last-good generation. Each previous object is restored,
+re-registered, and receives `OnAfterReload` so resources released by `OnBeforeReload` are reacquired. Resuming never
+reruns `Awake` or `Start`. If restoration or `OnAfterReload` also fails while rolling back, Kéire still retires the
+candidate and reports the original migration exception instead of leaving the reload half-prepared.
+
+Runtime assembly dependencies are resolved beside the active generation output. Search-path lists use the host
+platform's native separator (`;` on Windows and `:` on Unix), so project-local assembly references load consistently
+from drive-letter paths and Unix paths.
 
 Do not keep old-context delegates in static events, native registrations, or long-lived tasks. Unsubscribe and cancel
 them in `OnBeforeReload`, then recreate them in `OnAfterReload`.
