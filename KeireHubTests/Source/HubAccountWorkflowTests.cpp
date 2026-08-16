@@ -204,6 +204,7 @@ TEST_CASE("Hub account workflow completes browser PKCE sign-in with a separate s
     REQUIRE(workflow.Start(configuration, sessionPath, {}));
     auto ready = WaitFor(workflow, [](const auto& snapshot) { return snapshot.Configured && !snapshot.Busy; });
     REQUIRE(ready->BrowserSignInAvailable);
+    const bool persistentSessionAvailable = ready->PersistentSessionAvailable;
     CHECK_FALSE(workflow.AccessToken(0U));
 
     const auto authorization = workflow.BeginBrowserSignIn(DeterministicEntropy);
@@ -227,11 +228,23 @@ TEST_CASE("Hub account workflow completes browser PKCE sign-in with a separate s
 
     HubAccountWorkflow restarted(ClientFactory(script), OAuthFactory(script));
     REQUIRE(restarted.Start(configuration, sessionPath, {}));
-    const auto restored = WaitFor(restarted, [](const auto& snapshot) { return snapshot.SignedIn && !snapshot.Busy; });
-    REQUIRE(restored->SignedIn);
-    CHECK(script->OAuthRefreshRequests.load(std::memory_order_relaxed) == 1U);
-    CHECK(script->OAuthRefreshIncludesClientId.load(std::memory_order_relaxed));
-    CHECK(script->RefreshRequests.load(std::memory_order_relaxed) == 0U);
+    if (persistentSessionAvailable)
+    {
+        const auto restored =
+            WaitFor(restarted, [](const auto& snapshot) { return snapshot.SignedIn && !snapshot.Busy; });
+        REQUIRE(restored->SignedIn);
+        CHECK(script->OAuthRefreshRequests.load(std::memory_order_relaxed) == 1U);
+        CHECK(script->OAuthRefreshIncludesClientId.load(std::memory_order_relaxed));
+        CHECK(script->RefreshRequests.load(std::memory_order_relaxed) == 0U);
+    }
+    else
+    {
+        const auto sessionOnly =
+            WaitFor(restarted, [](const auto& snapshot) { return snapshot.Configured && !snapshot.Busy; });
+        CHECK_FALSE(sessionOnly->SignedIn);
+        CHECK(script->OAuthRefreshRequests.load(std::memory_order_relaxed) == 0U);
+        CHECK(script->RefreshRequests.load(std::memory_order_relaxed) == 0U);
+    }
     restarted.Stop();
 }
 
@@ -246,15 +259,27 @@ TEST_CASE("Hub account workflow restores direct-auth sessions through the Supaba
     auto script = std::make_shared<Script>();
     HubAccountWorkflow workflow(ClientFactory(script), OAuthFactory(script));
     REQUIRE(workflow.Start(configuration, sessionPath, {}));
-    REQUIRE(WaitFor(workflow, [](const auto& snapshot) { return snapshot.Configured && !snapshot.Busy; })->Configured);
+    const auto ready = WaitFor(workflow, [](const auto& snapshot) { return snapshot.Configured && !snapshot.Busy; });
+    REQUIRE(ready->Configured);
+    const bool persistentSessionAvailable = ready->PersistentSessionAvailable;
     REQUIRE(workflow.SignIn("user@example.com", "correct-password"));
     REQUIRE(WaitFor(workflow, [](const auto& snapshot) { return snapshot.SignedIn && !snapshot.Busy; })->SignedIn);
     workflow.Stop();
 
     HubAccountWorkflow restarted(ClientFactory(script), OAuthFactory(script));
     REQUIRE(restarted.Start(configuration, sessionPath, {}));
-    REQUIRE(WaitFor(restarted, [](const auto& snapshot) { return snapshot.SignedIn && !snapshot.Busy; })->SignedIn);
-    CHECK(script->RefreshRequests.load(std::memory_order_relaxed) == 1U);
+    if (persistentSessionAvailable)
+    {
+        REQUIRE(WaitFor(restarted, [](const auto& snapshot) { return snapshot.SignedIn && !snapshot.Busy; })->SignedIn);
+        CHECK(script->RefreshRequests.load(std::memory_order_relaxed) == 1U);
+    }
+    else
+    {
+        const auto sessionOnly =
+            WaitFor(restarted, [](const auto& snapshot) { return snapshot.Configured && !snapshot.Busy; });
+        CHECK_FALSE(sessionOnly->SignedIn);
+        CHECK(script->RefreshRequests.load(std::memory_order_relaxed) == 0U);
+    }
     CHECK(script->OAuthRefreshRequests.load(std::memory_order_relaxed) == 0U);
     restarted.Stop();
 }

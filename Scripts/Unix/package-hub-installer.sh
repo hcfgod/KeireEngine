@@ -156,6 +156,10 @@ install_root="$linux_root/$install_relative"
 mkdir -p "$install_root" "$linux_root/usr/bin" "$linux_root/usr/share/applications" \
   "$linux_root/usr/share/icons/hicolor/256x256/apps"
 cp -a "$distribution/." "$install_root/"
+# The .NET LTTng tracepoint provider is an optional diagnostics binary and targets an ABI that is unavailable on
+# current Fedora and openSUSE. EventPipe diagnostics remain in the runtime; omit only this optional native provider so
+# one Rocky-built RPM remains installable across the supported RPM-family matrix.
+find "$install_root/bin/Managed/Dotnet" -type f -name 'libcoreclrtraceptprovider.so' -delete
 cat > "$linux_root/usr/bin/$ARTIFACT_PREFIX-hub" <<EOF
 #!/usr/bin/env sh
 set -eu
@@ -208,7 +212,7 @@ resolve_linux_installer_format() {
     identities="${identities,,}"
     if [[ "$identities" =~ (debian|ubuntu) ]]; then
         printf 'deb'
-    elif [[ "$identities" =~ (fedora|rhel|centos|rocky) ]]; then
+    elif [[ "$identities" =~ (fedora|rhel|centos|rocky|suse|opensuse) ]]; then
         printf 'rpm'
     elif command -v dpkg-deb >/dev/null 2>&1 && ! command -v rpmbuild >/dev/null 2>&1; then
         printf 'deb'
@@ -275,7 +279,7 @@ Section: devel
 Priority: optional
 Architecture: $deb_architecture
 Installed-Size: $installed_size
-Depends: libc6, libstdc++6, libgcc-s1, libcurl4t64 | libcurl4, zenity
+Depends: libc6, libstdc++6, libgcc-s1, libcurl4t64 | libcurl4, pkexec, zenity
 Maintainer: $PROJECT_DISPLAY_NAME Engine
 Description: $PROJECT_DISPLAY_NAME standalone project and editor Hub
  Manages projects, independently installed editors, Build Support, templates,
@@ -290,7 +294,7 @@ EOF
     dpkg-deb --build --root-owner-group "$package_root" "$artifact"
     dpkg-deb --info "$artifact" >/dev/null
     [[ "$(dpkg-deb --field "$artifact" Depends)" == \
-       'libc6, libstdc++6, libgcc-s1, libcurl4t64 | libcurl4, zenity' ]] || {
+       'libc6, libstdc++6, libgcc-s1, libcurl4t64 | libcurl4, pkexec, zenity' ]] || {
       printf 'DEB Hub installer runtime dependencies are incomplete.\n' >&2
       exit 1
     }
@@ -325,10 +329,11 @@ Summary:        $PROJECT_DISPLAY_NAME standalone project and editor Hub
 License:        MIT
 URL:            https://keireengine.duckdns.org
 BuildArch:      $rpm_architecture
-Requires:       glibc
-Requires:       libstdc++
-Requires:       libgcc
-Requires:       libcurl
+Requires:       libc.so.6()(64bit)
+Requires:       libstdc++.so.6()(64bit)
+Requires:       libgcc_s.so.1()(64bit)
+Requires:       libcurl.so.4()(64bit)
+Requires:       polkit
 Requires:       zenity
 
 %description
@@ -371,12 +376,24 @@ EOF
       exit 1
     }
     rpm_requirements="$(rpm -qp --requires "$artifact")"
-    for requirement in glibc libstdc++ libgcc libcurl zenity; do
+    rpm_runtime_requirements=(
+      'libc.so.6()(64bit)'
+      'libstdc++.so.6()(64bit)'
+      'libgcc_s.so.1()(64bit)'
+      'libcurl.so.4()(64bit)'
+      polkit
+      zenity
+    )
+    for requirement in "${rpm_runtime_requirements[@]}"; do
         grep -Fqx "$requirement" <<< "$rpm_requirements" || {
           printf "RPM Hub installer is missing its '%s' runtime dependency.\n" "$requirement" >&2
           exit 1
         }
     done
+    if grep -Fqx 'liblttng-ust.so.0()(64bit)' <<< "$rpm_requirements"; then
+      printf 'RPM Hub installer unexpectedly requires the optional legacy LTTng tracepoint provider.\n' >&2
+      exit 1
+    fi
 
     extracted="$temporary_root/rpm-extracted"
     mkdir -p "$extracted"

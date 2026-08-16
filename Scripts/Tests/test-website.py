@@ -200,6 +200,9 @@ def main() -> int:
         "publishedAt",
         "publishedTimestamp",
         "packageFormat",
+        "keire-hub.deb",
+        "keire-hub.rpm",
+        "defaultInstallerFormats",
         'timeZoneName: "short"',
         "data-download-history",
     ):
@@ -230,10 +233,15 @@ def main() -> int:
     )
     packages = previews.get("packages", [])
     release_status = previews.get("releaseStatus")
+    project_version = next(
+        line.removeprefix("PROJECT_VERSION=")
+        for line in (ROOT / "Config" / "Project.conf").read_text(encoding="utf-8").splitlines()
+        if line.startswith("PROJECT_VERSION=")
+    )
     valid_release_status = (
         isinstance(release_status, dict)
         and release_status.get("state") == "preparing"
-        and str(release_status.get("version", "")) == "0.3.1"
+        and str(release_status.get("version", "")) == project_version
         and 20 <= len(str(release_status.get("message", ""))) <= 240
     )
     if previews.get("schemaVersion") != 2 or not isinstance(packages, list):

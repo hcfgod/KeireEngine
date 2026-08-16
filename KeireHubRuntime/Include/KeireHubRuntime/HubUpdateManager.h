@@ -70,6 +70,7 @@ namespace KeireHub
 
         [[nodiscard]] static std::string_view HostPlatformIdentity() noexcept;
         [[nodiscard]] static std::string_view HostArchitectureIdentity() noexcept;
+        [[nodiscard]] static std::string_view HostPackageFormatIdentity() noexcept;
 
       private:
         std::filesystem::path m_ResumeTokenPath;

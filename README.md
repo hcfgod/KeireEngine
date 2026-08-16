@@ -10,7 +10,7 @@ a project-first authoring workflow. The Kéire Hub manages projects and installe
 native scene, asset, rendering, scripting, profiling, and player-build workflows; and the runtime ships only the
 systems and cooked content selected by a project.
 
-Kéire is currently **version 0.3.1 and pre-1.0**. Its foundations are production-oriented, but interfaces, content
+Kéire is currently **version 0.3.2 and pre-1.0**. Its foundations are production-oriented, but interfaces, content
 formats, and release procedures may still change before the first stable release. The project documents current
 capabilities and remaining production-readiness work directly rather than presenting roadmap work as complete.
 

@@ -21,7 +21,7 @@ export const roadmapHorizons: readonly RoadmapHorizon[] = [
     {
         id: "now",
         label: "Now",
-        timeframe: "0.3.1 release train",
+        timeframe: "0.3.2 release train",
         statement: "Turn the current Windows technology preview into a dependable daily-development foundation.",
         initiatives: [
             {
@@ -34,7 +34,7 @@ export const roadmapHorizons: readonly RoadmapHorizon[] = [
                     "Direct3D 12 and Vulkan validation",
                     "Actionable launch, installation, and recovery diagnostics",
                 ],
-                evidenceUrl: "/changelog/0.3.1/",
+                evidenceUrl: "/changelog/0.3.2/",
             },
             {
                 title: "Marketplace and package workflows",

@@ -89,6 +89,7 @@ class HubPackagePublisherTests(unittest.TestCase):
         self.assertEqual(published["channel"], "stable")
         self.assertEqual(published["platform"], "windows")
         self.assertEqual(published["architecture"], "x86_64")
+        self.assertNotIn("packageFormat", published)
         self.assertEqual(published["signatureKeyId"], KEY_ID)
         self.assertEqual(
             published["artifact"],
@@ -147,6 +148,7 @@ class HubPackagePublisherTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             published = json.loads((self.root / output).read_bytes())
             self.assertEqual(published["platform"], "linux")
+            self.assertEqual(published["packageFormat"], extension[1:])
             self.assertEqual(published["files"][0]["path"], installer.name)
 
         mismatched = self.root / "KeireHubSetup.exe"

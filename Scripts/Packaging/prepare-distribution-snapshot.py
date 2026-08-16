@@ -90,7 +90,13 @@ def validate_package(manifest_path: Path, package: Path, key_id: str) -> Package
         "files",
         "signatureKeyId",
     }
-    optional = {"engineCompatibility", "dependencies", "conflicts", "licenses"}
+    optional = {
+        "engineCompatibility",
+        "dependencies",
+        "conflicts",
+        "licenses",
+        "packageFormat",
+    }
     artifact = manifest.get("artifact")
     if (
         not required.issubset(manifest)
@@ -129,6 +135,18 @@ def validate_package(manifest_path: Path, package: Path, key_id: str) -> Package
         raise ValueError(
             "Package identity, channel, platform, or architecture is invalid."
         )
+    package_format = manifest.get("packageFormat")
+    expected_formats = {
+        "windows": {"exe"},
+        "macos": {"dmg"},
+        "linux": {"deb", "rpm"},
+    }
+    if package_format is not None and (
+        manifest["type"] != "hubInstaller"
+        or not isinstance(package_format, str)
+        or package_format not in expected_formats[platform]
+    ):
+        raise ValueError("The native Hub package format is invalid for its platform.")
     if (
         not package.is_file()
         or package.is_symlink()
@@ -176,7 +194,7 @@ def main() -> int:
 
     legacy_catalogs: dict[tuple[str, str, str], list[dict[str, object]]] = {}
     compact_catalogs: dict[tuple[str, str, str], list[dict[str, object]]] = {}
-    identities: set[tuple[str, str, str, str, str]] = set()
+    identities: set[tuple[str, str, str, str, str, str]] = set()
     for item in packages:
         identity = (
             item.channel,
@@ -184,6 +202,7 @@ def main() -> int:
             item.architecture,
             str(item.manifest["packageId"]),
             str(item.manifest["version"]),
+            str(item.manifest.get("packageFormat", "")),
         )
         if identity in identities:
             raise ValueError(
@@ -223,6 +242,7 @@ def main() -> int:
                     key=lambda value: (
                         str(value["packageId"]),
                         str(value["version"]),
+                        str(value.get("packageFormat", "")),
                     )
                 )
                 write_atomic(

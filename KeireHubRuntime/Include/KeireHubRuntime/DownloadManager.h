@@ -25,7 +25,11 @@ namespace KeireHub
     enum class DownloadCacheKind
     {
         Package,
-        AssetPackage
+        AssetPackage,
+        WindowsExecutable,
+        DebianPackage,
+        RpmPackage,
+        MacDiskImage
     };
 
     struct DownloadRequest final

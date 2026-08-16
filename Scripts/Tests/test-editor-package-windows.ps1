@@ -56,7 +56,8 @@ try {
     New-Item -ItemType Directory -Force $dotnetSdkBuild | Out-Null
     New-Item -ItemType File -Force (Join-Path $dotnetSdkBuild "Fixture.targets") | Out-Null
 
-    $python = (Get-Command python -ErrorAction Stop).Source
+    $python = Get-PythonInvocation
+    $pythonPrefix = @($python.PrefixArguments)
     $manifestWriter = Join-Path (Get-RepositoryRoot) "Scripts\Packaging\write-package-manifest.py"
     $manifestArguments = @(
         $manifestWriter, "write", "--stage", $stage, "--output", "editor-package.json",
@@ -71,7 +72,8 @@ try {
         "--entrypoint", "shaderCompiler=bin/KeireShaderCompiler.exe",
         "--toolchain", "dotnet-sdk|10.0.100|bin/Managed/Dotnet", "--release-notes", "CHANGELOG.md"
     )
-    Invoke-CheckedWindowsCommand { & $python @manifestArguments } "Fixture editor manifest generation"
+    Invoke-CheckedWindowsCommand { & $python.Executable @pythonPrefix @manifestArguments } `
+        "Fixture editor manifest generation"
     $manifest = Get-Content -LiteralPath (Join-Path $stage "editor-package.json") -Raw | ConvertFrom-Json
     $entrypointNames = @($manifest.entrypoints.PSObject.Properties.Name)
     if ($manifest.schemaVersion -ne 2 -or $manifest.entrypoints.editor -ne "bin/Client.exe" -or
@@ -107,7 +109,8 @@ try {
         -Encoding UTF8
     Assert-Throws { Assert-WindowsEditorPackageStage $stage Client Hub Core Core } `
         "Editor package Hub manifest entrypoint rejection"
-    Invoke-CheckedWindowsCommand { & $python @manifestArguments } "Fixture editor manifest regeneration"
+    Invoke-CheckedWindowsCommand { & $python.Executable @pythonPrefix @manifestArguments } `
+        "Fixture editor manifest regeneration"
     $manifest = Get-Content -LiteralPath (Join-Path $stage "editor-package.json") -Raw | ConvertFrom-Json
     $manifest.compatibility.legacyTopLevelFields = @(
         $manifest.compatibility.legacyTopLevelFields | Where-Object { $_ -ne "bundledDotnetSdk" }
@@ -116,7 +119,8 @@ try {
         -Encoding UTF8
     Assert-Throws { Assert-WindowsEditorPackageStage $stage Client Hub Core Core } `
         "Editor package legacy manifest compatibility rejection"
-    Invoke-CheckedWindowsCommand { & $python @manifestArguments } "Fixture editor manifest regeneration"
+    Invoke-CheckedWindowsCommand { & $python.Executable @pythonPrefix @manifestArguments } `
+        "Fixture editor manifest regeneration"
     Write-TestPeExecutable (Join-Path $stage "bin\Hub.exe") 2
     Assert-Throws { Assert-WindowsEditorPackageStage $stage Client Hub Core Core } `
         "Editor package Hub executable rejection"
@@ -135,10 +139,12 @@ try {
     Add-Content -LiteralPath (Join-Path $stage "README.md") -Value "tampered" -Encoding ASCII
     Assert-Throws {
         Invoke-CheckedWindowsCommand {
-            & $python $manifestWriter validate --stage $stage --manifest editor-package.json --artifact editor
+            & $python.Executable @pythonPrefix $manifestWriter validate --stage $stage `
+                --manifest editor-package.json --artifact editor
         } "Tampered editor manifest validation"
     } "Tampered editor inventory rejection"
-    Invoke-CheckedWindowsCommand { & $python @manifestArguments } "Fixture editor manifest regeneration"
+    Invoke-CheckedWindowsCommand { & $python.Executable @pythonPrefix @manifestArguments } `
+        "Fixture editor manifest regeneration"
 
     Write-TestPeExecutable (Join-Path $stage "bin\Client.exe") 3
     Assert-Throws { Assert-WindowsEditorPackageStage $stage Client Hub Core Core } `

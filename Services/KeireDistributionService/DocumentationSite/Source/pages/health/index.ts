@@ -25,7 +25,7 @@ export const GET: APIRoute = async (context) => {
         probe("validator", runtimeEnvironment("KEIRE_VALIDATOR_HEALTH_URL")),
     ]);
     const degraded = Object.values(checks).some(({ status }) => status === "degraded");
-    return apiResponse(context, { status: degraded ? "degraded" : "healthy", service: "keire-web", version: "0.3.1", checks, correlationId: context.locals.correlationId }, degraded ? 503 : 200, "no-store");
+    return apiResponse(context, { status: degraded ? "degraded" : "healthy", service: "keire-web", version: "0.3.2", checks, correlationId: context.locals.correlationId }, degraded ? 503 : 200, "no-store");
 };
 
 export const HEAD: APIRoute = (context) => new Response(null, {

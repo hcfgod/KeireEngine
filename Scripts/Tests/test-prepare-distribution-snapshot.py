@@ -324,6 +324,51 @@ class DistributionSnapshotPreparationTests(unittest.TestCase):
             },
         )
 
+    def test_preserves_deb_and_rpm_for_one_linux_hub_version(self) -> None:
+        pairs: list[tuple[Path, Path]] = []
+        for package_format in ("deb", "rpm"):
+            package = self.root / f"keire-hub.{package_format}"
+            package.write_bytes(f"linux-{package_format}-installer".encode())
+            digest = hashlib.sha256(package.read_bytes()).hexdigest()
+            document = {
+                **self.document,
+                "packageId": "keire.hub",
+                "type": "hubInstaller",
+                "displayName": "Keire Hub 1.2.3",
+                "platform": "linux",
+                "packageFormat": package_format,
+                "artifact": {"sizeBytes": package.stat().st_size, "sha256": digest},
+                "installedSizeBytes": package.stat().st_size,
+                "files": [
+                    {
+                        "path": package.name,
+                        "sizeBytes": package.stat().st_size,
+                        "sha256": digest,
+                        "mode": 420,
+                    }
+                ],
+            }
+            manifest = self.root / f"hub-{package_format}.manifest.json"
+            manifest.write_text(json.dumps(document), encoding="utf-8")
+            pairs.append((manifest, package))
+
+        result = self.run_preparer("linux-formats", pairs)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        catalog = json.loads(
+            (
+                self.root
+                / "linux-formats"
+                / "catalogs-v2"
+                / "stable"
+                / "linux"
+                / "x86_64.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [package["packageFormat"] for package in catalog["packages"]],
+            ["deb", "rpm"],
+        )
+
     def test_rejects_tampering_draft_contracts_and_existing_outputs(self) -> None:
         self.package.write_bytes(b"tampered")
         self.assertNotEqual(self.run_preparer("tampered").returncode, 0)

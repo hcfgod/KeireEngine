@@ -90,7 +90,7 @@ assert_true grep -Fq 'AmbientCapabilities=CAP_NET_BIND_SERVICE' \
   "$ROOT/Services/KeireDistributionService/scripts/install-wsl2-host-bridge.sh"
 bash "$ROOT/Services/KeireDistributionService/scripts/install-wsl2-host-bridge.sh" \
   --host distribution.example.test --upstream-port 50255 --validate-only
-assert_true grep -Fq '@distribution_api path /v1 /v1/* /v2 /v2/* /health /health/*' \
+assert_true grep -Fq '@distribution_api path /v1 /v1/* /v2 /v2/* /health/live /health/ready' \
   "$ROOT/Services/KeireDistributionService/Deployment/Caddyfile.example"
 python3 "$ROOT/Scripts/Tests/test-supabase-config.py"
 python3 "$ROOT/Scripts/Tests/test-patch-ninja-depfiles.py"
@@ -305,6 +305,7 @@ assert_true grep -q 'imgui|zstd|entt|glm|SDL_shadercross|assimp|stb)' "$ROOT/Scr
 assert_true grep -q 'Vendor/SDL_shadercross' "$ROOT/Scripts/Unix/vendor.sh"
 assert_true grep -q 'Vendor/assimp' "$ROOT/Scripts/Unix/vendor.sh"
 assert_true grep -q 'Vendor/stb' "$ROOT/Scripts/Unix/vendor.sh"
+assert_true grep -q 'Vendor/ffmpeg' "$ROOT/Scripts/Unix/vendor.sh"
 assert_true grep -q 'SDL_SHADERCROSS_DXC_COMMIT' "$ROOT/Scripts/Unix/vendor.sh"
 assert_true grep -q 'keire-dependency.stamp' "$ROOT/Scripts/Unix/dependencies.sh"
 assert_true grep -q 'SDL_DUMMYVIDEO=ON' "$ROOT/Scripts/Unix/dependencies.sh"
@@ -326,6 +327,7 @@ assert_true grep -F -q 'install_nasm' "$ROOT/Scripts/Linux/bootstrap.sh"
 assert_true grep -F -q 'install_patchelf' "$ROOT/Scripts/Linux/bootstrap.sh"
 assert_true grep -F -q 'install_logical_packages perl-json' "$ROOT/Scripts/Linux/bootstrap.sh"
 assert_true grep -F -q 'install_logical_packages perl-open' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'ensure_command cmp diffutils' "$ROOT/Scripts/Linux/bootstrap.sh"
 assert_true grep -F -q 'perl -Mopen=:std -e 1' "$ROOT/Scripts/Linux/bootstrap.sh"
 assert_true grep -F -q 'install_dotnet_sdk' "$ROOT/Scripts/Linux/bootstrap.sh"
 assert_true grep -F -q 'install_gcc_toolchain' "$ROOT/Scripts/Linux/bootstrap.sh"

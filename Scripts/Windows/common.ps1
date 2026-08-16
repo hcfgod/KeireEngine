@@ -120,6 +120,23 @@ function Get-CMakeExecutable {
     return $null
 }
 
+function Get-PythonInvocation {
+    foreach ($candidate in @(@{ Name = "py"; PrefixArguments = @("-3") },
+            @{ Name = "python"; PrefixArguments = @() })) {
+        $command = Get-Command $candidate.Name -ErrorAction SilentlyContinue
+        if (-not $command) { continue }
+        $prefixArguments = @($candidate.PrefixArguments)
+        & $command.Source @prefixArguments -c "import sys; raise SystemExit(0)" 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            return [PSCustomObject]@{
+                Executable = $command.Source
+                PrefixArguments = $prefixArguments
+            }
+        }
+    }
+    throw "Python 3 is required. Install it or make the Windows py launcher available."
+}
+
 function Get-GitWorktreeRoot {
     param([string]$Path)
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return $null }

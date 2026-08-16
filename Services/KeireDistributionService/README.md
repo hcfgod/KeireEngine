@@ -155,7 +155,8 @@ python Scripts/Packaging/prepare-distribution-snapshot.py `
 
 Both release-package commands reject dirty or development manifests, symlinks/reparse points, existing outputs,
 mismatched host extensions, unsafe identities, invalid sizes/digests, and a manifest that does not round-trip through
-the catalog parser. Linux Hub manifests accept native DEB and RPM installers. Do not publish an unsigned Windows
+the catalog parser. Linux Hub manifests include their `packageFormat`; a Linux catalog may therefore retain DEB and
+RPM installers for the same Hub version without identity ambiguity. Do not publish an unsigned Windows
 executable, an unnotarized macOS DMG, or a Linux package not built and validated on its claimed distribution baseline.
 
 Use a future expiry appropriate to the release rather than copying the example date. The preparer refuses an existing

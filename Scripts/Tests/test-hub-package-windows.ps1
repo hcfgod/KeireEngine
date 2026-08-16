@@ -61,13 +61,15 @@ try {
     New-Item -ItemType File -Force (Join-Path $stage "bin\libsodium.dll"), `
         (Join-Path $stage "third-party\licenses\libsodium-LICENSE.txt") | Out-Null
 
-    $python = (Get-Command python -ErrorAction Stop).Source
+    $python = Get-PythonInvocation
+    $pythonPrefix = @($python.PrefixArguments)
     Copy-Item -LiteralPath (Join-Path (Get-RepositoryRoot) "Config\Supabase.json") `
         -Destination (Join-Path $stage "Config\Supabase.json") -Force
     $distributionWriter = Join-Path (Get-RepositoryRoot) "Scripts\Packaging\write-distribution-config.py"
     $distributionSource = Join-Path (Get-RepositoryRoot) "Config\Distribution.json"
     Invoke-CheckedWindowsCommand {
-        & $python $distributionWriter --output (Join-Path $stage "Config\Distribution.json") `
+        & $python.Executable @pythonPrefix $distributionWriter `
+            --output (Join-Path $stage "Config\Distribution.json") `
             --source-config $distributionSource
     } "Fixture distribution configuration generation"
     $distribution = Get-Content -LiteralPath (Join-Path $stage "Config\Distribution.json") -Raw |
@@ -92,7 +94,8 @@ try {
         "--entrypoint", "worker=bin/CoreHubWorker.exe",
         "--template-catalog", "content/Templates/catalog.json", "--release-notes", "CHANGELOG.md"
     )
-    Invoke-CheckedWindowsCommand { & $python @manifestArguments } "Fixture Hub manifest generation"
+    Invoke-CheckedWindowsCommand { & $python.Executable @pythonPrefix @manifestArguments } `
+        "Fixture Hub manifest generation"
     $manifest = Get-Content -LiteralPath (Join-Path $stage "hub-package.json") -Raw | ConvertFrom-Json
     if ($manifest.schemaVersion -ne 2 -or $manifest.artifact -ne "hub" -or
         $manifest.entrypoints.hub -ne "bin/Hub.exe" -or
@@ -133,10 +136,12 @@ try {
     Add-Content -LiteralPath (Join-Path $stage "README.md") -Value "tampered" -Encoding ASCII
     Assert-Throws {
         Invoke-CheckedWindowsCommand {
-            & $python $manifestWriter validate --stage $stage --manifest hub-package.json --artifact hub
+            & $python.Executable @pythonPrefix $manifestWriter validate --stage $stage `
+                --manifest hub-package.json --artifact hub
         } "Tampered Hub manifest validation"
     } "Tampered Hub inventory rejection"
-    Invoke-CheckedWindowsCommand { & $python @manifestArguments } "Fixture Hub manifest regeneration"
+    Invoke-CheckedWindowsCommand { & $python.Executable @pythonPrefix @manifestArguments } `
+        "Fixture Hub manifest regeneration"
 
     Write-TestPeExecutable (Join-Path $stage "bin\Client.exe") 2
     Assert-Throws { Assert-WindowsHubPackageStage $stage Hub Client Core } "Bundled editor rejection"

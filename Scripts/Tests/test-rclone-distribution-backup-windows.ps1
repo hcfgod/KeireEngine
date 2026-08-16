@@ -1,5 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $Root = Resolve-Path (Join-Path $PSScriptRoot '..\..')
+. (Join-Path $Root 'Scripts\Windows\common.ps1')
 
 function Assert-Throws([scriptblock] $Action, [string] $Message) {
     try {
@@ -22,7 +23,9 @@ $fakeRclone = Join-Path $fixture 'rclone.cmd'
 $fakePublisherPython = Join-Path $fixture 'fake-publisher.py'
 $fakePublisher = Join-Path $fixture 'publisher.cmd'
 $config = Join-Path $fixture 'rclone.conf'
-$python = (Get-Command python -ErrorAction Stop).Source
+$python = Get-PythonInvocation
+$pythonCommandParts = @("`"$($python.Executable)`"") + @($python.PrefixArguments)
+$pythonCommand = $pythonCommandParts -join ' '
 $previousFakeRoot = $env:KEIRE_TEST_RCLONE_ROOT
 try {
     [IO.Directory]::CreateDirectory((Join-Path $distribution 'snapshots\snapshot-a')) | Out-Null
@@ -114,11 +117,11 @@ if not current or not (root / "snapshots" / current).is_dir():
 '@ | Set-Content -LiteralPath $fakePublisherPython -Encoding UTF8
     [IO.File]::WriteAllText(
         $fakeRclone,
-        "@echo off`r`n`"$python`" `"$fakeRclonePython`" %*`r`nexit /b %ERRORLEVEL%`r`n",
+        "@echo off`r`n$pythonCommand `"$fakeRclonePython`" %*`r`nexit /b %ERRORLEVEL%`r`n",
         [Text.Encoding]::ASCII)
     [IO.File]::WriteAllText(
         $fakePublisher,
-        "@echo off`r`n`"$python`" `"$fakePublisherPython`" %*`r`nexit /b %ERRORLEVEL%`r`n",
+        "@echo off`r`n$pythonCommand `"$fakePublisherPython`" %*`r`nexit /b %ERRORLEVEL%`r`n",
         [Text.Encoding]::ASCII)
     $env:KEIRE_TEST_RCLONE_ROOT = $remoteStorage
 

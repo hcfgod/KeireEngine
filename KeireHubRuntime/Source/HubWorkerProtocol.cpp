@@ -10,6 +10,7 @@
 #include <map>
 #include <ranges>
 #include <set>
+#include <stdexcept>
 #include <utility>
 
 namespace KeireHub
@@ -126,6 +127,39 @@ namespace KeireHub
             return std::nullopt;
         }
 
+        [[nodiscard]] std::string_view CacheKindName(const DownloadCacheKind kind) noexcept
+        {
+            switch (kind)
+            {
+            case DownloadCacheKind::Package:
+                return "package";
+            case DownloadCacheKind::AssetPackage:
+                return "asset-package";
+            case DownloadCacheKind::WindowsExecutable:
+                return "windows-executable";
+            case DownloadCacheKind::DebianPackage:
+                return "debian-package";
+            case DownloadCacheKind::RpmPackage:
+                return "rpm-package";
+            case DownloadCacheKind::MacDiskImage:
+                return "mac-disk-image";
+            }
+            return "invalid";
+        }
+
+        [[nodiscard]] std::optional<DownloadCacheKind> ParseCacheKind(const std::string_view value) noexcept
+        {
+            constexpr std::array values{DownloadCacheKind::Package,           DownloadCacheKind::AssetPackage,
+                                        DownloadCacheKind::WindowsExecutable, DownloadCacheKind::DebianPackage,
+                                        DownloadCacheKind::RpmPackage,        DownloadCacheKind::MacDiskImage};
+            for (const auto kind : values)
+            {
+                if (CacheKindName(kind) == value)
+                    return kind;
+            }
+            return std::nullopt;
+        }
+
         [[nodiscard]] std::string_view EditorInstallModeName(const HubWorkerEditorInstallMode mode) noexcept
         {
             return mode == HubWorkerEditorInstallMode::Repair ? "repair" : "install";
@@ -191,6 +225,13 @@ namespace KeireHub
                 .BandwidthLimitBytesPerSecond = value.value("bandwidthLimitBytesPerSecond", std::uint64_t{0})};
             if (value.contains("customProxyUrl"))
                 result.CustomProxyUrl = value.at("customProxyUrl").get<std::string>();
+            if (value.contains("cacheKind"))
+            {
+                const auto cacheKind = ParseCacheKind(value.at("cacheKind").get<std::string>());
+                if (!cacheKind)
+                    throw std::invalid_argument("Unknown download cache kind.");
+                result.CacheKind = *cacheKind;
+            }
             return result;
         }
 
@@ -211,6 +252,8 @@ namespace KeireHub
                 result["customProxyUrl"] = *request.CustomProxyUrl;
             if (request.BandwidthLimitBytesPerSecond != 0)
                 result["bandwidthLimitBytesPerSecond"] = request.BandwidthLimitBytesPerSecond;
+            if (request.CacheKind != DownloadCacheKind::Package)
+                result["cacheKind"] = CacheKindName(request.CacheKind);
             return result;
         }
 
@@ -224,7 +267,8 @@ namespace KeireHub
                    left.Retry.JitterPermille == right.Retry.JitterPermille &&
                    left.AllowInsecureLoopbackDevelopment == right.AllowInsecureLoopbackDevelopment &&
                    left.CustomProxyUrl == right.CustomProxyUrl &&
-                   left.BandwidthLimitBytesPerSecond == right.BandwidthLimitBytesPerSecond;
+                   left.BandwidthLimitBytesPerSecond == right.BandwidthLimitBytesPerSecond &&
+                   left.CacheKind == right.CacheKind;
         }
 
         [[nodiscard]] HubResult<Detail::Json> ReadDocument(const std::filesystem::path& path)

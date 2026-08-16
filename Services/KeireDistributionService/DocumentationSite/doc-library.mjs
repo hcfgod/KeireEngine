@@ -25,6 +25,7 @@ export const docGroups = [
         "InputDebugger.md",
         "UndoRedo.md",
         "AnimationRigging.md",
+        "ProceduralMotion.md",
         "WeaponAuthoring.md",
     ]),
     group("Assets, rendering, and builds", "layers", [
@@ -124,6 +125,7 @@ export const docAuthorities = {
     "InputDebugger.md": ["KeireClient/Source/ClientApplication.cpp", "KeireCore/Include/Keire/Input/Input.h"],
     "UndoRedo.md": ["KeireCore/Include/Keire/Undo.h", "KeireCore/Source/Undo.cpp"],
     "AnimationRigging.md": ["KeireCore/Include/Keire/Animation/RiggingSystem.h", "KeireClient/Include/KeireClient/Editor/RiggingStudioPanel.h"],
+    "ProceduralMotion.md": ["KeireCore/Include/Keire/Animation/ProceduralMotion.h", "KeireCore/Source/Animation/ProceduralMotion.cpp"],
     "WeaponAuthoring.md": ["KeireManaged/ProductionWeapons.cs", "KeireManaged/WeaponSystem.cs"],
     "AssetRuntime.md": ["KeireCore/Include/Keire/Assets/AssetSystem.h", "KeireCore/Source/Assets"],
     "AssetPipeline.md": ["KeireCore/Include/Keire/Assets/AssetSystem.h", "KeireCore/Source/Assets/RenderableAssets.cpp"],

@@ -316,7 +316,8 @@ the native artifact only after its signed-catalog SHA-256 and size match. Downlo
 The separately enabled **Install update…** action rechecks the digest, verifies Authenticode on Windows, writes an
 atomic resume token, and then opens the native installer before the Hub exits normally. Windows NSIS waits for the
 recorded Hub PID and revalidates the registered install root and ownership marker before replacing files. Linux uses an
-explicit `pkexec`/`dpkg` handoff when those tools exist; its signed-catalog digest remains the package trust boundary.
+explicit `pkexec` handoff to `dpkg` for DEB hosts or `dnf`/`zypper` for RPM hosts when those tools exist; its
+signed-catalog digest remains the package trust boundary.
 The macOS drag-to-Applications DMG is revealed for manual installation rather than treated as an automatic replacement.
 If a safe native handoff is unavailable, the Hub offers only to reveal the verified installer. On the next launch the Hub
 removes the token only when the installed semantic version reached or exceeded the target; otherwise it keeps a recovery
@@ -335,9 +336,11 @@ content bytes, immutable packages with conditional and range requests, and liven
 signs offline, validates a complete staging snapshot, and atomically advances `current`; an invalid replacement does not
 displace the last valid snapshot. `KeireHubPackagePublisher create-editor` converts a validated schema-2 editor
 distribution into the generic archive/catalog manifest. `create-hub-installer` creates the corresponding catalog
-manifest only for a clean Hub package and platform-native `.exe`, `.dmg`, `.deb`, or `.rpm`; native signing/notarization remains
-a release prerequisite. `prepare-distribution-snapshot.py` accepts repeated manifest/artifact pairs, rechecks every
-length and digest, rejects duplicate identities, and groups records into their host catalog before offline signing. A
+manifest only for a clean Hub package and platform-native `.exe`, `.dmg`, `.deb`, or `.rpm`; native signing/notarization
+remains a release prerequisite. Linux Hub records carry an explicit `packageFormat`. This lets one signed Linux
+catalog retain DEB and RPM artifacts for the same Hub version while each host and the downloads site select the correct
+format. `prepare-distribution-snapshot.py` accepts repeated manifest/artifact pairs, rechecks every length and digest,
+rejects duplicate identities, and groups records into their host catalog before offline signing. A
 new Editor release carries every retained Editor manifest and its original content-addressed package into that input;
 publishing a newer version must not silently retire an older downloadable Editor. Retirement is an explicit release
 decision, while ordinary publication is additive across supported versions and preserves each artifact's exact digest.

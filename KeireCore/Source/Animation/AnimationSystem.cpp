@@ -774,7 +774,13 @@ namespace Keire
                 hash ^= static_cast<std::uint8_t>(value);
                 hash *= 1099511628211ULL;
             }
-            return "legacy-" + std::string(category) + '-' + std::to_string(hash);
+            std::string result;
+            result.reserve(8 + category.size() + 20);
+            result.append("legacy-");
+            result.append(category);
+            result.push_back('-');
+            result.append(std::to_string(hash));
+            return result;
         }
 
         [[nodiscard]] std::string DecodeLocalId(const Json& value, const std::string_view key)

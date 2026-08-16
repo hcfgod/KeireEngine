@@ -13,23 +13,23 @@ const identityPattern = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const keyIdPattern = /^ed25519-[0-9a-f]{32}$/;
 const utcTimestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|\+00:00)$/;
 const installerNamePattern = /^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/;
-const fileNames = {
-    windows: ".exe",
-    macos: ".dmg",
-    linux: ".deb",
-};
 const installerFormats = {
     windows: { exe: { suffix: ".exe", label: "EXE", audience: "Windows" } },
     macos: { dmg: { suffix: ".dmg", label: "DMG", audience: "macOS" } },
     linux: {
         deb: { suffix: ".deb", label: "DEB", audience: "Ubuntu/Debian" },
-        rpm: { suffix: ".rpm", label: "RPM", audience: "Rocky/Fedora" },
+        rpm: { suffix: ".rpm", label: "RPM", audience: "Rocky/Fedora/openSUSE" },
     },
 };
+const defaultInstallerFormats = {
+    windows: "exe",
+    macos: "dmg",
+    linux: "deb",
+};
 const compactInstallerNames = {
-    windows: "KeireHubSetup.exe",
-    macos: "KeireHub.dmg",
-    linux: "keire-hub.deb",
+    windows: { exe: "KeireHubSetup.exe" },
+    macos: { dmg: "KeireHub.dmg" },
+    linux: { deb: "keire-hub.deb", rpm: "keire-hub.rpm" },
 };
 let previewReleaseStatus = null;
 
@@ -117,7 +117,23 @@ function previewInstallerFormat(packageRecord) {
     return descriptor && packageRecord.fileName.toLowerCase().endsWith(descriptor.suffix) ? format : null;
 }
 
-function safeInstallerName(packageRecord, platform, artifact, catalogSchema) {
+function catalogInstallerFormat(packageRecord, platform, catalogSchema) {
+    const formats = installerFormats[platform];
+    if (!formats) {
+        return null;
+    }
+    if (packageRecord.packageFormat !== undefined) {
+        return typeof packageRecord.packageFormat === "string" && formats[packageRecord.packageFormat] ?
+            packageRecord.packageFormat : null;
+    }
+    if (catalogSchema === 1 && Array.isArray(packageRecord.files) && packageRecord.files.length === 1) {
+        const path = packageRecord.files[0]?.path?.toLowerCase();
+        return Object.keys(formats).find((candidate) => path?.endsWith(formats[candidate].suffix)) ?? null;
+    }
+    return defaultInstallerFormats[platform] ?? null;
+}
+
+function safeInstallerName(packageRecord, platform, artifact, catalogSchema, installerFormat) {
     if (catalogSchema === 2) {
         const manifest = packageRecord.manifest;
         if (!manifest || !Number.isSafeInteger(manifest.sizeBytes) || manifest.sizeBytes < 1 ||
@@ -125,7 +141,7 @@ function safeInstallerName(packageRecord, platform, artifact, catalogSchema) {
             Object.hasOwn(packageRecord, "files")) {
             return null;
         }
-        return compactInstallerNames[platform] ?? null;
+        return compactInstallerNames[platform]?.[installerFormat] ?? null;
     }
     if (!Array.isArray(packageRecord.files) || packageRecord.files.length !== 1) {
         return null;
@@ -136,7 +152,7 @@ function safeInstallerName(packageRecord, platform, artifact, catalogSchema) {
         file.sizeBytes !== artifact?.sizeBytes || file.sha256 !== artifact?.sha256 || file.mode !== 420) {
         return null;
     }
-    if (!path.toLowerCase().endsWith(fileNames[platform])) {
+    if (!path.toLowerCase().endsWith(installerFormats[platform][installerFormat].suffix)) {
         return null;
     }
     return path;
@@ -156,7 +172,9 @@ function validateCatalog(catalog, platform, architecture) {
     for (const packageRecord of catalog.packages) {
         const version = semanticVersion(packageRecord?.version);
         const artifact = packageRecord?.artifact;
-        const installerName = safeInstallerName(packageRecord, platform, artifact, catalog.schemaVersion);
+        const installerFormat = catalogInstallerFormat(packageRecord, platform, catalog.schemaVersion);
+        const installerName = installerFormat ?
+            safeInstallerName(packageRecord, platform, artifact, catalog.schemaVersion, installerFormat) : null;
         if (packageRecord?.schemaVersion !== 1 || packageRecord?.type !== "hubInstaller" || !version ||
             packageRecord.channel !== channel || packageRecord.platform !== platform ||
             packageRecord.architecture !== architecture || packageRecord.signatureKeyId !== catalog.keyId ||
@@ -166,7 +184,7 @@ function validateCatalog(catalog, platform, architecture) {
             typeof artifact.sha256 !== "string" || !sha256Pattern.test(artifact.sha256) || !installerName) {
             continue;
         }
-        candidates.push({ packageRecord, version, installerName });
+        candidates.push({ packageRecord, version, installerName, installerFormat });
     }
     candidates.sort((left, right) => compareVersions(right.version, left.version));
     return candidates;
@@ -262,16 +280,17 @@ function element(name, className, text) {
 
 function renderVariant(target, platform, architecture, candidate) {
     const variant = element("section", "download-variant");
+    const format = installerFormats[platform][candidate.installerFormat];
     const header = element("div", "variant-row");
-    header.append(element("strong", "", architectureLabel(architecture)));
+    header.append(element("strong", "", `${architectureLabel(architecture)} · ${format.label}`));
     header.append(element("span", "", `${bytes(candidate.packageRecord.artifact.sizeBytes)}`));
     variant.append(header);
     variant.append(element("p", "version-detail", `Hub v${candidate.version.raw} · Verified by signed Kéire catalog`));
 
-    const download = element("a", "button button-primary", `Download ${architectureLabel(architecture)}`);
+    const download = element("a", "button button-primary", `Download ${format.label}`);
     download.href = `/v1/packages/${candidate.packageRecord.artifact.sha256}`;
     download.download = candidate.installerName;
-    download.setAttribute("aria-label", `Download Kéire Hub ${candidate.version.raw} for ${platform} ${architectureLabel(architecture)}`);
+    download.setAttribute("aria-label", `Download Kéire Hub ${candidate.version.raw} ${format.label} for ${platform} ${architectureLabel(architecture)}`);
     variant.append(download);
 
     const checksumRow = element("div", "checksum-row");
@@ -420,8 +439,8 @@ async function loadDownloads() {
         }
         const matching = results.filter((result) => result.status === "fulfilled" && result.value.platform === hostPlatform);
         for (const result of matching) {
-            const candidate = result.value.candidates[0];
-            if (candidate) {
+            const latestVersion = result.value.candidates[0]?.version.raw;
+            for (const candidate of result.value.candidates.filter((value) => value.version.raw === latestVersion)) {
                 renderVariant(variants, hostPlatform, result.value.architecture, candidate);
             }
         }

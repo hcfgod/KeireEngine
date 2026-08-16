@@ -94,7 +94,8 @@ if (-not $dotnetSdk) { throw "The bundled editor runtime does not contain the .N
 $launcher = "@echo off`r`nstart `"`" `"%~dp0bin\$($Project.CLIENT_TARGET).exe`" %*`r`n"
 [IO.File]::WriteAllText((Join-Path $stage "Launch-KeireEditor.cmd"), $launcher,
     [Text.ASCIIEncoding]::new())
-$python = (Get-Command python -ErrorAction Stop).Source
+$python = Get-PythonInvocation
+$pythonPrefix = @($python.PrefixArguments)
 $manifestWriter = Join-Path $Root "Scripts\Packaging\write-package-manifest.py"
 $manifestArguments = @(
     $manifestWriter, "write", "--stage", $stage, "--output", "editor-package.json",
@@ -115,7 +116,8 @@ $manifestArguments = @(
     "--toolchain", "dotnet-sdk|$($dotnetSdk.Name)|bin/Managed/Dotnet",
     "--release-notes", "CHANGELOG.md"
 )
-Invoke-CheckedWindowsCommand { & $python @manifestArguments } "Editor package manifest generation"
+Invoke-CheckedWindowsCommand { & $python.Executable @pythonPrefix @manifestArguments } `
+    "Editor package manifest generation"
 
 Assert-WindowsEditorPackageStage $stage $Project.CLIENT_TARGET $Project.HUB_TARGET $Project.CORE_TARGET `
     $Project.PROJECT_NAMESPACE
@@ -141,7 +143,8 @@ try {
     Assert-WindowsEditorPackageStage $validationRoot $Project.CLIENT_TARGET $Project.HUB_TARGET `
         $Project.CORE_TARGET $Project.PROJECT_NAMESPACE
     Invoke-CheckedWindowsCommand {
-        & $python $manifestWriter validate --stage $validationRoot --manifest editor-package.json `
+        & $python.Executable @pythonPrefix $manifestWriter validate --stage $validationRoot `
+            --manifest editor-package.json `
             --artifact editor
     } "Extracted editor package manifest validation"
     $extractedSdkList = (& (Join-Path $validationRoot "bin\Managed\Dotnet\dotnet.exe") --list-sdks) -join "`n"

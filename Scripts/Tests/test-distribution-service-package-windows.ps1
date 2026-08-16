@@ -356,7 +356,8 @@ try {
         [IO.File]::WriteAllText((Join-Path $source $relative), $relative, [Text.UTF8Encoding]::new($false))
     }
 
-    $python = (Get-Command python -ErrorAction Stop).Source
+    $python = Get-PythonInvocation
+    $pythonPrefix = @($python.PrefixArguments)
     $writer = Join-Path $Root "Scripts\Packaging\write-deterministic-tar.py"
     $arguments = @(
         $writer,
@@ -371,10 +372,10 @@ try {
         "--executable", "scripts/restore-distribution.sh"
         "--executable", "scripts/restore-distribution-rclone.sh"
     )
-    Invoke-CheckedWindowsCommand { & $python @arguments --output $archiveA } `
+    Invoke-CheckedWindowsCommand { & $python.Executable @pythonPrefix @arguments --output $archiveA } `
         "First deterministic service archive"
     [IO.File]::SetLastWriteTimeUtc((Join-Path $source "README.md"), [DateTime]::UtcNow.AddYears(-10))
-    Invoke-CheckedWindowsCommand { & $python @arguments --output $archiveB } `
+    Invoke-CheckedWindowsCommand { & $python.Executable @pythonPrefix @arguments --output $archiveB } `
         "Second deterministic service archive"
 
     $firstDigest = (Get-FileHash -LiteralPath $archiveA -Algorithm SHA256).Hash
@@ -468,7 +469,8 @@ try {
     $missingArchive = Join-Path $fixture "missing-executable.tar.gz"
     Assert-Throws {
         Invoke-CheckedWindowsCommand {
-            & $python @arguments --output $missingArchive --executable "missing-tool" 2>$null
+            & $python.Executable @pythonPrefix @arguments --output $missingArchive `
+                --executable "missing-tool" 2>$null
         } "Missing service executable rejection"
     } "Missing service executable rejection"
     if (Test-Path -LiteralPath $missingArchive) {
@@ -477,7 +479,8 @@ try {
 
     $nestedArchive = Join-Path $source "nested.tar.gz"
     Assert-Throws {
-        Invoke-CheckedWindowsCommand { & $python @arguments --output $nestedArchive 2>$null } `
+        Invoke-CheckedWindowsCommand { & $python.Executable @pythonPrefix @arguments `
+                --output $nestedArchive 2>$null } `
             "Nested service archive rejection"
     } "Nested service archive rejection"
     if (Test-Path -LiteralPath $nestedArchive) {
@@ -485,7 +488,8 @@ try {
     }
 
     Assert-Throws {
-        Invoke-CheckedWindowsCommand { & $python @arguments --output $archiveA 2>$null } `
+        Invoke-CheckedWindowsCommand { & $python.Executable @pythonPrefix @arguments `
+                --output $archiveA 2>$null } `
             "Existing service archive rejection"
     } "Existing service archive rejection"
 }

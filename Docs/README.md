@@ -5,7 +5,7 @@ authoring, runtime, scripting, packaging, and release workflows implemented by t
 [Kéire documentation site](https://keireengine.duckdns.org/docs/) is generated from these exact Markdown files; GitHub
 and the website therefore present one maintained body of documentation rather than parallel copies.
 
-Kéire is currently version 0.3.1 and pre-1.0. Guides describe the checked-in implementation and identify unfinished
+Kéire is currently version 0.3.2 and pre-1.0. Guides describe the checked-in implementation and identify unfinished
 release work honestly. Roadmap material is labeled as roadmap material and does not redefine the supported API.
 
 ## Choose a Starting Point
@@ -23,7 +23,7 @@ release work honestly. Roadmap material is labeled as roadmap material and does 
 
 ## Complete Guide Library
 
-All 58 published guides are listed below in the same groups used by the documentation website.
+All 59 published guides are listed below in the same groups used by the documentation website.
 
 ### Start Here
 

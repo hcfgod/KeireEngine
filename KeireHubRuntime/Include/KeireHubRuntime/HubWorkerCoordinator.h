@@ -45,6 +45,7 @@ namespace KeireHub
         bool AllowInsecureLoopbackDevelopment = false;
         std::optional<std::string> CustomProxyUrl;
         std::uint64_t BandwidthLimitBytesPerSecond = 0;
+        DownloadCacheKind CacheKind = DownloadCacheKind::Package;
     };
 
     struct CatalogEditorInstallRequest final

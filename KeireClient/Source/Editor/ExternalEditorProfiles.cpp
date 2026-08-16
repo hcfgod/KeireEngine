@@ -69,6 +69,7 @@ namespace KeireEditor
             return std::nullopt;
         }
 
+#if defined(_WIN32)
         [[nodiscard]] std::optional<std::filesystem::path>
         FindNewestBelow(const std::span<const std::filesystem::path> roots,
                         const std::span<const std::filesystem::path> executableNames)
@@ -107,6 +108,7 @@ namespace KeireEditor
             }
             return result;
         }
+#endif
 
         void Add(std::vector<ExternalEditorProfile>& profiles, std::string id, std::string name,
                  const std::initializer_list<std::filesystem::path> candidates)
@@ -118,6 +120,7 @@ namespace KeireEditor
                                 .Installed = executable.has_value()});
         }
 
+#if defined(_WIN32)
         void AddDiscovered(std::vector<ExternalEditorProfile>& profiles, std::string id, std::string name,
                            const std::initializer_list<std::filesystem::path> candidates,
                            const std::initializer_list<std::filesystem::path> roots,
@@ -132,6 +135,7 @@ namespace KeireEditor
                                 .Executable = executable.value_or(std::filesystem::path{}),
                                 .Installed = executable.has_value()});
         }
+#endif
     } // namespace
 
     std::vector<ExternalEditorProfile> DiscoverExternalEditorProfiles()

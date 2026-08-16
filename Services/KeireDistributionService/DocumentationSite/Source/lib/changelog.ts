@@ -108,6 +108,7 @@ const categoryDefinitions: readonly CategoryDefinition[] = [
 ];
 
 const summaries: Readonly<Record<string, string>> = {
+    "0.3.2": "A cross-platform preview adding procedural humanoid locomotion, Linux Hub packages, and stronger release/runtime reliability.",
     "0.3.1": "A production-oriented preview centered on the asset ecosystem, modern authoring workflows, audio, animation, Hub reliability, and cross-platform release foundations.",
     "0.3.0": "The visual-authoring milestone that separated reusable Shader Graphs from Material Graphs and established the production Sandbox showcase.",
     "0.2.0": "A broad Editor and engine expansion covering asset workflows, rendering, diagnostics, authoring, and project compatibility.",
@@ -115,7 +116,7 @@ const summaries: Readonly<Record<string, string>> = {
 };
 
 const parsedReleases = parseChangelog(changelogSource) as ParsedChangelogRelease[];
-const currentVersion = /^PROJECT_VERSION=(.+)$/m.exec(projectConfiguration)?.[1]?.trim() ?? "0.3.1";
+const currentVersion = /^PROJECT_VERSION=(.+)$/m.exec(projectConfiguration)?.[1]?.trim() ?? "0.3.2";
 
 function flatten(release: ParsedChangelogRelease | undefined): string[] {
     return release?.groups.flatMap((group) => group.entries) ?? [];
@@ -150,6 +151,9 @@ function pickHighlights(changes: ReleaseChange[], version: string): ReleaseChang
         return changes.slice(0, Math.min(4, changes.length));
     }
     const preferred = [
+        /explicit native Hub package-format identity/i,
+        /zero-clip `ProceduralHumanoid`/i,
+        /Play Mode crash when procedural state-change/i,
         /website-to-editor marketplace workflow/i,
         /full-body ik and ground adaptation/i,
         /audio workflow around a live channel-based mix console/i,
@@ -179,9 +183,9 @@ function buildReleaseNote(release: ParsedChangelogRelease): ReleaseNote {
             "Marketplace artifacts retain quarantine, validator, moderation, signature, immutable publication, entitlement, and download evidence as separate trust decisions.",
         ],
         limitations: [
-            "Kéire 0.3.1 remains a pre-1.0 Windows technology preview rather than a completed AAA production claim.",
-            "Linux packages remain gated on exact-commit native acceptance, and macOS remains source-compatible but unadvertised pending Metal, signing, and notarization validation.",
-            "Marketplace, publisher, community, and paid-checkout capabilities remain subject to their explicit feature flags and launch gates; paid checkout is disabled for 0.3.1.",
+            `Kéire ${currentVersion} remains a pre-1.0 technology preview rather than a completed AAA production claim.`,
+            "Windows and Linux packages are published for x86-64; macOS remains source-compatible but unadvertised pending Metal, signing, and notarization validation.",
+            `Marketplace, publisher, community, and paid-checkout capabilities remain subject to their explicit feature flags and launch gates; paid checkout is disabled for ${currentVersion}.`,
         ],
     } as const;
     return {

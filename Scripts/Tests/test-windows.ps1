@@ -19,19 +19,19 @@ function Assert-True([bool]$Condition, [string]$Message) {
 }
 
 $project = Get-ProjectConfig
-$python = (Get-Command python -ErrorAction Stop).Source
+$python = Get-PythonInvocation
 if ($runFast) {
-& $python (Join-Path $PSScriptRoot "check-repository-layout.py")
+& $python.Executable @($python.PrefixArguments) (Join-Path $PSScriptRoot "check-repository-layout.py")
 if ($LASTEXITCODE -ne 0) { throw "Repository layout checks failed." }
-& $python (Join-Path $PSScriptRoot "..\Packaging\sync-sandbox-template.py") --check
+& $python.Executable @($python.PrefixArguments) (Join-Path $PSScriptRoot "..\Packaging\sync-sandbox-template.py") --check
 if ($LASTEXITCODE -ne 0) { throw "Sandbox template synchronization checks failed." }
 & (Join-Path $PSScriptRoot "test-clean-windows.ps1")
 & (Join-Path $PSScriptRoot "test-managed-host-staging-windows.ps1")
 & (Join-Path $PSScriptRoot "test-editor-package-windows.ps1")
 & (Join-Path $PSScriptRoot "test-hub-package-windows.ps1")
-& $python (Join-Path $PSScriptRoot "test-prepare-distribution-snapshot.py")
+& $python.Executable @($python.PrefixArguments) (Join-Path $PSScriptRoot "test-prepare-distribution-snapshot.py")
 if ($LASTEXITCODE -ne 0) { throw "Distribution snapshot preparation checks failed." }
-& $python (Join-Path $PSScriptRoot "test-website.py")
+& $python.Executable @($python.PrefixArguments) (Join-Path $PSScriptRoot "test-website.py")
 if ($LASTEXITCODE -ne 0) { throw "Website checks failed." }
 $node = Get-Command node -ErrorAction SilentlyContinue
 if ($node) {
@@ -44,15 +44,15 @@ if ($node) {
     & $node.Source (Join-Path $PSScriptRoot "test-website-docs.mjs")
     if ($LASTEXITCODE -ne 0) { throw "Website documentation source checks failed." }
 }
-& $python (Join-Path $PSScriptRoot "test-supabase-config.py")
+& $python.Executable @($python.PrefixArguments) (Join-Path $PSScriptRoot "test-supabase-config.py")
 if ($LASTEXITCODE -ne 0) { throw "Supabase desktop configuration checks failed." }
-& $python (Join-Path $PSScriptRoot "test-marketplace-migrations.py")
+& $python.Executable @($python.PrefixArguments) (Join-Path $PSScriptRoot "test-marketplace-migrations.py")
 if ($LASTEXITCODE -ne 0) { throw "Marketplace migration security-contract checks failed." }
-& $python (Join-Path $PSScriptRoot "test-marketplace-edge.py")
+& $python.Executable @($python.PrefixArguments) (Join-Path $PSScriptRoot "test-marketplace-edge.py")
 if ($LASTEXITCODE -ne 0) { throw "Marketplace Edge trust-boundary checks failed." }
-& $python (Join-Path $PSScriptRoot "test-marketplace-upload-sample.py")
+& $python.Executable @($python.PrefixArguments) (Join-Path $PSScriptRoot "test-marketplace-upload-sample.py")
 if ($LASTEXITCODE -ne 0) { throw "Marketplace package-fixture checks failed." }
-& $python (Join-Path $PSScriptRoot "test-patch-ninja-depfiles.py")
+& $python.Executable @($python.PrefixArguments) (Join-Path $PSScriptRoot "test-patch-ninja-depfiles.py")
 if ($LASTEXITCODE -ne 0) { throw "Ninja dependency-file rule checks failed." }
 & (Join-Path $PSScriptRoot "test-installer-windows.ps1")
 & (Join-Path $PSScriptRoot "test-hub-installer-windows.ps1")
@@ -186,12 +186,12 @@ Assert-True ($securityWorkflow -match "(?m)^  security-status:\s*$") "Security a
 Assert-True ($securityWorkflow -match "(?m)^    if: always\(\)\s*$") "Security sentinel always runs"
 Assert-True ($securityWorkflow.Contains("ENABLE_ADVANCED_SECURITY")) "Advanced security opt-in variable"
 Assert-True (-not $securityWorkflow.Contains("continue-on-error")) "Strict advanced security checks"
-$python = (Get-Command python -ErrorAction Stop).Source
-& $python (Join-Path (Get-RepositoryRoot) "Scripts\Tests\check-text-integrity.py")
+$python = Get-PythonInvocation
+& $python.Executable @($python.PrefixArguments) (Join-Path (Get-RepositoryRoot) "Scripts\Tests\check-text-integrity.py")
 if ($LASTEXITCODE -ne 0) { throw "Versioned text integrity validation failed." }
-& $python (Join-Path (Get-RepositoryRoot) "Scripts\Tests\check-source-budgets.py")
+& $python.Executable @($python.PrefixArguments) (Join-Path (Get-RepositoryRoot) "Scripts\Tests\check-source-budgets.py")
 if ($LASTEXITCODE -ne 0) { throw "Source-file budget validation failed." }
-& $python (Join-Path (Get-RepositoryRoot) "Scripts\Tests\validate-workflows.py")
+& $python.Executable @($python.PrefixArguments) (Join-Path (Get-RepositoryRoot) "Scripts\Tests\validate-workflows.py")
 if ($LASTEXITCODE -ne 0) { throw "GitHub Actions workflow parsing failed." }
 $emptyRepository = Join-Path ([IO.Path]::GetTempPath()) ("template-empty-git-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory $emptyRepository | Out-Null

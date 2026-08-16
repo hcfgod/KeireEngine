@@ -38,7 +38,7 @@ Astro.response.headers.set("cache-control", Astro.locals.user ? "private, no-sto
 
 <PlatformLayout title="Marketplace" description="Discover verified free content, tools, shaders, VFX, and gameplay packages for Kéire Engine." active="marketplace">
     <section class="platform-section marketplace-catalog"><div class="platform-shell">
-        <div class="section-heading"><div><p class="eyebrow">Kéire Marketplace</p><h1>Production content with visible provenance.</h1></div><p>Every published package is immutable, versioned, compatibility-scoped, validated, and independently verified by Hub. All 0.3.1 marketplace products are free.</p></div>
+        <div class="section-heading"><div><p class="eyebrow">Kéire Marketplace</p><h1>Production content with visible provenance.</h1></div><p>Every published package is immutable, versioned, compatibility-scoped, validated, and independently verified by Hub. All 0.3.2 marketplace products are free.</p></div>
         <form class="market-toolbar" method="get" role="search">
             <label class="search-field"><span>Search assets</span><input type="search" name="q" value={search} placeholder="Shaders, VFX, gameplay, UI…" maxlength="100" /></label>
             <label class="field"><span>Category</span><select name="category"><option value="">All categories</option>{categories.map((item) => <option value={item.slug} selected={item.slug === category}>{item.display_name}</option>)}</select></label>

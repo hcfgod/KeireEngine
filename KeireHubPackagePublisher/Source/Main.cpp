@@ -325,6 +325,10 @@ namespace
                                        (result.Platform == "linux" && (extension == ".deb" || extension == ".rpm"));
         if (!expectedExtension || (result.Architecture != "x86_64" && result.Architecture != "arm64"))
             throw std::invalid_argument("The native Hub installer does not match a supported host identity.");
+        if (result.Platform == "linux")
+        {
+            result.PackageFormat = extension.substr(1);
+        }
 
         const auto size = std::filesystem::file_size(arguments.Installer, error);
         if (error || size == 0 || size > KeireHub::PackageArchiveLimits::MaximumFileBytes)

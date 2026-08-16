@@ -3,7 +3,7 @@
 #include "KeireHubRuntime/DownloadManager.h"
 #include "KeireHubRuntime/MarketplaceClient.h"
 
-#include <KeireHubRuntimeInternal\Persistence.h>
+#include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <algorithm>
 #include <exception>

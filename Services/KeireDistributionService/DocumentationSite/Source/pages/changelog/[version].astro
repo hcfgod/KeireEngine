@@ -46,9 +46,9 @@ const structuredData = {
             </div>
             {release.current && (
                 <div class="availability-legend" aria-label="Change availability labels">
-                    <div><span class="availability-label availability-label--released">Public package</span><p>Included in the published 0.3.1 release record.</p></div>
+                    <div><span class="availability-label availability-label--released">Public package</span><p>Included in the published {release.version} release record.</p></div>
                     <div><span class="availability-label availability-label--live">Live platform</span><p>Deployed through the website or Marketplace service.</p></div>
-                    <div><span class="availability-label availability-label--source">Source update</span><p>Implemented for the next packaged 0.3.1 refresh.</p></div>
+                    <div><span class="availability-label availability-label--source">Source update</span><p>Implemented for the next packaged {release.version} refresh.</p></div>
                 </div>
             )}
         </div>

@@ -9,6 +9,7 @@
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <ranges>
 #include <stdexcept>

@@ -100,6 +100,7 @@ namespace KeireHub
         std::string Channel;
         std::string Platform;
         std::string Architecture;
+        std::string PackageFormat;
         std::optional<VersionConstraint> EngineCompatibility;
         std::vector<PackageDependency> Dependencies;
         std::vector<PackageConflict> Conflicts;
@@ -123,6 +124,7 @@ namespace KeireHub
     {
         std::string Platform;
         std::string Architecture;
+        std::string PackageFormat;
         std::optional<SemanticVersion> EngineVersion;
         std::optional<std::uint64_t> AvailableDiskBytes;
     };

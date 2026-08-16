@@ -22,7 +22,8 @@ namespace KeireHub::Detail
                     .Retry = request.Retry,
                     .AllowInsecureLoopbackDevelopment = request.AllowInsecureLoopbackDevelopment,
                     .CustomProxyUrl = request.CustomProxyUrl,
-                    .BandwidthLimitBytesPerSecond = request.BandwidthLimitBytesPerSecond};
+                    .BandwidthLimitBytesPerSecond = request.BandwidthLimitBytesPerSecond,
+                    .CacheKind = request.CacheKind};
         }
     } // namespace
 

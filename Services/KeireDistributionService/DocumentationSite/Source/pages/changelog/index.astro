@@ -37,7 +37,7 @@ const structuredData = {
                 <dl>
                     <div><dt>Released</dt><dd><time datetime={currentRelease.releaseDate ?? undefined}>{releaseDate}</time></dd></div>
                     <div><dt>Documented changes</dt><dd>{currentRelease.changeCount}</dd></div>
-                    <div><dt>Public package</dt><dd>Windows x86-64</dd></div>
+                    <div><dt>Public package</dt><dd>Windows + Linux x86-64</dd></div>
                 </dl>
             </aside>
         </div>
@@ -46,7 +46,7 @@ const structuredData = {
     <section class="platform-section platform-section--line" aria-labelledby="release-highlights">
         <div class="platform-shell">
             <div class="section-heading section-heading--release">
-                <div><p class="eyebrow">0.3.1 highlights</p><h2 id="release-highlights">The release train at a glance.</h2></div>
+                <div><p class="eyebrow">{currentRelease.version} highlights</p><h2 id="release-highlights">The release train at a glance.</h2></div>
                 <p>The complete release page contains every notable entry. These are the changes with the broadest effect on day-to-day Kéire work.</p>
             </div>
             <ol class="release-highlights">

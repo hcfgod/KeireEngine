@@ -28,13 +28,13 @@ async function collectFiles(directory) {
 
 await access(path.join(outputRoot, "index.html"));
 await access(path.join(outputRoot, "changelog", "index.html"));
-for (const version of ["0.3.1", "0.3.0", "0.2.0", "0.1.0"]) {
+for (const version of ["0.3.2", "0.3.1", "0.3.0", "0.2.0", "0.1.0"]) {
     await access(path.join(outputRoot, "changelog", version, "index.html"));
 }
 const changelogFeed = await readFile(path.join(outputRoot, "changelog", "rss.xml"), "utf8");
 assert(changelogFeed.startsWith('<?xml version="1.0" encoding="UTF-8"?>') &&
     changelogFeed.includes("<title>Kéire Engine changelog</title>") &&
-    changelogFeed.includes("/changelog/0.3.1/"),
+    changelogFeed.includes("/changelog/0.3.2/"),
     "Built changelog feed is missing its canonical metadata or current release.");
 for (const sourcePath of allDocSources) {
     await access(path.join(outputRoot, "docs", ...sourcePathToSlug(sourcePath).split("/"), "index.html"));

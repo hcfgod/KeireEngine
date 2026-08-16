@@ -1038,6 +1038,8 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
                         return "OnAfterReload";
                     case Keire::ManagedBehaviourCallback::AnimatorIk:
                         return "OnAnimatorIk";
+                    case Keire::ManagedBehaviourCallback::ProceduralMotionEvent:
+                        return "OnProceduralMotionEvent";
                     }
                     return "Unknown";
                 };

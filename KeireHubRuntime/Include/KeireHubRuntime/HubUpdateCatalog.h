@@ -18,5 +18,6 @@ namespace KeireHub
     // Consumes only immutable catalogs that have already crossed the signature, identity, expiry, and replay gates.
     // Equal versions prefer the least experimental channel so opting into previews never obscures a stable installer.
     [[nodiscard]] HubResult<std::optional<HubUpdateCandidate>>
-    SelectHubUpdate(const DistributionCatalogSnapshot& catalogs, std::string_view installedHubVersion);
+    SelectHubUpdate(const DistributionCatalogSnapshot& catalogs, std::string_view installedHubVersion,
+                    std::string_view nativePackageFormat = {});
 } // namespace KeireHub

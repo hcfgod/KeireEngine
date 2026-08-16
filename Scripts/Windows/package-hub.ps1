@@ -76,10 +76,11 @@ Copy-Item -LiteralPath (Join-Path $Root "Config\Marketplace\trusted-marketplace-
     -Destination (Join-Path $stage "Config\Marketplace")
 Copy-Item -LiteralPath (Join-Path $Root "Config\SourceModules.premake.lua") `
     -Destination (Join-Path $stage "Config")
-$python = (Get-Command python -ErrorAction Stop).Source
+$python = Get-PythonInvocation
+$pythonPrefix = @($python.PrefixArguments)
 $supabaseConfiguration = Join-Path $Root "Config\Supabase.json"
 Invoke-CheckedWindowsCommand {
-    & $python (Join-Path $Root "Scripts\Packaging\validate-supabase-config.py") `
+    & $python.Executable @pythonPrefix (Join-Path $Root "Scripts\Packaging\validate-supabase-config.py") `
         --config $supabaseConfiguration
 } "Supabase desktop configuration validation"
 Copy-Item -LiteralPath (Join-Path $Root "Config\Supabase.json") `
@@ -169,7 +170,8 @@ else {
 if ($distributionMinimumSequence -and $hasDistributionOverride) {
     $distributionArguments += @("--minimum-sequence", $distributionMinimumSequence)
 }
-Invoke-CheckedWindowsCommand { & $python @distributionArguments } "Hub distribution configuration generation"
+Invoke-CheckedWindowsCommand { & $python.Executable @pythonPrefix @distributionArguments } `
+    "Hub distribution configuration generation"
 $manifestWriter = Join-Path $Root "Scripts\Packaging\write-package-manifest.py"
 $manifestArguments = @(
     $manifestWriter, "write", "--stage", $stage, "--output", "hub-package.json",
@@ -190,7 +192,8 @@ $dotnetRuntime = Get-ChildItem -LiteralPath (Join-Path $dotnetLicenseRoot "share
 if ($dotnetRuntime) {
     $manifestArguments += @("--toolchain", "dotnet-runtime|$($dotnetRuntime.Name)|bin/Managed/Dotnet")
 }
-Invoke-CheckedWindowsCommand { & $python @manifestArguments } "Standalone Hub package manifest generation"
+Invoke-CheckedWindowsCommand { & $python.Executable @pythonPrefix @manifestArguments } `
+    "Standalone Hub package manifest generation"
 
 Assert-WindowsHubPackageStage $stage $Project.HUB_TARGET $Project.CLIENT_TARGET $Project.PROJECT_NAMESPACE
 $hubVersion = Invoke-WindowsExecutableCapture (Join-Path $stage "bin\$($Project.HUB_TARGET).exe") @("--version")
@@ -217,7 +220,8 @@ try {
     Assert-WindowsHubPackageStage $validationRoot $Project.HUB_TARGET $Project.CLIENT_TARGET `
         $Project.PROJECT_NAMESPACE
     Invoke-CheckedWindowsCommand {
-        & $python $manifestWriter validate --stage $validationRoot --manifest hub-package.json --artifact hub
+        & $python.Executable @pythonPrefix $manifestWriter validate --stage $validationRoot `
+            --manifest hub-package.json --artifact hub
     } "Extracted standalone Hub package manifest validation"
     $extractedWorkerHelp = Invoke-WindowsExecutableCapture `
         (Join-Path $validationRoot "bin\$hubWorkerTarget.exe") @("--help")

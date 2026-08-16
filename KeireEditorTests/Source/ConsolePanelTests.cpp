@@ -2,6 +2,7 @@
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <ranges>

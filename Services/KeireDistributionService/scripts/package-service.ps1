@@ -13,6 +13,7 @@ $ErrorActionPreference = 'Stop'
 
 $serviceRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $serviceRoot '..\..'))
+. (Join-Path $repositoryRoot 'Scripts\Windows\common.ps1')
 if ([string]::IsNullOrWhiteSpace($Dotnet)) {
     $workspaceDotnet = Join-Path $repositoryRoot 'Build\Dependencies\dotnet-sdk\dotnet.exe'
     $Dotnet = if (Test-Path -LiteralPath $workspaceDotnet -PathType Leaf) {
@@ -168,9 +169,10 @@ foreach ($runtimeIdentifier in $RuntimeIdentifiers) {
         Compress-Archive -LiteralPath $packageDirectory -DestinationPath $archive -CompressionLevel Optimal
     } else {
         $archive = "$packageDirectory.tar.gz"
-        $python = (Get-Command python -ErrorAction Stop).Source
+        $python = Get-PythonInvocation
+        $pythonPrefix = @($python.PrefixArguments)
         $archiveWriter = Join-Path $serviceRoot '..\..\Scripts\Packaging\write-deterministic-tar.py'
-        & $python $archiveWriter --source $packageDirectory --output $archive `
+        & $python.Executable @pythonPrefix $archiveWriter --source $packageDirectory --output $archive `
             --executable 'KeireDistributionService' `
             --executable 'tools/publisher/KeireDistributionPublisher' `
             --executable 'tools/marketplace-validator/worker/KeireMarketplaceValidator' `

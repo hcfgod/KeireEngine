@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "releaseStatus": {
     "state": "preparing",
-    "version": "0.3.1",
-    "message": "Windows x86-64 Hub 0.3.1 is available through the catalog-verified release. Linux and macOS downloads remain gated."
+    "version": "0.3.2",
+    "message": "Windows and Linux x86-64 Hub 0.3.2 are available through catalog-verified releases. macOS downloads remain gated."
   },
   "packages": []
 }

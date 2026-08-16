@@ -200,7 +200,7 @@ namespace KeireHub
         // the distribution session can apply its normal freshness/trust policy.
         if (product.Settings.CheckForUpdates && !catalogs.OfflineMode)
         {
-            auto update = SelectHubUpdate(catalogs, product.HubVersion);
+            auto update = SelectHubUpdate(catalogs, product.HubVersion, HubUpdateManager::HostPackageFormatIdentity());
             if (!update)
                 product.HubUpdateMessage = update.Error().Message;
             else if (update.Value())

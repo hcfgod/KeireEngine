@@ -61,8 +61,9 @@ if ($generationExitCode -ne 0) {
     throw "Premake generation failed with exit code $generationExitCode."
 }
 if ($Generator -in @("ninja", "compilecommands")) {
-    $python = (Get-Command python -ErrorAction Stop).Source
-    & $python (Join-Path $Root "Scripts\patch-ninja-depfiles.py") $Root
+    $python = Get-PythonInvocation
+    $pythonPrefix = @($python.PrefixArguments)
+    & $python.Executable @pythonPrefix (Join-Path $Root "Scripts\patch-ninja-depfiles.py") $Root
     if ($LASTEXITCODE -ne 0) { throw "Ninja dependency-file rule repair failed." }
 }
 if ($Generator -eq "compilecommands") {

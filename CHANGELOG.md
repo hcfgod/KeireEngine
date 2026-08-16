@@ -5,6 +5,31 @@ versions.
 
 ## Unreleased
 
+## 0.3.2 - 2026-08-15
+
+- Fixed the Unix dependency bootstrap omitting the locked FFmpeg submodule and the `cmp` utility, which previously
+  stopped or degraded fresh Linux worktrees after the shader compiler and Coral builds completed.
+- Fixed Windows Ninja generation and package creation failing when Python 3 is available through the standard `py`
+  launcher but the disabled Microsoft Store `python.exe` alias is selected first.
+- Fixed Linux Hub builds using a Windows-only internal include path, and made RPM runtime requirements portable across
+  Rocky Linux, Fedora, and openSUSE while ensuring native update authorization is installed.
+- Fixed RPM Hub installation on current Fedora and openSUSE by omitting .NET's optional legacy LTTng tracepoint
+  provider. EventPipe diagnostics remain available and the package no longer acquires an unavailable
+  `liblttng-ust.so.0` dependency.
+- Fixed Hub account workflow coverage assuming every Linux test host provides a Secret Service. Session-only Linux
+  environments are now validated without misreporting a failed secure-session restore.
+- Fixed a GCC 16 lifetime warning in the Material Graph diagnostic fallback by making its owned-vector assignment
+  explicit.
+- Fixed the Linux editor client relying on a transitive standard-library declaration for `std::round` in the Asset
+  Inspector.
+- Fixed the Player Build panel relying on a transitive `<algorithm>` include for `std::ranges::any_of` on Linux.
+- Added the procedural-motion callback name to managed profiler diagnostics instead of displaying it as unknown.
+- Added explicit native Hub package-format identity to signed catalogs. Linux catalogs can now publish DEB and RPM
+  installers for the same version, the Hub selects and hands off through the host's matching package manager, and the
+  downloads site renders both verified formats with correct filenames.
+- Fixed verified Hub updates being stored with a generic `.package` suffix. Native installers now retain `.exe`,
+  `.deb`, `.rpm`, or `.dmg` cache names through the isolated worker protocol so each operating system can hand the
+  artifact directly to its package manager.
 - Added a zero-clip `ProceduralHumanoid` Animator pose source, normalized `.keiremotionprofile` assets, managed
   fixed-step locomotion intent/state/events, terrain-aware planted-foot and airborne posing, quality tiers, and
   presentation-transform interpolation. Existing Animators migrate to graph mode unchanged; the Vanguard showcase now

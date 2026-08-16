@@ -14,6 +14,7 @@
 #include <ranges>
 #include <set>
 #include <sstream>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -219,9 +220,26 @@ namespace KeireHub
                 return false;
             if (package.Architecture != "any" && package.Architecture != host.Architecture)
                 return false;
+            if (!package.PackageFormat.empty() && package.PackageFormat != host.PackageFormat)
+                return false;
             if (package.EngineCompatibility)
                 return host.EngineVersion && package.EngineCompatibility->Matches(*host.EngineVersion);
             return true;
+        }
+
+        [[nodiscard]] bool ValidPackageFormat(const PackageManifest& manifest) noexcept
+        {
+            if (manifest.PackageFormat.empty())
+                return true;
+            if (manifest.Kind != PackageKind::HubInstaller)
+                return false;
+            if (manifest.Platform == "windows")
+                return manifest.PackageFormat == "exe";
+            if (manifest.Platform == "macos")
+                return manifest.PackageFormat == "dmg";
+            if (manifest.Platform == "linux")
+                return manifest.PackageFormat == "deb" || manifest.PackageFormat == "rpm";
+            return false;
         }
 
         [[nodiscard]] bool Conflicts(const PackageManifest& left, const PackageManifest& right) noexcept
@@ -574,10 +592,11 @@ namespace KeireHub
             (manifest.Platform != "any" && manifest.Platform != "windows" && manifest.Platform != "linux" &&
              manifest.Platform != "macos") ||
             (manifest.Architecture != "any" && manifest.Architecture != "x86_64" && manifest.Architecture != "arm64") ||
-            manifest.ArtifactSizeBytes == 0 || !Detail::IsSha256(manifest.ArtifactSha256) ||
-            manifest.InstalledSizeBytes == 0 || manifest.Files.size() > 100000 ||
-            !Detail::IsBoundedIdentifier(manifest.SignatureKeyId) || manifest.Dependencies.size() > 128 ||
-            manifest.Conflicts.size() > 128 || manifest.LicenseReferences.size() > 128)
+            !ValidPackageFormat(manifest) || manifest.ArtifactSizeBytes == 0 ||
+            !Detail::IsSha256(manifest.ArtifactSha256) || manifest.InstalledSizeBytes == 0 ||
+            manifest.Files.size() > 100000 || !Detail::IsBoundedIdentifier(manifest.SignatureKeyId) ||
+            manifest.Dependencies.size() > 128 || manifest.Conflicts.size() > 128 ||
+            manifest.LicenseReferences.size() > 128)
         {
             return HubStatus::Failure({.Code = HubErrorCode::PackageManifestInvalid,
                                        .Message = "The package manifest is invalid.",
@@ -699,6 +718,8 @@ namespace KeireHub
                 {"artifact", {{"sizeBytes", manifest.ArtifactSizeBytes}, {"sha256", manifest.ArtifactSha256}}},
                 {"installedSizeBytes", manifest.InstalledSizeBytes},
                 {"signatureKeyId", manifest.SignatureKeyId}};
+            if (!manifest.PackageFormat.empty())
+                document["packageFormat"] = manifest.PackageFormat;
             if (manifest.EngineCompatibility)
                 document["engineCompatibility"] = manifest.EngineCompatibility->ToString();
             if (!manifest.Dependencies.empty())
@@ -774,6 +795,7 @@ namespace KeireHub
             result.Channel = json.at("channel").get<std::string>();
             result.Platform = json.at("platform").get<std::string>();
             result.Architecture = json.at("architecture").get<std::string>();
+            result.PackageFormat = json.value("packageFormat", std::string{});
             if (json.contains("engineCompatibility"))
             {
                 auto constraint = VersionConstraint::Parse(json.at("engineCompatibility").get<std::string>());
@@ -890,17 +912,21 @@ namespace KeireHub
                                                           const std::vector<PackageRequirement>& requested,
                                                           const PackageHost& host) const
     {
+        const bool validHostFormat =
+            host.PackageFormat.empty() || (host.Platform == "windows" && host.PackageFormat == "exe") ||
+            (host.Platform == "macos" && host.PackageFormat == "dmg") ||
+            (host.Platform == "linux" && (host.PackageFormat == "deb" || host.PackageFormat == "rpm"));
         if ((host.Platform != "windows" && host.Platform != "linux" && host.Platform != "macos") ||
-            (host.Architecture != "x86_64" && host.Architecture != "arm64") || requested.empty())
+            (host.Architecture != "x86_64" && host.Architecture != "arm64") || !validHostFormat || requested.empty())
             return HubResult<PackageResolution>::Failure(
                 {.Code = HubErrorCode::InvalidArgument, .Message = "The package resolution request is invalid."});
         PackageIndex index;
-        std::set<std::pair<std::string, SemanticVersion>> identities;
+        std::set<std::tuple<std::string, SemanticVersion, std::string>> identities;
         for (const auto& package : available)
         {
             if (const auto status = ValidatePackageManifest(package); !status)
                 return HubResult<PackageResolution>::Failure(status.Error());
-            if (!identities.emplace(package.Id, package.Version).second)
+            if (!identities.emplace(package.Id, package.Version, package.PackageFormat).second)
                 return HubResult<PackageResolution>::Failure(
                     {.Code = HubErrorCode::DuplicateIdentifier,
                      .Message = "The package catalog contains a duplicate version.",

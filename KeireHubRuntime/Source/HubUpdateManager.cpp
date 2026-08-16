@@ -6,6 +6,8 @@
 #include <KeireHubRuntimeInternal/Persistence.h>
 #include <KeireHubRuntimeInternal/Sha256.h>
 
+#include <array>
+#include <cstdio>
 #include <stdexcept>
 #include <system_error>
 #include <utility>
@@ -23,6 +25,36 @@ namespace KeireHub
             const auto targetVersion = SemanticVersion::Parse(target);
             return currentVersion && targetVersion && targetVersion.Value() > currentVersion.Value();
         }
+
+#if defined(__linux__)
+        [[nodiscard]] std::string_view LinuxOsRelease() noexcept
+        {
+            static const auto value = []
+            {
+                std::array<char, 4096> result{};
+                if (auto* file = std::fopen("/etc/os-release", "rb"))
+                {
+                    const auto size = std::fread(result.data(), 1, result.size() - 1, file);
+                    result[size] = '\0';
+                    std::fclose(file);
+                }
+                return result;
+            }();
+            return value.data();
+        }
+
+        template <std::size_t Count>
+        [[nodiscard]] bool ContainsLinuxIdentity(const std::string_view value,
+                                                 const std::array<std::string_view, Count>& identities) noexcept
+        {
+            for (const auto identity : identities)
+            {
+                if (value.find(identity) != std::string_view::npos)
+                    return true;
+            }
+            return false;
+        }
+#endif
 
         [[nodiscard]] bool IsDescendant(const std::filesystem::path& path, const std::filesystem::path& root)
         {
@@ -289,6 +321,39 @@ namespace KeireHub
         return "arm64";
 #else
         return "unknown";
+#endif
+    }
+
+    std::string_view HubUpdateManager::HostPackageFormatIdentity() noexcept
+    {
+#if defined(_WIN32)
+        return "exe";
+#elif defined(__APPLE__)
+        return "dmg";
+#elif defined(__linux__)
+        const auto osRelease = LinuxOsRelease();
+        constexpr std::array debianIdentities{std::string_view{"debian"}, std::string_view{"ubuntu"}};
+        constexpr std::array rpmIdentities{std::string_view{"fedora"}, std::string_view{"rhel"},
+                                           std::string_view{"centos"}, std::string_view{"rocky"},
+                                           std::string_view{"suse"},   std::string_view{"opensuse"}};
+        if (ContainsLinuxIdentity(osRelease, debianIdentities))
+            return "deb";
+        if (ContainsLinuxIdentity(osRelease, rpmIdentities))
+            return "rpm";
+
+        std::error_code error;
+        const auto isRegular = [&error](const std::filesystem::path& candidate)
+        {
+            error.clear();
+            return std::filesystem::is_regular_file(candidate, error) && !error;
+        };
+        if (isRegular("/usr/bin/dpkg") || isRegular("/usr/sbin/dpkg"))
+            return "deb";
+        if (isRegular("/usr/bin/rpm") || isRegular("/usr/sbin/rpm"))
+            return "rpm";
+        return {};
+#else
+        return {};
 #endif
     }
 } // namespace KeireHub

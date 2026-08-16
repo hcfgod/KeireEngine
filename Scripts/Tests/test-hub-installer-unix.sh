@@ -32,21 +32,23 @@ grep -Fq 'install_relative="opt/$ARTIFACT_PREFIX-hub"' "$packager"
 grep -Fq 'cat > "$linux_root/usr/bin/$ARTIFACT_PREFIX-hub"' "$packager"
 grep -Fq 'exec "/$install_relative/bin/$HUB_TARGET" "\$@"' "$packager"
 grep -Fq 'expected_hub_exec=' "$packager"
+grep -Fq -- "-name 'libcoreclrtraceptprovider.so' -delete" "$packager"
 grep -Fq 'KEIRE_LINUX_INSTALLER_FORMAT:-auto' "$packager"
 grep -Eq 'debian\|ubuntu' "$packager"
-grep -Eq 'fedora\|rhel\|centos\|rocky' "$packager"
+grep -Eq 'fedora\|rhel\|centos\|rocky\|suse\|opensuse' "$packager"
 grep -Fq 'SOURCE_DATE_EPOCH' "$packager"
 grep -Fq 'dpkg-deb --field "$artifact" Depends' "$packager"
 grep -Fq 'Exec=/usr/bin/$ARTIFACT_PREFIX-hub' "$packager"
 grep -Fq 'Package: $ARTIFACT_PREFIX-hub' "$packager"
-grep -Fq 'Depends: libc6, libstdc++6, libgcc-s1, libcurl4t64 | libcurl4, zenity' "$packager"
+grep -Fq 'Depends: libc6, libstdc++6, libgcc-s1, libcurl4t64 | libcurl4, pkexec, zenity' "$packager"
 grep -Fq 'StartupWMClass=$HUB_TARGET' "$packager"
 grep -Fq 'dpkg-deb --build' "$packager"
 grep -Fq 'for tool in rpmbuild rpm rpm2cpio cpio' "$packager"
-grep -Fq 'Requires:       glibc' "$packager"
-grep -Fq 'Requires:       libstdc++' "$packager"
-grep -Fq 'Requires:       libgcc' "$packager"
-grep -Fq 'Requires:       libcurl' "$packager"
+grep -Fq 'Requires:       libc.so.6()(64bit)' "$packager"
+grep -Fq 'Requires:       libstdc++.so.6()(64bit)' "$packager"
+grep -Fq 'Requires:       libgcc_s.so.1()(64bit)' "$packager"
+grep -Fq 'Requires:       libcurl.so.4()(64bit)' "$packager"
+grep -Fq 'Requires:       polkit' "$packager"
 grep -Fq 'Requires:       zenity' "$packager"
 grep -Fq 'rpmbuild -bb' "$packager"
 grep -Fq -- "--define '__os_install_post %{nil}'" "$packager"
@@ -54,6 +56,7 @@ grep -Fq -- "--define '_buildhost keire-release'" "$packager"
 grep -Fq -- "--define 'use_source_date_epoch_as_buildtime 1'" "$packager"
 grep -Fq "rpm -qp --queryformat '%{NAME}'" "$packager"
 grep -Fq 'grep -Fqx "$requirement" <<< "$rpm_requirements"' "$packager"
+grep -Fq "grep -Fqx 'liblttng-ust.so.0()(64bit)'" "$packager"
 grep -Fq 'rpm2cpio "$artifact" | cpio' "$packager"
 grep -Fq '${ARTIFACT_PREFIX}-hub-${PROJECT_VERSION}-1.${rpm_architecture}.rpm' "$packager"
 grep -Fq 'usr/share/applications' "$packager"
@@ -75,8 +78,16 @@ if grep -Eq 'rm -rf.*(\$HOME|XDG_CONFIG_HOME|XDG_CACHE_HOME)|DEBIAN/(pre|post)rm
   exit 1
 fi
 
-rpm_requirements=$'glibc\nlibstdc++\nlibgcc\nlibcurl\nzenity'
-for requirement in glibc libstdc++ libgcc libcurl zenity; do
+rpm_requirements=$'libc.so.6()(64bit)\nlibstdc++.so.6()(64bit)\nlibgcc_s.so.1()(64bit)\nlibcurl.so.4()(64bit)\npolkit\nzenity'
+rpm_runtime_requirements=(
+  'libc.so.6()(64bit)'
+  'libstdc++.so.6()(64bit)'
+  'libgcc_s.so.1()(64bit)'
+  'libcurl.so.4()(64bit)'
+  polkit
+  zenity
+)
+for requirement in "${rpm_runtime_requirements[@]}"; do
   grep -Fqx "$requirement" <<< "$rpm_requirements" || {
     printf "The RPM dependency validator rejected the literal '%s' package name.\n" "$requirement" >&2
     exit 1

@@ -27,7 +27,9 @@ namespace
     }
 
     [[nodiscard]] PackageManifest Installer(const std::string_view id, const std::string_view version,
-                                            const std::string_view channel)
+                                            const std::string_view channel,
+                                            const std::string_view packageFormat = "exe",
+                                            const std::string_view platform = "windows")
     {
         return {.SchemaVersion = PackageManifest::CurrentSchemaVersion,
                 .Id = std::string(id),
@@ -35,8 +37,9 @@ namespace
                 .Kind = PackageKind::HubInstaller,
                 .DisplayName = "Kéire Hub " + std::string(version),
                 .Channel = std::string(channel),
-                .Platform = "windows",
+                .Platform = std::string(platform),
                 .Architecture = "x86_64",
+                .PackageFormat = std::string(packageFormat),
                 .EngineCompatibility = std::nullopt,
                 .Dependencies = {},
                 .Conflicts = {},
@@ -54,14 +57,14 @@ namespace
     [[nodiscard]] DistributionPackageCatalogSnapshot
     Source(std::string channel, const std::uint64_t sequence, std::vector<PackageManifest> packages,
            const DistributionCatalogSourceState state = DistributionCatalogSourceState::Online,
-           const std::string_view minimumHubVersion = {})
+           const std::string_view minimumHubVersion = {}, const std::string_view platform = "windows")
     {
         DistributionPackageCatalog catalog;
         catalog.Identity = {.KeyId = std::string(KeyId),
                             .Sequence = sequence,
                             .ExpiresAt = std::string(Expiry),
                             .Channel = channel,
-                            .Platform = "windows",
+                            .Platform = std::string(platform),
                             .Architecture = "x86_64"};
         if (!minimumHubVersion.empty())
             catalog.MinimumSupportedHubVersion = Version(minimumHubVersion);
@@ -75,6 +78,40 @@ namespace
                            .Error = std::nullopt}};
     }
 } // namespace
+
+TEST_CASE("Hub update selection chooses the native Linux package format")
+{
+    DistributionCatalogSnapshot catalogs;
+    catalogs.PackageCatalogs.push_back(Source("stable", 7,
+                                              {Installer("keire.hub", "2.0.0", "stable", "deb", "linux"),
+                                               Installer("keire.hub", "2.0.0", "stable", "rpm", "linux")},
+                                              DistributionCatalogSourceState::Online, {}, "linux"));
+
+    const auto deb = SelectHubUpdate(catalogs, "1.0.0", "deb");
+    REQUIRE(deb);
+    REQUIRE(deb.Value());
+    CHECK(deb.Value()->Package.PackageFormat == "deb");
+
+    const auto rpm = SelectHubUpdate(catalogs, "1.0.0", "rpm");
+    REQUIRE(rpm);
+    REQUIRE(rpm.Value());
+    CHECK(rpm.Value()->Package.PackageFormat == "rpm");
+}
+
+TEST_CASE("Legacy Linux Hub manifests remain Debian-only")
+{
+    DistributionCatalogSnapshot catalogs;
+    catalogs.PackageCatalogs.push_back(Source("stable", 7, {Installer("keire.hub", "2.0.0", "stable", {}, "linux")},
+                                              DistributionCatalogSourceState::Online, {}, "linux"));
+
+    const auto deb = SelectHubUpdate(catalogs, "1.0.0", "deb");
+    REQUIRE(deb);
+    REQUIRE(deb.Value());
+
+    const auto rpm = SelectHubUpdate(catalogs, "1.0.0", "rpm");
+    REQUIRE(rpm);
+    CHECK_FALSE(rpm.Value());
+}
 
 TEST_CASE("Hub update selection chooses the newest trusted installer and prefers stable ties")
 {

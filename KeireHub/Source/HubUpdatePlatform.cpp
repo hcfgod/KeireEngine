@@ -2,11 +2,11 @@
 
 #include "KeireInternal/Process.h"
 
+#include <array>
 #include <chrono>
 #include <optional>
 #include <span>
 #include <string_view>
-#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -25,6 +25,41 @@ namespace KeireHub
 {
     namespace
     {
+#if defined(__linux__)
+        [[nodiscard]] std::string_view FirstLinuxExecutable(const std::span<const std::string_view> candidates) noexcept
+        {
+            for (const auto candidate : candidates)
+            {
+                if (access(candidate.data(), X_OK) == 0)
+                    return candidate;
+            }
+            return {};
+        }
+
+        [[nodiscard]] std::string_view LinuxPrivilegeTool() noexcept
+        {
+            constexpr std::array candidates{std::string_view{"/usr/bin/pkexec"}, std::string_view{"/usr/sbin/pkexec"}};
+            return FirstLinuxExecutable(candidates);
+        }
+
+        [[nodiscard]] std::string_view LinuxPackageManager(const std::string_view format) noexcept
+        {
+            if (format == "deb")
+            {
+                constexpr std::array candidates{std::string_view{"/usr/bin/dpkg"}, std::string_view{"/usr/sbin/dpkg"}};
+                return FirstLinuxExecutable(candidates);
+            }
+            if (format == "rpm")
+            {
+                constexpr std::array candidates{std::string_view{"/usr/bin/dnf"}, std::string_view{"/usr/sbin/dnf"},
+                                                std::string_view{"/usr/bin/zypper"},
+                                                std::string_view{"/usr/sbin/zypper"}};
+                return FirstLinuxExecutable(candidates);
+            }
+            return {};
+        }
+#endif
+
         [[nodiscard]] HubStatus LaunchFailure(const std::filesystem::path& installer, std::string details)
         {
             return HubStatus::Failure({.Code = HubErrorCode::WorkerInterrupted,
@@ -79,9 +114,8 @@ namespace KeireHub
 #elif defined(__APPLE__)
         return false;
 #elif defined(__linux__)
-        std::error_code error;
-        return std::filesystem::is_regular_file("/usr/bin/pkexec", error) && !error &&
-               std::filesystem::is_regular_file("/usr/bin/dpkg", error) && !error;
+        const auto format = HubUpdateManager::HostPackageFormatIdentity();
+        return !LinuxPrivilegeTool().empty() && !LinuxPackageManager(format).empty();
 #else
         return false;
 #endif
@@ -99,6 +133,12 @@ namespace KeireHub
     std::string NativeHubUpdateHandoffUnavailableMessage()
     {
 #if defined(__linux__)
+        const auto format = HubUpdateManager::HostPackageFormatIdentity();
+        if (format == "rpm")
+        {
+            return "The verified RPM package is ready, but pkexec or a supported RPM package manager is unavailable. "
+                   "Reveal it and use your system package manager.";
+        }
         return "The verified Debian package is ready, but pkexec or dpkg is unavailable. Reveal it and use your "
                "system package manager.";
 #elif defined(__APPLE__)
@@ -181,9 +221,27 @@ namespace KeireHub
         return LaunchFailure(launch.Executable, NativeHubUpdateHandoffUnavailableMessage());
 #elif defined(__linux__)
         std::string diagnostic;
-        const std::vector<std::string> arguments{"/usr/bin/dpkg", "--install", launch.Executable.string()};
-        if (!Keire::Detail::LaunchDetachedProcess("/usr/bin/pkexec", arguments, launch.Executable.parent_path(),
-                                                  diagnostic))
+        const auto format = HubUpdateManager::HostPackageFormatIdentity();
+        const auto packageManager = LinuxPackageManager(format);
+        const auto privilegeTool = LinuxPrivilegeTool();
+        const auto isZypper = packageManager.ends_with("/zypper");
+        std::vector<std::string> arguments;
+        if (format == "deb")
+        {
+            arguments = {std::string(packageManager), "--install", launch.Executable.string()};
+        }
+        else if (isZypper)
+        {
+            arguments = {std::string(packageManager), "--non-interactive", "install", "--allow-unsigned-rpm",
+                         launch.Executable.string()};
+        }
+        else
+        {
+            arguments = {std::string(packageManager), "install", "--assumeyes", launch.Executable.string()};
+        }
+        if (privilegeTool.empty() || packageManager.empty() ||
+            !Keire::Detail::LaunchDetachedProcess(std::filesystem::path(privilegeTool), arguments,
+                                                  launch.Executable.parent_path(), diagnostic))
         {
             return LaunchFailure(launch.Executable, std::move(diagnostic));
         }

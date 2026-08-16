@@ -23,7 +23,8 @@ namespace KeireHub
                      .TechnicalDetails = {},
                      .LogReference = {}});
             }
-            auto selected = SelectHubUpdate(*distribution.Catalogs, currentVersion);
+            auto selected =
+                SelectHubUpdate(*distribution.Catalogs, currentVersion, HubUpdateManager::HostPackageFormatIdentity());
             if (!selected)
                 return HubResult<HubUpdateCandidate>::Failure(selected.Error());
             if (!selected.Value())

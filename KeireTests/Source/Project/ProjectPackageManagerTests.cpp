@@ -3,6 +3,7 @@
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -25,10 +26,11 @@ namespace
             Project = Keire::Project::Create({ProjectParent, "Packages", Keire::ProjectTemplate::Empty});
             const auto descriptor = Project->Root() / "ProjectSettings" / "Project.keireproject";
             auto text = KeireTests::ReadFile(descriptor);
-            const auto current = text.find("\"minimumEngineVersion\": \"0.3.1\"");
+            const auto currentVersion =
+                "\"minimumEngineVersion\": \"" + std::string(Keire::GetBuildInfo().Version) + "\"";
+            const auto current = text.find(currentVersion);
             if (current != std::string::npos)
-                text.replace(current, std::string("\"minimumEngineVersion\": \"0.3.1\"").size(),
-                             "\"minimumEngineVersion\": \"0.1.0\"");
+                text.replace(current, currentVersion.size(), "\"minimumEngineVersion\": \"0.1.0\"");
             std::ofstream stream(descriptor, std::ios::binary | std::ios::trunc);
             stream << text;
         }

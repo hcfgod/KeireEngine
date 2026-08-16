@@ -23,6 +23,7 @@ if ($packager.Contains('package-editor.ps1') -or $packager.Contains('Assert-Wind
 $template = Get-Content -LiteralPath (Join-Path $Root "Installer\Windows\KeireHub.nsi") -Raw
 foreach ($contract in @('RequestExecutionLevel user', 'MUI_PAGE_LICENSE', 'MUI_PAGE_COMPONENTS',
         'MUI_PAGE_DIRECTORY', 'Desktop shortcut', 'Start Menu shortcuts', 'WriteUninstaller',
+        'LegalCopyright',
         '.keire-hub-install', 'Software\${PRODUCT_IDENTIFIER}\HubInstaller', 'UnsafeUninstall',
         'MUI_FINISHPAGE_RUN', 'intentionally preserved', '/KEIRE_HUB_UPDATE=', '/INSTALL_ROOT=',
         '/RESUME_TOKEN=', '/WAIT_PROCESS=', 'WaitForSingleObject', 'SkipUpdateDirectoryPage',

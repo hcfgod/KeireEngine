@@ -61,6 +61,19 @@ namespace KeireHub
                     .TechnicalDetails = std::move(details),
                     .LogReference = {}};
         }
+
+        [[nodiscard]] DownloadCacheKind NativeInstallerCacheKind(const PackageManifest& package) noexcept
+        {
+            if (package.Platform == "windows")
+                return DownloadCacheKind::WindowsExecutable;
+            if (package.Platform == "macos")
+                return DownloadCacheKind::MacDiskImage;
+            if (package.Platform == "linux" && package.PackageFormat == "rpm")
+                return DownloadCacheKind::RpmPackage;
+            if (package.Platform == "linux")
+                return DownloadCacheKind::DebianPackage;
+            return DownloadCacheKind::Package;
+        }
     } // namespace
 
     std::string HubUpdateTaskPrefix(const HubUpdateCandidate& candidate)
@@ -70,10 +83,16 @@ namespace KeireHub
 
     HubStatus ValidateHubUpdateCandidateForHost(const HubUpdateCandidate& candidate)
     {
+        const auto nativePackageFormat = HubUpdateManager::HostPackageFormatIdentity();
+        const auto effectivePackageFormat =
+            candidate.Package.PackageFormat.empty() && candidate.Package.Platform == "linux"
+                ? std::string_view{"deb"}
+                : std::string_view{candidate.Package.PackageFormat};
         if (!TrustedSource(candidate.Source) || candidate.Package.Kind != PackageKind::HubInstaller ||
             candidate.CatalogIdentity.Sequence == 0 || !MatchesCatalogIdentity(candidate) ||
             candidate.Package.Platform != HubUpdateManager::HostPlatformIdentity() ||
-            candidate.Package.Architecture != HubUpdateManager::HostArchitectureIdentity())
+            candidate.Package.Architecture != HubUpdateManager::HostArchitectureIdentity() ||
+            (!effectivePackageFormat.empty() && effectivePackageFormat != nativePackageFormat))
         {
             return HubStatus::Failure({.Code = HubErrorCode::CatalogIdentityMismatch,
                                        .Message = "The signed Hub installer does not match this computer.",
@@ -119,7 +138,8 @@ namespace KeireHub
             .Retry = {},
             .AllowInsecureLoopbackDevelopment = options.AllowInsecureLoopbackDevelopment,
             .CustomProxyUrl = std::move(options.CustomProxyUrl),
-            .BandwidthLimitBytesPerSecond = options.BandwidthLimitBytesPerSecond};
+            .BandwidthLimitBytesPerSecond = options.BandwidthLimitBytesPerSecond,
+            .CacheKind = NativeInstallerCacheKind(candidate.Package)};
         if (const auto status =
                 DownloadManager::Validate({.PackageId = request.Package.Id,
                                            .Url = request.PackageUrl,
@@ -129,7 +149,8 @@ namespace KeireHub
                                            .Retry = request.Retry,
                                            .AllowInsecureLoopbackDevelopment = request.AllowInsecureLoopbackDevelopment,
                                            .CustomProxyUrl = request.CustomProxyUrl,
-                                           .BandwidthLimitBytesPerSecond = request.BandwidthLimitBytesPerSecond});
+                                           .BandwidthLimitBytesPerSecond = request.BandwidthLimitBytesPerSecond,
+                                           .CacheKind = request.CacheKind});
             !status)
         {
             return HubResult<CatalogPackageDownloadRequest>::Failure(status.Error());
@@ -198,7 +219,8 @@ namespace KeireHub
                                        .Retry = {},
                                        .AllowInsecureLoopbackDevelopment = false,
                                        .CustomProxyUrl = std::nullopt,
-                                       .BandwidthLimitBytesPerSecond = 0};
+                                       .BandwidthLimitBytesPerSecond = 0,
+                                       .CacheKind = NativeInstallerCacheKind(candidate.Package)};
         if (verified->CachePath.lexically_normal() != DownloadManager::CachePath(expected).lexically_normal())
         {
             return HubResult<HubUpdateWorkflowState>::Failure(

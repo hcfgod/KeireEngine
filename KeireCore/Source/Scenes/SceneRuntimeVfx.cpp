@@ -1,5 +1,7 @@
 #include "KeireInternal/Scenes/SceneRuntimeSessionImpl.h"
 
+#include <algorithm>
+
 namespace Keire
 {
     void SceneRuntimeSession::Impl::InitializeVfx(const VfxBackend backend)

@@ -144,6 +144,36 @@ TEST_CASE("Compact catalog references hydrate only exact matching package manife
     CHECK(rejectedIdentity.Error().Code == HubErrorCode::CatalogIdentityMismatch);
 }
 
+TEST_CASE("Native Hub package formats round trip and resolve for the matching Linux family")
+{
+    auto deb = Package("keire.hub", "2.0.0", "linux");
+    deb.Kind = PackageKind::HubInstaller;
+    deb.PackageFormat = "deb";
+    deb.Files.front().Path = "keire-hub.deb";
+    auto rpm = deb;
+    rpm.PackageFormat = "rpm";
+    rpm.Files.front().Path = "keire-hub.rpm";
+
+    const auto encoded = EncodePackageManifest(rpm);
+    REQUIRE(encoded);
+    const auto decoded = ParsePackageManifest(encoded.Value());
+    REQUIRE(decoded);
+    CHECK(decoded.Value().PackageFormat == "rpm");
+
+    const auto resolved = PackageResolver{}.Resolve(
+        {deb, rpm}, {{"keire.hub", Constraint("=2.0.0")}},
+        {.Platform = "linux", .Architecture = "x86_64", .PackageFormat = "rpm", .AvailableDiskBytes = 100});
+    REQUIRE(resolved);
+    REQUIRE(resolved.Value().InstallOrder.size() == 1U);
+    CHECK(resolved.Value().InstallOrder.front().PackageFormat == "rpm");
+
+    auto invalidEditor = Package("editor", "2.0.0", "linux");
+    invalidEditor.PackageFormat = "deb";
+    CHECK_FALSE(ValidatePackageManifest(invalidEditor));
+    deb.PackageFormat = "dmg";
+    CHECK_FALSE(ValidatePackageManifest(deb));
+}
+
 TEST_CASE("Package resolver selects the highest compatible dependency in topological order")
 {
     auto editor = Package("editor", "3.0.0");

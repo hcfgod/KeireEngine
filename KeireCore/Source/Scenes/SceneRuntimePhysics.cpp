@@ -1,5 +1,8 @@
 #include "KeireInternal/Scenes/SceneRuntimeSessionImpl.h"
 
+#include <algorithm>
+#include <cmath>
+
 namespace Keire
 {
     bool SceneRuntimeSession::Impl::SameCollision(const std::shared_ptr<const CookedCollisionMesh>& first,

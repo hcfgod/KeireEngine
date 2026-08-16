@@ -146,6 +146,25 @@ TEST_CASE("Asset package downloads preserve the inspected archive extension")
     CHECK(KeireHubTests::ReadText(acquired.Value().CachePath) == Payload);
 }
 
+TEST_CASE("Native installer downloads preserve package-manager extensions")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    auto request = Request(temporary.Path() / "Cache");
+    constexpr std::array cases{std::pair{DownloadCacheKind::WindowsExecutable, std::string_view{".exe"}},
+                               std::pair{DownloadCacheKind::DebianPackage, std::string_view{".deb"}},
+                               std::pair{DownloadCacheKind::RpmPackage, std::string_view{".rpm"}},
+                               std::pair{DownloadCacheKind::MacDiskImage, std::string_view{".dmg"}}};
+
+    for (const auto& [kind, extension] : cases)
+    {
+        request.CacheKind = kind;
+        CAPTURE(extension);
+        CHECK(DownloadManager::CachePath(request).extension() == extension);
+        CHECK(DownloadManager::PartialPath(request).extension() == ".partial");
+        CHECK(DownloadManager::ResumeMetadataPath(request).filename().string().ends_with(".partial.json"));
+    }
+}
+
 TEST_CASE("Paused and cancelled downloads preserve resumable partial data")
 {
     KeireHubTests::TemporaryDirectory temporary;
@@ -402,13 +421,16 @@ TEST_CASE("Hub worker request status result and control journals round trip atom
 {
     KeireHubTests::TemporaryDirectory temporary;
     const auto operation = temporary.Path() / "Operation";
-    const HubWorkerRequest request{.TaskId = "task-download", .Download = Request(temporary.Path() / "Cache")};
+    auto download = Request(temporary.Path() / "Cache");
+    download.CacheKind = DownloadCacheKind::RpmPackage;
+    const HubWorkerRequest request{.TaskId = "task-download", .Download = std::move(download)};
     REQUIRE(WriteHubWorkerRequest(operation / "request.json", request));
     auto decodedRequest = ReadHubWorkerRequest(operation / "request.json");
     REQUIRE(decodedRequest);
     CHECK(decodedRequest.Value().TaskId == request.TaskId);
     CHECK(decodedRequest.Value().Download.Sha256 == request.Download.Sha256);
     CHECK(decodedRequest.Value().Download.BandwidthLimitBytesPerSecond == 0);
+    CHECK(decodedRequest.Value().Download.CacheKind == DownloadCacheKind::RpmPackage);
 
     const HubWorkerStatus status{.TaskId = request.TaskId,
                                  .State = HubTaskState::Downloading,

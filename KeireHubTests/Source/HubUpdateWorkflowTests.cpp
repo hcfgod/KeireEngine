@@ -27,6 +27,7 @@ namespace
                             .Channel = "stable",
                             .Platform = platform,
                             .Architecture = architecture,
+                            .PackageFormat = std::string(HubUpdateManager::HostPackageFormatIdentity()),
                             .EngineCompatibility = std::nullopt,
                             .Dependencies = {},
                             .Conflicts = {},
@@ -68,6 +69,11 @@ TEST_CASE("Hub update workflow builds a catalog-bound task request")
     CHECK(request.Value().PackageUrl == "https://updates.example/v1/packages/" + candidate.Package.ArtifactSha256);
     CHECK(request.Value().CustomProxyUrl == "http://proxy.example:8080");
     CHECK(request.Value().BandwidthLimitBytesPerSecond == 4096);
+    const auto expectedCacheKind = candidate.Package.Platform == "windows"    ? DownloadCacheKind::WindowsExecutable
+                                   : candidate.Package.Platform == "macos"    ? DownloadCacheKind::MacDiskImage
+                                   : candidate.Package.PackageFormat == "rpm" ? DownloadCacheKind::RpmPackage
+                                                                              : DownloadCacheKind::DebianPackage;
+    CHECK(request.Value().CacheKind == expectedCacheKind);
 
     auto mismatched = candidate;
     mismatched.Package.Platform = "any";
@@ -79,6 +85,14 @@ TEST_CASE("Hub update workflow builds a catalog-bound task request")
                                                                       .BandwidthLimitBytesPerSecond = 0});
     REQUIRE_FALSE(rejected);
     CHECK(rejected.Error().Code == HubErrorCode::CatalogIdentityMismatch);
+
+    mismatched = candidate;
+    mismatched.Package.PackageFormat = "mismatched";
+    const auto rejectedFormat = CreateHubUpdateDownloadRequest(mismatched, {.TaskId = TaskId(mismatched),
+                                                                            .ServiceBaseUrl = "https://updates.example",
+                                                                            .CacheRoot = temporary.Path() / "Cache"});
+    REQUIRE_FALSE(rejectedFormat);
+    CHECK(rejectedFormat.Error().Code == HubErrorCode::CatalogIdentityMismatch);
 }
 
 TEST_CASE("Hub update workflow exposes only matching verified completion records")
@@ -95,7 +109,12 @@ TEST_CASE("Hub update workflow exposes only matching verified completion records
                                    .Retry = {},
                                    .AllowInsecureLoopbackDevelopment = false,
                                    .CustomProxyUrl = std::nullopt,
-                                   .BandwidthLimitBytesPerSecond = 0};
+                                   .BandwidthLimitBytesPerSecond = 0,
+                                   .CacheKind =
+                                       candidate.Package.Platform == "windows"    ? DownloadCacheKind::WindowsExecutable
+                                       : candidate.Package.Platform == "macos"    ? DownloadCacheKind::MacDiskImage
+                                       : candidate.Package.PackageFormat == "rpm" ? DownloadCacheKind::RpmPackage
+                                                                                  : DownloadCacheKind::DebianPackage};
     const auto installerPath = DownloadManager::CachePath(download);
     KeireHubTests::WriteText(installerPath, "abc");
 
@@ -157,7 +176,12 @@ TEST_CASE("Hub update workflow reports cache eviction as downloadable again")
                                    .Retry = {},
                                    .AllowInsecureLoopbackDevelopment = false,
                                    .CustomProxyUrl = std::nullopt,
-                                   .BandwidthLimitBytesPerSecond = 0};
+                                   .BandwidthLimitBytesPerSecond = 0,
+                                   .CacheKind =
+                                       candidate.Package.Platform == "windows"    ? DownloadCacheKind::WindowsExecutable
+                                       : candidate.Package.Platform == "macos"    ? DownloadCacheKind::MacDiskImage
+                                       : candidate.Package.PackageFormat == "rpm" ? DownloadCacheKind::RpmPackage
+                                                                                  : DownloadCacheKind::DebianPackage};
     HubWorkerCoordinatorSnapshot snapshot{
         .State = HubWorkerCoordinatorState::Ready,
         .Revision = 1,

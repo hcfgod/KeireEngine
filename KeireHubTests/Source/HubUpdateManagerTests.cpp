@@ -34,6 +34,20 @@ namespace
     }
 } // namespace
 
+TEST_CASE("Hub update host package format matches the native platform")
+{
+#if defined(_WIN32)
+    CHECK(KeireHub::HubUpdateManager::HostPackageFormatIdentity() == "exe");
+#elif defined(__APPLE__)
+    CHECK(KeireHub::HubUpdateManager::HostPackageFormatIdentity() == "dmg");
+#elif defined(__linux__)
+    const auto format = KeireHub::HubUpdateManager::HostPackageFormatIdentity();
+    CHECK((format == "deb" || format == "rpm"));
+#else
+    CHECK(KeireHub::HubUpdateManager::HostPackageFormatIdentity().empty());
+#endif
+}
+
 TEST_CASE("Hub update handoff verifies the installer and records resumable state")
 {
     KeireHubTests::TemporaryDirectory temporary;

@@ -486,6 +486,7 @@ install_gcc_toolchain() {
 
 ensure_command awk awk
 ensure_command find findutils
+ensure_command cmp diffutils
 install_premake
 ensure_command git git
 check_version Git "$(git --version | extract_version)" 2.34

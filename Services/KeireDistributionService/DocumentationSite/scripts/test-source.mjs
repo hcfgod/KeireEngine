@@ -89,7 +89,7 @@ function parseUnsignedConstant(source, name) {
 
 const actual = await collectMarkdown(docsRoot);
 const expected = [...allDocSources].sort((left, right) => left.localeCompare(right));
-assert(allDocSources.length === 58, `Expected 58 documentation sources, found ${allDocSources.length}.`);
+assert(allDocSources.length === 59, `Expected 59 documentation sources, found ${allDocSources.length}.`);
 assert(new Set(allDocSources).size === allDocSources.length, "Documentation inventory contains duplicate source paths.");
 assert(JSON.stringify(actual) === JSON.stringify(expected), "Documentation inventory does not exactly cover Docs/**/*.md.");
 
@@ -192,18 +192,18 @@ const rootReadme = await readFile(path.join(repositoryRoot, "README.md"), "utf8"
 await validateLocalLinks("README.md", path.join(repositoryRoot, "README.md"), rootReadme);
 const downloadsPage = await readFile(path.join(siteRoot, "Source", "pages", "downloads", "index.astro"), "utf8");
 for (const contract of [
-    `Windows x86-64 is available now through the catalog-verified ${projectVersion} release`,
+    "Catalog-verified Windows and Linux x86-64 releases are available",
     "The catalog and artifact hash are verified",
-    "No Linux link is shown until install, upgrade, removal, Hub, Editor, and Vulkan acceptance pass",
+    "Use the DEB on Ubuntu or Debian and the RPM on Rocky Linux, Fedora, or openSUSE",
 ]) {
     assert(downloadsPage.includes(contract), `Downloads page is missing current platform contract: ${contract}`);
 }
 const previewDownloadMetadata = JSON.parse(await readFile(path.join(repositoryRoot, "Services",
     "KeireDistributionService", "Website", "assets", "preview-downloads.json"), "utf8"));
 assert(previewDownloadMetadata?.releaseStatus?.version === projectVersion &&
-    previewDownloadMetadata.releaseStatus.message.includes(`Windows x86-64 Hub ${projectVersion} is available`) &&
-    previewDownloadMetadata.releaseStatus.message.includes("Linux and macOS downloads remain gated"),
-"Download fallback metadata must describe the current Windows release and gated platforms.");
+    previewDownloadMetadata.releaseStatus.message.includes(`Windows and Linux x86-64 Hub ${projectVersion} are available`) &&
+    previewDownloadMetadata.releaseStatus.message.includes("macOS downloads remain gated"),
+"Download fallback metadata must describe the current Windows/Linux releases and gated macOS platform.");
 for (const [displayPath, source] of [
     ["README.md", rootReadme],
     ["Docs/README.md", documentationOverview],

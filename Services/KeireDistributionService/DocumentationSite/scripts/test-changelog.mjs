@@ -39,11 +39,11 @@ assert.throws(() => parseChangelog("## 0.3.1\n- One\n## 0.3.1\n- Two"), /Duplica
 
 const canonicalSource = await readFile(path.join(repositoryRoot, "CHANGELOG.md"), "utf8");
 const canonicalReleases = parseChangelog(canonicalSource);
-const current = canonicalReleases.find(({ version }) => version === "0.3.1");
-const sourceUpdates = canonicalReleases.find(({ version }) => version === "Unreleased");
-assert(current && current.groups.flatMap(({ entries }) => entries).length >= 29,
-    "The canonical 0.3.1 release record is unexpectedly incomplete.");
-assert(sourceUpdates && sourceUpdates.groups.flatMap(({ entries }) => entries).length > 0,
-    "Current source updates must remain visible alongside the 0.3.1 release train.");
+const projectConfiguration = await readFile(path.join(repositoryRoot, "Config", "Project.conf"), "utf8");
+const currentVersion = /^PROJECT_VERSION=(\S+)$/m.exec(projectConfiguration)?.[1];
+const current = canonicalReleases.find(({ version }) => version === currentVersion);
+assert(currentVersion && current && current.groups.flatMap(({ entries }) => entries).length >= 10,
+    `The canonical ${currentVersion} release record is unexpectedly incomplete.`);
+assert(/^## Unreleased$/m.test(canonicalSource), "The canonical changelog must retain an Unreleased section.");
 
-console.log(`Changelog parsing passed for ${canonicalReleases.length} releases and ${current.groups.flatMap(({ entries }) => entries).length} canonical 0.3.1 entries.`);
+console.log(`Changelog parsing passed for ${canonicalReleases.length} releases and ${current.groups.flatMap(({ entries }) => entries).length} canonical ${currentVersion} entries.`);

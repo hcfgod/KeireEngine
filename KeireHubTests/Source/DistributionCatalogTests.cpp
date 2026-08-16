@@ -56,6 +56,15 @@ namespace
                KeireHubTests::Digest('c') + "\"},\"signatureKeyId\":\"" + std::string(ParserKeyId) + "\"}";
     }
 
+    [[nodiscard]] std::string NativeLinuxHubPackage(const std::string_view packageFormat)
+    {
+        auto package = Package("keire.hub", "1.2.3", "stable", "linux", "x86_64",
+                               ",\"packageFormat\":\"" + std::string(packageFormat) + "\"");
+        package.replace(package.find("\"type\":\"editor\""), std::string_view{"\"type\":\"editor\""}.size(),
+                        "\"type\":\"hubInstaller\"");
+        return package;
+    }
+
     [[nodiscard]] std::string PackageCatalog(const std::string_view keyId, const std::uint64_t sequence,
                                              const std::vector<std::string>& packages,
                                              const std::string_view channel = "stable",
@@ -253,6 +262,22 @@ TEST_CASE("Distribution package catalogs reject excessive, duplicate, and incomp
     const auto duplicate = ParseCatalog(duplicates);
     REQUIRE_FALSE(duplicate);
     CHECK(duplicate.Error().Code == HubErrorCode::DuplicateIdentifier);
+
+    auto linuxIdentity = Identity();
+    linuxIdentity.Platform = "linux";
+    const auto nativeFormats = ParseCatalog(
+        PackageCatalog(ParserKeyId, 7, {NativeLinuxHubPackage("deb"), NativeLinuxHubPackage("rpm")}, "stable", "linux"),
+        linuxIdentity);
+    REQUIRE(nativeFormats);
+    REQUIRE(nativeFormats.Value().Packages.size() == 2U);
+    CHECK(nativeFormats.Value().Packages[0].PackageFormat == "deb");
+    CHECK(nativeFormats.Value().Packages[1].PackageFormat == "rpm");
+
+    const auto duplicateFormat = ParseCatalog(
+        PackageCatalog(ParserKeyId, 7, {NativeLinuxHubPackage("deb"), NativeLinuxHubPackage("deb")}, "stable", "linux"),
+        linuxIdentity);
+    REQUIRE_FALSE(duplicateFormat);
+    CHECK(duplicateFormat.Error().Code == HubErrorCode::DuplicateIdentifier);
 
     const auto wrongHost = PackageCatalog(ParserKeyId, 7, {Package("keire.editor", "1.2.3", "stable", "linux")});
     const auto incompatible = ParseCatalog(wrongHost);

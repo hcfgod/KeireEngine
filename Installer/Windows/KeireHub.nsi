@@ -84,6 +84,7 @@ VIAddVersionKey /LANG=1033 "CompanyName" "${PRODUCT_DISPLAY_NAME}"
 VIAddVersionKey /LANG=1033 "FileDescription" "${PRODUCT_NAME} Setup"
 VIAddVersionKey /LANG=1033 "FileVersion" "${PRODUCT_VERSION}"
 VIAddVersionKey /LANG=1033 "ProductVersion" "${PRODUCT_VERSION}"
+VIAddVersionKey /LANG=1033 "LegalCopyright" "Copyright Kéire Engine contributors"
 
 !define MUI_ABORTWARNING
 !define MUI_COMPONENTSPAGE_SMALLDESC

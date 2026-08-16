@@ -554,15 +554,19 @@ namespace KeireEditor
     void MaterialGraphDocument::RefreshDiagnostics()
     {
         const auto shaderInterface = m_Specification.ResolveInterface(Definition().Shader);
-        m_Diagnostics =
-            shaderInterface
-                ? Keire::ValidateMaterialGraphAgainstInterface(Definition(), *shaderInterface)
-                : std::vector<Keire::MaterialGraphDiagnostic>{{Keire::MaterialGraphDiagnosticSeverity::Error,
-                                                               "MAT1000",
-                                                               "Selected shader interface is unavailable.",
-                                                               {},
-                                                               {},
-                                                               {}}};
+        if (shaderInterface)
+        {
+            m_Diagnostics = Keire::ValidateMaterialGraphAgainstInterface(Definition(), *shaderInterface);
+        }
+        else
+        {
+            m_Diagnostics = {{Keire::MaterialGraphDiagnosticSeverity::Error,
+                              "MAT1000",
+                              "Selected shader interface is unavailable.",
+                              {},
+                              {},
+                              {}}};
+        }
         if (Definition().Shader.Kind != Keire::MaterialShaderSourceKind::ShaderGraph ||
             !HasSurfaceExpressions(Definition()))
             return;

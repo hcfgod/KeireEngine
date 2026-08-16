@@ -42,6 +42,18 @@ namespace KeireHub
                    package.Architecture == identity.Architecture && package.SignatureKeyId == identity.KeyId;
         }
 
+        [[nodiscard]] bool MatchesPackageFormat(const PackageManifest& package,
+                                                const std::string_view nativePackageFormat) noexcept
+        {
+            if (nativePackageFormat.empty())
+                return true;
+            if (!package.PackageFormat.empty())
+                return package.PackageFormat == nativePackageFormat;
+
+            // Linux Hub manifests published before packageFormat support were Debian packages.
+            return package.Platform != "linux" || nativePackageFormat == "deb";
+        }
+
         [[nodiscard]] bool BetterCandidate(const HubUpdateCandidate& candidate,
                                            const HubUpdateCandidate& current) noexcept
         {
@@ -58,7 +70,8 @@ namespace KeireHub
     } // namespace
 
     HubResult<std::optional<HubUpdateCandidate>> SelectHubUpdate(const DistributionCatalogSnapshot& catalogs,
-                                                                 const std::string_view installedHubVersion)
+                                                                 const std::string_view installedHubVersion,
+                                                                 const std::string_view nativePackageFormat)
     {
         auto installed = SemanticVersion::Parse(installedHubVersion);
         if (!installed)
@@ -86,10 +99,6 @@ namespace KeireHub
             {
                 if (package.Kind != PackageKind::HubInstaller || package.Version <= installed.Value())
                     continue;
-                if (const auto status = ValidatePackageManifest(package); !status)
-                {
-                    return HubResult<std::optional<HubUpdateCandidate>>::Failure(status.Error());
-                }
                 if (!MatchesCatalogIdentity(package, catalog.Identity))
                 {
                     return HubResult<std::optional<HubUpdateCandidate>>::Failure(
@@ -99,6 +108,12 @@ namespace KeireHub
                          .TechnicalDetails = {},
                          .LogReference = {}});
                 }
+                if (const auto status = ValidatePackageManifest(package); !status)
+                {
+                    return HubResult<std::optional<HubUpdateCandidate>>::Failure(status.Error());
+                }
+                if (!MatchesPackageFormat(package, nativePackageFormat))
+                    continue;
                 HubUpdateCandidate candidate{
                     .Package = package, .CatalogIdentity = catalog.Identity, .Source = source.Status.State};
                 if (!selected || BetterCandidate(candidate, *selected))

@@ -13,6 +13,9 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Resolve-Path (Join-Path $PSScriptRoot "../..")
 $project = Join-Path $root "Scripts/project.ps1"
+. (Join-Path $PSScriptRoot "common.ps1")
+$python = Get-PythonInvocation
+$pythonPrefix = @($python.PrefixArguments)
 
 function Invoke-Checked
 {
@@ -27,19 +30,19 @@ function Invoke-Checked
 }
 
 Invoke-Checked "VFX manifest and generated capability validation" {
-    & python (Join-Path $root "Scripts/Vfx/validate_vfx_parity_manifest.py")
+    & $python.Executable @pythonPrefix (Join-Path $root "Scripts/Vfx/validate_vfx_parity_manifest.py")
     if ($LASTEXITCODE -eq 0) {
-        & python (Join-Path $root "Scripts/Vfx/reconcile_vfx_manifest.py") --check
+        & $python.Executable @pythonPrefix (Join-Path $root "Scripts/Vfx/reconcile_vfx_manifest.py") --check
     }
     if ($LASTEXITCODE -eq 0) {
-        & python (Join-Path $root "Scripts/Vfx/generate_vfx_capabilities.py") --check
+        & $python.Executable @pythonPrefix (Join-Path $root "Scripts/Vfx/generate_vfx_capabilities.py") --check
     }
     if ($LASTEXITCODE -eq 0) {
-        & python (Join-Path $root "Scripts/Vfx/test_vfx_parity_tooling.py")
+        & $python.Executable @pythonPrefix (Join-Path $root "Scripts/Vfx/test_vfx_parity_tooling.py")
     }
 }
 Invoke-Checked "Performance gate tooling tests" {
-    & python (Join-Path $root "Scripts/Performance/test_validate_capture.py")
+    & $python.Executable @pythonPrefix (Join-Path $root "Scripts/Performance/test_validate_capture.py")
 }
 if ($PerformanceSnapshot -or $PerformanceHistory -or $PerformanceMetadata)
 {
@@ -48,7 +51,7 @@ if ($PerformanceSnapshot -or $PerformanceHistory -or $PerformanceMetadata)
         throw "PerformanceSnapshot, PerformanceHistory, and PerformanceMetadata must be supplied together."
     }
     Invoke-Checked "Reference-hardware performance gate" {
-        & python (Join-Path $root "Scripts/Performance/validate_capture.py") `
+        & $python.Executable @pythonPrefix (Join-Path $root "Scripts/Performance/validate_capture.py") `
             --snapshot $PerformanceSnapshot --history $PerformanceHistory --metadata $PerformanceMetadata `
             --profile $PerformanceProfile
     }

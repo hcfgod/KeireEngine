@@ -13,6 +13,7 @@
 #include "Keire/Rendering/ShaderGraph.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <filesystem>
 #include <fstream>

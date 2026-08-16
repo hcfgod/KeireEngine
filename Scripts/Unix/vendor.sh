@@ -37,6 +37,7 @@ install_dependency glm Vendor/glm "$(config_value "$LOCK" GLM_URL)" "$(config_va
 install_dependency SDL_shadercross Vendor/SDL_shadercross "$(config_value "$LOCK" SDL_SHADERCROSS_URL)" "$(config_value "$LOCK" SDL_SHADERCROSS_COMMIT)"
 install_dependency assimp Vendor/assimp "$(config_value "$LOCK" ASSIMP_URL)" "$(config_value "$LOCK" ASSIMP_COMMIT)"
 install_dependency stb Vendor/stb "$(config_value "$LOCK" STB_URL)" "$(config_value "$LOCK" STB_COMMIT)"
+install_dependency ffmpeg Vendor/ffmpeg "$(config_value "$LOCK" FFMPEG_URL)" "$(config_value "$LOCK" FFMPEG_COMMIT)"
 git -C "$ROOT/Vendor/SDL_shadercross" submodule update --init --recursive
 imgui_files=(
     Scripts/Premake/DearImGui.lua

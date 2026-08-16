@@ -9,6 +9,7 @@
 #include <set>
 #include <stdexcept>
 #include <string_view>
+#include <tuple>
 #include <utility>
 
 namespace KeireHub
@@ -96,6 +97,7 @@ namespace KeireHub
                                           std::string_view{"dependencies"},
                                           std::string_view{"conflicts"},
                                           std::string_view{"licenses"},
+                                          std::string_view{"packageFormat"},
                                           std::string_view{"files"},
                                           std::string_view{"manifest"}};
             constexpr std::array artifactKeys{std::string_view{"sizeBytes"}, std::string_view{"sha256"}};
@@ -252,7 +254,7 @@ namespace KeireHub
 
             result.Packages.reserve(packages.size());
             std::size_t aggregateItems = 0;
-            std::set<std::pair<std::string, SemanticVersion>> identities;
+            std::set<std::tuple<std::string, SemanticVersion, std::string>> identities;
             for (const auto& value : packages)
             {
                 if (const auto status = ValidatePackageShape(value, schemaVersion, aggregateItems); !status)
@@ -274,7 +276,8 @@ namespace KeireHub
                         CatalogError(HubErrorCode::PackageHostIncompatible,
                                      "A package catalog entry does not support this host.", manifest.Value().Id));
                 }
-                if (!identities.emplace(manifest.Value().Id, manifest.Value().Version).second)
+                if (!identities.emplace(manifest.Value().Id, manifest.Value().Version, manifest.Value().PackageFormat)
+                         .second)
                 {
                     return HubResult<DistributionPackageCatalog>::Failure(
                         CatalogError(HubErrorCode::DuplicateIdentifier,
@@ -288,6 +291,8 @@ namespace KeireHub
                               {
                                   if (left.Id != right.Id)
                                       return left.Id < right.Id;
+                                  if (left.Version == right.Version)
+                                      return left.PackageFormat < right.PackageFormat;
                                   return left.Version > right.Version;
                               });
             return HubResult<DistributionPackageCatalog>::Success(std::move(result));

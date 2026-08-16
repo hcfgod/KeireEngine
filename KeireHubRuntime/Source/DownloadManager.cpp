@@ -526,7 +526,11 @@ namespace KeireHub
             request.Retry.MaximumDelay < request.Retry.BaseDelay ||
             request.Retry.MaximumDelay > std::chrono::minutes(5) || request.Retry.JitterPermille > 1000 ||
             request.BandwidthLimitBytesPerSecond > MaximumBandwidthBytesPerSecond ||
-            (request.CacheKind != DownloadCacheKind::Package && request.CacheKind != DownloadCacheKind::AssetPackage))
+            (request.CacheKind != DownloadCacheKind::Package && request.CacheKind != DownloadCacheKind::AssetPackage &&
+             request.CacheKind != DownloadCacheKind::WindowsExecutable &&
+             request.CacheKind != DownloadCacheKind::DebianPackage &&
+             request.CacheKind != DownloadCacheKind::RpmPackage &&
+             request.CacheKind != DownloadCacheKind::MacDiskImage))
         {
             return HubStatus::Failure(
                 DownloadError(HubErrorCode::InvalidArgument, request, "The package download request is invalid."));
@@ -542,7 +546,25 @@ namespace KeireHub
 
     std::filesystem::path DownloadManager::CachePath(const DownloadRequest& request)
     {
-        const auto extension = request.CacheKind == DownloadCacheKind::AssetPackage ? ".keireassetpackage" : ".package";
+        const auto extension = [kind = request.CacheKind]
+        {
+            switch (kind)
+            {
+            case DownloadCacheKind::Package:
+                return ".package";
+            case DownloadCacheKind::AssetPackage:
+                return ".keireassetpackage";
+            case DownloadCacheKind::WindowsExecutable:
+                return ".exe";
+            case DownloadCacheKind::DebianPackage:
+                return ".deb";
+            case DownloadCacheKind::RpmPackage:
+                return ".rpm";
+            case DownloadCacheKind::MacDiskImage:
+                return ".dmg";
+            }
+            return ".package";
+        }();
         return request.CacheRoot / "sha256" / request.Sha256.substr(0, 2) / (request.Sha256 + extension);
     }
 

@@ -392,7 +392,8 @@ Windows compiles `Installer/Windows/KeireHub.nsi` into a per-user Hub setup exec
 inside a self-contained Hub `.app` and drag-to-Applications DMG. Linux installs that stage beneath `/opt/keire-hub`
 with a `keire-hub` command, desktop entry, and icon. Its `/usr/bin` wrapper executes the explicit `/opt` Hub binary so
 the package-relative launcher cannot resolve beside `/usr/bin`. On Linux, `auto` selects DEB for Ubuntu/Debian and RPM
-for Rocky/Fedora; release automation can pass `--linux-installer-format deb` or `--linux-installer-format rpm`.
+for Rocky/Fedora/openSUSE; release automation can pass `--linux-installer-format deb` or
+`--linux-installer-format rpm`.
 The RPM path requires `rpm-build`, `rpm`, and `cpio`, records the native runtime dependencies, validates its identity and
 file inventory after extraction, and uses the source commit timestamp for deterministic payload metadata. All three
 platform workflows update or remove only the application
