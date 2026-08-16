@@ -5,6 +5,8 @@ versions.
 
 ## Unreleased
 
+- Fixed the distribution-snapshot preparer on Rocky Linux 9's supported Python 3.9 runtime and restored explicit
+  standard-library ownership in the decomposed procedural scene-runtime unit.
 - Added explicit Additive, Modulate, premultiplied Alpha Composite, and Alpha Holdout material modes with
   backend-owned blend/depth policies, transparent ordering, editor authoring choices, and focused renderer tests.
 - Added the CPU/GPU Kill Shape VFX Block with validated Box/Sphere Solid and Inverted semantics, canonical persistence,

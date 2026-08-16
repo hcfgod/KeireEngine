@@ -1,5 +1,7 @@
 #include "KeireInternal/Scenes/SceneRuntimeSessionImpl.h"
 
+#include <cmath>
+
 namespace Keire
 {
     void SceneRuntimeSession::Impl::AdvanceProceduralAnimation(const float deltaSeconds)

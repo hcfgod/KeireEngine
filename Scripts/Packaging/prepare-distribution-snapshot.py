@@ -189,7 +189,7 @@ def main() -> int:
         raise ValueError("Every package manifest requires one package artifact.")
     packages = [
         validate_package(manifest, package, args.key_id)
-        for manifest, package in zip(args.package_manifest, args.package, strict=True)
+        for manifest, package in zip(args.package_manifest, args.package)
     ]
 
     legacy_catalogs: dict[tuple[str, str, str], list[dict[str, object]]] = {}
