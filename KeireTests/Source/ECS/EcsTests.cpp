@@ -228,6 +228,31 @@ TEST_CASE("Entities own required Transforms and stale handles become inert after
     CHECK_FALSE(root.GetComponent<Keire::TransformComponent>());
 }
 
+TEST_CASE("Presentation transforms interpolate roots while children preserve their current local hierarchy")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
+    auto root = scene->CreateEntity("Root");
+    auto child = scene->CreateEntity("Child", root);
+    const auto rootTransform = root.GetComponent<Keire::TransformComponent>();
+    const auto childTransform = child.GetComponent<Keire::TransformComponent>();
+    rootTransform->SetLocalPosition({3.0F, 0.0F, 0.0F});
+    childTransform->SetLocalPosition({2.0F, 0.0F, 0.0F});
+
+    rootTransform->SetRuntimePresentationWorldMatrix(
+        Keire::Math::ComposeTransform({10.0F, 1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}));
+    CHECK(rootTransform->WorldPosition().X == doctest::Approx(3.0F));
+    CHECK(rootTransform->PresentationWorldPosition().X == doctest::Approx(10.0F));
+    CHECK(childTransform->WorldPosition().X == doctest::Approx(5.0F));
+    CHECK(childTransform->PresentationWorldPosition().X == doctest::Approx(12.0F));
+    CHECK(childTransform->PresentationWorldPosition().Y == doctest::Approx(1.0F));
+
+    const auto revision = rootTransform->PresentationResetRevision();
+    rootTransform->ResetPresentationInterpolation();
+    CHECK(rootTransform->PresentationResetRevision() == revision + 1);
+    CHECK(rootTransform->PresentationWorldPosition().X == doctest::Approx(3.0F));
+    CHECK(childTransform->PresentationWorldPosition().X == doctest::Approx(5.0F));
+}
+
 TEST_CASE("Hierarchy snapshots omit component payload serialization")
 {
     auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
@@ -456,6 +481,9 @@ TEST_CASE("Play mode retains the authored active camera and its transform")
     CHECK(runtimeCamera->ClearMode() == Keire::CameraClearMode::SolidColor);
     CHECK(runtimeCamera->ClearColor() == (Keire::Color{0.12F, 0.24F, 0.36F, 1.0F}));
     CHECK(runtimeTransform->LocalPosition() == (Keire::Vector3{3.0F, 4.0F, -8.0F}));
+    CHECK_NOTHROW(session->Update(0.0F, 0.5F));
+    CHECK_THROWS_AS(session->Update(0.0F, -0.01F), std::invalid_argument);
+    CHECK_THROWS_AS(session->Update(0.0F, 1.01F), std::invalid_argument);
 }
 
 TEST_CASE("Scene schema v1 migrates to canonical component schema v2")

@@ -1120,6 +1120,13 @@ private `AnimatorInstance` against the selected scene object's target skeleton a
 pose; teardown clears that pose. Transition visualization, pose/trajectory inspection, and profiling consume the same
 immutable debug snapshot as live playback.
 
+Animator schema 7 adds an explicit pose-source boundary. `AnimationGraph` retains the existing instance evaluation;
+`ProceduralHumanoid` owns deterministic fixed-step phase/state, prior/current local poses, terrain anchors, and
+profile/rig revisions. Gameplay submits value-only intent before physics, and the scene runtime combines it with the
+post-physics Character Controller result before solving. Both modes converge at managed IK, authored arm overrides,
+palette publication, and immutable diagnostics. `.keiremotionprofile` is a normalized asset boundary rather than
+component-owned tuning, so cooking, catalog dependencies, validation, and hot reload use the standard asset pipeline.
+
 ## Skeletal Deformation And Rig Authoring
 
 `SkeletonAsset`, `RigDefinitionAsset`, `SkinnedMeshAsset`, and `AnimationClipAsset` are independent immutable assets.
@@ -1192,6 +1199,13 @@ walkable-normal tests, and an up/forward/down stair transaction. Authored capsul
 Jolt receives the derived cylinder half-height. Ground state and resolved velocity are copied back to the component
 after stepping. Managed code receives only values through `CharacterControllerHandle`; no Jolt shape or body handle
 crosses the scripting boundary.
+
+Character Controllers and dynamic rigid bodies retain previous/current authoritative world samples after physics.
+Render updates interpolate a separate Transform presentation matrix; collision, scripts, and gameplay queries never
+read it implicitly. Child presentation composes the interpolated parent with the current local transform, keeping a
+camera target and skinned visual synchronized. Teleports explicitly reset interpolation, while body recreation, scene
+replacement, and Play initialization snap both samples. This bounded serial state belongs to `SceneRuntimeSession` and
+does not introduce a job-system or physics ownership dependency into Transform.
 
 ## Managed Scripting
 

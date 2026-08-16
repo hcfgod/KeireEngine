@@ -111,6 +111,8 @@ namespace KeireEditor
         virtual void PersistInspectorMaterialInstance(Keire::AssetId asset, std::span<const std::byte> bytes) = 0;
         virtual void PersistInspectorMaterialParameterCollection(Keire::AssetId asset,
                                                                  std::span<const std::byte> bytes) = 0;
+        virtual void PersistInspectorProceduralMotionProfile(Keire::AssetId asset,
+                                                             std::span<const std::byte> bytes) = 0;
         virtual void ImportInspectorAssets() = 0;
         virtual void PreviewInspectorManagedData(Keire::AssetId asset,
                                                  const Keire::ManagedDataDefinition& definition) = 0;
@@ -229,7 +231,9 @@ namespace KeireEditor
         Keire::AssetId m_EditingAsset;
         std::string m_AssetName;
         std::optional<Keire::MaterialParameterCollectionDefinition> m_MaterialParameterCollection;
+        std::optional<Keire::ProceduralMotionProfile> m_ProceduralMotionProfile;
         bool m_MaterialParameterCollectionDirty = false;
+        bool m_ProceduralMotionProfileDirty = false;
     };
 
     class InspectorPanel final

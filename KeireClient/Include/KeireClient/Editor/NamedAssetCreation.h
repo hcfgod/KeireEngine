@@ -11,6 +11,7 @@ namespace KeireEditor
         Scene,
         Material,
         AnimationGraph,
+        ProceduralMotionProfile,
         Script,
         ManagedAssembly,
         ManagedData,

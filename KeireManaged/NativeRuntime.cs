@@ -124,6 +124,22 @@ internal struct NativeAnimatorState
     internal byte Paused;
 }
 
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeProceduralLocomotionState
+{
+    internal Vector3 ActualWorldVelocity;
+    internal Vector3 GroundNormal;
+    internal float GaitPhase;
+    internal float Speed;
+    internal float VerticalSpeed;
+    internal float LandingIntensity;
+    internal byte State;
+    internal byte Quality;
+    internal byte Grounded;
+    internal byte LeftFootPlanted;
+    internal byte RightFootPlanted;
+}
+
 internal static unsafe class NativeRuntime
 {
     private static readonly object ManagedAssetGate = new();
@@ -320,6 +336,10 @@ internal static unsafe class NativeRuntime
     internal static delegate* unmanaged<ulong, ulong, ulong, byte> StopAnimatorIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, float, byte> SetAnimatorSpeedIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, float, byte> SetAnimatorFootGroundingWeightIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, Vector3, Vector3, Vector3, float, float, byte, byte>
+        SetProceduralLocomotionIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, NativeProceduralLocomotionState*, byte>
+        GetProceduralLocomotionStateIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, NativeAnimatorState*, byte> GetAnimatorStateIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte*, int, int> GetAnimatorStateNameIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, NativeString, NativeString, NativeString,
@@ -334,6 +354,9 @@ internal static unsafe class NativeRuntime
     internal static delegate* unmanaged<ulong, ulong, ulong, Vector3> GetLocalScaleIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Vector3, void> SetLocalScaleIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Vector3> GetWorldPositionIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, Vector3> GetPresentationWorldPositionIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, Quaternion> GetPresentationWorldRotationIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, void> ResetPresentationInterpolationIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Quaternion> GetWorldRotationIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Vector3, void> SetWorldPositionIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Quaternion, void> SetWorldRotationIcall;
@@ -681,6 +704,21 @@ internal static unsafe class NativeRuntime
     internal static void SetAnimatorFootGroundingWeight(Entity entity, float weight) =>
         RequireAnimatorResult(SetAnimatorFootGroundingWeightIcall(entity.World, entity.Id.High, entity.Id.Low, weight));
 
+    internal static void SetProceduralLocomotion(Entity entity, ProceduralLocomotionIntent intent) =>
+        RequireAnimatorResult(SetProceduralLocomotionIcall(
+            entity.World, entity.Id.High, entity.Id.Low, intent.DesiredWorldVelocity, intent.FacingWorldDirection,
+            intent.LookWorldDirection, intent.CrouchAmount, intent.RunBlend, intent.JumpRequested ? (byte)1 : (byte)0));
+
+    internal static ProceduralLocomotionState GetProceduralLocomotionState(Entity entity)
+    {
+        NativeProceduralLocomotionState state = default;
+        RequireAnimatorResult(GetProceduralLocomotionStateIcall(entity.World, entity.Id.High, entity.Id.Low, &state));
+        return new ProceduralLocomotionState(
+            (ProceduralMotionState)state.State, (ProceduralMotionQuality)state.Quality, state.ActualWorldVelocity,
+            state.GroundNormal, state.GaitPhase, state.Speed, state.VerticalSpeed, state.LandingIntensity,
+            state.Grounded != 0, state.LeftFootPlanted != 0, state.RightFootPlanted != 0);
+    }
+
     internal static AnimatorStateInfo GetAnimatorState(Entity entity)
     {
         NativeAnimatorState state = default;
@@ -784,6 +822,12 @@ internal static unsafe class NativeRuntime
         SetLocalScaleIcall(entity.World, entity.Id.High, entity.Id.Low, value);
     internal static Vector3 GetWorldPosition(Entity entity) =>
         GetWorldPositionIcall(entity.World, entity.Id.High, entity.Id.Low);
+    internal static Vector3 GetPresentationWorldPosition(Entity entity) =>
+        GetPresentationWorldPositionIcall(entity.World, entity.Id.High, entity.Id.Low);
+    internal static Quaternion GetPresentationWorldRotation(Entity entity) =>
+        GetPresentationWorldRotationIcall(entity.World, entity.Id.High, entity.Id.Low);
+    internal static void ResetPresentationInterpolation(Entity entity) =>
+        ResetPresentationInterpolationIcall(entity.World, entity.Id.High, entity.Id.Low);
     internal static void SetWorldPosition(Entity entity, Vector3 value) => SetWorldPositionIcall(entity.World,
                                                                                                  entity.Id.High,
                                                                                                  entity.Id.Low, value);

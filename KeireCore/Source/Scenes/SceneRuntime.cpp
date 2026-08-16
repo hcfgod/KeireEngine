@@ -433,6 +433,8 @@ namespace Keire
         m_Impl->Invoke("FixedUpdate", [&] { m_Impl->Runtime->FixedUpdate(fixedDeltaSeconds); });
         if (m_Impl->PlayState != ScenePlayState::Faulted)
             m_Impl->Invoke("Physics", [&] { m_Impl->StepPhysics(fixedDeltaSeconds); });
+        if (m_Impl->PlayState != ScenePlayState::Faulted)
+            m_Impl->Invoke("Procedural Animation", [&] { m_Impl->AdvanceProceduralAnimation(fixedDeltaSeconds); });
         return m_Impl->PlayState != ScenePlayState::Faulted;
     }
 
@@ -444,14 +446,22 @@ namespace Keire
             m_Impl->Invoke("FixedUpdate", [&] { m_Impl->Runtime->FixedUpdate(deltaSeconds); });
             if (m_Impl->PlayState != ScenePlayState::Faulted)
                 m_Impl->Invoke("Physics", [&] { m_Impl->StepPhysics(deltaSeconds); });
+            if (m_Impl->PlayState != ScenePlayState::Faulted)
+                m_Impl->Invoke("Procedural Animation", [&] { m_Impl->AdvanceProceduralAnimation(deltaSeconds); });
         }
     }
 
-    void SceneRuntimeSession::Update(const float deltaSeconds)
+    void SceneRuntimeSession::Update(const float deltaSeconds) { Update(deltaSeconds, 1.0F); }
+
+    void SceneRuntimeSession::Update(const float deltaSeconds, const float interpolationAlpha)
     {
         m_Impl->RequireOwner("Update");
+        if (!std::isfinite(interpolationAlpha) || interpolationAlpha < 0.0F || interpolationAlpha > 1.0F)
+            throw std::invalid_argument("Scene presentation interpolation alpha must be finite and in the range 0..1.");
+        m_Impl->PresentationInterpolationAlpha = interpolationAlpha;
         if (m_Impl->PlayState == ScenePlayState::Playing)
         {
+            m_Impl->ApplyPhysicsPresentationInterpolation(interpolationAlpha);
             m_Impl->Invoke("Update", [&] { m_Impl->Runtime->Update(deltaSeconds); });
             if (m_Impl->PlayState != ScenePlayState::Faulted)
                 m_Impl->Invoke("Animation", [&] { m_Impl->SynchronizeAnimation(deltaSeconds); });

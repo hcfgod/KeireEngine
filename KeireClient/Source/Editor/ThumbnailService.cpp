@@ -989,6 +989,12 @@ namespace KeireEditor
         }
         if (type == Keire::AudioMixerAsset::StaticType())
             return MakeMixerPreview({.Missing = missing}, width, height);
+        if (type == Keire::ProceduralMotionProfileAsset::StaticType())
+        {
+            auto result = MakeIcon(width, height, {25, 47, 48}, {75, 214, 190}, 'P', missing);
+            ApplyBadge(result, width, height, "PM");
+            return result;
+        }
         if (type == Keire::AnimationSourceAsset::StaticType() || type == Keire::AnimationClipAsset::StaticType())
             return MakeAnimationPreview({.Missing = missing}, width, height);
         return MakeIcon(width, height, {40, 44, 52}, {130, 142, 162}, 'X', missing);
@@ -1234,6 +1240,7 @@ namespace KeireEditor
         RegisterProvider(".flac", 1, MakeAudioPreview);
         RegisterProvider(".keireanim", 2, MakeAnimationPreview);
         RegisterProvider(".keireanimgraph", 1, icon({39, 31, 54}, {165, 126, 248}, 'A'));
+        RegisterProvider(".keiremotionprofile", 1, icon({25, 47, 48}, {75, 214, 190}, 'P'));
         RegisterProvider(".keireavatarmask", 1, icon({46, 37, 44}, {232, 150, 110}, 'A'));
         RegisterProvider(".keirerig", 1, icon({37, 43, 52}, {121, 187, 238}, 'R'));
         RegisterProvider(".keirephysicsmaterial", 1, icon({39, 43, 35}, {159, 206, 92}, 'P'));

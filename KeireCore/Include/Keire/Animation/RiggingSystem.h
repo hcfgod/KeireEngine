@@ -234,6 +234,7 @@ namespace Keire
         float PelvisSupportRadius = 0.0F;
         float PelvisRotationWeight = 0.0F;
         float MaximumPelvisRotationDegrees = 0.0F;
+        float PositionTolerance = 0.01F;
     };
 
     struct FootGroundingResult

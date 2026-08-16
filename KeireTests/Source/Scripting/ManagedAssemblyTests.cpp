@@ -1,3 +1,4 @@
+#include "Keire/Animation/ProceduralMotion.h"
 #include "Keire/ECS/Component.h"
 #include "Keire/ECS/Components/AudioComponents.h"
 #include "Keire/Jobs/JobSystem.h"
@@ -418,6 +419,11 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                   "[SerializeField] public bool DisableObserved = false; "
                   "[SerializeField] public bool AnimatorIkObserved = false; "
                   "[SerializeField] public float AnimatorIkWeight = -1.0f; "
+                  "[SerializeField] public bool AnimationEventObserved = false; "
+                  "[SerializeField] public string AnimationEventName = string.Empty; "
+                  "[SerializeField] public string AnimationEventText = string.Empty; "
+                  "[SerializeField] public bool ProceduralMotionEventObserved = false; "
+                  "[SerializeField] public byte ProceduralMotionEventState = 0; "
                   "protected override void Awake() { Speed += ReloadBonus; } "
                   "protected override void FixedUpdate() { ConsumedSpeed = Speed; "
                   "if (DisableThroughProperty) { DisableThroughProperty = false; Enabled = false; } "
@@ -461,6 +467,11 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                   "protected override void OnDisable() { DisableObserved = !Enabled; } "
                   "protected override void OnAnimatorIk(AnimationIkContext context) { "
                   "AnimatorIkObserved = true; AnimatorIkWeight = context.LayerWeight; } "
+                  "protected override void OnAnimationEvent(AnimationEvent animationEvent) { "
+                  "AnimationEventObserved = true; AnimationEventName = animationEvent.Name; "
+                  "AnimationEventText = animationEvent.Text; } "
+                  "protected override void OnProceduralMotionEvent(ProceduralMotionEvent motionEvent) { "
+                  "ProceduralMotionEventObserved = true; ProceduralMotionEventState = (byte)motionEvent.State; } "
                   "protected override void OnBeforeReload() { Speed += 1.0f; } "
                   "protected override void OnAfterReload() { Speed += 1.0f; } } "
                   "[StableComponentId(\"73616e64-626f-4078-8000-000000000096\")] "
@@ -635,6 +646,26 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     REQUIRE(ikResults.contains("AnimatorIkWeight"));
     CHECK(std::get<bool>(ikResults.at("AnimatorIkObserved")));
     CHECK(std::get<double>(ikResults.at("AnimatorIkWeight")) == doctest::Approx(0.625));
+
+    CHECK_NOTHROW(play->RuntimeScene()->DispatchAnimationEvent(
+        scriptedEntity.Id(), {"Procedural.StateChanged", 0.0F, 0, 0.0F, "Turn In Place"}));
+    const auto animationEventResults = registration->Serialize(*runtimeComponent);
+    REQUIRE(animationEventResults.contains("AnimationEventObserved"));
+    REQUIRE(animationEventResults.contains("AnimationEventName"));
+    REQUIRE(animationEventResults.contains("AnimationEventText"));
+    CHECK(std::get<bool>(animationEventResults.at("AnimationEventObserved")));
+    CHECK(std::get<std::string>(animationEventResults.at("AnimationEventName")) == "Procedural.StateChanged");
+    CHECK(std::get<std::string>(animationEventResults.at("AnimationEventText")) == "Turn In Place");
+
+    CHECK_NOTHROW(play->RuntimeScene()->DispatchProceduralMotionEvent(
+        scriptedEntity.Id(), {Keire::ProceduralMotionEventType::StateChanged, Keire::ProceduralFootSide::None,
+                              Keire::ProceduralMotionState::TurnInPlace, 0.25F, 0.5F}));
+    const auto proceduralEventResults = registration->Serialize(*runtimeComponent);
+    REQUIRE(proceduralEventResults.contains("ProceduralMotionEventObserved"));
+    REQUIRE(proceduralEventResults.contains("ProceduralMotionEventState"));
+    CHECK(std::get<bool>(proceduralEventResults.at("ProceduralMotionEventObserved")));
+    CHECK(std::get<std::int64_t>(proceduralEventResults.at("ProceduralMotionEventState")) ==
+          static_cast<std::int64_t>(Keire::ProceduralMotionState::TurnInPlace));
 
     REQUIRE(runtimeEntity.AddComponent<Keire::AudioSourceComponent>());
     const auto listener = runtimeEntity.AddComponent<Keire::AudioListenerComponent>();

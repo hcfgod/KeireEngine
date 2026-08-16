@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <chrono>
 #include <cmath>
@@ -1072,6 +1073,161 @@ namespace Keire
             bool RootMotion = false;
         };
 
+        using WeightedBlendTreeChildren = std::vector<std::pair<const AnimationBlendTreeChild*, float>>;
+
+        [[nodiscard]] double SquaredDistance(const Vector2 first, const Vector2 second) noexcept
+        {
+            const auto x = static_cast<double>(first.X) - static_cast<double>(second.X);
+            const auto y = static_cast<double>(first.Y) - static_cast<double>(second.Y);
+            return x * x + y * y;
+        }
+
+        [[nodiscard]] double OrientedArea(const Vector2 first, const Vector2 second, const Vector2 third) noexcept
+        {
+            const auto firstX = static_cast<double>(second.X) - static_cast<double>(first.X);
+            const auto firstY = static_cast<double>(second.Y) - static_cast<double>(first.Y);
+            const auto secondX = static_cast<double>(third.X) - static_cast<double>(first.X);
+            const auto secondY = static_cast<double>(third.Y) - static_cast<double>(first.Y);
+            return firstX * secondY - firstY * secondX;
+        }
+
+        [[nodiscard]] WeightedBlendTreeChildren
+        ResolveBlendTree2DWeights(const std::span<const AnimationBlendTreeChild> children, const Vector2 value)
+        {
+            constexpr double ExactPositionToleranceSquared = 1.0e-12;
+            constexpr double DegenerateAreaTolerance = 1.0e-12;
+            constexpr double BarycentricTolerance = 1.0e-7;
+            constexpr float MinimumWeight = 1.0e-6F;
+            constexpr std::size_t MaximumLocalChildren = 12;
+
+            std::vector<const AnimationBlendTreeChild*> sorted;
+            sorted.reserve(children.size());
+            for (const auto& child : children)
+                sorted.push_back(std::addressof(child));
+            std::ranges::sort(sorted, {}, &AnimationBlendTreeChild::Id);
+
+            for (const auto* child : sorted)
+                if (SquaredDistance(value, child->Position) <= ExactPositionToleranceSquared)
+                    return {{child, 1.0F}};
+            std::ranges::sort(sorted,
+                              [value](const auto* first, const auto* second)
+                              {
+                                  return std::tuple{SquaredDistance(value, first->Position), first->Id} <
+                                         std::tuple{SquaredDistance(value, second->Position), second->Id};
+                              });
+            // Runtime graphs allow hundreds of samples. Bound the simplex search to the nearest neighborhood so pose
+            // evaluation remains predictable while distant and opposing motions cannot influence the result.
+            if (sorted.size() > MaximumLocalChildren)
+                sorted.resize(MaximumLocalChildren);
+
+            struct TriangleCandidate
+            {
+                std::array<const AnimationBlendTreeChild*, 3> Children{};
+                std::array<double, 3> Weights{};
+                std::tuple<double, double, double> Score{};
+            };
+
+            TriangleCandidate bestTriangle;
+            bool foundTriangle = false;
+            for (std::size_t first = 0; first + 2 < sorted.size(); ++first)
+            {
+                for (std::size_t second = first + 1; second + 1 < sorted.size(); ++second)
+                {
+                    for (std::size_t third = second + 1; third < sorted.size(); ++third)
+                    {
+                        const auto& firstPosition = sorted[first]->Position;
+                        const auto& secondPosition = sorted[second]->Position;
+                        const auto& thirdPosition = sorted[third]->Position;
+                        const auto area = OrientedArea(firstPosition, secondPosition, thirdPosition);
+                        if (std::abs(area) <= DegenerateAreaTolerance)
+                            continue;
+
+                        std::array<double, 3> weights{OrientedArea(value, secondPosition, thirdPosition) / area,
+                                                      OrientedArea(value, thirdPosition, firstPosition) / area,
+                                                      OrientedArea(value, firstPosition, secondPosition) / area};
+                        if (std::ranges::any_of(weights,
+                                                [](const double weight) { return weight < -BarycentricTolerance; }))
+                            continue;
+
+                        const std::array<double, 3> distances{SquaredDistance(value, firstPosition),
+                                                              SquaredDistance(value, secondPosition),
+                                                              SquaredDistance(value, thirdPosition)};
+                        const auto score = std::tuple{*std::ranges::max_element(distances),
+                                                      distances[0] + distances[1] + distances[2], std::abs(area)};
+                        if (!foundTriangle || score < bestTriangle.Score)
+                        {
+                            bestTriangle = {{{sorted[first], sorted[second], sorted[third]}}, weights, score};
+                            foundTriangle = true;
+                        }
+                    }
+                }
+            }
+
+            WeightedBlendTreeChildren result;
+            if (foundTriangle)
+            {
+                double total = 0.0;
+                for (auto& weight : bestTriangle.Weights)
+                {
+                    weight = std::max(0.0, weight);
+                    total += weight;
+                }
+                for (std::size_t index = 0; index < bestTriangle.Children.size(); ++index)
+                {
+                    const auto weight = static_cast<float>(bestTriangle.Weights[index] / total);
+                    if (weight > MinimumWeight)
+                        result.emplace_back(bestTriangle.Children[index], weight);
+                }
+                return result;
+            }
+
+            struct SegmentCandidate
+            {
+                const AnimationBlendTreeChild* First = nullptr;
+                const AnimationBlendTreeChild* Second = nullptr;
+                double Amount = 0.0;
+                std::pair<double, double> Score{};
+            };
+
+            SegmentCandidate bestSegment;
+            bool foundSegment = false;
+            for (std::size_t first = 0; first + 1 < sorted.size(); ++first)
+            {
+                for (std::size_t second = first + 1; second < sorted.size(); ++second)
+                {
+                    const auto segmentX = static_cast<double>(sorted[second]->Position.X) -
+                                          static_cast<double>(sorted[first]->Position.X);
+                    const auto segmentY = static_cast<double>(sorted[second]->Position.Y) -
+                                          static_cast<double>(sorted[first]->Position.Y);
+                    const auto lengthSquared = segmentX * segmentX + segmentY * segmentY;
+                    if (lengthSquared <= ExactPositionToleranceSquared)
+                        continue;
+                    const auto valueX = static_cast<double>(value.X) - static_cast<double>(sorted[first]->Position.X);
+                    const auto valueY = static_cast<double>(value.Y) - static_cast<double>(sorted[first]->Position.Y);
+                    const auto amount = std::clamp((valueX * segmentX + valueY * segmentY) / lengthSquared, 0.0, 1.0);
+                    const Vector2 projected{
+                        static_cast<float>(static_cast<double>(sorted[first]->Position.X) + segmentX * amount),
+                        static_cast<float>(static_cast<double>(sorted[first]->Position.Y) + segmentY * amount)};
+                    const auto score = std::pair{SquaredDistance(value, projected), lengthSquared};
+                    if (!foundSegment || score < bestSegment.Score)
+                    {
+                        bestSegment = {sorted[first], sorted[second], amount, score};
+                        foundSegment = true;
+                    }
+                }
+            }
+
+            if (!foundSegment)
+                return {{sorted.front(), 1.0F}};
+            const auto firstWeight = static_cast<float>(1.0 - bestSegment.Amount);
+            const auto secondWeight = static_cast<float>(bestSegment.Amount);
+            if (firstWeight > MinimumWeight)
+                result.emplace_back(bestSegment.First, firstWeight);
+            if (secondWeight > MinimumWeight)
+                result.emplace_back(bestSegment.Second, secondWeight);
+            return result;
+        }
+
         [[nodiscard]] std::vector<WeightedClip>
         ResolveMotion(const AnimationStateDefinition& state,
                       const std::function<float(std::string_view)>& floatParameter,
@@ -1106,30 +1262,7 @@ namespace Keire
             else if (state.Motion.Type == AnimationMotionType::BlendTree2D)
             {
                 const Vector2 value{floatParameter(state.Motion.ParameterX), floatParameter(state.Motion.ParameterY)};
-                float total = 0.0F;
-                std::vector<const AnimationBlendTreeChild*> sorted;
-                sorted.reserve(state.Motion.Children.size());
-                for (const auto& child : state.Motion.Children)
-                    sorted.push_back(std::addressof(child));
-                std::ranges::sort(sorted, {}, &AnimationBlendTreeChild::Id);
-                for (const auto* child : sorted)
-                {
-                    const auto x = value.X - child->Position.X;
-                    const auto y = value.Y - child->Position.Y;
-                    const auto distanceSquared = x * x + y * y;
-                    if (distanceSquared <= 1.0e-12F)
-                    {
-                        weightedChildren = {{child, 1.0F}};
-                        total = 1.0F;
-                        break;
-                    }
-                    const auto weight = 1.0F / distanceSquared;
-                    weightedChildren.emplace_back(child, weight);
-                    total += weight;
-                }
-                if (weightedChildren.size() > 1)
-                    for (auto& [child, weight] : weightedChildren)
-                        weight /= total;
+                weightedChildren = ResolveBlendTree2DWeights(state.Motion.Children, value);
             }
 
             std::vector<WeightedClip> result;
@@ -1200,6 +1333,8 @@ namespace Keire
             result.Duration = MotionDuration(clips);
             result.Pose.resize(bones.size());
             std::vector<Vector4> rotations(bones.size());
+            std::vector<Quaternion> rotationReferences(bones.size());
+            std::vector<bool> hasRotationReference(bones.size());
             for (std::size_t bone = 0; bone < bones.size(); ++bone)
             {
                 result.Pose[bone].Translation = {};
@@ -1223,10 +1358,27 @@ namespace Keire
                     result.Pose[bone].Scale.X += pose[bone].Scale.X * weighted.Weight;
                     result.Pose[bone].Scale.Y += pose[bone].Scale.Y * weighted.Weight;
                     result.Pose[bone].Scale.Z += pose[bone].Scale.Z * weighted.Weight;
-                    rotations[bone].X += pose[bone].Rotation.X * weighted.Weight;
-                    rotations[bone].Y += pose[bone].Rotation.Y * weighted.Weight;
-                    rotations[bone].Z += pose[bone].Rotation.Z * weighted.Weight;
-                    rotations[bone].W += pose[bone].Rotation.W * weighted.Weight;
+                    auto rotation = pose[bone].Rotation;
+                    if (weighted.Weight > 0.0F)
+                    {
+                        if (!hasRotationReference[bone])
+                        {
+                            rotationReferences[bone] = rotation;
+                            hasRotationReference[bone] = true;
+                        }
+                        else
+                        {
+                            const auto& reference = rotationReferences[bone];
+                            const auto dot = reference.X * rotation.X + reference.Y * rotation.Y +
+                                             reference.Z * rotation.Z + reference.W * rotation.W;
+                            if (dot < 0.0F)
+                                rotation = {-rotation.X, -rotation.Y, -rotation.Z, -rotation.W};
+                        }
+                    }
+                    rotations[bone].X += rotation.X * weighted.Weight;
+                    rotations[bone].Y += rotation.Y * weighted.Weight;
+                    rotations[bone].Z += rotation.Z * weighted.Weight;
+                    rotations[bone].W += rotation.W * weighted.Weight;
                 }
                 result.Weights.push_back({weighted.Id, weighted.Asset, weighted.Weight});
                 if (weighted.Weight > 0.0F)

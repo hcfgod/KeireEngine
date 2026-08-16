@@ -1,5 +1,6 @@
 #include "Keire/ECS/Component.h"
 
+#include "Keire/Animation/ProceduralMotion.h"
 #include "Keire/ECS/Components/AnimatorComponent.h"
 #include "Keire/ECS/Components/AudioComponents.h"
 #include "Keire/ECS/Components/CameraComponent.h"
@@ -151,6 +152,12 @@ namespace Keire
     {
         if (m_Impl->LifecycleActive && !m_Impl->Destroyed)
             OnAnimationEvent(event);
+    }
+
+    void Component::InvokeProceduralMotionEvent(const ProceduralMotionEvent& event)
+    {
+        if (m_Impl->LifecycleActive && !m_Impl->Destroyed)
+            OnProceduralMotionEvent(event);
     }
 
     void Component::InvokeAnimatorIk(const AnimationIkMessage& context)

@@ -1,5 +1,6 @@
 #include "Keire/Scenes/Scene.h"
 
+#include "Keire/Animation/ProceduralMotion.h"
 #include "Keire/ECS/Components/CharacterControllerComponent.h"
 #include "Keire/ECS/Components/ColliderComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
@@ -1207,6 +1208,29 @@ namespace Keire
             FlushDeferred();
         }
 
+        void SceneState::DispatchProceduralMotionEvent(const EntityId entity, const ProceduralMotionEvent& event)
+        {
+            RequireOwner("DispatchProceduralMotionEvent");
+            if (!m_Impl->Playing || !entity || event.Type > ProceduralMotionEventType::StateChanged ||
+                event.Foot > ProceduralFootSide::Right || event.State > ProceduralMotionState::Landing ||
+                !std::isfinite(event.Phase) || event.Phase < 0.0F || event.Phase > 1.0F ||
+                !std::isfinite(event.Intensity) || event.Intensity < 0.0F || !Math::IsFinite(event.ContactPosition) ||
+                !Math::IsFinite(event.ContactNormal))
+            {
+                throw std::invalid_argument("Procedural motion event dispatch arguments are invalid.");
+            }
+            auto* record = m_Impl->Find(entity);
+            if (!record || !ActiveInHierarchy(entity))
+                return;
+            m_Impl->Traverse(
+                [&]
+                {
+                    for (const auto& component : record->Components)
+                        component->InvokeProceduralMotionEvent(event);
+                });
+            FlushDeferred();
+        }
+
         void SceneState::DispatchAnimatorIk(const EntityId entity, const AnimationIkMessage& context)
         {
             RequireOwner("DispatchAnimatorIk");
@@ -1442,6 +1466,10 @@ namespace Keire
     void Scene::DispatchAnimationEvent(const EntityId entity, const AnimationEventMessage& event)
     {
         m_Impl->State->DispatchAnimationEvent(entity, event);
+    }
+    void Scene::DispatchProceduralMotionEvent(const EntityId entity, const ProceduralMotionEvent& event)
+    {
+        m_Impl->State->DispatchProceduralMotionEvent(entity, event);
     }
     void Scene::DispatchAnimatorIk(const EntityId entity, const AnimationIkMessage& context)
     {

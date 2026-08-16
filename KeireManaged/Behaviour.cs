@@ -6,6 +6,25 @@ namespace Keire;
 public readonly record struct CollisionContact(Entity Other, Vector3 Point, Vector3 Normal, float Impulse, bool Trigger);
 public readonly record struct AnimationEvent(string Name, float NormalizedTime, int Integer, float Scalar, string Text);
 public readonly record struct AnimationIkContext(float LayerWeight);
+public enum ProceduralMotionEventType : byte
+{
+    FootLift,
+    FootPlant,
+    Takeoff,
+    Apex,
+    Land,
+    StateChanged
+}
+public enum ProceduralFootSide : byte
+{
+    None,
+    Left,
+    Right
+}
+public readonly record struct ProceduralMotionEvent(ProceduralMotionEventType Type, ProceduralFootSide Foot,
+                                                     ProceduralMotionState State, float Phase, float Intensity,
+                                                     Vector3 ContactPosition, Vector3 ContactNormal, Entity Support,
+                                                     AssetId PhysicsMaterial);
 
 internal static class BehaviourRegistry
 {
@@ -101,6 +120,8 @@ public abstract class Behaviour
     private const uint UpdateCallback = 1U << 1;
     private const uint LateUpdateCallback = 1U << 2;
     private const uint AnimatorIkCallback = 1U << 3;
+    private const uint AnimationEventCallback = 1U << 4;
+    private const uint ProceduralMotionEventCallback = 1U << 5;
 
     protected virtual void Awake() { }
     protected virtual void OnEnable() { }
@@ -117,6 +138,7 @@ public abstract class Behaviour
     protected virtual void OnTriggerStay(CollisionContact contact) { }
     protected virtual void OnTriggerExit(CollisionContact contact) { }
     protected virtual void OnAnimationEvent(AnimationEvent animationEvent) { }
+    protected virtual void OnProceduralMotionEvent(ProceduralMotionEvent motionEvent) { }
     protected virtual void OnAnimatorIk(AnimationIkContext context) { }
     protected virtual void OnBeforeReload() { }
     protected virtual void OnAfterReload() { }
@@ -142,6 +164,12 @@ public abstract class Behaviour
                 if (method.Name == nameof(OnAnimatorIk) && parameters.Length == 1 &&
                     parameters[0].ParameterType == typeof(AnimationIkContext))
                     result |= AnimatorIkCallback;
+                else if (method.Name == nameof(OnAnimationEvent) && parameters.Length == 1 &&
+                         parameters[0].ParameterType == typeof(AnimationEvent))
+                    result |= AnimationEventCallback;
+                else if (method.Name == nameof(OnProceduralMotionEvent) && parameters.Length == 1 &&
+                         parameters[0].ParameterType == typeof(ProceduralMotionEvent))
+                    result |= ProceduralMotionEventCallback;
                 else if (parameters.Length != 0)
                     continue;
                 else if (method.Name == nameof(FixedUpdate))
@@ -211,6 +239,15 @@ public abstract class Behaviour
             true);
     public void RuntimeAnimatorIk(float layerWeight) =>
         InvokeWithContext(() => OnAnimatorIk(new AnimationIkContext(layerWeight)), true);
+    public void RuntimeProceduralMotionEvent(byte type, byte foot, byte state, float phase, float intensity,
+                                             Vector3 contactPosition, Vector3 contactNormal, ulong supportHigh,
+                                             ulong supportLow, ulong materialHigh, ulong materialLow) =>
+        InvokeWithContext(
+            () => OnProceduralMotionEvent(new ProceduralMotionEvent(
+                (ProceduralMotionEventType)type, (ProceduralFootSide)foot, (ProceduralMotionState)state, phase,
+                intensity, contactPosition, contactNormal,
+                new Entity(Entity.World, new EntityId(supportHigh, supportLow)), new AssetId(materialHigh, materialLow))),
+            true);
     public void RuntimePhysicsContact(byte phase, byte trigger, ulong otherHigh, ulong otherLow, Vector3 point,
                                       Vector3 normal, float impulse)
     {

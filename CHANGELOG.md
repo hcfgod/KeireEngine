@@ -5,6 +5,22 @@ versions.
 
 ## Unreleased
 
+- Added a zero-clip `ProceduralHumanoid` Animator pose source, normalized `.keiremotionprofile` assets, managed
+  fixed-step locomotion intent/state/events, terrain-aware planted-foot and airborne posing, quality tiers, and
+  presentation-transform interpolation. Existing Animators migrate to graph mode unchanged; the Vanguard showcase now
+  uses the grounded-armored procedural profile with its imported heading correction isolated on the visual hierarchy.
+- Fixed procedural humanoid feet being driven by grounding during their swing phase. Gait cadence now derives natural
+  step travel from realized speed, diagonal strides remain normalized, armored stances stay wider, sole clearance no
+  longer causes visible hovering, and an unsupported ledge foot relaxes downward without moving the character capsule.
+- Fixed a Play Mode crash when procedural state-change animation events crossed the Coral boundary. Managed string
+  arguments now use Coral-owned native strings, and animation/procedural events skip behaviours that do not override
+  their corresponding callback.
+- Fixed 2D animation blend trees mixing every distant sample into a pose. Runtime evaluation now selects a bounded
+  local simplex, projects parameters outside the sample hull onto the nearest local segment, and aligns quaternion
+  signs before accumulating rotations so equivalent clip rotations cannot cancel into a malformed pose.
+- Added explicit animation-motion import modes. Physics/script-driven characters can now bake semantic pelvis/root
+  translation horizontally or on all axes, preventing imported locomotion and jump takes from pulling the rendered
+  character away from its controller capsule while preserving the existing root-motion default.
 - Fixed Character Controller ground-stick motion generating downhill drift on walkable slopes and capsule edges.
   Grounded controllers now snap across bounded walkable descents without catching upward jumps, while automatic foot
   grounding can shift the pelvis toward a single supported foot at a ledge instead of requiring two contacts.
@@ -138,7 +154,9 @@ versions.
   property now carries its stable serialized key as a hidden widget identity.
 - Fixed foot grounding on scaled imported characters. World-space sole offsets and pelvis-adjustment limits are now
   converted into model space before the bilateral IK solve, so uneven terrain bends the legs and compensates the hips
-  consistently for rigs such as the 0.01-scale Vanguard.
+  consistently for rigs such as the 0.01-scale Vanguard. Reach diagnostics now use a caller-configurable model-space
+  tolerance derived from 1 cm in world space, and procedural idle retains both planted contacts instead of clearing
+  them when gait weight settles to zero.
 - Changed Marketplace **Import into Project** to open a verified preflight review before writing files. The modal lists
   install, replace, reuse, keep-local, and unresolved-conflict actions and enables confirmation only for a valid plan.
 - Fixed Editor marketplace Asset Import terminating with a CoreCLR stack-overflow report. Archive and conflict hashing

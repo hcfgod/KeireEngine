@@ -73,6 +73,7 @@ namespace Keire::Detail
         void Update(float deltaSeconds);
         void LateUpdate();
         void DispatchAnimationEvent(EntityId entity, const AnimationEventMessage& event);
+        void DispatchProceduralMotionEvent(EntityId entity, const ProceduralMotionEvent& event);
         void DispatchAnimatorIk(EntityId entity, const AnimationIkMessage& context);
         void DispatchPhysicsContact(EntityId entity, PhysicsContactPhase phase, const PhysicsContactMessage& contact);
         void EndPlay() noexcept;

@@ -247,7 +247,7 @@ namespace Keire
         {
             Vector3 position;
             if (const auto transform = entity.GetComponent<TransformComponent>())
-                position = transform->WorldPosition();
+                position = transform->PresentationWorldPosition();
             auto result = source.PlaybackRequest(std::move(clip), position);
             if (!result.Mixer)
                 result.Mixer = DefaultMixer;
@@ -624,9 +624,9 @@ namespace Keire
                 AudioListenerState state;
                 if (const auto transform = entity.GetComponent<TransformComponent>())
                 {
-                    state.Position = transform->WorldPosition();
-                    state.Forward = Math::TransformDirection(transform->WorldMatrix(), {0.0F, 0.0F, -1.0F});
-                    state.Up = Math::TransformDirection(transform->WorldMatrix(), {0.0F, 1.0F, 0.0F});
+                    state.Position = transform->PresentationWorldPosition();
+                    state.Forward = Math::TransformDirection(transform->PresentationWorldMatrix(), {0.0F, 0.0F, -1.0F});
+                    state.Up = Math::TransformDirection(transform->PresentationWorldMatrix(), {0.0F, 1.0F, 0.0F});
                 }
                 state.Gain = listener->Gain();
                 Audio->SetListener(state);
@@ -655,9 +655,10 @@ namespace Keire
                     AudioListenerState state;
                     if (const auto transform = selectedCamera.GetComponent<TransformComponent>())
                     {
-                        state.Position = transform->WorldPosition();
-                        state.Forward = Math::TransformDirection(transform->WorldMatrix(), {0.0F, 0.0F, -1.0F});
-                        state.Up = Math::TransformDirection(transform->WorldMatrix(), {0.0F, 1.0F, 0.0F});
+                        state.Position = transform->PresentationWorldPosition();
+                        state.Forward =
+                            Math::TransformDirection(transform->PresentationWorldMatrix(), {0.0F, 0.0F, -1.0F});
+                        state.Up = Math::TransformDirection(transform->PresentationWorldMatrix(), {0.0F, 1.0F, 0.0F});
                     }
                     Audio->SetListener(state);
                     listenerPosition = state.Position;
@@ -677,7 +678,7 @@ namespace Keire
                     const auto zoneMixer = zone->Mixer() ? zone->Mixer() : DefaultMixer;
                     if (!entity.ActiveInHierarchy() || !zone->Enabled() || !zoneMixer || !transform)
                         continue;
-                    const auto world = transform->WorldMatrix();
+                    const auto world = transform->PresentationWorldMatrix();
                     const auto localPosition = Math::TransformPoint(Math::Inverse(world), listenerPosition);
                     float outsideDistance = 0.0F;
                     if (zone->Shape() == AudioReverbZoneShape::Sphere)

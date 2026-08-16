@@ -49,6 +49,52 @@ namespace Keire
         constexpr std::size_t MaximumTextureDimension = std::size_t{16} * 1024U;
         constexpr std::size_t MaximumTextureBytes = std::size_t{1024} * 1024U * 1024U;
 
+        enum class ImportedAnimationMotion : std::uint8_t
+        {
+            RootMotion,
+            Authored,
+            InPlaceHorizontal,
+            InPlace
+        };
+
+        [[nodiscard]] ImportedAnimationMotion ParseImportedAnimationMotion(const std::string_view value)
+        {
+            if (value == "rootMotion")
+                return ImportedAnimationMotion::RootMotion;
+            if (value == "authored")
+                return ImportedAnimationMotion::Authored;
+            if (value == "inPlaceHorizontal")
+                return ImportedAnimationMotion::InPlaceHorizontal;
+            if (value == "inPlace")
+                return ImportedAnimationMotion::InPlace;
+            throw std::invalid_argument(
+                "Animation motion must be rootMotion, authored, inPlaceHorizontal, or inPlace.");
+        }
+
+        [[nodiscard]] bool BakeImportedAnimationInPlace(std::vector<AnimationTrack>& tracks, const RigDefinition& rig,
+                                                        const bool lockVertical)
+        {
+            auto motionBone = std::ranges::find(rig.Bones, RigBoneSemantic::Pelvis, &RigBoneDefinition::Semantic);
+            if (motionBone == rig.Bones.end())
+                motionBone = std::ranges::find(rig.Bones, RigBoneSemantic::Root, &RigBoneDefinition::Semantic);
+            if (motionBone == rig.Bones.end())
+                return false;
+            const auto motionBoneIndex = static_cast<std::uint32_t>(std::distance(rig.Bones.begin(), motionBone));
+            const auto motionTrack = std::ranges::find(tracks, motionBoneIndex, &AnimationTrack::Bone);
+            if (motionTrack == tracks.end() || motionTrack->Keys.empty())
+                return false;
+
+            const auto reference = motionTrack->Keys.front().Value.Translation;
+            for (auto& key : motionTrack->Keys)
+            {
+                key.Value.Translation.X = reference.X;
+                key.Value.Translation.Z = reference.Z;
+                if (lockVertical)
+                    key.Value.Translation.Y = reference.Y;
+            }
+            return true;
+        }
+
         [[nodiscard]] std::string Lowercase(std::string value)
         {
             std::ranges::transform(value, value.begin(), [](const unsigned char character)
@@ -1085,7 +1131,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.Mesh";
-        result.Version = 14;
+        result.Version = 15;
         result.Type = MeshAsset::StaticType();
         result.CompatibleTypes = {AnimationSourceAsset::StaticType()};
         result.Extensions = {".obj", ".fbx", ".gltf", ".glb", ".keiremesh"};
@@ -1106,6 +1152,8 @@ namespace Keire
             const auto requestedSkinning = stringSetting("skinningMethod", "linearBlend");
             const auto requestedInfluences = stringSetting("maximumInfluences", "4") == "8" ? 8 : 4;
             const auto requestedCompression = stringSetting("animationCompression", "balanced");
+            const auto requestedAnimationMotion =
+                ParseImportedAnimationMotion(stringSetting("animationMotion", "rootMotion"));
             if (context.SourcePath.extension() == ".keiremesh")
             {
                 const auto mesh = MeshAsset::Decode(bytes);
@@ -1653,6 +1701,19 @@ namespace Keire
                     auto name = std::string(animation->mName.C_Str());
                     if (name.empty())
                         name = "Animation " + std::to_string(animationIndex + 1U);
+                    if (requestedAnimationMotion == ImportedAnimationMotion::InPlaceHorizontal ||
+                        requestedAnimationMotion == ImportedAnimationMotion::InPlace)
+                    {
+                        const auto baked = BakeImportedAnimationInPlace(
+                            tracks, embeddedRig, requestedAnimationMotion == ImportedAnimationMotion::InPlace);
+                        output.Diagnostics.push_back(
+                            {baked ? AssetDiagnosticSeverity::Information : AssetDiagnosticSeverity::Warning,
+                             context.RelativePath, 0, 0,
+                             baked
+                                 ? "Baked animation '" + name + "' in place using its semantic motion bone."
+                                 : "Animation '" + name +
+                                       "' requested in-place motion but has no animated semantic pelvis/root track."});
+                    }
                     const auto compressionPreset = requestedCompression == "none" ? AnimationCompressionPreset::Disabled
                                                    : requestedCompression == "light" ? AnimationCompressionPreset::Light
                                                    : requestedCompression == "aggressive"
@@ -1675,12 +1736,14 @@ namespace Keire
                     tracks = std::move(compressed.Tracks);
                     const auto key = "animation/" + name + "/" + std::to_string(animationIndex);
                     const auto clipId = context.ResolveSubAssetId(key);
-                    output.SubAssets.push_back({clipId,
-                                                AnimationClipAsset::StaticType(),
-                                                key,
-                                                name,
-                                                AnimationClipAsset::Encode(skeletonId, duration, tracks, {}, true),
-                                                {skeletonId}});
+                    output.SubAssets.push_back(
+                        {clipId,
+                         AnimationClipAsset::StaticType(),
+                         key,
+                         name,
+                         AnimationClipAsset::Encode(skeletonId, duration, tracks, {},
+                                                    requestedAnimationMotion == ImportedAnimationMotion::RootMotion),
+                         {skeletonId}});
                     animationTakes.push_back({clipId, name, duration});
                 }
                 if (animationSource)
@@ -2011,7 +2074,16 @@ namespace Keire
                                  {},
                                  {},
                                  1.0,
-                                 {"none", "light", "balanced", "aggressive"}}};
+                                 {"none", "light", "balanced", "aggressive"}},
+                                {"animationMotion",
+                                 "Animation Motion",
+                                 "Animation",
+                                 AssetImportOptionKind::Choice,
+                                 std::string("rootMotion"),
+                                 {},
+                                 {},
+                                 1.0,
+                                 {"rootMotion", "authored", "inPlaceHorizontal", "inPlace"}}};
         return result;
     }
 

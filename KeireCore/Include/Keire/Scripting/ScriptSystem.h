@@ -320,7 +320,8 @@ namespace Keire
         Destroy,
         BeforeReload,
         AfterReload,
-        AnimatorIk
+        AnimatorIk,
+        ProceduralMotionEvent
     };
 
     struct ManagedCallbackMetric

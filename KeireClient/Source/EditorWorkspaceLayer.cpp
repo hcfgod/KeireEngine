@@ -453,6 +453,29 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
             return editor.EditChoice(property.DisplayName, *projection, choices);
         });
     m_PropertyDrawers->RegisterOverride(
+        Keire::AnimatorComponent::StaticType(), "poseSource",
+        [](KeireEditor::IPropertyEditor& editor, const Keire::ComponentProperty& property,
+           Keire::ComponentPropertyValue& value)
+        {
+            auto* source = std::get_if<std::int64_t>(&value);
+            if (!source)
+                throw std::invalid_argument("Animator pose-source metadata must serialize an Integer.");
+            constexpr std::array choices{std::string_view("Animation Graph"), std::string_view("Procedural Humanoid")};
+            return editor.EditChoice(property.DisplayName, *source, choices);
+        });
+    m_PropertyDrawers->RegisterOverride(
+        Keire::AnimatorComponent::StaticType(), "proceduralQuality",
+        [](KeireEditor::IPropertyEditor& editor, const Keire::ComponentProperty& property,
+           Keire::ComponentPropertyValue& value)
+        {
+            auto* quality = std::get_if<std::int64_t>(&value);
+            if (!quality)
+                throw std::invalid_argument("Animator procedural-quality metadata must serialize an Integer.");
+            constexpr std::array choices{std::string_view("Auto"), std::string_view("High"), std::string_view("Medium"),
+                                         std::string_view("Low")};
+            return editor.EditChoice(property.DisplayName, *quality, choices);
+        });
+    m_PropertyDrawers->RegisterOverride(
         Keire::CameraComponent::StaticType(), "clearMode",
         [](KeireEditor::IPropertyEditor& editor, const Keire::ComponentProperty& property,
            Keire::ComponentPropertyValue& value)
@@ -1087,7 +1110,8 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
     if (m_SceneDocument->PlaySession())
     {
         Keire::ProfileScope playUpdate(Owner().GetProfiler(), Keire::ProfileCategory::Scripting, "Play update");
-        m_SceneDocument->PlaySession()->Update(static_cast<float>(time.DeltaTime().Seconds()));
+        m_SceneDocument->PlaySession()->Update(static_cast<float>(time.DeltaTime().Seconds()),
+                                               static_cast<float>(time.InterpolationAlpha()));
         if (m_SceneDocument->PlaySession()->State() == Keire::ScenePlayState::Faulted && !m_PlayFaultReported)
         {
             const auto diagnostic = m_SceneDocument->PlaySession()->Diagnostic();

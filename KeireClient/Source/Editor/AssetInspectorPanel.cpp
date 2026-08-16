@@ -1,6 +1,7 @@
 #include "KeireClient/Editor/EditorPanels.h"
 
 #include "KeireClient/Editor/AssetPicker.h"
+#include "KeireClient/Editor/AuthoringWidgets.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/InspectorPropertyEditor.h"
 #include "KeireClient/Editor/ManagedDataInspectorPanel.h"
@@ -64,7 +65,9 @@ void KeireEditor::AssetInspectorPanel::ClearState() noexcept
     m_EditingAsset = {};
     m_AssetName.clear();
     m_MaterialParameterCollection.reset();
+    m_ProceduralMotionProfile.reset();
     m_MaterialParameterCollectionDirty = false;
+    m_ProceduralMotionProfileDirty = false;
     m_ManagedDataInspector->Clear();
 }
 
@@ -98,7 +101,9 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
         m_EditingAsset = record->Id;
         m_AssetName = record->RelativePath.filename().string();
         m_MaterialParameterCollection.reset();
+        m_ProceduralMotionProfile.reset();
         m_MaterialParameterCollectionDirty = false;
+        m_ProceduralMotionProfileDirty = false;
     }
     ui.Text(record->RelativePath.generic_string());
     ui.TextColored(theme.MutedText, "Asset ID");
@@ -168,6 +173,145 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
             m_Controller.ImportInspectorAssets();
         if (!assetStatus.empty())
             ui.TextColored(theme.MutedText, assetStatus);
+    }
+    else if (record->Type == Keire::ProceduralMotionProfileAsset::StaticType())
+    {
+        ui.Separator();
+        ui.TextColored(theme.Accent, "PROCEDURAL MOTION PROFILE");
+        ui.Text("Normalized zero-clip humanoid gait, grounding, airborne, and response settings.");
+        try
+        {
+            const auto sourceRoot = database->Specification().ProjectRoot / database->Specification().SourceDirectory;
+            const auto source = sourceRoot / record->RelativePath;
+            if (!m_ProceduralMotionProfile)
+                m_ProceduralMotionProfile = Keire::ProceduralMotionProfileAsset::Decode(ReadBytes(source))->Profile();
+            auto& profile = *m_ProceduralMotionProfile;
+            const auto scalar = [&](const std::string_view label, float& value, const double step, const double minimum,
+                                    const double maximum)
+            {
+                double candidate = value;
+                if (ui.DragScalar(label, candidate, step, minimum, maximum))
+                {
+                    value = static_cast<float>(candidate);
+                    m_ProceduralMotionProfileDirty = true;
+                }
+            };
+
+            if (auto gait = ui.BeginTreeNode("Gait", true); gait)
+            {
+                scalar("Walk Speed", profile.WalkSpeed, 0.05, 0.01, 100.0);
+                scalar("Sprint Speed", profile.SprintSpeed, 0.05, 0.01, 100.0);
+                scalar("Walk Cadence", profile.WalkCadence, 0.01, 0.05, 10.0);
+                scalar("Sprint Cadence", profile.SprintCadence, 0.01, 0.05, 12.0);
+                scalar("Stride Length / Leg", profile.StrideLengthRatio, 0.005, 0.01, 2.0);
+                scalar("Lateral Stride / Leg", profile.LateralStrideRatio, 0.005, 0.01, 2.0);
+                scalar("Backward Stride / Leg", profile.BackwardStrideRatio, 0.005, 0.01, 2.0);
+                scalar("Foot Spacing / Leg", profile.FootSpacingRatio, 0.005, 0.01, 1.0);
+                scalar("Minimum Movement Speed", profile.MinimumMovementSpeed, 0.01, 0.0, 5.0);
+                scalar("Stop Settle Time", profile.StopSettleTime, 0.01, 0.0, 2.0);
+                scalar("Turn Threshold (degrees/s)", profile.TurnInPlaceThresholdDegrees, 1.0, 0.0, 180.0);
+                scalar("Turn Step (degrees)", profile.TurnStepDegrees, 1.0, 1.0, 180.0);
+            }
+            if (auto body = ui.BeginTreeNode("Body and Upper Body", false); body)
+            {
+                scalar("Pelvis Bob / Leg", profile.PelvisBobRatio, 0.001, 0.0, 0.25);
+                scalar("Pelvis Sway / Leg", profile.PelvisSwayRatio, 0.001, 0.0, 0.25);
+                scalar("Crouch Depth / Leg", profile.CrouchDepthRatio, 0.005, 0.0, 0.6);
+                scalar("Acceleration Lean", profile.MaximumAccelerationLeanDegrees, 0.5, 0.0, 45.0);
+                scalar("Turn Lean", profile.MaximumTurnLeanDegrees, 0.5, 0.0, 45.0);
+                scalar("Spine Counter Rotation", profile.SpineCounterRotationDegrees, 0.5, 0.0, 45.0);
+                scalar("Arm Rest Drop", profile.ArmRestDropDegrees, 0.5, 0.0, 90.0);
+                scalar("Arm Swing", profile.ArmSwingDegrees, 0.5, 0.0, 90.0);
+                scalar("Elbow Bend", profile.ElbowBendDegrees, 0.5, 0.0, 150.0);
+                scalar("Breathing Amplitude", profile.BreathingAmplitudeDegrees, 0.05, 0.0, 15.0);
+                scalar("Breathing Frequency", profile.BreathingFrequency, 0.01, 0.0, 5.0);
+            }
+            if (auto grounding = ui.BeginTreeNode("Grounding and Joint Limits", true); grounding)
+            {
+                scalar("Probe Height / Stature", profile.ProbeHeightRatio, 0.005, 0.01, 2.0);
+                scalar("Probe Distance / Stature", profile.ProbeDistanceRatio, 0.005, 0.01, 3.0);
+                scalar("Sole Offset / Stature", profile.SoleOffsetRatio, 0.001, 0.0, 0.25);
+                scalar("Vertical Pelvis Range / Stature", profile.MaximumPelvisAdjustmentRatio, 0.005, 0.0, 1.0);
+                scalar("Horizontal Pelvis Range / Stature", profile.MaximumHorizontalPelvisAdjustmentRatio, 0.005, 0.0,
+                       1.0);
+                scalar("Plant Distance / Stature", profile.PlantDistanceRatio, 0.002, 0.0, 0.5);
+                scalar("Release Distance / Stature", profile.ReleaseDistanceRatio, 0.002, 0.0, 1.0);
+                scalar("Step Clearance / Leg", profile.StepClearanceRatio, 0.005, 0.0, 1.0);
+                scalar("Maximum Slope", profile.MaximumSlopeDegrees, 0.5, 0.0, 89.0);
+                scalar("Maximum Ankle Slope", profile.MaximumAnkleSlopeDegrees, 0.5, 0.0, 89.0);
+                scalar("Minimum Knee Bend", profile.MinimumKneeBendDegrees, 0.5, 0.0, 90.0);
+                scalar("Maximum Knee Bend", profile.MaximumKneeBendDegrees, 0.5, 0.0, 179.0);
+            }
+            if (auto airborne = ui.BeginTreeNode("Airborne and Landing", false); airborne)
+            {
+                scalar("Takeoff Compression / Leg", profile.TakeoffCompressionRatio, 0.005, 0.0, 0.5);
+                scalar("Airborne Tuck / Leg", profile.AirborneTuckRatio, 0.005, 0.0, 0.6);
+                scalar("Falling Extension / Leg", profile.FallingExtensionRatio, 0.005, 0.0, 0.5);
+                scalar("Pre-Landing Probe Time", profile.PreLandingProbeTime, 0.01, 0.0, 2.0);
+                scalar("Landing Compression / Leg", profile.LandingCompressionRatio, 0.005, 0.0, 0.6);
+                scalar("Landing Recovery Time", profile.LandingRecoveryTime, 0.01, 0.01, 2.0);
+                scalar("Maximum Landing Speed", profile.MaximumLandingSpeed, 0.1, 0.1, 100.0);
+            }
+            if (auto response = ui.BeginTreeNode("Response", false); response)
+            {
+                scalar("Velocity Response", profile.VelocityResponseTime, 0.005, 0.0, 2.0);
+                scalar("Facing Response", profile.FacingResponseTime, 0.005, 0.0, 2.0);
+                scalar("Pose Response", profile.PoseResponseTime, 0.005, 0.0, 2.0);
+                scalar("Grounding Response", profile.GroundingResponseTime, 0.005, 0.0, 2.0);
+            }
+            if (auto curves = ui.BeginTreeNode("Normalized Curves", false); curves)
+            {
+                m_ProceduralMotionProfileDirty |=
+                    KeireEditor::AuthoringValueEditors::Curve(ui, "Stride Travel", profile.StrideTravel);
+                m_ProceduralMotionProfileDirty |=
+                    KeireEditor::AuthoringValueEditors::Curve(ui, "Foot Lift", profile.FootLift);
+                m_ProceduralMotionProfileDirty |=
+                    KeireEditor::AuthoringValueEditors::Curve(ui, "Foot Roll", profile.FootRoll);
+                m_ProceduralMotionProfileDirty |=
+                    KeireEditor::AuthoringValueEditors::Curve(ui, "Pelvis Motion", profile.PelvisMotion);
+                m_ProceduralMotionProfileDirty |=
+                    KeireEditor::AuthoringValueEditors::Curve(ui, "Airborne Tuck", profile.AirborneTuck);
+                m_ProceduralMotionProfileDirty |=
+                    KeireEditor::AuthoringValueEditors::Curve(ui, "Landing Compression", profile.LandingCompression);
+                m_ProceduralMotionProfileDirty |=
+                    KeireEditor::AuthoringValueEditors::Curve(ui, "Arm Swing", profile.ArmSwing);
+            }
+
+            std::string validationError;
+            try
+            {
+                Keire::ValidateProceduralMotionProfile(profile);
+            }
+            catch (const std::exception& error)
+            {
+                validationError = error.what();
+                ui.TextColored(theme.Error, validationError);
+            }
+            if (auto disabled = ui.BeginDisabled(!m_ProceduralMotionProfileDirty || !validationError.empty()); disabled)
+            {
+                if (ui.Button("Save Profile"))
+                {
+                    m_Controller.PersistInspectorProceduralMotionProfile(
+                        record->Id, Keire::ProceduralMotionProfileAsset::Encode(profile));
+                    m_ProceduralMotionProfileDirty = false;
+                }
+            }
+            ui.SameLine();
+            if (auto disabled = ui.BeginDisabled(!m_ProceduralMotionProfileDirty); disabled)
+            {
+                if (ui.Button("Revert Profile"))
+                {
+                    profile = Keire::ProceduralMotionProfileAsset::Decode(ReadBytes(source))->Profile();
+                    m_ProceduralMotionProfileDirty = false;
+                }
+            }
+            ui.TextColored(theme.MutedText,
+                           "Use the showcase scene to preview terrain contacts, gait phase, and IK diagnostics live.");
+        }
+        catch (const std::exception& error)
+        {
+            ui.TextColored(theme.Error, std::string("Procedural Motion Profile editor unavailable: ") + error.what());
+        }
     }
     else if (record->Type == Keire::ManagedDataAsset::StaticType())
     {

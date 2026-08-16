@@ -1,6 +1,7 @@
 #include "KeireInternal/Assets/AssetDatabaseImplementation.h"
 
 #include "Keire/Animation/AnimationSystem.h"
+#include "Keire/Animation/ProceduralMotion.h"
 #include "Keire/Animation/RiggingSystem.h"
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/Audio/AudioAssets.h"
@@ -278,6 +279,10 @@ namespace Keire
                 else if (asset.Type == RigDefinitionAsset::StaticType())
                 {
                     static_cast<void>(RigDefinitionAsset::Decode(asset.Imported.Bytes));
+                }
+                else if (asset.Type == ProceduralMotionProfileAsset::StaticType())
+                {
+                    static_cast<void>(ProceduralMotionProfileAsset::Decode(asset.Imported.Bytes));
                 }
                 else if (asset.Type == AnimationClipAsset::StaticType())
                 {

@@ -159,6 +159,8 @@ public readonly record struct TransformHandle(Entity Entity)
             NativeRuntime.SetWorldRotation(Entity, value.Normalized);
         }
     }
+    public Vector3 PresentationPosition => NativeRuntime.GetPresentationWorldPosition(Entity);
+    public Quaternion PresentationRotation => NativeRuntime.GetPresentationWorldRotation(Entity);
     public Vector3 Forward => Rotation * Vector3.Forward;
     public Vector3 Right => Rotation * Vector3.Right;
     public Vector3 Up => Rotation * Vector3.Up;
@@ -172,6 +174,8 @@ public readonly record struct TransformHandle(Entity Entity)
         ValidateRotation(rotation, nameof(rotation));
         Rotation = (worldSpace ? rotation * Rotation : Rotation * rotation).Normalized;
     }
+
+    public void ResetPresentationInterpolation() => NativeRuntime.ResetPresentationInterpolation(Entity);
 
     private static void ValidateFinite(Vector3 value, string parameter)
     {

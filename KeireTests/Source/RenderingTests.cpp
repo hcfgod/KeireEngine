@@ -698,7 +698,7 @@ TEST_CASE("Sandbox pyramid triangle winding agrees with its authored outward nor
 TEST_CASE("model importer exposes explicit animation source routing")
 {
     const auto importer = Keire::CreateMeshAssetImporter();
-    CHECK(importer.Version == 14);
+    CHECK(importer.Version == 15);
     const auto content =
         std::ranges::find(importer.ImportOptions, std::string("contentType"), &Keire::AssetImportOptionDescriptor::Key);
     REQUIRE(content != importer.ImportOptions.end());
@@ -711,6 +711,57 @@ TEST_CASE("model importer exposes explicit animation source routing")
     CHECK(compression->Group == "Animation");
     CHECK(std::get<std::string>(compression->DefaultValue) == "balanced");
     CHECK(compression->Choices == std::vector<std::string>{"none", "light", "balanced", "aggressive"});
+    const auto motion = std::ranges::find(importer.ImportOptions, std::string("animationMotion"),
+                                          &Keire::AssetImportOptionDescriptor::Key);
+    REQUIRE(motion != importer.ImportOptions.end());
+    CHECK(motion->Group == "Animation");
+    CHECK(std::get<std::string>(motion->DefaultValue) == "rootMotion");
+    CHECK(motion->Choices == std::vector<std::string>{"rootMotion", "authored", "inPlaceHorizontal", "inPlace"});
+}
+
+TEST_CASE("animation source import can bake semantic pelvis translation in place")
+{
+    TemporaryDirectory directory("AnimationMotionImportTests");
+    const auto sourcePath = directory.Path / "motion.gltf";
+    const std::string gltf = R"({
+        "asset":{"version":"2.0"},
+        "buffers":[{"uri":"data:application/octet-stream;base64,AAAAAAAAgD8AAIA/AAAAQAAAQEAAAIBAAADAQAAAAEE=","byteLength":32}],
+        "bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":8},{"buffer":0,"byteOffset":8,"byteLength":24}],
+        "accessors":[{"bufferView":0,"componentType":5126,"count":2,"type":"SCALAR","min":[0],"max":[1]},{"bufferView":1,"componentType":5126,"count":2,"type":"VEC3"}],
+        "nodes":[{"name":"Hips"}],
+        "animations":[{"name":"Move","samplers":[{"input":0,"output":1,"interpolation":"LINEAR"}],"channels":[{"sampler":0,"target":{"node":0,"path":"translation"}}]}],
+        "scenes":[{"nodes":[0]}],
+        "scene":0
+    })";
+    {
+        std::ofstream source(sourcePath);
+        source << gltf;
+    }
+
+    Keire::AssetImportContext context;
+    context.Asset = Keire::AssetId::Parse("12345678-1234-4567-89ab-123456789abc");
+    context.ProjectRoot = directory.Path;
+    context.SourceRoot = directory.Path;
+    context.SourcePath = sourcePath;
+    context.RelativePath = sourcePath.filename();
+    context.ImportSettings["contentType"] = std::string("animation");
+    context.ImportSettings["animationMotion"] = std::string("inPlace");
+    std::unordered_map<std::string, Keire::AssetId> identities;
+    context.ResolveSubAssetId = [&identities](const std::string_view key)
+    { return identities.try_emplace(std::string(key), Keire::AssetId::Generate()).first->second; };
+
+    const auto output = Keire::CreateMeshAssetImporter().ContextualImport(context, std::as_bytes(std::span(gltf)));
+    const auto clipOutput = std::ranges::find(output.SubAssets, Keire::AnimationClipAsset::StaticType(),
+                                              &Keire::AssetGeneratedSubAsset::Type);
+    REQUIRE(clipOutput != output.SubAssets.end());
+    const auto clip = Keire::AnimationClipAsset::Decode(clipOutput->Bytes);
+    CHECK_FALSE(clip->RootMotion());
+    REQUIRE(clip->Tracks().size() == 1);
+    REQUIRE(clip->Tracks().front().Keys.size() == 2);
+    CHECK(clip->Tracks().front().Keys.front().Value.Translation ==
+          clip->Tracks().front().Keys.back().Value.Translation);
+    CHECK(std::ranges::any_of(output.Diagnostics, [](const auto& diagnostic)
+                              { return diagnostic.Message.find("Baked animation") != std::string::npos; }));
 }
 
 TEST_CASE("glTF import publishes faithful material and embedded texture subassets")

@@ -199,6 +199,11 @@ bool EditorWorkspaceLayer::CreateAssetBrowserAnimationGraph(const std::string_vi
     return CreateAnimationGraph(name);
 }
 
+bool EditorWorkspaceLayer::CreateAssetBrowserProceduralMotionProfile(const std::string_view name)
+{
+    return CreateProceduralMotionProfile(name);
+}
+
 bool EditorWorkspaceLayer::CreateAssetBrowserScript(const std::string_view name) { return CreateCSharpScript(name); }
 
 bool EditorWorkspaceLayer::CreateAssetBrowserManagedAssembly(const std::string_view name)
@@ -2116,6 +2121,34 @@ bool EditorWorkspaceLayer::CreateAnimationGraph(const std::string_view name)
     catch (const std::exception& error)
     {
         SetAssetError(std::string("Animator Controller creation failed: ") + error.what());
+        return false;
+    }
+}
+
+bool EditorWorkspaceLayer::CreateProceduralMotionProfile(const std::string_view name)
+{
+    if (!m_AssetDatabase || !m_AssetOperations)
+        return false;
+    try
+    {
+        if (m_AssetOperations->Busy())
+            (void)m_AssetOperations->PreemptBackgroundImports();
+        const auto directory = m_AssetBrowserPanel ? m_AssetBrowserPanel->CurrentFolder() : std::filesystem::path{};
+        if (name.empty() || name == "." || name == ".." || name.find_first_of("/\\") != std::string_view::npos)
+            throw std::invalid_argument("Procedural Motion Profile name must be one non-empty path component.");
+        const auto destination = directory / (std::string(name) + ".keiremotionprofile");
+        if (m_AssetDatabase->Find(destination))
+            throw std::runtime_error("A Procedural Motion Profile with that name already exists in this folder.");
+        m_AssetOperations->QueueCreateAsset(
+            destination, Keire::ProceduralMotionProfileAsset::Encode(Keire::ProceduralMotionProfile::GroundedArmored()),
+            {},
+            {.FollowUp = KeireEditor::AssetOperationFollowUp::Reveal, .UndoName = "Create Procedural Motion Profile"});
+        m_AssetStatus = "Creating " + destination.generic_string() + " in the isolated asset worker.";
+        return true;
+    }
+    catch (const std::exception& error)
+    {
+        SetAssetError(std::string("Procedural Motion Profile creation failed: ") + error.what());
         return false;
     }
 }

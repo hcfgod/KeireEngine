@@ -2,6 +2,7 @@
 
 #include <doctest/doctest.h>
 
+#include <cmath>
 #include <limits>
 #include <span>
 #include <stdexcept>
@@ -36,6 +37,17 @@ namespace
         Keire::AnimationTrack track;
         track.Bone = 1;
         const Keire::BoneTransform transform{{translation, 1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}};
+        track.Keys = {{0.0F, transform}, {1.0F, transform}};
+        return Keire::AnimationClipAsset::Decode(
+            Keire::AnimationClipAsset::Encode(skeleton, 1.0F, std::span(&track, 1), {}, false));
+    }
+
+    [[nodiscard]] Keire::Ref<Keire::AnimationClipAsset> ConstantHandRotationClip(const Keire::AssetId skeleton,
+                                                                                 const Keire::Quaternion rotation)
+    {
+        Keire::AnimationTrack track;
+        track.Bone = 1;
+        const Keire::BoneTransform transform{{0.0F, 1.0F, 0.0F}, rotation, {1.0F, 1.0F, 1.0F}};
         track.Keys = {{0.0F, transform}, {1.0F, transform}};
         return Keire::AnimationClipAsset::Decode(
             Keire::AnimationClipAsset::Encode(skeleton, 1.0F, std::span(&track, 1), {}, false));
@@ -417,6 +429,102 @@ TEST_CASE("Animator samples deterministic blend trees and applies masked layer w
     CHECK(animator2D.Update(0.0F).LocalPose[1].Translation.X == doctest::Approx(10.0F));
     REQUIRE(animator2D.DebugSnapshot()->Layers.front().BlendWeights.size() == 1);
     CHECK(animator2D.DebugSnapshot()->Layers.front().BlendWeights.front().ChildId == "child-2d-b");
+}
+
+TEST_CASE("Animator 2D blend trees use a local simplex without opposing motion leakage")
+{
+    const auto skeletonId = Keire::AssetId::Parse("41000000-0000-4000-8000-000000000001");
+    const auto idleId = Keire::AssetId::Parse("41000000-0000-4000-8000-000000000002");
+    const auto forwardWalkId = Keire::AssetId::Parse("41000000-0000-4000-8000-000000000003");
+    const auto rightWalkId = Keire::AssetId::Parse("41000000-0000-4000-8000-000000000004");
+    const auto leftWalkId = Keire::AssetId::Parse("41000000-0000-4000-8000-000000000005");
+    const auto backwardWalkId = Keire::AssetId::Parse("41000000-0000-4000-8000-000000000006");
+    const auto forwardRunId = Keire::AssetId::Parse("41000000-0000-4000-8000-000000000007");
+    const auto rightRunId = Keire::AssetId::Parse("41000000-0000-4000-8000-000000000008");
+    const auto skeleton = TestSkeleton();
+    const std::vector<std::pair<Keire::AssetId, Keire::Ref<Keire::AnimationClipAsset>>> clips{
+        {idleId, ConstantHandClip(skeletonId, 0.0F)},         {forwardWalkId, ConstantHandClip(skeletonId, 1.0F)},
+        {rightWalkId, ConstantHandClip(skeletonId, 2.0F)},    {leftWalkId, ConstantHandClip(skeletonId, 3.0F)},
+        {backwardWalkId, ConstantHandClip(skeletonId, 4.0F)}, {forwardRunId, ConstantHandClip(skeletonId, 5.0F)},
+        {rightRunId, ConstantHandClip(skeletonId, 6.0F)}};
+
+    auto blend = ClipState("state-locomotion", "Locomotion", idleId);
+    blend.Clip = {};
+    blend.Motion.Type = Keire::AnimationMotionType::BlendTree2D;
+    blend.Motion.Clip = {};
+    blend.Motion.ParameterX = "parameter-x";
+    blend.Motion.ParameterY = "parameter-y";
+    blend.Motion.Children = {{"idle", idleId, 0.0F, {0.0F, 0.0F}},
+                             {"forward-walk", forwardWalkId, 0.0F, {0.0F, 0.5F}},
+                             {"right-walk", rightWalkId, 0.0F, {0.5F, 0.0F}},
+                             {"left-walk", leftWalkId, 0.0F, {-0.5F, 0.0F}},
+                             {"backward-walk", backwardWalkId, 0.0F, {0.0F, -0.5F}},
+                             {"forward-run", forwardRunId, 0.0F, {0.0F, 1.0F}},
+                             {"right-run", rightRunId, 0.0F, {1.0F, 0.0F}}};
+    const auto graph = Keire::CreateRef<Keire::AnimationGraphAsset>(
+        GraphWithBaseLayer({{"parameter-x", "X", Keire::AnimationParameterType::Float, 0.25F},
+                            {"parameter-y", "Y", Keire::AnimationParameterType::Float, 0.25F}},
+                           {blend}));
+    Keire::AnimatorInstance animator(skeleton, graph,
+                                     [&](const Keire::AssetId id)
+                                     {
+                                         for (const auto& [asset, clip] : clips)
+                                             if (asset == id)
+                                                 return clip;
+                                         return Keire::Ref<Keire::AnimationClipAsset>{};
+                                     });
+
+    CHECK(animator.Update(0.0F).LocalPose[1].Translation.X == doctest::Approx(1.5F));
+    auto weights = animator.DebugSnapshot()->Layers.front().BlendWeights;
+    REQUIRE(weights.size() == 2);
+    CHECK(weights[0].ChildId == "forward-walk");
+    CHECK(weights[0].Weight == doctest::Approx(0.5F));
+    CHECK(weights[1].ChildId == "right-walk");
+    CHECK(weights[1].Weight == doctest::Approx(0.5F));
+
+    animator.SetFloat("X", 2.0F);
+    animator.SetFloat("Y", 2.0F);
+    (void)animator.Update(0.0F);
+    weights = animator.DebugSnapshot()->Layers.front().BlendWeights;
+    REQUIRE(weights.size() == 2);
+    CHECK(weights[0].ChildId == "forward-run");
+    CHECK(weights[0].Weight == doctest::Approx(0.5F));
+    CHECK(weights[1].ChildId == "right-run");
+    CHECK(weights[1].Weight == doctest::Approx(0.5F));
+}
+
+TEST_CASE("Animator blend-tree rotation accumulation treats opposite quaternion signs as equivalent")
+{
+    const auto skeletonId = Keire::AssetId::Parse("42000000-0000-4000-8000-000000000001");
+    const auto firstId = Keire::AssetId::Parse("42000000-0000-4000-8000-000000000002");
+    const auto secondId = Keire::AssetId::Parse("42000000-0000-4000-8000-000000000003");
+    const auto skeleton = TestSkeleton();
+    const auto rotation = Keire::Math::EulerDegreesToQuaternion({20.0F, 50.0F, -10.0F});
+    const Keire::Quaternion opposite{-rotation.X, -rotation.Y, -rotation.Z, -rotation.W};
+    const auto first = ConstantHandRotationClip(skeletonId, rotation);
+    const auto second = ConstantHandRotationClip(skeletonId, opposite);
+
+    auto blend = ClipState("state-rotation", "Rotation", firstId);
+    blend.Clip = {};
+    blend.Motion.Type = Keire::AnimationMotionType::BlendTree1D;
+    blend.Motion.Clip = {};
+    blend.Motion.ParameterX = "parameter-weight";
+    blend.Motion.Children = {{"first", firstId, 0.0F}, {"second", secondId, 1.0F}};
+    const auto graph = Keire::CreateRef<Keire::AnimationGraphAsset>(
+        GraphWithBaseLayer({{"parameter-weight", "Weight", Keire::AnimationParameterType::Float, 0.5F}}, {blend}));
+    Keire::AnimatorInstance animator(skeleton, graph,
+                                     [&](const Keire::AssetId id)
+                                     {
+                                         if (id == firstId)
+                                             return first;
+                                         if (id == secondId)
+                                             return second;
+                                         return Keire::Ref<Keire::AnimationClipAsset>{};
+                                     });
+
+    const auto sampled = animator.Update(0.0F).LocalPose[1].Rotation;
+    const auto dot = sampled.X * rotation.X + sampled.Y * rotation.Y + sampled.Z * rotation.Z + sampled.W * rotation.W;
+    CHECK(std::abs(dot) == doctest::Approx(1.0F));
 }
 
 TEST_CASE("Animator publishes rotational root motion without reset or wrap discontinuities")

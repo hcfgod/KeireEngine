@@ -273,6 +273,22 @@ namespace KeireEditor
                 }
                 ui.TextColored(theme.MutedText,
                                "Balanced preserves millimeter-scale translation and quarter-degree rotation error.");
+
+                auto motion = ReadChoice(m_Draft, "animationMotion", "rootMotion");
+                if (auto combo = ui.BeginCombo("Animation Motion", motion); combo)
+                {
+                    for (const auto value : {"rootMotion", "authored", "inPlaceHorizontal", "inPlace"})
+                    {
+                        if (ui.Selectable(value, motion == value))
+                        {
+                            motion = value;
+                            m_Draft["animationMotion"] = motion;
+                            m_Dirty = true;
+                        }
+                    }
+                }
+                ui.TextColored(theme.MutedText,
+                               "In-place modes lock semantic pelvis/root translation for scripted controllers.");
             }
 
             ui.Separator();

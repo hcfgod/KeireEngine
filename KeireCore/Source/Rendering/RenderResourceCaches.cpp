@@ -305,7 +305,7 @@ namespace Keire::RenderBackend
             }
             packet.DrawItems.push_back({renderer->Mesh(),
                                         {renderer->Materials().begin(), renderer->Materials().end()},
-                                        transform->WorldMatrix(),
+                                        transform->PresentationWorldMatrix(),
                                         renderer->Tint(),
                                         entity.Id(),
                                         skin,

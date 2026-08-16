@@ -294,6 +294,8 @@ namespace KeireEditor
                 RequestCreateMaterial();
             if (ui.MenuItem("Animator Controller"))
                 RequestNamedCreate(NamedCreateKind::AnimationGraph, "NewAnimatorController");
+            if (ui.MenuItem("Procedural Motion Profile"))
+                RequestNamedCreate(NamedCreateKind::ProceduralMotionProfile, "NewProceduralMotionProfile");
             if (ui.MenuItem("C# Script"))
                 RequestNamedCreate(NamedCreateKind::Script, "NewBehaviour");
             if (ui.MenuItem("Managed Assembly"))
@@ -713,6 +715,8 @@ namespace KeireEditor
                                         ? editor.CreateAssetBrowserMaterial(CreateNameBuffer)
                                     : PendingCreateKind == NamedCreateKind::AnimationGraph
                                         ? editor.CreateAssetBrowserAnimationGraph(CreateNameBuffer)
+                                    : PendingCreateKind == NamedCreateKind::ProceduralMotionProfile
+                                        ? editor.CreateAssetBrowserProceduralMotionProfile(CreateNameBuffer)
                                     : PendingCreateKind == NamedCreateKind::Script
                                         ? editor.CreateAssetBrowserScript(CreateNameBuffer)
                                     : PendingCreateKind == NamedCreateKind::ManagedAssembly

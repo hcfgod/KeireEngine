@@ -3,6 +3,10 @@
 Kéire treats model geometry, skeletons, semantic rigs, skin weights, clips, and Animator Controllers as separate assets.
 This keeps reimport, retargeting, prefab references, and cooked dependencies deterministic.
 
+For characters whose complete pose is generated without clips, see [Procedural Humanoid Motion](ProceduralMotion.md).
+That pose source shares semantic rigs and the Animator's final override stages while leaving graph-mode behavior
+unchanged.
+
 ## Import A Character
 
 1. Import an FBX, glTF, or GLB model into the Project panel. For an animation take, set **Content** to `animation` in
@@ -19,7 +23,10 @@ This keeps reimport, retargeting, prefab references, and cooked dependencies det
 5. Choose four or eight maximum influences and linear-blend or dual-quaternion skinning.
 6. Choose an **Animation Compression** preset. `Balanced` is the default; `None`, `Light`, and `Aggressive` trade
    key count for increasingly large translation, rotation, and scale error tolerances.
-7. Select **Apply & Regenerate**. The isolated asset worker publishes the model and all generated subassets as one
+7. Choose **Animation Motion**. `Root Motion` preserves extraction for animation-driven characters, `Authored` keeps
+   the source pose without extraction, `In Place Horizontal` removes semantic pelvis/root X/Z travel while preserving
+   vertical motion, and `In Place` also removes vertical travel for physics-driven jumps.
+8. Select **Apply & Regenerate**. The isolated asset worker publishes the model and all generated subassets as one
    operation.
 
 Embedded skeleton inference recognizes common Mixamo, Blender, and Unreal-style names. It never reorders or removes
@@ -66,6 +73,11 @@ transitions, masks, blend trees, and state-machine subgraphs, then assign the co
 Override layers replace masked bones, additive layers apply deltas from the skeleton bind pose, and avatar-mask weights
 can attenuate either mode per bone. Runtime sampling, events, root motion, transitions, and skinning occur in scene-safe
 order.
+
+2D blend trees evaluate only the closest triangle containing the parameter point. Parameters outside that local sample
+hull project onto its nearest segment, so distant or opposing motions do not leak into the pose. Place center, walk,
+and run samples on consistent contours; diagonal parameters should remain inside the contour formed by their adjacent
+directional samples. Quaternion accumulation aligns equivalent rotation signs before normalization.
 
 The state machine uses the same stable production canvas as VFX authoring:
 

@@ -278,6 +278,24 @@ void EditorWorkspaceLayer::PersistInspectorMaterialParameterCollection(const Kei
     m_AssetStatus = "Saved Material Parameter Collection and queued dependent material rebuilds.";
 }
 
+void EditorWorkspaceLayer::PersistInspectorProceduralMotionProfile(const Keire::AssetId asset,
+                                                                   const std::span<const std::byte> bytes)
+{
+    if (!m_AssetDatabase || !m_AssetOperations)
+        throw std::runtime_error("Procedural Motion Profile persistence services are unavailable.");
+    const auto record = m_AssetDatabase->Find(asset);
+    if (!record || record->Type != Keire::ProceduralMotionProfileAsset::StaticType() ||
+        record->RelativePath.extension() != ".keiremotionprofile")
+    {
+        throw std::invalid_argument("Only Procedural Motion Profile sources can be persisted here.");
+    }
+    const auto& specification = m_AssetDatabase->Specification();
+    KeireEditor::Detail::WriteBytesAtomically(
+        specification.ProjectRoot / specification.SourceDirectory / record->RelativePath, bytes);
+    m_AssetOperations->QueueImport(KeireEditor::AssetOperationPriority::ExplicitAction, {.ReloadAsset = asset});
+    m_AssetStatus = "Saved Procedural Motion Profile and queued a hot reload.";
+}
+
 void EditorWorkspaceLayer::ImportInspectorAssets() { ImportAssets(); }
 
 void EditorWorkspaceLayer::PreviewInspectorManagedData(const Keire::AssetId asset,

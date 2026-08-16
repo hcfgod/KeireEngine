@@ -38,6 +38,7 @@ namespace KeireEditor
         virtual bool CreateAssetBrowserScene(std::string_view name) = 0;
         virtual bool CreateAssetBrowserMaterial(std::string_view name) = 0;
         virtual bool CreateAssetBrowserAnimationGraph(std::string_view name) = 0;
+        virtual bool CreateAssetBrowserProceduralMotionProfile(std::string_view name) = 0;
         virtual bool CreateAssetBrowserScript(std::string_view name) = 0;
         virtual bool CreateAssetBrowserManagedAssembly(std::string_view name) = 0;
         virtual bool CreateAssetBrowserManagedData(Keire::ManagedTypeId type, std::string_view name) = 0;

@@ -1,6 +1,7 @@
 #include "Keire/Assets/BuiltinAssetRegistry.h"
 
 #include "Keire/Animation/AnimationSystem.h"
+#include "Keire/Animation/ProceduralMotion.h"
 #include "Keire/Animation/RiggingSystem.h"
 #include "Keire/Assets/InputActionAsset.h"
 #include "Keire/Assets/LightingAssets.h"
@@ -53,6 +54,7 @@ namespace Keire
         result.emplace_back(CreateAnimationGraphAssetImporter());
         result.emplace_back(CreateAvatarMaskAssetImporter());
         result.emplace_back(CreateRigDefinitionAssetImporter());
+        result.emplace_back(CreateProceduralMotionProfileAssetImporter());
         result.emplace_back(CreateAudioMixerAssetImporter());
         result.emplace_back(CreatePhysicsMaterialAssetImporter());
         result.emplace_back(CreateManagedDataAssetImporter());
@@ -103,6 +105,7 @@ namespace Keire
         result.emplace_back(CreateAnimationGraphAssetDecoder());
         result.emplace_back(CreateAvatarMaskAssetDecoder());
         result.emplace_back(CreateRigDefinitionAssetDecoder());
+        result.emplace_back(CreateProceduralMotionProfileAssetDecoder());
         result.emplace_back(CreatePrefabAssetDecoder());
         result.emplace_back(CreateManagedAssemblyAssetDecoder());
         result.emplace_back(CreateAudioMixerAssetDecoder());

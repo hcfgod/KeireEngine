@@ -388,6 +388,40 @@ TEST_CASE("Foot grounding adapts pelvis and legs transactionally to validated co
     CHECK(pose == lastGood);
 }
 
+TEST_CASE("Foot grounding reach diagnostics use the caller's model-space tolerance")
+{
+    const std::vector<Keire::SkeletonBone> bones{{"Upper", -1, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                 {"Lower", 0, {{0.0F, 1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                 {"Foot", 1, {{0.0F, 1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}}};
+    const Keire::SkeletonAsset skeleton(bones);
+    const auto bindPose = [&]
+    {
+        std::vector<Keire::BoneTransform> result;
+        for (const auto& bone : bones)
+            result.push_back(bone.BindPose);
+        return result;
+    }();
+
+    Keire::FootGroundingRequest request;
+    request.FootHeight = 0.0F;
+    request.Contacts.push_back({0, 1, 2, {0.0F, 2.005F, 0.0F}, {0.0F, 1.0F, 0.0F}, {0.0F, 1.0F, 1.0F}});
+
+    auto tolerantPose = bindPose;
+    request.PositionTolerance = 0.01F;
+    const auto tolerant = Keire::SolveFootGrounding(skeleton, tolerantPose, request);
+    REQUIRE(tolerant);
+    CHECK(tolerant->UnreachableFeet == 0);
+
+    auto strictPose = bindPose;
+    request.PositionTolerance = 0.001F;
+    const auto strict = Keire::SolveFootGrounding(skeleton, strictPose, request);
+    REQUIRE(strict);
+    CHECK(strict->UnreachableFeet == 1);
+
+    request.PositionTolerance = 0.0F;
+    CHECK_FALSE(Keire::SolveFootGrounding(skeleton, strictPose, request));
+}
+
 TEST_CASE("Foot grounding lowers the pelvis once and plants both feet on uneven ground")
 {
     const std::vector<Keire::SkeletonBone> bones{

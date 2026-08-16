@@ -230,7 +230,7 @@ namespace Keire::Detail
                 name == "OnDisable" || name == "OnDestroy" || name == "OnCollisionEnter" || name == "OnCollisionStay" ||
                 name == "OnCollisionExit" || name == "OnTriggerEnter" || name == "OnTriggerStay" ||
                 name == "OnTriggerExit" || name == "OnAnimationEvent" || name == "OnAnimatorIk" ||
-                name == "OnBeforeReload" || name == "OnAfterReload")
+                name == "OnProceduralMotionEvent" || name == "OnBeforeReload" || name == "OnAfterReload")
             {
                 continue;
             }

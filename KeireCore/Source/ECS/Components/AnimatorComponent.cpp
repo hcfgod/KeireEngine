@@ -1,6 +1,7 @@
 #include "Keire/ECS/Components/AnimatorComponent.h"
 
 #include "Keire/Animation/AnimationSystem.h"
+#include "Keire/Animation/RiggingSystem.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 
 #include <algorithm>
@@ -15,7 +16,7 @@ namespace Keire
 {
     namespace
     {
-        constexpr std::uint32_t AnimatorSchemaVersion = 6;
+        constexpr std::uint32_t AnimatorSchemaVersion = 7;
 
         template <typename T>
         [[nodiscard]] T ReadAnimatorProperty(const ComponentPropertyBag& values, const std::string_view key,
@@ -85,6 +86,34 @@ namespace Keire
     void AnimatorComponent::SetSkinnedMesh(const AssetId mesh)
     {
         m_SkinnedMesh = mesh;
+        NotifyChanged();
+    }
+
+    void AnimatorComponent::SetPoseSource(const AnimatorPoseSource source)
+    {
+        if (source != AnimatorPoseSource::AnimationGraph && source != AnimatorPoseSource::ProceduralHumanoid)
+            throw std::invalid_argument("Animator pose source is invalid.");
+        m_PoseSource = source;
+        NotifyChanged();
+    }
+
+    void AnimatorComponent::SetProceduralProfile(const AssetId profile)
+    {
+        m_ProceduralProfile = profile;
+        NotifyChanged();
+    }
+
+    void AnimatorComponent::SetRigDefinition(const AssetId rig)
+    {
+        m_RigDefinition = rig;
+        NotifyChanged();
+    }
+
+    void AnimatorComponent::SetProceduralQuality(const ProceduralMotionQuality quality)
+    {
+        if (quality > ProceduralMotionQuality::Low)
+            throw std::invalid_argument("Animator procedural quality is invalid.");
+        m_ProceduralQuality = quality;
         NotifyChanged();
     }
 
@@ -301,6 +330,24 @@ namespace Keire
         NotifyChanged();
     }
 
+    void AnimatorComponent::SetProceduralLocomotion(ProceduralLocomotionIntent intent)
+    {
+        ValidateProceduralLocomotionIntent(intent);
+        m_ProceduralIntent = intent;
+    }
+
+    ProceduralLocomotionIntent AnimatorComponent::ConsumeProceduralLocomotionIntent() noexcept
+    {
+        auto result = m_ProceduralIntent;
+        m_ProceduralIntent.JumpRequested = false;
+        return result;
+    }
+
+    void AnimatorComponent::SetRuntimeProceduralState(const ProceduralLocomotionState state) noexcept
+    {
+        m_ProceduralState = state;
+    }
+
     std::vector<AnimatorCommand> AnimatorComponent::ConsumeRuntimeCommands()
     {
         return std::exchange(m_RuntimeCommands, {});
@@ -356,6 +403,8 @@ namespace Keire
         m_DebugSnapshot.reset();
         m_RuntimeDiagnostic.clear();
         m_RuntimeFootGroundingWeight = 1.0F;
+        m_ProceduralIntent = {};
+        m_ProceduralState = {};
     }
 
     ComponentRegistration CreateAnimatorComponentRegistration()
@@ -367,6 +416,7 @@ namespace Keire
         result.SchemaVersion = AnimatorSchemaVersion;
         result.RequiredComponents = {TransformComponent::StaticType()};
         result.Properties = {
+            {"poseSource", "Pose Source", "Animation", ComponentPropertyKind::Integer, false, 0.0, 1.0, 1.0},
             {"graph",
              "Graph",
              "Animation",
@@ -376,6 +426,25 @@ namespace Keire
              {},
              0.1,
              AnimationGraphAsset::StaticType()},
+            {"proceduralProfile",
+             "Procedural Profile",
+             "Procedural Motion",
+             ComponentPropertyKind::Asset,
+             false,
+             {},
+             {},
+             0.1,
+             ProceduralMotionProfileAsset::StaticType()},
+            {"rigDefinition",
+             "Rig Definition",
+             "Procedural Motion",
+             ComponentPropertyKind::Asset,
+             false,
+             {},
+             {},
+             0.1,
+             RigDefinitionAsset::StaticType()},
+            {"proceduralQuality", "Quality", "Procedural Motion", ComponentPropertyKind::Integer, false, 0.0, 3.0, 1.0},
             {"skeleton",
              "Skeleton",
              "Animation",
@@ -485,7 +554,11 @@ namespace Keire
             const auto& animator = dynamic_cast<const AnimatorComponent&>(component);
             const auto& foot = animator.m_FootGrounding;
             ComponentPropertyBag values{
+                {"poseSource", static_cast<std::int64_t>(animator.m_PoseSource)},
                 {"graph", animator.m_Graph},
+                {"proceduralProfile", animator.m_ProceduralProfile},
+                {"rigDefinition", animator.m_RigDefinition},
+                {"proceduralQuality", static_cast<std::int64_t>(animator.m_ProceduralQuality)},
                 {"skeleton", animator.m_Skeleton},
                 {"skinnedMesh", animator.m_SkinnedMesh},
                 {"applyRootMotion", animator.m_ApplyRootMotion},
@@ -539,7 +612,18 @@ namespace Keire
             if (version != AnimatorSchemaVersion)
                 throw std::invalid_argument("Unsupported Animator component schema version.");
             auto& animator = dynamic_cast<AnimatorComponent&>(component);
+            const auto poseSource = ReadAnimatorProperty(values, "poseSource", std::int64_t{0});
+            const auto quality = ReadAnimatorProperty(values, "proceduralQuality", std::int64_t{0});
+            if (poseSource < 0 || poseSource > static_cast<std::int64_t>(AnimatorPoseSource::ProceduralHumanoid) ||
+                quality < 0 || quality > static_cast<std::int64_t>(ProceduralMotionQuality::Low))
+            {
+                throw std::invalid_argument("Animator procedural mode contains an invalid enum value.");
+            }
+            animator.SetPoseSource(static_cast<AnimatorPoseSource>(poseSource));
             animator.SetGraph(ReadAnimatorProperty(values, "graph", AssetId{}));
+            animator.SetProceduralProfile(ReadAnimatorProperty(values, "proceduralProfile", AssetId{}));
+            animator.SetRigDefinition(ReadAnimatorProperty(values, "rigDefinition", AssetId{}));
+            animator.SetProceduralQuality(static_cast<ProceduralMotionQuality>(quality));
             animator.SetSkeleton(ReadAnimatorProperty(values, "skeleton", AssetId{}));
             animator.SetSkinnedMesh(ReadAnimatorProperty(values, "skinnedMesh", AssetId{}));
             animator.SetApplyRootMotion(ReadAnimatorProperty(values, "applyRootMotion", true));
@@ -602,9 +686,13 @@ namespace Keire
         };
         result.Migrate = [](const ComponentPropertyBag& values, const std::uint32_t version)
         {
-            if (version != 1 && version != 2 && version != 3 && version != 4 && version != 5)
+            if (version != 1 && version != 2 && version != 3 && version != 4 && version != 5 && version != 6)
                 throw std::invalid_argument("Unsupported Animator component schema migration.");
             auto migrated = values;
+            migrated.insert_or_assign("poseSource", std::int64_t{0});
+            migrated.insert_or_assign("proceduralProfile", AssetId{});
+            migrated.insert_or_assign("rigDefinition", AssetId{});
+            migrated.insert_or_assign("proceduralQuality", std::int64_t{0});
             if (version == 1)
             {
                 migrated.emplace("footGrounding", false);

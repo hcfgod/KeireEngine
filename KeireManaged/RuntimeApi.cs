@@ -173,6 +173,35 @@ public sealed class AnimatorController;
 public readonly record struct AnimatorStateInfo(string State, float NormalizedTime, bool IsPlaying, bool IsPaused,
                                                 float Speed);
 
+public enum ProceduralMotionState : byte
+{
+    Idle,
+    Locomotion,
+    TurnInPlace,
+    Takeoff,
+    Rising,
+    Falling,
+    Landing
+}
+
+public enum ProceduralMotionQuality : byte
+{
+    Auto,
+    High,
+    Medium,
+    Low
+}
+
+public readonly record struct ProceduralLocomotionIntent(Vector3 DesiredWorldVelocity, Vector3 FacingWorldDirection,
+                                                          Vector3 LookWorldDirection, float CrouchAmount,
+                                                          float RunBlend, bool JumpRequested);
+
+public readonly record struct ProceduralLocomotionState(ProceduralMotionState State, ProceduralMotionQuality Quality,
+                                                         Vector3 ActualWorldVelocity, Vector3 GroundNormal,
+                                                         float GaitPhase, float Speed, float VerticalSpeed,
+                                                         float LandingIntensity, bool Grounded,
+                                                         bool LeftFootPlanted, bool RightFootPlanted);
+
 public readonly record struct CharacterControllerState(bool Grounded, Vector3 GroundNormal, Vector3 Velocity);
 
 public enum RigidBodyMotion : byte
@@ -340,6 +369,21 @@ public static class Animator
         NativeRuntime.SetAnimatorFootGroundingWeight(entity, weight);
     }
     public static AnimatorStateInfo GetStateInfo(Entity entity) => NativeRuntime.GetAnimatorState(entity);
+    public static void SetProceduralLocomotion(Entity entity, ProceduralLocomotionIntent intent)
+    {
+        ValidateFinite(intent.DesiredWorldVelocity, nameof(intent));
+        ValidateFinite(intent.FacingWorldDirection, nameof(intent));
+        ValidateFinite(intent.LookWorldDirection, nameof(intent));
+        if (!float.IsFinite(intent.CrouchAmount) || intent.CrouchAmount < 0.0f || intent.CrouchAmount > 1.0f ||
+            !float.IsFinite(intent.RunBlend) || intent.RunBlend < 0.0f || intent.RunBlend > 1.0f)
+        {
+            throw new ArgumentOutOfRangeException(nameof(intent),
+                "Procedural locomotion crouch and run blends must be between zero and one.");
+        }
+        NativeRuntime.SetProceduralLocomotion(entity, intent);
+    }
+    public static ProceduralLocomotionState GetProceduralState(Entity entity) =>
+        NativeRuntime.GetProceduralLocomotionState(entity);
 
     public static void SetFloat(Entity entity, string parameter, float value) =>
         NativeRuntime.SetAnimatorFloat(entity, parameter, value);
@@ -405,6 +449,12 @@ public static class Animator
         if (!float.IsFinite(normalizedTime) || normalizedTime < 0.0f || normalizedTime > 1.0f)
             throw new ArgumentOutOfRangeException(nameof(normalizedTime),
                 "Animator normalized time must be between zero and one.");
+    }
+
+    private static void ValidateFinite(Vector3 value, string parameter)
+    {
+        if (!float.IsFinite(value.X) || !float.IsFinite(value.Y) || !float.IsFinite(value.Z))
+            throw new ArgumentException("Procedural locomotion vectors must be finite.", parameter);
     }
 }
 

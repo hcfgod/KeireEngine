@@ -9,7 +9,7 @@
 namespace Keire::Detail
 {
     inline constexpr std::size_t ManagedCallbackProfileCount =
-        static_cast<std::size_t>(ManagedBehaviourCallback::AnimatorIk) + 1;
+        static_cast<std::size_t>(ManagedBehaviourCallback::ProceduralMotionEvent) + 1;
 
     struct NativeAnimatorState final
     {
@@ -17,6 +17,21 @@ namespace Keire::Detail
         float NormalizedTime = 0.0F;
         std::uint8_t Playing = 0;
         std::uint8_t Paused = 0;
+    };
+
+    struct NativeProceduralLocomotionState final
+    {
+        Vector3 ActualWorldVelocity;
+        Vector3 GroundNormal{0.0F, 1.0F, 0.0F};
+        float GaitPhase = 0.0F;
+        float Speed = 0.0F;
+        float VerticalSpeed = 0.0F;
+        float LandingIntensity = 0.0F;
+        std::uint8_t State = 0;
+        std::uint8_t Quality = 0;
+        std::uint8_t Grounded = 0;
+        std::uint8_t LeftFootPlanted = 0;
+        std::uint8_t RightFootPlanted = 0;
     };
 
     struct NativeAudioSourceProperties final

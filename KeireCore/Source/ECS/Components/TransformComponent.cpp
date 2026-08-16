@@ -81,6 +81,16 @@ namespace Keire
 
     Matrix4 TransformComponent::WorldMatrix() const { return IsAttached() ? OwnerWorldMatrix() : LocalMatrix(); }
 
+    Matrix4 TransformComponent::PresentationWorldMatrix() const
+    {
+        if (m_HasPresentationWorldMatrix)
+            return m_PresentationWorldMatrix;
+        const auto parent = Parent();
+        const auto parentTransform = parent ? parent.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
+        return parentTransform ? Math::Multiply(parentTransform->PresentationWorldMatrix(), LocalMatrix())
+                               : LocalMatrix();
+    }
+
     Vector3 TransformComponent::WorldPosition() const
     {
         const auto& values = WorldMatrix().Elements;
@@ -92,6 +102,21 @@ namespace Keire
         const auto parent = Parent();
         const auto parentTransform = parent ? parent.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
         return parentTransform ? MultiplyRotation(parentTransform->WorldRotation(), m_LocalRotation) : m_LocalRotation;
+    }
+
+    Vector3 TransformComponent::PresentationWorldPosition() const
+    {
+        const auto& values = PresentationWorldMatrix().Elements;
+        return {values[12], values[13], values[14]};
+    }
+
+    Quaternion TransformComponent::PresentationWorldRotation() const
+    {
+        Vector3 position;
+        Vector3 scale;
+        Quaternion rotation;
+        return Math::DecomposeTransform(PresentationWorldMatrix(), position, rotation, scale) ? rotation
+                                                                                              : WorldRotation();
     }
 
     void TransformComponent::SetWorldPosition(const Vector3 value)
@@ -137,11 +162,31 @@ namespace Keire
         owner.SetParent(std::move(parent), preserveWorldTransform);
     }
 
+    void TransformComponent::SetRuntimePresentationWorldMatrix(const Matrix4 value)
+    {
+        if (!Math::IsFinite(value))
+            throw std::invalid_argument("Transform presentation matrix must be finite.");
+        m_PresentationWorldMatrix = value;
+        m_HasPresentationWorldMatrix = true;
+    }
+
+    void TransformComponent::ResetPresentationInterpolation() noexcept
+    {
+        m_HasPresentationWorldMatrix = false;
+        ++m_PresentationResetRevision;
+        for (const auto& child : Children())
+        {
+            if (const auto transform = child.GetComponent<TransformComponent>())
+                transform->ResetPresentationInterpolation();
+        }
+    }
+
     void TransformComponent::Reset()
     {
         m_LocalPosition = {};
         m_LocalRotation = {};
         m_LocalScale = {1.0F, 1.0F, 1.0F};
+        ResetPresentationInterpolation();
         NotifyChanged();
     }
 
@@ -176,6 +221,7 @@ namespace Keire
             transform.m_LocalPosition = position;
             transform.m_LocalRotation = rotation;
             transform.m_LocalScale = scale;
+            transform.m_HasPresentationWorldMatrix = false;
         };
         return result;
     }

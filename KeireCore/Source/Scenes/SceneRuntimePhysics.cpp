@@ -152,6 +152,7 @@ namespace Keire
             return;
         PhysicsWorldService = PhysicsService->CreateWorld();
         SynchronizePhysicsBodies();
+        CapturePhysicsPresentationSamples();
     }
 
     void SceneRuntimeSession::Impl::SynchronizePhysicsBodies()
@@ -500,6 +501,76 @@ namespace Keire
         PullDynamicBodies();
         UpdateCharacterGrounding();
         DispatchPhysicsContacts();
+        CapturePhysicsPresentationSamples();
+    }
+
+    void SceneRuntimeSession::Impl::CapturePhysicsPresentationSamples()
+    {
+        if (!Runtime)
+            return;
+        for (auto& [entityId, state] : PhysicsBodies)
+        {
+            const auto entity = Runtime->FindEntity(entityId);
+            const auto transform = entity ? entity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
+            if (!transform)
+                continue;
+            const auto current = transform->WorldMatrix();
+            const auto resetRevision = transform->PresentationResetRevision();
+            if (!state.HasPresentationSamples || state.PresentationResetRevision != resetRevision)
+            {
+                state.PreviousPresentationWorld = current;
+                state.CurrentPresentationWorld = current;
+                state.PresentationResetRevision = resetRevision;
+                state.HasPresentationSamples = true;
+            }
+            else
+            {
+                state.PreviousPresentationWorld = state.CurrentPresentationWorld;
+                state.CurrentPresentationWorld = current;
+            }
+        }
+    }
+
+    void SceneRuntimeSession::Impl::ApplyPhysicsPresentationInterpolation(const float alpha)
+    {
+        if (!Runtime)
+            return;
+        const auto amount = std::clamp(alpha, 0.0F, 1.0F);
+        for (auto& [entityId, state] : PhysicsBodies)
+        {
+            if (!state.HasPresentationSamples)
+                continue;
+            const auto entity = Runtime->FindEntity(entityId);
+            const auto transform = entity ? entity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
+            if (!transform)
+                continue;
+            const auto character = entity.GetComponent<CharacterControllerComponent>();
+            const auto rigidBody = entity.GetComponent<RigidBodyComponent>();
+            if (!character && (!rigidBody || rigidBody->Motion() != PhysicsMotionType::Dynamic))
+                continue;
+            Vector3 previousPosition;
+            Vector3 previousScale;
+            Quaternion previousRotation;
+            Vector3 currentPosition;
+            Vector3 currentScale;
+            Quaternion currentRotation;
+            if (!Math::DecomposeTransform(state.PreviousPresentationWorld, previousPosition, previousRotation,
+                                          previousScale) ||
+                !Math::DecomposeTransform(state.CurrentPresentationWorld, currentPosition, currentRotation,
+                                          currentScale))
+            {
+                transform->SetRuntimePresentationWorldMatrix(state.CurrentPresentationWorld);
+                continue;
+            }
+            const Vector3 position{previousPosition.X + (currentPosition.X - previousPosition.X) * amount,
+                                   previousPosition.Y + (currentPosition.Y - previousPosition.Y) * amount,
+                                   previousPosition.Z + (currentPosition.Z - previousPosition.Z) * amount};
+            const Vector3 scale{previousScale.X + (currentScale.X - previousScale.X) * amount,
+                                previousScale.Y + (currentScale.Y - previousScale.Y) * amount,
+                                previousScale.Z + (currentScale.Z - previousScale.Z) * amount};
+            transform->SetRuntimePresentationWorldMatrix(Math::ComposeTransform(
+                position, RiggingDetail::Nlerp(previousRotation, currentRotation, amount), scale));
+        }
     }
 
     void SceneRuntimeSession::Impl::ClearPhysics() noexcept

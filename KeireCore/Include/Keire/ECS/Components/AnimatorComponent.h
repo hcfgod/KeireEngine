@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Keire/Animation/ProceduralMotion.h"
 #include "Keire/ECS/Component.h"
 
 #include <cstdint>
@@ -118,6 +119,10 @@ namespace Keire
         [[nodiscard]] AssetId Graph() const noexcept { return m_Graph; }
         [[nodiscard]] AssetId Skeleton() const noexcept { return m_Skeleton; }
         [[nodiscard]] AssetId SkinnedMesh() const noexcept { return m_SkinnedMesh; }
+        [[nodiscard]] AnimatorPoseSource PoseSource() const noexcept { return m_PoseSource; }
+        [[nodiscard]] AssetId ProceduralProfile() const noexcept { return m_ProceduralProfile; }
+        [[nodiscard]] AssetId RigDefinition() const noexcept { return m_RigDefinition; }
+        [[nodiscard]] ProceduralMotionQuality ProceduralQuality() const noexcept { return m_ProceduralQuality; }
         [[nodiscard]] bool ApplyRootMotion() const noexcept { return m_ApplyRootMotion; }
         [[nodiscard]] float Speed() const noexcept { return m_Speed; }
         [[nodiscard]] bool Paused() const noexcept { return m_Paused; }
@@ -134,6 +139,10 @@ namespace Keire
         void SetGraph(AssetId graph);
         void SetSkeleton(AssetId skeleton);
         void SetSkinnedMesh(AssetId mesh);
+        void SetPoseSource(AnimatorPoseSource source);
+        void SetProceduralProfile(AssetId profile);
+        void SetRigDefinition(AssetId rig);
+        void SetProceduralQuality(ProceduralMotionQuality quality);
         void SetApplyRootMotion(bool enabled);
         void SetSpeed(float speed);
         void SetPaused(bool paused) noexcept;
@@ -163,6 +172,10 @@ namespace Keire
         [[nodiscard]] const AnimatorLimbIkSettings& RightArmIk() const noexcept { return m_RightArmIk; }
         void SetLeftArmIk(AnimatorLimbIkSettings settings);
         void SetRightArmIk(AnimatorLimbIkSettings settings);
+        void SetProceduralLocomotion(ProceduralLocomotionIntent intent);
+        [[nodiscard]] ProceduralLocomotionIntent ConsumeProceduralLocomotionIntent() noexcept;
+        [[nodiscard]] const ProceduralLocomotionState& ProceduralState() const noexcept { return m_ProceduralState; }
+        void SetRuntimeProceduralState(ProceduralLocomotionState state) noexcept;
         [[nodiscard]] std::vector<AnimatorCommand> ConsumeRuntimeCommands();
         void SetRuntimePose(std::string state, float normalizedTime, bool playing,
                             std::span<const Matrix4> skinPalette);
@@ -177,6 +190,10 @@ namespace Keire
         AssetId m_Graph;
         AssetId m_Skeleton;
         AssetId m_SkinnedMesh;
+        AnimatorPoseSource m_PoseSource = AnimatorPoseSource::AnimationGraph;
+        AssetId m_ProceduralProfile;
+        AssetId m_RigDefinition;
+        ProceduralMotionQuality m_ProceduralQuality = ProceduralMotionQuality::Auto;
         bool m_ApplyRootMotion = true;
         float m_Speed = 1.0F;
         bool m_Paused = false;
@@ -190,6 +207,8 @@ namespace Keire
         float m_RuntimeFootGroundingWeight = 1.0F;
         AnimatorLimbIkSettings m_LeftArmIk;
         AnimatorLimbIkSettings m_RightArmIk;
+        ProceduralLocomotionIntent m_ProceduralIntent;
+        ProceduralLocomotionState m_ProceduralState;
         std::uint64_t m_NextRuntimeCommand = 1;
         std::shared_ptr<const AnimatorDebugSnapshot> m_DebugSnapshot;
         std::string m_RuntimeDiagnostic;

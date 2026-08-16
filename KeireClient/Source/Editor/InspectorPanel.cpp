@@ -856,11 +856,13 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                             registration->Type == Keire::AudioReverbZoneComponent::StaticType()
                         ? 72.0F
                         : 0.0F;
+                const float proceduralDiagnosticsHeight =
+                    registration->Type == Keire::AnimatorComponent::StaticType() ? 138.0F : 0.0F;
                 const float cardHeight =
                     expanded ? std::max(115.0F, 80.0F + anchorPickerHeight +
                                                     static_cast<float>(registration->Properties.size()) * 34.0F +
                                                     static_cast<float>(groupRows) * 22.0F + vfxInspectorHeight +
-                                                    audioSetupHeight)
+                                                    audioSetupHeight + proceduralDiagnosticsHeight)
                              : 38.0F;
                 if (auto card = ui.BeginChild(cardId, {0.0F, cardHeight}, true); card)
                 {
@@ -874,6 +876,25 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                     {
                         m_Controller.RecordInspectorUndo("Change " + registration->Name);
                         sceneDocument.SetComponentEnabled(entity.Id(), registration->Type, enabled);
+                    }
+                    if (const auto animator = Keire::DynamicRefCast<Keire::AnimatorComponent>(component);
+                        animator && animator->PoseSource() == Keire::AnimatorPoseSource::ProceduralHumanoid)
+                    {
+                        const auto& state = animator->ProceduralState();
+                        ui.TextColored(theme.Accent, "PROCEDURAL RUNTIME");
+                        ui.Text("State: " + std::string(Keire::ProceduralMotionStateName(state.State)));
+                        ui.Text("Phase: " + std::to_string(state.GaitPhase) +
+                                " | Speed: " + std::to_string(state.Speed));
+                        ui.Text(std::string("Contacts: L ") + (state.LeftFootPlanted ? "planted" : "free") + " | R " +
+                                (state.RightFootPlanted ? "planted" : "free"));
+                        ui.Text("Quality: " +
+                                std::string(state.Quality == Keire::ProceduralMotionQuality::High     ? "High"
+                                            : state.Quality == Keire::ProceduralMotionQuality::Medium ? "Medium"
+                                            : state.Quality == Keire::ProceduralMotionQuality::Low    ? "Low"
+                                                                                                      : "Auto"));
+                        if (!animator->RuntimeDiagnostic().empty())
+                            ui.TextColored(theme.Warning, animator->RuntimeDiagnostic());
+                        ui.Separator();
                     }
                     if (rectTransform)
                     {

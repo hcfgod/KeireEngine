@@ -8,6 +8,7 @@
 #include "Keire/Assets/PhysicsMaterialAsset.h"
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/ECS/Components/AnimatorComponent.h"
+#include "Keire/ECS/Components/CameraComponent.h"
 #include "Keire/ECS/Components/CharacterControllerComponent.h"
 #include "Keire/ECS/Components/ColliderComponent.h"
 #include "Keire/ECS/Components/RigidBodyComponent.h"
@@ -17,6 +18,8 @@
 #include "Keire/Scenes/ScenePresentationRuntime.h"
 #include "Keire/Vfx/VfxSystem.h"
 #include "Keire/Vfx/VfxVolumeAsset.h"
+#include "KeireInternal/Animation/ProceduralPoseMath.h"
+#include "KeireInternal/Animation/RiggingMath.h"
 #include "KeireInternal/Scenes/AnimationIkPasses.h"
 #include "KeireInternal/Scenes/CharacterGrounding.h"
 #include "KeireInternal/Scenes/FootGroundingSpace.h"
@@ -136,8 +139,13 @@ namespace Keire
             AssetId Graph;
             AssetId Skeleton;
             AssetId Skin;
+            AnimatorPoseSource PoseSource = AnimatorPoseSource::AnimationGraph;
+            AssetId ProceduralProfile;
+            AssetId RigDefinition;
             AssetHandle<AnimationGraphAsset> GraphHandle;
             AssetHandle<SkeletonAsset> SkeletonHandle;
+            AssetHandle<ProceduralMotionProfileAsset> ProceduralProfileHandle;
+            AssetHandle<RigDefinitionAsset> RigDefinitionHandle;
             std::map<AssetId, AssetHandle<AnimationClipAsset>> Clips;
             std::map<AssetId, RetargetedClip> RetargetedClips;
             std::map<AssetId, AssetHandle<AvatarMaskAsset>> Masks;
@@ -147,6 +155,8 @@ namespace Keire
             std::uint64_t GraphRevision = 0;
             std::uint64_t DependencyGraphRevision = 0;
             std::uint64_t SkeletonRevision = 0;
+            std::uint64_t ProceduralProfileRevision = 0;
+            std::uint64_t RigDefinitionRevision = 0;
             std::string DependencyDiagnostic;
             Detail::AutomaticLimbIkState LeftArmIkState;
             Detail::AutomaticLimbIkState RightArmIkState;
@@ -161,6 +171,26 @@ namespace Keire
             std::uint64_t FootClearanceMeshRevision = 0;
             std::map<std::uint32_t, std::optional<float>> FootMeshClearances;
             std::map<std::uint32_t, std::optional<std::uint32_t>> FootToeBones;
+            std::vector<BoneTransform> PreviousProceduralPose;
+            std::vector<BoneTransform> CurrentProceduralPose;
+            ProceduralLocomotionState ProceduralState;
+            ProceduralLocomotionIntent ProceduralIntent;
+            ProceduralMotionState PreviousProceduralState = ProceduralMotionState::Idle;
+            float GaitPhase = 0.0F;
+            float PreviousGaitPhase = 0.0F;
+            float ProceduralTime = 0.0F;
+            float LandingElapsed = 0.0F;
+            float StopSettleRemaining = 0.0F;
+            float PreviousVerticalSpeed = 0.0F;
+            Vector3 PreviousRootForward;
+            Vector3 PreviousHorizontalVelocity;
+            float RootAngularVelocityDegrees = 0.0F;
+            float HorizontalAcceleration = 0.0F;
+            bool PreviousGrounded = true;
+            bool HasPreviousRootForward = false;
+            bool ProceduralInitialized = false;
+            bool ApexSent = false;
+            std::uint64_t ProceduralTick = 0;
         };
 
         struct PhysicsRuntimeState final
@@ -182,6 +212,10 @@ namespace Keire
             float CharacterRequestedVerticalDisplacement = 0.0F;
             std::uint32_t CharacterMissedWalkableFrames = 0;
             std::uint32_t Generation = 0;
+            Matrix4 PreviousPresentationWorld;
+            Matrix4 CurrentPresentationWorld;
+            std::uint64_t PresentationResetRevision = 0;
+            bool HasPresentationSamples = false;
         };
 
         struct VfxRuntimeState final
@@ -597,15 +631,16 @@ namespace Keire
             return {};
         }
 
-        [[nodiscard]] std::string ApplyFootGrounding(const Entity& entity, const SkeletonAsset& skeleton,
-                                                     const AnimatorComponent& animator, const float deltaSeconds,
-                                                     std::span<BoneTransform> localPose,
-                                                     const std::map<std::string, std::uint32_t, std::less<>>& indices,
-                                                     const std::map<RigBoneSemantic, std::uint32_t>& semantics,
-                                                     AnimationRuntimeState& runtimeState)
+        [[nodiscard]] std::string ApplyFootGrounding(
+            const Entity& entity, const SkeletonAsset& skeleton, const AnimatorFootGroundingSettings& settings,
+            const float runtimeWeight, const AssetId skinnedMesh, const float deltaSeconds,
+            std::span<BoneTransform> localPose, const std::map<std::string, std::uint32_t, std::less<>>& indices,
+            const std::map<RigBoneSemantic, std::uint32_t>& semantics, AnimationRuntimeState& runtimeState,
+            const std::optional<float> horizontalPelvisRatio = std::nullopt,
+            const std::optional<float> maximumFootRotationDegrees = std::nullopt,
+            const std::optional<std::array<float, 2>> proceduralFootWeights = std::nullopt,
+            const std::optional<float> unsupportedFootDropRatio = std::nullopt)
         {
-            const auto& settings = animator.FootGrounding();
-            const auto runtimeWeight = animator.RuntimeFootGroundingWeight();
             if (!settings.Enabled || runtimeWeight <= std::numeric_limits<float>::epsilon())
             {
                 runtimeState.LeftFootIkState = {};
@@ -695,15 +730,17 @@ namespace Keire
             request.PelvisWeight = settings.Weight * runtimeWeight;
             request.MaximumPelvisAdjustment =
                 Detail::WorldVerticalDistanceToModel(worldToModel, settings.MaximumPelvisAdjustment);
+            request.PositionTolerance = Detail::WorldVerticalDistanceToModel(worldToModel, 0.01F);
             float totalLegLength = 0.0F;
             std::size_t legCount = 0;
             float maximumGroundingBlend = 0.0F;
             float minimumGroundingBlend = 1.0F;
+            std::array<bool, 2> unsupportedFeet{};
             Ref<const SkinnedMeshAsset> skin;
             Ref<const MeshAsset> skinMesh;
-            if (Assets && animator.SkinnedMesh())
+            if (Assets && skinnedMesh)
             {
-                const auto skinHandle = Assets->Load<SkinnedMeshAsset>(animator.SkinnedMesh(), AssetPriority::High);
+                const auto skinHandle = Assets->Load<SkinnedMeshAsset>(skinnedMesh, AssetPriority::High);
                 skin = skinHandle.TryGetLoaded();
                 if (skin)
                 {
@@ -721,6 +758,13 @@ namespace Keire
                     }
                 }
             }
+            const auto distance = [](const Vector3 left, const Vector3 right)
+            {
+                const auto x = right.X - left.X;
+                const auto y = right.Y - left.Y;
+                const auto z = right.Z - left.Z;
+                return std::sqrt(x * x + y * y + z * z);
+            };
             for (std::size_t chainIndex = 0; chainIndex < chains.size(); ++chainIndex)
             {
                 const auto& chain = chains[chainIndex];
@@ -730,13 +774,6 @@ namespace Keire
                     Math::TransformPoint(modelToWorld, Math::TransformPoint(modelBones[*chain[0]], {}));
                 const auto lowerWorld =
                     Math::TransformPoint(modelToWorld, Math::TransformPoint(modelBones[*chain[1]], {}));
-                const auto distance = [](const Vector3 left, const Vector3 right)
-                {
-                    const auto x = right.X - left.X;
-                    const auto y = right.Y - left.Y;
-                    const auto z = right.Z - left.Z;
-                    return std::sqrt(x * x + y * y + z * z);
-                };
                 const auto legLength = distance(upperWorld, lowerWorld) + distance(lowerWorld, footWorld);
                 const auto upperModel = Math::TransformPoint(modelBones[*chain[0]], {});
                 const auto lowerModel = Math::TransformPoint(modelBones[*chain[1]], {});
@@ -748,6 +785,15 @@ namespace Keire
                 auto& stability = chainIndex == 0 ? runtimeState.LeftFootIkState : runtimeState.RightFootIkState;
                 auto& smoothing = chainIndex == 0 ? runtimeState.LeftFootGroundingSmoothingState
                                                   : runtimeState.RightFootGroundingSmoothingState;
+                const auto chainRuntimeWeight =
+                    proceduralFootWeights ? std::clamp((*proceduralFootWeights)[chainIndex], 0.0F, 1.0F) : 1.0F;
+                if (chainRuntimeWeight <= std::numeric_limits<float>::epsilon())
+                {
+                    plantRuntime = {};
+                    stability = {};
+                    smoothing = {};
+                    continue;
+                }
                 bool forcePlantCandidate = false;
                 bool resolvedLockedSupport = settings.LockPlantedFeet && plantState.Locked;
                 if (resolvedLockedSupport && plantRuntime.Support)
@@ -849,6 +895,7 @@ namespace Keire
                     if (hit == hits.end())
                     {
                         plantRuntime = {};
+                        unsupportedFeet[chainIndex] = unsupportedFootDropRatio.has_value();
                     }
                     else
                     {
@@ -961,10 +1008,30 @@ namespace Keire
                     settings.ResponseTime, smoothing);
                 if (!smoothed)
                 {
-                    stability = {};
+                    if (!unsupportedFeet[chainIndex])
+                        stability = {};
                     continue;
                 }
-                contact = Detail::ToModelFootGroundContact(worldToModel, smoothed->Position, smoothed->Normal, 0.0F);
+                unsupportedFeet[chainIndex] = false;
+                auto limitedNormal = smoothed->Normal;
+                if (maximumFootRotationDegrees)
+                {
+                    limitedNormal = Detail::IkNormalize(limitedNormal);
+                    const auto slope = std::acos(std::clamp(limitedNormal.Y, -1.0F, 1.0F)) * 57.2957795131F;
+                    if (slope > *maximumFootRotationDegrees)
+                    {
+                        const auto horizontalLength =
+                            std::sqrt(limitedNormal.X * limitedNormal.X + limitedNormal.Z * limitedNormal.Z);
+                        if (horizontalLength > 0.000001F)
+                        {
+                            const auto radians = *maximumFootRotationDegrees * 0.0174532925199F;
+                            const auto sine = std::sin(radians);
+                            limitedNormal = {limitedNormal.X / horizontalLength * sine, std::cos(radians),
+                                             limitedNormal.Z / horizontalLength * sine};
+                        }
+                    }
+                }
+                contact = Detail::ToModelFootGroundContact(worldToModel, smoothed->Position, limitedNormal, 0.0F);
                 if (!contact)
                 {
                     smoothing = {};
@@ -983,8 +1050,9 @@ namespace Keire
                                            *footTarget,
                                            contact->Normal,
                                            pole,
-                                           settings.Weight * runtimeWeight * smoothed->Blend,
-                                           settings.RotationWeight * runtimeWeight * smoothed->Blend};
+                                           settings.Weight * runtimeWeight * chainRuntimeWeight * smoothed->Blend,
+                                           settings.RotationWeight * runtimeWeight * chainRuntimeWeight *
+                                               smoothed->Blend};
                 auto toe = runtimeState.FootToeBones.find(*chain[2]);
                 if (toe == runtimeState.FootToeBones.end())
                 {
@@ -993,39 +1061,66 @@ namespace Keire
                               .first;
                 }
                 grounded.Toe = toe->second;
-                maximumGroundingBlend = std::max(maximumGroundingBlend, smoothed->Blend);
-                minimumGroundingBlend = std::min(minimumGroundingBlend, smoothed->Blend);
+                const auto effectiveBlend = chainRuntimeWeight * smoothed->Blend;
+                maximumGroundingBlend = std::max(maximumGroundingBlend, effectiveBlend);
+                minimumGroundingBlend = std::min(minimumGroundingBlend, effectiveBlend);
                 request.Contacts.push_back(std::move(grounded));
             }
-            if (request.Contacts.empty())
-                return {};
-            request.PelvisWeight *= maximumGroundingBlend;
-            if (legCount != 0 && settings.LockPlantedFeet)
+            if (!request.Contacts.empty())
             {
-                const auto averageLegLength = totalLegLength / static_cast<float>(legCount);
-                request.MaximumHorizontalPelvisAdjustment = averageLegLength * 0.25F * minimumGroundingBlend;
-                request.PelvisSupportRadius = averageLegLength * 0.025F;
-                const auto chest = semantics.find(RigBoneSemantic::Chest);
-                const auto spine = semantics.find(RigBoneSemantic::Spine);
-                if (chest != semantics.end() && Detail::IsBoneInSubtree(skeleton, chest->second, *pelvis) &&
-                    chest->second != *pelvis)
-                    request.Torso = chest->second;
-                else if (spine != semantics.end() && Detail::IsBoneInSubtree(skeleton, spine->second, *pelvis) &&
-                         spine->second != *pelvis)
-                    request.Torso = spine->second;
-                if (request.Torso)
+                request.PelvisWeight *= maximumGroundingBlend;
+                if (legCount != 0 && settings.LockPlantedFeet)
                 {
-                    request.PelvisRotationWeight =
-                        settings.Weight * settings.LeanCorrectionWeight * minimumGroundingBlend;
-                    request.MaximumPelvisRotationDegrees = settings.MaximumLeanCorrectionDegrees;
+                    const auto averageLegLength = totalLegLength / static_cast<float>(legCount);
+                    request.MaximumHorizontalPelvisAdjustment =
+                        averageLegLength * horizontalPelvisRatio.value_or(0.25F) * minimumGroundingBlend;
+                    request.PelvisSupportRadius = averageLegLength * 0.025F;
+                    const auto chest = semantics.find(RigBoneSemantic::Chest);
+                    const auto spine = semantics.find(RigBoneSemantic::Spine);
+                    if (chest != semantics.end() && Detail::IsBoneInSubtree(skeleton, chest->second, *pelvis) &&
+                        chest->second != *pelvis)
+                        request.Torso = chest->second;
+                    else if (spine != semantics.end() && Detail::IsBoneInSubtree(skeleton, spine->second, *pelvis) &&
+                             spine->second != *pelvis)
+                        request.Torso = spine->second;
+                    if (request.Torso)
+                    {
+                        request.PelvisRotationWeight =
+                            settings.Weight * settings.LeanCorrectionWeight * minimumGroundingBlend;
+                        request.MaximumPelvisRotationDegrees = settings.MaximumLeanCorrectionDegrees;
+                    }
+                }
+                const auto solved = SolveFootGrounding(skeleton, localPose, request);
+                if (!solved)
+                    return "Foot grounding could not solve the configured leg chains.";
+                if (solved->UnreachableFeet != 0)
+                    return "Foot grounding reached the configured pelvis/leg limit for " +
+                           std::to_string(solved->UnreachableFeet) + " foot target(s).";
+            }
+            if (unsupportedFootDropRatio)
+            {
+                for (std::size_t chainIndex = 0; chainIndex < chains.size(); ++chainIndex)
+                {
+                    if (!unsupportedFeet[chainIndex])
+                        continue;
+                    const auto& chain = chains[chainIndex];
+                    const auto matrices = ModelBoneMatrices(skeleton, localPose);
+                    const auto upperLeg = Math::TransformPoint(matrices[*chain[0]], {});
+                    const auto knee = Math::TransformPoint(matrices[*chain[1]], {});
+                    const auto foot = Math::TransformPoint(matrices[*chain[2]], {});
+                    const auto target = Detail::ProceduralUnsupportedFootTarget(
+                        foot, gravityUpModel, distance(upperLeg, knee) + distance(knee, foot),
+                        *unsupportedFootDropRatio);
+                    auto& stability = chainIndex == 0 ? runtimeState.LeftFootIkState : runtimeState.RightFootIkState;
+                    const auto pole =
+                        Detail::StableAutomaticLimbPole(upperLeg, knee, foot, target, kneeReference, deltaSeconds,
+                                                        settings.ResponseTime, settings.KneeStability, stability);
+                    const auto footWeights = proceduralFootWeights.value_or(std::array{1.0F, 1.0F});
+                    const auto weight =
+                        settings.Weight * runtimeWeight * std::clamp(footWeights[chainIndex], 0.0F, 1.0F);
+                    (void)SolveTwoBoneIk(skeleton, localPose, {*chain[0], *chain[1], *chain[2], target, pole, weight});
                 }
             }
-            const auto solved = SolveFootGrounding(skeleton, localPose, request);
-            if (!solved)
-                return "Foot grounding could not solve the configured leg chains.";
-            if (solved->UnreachableFeet != 0)
-                return "Foot grounding reached the configured pelvis/leg limit for " +
-                       std::to_string(solved->UnreachableFeet) + " foot target(s).";
             return {};
         }
 
@@ -1068,6 +1163,741 @@ namespace Keire
             }
         }
 
+        [[nodiscard]] bool PrepareProceduralAnimator(const Entity& entity, AnimatorComponent& animator,
+                                                     AnimationRuntimeState& state, Ref<const SkeletonAsset>& skeleton,
+                                                     Ref<const ProceduralMotionProfileAsset>& profile)
+        {
+            auto targetSkeleton = animator.Skeleton();
+            if (animator.SkinnedMesh())
+            {
+                const auto skin =
+                    Assets->Load<SkinnedMeshAsset>(animator.SkinnedMesh(), AssetPriority::High).TryGetLoaded();
+                if (!skin)
+                {
+                    animator.SetRuntimeDiagnostic("Procedural Animator is waiting for its skinned mesh to load.");
+                    return false;
+                }
+                targetSkeleton = skin->Skeleton();
+                if (!targetSkeleton)
+                {
+                    animator.SetRuntimeDiagnostic("The assigned skinned mesh does not reference a skeleton.");
+                    return false;
+                }
+                if (animator.Skeleton() != targetSkeleton)
+                    animator.SetSkeleton(targetSkeleton);
+            }
+
+            const bool changed = state.PoseSource != animator.PoseSource() || state.Skeleton != targetSkeleton ||
+                                 state.Skin != animator.SkinnedMesh() ||
+                                 state.ProceduralProfile != animator.ProceduralProfile() ||
+                                 state.RigDefinition != animator.RigDefinition();
+            if (changed)
+            {
+                state = {};
+                state.PoseSource = AnimatorPoseSource::ProceduralHumanoid;
+                state.Skeleton = targetSkeleton;
+                state.Skin = animator.SkinnedMesh();
+                state.ProceduralProfile = animator.ProceduralProfile();
+                state.RigDefinition = animator.RigDefinition();
+                if (state.Skeleton)
+                    state.SkeletonHandle = Assets->Load<SkeletonAsset>(state.Skeleton, AssetPriority::High);
+                if (state.ProceduralProfile)
+                {
+                    state.ProceduralProfileHandle =
+                        Assets->Load<ProceduralMotionProfileAsset>(state.ProceduralProfile, AssetPriority::High);
+                }
+                if (state.RigDefinition)
+                    state.RigDefinitionHandle =
+                        Assets->Load<RigDefinitionAsset>(state.RigDefinition, AssetPriority::High);
+                animator.SetRuntimeDiagnostic({});
+            }
+            if (!state.Skeleton || !state.ProceduralProfile || !state.RigDefinition)
+            {
+                animator.SetRuntimeDiagnostic(
+                    "Procedural Humanoid requires skeleton, motion profile, and Rig Definition assets.");
+                return false;
+            }
+            skeleton = state.SkeletonHandle.TryGetLoaded();
+            profile = state.ProceduralProfileHandle.TryGetLoaded();
+            const auto rig = state.RigDefinitionHandle.TryGetLoaded();
+            if (!skeleton || !profile || !rig)
+            {
+                animator.SetRuntimeDiagnostic("Procedural Animator is waiting for its profile and rig dependencies.");
+                return false;
+            }
+
+            const auto skeletonRevision = state.SkeletonHandle.Revision();
+            const auto profileRevision = state.ProceduralProfileHandle.Revision();
+            const auto rigRevision = state.RigDefinitionHandle.Revision();
+            if (!state.ProceduralInitialized || state.SkeletonRevision != skeletonRevision ||
+                state.ProceduralProfileRevision != profileRevision || state.RigDefinitionRevision != rigRevision)
+            {
+                state.BoneIndices.clear();
+                state.SemanticBoneIndices.clear();
+                for (std::uint32_t index = 0; index < skeleton->Bones().size(); ++index)
+                    state.BoneIndices.emplace(skeleton->Bones()[index].Name, index);
+                for (const auto& bone : rig->Definition().Bones)
+                {
+                    const auto found = state.BoneIndices.find(bone.Name);
+                    if (bone.Semantic != RigBoneSemantic::None && found != state.BoneIndices.end())
+                        state.SemanticBoneIndices.emplace(bone.Semantic, found->second);
+                }
+                constexpr std::array required{
+                    RigBoneSemantic::Pelvis,        RigBoneSemantic::Spine,     RigBoneSemantic::LeftUpperArm,
+                    RigBoneSemantic::LeftLowerArm,  RigBoneSemantic::LeftHand,  RigBoneSemantic::RightUpperArm,
+                    RigBoneSemantic::RightLowerArm, RigBoneSemantic::RightHand, RigBoneSemantic::LeftUpperLeg,
+                    RigBoneSemantic::LeftLowerLeg,  RigBoneSemantic::LeftFoot,  RigBoneSemantic::RightUpperLeg,
+                    RigBoneSemantic::RightLowerLeg, RigBoneSemantic::RightFoot};
+                const auto missing = std::ranges::find_if(required, [&](const auto semantic)
+                                                          { return !state.SemanticBoneIndices.contains(semantic); });
+                if (missing != required.end())
+                {
+                    animator.SetRuntimeDiagnostic("Procedural Humanoid rig is missing semantic bone '" +
+                                                  std::string(RigBoneSemanticName(*missing)) + "'.");
+                    return false;
+                }
+                state.PreviousProceduralPose.clear();
+                state.CurrentProceduralPose.clear();
+                state.PreviousProceduralPose.reserve(skeleton->Bones().size());
+                for (const auto& bone : skeleton->Bones())
+                    state.PreviousProceduralPose.push_back(bone.BindPose);
+                state.CurrentProceduralPose = state.PreviousProceduralPose;
+                state.SkeletonRevision = skeletonRevision;
+                state.ProceduralProfileRevision = profileRevision;
+                state.RigDefinitionRevision = rigRevision;
+                state.ProceduralInitialized = true;
+                state.PreviousGrounded = true;
+                state.PreviousProceduralState = ProceduralMotionState::Idle;
+                state.LeftFootPlantState = {};
+                state.RightFootPlantState = {};
+                if (skeletonRevision > 1 || profileRevision > 1 || rigRevision > 1)
+                {
+                    animator.SetRuntimeDiagnostic(
+                        "Procedural profile or rig reload reset planted contacts and pose interpolation safely.");
+                }
+            }
+            (void)entity;
+            return true;
+        }
+
+        [[nodiscard]] static float VectorLength(const Vector3 value) noexcept
+        {
+            return std::sqrt(value.X * value.X + value.Y * value.Y + value.Z * value.Z);
+        }
+
+        [[nodiscard]] static Vector3 NormalizeHorizontal(const Vector3 value, const Vector3 fallback = {}) noexcept
+        {
+            const auto length = std::sqrt(value.X * value.X + value.Z * value.Z);
+            return length > 0.000001F ? Vector3{value.X / length, 0.0F, value.Z / length} : fallback;
+        }
+
+        [[nodiscard]] static bool CrossedPhase(const float previous, const float current, const float target) noexcept
+        {
+            return current >= previous ? previous < target && current >= target
+                                       : previous < target || current >= target;
+        }
+
+        [[nodiscard]] static float SignedHorizontalAngleDegrees(const Vector3 from, const Vector3 to) noexcept
+        {
+            const auto first = NormalizeHorizontal(from);
+            const auto second = NormalizeHorizontal(to);
+            if (VectorLength(first) <= 0.000001F || VectorLength(second) <= 0.000001F)
+                return 0.0F;
+            const auto cosine = std::clamp(first.X * second.X + first.Z * second.Z, -1.0F, 1.0F);
+            const auto angle = std::acos(cosine) * 57.2957795131F;
+            return first.X * second.Z - first.Z * second.X < 0.0F ? -angle : angle;
+        }
+
+        void DispatchProceduralFootEvents(const Entity& entity, AnimationRuntimeState& state,
+                                          const ProceduralLocomotionState& procedural)
+        {
+            if (!Runtime || (procedural.State != ProceduralMotionState::Locomotion &&
+                             procedural.State != ProceduralMotionState::TurnInPlace))
+                return;
+            const auto emit = [&](const bool left, const bool plant)
+            {
+                const auto name = plant ? "Procedural.FootPlant" : "Procedural.FootLift";
+                const auto& footState = left ? state.LeftFootPlantState : state.RightFootPlantState;
+                AssetId physicsMaterial;
+                if (footState.Support)
+                {
+                    const auto supportBody = PhysicsBodies.find(*footState.Support);
+                    if (supportBody != PhysicsBodies.end())
+                        physicsMaterial = supportBody->second.Material;
+                }
+                Runtime->DispatchProceduralMotionEvent(
+                    entity.Id(),
+                    {plant ? ProceduralMotionEventType::FootPlant : ProceduralMotionEventType::FootLift,
+                     left ? ProceduralFootSide::Left : ProceduralFootSide::Right, procedural.State,
+                     procedural.GaitPhase, std::clamp(procedural.Speed / 6.0F, 0.0F, 1.0F), footState.Plant.Position,
+                     footState.Plant.Normal, footState.Support.value_or(EntityId{}), physicsMaterial});
+                Runtime->DispatchAnimationEvent(entity.Id(),
+                                                {name, procedural.GaitPhase, left ? 0 : 1, procedural.Speed, {}});
+                if (plant)
+                {
+                    Runtime->DispatchAnimationEvent(entity.Id(), {"Footstep",
+                                                                  procedural.GaitPhase,
+                                                                  left ? 0 : 1,
+                                                                  std::clamp(procedural.Speed / 6.0F, 0.0F, 1.0F),
+                                                                  {}});
+                }
+            };
+            constexpr float liftPhase = 0.02F;
+            constexpr float plantPhase = 0.50F;
+            for (std::size_t foot = 0; foot < 2; ++foot)
+            {
+                const auto offset = foot == 0 ? 0.0F : 0.5F;
+                auto previous = state.PreviousGaitPhase + offset;
+                auto current = state.GaitPhase + offset;
+                previous -= std::floor(previous);
+                current -= std::floor(current);
+                if (CrossedPhase(previous, current, liftPhase))
+                    emit(foot == 0, false);
+                if (CrossedPhase(previous, current, plantPhase))
+                    emit(foot == 0, true);
+            }
+        }
+
+        void AdvanceProceduralAnimation(const float deltaSeconds)
+        {
+            if (!Assets || !Runtime || deltaSeconds <= 0.0F)
+                return;
+            for (const auto& entity : Runtime->Query<AnimatorComponent>())
+            {
+                const auto animator = entity.GetComponent<AnimatorComponent>();
+                if (!animator || animator->PoseSource() != AnimatorPoseSource::ProceduralHumanoid ||
+                    !entity.ActiveInHierarchy() || !animator->Enabled())
+                {
+                    continue;
+                }
+                auto& statePointer = Animators[entity.Id()];
+                if (!statePointer)
+                    statePointer = std::make_unique<AnimationRuntimeState>();
+                auto& state = *statePointer;
+                Ref<const SkeletonAsset> skeleton;
+                Ref<const ProceduralMotionProfileAsset> profileAsset;
+                if (!PrepareProceduralAnimator(entity, *animator, state, skeleton, profileAsset))
+                    continue;
+                const auto& profile = profileAsset->Profile();
+                animator->SetRuntimeDiagnostic({});
+                state.PreviousProceduralPose = state.CurrentProceduralPose;
+                state.PreviousGaitPhase = state.GaitPhase;
+                state.ProceduralIntent = animator->ConsumeProceduralLocomotionIntent();
+                state.ProceduralTime += deltaSeconds;
+                ++state.ProceduralTick;
+
+                const auto characterRoot = Detail::FindCharacterControllerRoot(entity);
+                const auto character = characterRoot ? characterRoot.GetComponent<CharacterControllerComponent>()
+                                                     : entity.GetComponent<CharacterControllerComponent>();
+                const auto characterState = character ? character->RuntimeState() : CharacterControllerRuntimeState{};
+                const auto grounded = character ? characterState.Grounded : false;
+                const auto velocity = character ? characterState.Velocity : state.ProceduralIntent.DesiredWorldVelocity;
+                const Vector3 horizontalVelocity{velocity.X, 0.0F, velocity.Z};
+                const auto speed = VectorLength(horizontalVelocity);
+                state.HorizontalAcceleration =
+                    VectorLength(RiggingDetail::Subtract(horizontalVelocity, state.PreviousHorizontalVelocity)) /
+                    deltaSeconds;
+                Vector3 rootForward{0.0F, 0.0F, 1.0F};
+                const auto rootTransform = characterRoot ? characterRoot.GetComponent<TransformComponent>()
+                                                         : entity.GetComponent<TransformComponent>();
+                if (rootTransform)
+                    rootForward = NormalizeHorizontal(
+                        Math::TransformDirection(rootTransform->WorldMatrix(), rootForward), rootForward);
+                state.RootAngularVelocityDegrees =
+                    state.HasPreviousRootForward
+                        ? SignedHorizontalAngleDegrees(state.PreviousRootForward, rootForward) / deltaSeconds
+                        : 0.0F;
+                const auto turningInPlace =
+                    grounded && speed <= profile.MinimumMovementSpeed &&
+                    std::abs(state.RootAngularVelocityDegrees) >= profile.TurnInPlaceThresholdDegrees;
+                const auto justLanded = grounded && !state.PreviousGrounded;
+                const auto confirmedTakeoff =
+                    !grounded && state.PreviousGrounded && (state.ProceduralIntent.JumpRequested || velocity.Y > 0.1F);
+                auto motionState = state.ProceduralState.State;
+                if (justLanded)
+                {
+                    motionState = ProceduralMotionState::Landing;
+                    state.LandingElapsed = 0.0F;
+                    state.ProceduralState.LandingIntensity =
+                        std::clamp(-state.PreviousVerticalSpeed / profile.MaximumLandingSpeed, 0.0F, 1.0F);
+                    Runtime->DispatchProceduralMotionEvent(entity.Id(),
+                                                           {ProceduralMotionEventType::Land, ProceduralFootSide::None,
+                                                            motionState, 0.0F, state.ProceduralState.LandingIntensity});
+                    Runtime->DispatchAnimationEvent(
+                        entity.Id(), {"Procedural.Land", 0.0F, 0, state.ProceduralState.LandingIntensity, {}});
+                }
+                else if (!grounded)
+                {
+                    if (confirmedTakeoff)
+                    {
+                        motionState = ProceduralMotionState::Takeoff;
+                        state.ApexSent = false;
+                        Runtime->DispatchProceduralMotionEvent(
+                            entity.Id(),
+                            {ProceduralMotionEventType::Takeoff, ProceduralFootSide::None, motionState, 0.0F, 1.0F});
+                        Runtime->DispatchAnimationEvent(entity.Id(), {"Procedural.Takeoff", 0.0F, 0, 1.0F, {}});
+                    }
+                    else if (velocity.Y > 0.08F)
+                    {
+                        motionState = ProceduralMotionState::Rising;
+                    }
+                    else
+                    {
+                        motionState = ProceduralMotionState::Falling;
+                        if (!state.ApexSent && state.PreviousVerticalSpeed > 0.0F)
+                        {
+                            state.ApexSent = true;
+                            Runtime->DispatchProceduralMotionEvent(
+                                entity.Id(),
+                                {ProceduralMotionEventType::Apex, ProceduralFootSide::None, motionState, 0.0F, 1.0F});
+                            Runtime->DispatchAnimationEvent(entity.Id(), {"Procedural.Apex", 0.0F, 0, 1.0F, {}});
+                        }
+                    }
+                }
+                else if (motionState == ProceduralMotionState::Landing &&
+                         state.LandingElapsed < profile.LandingRecoveryTime)
+                {
+                    state.LandingElapsed += deltaSeconds;
+                }
+                else if (speed > profile.MinimumMovementSpeed)
+                {
+                    motionState = ProceduralMotionState::Locomotion;
+                    state.ProceduralState.LandingIntensity = 0.0F;
+                }
+                else if (turningInPlace)
+                {
+                    motionState = ProceduralMotionState::TurnInPlace;
+                    state.ProceduralState.LandingIntensity = 0.0F;
+                }
+                else
+                {
+                    motionState = ProceduralMotionState::Idle;
+                    state.ProceduralState.LandingIntensity = 0.0F;
+                    if (state.PreviousProceduralState == ProceduralMotionState::Locomotion)
+                        state.StopSettleRemaining = profile.StopSettleTime;
+                }
+                if (motionState == ProceduralMotionState::Takeoff && !confirmedTakeoff)
+                    motionState = velocity.Y > 0.08F ? ProceduralMotionState::Rising : ProceduralMotionState::Falling;
+                if (motionState != state.ProceduralState.State)
+                {
+                    Runtime->DispatchProceduralMotionEvent(entity.Id(), {ProceduralMotionEventType::StateChanged,
+                                                                         ProceduralFootSide::None, motionState,
+                                                                         state.GaitPhase, 0.0F});
+                    Runtime->DispatchAnimationEvent(entity.Id(), {"Procedural.StateChanged", 0.0F,
+                                                                  static_cast<std::int32_t>(motionState), 0.0F,
+                                                                  std::string(ProceduralMotionStateName(motionState))});
+                }
+
+                auto quality = animator->ProceduralQuality();
+                if (quality == ProceduralMotionQuality::Auto)
+                {
+                    quality = ProceduralMotionQuality::High;
+                    const auto animatorTransform = entity.GetComponent<TransformComponent>();
+                    if (animatorTransform)
+                    {
+                        auto closestSquared = std::numeric_limits<float>::max();
+                        for (const auto& cameraEntity : Runtime->Query<CameraComponent>())
+                        {
+                            const auto camera = cameraEntity.GetComponent<CameraComponent>();
+                            const auto cameraTransform = cameraEntity.GetComponent<TransformComponent>();
+                            if (!camera || !camera->Primary() || !cameraTransform || !cameraEntity.ActiveInHierarchy())
+                            {
+                                continue;
+                            }
+                            const auto delta = RiggingDetail::Subtract(cameraTransform->WorldPosition(),
+                                                                       animatorTransform->WorldPosition());
+                            closestSquared = std::min(closestSquared, RiggingDetail::Dot(delta, delta));
+                        }
+                        if (closestSquared > 50.0F * 50.0F)
+                            quality = ProceduralMotionQuality::Low;
+                        else if (closestSquared > 20.0F * 20.0F)
+                            quality = ProceduralMotionQuality::Medium;
+                    }
+                }
+                state.ProceduralState.State = motionState;
+                state.ProceduralState.Quality = quality;
+                state.ProceduralState.ActualWorldVelocity = velocity;
+                state.ProceduralState.GroundNormal = characterState.GroundNormal;
+                state.ProceduralState.Speed = speed;
+                state.ProceduralState.VerticalSpeed = velocity.Y;
+                state.ProceduralState.Grounded = grounded;
+
+                auto phaseRate = 0.0F;
+                if (motionState == ProceduralMotionState::Locomotion)
+                {
+                    phaseRate = Detail::ProceduralGaitPhaseRate(speed, state.ProceduralIntent.RunBlend,
+                                                                profile.WalkSpeed, profile.SprintSpeed,
+                                                                profile.WalkCadence, profile.SprintCadence);
+                    state.GaitPhase += deltaSeconds * phaseRate;
+                    state.GaitPhase -= std::floor(state.GaitPhase);
+                }
+                else if (motionState == ProceduralMotionState::TurnInPlace)
+                {
+                    state.GaitPhase += deltaSeconds * std::abs(state.RootAngularVelocityDegrees) /
+                                       std::max(profile.TurnStepDegrees, 1.0F);
+                    state.GaitPhase -= std::floor(state.GaitPhase);
+                }
+                else if (motionState == ProceduralMotionState::Idle && state.GaitPhase != 0.0F)
+                {
+                    state.StopSettleRemaining = std::max(0.0F, state.StopSettleRemaining - deltaSeconds);
+                    const auto settle = profile.StopSettleTime <= 0.0F ? 1.0F : deltaSeconds / profile.StopSettleTime;
+                    const auto nearest = state.GaitPhase < 0.5F ? 0.0F : 1.0F;
+                    state.GaitPhase += (nearest - state.GaitPhase) * std::clamp(settle, 0.0F, 1.0F);
+                    if (state.GaitPhase >= 0.999F || state.GaitPhase <= 0.001F)
+                        state.GaitPhase = 0.0F;
+                }
+                state.ProceduralState.GaitPhase = state.GaitPhase;
+
+                const auto solveInterval = quality == ProceduralMotionQuality::Low      ? std::uint64_t{4}
+                                           : quality == ProceduralMotionQuality::Medium ? std::uint64_t{2}
+                                                                                        : std::uint64_t{1};
+                if ((state.ProceduralTick - 1U) % solveInterval != 0U)
+                {
+                    animator->SetRuntimeProceduralState(state.ProceduralState);
+                    DispatchProceduralFootEvents(entity, state, state.ProceduralState);
+                    state.PreviousGrounded = grounded;
+                    state.PreviousVerticalSpeed = velocity.Y;
+                    state.PreviousProceduralState = motionState;
+                    state.PreviousRootForward = rootForward;
+                    state.PreviousHorizontalVelocity = horizontalVelocity;
+                    state.HasPreviousRootForward = true;
+                    continue;
+                }
+
+                auto pose = std::vector<BoneTransform>{};
+                pose.reserve(skeleton->Bones().size());
+                for (const auto& bone : skeleton->Bones())
+                    pose.push_back(bone.BindPose);
+                const auto semantic = [&](const RigBoneSemantic value) { return state.SemanticBoneIndices.at(value); };
+                const auto pelvis = semantic(RigBoneSemantic::Pelvis);
+                const auto leftUpper = semantic(RigBoneSemantic::LeftUpperLeg);
+                const auto leftLower = semantic(RigBoneSemantic::LeftLowerLeg);
+                const auto leftFoot = semantic(RigBoneSemantic::LeftFoot);
+                const auto rightUpper = semantic(RigBoneSemantic::RightUpperLeg);
+                const auto rightLower = semantic(RigBoneSemantic::RightLowerLeg);
+                const auto rightFoot = semantic(RigBoneSemantic::RightFoot);
+
+                const auto bindMatrices = ModelBoneMatrices(*skeleton, pose);
+                const auto position = [&](const std::uint32_t bone)
+                { return Math::TransformPoint(bindMatrices[bone], {}); };
+                const auto distance = [&](const std::uint32_t first, const std::uint32_t second)
+                { return VectorLength(RiggingDetail::Subtract(position(first), position(second))); };
+                const auto leftLegLength = distance(leftUpper, leftLower) + distance(leftLower, leftFoot);
+                const auto rightLegLength = distance(rightUpper, rightLower) + distance(rightLower, rightFoot);
+                const auto legLength = std::max((leftLegLength + rightLegLength) * 0.5F, 0.001F);
+                const auto locomotionWeight =
+                    motionState == ProceduralMotionState::Locomotion
+                        ? Detail::ProceduralLocomotionPoseWeight(speed, profile.MinimumMovementSpeed, profile.WalkSpeed)
+                    : motionState == ProceduralMotionState::TurnInPlace
+                        ? std::clamp(std::abs(state.RootAngularVelocityDegrees) / 180.0F, 0.25F, 1.0F)
+                    : motionState == ProceduralMotionState::Idle && profile.StopSettleTime > 0.0F
+                        ? std::clamp(state.StopSettleRemaining / profile.StopSettleTime, 0.0F, 1.0F)
+                        : 0.0F;
+                const auto bob = profile.PelvisMotion.Evaluate(state.GaitPhase) * profile.PelvisBobRatio * legLength *
+                                 locomotionWeight;
+                const auto sway =
+                    std::sin(state.GaitPhase * 6.28318530718F) * profile.PelvisSwayRatio * legLength * locomotionWeight;
+                pose[pelvis].Translation.X += sway;
+                pose[pelvis].Translation.Y +=
+                    bob - profile.CrouchDepthRatio * legLength * state.ProceduralIntent.CrouchAmount;
+                if (motionState == ProceduralMotionState::Landing)
+                {
+                    const auto recovery = std::clamp(state.LandingElapsed / profile.LandingRecoveryTime, 0.0F, 1.0F);
+                    pose[pelvis].Translation.Y -= profile.LandingCompression.Evaluate(recovery) *
+                                                  profile.LandingCompressionRatio * legLength *
+                                                  state.ProceduralState.LandingIntensity;
+                }
+                else if (motionState == ProceduralMotionState::Takeoff)
+                {
+                    pose[pelvis].Translation.Y -= profile.TakeoffCompressionRatio * legLength;
+                }
+                else if (!grounded)
+                {
+                    const auto airborneAmount =
+                        velocity.Y > 0.0F ? std::clamp(1.0F - velocity.Y / 8.0F, 0.0F, 1.0F) : 1.0F;
+                    pose[pelvis].Translation.Y -=
+                        profile.AirborneTuck.Evaluate(airborneAmount) * profile.AirborneTuckRatio * legLength * 0.25F;
+                }
+
+                const auto animatorTransform = entity.GetComponent<TransformComponent>();
+                Matrix4 worldToModel;
+                try
+                {
+                    worldToModel = Math::Inverse(animatorTransform->WorldMatrix());
+                }
+                catch (const std::exception&)
+                {
+                    animator->SetRuntimeDiagnostic("Procedural Animator world transform is not invertible.");
+                    continue;
+                }
+                auto localMotion = Math::TransformDirection(worldToModel, horizontalVelocity);
+                localMotion.Y = 0.0F;
+                const auto modelSpeed = VectorLength(localMotion);
+                localMotion = motionState == ProceduralMotionState::TurnInPlace
+                                  ? Vector3{state.RootAngularVelocityDegrees < 0.0F ? -1.0F : 1.0F, 0.0F, 0.0F}
+                                  : NormalizeHorizontal(localMotion, {0.0F, 0.0F, 1.0F});
+                const auto directionalRatio = Detail::ProceduralDirectionalStrideRatio(
+                    localMotion, profile.LateralStrideRatio, profile.BackwardStrideRatio);
+                const auto stride = motionState == ProceduralMotionState::Locomotion
+                                        ? Detail::ProceduralStrideLength(
+                                              modelSpeed, phaseRate, legLength, profile.StrideLengthRatio,
+                                              directionalRatio, state.ProceduralIntent.RunBlend, profile.WalkSpeed,
+                                              profile.SprintSpeed, profile.WalkCadence, profile.SprintCadence)
+                                        : legLength * profile.StrideLengthRatio * directionalRatio * locomotionWeight;
+
+                const auto modelRight = RiggingDetail::Normalize(
+                    RiggingDetail::Subtract(position(rightUpper), position(leftUpper)), {1.0F, 0.0F, 0.0F});
+                const auto solveLeg = [&](const std::uint32_t upper, const std::uint32_t lower,
+                                          const std::uint32_t foot, const float offset, const float side)
+                {
+                    auto phase = state.GaitPhase + offset;
+                    phase -= std::floor(phase);
+                    auto matrices = ModelBoneMatrices(*skeleton, pose);
+                    const auto currentPelvis = Math::TransformPoint(matrices[pelvis], {});
+                    const auto currentFoot = Math::TransformPoint(matrices[foot], {});
+                    auto target = currentFoot;
+                    if (grounded)
+                    {
+                        const auto travel = profile.StrideTravel.Evaluate(phase) * stride * 0.5F;
+                        target.X += localMotion.X * travel;
+                        target.Z += localMotion.Z * travel;
+                        target.Y += profile.FootLift.Evaluate(phase) * profile.StepClearanceRatio * legLength *
+                                    locomotionWeight;
+                    }
+                    else
+                    {
+                        const auto verticalPhase =
+                            velocity.Y > 0.0F ? std::clamp(1.0F - velocity.Y / 8.0F, 0.0F, 1.0F) : 1.0F;
+                        const auto tuck = profile.AirborneTuck.Evaluate(verticalPhase) * profile.AirborneTuckRatio -
+                                          (velocity.Y < 0.0F ? profile.FallingExtensionRatio : 0.0F);
+                        target.Y += tuck * legLength;
+                        target.Z += profile.AirborneTuckRatio * legLength * 0.22F;
+                    }
+                    const auto currentLateralOffset =
+                        RiggingDetail::Dot(RiggingDetail::Subtract(currentFoot, currentPelvis), modelRight);
+                    target = RiggingDetail::Add(
+                        target, RiggingDetail::Multiply(
+                                    modelRight, Detail::ProceduralFootLateralCorrection(
+                                                    currentLateralOffset, legLength, profile.FootSpacingRatio, side)));
+                    const auto hip = Math::TransformPoint(matrices[upper], {});
+                    const auto knee = Math::TransformPoint(matrices[lower], {});
+                    const auto upperLength = VectorLength(RiggingDetail::Subtract(knee, hip));
+                    const auto lowerLength = VectorLength(RiggingDetail::Subtract(currentFoot, knee));
+                    auto hipToTarget = RiggingDetail::Subtract(target, hip);
+                    const auto targetDistance = VectorLength(hipToTarget);
+                    const auto distanceForBend = [&](const float degrees)
+                    {
+                        const auto radians = degrees * 0.0174532925199F;
+                        return std::sqrt(std::max(0.0F, upperLength * upperLength + lowerLength * lowerLength +
+                                                            2.0F * upperLength * lowerLength * std::cos(radians)));
+                    };
+                    const auto minimumReach = distanceForBend(profile.MaximumKneeBendDegrees);
+                    const auto maximumReach = distanceForBend(profile.MinimumKneeBendDegrees);
+                    if (targetDistance > 0.000001F)
+                    {
+                        const auto constrainedDistance = std::clamp(targetDistance, minimumReach, maximumReach);
+                        hipToTarget = RiggingDetail::Multiply(hipToTarget, constrainedDistance / targetDistance);
+                        target = RiggingDetail::Add(hip, hipToTarget);
+                    }
+                    const auto forward =
+                        Vector3{hip.X + localMotion.X * legLength, knee.Y, hip.Z + localMotion.Z * legLength};
+                    (void)SolveTwoBoneIk(*skeleton, pose, {upper, lower, foot, target, forward, 1.0F});
+                };
+                solveLeg(leftUpper, leftLower, leftFoot, 0.0F, -1.0F);
+                solveLeg(rightUpper, rightLower, rightFoot, 0.5F, 1.0F);
+
+                const auto rotateBone = [&](const RigBoneSemantic bone, const Vector3 degrees)
+                {
+                    const auto found = state.SemanticBoneIndices.find(bone);
+                    if (found == state.SemanticBoneIndices.end())
+                        return;
+                    pose[found->second].Rotation = RiggingDetail::Normalize(
+                        RiggingDetail::Multiply(pose[found->second].Rotation, Math::EulerDegreesToQuaternion(degrees)));
+                };
+                const auto arm =
+                    profile.ArmSwing.Evaluate(state.GaitPhase) * profile.ArmSwingDegrees * locomotionWeight;
+                const auto solveArm = [&](const RigBoneSemantic upperSemantic, const RigBoneSemantic lowerSemantic,
+                                          const RigBoneSemantic handSemantic, const float side, const float swing)
+                {
+                    const auto upperFound = state.SemanticBoneIndices.find(upperSemantic);
+                    const auto lowerFound = state.SemanticBoneIndices.find(lowerSemantic);
+                    const auto handFound = state.SemanticBoneIndices.find(handSemantic);
+                    if (upperFound == state.SemanticBoneIndices.end() ||
+                        lowerFound == state.SemanticBoneIndices.end() || handFound == state.SemanticBoneIndices.end())
+                    {
+                        return;
+                    }
+
+                    const auto matrices = ModelBoneMatrices(*skeleton, pose);
+                    const auto shoulder = Math::TransformPoint(matrices[upperFound->second], {});
+                    const auto elbow = Math::TransformPoint(matrices[lowerFound->second], {});
+                    const auto hand = Math::TransformPoint(matrices[handFound->second], {});
+                    const auto upperLength = VectorLength(RiggingDetail::Subtract(elbow, shoulder));
+                    const auto lowerLength = VectorLength(RiggingDetail::Subtract(hand, elbow));
+                    if (upperLength <= 0.000001F || lowerLength <= 0.000001F)
+                        return;
+
+                    const auto shoulderCenter =
+                        RiggingDetail::Multiply(RiggingDetail::Add(position(semantic(RigBoneSemantic::LeftUpperArm)),
+                                                                   position(semantic(RigBoneSemantic::RightUpperArm))),
+                                                0.5F);
+                    const auto modelUp = RiggingDetail::Normalize(
+                        RiggingDetail::Subtract(shoulderCenter, Math::TransformPoint(matrices[pelvis], {})),
+                        {0.0F, 1.0F, 0.0F});
+                    const auto geometry =
+                        Detail::BuildProceduralArmGeometry(modelRight, modelUp, side, profile.ArmRestDropDegrees, swing,
+                                                           profile.ElbowBendDegrees, upperLength, lowerLength);
+                    const auto target =
+                        RiggingDetail::Add(shoulder, RiggingDetail::Multiply(geometry.TargetDirection, geometry.Reach));
+                    const auto pole =
+                        RiggingDetail::Add(shoulder, RiggingDetail::Multiply(geometry.PoleDirection, upperLength));
+                    (void)SolveTwoBoneIk(
+                        *skeleton, pose,
+                        {upperFound->second, lowerFound->second, handFound->second, target, pole, 1.0F});
+                };
+                if (state.SemanticBoneIndices.contains(RigBoneSemantic::LeftUpperArm) &&
+                    state.SemanticBoneIndices.contains(RigBoneSemantic::RightUpperArm))
+                {
+                    solveArm(RigBoneSemantic::LeftUpperArm, RigBoneSemantic::LeftLowerArm, RigBoneSemantic::LeftHand,
+                             -1.0F, arm);
+                    solveArm(RigBoneSemantic::RightUpperArm, RigBoneSemantic::RightLowerArm, RigBoneSemantic::RightHand,
+                             1.0F, -arm);
+                }
+                const auto breathing = std::sin(state.ProceduralTime * profile.BreathingFrequency * 6.28318530718F) *
+                                       profile.BreathingAmplitudeDegrees;
+                const auto accelerationLean = std::clamp(state.HorizontalAcceleration / 30.0F, 0.0F, 1.0F) *
+                                              profile.MaximumAccelerationLeanDegrees;
+                const auto turnLean =
+                    std::clamp(state.RootAngularVelocityDegrees / 180.0F, -1.0F, 1.0F) * profile.MaximumTurnLeanDegrees;
+                rotateBone(RigBoneSemantic::Spine, {breathing + accelerationLean, -arm * 0.12F, -turnLean});
+                rotateBone(RigBoneSemantic::Chest,
+                           {breathing * 0.5F,
+                            arm * profile.SpineCounterRotationDegrees / std::max(profile.ArmSwingDegrees, 0.001F),
+                            0.0F});
+                auto lookDirection = NormalizeHorizontal(state.ProceduralIntent.LookWorldDirection, rootForward);
+                const auto lookYaw =
+                    std::clamp(SignedHorizontalAngleDegrees(rootForward, lookDirection), -55.0F, 55.0F);
+                rotateBone(RigBoneSemantic::Neck, {0.0F, lookYaw * 0.35F, 0.0F});
+                rotateBone(RigBoneSemantic::Head, {0.0F, lookYaw * 0.65F, 0.0F});
+
+                if (grounded && motionState != ProceduralMotionState::Takeoff)
+                {
+                    AnimatorFootGroundingSettings grounding;
+                    grounding.Enabled = true;
+                    grounding.AutomaticBoneMapping = true;
+                    grounding.AutomaticRaycastDistance = false;
+                    grounding.LockPlantedFeet = true;
+                    grounding.Weight = 1.0F;
+                    grounding.RotationWeight = 1.0F;
+                    const auto characterHeight = character ? character->Height() : legLength * 2.0F;
+                    grounding.RaycastHeight = characterHeight * profile.ProbeHeightRatio;
+                    grounding.RaycastDistance = characterHeight * profile.ProbeDistanceRatio;
+                    grounding.FootOffset = characterHeight * profile.SoleOffsetRatio;
+                    grounding.MaximumPelvisAdjustment = characterHeight * profile.MaximumPelvisAdjustmentRatio;
+                    grounding.PlantDistance = characterHeight * profile.PlantDistanceRatio;
+                    grounding.ReleaseDistance = characterHeight * profile.ReleaseDistanceRatio;
+                    grounding.ResponseTime = profile.GroundingResponseTime;
+                    grounding.MaximumSlopeDegrees = profile.MaximumSlopeDegrees;
+                    grounding.CollisionMask = profile.CollisionMask;
+                    auto footWeights = std::array{1.0F, 1.0F};
+                    if (motionState == ProceduralMotionState::Locomotion ||
+                        motionState == ProceduralMotionState::TurnInPlace)
+                    {
+                        footWeights = {Detail::ProceduralFootGroundingWeight(state.GaitPhase),
+                                       Detail::ProceduralFootGroundingWeight(state.GaitPhase + 0.5F)};
+                    }
+                    const auto diagnostic =
+                        ApplyFootGrounding(entity, *skeleton, grounding, 1.0F, animator->SkinnedMesh(), deltaSeconds,
+                                           pose, state.BoneIndices, state.SemanticBoneIndices, state,
+                                           profile.MaximumHorizontalPelvisAdjustmentRatio,
+                                           profile.MaximumAnkleSlopeDegrees, footWeights, 0.10F);
+                    if (!diagnostic.empty())
+                        animator->SetRuntimeDiagnostic(diagnostic);
+                }
+
+                if (grounded && locomotionWeight > 0.0F)
+                {
+                    const auto rollFoot = [&](const std::uint32_t foot, const float phaseOffset)
+                    {
+                        const auto toe = state.FootToeBones.find(foot);
+                        if (toe == state.FootToeBones.end() || !toe->second)
+                            return;
+                        auto phase = state.GaitPhase + phaseOffset;
+                        phase -= std::floor(phase);
+                        const auto roll = profile.FootRoll.Evaluate(phase) * 18.0F * locomotionWeight;
+                        pose[*toe->second].Rotation = RiggingDetail::Normalize(RiggingDetail::Multiply(
+                            pose[*toe->second].Rotation, Math::EulerDegreesToQuaternion({roll, 0.0F, 0.0F})));
+                    };
+                    rollFoot(leftFoot, 0.0F);
+                    rollFoot(rightFoot, 0.5F);
+                }
+                else if (Detail::ShouldResetProceduralFootContacts(grounded, motionState))
+                {
+                    state.LeftFootIkState = {};
+                    state.RightFootIkState = {};
+                    state.LeftFootGroundingSmoothingState = {};
+                    state.RightFootGroundingSmoothingState = {};
+                    state.LeftFootPlantState = {};
+                    state.RightFootPlantState = {};
+                }
+
+                Runtime->DispatchAnimatorIk(entity.Id(), {.LayerWeight = 1.0F});
+                const auto overrideDiagnostic = Detail::EvaluateIndependentAnimationIkPasses(
+                    [&] { return ApplyIkGoals(entity, *skeleton, *animator, pose, state.BoneIndices); },
+                    [&]
+                    {
+                        return ApplyAuthoredArmIk(entity, *skeleton, *animator, pose, state.BoneIndices,
+                                                  state.SemanticBoneIndices, state);
+                    });
+                if (!overrideDiagnostic.empty())
+                    animator->SetRuntimeDiagnostic(overrideDiagnostic);
+                state.CurrentProceduralPose = std::move(pose);
+                state.ProceduralState.LeftFootPlanted = state.LeftFootPlantState.Plant.Locked;
+                state.ProceduralState.RightFootPlanted = state.RightFootPlantState.Plant.Locked;
+                animator->SetRuntimeProceduralState(state.ProceduralState);
+                DispatchProceduralFootEvents(entity, state, state.ProceduralState);
+                state.PreviousGrounded = grounded;
+                state.PreviousVerticalSpeed = velocity.Y;
+                state.PreviousProceduralState = motionState;
+                state.PreviousRootForward = rootForward;
+                state.PreviousHorizontalVelocity = horizontalVelocity;
+                state.HasPreviousRootForward = true;
+            }
+        }
+
+        void PublishProceduralAnimation(const Entity& entity, AnimatorComponent& animator, AnimationRuntimeState& state)
+        {
+            const auto skeleton = state.SkeletonHandle.TryGetLoaded();
+            if (!skeleton || state.CurrentProceduralPose.size() != skeleton->Bones().size())
+                return;
+            const auto alpha = std::clamp(PresentationInterpolationAlpha, 0.0F, 1.0F);
+            auto pose = state.CurrentProceduralPose;
+            if (state.PreviousProceduralPose.size() == pose.size())
+            {
+                for (std::size_t index = 0; index < pose.size(); ++index)
+                {
+                    const auto& previous = state.PreviousProceduralPose[index];
+                    const auto& current = state.CurrentProceduralPose[index];
+                    pose[index].Translation = {
+                        previous.Translation.X + (current.Translation.X - previous.Translation.X) * alpha,
+                        previous.Translation.Y + (current.Translation.Y - previous.Translation.Y) * alpha,
+                        previous.Translation.Z + (current.Translation.Z - previous.Translation.Z) * alpha};
+                    pose[index].Scale = {previous.Scale.X + (current.Scale.X - previous.Scale.X) * alpha,
+                                         previous.Scale.Y + (current.Scale.Y - previous.Scale.Y) * alpha,
+                                         previous.Scale.Z + (current.Scale.Z - previous.Scale.Z) * alpha};
+                    pose[index].Rotation = RiggingDetail::Nlerp(previous.Rotation, current.Rotation, alpha);
+                }
+            }
+            const auto palette = SkinPalette(*skeleton, pose);
+            animator.SetRuntimePose(std::string(ProceduralMotionStateName(state.ProceduralState.State)),
+                                    state.GaitPhase, true, palette);
+            auto snapshot = std::make_shared<AnimatorDebugSnapshot>();
+            snapshot =
+                std::const_pointer_cast<AnimatorDebugSnapshot>(FinalPoseDebugSnapshot(*skeleton, pose, snapshot));
+            animator.SetRuntimeDebugSnapshot(std::move(snapshot));
+            (void)entity;
+        }
+
         void SynchronizeAnimation(const float deltaSeconds)
         {
             if (!Assets || !Runtime)
@@ -1082,6 +1912,19 @@ namespace Keire
                 auto& state = Animators[entity.Id()];
                 if (!state)
                     state = std::make_unique<AnimationRuntimeState>();
+                if (animator->PoseSource() == AnimatorPoseSource::ProceduralHumanoid)
+                {
+                    if (entity.ActiveInHierarchy() && animator->Enabled())
+                    {
+                        PublishProceduralAnimation(entity, *animator, *state);
+                        if (animator->FootGrounding().Enabled && animator->RuntimeDiagnostic().empty())
+                        {
+                            animator->SetRuntimeDiagnostic(
+                                "Legacy automatic foot grounding is ignored in Procedural Humanoid mode.");
+                        }
+                    }
+                    continue;
+                }
 
                 const auto skinId = animator->SkinnedMesh();
                 auto targetSkeleton = animator->Skeleton();
@@ -1103,9 +1946,11 @@ namespace Keire
                         animator->SetSkeleton(targetSkeleton);
                 }
 
-                if (state->Graph != animator->Graph() || state->Skeleton != targetSkeleton || state->Skin != skinId)
+                if (state->PoseSource != AnimatorPoseSource::AnimationGraph || state->Graph != animator->Graph() ||
+                    state->Skeleton != targetSkeleton || state->Skin != skinId)
                 {
                     *state = {};
+                    state->PoseSource = AnimatorPoseSource::AnimationGraph;
                     state->Graph = animator->Graph();
                     state->Skeleton = targetSkeleton;
                     state->Skin = skinId;
@@ -1200,8 +2045,10 @@ namespace Keire
                     },
                     [&]
                     {
-                        return ApplyFootGrounding(entity, *skeleton, *animator, deltaSeconds, sample.LocalPose,
-                                                  state->BoneIndices, state->SemanticBoneIndices, *state);
+                        return ApplyFootGrounding(entity, *skeleton, animator->FootGrounding(),
+                                                  animator->RuntimeFootGroundingWeight(), animator->SkinnedMesh(),
+                                                  deltaSeconds, sample.LocalPose, state->BoneIndices,
+                                                  state->SemanticBoneIndices, *state);
                     });
                 if (!ikDiagnostics.empty())
                     animator->SetRuntimeDiagnostic(ikDiagnostics);
@@ -1362,6 +2209,8 @@ namespace Keire
         void PullDynamicBodies();
         void DispatchPhysicsContacts();
         void StepPhysics(float deltaSeconds);
+        void CapturePhysicsPresentationSamples();
+        void ApplyPhysicsPresentationInterpolation(float alpha);
         void ClearPhysics() noexcept;
 
         Ref<Scene> Edit;
@@ -1383,6 +2232,7 @@ namespace Keire
         std::map<AssetId, AssetHandle<VfxVolumeAsset>> VfxVolumes;
         float PresentationWidth = 1920.0F;
         float PresentationHeight = 1080.0F;
+        float PresentationInterpolationAlpha = 1.0F;
         RuntimeUiInsets SafeArea;
     };
 } // namespace Keire

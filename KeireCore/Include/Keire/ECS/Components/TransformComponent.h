@@ -3,6 +3,8 @@
 #include "Keire/ECS/Component.h"
 #include "Keire/ECS/Entity.h"
 
+#include <cstdint>
+
 namespace Keire
 {
     class KEIRE_API TransformComponent final : public Component
@@ -30,13 +32,19 @@ namespace Keire
 
         [[nodiscard]] Matrix4 LocalMatrix() const;
         [[nodiscard]] Matrix4 WorldMatrix() const;
+        [[nodiscard]] Matrix4 PresentationWorldMatrix() const;
         [[nodiscard]] Vector3 WorldPosition() const;
         [[nodiscard]] Quaternion WorldRotation() const;
+        [[nodiscard]] Vector3 PresentationWorldPosition() const;
+        [[nodiscard]] Quaternion PresentationWorldRotation() const;
+        [[nodiscard]] std::uint64_t PresentationResetRevision() const noexcept { return m_PresentationResetRevision; }
         void SetWorldPosition(Vector3 value);
         void SetWorldRotation(Quaternion value);
         [[nodiscard]] Entity Parent() const noexcept;
         [[nodiscard]] std::vector<Entity> Children() const;
         void SetParent(Entity parent = {}, bool preserveWorldTransform = true);
+        void SetRuntimePresentationWorldMatrix(Matrix4 value);
+        void ResetPresentationInterpolation() noexcept;
         void Reset();
 
       private:
@@ -44,6 +52,9 @@ namespace Keire
         Vector3 m_LocalPosition;
         Quaternion m_LocalRotation;
         Vector3 m_LocalScale{1.0F, 1.0F, 1.0F};
+        Matrix4 m_PresentationWorldMatrix;
+        bool m_HasPresentationWorldMatrix = false;
+        std::uint64_t m_PresentationResetRevision = 0;
     };
 
     [[nodiscard]] KEIRE_API ComponentRegistration CreateTransformComponentRegistration();

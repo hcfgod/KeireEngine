@@ -200,7 +200,8 @@ namespace Keire
             (request.Torso && !request.Pelvis) || !std::isfinite(request.PelvisRotationWeight) ||
             request.PelvisRotationWeight < 0.0F || request.PelvisRotationWeight > 1.0F ||
             !std::isfinite(request.MaximumPelvisRotationDegrees) || request.MaximumPelvisRotationDegrees < 0.0F ||
-            request.MaximumPelvisRotationDegrees > 180.0F)
+            request.MaximumPelvisRotationDegrees > 180.0F || !std::isfinite(request.PositionTolerance) ||
+            request.PositionTolerance <= 0.0F)
             return std::nullopt;
         if (request.Torso && !IsDescendantOf(skeleton, *request.Torso, *request.Pelvis))
             return std::nullopt;
@@ -357,7 +358,7 @@ namespace Keire
             const auto solvedPosition = Math::TransformPoint(solvedWorld[contact.Foot], {});
             const auto positionError = Length(Subtract(solvedPosition, target));
             result.MaximumPositionError = std::max(result.MaximumPositionError, positionError);
-            if (positionError > 0.01F)
+            if (positionError > request.PositionTolerance)
                 ++result.UnreachableFeet;
             ++result.SolvedFeet;
         }

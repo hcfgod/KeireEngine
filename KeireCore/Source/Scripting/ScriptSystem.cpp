@@ -127,6 +127,8 @@ namespace Keire
         static constexpr std::uint32_t UpdateCallback = 1U << 1;
         static constexpr std::uint32_t LateUpdateCallback = 1U << 2;
         static constexpr std::uint32_t AnimatorIkCallback = 1U << 3;
+        static constexpr std::uint32_t AnimationEventCallback = 1U << 4;
+        static constexpr std::uint32_t ProceduralMotionEventCallback = 1U << 5;
 
         class RuntimeScope final
         {
@@ -195,7 +197,9 @@ namespace Keire
             const auto encoded = ManagedDataAsset::Encode(source.Definition());
             const std::string document(reinterpret_cast<const char*>(encoded.data()), encoded.size());
             const RuntimeScope scope(*this);
-            object.InvokeMethod("RuntimeHydrateManagedData", document);
+            const Coral::ScopedString scopedDocument(Coral::String::New(document));
+            auto managedDocument = static_cast<Coral::String>(scopedDocument);
+            object.InvokeMethod("RuntimeHydrateManagedData", managedDocument);
             return object;
         }
 
@@ -1204,6 +1208,52 @@ namespace Keire
             }
         }
 
+        [[nodiscard]] static std::uint8_t
+        RuntimeSetProceduralLocomotion(const std::uint64_t world, const std::uint64_t high, const std::uint64_t low,
+                                       const Vector3 desiredWorldVelocity, const Vector3 facingWorldDirection,
+                                       const Vector3 lookWorldDirection, const float crouchAmount, const float runBlend,
+                                       const std::uint8_t jumpRequested) noexcept
+        {
+            try
+            {
+                const auto animator = RuntimeAnimator(world, high, low);
+                if (!animator)
+                    return 0;
+                animator->SetProceduralLocomotion({desiredWorldVelocity, facingWorldDirection, lookWorldDirection,
+                                                   crouchAmount, runBlend, jumpRequested != 0});
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t
+        RuntimeGetProceduralLocomotionState(const std::uint64_t world, const std::uint64_t high,
+                                            const std::uint64_t low,
+                                            Detail::NativeProceduralLocomotionState* result) noexcept
+        {
+            if (!result)
+                return 0;
+            const auto animator = RuntimeAnimator(world, high, low);
+            if (!animator)
+                return 0;
+            const auto& state = animator->ProceduralState();
+            result->ActualWorldVelocity = state.ActualWorldVelocity;
+            result->GroundNormal = state.GroundNormal;
+            result->GaitPhase = state.GaitPhase;
+            result->Speed = state.Speed;
+            result->VerticalSpeed = state.VerticalSpeed;
+            result->LandingIntensity = state.LandingIntensity;
+            result->State = static_cast<std::uint8_t>(state.State);
+            result->Quality = static_cast<std::uint8_t>(state.Quality);
+            result->Grounded = state.Grounded ? 1 : 0;
+            result->LeftFootPlanted = state.LeftFootPlanted ? 1 : 0;
+            result->RightFootPlanted = state.RightFootPlanted ? 1 : 0;
+            return 1;
+        }
+
         [[nodiscard]] static std::uint8_t RuntimeGetAnimatorState(const std::uint64_t world, const std::uint64_t high,
                                                                   const std::uint64_t low,
                                                                   Detail::NativeAnimatorState* state) noexcept
@@ -1714,6 +1764,32 @@ namespace Keire
             const auto entity = ResolveRuntimeEntity(world, high, low);
             const auto transform = entity ? entity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
             return transform ? transform->WorldPosition() : Vector3{};
+        }
+
+        [[nodiscard]] static Vector3 RuntimeGetPresentationWorldPosition(const std::uint64_t world,
+                                                                         const std::uint64_t high,
+                                                                         const std::uint64_t low) noexcept
+        {
+            const auto entity = ResolveRuntimeEntity(world, high, low);
+            const auto transform = entity ? entity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
+            return transform ? transform->PresentationWorldPosition() : Vector3{};
+        }
+
+        [[nodiscard]] static Quaternion RuntimeGetPresentationWorldRotation(const std::uint64_t world,
+                                                                            const std::uint64_t high,
+                                                                            const std::uint64_t low) noexcept
+        {
+            const auto entity = ResolveRuntimeEntity(world, high, low);
+            const auto transform = entity ? entity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
+            return transform ? transform->PresentationWorldRotation() : Quaternion{};
+        }
+
+        static void RuntimeResetPresentationInterpolation(const std::uint64_t world, const std::uint64_t high,
+                                                          const std::uint64_t low) noexcept
+        {
+            const auto entity = ResolveRuntimeEntity(world, high, low);
+            if (const auto transform = entity ? entity.GetComponent<TransformComponent>() : Ref<TransformComponent>{})
+                transform->ResetPresentationInterpolation();
         }
 
         static void RuntimeCloneEntity(const std::uint64_t world, const std::uint64_t high, const std::uint64_t low,
@@ -2576,6 +2652,8 @@ namespace Keire
                 case ManagedBehaviourCallback::AnimatorIk:
                     Invoke(instance.Object, "RuntimeAnimatorIk", deltaSeconds);
                     break;
+                case ManagedBehaviourCallback::ProceduralMotionEvent:
+                    throw std::logic_error("Procedural motion events require an event payload.");
                 }
             }
             catch (const std::exception& error)
@@ -2612,6 +2690,12 @@ namespace Keire
             auto& instance = found->second;
             constexpr auto callback = ManagedBehaviourCallback::AnimationEvent;
             auto& callbackProfile = instance.CallbackProfiles[static_cast<std::size_t>(callback)];
+            if ((instance.CallbackMask & AnimationEventCallback) == 0)
+            {
+                ++SkippedCallbacks;
+                ++callbackProfile.SkippedInvocations;
+                return;
+            }
             const auto callbackStarted = std::chrono::steady_clock::now();
             ++CallbackInvocations;
             ++callbackProfile.Invocations;
@@ -2620,8 +2704,67 @@ namespace Keire
                 ++ManagedInteropCalls;
                 const RuntimeScope scope(*this);
                 ClearRuntimeException();
-                instance.Object.InvokeMethod("RuntimeAnimationEvent", event.Name, event.NormalizedTime, event.Integer,
-                                             event.Scalar, event.Text);
+                const Coral::ScopedString scopedName(Coral::String::New(event.Name));
+                const Coral::ScopedString scopedText(Coral::String::New(event.Text));
+                auto managedName = static_cast<Coral::String>(scopedName);
+                auto managedText = static_cast<Coral::String>(scopedText);
+                instance.Object.InvokeMethod("RuntimeAnimationEvent", managedName, event.NormalizedTime, event.Integer,
+                                             event.Scalar, managedText);
+                ThrowRuntimeException();
+            }
+            catch (const std::exception& error)
+            {
+                const auto elapsed =
+                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - callbackStarted)
+                        .count();
+                CallbackMilliseconds += elapsed;
+                MaximumCallbackMilliseconds = std::max(MaximumCallbackMilliseconds, elapsed);
+                callbackProfile.Milliseconds += elapsed;
+                callbackProfile.MaximumMilliseconds = std::max(callbackProfile.MaximumMilliseconds, elapsed);
+                RuntimeDiagnostics.push_back({ManagedBehaviourInstanceId(id), ManagedDiagnosticSeverity::Error,
+                                              callback, Reload.Generation, instance.TypeName, instance.Entity,
+                                              error.what()});
+                if (Specification.ExceptionPolicy == ManagedExceptionPolicy::Propagate)
+                    throw;
+                instance.Faulted = true;
+                instance.Enabled = false;
+                return;
+            }
+            const auto elapsed =
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - callbackStarted).count();
+            CallbackMilliseconds += elapsed;
+            MaximumCallbackMilliseconds = std::max(MaximumCallbackMilliseconds, elapsed);
+            callbackProfile.Milliseconds += elapsed;
+            callbackProfile.MaximumMilliseconds = std::max(callbackProfile.MaximumMilliseconds, elapsed);
+        }
+
+        void InvokeProceduralMotionEvent(const std::uint64_t id, const ProceduralMotionEvent& event)
+        {
+            const auto found = Instances.find(id);
+            if (found == Instances.end() || !found->second.Object.IsValid() || found->second.Faulted)
+                return;
+            auto& instance = found->second;
+            constexpr auto callback = ManagedBehaviourCallback::ProceduralMotionEvent;
+            auto& callbackProfile = instance.CallbackProfiles[static_cast<std::size_t>(callback)];
+            if ((instance.CallbackMask & ProceduralMotionEventCallback) == 0)
+            {
+                ++SkippedCallbacks;
+                ++callbackProfile.SkippedInvocations;
+                return;
+            }
+            const auto callbackStarted = std::chrono::steady_clock::now();
+            ++CallbackInvocations;
+            ++callbackProfile.Invocations;
+            try
+            {
+                ++ManagedInteropCalls;
+                const RuntimeScope scope(*this);
+                ClearRuntimeException();
+                instance.Object.InvokeMethod(
+                    "RuntimeProceduralMotionEvent", static_cast<std::uint8_t>(event.Type),
+                    static_cast<std::uint8_t>(event.Foot), static_cast<std::uint8_t>(event.State), event.Phase,
+                    event.Intensity, event.ContactPosition, event.ContactNormal, event.Support.Value().High(),
+                    event.Support.Value().Low(), event.PhysicsMaterial.High(), event.PhysicsMaterial.Low());
                 ThrowRuntimeException();
             }
             catch (const std::exception& error)
@@ -3006,6 +3149,15 @@ namespace Keire
                 {
                     if (m_Instance)
                         implementation.InvokeAnimationEvent(m_Instance.Value(), event);
+                });
+        }
+        void OnProceduralMotionEvent(const ProceduralMotionEvent& event) override
+        {
+            WithImplementation(
+                [&](ScriptImpl& implementation)
+                {
+                    if (m_Instance)
+                        implementation.InvokeProceduralMotionEvent(m_Instance.Value(), event);
                 });
         }
         void OnAnimatorIk(const AnimationIkMessage& context) override
@@ -3491,6 +3643,10 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimeSetAnimatorSpeed));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetAnimatorFootGroundingWeightIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeSetAnimatorFootGroundingWeight));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetProceduralLocomotionIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetProceduralLocomotion));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "GetProceduralLocomotionStateIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeGetProceduralLocomotionState));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "GetAnimatorStateIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeGetAnimatorState));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "GetAnimatorStateNameIcall",
@@ -3549,6 +3705,12 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimeSetLocalScale));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "GetWorldPositionIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeGetWorldPosition));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "GetPresentationWorldPositionIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeGetPresentationWorldPosition));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "GetPresentationWorldRotationIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeGetPresentationWorldRotation));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "ResetPresentationInterpolationIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeResetPresentationInterpolation));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "GetWorldRotationIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeGetWorldRotation));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetWorldPositionIcall",

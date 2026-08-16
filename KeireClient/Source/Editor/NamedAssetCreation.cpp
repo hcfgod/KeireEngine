@@ -12,6 +12,8 @@ namespace KeireEditor
             return "material";
         case NamedAssetCreationKind::AnimationGraph:
             return "Animator Controller";
+        case NamedAssetCreationKind::ProceduralMotionProfile:
+            return "Procedural Motion Profile";
         case NamedAssetCreationKind::Script:
             return "C# script";
         case NamedAssetCreationKind::ManagedAssembly:

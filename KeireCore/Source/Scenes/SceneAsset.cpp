@@ -202,7 +202,8 @@ namespace Keire
             }
             else if (component.Type == AnimatorComponent::StaticType())
             {
-                for (const auto key : {"graph", "skeleton", "skinnedMesh", "avatarMask", "avatarMasks"})
+                for (const auto key : {"graph", "skeleton", "skinnedMesh", "avatarMask", "avatarMasks",
+                                       "proceduralProfile", "rigDefinition"})
                     CollectSerializedAsset(data, key, dependencies);
             }
             else if (component.Type == ColliderComponent::StaticType())

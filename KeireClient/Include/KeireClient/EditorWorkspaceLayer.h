@@ -225,6 +225,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     bool CreateAssetBrowserScene(std::string_view name) override;
     bool CreateAssetBrowserMaterial(std::string_view name) override;
     bool CreateAssetBrowserAnimationGraph(std::string_view name) override;
+    bool CreateAssetBrowserProceduralMotionProfile(std::string_view name) override;
     bool CreateAssetBrowserScript(std::string_view name) override;
     bool CreateAssetBrowserManagedAssembly(std::string_view name) override;
     bool CreateAssetBrowserManagedData(Keire::ManagedTypeId type, std::string_view name) override;
@@ -288,6 +289,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void OpenInspectorMaterialGraph(Keire::AssetId asset) override;
     void PersistInspectorMaterialInstance(Keire::AssetId asset, std::span<const std::byte> bytes) override;
     void PersistInspectorMaterialParameterCollection(Keire::AssetId asset, std::span<const std::byte> bytes) override;
+    void PersistInspectorProceduralMotionProfile(Keire::AssetId asset, std::span<const std::byte> bytes) override;
     void ImportInspectorAssets() override;
     void PreviewInspectorManagedData(Keire::AssetId asset, const Keire::ManagedDataDefinition& definition) override;
     void PersistInspectorManagedData(Keire::AssetId asset, std::span<const std::byte> bytes) override;
@@ -443,6 +445,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     bool CreateUnlitShader(std::string_view name = {});
     [[nodiscard]] bool CreateMaterial(std::string_view name = "Material");
     [[nodiscard]] bool CreateAnimationGraph(std::string_view name = "NewAnimatorController");
+    [[nodiscard]] bool CreateProceduralMotionProfile(std::string_view name = "NewProceduralMotionProfile");
     void OpenAnimationGraph(Keire::AssetId asset);
     void SaveAnimationGraph();
     void OpenAudioMixer(Keire::AssetId asset);

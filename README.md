@@ -299,12 +299,13 @@ documentation authorities.
 
 ## Documentation
 
-The [documentation library](Docs/README.md) contains 57 maintained guides grouped around real tasks:
+The [documentation library](Docs/README.md) contains 58 maintained guides grouped around real tasks:
 
 - [Getting Started](Docs/GettingStarted.md) and [Project Hub](Docs/ProjectHub.md)
 - [Architecture](Docs/Architecture.md), [Runtime Lifecycle](Docs/RuntimeLifecycle.md), and
   [ECS and Components](Docs/ECSAndComponents.md)
-- [Scene Authoring](Docs/SceneAuthoring.md), [Asset Browser](Docs/AssetBrowser.md), and
+- [Scene Authoring](Docs/SceneAuthoring.md), [Asset Browser](Docs/AssetBrowser.md),
+  [Procedural Humanoid Motion](Docs/ProceduralMotion.md), and
   [Undo and Redo](Docs/UndoRedo.md)
 - [Asset Pipeline](Docs/AssetPipeline.md), [Asset Packages](Docs/AssetPackages.md), [Rendering](Docs/Rendering.md),
   [Shaders and Materials](Docs/ShadersAndMaterials.md), and [VFX](Docs/Vfx.md)
