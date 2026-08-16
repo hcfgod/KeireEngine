@@ -57,8 +57,8 @@ with tempfile.TemporaryDirectory(
     payload = pathlib.Path(temporary)
     generator.write_managed_sample(payload)
     readme = payload / generator.CONTENT_ROOT / "README.md"
-    readme.write_text("sample\n", encoding="utf-8", newline="\n")
-    (payload / "LICENSE.txt").write_text("MIT\n", encoding="utf-8", newline="\n")
+    generator.write_utf8_lf(readme, "sample\n")
+    generator.write_utf8_lf(payload / "LICENSE.txt", "MIT\n")
     manifest = generator.create_manifest(payload)
     encoded = generator.canonical_json(manifest)
     require(

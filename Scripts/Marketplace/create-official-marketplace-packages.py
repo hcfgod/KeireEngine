@@ -87,6 +87,11 @@ def canonical_json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
 
+def write_utf8_lf(path: pathlib.Path, content: str) -> None:
+    with path.open("w", encoding="utf-8", newline="\n") as stream:
+        stream.write(content)
+
+
 def sha256(path: pathlib.Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -350,10 +355,9 @@ def create_package(
         for source in definition.sources:
             copy_source(project, source, payload, tracked_files)
         shutil.copyfile(repository / "LICENSE.txt", payload / "LICENSE.txt")
-        manifest_path.write_text(
+        write_utf8_lf(
+            manifest_path,
             canonical_json(create_manifest(definition, payload)),
-            encoding="utf-8",
-            newline="\n",
         )
         run(
             asset_tool,
@@ -397,10 +401,9 @@ def create_package(
             "signed": False,
             "version": VERSION,
         }
-        (staging / "artifact.json").write_text(
+        write_utf8_lf(
+            staging / "artifact.json",
             json.dumps(artifact, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-            newline="\n",
         )
         shutil.move(str(staging), str(destination))
         return {**artifact, "path": str(destination / package.name)}
@@ -454,10 +457,9 @@ def main() -> int:
             "schemaVersion": 1,
             "version": VERSION,
         }
-        (output / "release-index.json").write_text(
+        write_utf8_lf(
+            output / "release-index.json",
             json.dumps(index, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-            newline="\n",
         )
         print(json.dumps(index, indent=2, sort_keys=True))
         return 0
