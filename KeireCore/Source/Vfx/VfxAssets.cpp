@@ -158,6 +158,27 @@ namespace Keire
             throw std::runtime_error("VFX collision mode is unsupported.");
         }
 
+        [[nodiscard]] std::string_view KillShapeModeName(const VfxKillShapeMode value)
+        {
+            switch (value)
+            {
+            case VfxKillShapeMode::Solid:
+                return "solid";
+            case VfxKillShapeMode::Inverted:
+                return "inverted";
+            }
+            throw std::invalid_argument("VFX kill-shape mode is unsupported.");
+        }
+
+        [[nodiscard]] VfxKillShapeMode ParseKillShapeMode(const std::string_view value)
+        {
+            if (value == "solid")
+                return VfxKillShapeMode::Solid;
+            if (value == "inverted")
+                return VfxKillShapeMode::Inverted;
+            throw std::runtime_error("VFX kill-shape mode is unsupported.");
+        }
+
         [[nodiscard]] std::string_view RendererTypeName(const VfxRendererType value)
         {
             switch (value)
@@ -200,6 +221,7 @@ namespace Keire
                     [](const VfxColorOverLifetimeModule&) -> std::string_view { return "colorOverLifetime"; },
                     [](const VfxCollisionModule&) -> std::string_view { return "collision"; },
                     [](const VfxRendererModule&) -> std::string_view { return "renderer"; },
+                    [](const VfxKillShapeModule&) -> std::string_view { return "killShape"; },
                 },
                 payload);
         }
@@ -259,6 +281,14 @@ namespace Keire
                         result["mesh"] = IdText(value.Mesh);
                         result["material"] = IdText(value.Material);
                     },
+                    [&result](const VfxKillShapeModule& value)
+                    {
+                        result["shape"] = ShapeName(value.Shape);
+                        result["center"] = EncodeVector(value.Center);
+                        result["boxHalfExtent"] = EncodeVector(value.BoxHalfExtent);
+                        result["radius"] = value.Radius;
+                        result["mode"] = KillShapeModeName(value.Mode);
+                    },
                 },
                 module.Payload);
             return result;
@@ -307,6 +337,12 @@ namespace Keire
                 result.Payload = VfxRendererModule{ParseRendererType(value.value("renderer", std::string("sprite"))),
                                                    ParseId(value, "sprite"), ParseId(value, "mesh"),
                                                    value.contains("material") ? ParseId(value, "material") : AssetId{}};
+            else if (type == "killShape")
+                result.Payload = VfxKillShapeModule{
+                    ParseShape(value.value("shape", std::string("sphere"))),
+                    DecodeVector(value.value("center", Json::array({0.0F, 0.0F, 0.0F}))),
+                    DecodeVector(value.value("boxHalfExtent", Json::array({0.5F, 0.5F, 0.5F}))),
+                    value.value("radius", 0.5F), ParseKillShapeMode(value.value("mode", std::string("solid")))};
             else
                 throw std::runtime_error("VFX module type is unsupported.");
             return result;
@@ -1249,6 +1285,7 @@ namespace Keire
                     [](const VfxSizeOverLifetimeModule&) { return VfxContextType::Update; },
                     [](const VfxColorOverLifetimeModule&) { return VfxContextType::Update; },
                     [](const VfxCollisionModule&) { return VfxContextType::Update; },
+                    [](const VfxKillShapeModule&) { return VfxContextType::Update; },
                     [](const VfxRendererModule&) { return VfxContextType::Output; },
                 },
                 payload);
@@ -1286,6 +1323,7 @@ namespace Keire
                     [](const VfxColorOverLifetimeModule&) -> std::string_view
                     { return "keire.block.color-over-lifetime"; },
                     [](const VfxCollisionModule&) -> std::string_view { return "keire.block.collision"; },
+                    [](const VfxKillShapeModule&) -> std::string_view { return "keire.block.kill-shape"; },
                     [](const VfxRendererModule&) -> std::string_view { return "keire.output.renderer"; },
                 },
                 payload);
@@ -1425,6 +1463,18 @@ namespace Keire
                              VfxModuleProperty::CollisionRestitution, value.Restitution},
                             {"Kill On Collision", "killOnCollision", VfxValueType::Boolean,
                              VfxModuleProperty::CollisionKillOnCollision, value.KillOnCollision}};
+                    },
+                    [](const VfxKillShapeModule& value)
+                    {
+                        return std::vector<ModulePinSpecification>{
+                            {"Center", "center", VfxValueType::Vector3, VfxModuleProperty::KillShapeCenter,
+                             value.Center},
+                            {"Box Half Extent", "boxHalfExtent", VfxValueType::Vector3,
+                             VfxModuleProperty::KillShapeBoxHalfExtent, value.BoxHalfExtent},
+                            {"Radius", "radius", VfxValueType::Scalar, VfxModuleProperty::KillShapeRadius,
+                             value.Radius},
+                            {"Inverted", "inverted", VfxValueType::Boolean, VfxModuleProperty::KillShapeInverted,
+                             value.Mode == VfxKillShapeMode::Inverted}};
                     },
                     [](const VfxRendererModule& value)
                     {
@@ -3168,6 +3218,7 @@ namespace Keire
                                             "queries require the CPU backend.");
                             }
                         },
+                        [](const VfxKillShapeModule&) {},
                         [&](const VfxRendererModule& value)
                         {
                             if (!renderer)
@@ -3393,6 +3444,19 @@ namespace Keire
             case VfxModuleProperty::CollisionKillOnCollision:
                 std::get<VfxCollisionModule>(module.Payload).KillOnCollision = std::get<bool>(value);
                 break;
+            case VfxModuleProperty::KillShapeCenter:
+                std::get<VfxKillShapeModule>(module.Payload).Center = std::get<Vector3>(value);
+                break;
+            case VfxModuleProperty::KillShapeBoxHalfExtent:
+                std::get<VfxKillShapeModule>(module.Payload).BoxHalfExtent = std::get<Vector3>(value);
+                break;
+            case VfxModuleProperty::KillShapeRadius:
+                std::get<VfxKillShapeModule>(module.Payload).Radius = std::get<float>(value);
+                break;
+            case VfxModuleProperty::KillShapeInverted:
+                std::get<VfxKillShapeModule>(module.Payload).Mode =
+                    std::get<bool>(value) ? VfxKillShapeMode::Inverted : VfxKillShapeMode::Solid;
+                break;
             case VfxModuleProperty::RendererSprite:
                 std::get<VfxRendererModule>(module.Payload).Sprite = std::get<AssetId>(value);
                 break;
@@ -3576,6 +3640,20 @@ namespace Keire
                             value.Restitution < 0.0F || value.Restitution > 1.0F)
                         {
                             throw std::invalid_argument("VFX collision module is invalid.");
+                        }
+                    },
+                    [&](const VfxKillShapeModule& value)
+                    {
+                        if ((value.Shape != VfxShape::Box && value.Shape != VfxShape::Sphere) ||
+                            value.Mode > VfxKillShapeMode::Inverted || !BoundedVector(value.Center) ||
+                            !Math::IsFinite(value.BoxHalfExtent) || value.BoxHalfExtent.X <= 0.0F ||
+                            value.BoxHalfExtent.Y <= 0.0F || value.BoxHalfExtent.Z <= 0.0F ||
+                            value.BoxHalfExtent.X > MaximumAuthoredScalar ||
+                            value.BoxHalfExtent.Y > MaximumAuthoredScalar ||
+                            value.BoxHalfExtent.Z > MaximumAuthoredScalar || !std::isfinite(value.Radius) ||
+                            value.Radius <= 0.0F || value.Radius > MaximumAuthoredScalar)
+                        {
+                            throw std::invalid_argument("VFX kill-shape module is invalid.");
                         }
                     },
                     [&](const VfxRendererModule& value)
@@ -3879,6 +3957,10 @@ namespace Keire
                         case VfxModuleProperty::ColorConstant:
                         case VfxModuleProperty::CollisionRestitution:
                         case VfxModuleProperty::CollisionKillOnCollision:
+                        case VfxModuleProperty::KillShapeCenter:
+                        case VfxModuleProperty::KillShapeBoxHalfExtent:
+                        case VfxModuleProperty::KillShapeRadius:
+                        case VfxModuleProperty::KillShapeInverted:
                             return true;
                         case VfxModuleProperty::None:
                         case VfxModuleProperty::EmissionParticlesPerSecond:
@@ -3912,8 +3994,8 @@ namespace Keire
                         result.Diagnostics.push_back(
                             {VfxCompileDiagnosticSeverity::Error, instruction->Node,
                              "This per-particle GPU expression targets a host-evaluated Block property. Particle-stage "
-                             "bindings are supported for Shape, Initialize, Force, Size, Color, and Collision numeric "
-                             "inputs; emission schedules and resource selections remain per-effect values."});
+                             "bindings are supported for Shape, Initialize, Force, Size, Color, Collision, and Kill "
+                             "Shape inputs; emission schedules and resource selections remain per-effect values."});
                     }
                 }
                 result.CanonicalIr = BuildCanonicalIr(definition, plan);
@@ -4199,113 +4281,6 @@ namespace Keire
         ValidateVfxEffect(result);
         return result;
     }
-
-    namespace
-    {
-        [[nodiscard]] std::size_t VfxValueOwnedBytes(const VfxParameterValue& value) noexcept
-        {
-            if (const auto* curve = std::get_if<Curve1D>(&value))
-                return curve->Keys().size() * sizeof(CurveKey);
-            if (const auto* gradient = std::get_if<ColorGradient>(&value))
-                return gradient->Keys().size() * sizeof(ColorGradientKey);
-            return 0;
-        }
-
-        [[nodiscard]] std::size_t VfxPropertyOwnedBytes(const VfxGraphProperty& property) noexcept
-        {
-            auto result = property.Name.capacity();
-            if (const auto* text = std::get_if<std::string>(&property.Value))
-                result += text->capacity();
-            return result;
-        }
-
-        [[nodiscard]] std::size_t VfxPinOwnedBytes(const VfxGraphPin& pin) noexcept
-        {
-            return pin.Name.capacity() + pin.Semantic.capacity() +
-                   (pin.DefaultValue ? VfxValueOwnedBytes(*pin.DefaultValue) : 0);
-        }
-
-        [[nodiscard]] std::size_t VfxBlockOwnedBytes(const VfxGraphBlock& block) noexcept
-        {
-            auto result = block.TypeId.Value.capacity() + block.Type.capacity() +
-                          block.Pins.capacity() * sizeof(VfxGraphPin) +
-                          block.Properties.capacity() * sizeof(VfxGraphProperty);
-            for (const auto& pin : block.Pins)
-                result += VfxPinOwnedBytes(pin);
-            for (const auto& property : block.Properties)
-                result += VfxPropertyOwnedBytes(property);
-            return result;
-        }
-
-        [[nodiscard]] std::size_t VfxNodeOwnedBytes(const VfxGraphNode& node) noexcept
-        {
-            auto result =
-                node.Type.capacity() + node.CustomHlsl.capacity() + node.TypeId.Value.capacity() +
-                node.Pins.capacity() * sizeof(VfxGraphPin) + node.Properties.capacity() * sizeof(VfxGraphProperty) +
-                node.ResolvedSignature.capacity() * sizeof(VfxValueType) +
-                node.DynamicPinOrder.capacity() * sizeof(AssetId) + node.Blocks.capacity() * sizeof(VfxGraphBlock);
-            for (const auto& pin : node.Pins)
-                result += VfxPinOwnedBytes(pin);
-            for (const auto& property : node.Properties)
-                result += VfxPropertyOwnedBytes(property);
-            for (const auto& block : node.Blocks)
-                result += VfxBlockOwnedBytes(block);
-            return result;
-        }
-    } // namespace
-
-    VfxEffectAsset::VfxEffectAsset(const VfxEffectDefinition& definition)
-        : m_Definition(MigrateVfxEffectToSchema4(definition))
-    {
-        ValidateVfxEffect(m_Definition);
-    }
-
-    std::size_t VfxEffectAsset::ResidentBytes() const noexcept
-    {
-        auto result = sizeof(*this) + m_Definition.Name.capacity() +
-                      m_Definition.Modules.capacity() * sizeof(VfxModuleDefinition) +
-                      m_Definition.Systems.capacity() * sizeof(VfxGraphSystem) +
-                      m_Definition.Blackboard.capacity() * sizeof(VfxBlackboardParameter);
-        for (const auto& module : m_Definition.Modules)
-        {
-            if (const auto* size = std::get_if<VfxSizeOverLifetimeModule>(&module.Payload))
-                result += size->Size.Keys().size() * sizeof(CurveKey);
-            if (const auto* color = std::get_if<VfxColorOverLifetimeModule>(&module.Payload))
-                result += color->Color.Keys().size() * sizeof(ColorGradientKey);
-        }
-        for (const auto& system : m_Definition.Systems)
-        {
-            result += system.Name.capacity() + system.Nodes.capacity() * sizeof(VfxGraphNode) +
-                      system.Connections.capacity() * sizeof(VfxGraphConnection);
-            for (const auto& node : system.Nodes)
-                result += VfxNodeOwnedBytes(node);
-        }
-        for (const auto& parameter : m_Definition.Blackboard)
-            result += parameter.Name.capacity() + VfxValueOwnedBytes(parameter.DefaultValue);
-        return result;
-    }
-
-    VfxEffectDefinition VfxEffectAsset::DefaultDefinition()
-    {
-        constexpr auto emitter = AssetId(0x5646584445464155ULL, 1);
-        VfxEffectDefinition definition;
-        definition.EmitterId = emitter;
-        definition.Modules = {
-            {AssetId(0x5646584445464155ULL, 2), true, VfxEmissionRateModule{}},
-            {AssetId(0x5646584445464155ULL, 3), true, VfxShapeModule{}},
-            {AssetId(0x5646584445464155ULL, 4), true,
-             VfxInitializeModule{1.0F, 1.0F, {-0.5F, 1.0F, -0.5F}, {0.5F, 2.0F, 0.5F}}},
-            {AssetId(0x5646584445464155ULL, 5), true, VfxSizeOverLifetimeModule{}},
-            {AssetId(0x5646584445464155ULL, 6), true, VfxColorOverLifetimeModule{}},
-            {AssetId(0x5646584445464155ULL, 7), true, VfxRendererModule{}},
-        };
-        definition.ExecutionSource = VfxExecutionSource::LegacyModules;
-        auto result = ConvertVfxEffectToGraph(definition);
-        result.CompatibilityMode = VfxCompatibilityMode::NativeSchema4;
-        return result;
-    }
-
-    Ref<VfxEffectAsset> VfxEffectAsset::Default() { return CreateRef<VfxEffectAsset>(DefaultDefinition()); }
 
     Ref<VfxEffectAsset> VfxEffectAsset::Decode(const std::span<const std::byte> bytes)
     {

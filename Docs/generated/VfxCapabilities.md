@@ -8,26 +8,26 @@ This reference is generated from the runtime node catalog and the frozen Unity 6
 
 | Contract | Supported | GPU Required | Kéire Equivalent | Disabled | Total |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Unity parity rows | 0 | 0 | 245 | 33 | 278 |
-| Runtime descriptors | 136 | 0 | 104 | 0 | 240 |
+| Unity parity rows | 0 | 0 | 248 | 30 | 278 |
+| Runtime descriptors | 136 | 0 | 105 | 0 | 241 |
 
 A runtime descriptor can be fully supported by Kéire while remaining a **Kéire Equivalent** in the parity manifest when Unity exposes broader polymorphic signatures or different authoring settings.
 
 ## First Major Parity Milestone
 
-The first major milestone target is **50** validated parity rows. The checked-in ledger closes **245** rows and therefore meets the target. 33 frozen rows remain.
+The first major milestone target is **50** validated parity rows. The checked-in ledger closes **248** rows and therefore meets the target. 30 frozen rows remain.
 
 Measurement contract: Enabled frozen Unity parity rows with a runtime catalog implementation, focused tests, documentation, and production-slice coverage.
 
 ## Portable Parity Expansion
 
-The expansion started from **125** enabled rows and targeted **120** additional rows. It now closes **120** additional rows, for a target total of **245**, and therefore meets the expansion gate. 0 expansion rows remain.
+The expansion started from **125** enabled rows and targeted **120** additional rows. It now closes **123** additional rows, for a target total of **245**, and therefore meets the expansion gate. 0 expansion rows remain.
 
 Measurement contract: Additional enabled frozen Unity parity rows above the validated 125-row baseline; each row requires a live runtime descriptor, focused test, documentation, and production slice.
 
 | Priority | Remaining rows | Delivery meaning |
 | --- | ---: | --- |
-| P0 | 18 | Required for production simulation, events, attributes, geometry, or Shader Graph output workflows. |
+| P0 | 15 | Required for production simulation, events, attributes, geometry, or Shader Graph output workflows. |
 | P1 | 8 | Broad authoring coverage and commonly used sampling or presentation workflows. |
 | P2 | 3 | Specialized production capability after the primary runtime contracts are stable. |
 | Deferred | 4 | Pipeline-specific or low-portability work requiring an explicit Kéire design decision. |
@@ -39,20 +39,17 @@ Measurement contract: Additional enabled frozen Unity parity rows above the vali
 | Core value modulation | CPU and GPU | 112 | Samples/KeireSandbox/Assets/Vfx/VfxEffect.keirevfx | KeireTests/Source/Vfx/VfxExpressionTests.cpp, KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp |
 | Portable attributes, inline values, and geometry math | CPU and GPU | 33 | Samples/KeireSandbox/Assets/Vfx/VfxEffect.keirevfx | KeireTests/Source/Vfx/VfxParityExpansionTests.cpp, KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp |
 | CPU structured values and host resource queries | CPU Only | 45 | Samples/KeireSandbox/Assets/Vfx/VfxEffect.keirevfx | KeireTests/Source/Vfx/VfxParityExpansionTests.cpp |
-| Context and particle-output pipeline | CPU and GPU | 11 | Samples/KeireSandbox/Assets/Vfx/ArcaneSigilOrbit.keirevfx, Samples/KeireSandbox/Assets/Vfx/EmberShardCyclone.keirevfx, Samples/KeireSandbox/Assets/Vfx/VfxEffect.keirevfx | KeireTests/Source/Vfx/VfxGpuCapabilityTests.cpp, KeireTests/Source/Vfx/VfxTests.cpp |
+| Context and particle-output pipeline | CPU and GPU | 12 | Samples/KeireSandbox/Assets/Vfx/ArcaneSigilOrbit.keirevfx, Samples/KeireSandbox/Assets/Vfx/EmberShardCyclone.keirevfx, Samples/KeireSandbox/Assets/Vfx/VfxEffect.keirevfx | KeireTests/Source/Vfx/VfxGpuCapabilityTests.cpp, KeireTests/Source/Vfx/VfxTests.cpp |
 
 ## Prioritized Outstanding Matrix
 
 | Priority | Class | Unity capability | Category | Backend target |
 | --- | --- | --- | --- | --- |
 | P0 | Block | Calculate Mass from Volume | Attribute > Derived | CPU and GPU |
-| P0 | Block | Kill Shape | Collision | CPU and GPU |
 | P0 | Block | Trigger Shape | Collision | CPU and GPU |
 | P0 | Block | Attractor Shape Signed Distance Field | Force | GPU Required |
 | P0 | Block | Vector Field Force | Force | GPU Required |
 | P0 | Block | Trigger Event | GPUEvent | CPU and GPU |
-| P0 | Block | Kill (AABox) | Kill | CPU and GPU |
-| P0 | Block | Kill (Sphere) | Kill | CPU and GPU |
 | P0 | Block | Set Position (Depth) | Position | GPU Required |
 | P0 | Block | Set Position (Skinned Mesh) | Position | GPU Required |
 | P0 | Block | Set SpawnEvent <Attribute> | Spawn | CPU and GPU |
@@ -89,6 +86,7 @@ Measurement contract: Additional enabled frozen Unity parity rows above the vali
 | `keire.block.emission-rate` | Emission Rate | Block | Supported | CPU and GPU | 2 |
 | `keire.block.force` | Force | Block | Supported | CPU and GPU | 3 |
 | `keire.block.initialize` | Initialize | Block | Supported | CPU and GPU | 0 |
+| `keire.block.kill-shape` | Kill Shape | Block | Kéire Equivalent | CPU and GPU | 3 |
 | `keire.block.portable-hlsl` | Portable Custom HLSL | Block | Kéire Equivalent | CPU and GPU | 17 |
 | `keire.block.shape` | Shape | Block | Kéire Equivalent | CPU and GPU | 2 |
 | `keire.block.size-over-lifetime` | Size over Lifetime | Block | Supported | CPU and GPU | 0 |

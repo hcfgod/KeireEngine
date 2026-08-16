@@ -136,7 +136,7 @@ namespace KeireEditor
 
     bool MaterialDocument::SetSurface(const Keire::MaterialSurfaceState surface)
     {
-        if (surface.AlphaMode > Keire::MaterialAlphaMode::Blend || !std::isfinite(surface.AlphaCutoff) ||
+        if (surface.AlphaMode > Keire::MaterialAlphaMode::AlphaHoldout || !std::isfinite(surface.AlphaCutoff) ||
             surface.AlphaCutoff < 0.0F || surface.AlphaCutoff > 1.0F)
             throw std::invalid_argument("Material surface state is invalid.");
         if (m_Definition.Surface == surface)

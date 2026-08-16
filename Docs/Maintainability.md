@@ -30,18 +30,23 @@ The highest-value seams are:
 
 - `ScriptSystem.cpp`: runtime hosting, native-call adapters, reload transactions, and managed jobs. Managed build workspace
   generation, diagnostics parsing, source fingerprinting, and atomic text publication live behind the private
-  `ManagedBuildWorkspace` boundary; managed reflection state and metadata parsing live behind `ManagedReflection`.
+  `ManagedBuildWorkspace` boundary; managed reflection state and metadata parsing live behind `ManagedReflection`;
+  the ECS lifecycle adapter lives behind `ManagedBehaviourComponent` and a weak value-only callback table.
 - `MaterialGraph.cpp`: schema/validation, lowering, shader emission, and asset import/publication. The immutable node
   descriptor catalog and its lookup/type-ID contract live in `MaterialGraphNodeCatalog.cpp`; deterministic generated
   shader manifest assembly lives in `MaterialGraphManifest.cpp`. Both use private boundaries behind the existing typed
   material-graph API.
-- `RenderSceneRecording.cpp`: snapshot extraction, preparation, pass recording, and submission telemetry.
+- renderer recording: `RenderSceneRecording.cpp` now stays below the default ceiling and owns surface draw preparation;
+  frame execution, skinning, shadow/sample-depth recording, and GPU VFX preparation/pipelines/drawing are separate units.
+- `ShaderGraph.cpp`: compilation and shader emission remain ratcheted while built-in and function-call construction is
+  isolated in `ShaderGraphNodes.cpp`.
 - `VfxAssets.cpp` and `VfxSystem.cpp`: encoding/import, compilation, CPU simulation, and GPU publication. Reusable JSON
   encoding and strict decoding of asset IDs, vectors, matrices, colors, curves, and gradients now live behind the
-  private `VfxAssetValueCodec` boundary.
+  private `VfxAssetValueCodec` boundary; effect construction/residency and checkpoint byte encoding have dedicated
+  private units.
 - `RuntimeServices.cpp` and `SceneRuntime.cpp`: service orchestration and scene control stay readable by keeping audio
-  implementation state and scene implementation state in private internal headers, with scene VFX and physics work in
-  dedicated implementation units.
+  implementation state and scene implementation state in private internal headers, with scene VFX, physics, and
+  procedural animation advance/publication in dedicated implementation units.
 - editor asset/VFX panels: document commands, background operations, canvas interaction, and presentation. Editor file
   validation/diagnostics use `EditorAssetFileService`; asset inspection, VFX workspace operations, and architecture
   dashboard presentation have dedicated implementation units; VFX canvas node construction, stable IDs, colors, and

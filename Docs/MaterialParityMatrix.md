@@ -127,7 +127,7 @@ scenarios and executable validation decide milestone acceptance.
 | ME-RS-008 | Hair output | Complete | P1 | Dedicated template/output contract. |
 | ME-RS-009 | Eye output | Complete | P1 | Dedicated template/output contract. |
 | ME-RS-010 | Transparent output | Complete | P0 | Premultiplied output and renderer state. |
-| ME-RS-011 | Additional blend modes | Planned | P0 | Add additive, modulate, alpha-composite, and alpha-holdout deliberately. |
+| ME-RS-011 | Additional blend modes | Complete | P0 | Additive, modulate, premultiplied alpha-composite, and alpha-holdout use explicit color/alpha factors, transparent sorting, and disabled depth writes with focused policy and batching tests. |
 | ME-RS-012 | Two-sided shading controls | Complete | P0 | Material surface state is serialized and renderer-consumed. |
 | ME-RS-013 | World-position offset | Complete | P0 | Vertex-stage validation and generated ABI. |
 | ME-RS-014 | Pixel-depth offset | Complete | P1 | Fragment depth output and stage validation. |

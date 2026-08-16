@@ -14,6 +14,7 @@
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
 #include "KeireInternal/Scripting/CoralLog.h"
+#include "KeireInternal/Scripting/ManagedBehaviourComponent.h"
 #include "KeireInternal/Scripting/ManagedBuildWorkspace.h"
 #include "KeireInternal/Scripting/ManagedGenerationSequence.h"
 #include "KeireInternal/Scripting/ManagedReflection.h"
@@ -76,8 +77,6 @@ namespace Keire
     class ScriptSystem::Impl final
     {
       public:
-        class ManagedComponent;
-
         struct BehaviourType final
         {
             std::string Name;
@@ -158,6 +157,96 @@ namespace Keire
             }
             WorkScope = Scheduler->CreateScope("Managed builds");
             ManagedJobs = Scheduler->CreateScope("Managed assembly jobs");
+            ComponentCallbacks = std::make_shared<Detail::ManagedBehaviourComponentCallbacks>();
+            ComponentCallbacks->Create = [this](const ComponentTypeId componentType, const std::string_view managedType,
+                                                const Entity owner) -> ManagedBehaviourInstanceId
+            {
+                if (!Open.load(std::memory_order_acquire))
+                    return {};
+                const auto* type = FindType(ActiveTypes, managedType);
+                if (!type)
+                    return {};
+                const auto id = NextInstance++;
+                auto object = CreateObject(*type, owner.World(), owner.Id().Value());
+                auto [instance, inserted] =
+                    Instances.emplace(id, BehaviourInstance{std::string(managedType), componentType, owner.World(),
+                                                            owner.Id().Value(), std::move(object)});
+                (void)inserted;
+                instance->second.NativeEntity = owner;
+                instance->second.CallbackMask = ReadCallbackMask(instance->second.Object);
+                return ManagedBehaviourInstanceId(id);
+            };
+            ComponentCallbacks->Invoke = [this](const ManagedBehaviourInstanceId instance,
+                                                const ManagedBehaviourCallback callback, const float deltaSeconds)
+            {
+                if (!Open.load(std::memory_order_acquire))
+                    return;
+                const auto found = Instances.find(instance.Value());
+                if (found != Instances.end() && found->second.Object.IsValid())
+                    InvokeInstance(found->first, callback, deltaSeconds);
+            };
+            ComponentCallbacks->AnimationEvent =
+                [this](const ManagedBehaviourInstanceId instance, const AnimationEventMessage& event)
+            {
+                if (Open.load(std::memory_order_acquire))
+                    InvokeAnimationEvent(instance.Value(), event);
+            };
+            ComponentCallbacks->ProceduralMotionEvent =
+                [this](const ManagedBehaviourInstanceId instance, const ProceduralMotionEvent& event)
+            {
+                if (Open.load(std::memory_order_acquire))
+                    InvokeProceduralMotionEvent(instance.Value(), event);
+            };
+            ComponentCallbacks->PhysicsContact = [this](const ManagedBehaviourInstanceId instance,
+                                                        const PhysicsContactPhase phase,
+                                                        const PhysicsContactMessage& contact)
+            {
+                if (Open.load(std::memory_order_acquire))
+                    InvokePhysicsContact(instance.Value(), phase, contact);
+            };
+            ComponentCallbacks->Destroy = [this](const ManagedBehaviourInstanceId instance)
+            {
+                if (!Open.load(std::memory_order_acquire))
+                    return;
+                const auto found = Instances.find(instance.Value());
+                if (found == Instances.end())
+                    return;
+                std::exception_ptr failure;
+                try
+                {
+                    if (found->second.Object.IsValid())
+                        InvokeInstance(found->first, ManagedBehaviourCallback::Destroy);
+                }
+                catch (...)
+                {
+                    failure = std::current_exception();
+                }
+                Instances.erase(found);
+                if (failure)
+                    std::rethrow_exception(failure);
+            };
+            ComponentCallbacks->CaptureState =
+                [this](const ManagedBehaviourInstanceId instance) -> std::optional<std::string>
+            {
+                if (!Open.load(std::memory_order_acquire))
+                    return std::nullopt;
+                const auto found = Instances.find(instance.Value());
+                if (found == Instances.end() || !found->second.Object.IsValid())
+                    return std::nullopt;
+                found->second.State = CaptureState(found->second.Object, true);
+                return found->second.State;
+            };
+            ComponentCallbacks->RestoreState =
+                [this](const ManagedBehaviourInstanceId instance, const std::string_view state)
+            {
+                if (!Open.load(std::memory_order_acquire))
+                    return;
+                const auto found = Instances.find(instance.Value());
+                if (found == Instances.end() || !found->second.Object.IsValid())
+                    return;
+                found->second.State = state;
+                RestoreState(found->second.Object, found->second.State, true);
+            };
         }
 
         ~Impl()
@@ -171,6 +260,7 @@ namespace Keire
             DrainManagedJobs(false);
             if (OwnScheduler && Scheduler)
                 Scheduler->Close();
+            ComponentCallbacks.reset();
             *Lifetime = nullptr;
             ShutdownRuntime();
         }
@@ -3082,6 +3172,7 @@ namespace Keire
         std::unordered_map<std::uint64_t, std::string> ProfileNames;
         std::uint64_t NextInstance = 1;
         std::shared_ptr<Impl*> Lifetime;
+        std::shared_ptr<Detail::ManagedBehaviourComponentCallbacks> ComponentCallbacks;
         ManagedReloadStatus Reload;
         std::string RuntimeException;
         bool RuntimeInitialized = false;
@@ -3097,198 +3188,6 @@ namespace Keire
         bool OwnScheduler = false;
         std::uint64_t NextOperation = 1;
         static inline thread_local Impl* CurrentRuntime = nullptr;
-    };
-
-    class ScriptSystem::Impl::ManagedComponent final : public Component
-    {
-      public:
-        using ScriptImpl = ScriptSystem::Impl;
-
-        ManagedComponent(const ComponentTypeId componentType, std::string managedType,
-                         std::weak_ptr<ScriptImpl*> lifetime)
-            : Component(componentType), m_ManagedType(std::move(managedType)), m_Lifetime(std::move(lifetime))
-        {
-        }
-
-      protected:
-        void Awake() override
-        {
-            WithImplementation(
-                [&](ScriptImpl& implementation)
-                {
-                    const auto* type = implementation.FindType(implementation.ActiveTypes, m_ManagedType);
-                    if (!type)
-                        return;
-                    const auto owner = Owner();
-                    const auto id = implementation.NextInstance++;
-                    auto object = implementation.CreateObject(*type, owner.World(), owner.Id().Value());
-                    const auto [instance, inserted] = implementation.Instances.emplace(
-                        id, BehaviourInstance{m_ManagedType, Type(), owner.World(), owner.Id().Value(),
-                                              std::move(object), m_State});
-                    (void)inserted;
-                    instance->second.NativeEntity = owner;
-                    instance->second.CallbackMask = implementation.ReadCallbackMask(instance->second.Object);
-                    m_Instance = ManagedBehaviourInstanceId(id);
-                    if (!m_State.empty())
-                        implementation.RestoreState(implementation.Instances.at(id).Object, m_State, true);
-                    implementation.InvokeInstance(id, ManagedBehaviourCallback::Awake);
-                });
-        }
-
-        void OnEnable() override { Invoke(ManagedBehaviourCallback::Enable); }
-        void Start() override { Invoke(ManagedBehaviourCallback::Start); }
-        void FixedUpdate(const float deltaSeconds) override
-        {
-            Invoke(ManagedBehaviourCallback::FixedUpdate, deltaSeconds);
-        }
-        void Update(const float deltaSeconds) override { Invoke(ManagedBehaviourCallback::Update, deltaSeconds); }
-        void LateUpdate() override { Invoke(ManagedBehaviourCallback::LateUpdate); }
-        void OnAnimationEvent(const AnimationEventMessage& event) override
-        {
-            WithImplementation(
-                [&](ScriptImpl& implementation)
-                {
-                    if (m_Instance)
-                        implementation.InvokeAnimationEvent(m_Instance.Value(), event);
-                });
-        }
-        void OnProceduralMotionEvent(const ProceduralMotionEvent& event) override
-        {
-            WithImplementation(
-                [&](ScriptImpl& implementation)
-                {
-                    if (m_Instance)
-                        implementation.InvokeProceduralMotionEvent(m_Instance.Value(), event);
-                });
-        }
-        void OnAnimatorIk(const AnimationIkMessage& context) override
-        {
-            Invoke(ManagedBehaviourCallback::AnimatorIk, context.LayerWeight);
-        }
-        void OnCollisionEnter(const PhysicsContactMessage& contact) override
-        {
-            InvokeContact(PhysicsContactPhase::Enter, contact);
-        }
-        void OnCollisionStay(const PhysicsContactMessage& contact) override
-        {
-            InvokeContact(PhysicsContactPhase::Stay, contact);
-        }
-        void OnCollisionExit(const PhysicsContactMessage& contact) override
-        {
-            InvokeContact(PhysicsContactPhase::Exit, contact);
-        }
-        void OnTriggerEnter(const PhysicsContactMessage& contact) override
-        {
-            InvokeContact(PhysicsContactPhase::Enter, contact);
-        }
-        void OnTriggerStay(const PhysicsContactMessage& contact) override
-        {
-            InvokeContact(PhysicsContactPhase::Stay, contact);
-        }
-        void OnTriggerExit(const PhysicsContactMessage& contact) override
-        {
-            InvokeContact(PhysicsContactPhase::Exit, contact);
-        }
-        void OnDisable() override { Invoke(ManagedBehaviourCallback::Disable); }
-        void OnDestroy() override
-        {
-            WithImplementation(
-                [&](ScriptImpl& implementation)
-                {
-                    if (!m_Instance)
-                        return;
-                    const auto found = implementation.Instances.find(m_Instance.Value());
-                    if (found == implementation.Instances.end())
-                        return;
-                    std::exception_ptr failure;
-                    try
-                    {
-                        if (found->second.Object.IsValid())
-                            implementation.InvokeInstance(found->first, ManagedBehaviourCallback::Destroy);
-                    }
-                    catch (...)
-                    {
-                        failure = std::current_exception();
-                    }
-                    implementation.Instances.erase(found);
-                    m_Instance = {};
-                    if (failure)
-                        std::rethrow_exception(failure);
-                });
-        }
-
-      private:
-        template <typename Function> void WithImplementation(Function&& function)
-        {
-            const auto lifetime = m_Lifetime.lock();
-            if (!lifetime || !*lifetime || !(*lifetime)->Open.load(std::memory_order_acquire))
-                return;
-            function(**lifetime);
-        }
-
-        void Invoke(const ManagedBehaviourCallback callback, const float deltaSeconds = 0.0F)
-        {
-            WithImplementation(
-                [&](ScriptImpl& implementation)
-                {
-                    if (!m_Instance)
-                        return;
-                    const auto found = implementation.Instances.find(m_Instance.Value());
-                    if (found == implementation.Instances.end() || !found->second.Object.IsValid())
-                        return;
-                    implementation.InvokeInstance(found->first, callback, deltaSeconds);
-                });
-        }
-
-        void InvokeContact(const PhysicsContactPhase phase, const PhysicsContactMessage& contact)
-        {
-            WithImplementation(
-                [&](ScriptImpl& implementation)
-                {
-                    if (m_Instance)
-                        implementation.InvokePhysicsContact(m_Instance.Value(), phase, contact);
-                });
-        }
-
-      public:
-        [[nodiscard]] std::string SerializedState() const
-        {
-            auto& component = const_cast<ManagedComponent&>(*this);
-            component.WithImplementation(
-                [&](ScriptImpl& implementation)
-                {
-                    if (!component.m_Instance)
-                        return;
-                    const auto found = implementation.Instances.find(component.m_Instance.Value());
-                    if (found == implementation.Instances.end() || !found->second.Object.IsValid())
-                        return;
-                    found->second.State = implementation.CaptureState(found->second.Object, true);
-                    component.m_State = found->second.State;
-                });
-            return m_State;
-        }
-
-        void SetSerializedState(std::string state)
-        {
-            m_State = std::move(state);
-            WithImplementation(
-                [&](ScriptImpl& implementation)
-                {
-                    if (!m_Instance)
-                        return;
-                    const auto found = implementation.Instances.find(m_Instance.Value());
-                    if (found == implementation.Instances.end() || !found->second.Object.IsValid())
-                        return;
-                    found->second.State = m_State;
-                    implementation.RestoreState(found->second.Object, m_State, true);
-                });
-        }
-
-      private:
-        std::string m_ManagedType;
-        std::weak_ptr<ScriptImpl*> m_Lifetime;
-        ManagedBehaviourInstanceId m_Instance;
-        std::string m_State = "{\"Version\":1,\"Fields\":[]}";
     };
 
     ScriptSystem::ScriptSystem(ScriptSystemSpecification specification, Ref<JobSystem> jobs)
@@ -4598,12 +4497,15 @@ namespace Keire
             const auto componentType = type.ComponentType;
             const auto managedType = type.Name;
             const auto properties = type.Properties;
-            const std::weak_ptr<Impl*> lifetime = m_Impl->Lifetime;
-            registration.Factory = [componentType, managedType, lifetime]
-            { return Ref<Component>(CreateRef<Impl::ManagedComponent>(componentType, managedType, lifetime)); };
+            const std::weak_ptr<Detail::ManagedBehaviourComponentCallbacks> callbacks = m_Impl->ComponentCallbacks;
+            registration.Factory = [componentType, managedType, callbacks]
+            {
+                return Ref<Component>(
+                    CreateRef<Detail::ManagedBehaviourComponent>(componentType, managedType, callbacks));
+            };
             registration.Serialize = [properties](const Component& component)
             {
-                const auto& managed = dynamic_cast<const Impl::ManagedComponent&>(component);
+                const auto& managed = dynamic_cast<const Detail::ManagedBehaviourComponent&>(component);
                 return ProjectManagedState(managed.SerializedState(), properties);
             };
             registration.Deserialize =
@@ -4611,7 +4513,7 @@ namespace Keire
             {
                 if (version != 1)
                     throw std::invalid_argument("Unsupported managed component state version.");
-                auto& managed = dynamic_cast<Impl::ManagedComponent&>(component);
+                auto& managed = dynamic_cast<Detail::ManagedBehaviourComponent&>(component);
                 const auto found = values.find("managedState");
                 if (found == values.end())
                     return;
@@ -4641,6 +4543,7 @@ namespace Keire
         m_Impl->RequireOwner();
         if (!m_Impl->Open.exchange(false, std::memory_order_acq_rel))
             return;
+        m_Impl->ComponentCallbacks.reset();
         m_Impl->StopWorker();
         if (m_Impl->WorkScope)
         {

@@ -314,6 +314,24 @@ TEST_CASE("material and built-in mesh assets retain Kéire-owned identities")
     CHECK(Keire::MaterialAsset::Error()->Definition().Properties.contains("ErrorColor"));
 }
 
+TEST_CASE("material alpha modes retain stable binary and authoring identities")
+{
+    constexpr std::array modes{Keire::MaterialAlphaMode::Opaque,      Keire::MaterialAlphaMode::Mask,
+                               Keire::MaterialAlphaMode::Blend,       Keire::MaterialAlphaMode::Additive,
+                               Keire::MaterialAlphaMode::Modulate,    Keire::MaterialAlphaMode::AlphaComposite,
+                               Keire::MaterialAlphaMode::AlphaHoldout};
+    for (const auto mode : modes)
+    {
+        Keire::MaterialAssetDefinition definition;
+        definition.Surface.AlphaMode = mode;
+        const auto runtime = Keire::MaterialAsset::Decode(Keire::MaterialAsset::Encode(definition));
+        REQUIRE(runtime);
+        CHECK(runtime->Definition().Surface.AlphaMode == mode);
+        CHECK(Keire::MaterialAsset::DecodeSource(Keire::MaterialAsset::EncodeSource(definition)).Surface.AlphaMode ==
+              mode);
+    }
+}
+
 TEST_CASE("material overrides are validated against shader declarations")
 {
     Keire::ShaderAssetDefinition shader;

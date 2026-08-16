@@ -12,12 +12,12 @@ same immutable shader/material runtime boundary and remain independently authora
 
 | Initiative | Current validated baseline | First decision |
 | --- | --- | --- |
-| VFX parity | 278 frozen Unity 6.3 rows, 245 enabled Kéire-equivalent rows, 33 disabled rows, and 240 runtime descriptors | Deliver the remaining event/behavior and renderer-specific rows by production slice; never enable a catalog row without runtime, test, documentation, and scenario evidence. |
+| VFX parity | 278 frozen Unity 6.3 rows, 248 enabled Kéire-equivalent rows, 30 disabled rows, and 241 runtime descriptors | Deliver the remaining event/behavior and renderer-specific rows by production slice; never enable a catalog row without runtime, test, documentation, and scenario evidence. |
 | Shader Graph and Materials | 120 stable node types, seven output models, reusable functions/layers, Material Parameter Collections, dynamic instances, generated DXIL/SPIR-V/MSL, Material Graph composition, live previews, and transactional publication | Complete renderer-wide collection binding, sampler/resource breadth, node previews, and enforceable performance gates before expanding specialized shading models. |
 
 The VFX first-major-milestone target is 50 enabled parity rows. The next portable expansion targets 120 additional rows
-above the validated 125-row baseline. The checked-in ledger closes all 120, for 245 total. This satisfies both
-numerical gates, but does not close the initiative: the generated matrix keeps all 33 remaining renderer/GPU-resource
+above the validated 125-row baseline. The checked-in ledger closes that expansion plus three Kill Shape P0 rows, for
+248 total. This satisfies both numerical gates, but does not close the initiative: the generated matrix keeps all 30 remaining renderer/GPU-resource
 items visible and prioritized. The authoritative counts, priority assignments, evidence paths, and remaining rows are in the
 [generated VFX capability matrix](generated/VfxCapabilities.md) and its
 [machine-readable manifest](VfxParityManifest.json).

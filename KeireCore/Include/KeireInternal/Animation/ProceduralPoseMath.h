@@ -15,6 +15,35 @@ namespace Keire::Detail
         float Reach = 0.0F;
     };
 
+    [[nodiscard]] inline float ProceduralResponseBlend(const float deltaSeconds, const float responseTime) noexcept
+    {
+        if (deltaSeconds <= 0.0F)
+            return 0.0F;
+        if (responseTime <= 0.0F)
+            return 1.0F;
+        return 1.0F - std::exp(-deltaSeconds / responseTime);
+    }
+
+    [[nodiscard]] inline float ProceduralPreLandingAmount(const float groundClearance, const float downwardSpeed,
+                                                          const float probeTime, const float gravity = 9.81F) noexcept
+    {
+        if (groundClearance < 0.0F || downwardSpeed < 0.0F || probeTime <= 0.0F || gravity < 0.0F)
+            return 0.0F;
+        if (groundClearance <= 0.000001F)
+            return 1.0F;
+
+        const auto maximumDistance = downwardSpeed * probeTime + 0.5F * gravity * probeTime * probeTime;
+        if (groundClearance >= maximumDistance || maximumDistance <= 0.000001F)
+            return 0.0F;
+
+        const auto timeToGround =
+            gravity > 0.000001F
+                ? (std::sqrt(downwardSpeed * downwardSpeed + 2.0F * gravity * groundClearance) - downwardSpeed) /
+                      gravity
+                : groundClearance / std::max(downwardSpeed, 0.000001F);
+        return std::clamp(1.0F - timeToGround / probeTime, 0.0F, 1.0F);
+    }
+
     [[nodiscard]] inline float ProceduralFootLateralCorrection(const float currentOffset, const float legLength,
                                                                const float spacingRatio, const float side) noexcept
     {

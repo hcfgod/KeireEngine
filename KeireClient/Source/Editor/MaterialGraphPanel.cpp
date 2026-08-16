@@ -792,8 +792,10 @@ namespace KeireEditor
             if (materialOutput)
             {
                 auto surface = document.Definition().Surface;
-                constexpr std::array modes{std::string_view("Opaque"), std::string_view("Masked"),
-                                           std::string_view("Transparent")};
+                constexpr std::array modes{std::string_view("Opaque"),       std::string_view("Masked"),
+                                           std::string_view("Transparent"),  std::string_view("Additive"),
+                                           std::string_view("Modulate"),     std::string_view("Alpha Composite"),
+                                           std::string_view("Alpha Holdout")};
                 const auto mode = static_cast<std::size_t>(surface.AlphaMode);
                 if (auto combo = ui.BeginCombo("Surface", modes[mode]); combo)
                     for (std::size_t index = 0; index < modes.size(); ++index)

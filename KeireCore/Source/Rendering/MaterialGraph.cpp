@@ -893,10 +893,11 @@ namespace Keire
             definition.Nodes.size() > MaximumMaterialGraphNodes ||
             definition.Connections.size() > MaximumMaterialGraphConnections || !definition.OutputNode ||
             definition.Shader.Keywords.size() > MaximumMaterialKeywords ||
-            definition.Surface.AlphaMode > MaterialAlphaMode::Blend || !std::isfinite(definition.Surface.AlphaCutoff) ||
-            definition.Surface.AlphaCutoff < 0.0F || definition.Surface.AlphaCutoff > 1.0F ||
-            !std::isfinite(definition.EmissiveGIIntensity) || definition.EmissiveGIIntensity < 0.0F ||
-            definition.EmissiveGIIntensity > 100'000.0F || !Math::IsFinite(definition.OutputPosition))
+            definition.Surface.AlphaMode > MaterialAlphaMode::AlphaHoldout ||
+            !std::isfinite(definition.Surface.AlphaCutoff) || definition.Surface.AlphaCutoff < 0.0F ||
+            definition.Surface.AlphaCutoff > 1.0F || !std::isfinite(definition.EmissiveGIIntensity) ||
+            definition.EmissiveGIIntensity < 0.0F || definition.EmissiveGIIntensity > 100'000.0F ||
+            !Math::IsFinite(definition.OutputPosition))
             throw std::invalid_argument("Material Graph definition is invalid or exceeds a portable bound.");
         if (!definition.Shader.Asset ||
             (definition.Shader.Kind == MaterialShaderSourceKind::ShaderGraph && !ValidTarget(definition.Shader.Target)))
@@ -1023,7 +1024,7 @@ namespace Keire
         if (definition.SchemaVersion != MaterialInstanceSourceSchemaVersion || !definition.Parent ||
             definition.Properties.size() > MaximumMaterialProperties)
             throw std::invalid_argument("Material Instance definition is invalid or exceeds a portable bound.");
-        if (definition.Surface && (definition.Surface->AlphaMode > MaterialAlphaMode::Blend ||
+        if (definition.Surface && (definition.Surface->AlphaMode > MaterialAlphaMode::AlphaHoldout ||
                                    !std::isfinite(definition.Surface->AlphaCutoff) ||
                                    definition.Surface->AlphaCutoff < 0.0F || definition.Surface->AlphaCutoff > 1.0F))
             throw std::invalid_argument("Material Instance surface override is invalid.");

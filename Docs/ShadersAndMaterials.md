@@ -147,8 +147,10 @@ the current runtime contract does not silently treat collection values as ordina
 
 The immutable runtime material source schema version 3 includes alpha mode, alpha cutoff, double-sided state,
 baked-emission contribution, emissive GI intensity, and validated property overrides. Opaque and masked materials
-write depth; masked surfaces apply the cutoff; blended surfaces use premultiplied alpha, retain depth testing, disable
-depth writes, and submit back-to-front.
+write depth; masked surfaces apply the cutoff. Blend uses straight source alpha, Additive accumulates source color,
+Modulate multiplies the destination, Alpha Composite consumes premultiplied source color, and Alpha Holdout removes
+destination coverage. These transparent modes retain depth testing, disable depth writes, bypass opaque instancing,
+and submit back-to-front.
 
 ## Safe Legacy Migration
 

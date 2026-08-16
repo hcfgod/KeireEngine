@@ -298,8 +298,10 @@ favor throughput at the cost of additional presentation latency. Profiling attri
 draw preparation, frame-graph passes, and residual orchestration overhead.
 
 The public `RenderSystem.cpp` PImpl facade delegates to separately compiled private backend units for device/frame
-lifecycle, resource caches, surface/pipeline management, and scene recording. `RenderBackendInternal.h` is an internal
-coordination boundary only; SDL handles and backend state remain absent from supported headers.
+lifecycle, resource caches, surface/pipeline management, and scene recording. Frame execution, skinning, sampled-depth
+and shadow recording, scene surfaces, GPU VFX preparation, VFX pipeline ownership, and VFX drawing are separate
+translation units coordinated by `RenderBackendInternal.h`. Shared frustum and projected-size math lives in a private
+header with no resource ownership. SDL handles and backend state remain absent from supported headers.
 
 Offline spatial lighting follows the same ownership boundary. `LightingBaker` consumes an immutable scene definition,
 validated public asset values, transitive content digests, and explicit bake settings; it does not own an editor, scene,
@@ -347,7 +349,12 @@ attempts for the same asset revision and Blackboard override set, and retries af
 scene remains `Playing` in both cases; only a failure of the shared VFX world update remains a session-level fault.
 
 `VfxWorld` remains the backend-neutral scene facade. Render-capable scene sessions select the GPU backend; headless
-tests and explicit compatibility policy select deterministic CPU simulation. GPU snapshots contain only immutable
+tests and explicit compatibility policy select deterministic CPU simulation. Effect-asset construction and residency
+accounting live in `VfxEffectAsset.cpp`, while
+the larger authoring/compiler unit retains schema, lowering, and import responsibilities. Checkpoint byte encoding is a
+separate internal value codec shared by capture and restore; it owns no world state.
+
+GPU snapshots contain only immutable
 per-emitter work descriptors, cumulative spawn sequences, per-handle simulation revisions, a world simulation-step
 revision, a world reset revision, and aggregate limits, including resolved bounded custom instructions. They never
 contain per-particle CPU snapshots. The renderer owns persistent particle, free-list, alive-list, counter, event,
@@ -740,7 +747,9 @@ refreshed after the editor becomes usable.
 second graph interaction implementation. It owns graph validation, undo/redo, compile options, generated diagnostics,
 and the last-good preview definition and compilation. `ShaderGraphPanel` owns only transient selection, inspector
 buffers, searchable node-palette state, graph gestures, output/preview controls, bounded adaptive software-preview
-pixels, and presentation. The preview evaluates the validated built-in graph per shaded sample using the same coercion,
+pixels, and presentation. Built-in and function-call node construction lives in `ShaderGraphNodes.cpp`; compilation,
+validation, and shader emission remain in the core graph unit and consume those value-only definitions. The preview
+evaluates the validated built-in graph per shaded sample using the same coercion,
 UV, procedural, shaping, surface, and neutral texture-semantic rules as generated shaders; unsupported custom functions
 retain a bounded node-default fallback. The shared stable canvas installs an RAII draw-list clip covering the exact
 canvas rectangle, so nodes and connection feedback cannot escape into adjacent preview or inspector regions. The graph
@@ -1126,6 +1135,9 @@ profile/rig revisions. Gameplay submits value-only intent before physics, and th
 post-physics Character Controller result before solving. Both modes converge at managed IK, authored arm overrides,
 palette publication, and immutable diagnostics. `.keiremotionprofile` is a normalized asset boundary rather than
 component-owned tuning, so cooking, catalog dependencies, validation, and hot reload use the standard asset pipeline.
+The scene-session header retains orchestration and cached state, while `SceneRuntimeProcedural.cpp` owns procedural
+advance and publication. Per-Animator pose, matrix, palette, grounding-request, and double-buffered debug storage is
+retained after warm-up; published debug snapshots are immutable even when a consumer holds an older snapshot.
 
 ## Skeletal Deformation And Rig Authoring
 
@@ -1217,6 +1229,10 @@ active build dependency. Managed Behaviours own a phase-aware coroutine schedule
 generation-local values, nested iterators are disposed in LIFO order, and disable, destruction, or reload stops all
 pending routines. Transform handles support parent-aware world setters, while the Rigid Body handle maps validated value
 properties and force modes through internal calls; neither API exposes an ECS component pointer or physics body handle.
+The reflected ECS component adapter is compiled separately as `ManagedBehaviourComponent`. It retains only a weak
+callback table and value IDs, so components become inert when `ScriptSystem` closes without exposing Coral objects or
+the runtime implementation. Creation, callback invocation, state capture/restore, and exception-preserving destruction
+remain owned by the active script generation.
 
 ## Managed Data Assets
 

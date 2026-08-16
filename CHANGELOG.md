@@ -5,6 +5,20 @@ versions.
 
 ## Unreleased
 
+- Added explicit Additive, Modulate, premultiplied Alpha Composite, and Alpha Holdout material modes with
+  backend-owned blend/depth policies, transparent ordering, editor authoring choices, and focused renderer tests.
+- Added the CPU/GPU Kill Shape VFX Block with validated Box/Sphere Solid and Inverted semantics, canonical persistence,
+  dynamic property lowering, GPU shader execution, and D3D12/Vulkan rendered-output evidence closing the generic,
+  AABox, and Sphere P0 parity rows.
+- Split renderer frame, skinning, shadow, and VFX recording; Shader Graph node construction; VFX effect ownership;
+  scene procedural animation; and managed Behaviour component forwarding into private production units, ratcheting all
+  affected source budgets and removing the legacy `RenderSceneRecording.cpp` exception.
+- Completed the procedural humanoid runtime contract: authored facing now drives filtered turn/pelvis heading, all
+  velocity, facing, pose, and grounding response controls are honored, and terrain-aware pre-landing extension begins
+  only when a walkable surface is reachable inside the authored probe horizon. Procedural pose, matrix, palette,
+  grounding-request, and immutable debug-snapshot storage is cached after warm-up, with scene-runtime acceptance
+  coverage for locomotion, turning, the airborne/landing lifecycle, and cache reuse.
+
 ## 0.3.2 - 2026-08-15
 
 - Fixed the Unix dependency bootstrap omitting the locked FFmpeg submodule and the `cmp` utility, which previously

@@ -174,6 +174,24 @@ namespace Keire
         [[nodiscard]] bool operator==(const VfxCollisionModule&) const = default;
     };
 
+    enum class VfxKillShapeMode : std::uint8_t
+    {
+        Solid,
+        Inverted
+    };
+
+    /// Releases particles inside (Solid) or outside (Inverted) an axis-aligned box or sphere.
+    struct VfxKillShapeModule
+    {
+        VfxShape Shape = VfxShape::Sphere;
+        Vector3 Center;
+        Vector3 BoxHalfExtent{0.5F, 0.5F, 0.5F};
+        float Radius = 0.5F;
+        VfxKillShapeMode Mode = VfxKillShapeMode::Solid;
+
+        [[nodiscard]] bool operator==(const VfxKillShapeModule&) const = default;
+    };
+
     /// Output selection and its optional sprite or mesh asset.
     struct VfxRendererModule
     {
@@ -185,9 +203,9 @@ namespace Keire
         [[nodiscard]] bool operator==(const VfxRendererModule&) const = default;
     };
 
-    using VfxModulePayload =
-        std::variant<VfxEmissionRateModule, VfxBurstModule, VfxShapeModule, VfxInitializeModule, VfxForceModule,
-                     VfxSizeOverLifetimeModule, VfxColorOverLifetimeModule, VfxCollisionModule, VfxRendererModule>;
+    using VfxModulePayload = std::variant<VfxEmissionRateModule, VfxBurstModule, VfxShapeModule, VfxInitializeModule,
+                                          VfxForceModule, VfxSizeOverLifetimeModule, VfxColorOverLifetimeModule,
+                                          VfxCollisionModule, VfxRendererModule, VfxKillShapeModule>;
 
     /// Stable compatibility payload. LegacyModules executes enabled entries directly. Graph Blocks reference payloads
     /// for structural data, while each Block's enabled state, typed inputs, and Context-stack position are
@@ -616,7 +634,11 @@ namespace Keire
         CollisionKillOnCollision,
         RendererSprite,
         RendererMesh,
-        RendererMaterial
+        RendererMaterial,
+        KillShapeCenter,
+        KillShapeBoxHalfExtent,
+        KillShapeRadius,
+        KillShapeInverted
     };
 
     struct VfxCompiledParameter
@@ -1119,7 +1141,8 @@ namespace Keire
         Color,
         Collision,
         Renderer,
-        CustomHlsl
+        CustomHlsl,
+        KillShape
     };
 
     struct VfxGpuCustomInstruction

@@ -76,9 +76,14 @@ defaults, and creates a deterministic draw order. Opaque and
 masked work is state sorted; premultiplied blend work remains depth-tested, disables depth writes, and sorts
 back-to-front with stable entity/submesh tie breaking.
 
-Material schema v2 owns `Opaque`, `Mask`, and `Blend` alpha mode, alpha cutoff, and double-sided state. Mask surfaces
-write depth and reject fragments below their cutoff. A shader schema-v1 blend flag remains a compatibility default.
-Failed material or shader revisions retain the complete last-good binding.
+Material schema v2 owns `Opaque`, `Mask`, `Blend`, `Additive`, `Modulate`, `Alpha Composite`, and `Alpha Holdout`
+alpha modes, alpha cutoff, and double-sided state. Mask surfaces
+write depth and reject fragments below their cutoff. Blend uses straight source alpha, Additive accumulates source color
+weighted by source alpha, Modulate multiplies destination color, Alpha Composite expects premultiplied source color,
+and Alpha Holdout removes destination coverage without contributing source color. Every transparent mode remains
+depth-tested, disables depth writes, bypasses opaque instancing, and participates in stable back-to-front submission. A
+shader schema-v1 blend flag remains a compatibility default. Failed material or shader revisions retain the complete
+last-good binding.
 
 The private frame graph executes resource upload, directional-shadow, Forward+ culling, opaque/mask, sky,
 transparency, ACES tone-map, overlay, readback, and presentation passes. Its compiler validates transient reads,

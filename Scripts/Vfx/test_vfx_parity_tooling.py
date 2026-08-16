@@ -157,7 +157,9 @@ class RuntimeCatalogIntegrityTests(unittest.TestCase):
         expansion = manifest["portableParityExpansion"]
         self.assertEqual(expansion["baselineParityRows"], 125)
         self.assertEqual(expansion["targetAdditionalRows"], 120)
-        self.assertEqual(expansion["completedAdditionalRows"], 120)
+        self.assertGreaterEqual(
+            expansion["completedAdditionalRows"], expansion["targetAdditionalRows"]
+        )
         self.assertEqual(expansion["remainingAdditionalRows"], 0)
         self.assertTrue(expansion["achieved"])
 

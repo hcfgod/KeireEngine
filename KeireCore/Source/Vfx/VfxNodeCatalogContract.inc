@@ -7,6 +7,7 @@ KEIRE_VFX_NODE("keire.block.color-over-lifetime", "Color over Lifetime", Block, 
 KEIRE_VFX_NODE("keire.block.emission-rate", "Emission Rate", Block, Supported, CpuAndGpu)
 KEIRE_VFX_NODE("keire.block.force", "Force", Block, Supported, CpuAndGpu)
 KEIRE_VFX_NODE("keire.block.initialize", "Initialize", Block, Supported, CpuAndGpu)
+KEIRE_VFX_NODE("keire.block.kill-shape", "Kill Shape", Block, KeireEquivalent, CpuAndGpu)
 KEIRE_VFX_NODE("keire.block.portable-hlsl", "Portable Custom HLSL", Block, KeireEquivalent, CpuAndGpu)
 KEIRE_VFX_NODE("keire.block.shape", "Shape", Block, KeireEquivalent, CpuAndGpu)
 KEIRE_VFX_NODE("keire.block.size-over-lifetime", "Size over Lifetime", Block, Supported, CpuAndGpu)

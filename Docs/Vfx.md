@@ -209,19 +209,18 @@ Unity Editor 6000.3, `com.unity.visualeffectgraph` 17.3.0, and Unity Graphics co
 provenance, Kéire implementation ID, backend tier, tests, documentation, support state, priority, and disabled reason
 for every catalogued Operator, Block, Context, and Output.
 
-The frozen snapshot contains 278 rows: 214 Operators, 46 Blocks, 5 Contexts, and 13 Outputs. Two hundred forty-five
+The frozen snapshot contains 278 rows: 214 Operators, 46 Blocks, 5 Contexts, and 13 Outputs. Two hundred forty-eight
 rows carry the explicit **Kéire Equivalent** tier for tested value, attribute, structured-value, geometry, sampling,
-context, event, collision, and renderer workflows; 33 remain `Disabled`. A `keire` implementation mapping alone means
+context, event, collision, and renderer workflows; 30 remain `Disabled`. A `keire` implementation mapping alone means
 related native functionality exists and does not claim Unity parity. A row is enabled only when its native descriptor,
 backend tier, focused tests, documentation, and deliberately documented semantic differences agree. Disabled entries
 remain visible to tooling but creation or compilation must reject them with their recorded reason.
 
 The portable expansion starts from the validated 125-row baseline and requires 120 additional evidence-backed rows.
-The checked-in ledger now closes exactly those 120 rows, for 245 total, so both the 50-row first-major target and the
-120-row expansion gate are achieved. It does not imply full parity. Every disabled row is assigned P0, P1, P2, or
-Deferred through the checked-in priority policy, and the validator rejects drifted priorities or milestone counts. The
-[initiative matrix](VisualAuthoringInitiatives.md) defines the production scenarios and delivery meaning behind those
-tiers.
+The checked-in ledger closes that expansion gate plus the three Kill Shape P0 rows, for 248 total. It does not imply
+full parity. Every disabled row is assigned P0, P1, P2, or Deferred through the checked-in priority policy, and the
+validator rejects drifted priorities or milestone counts. The [initiative matrix](VisualAuthoringInitiatives.md)
+defines the production scenarios and delivery meaning behind those tiers.
 
 The [VFX Beyond-Parity Roadmap](VfxBeyondParityRoadmap.md) tracks Kéire-specific runtime, networking, debugging,
 scalability, streaming, collaboration, and production-operations features. Those items are deliberately excluded from
@@ -946,6 +945,22 @@ at most 1,048,576 cells and 64 MiB of source JSON.
 After import, assign the asset to **Shape > Volume Asset** and choose **Volume**. Cooking records it as a typed
 dependency. CPU and GPU choose the same weighted cell deterministically; each backend then samples a point inside that
 cell. Reimport publishes the new table transactionally and keeps the previous loaded asset if validation fails.
+
+### Kill Shape
+
+Kill Shape is an ordered Update Block with axis-aligned Box and Sphere modes. **Solid** releases a particle whose
+simulation-space position is inside or on the volume boundary; **Inverted** releases one outside the volume. Center,
+Box Half Extent, Radius, and Inverted accept ordinary typed Block inputs on CPU and GPU, while Shape remains a
+compiler-reflected setting. Extents and radius must be finite and positive.
+
+Local-space effects evaluate the volume in emitter-local coordinates, so it follows emitter translation and rotation.
+World-space effects interpret Center and the volume axes directly in world space. The check runs at the Block's stored
+position in Update order, before the runtime's fallback velocity integration; place position-writing Blocks before
+Kill Shape when the authored effect requires their result to be tested in the same step. Kéire's single block is the
+documented equivalent for Unity's generic Kill Shape, Kill (AABox), and Kill (Sphere) rows; particle-radius expansion,
+planes, and collision-attribute writes remain outside this bounded contract. Focused rendered-output acceptance proves
+the Solid/Inverted sphere differential on both D3D12 and Vulkan in addition to deterministic CPU semantics and GPU
+payload validation.
 
 ### Initialize
 
