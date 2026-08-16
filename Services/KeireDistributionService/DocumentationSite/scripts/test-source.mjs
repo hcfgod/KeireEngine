@@ -167,6 +167,19 @@ const vfxSchema = parseUnsignedConstant(
     await readFile(path.join(repositoryRoot, "KeireCore", "Include", "Keire", "Vfx", "VfxSystem.h"), "utf8"),
     "CurrentVfxSchemaVersion",
 );
+const animatorSchema = parseUnsignedConstant(
+    await readFile(path.join(repositoryRoot, "KeireCore", "Source", "ECS", "Components", "AnimatorComponent.cpp"), "utf8"),
+    "AnimatorSchemaVersion",
+);
+const proceduralMotionHeader = await readFile(
+    path.join(repositoryRoot, "KeireCore", "Include", "Keire", "Animation", "ProceduralMotion.h"),
+    "utf8",
+);
+const proceduralMotionSchemaMatch = proceduralMotionHeader.match(
+    /struct ProceduralMotionProfile[\s\S]*?\bSchemaVersion\s*=\s*(\d+)/,
+);
+assert(proceduralMotionSchemaMatch, "Could not locate the procedural motion profile schema.");
+const proceduralMotionSchema = Number.parseInt(proceduralMotionSchemaMatch[1], 10);
 const runtimeSource = await readFile(path.join(repositoryRoot, "KeireRuntime", "Source", "RuntimeApplication.cpp"), "utf8");
 const runtimeSchemaMatch = runtimeSource.match(/supported schema:\s*(\d+)/);
 assert(runtimeSchemaMatch, "Could not locate the cooked runtime manifest schema.");
@@ -181,6 +194,8 @@ const versionContracts = [
     ["Rendering.md", new RegExp(`mesh schema v${meshSchema}\\b`, "i")],
     ["ShadersAndMaterials.md", new RegExp(`material source schema version ${materialSchema}\\b`, "i")],
     ["Vfx.md", new RegExp(`schema[- ]${vfxSchema}\\b`, "i")],
+    ["AnimationRigging.md", new RegExp(`Animator component schema ${animatorSchema}\\b`, "i")],
+    ["ProceduralMotion.md", new RegExp(`\\.keiremotionprofile[^\\n]*schema version ${proceduralMotionSchema}\\b`, "i")],
     ["GameplayFoundations.md", new RegExp(`runtime manifests use schema ${runtimeSchema}\\b`, "i")],
 ];
 for (const [sourcePath, contract] of versionContracts) {
@@ -190,6 +205,19 @@ for (const [sourcePath, contract] of versionContracts) {
 
 const rootReadme = await readFile(path.join(repositoryRoot, "README.md"), "utf8");
 await validateLocalLinks("README.md", path.join(repositoryRoot, "README.md"), rootReadme);
+assert(rootReadme.includes(`currently **version ${projectVersion}`),
+    "Root README version does not match Config/Project.conf.");
+assert(rootReadme.includes(`contains ${allDocSources.length} maintained guides`),
+    "Root README guide count does not match the canonical inventory.");
+const documentationLanding = await readFile(path.join(siteRoot, "Source", "content", "docs", "index.mdx"), "utf8");
+assert(documentationLanding.includes(`${allDocSources.length} maintained guides`),
+    "Documentation website landing guide count does not match the canonical inventory.");
+for (const sourcePath of ["GettingStarted.md", "TestingAndRelease.md", "ProjectHub.md", "ProductionReadinessReview.md"]) {
+    const source = await readMarkdown(path.join(docsRoot, sourcePath));
+    assert(source.includes(projectVersion), `Current release guide does not mention ${projectVersion}: Docs/${sourcePath}`);
+    assert(!/active (?:Windows )?0\.3\.1 stable (?:catalog|snapshot)/i.test(source),
+        `Current release guide still describes the 0.3.1 distribution as active: Docs/${sourcePath}`);
+}
 const downloadsPage = await readFile(path.join(siteRoot, "Source", "pages", "downloads", "index.astro"), "utf8");
 for (const contract of [
     "Catalog-verified Windows and Linux x86-64 releases are available",

@@ -10,7 +10,7 @@ This index is a discovery map, not a replacement for the workflow guides or sour
 | `Entity`, `EntityId` | Runtime scene object identity and operations | [Entities](EntitiesComponentsAndTransforms.md) |
 | `ComponentTypeId` | Stable component type identity | [Entities](EntitiesComponentsAndTransforms.md) |
 | `ComponentHandle`, `ComponentHandle<T>` | Presence, enabled-state, and removal views | [Entities](EntitiesComponentsAndTransforms.md) |
-| `TransformHandle` | Local and world transform mutation plus direction vectors | [Entities](EntitiesComponentsAndTransforms.md) |
+| `TransformHandle` | Authoritative local/world transforms, presentation transforms, reset, and direction vectors | [Entities](EntitiesComponentsAndTransforms.md) |
 | `CharacterControllerHandle`, `CharacterControllerState` | Collision-resolved movement and grounded-state access | [Gameplay Services](GameplayServices.md) |
 | `RigidBodyHandle`, `RigidBodyProperties` | Runtime body state, forces, and impulses | [Gameplay Services](GameplayServices.md) |
 | `AssetId` | Stable untyped asset identity | [Assets](AssetsAndScriptableObjects.md) |
@@ -35,6 +35,7 @@ OnDestroy
 OnCollisionEnter / OnCollisionStay / OnCollisionExit
 OnTriggerEnter / OnTriggerStay / OnTriggerExit
 OnAnimationEvent
+OnProceduralMotionEvent
 OnAnimatorIk
 OnBeforeReload
 OnAfterReload
@@ -49,6 +50,7 @@ Callback payloads:
 | `CollisionContact` | `Other`, `Point`, `Normal`, `Impulse`, `Trigger` |
 | `AnimationEvent` | `Name`, `NormalizedTime`, `Integer`, `Scalar`, `Text` |
 | `AnimationIkContext` | `LayerWeight` |
+| `ProceduralMotionEvent` | `Type`, `Foot`, `State`, `Phase`, `Intensity`, `ContactPosition`, `ContactNormal`, `Support`, `PhysicsMaterial` |
 
 ## Serialization Attributes
 
@@ -92,6 +94,8 @@ Children
 Transform
 Animator
 AudioSource
+AudioListener
+AudioReverbZone
 CharacterController
 RigidBody
 ```
@@ -121,7 +125,7 @@ value-handle view without exposing scheduler ownership.
 | --- | --- |
 | Scene/rendering | `TransformComponent`, `CameraComponent`, `MeshRendererComponent`, `AnimatorComponent` |
 | Physics | `ColliderComponent`, `RigidBodyComponent`, `CharacterControllerComponent` |
-| Audio | `AudioSourceComponent`, `AudioListenerComponent` |
+| Audio | `AudioSourceComponent`, `AudioListenerComponent`, `AudioReverbZoneComponent` |
 | VFX | `VfxEmitterComponent` |
 | Lighting | `DirectionalLightComponent`, `PointLightComponent`, `SpotLightComponent` |
 | UI | `CanvasComponent`, `RectTransformComponent`, `UiTextComponent`, `UiImageComponent`, `UiButtonComponent`, `UiLayoutComponent` |
@@ -144,6 +148,24 @@ These types identify native components. Their layout is intentionally not expose
 
 Result values include `RaycastHit`, `NavigationPath`, `PrefabInstance`, and `ProfileSample`.
 
+Physics motion and force values include `RigidBodyMotion` and `ForceMode`. Logging filters use `LogLevel`.
+
+## Managed Jobs
+
+```text
+Jobs.Run / Jobs.Submit
+JobDescription
+JobHandle
+JobContext
+JobPriority
+JobClass
+JobStatus
+```
+
+`JobHandle` exposes `Id`, `IsValid`, `Status`, `Completion`, and cooperative `Cancel()`. A `JobDescription` supplies the
+name, priority, compute/blocking class, and dependencies. See
+[Async, Reload, And Diagnostics](AsyncReloadAndDiagnostics.md#managed-jobs).
+
 ## Audio
 
 Asset markers:
@@ -160,6 +182,9 @@ AudioPlaybackState
 AudioSourceStatus
 AudioPlaybackOptions
 AudioSourceHandle
+AudioListenerHandle
+AudioReverbZoneHandle
+AudioReverbZoneShape
 ```
 
 `Audio` methods:
@@ -192,6 +217,13 @@ AnimatorStateInfo
 AnimatorIkSpace
 AnimationEvent
 AnimationIkContext
+ProceduralMotionState
+ProceduralMotionQuality
+ProceduralMotionEventType
+ProceduralFootSide
+ProceduralLocomotionIntent
+ProceduralLocomotionState
+ProceduralMotionEvent
 ```
 
 `Animator` operations:
@@ -204,6 +236,8 @@ TryGetFloat / TryGetInteger / TryGetBool
 GetFloat / GetInteger / GetBool
 SetLayerWeight / TryGetLayerWeight / GetLayerWeight
 SetTwoBoneIK / SetFabrikIK / ClearIK
+SetFootGroundingWeight
+SetProceduralLocomotion / GetProceduralState
 ```
 
 See [Animation](Animation.md).
@@ -327,6 +361,7 @@ Gameplay code should not replace the engine-installed bridge.
 | [`ScriptableObject.cs`](../../KeireManaged/ScriptableObject.cs) | Managed data lifecycle |
 | [`ManagedAssetRuntime.cs`](../../KeireManaged/ManagedAssetRuntime.cs) | Managed data registry and load façade |
 | [`SerializationAttributes.cs`](../../KeireManaged/SerializationAttributes.cs) | Inspector and identity attributes |
+| [`Jobs.cs`](../../KeireManaged/Jobs.cs) | Managed job submission, dependencies, cancellation, and completion |
 | [`Profiler.cs`](../../KeireManaged/Profiler.cs) | Managed profile samples and counters |
 | [`MathTypes.cs`](../../KeireManaged/MathTypes.cs) | Managed vectors, quaternion, and color |
 | [`BuiltInComponents.cs`](../../KeireManaged/BuiltInComponents.cs) | Built-in component marker IDs |

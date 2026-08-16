@@ -1,168 +1,157 @@
 # Kéire Production Readiness Review
 
-Review date: 2026-08-14
+Review date: 2026-08-16
 
-Revision: repository-wide remediation and Windows source-evidence refresh
+Revision: Kéire 0.3.2 exact-release Windows/Linux evidence refresh
 
-Review scope: Kéire 0.3.1 source remediation based on commit `6ca7bbf`, the clean Windows Editor candidate built from
-commit `6f27aaa`, the Windows packages published from commit `7619442` in signed distribution snapshot sequence 9, the
-canonical documentation library, and the current feature-gated online platform. Source-review, candidate, and
-public-release evidence are kept separate throughout this review; the remediated source is not presented as package
-evidence until its replacement artifacts complete the release gates.
+Review scope: commit `4b966260f9f6eb5fcb988d48da89639554c63a4d`, its clean Windows and Linux Dist
+packages, signed distribution snapshot `release-0.3.2-sequence-14-4b96626`, the canonical documentation library, and
+the feature-gated online platform. Source behavior, package validation, native installation, and public-catalog
+evidence remain distinct; success in one lane is not silently promoted into another.
 
 Review target: sustained commercial and AAA-team production use. A feature existing in source is not equivalent to a
-validated workflow, and a validated local workflow is not equivalent to a supported public release.
+validated workflow, and a validated preview is not equivalent to a production-proven 1.0 release.
 
 ## What Changed In This Refresh
 
-- The source review advanced from `6ca7bbf` through the repository-wide remediation. Automatic Marketplace publication
-  now has current primary-flow tests; all Edge Functions have frozen Deno dependency graphs and CI type checks; public
-  catalog and private library APIs use indexed keyset cursors; compile-database generation records the shared Ninja
-  artifact identity; and the current Python-format and clang-tidy findings are resolved.
-- The clean Windows Editor candidate remains the package built from `6f27aaa`; its Dist runtime reports that exact
-  commit. That candidate's recorded package gate passed 591 Core tests with 47,736 assertions, 133 Editor tests with
-  2,230 assertions, and 347 Hub tests with 3,604 assertions. Its D3D12 and Vulkan rendered-output suites passed 21/21
-  cases each. These counts describe that candidate, not the advancing source tree.
-- The remediated source passed the complete Windows Debug and Release gates with 630 Core tests/48,189 assertions, 140
-  Editor tests/2,262 assertions, and 362 Hub tests/3,752 assertions. Both configurations passed the complete client
-  compile gate and the 21-case D3D12 and Vulkan rendered suites. DebugASan passed the same 630/140/362 test inventory
-  plus the instrumented client compile gate with no sanitizer diagnostic.
-- The fast Windows script harness, documentation build and source suite, frozen checks for all eight Supabase Edge
-  Functions, migration/RLS contracts, compile-database coverage, Ruff, PSScriptAnalyzer, clang-format, and the changed
-  translation-unit clang-tidy sweep are current source evidence.
-- Windows Hub and Editor now diagnose elevated launch sessions that cannot accept Explorer file drops, while the Hub
-  avoids starting another elevated Editor. The browser-to-Hub URL-protocol handoff and package ownership contracts are
-  represented in the reviewed source baseline.
-- The active public catalog remains sequence 9 until a matching replacement Hub installer completes the release gates.
-  Its Ed25519 catalog and SHA-256 identities are verified, but the native Windows installer is not Authenticode-signed.
-  The Downloads UI now describes that distinction instead of calling the executable itself signed.
-- Linux source and package contracts remain maintained, but no Linux artifact is advertised while exact-release native
-  installation and Vulkan acceptance are pending. This is intentionally unaffected by the unavailable local WSL run.
-
-### Post-review source remediation
-
-The current source closes additional repository findings without relabeling them as public-release evidence:
-
-- Hub Editor tracking now binds a launch to the operating system's process-creation identity as well as its PID and
-  exact executable path, including same-executable PID-reuse and indeterminate-probe regressions.
-- Coral reflection metadata uses monotonic collision-safe identities; assembly, load-context, and reflected-method
-  caches support concurrent runtime hosts; and loader status is thread-local. The complete ordered Coral patch stack
-  builds cleanly on the reviewed Windows toolchain.
-- Asset-package validation has a deterministic mutation corpus for truncation, distributed bit flips, and trailing
-  data, with an invariant that rejection cannot leave a partial extraction tree. Sustained coverage-guided fuzzing on
-  a production corpus remains a release-evidence activity.
-- The Asset Browser no longer rescans, resorts, or prepares thumbnails for the complete project catalog every frame.
-  Its visible record slice is revision/folder/search keyed and regression-covered with 50,000 records. Broader
-  collaborative-depot and long-session interaction programs remain part of production acceptance.
-- Asset-package export, editor diagnostics, and native managed-runtime interop definitions now live in focused source
-  units; the existing file-size ceilings were preserved, and the Asset workspace ceiling was ratcheted downward.
-
-Keyboard navigation and automatic DPI font scaling are now asserted by the headless UI regression suite. That evidence
-does not by itself close the broader keyboard-only, screen-reader, localization, or user-controlled text-scale program.
-Authenticode, notarization, legal/policy acceptance, live protocol installation, exact Linux/macOS builds, Metal, and
-named-hardware GPU captures require external credentials, infrastructure, approvals, or hardware and remain explicit
-release gates below.
+- Kéire 0.3.2 is now the active Windows and Linux x86-64 public preview. The immutable sequence-14 snapshot publishes
+  Windows Editor/Hub packages and Linux Editor, DEB Hub, and RPM Hub packages from the same exact release commit.
+- The clean Windows package gate passed 647 Core tests/48,377 assertions, 147 Editor tests/2,300 assertions, and 370
+  Hub tests/3,789 assertions, together with SDK/package consumers, smoke, cooking, and inventory validation.
+- The clean Rocky Linux package gate passed 641 Core tests/48,343 assertions, 147 Editor tests/2,290 assertions, and
+  368 Hub tests/3,792 assertions, together with the full Client compile gate and a packaged Vulkan/WSLg Play Mode
+  smoke.
+- The DEB installed and reported the exact release version on Ubuntu 22.04 and Debian. The RPM did the same on Rocky
+  Linux 9, Fedora 44, and openSUSE Tumbleweed. These are native package-acceptance observations; they are not a claim
+  that every complete test suite ran independently on every distribution.
+- The `ProceduralHumanoid` Animator pose source, schema-1 `.keiremotionprofile`, managed locomotion intent/state/events,
+  terrain-aware contacts, and fixed-step presentation interpolation are now public release contracts. Existing
+  Animators migrate to graph mode unchanged.
+- Hub catalogs distinguish Linux DEB and RPM package formats and preserve the native installer extension through the
+  download worker and update handoff. The download site presents the formats independently.
+- Catalog and artifact integrity are verified, but the current Windows Hub EXE is not Authenticode-signed and the RPM
+  is not GPG-signed. Those facts are disclosed on the download surface and remain production-signing gaps.
+- The canonical documentation inventory contains 59 guides. Source validation checks inventory, authorities, local
+  links/fragments, schema statements, release/platform claims, and the generated site.
 
 ## Executive Assessment
 
-Kéire is a serious production-oriented pre-1.0 engine with unusually explicit ownership, deterministic serialization,
-transactional assets and projects, strong failure isolation, and broad native test coverage. Version 0.3.1 is a usable
-Windows technology preview and development platform. It is not yet justified as a finished AAA production engine or a
-generally available cross-platform marketplace.
+Kéire is a serious production-oriented pre-1.0 engine with explicit ownership, deterministic serialization,
+transactional assets/projects, strong failure isolation, broad native tests, and real Windows/Linux distribution.
+Version 0.3.2 is a usable cross-platform technology preview and development platform. It is not yet justified as a
+finished AAA production engine or a generally available cross-platform marketplace.
 
-The current overall grade is **B+ (87/100)**. The engineering foundation is stronger than the release-evidence score:
-the Windows Editor candidate and graphics paths are current and reproducible, while the public Hub still trails that
-candidate and native validation of this exact commit on Linux and macOS, named-hardware performance gates,
-Authenticode/notarization, marketplace acceptance, and shipped-project soak evidence remain incomplete.
+The current overall grade is **B+ (89/100)**. Exact-release Linux artifacts close the previous review's largest
+distribution-evidence gap, and procedural motion materially expands animation capability. Native release signing,
+macOS/Metal, reference-hardware GPU evidence, marketplace launch acceptance, accessibility/localization, and
+shipped-project soak evidence remain incomplete.
 
 | Assessment | Grade | Score | Current judgment |
 | --- | ---: | ---: | --- |
 | Architecture, ownership, and lifecycle | A | 95/100 | Coherent public/private boundaries and deterministic service lifetimes. |
-| Tests and local quality policy | A | 96/100 | Debug, Release, ASan, package/script gates, and both rendered backends are current. |
+| Tests and local quality policy | A | 96/100 | Broad Debug/Release/sanitizer, package, script, consumer, and rendered validation. |
 | Assets, projects, packaging, and recovery | A- | 92/100 | Transactional publication, migration, immutable content, and recovery are major strengths. |
 | Editor and authoring workflows | B+ | 88/100 | Broad and usable, with interaction, accessibility, and content-scale evidence still growing. |
 | Rendering, shaders, materials, and VFX | B | 85/100 | Modern production slices work; parity matrices and hardware evidence remain incomplete. |
-| Managed gameplay and runtime services | A- | 91/100 | Reload-safe handles, last-good retention, and broad gameplay APIs are implemented. |
-| Hub, distribution, and website | A- | 91/100 | Signed immutable distribution and the unified site are live; native signing and full desktop SSO acceptance remain. |
-| Marketplace and package ecosystem | B | 84/100 | Automatic publication, frozen Edge dependencies, indexed APIs, and signed validation are implemented; launch acceptance remains gated. |
-| Performance evidence | C+ | 78/100 | Useful profiling and machine-readable gates exist, but current reference captures cannot supply true portable GPU time. |
-| Cross-platform release evidence | C | 75/100 | Windows is current; exact-commit Linux and native macOS/Metal evidence are outstanding. |
-| Overall production readiness | **B+** | **87/100** | Release-clean source for a production-oriented preview, not finished AAA production readiness. |
+| Managed gameplay and runtime services | A- | 92/100 | Reload safety, gameplay APIs, and procedural-motion bridging are substantial. |
+| Hub, distribution, and website | A- | 93/100 | Signed immutable Windows/Linux distribution is live; native signatures and full update acceptance remain. |
+| Marketplace and package ecosystem | B | 84/100 | Upload-once validation/publication foundations exist; public launch gates remain closed. |
+| Performance evidence | C+ | 78/100 | Profiling and fail-closed gates exist, but current reference captures lack true portable GPU time. |
+| Cross-platform release evidence | B- | 82/100 | Windows and Linux x86-64 are published; native macOS/Metal and ARM64 remain unobserved. |
+| Overall production readiness | **B+** | **89/100** | Production-oriented cross-platform preview, not finished AAA production readiness. |
 
-Scores are review shorthand, not release gates. The release gates below are authoritative.
+Scores are review shorthand, not release gates. The remaining gates below are authoritative.
 
 ## Current Reproducible Evidence
 
-### Windows 0.3.1 candidate and public release paths
+### Windows 0.3.2 release
 
-The clean `package-editor` workflow completed from commit `6f27aaa` and produced a schema-2 Dist editor candidate with
-a clean-worktree identity. Its package gate passed:
+The clean Windows Dist Editor archive has SHA-256
+`a305020d42fd132f349715ccd2cdd672828cd4b3c20ecb4c73cfbf3f82215cfd`; the Hub setup executable has SHA-256
+`50a6fd5880ce3aca8a4a5140e91034b1d28a1f080a48765724bddd3604c5f1ff`. Both report
+`Kéire 0.3.2 (4b966260f9f6, Dist, MSVC 1944, Windows x86_64)`.
 
-- 591/591 Core tests with 47,736 assertions;
-- 133/133 Editor tests with 2,230 assertions;
-- 347/347 Hub tests with 3,604 assertions;
-- the complete Client compile gate, Dist Client smoke, packaged Sandbox smoke, and extracted package validation;
-- direct, managed, and source-module SDK consumer checks owned by the editor packaging workflow.
+The package workflow passed:
 
-The currently public Editor and Hub artifacts were built from commit `7619442`. The release publisher created their
-package records, signed both v1 and v2 catalogs with the rotated Ed25519 release key, verified every signed document,
-and atomically activated immutable snapshot `release-0.3.1-sequence-9-08e10a7`. The live Windows catalog exposes only
-`keire.editor@0.3.1` and `keire.hub@0.3.1`; both content-addressed artifacts respond over HTTPS with exact lengths and
-byte-range support. The Hub installer is 55,834,101 bytes with SHA-256
-`29096f0d837294cd79bfe2b099d67f75e7441b0ef791567a964af50d15795384`. Catalog signing does not replace Authenticode
-signing of the native installer, and the `6f27aaa` Editor candidate is not relabeled as public sequence-9 evidence.
+- 647/647 Core tests with 48,377 assertions;
+- 147/147 Editor tests with 2,300 assertions;
+- 370/370 Hub tests with 3,789 assertions;
+- the complete Client compile gate, SDK consumers, Sandbox cook/runtime smoke, and staged/extracted inventory checks.
 
-### Rendered output
+The Hub EXE is distributed through the signed catalog and exact SHA-256 identity but is not Authenticode-signed.
+Windows may therefore show an unknown-publisher warning, and automatic Windows update installation remains unavailable
+until native signature verification can succeed.
 
-The current Release rendered-output executable contains 21 cases after including the backend-alias regression test.
-Direct3D 12 and Vulkan each pass the 20 production rendered-output cases; these cover native runtime UI, lighting,
-VFX, asset revision safety, Shader Graph, Material Graph, skinning, shadows, resize/minimize, bounded queues, and injected
-device loss. The Direct3D 12 run passes when selected by either the canonical `direct3d12` name or the normalized
-`d3d12` shorthand.
+### Linux 0.3.2 release
 
-These are local functional image/readback tests. They are not a multi-vendor GPU matrix, long-duration soak, or formal
-reference-hardware performance capture.
+The clean Linux Editor package has SHA-256
+`ce9d6da5582e463fe7ded7ada764e13669525425e8c75b529b05c8c08b8e3bcb`. The Hub DEB has SHA-256
+`30eb63828577143a64fee2844cb504ca7816c3c735c901de8d7e5d384bbf1023`; the Hub RPM has SHA-256
+`87e99e88bfc42f958ccf9db75bb570402655e3817fc68c24ed13491ad18c4dff`.
+
+The Rocky Linux release gate passed:
+
+- 641/641 Core tests with 48,343 assertions;
+- 147/147 Editor tests with 2,290 assertions;
+- 368/368 Hub tests with 3,792 assertions;
+- the full Client compile gate, SDK/package consumers, package inventory, and packaged Vulkan/WSLg Play Mode smoke.
+
+The DEB installed successfully on Ubuntu 22.04 and Debian. The RPM installed successfully on Rocky Linux 9, Fedora 44,
+and openSUSE Tumbleweed. Every installed Hub reported version 0.3.2 and commit `4b966260f9f6`. The RPM has no distro GPG
+signature; its current preview trust boundary is the Ed25519 catalog plus the bound SHA-256.
+
+### Distribution and website
+
+The publisher signed and verified four catalog documents with key
+`ed25519-019da85781015fa51aefbaeb3acdca5e`, then atomically activated
+`release-0.3.2-sequence-14-4b96626`. The snapshot expires on 2026-11-14 and contains five packages:
+
+- Windows Editor and Hub;
+- Linux Editor, DEB Hub, and RPM Hub.
+
+The v1 and v2 Windows/Linux x86-64 catalog endpoints and all five content-addressed package endpoints returned HTTP
+200 with their exact advertised lengths and ETags during release validation. The Downloads page exposes the verified
+Windows, DEB, and RPM records and states the native-signing limitations explicitly.
 
 ### Capability ledgers
 
-- The frozen Unity 6.3 VFX ledger contains 278 rows: 245 have a Kéire implementation and 33 remain disabled. The first
-  50-item milestone and the subsequent 120-item portable expansion are complete, but the remaining 33 GPU-resource and
-  renderer-dependent rows prevent a complete parity claim.
-- The Unreal-inspired Material Ecosystem matrix contains 145 rows: 90 Complete, 7 Partial, and 48 Planned. This is a
-  strong authoring foundation, not Unreal Engine material-system parity. The largest gaps are renderer-side dynamic
-  instances and collections, broader resources and blend paths, analyzers, performance budgets, and cross-platform QA.
-- Current content authorities are project schema 3, scene schema 5, mesh schema 5, VFX schema 4, material source schema
-  3, and cooked runtime-manifest schema 4. Older supported schemas are upgraded through explicit parsers and save paths.
+- The frozen Unity 6.3 VFX ledger contains 278 rows: 245 implemented and 33 disabled. This is substantial coverage, not
+  a complete Unity parity claim.
+- The Unreal-inspired Material Ecosystem matrix contains 145 rows: 93 Complete, 6 Partial, and 46 Planned after the
+  exact Windows/Linux release and SDK-consumer evidence was recorded. Planned rows remain unsupported.
+- Current content authorities are project schema 3, scene schema 5, mesh schema 5, VFX schema 4, material source
+  schema 3, Animator component schema 7, procedural motion profile schema 1, and cooked runtime-manifest schema 4.
 
 ### Documentation and web platform
 
-All 58 canonical Markdown guides are mapped to implementation authorities. Source validation checks exact inventory,
-headings, local links and fragments, schema statements, required website security contracts, and prohibited unresolved
-markers. The Astro build synchronizes those sources into Starlight, renders Mermaid diagrams, builds local Pagefind
-search, and validates generated routes, assets, CSP-compatible output, sitemap content, and the branded 404 page.
+All 59 canonical Markdown guides are mapped to implementation authorities. Source validation checks the exact
+inventory, headings, local links and fragments, schema statements, current product version, current release-platform
+claims, and prohibited unresolved markers. The Astro build synchronizes those sources into Starlight, renders Mermaid
+diagrams, builds local Pagefind search, and validates generated routes, assets, CSP-compatible output, sitemap content,
+and the branded 404 page.
 
-The unified Astro account, documentation, marketplace, publisher, policy, download, news, and roadmap surfaces are live
-behind Caddy on the DuckDNS staging origin. Supabase SSR sessions, GitHub sign-in, MFA surfaces, Hub OAuth contracts,
-forced RLS, private Storage, Edge transition boundaries, and validator deployment foundations exist. The signed-only
-marketplace catalog preview is enabled after real validation and moderation acceptance; unsigned drafts remain
-unclaimable, while asset-package and community flags remain disabled pending signing and end-to-end acceptance.
+The unified account, documentation, marketplace, publisher, policy, download, news, and roadmap surfaces are live
+behind Caddy. Supabase SSR sessions, GitHub sign-in, MFA surfaces, Hub OAuth contracts, forced RLS, private Storage,
+Edge transition boundaries, and isolated validator/publication-worker foundations exist. Marketplace feature flags and
+the separate launch runbook remain authoritative; software-distribution publication is not evidence that marketplace
+products are publicly launch-ready.
 
 ## System Assessment
 
 | System | Grade | Evidence and remaining risk |
 | --- | ---: | --- |
-| Application, layers, events, and time | A | Owner-thread rules, deferred structural mutation, bounded event queues, scaled/fixed time, exception containment, and shutdown have focused lifecycle coverage. Continued long-session and platform differential testing remains appropriate. |
-| ECS, scenes, prefabs, and undo | A- | Stable identities, missing-component retention, schema migration, Play isolation, nested prefabs, recovery, and transactional undo are mature. Larger collaborative scenes and merge-heavy production projects need sustained evidence. |
-| Editor workspace and authoring | B+ | Docking, documents, hierarchy/Inspector, asset browsing, previews, graph editors, settings, diagnostics, and package management are implemented. Revision-keyed Asset Browser views now have a 50,000-record regression, and keyboard/DPI configuration is asserted. Full accessibility, localization, user-controlled text scaling, and collaborative-depot automation remain incomplete. |
-| Rendering | B | SDL GPU isolation, D3D12/Vulkan shader formats, HDR/ACES, Forward+, shadows, lighting bake data, probes, LOD/submeshes, instancing, skinning, graph-generated pipelines, and last-good revision safety are substantial. Metal, multiple GPU vendors, true GPU timestamps, sustained device-loss/resize stress, and broader render-feature coverage remain. |
-| Shader and material ecosystem | B- | Shader Graph and Material Graph are distinct assets, materials consume reflected shader parameters, functions/layers/instances exist, and live revisions reach the renderer. The 90/145 Complete matrix and 48 Planned rows make a full Unreal-parity claim inaccurate. |
-| VFX | B+ | Typed schema-4 graphs, ordered contexts/blocks, CPU/GPU execution, events, strips, resource-backed operations, mesh/ribbon/volume output, diagnostics, and bounded pools cover 245/278 ledger rows. The 33 disabled rows and incomplete scalability/per-effect GPU attribution remain visible work. |
-| Managed scripting | A- | Collectible generations, generation-safe handles, collision-safe reflection identities, concurrent-host caches, serialized fields, ScriptableObjects, gameplay services, coroutines, last-good assembly retention, and explicit Play readiness are production-minded. Cross-platform reload soaks and larger gameplay-project evidence remain necessary. |
-| Assets and project packages | A- | Stable metadata, isolated workers, deterministic cooking, content-addressed packs, archive hardening, deterministic mutation coverage, dependency resolution, lockfiles, embedding, selective import, executable-code consent, three-way conflict handling, journals, and recovery are implemented. Catalog-backed Hub/Editor acceptance and sustained coverage-guided production corpus fuzzing remain gated. |
-| Hub and software distribution | B+ | Independent Hub/editor products, version selection, PID-reuse-safe Editor tracking, compatibility checks, resumable task worker, signed catalogs, immutable snapshots, package verification, and safe activation are implemented. The 0.3.1 Windows catalog is current; automatic desktop SSO still requires an installed protocol handler and complete native acceptance. |
-| Online platform and marketplace | C | Accounts, organizations, publisher schemas, RLS, private uploads, resumable publishing UI, bounded APIs, validator worker/broker, malware/secret checks, a real passing upload, staff moderation, and free-entitlement contracts exist. The catalog preview is open but cannot expose claim/download controls for unsigned drafts; signed products, legal review, backup restore, abuse controls, and Windows/Linux end-to-end scenarios remain launch gates. |
-| Audio, animation, physics, navigation, input, and UI | B+ | Each area has implemented runtime/authoring contracts and focused tests. Platform/device matrices, content diversity, dense UI/controller/IME workflows, physics/crowd stress, and long-running content scenarios are not yet equivalent to shipped AAA evidence. |
-| Build, package, and SDK | A- | Premake authority, supported launchers, clean-worktree manifests, deterministic inventories, SDK consumers, native installers, distribution signing, and regression harnesses are strong. Exact-current-commit Linux packages and native macOS signing/notarization remain release evidence, not design work. |
+| Application, layers, events, and time | A | Owner-thread rules, deferred mutation, bounded queues, fixed time, exception containment, and shutdown have focused coverage. Continued long-session and platform differential testing remains appropriate. |
+| ECS, scenes, prefabs, and undo | A- | Stable identities, missing-component retention, schema migration, Play isolation, nested prefabs, recovery, and transactional undo are mature. Larger collaborative scenes need sustained evidence. |
+| Editor workspace and authoring | B+ | Docking, documents, hierarchy/Inspector, asset browsing, previews, graph editors, settings, diagnostics, procedural profiles, and package management are implemented. Full accessibility, localization, and collaborative-depot automation remain incomplete. |
+| Rendering | B | SDL GPU isolation, D3D12/Vulkan formats, HDR/ACES, Forward+, shadows, lighting data, LODs, skinning, graph pipelines, and last-good safety are substantial. Metal, broader hardware, true GPU timestamps, and sustained device-loss stress remain. |
+| Animation and rigging | B+ | Graph animation, retargeting, semantic rigs, arm/leg IK, procedural humanoid motion, terrain contacts, airborne states, and presentation interpolation are implemented. Procedural motion still needs broader rig/content tuning and long-session visual acceptance. |
+| Shader and material ecosystem | B- | Shader/Material Graphs, functions, layers, persistent/dynamic instances, collections, and live revisions exist. The 93/145 Complete matrix and 46 Planned rows make a full Unreal-parity claim inaccurate. |
+| VFX | B+ | Typed schema-4 graphs, ordered contexts/blocks, CPU/GPU execution, events, strips, resource operations, mesh/ribbon/volume output, diagnostics, and bounded pools cover 245/278 rows. The 33 disabled rows and incomplete GPU attribution remain. |
+| Managed scripting | A- | Collectible generations, generation-safe handles, concurrent-host caches, serialized fields, gameplay services, coroutines, last-good retention, procedural callbacks, and explicit Play readiness are production-minded. Cross-platform reload soaks remain necessary. |
+| Assets and project packages | A- | Stable metadata, isolated workers, deterministic cooking, hardened archives, dependency resolution, selective import, executable-code consent, conflicts, journals, and recovery are implemented. Sustained production-corpus fuzzing remains gated. |
+| Hub and software distribution | A- | Independent Hub/editor products, version selection, process-identity tracking, resumable tasks, signed catalogs, immutable snapshots, DEB/RPM selection, package verification, and safe activation are implemented. Native signatures and real-host update/remove drills remain. |
+| Online platform and marketplace | C+ | Accounts, organizations, publisher schemas, RLS, private uploads, resumable UI, bounded APIs, isolated validation, moderation, and free-entitlement contracts exist. Legal, backup, abuse, accessibility, and public end-to-end launch gates remain. |
+| Build, package, and SDK | A- | Premake authority, launchers, clean manifests, deterministic inventories, SDK consumers, native installers, Windows/Linux packages, and regression harnesses are strong. Native macOS signing/notarization remains unobserved. |
 
 ## Performance Assessment
 
@@ -172,70 +161,66 @@ one uninterrupted capture with matching snapshot, history, and hardware metadata
 
 The current SDL GPU boundary publishes completion latency and fence wait but cannot provide portable timestamp-query
 execution time. Both shipped reference profiles require true GPU timestamps and therefore fail closed on this backend.
-No new 0.3.1 named-hardware capture satisfying the complete profile is recorded in this review. Historical frame data
-remains useful diagnostic context but is not carried forward as current release evidence.
+No new 0.3.2 named-hardware capture satisfying the complete profile is recorded in this review. Functional Vulkan/WSLg
+startup and Play Mode evidence must not be relabeled as performance evidence.
 
 Production performance acceptance still requires:
 
 1. reviewed per-backend timestamp support or an explicitly supported backend-specific boundary;
 2. cold and warm captures on named CPU/GPU/driver/resolution/workload profiles;
 3. D3D12, Vulkan, and eventually Metal runs across representative vendors and tiers;
-4. long-duration scene, asset-streaming, managed-reload, VFX-capacity, audio, and project-operation soaks;
+4. long-duration scene, asset-streaming, managed-reload, VFX, audio, and project-operation soaks;
 5. retained raw artifacts and intentional baseline review rather than copied summary values.
 
-## Release Gates
+## Remaining Release Gates
 
-### Required for the current Windows preview
+### Before a production-grade Windows claim
 
-- Keep the catalog snapshot immutable, signed, unexpired, and available with exact package hashes.
-- Authenticode-sign and timestamp the native Hub installer before calling it a production Windows installer.
-- Install the current Hub and validate `keirehub://` registration, browser PKCE handoff, refresh rotation, revocation,
-  update handoff, uninstall ownership, and a clean Editor installation from the live catalog.
-- Repeat Debug, Release, AddressSanitizer, package, Sandbox, Direct3D 12, and Vulkan acceptance on the release commit.
+- Authenticode-sign and timestamp the Hub installer, then validate the automatic update handoff.
+- Validate installed `keirehub://` registration, browser PKCE, refresh/revocation, update, repair, and uninstall on clean
+  supported Windows 10 and Windows 11 hosts.
+- Retain exact-release D3D12/Vulkan, package, Sandbox, and sanitizer evidence for each promoted artifact.
 
-### Required before advertising Linux 0.3.1 downloads
+### Before a production-grade Linux claim
 
-- Build from the exact release commit on the declared oldest glibc baseline.
-- Pass native Debug, Release, sanitizer, Vulkan, Hub, Editor, package, DEB, and RPM acceptance without dirty markers.
-- Verify desktop files, `keirehub://`, declared runtime dependencies, install/update/remove ownership, and packaged
-  Sandbox/player behavior on supported Debian/Ubuntu and Rocky/Fedora families.
-- Publish only the artifacts whose platform, architecture, dependency baseline, hash, and support statement were
-  validated. The active sequence-9 catalog is currently Windows-only.
+- Repeat graphical Hub-to-Editor, URL-protocol, native update, repair, and uninstall acceptance on real non-WSL
+  Ubuntu/Debian and Rocky/Fedora/openSUSE hosts.
+- GPG-sign the RPM and publish repository metadata if distro-managed repository installation is advertised.
+- Publish and validate exact-version Build Support for every advertised player target.
+- Keep Linux ARM64 and Alpine/musl unadvertised until their own native build, package, graphics, and player gates pass.
 
-### Required before advertising macOS
+### Before advertising macOS
 
-- Complete native x86-64 and ARM64 builds, tests, Metal rendered output, package consumers, and player smoke.
+- Complete native x86-64 and ARM64 builds, tests, Metal output, package consumers, and player smoke.
 - Sign hardened-runtime bundles inside-out, notarize, staple, validate Keychain session storage and URL activation, and
   exercise the pinned deployment target on supported macOS versions.
 
-### Required before public marketplace launch
+### Before public marketplace launch
 
 - Complete every ordered gate in [Marketplace Launch](MarketplaceLaunch.md), including SMTP and leaked-password
-  protection, policy review, signed official packages, moderation, validator acceptance, backup/restore rehearsal,
-  abuse controls, accessibility/performance audits, and Windows/Linux end-to-end recovery scenarios.
-- Keep `paid_checkout_enabled=false` for 0.3.1. Native plugins remain unsupported.
+  protection, policy review, official signed packages, moderation, validator recovery, backup/restore rehearsal, abuse
+  controls, accessibility/performance audits, and Windows/Linux end-to-end recovery scenarios.
+- Keep `paid_checkout_enabled=false` for 0.3.2. Native plugins remain unsupported.
 
-### Required for an AAA production-readiness claim
+### Before an AAA production-readiness claim
 
-- Close or explicitly scope every advertised capability matrix; planned rows cannot be marketed as supported.
-- Ship and support multiple representative projects through upgrades, builds, crashes, asset corruption, and long
-  production sessions, with defect and recovery evidence retained.
-- Establish named hardware tiers, enforce CPU/GPU/memory/load-time budgets, and maintain multi-vendor platform labs.
+- Close or explicitly scope every advertised capability matrix; Planned rows cannot be marketed as supported.
+- Ship and support representative projects through upgrades, builds, crashes, corruption, and long production sessions.
+- Establish named hardware tiers and enforce CPU/GPU/memory/load-time budgets across multiple vendors.
 - Complete accessibility, localization, input-device, source-control, large-depot, and content-team usability programs.
-- Maintain a clean hosted and self-hosted release matrix with signed/notarized artifacts and rehearsed rollback.
+- Maintain clean hosted and self-hosted release matrices with native signatures and rehearsed rollback.
 
 ## Recommended Closure Order
 
-1. Validate and install the clean Windows 0.3.1 Hub, including URL-protocol SSO and Authenticode release signing.
-2. Reproduce the exact commit on supported Linux baselines, publish clean DEB/RPM/editor artifacts, and run the full
-   Hub-to-Editor flow.
-3. Complete marketplace signing, official products, moderation, validator, backup/restore, and legal launch gates while
-   flags remain closed.
+1. Acquire Windows Authenticode and RPM GPG signing identities and exercise native update/rollback from the live 0.3.2
+   catalog.
+2. Repeat Linux graphical and package-manager acceptance on real distro hosts, then publish exact-version Build Support.
+3. Complete marketplace signing, official products, moderation, validator recovery, backup/restore, and legal gates
+   while launch flags remain closed.
 4. Implement renderer timestamps and collect current named-hardware cold/warm and soak evidence.
-5. Prioritize the 48 Planned and 7 Partial material rows plus the 33 disabled VFX rows by production scenario, not raw
-   feature count.
+5. Prioritize the 46 Planned and 6 Partial material rows plus the 33 disabled VFX rows by production scenario.
 6. Establish native macOS/Metal validation before presenting macOS as supported.
 
-The correct public description is **production-oriented Kéire 0.3.1 technology preview with a validated Windows
-foundation**. “AAA production ready,” “complete Unreal/Unity parity,” and “cross-platform release complete” remain
-future acceptance outcomes, not current product facts.
+The correct public description is **production-oriented Kéire 0.3.2 technology preview with catalog-verified Windows
+and Linux x86-64 downloads**. “AAA production ready,” “complete Unreal/Unity parity,” and “cross-platform release complete”
+remain future acceptance outcomes, not current product facts.

@@ -238,9 +238,9 @@ minimum length and rotates every accepted token through the platform secure stor
 The Windows installer owns the current user's `keirehub` protocol registration and removes it only when it still points
 to that exact installation. Linux packages declare `x-scheme-handler/keirehub` and pass a single `%u` activation to the
 verified Hub wrapper. The callback page never displays or copies the authorization code: it offers a user-initiated app
-handoff, reports focus/visibility feedback, and directs a missing handler to the signed Hub installer. A pending request
-can be cancelled in Hub before starting another flow; callbacks from cancelled or unrelated flows remain rejected by
-the state check.
+handoff, reports focus/visibility feedback, and directs a missing handler to the catalog-verified Hub download. A
+pending request can be cancelled in Hub before starting another flow; callbacks from cancelled or unrelated flows
+remain rejected by the state check.
 Sign-up correctly
 accepts both direct user and user-envelope response forms, represents email-confirmation-required responses without
 inventing a session, and reports confirmation-email cooldowns directly. Sign-in, refresh-token rotation, local sign-out,
@@ -336,8 +336,10 @@ content bytes, immutable packages with conditional and range requests, and liven
 signs offline, validates a complete staging snapshot, and atomically advances `current`; an invalid replacement does not
 displace the last valid snapshot. `KeireHubPackagePublisher create-editor` converts a validated schema-2 editor
 distribution into the generic archive/catalog manifest. `create-hub-installer` creates the corresponding catalog
-manifest only for a clean Hub package and platform-native `.exe`, `.dmg`, `.deb`, or `.rpm`; native signing/notarization
-remains a release prerequisite. Linux Hub records carry an explicit `packageFormat`. This lets one signed Linux
+manifest only for a clean Hub package and platform-native `.exe`, `.dmg`, `.deb`, or `.rpm`. Catalog signing and
+SHA-256 binding are mandatory. Native signing/notarization remains mandatory for a production platform claim; an
+unsigned preview must be disclosed and may have a narrower installation path. Linux Hub records carry an explicit
+`packageFormat`. This lets one signed Linux
 catalog retain DEB and RPM artifacts for the same Hub version while each host and the downloads site select the correct
 format. `prepare-distribution-snapshot.py` accepts repeated manifest/artifact pairs, rechecks every length and digest,
 rejects duplicate identities, and groups records into their host catalog before offline signing. A
@@ -356,10 +358,12 @@ separately. After the replacement Hub has been distributed and the transition po
 public key is a separate release decision. Packaging overrides may supply an operating-system path-separated
 `KEIRE_DISTRIBUTION_TRUSTED_KEYS` list during an overlap; the legacy singular key variable remains supported.
 
-The active Windows stable snapshot reviewed on 2026-08-12 is sequence 9 and intentionally contains only
-`keire.editor@0.3.1` and `keire.hub@0.3.1`. Earlier versions were retired as an explicit release decision because they
-contain known major defects; ordinary future publication remains additive unless another documented retirement is
-approved.
+The active stable snapshot reviewed on 2026-08-16 is
+`release-0.3.2-sequence-14-4b96626`. Its Windows x86-64 catalog contains `keire.editor@0.3.2` and
+`keire.hub@0.3.2`; its Linux x86-64 catalog contains the Editor archive plus distinct DEB and RPM Hub records. The
+Windows EXE and RPM are catalog/hash verified but do not carry Authenticode or RPM GPG signatures. Earlier versions
+were retired as an explicit release decision because they contain known major defects; ordinary future publication
+remains additive unless another documented retirement is approved.
 
 ## Launch and activation
 
@@ -401,9 +405,9 @@ bash Scripts/project.sh package-hub
 bash Scripts/project.sh package-hub-installer
 ```
 
-On Linux, the standalone Hub installer selects DEB for Ubuntu/Debian and RPM for Rocky/Fedora. Release builders can
-make that choice explicit with `--linux-installer-format deb` or `--linux-installer-format rpm`; the two formats remain
-separate native artifacts with independent checksums and website identities.
+On Linux, the standalone Hub installer selects DEB for Ubuntu/Debian and RPM for Rocky/Fedora/openSUSE. Release
+builders can make that choice explicit with `--linux-installer-format deb` or `--linux-installer-format rpm`; the two
+formats remain separate native artifacts with independent checksums and website identities.
 
 `--smoke-ui` validates bounded Hub startup and rendering. `--smoke-project` opens the sample through the real project,
 asset, input, scene, workspace, and editor lifecycle before exiting cleanly. The focused private runtime suite is the

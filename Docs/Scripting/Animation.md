@@ -1,10 +1,10 @@
 # Animation From C#
 
-Managed animation controls Animator Controller states, parameters, layers, playback state, events, and named IK goals.
-Scripts refer to engine-owned assets and scene components; they do not own skeletons, clips, or native animator
-instances.
+Managed animation controls Animator Controller states, parameters, layers, playback state, events, procedural
+locomotion intent/state, and named IK goals. Scripts refer to engine-owned assets and scene components; they do not own
+skeletons, clips, motion profiles, or native animator instances.
 
-## Authoring Prerequisites
+## Animation Graph Prerequisites
 
 Before scripting playback:
 
@@ -15,6 +15,9 @@ Before scripting playback:
 5. Reference state, parameter, layer, event, goal, and bone names exactly in C#.
 
 See [Animation And Rigging](../AnimationRigging.md) for import, retargeting, controller authoring, preview, and cooking.
+For a complete pose generated without clips or a controller, assign the Animator's `ProceduralHumanoid` pose source,
+Rig Definition, skeleton, skinned mesh, and `.keiremotionprofile`; see
+[Procedural Humanoid Motion](../ProceduralMotion.md).
 
 ## Animation Asset References
 
@@ -164,6 +167,54 @@ The payload contains:
 
 Use the payload that fits the event instead of encoding several values into its name.
 
+## Procedural Humanoid Locomotion
+
+Submit procedural intent from `FixedUpdate` after gameplay has resolved the desired direction and jump request. The
+engine combines that intent with the Character Controller's actual post-physics velocity, grounding, surface normal,
+and support motion:
+
+```csharp
+protected override void FixedUpdate()
+{
+    Vector2 move = Input.Axis2D("Move");
+    Vector3 desiredVelocity =
+        (Entity.Transform.Right * move.X + Entity.Transform.Forward * move.Y) * _moveSpeed;
+
+    Animator.SetProceduralLocomotion(
+        Entity,
+        new ProceduralLocomotionIntent(
+            desiredVelocity,
+            Entity.Transform.Forward,
+            Vector3.Zero,
+            _crouching ? 1.0f : 0.0f,
+            _sprinting ? 1.0f : 0.0f,
+            Input.Pressed("Jump")));
+}
+```
+
+`CrouchAmount` and `RunBlend` must be finite values in `0..1`; all direction and velocity values must be finite.
+`JumpRequested` is a one-tick request. Zero facing or look vectors ask the runtime to use the resolved character root.
+Read the actual resolved state without taking ownership of native pose data:
+
+```csharp
+ProceduralLocomotionState state = Animator.GetProceduralState(Entity);
+if (state.State == ProceduralMotionState.Landing)
+    Debug.Log($"Landing intensity: {state.LandingIntensity:0.00}");
+```
+
+Override the typed callback for `FootLift`, `FootPlant`, `Takeoff`, `Apex`, `Land`, and `StateChanged` events:
+
+```csharp
+protected override void OnProceduralMotionEvent(ProceduralMotionEvent motionEvent)
+{
+    if (motionEvent.Type == ProceduralMotionEventType.FootPlant)
+        PlayFootstep(motionEvent.Intensity);
+}
+```
+
+The event also reports foot side, phase, state, contact position/normal, support entity, and physics material. A
+procedural foot plant continues to emit the legacy `Footstep` animation event for compatibility.
+
 ## Two-Bone IK
 
 Submit a named two-bone goal:
@@ -234,7 +285,7 @@ protected override void OnDisable()
 
 ## Runtime Foot Grounding Weight
 
-Automatic Ground Adaptation is authored on the Animator component, but gameplay can blend its influence without
+Automatic Ground Adaptation belongs to the `AnimationGraph` pose source. Gameplay can blend its influence without
 changing or serializing those authored settings:
 
 ```csharp
@@ -245,9 +296,10 @@ Animator.SetFootGroundingWeight(Entity, groundingWeight);
 The runtime value is a `0..1` multiplier over the Animator's authored foot-position, foot-rotation, and pelvis
 grounding weights. Zero clears transient foot locks and restores the sampled animation, which prevents terrain IK from
 pulling an airborne character back toward the surface. The multiplier returns to one when runtime pose state is
-cleared and is never written into the scene or prefab.
+cleared and is never written into the scene or prefab. Procedural mode owns its leg contacts internally and ignores the
+legacy automatic grounding pass rather than applying both solvers.
 
-## Complete Controller Pattern
+## Complete Animation-Graph Controller Pattern
 
 ```csharp
 using Keire;

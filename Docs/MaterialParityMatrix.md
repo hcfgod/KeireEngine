@@ -150,13 +150,13 @@ scenarios and executable validation decide milestone acceptance.
 | ME-QA-001 | Core deterministic tests | Complete | P0 | Function, layer, collection, compile, and instance tests. |
 | ME-QA-002 | Editor routing tests | Complete | P0 | New extensions route to graph or Inspector workflows. |
 | ME-QA-003 | Windows debug build | Complete | P0 | Required build is run for this slice. |
-| ME-QA-004 | Windows Release validation | Partial | P0 | Release builds and focused material-ecosystem tests pass; the complete release-candidate gate remains. |
+| ME-QA-004 | Windows Release validation | Complete | P0 | The clean 0.3.2 Dist Editor package passed the complete Core/editor/Hub, consumer, cook, smoke, and inventory gate. |
 | ME-QA-005 | Windows ASan validation | Partial | P0 | Reusable-graph import, collection-state, and dynamic-instance tests pass under ASan; the complete release-candidate gate remains. |
-| ME-QA-006 | Linux build/test | Planned | P0 | Required before cross-platform release claim. |
+| ME-QA-006 | Linux build/test | Complete | P0 | The exact 0.3.2 commit passed the Rocky Linux package suites and packaged Vulkan/WSLg smoke; DEB/RPM acceptance covered Ubuntu, Debian, Rocky, Fedora, and openSUSE. |
 | ME-QA-007 | macOS build/test | Planned | P0 | Required before cross-platform release claim. |
 | ME-QA-008 | Sandbox function/layer examples | Planned | P1 | Add progressive reusable graph examples and scene objects. |
 | ME-QA-009 | Automated screenshot/golden UI coverage | Planned | P2 | Must remain resilient to backend/font differences. |
-| ME-QA-010 | Package/SDK consumer validation | Planned | P0 | Required when new runtime APIs enter a release package. |
+| ME-QA-010 | Package/SDK consumer validation | Complete | P0 | Windows and Linux 0.3.2 package gates passed the direct and CMake SDK consumers after the public API additions. |
 
 ## Production Scenario Gates
 

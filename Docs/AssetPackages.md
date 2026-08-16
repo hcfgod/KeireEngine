@@ -132,7 +132,8 @@ Package C# must be explicitly declared as runtime, Editor, or test code. Import 
 consent. The receipt binds that consent to the package's executable-code fingerprint, so a version that changes code
 requires renewed approval. Marketplace validation may compile declared C#
 with the pinned Kéire SDK in a generated no-network build, but it must never execute package code, MSBuild hooks,
-analyzers, source generators, native binaries, or install scripts. Native plugins are prohibited in 0.3.1.
+analyzers, source generators, native binaries, or install scripts. Native plugins remain prohibited in the current
+0.3.2 release.
 
 ## Automation
 

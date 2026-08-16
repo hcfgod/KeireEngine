@@ -156,8 +156,11 @@ python Scripts/Packaging/prepare-distribution-snapshot.py `
 Both release-package commands reject dirty or development manifests, symlinks/reparse points, existing outputs,
 mismatched host extensions, unsafe identities, invalid sizes/digests, and a manifest that does not round-trip through
 the catalog parser. Linux Hub manifests include their `packageFormat`; a Linux catalog may therefore retain DEB and
-RPM installers for the same Hub version without identity ambiguity. Do not publish an unsigned Windows
-executable, an unnotarized macOS DMG, or a Linux package not built and validated on its claimed distribution baseline.
+RPM installers for the same Hub version without identity ambiguity. Catalog signing authenticates metadata and binds
+the exact artifact hash; it does not assert Authenticode, RPM GPG signing, or Apple notarization. Any preview lacking a
+native signature must be disclosed on its download surface, and Windows automatic installation remains disabled until
+Authenticode verification can pass. Never publish an unnotarized macOS DMG or a Linux package not built and validated
+on its claimed distribution baseline.
 
 Use a future expiry appropriate to the release rather than copying the example date. The preparer refuses an existing
 output, draft manifest fields, unsafe input files, key mismatches, expired metadata, and archive size or SHA-256
@@ -329,7 +332,7 @@ defaults to false.
 
 Staff roles live in `public.platform_staff_members`, not browser token metadata. Moderators inspect publisher identity,
 signed package evidence, and reports. Administrators additionally approve package publication, manage staff, and change
-launch gates. The database preserves a final active administrator, keeps paid checkout disabled for 0.3.1, and appends
+launch gates. The database preserves a final active administrator, keeps paid checkout disabled for 0.3.2, and appends
 every decision to `public.platform_audit_events`. The staff console requests a five-minute URL for sanitized validation
 evidence only after the Edge boundary verifies its Ed25519 attestation. The browser then verifies the evidence size and
 SHA-256 before rendering a searchable manifest inventory. Staff never need the publisher's package archive.
@@ -375,9 +378,10 @@ them in shell history, logs, chat, or source control. The no-JWT settings are in
 origins and performs a fixed-length digest comparison before touching its own queue.
 
 The service package includes self-contained worker and broker binaries under `tools/marketplace-validator/` plus the
-metadata-only signer under `tools/marketplace-publication-signer/`. The worker
-also requires the matching 0.3.1 `KeireAssetTool`, `Keire.Managed.dll`, pinned .NET 10.0.302 SDK, and a current ClamAV
-installation. Malware definitions are updated by the trusted host outside the offline worker.
+metadata-only signer under `tools/marketplace-publication-signer/`. The worker also requires the `KeireAssetTool` and
+`Keire.Managed.dll` from the same Kéire release, the pinned .NET 10.0.302 SDK, and a current ClamAV installation. The
+validator protocol remains versioned independently of the product release. Malware definitions are updated by the
+trusted host outside the offline worker.
 
 For Linux, create separate `keire-validator` and `keire-validator-broker` users plus a shared
 `keire-validator-exchange` group. Make the exchange root group-owned and setgid with mode `2770`; make the worker's

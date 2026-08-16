@@ -6,10 +6,10 @@ remain the default for existing components and scenes; schema-6 and older Animat
 
 ## Author A Profile
 
-Create **Procedural Motion Profile** from the Project panel. The resulting `.keiremotionprofile` stores schema-versioned
-gait, body, grounding, airborne, joint-limit, response, and normalized curve data. Select it to edit grouped settings
-and the stride, lift, roll, pelvis, airborne, landing, and arm-swing curves. Invalid or non-finite settings cannot be
-saved. Saving queues an isolated reimport and hot reload.
+Create **Procedural Motion Profile** from the Project panel. The resulting `.keiremotionprofile` uses schema version 1
+and stores gait, body, grounding, airborne, joint-limit, response, and normalized curve data. Select it to edit grouped
+settings and the stride, lift, roll, pelvis, airborne, landing, and arm-swing curves. Invalid or non-finite settings
+cannot be saved. Saving queues an isolated reimport and hot reload.
 
 Assign the profile, a Skeleton, Skinned Mesh, and Rig Definition to an Animator, then select
 `ProceduralHumanoid`. Required semantic bones are pelvis, spine, and complete left/right upper-leg, lower-leg, and foot

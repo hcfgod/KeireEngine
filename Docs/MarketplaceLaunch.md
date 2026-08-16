@@ -1,12 +1,12 @@
 # Marketplace Launch Runbook
 
-This runbook is the release authority for the Kéire 0.3.1 website, identity, marketplace, and asset-package staging
+This runbook is the release authority for the Kéire 0.3.2 website, identity, marketplace, and asset-package staging
 initiative. A deployed page or database object is not proof that its feature is ready. Public behavior is controlled by
 the feature flags in `public.platform_feature_flags`, which default to disabled.
 
 ## Current staging state
 
-As of 2026-08-13, `https://keireengine.duckdns.org` serves the unified Astro website through Caddy. The router exposes
+As of 2026-08-16, `https://keireengine.duckdns.org` serves the unified Astro website through Caddy. The router exposes
 only public TCP 80/443; Astro (`127.0.0.1:4321`) and the distribution service (`127.0.0.1:5088`) remain private. The
 marketplace schema, private Storage buckets, RLS policies, official draft products, MFA account surfaces, and
 JWT-protected marketplace Edge Functions are deployed. GitHub sign-in is configured through Supabase, the Kéire Hub
@@ -21,13 +21,15 @@ Supabase plan and branded production domain are available.
 Staff authorization is database-authoritative in `public.platform_staff_members`; browser JWT metadata is not an
 authorization source. Moderators can review publisher applications, validated packages, and marketplace reports.
 Administrators can additionally appoint or revoke staff and change launch gates, except that paid checkout is blocked
-for 0.3.1. Every staff action requires AAL2 and crosses `marketplace-moderation` into a service-role-only, transactional
+for 0.3.2. Every staff action requires AAL2 and crosses `marketplace-moderation` into a service-role-only, transactional
 RPC that writes an audit event. Direct authenticated moderation writes are revoked, and the final active administrator
 cannot be removed. The initial staging account is the bootstrapped administrator.
 
-The live signed software-distribution snapshot is sequence 9. Its Windows x86-64 catalog contains the clean
-`keire.editor@0.3.1` and `keire.hub@0.3.1` artifacts only. This proves software distribution, not marketplace product
-publication: `.keireassetpackage` products use a separate trust root and remain behind their launch gates.
+The live signed software-distribution snapshot is
+`release-0.3.2-sequence-14-4b96626`. Its Windows x86-64 catalog contains the clean `keire.editor@0.3.2` and
+`keire.hub@0.3.2` artifacts; its Linux x86-64 catalog contains the Editor archive plus distinct DEB and RPM Hub
+packages. This proves software distribution, not marketplace product publication: `.keireassetpackage` products use
+a separate trust root and remain behind their launch gates.
 
 The asset Marketplace uses separate, rotatable Ed25519 identities for validator attestations and release publication.
 Publishers upload each version once to a content-addressed private path. The offline validator signs the exact package,
@@ -41,13 +43,14 @@ deterministic unsigned quarantine artifacts are prepared with
 hash-bound release index beneath `Build/Marketplace/Official/0.3.1`. Staff opens an official draft's standard Publisher
 release workflow, uploads the matching artifact, and never fabricates a signed envelope for draft metadata.
 
-The repository now contains the 0.3.1 isolated package validator, network broker, automatic metadata signer, atomic
-validation/publication queues,
+The marketplace validation protocol remains versioned as 0.3.1 within the 0.3.2 product release. The repository
+contains the isolated package validator, network broker, automatic metadata signer, atomic validation/publication queues,
 ClamAV adapter, secret scanner, generated no-network C# compilation, Windows firewall launcher, and hardened Linux
 units. The validator lease migration is applied to the staging project and `marketplace-validator-queue` version 2 is
 deployed in a fail-closed state. The scoped broker secret is now stored as ACL-protected machine-DPAPI ciphertext on
-the Windows staging host. The reviewed 0.3.1 worker, broker, Asset Tool, managed API, pinned .NET SDK, and current
-ClamAV definitions are provisioned under separate `LOCAL SERVICE` and `NETWORK SERVICE` startup tasks. The offline
+the Windows staging host. The reviewed protocol-0.3.1 worker and broker, matching current-release Asset Tool and managed
+API, pinned .NET SDK, and current ClamAV definitions are provisioned under separate `LOCAL SERVICE` and
+`NETWORK SERVICE` startup tasks. The offline
 worker blocks all four untrusted-content processes with verified firewall rules and an administrator-generated,
 ACL-protected path/hash attestation. Harmless and EICAR fixtures passed their expected offline outcomes, a controlled
 task restart preserved both validator service identities, and the broker authenticates to the staging queue with HTTP 200
@@ -93,7 +96,7 @@ Complete the gates in this order. If a gate fails, keep its feature flag disable
    - Validate organization ownership and MFA-protected publisher application/moderation transitions with staging users.
    - Review submitted applications at `/admin/marketplace/`; approval transactionally activates the publisher, while
      changes and rejection preserve the recorded decision reason.
-   - Keep `paid_checkout_enabled=false`; 0.3.1 products are free only.
+   - Keep `paid_checkout_enabled=false`; 0.3.2 products are free only.
 3. **Package validation and signing**
    - Deploy the isolated validator worker under a dedicated unprivileged identity and private temporary root.
    - Add malware and secret scanning, no-network managed compilation, lease recovery, structured diagnostics, bounded
@@ -152,7 +155,7 @@ The recommended activation order is:
 4. `asset_packages_enabled` after downloads, signature verification, Hub cache, and Editor recovery pass together.
 5. `community_enabled` after reviews, replies, reports, moderation, and abuse throttling pass.
 
-`paid_checkout_enabled` remains false for the complete 0.3.1 release.
+`paid_checkout_enabled` remains false for the complete 0.3.2 release.
 
 ## Go/no-go evidence
 

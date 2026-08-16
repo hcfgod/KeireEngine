@@ -56,9 +56,9 @@ Kéire already includes substantial, integrated engine and authoring foundations
   receipts, rollback, and recovery.
 - SDL3 multi-window and SDL_GPU rendering, Scene and Game views, cameras, picking, separate Shader and Material Graphs,
   Direct Materials, inherited and dynamic Material Instances, reusable material/shader functions and layers,
-  Material Parameter Collections, tagged custom-shader materials, LODs,
-  spatial lighting data, animation, importer-independent semantic auto-rigging, target-driven arm IK, bilateral foot
-  grounding with planted-contact locking and toe/sole alignment, VFX authoring, and performance gates.
+  Material Parameter Collections, tagged custom-shader materials, LODs, spatial lighting data, animation,
+  importer-independent semantic auto-rigging, target-driven arm IK, bilateral foot grounding, zero-clip procedural
+  humanoid locomotion, presentation interpolation, VFX authoring, and performance gates.
 - Input actions and rebinding, physics, navigation, configurable mono/stereo/5.1/7.1 audio output, typed live Mix
   Console authoring, stable mixer routing, spatial sources, listener/camera fallback, priority-blended Reverb Zones,
   managed audio controls, replay/diagnostic foundations, and profiling.
@@ -104,8 +104,10 @@ bash Scripts/setup-linux.sh --generator ninja --toolset gcc --test
 bash Scripts/project.sh run --generator ninja --configuration Debug --toolset gcc
 ```
 
-The clean Linux workflow is validated on Ubuntu 22.04/24.04, Debian 12, current Fedora and Arch, openSUSE
-Tumbleweed, and Rocky Linux 9. Ubuntu 26.04 is a setup and container-matrix target pending complete native validation.
+The Linux workflow has source-build coverage on Ubuntu 22.04/24.04, Debian 12, current Fedora and Arch, openSUSE
+Tumbleweed, and Rocky Linux 9. Release 0.3.2 additionally passed exact-artifact acceptance for its DEB on Ubuntu 22.04
+and Debian and for its RPM on Rocky Linux 9, Fedora 44, and openSUSE Tumbleweed. Ubuntu 26.04 remains a setup and
+container-matrix target pending complete native validation.
 `Scripts/setup-linux.sh` detects the host and runs the authoritative bootstrap, workstation doctor, and optional test
 gate as one command. The bootstrap supports the `apt`, `dnf`, `pacman`, and `zypper` package families and
 installs verified project-private fallbacks when a distribution's Premake, CMake, Ninja, NASM, patchelf, .NET SDK, or
@@ -124,9 +126,9 @@ Set `KEIRE_BUILD_JOBS` to a positive integer when the machine can safely support
 
 Windows and Linux x86-64 are the currently tested public-preview platforms. Download records show the Hub version and
 the corresponding editor version separately, retain complete artifact identity, and link to an append-only previous
-versions page. Linux Hub packaging emits native DEB packages for Ubuntu/Debian and RPM packages for Rocky/Fedora;
-the download page presents each verified format independently. Arch and openSUSE remain validated source-build
-targets. Linux ARM64, Alpine/musl, native macOS, and Metal are not yet claimed as tested download targets.
+versions page. Linux Hub packaging emits native DEB packages for Ubuntu/Debian and RPM packages for
+Rocky/Fedora/openSUSE; the download page presents each verified format independently. Arch remains a validated
+source-build target. Linux ARM64, Alpine/musl, native macOS, and Metal are not yet claimed as tested download targets.
 
 macOS with Ninja and Clang:
 
@@ -245,12 +247,14 @@ Packaging is performed on the target operating system:
 
 - Windows produces ZIP distributions and native EXE installers.
 - macOS produces native application/distribution output and requires platform signing and notarization for release.
-- Linux produces native `.tar.gz` distributions on every validated distro and DEB installers on Debian/Ubuntu.
+- Linux produces native `.tar.gz` distributions, DEB Hub/editor installers on Debian/Ubuntu, and RPM Hub installers
+  on Rocky/Fedora/openSUSE.
 
-The distribution service uses offline Ed25519 signing, immutable SHA-256 package addressing, transactional snapshot
-activation, ETags, conditional requests, and range requests. Public release catalogs publish only artifacts that have
-completed the platform’s release-signing requirements. Development previews are labeled separately and do not weaken
-the signed stable catalog path.
+The distribution service uses offline Ed25519 catalog signing, immutable SHA-256 package addressing, transactional
+snapshot activation, ETags, conditional requests, and range requests. Catalog trust authenticates metadata and exact
+artifact bytes; it does not imply Authenticode, RPM GPG, or Apple notarization. A preview artifact without a native
+platform signature must be disclosed as such and cannot use the automatic Windows update handoff. Production release
+claims still require the platform-native signing policy described in the release guide.
 
 See [Asset Packages](Docs/AssetPackages.md), [Desktop Player Builds](Docs/PlayerBuilds.md),
 [Package Archives](Docs/PackageArchives.md), and
@@ -299,7 +303,7 @@ documentation authorities.
 
 ## Documentation
 
-The [documentation library](Docs/README.md) contains 58 maintained guides grouped around real tasks:
+The [documentation library](Docs/README.md) contains 59 maintained guides grouped around real tasks:
 
 - [Getting Started](Docs/GettingStarted.md) and [Project Hub](Docs/ProjectHub.md)
 - [Architecture](Docs/Architecture.md), [Runtime Lifecycle](Docs/RuntimeLifecycle.md), and

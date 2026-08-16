@@ -25,8 +25,8 @@ pointers or stage Git changes.
 
 | Platform | Current evidence | Public preview |
 | --- | --- | --- |
-| Windows x86-64 | Clean 0.3.1 Dist package; complete Core/editor/Hub suites, SDK/package consumers, Direct3D 12, and Vulkan | Signed sequence-9 catalog; native installer is not yet Authenticode-signed |
-| Linux x86-64 (glibc) | Earlier 0.3.1-line validation covers Ubuntu 22.04/24.04, Debian 12, Fedora, Arch, openSUSE Tumbleweed, and Rocky Linux 9; the exact current release commit still needs native package acceptance | Not present in the active 0.3.1 catalog |
+| Windows x86-64 | Clean 0.3.2 Dist Editor and Hub packages from commit `4b966260`; complete Core/editor/Hub suites, SDK/package consumers, package smoke, and inventory validation | Signed sequence-14 catalog; the native Hub EXE is catalog/hash verified but not Authenticode-signed |
+| Linux x86-64 (glibc) | Clean 0.3.2 release builds on the declared Ubuntu and Rocky baselines; DEB acceptance on Ubuntu 22.04 and Debian; RPM acceptance on Rocky Linux 9, Fedora 44, and openSUSE Tumbleweed; packaged Vulkan/WSLg smoke | Signed sequence-14 catalog with Editor archive plus native DEB and RPM Hub packages; the RPM is catalog/hash verified but not GPG-signed |
 | Linux ARM64 or Alpine/musl | Build contracts retained but not validated in this audit | Not published |
 | macOS x86-64/ARM64 | Build and packaging contracts retained; native macOS and Metal evidence remains outstanding | Not published |
 
@@ -148,8 +148,8 @@ bash Scripts/project.sh run --generator ninja --configuration Debug --toolset gc
 ### Linux Hub and editor packages
 
 Packaging requires a clean checkout and always builds the `Dist` configuration. The distribution commands create
-portable archives. The Hub installer command auto-selects DEB on Ubuntu/Debian and RPM on Rocky/Fedora; the editor
-installer remains DEB-based. Every installer is written under `Artifacts/`:
+portable archives. The Hub installer command auto-selects DEB on Ubuntu/Debian and RPM on
+Rocky/Fedora/openSUSE; the editor installer remains DEB-based. Every installer is written under `Artifacts/`:
 
 ```sh
 git status --short
@@ -173,7 +173,9 @@ dpkg-deb --contents "$hub_installer"
 cd ..
 ```
 
-On Rocky Linux or Fedora, install the native packaging tools and build or verify the RPM explicitly:
+On Rocky Linux, Fedora, or openSUSE, install the distribution's RPM packaging tools and build or verify the RPM
+explicitly. The following `dnf` preparation applies to Rocky and Fedora; use the equivalent `zypper` packages on
+openSUSE:
 
 ```sh
 sudo dnf install -y rpm-build rpm cpio

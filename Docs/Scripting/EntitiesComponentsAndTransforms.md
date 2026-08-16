@@ -85,6 +85,10 @@ transform.Position = new Vector3(4.0f, 2.0f, -1.0f);
 transform.Rotation = Quaternion.Euler(0.0f, 180.0f);
 transform.Translate(Vector3.Forward * Time.DeltaTime, worldSpace: false);
 Vector3 forward = transform.Forward;
+
+Vector3 renderedPosition = transform.PresentationPosition;
+Quaternion renderedRotation = transform.PresentationRotation;
+transform.ResetPresentationInterpolation(); // Call after a teleport.
 ```
 
 Available properties:
@@ -96,10 +100,17 @@ Available properties:
 | `LocalScale` | Read/write | Parent-local |
 | `Position` | Read/write | World |
 | `Rotation` | Read/write | World |
+| `PresentationPosition` | Read | Interpolated world presentation |
+| `PresentationRotation` | Read | Interpolated world presentation |
 | `Forward`, `Right`, `Up` | Read | Derived from world rotation |
 
 `Translate` and `Rotate` accept an optional `worldSpace` flag. World setters preserve the authored parent relation by
 converting the requested value through the parent's inverse world transform.
+
+Physics, collision, and gameplay use the authoritative `Position` and `Rotation`. Rendering and camera-follow code can
+read the presentation properties to follow fixed-step Character Controllers and dynamic bodies smoothly. Call
+`ResetPresentationInterpolation()` immediately after a teleport or other discontinuous move so the previous and
+current presentation samples snap together; ordinary continuous movement must not reset interpolation every frame.
 
 Use `Time.DeltaTime` or `Time.FixedDeltaTime` when applying rates:
 

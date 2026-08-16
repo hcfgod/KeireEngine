@@ -118,18 +118,19 @@ Windows/Linux/macOS × x86_64/ARM64 modules remains an explicit release operatio
 
 ### Supported Linux matrix
 
-Linux Editor and player releases use glibc and the supported Clang toolchain. The release gate is explicit; a row is
-not considered supported merely because it compiles on a maintainer workstation.
+Linux Editor and Hub releases use glibc with the supported GCC or Clang host toolchain selected by the release builder.
+The Build Support generator currently uses Clang for Linux player templates. The release gate is explicit; a row is not
+considered supported merely because it compiles on a maintainer workstation.
 
 | Distribution | x86_64 Editor / player | ARM64 Editor / player | Release validation |
 | --- | --- | --- | --- |
 | Ubuntu 22.04 LTS and 24.04 LTS | Supported | Preview | Native build, tests, packaged Build & Run |
 | Ubuntu 26.04 LTS | Validation target | Unobserved | Distro-aware setup and Podman matrix added; native graphics/package evidence pending |
 | Debian 12 | Supported | Preview | Native build, tests, packaged Build & Run |
-| Fedora (current supported release) | Supported | Preview | Podman bootstrap plus native packaged smoke |
+| Fedora (current supported release) | Supported | Preview | Source-build matrix plus 0.3.2 RPM install/version acceptance on Fedora 44 |
 | Arch Linux (current) | Supported | Preview | Podman bootstrap plus native packaged smoke |
-| openSUSE Tumbleweed | Supported | Preview | Podman bootstrap plus native packaged smoke |
-| Rocky Linux 9 | Supported | Preview | Podman bootstrap plus native packaged smoke |
+| openSUSE Tumbleweed | Supported | Preview | Source-build matrix plus 0.3.2 RPM install/version acceptance |
+| Rocky Linux 9 | Supported | Preview | Exact-release package suites, SDK consumers, Vulkan/WSLg Play Mode smoke, and RPM acceptance |
 
 `x86_64` is the production Linux architecture. ARM64 artifacts may be authored and installed for preview validation,
 but must not be advertised as a stable release until native ARM64 build, test, and packaged-game execution complete.

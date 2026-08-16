@@ -102,17 +102,18 @@ current base images. `--jobs <count>` controls compiler concurrency inside each 
 This is the locally repeatable substitute when hosted Actions execution is unavailable; it does not convert an
 unobserved hosted check into a pass. Linux `.tar.gz` distributions are the common archive format produced on each
 intended Linux release baseline; a binary built against a newer glibc is not relabeled as universal. Native DEB
-installers target Debian/Ubuntu and must be built and tested on their declared Debian/Ubuntu baseline; RPM/repository
-publication remains a separate release artifact rather than being simulated by the matrix.
+installers target Debian/Ubuntu and native RPM installers target Rocky/Fedora/openSUSE. Each is a separate artifact
+built and tested on its declared baseline rather than simulated by the container matrix.
 
 Stable Linux editor catalog packages are produced from a clean detached release commit inside the Rocky Linux 9
 baseline container (glibc 2.34 and GCC Toolset 12). Headless release validation uses Xvfb with Mesa Vulkan for the
 packaged runtime GPU smoke. Do not relabel an artifact built against a newer glibc as a general Linux release.
 
-The active 0.3.1 stable catalog currently publishes Windows x86-64 only. Linux x86-64 source and packaging contracts
-remain maintained, but a Linux download must not be advertised until clean exact-release artifacts pass the native
-baseline, installer, Vulkan, Hub, and Editor acceptance gates. Linux ARM64, Alpine/musl, native macOS, and Metal remain
-unobserved and must not be presented as tested download targets.
+The active 0.3.2 sequence-14 stable catalog publishes Windows and Linux x86-64. Its Linux catalog contains the Editor
+archive plus distinct DEB and RPM Hub records. The exact release Editor/package gate ran on the Rocky Linux 9 baseline;
+the DEB was installed on Ubuntu 22.04 and Debian, the RPM on Rocky Linux 9, Fedora 44, and openSUSE Tumbleweed, and a
+packaged Vulkan/WSLg Play Mode smoke completed. Linux ARM64, Alpine/musl, native macOS, and Metal remain unobserved and
+must not be presented as tested download targets.
 
 ## Risk-Based Matrix
 
@@ -408,8 +409,11 @@ identity. Hub code is signed explicitly from inner Mach-O files and nested bundl
 blanket `--deep` signing and gives the native Hub no managed-runtime entitlements. These values are release secrets
 and must not be committed.
 
-Only publish a Hub installer catalog record when its package key, channel, platform, and architecture exactly match the
-catalog endpoint. Windows automatic update handoff requires Authenticode. The macOS drag-to-Applications DMG remains a
+Only publish a Hub installer catalog record when its package key, channel, platform, architecture, native format, and
+disclosed trust level exactly match the catalog endpoint and download surface. The Ed25519 catalog signature and bound
+SHA-256 authenticate an artifact but do not replace Authenticode, RPM GPG signing, or Apple notarization. A
+catalog-verified unsigned Windows preview remains manual-download-only because Windows automatic update handoff
+requires Authenticode. The macOS drag-to-Applications DMG remains a
 manual install: the Hub reveals the verified artifact and does not exit as though mounting it had replaced the app. The
 in-Hub flow downloads through the persistent task worker, verifies the catalog size and SHA-256, and waits for a second
 explicit install action only where a transactional native handoff exists. The Windows NSIS update mode accepts only the

@@ -234,12 +234,14 @@ and maximum slope keep walls and unrelated trigger geometry out of the solution.
 needs a strict ledge/drop cutoff. Ray height/range, sole offset, pelvis limit, plant/release distances, knee stability,
 response time, lean controls, position/rotation weights, and collision mask are all serialized per Animator.
 
+Animator component schema 7 adds the pose source, procedural profile, Rig Definition, and procedural quality fields.
+Schemas 1–6 migrate to `AnimationGraph` with no procedural assets assigned, so existing playback does not change.
 New Animators enable semantic mapping, automatic ray distance, and planted-foot locking by default. Schema-one and
 schema-two Animators retain their exact authored bone-name mapping during migration, while schema-three Animators
 preserve their existing semantic and limb settings; schema-four Animators retain their authored contact-lock values.
-Schema-five Animators preserve their authored response and lean values and receive only the new knee-stability default.
-Earlier schemas receive the defaults introduced after their version. Authors can opt into semantic mapping after
-verifying a legacy custom rig.
+Schema-five Animators preserve their authored response and lean values, and all pre-knee-stability schemas receive its
+current default. Earlier schemas receive the defaults introduced after their version. Authors can opt into semantic
+mapping after verifying a legacy custom rig.
 
 Gameplay code can call `Animator.SetFootGroundingWeight(entity, weight)` to apply a transient `0..1` multiplier over
 the authored position, rotation, and pelvis grounding weights. A zero multiplier also clears planted-foot state. Use

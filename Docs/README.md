@@ -90,9 +90,9 @@ All 59 published guides are listed below in the same groups used by the document
 | [Assets and ScriptableObjects](Scripting/AssetsAndScriptableObjects.md) | Managed asset references, data assets, loading, cloning, serialization, and validation. |
 | [Gameplay Services](Scripting/GameplayServices.md) | Time, input, physics, navigation, prefabs, VFX, cursor, logging, and profiling. |
 | [Audio](Scripting/Audio.md) | Audio clips, source components, playback, mixers, buses, parameters, and status. |
-| [Animation](Scripting/Animation.md) | Animator state, parameters, layers, events, playback, root motion, and IK. |
+| [Animation](Scripting/Animation.md) | Graph playback, procedural locomotion intent/state/events, root motion, and IK. |
 | [UI and Events](Scripting/UiAndEvents.md) | Scene UI, buttons, text, typed events, subscriptions, and cursor ownership. |
-| [Async, Reload, and Diagnostics](Scripting/AsyncReloadAndDiagnostics.md) | Synchronization context, cancellation, hot reload, state transfer, failure isolation, and troubleshooting. |
+| [Async, Reload, and Diagnostics](Scripting/AsyncReloadAndDiagnostics.md) | Synchronization context, managed jobs, cancellation, hot reload, failure isolation, and troubleshooting. |
 | [Managed API Index](Scripting/ApiIndex.md) | Compact lookup for public types, callbacks, components, attributes, and services. |
 | [Managed Scripting Internals](ManagedScripting.md) | Native hosting, discovery, schema publication, build transactions, runtime load, reload, and packaging. |
 
