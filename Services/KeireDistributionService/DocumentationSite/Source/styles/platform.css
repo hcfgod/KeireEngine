@@ -429,6 +429,7 @@ button:disabled,
 .editorial-panel {
     position: relative;
     min-height: 21rem;
+    min-width: 0;
     padding: clamp(1.5rem, 4vw, 2.5rem);
     border: 1px solid var(--line);
     border-radius: var(--radius-l);
@@ -447,6 +448,10 @@ button:disabled,
 .editorial-panel:nth-child(2),
 .editorial-panel:nth-child(3) {
     grid-column: span 5;
+}
+
+.download-card {
+    overflow: visible;
 }
 
 .editorial-panel h3 {
@@ -1387,22 +1392,35 @@ button:disabled,
 .download-variants {
     display: grid;
     margin-top: 1rem;
+    min-width: 0;
     gap: 1rem;
 }
 
 .download-variant {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
     padding: 1rem;
     border: 1px solid var(--line);
     border-radius: var(--radius-s);
     background: rgba(4, 13, 24, 0.55);
 }
 
+.download-variant .button {
+    width: 100%;
+    min-width: 0;
+    margin-top: 0.75rem;
+    white-space: normal;
+}
+
 .variant-row,
 .checksum-row {
     display: flex;
+    min-width: 0;
     align-items: center;
     justify-content: space-between;
     gap: 0.75rem;
+    flex-wrap: wrap;
 }
 
 .version-detail,
@@ -1416,10 +1434,15 @@ button:disabled,
 }
 
 .checksum {
-    max-width: 70%;
+    display: block;
+    flex: 1 1 0;
+    width: 0;
+    min-width: 0;
     overflow: hidden;
+    overflow-wrap: anywhere;
     color: var(--ink-muted);
     font-size: 0.68rem;
+    white-space: nowrap;
     text-overflow: ellipsis;
 }
 
