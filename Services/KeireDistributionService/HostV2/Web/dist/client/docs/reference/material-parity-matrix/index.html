@@ -1,0 +1,1052 @@
+<!DOCTYPE html><html lang="en" dir="ltr" data-theme="dark" data-has-toc data-has-sidebar class="astro-vdxcvpsm"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Material Ecosystem Parity Matrix — Kéire Engine Docs</title><link rel="canonical" href="https://keireengine.duckdns.org/docs/reference/material-parity-matrix/"/><link rel="sitemap" href="/sitemap-index.xml"/><link rel="shortcut icon" href="/assets/keire.png" type="image/png"/><meta name="generator" content="Astro v7.2.0"/><meta name="generator" content="Starlight v0.41.7"/><meta property="og:title" content="Material Ecosystem Parity Matrix"/><meta property="og:type" content="article"/><meta property="og:url" content="https://keireengine.duckdns.org/docs/reference/material-parity-matrix/"/><meta property="og:locale" content="en"/><meta property="og:description" content="Review date: 2026-08-10 Comparison model: Unreal-inspired material workflow, adapted to Kéire's renderer-neutral asset and runtime boundaries"/><meta property="og:site_name" content="Kéire Engine Docs"/><meta name="twitter:card" content="summary_large_image"/><meta name="description" content="Review date: 2026-08-10 Comparison model: Unreal-inspired material workflow, adapted to Kéire's renderer-neutral asset and runtime boundaries"/><meta property="og:image" content="https://keireengine.duckdns.org/assets/hero-cinematic.png"/><meta name="theme-color" content="#050915"/><script src="/_astro/keire-csp-556a395a9e1aa928.js"></script><template id="theme-icons"><svg aria-hidden="true" class="light astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" data-keire-style-5582daf1f3b7=""><path d="M5 12a1 1 0 0 0-1-1H3a1 1 0 0 0 0 2h1a1 1 0 0 0 1-1Zm.64 5-.71.71a1 1 0 0 0 0 1.41 1 1 0 0 0 1.41 0l.71-.71A1 1 0 0 0 5.64 17ZM12 5a1 1 0 0 0 1-1V3a1 1 0 0 0-2 0v1a1 1 0 0 0 1 1Zm5.66 2.34a1 1 0 0 0 .7-.29l.71-.71a1 1 0 1 0-1.41-1.41l-.66.71a1 1 0 0 0 0 1.41 1 1 0 0 0 .66.29Zm-12-.29a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.71-.71a1.004 1.004 0 1 0-1.43 1.41l.73.71ZM21 11h-1a1 1 0 0 0 0 2h1a1 1 0 0 0 0-2Zm-2.64 6A1 1 0 0 0 17 18.36l.71.71a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.76-.66ZM12 6.5a5.5 5.5 0 1 0 5.5 5.5A5.51 5.51 0 0 0 12 6.5Zm0 9a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Zm0 3.5a1 1 0 0 0-1 1v1a1 1 0 0 0 2 0v-1a1 1 0 0 0-1-1Z"/></svg><svg aria-hidden="true" class="dark astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" data-keire-style-5582daf1f3b7=""><path d="M21.64 13a1 1 0 0 0-1.05-.14 8.049 8.049 0 0 1-3.37.73 8.15 8.15 0 0 1-8.14-8.1 8.59 8.59 0 0 1 .25-2A1 1 0 0 0 8 2.36a10.14 10.14 0 1 0 14 11.69 1 1 0 0 0-.36-1.05Zm-9.5 6.69A8.14 8.14 0 0 1 7.08 5.22v.27a10.15 10.15 0 0 0 10.14 10.14 9.784 9.784 0 0 0 2.1-.22 8.11 8.11 0 0 1-7.18 4.32v-.04Z"/></svg><svg aria-hidden="true" class="auto astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" data-keire-style-5582daf1f3b7=""><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg></template><link rel="stylesheet" href="/_astro/print.ehPL0gv-.css" media="print"><link rel="stylesheet" href="/_astro/common.XyjS4Vde.css"><link rel="stylesheet" href="/_astro/docs.DfD-eiDA.css"><link rel="stylesheet" href="/_astro/LinkButton.DLKvWM-3.css"><script type="module" src="/_astro/page.Dwipeu-R.js"></script><link rel="stylesheet" href="/_astro/keire-csp-ab36cbb67f5ba0fc.css"></head><body class="astro-vdxcvpsm"><a class="sl-skip-link astro-vxeigawq" href="#_top">Skip to content</a><div class="page sl-flex astro-gqpr5s5a"><header class="header astro-gqpr5s5a"><div class="header astro-nczgtkxc"><div class="title-wrapper sl-flex astro-nczgtkxc"><a href="/" class="site-title sl-flex astro-clw6ags5"><img class="astro-clw6ags5" alt="Kéire Engine" src="/_astro/keire.iKKO2Cqy.png" width="1024" height="1024"><span class="astro-clw6ags5" translate="no">Kéire Engine Docs</span></a></div><div class="sl-flex print:hidden astro-nczgtkxc"><site-search class="astro-nczgtkxc astro-r5ar4xm7" data-translations="{&quot;placeholder&quot;:&quot;Search&quot;}"><button data-open-modal disabled aria-label="Search" aria-keyshortcuts="Control+K" class="astro-r5ar4xm7"><svg aria-hidden="true" class="astro-r5ar4xm7 astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" data-keire-style-5582daf1f3b7=""><path d="M21.71 20.29 18 16.61A9 9 0 1 0 16.61 18l3.68 3.68a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.39ZM11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14Z"/></svg><span class="sl-hidden md:sl-block astro-r5ar4xm7" aria-hidden="true">Search</span><kbd class="sl-hidden md:sl-flex astro-r5ar4xm7" data-keire-style-6e22c58a7a6a=""><kbd class="astro-r5ar4xm7">Ctrl</kbd><kbd class="astro-r5ar4xm7">K</kbd></kbd></button><dialog data-keire-style-35eecf3e8311="" aria-label="Search" class="astro-r5ar4xm7"><div class="dialog-frame sl-flex astro-r5ar4xm7"><button data-close-modal class="sl-flex md:sl-hidden astro-r5ar4xm7">Cancel</button><div class="search-container astro-r5ar4xm7"><div id="starlight__search" class="astro-r5ar4xm7"></div></div></div></dialog></site-search><script src="/_astro/keire-csp-7ffcc0504ef8b9c7.js"></script><script type="module" src="/_astro/Search.astro_astro_type_script_index_0_lang.B-Vh4ymV.js"></script></div><div class="sl-hidden md:sl-flex print:hidden right-group astro-nczgtkxc"><div class="sl-flex social-icons astro-nczgtkxc"><a href="/" rel="me" class="sl-flex astro-cg55etiy"><span class="sr-only astro-cg55etiy">Kéire Engine website</span><svg aria-hidden="true" class="astro-cg55etiy astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" data-keire-style-5582daf1f3b7=""><path d="M19.33 10.18a1 1 0 0 1-.77 0 1 1 0 0 1-.62-.93l.01-1.83-8.2 8.2a1 1 0 0 1-1.41-1.42l8.2-8.2H14.7a1 1 0 0 1 0-2h4.25a1 1 0 0 1 1 1v4.25a1 1 0 0 1-.62.93Z"/><path d="M11 4a1 1 0 1 1 0 2H7a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-4a1 1 0 1 1 2 0v4a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3h4Z"/></svg></a><a href="https://github.com/hcfgod/KeireEngine" rel="me" class="sl-flex astro-cg55etiy"><span class="sr-only astro-cg55etiy">Kéire Engine on GitHub</span><svg aria-hidden="true" class="astro-cg55etiy astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" data-keire-style-5582daf1f3b7=""><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg></a></div><starlight-theme-select><label data-keire-style-10e67b2302fa="" class="astro-r2p65idu"><span class="sr-only astro-r2p65idu">Select theme</span><svg aria-hidden="true" class="icon label-icon astro-r2p65idu astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" data-keire-style-5582daf1f3b7=""><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg><select autocomplete="off" class="astro-r2p65idu"><option value="dark" class="astro-r2p65idu">Dark</option><option value="light" class="astro-r2p65idu">Light</option><option value="auto" selected class="astro-r2p65idu">Auto</option></select><svg aria-hidden="true" class="icon caret astro-r2p65idu astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" data-keire-style-5582daf1f3b7=""><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg></label></starlight-theme-select><script src="/_astro/keire-csp-1a4641467bd2ba1b.js"></script><script type="module" src="/_astro/ThemeSelect.astro_astro_type_script_index_0_lang.COBTTKEJ.js"></script><script type="module" src="/_astro/LanguageSelect.astro_astro_type_script_index_0_lang.DZJqHYaV.js"></script></div></div></header><nav class="sidebar print:hidden astro-gqpr5s5a" aria-label="Main"><starlight-menu-button class="print:hidden astro-vvx7mffu"><button aria-expanded="false" aria-label="Menu" aria-controls="starlight__sidebar" class="sl-flex md:sl-hidden astro-vvx7mffu"><svg aria-hidden="true" class="open-menu astro-vvx7mffu astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" data-keire-style-5582daf1f3b7=""><path d="M3 8h18a1 1 0 1 0 0-2H3a1 1 0 0 0 0 2Zm18 8H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Zm0-5H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Z"/></svg><svg aria-hidden="true" class="close-menu astro-vvx7mffu astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" data-keire-style-5582daf1f3b7=""><path d="m13.41 12 6.3-6.29a1.004 1.004 0 1 0-1.42-1.42L12 10.59l-6.29-6.3a1.004 1.004 0 0 0-1.42 1.42l6.3 6.29-6.3 6.29a1 1 0 0 0 0 1.42.998.998 0 0 0 1.42 0l6.29-6.3 6.29 6.3a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.42L13.41 12Z"/></svg></button></starlight-menu-button><script type="module" src="/_astro/MobileMenuToggle.astro_astro_type_script_index_0_lang.BdbKaZ7j.js"></script><div id="starlight__sidebar" class="sidebar-pane astro-gqpr5s5a"><div class="sidebar-content sl-flex astro-gqpr5s5a"><sl-sidebar-state-persist data-hash="0wtzl7i" class="astro-f5yvicm7"><script aria-hidden="true" src="/_astro/keire-csp-c17db23800de57e3.js"></script><ul class="top-level astro-ojxuodky"><li class="astro-ojxuodky"><details open class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">Kéire Engine</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" data-keire-style-e27c263fbcb6=""><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="0"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/docs/" class="astro-ojxuodky"><span class="astro-ojxuodky">Documentation home</span></a></li></ul></details></li><li class="astro-ojxuodky"><details open class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">Start here</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" data-keire-style-e27c263fbcb6=""><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="1"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/docs/reference/overview/" class="astro-ojxuodky"><span class="astro-ojxuodky">Kéire Documentation</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/getting-started/" class="astro-ojxuodky"><span class="astro-ojxuodky">Getting Started</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/project-hub/" class="astro-ojxuodky"><span class="astro-ojxuodky">Kéire Hub</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/project-system/" class="astro-ojxuodky"><span class="astro-ojxuodky">Project System</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/project-settings/" class="astro-ojxuodky"><span class="astro-ojxuodky">Project Settings</span></a></li></ul></details></li><li class="astro-ojxuodky"><details class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">Engine foundations</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" data-keire-style-e27c263fbcb6=""><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="2"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/docs/reference/architecture/" class="astro-ojxuodky"><span class="astro-ojxuodky">Architecture</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/runtime-lifecycle/" class="astro-ojxuodky"><span class="astro-ojxuodky">Runtime Lifecycle</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/ecs-and-components/" class="astro-ojxuodky"><span class="astro-ojxuodky">ECS And Components</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/scene-system/" class="astro-ojxuodky"><span class="astro-ojxuodky">Scene System</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/gameplay-foundations/" class="astro-ojxuodky"><span class="astro-ojxuodky">Gameplay-production foundations</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/input-system/" class="astro-ojxuodky"><span class="astro-ojxuodky">Input System</span></a></li></ul></details></li><li class="astro-ojxuodky"><details class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">Editor and authoring</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" data-keire-style-e27c263fbcb6=""><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="3"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/docs/reference/ui-workspace/" class="astro-ojxuodky"><span class="astro-ojxuodky">UI Workspace Guide</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/editor-panels/" class="astro-ojxuodky"><span class="astro-ojxuodky">Editor Panels And Commands</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/scene-authoring/" class="astro-ojxuodky"><span class="astro-ojxuodky">Scene Authoring</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/asset-browser/" class="astro-ojxuodky"><span class="astro-ojxuodky">Asset Browser</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/input-actions-editor/" class="astro-ojxuodky"><span class="astro-ojxuodky">Input Actions Editor</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/input-debugger/" class="astro-ojxuodky"><span class="astro-ojxuodky">Input Debugger</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/undo-redo/" class="astro-ojxuodky"><span class="astro-ojxuodky">Undo And Redo</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/animation-rigging/" class="astro-ojxuodky"><span class="astro-ojxuodky">Animation And Rigging</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/weapon-authoring/" class="astro-ojxuodky"><span class="astro-ojxuodky">Weapon Authoring</span></a></li></ul></details></li><li class="astro-ojxuodky"><details open class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">Assets, rendering, and builds</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" data-keire-style-e27c263fbcb6=""><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="4"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/docs/reference/asset-runtime/" class="astro-ojxuodky"><span class="astro-ojxuodky">Asset Runtime</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/asset-pipeline/" class="astro-ojxuodky"><span class="astro-ojxuodky">Asset Database And Cook Pipeline</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/audio-production/" class="astro-ojxuodky"><span class="astro-ojxuodky">Audio Production Workflow And Audit</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/builtin-meshes/" class="astro-ojxuodky"><span class="astro-ojxuodky">Built-In Meshes</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/rendering/" class="astro-ojxuodky"><span class="astro-ojxuodky">Rendering</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/shaders-and-materials/" class="astro-ojxuodky"><span class="astro-ojxuodky">Shaders And Materials</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/material-parity-matrix/" aria-current="page" class="astro-ojxuodky"><span class="astro-ojxuodky">Material Ecosystem Parity Matrix</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/vfx/" class="astro-ojxuodky"><span class="astro-ojxuodky">VFX Authoring And Runtime</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/vfx-beyond-parity-roadmap/" class="astro-ojxuodky"><span class="astro-ojxuodky">Kéire VFX Beyond-Parity Roadmap</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/generated/vfx-capabilities/" class="astro-ojxuodky"><span class="astro-ojxuodky">Generated VFX Capabilities</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/visual-authoring-initiatives/" class="astro-ojxuodky"><span class="astro-ojxuodky">VFX And Shader Graph Initiatives</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/player-builds/" class="astro-ojxuodky"><span class="astro-ojxuodky">Desktop Player Builds</span></a></li></ul></details></li><li class="astro-ojxuodky"><details class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">C# scripting</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" data-keire-style-e27c263fbcb6=""><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="5"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/docs/reference/scripting/" class="astro-ojxuodky"><span class="astro-ojxuodky">C# Scripting</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/scripting/getting-started/" class="astro-ojxuodky"><span class="astro-ojxuodky">Getting Started With C# Scripting</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/scripting/behaviours-and-lifecycle/" class="astro-ojxuodky"><span class="astro-ojxuodky">Behaviours And Lifecycle</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/scripting/serialization-and-inspector/" class="astro-ojxuodky"><span class="astro-ojxuodky">Serialization And The Inspector</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/scripting/entities-components-and-transforms/" class="astro-ojxuodky"><span class="astro-ojxuodky">Entities, Components, And Transforms</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/scripting/assets-and-scriptable-objects/" class="astro-ojxuodky"><span class="astro-ojxuodky">Assets And ScriptableObjects</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/scripting/gameplay-services/" class="astro-ojxuodky"><span class="astro-ojxuodky">Gameplay Services</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/scripting/audio/" class="astro-ojxuodky"><span class="astro-ojxuodky">Audio From C#</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/scripting/animation/" class="astro-ojxuodky"><span class="astro-ojxuodky">Animation From C#</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/scripting/ui-and-events/" class="astro-ojxuodky"><span class="astro-ojxuodky">UI And Events From C#</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/scripting/async-reload-and-diagnostics/" class="astro-ojxuodky"><span class="astro-ojxuodky">Async, Reload, And Diagnostics</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/scripting/api-index/" class="astro-ojxuodky"><span class="astro-ojxuodky">Managed API Index</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/managed-scripting/" class="astro-ojxuodky"><span class="astro-ojxuodky">Managed Scripting</span></a></li></ul></details></li><li class="astro-ojxuodky"><details class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">Production and release</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" data-keire-style-e27c263fbcb6=""><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="6"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/docs/reference/profiling/" class="astro-ojxuodky"><span class="astro-ojxuodky">Profiling and Performance Diagnostics</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/performance-gates/" class="astro-ojxuodky"><span class="astro-ojxuodky">Reference-Hardware Performance Gates</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/testing-and-release/" class="astro-ojxuodky"><span class="astro-ojxuodky">Testing And Release</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/package-archives/" class="astro-ojxuodky"><span class="astro-ojxuodky">Generic Package Archives</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/asset-packages/" class="astro-ojxuodky"><span class="astro-ojxuodky">Asset Packages and Project Package Manager</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/production-readiness-review/" class="astro-ojxuodky"><span class="astro-ojxuodky">Kéire Production Readiness Review</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/maintainability/" class="astro-ojxuodky"><span class="astro-ojxuodky">Maintainability Boundaries</span></a></li></ul></details></li><li class="astro-ojxuodky"><details class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">Diagnostics</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" data-keire-style-e27c263fbcb6=""><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="7"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/docs/reference/diagnostics/" class="astro-ojxuodky"><span class="astro-ojxuodky">Structured diagnostics</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/diagnostics/keire-audio-0001/" class="astro-ojxuodky"><span class="astro-ojxuodky">KEIRE-AUDIO-0001: Audio streaming underrun</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/diagnostics/keire-example-0001/" class="astro-ojxuodky"><span class="astro-ojxuodky">KEIRE-EXAMPLE-0001: Example module diagnostic</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/diagnostics/keire-replay-0001/" class="astro-ojxuodky"><span class="astro-ojxuodky">KEIRE-REPLAY-0001: Replay divergence</span></a></li><li class="astro-ojxuodky"><a href="/docs/reference/diagnostics/keire-replay-0002/" class="astro-ojxuodky"><span class="astro-ojxuodky">KEIRE-REPLAY-0002: Replay session failure</span></a></li></ul></details></li></ul><script aria-hidden="true" src="/_astro/keire-csp-ede095e23b6caf8b.js"></script></sl-sidebar-state-persist><div class="md:sl-hidden"><div class="mobile-preferences sl-flex astro-b5gddk54"><div class="social-icons astro-b5gddk54"><a href="/" rel="me" class="sl-flex astro-cg55etiy"><span class="sr-only astro-cg55etiy">Kéire Engine website</span><svg aria-hidden="true" class="astro-cg55etiy astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" data-keire-style-5582daf1f3b7=""><path d="M19.33 10.18a1 1 0 0 1-.77 0 1 1 0 0 1-.62-.93l.01-1.83-8.2 8.2a1 1 0 0 1-1.41-1.42l8.2-8.2H14.7a1 1 0 0 1 0-2h4.25a1 1 0 0 1 1 1v4.25a1 1 0 0 1-.62.93Z"/><path d="M11 4a1 1 0 1 1 0 2H7a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-4a1 1 0 1 1 2 0v4a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3h4Z"/></svg></a><a href="https://github.com/hcfgod/KeireEngine" rel="me" class="sl-flex astro-cg55etiy"><span class="sr-only astro-cg55etiy">Kéire Engine on GitHub</span><svg aria-hidden="true" class="astro-cg55etiy astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" data-keire-style-5582daf1f3b7=""><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg></a></div><starlight-theme-select><label data-keire-style-10e67b2302fa="" class="astro-r2p65idu"><span class="sr-only astro-r2p65idu">Select theme</span><svg aria-hidden="true" class="icon label-icon astro-r2p65idu astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" data-keire-style-5582daf1f3b7=""><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg><select autocomplete="off" class="astro-r2p65idu"><option value="dark" class="astro-r2p65idu">Dark</option><option value="light" class="astro-r2p65idu">Light</option><option value="auto" selected class="astro-r2p65idu">Auto</option></select><svg aria-hidden="true" class="icon caret astro-r2p65idu astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" data-keire-style-5582daf1f3b7=""><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg></label></starlight-theme-select><script src="/_astro/keire-csp-1a4641467bd2ba1b.js"></script></div></div></div></div></nav><div class="main-frame astro-gqpr5s5a"><script type="module" src="/_astro/Page.astro_astro_type_script_index_0_lang.DC4zszI0.js"></script><div class="lg:sl-flex astro-abfeecmu"><aside class="right-sidebar-container print:hidden astro-abfeecmu"><div class="right-sidebar astro-abfeecmu"><div class="lg:sl-hidden astro-q5mffni3"><mobile-starlight-toc data-min-h="2" data-max-h="3" class="astro-5ulgm6bh"><nav aria-labelledby="starlight__on-this-page--mobile" class="astro-5ulgm6bh"><details id="starlight__mobile-toc" class="astro-5ulgm6bh"><summary id="starlight__on-this-page--mobile" class="sl-flex astro-5ulgm6bh"><span class="toggle sl-flex astro-5ulgm6bh">On this page<svg aria-hidden="true" class="caret astro-5ulgm6bh astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" data-keire-style-c2bbcc372c09=""><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></span><span class="display-current astro-5ulgm6bh"></span></summary><div class="dropdown astro-5ulgm6bh"><ul class="isMobile astro-cxyftcne" data-keire-style-37453b51b5fb=""><li data-keire-style-37453b51b5fb="" class="astro-cxyftcne"><a href="#_top" data-keire-style-37453b51b5fb="" class="astro-cxyftcne"><span data-keire-style-37453b51b5fb="" class="astro-cxyftcne">Overview</span></a></li><li data-keire-style-37453b51b5fb="" class="astro-cxyftcne"><a href="#capability-matrix" data-keire-style-37453b51b5fb="" class="astro-cxyftcne"><span data-keire-style-37453b51b5fb="" class="astro-cxyftcne">Capability Matrix</span></a></li><li data-keire-style-37453b51b5fb="" class="astro-cxyftcne"><a href="#production-scenario-gates" data-keire-style-37453b51b5fb="" class="astro-cxyftcne"><span data-keire-style-37453b51b5fb="" class="astro-cxyftcne">Production Scenario Gates</span></a></li></ul></div></details></nav></mobile-starlight-toc><script type="module" src="/_astro/MobileTableOfContents.astro_astro_type_script_index_0_lang.BcSo_yiZ.js"></script></div><div class="right-sidebar-panel sl-hidden lg:sl-block astro-q5mffni3"><div class="sl-container astro-q5mffni3"><starlight-toc data-min-h="2" data-max-h="3"><nav aria-labelledby="starlight__on-this-page"><h2 id="starlight__on-this-page">On this page</h2><ul class="astro-cxyftcne" data-keire-style-37453b51b5fb=""><li data-keire-style-37453b51b5fb="" class="astro-cxyftcne"><a href="#_top" data-keire-style-37453b51b5fb="" class="astro-cxyftcne"><span data-keire-style-37453b51b5fb="" class="astro-cxyftcne">Overview</span></a></li><li data-keire-style-37453b51b5fb="" class="astro-cxyftcne"><a href="#capability-matrix" data-keire-style-37453b51b5fb="" class="astro-cxyftcne"><span data-keire-style-37453b51b5fb="" class="astro-cxyftcne">Capability Matrix</span></a></li><li data-keire-style-37453b51b5fb="" class="astro-cxyftcne"><a href="#production-scenario-gates" data-keire-style-37453b51b5fb="" class="astro-cxyftcne"><span data-keire-style-37453b51b5fb="" class="astro-cxyftcne">Production Scenario Gates</span></a></li></ul></nav></starlight-toc><script type="module" src="/_astro/TableOfContents.astro_astro_type_script_index_0_lang.Csloo1VZ.js"></script></div></div></div></aside><div class="main-pane astro-abfeecmu"><main data-pagefind-body class="astro-vdxcvpsm" lang="en" dir="ltr"><div class="content-panel astro-oil7k7jf"><div class="sl-container astro-oil7k7jf"><h1 id="_top" class="astro-2sm4b3ln">Material Ecosystem Parity Matrix</h1></div></div><div class="content-panel astro-oil7k7jf"><div class="sl-container astro-oil7k7jf"><div class="sl-markdown-content"><p>Review date: 2026-08-10
+Comparison model: Unreal-inspired material workflow, adapted to Kéire’s renderer-neutral asset and runtime boundaries</p>
+<p>This matrix is the acceptance authority for the Material Ecosystem initiative. <code dir="auto">Complete</code> means the capability has an
+implemented engine/editor path and focused evidence. <code dir="auto">Partial</code> means the shipped subset rejects unsupported behavior
+instead of silently degrading. <code dir="auto">Planned</code> is not a supported feature. Counts are useful for planning, but production
+scenarios and executable validation decide milestone acceptance.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="capability-matrix">Capability Matrix</h2><a class="sl-anchor-link" href="#capability-matrix"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Capability Matrix”</span></a></div>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Capability</th>
+<th>Status</th>
+<th>Priority</th>
+<th>Evidence or remaining gate</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ME-AS-001</td>
+<td>Distinct Shader Graph asset</td>
+<td>Complete</td>
+<td>P0</td>
+<td><code dir="auto">.keireshadergraph</code>, importer, editor, generated variants, and tests.</td>
+</tr>
+<tr>
+<td>ME-AS-002</td>
+<td>Distinct Material Graph asset</td>
+<td>Complete</td>
+<td>P0</td>
+<td><code dir="auto">.keirematerialgraph</code>, Material Output composition, importer, editor, and tests.</td>
+</tr>
+<tr>
+<td>ME-AS-003</td>
+<td>Direct Material asset</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Inspector-authored <code dir="auto">.keirematerial</code> remains assignable and shader-backed.</td>
+</tr>
+<tr>
+<td>ME-AS-004</td>
+<td>Material Instance asset</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Versioned inheritance, static/dynamic overrides, bounded ancestry, and tests.</td>
+</tr>
+<tr>
+<td>ME-AS-005</td>
+<td>Material Function asset</td>
+<td>Complete</td>
+<td>P0</td>
+<td><code dir="auto">.keirematerialfunction</code>, typed body, importer/decoder, editor create/open/save.</td>
+</tr>
+<tr>
+<td>ME-AS-006</td>
+<td>Shader Function asset</td>
+<td>Complete</td>
+<td>P1</td>
+<td><code dir="auto">.keireshaderfunction</code>, typed body, importer/decoder, editor create/open/save.</td>
+</tr>
+<tr>
+<td>ME-AS-007</td>
+<td>Material Layer asset</td>
+<td>Complete</td>
+<td>P0</td>
+<td><code dir="auto">.keiremateriallayer</code> with Material Attributes output.</td>
+</tr>
+<tr>
+<td>ME-AS-008</td>
+<td>Material Layer Blend asset</td>
+<td>Complete</td>
+<td>P0</td>
+<td><code dir="auto">.keirematerialblend</code> with Bottom, Top, and Alpha interface.</td>
+</tr>
+<tr>
+<td>ME-AS-009</td>
+<td>Material Parameter Collection asset</td>
+<td>Complete</td>
+<td>P0</td>
+<td><code dir="auto">.keirematerialcollection</code>, deterministic source/cooked data, importer/decoder.</td>
+</tr>
+<tr>
+<td>ME-AS-010</td>
+<td>Safe rename, duplicate, move, and trash</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Generic stable-ID asset operations cover every new extension.</td>
+</tr>
+<tr>
+<td>ME-AS-011</td>
+<td>Deterministic source serialization</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Canonical JSON and byte-equality tests for functions and collections.</td>
+</tr>
+<tr>
+<td>ME-AS-012</td>
+<td>Bounded source decoding</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Explicit size, count, text, schema, identifier, and finite-value limits.</td>
+</tr>
+<tr>
+<td>ME-AS-013</td>
+<td>Future-schema rejection</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Shader schema 3 and reusable schema 1 reject unsupported future data.</td>
+</tr>
+<tr>
+<td>ME-AS-014</td>
+<td>Import dependency extraction</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Function calls publish sorted unique asset dependencies.</td>
+</tr>
+<tr>
+<td>ME-AS-015</td>
+<td>Dependent reimport after function change</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Asset dependency graph invalidates Shader/Material Graph imports.</td>
+</tr>
+<tr>
+<td>ME-AS-016</td>
+<td>Transactional generated shader publication</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Staged replacement and rollback retain last-good variants.</td>
+</tr>
+<tr>
+<td>ME-AS-017</td>
+<td>Function metadata preservation</td>
+<td>Complete</td>
+<td>P1</td>
+<td>Reusable document saves preserve description, category, priority, and library visibility.</td>
+</tr>
+<tr>
+<td>ME-AS-018</td>
+<td>Function metadata editing UI</td>
+<td>Planned</td>
+<td>P1</td>
+<td>Add dedicated Library metadata controls and undo coverage.</td>
+</tr>
+<tr>
+<td>ME-AS-019</td>
+<td>Redirectors after asset moves</td>
+<td>Planned</td>
+<td>P1</td>
+<td>Requires explicit redirector asset and cook policy.</td>
+</tr>
+<tr>
+<td>ME-AS-020</td>
+<td>Source-control-aware checkout/status</td>
+<td>Planned</td>
+<td>P2</td>
+<td>Requires provider-neutral source-control boundary.</td>
+</tr>
+<tr>
+<td>ME-GR-001</td>
+<td>Typed function call node</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Interface derives from stable Parameter and Output pins.</td>
+</tr>
+<tr>
+<td>ME-GR-002</td>
+<td>Calls in Shader Graph</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Search palette lists compatible project functions and layers.</td>
+</tr>
+<tr>
+<td>ME-GR-003</td>
+<td>Calls in Material Graph</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Material expressions use the same call contract.</td>
+</tr>
+<tr>
+<td>ME-GR-004</td>
+<td>Deterministic recursive expansion</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Derived IDs make repeated expansion byte-identical.</td>
+</tr>
+<tr>
+<td>ME-GR-005</td>
+<td>Missing function diagnostics</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Expansion rejects unresolved assets before shader publication.</td>
+</tr>
+<tr>
+<td>ME-GR-006</td>
+<td>Function recursion rejection</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Dependency stack rejects direct and indirect cycles.</td>
+</tr>
+<tr>
+<td>ME-GR-007</td>
+<td>Expansion depth budget</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Configurable depth cap defaults to 32.</td>
+</tr>
+<tr>
+<td>ME-GR-008</td>
+<td>Stale call-interface rejection</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Typed pin mapping fails recoverably when an interface no longer matches.</td>
+</tr>
+<tr>
+<td>ME-GR-009</td>
+<td>Function input defaults</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Unconnected call inputs substitute the authored Parameter default.</td>
+</tr>
+<tr>
+<td>ME-GR-010</td>
+<td>Multiple function outputs</td>
+<td>Complete</td>
+<td>P1</td>
+<td>Output node inputs become independent typed call outputs.</td>
+</tr>
+<tr>
+<td>ME-GR-011</td>
+<td>Material Attributes function IO</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Structured attributes are valid function and layer interfaces.</td>
+</tr>
+<tr>
+<td>ME-GR-012</td>
+<td>BSDF function IO</td>
+<td>Complete</td>
+<td>P1</td>
+<td>Structured BSDF parameters are valid in reusable bodies.</td>
+</tr>
+<tr>
+<td>ME-GR-013</td>
+<td>Function preview in parent graph</td>
+<td>Partial</td>
+<td>P1</td>
+<td>Expanded shader preview works; reusable-body standalone preview is intentionally absent.</td>
+</tr>
+<tr>
+<td>ME-GR-014</td>
+<td>Promote selection to function</td>
+<td>Planned</td>
+<td>P1</td>
+<td>Needs transactional graph extraction and cable rewiring.</td>
+</tr>
+<tr>
+<td>ME-GR-015</td>
+<td>Inline function command</td>
+<td>Planned</td>
+<td>P2</td>
+<td>Needs editor placement policy for expanded nodes.</td>
+</tr>
+<tr>
+<td>ME-GR-016</td>
+<td>Function-library favorites/recent</td>
+<td>Partial</td>
+<td>P2</td>
+<td>Base node palette has recent/common; dynamic asset calls do not yet persist recents.</td>
+</tr>
+<tr>
+<td>ME-GR-017</td>
+<td>Reroute node</td>
+<td>Complete</td>
+<td>P1</td>
+<td>Typed pass-through node compiles and previews.</td>
+</tr>
+<tr>
+<td>ME-GR-018</td>
+<td>If node</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Thresholded three-way selection with typed results.</td>
+</tr>
+<tr>
+<td>ME-GR-019</td>
+<td>Compare node</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Equal, greater, and less scalar outputs.</td>
+</tr>
+<tr>
+<td>ME-GR-020</td>
+<td>Boolean logic nodes</td>
+<td>Complete</td>
+<td>P0</td>
+<td>And, Or, and Not lower to portable scalar truth values.</td>
+</tr>
+<tr>
+<td>ME-GR-021</td>
+<td>Unit conversion nodes</td>
+<td>Complete</td>
+<td>P1</td>
+<td>Degrees/Radians conversion compiles and previews.</td>
+</tr>
+<tr>
+<td>ME-GR-022</td>
+<td>General exponent/log nodes</td>
+<td>Complete</td>
+<td>P1</td>
+<td>Natural exponential/logarithm with contained domains.</td>
+</tr>
+<tr>
+<td>ME-GR-023</td>
+<td>Hyperbolic math nodes</td>
+<td>Complete</td>
+<td>P2</td>
+<td>Sinh, cosh, and tanh use portable HLSL intrinsics.</td>
+</tr>
+<tr>
+<td>ME-GR-024</td>
+<td>Scale and Bias node</td>
+<td>Complete</td>
+<td>P1</td>
+<td>Typed input with scalar scale and bias.</td>
+</tr>
+<tr>
+<td>ME-GR-025</td>
+<td>Node comments</td>
+<td>Planned</td>
+<td>P1</td>
+<td>Requires serialized comment regions and canvas interaction.</td>
+</tr>
+<tr>
+<td>ME-GR-026</td>
+<td>Named reroute declarations/usages</td>
+<td>Planned</td>
+<td>P2</td>
+<td>Requires cross-canvas name resolution.</td>
+</tr>
+<tr>
+<td>ME-GR-027</td>
+<td>Collapsible graph regions</td>
+<td>Planned</td>
+<td>P2</td>
+<td>Requires persistent region ownership and navigation.</td>
+</tr>
+<tr>
+<td>ME-GR-028</td>
+<td>Graph bookmarks</td>
+<td>Planned</td>
+<td>P2</td>
+<td>Requires workspace-scoped navigation state.</td>
+</tr>
+<tr>
+<td>ME-GR-029</td>
+<td>Copy/paste across assets</td>
+<td>Planned</td>
+<td>P1</td>
+<td>Requires collision-safe stable-ID remapping and dependency transfer.</td>
+</tr>
+<tr>
+<td>ME-GR-030</td>
+<td>Diff/merge visualization</td>
+<td>Planned</td>
+<td>P1</td>
+<td>Requires semantic graph diff independent of JSON ordering.</td>
+</tr>
+<tr>
+<td>ME-MA-001</td>
+<td>Material Output node</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Owns surface contract and remains distinct from Shader Output.</td>
+</tr>
+<tr>
+<td>ME-MA-002</td>
+<td>Shader Graph template selection</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Material Graph composes expressions through an explicit template.</td>
+</tr>
+<tr>
+<td>ME-MA-003</td>
+<td>Raw Shader compatibility workflow</td>
+<td>Complete</td>
+<td>P1</td>
+<td>Direct/compatibility material values remain supported.</td>
+</tr>
+<tr>
+<td>ME-MA-004</td>
+<td>Dynamic exposed parameters</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Parameter nodes become instance-editable material properties.</td>
+</tr>
+<tr>
+<td>ME-MA-005</td>
+<td>Static switch parameters</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Bounded deterministic shader variants and instance overrides.</td>
+</tr>
+<tr>
+<td>ME-MA-006</td>
+<td>Material Attributes make/break/blend</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Structured layer composition compiles through the normal graph path.</td>
+</tr>
+<tr>
+<td>ME-MA-007</td>
+<td>Standard Surface BSDF</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Portable lit surface closure.</td>
+</tr>
+<tr>
+<td>ME-MA-008</td>
+<td>Clear Coat BSDF</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Weight and roughness modify a typed BSDF.</td>
+</tr>
+<tr>
+<td>ME-MA-009</td>
+<td>Sheen BSDF</td>
+<td>Complete</td>
+<td>P1</td>
+<td>Color, weight, and roughness modify a typed BSDF.</td>
+</tr>
+<tr>
+<td>ME-MA-010</td>
+<td>Subsurface BSDF</td>
+<td>Complete</td>
+<td>P1</td>
+<td>Color and weight publish bounded subsurface attributes.</td>
+</tr>
+<tr>
+<td>ME-MA-011</td>
+<td>Transmission BSDF</td>
+<td>Complete</td>
+<td>P1</td>
+<td>Weight, IOR, refraction, and thickness publish typed attributes.</td>
+</tr>
+<tr>
+<td>ME-MA-012</td>
+<td>Surface Stack multi-closure evaluation</td>
+<td>Partial</td>
+<td>P0</td>
+<td>Layered attributes and BSDF modifiers ship; multi-lobe energy evaluation remains.</td>
+</tr>
+<tr>
+<td>ME-MA-013</td>
+<td>Material Layer call workflow</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Layer functions appear in both graph palettes.</td>
+</tr>
+<tr>
+<td>ME-MA-014</td>
+<td>Layer Blend call workflow</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Blend function exposes Bottom, Top, and Alpha.</td>
+</tr>
+<tr>
+<td>ME-MA-015</td>
+<td>Per-instance layer selection</td>
+<td>Planned</td>
+<td>P1</td>
+<td>Requires layer-stack instance schema and static permutation policy.</td>
+</tr>
+<tr>
+<td>ME-MA-016</td>
+<td>Material quality levels</td>
+<td>Planned</td>
+<td>P1</td>
+<td>Requires project quality policy and variant pruning.</td>
+</tr>
+<tr>
+<td>ME-MA-017</td>
+<td>Material parameter associations</td>
+<td>Planned</td>
+<td>P1</td>
+<td>Required for layer/function parameter identity across instances.</td>
+</tr>
+<tr>
+<td>ME-MA-018</td>
+<td>Parameter groups and sort priority</td>
+<td>Complete</td>
+<td>P1</td>
+<td>Stable metadata drives editor ordering.</td>
+</tr>
+<tr>
+<td>ME-MA-019</td>
+<td>Parameter ranges and steps</td>
+<td>Complete</td>
+<td>P1</td>
+<td>Optional finite metadata is reflected and validated.</td>
+</tr>
+<tr>
+<td>ME-MA-020</td>
+<td>Parameter rename stability</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Stable property IDs preserve compatibility bindings.</td>
+</tr>
+<tr>
+<td>ME-RT-001</td>
+<td>Immutable runtime MaterialAsset</td>
+<td>Complete</td>
+<td>P0</td>
+<td>All authoring workflows converge before RenderSystem.</td>
+</tr>
+<tr>
+<td>ME-RT-002</td>
+<td>Persistent Material Instance resolution</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Bounded parent resolution publishes one runtime material.</td>
+</tr>
+<tr>
+<td>ME-RT-003</td>
+<td>Dynamic Material Instance snapshots</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Thread-safe typed overrides, resets, revisions, and close.</td>
+</tr>
+<tr>
+<td>ME-RT-004</td>
+<td>Dynamic instance render upload</td>
+<td>Planned</td>
+<td>P0</td>
+<td>Needs renderer-owned coalesced upload and lifetime fencing.</td>
+</tr>
+<tr>
+<td>ME-RT-005</td>
+<td>Parameter Collection runtime snapshots</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Stable-ID values, typed mutation, reset, revision, and close.</td>
+</tr>
+<tr>
+<td>ME-RT-006</td>
+<td>Renderer-wide collection buffer</td>
+<td>Planned</td>
+<td>P0</td>
+<td>Needs renderer ABI, dirty-range upload, and per-frame binding.</td>
+</tr>
+<tr>
+<td>ME-RT-007</td>
+<td>World-scoped collection state</td>
+<td>Planned</td>
+<td>P0</td>
+<td>Needs scene/runtime ownership and Play Mode isolation.</td>
+</tr>
+<tr>
+<td>ME-RT-008</td>
+<td>Collection access nodes</td>
+<td>Planned</td>
+<td>P0</td>
+<td>Must bind stable collection/parameter IDs through the renderer ABI.</td>
+</tr>
+<tr>
+<td>ME-RT-009</td>
+<td>Managed collection API</td>
+<td>Planned</td>
+<td>P1</td>
+<td>Requires generated C# value contracts and reload-safe handles.</td>
+</tr>
+<tr>
+<td>ME-RT-010</td>
+<td>Managed dynamic instance API</td>
+<td>Planned</td>
+<td>P1</td>
+<td>Requires lifetime-safe managed wrappers and render handoff.</td>
+</tr>
+<tr>
+<td>ME-RT-011</td>
+<td>Material render proxies</td>
+<td>Planned</td>
+<td>P0</td>
+<td>Needed for scalable immutable-parent plus override binding.</td>
+</tr>
+<tr>
+<td>ME-RT-012</td>
+<td>Uniform-expression cache</td>
+<td>Planned</td>
+<td>P0</td>
+<td>Requires dependency-aware per-world cache invalidation.</td>
+</tr>
+<tr>
+<td>ME-RT-013</td>
+<td>Pipeline state sorting</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Opaque/masked/transparent submissions preserve deterministic policy.</td>
+</tr>
+<tr>
+<td>ME-RT-014</td>
+<td>Transparent sorting</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Back-to-front view-depth order is tested.</td>
+</tr>
+<tr>
+<td>ME-RT-015</td>
+<td>Material hot reload</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Development assets update without replacing last-good on failure.</td>
+</tr>
+<tr>
+<td>ME-ED-001</td>
+<td>Separate Shader and Material Graph documents</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Double-click routing and docked panels remain distinct.</td>
+</tr>
+<tr>
+<td>ME-ED-002</td>
+<td>Reusable graph document mode</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Purpose-aware validation and save do not generate standalone shaders.</td>
+</tr>
+<tr>
+<td>ME-ED-003</td>
+<td>Search-first node palette</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Toolbar/context search share the stable catalog.</td>
+</tr>
+<tr>
+<td>ME-ED-004</td>
+<td>Function/layer asset palette</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Project assets appear under Functions &amp; Layers.</td>
+</tr>
+<tr>
+<td>ME-ED-005</td>
+<td>Material Parameter Collection Inspector</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Add/edit/remove, explicit save/revert, type/default controls.</td>
+</tr>
+<tr>
+<td>ME-ED-006</td>
+<td>Live Shader Graph preview</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Last-good sphere/plane/cube/custom mesh preview.</td>
+</tr>
+<tr>
+<td>ME-ED-007</td>
+<td>Material live scene preview</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Draft runtime material is published to assigned scene objects.</td>
+</tr>
+<tr>
+<td>ME-ED-008</td>
+<td>Reusable body preview</td>
+<td>Planned</td>
+<td>P1</td>
+<td>Needs caller-supplied preview values and output visualization.</td>
+</tr>
+<tr>
+<td>ME-ED-009</td>
+<td>Per-node preview tiles</td>
+<td>Planned</td>
+<td>P1</td>
+<td>Needs selective compilation and bounded thumbnail scheduling.</td>
+</tr>
+<tr>
+<td>ME-ED-010</td>
+<td>Node/pin diagnostic focus</td>
+<td>Partial</td>
+<td>P1</td>
+<td>IDs are reported; canvas focus/navigation remains.</td>
+</tr>
+<tr>
+<td>ME-ED-011</td>
+<td>Undo/redo graph topology</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Bounded document contexts cover nodes, cables, values, and metadata.</td>
+</tr>
+<tr>
+<td>ME-ED-012</td>
+<td>Collection undo/redo</td>
+<td>Planned</td>
+<td>P1</td>
+<td>Current editor uses explicit save/revert.</td>
+</tr>
+<tr>
+<td>ME-ED-013</td>
+<td>Last-good compile recovery</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Failed drafts do not replace preview or runtime shader variants.</td>
+</tr>
+<tr>
+<td>ME-ED-014</td>
+<td>Background generation checks</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Superseded compilation results are discarded.</td>
+</tr>
+<tr>
+<td>ME-ED-015</td>
+<td>Compile statistics</td>
+<td>Complete</td>
+<td>P1</td>
+<td>Active nodes, textures, ALU estimate, and variants.</td>
+</tr>
+<tr>
+<td>ME-ED-016</td>
+<td>Platform compiler diagnostics</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Importer diagnostics retain generated-line context.</td>
+</tr>
+<tr>
+<td>ME-ED-017</td>
+<td>Shader complexity visualization</td>
+<td>Planned</td>
+<td>P1</td>
+<td>Needs renderer instrumentation and viewport overlay.</td>
+</tr>
+<tr>
+<td>ME-ED-018</td>
+<td>Material analyzer</td>
+<td>Planned</td>
+<td>P0</td>
+<td>Needs enforceable instruction/resource/variant budget policy.</td>
+</tr>
+<tr>
+<td>ME-ED-019</td>
+<td>Usage/reference viewer</td>
+<td>Planned</td>
+<td>P1</td>
+<td>Requires asset dependency query UI.</td>
+</tr>
+<tr>
+<td>ME-ED-020</td>
+<td>Batch recompile dashboard</td>
+<td>Planned</td>
+<td>P1</td>
+<td>Requires cancellable asset-operation aggregation.</td>
+</tr>
+<tr>
+<td>ME-RS-001</td>
+<td>Texture2D parameters and sampling</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Reflected resource ABI and texture semantics.</td>
+</tr>
+<tr>
+<td>ME-RS-002</td>
+<td>Explicit sampler states</td>
+<td>Planned</td>
+<td>P0</td>
+<td>Requires portable sampler asset/value contract.</td>
+</tr>
+<tr>
+<td>ME-RS-003</td>
+<td>Texture arrays/cubes/3D textures</td>
+<td>Planned</td>
+<td>P0</td>
+<td>Requires asset types, reflection, preview, and backend coverage.</td>
+</tr>
+<tr>
+<td>ME-RS-004</td>
+<td>Structured/byte-address buffers</td>
+<td>Planned</td>
+<td>P1</td>
+<td>Requires security and size budgets in authoring/runtime.</td>
+</tr>
+<tr>
+<td>ME-RS-005</td>
+<td>Virtual textures</td>
+<td>Planned</td>
+<td>P2</td>
+<td>Requires streaming system and feedback integration.</td>
+</tr>
+<tr>
+<td>ME-RS-006</td>
+<td>Decal output</td>
+<td>Complete</td>
+<td>P1</td>
+<td>Dedicated template/output contract.</td>
+</tr>
+<tr>
+<td>ME-RS-007</td>
+<td>Fullscreen output</td>
+<td>Complete</td>
+<td>P1</td>
+<td>Dedicated template/output contract.</td>
+</tr>
+<tr>
+<td>ME-RS-008</td>
+<td>Hair output</td>
+<td>Complete</td>
+<td>P1</td>
+<td>Dedicated template/output contract.</td>
+</tr>
+<tr>
+<td>ME-RS-009</td>
+<td>Eye output</td>
+<td>Complete</td>
+<td>P1</td>
+<td>Dedicated template/output contract.</td>
+</tr>
+<tr>
+<td>ME-RS-010</td>
+<td>Transparent output</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Premultiplied output and renderer state.</td>
+</tr>
+<tr>
+<td>ME-RS-011</td>
+<td>Additional blend modes</td>
+<td>Planned</td>
+<td>P0</td>
+<td>Add additive, modulate, alpha-composite, and alpha-holdout deliberately.</td>
+</tr>
+<tr>
+<td>ME-RS-012</td>
+<td>Two-sided shading controls</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Material surface state is serialized and renderer-consumed.</td>
+</tr>
+<tr>
+<td>ME-RS-013</td>
+<td>World-position offset</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Vertex-stage validation and generated ABI.</td>
+</tr>
+<tr>
+<td>ME-RS-014</td>
+<td>Pixel-depth offset</td>
+<td>Complete</td>
+<td>P1</td>
+<td>Fragment depth output and stage validation.</td>
+</tr>
+<tr>
+<td>ME-RS-015</td>
+<td>Tessellation/displacement pipeline</td>
+<td>Planned</td>
+<td>P2</td>
+<td>Depends on renderer backend strategy.</td>
+</tr>
+<tr>
+<td>ME-RS-016</td>
+<td>Ray tracing material path</td>
+<td>Planned</td>
+<td>P2</td>
+<td>Depends on explicit cross-platform RT milestone.</td>
+</tr>
+<tr>
+<td>ME-RS-017</td>
+<td>Path-tracing material path</td>
+<td>Planned</td>
+<td>P2</td>
+<td>Depends on offline renderer milestone.</td>
+</tr>
+<tr>
+<td>ME-RS-018</td>
+<td>Mobile material tier</td>
+<td>Planned</td>
+<td>P0</td>
+<td>Requires explicit resource/instruction and feature policy.</td>
+</tr>
+<tr>
+<td>ME-RS-019</td>
+<td>Platform-specific variant pruning</td>
+<td>Partial</td>
+<td>P0</td>
+<td>Target formats cook selectively; feature-level pruning remains.</td>
+</tr>
+<tr>
+<td>ME-RS-020</td>
+<td>Stable renderer ABI versioning</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Generator and vertex-layout versions are embedded and tested.</td>
+</tr>
+<tr>
+<td>ME-PF-001</td>
+<td>Node/connection hard limits</td>
+<td>Complete</td>
+<td>P0</td>
+<td>1,024 nodes and 4,096 connections by default.</td>
+</tr>
+<tr>
+<td>ME-PF-002</td>
+<td>Texture resource hard limits</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Portable material texture budget is validated.</td>
+</tr>
+<tr>
+<td>ME-PF-003</td>
+<td>Keyword/variant hard limits</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Deterministic maximum and explicit diagnostic.</td>
+</tr>
+<tr>
+<td>ME-PF-004</td>
+<td>Compile cancellation/supersession</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Generation-checked background jobs.</td>
+</tr>
+<tr>
+<td>ME-PF-005</td>
+<td>Derived-data shader cache</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Asset import cache and immutable inputs.</td>
+</tr>
+<tr>
+<td>ME-PF-006</td>
+<td>Reference-scene CPU budget</td>
+<td>Planned</td>
+<td>P0</td>
+<td>Define hardware tiers and measured thresholds.</td>
+</tr>
+<tr>
+<td>ME-PF-007</td>
+<td>Reference-scene GPU budget</td>
+<td>Planned</td>
+<td>P0</td>
+<td>Define hardware tiers and measured thresholds.</td>
+</tr>
+<tr>
+<td>ME-PF-008</td>
+<td>Shader compile-time gate</td>
+<td>Planned</td>
+<td>P0</td>
+<td>Add cold/warm percentile validation.</td>
+</tr>
+<tr>
+<td>ME-PF-009</td>
+<td>Variant explosion dashboard</td>
+<td>Planned</td>
+<td>P0</td>
+<td>Needs project-wide ownership and package impact reporting.</td>
+</tr>
+<tr>
+<td>ME-PF-010</td>
+<td>Runtime material memory attribution</td>
+<td>Planned</td>
+<td>P1</td>
+<td>Needs profiler counters by parent/instance/collection.</td>
+</tr>
+<tr>
+<td>ME-QA-001</td>
+<td>Core deterministic tests</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Function, layer, collection, compile, and instance tests.</td>
+</tr>
+<tr>
+<td>ME-QA-002</td>
+<td>Editor routing tests</td>
+<td>Complete</td>
+<td>P0</td>
+<td>New extensions route to graph or Inspector workflows.</td>
+</tr>
+<tr>
+<td>ME-QA-003</td>
+<td>Windows debug build</td>
+<td>Complete</td>
+<td>P0</td>
+<td>Required build is run for this slice.</td>
+</tr>
+<tr>
+<td>ME-QA-004</td>
+<td>Windows Release validation</td>
+<td>Partial</td>
+<td>P0</td>
+<td>Release builds and focused material-ecosystem tests pass; the complete release-candidate gate remains.</td>
+</tr>
+<tr>
+<td>ME-QA-005</td>
+<td>Windows ASan validation</td>
+<td>Partial</td>
+<td>P0</td>
+<td>Reusable-graph import, collection-state, and dynamic-instance tests pass under ASan; the complete release-candidate gate remains.</td>
+</tr>
+<tr>
+<td>ME-QA-006</td>
+<td>Linux build/test</td>
+<td>Planned</td>
+<td>P0</td>
+<td>Required before cross-platform release claim.</td>
+</tr>
+<tr>
+<td>ME-QA-007</td>
+<td>macOS build/test</td>
+<td>Planned</td>
+<td>P0</td>
+<td>Required before cross-platform release claim.</td>
+</tr>
+<tr>
+<td>ME-QA-008</td>
+<td>Sandbox function/layer examples</td>
+<td>Planned</td>
+<td>P1</td>
+<td>Add progressive reusable graph examples and scene objects.</td>
+</tr>
+<tr>
+<td>ME-QA-009</td>
+<td>Automated screenshot/golden UI coverage</td>
+<td>Planned</td>
+<td>P2</td>
+<td>Must remain resilient to backend/font differences.</td>
+</tr>
+<tr>
+<td>ME-QA-010</td>
+<td>Package/SDK consumer validation</td>
+<td>Planned</td>
+<td>P0</td>
+<td>Required when new runtime APIs enter a release package.</td>
+</tr>
+</tbody>
+</table>
+<div class="sl-heading-wrapper level-h2"><h2 id="production-scenario-gates">Production Scenario Gates</h2><a class="sl-anchor-link" href="#production-scenario-gates"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Production Scenario Gates”</span></a></div>
+<ol>
+<li><strong>Layered hero material:</strong> a Material Graph calls reusable functions and layers, exposes instance parameters,
+previews and hot reloads, survives a broken dependency, and packages the same renderer contract on every target.</li>
+<li><strong>Large material-instance family:</strong> one parent drives at least 10,000 persistent/dynamic instances without shader
+duplication, unbounded uploads, or unstable draw ordering.</li>
+<li><strong>World-driven collection:</strong> gameplay updates weather/time/wind collection values once per world and all dependent
+materials observe one frame-consistent revision with bounded uploads.</li>
+<li><strong>Safe project upgrade:</strong> historical Shader/Material Graphs open without source mutation; explicit save upgrades
+deterministically; future schemas and broken functions retain the last-good runtime assets.</li>
+<li><strong>Cross-platform cook:</strong> Windows, Linux, and macOS packages include only target formats and the complete transitive
+function/layer/material dependency closure.</li>
+</ol>
+<p>The current slice closes the reusable-asset and deterministic-compiler foundation. It does not claim full Unreal
+Engine parity: the <code dir="auto">Partial</code> and <code dir="auto">Planned</code> rows above remain release-visible work, especially renderer-backed
+collections, dynamic-instance render proxies, resource breadth, performance gates, and cross-platform release proof.</p>
+</div><footer class="sl-flex astro-xhxjzfa7"><div class="meta sl-flex astro-xhxjzfa7"><a href="https://github.com/hcfgod/KeireEngine/edit/master/Docs/MaterialParityMatrix.md" class="sl-flex print:hidden astro-xk5gmzsg"><svg aria-hidden="true" class="astro-xk5gmzsg astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" data-keire-style-fcb71e43b06f=""><path d="M22 7.24a1 1 0 0 0-.29-.71l-4.24-4.24a1 1 0 0 0-1.1-.22 1 1 0 0 0-.32.22l-2.83 2.83L2.29 16.05a1 1 0 0 0-.29.71V21a1 1 0 0 0 1 1h4.24a1 1 0 0 0 .76-.29l10.87-10.93L21.71 8c.1-.1.17-.2.22-.33a1 1 0 0 0 0-.24v-.14l.07-.05ZM6.83 20H4v-2.83l9.93-9.93 2.83 2.83L6.83 20ZM18.17 8.66l-2.83-2.83 1.42-1.41 2.82 2.82-1.41 1.42Z"/></svg>Edit page</a></div><div class="pagination-links print:hidden astro-jgq3vlii" dir="ltr"><a href="/docs/reference/shaders-and-materials/" rel="prev" class="astro-jgq3vlii"><svg aria-hidden="true" class="astro-jgq3vlii astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" data-keire-style-af658469cc3c=""><path d="M17 11H9.41l3.3-3.29a1.004 1.004 0 1 0-1.42-1.42l-5 5a1 1 0 0 0-.21.33 1 1 0 0 0 0 .76 1 1 0 0 0 .21.33l5 5a1.002 1.002 0 0 0 1.639-.325 1 1 0 0 0-.219-1.095L9.41 13H17a1 1 0 0 0 0-2Z"/></svg><span class="astro-jgq3vlii">Previous<br class="astro-jgq3vlii"><span class="link-title astro-jgq3vlii">Shaders And Materials</span></span></a><a href="/docs/reference/vfx/" rel="next" class="astro-jgq3vlii"><svg aria-hidden="true" class="astro-jgq3vlii astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" data-keire-style-af658469cc3c=""><path d="M17.92 11.62a1.001 1.001 0 0 0-.21-.33l-5-5a1.003 1.003 0 1 0-1.42 1.42l3.3 3.29H7a1 1 0 0 0 0 2h7.59l-3.3 3.29a1.002 1.002 0 0 0 .325 1.639 1 1 0 0 0 1.095-.219l5-5a1 1 0 0 0 .21-.33 1 1 0 0 0 0-.76Z"/></svg><span class="astro-jgq3vlii">Next<br class="astro-jgq3vlii"><span class="link-title astro-jgq3vlii">VFX Authoring And Runtime</span></span></a></div></footer></div></div></main></div></div></div></div></body></html>

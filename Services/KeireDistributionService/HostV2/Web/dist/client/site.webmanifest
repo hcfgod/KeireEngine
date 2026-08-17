@@ -1,0 +1,16 @@
+{
+  "name": "Kéire Engine",
+  "short_name": "Kéire",
+  "description": "Open, cross-platform game technology.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#02040b",
+  "theme_color": "#050915",
+  "icons": [
+    {
+      "src": "/assets/keire.png",
+      "sizes": "1024x1024",
+      "type": "image/png"
+    }
+  ]
+}

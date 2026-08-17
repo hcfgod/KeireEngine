@@ -1,0 +1,23 @@
+[Unit]
+Description=Kéire Distribution Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=keire-distribution
+Group=keire-distribution
+WorkingDirectory=/opt/keire-distribution
+ExecStart=/opt/keire-distribution/KeireDistributionService
+Environment=DOTNET_ENVIRONMENT=Production
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadOnlyPaths=/srv/keire-distribution
+ReadWritePaths=/var/log/keire-distribution
+
+[Install]
+WantedBy=multi-user.target

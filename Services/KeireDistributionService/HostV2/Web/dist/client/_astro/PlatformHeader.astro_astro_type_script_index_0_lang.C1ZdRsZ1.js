@@ -1,0 +1,1 @@
+var e=document.querySelector(`[data-platform-nav-toggle]`),t=document.querySelector(`[data-platform-nav]`);e?.addEventListener(`click`,()=>{let n=e.getAttribute(`aria-expanded`)===`true`;e.setAttribute(`aria-expanded`,String(!n)),t?.toggleAttribute(`data-open`,!n)});
