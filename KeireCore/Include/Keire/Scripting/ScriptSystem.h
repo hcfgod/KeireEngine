@@ -69,6 +69,31 @@ namespace Keire
         float Distance = 0.0F;
     };
 
+    struct ManagedCapsuleCastQuery
+    {
+        std::uint64_t World = 0;
+        AssetId ContextEntity;
+        Vector3 Origin;
+        Quaternion Rotation;
+        float Radius = 0.5F;
+        float Height = 1.0F;
+        Vector3 Displacement;
+        std::uint32_t Mask = ~0U;
+        AssetId IgnoredEntity;
+        bool IncludeTriggers = false;
+    };
+
+    struct ManagedSphereOverlapQuery
+    {
+        std::uint64_t World = 0;
+        AssetId ContextEntity;
+        Vector3 Center;
+        float Radius = 0.5F;
+        std::uint32_t Mask = ~0U;
+        AssetId IgnoredEntity;
+        bool IncludeTriggers = true;
+    };
+
     struct ManagedAudioPlayback
     {
         AssetId Entity;
@@ -272,6 +297,12 @@ namespace Keire
         {
             return std::nullopt;
         }
+        [[nodiscard]] virtual std::optional<ManagedRaycastHit>
+        CapsuleCastManaged(const ManagedCapsuleCastQuery&) noexcept
+        {
+            return std::nullopt;
+        }
+        [[nodiscard]] virtual std::vector<AssetId> OverlapSphereManaged(const ManagedSphereOverlapQuery&) { return {}; }
         virtual void SetManagedCursorVisible(bool) noexcept {}
         virtual void SetManagedCursorLocked(bool) noexcept {}
         [[nodiscard]] virtual bool IsManagedCursorVisible() const noexcept { return true; }

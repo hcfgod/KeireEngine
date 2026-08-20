@@ -85,6 +85,10 @@ namespace KeireRuntime
         [[nodiscard]] std::vector<Keire::AssetId> LoadedManagedScenes() const final;
         [[nodiscard]] std::optional<Keire::RenderEnvironmentSettings> ManagedRenderEnvironment() const noexcept final;
         [[nodiscard]] bool SetManagedRenderEnvironment(Keire::RenderEnvironmentSettings settings) noexcept final;
+        [[nodiscard]] std::optional<Keire::ManagedRaycastHit>
+        CapsuleCastManaged(const Keire::ManagedCapsuleCastQuery& query) noexcept final;
+        [[nodiscard]] std::vector<Keire::AssetId>
+        OverlapSphereManaged(const Keire::ManagedSphereOverlapQuery& query) final;
 
         ManagedWorldRuntime m_ManagedWorld;
         Keire::RenderEnvironmentSettings m_Rendering;

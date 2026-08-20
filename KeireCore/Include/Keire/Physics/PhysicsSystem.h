@@ -152,6 +152,16 @@ namespace Keire
         PhysicsBodyId IgnoreBody;
     };
 
+    struct PhysicsSphereOverlapQuery
+    {
+        Vector3 Center;
+        float Radius = 0.5F;
+        std::uint32_t Mask = ~0U;
+        bool IncludeTriggers = true;
+        std::uint32_t Layer = 1;
+        PhysicsBodyId IgnoreBody;
+    };
+
     struct PhysicsQueryHit
     {
         PhysicsBodyId Body;
@@ -251,6 +261,7 @@ namespace Keire
         [[nodiscard]] std::optional<PhysicsBodyState> TryGetBody(PhysicsBodyId body) const;
         [[nodiscard]] std::vector<PhysicsQueryHit> RayCast(const PhysicsRayQuery& query) const;
         [[nodiscard]] std::optional<PhysicsQueryHit> CastCapsule(const PhysicsCapsuleCastQuery& query) const;
+        [[nodiscard]] std::vector<PhysicsBodyId> OverlapSphere(const PhysicsSphereOverlapQuery& query) const;
         [[nodiscard]] std::vector<PhysicsBodyId> OverlapSphere(Vector3 center, float radius, std::uint32_t mask = ~0U,
                                                                std::uint32_t layer = 1) const;
         void Step(float deltaSeconds);

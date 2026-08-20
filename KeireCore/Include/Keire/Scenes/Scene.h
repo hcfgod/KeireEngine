@@ -195,6 +195,10 @@ namespace Keire
         [[nodiscard]] bool SetVfxParameter(EntityId entity, const VfxParameterOverride& value);
         [[nodiscard]] std::vector<ScenePhysicsQueryHit> RayCast(const PhysicsRayQuery& query,
                                                                 EntityId ignoredEntity = {}) const;
+        [[nodiscard]] std::optional<ScenePhysicsQueryHit> CastCapsule(const PhysicsCapsuleCastQuery& query,
+                                                                      EntityId ignoredEntity = {}) const;
+        [[nodiscard]] std::vector<EntityId> OverlapSphere(const PhysicsSphereOverlapQuery& query,
+                                                          EntityId ignoredEntity = {}) const;
         void SetPresentationViewport(float width, float height, RuntimeUiInsets safeArea = {});
         void Play();
         void Pause(bool paused = true);

@@ -4,6 +4,7 @@
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/Scene.h"
 #include "Keire/Scenes/ScenePresentationRuntime.h"
+#include "KeireInternal/Scripting/ManagedRuntimePhysics.h"
 
 #include <algorithm>
 #include <ranges>
@@ -306,5 +307,19 @@ namespace KeireRuntime
         {
             return false;
         }
+    }
+
+    std::optional<Keire::ManagedRaycastHit>
+    ManagedWorldRuntimeServices::CapsuleCastManaged(const Keire::ManagedCapsuleCastQuery& query) noexcept
+    {
+        return Keire::Detail::QueryManagedCapsule(m_Runtime ? *m_Runtime : Keire::Ref<Keire::SceneRuntimeSession>{},
+                                                  query);
+    }
+
+    std::vector<Keire::AssetId>
+    ManagedWorldRuntimeServices::OverlapSphereManaged(const Keire::ManagedSphereOverlapQuery& query)
+    {
+        return Keire::Detail::QueryManagedSphereOverlap(
+            m_Runtime ? *m_Runtime : Keire::Ref<Keire::SceneRuntimeSession>{}, query);
     }
 } // namespace KeireRuntime

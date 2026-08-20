@@ -345,6 +345,44 @@ namespace Keire
         return result;
     }
 
+    std::optional<ScenePhysicsQueryHit> SceneRuntimeSession::CastCapsule(const PhysicsCapsuleCastQuery& query,
+                                                                         const EntityId ignoredEntity) const
+    {
+        m_Impl->RequireOwner("CastCapsule");
+        if (!m_Impl->PhysicsWorldService)
+            return std::nullopt;
+        auto candidate = query;
+        if (ignoredEntity)
+        {
+            const auto found = m_Impl->PhysicsBodies.find(ignoredEntity);
+            candidate.IgnoreBody = found == m_Impl->PhysicsBodies.end() ? PhysicsBodyId{} : found->second.Body;
+        }
+        const auto hit = m_Impl->PhysicsWorldService->CastCapsule(candidate);
+        const auto entity = hit ? m_Impl->EntityForBody(hit->Body) : std::nullopt;
+        return hit && entity ? std::optional{ScenePhysicsQueryHit{*entity, *hit}} : std::nullopt;
+    }
+
+    std::vector<EntityId> SceneRuntimeSession::OverlapSphere(const PhysicsSphereOverlapQuery& query,
+                                                             const EntityId ignoredEntity) const
+    {
+        m_Impl->RequireOwner("OverlapSphere");
+        std::vector<EntityId> result;
+        if (!m_Impl->PhysicsWorldService)
+            return result;
+        auto candidate = query;
+        if (ignoredEntity)
+        {
+            const auto found = m_Impl->PhysicsBodies.find(ignoredEntity);
+            candidate.IgnoreBody = found == m_Impl->PhysicsBodies.end() ? PhysicsBodyId{} : found->second.Body;
+        }
+        for (const auto body : m_Impl->PhysicsWorldService->OverlapSphere(candidate))
+        {
+            if (const auto entity = m_Impl->EntityForBody(body); entity && *entity != ignoredEntity)
+                result.push_back(*entity);
+        }
+        return result;
+    }
+
     void SceneRuntimeSession::SetPresentationViewport(const float width, const float height,
                                                       const RuntimeUiInsets safeArea)
     {
