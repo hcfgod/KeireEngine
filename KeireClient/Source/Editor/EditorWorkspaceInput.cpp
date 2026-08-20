@@ -576,6 +576,11 @@ bool EditorWorkspaceLayer::FocusManagedUi(const Keire::AssetId entity) noexcept
     return Keire::Detail::FocusManagedUi(presentation, entity);
 }
 
+Keire::Ref<Keire::Scene> EditorWorkspaceLayer::ManagedRuntimeScene() const noexcept
+{
+    return m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+}
+
 std::optional<Keire::ManagedRaycastHit>
 EditorWorkspaceLayer::RaycastManaged(const Keire::ManagedRaycastQuery& query) noexcept
 {

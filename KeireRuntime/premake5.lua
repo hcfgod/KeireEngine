@@ -6,12 +6,15 @@ project(RuntimeTarget)
 
     files
     {
+        "Include/**.h",
+        "Include/**.hpp",
         "Source/**.cpp"
     }
     AddKeireApplicationIcon()
 
     includedirs
     {
+        "Include",
         "../" .. ProjectConfig.CORE_DIRECTORY .. "/Include"
     }
 

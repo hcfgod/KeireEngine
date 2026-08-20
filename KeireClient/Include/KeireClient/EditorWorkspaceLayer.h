@@ -13,6 +13,7 @@
 #include "KeireClient/Editor/ShaderGraphPanel.h"
 #include "KeireClient/Editor/VfxEffectPanel.h"
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
+#include "KeireInternal/Scripting/ManagedRuntimeRenderingServices.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -81,7 +82,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
                                    private KeireEditor::ILightingPanelController,
                                    private KeireEditor::IAssetBrowserController,
                                    private KeireEditor::IViewportAssetDropCommands,
-                                   private Keire::IScriptRuntimeServices
+                                   private Keire::Detail::ManagedRuntimeSceneServices
 {
   public:
     explicit EditorWorkspaceLayer(bool smoke, bool initializeProject = false, bool smokePlay = false,
@@ -543,6 +544,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] bool SetManagedUiInputText(Keire::AssetId entity, std::string_view text) noexcept override;
     [[nodiscard]] bool ConsumeManagedUiEvent(Keire::AssetId entity, Keire::RuntimeUiEventType type) noexcept override;
     [[nodiscard]] bool FocusManagedUi(Keire::AssetId entity) noexcept override;
+    [[nodiscard]] Keire::Ref<Keire::Scene> ManagedRuntimeScene() const noexcept override;
     void AddConsoleMessage(std::string category, std::string message, Keire::UiColor color,
                            Keire::LogLevel level = Keire::LogLevel::Info) noexcept;
     void ReportError(std::string category, std::string message) noexcept;

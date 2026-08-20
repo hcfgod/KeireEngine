@@ -1,4 +1,4 @@
-#include "RuntimeUiInput.h"
+#include "KeireRuntimeInternal/RuntimeUiInput.h"
 
 #include "Keire/Scenes/ScenePresentationRuntime.h"
 #include "Keire/Window.h"

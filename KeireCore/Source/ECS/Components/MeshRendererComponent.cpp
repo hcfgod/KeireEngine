@@ -6,6 +6,8 @@
 #include <cmath>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
+#include <utility>
 
 namespace Keire
 {
@@ -28,6 +30,22 @@ namespace Keire
             return Math::IsFinite(color) && color.Red >= 0.0F && color.Red <= 1.0F && color.Green >= 0.0F &&
                    color.Green <= 1.0F && color.Blue >= 0.0F && color.Blue <= 1.0F && color.Alpha >= 0.0F &&
                    color.Alpha <= 1.0F;
+        }
+
+        [[nodiscard]] bool FiniteMaterialProperty(const MaterialPropertyValue& value) noexcept
+        {
+            return std::visit(
+                [](const auto& property) noexcept
+                {
+                    using Value = std::decay_t<decltype(property)>;
+                    if constexpr (std::is_same_v<Value, AssetId>)
+                        return true;
+                    else if constexpr (std::is_same_v<Value, float>)
+                        return std::isfinite(property);
+                    else
+                        return Math::IsFinite(property);
+                },
+                value);
         }
     } // namespace
 
@@ -117,6 +135,41 @@ namespace Keire
         NotifyChanged();
     }
 
+    void MeshRendererComponent::SetMaterialProperty(std::string name, MaterialPropertyValue value)
+    {
+        constexpr std::size_t maximumPropertyCount = 64;
+        constexpr std::size_t maximumPropertyNameBytes = 128;
+        if (name.empty() || name.size() > maximumPropertyNameBytes)
+            throw std::invalid_argument("Material property names must contain 1..128 UTF-8 bytes.");
+        if (!FiniteMaterialProperty(value))
+            throw std::invalid_argument("Material property values must be finite.");
+        const auto existing = m_MaterialProperties.find(name);
+        if (existing == m_MaterialProperties.end() && m_MaterialProperties.size() >= maximumPropertyCount)
+            throw std::length_error("Mesh Renderer material property block exceeds its 64-property limit.");
+        if (existing != m_MaterialProperties.end() && existing->second == value)
+            return;
+        m_MaterialProperties.insert_or_assign(std::move(name), std::move(value));
+        NotifyChanged();
+    }
+
+    bool MeshRendererComponent::ResetMaterialProperty(const std::string_view name)
+    {
+        const auto existing = m_MaterialProperties.find(name);
+        if (existing == m_MaterialProperties.end())
+            return false;
+        m_MaterialProperties.erase(existing);
+        NotifyChanged();
+        return true;
+    }
+
+    void MeshRendererComponent::ClearMaterialProperties()
+    {
+        if (m_MaterialProperties.empty())
+            return;
+        m_MaterialProperties.clear();
+        NotifyChanged();
+    }
+
     void MeshRendererComponent::Reset()
     {
         m_Mesh = MeshAsset::CubeId();
@@ -129,6 +182,7 @@ namespace Keire
         m_GIReceive = GIReceiveMode::LightProbes;
         m_LightmapScale = 1.0F;
         m_PreserveLightmapUVs = true;
+        m_MaterialProperties.clear();
         NotifyChanged();
     }
 

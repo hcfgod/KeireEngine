@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Keire/Api.h"
+#include "Keire/Assets/RenderingAssets.h"
 #include "Keire/ECS/Component.h"
 #include "Keire/Ref.h"
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
@@ -12,6 +13,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -145,6 +147,75 @@ namespace Keire
         ContentSize
     };
 
+    enum class ManagedRenderingComponent : std::uint8_t
+    {
+        Camera,
+        MeshRenderer,
+        DirectionalLight,
+        PointLight,
+        SpotLight
+    };
+
+    enum class ManagedRenderingScalarProperty : std::uint8_t
+    {
+        VerticalFieldOfView,
+        OrthographicSize,
+        NearPlane,
+        FarPlane,
+        LightmapScale,
+        Intensity,
+        Range,
+        ColorTemperature,
+        InnerAngle,
+        OuterAngle,
+        ShadowStrength,
+        ShadowBias,
+        CookieRotation,
+        IndirectMultiplier
+    };
+
+    enum class ManagedRenderingIntegerProperty : std::uint8_t
+    {
+        Priority,
+        Projection,
+        ClearMode,
+        GIReceive,
+        Shadows,
+        BakeMode,
+        ShadowResolution
+    };
+
+    enum class ManagedRenderingFlagProperty : std::uint8_t
+    {
+        Primary,
+        Visible,
+        CastShadows,
+        ReceiveShadows,
+        StaticLighting,
+        PreserveLightmapUVs,
+        UseColorTemperature,
+        ContactShadows
+    };
+
+    enum class ManagedRenderingVectorProperty : std::uint8_t
+    {
+        CookieScale,
+        CookieOffset
+    };
+
+    enum class ManagedRenderingColorProperty : std::uint8_t
+    {
+        ClearColor,
+        Tint,
+        LightColor
+    };
+
+    enum class ManagedRenderingAssetProperty : std::uint8_t
+    {
+        Mesh,
+        Cookie
+    };
+
     class KEIRE_API IScriptRuntimeServices
     {
       public:
@@ -233,6 +304,80 @@ namespace Keire
         [[nodiscard]] virtual bool SetManagedUiInputText(AssetId, std::string_view) noexcept { return false; }
         [[nodiscard]] virtual bool ConsumeManagedUiEvent(AssetId, RuntimeUiEventType) noexcept { return false; }
         [[nodiscard]] virtual bool FocusManagedUi(AssetId) noexcept { return false; }
+        [[nodiscard]] virtual std::optional<float> ReadManagedRenderingScalar(AssetId, ManagedRenderingComponent,
+                                                                              ManagedRenderingScalarProperty) noexcept
+        {
+            return std::nullopt;
+        }
+        [[nodiscard]] virtual bool SetManagedRenderingScalar(AssetId, ManagedRenderingComponent,
+                                                             ManagedRenderingScalarProperty, float) noexcept
+        {
+            return false;
+        }
+        [[nodiscard]] virtual std::optional<std::int32_t>
+        ReadManagedRenderingInteger(AssetId, ManagedRenderingComponent, ManagedRenderingIntegerProperty) noexcept
+        {
+            return std::nullopt;
+        }
+        [[nodiscard]] virtual bool SetManagedRenderingInteger(AssetId, ManagedRenderingComponent,
+                                                              ManagedRenderingIntegerProperty, std::int32_t) noexcept
+        {
+            return false;
+        }
+        [[nodiscard]] virtual std::optional<bool> ReadManagedRenderingFlag(AssetId, ManagedRenderingComponent,
+                                                                           ManagedRenderingFlagProperty) noexcept
+        {
+            return std::nullopt;
+        }
+        [[nodiscard]] virtual bool SetManagedRenderingFlag(AssetId, ManagedRenderingComponent,
+                                                           ManagedRenderingFlagProperty, bool) noexcept
+        {
+            return false;
+        }
+        [[nodiscard]] virtual std::optional<Vector2> ReadManagedRenderingVector(AssetId, ManagedRenderingComponent,
+                                                                                ManagedRenderingVectorProperty) noexcept
+        {
+            return std::nullopt;
+        }
+        [[nodiscard]] virtual bool SetManagedRenderingVector(AssetId, ManagedRenderingComponent,
+                                                             ManagedRenderingVectorProperty, Vector2) noexcept
+        {
+            return false;
+        }
+        [[nodiscard]] virtual std::optional<Color> ReadManagedRenderingColor(AssetId, ManagedRenderingComponent,
+                                                                             ManagedRenderingColorProperty) noexcept
+        {
+            return std::nullopt;
+        }
+        [[nodiscard]] virtual bool SetManagedRenderingColor(AssetId, ManagedRenderingComponent,
+                                                            ManagedRenderingColorProperty, Color) noexcept
+        {
+            return false;
+        }
+        [[nodiscard]] virtual std::optional<AssetId> ReadManagedRenderingAsset(AssetId, ManagedRenderingComponent,
+                                                                               ManagedRenderingAssetProperty) noexcept
+        {
+            return std::nullopt;
+        }
+        [[nodiscard]] virtual bool SetManagedRenderingAsset(AssetId, ManagedRenderingComponent,
+                                                            ManagedRenderingAssetProperty, AssetId) noexcept
+        {
+            return false;
+        }
+        [[nodiscard]] virtual std::optional<std::vector<AssetId>> ReadManagedRendererMaterials(AssetId) noexcept
+        {
+            return std::nullopt;
+        }
+        [[nodiscard]] virtual bool SetManagedRendererMaterials(AssetId, std::span<const AssetId>) noexcept
+        {
+            return false;
+        }
+        [[nodiscard]] virtual bool SetManagedMaterialProperty(AssetId, std::string_view, MaterialPropertyValue) noexcept
+        {
+            return false;
+        }
+        [[nodiscard]] virtual bool ResetManagedMaterialProperty(AssetId, std::string_view) noexcept { return false; }
+        [[nodiscard]] virtual bool ClearManagedMaterialProperties(AssetId) noexcept { return false; }
     };
 
     enum class ScriptMode : std::uint8_t

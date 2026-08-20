@@ -112,11 +112,18 @@ namespace
                     std::vector<Keire::AssetImporterRegistration>{shaderImporter, materialImporter, graphImporter}});
 
             auto graph = Keire::CreateDefaultShaderGraph();
-            const auto baseColor =
-                std::ranges::find(graph.Nodes.front().Pins, "BaseColor", &Keire::ShaderGraphPin::Name);
-            if (baseColor == graph.Nodes.front().Pins.end())
+            auto parameter =
+                Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Parameter, Keire::ShaderGraphValueType::Color);
+            parameter.Name = "BaseColor";
+            parameter.Symbol = "BaseColor";
+            parameter.Value = Keire::Color{0.0F, 1.0F, 0.0F, 1.0F};
+            graph.Nodes.push_back(std::move(parameter));
+            const auto output = std::ranges::find(graph.Nodes.back().Pins, "Value", &Keire::ShaderGraphPin::Name);
+            const auto input = std::ranges::find(graph.Nodes.front().Pins, "BaseColor", &Keire::ShaderGraphPin::Name);
+            if (output == graph.Nodes.back().Pins.end() || input == graph.Nodes.front().Pins.end())
                 throw std::logic_error("The default Shader Graph does not expose a BaseColor input.");
-            baseColor->DefaultValue = Keire::Color{0.0F, 1.0F, 0.0F, 1.0F};
+            graph.Connections.push_back(
+                {Keire::AssetId::Generate(), {graph.Nodes.back().Id, output->Id}, {graph.Nodes.front().Id, input->Id}});
             Graph = Database->CreateAsset("Live.keireshadergraph", graphImporter,
                                           Keire::ShaderGraphAsset::EncodeSource(graph));
             const auto record = Database->Find(Graph);
@@ -301,6 +308,86 @@ namespace
         bool m_Submitted = false;
     };
 
+    class MaterialPropertyBlockCaptureLayer final : public Keire::Layer
+    {
+      public:
+        MaterialPropertyBlockCaptureLayer(const Keire::AssetId material,
+                                          std::shared_ptr<std::vector<std::uint8_t>> pixels)
+            : Layer("Material property block capture"), m_Material(material), m_Pixels(std::move(pixels))
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            m_Scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                     Keire::SceneAsset::EmptyDefinition("Material property block"),
+                                                     Keire::ComponentRegistry::CreateDefault());
+            auto object = m_Scene->CreateEntity("Overridden surface");
+            const auto renderer = object.AddComponent<Keire::MeshRendererComponent>();
+            renderer->SetMesh(Keire::MeshAsset::CubeId());
+            renderer->SetMaterial(m_Material);
+            renderer->SetMaterialProperty("BaseColor", Keire::Color{1.0F, 0.0F, 0.0F, 1.0F});
+            object.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, 2.7364445F, 7.5536985F});
+
+            Keire::RenderSurfaceSpecification surface;
+            surface.Name = "Material property block";
+            surface.Width = SurfaceSize;
+            surface.Height = SurfaceSize;
+            surface.ClearColor = {0.0F, 0.0F, 0.0F, 1.0F};
+            m_View = Owner().Renderer()->CreateView(surface);
+            Keire::RenderCamera camera;
+            camera.View = Keire::Math::LookAt({-9.550004F, 9.944860F, 8.224380F}, {-6.672211F, 7.929247F, 7.611357F},
+                                              {0.0F, 1.0F, 0.0F});
+            camera.Projection = Keire::Math::Perspective(55.0F, 1.0F, 0.1F, 100.0F);
+            camera.ClearColor = surface.ClearColor;
+            m_View->SetCamera(camera);
+        }
+
+        void OnDetach() noexcept override
+        {
+            if (m_Scene)
+                m_Scene->Close();
+            m_View.Reset();
+            m_Scene.Reset();
+        }
+
+        void OnUpdate(const Keire::Time&) override
+        {
+            if (m_Submitted)
+            {
+                auto pixels = Keire::RenderSystemInternalAccess::ReadbackRGBA8(*Owner().Renderer(), *m_View->Surface());
+                if (!pixels.empty())
+                    *m_Pixels = pixels;
+                if (ContainsDominantChannel(pixels, 0))
+                {
+                    *m_Pixels = std::move(pixels);
+                    Owner().RequestExit();
+                    return;
+                }
+            }
+            if (++m_FrameCount > 120)
+            {
+                Owner().RequestExit();
+                return;
+            }
+            Keire::RenderEnvironmentSettings environment;
+            environment.AmbientColor = {0.08F, 0.09F, 0.12F, 1.0F};
+            environment.AmbientIntensity = 0.45F;
+            environment.SkyVisible = false;
+            Owner().Renderer()->Submit({m_Scene, m_View, false, environment});
+            m_Submitted = true;
+        }
+
+      private:
+        Keire::AssetId m_Material;
+        std::shared_ptr<std::vector<std::uint8_t>> m_Pixels;
+        Keire::Ref<Keire::Scene> m_Scene;
+        Keire::Ref<Keire::RenderView> m_View;
+        std::uint32_t m_FrameCount = 0;
+        bool m_Submitted = false;
+    };
+
     class SandboxMaterialGraphFixture final
     {
       public:
@@ -451,6 +538,23 @@ TEST_CASE("live Shader Graph shader and parameter revisions update assigned scen
     REQUIRE_FALSE(results->Revised.empty());
     CHECK(ContainsDominantChannel(results->Initial, 1));
     CHECK(ContainsDominantChannel(results->Revised, 0));
+}
+
+TEST_CASE("per-renderer material property blocks reach Shader Graph GPU bindings")
+{
+    LiveShaderGraphFixture assets;
+    const auto pixels = std::make_shared<std::vector<std::uint8_t>>();
+    auto specification = RenderTestSpecification();
+    specification.Assets.Mode = Keire::AssetMode::Development;
+    specification.Assets.DevelopmentCatalog = assets.Catalog;
+    {
+        Keire::Application application(std::move(specification));
+        (void)application.PushLayer(std::make_unique<MaterialPropertyBlockCaptureLayer>(assets.Material, pixels));
+        REQUIRE(application.Run() == 0);
+    }
+
+    REQUIRE_FALSE(pixels->empty());
+    CHECK(ContainsDominantChannel(*pixels, 0));
 }
 
 TEST_CASE("Sandbox unlit Material Graph creates a native GPU pipeline")

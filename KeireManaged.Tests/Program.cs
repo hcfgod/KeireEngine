@@ -22,6 +22,7 @@ var tests = new (string Name, Action Run)[]
     ("Physics rejects non-finite raycasts before native dispatch", PhysicsRaycastValidationContract),
     ("Native UI button dispatch advances with the player clock", NativeUiButtonDispatchClockContract),
     ("Native runtime UI controls preserve values text focus and events", NativeRuntimeUiControlContract),
+    ("Managed rendering handles preserve camera lights materials and shader overrides", ManagedRenderingContract),
     ("Managed jobs execute delegates and publish terminal states", ManagedJobExecutionContract),
     ("Managed jobs preserve terminal dependency semantics", ManagedJobDependencyContract),
     ("Application, time, and screen use the native foundation contract", RuntimeFoundationContract),
@@ -226,6 +227,53 @@ static unsafe void NativeRuntimeUiControlContract()
     finally
     {
         NativeRuntimeUiFixture.Uninstall();
+    }
+}
+
+static unsafe void ManagedRenderingContract()
+{
+    NativeRenderingFixture.Install();
+    var entity = new Keire.Entity(17, new Keire.EntityId(23, 29));
+    try
+    {
+        Keire.CameraHandle camera = entity.Camera;
+        Assert(MathF.Abs(camera.VerticalFieldOfView - 68.0f) < 0.0001f && camera.Primary,
+               "Camera handles must read native lens and selection state.");
+        camera.VerticalFieldOfView = 91.0f;
+        camera.Projection = Keire.CameraProjection.Orthographic;
+        Assert(NativeRenderingFixture.ScalarComponent == Keire.NativeRenderingComponent.Camera &&
+                   NativeRenderingFixture.ScalarProperty == Keire.NativeRenderingScalarProperty.VerticalFieldOfView &&
+                   MathF.Abs(NativeRenderingFixture.ScalarValue - 91.0f) < 0.0001f &&
+                   NativeRenderingFixture.IntegerValue == (int)Keire.CameraProjection.Orthographic,
+               "Camera writes must preserve the native component, property, and value.");
+
+        Keire.MeshRendererHandle renderer = entity.MeshRenderer;
+        Assert(renderer.Materials.Count == 2 && renderer.Materials[1].Id == NativeRenderingFixture.SecondMaterial,
+               "Mesh Renderer material arrays must round-trip through the bounded native ABI.");
+        renderer.Materials = [new Keire.AssetReference<Keire.Material>(NativeRenderingFixture.ReplacementMaterial)];
+        renderer.PropertyBlock.SetFloat("Roughness", 0.37f);
+        renderer.PropertyBlock.SetTexture(
+            "Albedo", new Keire.AssetReference<Keire.Texture>(NativeRenderingFixture.ReplacementTexture));
+        Assert(NativeRenderingFixture.MaterialCount == 1 &&
+                   NativeRenderingFixture.FirstMaterial == NativeRenderingFixture.ReplacementMaterial &&
+                   MathF.Abs(NativeRenderingFixture.MaterialFloat - 0.37f) < 0.0001f &&
+                   NativeRenderingFixture.MaterialTexture == NativeRenderingFixture.ReplacementTexture,
+               "Material slots and typed shader property overrides must reach native renderer state.");
+        AssertThrows<ArgumentOutOfRangeException>(() => renderer.PropertyBlock.SetFloat("Invalid", float.NaN),
+                                                  "Material property blocks must reject non-finite values early.");
+
+        Keire.SpotLightHandle spot = entity.SpotLight;
+        spot.OuterAngle = 46.0f;
+        spot.CookieOffset = new Keire.Vector2(0.25f, 0.5f);
+        Assert(NativeRenderingFixture.ScalarComponent == Keire.NativeRenderingComponent.SpotLight &&
+                   NativeRenderingFixture.ScalarProperty == Keire.NativeRenderingScalarProperty.OuterAngle &&
+                   MathF.Abs(NativeRenderingFixture.ScalarValue - 46.0f) < 0.0001f &&
+                   NativeRenderingFixture.VectorValue == new Keire.Vector2(0.25f, 0.5f),
+               "Typed light handles must preserve cone and cookie controls.");
+    }
+    finally
+    {
+        NativeRenderingFixture.Uninstall();
     }
 }
 
@@ -1038,6 +1086,237 @@ file static unsafe class NativeRuntimeUiFixture
         Focused = high == 23 && low == 29;
         return Focused ? (byte)1 : (byte)0;
     }
+}
+
+file static unsafe class NativeRenderingFixture
+{
+    internal static readonly Keire.AssetId FirstSourceMaterial = new(101, 201);
+    internal static readonly Keire.AssetId SecondMaterial = new(102, 202);
+    internal static readonly Keire.AssetId ReplacementMaterial = new(103, 203);
+    internal static readonly Keire.AssetId ReplacementTexture = new(104, 204);
+    internal static Keire.NativeRenderingComponent ScalarComponent;
+    internal static Keire.NativeRenderingScalarProperty ScalarProperty;
+    internal static float ScalarValue;
+    internal static int IntegerValue;
+    internal static Keire.Vector2 VectorValue;
+    internal static int MaterialCount;
+    internal static Keire.AssetId FirstMaterial;
+    internal static float MaterialFloat;
+    internal static Keire.AssetId MaterialTexture;
+
+    internal static void Install()
+    {
+        ScalarComponent = default;
+        ScalarProperty = default;
+        ScalarValue = default;
+        IntegerValue = default;
+        VectorValue = default;
+        MaterialCount = default;
+        FirstMaterial = default;
+        MaterialFloat = default;
+        MaterialTexture = default;
+        Keire.NativeRuntimeRendering.GetScalarIcall = &GetScalar;
+        Keire.NativeRuntimeRendering.SetScalarIcall = &SetScalar;
+        Keire.NativeRuntimeRendering.GetIntegerIcall = &GetInteger;
+        Keire.NativeRuntimeRendering.SetIntegerIcall = &SetInteger;
+        Keire.NativeRuntimeRendering.GetFlagIcall = &GetFlag;
+        Keire.NativeRuntimeRendering.SetFlagIcall = &SetFlag;
+        Keire.NativeRuntimeRendering.GetVectorIcall = &GetVector;
+        Keire.NativeRuntimeRendering.SetVectorIcall = &SetVector;
+        Keire.NativeRuntimeRendering.GetColorIcall = &GetColor;
+        Keire.NativeRuntimeRendering.SetColorIcall = &SetColor;
+        Keire.NativeRuntimeRendering.GetAssetIcall = &GetAsset;
+        Keire.NativeRuntimeRendering.SetAssetIcall = &SetAsset;
+        Keire.NativeRuntimeRendering.GetMaterialsIcall = &GetMaterials;
+        Keire.NativeRuntimeRendering.SetMaterialsIcall = &SetMaterials;
+        Keire.NativeRuntimeRendering.SetMaterialFloatIcall = &SetMaterialFloat;
+        Keire.NativeRuntimeRendering.SetMaterialVector2Icall = &SetMaterialVector2;
+        Keire.NativeRuntimeRendering.SetMaterialVector3Icall = &SetMaterialVector3;
+        Keire.NativeRuntimeRendering.SetMaterialVector4Icall = &SetMaterialVector4;
+        Keire.NativeRuntimeRendering.SetMaterialColorIcall = &SetMaterialColor;
+        Keire.NativeRuntimeRendering.SetMaterialTextureIcall = &SetMaterialTexture;
+        Keire.NativeRuntimeRendering.ResetMaterialPropertyIcall = &ResetMaterialProperty;
+        Keire.NativeRuntimeRendering.ClearMaterialPropertiesIcall = &ClearMaterialProperties;
+    }
+
+    internal static void Uninstall()
+    {
+        Keire.NativeRuntimeRendering.GetScalarIcall = null;
+        Keire.NativeRuntimeRendering.SetScalarIcall = null;
+        Keire.NativeRuntimeRendering.GetIntegerIcall = null;
+        Keire.NativeRuntimeRendering.SetIntegerIcall = null;
+        Keire.NativeRuntimeRendering.GetFlagIcall = null;
+        Keire.NativeRuntimeRendering.SetFlagIcall = null;
+        Keire.NativeRuntimeRendering.GetVectorIcall = null;
+        Keire.NativeRuntimeRendering.SetVectorIcall = null;
+        Keire.NativeRuntimeRendering.GetColorIcall = null;
+        Keire.NativeRuntimeRendering.SetColorIcall = null;
+        Keire.NativeRuntimeRendering.GetAssetIcall = null;
+        Keire.NativeRuntimeRendering.SetAssetIcall = null;
+        Keire.NativeRuntimeRendering.GetMaterialsIcall = null;
+        Keire.NativeRuntimeRendering.SetMaterialsIcall = null;
+        Keire.NativeRuntimeRendering.SetMaterialFloatIcall = null;
+        Keire.NativeRuntimeRendering.SetMaterialVector2Icall = null;
+        Keire.NativeRuntimeRendering.SetMaterialVector3Icall = null;
+        Keire.NativeRuntimeRendering.SetMaterialVector4Icall = null;
+        Keire.NativeRuntimeRendering.SetMaterialColorIcall = null;
+        Keire.NativeRuntimeRendering.SetMaterialTextureIcall = null;
+        Keire.NativeRuntimeRendering.ResetMaterialPropertyIcall = null;
+        Keire.NativeRuntimeRendering.ClearMaterialPropertiesIcall = null;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte GetScalar(ulong high, ulong low, byte component, byte property, float* value)
+    {
+        if (high != 23 || low != 29 || value == null)
+            return 0;
+        *value = (Keire.NativeRenderingComponent)component == Keire.NativeRenderingComponent.Camera &&
+                 (Keire.NativeRenderingScalarProperty)property ==
+                 Keire.NativeRenderingScalarProperty.VerticalFieldOfView
+            ? 68.0f
+            : 12.0f;
+        return 1;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetScalar(ulong high, ulong low, byte component, byte property, float value)
+    {
+        ScalarComponent = (Keire.NativeRenderingComponent)component;
+        ScalarProperty = (Keire.NativeRenderingScalarProperty)property;
+        ScalarValue = value;
+        return high == 23 && low == 29 ? (byte)1 : (byte)0;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte GetInteger(ulong high, ulong low, byte component, byte property, int* value)
+    {
+        if (high != 23 || low != 29 || value == null)
+            return 0;
+        *value = 0;
+        return 1;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetInteger(ulong high, ulong low, byte component, byte property, int value)
+    {
+        IntegerValue = value;
+        return high == 23 && low == 29 ? (byte)1 : (byte)0;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte GetFlag(ulong high, ulong low, byte component, byte property, byte* value)
+    {
+        if (high != 23 || low != 29 || value == null)
+            return 0;
+        *value = 1;
+        return 1;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetFlag(ulong high, ulong low, byte component, byte property, byte value) =>
+        high == 23 && low == 29 ? (byte)1 : (byte)0;
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte GetVector(ulong high, ulong low, byte component, byte property, Keire.Vector2* value)
+    {
+        if (high != 23 || low != 29 || value == null)
+            return 0;
+        *value = new Keire.Vector2(1.0f, 1.0f);
+        return 1;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetVector(ulong high, ulong low, byte component, byte property, Keire.Vector2 value)
+    {
+        VectorValue = value;
+        return high == 23 && low == 29 ? (byte)1 : (byte)0;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte GetColor(ulong high, ulong low, byte component, byte property, Keire.Color* value)
+    {
+        if (high != 23 || low != 29 || value == null)
+            return 0;
+        *value = Keire.Color.White;
+        return 1;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetColor(ulong high, ulong low, byte component, byte property, Keire.Color value) =>
+        high == 23 && low == 29 ? (byte)1 : (byte)0;
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte GetAsset(ulong high, ulong low, byte component, byte property, Keire.AssetId* value)
+    {
+        if (high != 23 || low != 29 || value == null)
+            return 0;
+        *value = new Keire.AssetId(105, 205);
+        return 1;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetAsset(ulong high, ulong low, byte component, byte property, Keire.AssetId value) =>
+        high == 23 && low == 29 ? (byte)1 : (byte)0;
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static int GetMaterials(ulong high, ulong low, Keire.AssetId* destination, int capacity)
+    {
+        if (high != 23 || low != 29)
+            return -1;
+        if (destination == null || capacity == 0)
+            return 2;
+        if (capacity < 2)
+            return -1;
+        destination[0] = FirstSourceMaterial;
+        destination[1] = SecondMaterial;
+        return 2;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetMaterials(ulong high, ulong low, Keire.AssetId* materials, int count)
+    {
+        MaterialCount = count;
+        FirstMaterial = count > 0 ? materials[0] : default;
+        return high == 23 && low == 29 ? (byte)1 : (byte)0;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetMaterialFloat(ulong high, ulong low, Keire.NativeString name, float value)
+    {
+        MaterialFloat = value;
+        return high == 23 && low == 29 ? (byte)1 : (byte)0;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetMaterialVector2(ulong high, ulong low, Keire.NativeString name, Keire.Vector2 value) =>
+        high == 23 && low == 29 ? (byte)1 : (byte)0;
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetMaterialVector3(ulong high, ulong low, Keire.NativeString name, Keire.Vector3 value) =>
+        high == 23 && low == 29 ? (byte)1 : (byte)0;
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetMaterialVector4(ulong high, ulong low, Keire.NativeString name, Keire.Vector4 value) =>
+        high == 23 && low == 29 ? (byte)1 : (byte)0;
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetMaterialColor(ulong high, ulong low, Keire.NativeString name, Keire.Color value) =>
+        high == 23 && low == 29 ? (byte)1 : (byte)0;
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetMaterialTexture(ulong high, ulong low, Keire.NativeString name, Keire.AssetId value)
+    {
+        MaterialTexture = value;
+        return high == 23 && low == 29 ? (byte)1 : (byte)0;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte ResetMaterialProperty(ulong high, ulong low, Keire.NativeString name) =>
+        high == 23 && low == 29 ? (byte)1 : (byte)0;
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte ClearMaterialProperties(ulong high, ulong low) =>
+        high == 23 && low == 29 ? (byte)1 : (byte)0;
 }
 
 file sealed class RecordingSink : IWeaponRuntimeSink

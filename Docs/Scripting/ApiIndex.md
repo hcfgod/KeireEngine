@@ -13,6 +13,9 @@ This index is a discovery map, not a replacement for the workflow guides or sour
 | `TransformHandle` | Authoritative local/world transforms, presentation transforms, reset, and direction vectors | [Entities](EntitiesComponentsAndTransforms.md) |
 | `CharacterControllerHandle`, `CharacterControllerState` | Collision-resolved movement and grounded-state access | [Gameplay Services](GameplayServices.md) |
 | `RigidBodyHandle`, `RigidBodyProperties` | Runtime body state, forces, and impulses | [Gameplay Services](GameplayServices.md) |
+| `CameraHandle`, `MeshRendererHandle` | Runtime camera and renderable state | [Rendering](RenderingAndMaterials.md) |
+| `DirectionalLightHandle`, `PointLightHandle`, `SpotLightHandle` | Typed realtime and baked-light controls | [Rendering](RenderingAndMaterials.md) |
+| `MaterialPropertyBlock` | Bounded per-renderer shader property overrides | [Rendering](RenderingAndMaterials.md) |
 | `AssetId` | Stable untyped asset identity | [Assets](AssetsAndScriptableObjects.md) |
 | `AssetReference<T>` | Typed serialized asset identity | [Assets](AssetsAndScriptableObjects.md) |
 | `ScriptableObject` | Managed data base type and transient clone API | [Assets](AssetsAndScriptableObjects.md) |
@@ -96,6 +99,11 @@ Animator
 AudioSource
 AudioListener
 AudioReverbZone
+Camera
+MeshRenderer
+DirectionalLight
+PointLight
+SpotLight
 CharacterController
 RigidBody
 ```
@@ -202,6 +210,38 @@ GetStatus
 ```
 
 See [Audio](Audio.md).
+
+## Rendering And Materials
+
+Asset markers:
+
+```text
+Mesh
+Material
+Shader
+Texture
+```
+
+Runtime handles and values:
+
+```text
+CameraHandle
+MeshRendererHandle
+DirectionalLightHandle
+PointLightHandle
+SpotLightHandle
+MaterialPropertyBlock
+CameraProjection
+CameraClearMode
+GIReceiveMode
+ShadowQuality
+LightBakeMode
+ShadowResolution
+```
+
+`MeshRendererHandle.Materials` replaces the complete bounded material-slot array transactionally.
+`MeshRendererHandle.PropertyBlock` writes transient per-renderer float, vector, color, and texture overrides without
+mutating or cloning the shared material asset. See [Rendering And Materials](RenderingAndMaterials.md).
 
 ## Animation
 
@@ -367,6 +407,7 @@ Gameplay code should not replace the engine-installed bridge.
 | [`Behaviour.cs`](../../KeireManaged/Behaviour.cs) | Lifecycle, callbacks, synchronization context integration |
 | [`Handles.cs`](../../KeireManaged/Handles.cs) | Entity, component, transform, asset handles |
 | [`RuntimeApi.cs`](../../KeireManaged/RuntimeApi.cs) | Time, input, physics, navigation, animation, audio, VFX, prefab, cursor, diagnostics |
+| [`Rendering.cs`](../../KeireManaged/Rendering.cs) | Camera, renderer, light, material-slot, and shader-property handles |
 | [`RuntimeUi.cs`](../../KeireManaged/RuntimeUi.cs) | UI wrappers and in-memory layout |
 | [`Events.cs`](../../KeireManaged/Events.cs) | Persistent and runtime events |
 | [`ScriptableObject.cs`](../../KeireManaged/ScriptableObject.cs) | Managed data lifecycle |

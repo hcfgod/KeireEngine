@@ -1,9 +1,13 @@
 #pragma once
 
+#include "Keire/Assets/RenderingAssets.h"
 #include "Keire/ECS/Component.h"
 #include "Keire/Rendering/Lighting.h"
 
+#include <map>
 #include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace Keire
@@ -33,6 +37,11 @@ namespace Keire
         [[nodiscard]] GIReceiveMode GIReceive() const noexcept { return m_GIReceive; }
         [[nodiscard]] float LightmapScale() const noexcept { return m_LightmapScale; }
         [[nodiscard]] bool PreserveLightmapUVs() const noexcept { return m_PreserveLightmapUVs; }
+        [[nodiscard]] const std::map<std::string, MaterialPropertyValue, std::less<>>&
+        MaterialProperties() const noexcept
+        {
+            return m_MaterialProperties;
+        }
 
         void SetMesh(AssetId mesh);
         void SetMaterial(AssetId material);
@@ -46,6 +55,9 @@ namespace Keire
         void SetGIReceive(GIReceiveMode value);
         void SetLightmapScale(float value);
         void SetPreserveLightmapUVs(bool enabled);
+        void SetMaterialProperty(std::string name, MaterialPropertyValue value);
+        [[nodiscard]] bool ResetMaterialProperty(std::string_view name);
+        void ClearMaterialProperties();
         void Reset();
 
       private:
@@ -60,6 +72,8 @@ namespace Keire
         GIReceiveMode m_GIReceive = GIReceiveMode::LightProbes;
         float m_LightmapScale = 1.0F;
         bool m_PreserveLightmapUVs = true;
+        // Property blocks are transient runtime state and intentionally do not participate in scene serialization.
+        std::map<std::string, MaterialPropertyValue, std::less<>> m_MaterialProperties;
     };
 
     [[nodiscard]] KEIRE_API ComponentRegistration CreateMeshRendererComponentRegistration();
