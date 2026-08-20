@@ -2,86 +2,104 @@
 
 #include <imgui.h>
 
+#include <cstdint>
+
 namespace Keire::Detail
 {
-    bool UiBackendKeyDown(const UiKey key) noexcept
+    namespace
     {
-        ImGuiKey imguiKey = ImGuiKey_None;
-        switch (key)
+        [[nodiscard]] ImGuiKey NativeKey(const UiKey key) noexcept
         {
-        case UiKey::Enter:
-            imguiKey = ImGuiKey_Enter;
-            break;
-        case UiKey::Escape:
-            imguiKey = ImGuiKey_Escape;
-            break;
-        case UiKey::Tab:
-            imguiKey = ImGuiKey_Tab;
-            break;
-        case UiKey::Delete:
-            imguiKey = ImGuiKey_Delete;
-            break;
-        case UiKey::F2:
-            imguiKey = ImGuiKey_F2;
-            break;
-        case UiKey::A:
-            imguiKey = ImGuiKey_A;
-            break;
-        case UiKey::B:
-            imguiKey = ImGuiKey_B;
-            break;
-        case UiKey::Backspace:
-            imguiKey = ImGuiKey_Backspace;
-            break;
-        case UiKey::C:
-            imguiKey = ImGuiKey_C;
-            break;
-        case UiKey::D:
-            imguiKey = ImGuiKey_D;
-            break;
-        case UiKey::Down:
-            imguiKey = ImGuiKey_DownArrow;
-            break;
-        case UiKey::E:
-            imguiKey = ImGuiKey_E;
-            break;
-        case UiKey::F:
-            imguiKey = ImGuiKey_F;
-            break;
-        case UiKey::Left:
-            imguiKey = ImGuiKey_LeftArrow;
-            break;
-        case UiKey::Q:
-            imguiKey = ImGuiKey_Q;
-            break;
-        case UiKey::R:
-            imguiKey = ImGuiKey_R;
-            break;
-        case UiKey::Right:
-            imguiKey = ImGuiKey_RightArrow;
-            break;
-        case UiKey::S:
-            imguiKey = ImGuiKey_S;
-            break;
-        case UiKey::Up:
-            imguiKey = ImGuiKey_UpArrow;
-            break;
-        case UiKey::V:
-            imguiKey = ImGuiKey_V;
-            break;
-        case UiKey::W:
-            imguiKey = ImGuiKey_W;
-            break;
-        case UiKey::X:
-            imguiKey = ImGuiKey_X;
-            break;
-        case UiKey::Y:
-            imguiKey = ImGuiKey_Y;
-            break;
-        case UiKey::Z:
-            imguiKey = ImGuiKey_Z;
-            break;
+            switch (key)
+            {
+            case UiKey::Enter:
+                return ImGuiKey_Enter;
+            case UiKey::Escape:
+                return ImGuiKey_Escape;
+            case UiKey::Tab:
+                return ImGuiKey_Tab;
+            case UiKey::Delete:
+                return ImGuiKey_Delete;
+            case UiKey::F2:
+                return ImGuiKey_F2;
+            case UiKey::A:
+                return ImGuiKey_A;
+            case UiKey::B:
+                return ImGuiKey_B;
+            case UiKey::Backspace:
+                return ImGuiKey_Backspace;
+            case UiKey::C:
+                return ImGuiKey_C;
+            case UiKey::D:
+                return ImGuiKey_D;
+            case UiKey::Down:
+                return ImGuiKey_DownArrow;
+            case UiKey::E:
+                return ImGuiKey_E;
+            case UiKey::F:
+                return ImGuiKey_F;
+            case UiKey::Left:
+                return ImGuiKey_LeftArrow;
+            case UiKey::Q:
+                return ImGuiKey_Q;
+            case UiKey::R:
+                return ImGuiKey_R;
+            case UiKey::Right:
+                return ImGuiKey_RightArrow;
+            case UiKey::S:
+                return ImGuiKey_S;
+            case UiKey::Up:
+                return ImGuiKey_UpArrow;
+            case UiKey::V:
+                return ImGuiKey_V;
+            case UiKey::W:
+                return ImGuiKey_W;
+            case UiKey::X:
+                return ImGuiKey_X;
+            case UiKey::Y:
+                return ImGuiKey_Y;
+            case UiKey::Z:
+                return ImGuiKey_Z;
+            }
+            return ImGuiKey_None;
         }
-        return ImGui::IsKeyDown(imguiKey);
+
+        void AppendUtf8(std::string& destination, const std::uint32_t codePoint)
+        {
+            if (codePoint == 0 || codePoint > 0x10FFFFU || (codePoint >= 0xD800U && codePoint <= 0xDFFFU))
+                return;
+            if (codePoint <= 0x7FU)
+                destination.push_back(static_cast<char>(codePoint));
+            else if (codePoint <= 0x7FFU)
+            {
+                destination.push_back(static_cast<char>(0xC0U | (codePoint >> 6U)));
+                destination.push_back(static_cast<char>(0x80U | (codePoint & 0x3FU)));
+            }
+            else if (codePoint <= 0xFFFFU)
+            {
+                destination.push_back(static_cast<char>(0xE0U | (codePoint >> 12U)));
+                destination.push_back(static_cast<char>(0x80U | ((codePoint >> 6U) & 0x3FU)));
+                destination.push_back(static_cast<char>(0x80U | (codePoint & 0x3FU)));
+            }
+            else
+            {
+                destination.push_back(static_cast<char>(0xF0U | (codePoint >> 18U)));
+                destination.push_back(static_cast<char>(0x80U | ((codePoint >> 12U) & 0x3FU)));
+                destination.push_back(static_cast<char>(0x80U | ((codePoint >> 6U) & 0x3FU)));
+                destination.push_back(static_cast<char>(0x80U | (codePoint & 0x3FU)));
+            }
+        }
+    } // namespace
+
+    bool UiBackendKeyDown(const UiKey key) noexcept { return ImGui::IsKeyDown(NativeKey(key)); }
+
+    bool UiBackendKeyPressed(const UiKey key) noexcept { return ImGui::IsKeyPressed(NativeKey(key), false); }
+
+    std::string UiBackendTextInput()
+    {
+        std::string result;
+        for (const auto character : ImGui::GetIO().InputQueueCharacters)
+            AppendUtf8(result, static_cast<std::uint32_t>(character));
+        return result;
     }
 } // namespace Keire::Detail

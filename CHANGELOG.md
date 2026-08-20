@@ -5,6 +5,10 @@ versions.
 
 ## Unreleased
 
+- Added production scene-backed runtime UI controls: sliders, toggles, UTF-8 input fields, scroll views, accessibility
+  metadata, explicit focus order, mouse-wheel/keyboard/gamepad navigation, and packaged-player text-input ownership.
+  Managed scripts can serialize typed control references and read/write live values, text, focus, interactability,
+  offsets, and one-shot change/submit/cancel events through the same presentation runtime used by editor Play Mode.
 - Added the managed runtime foundation: immutable `Application` identity and persistent-data paths, safe Play-mode
   exit, validated time scale and pause, logical/pixel `Screen` state with transactional resolution/fullscreen changes,
   and typed `PlayerPreferences` persisted through bounded versioned JSON and atomic replacement. A maintained managed

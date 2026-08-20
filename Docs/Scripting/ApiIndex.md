@@ -128,7 +128,7 @@ value-handle view without exposing scheduler ownership.
 | Audio | `AudioSourceComponent`, `AudioListenerComponent`, `AudioReverbZoneComponent` |
 | VFX | `VfxEmitterComponent` |
 | Lighting | `DirectionalLightComponent`, `PointLightComponent`, `SpotLightComponent` |
-| UI | `CanvasComponent`, `RectTransformComponent`, `UiTextComponent`, `UiImageComponent`, `UiButtonComponent`, `UiLayoutComponent` |
+| UI | `CanvasComponent`, `RectTransformComponent`, `UiTextComponent`, `UiImageComponent`, `UiButtonComponent`, `UiLayoutComponent`, `UiSliderComponent`, `UiToggleComponent`, `UiInputFieldComponent`, `UiScrollViewComponent`, `UiAccessibilityComponent` |
 
 These types identify native components. Their layout is intentionally not exposed to C#.
 
@@ -267,7 +267,15 @@ Scene-facing API:
 
 ```text
 UiButton
+UiSlider
+UiToggle
+UiInputField
+UiScrollView
 RuntimeUi.GetButton
+RuntimeUi.GetSlider
+RuntimeUi.GetToggle
+RuntimeUi.GetInputField
+RuntimeUi.GetScrollView
 RuntimeUi.SetText
 RuntimeUi.WasClicked
 RuntimeCanvas.SetText

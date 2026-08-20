@@ -843,6 +843,15 @@ namespace Keire
             return NativeFor(id);
         }
 
+        [[nodiscard]] bool SetTextInput(const WindowId id, const bool enabled)
+        {
+            RequireOwner("SetTextInput");
+            auto* native = NativeFor(id);
+            if (!native || SDL_TextInputActive(native) == enabled)
+                return native != nullptr;
+            return enabled ? SDL_StartTextInput(native) : SDL_StopTextInput(native);
+        }
+
         [[nodiscard]] WindowSystemInternalAccess::EventSinkToken
         AddEventSink(void* context, const WindowSystemInternalAccess::EventSink sink)
         {
@@ -935,7 +944,7 @@ namespace Keire
             return {};
         }
 
-        [[nodiscard]] bool GetFlag(const WindowId id, const bool CachedWindow::* member) const
+        [[nodiscard]] bool GetFlag(const WindowId id, const bool CachedWindow::*member) const
         {
             std::scoped_lock lock(m_StateMutex);
             if (const auto iterator = m_Windows.find(id.Value()); iterator != m_Windows.end())
@@ -1447,6 +1456,11 @@ namespace Keire
     SDL_Window* WindowSystemInternalAccess::NativeWindow(WindowSystem& system, const WindowId id)
     {
         return system.m_Impl->NativeHandle(id);
+    }
+
+    bool WindowSystemInternalAccess::SetTextInput(WindowSystem& system, const WindowId id, const bool enabled)
+    {
+        return system.m_Impl->SetTextInput(id, enabled);
     }
 
     WindowChromeRole WindowSystemInternalAccess::HitTestChromeLayout(const WindowChromeLayout& layout,

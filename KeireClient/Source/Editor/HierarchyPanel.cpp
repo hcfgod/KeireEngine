@@ -74,6 +74,15 @@ namespace KeireEditor
                                           Keire::Vector2{});
             return button;
         };
+        const auto createControl =
+            [&](const Keire::EntityId parent, std::string name, const Keire::ComponentTypeId type)
+        {
+            const auto control =
+                document.CreateEntity(std::move(name), parent, Keire::RectTransformComponent::StaticType());
+            (void)document.AddComponent(control, Keire::UiImageComponent::StaticType());
+            (void)document.AddComponent(control, type);
+            return control;
+        };
         const auto createModernCanvas = [&](const Keire::EntityId parent)
         {
             const auto canvas = document.CreateEntity("Canvas", parent, Keire::CanvasComponent::StaticType());
@@ -282,6 +291,38 @@ namespace KeireEditor
                     document.Select(createButton(Keire::EntityId(object.Id), "Button").Value());
                     m_Controller.MarkHierarchyEntity(document.Selection());
                 }
+                if (ui.MenuItem("UI Slider Child"))
+                {
+                    m_Controller.RecordHierarchyUndo();
+                    document.Select(
+                        createControl(Keire::EntityId(object.Id), "Slider", Keire::UiSliderComponent::StaticType())
+                            .Value());
+                    m_Controller.MarkHierarchyEntity(document.Selection());
+                }
+                if (ui.MenuItem("UI Toggle Child"))
+                {
+                    m_Controller.RecordHierarchyUndo();
+                    document.Select(
+                        createControl(Keire::EntityId(object.Id), "Toggle", Keire::UiToggleComponent::StaticType())
+                            .Value());
+                    m_Controller.MarkHierarchyEntity(document.Selection());
+                }
+                if (ui.MenuItem("UI Input Field Child"))
+                {
+                    m_Controller.RecordHierarchyUndo();
+                    document.Select(createControl(Keire::EntityId(object.Id), "Input Field",
+                                                  Keire::UiInputFieldComponent::StaticType())
+                                        .Value());
+                    m_Controller.MarkHierarchyEntity(document.Selection());
+                }
+                if (ui.MenuItem("UI Scroll View Child"))
+                {
+                    m_Controller.RecordHierarchyUndo();
+                    document.Select(createControl(Keire::EntityId(object.Id), "Scroll View",
+                                                  Keire::UiScrollViewComponent::StaticType())
+                                        .Value());
+                    m_Controller.MarkHierarchyEntity(document.Selection());
+                }
                 if (ui.MenuItem("Audio Source Child"))
                 {
                     m_Controller.RecordHierarchyUndo();
@@ -486,6 +527,30 @@ namespace KeireEditor
             {
                 m_Controller.RecordHierarchyUndo();
                 document.Select(createButton({}, "Button").Value());
+                m_Controller.MarkHierarchyEntity(document.Selection());
+            }
+            if (ui.MenuItem("UI / Slider"))
+            {
+                m_Controller.RecordHierarchyUndo();
+                document.Select(createControl({}, "Slider", Keire::UiSliderComponent::StaticType()).Value());
+                m_Controller.MarkHierarchyEntity(document.Selection());
+            }
+            if (ui.MenuItem("UI / Toggle"))
+            {
+                m_Controller.RecordHierarchyUndo();
+                document.Select(createControl({}, "Toggle", Keire::UiToggleComponent::StaticType()).Value());
+                m_Controller.MarkHierarchyEntity(document.Selection());
+            }
+            if (ui.MenuItem("UI / Input Field"))
+            {
+                m_Controller.RecordHierarchyUndo();
+                document.Select(createControl({}, "Input Field", Keire::UiInputFieldComponent::StaticType()).Value());
+                m_Controller.MarkHierarchyEntity(document.Selection());
+            }
+            if (ui.MenuItem("UI / Scroll View"))
+            {
+                m_Controller.RecordHierarchyUndo();
+                document.Select(createControl({}, "Scroll View", Keire::UiScrollViewComponent::StaticType()).Value());
                 m_Controller.MarkHierarchyEntity(document.Selection());
             }
             if (ui.MenuItem("Audio / Source"))

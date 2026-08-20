@@ -73,6 +73,64 @@ internal static class ManagedStateSerializer
             JsonSerializer.Serialize(writer, value.Entity, options);
     }
 
+    private sealed class UiSliderJsonConverter : JsonConverter<UiSlider>
+    {
+        public override UiSlider? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            if (reader.TokenType == JsonTokenType.Null)
+                return null;
+            Entity entity = JsonSerializer.Deserialize<Entity>(ref reader, options);
+            return entity.Id == default ? null : new UiSlider(entity);
+        }
+
+        public override void Write(Utf8JsonWriter writer, UiSlider value, JsonSerializerOptions options) =>
+            JsonSerializer.Serialize(writer, value.Entity, options);
+    }
+
+    private sealed class UiToggleJsonConverter : JsonConverter<UiToggle>
+    {
+        public override UiToggle? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            if (reader.TokenType == JsonTokenType.Null)
+                return null;
+            Entity entity = JsonSerializer.Deserialize<Entity>(ref reader, options);
+            return entity.Id == default ? null : new UiToggle(entity);
+        }
+
+        public override void Write(Utf8JsonWriter writer, UiToggle value, JsonSerializerOptions options) =>
+            JsonSerializer.Serialize(writer, value.Entity, options);
+    }
+
+    private sealed class UiInputFieldJsonConverter : JsonConverter<UiInputField>
+    {
+        public override UiInputField? Read(ref Utf8JsonReader reader, Type typeToConvert,
+                                           JsonSerializerOptions options)
+        {
+            if (reader.TokenType == JsonTokenType.Null)
+                return null;
+            Entity entity = JsonSerializer.Deserialize<Entity>(ref reader, options);
+            return entity.Id == default ? null : new UiInputField(entity);
+        }
+
+        public override void Write(Utf8JsonWriter writer, UiInputField value, JsonSerializerOptions options) =>
+            JsonSerializer.Serialize(writer, value.Entity, options);
+    }
+
+    private sealed class UiScrollViewJsonConverter : JsonConverter<UiScrollView>
+    {
+        public override UiScrollView? Read(ref Utf8JsonReader reader, Type typeToConvert,
+                                          JsonSerializerOptions options)
+        {
+            if (reader.TokenType == JsonTokenType.Null)
+                return null;
+            Entity entity = JsonSerializer.Deserialize<Entity>(ref reader, options);
+            return entity.Id == default ? null : new UiScrollView(entity);
+        }
+
+        public override void Write(Utf8JsonWriter writer, UiScrollView value, JsonSerializerOptions options) =>
+            JsonSerializer.Serialize(writer, value.Entity, options);
+    }
+
     private static readonly JsonSerializerOptions Options = CreateOptions();
     internal static JsonSerializerOptions SerializerOptions => Options;
 
@@ -106,6 +164,10 @@ internal static class ManagedStateSerializer
         };
         options.Converters.Add(new EntityJsonConverter());
         options.Converters.Add(new UiButtonJsonConverter());
+        options.Converters.Add(new UiSliderJsonConverter());
+        options.Converters.Add(new UiToggleJsonConverter());
+        options.Converters.Add(new UiInputFieldJsonConverter());
+        options.Converters.Add(new UiScrollViewJsonConverter());
         return options;
     }
 

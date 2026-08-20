@@ -92,7 +92,8 @@ namespace Keire::Detail
             return ComponentPropertyKind::Color;
         if (name == "Keire.Entity")
             return ComponentPropertyKind::Entity;
-        if (name == "Keire.UiButton")
+        if (name == "Keire.UiButton" || name == "Keire.UiSlider" || name == "Keire.UiToggle" ||
+            name == "Keire.UiInputField" || name == "Keire.UiScrollView")
             return ComponentPropertyKind::Entity;
         if (name == "Keire.KeireEvent" || name.starts_with("Keire.KeireEvent`"))
             return ComponentPropertyKind::Event;

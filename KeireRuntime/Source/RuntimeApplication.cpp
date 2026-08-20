@@ -6,7 +6,9 @@
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/RenderInternal.h"
 #include "KeireInternal/Scripting/ManagedRuntimeApplicationServices.h"
+#include "KeireInternal/Scripting/ManagedRuntimeUiServices.h"
 #include "KeireInternal/WindowInternal.h"
+#include "RuntimeUiInput.h"
 
 #include <nlohmann/json.hpp>
 
@@ -542,6 +544,7 @@ namespace
         void OnDetach() noexcept override
         {
             ApplyManagedCursorMode(true);
+            KeireRuntime::SynchronizeRuntimeUiTextInput({}, Owner().Windows(), Owner().MainWindow());
             if (m_EventSink)
             {
                 if (const auto windows = Owner().Windows())
@@ -646,6 +649,7 @@ namespace
             m_Runtime->Update(static_cast<float>(time.DeltaTime().Seconds()));
             if (m_Runtime->State() == Keire::ScenePlayState::Faulted)
                 throw std::runtime_error("Startup scene runtime failed: " + m_Runtime->Diagnostic().Message);
+            KeireRuntime::SynchronizeRuntimeUiTextInput(m_Presentation, Owner().Windows(), Owner().MainWindow());
             const auto selected = SelectCamera(m_Scene);
             if (!selected)
                 throw std::runtime_error("The startup scene has no active camera.");
@@ -691,42 +695,8 @@ namespace
                 logical.Width == 0 ? 1.0F : static_cast<float>(pixels.Width) / static_cast<float>(logical.Width);
             const float scaleY =
                 logical.Height == 0 ? 1.0F : static_cast<float>(pixels.Height) / static_cast<float>(logical.Height);
-            const auto move = [&](const float x, const float y)
-            {
-                m_PointerX = x * scaleX;
-                m_PointerY = y * scaleY;
-                m_Presentation->PointerMove(m_PointerX, m_PointerY);
-            };
-            if (event.type == SDL_EVENT_MOUSE_MOTION)
-                move(event.motion.x, event.motion.y);
-            else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_UP)
-            {
-                move(event.button.x, event.button.y);
-                const bool pressed = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
-                if (event.button.button == SDL_BUTTON_LEFT)
-                {
-                    m_PrimaryPointerDown = pressed;
-                    m_Presentation->PointerButton(m_PointerX, m_PointerY, Keire::RuntimeUiPointerButton::Primary,
-                                                  pressed);
-                }
-                else if (event.button.button == SDL_BUTTON_RIGHT)
-                {
-                    m_SecondaryPointerDown = pressed;
-                    m_Presentation->PointerButton(m_PointerX, m_PointerY, Keire::RuntimeUiPointerButton::Secondary,
-                                                  pressed);
-                }
-            }
-            else if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST)
-            {
-                if (m_PrimaryPointerDown)
-                    m_Presentation->PointerButton(m_PointerX, m_PointerY, Keire::RuntimeUiPointerButton::Primary,
-                                                  false);
-                if (m_SecondaryPointerDown)
-                    m_Presentation->PointerButton(m_PointerX, m_PointerY, Keire::RuntimeUiPointerButton::Secondary,
-                                                  false);
-                m_PrimaryPointerDown = false;
-                m_SecondaryPointerDown = false;
-            }
+            KeireRuntime::ProcessRuntimeUiEvent(m_Presentation, event, scaleX, scaleY, m_UiPointer);
+            KeireRuntime::SynchronizeRuntimeUiTextInput(m_Presentation, Owner().Windows(), Owner().MainWindow());
         }
 
         void WriteManagedLog(const Keire::ManagedLogLevel level, const std::string_view message) noexcept override
@@ -1054,6 +1024,68 @@ namespace
             }
         }
 
+        [[nodiscard]] std::optional<float>
+        ReadManagedUiScalar(const Keire::AssetId entity,
+                            const Keire::ManagedUiScalarProperty property) noexcept override
+        {
+            return Keire::Detail::ReadManagedUiScalar(m_Scene, entity, property);
+        }
+
+        [[nodiscard]] bool SetManagedUiScalar(const Keire::AssetId entity,
+                                              const Keire::ManagedUiScalarProperty property,
+                                              const float value) noexcept override
+        {
+            return Keire::Detail::SetManagedUiScalar(m_Scene, entity, property, value);
+        }
+
+        [[nodiscard]] std::optional<bool>
+        ReadManagedUiFlag(const Keire::AssetId entity, const Keire::ManagedUiFlagProperty property) noexcept override
+        {
+            return Keire::Detail::ReadManagedUiFlag(m_Scene, m_Presentation, entity, property);
+        }
+
+        [[nodiscard]] bool SetManagedUiFlag(const Keire::AssetId entity, const Keire::ManagedUiFlagProperty property,
+                                            const bool value) noexcept override
+        {
+            return Keire::Detail::SetManagedUiFlag(m_Scene, m_Presentation, entity, property, value);
+        }
+
+        [[nodiscard]] std::optional<Keire::Vector2>
+        ReadManagedUiVector(const Keire::AssetId entity,
+                            const Keire::ManagedUiVectorProperty property) noexcept override
+        {
+            return Keire::Detail::ReadManagedUiVector(m_Scene, entity, property);
+        }
+
+        [[nodiscard]] bool SetManagedUiVector(const Keire::AssetId entity,
+                                              const Keire::ManagedUiVectorProperty property,
+                                              const Keire::Vector2 value) noexcept override
+        {
+            return Keire::Detail::SetManagedUiVector(m_Scene, entity, property, value);
+        }
+
+        [[nodiscard]] std::optional<std::string> ReadManagedUiInputText(const Keire::AssetId entity) noexcept override
+        {
+            return Keire::Detail::ReadManagedUiInputText(m_Scene, entity);
+        }
+
+        [[nodiscard]] bool SetManagedUiInputText(const Keire::AssetId entity,
+                                                 const std::string_view text) noexcept override
+        {
+            return Keire::Detail::SetManagedUiInputText(m_Scene, entity, text);
+        }
+
+        [[nodiscard]] bool ConsumeManagedUiEvent(const Keire::AssetId entity,
+                                                 const Keire::RuntimeUiEventType type) noexcept override
+        {
+            return Keire::Detail::ConsumeManagedUiEvent(m_Presentation, entity, type);
+        }
+
+        [[nodiscard]] bool FocusManagedUi(const Keire::AssetId entity) noexcept override
+        {
+            return Keire::Detail::FocusManagedUi(m_Presentation, entity);
+        }
+
       private:
         void ApplyManagedCursorMode(const bool restore = false) noexcept
         {
@@ -1090,10 +1122,7 @@ namespace
         Keire::Ref<Keire::RenderView> m_View;
         Keire::Ref<Keire::ScenePresentationRuntime> m_Presentation;
         Keire::WindowSystemInternalAccess::EventSinkToken m_EventSink = 0;
-        float m_PointerX = 0.0F;
-        float m_PointerY = 0.0F;
-        bool m_PrimaryPointerDown = false;
-        bool m_SecondaryPointerDown = false;
+        KeireRuntime::RuntimeUiPointerState m_UiPointer;
         Keire::InputUserId m_InputUser;
         Keire::Ref<Keire::InputActionContext> m_InputContext;
         bool m_ManagedCursorVisible = true;

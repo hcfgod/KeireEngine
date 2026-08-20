@@ -39,7 +39,11 @@ namespace Keire
         HorizontalLayout,
         VerticalLayout,
         Spacer,
-        GridLayout
+        GridLayout,
+        Slider,
+        Toggle,
+        InputField,
+        ScrollView
     };
 
     enum class RuntimeUiPositionMode : std::uint8_t
@@ -80,6 +84,14 @@ namespace Keire
         Down,
         Accept,
         Cancel
+    };
+
+    enum class RuntimeUiKey : std::uint8_t
+    {
+        Backspace,
+        Delete,
+        Enter,
+        Escape
     };
 
     struct RuntimeUiRect
@@ -149,12 +161,14 @@ namespace Keire
         float Opacity = 1.0F;
         float FontSize = 16.0F;
         Vector2 GridCellSize{160.0F, 48.0F};
+        Vector2 ContentOffset;
         bool ControlChildWidth = true;
         bool ControlChildHeight = false;
         bool ForceExpandWidth = true;
         bool ForceExpandHeight = false;
         bool ClipChildren = false;
         std::int32_t SortingOrder = 0;
+        std::int32_t NavigationOrder = 0;
     };
 
     struct RuntimeUiContent
@@ -163,6 +177,19 @@ namespace Keire
         AssetId Image;
         AssetId Font;
         std::string AccessibilityLabel;
+        std::string AccessibilityHint;
+        std::uint8_t AccessibilityRole = 0;
+    };
+
+    struct RuntimeUiControlState
+    {
+        float Minimum = 0.0F;
+        float Maximum = 1.0F;
+        float Value = 0.0F;
+        Vector2 ContentSize;
+        bool Checked = false;
+        bool Vertical = false;
+        bool Reversed = false;
     };
 
     struct RuntimeUiElementState
@@ -171,6 +198,7 @@ namespace Keire
         RuntimeUiElementId Parent;
         RuntimeUiStyle Style;
         RuntimeUiContent Content;
+        RuntimeUiControlState Control;
         RuntimeUiRect Rect;
         RuntimeUiRect ClipRect;
         bool Visible = true;
@@ -191,7 +219,9 @@ namespace Keire
         Focus,
         Blur,
         Submit,
-        Cancel
+        Cancel,
+        ValueChanged,
+        TextChanged
     };
 
     struct RuntimeUiEvent
@@ -240,6 +270,7 @@ namespace Keire
         std::size_t ClippedElements = 0;
         std::size_t PendingEvents = 0;
         std::size_t DroppedEvents = 0;
+        float Scale = 1.0F;
     };
 
     class KEIRE_API RuntimeUiTree final : public RefCounted
@@ -261,6 +292,7 @@ namespace Keire
         [[nodiscard]] bool SetType(RuntimeUiElementId element, RuntimeUiElementType type);
         [[nodiscard]] bool SetStyle(RuntimeUiElementId element, RuntimeUiStyle style);
         [[nodiscard]] bool SetContent(RuntimeUiElementId element, RuntimeUiContent content);
+        [[nodiscard]] bool SetControl(RuntimeUiElementId element, RuntimeUiControlState control);
         [[nodiscard]] bool SetVisible(RuntimeUiElementId element, bool visible);
         [[nodiscard]] bool SetEnabled(RuntimeUiElementId element, bool enabled);
         [[nodiscard]] bool SetInteractable(RuntimeUiElementId element, bool interactable);

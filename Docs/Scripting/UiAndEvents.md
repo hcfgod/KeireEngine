@@ -1,7 +1,7 @@
 # UI And Events From C#
 
-Kéire supports scene-authored runtime UI, managed button bindings, text updates, persistent Inspector events, runtime
-listeners, and cooperative cursor ownership.
+Kéire supports scene-authored runtime UI, managed control bindings, text updates, persistent Inspector events,
+runtime listeners, keyboard/gamepad navigation, UTF-8 input, scrolling, and cooperative cursor ownership.
 
 ## Scene UI References
 
@@ -15,15 +15,21 @@ private Entity _panel;
 private Entity _ammoLabel;
 ```
 
-Use `UiButton?` for a scene-authored Button binding:
+Use typed managed handles for scene-authored controls:
 
 ```csharp
 [SerializeField, StableFieldId("3ea684dc-669f-4407-a358-8ed110de569b")]
 private UiButton? _resumeButton;
+
+[SerializeField, StableFieldId("71a9094c-d1c5-4e7c-8bfe-ab0726129b78")]
+private UiSlider? _sensitivity;
+
+[SerializeField, StableFieldId("eb542341-d318-4931-ae6a-2f1c95608fe3")]
+private UiInputField? _profileName;
 ```
 
-`UiButton` is a managed reference type and may be `null`. Its `IsValid` property also verifies that the entity still has
-a UI Button component.
+`UiButton`, `UiSlider`, `UiToggle`, `UiInputField`, and `UiScrollView` are managed reference types and may be `null`.
+Their `IsValid` properties also verify that the entity still has the corresponding native component.
 
 This differs from `AssetReference<T>`, which is a value type and uses only `.IsValid`.
 
@@ -89,6 +95,32 @@ UiButton? button = UiButton.FromEntity(buttonEntity);
 ```
 
 Both return `null` when the entity lacks a UI Button component.
+
+## Sliders, Toggles, Input Fields, And Scroll Views
+
+Typed controls read and write the live scene component used by both editor Play Mode and packaged players:
+
+```csharp
+protected override void Update()
+{
+    if (_sensitivity is not null && _sensitivity.ChangedThisFrame)
+        PlayerPreferences.SetFloat("input.lookSensitivity", _sensitivity.Value);
+
+    if (_profileName is not null && _profileName.SubmittedThisFrame)
+        PlayerPreferences.SetString("profile.name", _profileName.Text);
+}
+```
+
+`UiSlider` exposes `Minimum`, `Maximum`, `Value`, `Interactable`, and `ChangedThisFrame`. `UiToggle` exposes `IsOn`,
+`Interactable`, and `ChangedThisFrame`. `UiInputField` exposes UTF-8 `Text`, focus, change/submit/cancel events, and
+interactability. `UiScrollView` exposes `Offset`, `ContentSize`, interactability, and `ScrolledThisFrame`.
+
+Call `Focus()` to move runtime focus to a control. Tab/Shift+Tab, arrow keys, Enter/Escape, mouse wheels, and gamepad
+D-pad/accept/cancel are routed through the retained UI tree. Input-field length limits are measured in UTF-8 bytes so
+the native and managed contracts remain identical.
+
+The Inspector exposes accessibility label, hint, semantic role, and explicit navigation order through the
+`UiAccessibilityComponent`. Navigation order is stable; equal or automatic values retain scene order.
 
 ## Polling UI
 
@@ -399,4 +431,4 @@ UiRect result = panel.LayoutRect;
 
 `UiPanel`, `UiText`, `UiImage`, and unbound `UiButton` values support hierarchy and layout calculation. Cycles are
 rejected. This model is useful for runtime layout data; scene-authored UI rendering and native interaction remain
-entity/component operations through `RuntimeUi` and native-bound buttons.
+entity/component operations through `RuntimeUi` and native-bound control handles.

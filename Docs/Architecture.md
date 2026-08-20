@@ -727,9 +727,12 @@ scene entity IDs to generation-safe UI nodes and audio voices, synchronizes comp
 and clears every node, event, asset handle, and voice during scene replacement or Play Mode teardown. Editor Play Mode
 and cooked runtime use the same synchronization and input path.
 
-The retained tree owns layout, focus, hit testing, clipping, batching metadata, and bounded events. `UiFrame` currently
-adapts its draw commands to the SDL_GPU-backed application UI pass; managed code reaches the presentation runtime only
-through Coral internal calls and `IScriptRuntimeServices`, never through native pointers.
+The retained tree owns layout, ordered focus, hit testing, clipping, batching metadata, and bounded events. Sliders,
+toggles, input fields, and scroll views store authoritative values in scene components; pointer, wheel, UTF-8 text,
+keyboard, and gamepad input update those components and emit typed presentation events. Editor Play Mode and packaged
+players route through the same interaction state machine. `UiFrame` adapts draw commands to the SDL_GPU-backed
+application UI pass; managed control handles reach the presentation runtime only through bounded Coral internal calls
+and `IScriptRuntimeServices`, never through native pointers.
 
 Editor material authoring has three deliberate workflows. `MaterialDocument` and `MaterialInspectorPanel` own compact
 Direct Material editing. `MaterialGraphDocument` and `MaterialGraphPanel` own the Unreal-style artist surface graph,

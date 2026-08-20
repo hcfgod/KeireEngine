@@ -21,6 +21,7 @@ var tests = new (string Name, Action Run)[]
     ("Animator exposes transient foot-grounding control", AnimatorFootGroundingContract),
     ("Physics rejects non-finite raycasts before native dispatch", PhysicsRaycastValidationContract),
     ("Native UI button dispatch advances with the player clock", NativeUiButtonDispatchClockContract),
+    ("Native runtime UI controls preserve values text focus and events", NativeRuntimeUiControlContract),
     ("Managed jobs execute delegates and publish terminal states", ManagedJobExecutionContract),
     ("Managed jobs preserve terminal dependency semantics", ManagedJobDependencyContract),
     ("Application, time, and screen use the native foundation contract", RuntimeFoundationContract),
@@ -180,6 +181,51 @@ static unsafe void NativeUiButtonDispatchClockContract()
     {
         button.Clicked -= clicked;
         NativeUiDispatchFixture.Uninstall();
+    }
+}
+
+static unsafe void NativeRuntimeUiControlContract()
+{
+    NativeRuntimeUiFixture.Install();
+    var entity = new Keire.Entity(17, new Keire.EntityId(23, 29));
+    try
+    {
+        var slider = new Keire.UiSlider(entity);
+        Assert(slider.Minimum == 0.0f && slider.Maximum == 100.0f && slider.Value == 25.0f,
+               "Slider ranges and values must be read from the native scene component.");
+        slider.Value = 72.5f;
+        Assert(NativeRuntimeUiFixture.ScalarProperty == Keire.NativeUiScalarProperty.Value &&
+                   MathF.Abs(NativeRuntimeUiFixture.ScalarValue - 72.5f) < 0.0001f,
+               "Slider writes must preserve the native scalar property and value.");
+        Assert(slider.ChangedThisFrame && !slider.ChangedThisFrame,
+               "Typed UI events must be consumed exactly once.");
+
+        var toggle = new Keire.UiToggle(entity);
+        Assert(!toggle.IsOn && toggle.Interactable, "Toggle state and interactability must use native flags.");
+        toggle.IsOn = true;
+        Assert(NativeRuntimeUiFixture.FlagProperty == Keire.NativeUiFlagProperty.Checked &&
+                   NativeRuntimeUiFixture.FlagValue,
+               "Toggle writes must preserve the checked flag.");
+
+        var input = new Keire.UiInputField(entity);
+        Assert(input.Text == "Astra Ω", "Input text must round-trip through the UTF-8 native ABI.");
+        input.Text = "Nightglass";
+        input.Focus();
+        Assert(NativeRuntimeUiFixture.InputTextSet && NativeRuntimeUiFixture.Focused,
+               "Input text writes and focus requests must reach native services.");
+
+        var scroll = new Keire.UiScrollView(entity);
+        Assert(scroll.Offset == new Keire.Vector2(4.0f, 8.0f) &&
+                   scroll.ContentSize == new Keire.Vector2(1920.0f, 1080.0f),
+               "Scroll offset and content extents must preserve native vectors.");
+        scroll.Offset = new Keire.Vector2(10.0f, 20.0f);
+        Assert(NativeRuntimeUiFixture.VectorProperty == Keire.NativeUiVectorProperty.ScrollOffset &&
+                   NativeRuntimeUiFixture.VectorValue == new Keire.Vector2(10.0f, 20.0f),
+               "Scroll writes must preserve the native vector property and value.");
+    }
+    finally
+    {
+        NativeRuntimeUiFixture.Uninstall();
     }
 }
 
@@ -844,6 +890,153 @@ file static unsafe class NativeUiDispatchFixture
             return 0;
         --s_PendingClicks;
         return 1;
+    }
+}
+
+file static unsafe class NativeRuntimeUiFixture
+{
+    private static bool s_eventPending;
+
+    public static Keire.NativeUiScalarProperty ScalarProperty { get; private set; }
+    public static float ScalarValue { get; private set; }
+    public static Keire.NativeUiFlagProperty FlagProperty { get; private set; }
+    public static bool FlagValue { get; private set; }
+    public static Keire.NativeUiVectorProperty VectorProperty { get; private set; }
+    public static Keire.Vector2 VectorValue { get; private set; }
+    public static bool InputTextSet { get; private set; }
+    public static bool Focused { get; private set; }
+
+    public static void Install()
+    {
+        ScalarProperty = default;
+        ScalarValue = 0.0f;
+        FlagProperty = default;
+        FlagValue = false;
+        VectorProperty = default;
+        VectorValue = default;
+        InputTextSet = false;
+        Focused = false;
+        s_eventPending = true;
+        Keire.NativeRuntimeUi.GetScalarIcall = &GetScalar;
+        Keire.NativeRuntimeUi.SetScalarIcall = &SetScalar;
+        Keire.NativeRuntimeUi.GetFlagIcall = &GetFlag;
+        Keire.NativeRuntimeUi.SetFlagIcall = &SetFlag;
+        Keire.NativeRuntimeUi.GetVectorIcall = &GetVector;
+        Keire.NativeRuntimeUi.SetVectorIcall = &SetVector;
+        Keire.NativeRuntimeUi.GetInputTextIcall = &GetInputText;
+        Keire.NativeRuntimeUi.SetInputTextIcall = &SetInputText;
+        Keire.NativeRuntimeUi.ConsumeEventIcall = &ConsumeEvent;
+        Keire.NativeRuntimeUi.FocusIcall = &Focus;
+    }
+
+    public static void Uninstall()
+    {
+        Keire.NativeRuntimeUi.GetScalarIcall = null;
+        Keire.NativeRuntimeUi.SetScalarIcall = null;
+        Keire.NativeRuntimeUi.GetFlagIcall = null;
+        Keire.NativeRuntimeUi.SetFlagIcall = null;
+        Keire.NativeRuntimeUi.GetVectorIcall = null;
+        Keire.NativeRuntimeUi.SetVectorIcall = null;
+        Keire.NativeRuntimeUi.GetInputTextIcall = null;
+        Keire.NativeRuntimeUi.SetInputTextIcall = null;
+        Keire.NativeRuntimeUi.ConsumeEventIcall = null;
+        Keire.NativeRuntimeUi.FocusIcall = null;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte GetScalar(ulong high, ulong low, byte property, float* value)
+    {
+        if (high != 23 || low != 29 || value == null)
+            return 0;
+        *value = (Keire.NativeUiScalarProperty)property switch
+        {
+            Keire.NativeUiScalarProperty.Minimum => 0.0f,
+            Keire.NativeUiScalarProperty.Maximum => 100.0f,
+            _ => 25.0f
+        };
+        return 1;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetScalar(ulong high, ulong low, byte property, float value)
+    {
+        ScalarProperty = (Keire.NativeUiScalarProperty)property;
+        ScalarValue = value;
+        return high == 23 && low == 29 ? (byte)1 : (byte)0;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte GetFlag(ulong high, ulong low, byte property, byte* value)
+    {
+        if (high != 23 || low != 29 || value == null)
+            return 0;
+        *value = (Keire.NativeUiFlagProperty)property == Keire.NativeUiFlagProperty.Interactable ? (byte)1 : (byte)0;
+        return 1;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetFlag(ulong high, ulong low, byte property, byte value)
+    {
+        FlagProperty = (Keire.NativeUiFlagProperty)property;
+        FlagValue = value != 0;
+        return high == 23 && low == 29 ? (byte)1 : (byte)0;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte GetVector(ulong high, ulong low, byte property, Keire.Vector2* value)
+    {
+        if (high != 23 || low != 29 || value == null)
+            return 0;
+        *value = (Keire.NativeUiVectorProperty)property == Keire.NativeUiVectorProperty.ScrollOffset
+            ? new Keire.Vector2(4.0f, 8.0f)
+            : new Keire.Vector2(1920.0f, 1080.0f);
+        return 1;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetVector(ulong high, ulong low, byte property, Keire.Vector2 value)
+    {
+        VectorProperty = (Keire.NativeUiVectorProperty)property;
+        VectorValue = value;
+        return high == 23 && low == 29 ? (byte)1 : (byte)0;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static int GetInputText(ulong high, ulong low, byte* destination, int capacity)
+    {
+        if (high != 23 || low != 29)
+            return -1;
+        byte[] bytes = System.Text.Encoding.UTF8.GetBytes("Astra Ω");
+        if (destination == null || capacity == 0)
+            return bytes.Length;
+        if (capacity < bytes.Length)
+            return -1;
+        for (int index = 0; index < bytes.Length; ++index)
+            destination[index] = bytes[index];
+        return bytes.Length;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetInputText(ulong high, ulong low, Keire.NativeString value)
+    {
+        InputTextSet = true;
+        return high == 23 && low == 29 ? (byte)1 : (byte)0;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte ConsumeEvent(ulong high, ulong low, byte type)
+    {
+        if (high != 23 || low != 29 || type != (byte)Keire.NativeUiEventType.ValueChanged || !s_eventPending)
+            return 0;
+        s_eventPending = false;
+        return 1;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte Focus(ulong high, ulong low)
+    {
+        Focused = high == 23 && low == 29;
+        return Focused ? (byte)1 : (byte)0;
     }
 }
 

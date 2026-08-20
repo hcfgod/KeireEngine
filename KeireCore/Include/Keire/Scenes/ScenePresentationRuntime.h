@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string_view>
 #include <vector>
 
 namespace Keire
@@ -98,8 +99,14 @@ namespace Keire
         [[nodiscard]] AudioSourcePlaybackInfo Playback(EntityId source) const;
         [[nodiscard]] bool SetFocus(EntityId entity);
         [[nodiscard]] bool ConsumeClick(EntityId entity);
+        [[nodiscard]] bool ConsumeUiEvent(EntityId entity, RuntimeUiEventType type);
         void PointerMove(float x, float y);
         void PointerButton(float x, float y, RuntimeUiPointerButton button, bool pressed);
+        void PointerWheel(float x, float y, float horizontal, float vertical);
+        void TextInput(std::string_view text);
+        [[nodiscard]] bool KeyInput(RuntimeUiKey key);
+        [[nodiscard]] bool TextInputFocused() const noexcept;
+        [[nodiscard]] EntityId FocusedUiEntity() const noexcept;
         void Navigate(RuntimeUiNavigation navigation);
         [[nodiscard]] bool PollUiEvent(RuntimeUiEvent& event);
         [[nodiscard]] ScenePresentationCheckpoint CaptureCheckpoint() const;
