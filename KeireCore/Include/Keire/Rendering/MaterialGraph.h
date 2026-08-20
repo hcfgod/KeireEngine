@@ -54,6 +54,8 @@ namespace Keire
         AssetId Id;
         MaterialGraphEndpoint Output;
         MaterialGraphEndpoint Input;
+        /// Editor-only cable routing knots in graph space. They do not affect material evaluation.
+        std::vector<Vector2> RoutingPoints;
 
         bool operator==(const MaterialGraphConnection&) const = default;
     };

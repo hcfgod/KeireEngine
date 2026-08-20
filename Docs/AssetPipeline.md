@@ -82,13 +82,24 @@ Snapshot queries use only the record-store lock and never wait for the operation
 thumbnail lookup, and editor selection remain responsive while a scene save triggers background catalog work.
 
 `ImportAll()` hashes sources with SHA-256 and stores immutable raw objects below `Library/AssetCache/Objects`. Existing
-objects are cache hits. It then publishes content-addressed runtime packs under `Library/AssetCache/Runtime` and
-atomically replaces only the catalog and small metadata documents. `PollChangedAssets()` uses file signatures and a
+objects are cache hits. Contextual importers also persist their validated complete output below
+`Library/AssetCache/ImportOutputs`, including generated subassets, diagnostics, derived metadata, and dependency
+records. A new asset-worker process restores the previous source index before scanning, retains its importer-derived
+dependency state, and reruns an importer only when its source, metadata, source-file dependencies, or referenced asset
+source files that it actually read changed. Runtime-only references do not invalidate import output. This lets a
+Material Graph save recompile that graph and its actual dependents without invoking
+unrelated graph, shader, model, texture, or audio importers. Targeted editor requests compute the reverse dependency
+closure, cook only those source records and generated subassets, and merge the new entries with unchanged entries from
+the last-good development catalog. Unchanged content-addressed packs are reused in place while the complete merged
+catalog is validated and published atomically. `PollChangedAssets()` uses file signatures and a
 250 ms default stability window; hashing and import happen only after a stable change. The editor remounts the published
 catalog and requests last-good reloads
 for changed IDs. Interactive material authoring first publishes an immutable development asset revision directly to
-loaded handles, then coalesces source persistence and catalog rebuilding at the edit boundary on a background task.
-This preview path is unavailable in cooked mode and does not replace import/cook validation.
+loaded handles, then autosaves the source after 500 ms without another edit. The source-change monitor remains the sole
+owner of the resulting targeted worker import so the editor-authored write cannot enqueue the same rebuild twice.
+Material thumbnail invalidation is revision-aware: an in-flight request from before the edit cannot republish or cache
+stale pixels, and generation waits while the runtime handle is reloading. This preview path is unavailable in cooked
+mode and does not replace import/cook validation.
 
 The default raw import path classifies common source/configuration/shader extensions as UTF-8 text and all remaining
 files as binary. Owner-configured `AssetImporterRegistration` values claim specialized extensions, validate source
@@ -118,7 +129,10 @@ folder creation, move, duplicate, trash, restore, and permanent deletion. One pr
 exchanges atomic documents below `Library/AssetOperations`. Successful work publishes
 `Library/AssetCache/Runtime/source-index.json`, which the editor validates and reloads without scanning or hashing the
 project again. Operation documents and captured worker logs remain available for diagnostics; the worker is packaged
-with the editor but is not a supported SDK or importer plug-in API.
+with the editor but is not a supported SDK or importer plug-in API. Each request records its scheduling reason,
+operation kind, and targeted asset IDs. The captured `worker.log` also records the selected worker executable's view of
+the request, whether a prior runtime catalog was available, and the final imported closure size. A full import caused
+by automatic refresh therefore identifies its fallback reason instead of looking identical to an explicit rebuild.
 
 Command-line imports and cooks allow the worker deadline to be adjusted with
 `--worker-timeout-seconds <seconds>`. The default remains 600 seconds; the value must be greater than zero. This keeps

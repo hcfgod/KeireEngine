@@ -85,6 +85,8 @@ namespace Keire
                       system.Connections.capacity() * sizeof(VfxGraphConnection);
             for (const auto& node : system.Nodes)
                 result += VfxNodeOwnedBytes(node);
+            for (const auto& connection : system.Connections)
+                result += connection.RoutingPoints.capacity() * sizeof(Vector2);
         }
         for (const auto& parameter : m_Definition.Blackboard)
             result += parameter.Name.capacity() + VfxValueOwnedBytes(parameter.DefaultValue);

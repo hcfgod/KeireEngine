@@ -29,6 +29,8 @@ namespace KeireEditor
         ResolveMaterialGraphFunction(Keire::AssetId asset) const = 0;
         [[nodiscard]] virtual std::optional<Keire::ShaderGraphDefinition>
         ResolveMaterialGraphTemplate(const Keire::MaterialShaderReference& shader) const = 0;
+        [[nodiscard]] virtual Keire::Ref<const Keire::Texture2DAsset>
+        ResolveMaterialGraphTexture(Keire::AssetId asset) const = 0;
         virtual void SaveMaterialGraphDocument() = 0;
         virtual void UndoMaterialGraphEdit() = 0;
         virtual void RedoMaterialGraphEdit() = 0;
@@ -69,7 +71,9 @@ namespace KeireEditor
         void DrawInspector(Keire::UiFrame& ui);
         void DrawDiagnostics(Keire::UiFrame& ui);
         void EnsureJobScope();
-        [[nodiscard]] bool DrawExpressionCreationMenu(Keire::UiFrame& ui, std::optional<Keire::Vector2> position);
+        [[nodiscard]] bool DrawExpressionCreationMenu(Keire::UiFrame& ui, std::optional<Keire::Vector2> position,
+                                                      const Keire::ShaderGraphNode* compatibleNode = nullptr,
+                                                      const Keire::ShaderGraphPin* compatiblePin = nullptr);
         [[nodiscard]] bool DrawValueEditor(Keire::UiFrame& ui, std::string_view label,
                                            Keire::MaterialPropertyValue& value);
         [[nodiscard]] bool DrawExpressionValueEditor(Keire::UiFrame& ui, std::string_view label,
@@ -92,6 +96,7 @@ namespace KeireEditor
         std::optional<Keire::AssetId> m_SelectedConnection;
         std::optional<Keire::AssetId> m_InspectorNode;
         std::optional<Keire::Vector2> m_NodeCreationPosition;
+        std::optional<NodeGraphContextRequest> m_GraphContext;
         std::string m_InspectorName;
         std::string m_InspectorSymbol;
         std::string m_InspectorInclude;

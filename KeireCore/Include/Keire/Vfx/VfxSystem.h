@@ -502,6 +502,8 @@ namespace Keire
         AssetId InputPin;
         AssetId OutputBlock;
         AssetId InputBlock;
+        /// Editor-only cable routing knots in graph space. They do not affect VFX evaluation.
+        std::vector<Vector2> RoutingPoints;
 
         [[nodiscard]] VfxGraphEndpoint OutputEndpoint() const noexcept { return {OutputNode, OutputBlock, OutputPin}; }
         [[nodiscard]] VfxGraphEndpoint InputEndpoint() const noexcept { return {InputNode, InputBlock, InputPin}; }

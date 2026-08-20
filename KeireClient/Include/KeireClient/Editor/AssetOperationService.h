@@ -32,6 +32,8 @@ namespace KeireEditor
         OpenScene,
         OpenInputActions,
         OpenExternal,
+        OpenMaterialGraph,
+        OpenShaderGraph,
         AdoptSceneCopy
     };
 
@@ -64,6 +66,7 @@ namespace KeireEditor
         std::filesystem::path SceneSource;
         std::shared_ptr<AssetMutationUndoState> MutationUndo;
         AssetMutationPhase MutationPhase = AssetMutationPhase::Initial;
+        std::string Reason;
     };
 
     struct AssetOperationCompletion
@@ -91,6 +94,10 @@ namespace KeireEditor
         AssetOperationService& operator=(const AssetOperationService&) = delete;
 
         void QueueImport(AssetOperationPriority priority, AssetOperationContext context = {});
+        void QueueAssetImport(Keire::AssetId asset, AssetOperationPriority priority,
+                              AssetOperationContext context = {});
+        void QueueAssetImport(std::vector<Keire::AssetId> assets, AssetOperationPriority priority,
+                              AssetOperationContext context = {});
         void QueueExternalImport(std::vector<Keire::ExternalAssetImportItem> items, AssetOperationContext context);
         void QueueCreateAsset(std::filesystem::path relativePath, std::vector<std::byte> source,
                               Keire::AssetImportSettings settings, AssetOperationContext context);

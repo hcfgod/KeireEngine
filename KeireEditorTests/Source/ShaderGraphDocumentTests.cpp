@@ -390,6 +390,55 @@ TEST_CASE("Shader Graph live preview evaluates procedural nodes instead of prope
     CHECK(evaluatedBlue != approximatedBlue);
 }
 
+TEST_CASE("Shader Graph live preview samples supplied material textures")
+{
+    const auto source = std::filesystem::current_path() /
+                        "Samples/KeireSandbox/Assets/Examples/MaterialLab/ShaderGraphs/01_Foundations/"
+                        "SG_02_TiledCeramic.keireshadergraph";
+    const auto graph = Keire::ShaderGraphAsset::DecodeSource(ReadBytes(source));
+    const auto compilation = Keire::CompileShaderGraph(graph);
+    REQUIRE(compilation.Succeeded());
+    const auto textureParameter =
+        std::ranges::find_if(graph.Nodes,
+                             [](const Keire::ShaderGraphNode& node)
+                             {
+                                 return node.Kind == Keire::ShaderGraphNodeKind::Parameter &&
+                                        node.ValueType == Keire::ShaderGraphValueType::Texture2D;
+                             });
+    REQUIRE(textureParameter != graph.Nodes.end());
+    const auto textureAsset = std::get<Keire::AssetId>(textureParameter->Value);
+    REQUIRE(textureAsset);
+
+    Keire::TextureMipLevel mip;
+    mip.Width = 2;
+    mip.Height = 2;
+    mip.Pixels = {
+        std::byte{255}, std::byte{16},  std::byte{8},   std::byte{255}, std::byte{255}, std::byte{16},
+        std::byte{8},   std::byte{255}, std::byte{255}, std::byte{16},  std::byte{8},   std::byte{255},
+        std::byte{255}, std::byte{16},  std::byte{8},   std::byte{255},
+    };
+    Keire::TextureImportSettings textureSettings;
+    textureSettings.Mips = Keire::TextureMipPolicy::None;
+    const auto texture = Keire::CreateRef<Keire::Texture2DAsset>(textureSettings, std::vector{std::move(mip)});
+    const std::array textures{KeireEditor::ShaderGraphPreviewTexture{textureAsset, texture}};
+    KeireEditor::ShaderGraphPreviewRequest request{
+        .Output = graph.Output,
+        .Mesh = Keire::ShaderGraphPreviewMesh::Plane,
+        .Definition = &graph,
+        .Properties = compilation.Properties,
+        .Textures = textures,
+        .Width = 96,
+        .Height = 96,
+        .RotationDegrees = 0.0F,
+    };
+    const auto textured = KeireEditor::RenderShaderGraphPreview(request);
+    request.Textures = {};
+    const auto fallback = KeireEditor::RenderShaderGraphPreview(request);
+    CHECK(textured != fallback);
+    const auto center = (48U * request.Width + 48U) * 4U;
+    CHECK(std::to_integer<std::uint8_t>(textured[center]) > std::to_integer<std::uint8_t>(textured[center + 1U]));
+}
+
 TEST_CASE("Shader Graph live preview evaluates deep expression chains without recursive dispatcher frames")
 {
     auto graph = Keire::CreateDefaultShaderGraph();

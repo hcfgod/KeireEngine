@@ -53,6 +53,36 @@ namespace KeireEditor
         return stem.empty() ? path.filename().string() : stem;
     }
 
+    std::string ElideAssetDisplayName(const std::string_view name, const float maximumWidth,
+                                      const std::function<float(std::string_view)>& measureText)
+    {
+        if (!measureText)
+            throw std::invalid_argument("Asset-name elision requires a text measurement callback.");
+        if (name.empty())
+            return std::string(name);
+        if (maximumWidth <= 0.0F)
+            return {};
+        if (measureText(name) <= maximumWidth)
+            return std::string(name);
+
+        constexpr std::string_view ellipsis = "...";
+        if (measureText(ellipsis) > maximumWidth)
+            return {};
+
+        std::size_t end = name.size();
+        while (end > 0)
+        {
+            --end;
+            while (end > 0 && (static_cast<unsigned char>(name[end]) & 0xc0U) == 0x80U)
+                --end;
+            std::string candidate(name.substr(0, end));
+            candidate += ellipsis;
+            if (measureText(candidate) <= maximumWidth)
+                return candidate;
+        }
+        return std::string(ellipsis);
+    }
+
     bool SameOrChild(const std::filesystem::path& parent, const std::filesystem::path& candidate)
     {
         const auto normalizedParent = parent.lexically_normal();
@@ -274,6 +304,60 @@ namespace KeireEditor
         for (const auto asset : assets)
         {
             result += asset.ToString();
+            result.push_back('\n');
+        }
+        return result;
+    }
+
+    std::vector<std::filesystem::path> BuildFolderRangeSelection(const std::span<const std::filesystem::path> order,
+                                                                 const std::filesystem::path& anchor,
+                                                                 const std::filesystem::path& target,
+                                                                 const std::span<const std::filesystem::path> existing,
+                                                                 const bool additive)
+    {
+        std::vector<std::filesystem::path> result;
+        if (additive)
+            result.assign(existing.begin(), existing.end());
+        const auto anchorIterator = std::ranges::find(order, anchor);
+        const auto targetIterator = std::ranges::find(order, target);
+        if (anchorIterator == order.end() || targetIterator == order.end())
+        {
+            if (std::ranges::find(result, target) == result.end())
+                result.push_back(target);
+            return result;
+        }
+        const auto first = std::min(anchorIterator, targetIterator);
+        const auto last = std::max(anchorIterator, targetIterator);
+        for (auto iterator = first; iterator <= last; ++iterator)
+            if (std::ranges::find(result, *iterator) == result.end())
+                result.push_back(*iterator);
+        return result;
+    }
+
+    std::vector<std::filesystem::path> DecodeFolderPayload(const std::span<const std::byte> bytes)
+    {
+        const std::string text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        std::istringstream stream(text);
+        std::vector<std::filesystem::path> result;
+        std::string line;
+        while (std::getline(stream, line))
+        {
+            const auto path = std::filesystem::path(line).lexically_normal();
+            if (path.empty() || path.is_absolute() || path.generic_string().starts_with("..") || result.size() >= 1024)
+                throw std::invalid_argument("Folder drag payload is invalid or exceeds 1024 entries.");
+            result.push_back(path);
+        }
+        if (result.empty())
+            throw std::invalid_argument("Folder drag payload is empty.");
+        return result;
+    }
+
+    std::string EncodeFolderPayload(const std::span<const std::filesystem::path> folders)
+    {
+        std::string result;
+        for (const auto& folder : folders)
+        {
+            result += folder.generic_string();
             result.push_back('\n');
         }
         return result;

@@ -616,6 +616,9 @@ namespace Keire
         [[nodiscard]] UiPosition CursorScreenPosition() const;
         [[nodiscard]] bool WindowFocused() const;
         [[nodiscard]] UiPointerState PointerState() const;
+        /// Claims the vertical pointer wheel for the last item while it is hovered or active. Custom zoomable
+        /// controls use this to prevent the containing panel from scrolling in the same frame.
+        void CapturePointerWheel();
         [[nodiscard]] bool KeyDown(UiKey key) const;
         [[nodiscard]] bool ControlDown() const;
         [[nodiscard]] bool ShiftDown() const;

@@ -236,12 +236,47 @@ namespace KeireEditor
             return value / std::max(normalization, 1.0e-5F);
         }
 
+        [[nodiscard]] std::optional<Keire::Vector4>
+        SamplePreviewTexture(const std::span<const ShaderGraphPreviewTexture> textures, const Keire::AssetId asset,
+                             Keire::Vector2 uv) noexcept
+        {
+            const auto resolved = std::ranges::find(textures, asset, &ShaderGraphPreviewTexture::Asset);
+            if (resolved == textures.end() || !resolved->Texture || resolved->Texture->Mips().empty())
+                return std::nullopt;
+            const auto& mip = resolved->Texture->Mips().front();
+            if (mip.Width == 0 || mip.Height == 0 ||
+                mip.Pixels.size() != static_cast<std::size_t>(mip.Width) * mip.Height * 4U)
+                return std::nullopt;
+            uv.X -= std::floor(uv.X);
+            uv.Y -= std::floor(uv.Y);
+            const auto x = std::min(static_cast<std::uint32_t>(uv.X * static_cast<float>(mip.Width)), mip.Width - 1U);
+            const auto y = std::min(static_cast<std::uint32_t>(uv.Y * static_cast<float>(mip.Height)), mip.Height - 1U);
+            const auto offset = (static_cast<std::size_t>(y) * mip.Width + x) * 4U;
+            if (resolved->Texture->Settings().HighDynamicRange)
+            {
+                const auto exponent =
+                    std::ldexp(1.0F, static_cast<int>(std::to_integer<std::uint8_t>(mip.Pixels[offset + 3U])) - 136);
+                return Keire::Vector4{
+                    static_cast<float>(std::to_integer<std::uint8_t>(mip.Pixels[offset])) * exponent,
+                    static_cast<float>(std::to_integer<std::uint8_t>(mip.Pixels[offset + 1U])) * exponent,
+                    static_cast<float>(std::to_integer<std::uint8_t>(mip.Pixels[offset + 2U])) * exponent, 1.0F};
+            }
+            constexpr float byteScale = 1.0F / 255.0F;
+            return Keire::Vector4{
+                static_cast<float>(std::to_integer<std::uint8_t>(mip.Pixels[offset])) * byteScale,
+                static_cast<float>(std::to_integer<std::uint8_t>(mip.Pixels[offset + 1U])) * byteScale,
+                static_cast<float>(std::to_integer<std::uint8_t>(mip.Pixels[offset + 2U])) * byteScale,
+                static_cast<float>(std::to_integer<std::uint8_t>(mip.Pixels[offset + 3U])) * byteScale};
+        }
+
         class GraphPreviewEvaluator final
         {
           public:
             GraphPreviewEvaluator(const Keire::ShaderGraphDefinition& definition,
-                                  const std::span<const Keire::ShaderPropertyDefinition> properties)
-                : m_Definition(definition), m_Properties(properties), m_Visiting(definition.Nodes.size(), 0)
+                                  const std::span<const Keire::ShaderPropertyDefinition> properties,
+                                  const std::span<const ShaderGraphPreviewTexture> textures)
+                : m_Definition(definition), m_Properties(properties), m_Textures(textures),
+                  m_Visiting(definition.Nodes.size(), 0)
             {
                 for (std::size_t index = 0; index < definition.Nodes.size(); ++index)
                 {
@@ -385,6 +420,9 @@ namespace KeireEditor
             [[nodiscard]] PreviewGraphValue TextureSample(const PreviewGraphValue texture,
                                                           const Keire::Vector2 uv) const noexcept
             {
+                if (texture.Texture)
+                    if (const auto sample = SamplePreviewTexture(m_Textures, texture.Texture, uv))
+                        return {.Data = *sample, .Type = Keire::ShaderGraphValueType::Color};
                 const bool alternate =
                     ((static_cast<int>(std::floor(uv.X * 10.0F)) + static_cast<int>(std::floor(uv.Y * 10.0F))) & 1) !=
                     0;
@@ -1664,6 +1702,7 @@ namespace KeireEditor
 
             const Keire::ShaderGraphDefinition& m_Definition;
             std::span<const Keire::ShaderPropertyDefinition> m_Properties;
+            std::span<const ShaderGraphPreviewTexture> m_Textures;
             std::map<Keire::AssetId, std::size_t> m_Nodes;
             std::map<std::pair<Keire::AssetId, Keire::AssetId>, Keire::ShaderGraphEndpoint> m_Incoming;
             std::map<std::pair<Keire::AssetId, Keire::AssetId>, std::size_t> m_CacheIndices;
@@ -1936,7 +1975,8 @@ namespace KeireEditor
         }
         std::unique_ptr<GraphPreviewEvaluator> evaluator;
         if (request.Definition)
-            evaluator = std::make_unique<GraphPreviewEvaluator>(*request.Definition, request.Properties);
+            evaluator =
+                std::make_unique<GraphPreviewEvaluator>(*request.Definition, request.Properties, request.Textures);
         Rasterize(geometry, request, evaluator.get(), request.Width, request.Height, request.Exposure,
                   request.EnvironmentIntensity, request.RotationDegrees, pixels);
         return pixels;

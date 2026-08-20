@@ -122,7 +122,8 @@ TEST_CASE("Material Graph visual connections drive reflected Material Output inp
     const auto outputPin = value.OutputPin;
     definition.Nodes.push_back(std::move(value));
     const auto input = definition.Properties[1].Pin;
-    definition.Connections.push_back({Keire::AssetId::Generate(), {node, outputPin}, {definition.OutputNode, input}});
+    definition.Connections.push_back(
+        {Keire::AssetId::Generate(), {node, outputPin}, {definition.OutputNode, input}, {{240.0F, 180.0F}}});
 
     Keire::ValidateMaterialGraph(definition);
     const auto evaluated = Keire::EvaluateMaterialGraphProperties(definition);

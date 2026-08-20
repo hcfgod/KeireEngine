@@ -91,6 +91,7 @@ TEST_CASE("Shader Graph source and cooked assets preserve stable graph identity"
     auto roughness = Parameter("Roughness", Keire::ShaderGraphValueType::Scalar, 0.42F);
     definition.Nodes.push_back(roughness);
     Connect(definition, definition.Nodes.back(), "Value", definition.Nodes.front(), "Roughness");
+    definition.Connections.back().RoutingPoints = {{180.0F, 96.0F}, {320.0F, 132.0F}};
 
     const auto source = Keire::ShaderGraphAsset::EncodeSource(definition);
     const auto sourceDecoded = Keire::ShaderGraphAsset::DecodeSource(source);

@@ -70,6 +70,14 @@ namespace KeireEditor
             EnumEntry{Keire::VfxCollisionMode::GpuDepth, std::string_view("GPU Depth")},
             EnumEntry{Keire::VfxCollisionMode::ScenePhysics, std::string_view("Scene Physics")},
         };
+        constexpr std::array KillShapes{
+            EnumEntry{Keire::VfxShape::Box, std::string_view("Box")},
+            EnumEntry{Keire::VfxShape::Sphere, std::string_view("Sphere")},
+        };
+        constexpr std::array KillShapeModes{
+            EnumEntry{Keire::VfxKillShapeMode::Solid, std::string_view("Solid")},
+            EnumEntry{Keire::VfxKillShapeMode::Inverted, std::string_view("Inverted")},
+        };
         constexpr std::array RendererTypes{
             EnumEntry{Keire::VfxRendererType::Sprite, std::string_view("Sprite")},
             EnumEntry{Keire::VfxRendererType::Mesh, std::string_view("Mesh")},
@@ -797,6 +805,7 @@ namespace KeireEditor
                 .TargetPin = *targetPin,
                 .SourceBlock = *sourceBlock,
                 .TargetBlock = *targetBlock,
+                .RoutingPoints = connection.RoutingPoints,
             });
         }
         if (m_SelectedNode && !nodeIds.Find(m_SelectedNode))
@@ -837,7 +846,7 @@ namespace KeireEditor
             ui.TextColored(theme.Warning, "Release over a compatible pin  |  Escape cancels");
         else
             ui.TextColored(theme.MutedText,
-                           "Right-click to add  |  drag pins to connect  |  middle-drag pan  |  wheel zoom");
+                           "Right-click to add  |  drag pins to connect  |  double-click cables for routing points");
 
         const auto findGraphNode = [&](const StableNodeId canvasId) -> const Keire::VfxGraphNode*
         {
@@ -928,9 +937,57 @@ namespace KeireEditor
                 return NodeGraphConnectionValidation{NodeGraphConnectionValidationStatus::Reject,
                                                      "The connection could not be validated."};
             },
+            .EditableReroutes = true,
         };
         const auto result = m_GraphCanvas.Draw(ui, "VfxNodeCanvas", nodes, connections, options);
         const auto renderedCanvasSize = ui.LastItemRect().Size();
+
+        const auto setRouting = [&](const StableNodeId canvasConnection, std::vector<Keire::Vector2> routing)
+        {
+            const auto* connection = findGraphConnection(canvasConnection);
+            if (!connection)
+                return;
+            (void)ApplyAction("Routed VFX graph cable", [&document, graph = system->Id, connection = connection->Id,
+                                                         routing = std::move(routing)]() mutable
+                              { return document.SetConnectionRouting(graph, connection, std::move(routing)); });
+        };
+        if (result.AddRerouteRequested)
+        {
+            const auto connection =
+                std::ranges::find(connections, result.AddRerouteRequested->Connection, &NodeGraphConnection::Id);
+            if (connection != connections.end() &&
+                result.AddRerouteRequested->Index <= connection->RoutingPoints.size())
+            {
+                auto routing = connection->RoutingPoints;
+                routing.insert(routing.begin() + static_cast<std::ptrdiff_t>(result.AddRerouteRequested->Index),
+                               result.AddRerouteRequested->GraphPosition);
+                setRouting(connection->Id, std::move(routing));
+            }
+        }
+        if (result.MoveRerouteRequested)
+        {
+            const auto connection =
+                std::ranges::find(connections, result.MoveRerouteRequested->Connection, &NodeGraphConnection::Id);
+            if (connection != connections.end() &&
+                result.MoveRerouteRequested->Index < connection->RoutingPoints.size())
+            {
+                auto routing = connection->RoutingPoints;
+                routing[result.MoveRerouteRequested->Index] = result.MoveRerouteRequested->GraphPosition;
+                setRouting(connection->Id, std::move(routing));
+            }
+        }
+        if (result.DeleteRerouteRequested)
+        {
+            const auto connection =
+                std::ranges::find(connections, result.DeleteRerouteRequested->Connection, &NodeGraphConnection::Id);
+            if (connection != connections.end() &&
+                result.DeleteRerouteRequested->Index < connection->RoutingPoints.size())
+            {
+                auto routing = connection->RoutingPoints;
+                routing.erase(routing.begin() + static_cast<std::ptrdiff_t>(result.DeleteRerouteRequested->Index));
+                setRouting(connection->Id, std::move(routing));
+            }
+        }
 
         if (result.DeleteConnectionRequested)
         {
@@ -2803,6 +2860,16 @@ namespace KeireEditor
                     else if (value.Type == Keire::VfxRendererType::Volumetric)
                         ui.TextColored(m_Controller.VfxEffectTheme().MutedText,
                                        "Analytic density impostors provide CPU/GPU-matched volumetric particles.");
+                },
+                [&](Keire::VfxKillShapeModule& value)
+                {
+                    changed |= DrawEnum(ui, "Shape", value.Shape, KillShapes);
+                    changed |= DrawEnum(ui, "Mode", value.Mode, KillShapeModes);
+                    changed |= ui.DragVector3("Center", value.Center, 0.01F);
+                    if (value.Shape == Keire::VfxShape::Box)
+                        changed |= ui.DragVector3("Box Half Extent", value.BoxHalfExtent, 0.01F);
+                    else
+                        scalar("Radius", value.Radius, 0.01, 0.001, 1'000'000.0);
                 },
             },
             module.Payload);

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <cmath>
 #include <memory>
 #include <ranges>
 #include <stdexcept>
@@ -172,32 +173,69 @@ namespace KeireEditor
             throw std::invalid_argument("Material Graph shader interface is unavailable.");
         Keire::SynchronizeMaterialGraphInterface(definition, *shaderInterface);
         m_Host.Open(asset, std::move(definition), revision, std::move(undo));
+        m_AutosaveSeconds = 0.0;
         RefreshDiagnostics();
     }
 
-    void MaterialGraphDocument::Save() { m_Host.Save(); }
+    void MaterialGraphDocument::Save()
+    {
+        if (!Dirty())
+        {
+            m_AutosaveSeconds = 0.0;
+            return;
+        }
+        m_Host.Save();
+        m_AutosaveSeconds = 0.0;
+    }
+
+    bool MaterialGraphDocument::AdvanceAutosave(const double deltaSeconds)
+    {
+        if (!std::isfinite(deltaSeconds) || deltaSeconds < 0.0 || deltaSeconds > 60.0)
+            throw std::invalid_argument("Material Graph autosave delta must be finite and in the range 0..60.");
+        if (!Dirty())
+        {
+            m_AutosaveSeconds = 0.0;
+            return false;
+        }
+        constexpr double autosaveDelaySeconds = 0.5;
+        m_AutosaveSeconds += deltaSeconds;
+        if (m_AutosaveSeconds < autosaveDelaySeconds)
+            return false;
+        m_AutosaveSeconds = 0.0;
+        m_Host.Save();
+        return true;
+    }
+
     void MaterialGraphDocument::Discard()
     {
         m_Host.Discard();
+        m_AutosaveSeconds = 0.0;
         RefreshDiagnostics();
     }
     void MaterialGraphDocument::Close() noexcept
     {
         m_Host.Close();
         m_Diagnostics.clear();
+        m_AutosaveSeconds = 0.0;
     }
     bool MaterialGraphDocument::Undo()
     {
         const bool changed = m_Host.Undo();
         if (changed)
+        {
+            m_AutosaveSeconds = 0.0;
             RefreshDiagnostics();
+        }
         return changed;
     }
     bool MaterialGraphDocument::Redo()
     {
         const bool changed = m_Host.Redo();
         if (changed)
+        {
+            m_AutosaveSeconds = 0.0;
             RefreshDiagnostics();
+        }
         return changed;
     }
 
@@ -210,7 +248,10 @@ namespace KeireEditor
         operation(candidate);
         const bool changed = m_Host.Edit(name, std::move(candidate));
         if (changed)
+        {
+            m_AutosaveSeconds = 0.0;
             RefreshDiagnostics();
+        }
         return changed;
     }
 
@@ -443,6 +484,24 @@ namespace KeireEditor
                     });
     }
 
+    bool MaterialGraphDocument::SetConnectionRouting(const Keire::AssetId connection,
+                                                     std::vector<Keire::Vector2> routingPoints)
+    {
+        auto candidate = Definition();
+        auto found = std::ranges::find(candidate.Connections, connection, &Keire::MaterialGraphConnection::Id);
+        if (found != candidate.Connections.end())
+            found->RoutingPoints = std::move(routingPoints);
+        else
+        {
+            auto expression =
+                std::ranges::find(candidate.SurfaceGraph.Connections, connection, &Keire::ShaderGraphConnection::Id);
+            if (expression == candidate.SurfaceGraph.Connections.end())
+                throw std::invalid_argument("Material Graph connection is unavailable.");
+            expression->RoutingPoints = std::move(routingPoints);
+        }
+        return m_Host.EditMetadata("Route Material Graph connection", std::move(candidate));
+    }
+
     MaterialGraphCanvasModel MaterialGraphDocument::BuildCanvasModel(const bool includeTemplateParameters) const
     {
         MaterialGraphCanvasModel result;
@@ -536,6 +595,7 @@ namespace KeireEditor
                 canvas.SourcePin = *FindCanvasIdentity(result.PinIdentities, connection.Output.Pin);
                 canvas.Target = *FindCanvasIdentity(result.NodeIdentities, connection.Input.Node);
                 canvas.TargetPin = *FindCanvasIdentity(result.PinIdentities, connection.Input.Pin);
+                canvas.RoutingPoints = connection.RoutingPoints;
                 result.Connections.push_back(std::move(canvas));
             }
         for (const auto& connection : Definition().SurfaceGraph.Connections)
@@ -546,6 +606,7 @@ namespace KeireEditor
             canvas.SourcePin = *FindCanvasIdentity(result.PinIdentities, connection.Output.Pin);
             canvas.Target = *FindCanvasIdentity(result.NodeIdentities, connection.Input.Node);
             canvas.TargetPin = *FindCanvasIdentity(result.PinIdentities, connection.Input.Pin);
+            canvas.RoutingPoints = connection.RoutingPoints;
             result.Connections.push_back(std::move(canvas));
         }
         return result;

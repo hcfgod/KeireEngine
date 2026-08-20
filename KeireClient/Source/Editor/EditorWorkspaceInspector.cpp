@@ -258,7 +258,8 @@ void EditorWorkspaceLayer::PersistInspectorMaterialInstance(const Keire::AssetId
     const auto& specification = m_AssetDatabase->Specification();
     KeireEditor::Detail::WriteBytesAtomically(
         specification.ProjectRoot / specification.SourceDirectory / record->RelativePath, bytes);
-    m_AssetOperations->QueueImport(KeireEditor::AssetOperationPriority::ExplicitAction, {.ReloadAsset = asset});
+    m_AssetOperations->QueueAssetImport(asset, KeireEditor::AssetOperationPriority::ExplicitAction,
+                                        {.ReloadAsset = asset});
     m_AssetStatus = "Saved Material Instance overrides and queued its runtime material rebuild.";
 }
 
@@ -274,7 +275,8 @@ void EditorWorkspaceLayer::PersistInspectorMaterialParameterCollection(const Kei
     const auto& specification = m_AssetDatabase->Specification();
     KeireEditor::Detail::WriteBytesAtomically(
         specification.ProjectRoot / specification.SourceDirectory / record->RelativePath, bytes);
-    m_AssetOperations->QueueImport(KeireEditor::AssetOperationPriority::ExplicitAction, {.ReloadAsset = asset});
+    m_AssetOperations->QueueAssetImport(asset, KeireEditor::AssetOperationPriority::ExplicitAction,
+                                        {.ReloadAsset = asset});
     m_AssetStatus = "Saved Material Parameter Collection and queued dependent material rebuilds.";
 }
 
@@ -292,11 +294,36 @@ void EditorWorkspaceLayer::PersistInspectorProceduralMotionProfile(const Keire::
     const auto& specification = m_AssetDatabase->Specification();
     KeireEditor::Detail::WriteBytesAtomically(
         specification.ProjectRoot / specification.SourceDirectory / record->RelativePath, bytes);
-    m_AssetOperations->QueueImport(KeireEditor::AssetOperationPriority::ExplicitAction, {.ReloadAsset = asset});
+    m_AssetOperations->QueueAssetImport(asset, KeireEditor::AssetOperationPriority::ExplicitAction,
+                                        {.ReloadAsset = asset});
     m_AssetStatus = "Saved Procedural Motion Profile and queued a hot reload.";
 }
 
-void EditorWorkspaceLayer::ImportInspectorAssets() { ImportAssets(); }
+void EditorWorkspaceLayer::ApplyInspectorImportSettings(const Keire::AssetId asset,
+                                                        const Keire::AssetImportSettings& settings)
+{
+    if (!m_AssetDatabase || !m_AssetOperations)
+        throw std::runtime_error("Asset import settings services are unavailable.");
+    if (m_AssetOperations->Busy())
+        throw std::runtime_error("Wait for the active asset operation before applying import settings.");
+    m_AssetDatabase->SetImportSettings(asset, settings);
+    RefreshAssetBrowserRecords();
+    m_AssetOperations->QueueAssetImport(asset, KeireEditor::AssetOperationPriority::ExplicitAction,
+                                        {.ReloadAsset = asset, .Reason = "inspector-import-settings"});
+    m_AssetStatus = "Applied import settings and queued a targeted reimport.";
+}
+
+void EditorWorkspaceLayer::ImportInspectorAssets()
+{
+    if (!m_SelectedAsset || !m_AssetOperations)
+    {
+        ImportAssets();
+        return;
+    }
+    m_AssetOperations->QueueAssetImport(m_SelectedAsset, KeireEditor::AssetOperationPriority::ExplicitAction,
+                                        {.ReloadAsset = m_SelectedAsset, .Reason = "inspector-reimport"});
+    m_AssetStatus = "Queued a targeted asset reimport.";
+}
 
 void EditorWorkspaceLayer::PreviewInspectorManagedData(const Keire::AssetId asset,
                                                        const Keire::ManagedDataDefinition& definition)

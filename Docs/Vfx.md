@@ -588,10 +588,12 @@ Use the canvas controls as follows:
 - Drag from either end of a compatible typed connection: output to input or input to output.
 - Right-click empty space to open the searchable, categorized node palette at the pointer.
 - Right-click a node, pin, or cable for actions specific to that target.
+- Double-click a cable to add one or more persistent routing knots. Drag a knot to reshape the cable; select it and
+  press **Delete**, or double-click it, to remove only that knot.
 - Press **Delete** to remove the selected deletable node or selected cable.
 - Press **Escape** to cancel a cable drag or dismiss the active creation gesture without editing the document.
 - Middle-drag the canvas to pan.
-- Use the mouse wheel to zoom.
+- Use the mouse wheel to zoom. Hovered canvas zoom consumes the wheel instead of scrolling the containing panel.
 - Click the background to clear node selection.
 - Select **Frame All** to fit every card in the available canvas.
 

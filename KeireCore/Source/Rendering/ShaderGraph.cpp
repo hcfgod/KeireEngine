@@ -34,6 +34,7 @@ namespace Keire
 
         constexpr std::size_t MaximumGraphNodes = 1024;
         constexpr std::size_t MaximumGraphConnections = 4096;
+        constexpr std::size_t MaximumGraphRoutingPointsPerConnection = 64;
         constexpr std::size_t MaximumGraphKeywords = 16;
         constexpr std::size_t MaximumGraphProperties = 80;
         constexpr std::size_t MaximumGraphPinsPerNode = 32;
@@ -246,10 +247,16 @@ namespace Keire
             }
             Json connections = Json::array();
             for (const auto& connection : definition.Connections)
+            {
+                Json routing = Json::array();
+                for (const auto point : connection.RoutingPoints)
+                    routing.push_back({point.X, point.Y});
                 connections.push_back(
                     {{"id", connection.Id.ToString()},
                      {"output", {connection.Output.Node.ToString(), connection.Output.Pin.ToString()}},
-                     {"input", {connection.Input.Node.ToString(), connection.Input.Pin.ToString()}}});
+                     {"input", {connection.Input.Node.ToString(), connection.Input.Pin.ToString()}},
+                     {"routing", std::move(routing)}});
+            }
             Json keywords = Json::array();
             for (const auto& keyword : definition.Keywords)
                 keywords.push_back({{"name", keyword.Name},
@@ -372,10 +379,20 @@ namespace Keire
             {
                 const auto& output = encoded.at("output");
                 const auto& input = encoded.at("input");
-                result.Connections.push_back(
-                    {AssetId::Parse(encoded.at("id").get<std::string>()),
-                     {AssetId::Parse(output.at(0).get<std::string>()), AssetId::Parse(output.at(1).get<std::string>())},
-                     {AssetId::Parse(input.at(0).get<std::string>()), AssetId::Parse(input.at(1).get<std::string>())}});
+                ShaderGraphConnection connection{
+                    AssetId::Parse(encoded.at("id").get<std::string>()),
+                    {AssetId::Parse(output.at(0).get<std::string>()), AssetId::Parse(output.at(1).get<std::string>())},
+                    {AssetId::Parse(input.at(0).get<std::string>()), AssetId::Parse(input.at(1).get<std::string>())}};
+                const auto& routing = encoded.value("routing", Json::array());
+                if (!routing.is_array() || routing.size() > MaximumGraphRoutingPointsPerConnection)
+                    throw std::invalid_argument("Shader Graph cable routing points exceed their bounds.");
+                for (const auto& point : routing)
+                {
+                    if (!point.is_array() || point.size() != 2)
+                        throw std::invalid_argument("Shader Graph cable routing point is invalid.");
+                    connection.RoutingPoints.push_back({point.at(0).get<float>(), point.at(1).get<float>()});
+                }
+                result.Connections.push_back(std::move(connection));
             }
             for (const auto& encoded : keywords)
                 result.Keywords.push_back({encoded.at("name").get<std::string>(),
@@ -981,7 +998,7 @@ namespace Keire
                                                 ? attribute("SheenRoughness")
                                                 : optionalInput("SheenRoughness", ShaderGraphValueType::Scalar, "0.5F");
                 const auto normal = unlit || (!hasMaterialAttributes && !inputConnected("Normal")) ? "input.Normal"
-                                    : hasMaterialAttributes ? attribute("Normal")
+                                    : hasMaterialAttributes                                        ? attribute("Normal")
                                                             : input("Normal", ShaderGraphValueType::Vector3);
                 const bool hasDetailNormal = !unlit && !hasMaterialAttributes && inputConnected("DetailNormal");
                 const auto detailNormal = hasDetailNormal ? input("DetailNormal", ShaderGraphValueType::Vector3)
@@ -3128,6 +3145,8 @@ float4 PSMain(VertexOutput input) : SV_Target0
                       node.ParameterMetadata.Description.size() + node.ParameterMetadata.Category.size() +
                       node.Pins.size() * sizeof(ShaderGraphPin);
         result += m_Definition.Connections.size() * sizeof(ShaderGraphConnection);
+        for (const auto& connection : m_Definition.Connections)
+            result += connection.RoutingPoints.capacity() * sizeof(Vector2);
         return result;
     }
 
@@ -3661,7 +3680,10 @@ float4 PSMain(VertexOutput input) : SV_Target0
             if (!connection.Id || !identities.insert(connection.Id).second || !connection.Output.Node ||
                 !connection.Output.Pin || !connection.Input.Node || !connection.Input.Pin ||
                 connection.Output.Node == connection.Input.Node ||
-                !inputs.emplace(connection.Input.Node, connection.Input.Pin).second)
+                !inputs.emplace(connection.Input.Node, connection.Input.Pin).second ||
+                connection.RoutingPoints.size() > MaximumGraphRoutingPointsPerConnection ||
+                std::ranges::any_of(connection.RoutingPoints,
+                                    [](const Vector2 point) { return !Math::IsFinite(point); }))
                 throw std::invalid_argument("Shader Graph connection identity or destination is invalid.");
             const auto& outputNode = RequireNode(definition, connection.Output.Node);
             const auto& inputNode = RequireNode(definition, connection.Input.Node);

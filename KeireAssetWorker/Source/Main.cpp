@@ -73,7 +73,8 @@ namespace
         return !relative.empty() && *relative.begin() != "..";
     }
 
-    [[nodiscard]] Keire::Ref<Keire::AssetDatabase> CreateDatabase(const std::filesystem::path& projectRoot)
+    [[nodiscard]] Keire::AssetDatabaseSpecification
+    CreateDatabaseSpecification(const std::filesystem::path& projectRoot)
     {
         auto modules = Keire::CreateRef<Keire::ModuleRegistry>(
             Keire::ModuleRegistrySpecification{KeireProjectModules::CreateSourceModules()});
@@ -98,7 +99,7 @@ namespace
                 break;
             }
         }
-        return Keire::CreateRef<Keire::AssetDatabase>(std::move(specification));
+        return specification;
     }
 
     void RecoverAuxiliaryPublications(const std::filesystem::path& projectRoot)
@@ -152,6 +153,13 @@ namespace
             resultPath = commandLine.Result;
             const auto request = Keire::Detail::ReadAssetWorkerRequest(commandLine.Request);
             const auto operationRoot = request.ProjectRoot / "Library" / "AssetOperations" / request.OperationId;
+            std::cout << "Asset worker request: operation=" << request.OperationId
+                      << " kind=" << Keire::Detail::AssetWorkerOperationName(request.Kind) << " reason='"
+                      << (request.Reason.empty() ? "unspecified" : request.Reason)
+                      << "' targets=" << request.ImportAssets.size() << " project='"
+                      << Keire::Detail::PathToUtf8(request.ProjectRoot) << "'\n";
+            for (const auto asset : request.ImportAssets)
+                std::cout << "  requested asset: " << asset.ToString() << '\n';
             for (const auto& path : {commandLine.Request, commandLine.Progress, commandLine.Result, commandLine.Cancel})
                 if (!IsWithin(operationRoot, path))
                     throw std::invalid_argument("Asset-worker protocol path escapes its operation directory.");
@@ -176,9 +184,43 @@ namespace
             if (!IsWithin(sourceIndexRoot, request.SourceIndexPath))
                 throw std::invalid_argument(
                     "Asset-worker source index path escapes the development catalog directory.");
+            const auto runtimeCatalog = sourceIndexRoot / "catalog.json";
+            const bool hadRuntimeCatalog = std::filesystem::is_regular_file(runtimeCatalog);
+            std::cout << "Asset worker runtime catalog: " << (hadRuntimeCatalog ? "present" : "absent") << " ('"
+                      << Keire::Detail::PathToUtf8(runtimeCatalog) << "')\n";
+            if (request.Kind == Keire::Detail::AssetWorkerOperationKind::ImportAssets && !hadRuntimeCatalog)
+            {
+                std::cout << "Asset worker targeted import must bootstrap with a full import because no prior runtime "
+                             "catalog exists.\n";
+            }
 
             RecoverAuxiliaryPublications(request.ProjectRoot);
-            auto database = CreateDatabase(request.ProjectRoot);
+            auto databaseSpecification = CreateDatabaseSpecification(request.ProjectRoot);
+            Keire::Ref<Keire::AssetDatabase> database;
+            bool loadedSourceIndex = false;
+            if (std::filesystem::is_regular_file(request.SourceIndexPath))
+            {
+                try
+                {
+                    database = Keire::Detail::AssetDatabaseWorkerAccess::CreateFromSourceIndex(databaseSpecification,
+                                                                                               request.SourceIndexPath);
+                    loadedSourceIndex = true;
+                    std::cout << "Asset worker loaded the published source index without a full source scan.\n";
+                }
+                catch (const std::exception& error)
+                {
+                    std::cerr << "Asset worker ignored a stale source index and will rescan: " << error.what() << '\n';
+                }
+            }
+            if (!database)
+            {
+                if (!std::filesystem::is_regular_file(request.SourceIndexPath))
+                {
+                    std::cout << "Asset worker source index is absent; the database will scan the project: "
+                              << Keire::Detail::PathToUtf8(request.SourceIndexPath) << '\n';
+                }
+                database = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
+            }
             const auto progress = [&](const Keire::AssetOperationProgress& value)
             {
                 if (std::filesystem::exists(commandLine.Cancel))
@@ -190,6 +232,16 @@ namespace
             {
             case Keire::Detail::AssetWorkerOperationKind::ImportAll:
                 result.Import = database->ImportAll(Keire::AssetImportPolicy::KeepLastGood, {}, progress);
+                break;
+            case Keire::Detail::AssetWorkerOperationKind::ImportAssets:
+                if (request.ImportAssets.empty())
+                    throw std::invalid_argument("Targeted asset import requires at least one asset identity.");
+                result.Import =
+                    loadedSourceIndex
+                        ? Keire::Detail::AssetDatabaseWorkerAccess::ImportAssetsFromSourceIndex(
+                              *database, request.ImportAssets, Keire::AssetImportPolicy::KeepLastGood, {}, progress)
+                        : database->ImportAssets(request.ImportAssets, Keire::AssetImportPolicy::KeepLastGood, {},
+                                                 progress);
                 break;
             case Keire::Detail::AssetWorkerOperationKind::ExternalImport:
             {
@@ -391,6 +443,13 @@ namespace
             }
             }
             Keire::Detail::AssetDatabaseWorkerAccess::PublishSourceIndex(*database, request.SourceIndexPath);
+            std::cout << "Asset worker completed " << Keire::Detail::AssetWorkerOperationName(request.Kind)
+                      << ": imported-statuses=" << result.Import.Statuses.size() << '\n';
+            if (request.Kind == Keire::Detail::AssetWorkerOperationKind::ImportAssets)
+            {
+                std::cout << "Asset worker targeted closure: requested=" << request.ImportAssets.size()
+                          << " imported-statuses=" << result.Import.Statuses.size() << '\n';
+            }
             result.Success = true;
             Keire::Detail::WriteAssetWorkerResult(commandLine.Result, result);
             std::cout << "Asset operation " << request.OperationId << " completed.\n";

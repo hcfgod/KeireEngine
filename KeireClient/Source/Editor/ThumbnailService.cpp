@@ -1042,7 +1042,8 @@ namespace KeireEditor
         }
 
         const auto handle = assets->Load<Keire::MaterialAsset>(materialId, Keire::AssetPriority::Low);
-        const auto material = handle.TryGetLoaded();
+        const auto material = handle.State() == Keire::AssetState::Reloading ? Keire::Ref<const Keire::MaterialAsset>{}
+                                                                             : handle.TryGetLoaded();
         request.PreviewAsset = material;
         request.Missing = handle.State() == Keire::AssetState::Failed;
         if (!request.PreviewAsset && request.Missing)
@@ -1052,7 +1053,8 @@ namespace KeireEditor
         {
             const auto shaderHandle =
                 assets->Load<Keire::ShaderAsset>(material->Definition().Shader, Keire::AssetPriority::Low);
-            request.PreviewShader = shaderHandle.TryGetLoaded();
+            if (shaderHandle.State() != Keire::AssetState::Reloading)
+                request.PreviewShader = shaderHandle.TryGetLoaded();
             if (!request.PreviewShader && shaderHandle.State() == Keire::AssetState::Failed)
                 request.PreviewShader = shaderHandle.Get();
             ready = ready && static_cast<bool>(request.PreviewShader);
@@ -1064,7 +1066,8 @@ namespace KeireEditor
         if (texture)
         {
             const auto textureHandle = assets->Load<Keire::Texture2DAsset>(texture, Keire::AssetPriority::Low);
-            request.PreviewTexture = textureHandle.TryGetLoaded();
+            if (textureHandle.State() != Keire::AssetState::Reloading)
+                request.PreviewTexture = textureHandle.TryGetLoaded();
             if (!request.PreviewTexture && textureHandle.State() == Keire::AssetState::Failed)
                 request.PreviewTexture = textureHandle.Get();
             ready = ready && static_cast<bool>(request.PreviewTexture);
@@ -1086,6 +1089,7 @@ namespace KeireEditor
             ThumbnailRequest Request;
             std::string Key;
             std::uint64_t Generation = 0;
+            std::uint64_t AssetGeneration = 0;
         };
 
         Impl(std::filesystem::path cacheDirectory, const std::size_t capacity, Keire::Ref<Keire::JobSystem> jobs)
@@ -1171,13 +1175,27 @@ namespace KeireEditor
                 {
                     pixels = MakeIcon(ThumbnailWidth, ThumbnailHeight, {40, 32, 44}, {226, 72, 108}, 'X', true);
                 }
-                if (!job.Request.Missing &&
+                bool current = false;
+                {
+                    std::scoped_lock lock(Mutex);
+                    const auto assetGeneration = AssetGenerations.find(job.Request.Asset);
+                    const auto currentAssetGeneration =
+                        assetGeneration == AssetGenerations.end() ? std::uint64_t{0} : assetGeneration->second;
+                    current = job.Generation == Generation && job.AssetGeneration == currentAssetGeneration;
+                }
+                if (current && !job.Request.Missing &&
                     pixels.size() == static_cast<std::size_t>(ThumbnailWidth) * ThumbnailHeight * 4)
                     WriteCache(CachePath(job.Key), pixels);
             }
             std::scoped_lock lock(Mutex);
-            Pending.erase(job.Request.Asset);
-            if (!context.StopRequested() && job.Generation == Generation && !pixels.empty())
+            const auto pending = Pending.find(job.Request.Asset);
+            if (pending != Pending.end() && pending->second == job.AssetGeneration)
+                Pending.erase(pending);
+            const auto assetGeneration = AssetGenerations.find(job.Request.Asset);
+            const auto currentAssetGeneration =
+                assetGeneration == AssetGenerations.end() ? std::uint64_t{0} : assetGeneration->second;
+            if (!context.StopRequested() && job.Generation == Generation &&
+                job.AssetGeneration == currentAssetGeneration && !pixels.empty())
                 Completed.push_back({job.Request.Asset, ThumbnailWidth, ThumbnailHeight, std::move(pixels)});
         }
 
@@ -1187,7 +1205,8 @@ namespace KeireEditor
         mutable std::mutex Mutex;
         std::unordered_map<std::string, ProviderRecord> Providers;
         std::deque<ThumbnailResult> Completed;
-        std::unordered_set<Keire::AssetId> Pending;
+        std::unordered_map<Keire::AssetId, std::uint64_t> Pending;
+        std::unordered_map<Keire::AssetId, std::uint64_t> AssetGenerations;
         std::uint64_t Generation = 1;
         Keire::Ref<Keire::JobSystem> Scheduler;
         Keire::Ref<Keire::JobScope> WorkScope;
@@ -1285,8 +1304,9 @@ namespace KeireEditor
         std::scoped_lock lock(m_Impl->Mutex);
         if (m_Impl->Pending.contains(request.Asset) || m_Impl->Pending.size() >= m_Impl->Capacity)
             return false;
-        m_Impl->Pending.insert(request.Asset);
-        Impl::Job job{std::move(request), {}, m_Impl->Generation};
+        const auto assetGeneration = m_Impl->AssetGenerations[request.Asset];
+        m_Impl->Pending.emplace(request.Asset, assetGeneration);
+        Impl::Job job{std::move(request), {}, m_Impl->Generation, assetGeneration};
         const auto asset = job.Request.Asset;
         job.Key = m_Impl->KeyFor(job.Request, provider);
         try
@@ -1322,12 +1342,27 @@ namespace KeireEditor
         return result;
     }
 
+    void ThumbnailService::Invalidate(const Keire::AssetId asset)
+    {
+        m_Impl->RequireOwner("Invalidate");
+        if (!asset)
+            return;
+        std::scoped_lock lock(m_Impl->Mutex);
+        auto& generation = m_Impl->AssetGenerations[asset];
+        if (++generation == 0)
+            ++generation;
+        m_Impl->Pending.erase(asset);
+        std::erase_if(m_Impl->Completed,
+                      [asset](const ThumbnailResult& completion) { return completion.Asset == asset; });
+    }
+
     void ThumbnailService::CancelAll() noexcept
     {
         std::scoped_lock lock(m_Impl->Mutex);
         ++m_Impl->Generation;
         m_Impl->Completed.clear();
         m_Impl->Pending.clear();
+        m_Impl->AssetGenerations.clear();
     }
 
     std::size_t ThumbnailService::PendingCount() const noexcept

@@ -177,6 +177,18 @@ void EditorWorkspaceLayer::RefreshAssetBrowserRecords()
     {
         m_AssetRecords = m_AssetDatabase->Records();
         ++m_AssetRecordRevision;
+        if (m_SceneDocument && m_SceneDocument->Asset())
+        {
+            const auto scene = m_SceneDocument->Asset();
+            if (const auto record = m_AssetDatabase->Find(scene))
+            {
+                const auto& specification = m_AssetDatabase->Specification();
+                const auto source = (specification.ProjectRoot / specification.SourceDirectory / record->RelativePath)
+                                        .lexically_normal();
+                if (m_SceneDocument->Source() != source)
+                    m_SceneDocument->SetIdentity(scene, source);
+            }
+        }
     }
 }
 
@@ -672,7 +684,9 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
         if (!completion->Result.Success)
         {
             const auto generation = completion->Context.Generation;
-            if (completion->Result.Cancelled && completion->Kind == Keire::Detail::AssetWorkerOperationKind::ImportAll)
+            if (completion->Result.Cancelled &&
+                (completion->Kind == Keire::Detail::AssetWorkerOperationKind::ImportAll ||
+                 completion->Kind == Keire::Detail::AssetWorkerOperationKind::ImportAssets))
             {
                 m_AssetStatus = "Background asset refresh yielded to an interactive editor action.";
                 if (generation > 0)
@@ -859,6 +873,10 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
                 else if (completion->Context.FollowUp == KeireEditor::AssetOperationFollowUp::OpenExternal &&
                          m_AssetBrowserPanel)
                     m_AssetBrowserPanel->OpenAsset(created);
+                else if (completion->Context.FollowUp == KeireEditor::AssetOperationFollowUp::OpenMaterialGraph)
+                    OpenMaterialGraph(created);
+                else if (completion->Context.FollowUp == KeireEditor::AssetOperationFollowUp::OpenShaderGraph)
+                    OpenShaderGraph(created);
                 else if (completion->Context.FollowUp == KeireEditor::AssetOperationFollowUp::AdoptSceneCopy)
                 {
                     if (!completion->Context.SceneSnapshot)
@@ -973,7 +991,11 @@ void EditorWorkspaceLayer::ApplyAssetImportResult(const Keire::AssetImportResult
                 }
             }
             for (const auto asset : affected)
+            {
+                if (m_AssetBrowserPanel)
+                    m_AssetBrowserPanel->InvalidateThumbnail(asset);
                 (void)assets->Reload(asset, Keire::AssetPriority::Background);
+            }
         }
     }
     for (const auto& importStatus : result.Statuses)
@@ -1019,8 +1041,8 @@ void EditorWorkspaceLayer::UpdateMaterialCatalogRefresh(const Keire::Time& time)
         return;
     try
     {
-        m_AssetOperations->QueueImport(KeireEditor::AssetOperationPriority::MaterialRefresh,
-                                       {.ReloadAsset = pending->Asset, .Generation = pending->Generation});
+        m_AssetOperations->QueueAssetImport(pending->Asset, KeireEditor::AssetOperationPriority::MaterialRefresh,
+                                            {.ReloadAsset = pending->Asset, .Generation = pending->Generation});
         m_MaterialDocument->MarkCatalogRefreshQueued(pending->Generation);
     }
     catch (const std::exception& error)
@@ -1037,8 +1059,9 @@ void EditorWorkspaceLayer::FlushMaterialCatalogRefresh() noexcept
         {
             if (const auto pending = m_MaterialDocument->PendingCatalogRefresh(true))
             {
-                m_AssetOperations->QueueImport(KeireEditor::AssetOperationPriority::MaterialRefresh,
-                                               {.ReloadAsset = pending->Asset, .Generation = pending->Generation});
+                m_AssetOperations->QueueAssetImport(pending->Asset,
+                                                    KeireEditor::AssetOperationPriority::MaterialRefresh,
+                                                    {.ReloadAsset = pending->Asset, .Generation = pending->Generation});
                 m_MaterialDocument->MarkCatalogRefreshQueued(pending->Generation);
             }
         }
@@ -1446,10 +1469,11 @@ bool EditorWorkspaceLayer::CreateMaterialGraph(const std::string_view name, cons
         const auto destination = directory / (std::string(name) + ".keirematerialgraph");
         if (m_AssetDatabase->Find(destination))
             throw std::runtime_error("A Material Graph with that name already exists in this folder.");
-        m_AssetOperations->QueueCreateAsset(
-            destination, Keire::MaterialGraphAsset::EncodeSource(definition), {},
-            {.FollowUp = KeireEditor::AssetOperationFollowUp::Reveal, .UndoName = "Create Material Graph"});
-        m_AssetStatus = "Creating " + destination.generic_string() + " in the isolated asset worker.";
+        m_AssetOperations->QueueCreateAsset(destination, Keire::MaterialGraphAsset::EncodeSource(definition), {},
+                                            {.FollowUp = KeireEditor::AssetOperationFollowUp::OpenMaterialGraph,
+                                             .UndoName = "Create Material Graph",
+                                             .Reason = "material-graph-creation"});
+        m_AssetStatus = "Creating and opening " + destination.generic_string() + ".";
         return true;
     }
     catch (const std::exception& error)
@@ -1476,8 +1500,10 @@ bool EditorWorkspaceLayer::CreateShaderGraph(const std::string_view name,
             throw std::runtime_error("A Shader Graph with that name already exists in this folder.");
         m_AssetOperations->QueueCreateAsset(
             destination, Keire::ShaderGraphAsset::EncodeSource(Keire::CreateShaderGraphTemplate(graphTemplate)), {},
-            {.FollowUp = KeireEditor::AssetOperationFollowUp::Reveal, .UndoName = "Create Shader Graph"});
-        m_AssetStatus = "Creating " + destination.generic_string() + " in the isolated asset worker.";
+            {.FollowUp = KeireEditor::AssetOperationFollowUp::OpenShaderGraph,
+             .UndoName = "Create Shader Graph",
+             .Reason = "shader-graph-creation"});
+        m_AssetStatus = "Creating and opening " + destination.generic_string() + ".";
         return true;
     }
     catch (const std::exception& error)
@@ -2420,8 +2446,9 @@ void EditorWorkspaceLayer::SaveShaderGraph()
     m_ShaderGraphDocument->Save();
     if (!m_AssetOperations)
         throw std::runtime_error("The asset worker is unavailable for Shader Graph compilation.");
-    m_AssetOperations->QueueImport(KeireEditor::AssetOperationPriority::ExplicitAction,
-                                   {.ReloadAsset = m_ShaderGraphDocument->Asset()});
+    m_AssetOperations->QueueAssetImport(m_ShaderGraphDocument->Asset(),
+                                        KeireEditor::AssetOperationPriority::ExplicitAction,
+                                        {.ReloadAsset = m_ShaderGraphDocument->Asset()});
     m_ShaderGraphPanel->SetMessage(m_ShaderGraphDocument->ReusableGraph()
                                        ? "Saved " + record->RelativePath.generic_string() +
                                              "; recompiling dependent graphs..."

@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -56,6 +57,8 @@ namespace KeireEditor
     };
 
     [[nodiscard]] std::string DisplayName(const std::filesystem::path& path);
+    [[nodiscard]] std::string ElideAssetDisplayName(std::string_view name, float maximumWidth,
+                                                    const std::function<float(std::string_view)>& measureText);
     [[nodiscard]] bool SameOrChild(const std::filesystem::path& parent, const std::filesystem::path& candidate);
     [[nodiscard]] AssetBrowserPreferences LoadAssetBrowserPreferences(const std::filesystem::path& path) noexcept;
     void SaveAssetBrowserPreferences(const std::filesystem::path& path,
@@ -74,4 +77,10 @@ namespace KeireEditor
     [[nodiscard]] AssetBrowserOpenAction ResolveAssetBrowserOpenAction(const std::filesystem::path& path) noexcept;
     [[nodiscard]] std::vector<Keire::AssetId> DecodeAssetPayload(std::span<const std::byte> bytes);
     [[nodiscard]] std::string EncodeAssetPayload(std::span<const Keire::AssetId> assets);
+    [[nodiscard]] std::vector<std::filesystem::path>
+    BuildFolderRangeSelection(std::span<const std::filesystem::path> order, const std::filesystem::path& anchor,
+                              const std::filesystem::path& target, std::span<const std::filesystem::path> existing = {},
+                              bool additive = false);
+    [[nodiscard]] std::vector<std::filesystem::path> DecodeFolderPayload(std::span<const std::byte> bytes);
+    [[nodiscard]] std::string EncodeFolderPayload(std::span<const std::filesystem::path> folders);
 } // namespace KeireEditor

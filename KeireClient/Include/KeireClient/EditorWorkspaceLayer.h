@@ -290,6 +290,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void PersistInspectorMaterialInstance(Keire::AssetId asset, std::span<const std::byte> bytes) override;
     void PersistInspectorMaterialParameterCollection(Keire::AssetId asset, std::span<const std::byte> bytes) override;
     void PersistInspectorProceduralMotionProfile(Keire::AssetId asset, std::span<const std::byte> bytes) override;
+    void ApplyInspectorImportSettings(Keire::AssetId asset, const Keire::AssetImportSettings& settings) override;
     void ImportInspectorAssets() override;
     void PreviewInspectorManagedData(Keire::AssetId asset, const Keire::ManagedDataDefinition& definition) override;
     void PersistInspectorManagedData(Keire::AssetId asset, std::span<const std::byte> bytes) override;
@@ -305,6 +306,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     ResolveMaterialGraphFunction(Keire::AssetId asset) const override;
     [[nodiscard]] std::optional<Keire::ShaderGraphDefinition>
     ResolveMaterialGraphTemplate(const Keire::MaterialShaderReference& shader) const override;
+    [[nodiscard]] Keire::Ref<const Keire::Texture2DAsset>
+    ResolveMaterialGraphTexture(Keire::AssetId asset) const override;
     void SaveMaterialGraphDocument() override;
     void UndoMaterialGraphEdit() override;
     void RedoMaterialGraphEdit() override;
@@ -460,6 +463,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void SaveShaderGraph();
     void OpenMaterialGraph(Keire::AssetId asset);
     void SaveMaterialGraph();
+    void UpdateMaterialGraphAutosave(const Keire::Time& time);
     [[nodiscard]] std::optional<Keire::ShaderInterfaceDefinition>
     ResolveMaterialGraphInterface(const Keire::MaterialShaderReference& shader) const;
     [[nodiscard]] std::optional<Keire::ShaderGraphDefinition> ResolveReusableGraph(Keire::AssetId asset) const;

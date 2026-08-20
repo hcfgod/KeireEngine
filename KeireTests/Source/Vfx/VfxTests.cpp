@@ -570,6 +570,7 @@ TEST_CASE("VFX schema four round trips every persisted value property block and 
     system.Nodes = {source, context, sink};
     system.Connections = {{Id(2241), source.Id, Id(2202), context.Id, Id(2211), {}, block.Id},
                           {Id(2242), context.Id, Id(2212), sink.Id, Id(2231), block.Id, {}}};
+    system.Connections.front().RoutingPoints = {{180.0F, 72.0F}, {260.0F, 104.0F}};
     definition.Systems.push_back(std::move(system));
 
     const auto encoded = Keire::VfxEffectAsset::Encode(definition);
@@ -580,6 +581,7 @@ TEST_CASE("VFX schema four round trips every persisted value property block and 
     CHECK(document.at("systems").at(0).at("nodes").at(0).at("properties").at(1).at("type") == "integer");
     CHECK(document.at("systems").at(0).at("nodes").at(1).at("blocks").at(0).at("typeId") == "keire.block.force");
     CHECK(document.at("systems").at(0).at("connections").at(0).at("inputBlock") == Id(2210).ToString());
+    CHECK(document.at("systems").at(0).at("connections").at(0).at("routing").size() == 2);
 
     const auto decoded = Keire::VfxEffectAsset::Decode(encoded);
     REQUIRE(decoded);

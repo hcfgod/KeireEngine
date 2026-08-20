@@ -42,36 +42,12 @@ namespace Keire::Detail
             WriteTextFileAtomically(path, value.dump(2));
         }
 
-        [[nodiscard]] std::string KindName(const AssetWorkerOperationKind kind)
-        {
-            switch (kind)
-            {
-            case AssetWorkerOperationKind::ImportAll:
-                return "import-all";
-            case AssetWorkerOperationKind::ExternalImport:
-                return "external-import";
-            case AssetWorkerOperationKind::CreateAsset:
-                return "create-asset";
-            case AssetWorkerOperationKind::ExtractMaterials:
-                return "extract-materials";
-            case AssetWorkerOperationKind::Mutate:
-                return "mutate";
-            case AssetWorkerOperationKind::Cook:
-                return "cook";
-            case AssetWorkerOperationKind::UndoExternalImport:
-                return "undo-external-import";
-            case AssetWorkerOperationKind::RedoExternalImport:
-                return "redo-external-import";
-            case AssetWorkerOperationKind::BakeLighting:
-                return "bake-lighting";
-            }
-            throw std::invalid_argument("Unknown asset-worker operation kind.");
-        }
-
         [[nodiscard]] AssetWorkerOperationKind ParseKind(const std::string_view value)
         {
             if (value == "import-all")
                 return AssetWorkerOperationKind::ImportAll;
+            if (value == "import-assets")
+                return AssetWorkerOperationKind::ImportAssets;
             if (value == "external-import")
                 return AssetWorkerOperationKind::ExternalImport;
             if (value == "create-asset")
@@ -227,6 +203,34 @@ namespace Keire::Detail
         }
     } // namespace
 
+    std::string_view AssetWorkerOperationName(const AssetWorkerOperationKind kind) noexcept
+    {
+        switch (kind)
+        {
+        case AssetWorkerOperationKind::ImportAll:
+            return "import-all";
+        case AssetWorkerOperationKind::ImportAssets:
+            return "import-assets";
+        case AssetWorkerOperationKind::ExternalImport:
+            return "external-import";
+        case AssetWorkerOperationKind::CreateAsset:
+            return "create-asset";
+        case AssetWorkerOperationKind::ExtractMaterials:
+            return "extract-materials";
+        case AssetWorkerOperationKind::Mutate:
+            return "mutate";
+        case AssetWorkerOperationKind::Cook:
+            return "cook";
+        case AssetWorkerOperationKind::UndoExternalImport:
+            return "undo-external-import";
+        case AssetWorkerOperationKind::RedoExternalImport:
+            return "redo-external-import";
+        case AssetWorkerOperationKind::BakeLighting:
+            return "bake-lighting";
+        }
+        return "unknown";
+    }
+
     void WriteAssetWorkerRequest(const std::filesystem::path& path, const AssetWorkerRequest& request)
     {
         Json items = Json::array();
@@ -243,15 +247,20 @@ namespace Keire::Detail
         Json roots = Json::array();
         for (const auto root : request.BuildProfile.Roots)
             roots.push_back(root.ToString());
+        Json importAssets = Json::array();
+        for (const auto asset : request.ImportAssets)
+            importAssets.push_back(asset.ToString());
         Json auxiliarySources = Json::array();
         for (const auto& auxiliary : request.CreateAuxiliarySources)
             auxiliarySources.push_back({{"relativePath", PathToUtf8(auxiliary.RelativePath)},
                                         {"payloadPath", PathToUtf8(auxiliary.PayloadPath)}});
         WriteJson(path, {{"schemaVersion", 1},
                          {"operationId", request.OperationId},
-                         {"kind", KindName(request.Kind)},
+                         {"kind", std::string(AssetWorkerOperationName(request.Kind))},
                          {"projectRoot", PathToUtf8(request.ProjectRoot)},
                          {"sourceIndexPath", PathToUtf8(request.SourceIndexPath)},
+                         {"reason", request.Reason},
+                         {"importAssets", std::move(importAssets)},
                          {"externalItems", std::move(items)},
                          {"createRelativePath", PathToUtf8(request.CreateRelativePath)},
                          {"createPayloadPath", PathToUtf8(request.CreatePayloadPath)},
@@ -291,6 +300,9 @@ namespace Keire::Detail
         request.Kind = ParseKind(value.at("kind").get<std::string>());
         request.ProjectRoot = PathFromUtf8(value.at("projectRoot").get<std::string>());
         request.SourceIndexPath = PathFromUtf8(value.at("sourceIndexPath").get<std::string>());
+        request.Reason = value.value("reason", std::string{});
+        for (const auto& asset : value.value("importAssets", Json::array()))
+            request.ImportAssets.push_back(AssetId::Parse(asset.get<std::string>()));
         request.CookOutput = PathFromUtf8(value.value("cookOutput", std::string{}));
         request.CreateRelativePath = PathFromUtf8(value.value("createRelativePath", std::string{}));
         request.CreatePayloadPath = PathFromUtf8(value.value("createPayloadPath", std::string{}));

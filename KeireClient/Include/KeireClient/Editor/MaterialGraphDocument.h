@@ -48,6 +48,7 @@ namespace KeireEditor
         void Open(Keire::AssetId asset, std::span<const std::byte> bytes, std::uint64_t revision,
                   Keire::Ref<Keire::UndoContext> undo = {});
         void Save();
+        [[nodiscard]] bool AdvanceAutosave(double deltaSeconds);
         void Discard();
         void Close() noexcept;
         [[nodiscard]] bool Undo();
@@ -77,6 +78,7 @@ namespace KeireEditor
         [[nodiscard]] bool MoveNode(Keire::AssetId node, Keire::Vector2 position);
         [[nodiscard]] bool RemoveNode(Keire::AssetId node);
         [[nodiscard]] bool AddConnection(Keire::MaterialGraphConnection connection);
+        [[nodiscard]] bool SetConnectionRouting(Keire::AssetId connection, std::vector<Keire::Vector2> routingPoints);
         [[nodiscard]] bool RemoveConnection(Keire::AssetId connection);
         [[nodiscard]] NodeGraphConnectionValidation CheckConnection(Keire::MaterialGraphEndpoint output,
                                                                     Keire::MaterialGraphEndpoint input) const;
@@ -88,5 +90,6 @@ namespace KeireEditor
         MaterialGraphDocumentSpecification m_Specification;
         Host m_Host;
         std::vector<Keire::MaterialGraphDiagnostic> m_Diagnostics;
+        double m_AutosaveSeconds = 0.0;
     };
 } // namespace KeireEditor

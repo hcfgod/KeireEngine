@@ -75,7 +75,9 @@ namespace KeireEditor
         void DrawInspector(Keire::UiFrame& ui);
         void DrawDiagnostics(Keire::UiFrame& ui);
         void EnsureJobScope();
-        [[nodiscard]] bool DrawNodeCreationMenu(Keire::UiFrame& ui, std::optional<Keire::Vector2> graphPosition);
+        [[nodiscard]] bool DrawNodeCreationMenu(Keire::UiFrame& ui, std::optional<Keire::Vector2> graphPosition,
+                                                const Keire::ShaderGraphNode* compatibleNode = nullptr,
+                                                const Keire::ShaderGraphPin* compatiblePin = nullptr);
         [[nodiscard]] bool AddNode(Keire::ShaderGraphNodeKind kind,
                                    Keire::ShaderGraphValueType type = Keire::ShaderGraphValueType::Scalar,
                                    std::optional<Keire::Vector2> graphPosition = std::nullopt);
@@ -110,6 +112,7 @@ namespace KeireEditor
         std::string m_NodeSearch;
         NodeMenuSelection m_NodeMenuSelection;
         std::optional<Keire::Vector2> m_NodeCreationPosition;
+        std::optional<NodeGraphContextRequest> m_GraphContext;
         std::string m_Message;
         std::uint32_t m_PreviewWidth = 320;
         std::uint32_t m_PreviewHeight = 220;

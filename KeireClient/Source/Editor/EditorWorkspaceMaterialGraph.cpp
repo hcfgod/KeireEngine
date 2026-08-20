@@ -142,6 +142,18 @@ EditorWorkspaceLayer::ResolveMaterialGraphTemplate(const Keire::MaterialShaderRe
     }
 }
 
+Keire::Ref<const Keire::Texture2DAsset>
+EditorWorkspaceLayer::ResolveMaterialGraphTexture(const Keire::AssetId asset) const
+{
+    const auto assets = Owner().Assets();
+    if (!asset || !assets)
+        return {};
+    const auto handle = assets->Load<Keire::Texture2DAsset>(asset, Keire::AssetPriority::High);
+    if (const auto texture = handle.TryGetLoaded())
+        return texture;
+    return handle.State() == Keire::AssetState::Failed ? handle.Get() : Keire::Ref<const Keire::Texture2DAsset>{};
+}
+
 std::optional<Keire::ShaderGraphDefinition> EditorWorkspaceLayer::ResolveReusableGraph(const Keire::AssetId asset) const
 {
     if (!m_AssetDatabase || !asset)
@@ -216,7 +228,11 @@ void EditorWorkspaceLayer::ApplyMaterialGraphDevelopmentRevision(
                                                       return type && *type == Keire::MaterialAsset::StaticType();
                                                   });
         if (runtime != record->SubAssets.end())
+        {
             (void)assets->PublishDevelopmentAsset(*runtime, Keire::CreateRef<Keire::MaterialAsset>(material));
+            if (m_AssetBrowserPanel)
+                m_AssetBrowserPanel->InvalidateThumbnail(asset);
+        }
     }
     catch (const std::exception& error)
     {
@@ -274,11 +290,32 @@ void EditorWorkspaceLayer::SaveMaterialGraph()
     const auto record = m_AssetDatabase->Find(m_MaterialGraphDocument->Asset());
     if (!record)
         throw std::runtime_error("The edited Material Graph no longer exists.");
+    const bool dirty = m_MaterialGraphDocument->Dirty();
     m_MaterialGraphDocument->Save();
-    if (!m_AssetOperations)
-        throw std::runtime_error("The asset worker is unavailable for Material Graph import.");
-    m_AssetOperations->QueueImport(KeireEditor::AssetOperationPriority::ExplicitAction,
-                                   {.ReloadAsset = m_MaterialGraphDocument->Asset()});
-    m_MaterialGraphPanel->SetMessage("Saved " + record->RelativePath.generic_string() +
-                                     "; rebuilding and hot-reloading its runtime material...");
+    m_MaterialGraphPanel->SetMessage(dirty ? "Saved " + record->RelativePath.generic_string() +
+                                                 "; refreshing its runtime material..."
+                                           : record->RelativePath.generic_string() + " is already saved.");
+}
+
+void EditorWorkspaceLayer::UpdateMaterialGraphAutosave(const Keire::Time& time)
+{
+    if (!m_MaterialGraphDocument || !m_MaterialGraphDocument->IsOpen())
+        return;
+    try
+    {
+        if (!m_MaterialGraphDocument->AdvanceAutosave(time.UnscaledDeltaTime().Seconds()))
+            return;
+        const auto asset = m_MaterialGraphDocument->Asset();
+        // PollChangedAssets owns source-file imports. Queueing here as well leaves the editor-authored change pending
+        // behind its own worker operation and schedules the same targeted import again when that operation completes.
+        if (const auto record = m_AssetDatabase ? m_AssetDatabase->Find(asset) : std::nullopt)
+        {
+            m_MaterialGraphPanel->SetMessage("Autosaved " + record->RelativePath.generic_string() +
+                                             "; refreshing its runtime material...");
+        }
+    }
+    catch (const std::exception& error)
+    {
+        ReportMaterialGraphError(std::string("Material Graph autosave failed: ") + error.what());
+    }
 }

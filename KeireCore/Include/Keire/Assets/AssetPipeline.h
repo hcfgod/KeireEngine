@@ -328,6 +328,9 @@ namespace Keire
         [[nodiscard]] AssetImportResult ImportAll(AssetImportPolicy policy);
         [[nodiscard]] AssetImportResult ImportAll(AssetImportPolicy policy, std::stop_token cancellation,
                                                   AssetOperationProgressCallback progress = {});
+        [[nodiscard]] AssetImportResult ImportAssets(std::span<const AssetId> assets, AssetImportPolicy policy,
+                                                     std::stop_token cancellation = {},
+                                                     AssetOperationProgressCallback progress = {});
         [[nodiscard]] AssetImportStatus ImportStatus(AssetId id) const;
         [[nodiscard]] std::optional<AssetImporterRegistration>
         FindImporterForPath(const std::filesystem::path& path) const;
@@ -367,9 +370,23 @@ namespace Keire
       private:
         friend class AssetCooker;
         friend class Detail::AssetDatabaseWorkerAccess;
+        template <typename T, typename... Args> friend Ref<T> CreateRef(Args&&... args);
+
+        enum class Initialization : std::uint8_t
+        {
+            Full,
+            PublishedSourceIndex
+        };
+
+        AssetDatabase(AssetDatabaseSpecification specification, Initialization initialization);
         [[nodiscard]] std::size_t RefreshUnlocked();
+        void RefreshAssetsUnlocked(std::span<const AssetId> assets);
         [[nodiscard]] AssetImportResult ImportAllUnlocked(AssetImportPolicy policy, std::stop_token cancellation,
                                                           AssetOperationProgressCallback progress);
+        [[nodiscard]] AssetImportResult ImportAssetsUnlocked(std::span<const AssetId> assets, AssetImportPolicy policy,
+                                                             std::stop_token cancellation,
+                                                             AssetOperationProgressCallback progress,
+                                                             bool refreshSources);
         [[nodiscard]] AssetId CreateAssetUnlocked(const std::filesystem::path& relativePath,
                                                   const AssetImporterRegistration& importer,
                                                   std::span<const std::byte> sourceBytes,
@@ -416,11 +433,11 @@ namespace Keire
 
       private:
         friend class AssetDatabase;
-        [[nodiscard]] static AssetCookResult CookUnlocked(const AssetDatabase& database,
-                                                          const AssetBuildProfile& profile,
-                                                          const std::filesystem::path& outputDirectory,
-                                                          std::stop_token cancellation,
-                                                          AssetOperationProgressCallback progress);
+        [[nodiscard]] static AssetCookResult
+        CookUnlocked(const AssetDatabase& database, const AssetBuildProfile& profile,
+                     const std::filesystem::path& outputDirectory, std::stop_token cancellation,
+                     AssetOperationProgressCallback progress, std::span<const AssetId> sourceAssets = {},
+                     std::span<const AssetId> replacedAssets = {});
     };
 
     [[nodiscard]] KEIRE_API AssetImporterRegistration CreateTextAssetImporter();

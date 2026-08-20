@@ -19,13 +19,31 @@ namespace Keire
     std::string AssetTrashId::ToString() const { return m_Value.ToString(); }
 
     AssetDatabase::AssetDatabase(AssetDatabaseSpecification specification)
+        : AssetDatabase(std::move(specification), Initialization::Full)
+    {
+    }
+
+    AssetDatabase::AssetDatabase(AssetDatabaseSpecification specification, const Initialization initialization)
         : m_Impl(std::make_unique<Impl>(std::move(specification)))
     {
-        (void)Refresh();
-        m_Impl->StartChangeMonitor();
+        if (initialization == Initialization::Full)
+        {
+            (void)Refresh();
+            m_Impl->StartChangeMonitor();
+        }
     }
 
     AssetDatabase::~AssetDatabase() = default;
+
+    Ref<AssetDatabase>
+    Detail::AssetDatabaseWorkerAccess::CreateFromSourceIndex(AssetDatabaseSpecification specification,
+                                                             const std::filesystem::path& path)
+    {
+        auto database =
+            CreateRef<AssetDatabase>(std::move(specification), AssetDatabase::Initialization::PublishedSourceIndex);
+        (void)ReloadSourceIndex(*database, path);
+        return database;
+    }
 
     void Detail::AssetDatabaseWorkerAccess::PublishSourceIndex(const AssetDatabase& database,
                                                                const std::filesystem::path& path)
@@ -72,6 +90,16 @@ namespace Keire
         return database.m_Impl->Records.size();
     }
 
+    AssetImportResult Detail::AssetDatabaseWorkerAccess::ImportAssetsFromSourceIndex(
+        AssetDatabase& database, const std::span<const AssetId> assets, const AssetImportPolicy policy,
+        const std::stop_token cancellation, AssetOperationProgressCallback progress)
+    {
+        if (assets.empty())
+            throw std::invalid_argument("Indexed targeted asset import requires at least one asset identity.");
+        std::scoped_lock operation(*database.m_Impl->OperationMutex);
+        return database.ImportAssetsUnlocked(assets, policy, cancellation, std::move(progress), false);
+    }
+
     std::size_t AssetDatabase::Refresh()
     {
         std::scoped_lock operation(*m_Impl->OperationMutex);
@@ -82,6 +110,18 @@ namespace Keire
     {
         auto scanned = m_Impl->Scan();
         std::scoped_lock lock(m_Impl->Mutex);
+        for (auto& record : scanned.Records)
+        {
+            const auto previous = m_Impl->IdIndex.find(record.Id);
+            if (previous == m_Impl->IdIndex.end())
+                continue;
+            const auto& imported = m_Impl->Records[previous->second];
+            if (record.Importer != imported.Importer || record.ImporterVersion != imported.ImporterVersion)
+                continue;
+            record.Dependencies = imported.Dependencies;
+            record.SourceDependencies = imported.SourceDependencies;
+            record.Metadata = imported.Metadata;
+        }
         m_Impl->ReplaceRecords(std::move(scanned.Records));
         m_Impl->Observed = std::move(scanned.Signatures);
         m_Impl->PendingChanges.clear();
@@ -94,6 +134,41 @@ namespace Keire
                                  m_Impl->Records.end();
                       });
         return m_Impl->Records.size();
+    }
+
+    void AssetDatabase::RefreshAssetsUnlocked(const std::span<const AssetId> assets)
+    {
+        const auto records = Records();
+        std::vector<AssetSourceRecord> owners;
+        owners.reserve(assets.size());
+        for (const auto asset : assets)
+        {
+            const auto owner = std::ranges::find_if(
+                records, [asset](const AssetSourceRecord& record)
+                { return record.Id == asset || std::ranges::find(record.SubAssets, asset) != record.SubAssets.end(); });
+            if (owner == records.end())
+                throw std::invalid_argument("Targeted asset import identity is not in the source database: " +
+                                            asset.ToString());
+            if (std::ranges::find(owners, owner->Id, &AssetSourceRecord::Id) == owners.end())
+                owners.push_back(*owner);
+        }
+
+        for (const auto& previous : owners)
+        {
+            const auto source = ConfinedPath(m_Impl->SourceRoot, previous.RelativePath);
+            auto refreshed = ReadMetadata(m_Impl->SourceRoot, source, m_Impl->Specification.MaximumSourceBytes, true,
+                                          m_Impl->InferImporter(source));
+            if (refreshed.Id != previous.Id)
+                throw std::runtime_error("Targeted source refresh changed the stable asset identity.");
+            if (refreshed.Importer == previous.Importer && refreshed.ImporterVersion == previous.ImporterVersion)
+            {
+                refreshed.Dependencies = previous.Dependencies;
+                refreshed.SourceDependencies = previous.SourceDependencies;
+                refreshed.Metadata = previous.Metadata;
+            }
+            m_Impl->PublishRecord(std::move(refreshed),
+                                  m_Impl->ReadSignature(source, Detail::PathWithSuffix(source, ".keiremeta")));
+        }
     }
 
     std::vector<AssetSourceRecord> AssetDatabase::Records() const
@@ -197,10 +272,91 @@ namespace Keire
                                                        const std::stop_token cancellation,
                                                        AssetOperationProgressCallback progress)
     {
+        return ImportAssetsUnlocked({}, policy, cancellation, std::move(progress), true);
+    }
+
+    AssetImportResult AssetDatabase::ImportAssets(const std::span<const AssetId> assets, const AssetImportPolicy policy,
+                                                  const std::stop_token cancellation,
+                                                  AssetOperationProgressCallback progress)
+    {
+        if (assets.empty())
+            throw std::invalid_argument("Targeted asset import requires at least one asset identity.");
+        std::scoped_lock operation(*m_Impl->OperationMutex);
+        return ImportAssetsUnlocked(assets, policy, cancellation, std::move(progress), true);
+    }
+
+    AssetImportResult AssetDatabase::ImportAssetsUnlocked(const std::span<const AssetId> assets,
+                                                          const AssetImportPolicy policy,
+                                                          const std::stop_token cancellation,
+                                                          AssetOperationProgressCallback progress,
+                                                          const bool refreshSources)
+    {
         ThrowIfOperationCancelled(cancellation);
         ReportOperationProgress(progress, AssetOperationPhase::Scanning, 0, 0);
-        (void)RefreshUnlocked();
-        const auto records = Records();
+        if (refreshSources)
+            (void)RefreshUnlocked();
+        else
+            RefreshAssetsUnlocked(assets);
+        const auto allRecords = Records();
+        auto records = allRecords;
+        std::vector<AssetId> sourceAssets;
+        std::vector<AssetId> replacedAssets;
+        if (!assets.empty())
+        {
+            const auto previousCatalog = m_Impl->CacheRoot / "Runtime" / "catalog.json";
+            if (!std::filesystem::is_regular_file(previousCatalog))
+                return ImportAssetsUnlocked({}, policy, cancellation, std::move(progress), refreshSources);
+
+            std::unordered_set<AssetId> selected;
+            std::unordered_set<std::string> affectedSources;
+            const auto sourcePrefix = std::filesystem::relative(m_Impl->SourceRoot, m_Impl->Specification.ProjectRoot);
+            const auto addAffectedSource = [&affectedSources, &sourcePrefix](const AssetSourceRecord& record)
+            { affectedSources.insert((sourcePrefix / record.RelativePath).lexically_normal().generic_string()); };
+            for (const auto asset : assets)
+            {
+                const auto owner =
+                    std::ranges::find_if(allRecords,
+                                         [asset](const AssetSourceRecord& record)
+                                         {
+                                             return record.Id == asset || std::ranges::find(record.SubAssets, asset) !=
+                                                                              record.SubAssets.end();
+                                         });
+                if (owner == allRecords.end())
+                    throw std::invalid_argument("Targeted asset import identity is not in the source database: " +
+                                                asset.ToString());
+                selected.insert(owner->Id);
+                addAffectedSource(*owner);
+            }
+            bool expanded = true;
+            while (expanded)
+            {
+                expanded = false;
+                for (const auto& record : allRecords)
+                {
+                    if (selected.contains(record.Id) ||
+                        std::ranges::none_of(record.SourceDependencies,
+                                             [&affectedSources](const AssetSourceDependency& dependency)
+                                             {
+                                                 return affectedSources.contains(
+                                                     dependency.RelativePath.lexically_normal().generic_string());
+                                             }))
+                        continue;
+                    selected.insert(record.Id);
+                    addAffectedSource(record);
+                    expanded = true;
+                }
+            }
+            records.clear();
+            for (const auto& record : allRecords)
+            {
+                if (!selected.contains(record.Id))
+                    continue;
+                records.push_back(record);
+                sourceAssets.push_back(record.Id);
+                replacedAssets.push_back(record.Id);
+                replacedAssets.insert(replacedAssets.end(), record.SubAssets.begin(), record.SubAssets.end());
+            }
+        }
         ReportOperationProgress(progress, AssetOperationPhase::Importing, 0, records.size());
         m_Impl->ResetCookInputs();
         const auto objectRoot = m_Impl->CacheRoot / "Objects";
@@ -218,6 +374,7 @@ namespace Keire
             {
                 auto validated = m_Impl->TakeValidatedImport(record);
                 auto restored = validated ? std::optional<AssetImportOutput>{} : m_Impl->RestoreCachedImport(record);
+                const bool restoredFromCache = restored.has_value();
                 auto imported = validated  ? std::move(*validated)
                                 : restored ? std::move(*restored)
                                            : m_Impl->Import(record);
@@ -262,6 +419,8 @@ namespace Keire
                     ++result.Imported;
                     status.State = AssetImportState::Imported;
                 }
+                if (!restoredFromCache)
+                    m_Impl->StoreCachedImport(record, imported);
                 m_Impl->StoreCookInput(record, std::move(imported));
                 if (const auto* importer = m_Impl->FindImporter(record);
                     importer && importer->Version > record.ImporterVersion)
@@ -314,6 +473,7 @@ namespace Keire
             const auto object = m_Impl->ObjectPath(upgraded, m_Impl->ImportDigest(upgraded, *imported));
             if (!std::filesystem::exists(object))
                 Detail::WriteFileAtomically(object, imported->Bytes);
+            m_Impl->StoreCachedImport(upgraded, *imported);
             m_Impl->StoreCookInput(upgraded, std::move(*imported));
             m_Impl->PublishRecord(std::move(upgraded), m_Impl->ReadSignature(m_Impl->SourceRoot / record->RelativePath,
                                                                              record->MetadataPath));
@@ -322,7 +482,7 @@ namespace Keire
         {
             ThrowIfOperationCancelled(cancellation);
             const auto cooked = AssetCooker::CookUnlocked(*this, AssetBuildProfile{}, m_Impl->CacheRoot / "Runtime",
-                                                          cancellation, progress);
+                                                          cancellation, progress, sourceAssets, replacedAssets);
             result.CatalogPath = cooked.CatalogPath;
         }
         catch (const AssetOperationCancelled&)

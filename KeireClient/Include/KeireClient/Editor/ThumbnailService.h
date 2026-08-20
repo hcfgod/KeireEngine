@@ -56,6 +56,7 @@ namespace KeireEditor
         void RegisterProvider(std::string extension, std::uint32_t version, Provider provider);
         [[nodiscard]] bool Request(ThumbnailRequest request);
         [[nodiscard]] std::vector<ThumbnailResult> DrainCompleted(std::size_t maximum = 32);
+        void Invalidate(Keire::AssetId asset);
         void CancelAll() noexcept;
         [[nodiscard]] std::size_t PendingCount() const noexcept;
 

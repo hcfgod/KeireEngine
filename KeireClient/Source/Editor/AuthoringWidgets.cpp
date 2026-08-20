@@ -132,14 +132,20 @@ namespace
         Keire::UiItemRect Rectangle;
     };
 
-    struct DrawnConnection
+    struct DrawnConnectionSegment
     {
-        const KeireEditor::NodeGraphConnection* Connection = nullptr;
         Keire::UiPosition Start;
         Keire::UiPosition FirstControl;
         Keire::UiPosition SecondControl;
         Keire::UiPosition End;
+    };
+
+    struct DrawnConnection
+    {
+        const KeireEditor::NodeGraphConnection* Connection = nullptr;
         Keire::UiColor Color;
+        std::vector<DrawnConnectionSegment> Segments;
+        std::vector<Keire::UiPosition> Reroutes;
     };
 
     [[nodiscard]] std::pair<Keire::UiPosition, Keire::UiPosition> BezierControls(const Keire::UiPosition start,
@@ -166,7 +172,7 @@ namespace
         }
     }
 
-    [[nodiscard]] float DistanceToBezierSquared(const DrawnConnection& connection,
+    [[nodiscard]] float DistanceToBezierSquared(const DrawnConnectionSegment& connection,
                                                 const Keire::UiPosition point) noexcept
     {
         float distance = std::numeric_limits<float>::max();
@@ -180,6 +186,23 @@ namespace
             previous = current;
         }
         return distance;
+    }
+
+    [[nodiscard]] std::pair<float, std::size_t> DistanceToConnectionSquared(const DrawnConnection& connection,
+                                                                            const Keire::UiPosition point) noexcept
+    {
+        float distance = std::numeric_limits<float>::max();
+        std::size_t closestSegment = 0;
+        for (std::size_t index = 0; index < connection.Segments.size(); ++index)
+        {
+            const float candidate = DistanceToBezierSquared(connection.Segments[index], point);
+            if (candidate < distance)
+            {
+                distance = candidate;
+                closestSegment = index;
+            }
+        }
+        return {distance, closestSegment};
     }
 
     [[nodiscard]] const KeireEditor::NodeGraphNode* FindNode(const std::span<const KeireEditor::NodeGraphNode> nodes,
@@ -235,6 +258,40 @@ namespace
 
 namespace KeireEditor
 {
+    bool ShaderGraphPinsCanConnect(const Keire::ShaderGraphPin& first, const Keire::ShaderGraphPin& second) noexcept
+    {
+        if (first.Direction == second.Direction)
+            return false;
+        const auto& output = first.Direction == Keire::ShaderGraphPinDirection::Output ? first : second;
+        const auto& input = first.Direction == Keire::ShaderGraphPinDirection::Input ? first : second;
+        return output.Type == input.Type ||
+               ((output.Type == Keire::ShaderGraphValueType::Color &&
+                 input.Type == Keire::ShaderGraphValueType::Vector4) ||
+                (output.Type == Keire::ShaderGraphValueType::Vector4 &&
+                 input.Type == Keire::ShaderGraphValueType::Color) ||
+                ((output.Type == Keire::ShaderGraphValueType::Vector4 ||
+                  output.Type == Keire::ShaderGraphValueType::Color) &&
+                 input.Type == Keire::ShaderGraphValueType::Vector3) ||
+                (output.Type == Keire::ShaderGraphValueType::Vector3 &&
+                 (input.Type == Keire::ShaderGraphValueType::Vector4 ||
+                  input.Type == Keire::ShaderGraphValueType::Color))) ||
+               (output.Type == Keire::ShaderGraphValueType::Scalar &&
+                input.Type != Keire::ShaderGraphValueType::Texture2D &&
+                input.Type != Keire::ShaderGraphValueType::MaterialAttributes &&
+                input.Type != Keire::ShaderGraphValueType::Bsdf);
+    }
+
+    bool ShaderGraphNodesCanConnect(const Keire::ShaderGraphNode& first, const Keire::ShaderGraphNode& second) noexcept
+    {
+        return std::ranges::any_of(first.Pins,
+                                   [&](const Keire::ShaderGraphPin& firstPin)
+                                   {
+                                       return std::ranges::any_of(
+                                           second.Pins, [&](const Keire::ShaderGraphPin& secondPin)
+                                           { return ShaderGraphPinsCanConnect(firstPin, secondPin); });
+                                   });
+    }
+
     StableNodeId StableNodeGraphIdMap::Assign(const Keire::AssetId source, StableNodeId preferred)
     {
         if (const auto existing = std::ranges::find(m_Assignments, source, &decltype(m_Assignments)::value_type::first);
@@ -319,6 +376,10 @@ namespace KeireEditor
                 throw std::invalid_argument("Node graph connection IDs must be non-zero and unique.");
             if (!nodeIds.contains(connection.Source) || !nodeIds.contains(connection.Target))
                 throw std::invalid_argument("Node graph connections must reference existing nodes.");
+            if (connection.RoutingPoints.size() > 64 ||
+                std::ranges::any_of(connection.RoutingPoints, [](const Keire::Vector2 point)
+                                    { return !std::isfinite(point.X) || !std::isfinite(point.Y); }))
+                throw std::invalid_argument("Node graph connection routing points are invalid or exceed 64 entries.");
 
             const bool legacy = connection.SourcePin == 0 && connection.TargetPin == 0;
             if (legacy)
@@ -366,10 +427,10 @@ namespace KeireEditor
     NodeGraphCanvasDetail StableNodeGraphCanvas::DetailForZoom(const float zoom) noexcept
     {
         const float boundedZoom = std::isfinite(zoom) ? std::clamp(zoom, 0.35F, 2.5F) : 1.0F;
-        return {.NodeSubtitle = boundedZoom >= 0.85F,
-                .BlockLabels = boundedZoom >= 0.68F,
-                .PinLabels = boundedZoom >= 0.78F,
-                .ConnectionLabels = boundedZoom >= 0.68F};
+        return {.NodeSubtitle = boundedZoom >= 0.65F,
+                .BlockLabels = boundedZoom >= 0.5F,
+                .PinLabels = boundedZoom >= 0.5F,
+                .ConnectionLabels = boundedZoom >= 0.55F};
     }
 
     NodeGraphCanvasResult StableNodeGraphCanvas::Draw(Keire::UiFrame& ui, const std::string_view id,
@@ -394,7 +455,10 @@ namespace KeireEditor
         const auto canvas = ui.LastItemRect();
         const auto canvasClip = ui.PushClipRect(canvas);
         const auto pointer = ui.PointerState();
-        const bool canvasHovered = ui.LastItemState().Hovered;
+        const auto canvasItem = ui.LastItemState();
+        const bool canvasHovered = canvasItem.Hovered;
+        if (canvasHovered)
+            ui.CapturePointerWheel();
         result.PointerGraphPosition = ToGraph(pointer.Position, canvas);
 
         ui.DrawFilledRectangle(canvas, {0.055F, 0.06F, 0.073F, 1.0F}, 4.0F);
@@ -482,8 +546,25 @@ namespace KeireEditor
         {
             m_ConnectionSelection.reset();
         }
+        const auto rerouteAvailable = [&](const NodeGraphRerouteAddress address)
+        {
+            const auto found = std::ranges::find(connections, address.Connection, &NodeGraphConnection::Id);
+            return found != connections.end() && address.Index < found->RoutingPoints.size();
+        };
+        if (m_RerouteSelection && !rerouteAvailable(*m_RerouteSelection))
+            m_RerouteSelection.reset();
+        if (m_DraggingReroute && !rerouteAvailable(*m_DraggingReroute))
+            m_DraggingReroute.reset();
         if (!options.InteractiveConnections)
+        {
             m_ConnectionSelection.reset();
+            m_RerouteSelection.reset();
+        }
+        if (!options.EditableReroutes)
+        {
+            m_RerouteSelection.reset();
+            m_DraggingReroute.reset();
+        }
         if (m_DraggingPin && !FindPin(nodes, *m_DraggingPin))
         {
             m_DraggingPin.reset();
@@ -495,7 +576,16 @@ namespace KeireEditor
             result.ConnectionDragCancelled = true;
         }
         if (!options.Editable)
+        {
             m_DraggingBlock.reset();
+            m_DraggingReroute.reset();
+        }
+
+        if (m_DraggingReroute && pointer.LeftDown)
+        {
+            m_RerouteDragPosition = result.PointerGraphPosition;
+            result.Changed = pointer.Delta.X != 0.0F || pointer.Delta.Y != 0.0F;
+        }
 
         std::vector<DrawnNode> drawnNodes;
         std::vector<DrawnBlock> drawnBlocks;
@@ -589,9 +679,46 @@ namespace KeireEditor
                     {targetNode->second->Position.X, targetNode->second->Position.Y + targetSize.Height * 0.5F},
                     canvas);
             }
-            const auto [first, second] = BezierControls(sourcePosition, targetPosition, true, true);
-            drawnConnections.push_back(
-                {std::addressof(connection), sourcePosition, first, second, targetPosition, cableColor});
+            DrawnConnection drawn{std::addressof(connection), cableColor};
+            drawn.Reroutes.reserve(connection.RoutingPoints.size());
+            std::vector<Keire::UiPosition> waypoints;
+            waypoints.reserve(connection.RoutingPoints.size() + 2);
+            waypoints.push_back(sourcePosition);
+            for (std::size_t index = 0; index < connection.RoutingPoints.size(); ++index)
+            {
+                const NodeGraphRerouteAddress address{connection.Id, index};
+                const auto position = m_DraggingReroute && *m_DraggingReroute == address
+                                          ? m_RerouteDragPosition
+                                          : connection.RoutingPoints[index];
+                const auto screenPosition = ToScreen(position, canvas);
+                drawn.Reroutes.push_back(screenPosition);
+                waypoints.push_back(screenPosition);
+            }
+            waypoints.push_back(targetPosition);
+            drawn.Segments.reserve(waypoints.size() - 1);
+            for (std::size_t index = 1; index < waypoints.size(); ++index)
+            {
+                const auto [first, second] = BezierControls(waypoints[index - 1], waypoints[index], true, true);
+                drawn.Segments.push_back({waypoints[index - 1], first, second, waypoints[index]});
+            }
+            drawnConnections.push_back(std::move(drawn));
+        }
+
+        std::optional<NodeGraphRerouteAddress> hoveredReroute;
+        if (options.EditableReroutes)
+        {
+            const float rerouteHitRadius = std::clamp(10.0F * m_Zoom, 8.0F, 13.0F);
+            float rerouteDistance = rerouteHitRadius * rerouteHitRadius;
+            for (const auto& connection : drawnConnections)
+                for (std::size_t index = 0; index < connection.Reroutes.size(); ++index)
+                {
+                    const float candidate = SquaredDistance(pointer.Position, connection.Reroutes[index]);
+                    if (candidate <= rerouteDistance)
+                    {
+                        hoveredReroute = NodeGraphRerouteAddress{connection.Connection->Id, index};
+                        rerouteDistance = candidate;
+                    }
+                }
         }
 
         std::optional<NodeGraphPinAddress> hoveredPin;
@@ -599,6 +726,8 @@ namespace KeireEditor
         float pinDistance = pinHitRadius * pinHitRadius;
         for (const auto& pin : drawnPins)
         {
+            if (hoveredReroute)
+                break;
             const float candidate = SquaredDistance(pointer.Position, pin.Position);
             if (candidate <= pinDistance)
             {
@@ -608,7 +737,7 @@ namespace KeireEditor
         }
 
         std::optional<NodeGraphBlockAddress> hoveredBlock;
-        if (!hoveredPin)
+        if (!hoveredReroute && !hoveredPin)
         {
             for (const auto& block : drawnBlocks)
             {
@@ -621,7 +750,7 @@ namespace KeireEditor
         }
 
         std::optional<StableNodeId> hoveredNode;
-        if (!hoveredPin && !hoveredBlock)
+        if (!hoveredReroute && !hoveredPin && !hoveredBlock)
         {
             for (const auto& node : drawnNodes)
             {
@@ -634,15 +763,17 @@ namespace KeireEditor
         }
 
         std::optional<StableNodeId> hoveredConnection;
-        if (!hoveredPin && !hoveredBlock && !hoveredNode)
+        std::size_t hoveredConnectionSegment = 0;
+        if (!hoveredReroute && !hoveredPin && !hoveredBlock && !hoveredNode)
         {
             float cableDistance = ConnectionHitRadius * ConnectionHitRadius;
             for (const auto& connection : drawnConnections)
             {
-                const float candidate = DistanceToBezierSquared(connection, pointer.Position);
+                const auto [candidate, segment] = DistanceToConnectionSquared(connection, pointer.Position);
                 if (candidate <= cableDistance)
                 {
                     hoveredConnection = connection.Connection->Id;
+                    hoveredConnectionSegment = segment;
                     cableDistance = candidate;
                 }
             }
@@ -652,16 +783,45 @@ namespace KeireEditor
         result.HoveredBlock = hoveredBlock;
         result.HoveredNode = hoveredNode;
         result.HoveredConnection = hoveredConnection;
+        result.HoveredReroute = hoveredReroute;
+
+        if (canvasHovered && canvasItem.DoubleClicked && options.Editable && options.EditableReroutes)
+        {
+            if (hoveredReroute)
+                result.DeleteRerouteRequested = hoveredReroute;
+            else if (hoveredConnection)
+            {
+                result.AddRerouteRequested =
+                    NodeGraphRerouteRequest{*hoveredConnection, hoveredConnectionSegment, result.PointerGraphPosition};
+            }
+        }
 
         if (canvasHovered && pointer.LeftPressed)
         {
-            if (hoveredPin)
+            if (hoveredReroute)
+            {
+                m_Selection.reset();
+                m_BlockSelection.reset();
+                m_ConnectionSelection = hoveredReroute->Connection;
+                m_RerouteSelection = hoveredReroute;
+                result.ActivatedConnection = hoveredReroute->Connection;
+                result.ActivatedReroute = hoveredReroute;
+                if (options.Editable && options.EditableReroutes && !canvasItem.DoubleClicked)
+                {
+                    m_DraggingReroute = hoveredReroute;
+                    const auto found =
+                        std::ranges::find(connections, hoveredReroute->Connection, &NodeGraphConnection::Id);
+                    m_RerouteDragPosition = found->RoutingPoints[hoveredReroute->Index];
+                }
+            }
+            else if (hoveredPin)
             {
                 m_Selection = hoveredPin->Node;
                 m_BlockSelection = hoveredPin->Block
                                        ? std::optional(NodeGraphBlockAddress{hoveredPin->Node, hoveredPin->Block})
                                        : std::nullopt;
                 m_ConnectionSelection.reset();
+                m_RerouteSelection.reset();
                 result.ActivatedNode = hoveredPin->Node;
                 result.ActivatedPin = hoveredPin;
                 if (options.Editable)
@@ -672,6 +832,7 @@ namespace KeireEditor
                 m_Selection = hoveredBlock->Node;
                 m_BlockSelection = hoveredBlock;
                 m_ConnectionSelection.reset();
+                m_RerouteSelection.reset();
                 result.ActivatedNode = hoveredBlock->Node;
                 result.ActivatedBlock = hoveredBlock;
                 if (options.Editable)
@@ -686,6 +847,7 @@ namespace KeireEditor
                 m_Selection = hoveredNode;
                 m_BlockSelection.reset();
                 m_ConnectionSelection.reset();
+                m_RerouteSelection.reset();
                 result.ActivatedNode = hoveredNode;
                 if (options.Editable)
                 {
@@ -700,6 +862,7 @@ namespace KeireEditor
                 m_Selection.reset();
                 m_BlockSelection.reset();
                 m_ConnectionSelection = hoveredConnection;
+                m_RerouteSelection.reset();
                 result.ActivatedConnection = hoveredConnection;
             }
             else
@@ -707,6 +870,7 @@ namespace KeireEditor
                 m_Selection.reset();
                 m_BlockSelection.reset();
                 m_ConnectionSelection.reset();
+                m_RerouteSelection.reset();
                 result.BackgroundActivated = true;
             }
         }
@@ -715,7 +879,16 @@ namespace KeireEditor
         {
             NodeGraphContextRequest request;
             request.GraphPosition = result.PointerGraphPosition;
-            if (hoveredPin)
+            if (hoveredReroute)
+            {
+                request.Kind = NodeGraphContextTargetKind::Connection;
+                request.Connection = hoveredReroute->Connection;
+                m_Selection.reset();
+                m_BlockSelection.reset();
+                m_ConnectionSelection = hoveredReroute->Connection;
+                m_RerouteSelection = hoveredReroute;
+            }
+            else if (hoveredPin)
             {
                 request.Kind = NodeGraphContextTargetKind::Pin;
                 request.Node = hoveredPin->Node;
@@ -751,7 +924,10 @@ namespace KeireEditor
                 m_Selection.reset();
                 m_BlockSelection.reset();
                 m_ConnectionSelection = hoveredConnection;
+                m_RerouteSelection.reset();
             }
+            else
+                m_RerouteSelection.reset();
             result.ContextRequested = request;
         }
 
@@ -804,6 +980,12 @@ namespace KeireEditor
 
         if (pointer.LeftReleased)
         {
+            if (m_DraggingReroute)
+            {
+                result.MoveRerouteRequested = NodeGraphRerouteRequest{m_DraggingReroute->Connection,
+                                                                      m_DraggingReroute->Index, m_RerouteDragPosition};
+                m_DraggingReroute.reset();
+            }
             if (m_Dragging && m_DragMoved)
                 result.MoveCompletedNode = m_Dragging;
             m_Dragging.reset();
@@ -834,7 +1016,9 @@ namespace KeireEditor
 
         if (canvasHovered && options.Editable && ui.Shortcut({Keire::UiKey::Delete}))
         {
-            if (m_ConnectionSelection)
+            if (m_RerouteSelection && options.EditableReroutes)
+                result.DeleteRerouteRequested = m_RerouteSelection;
+            else if (m_ConnectionSelection)
                 result.DeleteConnectionRequested = m_ConnectionSelection;
             else if (m_BlockSelection)
                 result.DeleteBlockRequested = m_BlockSelection;
@@ -846,21 +1030,25 @@ namespace KeireEditor
         {
             const bool hovered = hoveredConnection && *hoveredConnection == connection.Connection->Id;
             const bool selected = m_ConnectionSelection && *m_ConnectionSelection == connection.Connection->Id;
-            DrawBezier(ui, connection.Start, connection.FirstControl, connection.SecondControl, connection.End,
-                       {0.008F, 0.012F, 0.02F, 0.88F}, selected ? 8.0F : 6.0F);
             const auto color = selected  ? ScaleColor(connection.Color, 1.35F, 1.0F)
                                : hovered ? ScaleColor(connection.Color, 1.2F, 1.0F)
                                          : connection.Color;
-            DrawBezier(ui, connection.Start, connection.FirstControl, connection.SecondControl, connection.End, color,
-                       selected  ? 3.5F
-                       : hovered ? 3.0F
-                                 : 2.0F);
+            for (const auto& segment : connection.Segments)
+            {
+                DrawBezier(ui, segment.Start, segment.FirstControl, segment.SecondControl, segment.End,
+                           {0.008F, 0.012F, 0.02F, 0.88F}, selected ? 8.0F : 6.0F);
+                DrawBezier(ui, segment.Start, segment.FirstControl, segment.SecondControl, segment.End, color,
+                           selected  ? 3.5F
+                           : hovered ? 3.0F
+                                     : 2.0F);
+            }
 
-            if (!connection.Connection->Label.empty() && detail.ConnectionLabels)
+            if (!connection.Connection->Label.empty() && detail.ConnectionLabels && !connection.Segments.empty())
             {
                 constexpr float labelFontSize = 11.0F;
-                const auto labelPosition = BezierPoint(connection.Start, connection.FirstControl,
-                                                       connection.SecondControl, connection.End, 0.5F);
+                const auto& labelSegment = connection.Segments[(connection.Segments.size() - 1) / 2];
+                const auto labelPosition = BezierPoint(labelSegment.Start, labelSegment.FirstControl,
+                                                       labelSegment.SecondControl, labelSegment.End, 0.5F);
                 const auto labelSize = ui.MeasureText(connection.Connection->Label, labelFontSize);
                 const Keire::UiItemRect labelRectangle{
                     {labelPosition.X - labelSize.Width * 0.5F - 5.0F, labelPosition.Y - labelSize.Height * 0.5F - 2.0F},
@@ -870,6 +1058,19 @@ namespace KeireEditor
                 ui.DrawRectangle(labelRectangle, color, 1.0F, 4.0F);
                 ui.DrawOverlayText({labelRectangle.Minimum.X + 5.0F, labelRectangle.Minimum.Y + 2.0F},
                                    {0.76F, 0.82F, 0.92F, 1.0F}, connection.Connection->Label, labelFontSize, canvas);
+            }
+
+            for (std::size_t index = 0; index < connection.Reroutes.size(); ++index)
+            {
+                const NodeGraphRerouteAddress address{connection.Connection->Id, index};
+                const bool rerouteHovered = hoveredReroute && *hoveredReroute == address;
+                const bool rerouteSelected = m_RerouteSelection && *m_RerouteSelection == address;
+                const float radius = std::clamp(6.0F * m_Zoom, 5.0F, 8.0F);
+                ui.DrawFilledCircle(connection.Reroutes[index], radius + 2.0F, {0.008F, 0.012F, 0.02F, 0.95F});
+                ui.DrawFilledCircle(connection.Reroutes[index], radius,
+                                    rerouteSelected  ? Keire::UiColor{0.3F, 0.78F, 1.0F, 1.0F}
+                                    : rerouteHovered ? ScaleColor(connection.Color, 1.35F, 1.0F)
+                                                     : connection.Color);
             }
         }
 
@@ -960,23 +1161,27 @@ namespace KeireEditor
 
                 if (detail.BlockLabels)
                 {
-                    constexpr float blockFontSize = 11.0F;
+                    const float blockFontSize = std::clamp(11.0F * m_Zoom, 8.0F, 11.0F);
                     const auto order = std::to_string(block.Index + 1);
-                    ui.DrawOverlayText({block.Rectangle.Minimum.X + 9.0F, block.Rectangle.Minimum.Y + 7.0F},
+                    const float blockTextY = block.Rectangle.Minimum.Y + std::clamp(7.0F * m_Zoom, 2.0F, 7.0F);
+                    ui.DrawOverlayText({block.Rectangle.Minimum.X + std::clamp(9.0F * m_Zoom, 5.0F, 9.0F), blockTextY},
                                        {0.48F, 0.58F, 0.72F, 1.0F}, order, blockFontSize, block.Rectangle);
-                    ui.DrawOverlayText({block.Rectangle.Minimum.X + 28.0F, block.Rectangle.Minimum.Y + 7.0F},
-                                       block.Block->Enabled ? Keire::UiColor{0.9F, 0.93F, 0.98F, 1.0F}
-                                                            : Keire::UiColor{0.5F, 0.54F, 0.62F, 1.0F},
-                                       block.Block->Label, blockFontSize, block.Rectangle);
                     constexpr std::string_view enabledText = "ON";
                     constexpr std::string_view disabledText = "OFF";
                     const auto state = block.Block->Enabled ? enabledText : disabledText;
                     const auto stateSize = ui.MeasureText(state, blockFontSize);
+                    const Keire::UiItemRect labelClip{
+                        {block.Rectangle.Minimum.X + 24.0F, block.Rectangle.Minimum.Y},
+                        {block.Rectangle.Maximum.X - stateSize.Width - 14.0F, block.Rectangle.Maximum.Y}};
                     ui.DrawOverlayText(
-                        {block.Rectangle.Maximum.X - stateSize.Width - 10.0F, block.Rectangle.Minimum.Y + 7.0F},
-                        block.Block->Enabled ? Keire::UiColor{0.3F, 0.9F, 0.58F, 1.0F}
-                                             : Keire::UiColor{0.62F, 0.65F, 0.72F, 1.0F},
-                        state, blockFontSize, block.Rectangle);
+                        {block.Rectangle.Minimum.X + std::clamp(28.0F * m_Zoom, 14.0F, 28.0F), blockTextY},
+                        block.Block->Enabled ? Keire::UiColor{0.9F, 0.93F, 0.98F, 1.0F}
+                                             : Keire::UiColor{0.5F, 0.54F, 0.62F, 1.0F},
+                        block.Block->Label, blockFontSize, labelClip);
+                    ui.DrawOverlayText({block.Rectangle.Maximum.X - stateSize.Width - 10.0F, blockTextY},
+                                       block.Block->Enabled ? Keire::UiColor{0.3F, 0.9F, 0.58F, 1.0F}
+                                                            : Keire::UiColor{0.62F, 0.65F, 0.72F, 1.0F},
+                                       state, blockFontSize, block.Rectangle);
                 }
 
                 if (m_DraggingBlock && m_DraggingBlock->Node == node.Id && block.Index == m_BlockDragDestination)
@@ -1027,7 +1232,7 @@ namespace KeireEditor
                 ring = {0.92F, 0.95F, 1.0F, 1.0F};
             }
 
-            const float radius = std::clamp(5.0F * m_Zoom, 3.5F, 6.0F);
+            const float radius = std::clamp(5.0F * m_Zoom, 4.0F, 6.0F);
             if (hovered || linkOrigin)
                 ui.DrawFilledCircle(pin.Position, radius + 3.0F, {ring.Red, ring.Green, ring.Blue, 0.18F});
             ui.DrawFilledCircle(pin.Position, radius, ScaleColor(pin.Pin->Color, hovered ? 1.2F : 0.88F, 1.0F));
@@ -1043,16 +1248,19 @@ namespace KeireEditor
                     if (block != drawnBlocks.end())
                         labelRectangle = block->Rectangle;
                 }
-                constexpr float pinFontSize = 11.0F;
+                const float midpoint = (labelRectangle.Minimum.X + labelRectangle.Maximum.X) * 0.5F;
+                const float pinFontSize = std::clamp(11.0F * m_Zoom, 8.0F, 11.0F);
                 if (pin.Pin->Direction == NodeGraphPinDirection::Input)
                 {
-                    ui.DrawOverlayText({pin.Position.X + 10.0F, pin.Position.Y - 6.0F}, {0.78F, 0.82F, 0.9F, 1.0F},
-                                       pin.Pin->Label, pinFontSize, labelRectangle);
+                    labelRectangle.Maximum.X = midpoint - 3.0F;
+                    ui.DrawOverlayText({pin.Position.X + 9.0F, pin.Position.Y - pinFontSize * 0.5F},
+                                       {0.78F, 0.82F, 0.9F, 1.0F}, pin.Pin->Label, pinFontSize, labelRectangle);
                 }
                 else
                 {
                     const auto labelSize = ui.MeasureText(pin.Pin->Label, pinFontSize);
-                    ui.DrawOverlayText({pin.Position.X - labelSize.Width - 10.0F, pin.Position.Y - 6.0F},
+                    labelRectangle.Minimum.X = midpoint + 3.0F;
+                    ui.DrawOverlayText({pin.Position.X - labelSize.Width - 9.0F, pin.Position.Y - pinFontSize * 0.5F},
                                        {0.78F, 0.82F, 0.9F, 1.0F}, pin.Pin->Label, pinFontSize, labelRectangle);
                 }
             }

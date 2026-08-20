@@ -1258,6 +1258,12 @@ namespace Keire
                 ImGui::IsMouseReleased(ImGuiMouseButton_Right)};
     }
 
+    void UiFrame::CapturePointerWheel()
+    {
+        m_Impl->RequireActive("CapturePointerWheel");
+        (void)ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
+    }
+
     bool UiFrame::KeyDown(const UiKey key) const
     {
         m_Impl->RequireActive("KeyDown");

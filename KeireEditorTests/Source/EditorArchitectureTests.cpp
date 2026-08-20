@@ -44,6 +44,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iterator>
 #include <ranges>
 #include <stdexcept>
@@ -258,6 +259,13 @@ TEST_CASE("asset browser record views cache a sorted 50000-asset project slice")
 
 TEST_CASE("asset browser utilities preserve preferences and deterministic folder routing")
 {
+    const auto measureCharacters = [](const std::string_view text) { return static_cast<float>(text.size()); };
+    CHECK(KeireEditor::ElideAssetDisplayName("Short", 10.0F, measureCharacters) == "Short");
+    CHECK(KeireEditor::ElideAssetDisplayName("LongAssetDisplayName", 10.0F, measureCharacters) == "LongAss...");
+    CHECK(KeireEditor::ElideAssetDisplayName("Long", 2.0F, measureCharacters).empty());
+    CHECK(KeireEditor::ElideAssetDisplayName("Long", 0.0F, measureCharacters).empty());
+    CHECK_THROWS_AS((void)KeireEditor::ElideAssetDisplayName("Asset", 20.0F, {}), std::invalid_argument);
+
     const auto root = std::filesystem::temp_directory_path() /
                       ("Keire-AssetBrowserUtilities-" + Keire::AssetId::Generate().ToString());
     std::error_code error;
@@ -285,6 +293,18 @@ TEST_CASE("asset browser utilities preserve preferences and deterministic folder
         KeireEditor::AssetBrowserDropTarget{.Rect = {{5.0F, 5.0F}, {15.0F, 15.0F}}, .Folder = "Inner"}};
     CHECK(KeireEditor::ResolveAssetBrowserDropFolder(targets, {10.0F, 10.0F}, "Fallback") == "Inner");
     CHECK(KeireEditor::ResolveAssetBrowserDropFolder(targets, {30.0F, 30.0F}, "Fallback") == "Fallback");
+
+    const std::array visibleFolders{std::filesystem::path("Audio"), std::filesystem::path("Models"),
+                                    std::filesystem::path("Textures"), std::filesystem::path("Vfx")};
+    const auto selectedFolders =
+        KeireEditor::BuildFolderRangeSelection(visibleFolders, visibleFolders[1], visibleFolders[3]);
+    REQUIRE(selectedFolders.size() == 3);
+    CHECK(selectedFolders.front() == visibleFolders[1]);
+    CHECK(selectedFolders.back() == visibleFolders[3]);
+    const auto encodedFolders = KeireEditor::EncodeFolderPayload(selectedFolders);
+    CHECK(KeireEditor::DecodeFolderPayload(std::as_bytes(std::span(encodedFolders))) == selectedFolders);
+    const std::array invalidFolderPayload{std::byte{'.'}, std::byte{'.'}, std::byte{'/'}, std::byte{'x'}};
+    CHECK_THROWS_AS((void)KeireEditor::DecodeFolderPayload(invalidFolderPayload), std::invalid_argument);
 
     std::filesystem::remove_all(root, error);
     CHECK_FALSE(error);
@@ -1480,9 +1500,48 @@ TEST_CASE("Material Graph documents separate the surface canvas from compatibili
     CHECK(document.Definition().Connections.empty());
     CHECK(document.Redo());
     CHECK(document.Definition().Connections.size() == 1);
-    document.Save();
+    CHECK_FALSE(document.AdvanceAutosave(0.49));
+    CHECK(document.Dirty());
+    CHECK(persisted.empty());
+    CHECK(document.AdvanceAutosave(0.02));
     CHECK_FALSE(persisted.empty());
     CHECK_FALSE(document.Dirty());
+}
+
+TEST_CASE("Material Graph autosave validates frame deltas and restarts after later edits")
+{
+    const auto graph = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000036");
+    const auto runtimeShader = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000037");
+    Keire::ShaderInterfaceDefinition shaderInterface;
+    Keire::MaterialShaderReference shaderReference;
+    shaderReference.Kind = Keire::MaterialShaderSourceKind::ShaderGraph;
+    shaderReference.Asset = graph;
+    auto definition = Keire::CreateMaterialGraph(shaderReference, shaderInterface);
+    std::size_t saves = 0;
+    KeireEditor::MaterialGraphDocument document({
+        .ResolveInterface = [&](const Keire::MaterialShaderReference& reference)
+        { return reference == shaderReference ? std::optional(shaderInterface) : std::nullopt; },
+        .ResolveShader = [&](const Keire::MaterialShaderReference& reference)
+        { return reference == shaderReference ? runtimeShader : Keire::AssetId{}; },
+        .Persist = [&](const Keire::AssetId, const std::span<const std::byte>) { ++saves; },
+    });
+    document.Open(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000038"),
+                  Keire::MaterialGraphAsset::EncodeSource(definition), 1);
+    auto surface = document.Definition().Surface;
+    surface.DoubleSided = !surface.DoubleSided;
+    REQUIRE(document.SetSurface(surface));
+    CHECK_THROWS_AS(static_cast<void>(document.AdvanceAutosave(-0.01)), std::invalid_argument);
+    CHECK_FALSE(document.AdvanceAutosave(0.5 - 0.001));
+    CHECK(document.AdvanceAutosave(0.001));
+    CHECK(saves == 1);
+    surface.DoubleSided = !surface.DoubleSided;
+    REQUIRE(document.SetSurface(surface));
+    CHECK_FALSE(document.AdvanceAutosave(0.25));
+    CHECK_FALSE(document.AdvanceAutosave(0.24));
+    CHECK(document.AdvanceAutosave(0.01));
+    CHECK(saves == 2);
+    document.Save();
+    CHECK(saves == 2);
 }
 
 TEST_CASE("scene picker selects transform-only and rendered entities by nearest viewport hit")
@@ -1813,6 +1872,58 @@ TEST_CASE("editor window restoration selects visible displays and clamps removed
     CHECK(small.Position == Keire::WindowPosition{0, 0});
 }
 
+TEST_CASE("thumbnail invalidation supersedes an in-flight revision of the same asset")
+{
+    const auto root = std::filesystem::temp_directory_path() / "Keire-ThumbnailInvalidation-Test";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    {
+        KeireEditor::ThumbnailService thumbnails(root);
+        std::atomic_uint32_t calls = 0;
+        std::promise<void> firstEntered;
+        auto firstEnteredFuture = firstEntered.get_future();
+        std::promise<void> releaseFirst;
+        const auto releaseFirstFuture = releaseFirst.get_future().share();
+        thumbnails.RegisterProvider(
+            ".refresh", 1,
+            [&](const KeireEditor::ThumbnailRequest&, const std::uint32_t width, const std::uint32_t height)
+            {
+                const auto call = ++calls;
+                if (call == 1)
+                {
+                    firstEntered.set_value();
+                    releaseFirstFuture.wait();
+                }
+                return std::vector<std::byte>(static_cast<std::size_t>(width) * height * 4U,
+                                              static_cast<std::byte>(call));
+            });
+        const auto asset = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000078");
+        REQUIRE(thumbnails.Request({.Asset = asset, .RelativePath = "Preview.refresh", .Digest = "same-digest"}));
+        if (firstEnteredFuture.wait_for(std::chrono::seconds(2)) != std::future_status::ready)
+        {
+            releaseFirst.set_value();
+            FAIL("The first thumbnail job did not start.");
+        }
+        thumbnails.Invalidate(asset);
+        REQUIRE(thumbnails.Request({.Asset = asset, .RelativePath = "Preview.refresh", .Digest = "same-digest"}));
+        releaseFirst.set_value();
+
+        KeireEditor::ThumbnailResult completed;
+        for (int attempt = 0; attempt < 200 && completed.Pixels.empty(); ++attempt)
+        {
+            auto results = thumbnails.DrainCompleted();
+            if (!results.empty())
+                completed = std::move(results.front());
+            else
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        REQUIRE(completed.Pixels.size() == 96U * 96U * 4U);
+        CHECK(std::to_integer<unsigned>(completed.Pixels.front()) == 2U);
+        CHECK(calls.load() == 2U);
+    }
+    std::filesystem::remove_all(root, error);
+}
+
 TEST_CASE("content previews use immutable loaded assets without blocking shutdown")
 {
     const auto root = std::filesystem::temp_directory_path() / "Keire-ThumbnailService-Test";
@@ -2047,6 +2158,25 @@ TEST_CASE("Asset operation service runs the isolated worker and publishes a sour
         CHECK(std::filesystem::is_regular_file(project->Root() / "Assets/Scenes/WorkerCreated.keirescene"));
         CHECK(std::filesystem::is_regular_file(project->Root() / "Assets/Shaders/WorkerAuxiliary.hlsl"));
 
+        operations.QueueAssetImport(created->Result.CreatedAsset, KeireEditor::AssetOperationPriority::ExplicitAction,
+                                    {.Reason = "isolated-worker-targeted-test"});
+        const auto targetedDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (operations.Busy() && std::chrono::steady_clock::now() < targetedDeadline)
+        {
+            operations.Update();
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        operations.Update();
+        const auto targeted = operations.TakeCompletion();
+        REQUIRE(targeted);
+        INFO(targeted->Result.Diagnostic);
+        CHECK(targeted->Result.Success);
+        CHECK(targeted->Kind == Keire::Detail::AssetWorkerOperationKind::ImportAssets);
+        CHECK(targeted->Result.Import.Statuses.size() == 1);
+        CHECK(targeted->WorkerOutput.find("kind=import-assets") != std::string::npos);
+        CHECK(targeted->WorkerOutput.find("reason='isolated-worker-targeted-test'") != std::string::npos);
+        CHECK(targeted->WorkerOutput.find("targets=1") != std::string::npos);
+
         operations.QueueMutation({.Kind = Keire::Detail::AssetWorkerMutationKind::MoveAsset,
                                   .Asset = created->Result.CreatedAsset,
                                   .Destination = "Scenes/WorkerRenamed.keirescene"});
@@ -2157,10 +2287,12 @@ TEST_CASE("Asset operation service coalesces material refresh generations before
     auto project = Keire::Project::Create(
         {.Location = location, .Name = "Worker Queue Project", .Template = Keire::ProjectTemplate::Empty});
     KeireEditor::AssetOperationService operations(KeireEditorTests::ExecutablePath, project->Root());
-    operations.QueueImport(KeireEditor::AssetOperationPriority::MaterialRefresh,
-                           {.ReloadAsset = Keire::AssetId::Generate(), .Generation = 1});
-    operations.QueueImport(KeireEditor::AssetOperationPriority::MaterialRefresh,
-                           {.ReloadAsset = Keire::AssetId::Generate(), .Generation = 2});
+    const auto first = Keire::AssetId::Generate();
+    const auto second = Keire::AssetId::Generate();
+    operations.QueueAssetImport(first, KeireEditor::AssetOperationPriority::MaterialRefresh,
+                                {.ReloadAsset = first, .Generation = 1});
+    operations.QueueAssetImport(second, KeireEditor::AssetOperationPriority::MaterialRefresh,
+                                {.ReloadAsset = second, .Generation = 2});
     operations.QueueCook({.Name = "Test"}, project->Root() / "Build/Cooked");
     operations.QueueImport(KeireEditor::AssetOperationPriority::ExplicitAction);
     CHECK(operations.QueuedCount() == 3);

@@ -147,8 +147,26 @@ namespace KeireEditor
         StableNodeId TargetPin = 0;
         StableNodeId SourceBlock = 0;
         StableNodeId TargetBlock = 0;
+        std::vector<Keire::Vector2> RoutingPoints;
 
         bool operator==(const NodeGraphConnection&) const = default;
+    };
+
+    struct NodeGraphRerouteAddress
+    {
+        StableNodeId Connection = 0;
+        std::size_t Index = 0;
+
+        bool operator==(const NodeGraphRerouteAddress&) const = default;
+    };
+
+    struct NodeGraphRerouteRequest
+    {
+        StableNodeId Connection = 0;
+        std::size_t Index = 0;
+        Keire::Vector2 GraphPosition;
+
+        bool operator==(const NodeGraphRerouteRequest&) const = default;
     };
 
     struct NodeGraphCanvasOptions
@@ -156,6 +174,7 @@ namespace KeireEditor
         bool Editable = true;
         bool InteractiveConnections = true;
         NodeGraphConnectionValidator ValidateConnection;
+        bool EditableReroutes = false;
     };
 
     struct NodeGraphCanvasResult
@@ -182,6 +201,11 @@ namespace KeireEditor
         std::optional<NodeGraphBlockAddress> HoveredBlock;
         std::optional<NodeGraphBlockMoveRequest> BlockMoveRequested;
         std::optional<NodeGraphBlockAddress> DeleteBlockRequested;
+        std::optional<NodeGraphRerouteAddress> ActivatedReroute;
+        std::optional<NodeGraphRerouteAddress> HoveredReroute;
+        std::optional<NodeGraphRerouteRequest> AddRerouteRequested;
+        std::optional<NodeGraphRerouteRequest> MoveRerouteRequested;
+        std::optional<NodeGraphRerouteAddress> DeleteRerouteRequested;
     };
 
     /// Screen-space graph detail selected from zoom. Geometry and interaction remain available at every level while
@@ -228,13 +252,19 @@ namespace KeireEditor
         void Focus(std::span<const NodeGraphNode> nodes, Keire::UiSize canvasSize);
         void Select(std::optional<StableNodeId> node) noexcept { m_Selection = node; }
         void SelectBlock(std::optional<NodeGraphBlockAddress> block) noexcept { m_BlockSelection = block; }
-        void SelectConnection(std::optional<StableNodeId> connection) noexcept { m_ConnectionSelection = connection; }
+        void SelectConnection(std::optional<StableNodeId> connection) noexcept
+        {
+            if (!m_RerouteSelection || !connection || m_RerouteSelection->Connection != *connection)
+                m_RerouteSelection.reset();
+            m_ConnectionSelection = connection;
+        }
         void CancelConnectionDrag() noexcept { m_DraggingPin.reset(); }
         void CancelInteractions() noexcept
         {
             m_Dragging.reset();
             m_DraggingBlock.reset();
             m_DraggingPin.reset();
+            m_DraggingReroute.reset();
             m_DragMoved = false;
         }
         [[nodiscard]] std::optional<StableNodeId> Selection() const noexcept { return m_Selection; }
@@ -257,6 +287,9 @@ namespace KeireEditor
         std::optional<NodeGraphBlockAddress> m_DraggingBlock;
         std::size_t m_BlockDragDestination = 0;
         std::optional<NodeGraphPinAddress> m_DraggingPin;
+        std::optional<NodeGraphRerouteAddress> m_RerouteSelection;
+        std::optional<NodeGraphRerouteAddress> m_DraggingReroute;
+        Keire::Vector2 m_RerouteDragPosition;
         Keire::Vector2 m_DragPosition;
         bool m_DragMoved = false;
     };
@@ -286,6 +319,14 @@ namespace KeireEditor
         std::vector<std::string> m_Recent;
         bool m_FocusRequested = false;
     };
+
+    /// Returns whether two Shader Graph pins can form a directed cable. The arguments may be supplied in either
+    /// order; direction and supported Shader Graph numeric coercions determine the output and input endpoints.
+    [[nodiscard]] bool ShaderGraphPinsCanConnect(const Keire::ShaderGraphPin& first,
+                                                 const Keire::ShaderGraphPin& second) noexcept;
+    /// Returns whether at least one pin pair can connect between two Shader Graph nodes.
+    [[nodiscard]] bool ShaderGraphNodesCanConnect(const Keire::ShaderGraphNode& first,
+                                                  const Keire::ShaderGraphNode& second) noexcept;
 
     class AuthoringValueEditors final
     {

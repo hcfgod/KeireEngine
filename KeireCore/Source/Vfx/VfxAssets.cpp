@@ -57,6 +57,7 @@ namespace Keire
         constexpr std::size_t MaximumSystems = 64;
         constexpr std::size_t MaximumGraphNodes = 4096;
         constexpr std::size_t MaximumGraphConnections = 16'384;
+        constexpr std::size_t MaximumGraphRoutingPointsPerConnection = 64;
         constexpr std::size_t MaximumBlackboardParameters = 1024;
         constexpr std::size_t MaximumPortableCustomInstructions = 4096;
         constexpr std::size_t MaximumBursts = 32;
@@ -959,13 +960,19 @@ namespace Keire
                 }
                 auto connections = Json::array();
                 for (const auto& connection : system.Connections)
+                {
+                    auto routing = Json::array();
+                    for (const auto point : connection.RoutingPoints)
+                        routing.push_back({point.X, point.Y});
                     connections.push_back({{"id", IdText(connection.Id)},
                                            {"outputNode", IdText(connection.OutputNode)},
                                            {"outputBlock", IdText(connection.OutputBlock)},
                                            {"outputPin", IdText(connection.OutputPin)},
                                            {"inputNode", IdText(connection.InputNode)},
                                            {"inputBlock", IdText(connection.InputBlock)},
-                                           {"inputPin", IdText(connection.InputPin)}});
+                                           {"inputPin", IdText(connection.InputPin)},
+                                           {"routing", std::move(routing)}});
+                }
                 encodedSystems.push_back(
                     {{"id", IdText(system.Id)},
                      {"name", system.Name},
@@ -1049,6 +1056,15 @@ namespace Keire
                             throw std::runtime_error("VFX schema-four connection block endpoints are required.");
                         connection.OutputBlock = ParseId(encodedConnection, "outputBlock");
                         connection.InputBlock = ParseId(encodedConnection, "inputBlock");
+                    }
+                    const auto& routing = encodedConnection.value("routing", Json::array());
+                    if (!routing.is_array() || routing.size() > MaximumGraphRoutingPointsPerConnection)
+                        throw std::runtime_error("VFX cable routing points exceed their bounds.");
+                    for (const auto& point : routing)
+                    {
+                        if (!point.is_array() || point.size() != 2)
+                            throw std::runtime_error("VFX cable routing point is invalid.");
+                        connection.RoutingPoints.push_back({point.at(0).get<float>(), point.at(1).get<float>()});
                     }
                     system.Connections.push_back(connection);
                 }
@@ -3789,7 +3805,10 @@ namespace Keire
                     const auto* output = findPin(connection.OutputNode, connection.OutputBlock, connection.OutputPin);
                     const auto* input = findPin(connection.InputNode, connection.InputBlock, connection.InputPin);
                     if (!connection.Id || !stableIds.insert(connection.Id).second || !output || !input ||
-                        output->Input || !input->Input || output->Type != input->Type)
+                        output->Input || !input->Input || output->Type != input->Type ||
+                        connection.RoutingPoints.size() > MaximumGraphRoutingPointsPerConnection ||
+                        std::ranges::any_of(connection.RoutingPoints,
+                                            [](const Vector2 point) { return !Math::IsFinite(point); }))
                         throw std::invalid_argument("VFX graph contains an invalid connection.");
                 }
             }

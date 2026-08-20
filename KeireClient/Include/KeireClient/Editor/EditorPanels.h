@@ -26,6 +26,7 @@ namespace KeireEditor
     class PropertyDrawerRegistry;
     class SceneCameraController;
     class SceneGizmoController;
+    class ThumbnailService;
     class ISceneViewportController
     {
       public:
@@ -113,6 +114,7 @@ namespace KeireEditor
                                                                  std::span<const std::byte> bytes) = 0;
         virtual void PersistInspectorProceduralMotionProfile(Keire::AssetId asset,
                                                              std::span<const std::byte> bytes) = 0;
+        virtual void ApplyInspectorImportSettings(Keire::AssetId asset, const Keire::AssetImportSettings& settings) = 0;
         virtual void ImportInspectorAssets() = 0;
         virtual void PreviewInspectorManagedData(Keire::AssetId asset,
                                                  const Keire::ManagedDataDefinition& definition) = 0;
@@ -228,7 +230,13 @@ namespace KeireEditor
         IInspectorController& m_Controller;
         std::unique_ptr<AssetPicker> m_AssetPicker;
         std::unique_ptr<ManagedDataInspectorPanel> m_ManagedDataInspector;
+        std::unique_ptr<ThumbnailService> m_Thumbnails;
+        Keire::Ref<Keire::UiImage> m_PreviewImage;
         Keire::AssetId m_EditingAsset;
+        Keire::AssetImportSettings m_OriginalImportSettings;
+        Keire::AssetImportSettings m_ImportSettings;
+        std::string m_PreviewDigest;
+        std::filesystem::path m_PreviewProjectRoot;
         std::string m_AssetName;
         std::optional<Keire::MaterialParameterCollectionDefinition> m_MaterialParameterCollection;
         std::optional<Keire::ProceduralMotionProfile> m_ProceduralMotionProfile;

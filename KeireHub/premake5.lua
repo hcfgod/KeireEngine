@@ -34,7 +34,7 @@ project(ProjectConfig.HUB_TARGET)
         "KEIRE_HUB_WORKER_TARGET=\"" .. HubWorkerTarget .. "\""
     }
 
-    dependson { HubWorkerTarget }
+    dependson { HubWorkerTarget, ProjectConfig.CLIENT_TARGET }
 
     links { HubRuntimeTarget }
 

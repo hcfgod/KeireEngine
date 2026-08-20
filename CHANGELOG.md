@@ -5,6 +5,37 @@ versions.
 
 ## Unreleased
 
+- Improved asset importing and inspection: folder drops now review importer options per supported file, importable
+  assets expose persistent Apply/Revert settings and type-aware previews in the Inspector, and settings changes use a
+  targeted reimport. Asset Browser folders now select on single-click, open on double-click, and support Ctrl/Shift
+  multi-selection across copy, cut, duplicate, delete, and drag moves. New Shader and Material Graphs open
+  automatically after their cached-index creation transaction, while graph pins and collision-safe labels remain
+  readable down to 50% zoom.
+- Fixed graph-wheel zoom also scrolling its containing editor panel. Shader, Material, and VFX cables now support
+  persistent multi-point routing: double-click a cable to add a knot, drag knots to reshape it, and press Delete or
+  double-click a knot to remove it. Asset Browser names now use measured `...` elision, and hovering either an asset
+  thumbnail or its label shows the complete asset details.
+- Added target-aware Material and Shader Graph context menus: nodes can be inspected, disconnected, deleted, or used
+  to open a type-compatible categorized node picker; pins and cables now expose their matching unlink and selection
+  actions. Material Graph's full creation palette is categorized instead of rendering one flat node list.
+- Material Graph live previews now sample every referenced texture instead of substituting gray checker patterns.
+  Asset creation and rename dialogs select their suggested names automatically and submit with Enter. Renaming an open
+  scene also updates its document save path immediately, preventing later saves from recreating the old scene file.
+- Material Graph edits now autosave after a short idle debounce and flow through the existing targeted source-change
+  import instead of requiring the graph Save button or scheduling a duplicate worker operation. Asset Browser material
+  thumbnails invalidate both queued and completed stale revisions and regenerate only after the replacement runtime
+  asset is available.
+- Fixed Material Graph saves causing every contextual asset importer to run again in each fresh asset-worker process.
+  Workers now restore the last dependency-enriched source index, cache complete validated import outputs including
+  generated subassets, and accept targeted import requests keyed by source files the importer actually read. Material
+  and Shader Graph saves, Inspector material edits, and automatic source refresh now import and cook only the edited
+  asset's reverse dependency closure, merge those entries into the development catalog, and reuse every unrelated pack.
+  Asset-operation requests and worker logs now record the scheduling reason, operation kind, target count, runtime
+  catalog state, and final closure size. A source-build Hub also launches and build-depends on its sibling source-build
+  editor by default, with the editor retaining its Asset Worker dependency, so rebuilding Debug cannot silently continue
+  through an older registered distribution editor or worker.
+- Fixed clean editor builds after the VFX Kill Shape module addition by completing its panel-model visitors and adding
+  the missing Kill Shape inspector controls.
 - Fixed Python 3.9 compatibility in the distribution-snapshot preparer and deterministic Marketplace artifact writers
   on Rocky Linux 9, and restored explicit standard-library ownership in the decomposed procedural scene-runtime unit.
 - Added explicit Additive, Modulate, premultiplied Alpha Composite, and Alpha Holdout material modes with
