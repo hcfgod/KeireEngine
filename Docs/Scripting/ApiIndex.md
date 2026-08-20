@@ -136,7 +136,10 @@ These types identify native components. Their layout is intentionally not expose
 
 | API | Main members |
 | --- | --- |
-| `Time` | `DeltaTime`, `FixedDeltaTime`, `UnscaledDeltaTime`, `Elapsed` |
+| `Application` | `ProductName`, `Version`, `Identifier`, `PersistentDataPath`, `IsEditor`, `Quit` |
+| `Time` | `DeltaTime`, `FixedDeltaTime`, `UnscaledDeltaTime`, `Elapsed`, `TimeScale`, `Paused` |
+| `Screen` | Resolution, display scale, safe area, focus, fullscreen mode, VSync state, `TrySetResolution` |
+| `PlayerPreferences` | Typed get/set, `HasKey`, `DeleteKey`, `DeleteAll`, atomic `Save` |
 | `Input` | `Axis2D`, `Axis`, `Held`, `Pressed`, `Released`, `Button` |
 | `Physics` | `TryRaycast`, `Raycast` |
 | `Navigation` | `FindPathAsync` |

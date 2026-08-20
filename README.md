@@ -238,8 +238,9 @@ generations publish assemblies for editor discovery and player builds. Gameplay 
 use stable component and field identities, and access runtime systems through validated handles.
 
 Start with [C# Scripting](Docs/Scripting/README.md), then use the
-[Managed API Index](Docs/Scripting/ApiIndex.md) as the compact API map. The managed API is intentionally distinct from
-the internal native-hosting layer.
+[Managed API Index](Docs/Scripting/ApiIndex.md) as the compact API map and the
+[Managed API Capability Matrix](Docs/Scripting/ManagedApiMatrix.md) for production status and planned parity work.
+The managed API is intentionally distinct from the internal native-hosting layer.
 
 ## Packaging and Releases
 
@@ -303,7 +304,7 @@ documentation authorities.
 
 ## Documentation
 
-The [documentation library](Docs/README.md) contains 59 maintained guides grouped around real tasks:
+The [documentation library](Docs/README.md) contains 60 maintained guides grouped around real tasks:
 
 - [Getting Started](Docs/GettingStarted.md) and [Project Hub](Docs/ProjectHub.md)
 - [Architecture](Docs/Architecture.md), [Runtime Lifecycle](Docs/RuntimeLifecycle.md), and

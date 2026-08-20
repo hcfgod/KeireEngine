@@ -17,6 +17,7 @@ If this is your first Kéire script, follow these guides in order:
 5. Continue with the system-specific guide you need.
 
 Experienced C# developers can use the [Managed API Index](ApiIndex.md) as a compact map of the available types.
+The [Managed API Capability Matrix](ManagedApiMatrix.md) records production support and the remaining parity roadmap.
 
 ## Minimal Behaviour
 
@@ -65,6 +66,7 @@ drag the script onto the Inspector, or drop it onto a GameObject in the Hierarch
 | [UI And Events](UiAndEvents.md) | Scene UI, buttons, `KeireEvent`, text, and cursor ownership |
 | [Async, Reload, And Diagnostics](AsyncReloadAndDiagnostics.md) | Cancellation, hot reload, failure isolation, logging, and troubleshooting |
 | [Managed API Index](ApiIndex.md) | Quick type, callback, component, and attribute lookup |
+| [Managed API Capability Matrix](ManagedApiMatrix.md) | Production status and named parity gaps by engine area |
 
 ## Core Mental Model
 
@@ -98,6 +100,8 @@ The managed API source is the final authority:
 - [`Behaviour.cs`](../../KeireManaged/Behaviour.cs) defines lifecycle callbacks.
 - [`Handles.cs`](../../KeireManaged/Handles.cs) defines entity, component, and asset handles.
 - [`RuntimeApi.cs`](../../KeireManaged/RuntimeApi.cs) defines gameplay service façades.
+- [`RuntimeFoundation.cs`](../../KeireManaged/RuntimeFoundation.cs) defines application, time, and screen services.
+- [`PlayerPreferences.cs`](../../KeireManaged/PlayerPreferences.cs) defines per-application persistent preferences.
 - [`RuntimeUi.cs`](../../KeireManaged/RuntimeUi.cs) and [`Events.cs`](../../KeireManaged/Events.cs) define UI and events.
 - [`SerializationAttributes.cs`](../../KeireManaged/SerializationAttributes.cs) defines Inspector metadata.
 

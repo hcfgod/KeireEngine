@@ -3,6 +3,27 @@
 The managed runtime exposes focused static façades for frame time, input, physics, navigation, prefabs, VFX, cursor
 state, diagnostics, and profiling. These APIs validate identity and arguments before crossing the native boundary.
 
+## Application And Player Preferences
+
+`Application` exposes immutable product identity and the platform-selected persistent-data root:
+
+```csharp
+Debug.Log($"{Application.ProductName} {Application.Version}");
+string saveRoot = Application.PersistentDataPath;
+
+PlayerPreferences.SetFloat("audio.master", 0.8f);
+PlayerPreferences.SetBool("accessibility.subtitles", true);
+PlayerPreferences.Save();
+```
+
+`PlayerPreferences` supports string, integer, finite float, and Boolean values. Reads are type-safe and return the
+caller's default when a key is missing or was written with another type. `Save` writes a versioned JSON document through
+a same-directory temporary file and atomic replacement. Corrupt or oversized files fail explicitly; the runtime never
+silently destroys player data.
+
+`Application.Quit(exitCode)` requests process exit in a packaged player. In the editor it requests a safe stop of the
+current Play session so a gameplay script cannot close the editor.
+
 ## Time
 
 ```csharp
@@ -10,6 +31,8 @@ float frameDelta = Time.DeltaTime;
 float fixedDelta = Time.FixedDeltaTime;
 float unscaledDelta = Time.UnscaledDeltaTime;
 double elapsed = Time.Elapsed;
+Time.TimeScale = 0.5f;
+Time.Paused = false;
 ```
 
 | Property | Use |
@@ -18,8 +41,25 @@ double elapsed = Time.Elapsed;
 | `FixedDeltaTime` | Fixed simulation work in `FixedUpdate` |
 | `UnscaledDeltaTime` | Frame work that should ignore simulation time scaling |
 | `Elapsed` | Runtime elapsed time in seconds |
+| `TimeScale` | Validated simulation scale in the range 0 through 100 |
+| `Paused` | Explicit simulation pause independent of the authored time scale |
 
 Multiply rates by the matching delta. Do not multiply one-time impulses or already time-integrated values.
+
+## Screen
+
+`Screen.CurrentResolution` distinguishes logical and physical-pixel dimensions and includes the display scale. Focus,
+visibility, minimized state, borderless fullscreen mode, VSync state, and the safe rectangle are available without
+exposing a platform window handle.
+
+```csharp
+Resolution current = Screen.CurrentResolution;
+if (!Screen.TrySetResolution(2560, 1440, FullscreenMode.BorderlessFullscreen))
+    Debug.Warn("The requested display configuration is unavailable.");
+```
+
+Resolution changes validate desktop-safe bounds and cross the application owner thread as one operation. The native
+service restores the previous window mode and size if a later step fails.
 
 ## Input
 

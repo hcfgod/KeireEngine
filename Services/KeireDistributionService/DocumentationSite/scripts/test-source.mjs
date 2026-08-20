@@ -89,7 +89,7 @@ function parseUnsignedConstant(source, name) {
 
 const actual = await collectMarkdown(docsRoot);
 const expected = [...allDocSources].sort((left, right) => left.localeCompare(right));
-assert(allDocSources.length === 59, `Expected 59 documentation sources, found ${allDocSources.length}.`);
+assert(allDocSources.length === 60, `Expected 60 documentation sources, found ${allDocSources.length}.`);
 assert(new Set(allDocSources).size === allDocSources.length, "Documentation inventory contains duplicate source paths.");
 assert(JSON.stringify(actual) === JSON.stringify(expected), "Documentation inventory does not exactly cover Docs/**/*.md.");
 

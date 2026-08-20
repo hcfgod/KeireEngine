@@ -1234,6 +1234,13 @@ callback table and value IDs, so components become inert when `ScriptSystem` clo
 the runtime implementation. Creation, callback invocation, state capture/restore, and exception-preserving destruction
 remain owned by the active script generation.
 
+Application, time, and screen internal calls are isolated in `ManagedRuntimeFoundation` instead of extending the
+already broad script host implementation. A thread-local scope publishes only the active `IScriptRuntimeServices`
+interface during a managed callback; it never publishes `Application`, `Window`, or `Time` ownership. The editor
+implements that interface on its construction thread. Screen changes capture the previous mode and extent and restore
+them on partial failure. Managed preferences use the platform preference root plus validated application identity, then
+perform bounded, typed, same-directory atomic file replacement entirely in the managed layer.
+
 ## Managed Data Assets
 
 `.keiredata` stores the authoritative stable managed type ID, a diagnostic type name, stable-field values, and sorted

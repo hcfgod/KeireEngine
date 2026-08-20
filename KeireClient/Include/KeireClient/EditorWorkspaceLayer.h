@@ -495,6 +495,15 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] float ManagedFixedDeltaTime() const noexcept override;
     [[nodiscard]] float ManagedUnscaledDeltaTime() const noexcept override;
     [[nodiscard]] double ManagedElapsedTime() const noexcept override;
+    [[nodiscard]] Keire::ManagedApplicationInfo ManagedApplication() const override;
+    void RequestManagedExit(int exitCode) noexcept override;
+    [[nodiscard]] double ManagedTimeScale() const noexcept override;
+    [[nodiscard]] bool SetManagedTimeScale(double scale) noexcept override;
+    [[nodiscard]] bool ManagedTimePaused() const noexcept override;
+    [[nodiscard]] bool SetManagedTimePaused(bool paused) noexcept override;
+    [[nodiscard]] Keire::ManagedScreenState ManagedScreen() const noexcept override;
+    [[nodiscard]] bool SetManagedScreen(std::uint32_t width, std::uint32_t height,
+                                        Keire::ManagedScreenMode mode) noexcept override;
     [[nodiscard]] Keire::Vector2 ReadManagedInput(std::string_view action) noexcept override;
     [[nodiscard]] Keire::ManagedInputState ReadManagedInputState(std::string_view action) noexcept override;
     [[nodiscard]] std::optional<Keire::ManagedRaycastHit>
