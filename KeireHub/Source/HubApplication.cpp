@@ -42,6 +42,7 @@
 #include "KeireHubRuntime/TaskNotificationTracker.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -1491,10 +1492,9 @@ namespace
 namespace KeireHub::Detail
 {
     std::unique_ptr<Keire::Layer> CreateHubLayer(std::filesystem::path executable, const bool smoke,
-                                                 std::optional<HubActivationRequest> pendingStartupActivation,
+                                                 std::optional<HubActivationRequest> activation,
                                                  std::shared_ptr<HubInstanceCoordinator> instance)
     {
-        return std::make_unique<HubLayer>(std::move(executable), smoke, std::move(pendingStartupActivation),
-                                          std::move(instance));
+        return std::make_unique<HubLayer>(std::move(executable), smoke, std::move(activation), std::move(instance));
     }
 } // namespace KeireHub::Detail

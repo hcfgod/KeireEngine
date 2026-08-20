@@ -4,6 +4,7 @@
 #include "KeireClient/Editor/VfxEffectDocument.h"
 #include "KeireClient/Editor/VfxEffectPanelModel.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
