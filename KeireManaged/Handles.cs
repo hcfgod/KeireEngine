@@ -74,6 +74,11 @@ public readonly record struct Entity(ulong World, EntityId Id)
     public AudioSourceHandle AudioSource => new(this);
     public AudioListenerHandle AudioListener => new(this);
     public AudioReverbZoneHandle AudioReverbZone => new(this);
+    public CameraHandle Camera => new(this);
+    public MeshRendererHandle MeshRenderer => new(this);
+    public DirectionalLightHandle DirectionalLight => new(this);
+    public PointLightHandle PointLight => new(this);
+    public SpotLightHandle SpotLight => new(this);
 
     public void SetParent(Entity parent, bool preserveWorldTransform = true) =>
         NativeRuntime.SetEntityParent(this, parent, preserveWorldTransform);

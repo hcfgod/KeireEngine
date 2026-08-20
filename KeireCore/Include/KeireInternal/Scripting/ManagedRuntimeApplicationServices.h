@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Keire/Scripting/ScriptSystem.h"
+#include "KeireInternal/Scripting/ManagedRuntimeRenderingServices.h"
 
 namespace Keire
 {
@@ -9,7 +9,7 @@ namespace Keire
 
 namespace Keire::Detail
 {
-    class ManagedRuntimeApplicationServices : public IScriptRuntimeServices
+    class ManagedRuntimeApplicationServices : public ManagedRuntimeSceneServices
     {
       public:
         explicit ManagedRuntimeApplicationServices(bool editor) noexcept : m_Editor(editor) {}

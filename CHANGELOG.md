@@ -5,6 +5,10 @@ versions.
 
 ## Unreleased
 
+- Added managed Camera, Mesh Renderer, and directional/point/spot light handles with typed mesh, material, texture, and
+  shader asset references. Material-slot replacement is transactional, and bounded per-renderer material property
+  blocks now drive matching numeric, vector, color, and texture bindings from Material/Shader Graph without mutating
+  shared material assets or serializing transient runtime overrides.
 - Added production scene-backed runtime UI controls: sliders, toggles, UTF-8 input fields, scroll views, accessibility
   metadata, explicit focus order, mouse-wheel/keyboard/gamepad navigation, and packaged-player text-input ownership.
   Managed scripts can serialize typed control references and read/write live values, text, focus, interactability,

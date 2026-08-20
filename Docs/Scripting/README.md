@@ -63,6 +63,7 @@ drag the script onto the Inspector, or drop it onto a GameObject in the Hierarch
 | [Gameplay Services](GameplayServices.md) | Time, input, physics, navigation, prefabs, VFX, cursor, logging, and profiling |
 | [Audio](Audio.md) | Clip references, Audio Sources, one-call playback, mixers, buses, and status |
 | [Animation](Animation.md) | Animator states, parameters, layers, events, playback, and IK |
+| [Rendering And Materials](RenderingAndMaterials.md) | Cameras, Mesh Renderers, lights, material slots, and shader property overrides |
 | [UI And Events](UiAndEvents.md) | Scene UI, buttons, `KeireEvent`, text, and cursor ownership |
 | [Async, Reload, And Diagnostics](AsyncReloadAndDiagnostics.md) | Cancellation, hot reload, failure isolation, logging, and troubleshooting |
 | [Managed API Index](ApiIndex.md) | Quick type, callback, component, and attribute lookup |
@@ -74,7 +75,8 @@ The managed API becomes easier to reason about when four rules stay explicit:
 
 - A `Behaviour` belongs to one entity in one runtime scene. Its `Entity` handle is non-owning and must be treated as
   invalid after the scene object is destroyed.
-- Handles such as `Entity`, `ComponentHandle`, `AssetReference<T>`, `AnimatorHandle`, and `AudioSourceHandle` are small
+- Handles such as `Entity`, `ComponentHandle`, `AssetReference<T>`, `AnimatorHandle`, `AudioSourceHandle`, and
+  `MeshRendererHandle` are small
   values. They contain identity, not native ownership.
 - Inspector state and hot-reload-only state are different. `[SerializeField]` persists authoring state;
   `[HotReloadState]` migrates transient Play Mode state without writing it into scenes or prefabs.
@@ -102,6 +104,7 @@ The managed API source is the final authority:
 - [`RuntimeApi.cs`](../../KeireManaged/RuntimeApi.cs) defines gameplay service façades.
 - [`RuntimeFoundation.cs`](../../KeireManaged/RuntimeFoundation.cs) defines application, time, and screen services.
 - [`PlayerPreferences.cs`](../../KeireManaged/PlayerPreferences.cs) defines per-application persistent preferences.
+- [`Rendering.cs`](../../KeireManaged/Rendering.cs) defines cameras, renderers, lights, and material property blocks.
 - [`RuntimeUi.cs`](../../KeireManaged/RuntimeUi.cs) and [`Events.cs`](../../KeireManaged/Events.cs) define UI and events.
 - [`SerializationAttributes.cs`](../../KeireManaged/SerializationAttributes.cs) defines Inspector metadata.
 

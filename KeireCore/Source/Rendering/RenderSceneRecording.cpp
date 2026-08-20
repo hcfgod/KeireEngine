@@ -25,6 +25,47 @@ namespace
     using Keire::RenderBackend::GeometryDetail::IntersectsFrustum;
     using Keire::RenderBackend::GeometryDetail::ProjectedHeight;
 
+    [[nodiscard]] bool PackMaterialProperty(const Keire::MaterialPropertyValue& value,
+                                            const Keire::ShaderPropertyType type, Keire::Vector4& packed) noexcept
+    {
+        switch (type)
+        {
+        case Keire::ShaderPropertyType::Scalar:
+            if (const auto* selected = std::get_if<float>(&value))
+                packed = {*selected, 0.0F, 0.0F, 0.0F};
+            else
+                return false;
+            break;
+        case Keire::ShaderPropertyType::Vector2:
+            if (const auto* selected = std::get_if<Keire::Vector2>(&value))
+                packed = {selected->X, selected->Y, 0.0F, 0.0F};
+            else
+                return false;
+            break;
+        case Keire::ShaderPropertyType::Vector3:
+            if (const auto* selected = std::get_if<Keire::Vector3>(&value))
+                packed = {selected->X, selected->Y, selected->Z, 0.0F};
+            else
+                return false;
+            break;
+        case Keire::ShaderPropertyType::Vector4:
+            if (const auto* selected = std::get_if<Keire::Vector4>(&value))
+                packed = *selected;
+            else
+                return false;
+            break;
+        case Keire::ShaderPropertyType::Color:
+            if (const auto* selected = std::get_if<Keire::Color>(&value))
+                packed = {selected->Red, selected->Green, selected->Blue, selected->Alpha};
+            else
+                return false;
+            break;
+        case Keire::ShaderPropertyType::Texture2D:
+            return false;
+        }
+        return true;
+    }
+
     class CallbackFrameGraphExecutionContext final : public Keire::RenderBackend::FrameGraphExecutionContext
     {
       public:
@@ -145,7 +186,8 @@ namespace Keire::RenderBackend
                 const auto* material = draw.Material ? ResolveAssetMaterial(draw.Material, samples) : nullptr;
                 instanceKeys.push_back({draw.Item->Mesh, draw.Material, draw.SubmeshIndex, draw.Surface.AlphaMode,
                                         draw.Item->ReceiveShadows, draw.Item->CastShadows,
-                                        material && material->UsesInstancing && !draw.Item->SkinnedAssetVertices});
+                                        material && material->UsesInstancing && !draw.Item->SkinnedAssetVertices &&
+                                            draw.Item->MaterialProperties.empty()});
             }
             const auto batches = BuildInstanceBatches(instanceKeys);
             list.Batches.reserve(batches.size());
@@ -178,6 +220,15 @@ namespace Keire::RenderBackend
 
         if (packet.Environment.Environment)
             (void)ResolveTexture(packet.Environment.Environment);
+        for (const auto& item : packet.DrawItems)
+        {
+            for (const auto& [name, value] : item.MaterialProperties)
+            {
+                (void)name;
+                if (const auto* texture = std::get_if<AssetId>(&value); texture && *texture)
+                    (void)ResolveTexture(*texture);
+            }
+        }
         for (const auto& particle : packet.Vfx.Particles())
             if (particle.Renderer != VfxRendererType::Sprite && particle.Mesh)
                 (void)ResolveMesh(particle.Mesh);
@@ -449,6 +500,15 @@ namespace Keire::RenderBackend
                 SDL_PushGPUFragmentUniformData(commands, 0, &scene, sizeof(scene));
                 std::array<Vector4, 64> numericProperties{};
                 std::ranges::copy(material->NumericProperties, numericProperties.begin());
+                for (const auto& [name, value] : item.MaterialProperties)
+                {
+                    const auto binding = material->Properties.find(name);
+                    if (binding != material->Properties.end() && binding->second.Type != ShaderPropertyType::Texture2D)
+                    {
+                        (void)PackMaterialProperty(value, binding->second.Type,
+                                                   numericProperties[binding->second.Slot]);
+                    }
+                }
                 if (material->TintSlot && !material->UsesInstancing)
                 {
                     auto& tint = numericProperties[*material->TintSlot];
@@ -487,6 +547,19 @@ namespace Keire::RenderBackend
                 {
                     std::array<SDL_GPUTextureSamplerBinding, 40> bindings{};
                     std::ranges::copy(material->Textures, bindings.begin());
+                    for (const auto& [name, value] : item.MaterialProperties)
+                    {
+                        const auto binding = material->Properties.find(name);
+                        const auto* texture = std::get_if<AssetId>(&value);
+                        if (binding == material->Properties.end() ||
+                            binding->second.Type != ShaderPropertyType::Texture2D || !texture)
+                        {
+                            continue;
+                        }
+                        const auto& resolved =
+                            *texture ? ResolveTexture(*texture) : DefaultTexture(binding->second.TextureSemantic);
+                        bindings[binding->second.Slot] = {resolved.Texture, resolved.Sampler};
+                    }
                     auto bindingCount = material->Textures.size();
                     if (material->ReceivesShadows)
                     {

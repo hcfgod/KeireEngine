@@ -26,7 +26,7 @@ Status meanings:
 | VFX | **Production** | Effect playback, lifetime, events, and typed parameter ranges | Managed graph construction is not a runtime goal |
 | Runtime UI | **Partial** | Scene-backed buttons, sliders, toggles, input fields and scroll views; typed polling events, focus/navigation, safe-area scaling and accessibility metadata | Localization, data binding, animated transitions, and platform screen-reader adapters |
 | Scenes and prefabs | **Partial** | Transactional prefab instantiate; native scene system has async load/unload/activate | Typed managed scene operations, progress, cancellation, additive loading |
-| Rendering and materials | **Planned** | Native renderer, material assets, Material Graph and Shader Graph are available | Camera/light/mesh/material handles, property blocks, render settings |
+| Rendering and materials | **Partial** | Typed Camera, Mesh Renderer, directional/point/spot light handles; mesh/material/texture/shader references; bounded per-renderer numeric, color, vector, and texture property blocks consumed by Material/Shader Graph output | Runtime render settings, dynamic material instances, and managed global parameter collections |
 | Jobs and async | **Production** | Managed jobs, dependencies, priorities, cancellation, synchronization context, lifetime token | Parallel-for convenience APIs |
 | Diagnostics | **Production** | Structured logs, exceptions, assertions, profiler spans/counters, debug lines | In-game diagnostic overlay controls |
 

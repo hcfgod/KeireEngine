@@ -237,6 +237,8 @@ Markdown, and its source validation checks these values against the correspondin
 Managed gameplay targets .NET 10 and C# 14. A project declares source roots through `.keireasm` assets; successful
 generations publish assemblies for editor discovery and player builds. Gameplay types inherit from `Keire.Behaviour`,
 use stable component and field identities, and access runtime systems through validated handles.
+Camera, Mesh Renderer, and typed light handles expose live presentation state, while bounded material property blocks
+override Material/Shader Graph properties per renderer without mutating shared asset definitions.
 
 Start with [C# Scripting](Docs/Scripting/README.md), then use the
 [Managed API Index](Docs/Scripting/ApiIndex.md) as the compact API map and the
@@ -305,7 +307,7 @@ documentation authorities.
 
 ## Documentation
 
-The [documentation library](Docs/README.md) contains 60 maintained guides grouped around real tasks:
+The [documentation library](Docs/README.md) contains 61 maintained guides grouped around real tasks:
 
 - [Getting Started](Docs/GettingStarted.md) and [Project Hub](Docs/ProjectHub.md)
 - [Architecture](Docs/Architecture.md), [Runtime Lifecycle](Docs/RuntimeLifecycle.md), and

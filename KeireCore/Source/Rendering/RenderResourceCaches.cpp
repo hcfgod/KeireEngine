@@ -279,8 +279,7 @@ namespace Keire::RenderBackend
         packet.FrameIndex = request.FrameIndex;
         const auto renderEntities = request.Scene->Query<MeshRendererComponent>();
         const auto meshParticleCount = std::ranges::count_if(packet.Vfx.Particles(),
-                                                             [](const auto& particle)
-                                                             {
+                                                             [](const auto& particle) {
                                                                  return particle.Renderer == VfxRendererType::Mesh &&
                                                                         static_cast<bool>(particle.Mesh) &&
                                                                         particle.Size > 0.0F;
@@ -305,6 +304,7 @@ namespace Keire::RenderBackend
             }
             packet.DrawItems.push_back({renderer->Mesh(),
                                         {renderer->Materials().begin(), renderer->Materials().end()},
+                                        renderer->MaterialProperties(),
                                         transform->PresentationWorldMatrix(),
                                         renderer->Tint(),
                                         entity.Id(),
@@ -768,6 +768,9 @@ namespace Keire::RenderBackend
                 const auto found = properties.find(property.Name);
                 if (property.Type == ShaderPropertyType::Texture2D)
                 {
+                    result.Properties.emplace(
+                        property.Name, ResolvedAssetMaterial::PropertyBinding{property.Type, property.TextureSemantic,
+                                                                              result.Textures.size()});
                     AssetId texture = property.DefaultTexture;
                     if (found != properties.end())
                     {
@@ -804,6 +807,9 @@ namespace Keire::RenderBackend
                     result.TintSlot = result.NumericProperties.size();
                 if (result.NumericProperties.size() >= 64)
                     throw std::runtime_error("Material exceeds the numeric property binding limit.");
+                result.Properties.emplace(
+                    property.Name, ResolvedAssetMaterial::PropertyBinding{property.Type, property.TextureSemantic,
+                                                                          result.NumericProperties.size()});
                 result.NumericProperties.push_back(packed);
             }
             if (result.NumericProperties.empty())

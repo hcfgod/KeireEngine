@@ -8,7 +8,7 @@
 #include "KeireInternal/Scripting/ManagedRuntimeApplicationServices.h"
 #include "KeireInternal/Scripting/ManagedRuntimeUiServices.h"
 #include "KeireInternal/WindowInternal.h"
-#include "RuntimeUiInput.h"
+#include "KeireRuntimeInternal/RuntimeUiInput.h"
 
 #include <nlohmann/json.hpp>
 
@@ -1085,6 +1085,8 @@ namespace
         {
             return Keire::Detail::FocusManagedUi(m_Presentation, entity);
         }
+
+        [[nodiscard]] Keire::Ref<Keire::Scene> ManagedRuntimeScene() const noexcept override { return m_Scene; }
 
       private:
         void ApplyManagedCursorMode(const bool restore = false) noexcept

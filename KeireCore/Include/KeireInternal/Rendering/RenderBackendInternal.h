@@ -33,6 +33,7 @@
 #include <deque>
 #include <functional>
 #include <limits>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -301,9 +302,17 @@ namespace Keire::RenderBackend
 
     struct ResolvedAssetMaterial final
     {
+        struct PropertyBinding final
+        {
+            ShaderPropertyType Type = ShaderPropertyType::Scalar;
+            ShaderTextureSemantic TextureSemantic = ShaderTextureSemantic::Generic;
+            std::size_t Slot = 0;
+        };
+
         SDL_GPUGraphicsPipeline* Pipeline = nullptr;
         std::vector<Vector4> NumericProperties;
         std::vector<SDL_GPUTextureSamplerBinding> Textures;
+        std::map<std::string, PropertyBinding, std::less<>> Properties;
         std::optional<std::size_t> TintSlot;
         MaterialSurfaceState Surface;
         bool ReceivesShadows = false;
@@ -632,6 +641,7 @@ namespace Keire::RenderBackend
     {
         AssetId Mesh;
         std::vector<AssetId> Materials;
+        std::map<std::string, MaterialPropertyValue, std::less<>> MaterialProperties;
         Matrix4 World;
         Color Tint;
         EntityId Entity;
@@ -651,6 +661,7 @@ namespace Keire::RenderBackend
             return std::nullopt;
         return SceneDrawItem{particle.Mesh,
                              particle.Material ? std::vector<AssetId>{particle.Material} : std::vector<AssetId>{},
+                             {},
                              Math::ComposeTransform(particle.Position,
                                                     Math::EulerDegreesToQuaternion(particle.Rotation),
                                                     {particle.Size, particle.Size, particle.Size}),

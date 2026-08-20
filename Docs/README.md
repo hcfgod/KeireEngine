@@ -23,7 +23,7 @@ release work honestly. Roadmap material is labeled as roadmap material and does 
 
 ## Complete Guide Library
 
-All 60 published guides are listed below in the same groups used by the documentation website.
+All 61 published guides are listed below in the same groups used by the documentation website.
 
 ### Start Here
 
@@ -92,6 +92,7 @@ All 60 published guides are listed below in the same groups used by the document
 | [Audio](Scripting/Audio.md) | Audio clips, source components, playback, mixers, buses, parameters, and status. |
 | [Animation](Scripting/Animation.md) | Graph playback, procedural locomotion intent/state/events, root motion, and IK. |
 | [UI and Events](Scripting/UiAndEvents.md) | Scene UI, buttons, text, typed events, subscriptions, and cursor ownership. |
+| [Rendering and Materials](Scripting/RenderingAndMaterials.md) | Cameras, Mesh Renderers, lights, material slots, and bounded per-renderer shader overrides. |
 | [Async, Reload, and Diagnostics](Scripting/AsyncReloadAndDiagnostics.md) | Synchronization context, managed jobs, cancellation, hot reload, failure isolation, and troubleshooting. |
 | [Managed API Index](Scripting/ApiIndex.md) | Compact lookup for public types, callbacks, components, attributes, and services. |
 | [Managed API Capability Matrix](Scripting/ManagedApiMatrix.md) | Production support and named parity gaps across the C# gameplay surface. |
