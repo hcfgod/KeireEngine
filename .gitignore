@@ -12,6 +12,7 @@ Services/KeireDistributionService/DocumentationSite/node_modules/
 Services/KeireDistributionService/DocumentationSite/public/assets/
 Services/KeireDistributionService/DocumentationSite/public/doc-inventory.json
 Services/KeireDistributionService/DocumentationSite/Source/content/docs/reference/
+Services/KeireDistributionService/HostV2/
 !KeireCore/Include/Keire/Build/
 !KeireCore/Include/Keire/Build/**
 !KeireCore/Include/KeireInternal/Build/

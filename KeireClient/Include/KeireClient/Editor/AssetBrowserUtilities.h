@@ -12,6 +12,21 @@
 
 namespace KeireEditor
 {
+    class IAssetBrowserController;
+
+    enum class AssetBrowserClipboardMode : std::uint8_t
+    {
+        Empty,
+        Copy,
+        Cut
+    };
+
+    struct AssetBrowserClipboardEntry final
+    {
+        Keire::AssetId Asset;
+        std::filesystem::path Folder;
+    };
+
     struct AssetBrowserPreferences final
     {
         bool GridView = true;
@@ -81,6 +96,20 @@ namespace KeireEditor
     BuildFolderRangeSelection(std::span<const std::filesystem::path> order, const std::filesystem::path& anchor,
                               const std::filesystem::path& target, std::span<const std::filesystem::path> existing = {},
                               bool additive = false);
+    void SelectAssetBrowserAsset(std::vector<Keire::AssetId>& selection,
+                                 std::vector<std::filesystem::path>& folderSelection, Keire::AssetId& anchor,
+                                 Keire::AssetId asset, bool additive, IAssetBrowserController& controller);
     [[nodiscard]] std::vector<std::filesystem::path> DecodeFolderPayload(std::span<const std::byte> bytes);
     [[nodiscard]] std::string EncodeFolderPayload(std::span<const std::filesystem::path> folders);
+    void DuplicateAssetBrowserFolders(std::span<const std::filesystem::path> folders,
+                                      const std::filesystem::path& assetRoot, IAssetBrowserController& controller);
+    void MoveAssetBrowserAssets(std::span<const Keire::AssetId> assets, const std::filesystem::path& folder,
+                                IAssetBrowserController& controller);
+    void SetAssetBrowserClipboard(std::span<const Keire::AssetId> assets,
+                                  std::vector<AssetBrowserClipboardEntry>& clipboard);
+    void SetAssetBrowserFolderClipboard(std::span<const std::filesystem::path> folders,
+                                        std::vector<AssetBrowserClipboardEntry>& clipboard);
+    void PasteAssetBrowserClipboard(AssetBrowserClipboardMode& mode, std::vector<AssetBrowserClipboardEntry>& clipboard,
+                                    const std::filesystem::path& assetRoot, const std::filesystem::path& folder,
+                                    IAssetBrowserController& controller);
 } // namespace KeireEditor

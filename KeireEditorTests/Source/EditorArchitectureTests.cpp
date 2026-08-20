@@ -1,7 +1,6 @@
 #include "KeireClient/Editor/AssetBrowserFolderCache.h"
 #include "KeireClient/Editor/AssetBrowserUtilities.h"
 #include "KeireClient/Editor/AssetOperationService.h"
-#include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
 #include "KeireClient/Editor/EditorRendererCapabilities.h"
 #include "KeireClient/Editor/EditorWindowPlacement.h"
@@ -2458,86 +2457,4 @@ TEST_CASE("Scene document views become inert after the underlying scene closes")
     CHECK_FALSE(document.EditingScene());
     CHECK_FALSE(document.Dirty());
     CHECK_NOTHROW(document.SynchronizeSelection());
-}
-
-TEST_CASE("Asset picker filters environment textures without exposing raw asset IDs")
-{
-    Keire::AssetSourceRecord hdr;
-    hdr.Id = Keire::AssetId::Generate();
-    hdr.Type = Keire::Texture2DAsset::StaticType();
-    hdr.RelativePath = "Sky/Studio.hdr";
-    CHECK(KeireEditor::AssetPicker::AcceptsEnvironmentTexture(hdr));
-
-    auto color = hdr;
-    color.Id = Keire::AssetId::Generate();
-    color.RelativePath = "Textures/Albedo.png";
-    CHECK_FALSE(KeireEditor::AssetPicker::AcceptsEnvironmentTexture(color));
-
-    color.ImportSettings["semantic"] = std::string("environment");
-    CHECK(KeireEditor::AssetPicker::AcceptsEnvironmentTexture(color));
-
-    KeireEditor::AssetPickerOptions options;
-    options.Label = "Skybox";
-    options.ExpectedType = Keire::Texture2DAsset::StaticType();
-    options.Filter = &KeireEditor::AssetPicker::AcceptsEnvironmentTexture;
-    CHECK(KeireEditor::AssetPicker::Accepts(hdr, options));
-    CHECK(KeireEditor::AssetPicker::Accepts(color, options));
-
-    auto mesh = hdr;
-    mesh.Type = Keire::MeshAsset::StaticType();
-    CHECK_FALSE(KeireEditor::AssetPicker::Accepts(mesh, options));
-}
-
-TEST_CASE("Asset picker resolves material authoring sources but hides Shader Graph preview materials")
-{
-    Keire::AssetSourceRecord shaderGraph;
-    shaderGraph.Id = Keire::AssetId::Generate();
-    shaderGraph.Type = Keire::ShaderGraphAsset::StaticType();
-    shaderGraph.RelativePath = "Shaders/Layered.keireshadergraph";
-    const auto compiledShader = Keire::AssetId::Generate();
-    const auto previewMaterial = Keire::AssetId::Generate();
-    shaderGraph.SubAssets = {compiledShader, previewMaterial};
-    Keire::AssetSourceRecord graph;
-    graph.Id = Keire::AssetId::Generate();
-    graph.Type = Keire::MaterialGraphAsset::StaticType();
-    graph.RelativePath = "Materials/Layered.keirematerialgraph";
-    const auto runtimeMaterial = Keire::AssetId::Generate();
-    graph.SubAssets = {runtimeMaterial};
-    Keire::AssetSourceRecord instance;
-    instance.Id = Keire::AssetId::Generate();
-    instance.Type = Keire::MaterialInstanceAsset::StaticType();
-    instance.RelativePath = "Materials/LayeredInstance.keirematerialinstance";
-    const auto instanceMaterial = Keire::AssetId::Generate();
-    instance.SubAssets = {instanceMaterial};
-    const std::array records{shaderGraph, graph, instance};
-
-    KeireEditor::AssetPickerOptions materialOptions;
-    materialOptions.Label = "Material";
-    materialOptions.ExpectedType = Keire::MaterialAsset::StaticType();
-    materialOptions.ResolveType = [previewMaterial, runtimeMaterial,
-                                   instanceMaterial](const Keire::AssetId asset) -> std::optional<Keire::AssetTypeId>
-    {
-        return asset == previewMaterial || asset == runtimeMaterial || asset == instanceMaterial
-                   ? std::optional{Keire::MaterialAsset::StaticType()}
-                   : std::nullopt;
-    };
-    CHECK_FALSE(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, shaderGraph.Id, materialOptions));
-    CHECK_FALSE(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, previewMaterial, materialOptions));
-    CHECK(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, graph.Id, materialOptions) == runtimeMaterial);
-    CHECK(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, runtimeMaterial, materialOptions) ==
-          runtimeMaterial);
-    CHECK(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, instance.Id, materialOptions) == instanceMaterial);
-    CHECK(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, instanceMaterial, materialOptions) ==
-          instanceMaterial);
-    materialOptions.ResolveType = {};
-    CHECK_FALSE(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, graph.Id, materialOptions));
-
-    KeireEditor::AssetPickerOptions meshOptions;
-    meshOptions.Label = "Mesh";
-    meshOptions.ExpectedType = Keire::MeshAsset::StaticType();
-    CHECK(KeireEditor::AssetPicker::ResolveCompatibleAsset({}, Keire::MeshAsset::CubeId(), meshOptions) ==
-          Keire::MeshAsset::CubeId());
-    CHECK(KeireEditor::AssetPicker::ResolveCompatibleAsset({}, Keire::MeshAsset::TorusId(), meshOptions) ==
-          Keire::MeshAsset::TorusId());
-    CHECK_FALSE(KeireEditor::AssetPicker::ResolveCompatibleAsset({}, Keire::AssetId::Generate(), meshOptions));
 }

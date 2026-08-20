@@ -42,8 +42,6 @@
 #include "KeireHubRuntime/TaskNotificationTracker.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
-#include <algorithm>
-#include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -1280,27 +1278,8 @@ namespace
             try
             {
                 auto editors = m_ProductSnapshot.Editors;
-#if !defined(KEIRE_DISTRIBUTION)
-                if (!requirePreferred)
-                {
-                    const auto developmentExecutable = KeireHub::ResolveEditorExecutable(m_Executable);
-                    constexpr std::string_view developmentId = "source-development-editor";
-                    editors.push_back({.Id = std::string(developmentId),
-                                       .Version = std::string(Keire::GetBuildInfo().Version),
-                                       .Channel = "Development",
-                                       .Platform = std::string(Keire::GetBuildInfo().Platform),
-                                       .Architecture = std::string(Keire::GetBuildInfo().Architecture),
-                                       .Root = developmentExecutable.parent_path(),
-                                       .Entrypoint = developmentExecutable,
-                                       .MinimumProjectSchema = inspection.SchemaVersion,
-                                       .MaximumProjectSchema = inspection.SchemaVersion,
-                                       .Healthy = true,
-                                       .HealthLabel = "Development build"});
-                    preferredEditorId = developmentId;
-                    KEIRE_CLIENT_INFO("[Project Hub] Source-build Hub will launch source-build editor '{}'.",
-                                      Keire::Detail::PathToUtf8(developmentExecutable));
-                }
-#endif
+                KeireHub::AddDevelopmentEditorFallback(editors, m_Executable, inspection.SchemaVersion,
+                                                       preferredEditorId, requirePreferred);
                 if (preferredEditorId.empty() && m_Registry)
                 {
                     const auto entries = m_Registry->Entries();

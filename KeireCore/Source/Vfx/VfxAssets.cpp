@@ -43,6 +43,8 @@ namespace Keire
         const auto DecodeMatrix = Detail::DecodeVfxMatrix;
         const auto EncodeColor = Detail::EncodeVfxColor;
         const auto DecodeColor = Detail::DecodeVfxColor;
+        const auto KillShapeModeName = Detail::VfxKillShapeModeName;
+        const auto ParseKillShapeMode = Detail::ParseVfxKillShapeMode;
         const auto CurveInterpolationName = Detail::VfxCurveInterpolationName;
         const auto ParseCurveInterpolation = Detail::ParseVfxCurveInterpolation;
         const auto EncodeCurve = Detail::EncodeVfxCurve;
@@ -157,27 +159,6 @@ namespace Keire
             if (value == "scenePhysics")
                 return VfxCollisionMode::ScenePhysics;
             throw std::runtime_error("VFX collision mode is unsupported.");
-        }
-
-        [[nodiscard]] std::string_view KillShapeModeName(const VfxKillShapeMode value)
-        {
-            switch (value)
-            {
-            case VfxKillShapeMode::Solid:
-                return "solid";
-            case VfxKillShapeMode::Inverted:
-                return "inverted";
-            }
-            throw std::invalid_argument("VFX kill-shape mode is unsupported.");
-        }
-
-        [[nodiscard]] VfxKillShapeMode ParseKillShapeMode(const std::string_view value)
-        {
-            if (value == "solid")
-                return VfxKillShapeMode::Solid;
-            if (value == "inverted")
-                return VfxKillShapeMode::Inverted;
-            throw std::runtime_error("VFX kill-shape mode is unsupported.");
         }
 
         [[nodiscard]] std::string_view RendererTypeName(const VfxRendererType value)

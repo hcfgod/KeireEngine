@@ -3,10 +3,12 @@
 #include "Keire/Project/Project.h"
 #include "Keire/Ui.h"
 #include "Keire/Window.h"
+#include "KeireHub/HubProductUi.h"
 
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace KeireHub
 {
@@ -28,6 +30,9 @@ namespace KeireHub
     [[nodiscard]] std::string FormatLastOpened(std::uint64_t seconds);
     [[nodiscard]] std::filesystem::path ResolveEditorExecutable(const std::filesystem::path& hubExecutable);
     [[nodiscard]] std::filesystem::path ResolveAssetToolExecutable(const std::filesystem::path& hubExecutable);
+    void AddDevelopmentEditorFallback(std::vector<HubEditorUiRecord>& editors,
+                                      const std::filesystem::path& hubExecutable, std::uint32_t projectSchema,
+                                      std::string& preferredEditorId, bool requirePreferred);
     void ReloadProjectRegistry(Keire::Ref<Keire::ProjectRegistry>& registry);
     void UpdateHubChromeLayout(Keire::Window& window, Keire::LogicalExtent size, bool reserveProductControls = true);
 } // namespace KeireHub

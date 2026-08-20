@@ -1,9 +1,0 @@
-{
-  "schemaVersion": 2,
-  "releaseStatus": {
-    "state": "preparing",
-    "version": "0.3.1",
-    "message": "Kéire Hub 0.3.1 is being prepared. Downloads are temporarily unavailable while release validation completes."
-  },
-  "packages": []
-}

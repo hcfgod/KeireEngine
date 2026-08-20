@@ -1,5 +1,6 @@
 #include "Keire/Rendering/ShaderGraph.h"
 #include "Keire/Rendering/MaterialEcosystem.h"
+#include "KeireInternal/Rendering/ShaderGraphIdentity.h"
 #include "KeireInternal/Rendering/ShaderGraphManifest.h"
 
 #include <nlohmann/json.hpp>
@@ -101,54 +102,6 @@ namespace Keire
             const auto normalized = value.lexically_normal().generic_string();
             return !normalized.empty() && normalized.size() <= MaximumGraphPath && normalized != "." &&
                    !normalized.starts_with("..") && normalized.find(':') == std::string::npos;
-        }
-
-        [[nodiscard]] AssetId StableMigratedPinId(const AssetId node, const std::string_view name,
-                                                  const ShaderGraphPinDirection direction) noexcept
-        {
-            const auto hash = [name, direction](std::uint64_t value)
-            {
-                value ^= static_cast<std::uint8_t>(direction);
-                value *= 1099511628211ULL;
-                for (const char input : name)
-                {
-                    const auto character = static_cast<unsigned char>(input);
-                    value ^= character;
-                    value *= 1099511628211ULL;
-                }
-                return value;
-            };
-            auto high = hash(node.High() ^ 0x4d4750494e484947ULL);
-            auto low = hash(node.Low() ^ 0x4d4750494e4c4f57ULL);
-            if ((high | low) == 0U)
-                low = 1U;
-            return {high, low};
-        }
-
-        [[nodiscard]] AssetId DerivedFunctionElementId(const AssetId call, const AssetId source,
-                                                       const std::string_view role) noexcept
-        {
-            std::uint64_t high = call.High() ^ 0x46554e4354494f4eULL;
-            std::uint64_t low = call.Low() ^ 0x455850414e53494fULL;
-            const auto mix = [&](const std::uint8_t value)
-            {
-                high = (high ^ value) * 1099511628211ULL;
-                low ^= static_cast<std::uint64_t>(value) + 0x9e3779b97f4a7c15ULL + (low << 6U) + (low >> 2U);
-            };
-            const auto mixInteger = [&](const std::uint64_t value)
-            {
-                for (std::size_t shift = 0; shift < 64; shift += 8)
-                    mix(static_cast<std::uint8_t>(value >> shift));
-            };
-            mixInteger(source.High());
-            mixInteger(source.Low());
-            for (const unsigned char character : role)
-                mix(character);
-            high = (high & 0xffffffffffff0fffULL) | 0x0000000000005000ULL;
-            low = (low & 0x3fffffffffffffffULL) | 0x8000000000000000ULL;
-            if ((high | low) == 0U)
-                low = 1U;
-            return {high, low};
         }
 
         template <typename Variant> [[nodiscard]] Json EncodeValue(const Variant& value)
@@ -418,7 +371,8 @@ namespace Keire
                         else
                         {
                             auto migrated = expected;
-                            migrated.Id = StableMigratedPinId(master->Id, expected.Name, expected.Direction);
+                            migrated.Id =
+                                Detail::StableMigratedShaderPinId(master->Id, expected.Name, expected.Direction);
                             migratedPins.push_back(std::move(migrated));
                         }
                     }
@@ -442,7 +396,8 @@ namespace Keire
                             else
                             {
                                 auto migrated = expected;
-                                migrated.Id = StableMigratedPinId(node.Id, expected.Name, expected.Direction);
+                                migrated.Id =
+                                    Detail::StableMigratedShaderPinId(node.Id, expected.Name, expected.Direction);
                                 migratedPins.push_back(std::move(migrated));
                             }
                         }
@@ -3329,14 +3284,14 @@ float4 PSMain(VertexOutput input) : SV_Target0
                     if (node.Kind == ShaderGraphNodeKind::Master || node.Kind == ShaderGraphNodeKind::Parameter)
                         continue;
                     auto cloned = node;
-                    cloned.Id = DerivedFunctionElementId(callId, node.Id, "node");
+                    cloned.Id = Detail::DerivedShaderFunctionElementId(callId, node.Id, "node");
                     nodeIds.emplace(node.Id, cloned.Id);
                     cloned.EditorPosition.X += call->EditorPosition.X;
                     cloned.EditorPosition.Y += call->EditorPosition.Y;
                     for (auto& pin : cloned.Pins)
                     {
                         const auto original = pin.Id;
-                        pin.Id = DerivedFunctionElementId(callId, original, "pin");
+                        pin.Id = Detail::DerivedShaderFunctionElementId(callId, original, "pin");
                         pinIds.emplace(original, pin.Id);
                     }
                     clonedNodes.push_back(std::move(cloned));
@@ -3419,7 +3374,7 @@ float4 PSMain(VertexOutput input) : SV_Target0
                         if (const auto incoming = callInputs.find(inputPin.Id); incoming != callInputs.end())
                         {
                             expandedConnections.push_back(
-                                {DerivedFunctionElementId(callId, connection.Id, "parameter-connection"),
+                                {Detail::DerivedShaderFunctionElementId(callId, connection.Id, "parameter-connection"),
                                  incoming->second, destination});
                         }
                         else
@@ -3430,8 +3385,9 @@ float4 PSMain(VertexOutput input) : SV_Target0
                     }
                     else
                     {
-                        expandedConnections.push_back({DerivedFunctionElementId(callId, connection.Id, "connection"),
-                                                       mappedEndpoint(connection.Output), destination});
+                        expandedConnections.push_back(
+                            {Detail::DerivedShaderFunctionElementId(callId, connection.Id, "connection"),
+                             mappedEndpoint(connection.Output), destination});
                     }
                 }
                 for (const auto& pin : functionMaster->Pins)

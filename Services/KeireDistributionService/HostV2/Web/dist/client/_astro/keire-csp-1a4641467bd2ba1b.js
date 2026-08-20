@@ -1,2 +1,0 @@
-
-	StarlightThemeProvider.updatePickers();

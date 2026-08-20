@@ -17,7 +17,6 @@
 #include <cmath>
 #include <optional>
 #include <ranges>
-#include <set>
 #include <unordered_map>
 #include <utility>
 
@@ -34,20 +33,9 @@ namespace KeireEditor
             Grid
         };
 
-        enum class ClipboardMode : std::uint8_t
-        {
-            Empty,
-            Copy,
-            Cut
-        };
-
         using NamedCreateKind = NamedAssetCreationKind;
-
-        struct ClipboardEntry final
-        {
-            Keire::AssetId Asset;
-            std::filesystem::path Folder;
-        };
+        using ClipboardMode = AssetBrowserClipboardMode;
+        using ClipboardEntry = AssetBrowserClipboardEntry;
 
         void SetProjectRoot(const std::filesystem::path& root)
         {
@@ -172,19 +160,7 @@ namespace KeireEditor
 
         void Select(const Keire::AssetId asset, const bool additive, IAssetBrowserController& editor)
         {
-            if (!additive)
-            {
-                Selection.clear();
-                FolderSelection.clear();
-            }
-            const auto found = std::ranges::find(Selection, asset);
-            if (additive && found != Selection.end())
-                Selection.erase(found);
-            else if (found == Selection.end())
-                Selection.push_back(asset);
-            SelectionAnchor = asset;
-            editor.SetAssetBrowserSelected(Selection.empty() ? Keire::AssetId{} : Selection.back());
-            editor.ClearAssetBrowserSceneSelection();
+            SelectAssetBrowserAsset(Selection, FolderSelection, SelectionAnchor, asset, additive, editor);
         }
 
         void SelectFromClick(const Keire::AssetId asset, Keire::UiFrame& ui, IAssetBrowserController& editor)
@@ -440,142 +416,30 @@ namespace KeireEditor
 
         void DuplicateFolders(IAssetBrowserController& editor)
         {
-            try
-            {
-                for (const auto& folder : FolderSelection)
-                {
-                    const auto destination = UniqueAssetBrowserFolder(
-                        AssetRoot, folder.parent_path() / (folder.filename().string() + " Copy"));
-                    editor.MutateAssetBrowser({.Kind = Keire::Detail::AssetWorkerMutationKind::DuplicateFolder,
-                                               .Source = folder,
-                                               .Destination = destination},
-                                              {}, "Duplicate Folder");
-                }
-                editor.SetAssetBrowserStatus("Queued " + std::to_string(FolderSelection.size()) +
-                                             " folder duplicate(s).");
-            }
-            catch (const std::exception& error)
-            {
-                editor.ReportAssetBrowserError(std::string("Folder duplication failed: ") + error.what());
-            }
+            DuplicateAssetBrowserFolders(FolderSelection, AssetRoot, editor);
         }
 
         void MoveAssets(const std::span<const Keire::AssetId> assets, const std::filesystem::path& folder,
                         IAssetBrowserController& editor)
         {
-            std::vector<std::pair<Keire::AssetSourceRecord, std::filesystem::path>> moves;
-            std::set<std::string> destinations;
-            for (const auto asset : assets)
-            {
-                const auto record = editor.AssetBrowserDatabase()->Find(asset);
-                if (!record)
-                    throw std::invalid_argument("Cannot move an asset that no longer exists.");
-                const auto destination = (folder / record->RelativePath.filename()).lexically_normal();
-                if (destination == record->RelativePath)
-                    continue;
-                if (editor.AssetBrowserDatabase()->Find(destination) ||
-                    !destinations.insert(destination.generic_string()).second)
-                    throw std::runtime_error("Asset move destination already exists: " + destination.generic_string());
-                moves.emplace_back(*record, destination);
-            }
-            for (const auto& [record, destination] : moves)
-            {
-                editor.MutateAssetBrowser({.Kind = Keire::Detail::AssetWorkerMutationKind::MoveAsset,
-                                           .Asset = record.Id,
-                                           .Destination = destination},
-                                          {.Kind = Keire::Detail::AssetWorkerMutationKind::MoveAsset,
-                                           .Asset = record.Id,
-                                           .Destination = record.RelativePath},
-                                          "Move Asset");
-            }
-            editor.SetAssetBrowserStatus("Queued " + std::to_string(moves.size()) + " asset move(s).");
+            MoveAssetBrowserAssets(assets, folder, editor);
         }
 
         void SetClipboard(const ClipboardMode mode, const std::span<const Keire::AssetId> assets)
         {
             ClipboardModeValue = mode;
-            Clipboard.clear();
-            for (const auto asset : assets)
-                Clipboard.push_back({asset, {}});
+            SetAssetBrowserClipboard(assets, Clipboard);
         }
 
         void SetFolderClipboard(const ClipboardMode mode, const std::span<const std::filesystem::path> folders)
         {
             ClipboardModeValue = mode;
-            Clipboard.clear();
-            for (const auto& folder : folders)
-                Clipboard.push_back({Keire::AssetId{}, folder});
+            SetAssetBrowserFolderClipboard(folders, Clipboard);
         }
 
         void Paste(const std::filesystem::path& folder, IAssetBrowserController& editor)
         {
-            if (ClipboardModeValue == ClipboardMode::Empty || Clipboard.empty())
-                return;
-            try
-            {
-                for (const auto& entry : Clipboard)
-                {
-                    if (entry.Asset)
-                    {
-                        const auto record = editor.AssetBrowserDatabase()->Find(entry.Asset);
-                        if (!record)
-                            throw std::runtime_error("Clipboard asset no longer exists.");
-                        if (ClipboardModeValue == ClipboardMode::Cut)
-                        {
-                            const auto destination = folder / record->RelativePath.filename();
-                            editor.MutateAssetBrowser({.Kind = Keire::Detail::AssetWorkerMutationKind::MoveAsset,
-                                                       .Asset = entry.Asset,
-                                                       .Destination = destination},
-                                                      {.Kind = Keire::Detail::AssetWorkerMutationKind::MoveAsset,
-                                                       .Asset = entry.Asset,
-                                                       .Destination = record->RelativePath},
-                                                      "Move Asset");
-                        }
-                        else
-                        {
-                            const auto destination =
-                                UniqueAssetBrowserPath(*record, folder, *editor.AssetBrowserDatabase());
-                            editor.MutateAssetBrowser({.Kind = Keire::Detail::AssetWorkerMutationKind::DuplicateAsset,
-                                                       .Asset = entry.Asset,
-                                                       .Destination = destination},
-                                                      {}, "Paste Asset", true);
-                        }
-                    }
-                    else
-                    {
-                        const auto destinationBase = folder / entry.Folder.filename();
-                        if (ClipboardModeValue == ClipboardMode::Cut)
-                        {
-                            editor.MutateAssetBrowser({.Kind = Keire::Detail::AssetWorkerMutationKind::MoveFolder,
-                                                       .Source = entry.Folder,
-                                                       .Destination = destinationBase},
-                                                      {.Kind = Keire::Detail::AssetWorkerMutationKind::MoveFolder,
-                                                       .Source = destinationBase,
-                                                       .Destination = entry.Folder},
-                                                      "Move Folder");
-                        }
-                        else
-                        {
-                            const auto destination = UniqueAssetBrowserFolder(AssetRoot, destinationBase);
-                            editor.MutateAssetBrowser({.Kind = Keire::Detail::AssetWorkerMutationKind::DuplicateFolder,
-                                                       .Source = entry.Folder,
-                                                       .Destination = destination},
-                                                      {}, "Paste Folder");
-                        }
-                    }
-                }
-                if (ClipboardModeValue == ClipboardMode::Cut)
-                {
-                    Clipboard.clear();
-                    ClipboardModeValue = ClipboardMode::Empty;
-                }
-                editor.SetAssetBrowserStatus("Pasted asset selection into " +
-                                             (folder.empty() ? std::string("Assets") : folder.generic_string()) + ".");
-            }
-            catch (const std::exception& error)
-            {
-                editor.ReportAssetBrowserError(std::string("Asset paste failed: ") + error.what());
-            }
+            PasteAssetBrowserClipboard(ClipboardModeValue, Clipboard, AssetRoot, folder, editor);
         }
 
         void RequestDeleteAssets(IAssetBrowserController& editor)
