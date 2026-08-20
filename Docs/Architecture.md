@@ -1208,6 +1208,10 @@ The editor writes collider handle changes through `SceneDocument`, so a drag is 
 `PhysicsDebugSnapshot` copies bounded body, contact, and query-ring state only when capture is enabled; the shipping
 default records nothing. Physics Material and collision-mesh references remain ordinary asset dependencies.
 
+Managed ray and capsule casts plus sphere overlaps enter through owner-thread runtime services and resolve native body
+IDs back to stable scene entity IDs. Capsule self-filtering is applied as a native body filter so a cast can reach the
+next surface. Managed overlap copies are deterministic, unique, and capped at 256 entities inside one callback scope.
+
 Character movement queues value displacements from scripts and consumes them at the scene physics boundary. The runtime
 uses closest-hit capsule casts with the controller body excluded, skin padding, bounded sweep/slide iterations,
 walkable-normal tests, and an up/forward/down stair transaction. Authored capsule height is total tip-to-tip height;

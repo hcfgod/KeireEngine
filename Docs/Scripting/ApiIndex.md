@@ -151,7 +151,7 @@ These types identify native components. Their layout is intentionally not expose
 | `Screen` | Resolution, display scale, safe area, focus, fullscreen mode, VSync state, `TrySetResolution` |
 | `PlayerPreferences` | Typed get/set, `HasKey`, `DeleteKey`, `DeleteAll`, atomic `Save` |
 | `Input` | `Axis2D`, `Axis`, `Held`, `Pressed`, `Released`, `Button` |
-| `Physics` | `TryRaycast`, `Raycast` |
+| `Physics` | `TryRaycast`, `Raycast`, `TryCapsuleCast`, `OverlapSphere` |
 | `Navigation` | `FindPathAsync` |
 | `Prefab` | `Instantiate` |
 | `SceneManager` | `ActiveScene`, `LoadedScenes`, `LoadSceneAsync` |

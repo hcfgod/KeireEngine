@@ -5,6 +5,8 @@ versions.
 
 ## Unreleased
 
+- Added managed capsule casts and deterministic bounded sphere overlaps with finite-input validation, trigger and layer
+  filtering, native ignored-body resolution, stable scene entity results, and matching Editor Play support.
 - Added managed active/loaded scene handles and coroutine-compatible packaged-player scene replacement with bounded
   status, progress, cancellation, diagnostics, camera validation, and activation rollback that keeps the previous
   runtime live on failure. Added atomic transient render-environment controls for ambient lighting, exposure,

@@ -41,6 +41,13 @@ internal struct NativeRaycastHit
     internal float Distance;
 }
 
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeEntityId
+{
+    internal ulong High;
+    internal ulong Low;
+}
+
 internal enum AudioSourceScalarProperty : byte
 {
     Gain,
@@ -381,6 +388,10 @@ internal static unsafe class NativeRuntime
     internal static delegate* unmanaged<ulong, ulong, ulong, void> DestroyEntityIcall;
     internal static delegate* unmanaged<ulong, Vector3, Vector3, float, uint, ulong, ulong, NativeRaycastHit*, byte>
         RaycastIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, Vector3, Quaternion, float, float, Vector3, uint, byte,
+        ulong, ulong, NativeRaycastHit*, byte> CapsuleCastIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, Vector3, float, uint, byte, ulong, ulong, NativeEntityId*,
+        int, int> OverlapSphereIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, float, byte> PlayAudioIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, ulong, ulong, ulong, ulong, NativeString,
         float, float, uint, byte, byte, float, float, byte> PlayAudioAdvancedIcall;
@@ -1003,5 +1014,45 @@ internal static unsafe class NativeRuntime
                              nativeHit.Point, nativeHit.Normal, nativeHit.Distance)
             : default;
         return didHit;
+    }
+
+    internal static bool TryCapsuleCast(Entity context, Vector3 origin, Quaternion rotation, float radius,
+                                        float height, Vector3 displacement, uint mask, bool includeTriggers,
+                                        Entity ignoredEntity, out RaycastHit hit)
+    {
+        NativeRaycastHit nativeHit = default;
+        bool didHit = CapsuleCastIcall(context.World, context.Id.High, context.Id.Low, origin, rotation, radius, height,
+                                       displacement, mask, includeTriggers ? (byte)1 : (byte)0, ignoredEntity.Id.High,
+                                       ignoredEntity.Id.Low, &nativeHit) != 0;
+        hit = didHit
+            ? new RaycastHit(new Entity(context.World, new EntityId(nativeHit.EntityHigh, nativeHit.EntityLow)),
+                             nativeHit.Point, nativeHit.Normal, nativeHit.Distance)
+            : default;
+        return didHit;
+    }
+
+    internal static IReadOnlyList<Entity> OverlapSphere(Entity context, Vector3 center, float radius, uint mask,
+                                                         bool includeTriggers, Entity ignoredEntity)
+    {
+        int count = OverlapSphereIcall(context.World, context.Id.High, context.Id.Low, center, radius, mask,
+                                       includeTriggers ? (byte)1 : (byte)0, ignoredEntity.Id.High,
+                                       ignoredEntity.Id.Low, null, 0);
+        if (count < 0)
+            throw new InvalidOperationException("The native physics world rejected the sphere overlap.");
+        if (count == 0)
+            return Array.Empty<Entity>();
+        var nativeEntities = new NativeEntityId[count];
+        fixed (NativeEntityId* destination = nativeEntities)
+        {
+            int copied = OverlapSphereIcall(context.World, context.Id.High, context.Id.Low, center, radius, mask,
+                                            includeTriggers ? (byte)1 : (byte)0, ignoredEntity.Id.High,
+                                            ignoredEntity.Id.Low, destination, nativeEntities.Length);
+            if (copied != count)
+                throw new InvalidOperationException("The native physics overlap changed during one managed call.");
+        }
+        var result = new Entity[count];
+        for (int index = 0; index < count; ++index)
+            result[index] = new Entity(context.World, new EntityId(nativeEntities[index].High, nativeEntities[index].Low));
+        return result;
     }
 }

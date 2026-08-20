@@ -19,7 +19,7 @@ var tests = new (string Name, Action Run)[]
     ("Coroutines schedule phases and dispose deterministically", CoroutineContract),
     ("Transform and rigid body gameplay handles expose writable runtime state", GameplayHandleContract),
     ("Animator exposes transient foot-grounding control", AnimatorFootGroundingContract),
-    ("Physics rejects non-finite raycasts before native dispatch", PhysicsRaycastValidationContract),
+    ("Managed physics shape queries validate and preserve native results", ManagedPhysicsQueryContract),
     ("Native UI button dispatch advances with the player clock", NativeUiButtonDispatchClockContract),
     ("Native runtime UI controls preserve values text focus and events", NativeRuntimeUiControlContract),
     ("Managed rendering handles preserve camera lights materials and shader overrides", ManagedRenderingContract),
@@ -143,7 +143,7 @@ static void AnimatorFootGroundingContract()
            "Animator must expose a model-agnostic runtime foot-grounding weight.");
 }
 
-static void PhysicsRaycastValidationContract()
+static unsafe void ManagedPhysicsQueryContract()
 {
     AssertThrows<ArgumentException>(
         () => Keire.Physics.TryRaycast(default, new Keire.Vector3(float.NaN, 0.0f, 0.0f),
@@ -156,6 +156,52 @@ static void PhysicsRaycastValidationContract()
     AssertThrows<ArgumentOutOfRangeException>(
         () => Keire.Physics.TryRaycast(default, default, new Keire.Vector3(0.0f, -1.0f, 0.0f), out _, float.NaN),
         "Raycasts must reject non-finite maximum distances before calling native code.");
+
+    Assert(System.Runtime.InteropServices.Marshal.SizeOf<Keire.NativeRaycastHit>() == 48 &&
+               System.Runtime.InteropServices.Marshal.SizeOf<Keire.NativeEntityId>() == 16,
+           "Managed physics query structs must preserve their native ABI layouts.");
+    NativePhysicsFixture.Install();
+    try
+    {
+        var context = new Keire.Entity(17, new Keire.EntityId(23, 29));
+        var ignored = new Keire.Entity(17, new Keire.EntityId(31, 37));
+        Assert(Keire.Physics.TryCapsuleCast(context, new Keire.Vector3(1.0f, 2.0f, 3.0f),
+                                            new Keire.Quaternion(0.0f, 0.0f, 0.0f, 2.0f), 0.5f, 1.8f,
+                                            new Keire.Vector3(0.0f, 0.0f, 4.0f), out Keire.RaycastHit capsuleHit,
+                                            0x40u, true, ignored),
+               "A valid capsule cast must reach the native runtime.");
+        Assert(capsuleHit.Entity == new Keire.Entity(17, new Keire.EntityId(41, 43)) &&
+                   capsuleHit.Distance == 2.5f && NativePhysicsFixture.CapsuleCalls == 1 &&
+                   NativePhysicsFixture.Rotation == Keire.Quaternion.Identity && NativePhysicsFixture.IncludeTriggers,
+               "Capsule casts must normalize rotation and preserve the native hit and trigger policy.");
+
+        IReadOnlyList<Keire.Entity> overlaps = Keire.Physics.OverlapSphere(
+            context, new Keire.Vector3(8.0f, 9.0f, 10.0f), 3.0f, 0x80u, false, ignored);
+        Assert(overlaps.Count == 2 && overlaps[0] == new Keire.Entity(17, new Keire.EntityId(47, 53)) &&
+                   overlaps[1] == new Keire.Entity(17, new Keire.EntityId(59, 61)) &&
+                   NativePhysicsFixture.OverlapCalls == 2 && !NativePhysicsFixture.IncludeTriggers,
+               "Sphere overlaps must perform one bounded count/copy transaction and preserve world identity.");
+
+        int calls = NativePhysicsFixture.CapsuleCalls + NativePhysicsFixture.OverlapCalls;
+        AssertThrows<ArgumentOutOfRangeException>(
+            () => Keire.Physics.TryCapsuleCast(context, default, Keire.Quaternion.Identity, 1.0f, 1.5f,
+                                                new Keire.Vector3(0.0f, 1.0f, 0.0f), out _),
+            "Capsule height must contain the complete diameter.");
+        AssertThrows<ArgumentException>(
+            () => Keire.Physics.TryCapsuleCast(context, default, Keire.Quaternion.Identity, 0.5f, 1.0f, default,
+                                                out _),
+            "Capsule displacement cannot be zero.");
+        AssertThrows<ArgumentException>(
+            () => Keire.Physics.OverlapSphere(context, default, 1.0f, ignoredEntity: new Keire.Entity(
+                                                  19, new Keire.EntityId(31, 37))),
+            "Ignored overlap entities must belong to the query world.");
+        Assert(calls == NativePhysicsFixture.CapsuleCalls + NativePhysicsFixture.OverlapCalls,
+               "Invalid managed shape queries must fail before native dispatch.");
+    }
+    finally
+    {
+        NativePhysicsFixture.Uninstall();
+    }
 }
 
 static unsafe void NativeUiButtonDispatchClockContract()

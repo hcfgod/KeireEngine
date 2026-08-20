@@ -12,6 +12,7 @@
 #include "Keire/ECS/Components/RuntimeUiComponents.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/PlatformDirectories.h"
+#include "KeireInternal/Scripting/ManagedRuntimePhysics.h"
 #include "KeireInternal/Scripting/ManagedRuntimeUiServices.h"
 #include "KeireInternal/WindowInternal.h"
 
@@ -640,6 +641,19 @@ EditorWorkspaceLayer::RaycastManaged(const Keire::ManagedRaycastQuery& query) no
     {
     }
     return std::nullopt;
+}
+
+std::optional<Keire::ManagedRaycastHit>
+EditorWorkspaceLayer::CapsuleCastManaged(const Keire::ManagedCapsuleCastQuery& query) noexcept
+{
+    const auto play = m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+    return Keire::Detail::QueryManagedCapsule(play, query);
+}
+
+std::vector<Keire::AssetId> EditorWorkspaceLayer::OverlapSphereManaged(const Keire::ManagedSphereOverlapQuery& query)
+{
+    const auto play = m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+    return Keire::Detail::QueryManagedSphereOverlap(play, query);
 }
 
 void EditorWorkspaceLayer::ApplyManagedCursorMode() noexcept

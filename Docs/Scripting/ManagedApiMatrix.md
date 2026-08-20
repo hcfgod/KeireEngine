@@ -20,7 +20,7 @@ Status meanings:
 | Inspector serialization | **Production** | Stable fields, ranges, tooltips, groups, nested data, asset references, reload-only state | Custom managed property drawers |
 | Assets and managed data | **Production** | Typed asset IDs/references, bounded async managed-data loading, `ScriptableObject` clone and hot reload | General native asset async handles for every asset class |
 | Input and cursor | **Partial** | Named actions, axis/button phases, cursor visibility and capture | Rebinding, devices, touch, gamepad metadata, rumble |
-| Physics | **Partial** | Nearest raycast, rigid bodies, character controller, collision/trigger callbacks | Shape casts, overlaps, joints, batched queries |
+| Physics | **Partial** | Nearest raycast and capsule cast, bounded sphere overlaps, rigid bodies, character controller, collision/trigger callbacks | Additional shapes, joints, batched queries |
 | Animation | **Production** | State playback, transitions, parameters, layers, IK, events, procedural locomotion | Animation-rig authoring remains editor/native |
 | Audio | **Production** | Clips, sources, listeners, reverb zones, mixers/buses, playback status and spatial options | DSP graph scripting and microphone input |
 | VFX | **Production** | Effect playback, lifetime, events, and typed parameter ranges | Managed graph construction is not a runtime goal |

@@ -149,6 +149,50 @@ public static class Physics
         TryRaycast(context, origin, direction, out RaycastHit hit, maximumDistance, mask)
             ? new[] { hit }
             : Array.Empty<RaycastHit>();
+
+    public static bool TryCapsuleCast(Entity context, Vector3 origin, Quaternion rotation, float radius, float height,
+                                      Vector3 displacement, out RaycastHit hit, uint mask = uint.MaxValue,
+                                      bool includeTriggers = false, Entity ignoredEntity = default)
+    {
+        if (!IsFinite(origin))
+            throw new ArgumentException("Capsule cast origins must be finite.", nameof(origin));
+        if (!IsFinite(rotation))
+            throw new ArgumentException("Capsule cast rotations must be finite.", nameof(rotation));
+        float rotationLengthSquared = (rotation.X * rotation.X) + (rotation.Y * rotation.Y) +
+                                      (rotation.Z * rotation.Z) + (rotation.W * rotation.W);
+        if (rotationLengthSquared <= 0.000001f)
+            throw new ArgumentException("Capsule cast rotations cannot be zero.", nameof(rotation));
+        if (!float.IsFinite(radius) || radius <= 0.0f)
+            throw new ArgumentOutOfRangeException(nameof(radius));
+        if (!float.IsFinite(height) || height < radius * 2.0f)
+            throw new ArgumentOutOfRangeException(nameof(height));
+        if (!IsFinite(displacement) || displacement.LengthSquared <= 0.000001f)
+            throw new ArgumentException("Capsule cast displacement must be finite and non-zero.", nameof(displacement));
+        ValidateIgnoredEntityWorld(context, ignoredEntity);
+        return NativeRuntime.TryCapsuleCast(context, origin, rotation.Normalized, radius, height, displacement, mask,
+                                            includeTriggers, ignoredEntity, out hit);
+    }
+
+    public static IReadOnlyList<Entity> OverlapSphere(Entity context, Vector3 center, float radius,
+                                                       uint mask = uint.MaxValue, bool includeTriggers = true,
+                                                       Entity ignoredEntity = default)
+    {
+        if (!IsFinite(center))
+            throw new ArgumentException("Sphere overlap centers must be finite.", nameof(center));
+        if (!float.IsFinite(radius) || radius <= 0.0f)
+            throw new ArgumentOutOfRangeException(nameof(radius));
+        ValidateIgnoredEntityWorld(context, ignoredEntity);
+        return NativeRuntime.OverlapSphere(context, center, radius, mask, includeTriggers, ignoredEntity);
+    }
+
+    private static void ValidateIgnoredEntityWorld(Entity context, Entity ignoredEntity)
+    {
+        if (ignoredEntity.Id.IsValid && ignoredEntity.World != context.World)
+            throw new ArgumentException("Ignored physics entities must belong to the query world.", nameof(ignoredEntity));
+    }
+
+    private static bool IsFinite(Quaternion value) =>
+        float.IsFinite(value.X) && float.IsFinite(value.Y) && float.IsFinite(value.Z) && float.IsFinite(value.W);
 }
 
 public static class Navigation

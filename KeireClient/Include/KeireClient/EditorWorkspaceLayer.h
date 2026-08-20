@@ -513,6 +513,10 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] Keire::ManagedInputState ReadManagedInputState(std::string_view action) noexcept override;
     [[nodiscard]] std::optional<Keire::ManagedRaycastHit>
     RaycastManaged(const Keire::ManagedRaycastQuery& query) noexcept override;
+    [[nodiscard]] std::optional<Keire::ManagedRaycastHit>
+    CapsuleCastManaged(const Keire::ManagedCapsuleCastQuery& query) noexcept override;
+    [[nodiscard]] std::vector<Keire::AssetId>
+    OverlapSphereManaged(const Keire::ManagedSphereOverlapQuery& query) override;
     void SetManagedCursorVisible(bool visible) noexcept override;
     void SetManagedCursorLocked(bool locked) noexcept override;
     [[nodiscard]] bool IsManagedCursorVisible() const noexcept override;

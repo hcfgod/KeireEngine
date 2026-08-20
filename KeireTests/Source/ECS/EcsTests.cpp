@@ -361,6 +361,18 @@ TEST_CASE("Play session eagerly owns physics and runs gameplay sync step pullbac
     REQUIRE_FALSE(hits.empty());
     CHECK(hits.front().Entity == falling.Id());
 
+    const auto capsuleHit = session->CastCapsule(
+        {.Origin = {0.0F, 5.0F, 0.0F}, .Radius = 0.2F, .Height = 0.4F, .Displacement = {0.0F, -10.0F, 0.0F}},
+        falling.Id());
+    REQUIRE(capsuleHit);
+    CHECK(capsuleHit->Entity == floor.Id());
+
+    const auto fallingPosition = runtimeFalling.GetComponent<Keire::TransformComponent>()->WorldPosition();
+    const auto sphereOverlaps = session->OverlapSphere({.Center = fallingPosition, .Radius = 0.75F});
+    CHECK(std::ranges::find(sphereOverlaps, falling.Id()) != sphereOverlaps.end());
+    const auto filteredOverlaps = session->OverlapSphere({.Center = fallingPosition, .Radius = 0.75F}, falling.Id());
+    CHECK(std::ranges::find(filteredOverlaps, falling.Id()) == filteredOverlaps.end());
+
     session->Stop();
     CHECK_FALSE(session->Physics());
     physics->Close();
