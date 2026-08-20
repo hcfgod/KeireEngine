@@ -47,19 +47,18 @@ dotnet_sdk_root() {
 
 load_project_config() {
     local root="$1" file="$1/Config/Project.conf"
-    local line key required
-    declare -A seen=()
+    local line key required seen_keys=$'\n'
     while IFS= read -r line || [[ -n "$line" ]]; do
         line="${line%$'\r'}"
         [[ "$line" != *$'\r'* ]] || { printf 'Configuration contains an embedded carriage return: %s\n' "$file" >&2; return 1; }
         [[ -z "$line" ]] && continue
         [[ "$line" =~ ^([A-Z0-9_]+)=(.*)$ ]] || { printf 'Malformed configuration line in %s: %s\n' "$file" "$line" >&2; return 1; }
         key="${BASH_REMATCH[1]}"
-        [[ -z "${seen[$key]+present}" ]] || { printf "Duplicate key '%s' in %s.\n" "$key" "$file" >&2; return 1; }
-        seen[$key]=1
+        [[ "$seen_keys" != *$'\n'"$key"$'\n'* ]] || { printf "Duplicate key '%s' in %s.\n" "$key" "$file" >&2; return 1; }
+        seen_keys+="$key"$'\n'
     done < "$file"
     for required in PROJECT_IDENTIFIER PROJECT_DISPLAY_NAME PROJECT_VERSION PROJECT_NAMESPACE PROJECT_MACRO_PREFIX CORE_TARGET CORE_DIRECTORY CLIENT_TARGET CLIENT_DIRECTORY HUB_TARGET HUB_DIRECTORY TESTS_TARGET TESTS_DIRECTORY ARTIFACT_PREFIX REPOSITORY_SLUG; do
-        [[ -n "${seen[$required]+present}" ]] || { printf "Project configuration is missing '%s'.\n" "$required" >&2; return 1; }
+        [[ "$seen_keys" == *$'\n'"$required"$'\n'* ]] || { printf "Project configuration is missing '%s'.\n" "$required" >&2; return 1; }
     done
     PROJECT_IDENTIFIER="$(config_value "$file" PROJECT_IDENTIFIER)"
     PROJECT_DISPLAY_NAME="$(config_value "$file" PROJECT_DISPLAY_NAME)"

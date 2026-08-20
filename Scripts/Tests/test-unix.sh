@@ -28,6 +28,8 @@ sha256_file() {
 
 load_project_config "$ROOT"
 if [[ $run_fast -eq 1 ]]; then
+assert_false grep -R -E -q 'declare[[:space:]]+-A|local[[:space:]]+-A' \
+  "$ROOT/Scripts/Unix" "$ROOT/Scripts/Linux" "$ROOT/Scripts/Mac"
 python3 "$ROOT/Scripts/Tests/check-repository-layout.py"
 python3 "$ROOT/Scripts/Packaging/sync-sandbox-template.py" --check
 bash "$ROOT/Scripts/Tests/test-clean-unix.sh"
