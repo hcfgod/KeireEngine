@@ -5,6 +5,16 @@ versions.
 
 ## Unreleased
 
+- Fixed newly added Collider and Character Controller components retaining generic dimensions on built-in meshes.
+  Primitive colliders now select the exact built-in primitive dimensions, mesh-backed shapes use the rendered mesh,
+  and capsule gizmos share the runtime's total-height convention. VFX cable-knot edits now end the current draw pass
+  after replacing the graph draft, preventing Debug iterator assertions on double-click.
+- Reduced asset creation and external-import latency by publishing the new or imported source set through one targeted
+  incremental import instead of a later watcher pass or a project-wide cook. Material Graph surface parameters now
+  publish directly to loaded scene materials while the validated compile runs in the background, and thumbnail
+  invalidation bypasses stale persistent pixels even when the source digest is unchanged.
+- Stabilized directional cascade centers in light-space texels, reserved a PCF guard band, and treated filter taps
+  outside a shadow map as lit, removing rotation-dependent shadow lines and rectangular edge artifacts.
 - Improved asset importing and inspection: folder drops now review importer options per supported file, importable
   assets expose persistent Apply/Revert settings and type-aware previews in the Inspector, and settings changes use a
   targeted reimport. Asset Browser folders now select on single-click, open on double-click, and support Ctrl/Shift

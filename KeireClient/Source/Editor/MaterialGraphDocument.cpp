@@ -145,16 +145,45 @@ namespace KeireEditor
                   {
                       if (!m_Specification.Preview || !m_Specification.ResolveShader)
                           return;
-                      const auto output =
-                          std::ranges::find(definition.SurfaceGraph.Nodes, Keire::ShaderGraphNodeKind::Master,
-                                            &Keire::ShaderGraphNode::Kind);
-                      if (output != definition.SurfaceGraph.Nodes.end() &&
-                          std::ranges::any_of(definition.SurfaceGraph.Connections,
-                                              [&](const Keire::ShaderGraphConnection& connection)
-                                              { return connection.Input.Node == output->Id; }))
+                      std::optional<Keire::MaterialAssetDefinition> material;
+                      try
+                      {
+                          if (HasSurfaceExpressions(definition))
+                          {
+                              const auto shaderTemplate = m_Specification.ResolveTemplate
+                                                              ? m_Specification.ResolveTemplate(definition.Shader)
+                                                              : std::optional<Keire::ShaderGraphDefinition>{};
+                              if (!shaderTemplate)
+                                  return;
+                              auto composed = Keire::ComposeMaterialGraphShader(definition, *shaderTemplate);
+                              if (!Keire::ShaderGraphReferencedAssets(composed).empty())
+                                  composed =
+                                      Keire::ExpandShaderGraphFunctions(composed, m_Specification.ResolveFunction);
+                              Keire::ShaderGraphInstanceDefinition defaults;
+                              defaults.Parent = asset;
+                              defaults.KeywordOverrides = definition.Shader.Keywords;
+                              const std::array ancestry{defaults};
+                              const auto resolved = Keire::ResolveShaderGraphInstance(composed, ancestry);
+                              Keire::MaterialAssetDefinition live;
+                              live.Shader = m_Specification.ResolveShader(definition.Shader);
+                              if (!live.Shader)
+                                  return;
+                              live.Surface = definition.Surface;
+                              live.ContributeEmissionToGI = definition.ContributeEmissionToGI;
+                              live.EmissiveGIIntensity = definition.EmissiveGIIntensity;
+                              live.Properties = resolved.Properties;
+                              material = std::move(live);
+                          }
+                          else
+                          {
+                              material = Keire::BakeMaterialGraph(definition, m_Specification.ResolveShader);
+                          }
+                      }
+                      catch (const std::exception&)
+                      {
                           return;
-                      m_Specification.Preview(asset,
-                                              Keire::BakeMaterialGraph(definition, m_Specification.ResolveShader));
+                      }
+                      m_Specification.Preview(asset, *material);
                   },
                   .CancelPreview = m_Specification.StopPreview,
                   .Persist = m_Specification.Persist})

@@ -42,3 +42,9 @@ becomes inert after object deletion or scene close and cannot extend the scene l
 
 All mutations are owner-thread-affine. The editor records snapshots for its bounded undo/redo stack, while the runtime
 observes immutable state at frame boundaries.
+
+When a Collider or Character Controller is added to an entity that renders a built-in prototype mesh, editor
+authoring initializes the new physics shape from that mesh. Cube, sphere, and capsule primitives use their exact local
+dimensions; cylinder and cone colliders use the built-in convex mesh, while plane, quad, and torus colliders use the
+static triangle mesh. The built-in capsule and its controller are both 0.25 m in radius and 1.0 m in total height.
+Existing components and imported meshes retain their authored settings.

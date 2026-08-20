@@ -942,14 +942,14 @@ namespace KeireEditor
         const auto result = m_GraphCanvas.Draw(ui, "VfxNodeCanvas", nodes, connections, options);
         const auto renderedCanvasSize = ui.LastItemRect().Size();
 
-        const auto setRouting = [&](const StableNodeId canvasConnection, std::vector<Keire::Vector2> routing)
+        const auto setRouting = [&](const StableNodeId canvasConnection, std::vector<Keire::Vector2> routing) -> bool
         {
             const auto* connection = findGraphConnection(canvasConnection);
             if (!connection)
-                return;
-            (void)ApplyAction("Routed VFX graph cable", [&document, graph = system->Id, connection = connection->Id,
-                                                         routing = std::move(routing)]() mutable
-                              { return document.SetConnectionRouting(graph, connection, std::move(routing)); });
+                return false;
+            return ApplyAction("Routed VFX graph cable", [&document, graph = system->Id, connection = connection->Id,
+                                                          routing = std::move(routing)]() mutable
+                               { return document.SetConnectionRouting(graph, connection, std::move(routing)); });
         };
         if (result.AddRerouteRequested)
         {
@@ -961,7 +961,8 @@ namespace KeireEditor
                 auto routing = connection->RoutingPoints;
                 routing.insert(routing.begin() + static_cast<std::ptrdiff_t>(result.AddRerouteRequested->Index),
                                result.AddRerouteRequested->GraphPosition);
-                setRouting(connection->Id, std::move(routing));
+                if (setRouting(connection->Id, std::move(routing)))
+                    return;
             }
         }
         if (result.MoveRerouteRequested)
@@ -973,7 +974,8 @@ namespace KeireEditor
             {
                 auto routing = connection->RoutingPoints;
                 routing[result.MoveRerouteRequested->Index] = result.MoveRerouteRequested->GraphPosition;
-                setRouting(connection->Id, std::move(routing));
+                if (setRouting(connection->Id, std::move(routing)))
+                    return;
             }
         }
         if (result.DeleteRerouteRequested)
@@ -985,7 +987,8 @@ namespace KeireEditor
             {
                 auto routing = connection->RoutingPoints;
                 routing.erase(routing.begin() + static_cast<std::ptrdiff_t>(result.DeleteRerouteRequested->Index));
-                setRouting(connection->Id, std::move(routing));
+                if (setRouting(connection->Id, std::move(routing)))
+                    return;
             }
         }
 

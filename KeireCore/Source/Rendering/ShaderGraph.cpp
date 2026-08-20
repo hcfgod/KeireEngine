@@ -998,7 +998,7 @@ namespace Keire
                                                 ? attribute("SheenRoughness")
                                                 : optionalInput("SheenRoughness", ShaderGraphValueType::Scalar, "0.5F");
                 const auto normal = unlit || (!hasMaterialAttributes && !inputConnected("Normal")) ? "input.Normal"
-                                    : hasMaterialAttributes                                        ? attribute("Normal")
+                                    : hasMaterialAttributes ? attribute("Normal")
                                                             : input("Normal", ShaderGraphValueType::Vector3);
                 const bool hasDetailNormal = !unlit && !hasMaterialAttributes && inputConnected("DetailNormal");
                 const auto detailNormal = hasDetailNormal ? input("DetailNormal", ShaderGraphValueType::Vector3)
@@ -1590,9 +1590,17 @@ float SampleShadowPcf(Texture2DArray<float> textureValue, SamplerState samplerVa
         [unroll]
         for (int x = -1; x <= 1; ++x)
         {
-            const float storedDepth =
-                textureValue.SampleLevel(samplerValue, float3(uv + float2(x, y) * inverseResolution, layer), 0.0F);
-            visibility += depth <= storedDepth ? 1.0F : 0.0F;
+            const float2 sampleUv = uv + float2(x, y) * inverseResolution;
+            if (any(sampleUv < 0.0F.xx) || any(sampleUv > 1.0F.xx))
+            {
+                visibility += 1.0F;
+            }
+            else
+            {
+                const float storedDepth =
+                    textureValue.SampleLevel(samplerValue, float3(sampleUv, layer), 0.0F);
+                visibility += depth <= storedDepth ? 1.0F : 0.0F;
+            }
         }
     }
     return visibility / 9.0F;

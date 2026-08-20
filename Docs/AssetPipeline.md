@@ -133,6 +133,10 @@ with the editor but is not a supported SDK or importer plug-in API. Each request
 operation kind, and targeted asset IDs. The captured `worker.log` also records the selected worker executable's view of
 the request, whether a prior runtime catalog was available, and the final imported closure size. A full import caused
 by automatic refresh therefore identifies its fallback reason instead of looking identical to an explicit rebuild.
+New assets are validated and immediately published through a targeted import in the same worker transaction, so they
+do not wait for a second source-watcher operation before appearing in the Asset Browser. External file and folder
+imports use the same targeted publication for the staged identities and their dependency closure; unrelated runtime
+packs remain mounted and are not recooked.
 
 Command-line imports and cooks allow the worker deadline to be adjusted with
 `--worker-timeout-seconds <seconds>`. The default remains 600 seconds; the value must be greater than zero. This keeps

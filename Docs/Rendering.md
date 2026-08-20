@@ -9,6 +9,9 @@ rendering settings. Local-light tile requests are allocated deterministically in
 resolution hint, stable entity identity, and point-light face. To keep local-light cost bounded, the renderer selects at
 most eight shadowed spot lights and two shadowed point lights; requests that do not fit remain fully lit. Point and spot
 components expose Disabled, Hard, and Soft authoring modes plus strength, bias, and resolution.
+Directional cascade centers snap in the light-space basis to whole shadow texels, and each projection reserves a
+two-texel filter guard band. PCF taps outside a map are treated as lit instead of clamping an edge depth, preventing
+camera or light rotation from exposing rectangular cascade borders.
 The engine-owned default material uses the same receiver contract, so primitives without an assigned material receive
 directional, point, and spot shadows instead of falling through an unshadowed compatibility path.
 Shadow layer, quality, strength, and receiver bias occupy a dedicated shadow uniform block; enabling shadows never

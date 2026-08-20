@@ -14,7 +14,9 @@
 namespace Keire::RenderBackend
 {
     using GeometryDetail::Add;
+    using GeometryDetail::Cross;
     using GeometryDetail::Length;
+    using GeometryDetail::NormalizeOr;
     using GeometryDetail::Scale;
     using GeometryDetail::Subtract;
     using GeometryDetail::TransformClip;
@@ -176,6 +178,9 @@ namespace Keire::RenderBackend
             }
             const auto direction = Normalize(
                 Vector3{packet.Lighting.Direction.X, packet.Lighting.Direction.Y, packet.Lighting.Direction.Z});
+            const auto up = std::abs(direction.Y) > 0.95F ? Vector3{0.0F, 0.0F, 1.0F} : Vector3{0.0F, 1.0F, 0.0F};
+            const auto lightRight = NormalizeOr(Cross(up, direction), {1.0F, 0.0F, 0.0F});
+            const auto lightUp = NormalizeOr(Cross(direction, lightRight), up);
             float previousSplit = nearPlane;
             for (std::uint32_t cascade = 0; cascade < cascadeCount; ++cascade)
             {
@@ -196,7 +201,9 @@ namespace Keire::RenderBackend
                 for (const auto corner : corners)
                     radius = std::max(radius, Length(Subtract(corner, center)));
                 radius = std::max(std::ceil(radius * 16.0F) / 16.0F, 0.25F);
-                const auto up = std::abs(direction.Y) > 0.95F ? Vector3{0.0F, 0.0F, 1.0F} : Vector3{0.0F, 1.0F, 0.0F};
+                if (resolution > 4U)
+                    radius *= static_cast<float>(resolution) / static_cast<float>(resolution - 4U);
+                center = StabilizeShadowCenter(center, lightRight, lightUp, radius * 2.0F, resolution);
                 const auto eye = Subtract(center, Scale(direction, radius * 2.0F));
                 const auto view = Math::LookAt(eye, center, up);
                 const auto projection = Math::Orthographic(radius * 2.0F, 1.0F, 0.01F, radius * 4.0F);

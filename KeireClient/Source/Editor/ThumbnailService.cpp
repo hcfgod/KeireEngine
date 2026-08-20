@@ -1148,15 +1148,17 @@ namespace KeireEditor
             return result;
         }
 
-        void WriteCache(const std::filesystem::path& path, const std::span<const std::byte> pixels) const
+        [[nodiscard]] bool WriteCache(const std::filesystem::path& path, const std::span<const std::byte> pixels) const
         {
             try
             {
                 Keire::Detail::WriteFileAtomically(path, pixels);
+                return true;
             }
             catch (const std::exception&)
             {
                 // Thumbnail persistence is an optional cache; generation still succeeds in memory.
+                return false;
             }
         }
 
@@ -1164,7 +1166,16 @@ namespace KeireEditor
         {
             if (context.StopRequested())
                 return;
-            auto pixels = job.Request.Missing ? std::vector<std::byte>{} : ReadCache(CachePath(job.Key));
+            bool cacheMatchesGeneration = job.AssetGeneration == 0;
+            if (!cacheMatchesGeneration)
+            {
+                std::scoped_lock lock(Mutex);
+                const auto cached = CachedAssetGenerations.find(job.Request.Asset);
+                cacheMatchesGeneration =
+                    cached != CachedAssetGenerations.end() && cached->second == job.AssetGeneration;
+            }
+            auto pixels = job.Request.Missing || !cacheMatchesGeneration ? std::vector<std::byte>{}
+                                                                         : ReadCache(CachePath(job.Key));
             if (pixels.empty() && !context.StopRequested())
             {
                 try
@@ -1182,10 +1193,11 @@ namespace KeireEditor
                     const auto currentAssetGeneration =
                         assetGeneration == AssetGenerations.end() ? std::uint64_t{0} : assetGeneration->second;
                     current = job.Generation == Generation && job.AssetGeneration == currentAssetGeneration;
+                    if (current && !job.Request.Missing &&
+                        pixels.size() == static_cast<std::size_t>(ThumbnailWidth) * ThumbnailHeight * 4 &&
+                        WriteCache(CachePath(job.Key), pixels))
+                        CachedAssetGenerations[job.Request.Asset] = job.AssetGeneration;
                 }
-                if (current && !job.Request.Missing &&
-                    pixels.size() == static_cast<std::size_t>(ThumbnailWidth) * ThumbnailHeight * 4)
-                    WriteCache(CachePath(job.Key), pixels);
             }
             std::scoped_lock lock(Mutex);
             const auto pending = Pending.find(job.Request.Asset);
@@ -1207,6 +1219,7 @@ namespace KeireEditor
         std::deque<ThumbnailResult> Completed;
         std::unordered_map<Keire::AssetId, std::uint64_t> Pending;
         std::unordered_map<Keire::AssetId, std::uint64_t> AssetGenerations;
+        std::unordered_map<Keire::AssetId, std::uint64_t> CachedAssetGenerations;
         std::uint64_t Generation = 1;
         Keire::Ref<Keire::JobSystem> Scheduler;
         Keire::Ref<Keire::JobScope> WorkScope;
@@ -1363,6 +1376,7 @@ namespace KeireEditor
         m_Impl->Completed.clear();
         m_Impl->Pending.clear();
         m_Impl->AssetGenerations.clear();
+        m_Impl->CachedAssetGenerations.clear();
     }
 
     std::size_t ThumbnailService::PendingCount() const noexcept

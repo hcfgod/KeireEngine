@@ -98,9 +98,17 @@ float SampleShadowPcf(Texture2DArray<float> textureValue, SamplerState samplerVa
     {
         for (int x = -radius; x <= radius; ++x)
         {
-            const float storedDepth = textureValue.SampleLevel(
-                samplerValue, float3(uv + float2(x, y) * inverseResolution, layer), 0.0F);
-            visibility += depth <= storedDepth ? 1.0F : 0.0F;
+            const float2 sampleUv = uv + float2(x, y) * inverseResolution;
+            if (any(sampleUv < 0.0F.xx) || any(sampleUv > 1.0F.xx))
+            {
+                visibility += 1.0F;
+            }
+            else
+            {
+                const float storedDepth =
+                    textureValue.SampleLevel(samplerValue, float3(sampleUv, layer), 0.0F);
+                visibility += depth <= storedDepth ? 1.0F : 0.0F;
+            }
         }
     }
     return visibility / (float)((radius * 2 + 1) * (radius * 2 + 1));

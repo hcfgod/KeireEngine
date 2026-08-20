@@ -527,6 +527,8 @@ TEST_CASE("External asset imports persist normalized options and preserve identi
     REQUIRE(unique.Entries.size() == 1);
     CHECK(unique.Entries.front().Id != id);
     CHECK(unique.Entries.front().RelativeDestination == std::filesystem::path("Imported/Incoming 2.opt"));
+    REQUIRE(unique.Import.Statuses.size() == 1);
+    CHECK(unique.Import.Statuses.front().Id == unique.Entries.front().Id);
 
     {
         std::ofstream stream(incoming, std::ios::binary | std::ios::trunc);
@@ -583,6 +585,40 @@ TEST_CASE("External asset imports persist normalized options and preserve identi
     CHECK(folderImport.Entries.front().RelativeDestination == std::filesystem::path("Folder/Supported.opt"));
     CHECK(std::filesystem::is_regular_file(project.Root / "Assets/Folder/Supported.opt"));
     CHECK_FALSE(std::filesystem::exists(project.Root / "Assets/Folder/Unsupported.unknown"));
+}
+
+TEST_CASE("created assets consume their validated import during immediate targeted publication")
+{
+    TemporaryAssetProject project;
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.ImmediateCreate";
+    importer.Type = Keire::TextAsset::StaticType();
+    importer.Extensions = {".immediate"};
+    std::size_t importCalls = 0;
+    importer.Import = [&importCalls](const std::span<const std::byte> bytes)
+    {
+        ++importCalls;
+        return std::vector<std::byte>(bytes.begin(), bytes.end());
+    };
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
+    const std::string baseline = "baseline";
+    (void)database->CreateAsset("Baseline.immediate", importer,
+                                std::as_bytes(std::span(baseline.data(), baseline.size())));
+    (void)database->ImportAll();
+    CHECK(importCalls == 1);
+
+    const std::string source = "created source";
+    const auto created =
+        database->CreateAsset("Created.immediate", importer, std::as_bytes(std::span(source.data(), source.size())));
+    CHECK(importCalls == 2);
+    const std::array targets{created};
+    const auto imported = Keire::Detail::AssetDatabaseWorkerAccess::ImportAssetsFromSourceIndex(
+        *database, targets, Keire::AssetImportPolicy::FailFast);
+    CHECK(importCalls == 2);
+    REQUIRE(imported.Statuses.size() == 1);
+    CHECK(imported.Statuses.front().Id == created);
+    CHECK(std::filesystem::is_regular_file(imported.CatalogPath));
 }
 
 TEST_CASE("Development catalog publication preserves packs that are still in use")

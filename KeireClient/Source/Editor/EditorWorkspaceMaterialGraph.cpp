@@ -221,15 +221,29 @@ void EditorWorkspaceLayer::ApplyMaterialGraphDevelopmentRevision(
         const auto record = m_AssetDatabase ? m_AssetDatabase->Find(asset) : std::nullopt;
         if (!assets || !record)
             return;
-        const auto runtime = std::ranges::find_if(record->SubAssets,
-                                                  [&](const Keire::AssetId candidate)
-                                                  {
-                                                      const auto type = assets->TryGetType(candidate);
-                                                      return type && *type == Keire::MaterialAsset::StaticType();
-                                                  });
+        Keire::AssetId generatedShader;
+        const auto runtime =
+            std::ranges::find_if(record->SubAssets,
+                                 [&](const Keire::AssetId candidate)
+                                 {
+                                     const auto type = assets->TryGetType(candidate);
+                                     if (type && *type == Keire::ShaderAsset::StaticType() && !generatedShader)
+                                         generatedShader = candidate;
+                                     return type && *type == Keire::MaterialAsset::StaticType();
+                                 });
         if (runtime != record->SubAssets.end())
         {
-            (void)assets->PublishDevelopmentAsset(*runtime, Keire::CreateRef<Keire::MaterialAsset>(material));
+            const auto current =
+                assets->Load<Keire::MaterialAsset>(*runtime, Keire::AssetPriority::High).TryGetLoaded();
+            const auto developmentShader = current && current->Definition().Shader ? current->Definition().Shader
+                                           : generatedShader                       ? generatedShader
+                                                                                   : material.Shader;
+            if (!developmentShader)
+                return;
+            auto revision = material;
+            revision.Shader = developmentShader;
+            if (!assets->PublishDevelopmentAsset(*runtime, Keire::CreateRef<Keire::MaterialAsset>(std::move(revision))))
+                return;
             if (m_AssetBrowserPanel)
                 m_AssetBrowserPanel->InvalidateThumbnail(asset);
         }

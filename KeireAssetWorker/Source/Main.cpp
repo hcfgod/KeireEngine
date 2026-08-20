@@ -283,6 +283,9 @@ namespace
                         result.CreatedAsset = database->CreateAsset(
                             request.CreateRelativePath, *importer,
                             std::as_bytes(std::span(source.data(), source.size())), request.CreateSettings);
+                        const std::array targets{result.CreatedAsset};
+                        result.Import = Keire::Detail::AssetDatabaseWorkerAccess::ImportAssetsFromSourceIndex(
+                            *database, targets, Keire::AssetImportPolicy::FailFast, {}, progress);
                     }
                     else
                     {

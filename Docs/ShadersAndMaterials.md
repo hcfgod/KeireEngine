@@ -120,9 +120,12 @@ bounded variants. Node properties, pin defaults, positions, connections, duplica
 undo/redo, and fallback recovery are serialized deterministically. The optional **Template Defaults** view exposes old
 reflected uniform bindings without crowding the primary surface canvas. Composition is validated against the selected
 Shader Graph while editing. Edits autosave after 500 ms of inactivity; the normal source-change monitor then performs
-one targeted compile and hot reload, so the Save button is only an immediate flush for a still-dirty document. Asset
-Browser thumbnails are invalidated with the live revision and regenerated after the replacement runtime material is
-ready. A failed import leaves the previously published material usable.
+one targeted compile and hot reload, so the Save button is only an immediate flush for a still-dirty document.
+Parameter and texture defaults are also baked into an immutable development material immediately and published to the
+loaded runtime-material identity used by scene renderers; topology changes still complete through the validated
+background shader compile. Asset Browser thumbnails are invalidated with the live revision, bypass an unchanged-digest
+disk-cache entry, and regenerate after the replacement runtime material is ready. A failed import leaves the previously
+published material usable.
 
 Shader Graph parameters publish stable property IDs. Compatibility bindings resolve those IDs before display names,
 so a template rename retains its value. Unknown properties, type changes, output-contract mismatches, duplicate

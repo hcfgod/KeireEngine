@@ -29,6 +29,11 @@ TEST_CASE("directional cascade centers snap to stable shadow texels")
     constexpr float texel = 64.0F / 2048.0F;
     CHECK(snapped.X / texel == doctest::Approx(std::round(1.234F / texel)));
     CHECK(snapped.Y / texel == doctest::Approx(std::round(-5.678F / texel)));
+    const auto world = Keire::RenderBackend::StabilizeShadowCenter({1.234F, -5.678F, 9.0F}, {1.0F, 0.0F, 0.0F},
+                                                                   {0.0F, 1.0F, 0.0F}, 64.0F, 2048);
+    CHECK(world.X == doctest::Approx(snapped.X));
+    CHECK(world.Y == doctest::Approx(snapped.Y));
+    CHECK(world.Z == doctest::Approx(9.0F));
     CHECK_THROWS_AS((void)Keire::RenderBackend::StabilizeShadowCenter({}, 0.0F, 2048), std::invalid_argument);
 }
 
