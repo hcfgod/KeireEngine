@@ -8,6 +8,7 @@
 #include "KeireInternal/Scripting/ManagedRuntimeApplicationServices.h"
 #include "KeireInternal/Scripting/ManagedRuntimeUiServices.h"
 #include "KeireInternal/WindowInternal.h"
+#include "KeireRuntimeInternal/ManagedWorldRuntime.h"
 #include "KeireRuntimeInternal/RuntimeUiInput.h"
 
 #include <nlohmann/json.hpp>
@@ -21,6 +22,7 @@
 #include <fstream>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -497,17 +499,16 @@ namespace
         state.ReportWritten = true;
     }
 
-    class RuntimeLayer final : public Keire::Layer, public Keire::Detail::ManagedRuntimeApplicationServices
+    class RuntimeLayer final : public Keire::Layer, public KeireRuntime::ManagedWorldRuntimeServices
     {
       public:
         RuntimeLayer(const Keire::AssetId startupScene, const Keire::AssetId defaultInput,
                      const Keire::AssetId defaultMixer, const Keire::RenderEnvironmentSettings rendering,
                      RuntimeCommandLine commandLine, Keire::ReplayFingerprints fingerprints,
                      std::shared_ptr<RuntimeReplayState> replayState)
-            : Layer("Runtime"), ManagedRuntimeApplicationServices(false), m_StartupScene(startupScene),
-              m_DefaultInput(defaultInput), m_DefaultMixer(defaultMixer), m_Rendering(rendering),
-              m_CommandLine(std::move(commandLine)), m_ReplayFingerprints(std::move(fingerprints)),
-              m_ReplayState(std::move(replayState))
+            : Layer("Runtime"), ManagedWorldRuntimeServices(false, rendering), m_StartupScene(startupScene),
+              m_DefaultInput(defaultInput), m_DefaultMixer(defaultMixer), m_CommandLine(std::move(commandLine)),
+              m_ReplayFingerprints(std::move(fingerprints)), m_ReplayState(std::move(replayState))
         {
         }
 
@@ -515,6 +516,8 @@ namespace
         void OnAttach() override
         {
             BindManagedApplication(Owner());
+            BindManagedWorld(Owner(), m_Runtime, m_Scene, m_Presentation, m_ReplayState->Session,
+                             m_ReplayState->Started, m_DefaultMixer);
             m_Load = Owner().Scenes()->Load(m_StartupScene);
             Keire::RenderSurfaceSpecification surface;
             surface.Name = "Runtime";
@@ -565,6 +568,7 @@ namespace
             }
             if (const auto scripts = Owner().Scripts())
                 scripts->SetRuntimeServices(nullptr);
+            UnbindManagedWorld();
             UnbindManagedApplication();
             if (const auto renderer = Owner().Renderer())
                 Keire::RenderSystemInternalAccess::SetPresentationSurface(*renderer, {});
@@ -590,6 +594,10 @@ namespace
 
         void OnUpdate(const Keire::Time& time) override
         {
+            [[maybe_unused]] const bool transitioned = ProcessManagedSceneTransition(
+                m_CommandLine.ReplayAction != RuntimeReplayAction::None &&
+                    m_CommandLine.ReplayProfile == Keire::ReplayProfile::StrictVerified,
+                [](const Keire::Ref<Keire::Scene>& scene) { return SelectCamera(scene).has_value(); });
             if (!m_Runtime)
             {
                 if (m_Load->State() == Keire::SceneLoadState::Failed)
@@ -662,7 +670,7 @@ namespace
             camera.NearPlane = selected->Camera->NearPlane();
             camera.FarPlane = selected->Camera->FarPlane();
             m_View->SetCamera(camera);
-            auto environment = m_Rendering;
+            auto environment = RenderEnvironment();
             environment.SkyVisible =
                 environment.SkyVisible && selected->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
             Keire::SceneRenderRequest renderRequest{m_Scene, m_View, false, environment};
@@ -1112,7 +1120,6 @@ namespace
         Keire::AssetId m_StartupScene;
         Keire::AssetId m_DefaultInput;
         Keire::AssetId m_DefaultMixer;
-        Keire::RenderEnvironmentSettings m_Rendering;
         RuntimeCommandLine m_CommandLine;
         Keire::ReplayFingerprints m_ReplayFingerprints;
         std::shared_ptr<RuntimeReplayState> m_ReplayState;

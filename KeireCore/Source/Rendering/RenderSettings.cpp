@@ -90,6 +90,8 @@ namespace Keire
         return result;
     }
 
+    void ValidateRenderEnvironmentSettings(const RenderEnvironmentSettings& settings) { Validate(settings); }
+
     void SaveRenderEnvironmentSettings(const std::filesystem::path& projectRoot,
                                        const RenderEnvironmentSettings& settings)
     {

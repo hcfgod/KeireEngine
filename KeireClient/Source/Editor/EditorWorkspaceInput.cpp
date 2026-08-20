@@ -2,6 +2,7 @@
 
 #include "KeireClient/Editor/EditorPanels.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
+#include "KeireClient/Editor/ProjectSettingsDocument.h"
 #include "KeireClient/Editor/SceneDocument.h"
 
 #include "Keire/BuildInfo.h"
@@ -86,6 +87,40 @@ float EditorWorkspaceLayer::ManagedUnscaledDeltaTime() const noexcept
 double EditorWorkspaceLayer::ManagedElapsedTime() const noexcept
 {
     return Owner().GetTime().TimeSinceStartup().Seconds();
+}
+
+Keire::AssetId EditorWorkspaceLayer::ActiveManagedScene() const noexcept
+{
+    return m_SceneDocument && m_SceneDocument->ActiveScene() ? m_SceneDocument->Asset() : Keire::AssetId{};
+}
+
+std::vector<Keire::AssetId> EditorWorkspaceLayer::LoadedManagedScenes() const
+{
+    const auto active = ActiveManagedScene();
+    return active ? std::vector{active} : std::vector<Keire::AssetId>{};
+}
+
+std::optional<Keire::RenderEnvironmentSettings> EditorWorkspaceLayer::ManagedRenderEnvironment() const noexcept
+{
+    if (m_ManagedRenderEnvironmentOverride)
+        return m_ManagedRenderEnvironmentOverride;
+    return m_ProjectSettingsDocument ? std::optional(m_ProjectSettingsDocument->Settings()) : std::nullopt;
+}
+
+bool EditorWorkspaceLayer::SetManagedRenderEnvironment(Keire::RenderEnvironmentSettings settings) noexcept
+{
+    try
+    {
+        if (!m_SceneDocument || !m_SceneDocument->PlaySession())
+            return false;
+        Keire::ValidateRenderEnvironmentSettings(settings);
+        m_ManagedRenderEnvironmentOverride = std::move(settings);
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
 }
 
 Keire::ManagedApplicationInfo EditorWorkspaceLayer::ManagedApplication() const

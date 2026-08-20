@@ -15,7 +15,7 @@ release work honestly. Roadmap material is labeled as roadmap material and does 
 | Build or evaluate Kéire | [Getting Started](GettingStarted.md) | [Project Hub](ProjectHub.md), [Testing and Release](TestingAndRelease.md) |
 | Understand engine ownership | [Architecture](Architecture.md) | [Runtime Lifecycle](RuntimeLifecycle.md), [ECS and Components](ECSAndComponents.md) |
 | Author a project | [Project System](ProjectSystem.md) | [Scene Authoring](SceneAuthoring.md), [Asset Browser](AssetBrowser.md), [Project Settings](ProjectSettings.md) |
-| Write C# gameplay | [C# Scripting](Scripting/README.md) | [Scripting Getting Started](Scripting/GettingStarted.md), [Managed API Index](Scripting/ApiIndex.md) |
+| Write C# gameplay | [C# Scripting](Scripting/README.md) | [Scripting Getting Started](Scripting/GettingStarted.md), [Scenes and Render Settings](Scripting/ScenesAndRenderSettings.md), [Managed API Index](Scripting/ApiIndex.md) |
 | Build rendering content | [Asset Pipeline](AssetPipeline.md) | [Rendering](Rendering.md), [Shaders and Materials](ShadersAndMaterials.md), [VFX](Vfx.md) |
 | Package a game or SDK | [Desktop Player Builds](PlayerBuilds.md) | [Package Archives](PackageArchives.md), [Testing and Release](TestingAndRelease.md) |
 | Investigate a diagnostic | [Structured Diagnostics](Diagnostics/README.md) | The matching `KEIRE-*` remediation page |
@@ -23,7 +23,7 @@ release work honestly. Roadmap material is labeled as roadmap material and does 
 
 ## Complete Guide Library
 
-All 61 published guides are listed below in the same groups used by the documentation website.
+All 62 published guides are listed below in the same groups used by the documentation website.
 
 ### Start Here
 
@@ -93,6 +93,7 @@ All 61 published guides are listed below in the same groups used by the document
 | [Animation](Scripting/Animation.md) | Graph playback, procedural locomotion intent/state/events, root motion, and IK. |
 | [UI and Events](Scripting/UiAndEvents.md) | Scene UI, buttons, text, typed events, subscriptions, and cursor ownership. |
 | [Rendering and Materials](Scripting/RenderingAndMaterials.md) | Cameras, Mesh Renderers, lights, material slots, and bounded per-renderer shader overrides. |
+| [Scenes and Render Settings](Scripting/ScenesAndRenderSettings.md) | Runtime-world inspection, transactional player scene replacement, progress, cancellation, and transient render environments. |
 | [Async, Reload, and Diagnostics](Scripting/AsyncReloadAndDiagnostics.md) | Synchronization context, managed jobs, cancellation, hot reload, failure isolation, and troubleshooting. |
 | [Managed API Index](Scripting/ApiIndex.md) | Compact lookup for public types, callbacks, components, attributes, and services. |
 | [Managed API Capability Matrix](Scripting/ManagedApiMatrix.md) | Production support and named parity gaps across the C# gameplay surface. |

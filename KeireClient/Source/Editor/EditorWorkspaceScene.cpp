@@ -653,6 +653,7 @@ void EditorWorkspaceLayer::BeginPlayMode()
         return;
     }
     m_ManagedInputCaptureOverride.reset();
+    m_ManagedRenderEnvironmentOverride.reset();
     m_GameplayInputContext.Reset();
     if (const auto input = Owner().Input(); input && m_EditorInputUser)
     {
@@ -795,6 +796,7 @@ void EditorWorkspaceLayer::FinishPlayMode(const bool apply)
         m_GameplayInputContext.Reset();
         m_ManagedCursorLocked = false;
         m_ManagedCursorVisible = true;
+        m_ManagedRenderEnvironmentOverride.reset();
         m_GameViewportCaptureSuspended = false;
         ApplyManagedCursorMode();
         if (applied)
@@ -1004,7 +1006,8 @@ Keire::Ref<Keire::RenderSystem> EditorWorkspaceLayer::SceneViewportRenderer() co
 
 const Keire::RenderEnvironmentSettings& EditorWorkspaceLayer::SceneViewportSettings() const noexcept
 {
-    return m_ProjectSettingsDocument->Settings();
+    return m_ManagedRenderEnvironmentOverride ? *m_ManagedRenderEnvironmentOverride
+                                              : m_ProjectSettingsDocument->Settings();
 }
 
 Keire::Ref<Keire::WindowSystem> EditorWorkspaceLayer::SceneViewportWindows() const noexcept

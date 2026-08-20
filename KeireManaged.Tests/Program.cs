@@ -23,6 +23,7 @@ var tests = new (string Name, Action Run)[]
     ("Native UI button dispatch advances with the player clock", NativeUiButtonDispatchClockContract),
     ("Native runtime UI controls preserve values text focus and events", NativeRuntimeUiControlContract),
     ("Managed rendering handles preserve camera lights materials and shader overrides", ManagedRenderingContract),
+    ("Managed scene loads and render settings preserve native world transactions", ManagedWorldContract),
     ("Managed jobs execute delegates and publish terminal states", ManagedJobExecutionContract),
     ("Managed jobs preserve terminal dependency semantics", ManagedJobDependencyContract),
     ("Application, time, and screen use the native foundation contract", RuntimeFoundationContract),
@@ -274,6 +275,55 @@ static unsafe void ManagedRenderingContract()
     finally
     {
         NativeRenderingFixture.Uninstall();
+    }
+}
+
+static unsafe void ManagedWorldContract()
+{
+    NativeWorldFixture.Install();
+    try
+    {
+        Assert(System.Runtime.InteropServices.Marshal.SizeOf<Keire.NativeSceneLoadStatus>() == 24 &&
+                   System.Runtime.InteropServices.Marshal.SizeOf<Keire.NativeAssetId>() == 16 &&
+                   System.Runtime.InteropServices.Marshal.SizeOf<Keire.NativeRenderEnvironment>() == 72,
+               "Managed world structs must preserve their native ABI layouts.");
+        Assert(Keire.SceneManager.ActiveScene.Asset == NativeWorldFixture.CurrentScene &&
+                   Keire.SceneManager.LoadedScenes is [{ Asset: var loaded }] &&
+                   loaded == NativeWorldFixture.CurrentScene,
+               "Scene Manager must expose the native active and loaded scene state.");
+
+        Keire.SceneLoadOperation load = Keire.SceneManager.LoadSceneAsync(
+            new Keire.AssetReference<Keire.SceneAsset>(NativeWorldFixture.ReplacementScene));
+        Assert(load.State == Keire.SceneLoadState.Loading && MathF.Abs(load.Progress - 0.5f) < 0.0001f &&
+                   load.KeepWaiting,
+               "Scene load operations must expose progress and remain coroutine-compatible while loading.");
+        NativeWorldFixture.CompleteLoad();
+        Assert(load.Succeeded && load.IsDone && !load.KeepWaiting &&
+                   load.Scene.Asset == NativeWorldFixture.ReplacementScene,
+               "A committed native scene transition must publish a successful terminal operation.");
+
+        Keire.RenderEnvironmentSettings environment = Keire.RenderSettings.Current;
+        Assert(MathF.Abs(environment.Exposure - 1.25f) < 0.0001f && environment.SkyVisible,
+               "Render settings must read the current native environment transaction.");
+        Keire.RenderSettings.Current = environment with
+        {
+            Exposure = 1.8f,
+            AmbientIntensity = 0.45f,
+            DirectionalShadowResolution = 4096
+        };
+        Assert(NativeWorldFixture.RenderSetCount == 1 &&
+                   MathF.Abs(NativeWorldFixture.Environment.Exposure - 1.8f) < 0.0001f &&
+                   NativeWorldFixture.Environment.DirectionalShadowResolution == 4096,
+               "Render settings must commit complete validated environment values atomically.");
+        AssertThrows<ArgumentOutOfRangeException>(
+            () => Keire.RenderSettings.Current = environment with { Exposure = float.NaN },
+            "Render settings must reject non-finite values before native dispatch.");
+        Assert(NativeWorldFixture.RenderSetCount == 1,
+               "Rejected render settings must leave native state unchanged.");
+    }
+    finally
+    {
+        NativeWorldFixture.Uninstall();
     }
 }
 
@@ -778,6 +828,142 @@ static void Advance(ProductionWeaponRuntime runtime, float seconds, uint firstTi
     int steps = (int)MathF.Ceiling(seconds / step);
     for (int index = 0; index < steps; ++index)
         runtime.Tick(step, default, unchecked(firstTick + (uint)index));
+}
+
+file static unsafe class NativeWorldFixture
+{
+    internal static readonly Keire.AssetId CurrentScene = new(301, 401);
+    internal static readonly Keire.AssetId ReplacementScene = new(302, 402);
+    private static byte s_loadState;
+
+    internal static Keire.NativeRenderEnvironment Environment { get; private set; }
+    internal static int RenderSetCount { get; private set; }
+
+    internal static void Install()
+    {
+        s_loadState = (byte)Keire.SceneLoadState.Loading;
+        Environment = new Keire.NativeRenderEnvironment
+        {
+            AmbientColor = new Keire.Color(0.2f, 0.25f, 0.3f, 1.0f),
+            AmbientIntensity = 0.75f,
+            Exposure = 1.25f,
+            EnvironmentHigh = 501,
+            EnvironmentLow = 601,
+            EnvironmentDiffuseIntensity = 1.0f,
+            EnvironmentSpecularIntensity = 1.0f,
+            SkyVisibleValue = 1,
+            DirectionalShadowDistance = 150.0f,
+            DirectionalShadowCascadeCount = 4,
+            DirectionalShadowResolution = 2048,
+            DirectionalShadowSplitLambda = 0.65f
+        };
+        RenderSetCount = 0;
+        Keire.NativeWorld.BeginSceneLoadIcall = &BeginSceneLoad;
+        Keire.NativeWorld.GetSceneLoadStatusIcall = &GetSceneLoadStatus;
+        Keire.NativeWorld.GetSceneLoadDiagnosticIcall = &GetSceneLoadDiagnostic;
+        Keire.NativeWorld.CancelSceneLoadIcall = &CancelSceneLoad;
+        Keire.NativeWorld.GetActiveSceneIcall = &GetActiveScene;
+        Keire.NativeWorld.GetLoadedScenesIcall = &GetLoadedScenes;
+        Keire.NativeWorld.GetRenderEnvironmentIcall = &GetRenderEnvironment;
+        Keire.NativeWorld.SetRenderEnvironmentIcall = &SetRenderEnvironment;
+    }
+
+    internal static void CompleteLoad() => s_loadState = (byte)Keire.SceneLoadState.Ready;
+
+    internal static void Uninstall()
+    {
+        Keire.NativeWorld.BeginSceneLoadIcall = null;
+        Keire.NativeWorld.GetSceneLoadStatusIcall = null;
+        Keire.NativeWorld.GetSceneLoadDiagnosticIcall = null;
+        Keire.NativeWorld.CancelSceneLoadIcall = null;
+        Keire.NativeWorld.GetActiveSceneIcall = null;
+        Keire.NativeWorld.GetLoadedScenesIcall = null;
+        Keire.NativeWorld.GetRenderEnvironmentIcall = null;
+        Keire.NativeWorld.SetRenderEnvironmentIcall = null;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static ulong BeginSceneLoad(ulong high, ulong low, byte mode) =>
+        high == ReplacementScene.High && low == ReplacementScene.Low && mode == (byte)Keire.SceneLoadMode.Single
+            ? 77UL
+            : 0UL;
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte GetSceneLoadStatus(ulong operation, Keire.NativeSceneLoadStatus* status)
+    {
+        if (operation != 77 || status == null)
+            return 0;
+        *status = new Keire.NativeSceneLoadStatus
+        {
+            SceneHigh = ReplacementScene.High,
+            SceneLow = ReplacementScene.Low,
+            Progress = s_loadState == (byte)Keire.SceneLoadState.Ready ? 1.0f : 0.5f,
+            Mode = (byte)Keire.SceneLoadMode.Single,
+            State = s_loadState
+        };
+        return 1;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static int GetSceneLoadDiagnostic(ulong operation, byte* destination, int capacity)
+    {
+        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(operation == 77 ? "activation failed" : string.Empty);
+        if (destination == null || capacity == 0)
+            return bytes.Length;
+        if (capacity < bytes.Length)
+            return -1;
+        for (int index = 0; index < bytes.Length; ++index)
+            destination[index] = bytes[index];
+        return bytes.Length;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte CancelSceneLoad(ulong operation)
+    {
+        if (operation != 77 || s_loadState == (byte)Keire.SceneLoadState.Ready)
+            return 0;
+        s_loadState = (byte)Keire.SceneLoadState.Cancelled;
+        return 1;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte GetActiveScene(Keire.NativeAssetId* destination)
+    {
+        if (destination == null)
+            return 0;
+        *destination = new Keire.NativeAssetId { High = CurrentScene.High, Low = CurrentScene.Low };
+        return 1;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static int GetLoadedScenes(Keire.NativeAssetId* destination, int capacity)
+    {
+        if (destination == null || capacity == 0)
+            return 1;
+        if (capacity < 1)
+            return -1;
+        destination[0] = new Keire.NativeAssetId { High = CurrentScene.High, Low = CurrentScene.Low };
+        return 1;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte GetRenderEnvironment(Keire.NativeRenderEnvironment* destination)
+    {
+        if (destination == null)
+            return 0;
+        *destination = Environment;
+        return 1;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetRenderEnvironment(Keire.NativeRenderEnvironment* value)
+    {
+        if (value == null)
+            return 0;
+        Environment = *value;
+        ++RenderSetCount;
+        return 1;
+    }
 }
 
 file static unsafe class NativeFoundationFixture
