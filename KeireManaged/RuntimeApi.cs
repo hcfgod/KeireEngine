@@ -104,7 +104,7 @@ public static class RuntimeBridge
     public static void Install(IRuntimeBridge bridge) => Interlocked.Exchange(ref s_current, bridge ?? throw new ArgumentNullException(nameof(bridge)));
 }
 
-public static class Time
+public static partial class Time
 {
     public static float DeltaTime => NativeRuntime.DeltaTime;
     public static float FixedDeltaTime => NativeRuntime.FixedDeltaTime;

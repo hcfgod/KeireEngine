@@ -55,6 +55,7 @@ export const docGroups = [
         "Scripting/UiAndEvents.md",
         "Scripting/AsyncReloadAndDiagnostics.md",
         "Scripting/ApiIndex.md",
+        "Scripting/ManagedApiMatrix.md",
         "ManagedScripting.md",
     ]),
     group("Production and release", "approve-check", [
@@ -151,6 +152,7 @@ export const docAuthorities = {
     "Scripting/UiAndEvents.md": ["KeireManaged/RuntimeUi.cs", "KeireManaged/Events.cs"],
     "Scripting/AsyncReloadAndDiagnostics.md": ["KeireManaged/Jobs.cs", "KeireManaged/BehaviourSynchronizationContext.cs"],
     "Scripting/ApiIndex.md": ["KeireManaged", "KeireManaged.Tests"],
+    "Scripting/ManagedApiMatrix.md": ["KeireManaged", "KeireCore/Include/Keire/Scripting/ScriptSystem.h"],
     "ManagedScripting.md": ["KeireCore/Include/Keire/Scripting/ScriptSystem.h", "KeireCore/Source/Scripting"],
     "Profiling.md": ["KeireCore/Include/Keire/Diagnostics/Profiler.h", "KeireManaged/Profiler.cs"],
     "PerformanceGates.md": ["Config/PerformanceGates.json", "Scripts/Performance/validate_capture.py"],

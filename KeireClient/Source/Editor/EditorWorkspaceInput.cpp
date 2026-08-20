@@ -4,11 +4,13 @@
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/SceneDocument.h"
 
+#include "Keire/BuildInfo.h"
 #include "Keire/ECS/Components/AudioComponents.h"
 #include "Keire/ECS/Components/ColliderComponent.h"
 #include "Keire/ECS/Components/RigidBodyComponent.h"
 #include "Keire/ECS/Components/RuntimeUiComponents.h"
 #include "Keire/ECS/Components/TransformComponent.h"
+#include "Keire/PlatformDirectories.h"
 
 #include <algorithm>
 #include <cmath>
@@ -82,6 +84,127 @@ float EditorWorkspaceLayer::ManagedUnscaledDeltaTime() const noexcept
 double EditorWorkspaceLayer::ManagedElapsedTime() const noexcept
 {
     return Owner().GetTime().TimeSinceStartup().Seconds();
+}
+
+Keire::ManagedApplicationInfo EditorWorkspaceLayer::ManagedApplication() const
+{
+    const auto& specification = Owner().Specification();
+    const auto& windowing = specification.Windowing;
+    const auto identifier =
+        windowing.ApplicationIdentifier.empty() ? std::string("keire.project") : windowing.ApplicationIdentifier;
+    return {.ProductName =
+                windowing.ApplicationName.empty() ? specification.MainWindow.Title : windowing.ApplicationName,
+            .Version = windowing.ApplicationVersion.empty() ? std::string(Keire::GetBuildInfo().Version)
+                                                            : windowing.ApplicationVersion,
+            .Identifier = identifier,
+            .PersistentDataPath = Keire::GetPreferenceDirectory() / "Applications" / identifier,
+            .IsEditor = true};
+}
+
+void EditorWorkspaceLayer::RequestManagedExit(const int) noexcept
+{
+    try
+    {
+        RequestStopPlayMode();
+    }
+    catch (...)
+    {
+    }
+}
+
+double EditorWorkspaceLayer::ManagedTimeScale() const noexcept { return Owner().GetTime().TimeScale(); }
+
+bool EditorWorkspaceLayer::SetManagedTimeScale(const double scale) noexcept
+{
+    try
+    {
+        Owner().GetTime().SetTimeScale(scale);
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+bool EditorWorkspaceLayer::ManagedTimePaused() const noexcept { return Owner().GetTime().Paused(); }
+
+bool EditorWorkspaceLayer::SetManagedTimePaused(const bool paused) noexcept
+{
+    Owner().GetTime().SetPaused(paused);
+    return true;
+}
+
+Keire::ManagedScreenState EditorWorkspaceLayer::ManagedScreen() const noexcept
+{
+    try
+    {
+        const auto window = Owner().MainWindow();
+        if (!window)
+            return {};
+        const auto logical = window->LogicalSize();
+        const auto pixels = window->PixelSize();
+        return {.LogicalWidth = logical.Width,
+                .LogicalHeight = logical.Height,
+                .PixelWidth = pixels.Width,
+                .PixelHeight = pixels.Height,
+                .DisplayScale = window->DisplayScale(),
+                .Mode = window->Mode() == Keire::WindowMode::BorderlessFullscreen
+                            ? Keire::ManagedScreenMode::BorderlessFullscreen
+                            : Keire::ManagedScreenMode::Windowed,
+                .Focused = window->Focused(),
+                .Visible = window->Visible(),
+                .Minimized = window->Minimized(),
+                .VSync = Owner().Specification().Render.PresentMode == Keire::RenderPresentMode::VSync};
+    }
+    catch (...)
+    {
+        return {};
+    }
+}
+
+bool EditorWorkspaceLayer::SetManagedScreen(const std::uint32_t width, const std::uint32_t height,
+                                            const Keire::ManagedScreenMode mode) noexcept
+{
+    if (width < 64 || height < 64 || width > 16384 || height > 16384)
+        return false;
+    try
+    {
+        const auto window = Owner().MainWindow();
+        if (!window)
+            return false;
+        const auto previousMode = window->Mode();
+        const auto previousSize = window->LogicalSize();
+        const auto requestedMode = mode == Keire::ManagedScreenMode::BorderlessFullscreen
+                                       ? Keire::WindowMode::BorderlessFullscreen
+                                       : Keire::WindowMode::Windowed;
+        try
+        {
+            if (window->Mode() != requestedMode)
+                window->SetMode(requestedMode);
+            if (requestedMode == Keire::WindowMode::Windowed)
+                window->SetSize({width, height});
+            return true;
+        }
+        catch (...)
+        {
+            try
+            {
+                if (window->Mode() != previousMode)
+                    window->SetMode(previousMode);
+                if (previousMode == Keire::WindowMode::Windowed)
+                    window->SetSize(previousSize);
+            }
+            catch (...)
+            {
+            }
+            return false;
+        }
+    }
+    catch (...)
+    {
+        return false;
+    }
 }
 
 Keire::Vector2 EditorWorkspaceLayer::ReadManagedInput(const std::string_view action) noexcept

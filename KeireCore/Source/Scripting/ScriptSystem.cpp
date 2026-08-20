@@ -1,5 +1,4 @@
 #include "Keire/Scripting/ScriptSystem.h"
-
 #include "Keire/Animation/AnimationSystem.h"
 #include "Keire/Audio/AudioAssets.h"
 #include "Keire/ECS/Component.h"
@@ -18,9 +17,9 @@
 #include "KeireInternal/Scripting/ManagedBuildWorkspace.h"
 #include "KeireInternal/Scripting/ManagedGenerationSequence.h"
 #include "KeireInternal/Scripting/ManagedReflection.h"
+#include "KeireInternal/Scripting/ManagedRuntimeFoundation.h"
 #include "KeireInternal/Scripting/ManagedRuntimeInterop.h"
 #include "KeireInternal/Scripting/ManagedSdk.h"
-
 #if defined(_MSC_VER)
 #pragma warning(push)
 #pragma warning(disable : 4146)
@@ -31,9 +30,6 @@
 #if defined(_MSC_VER)
 #pragma warning(pop)
 #endif
-
-#include <nlohmann/json.hpp>
-
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -44,6 +40,7 @@
 #include <limits>
 #include <map>
 #include <mutex>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <ranges>
 #include <set>
@@ -52,7 +49,6 @@
 #include <tuple>
 #include <unordered_map>
 #include <utility>
-
 namespace Keire
 {
     namespace
@@ -71,7 +67,6 @@ namespace Keire
         using Detail::ReflectManagedMethods;
         using Detail::ReflectManagedProperties;
         using Detail::WriteText;
-
     } // namespace
 
     class ScriptSystem::Impl final
@@ -133,7 +128,11 @@ namespace Keire
         class RuntimeScope final
         {
           public:
-            explicit RuntimeScope(Impl& runtime) noexcept : m_Previous(CurrentRuntime) { CurrentRuntime = &runtime; }
+            explicit RuntimeScope(Impl& runtime) noexcept
+                : m_Previous(CurrentRuntime), m_Foundation(runtime.Specification.RuntimeServices)
+            {
+                CurrentRuntime = &runtime;
+            }
             ~RuntimeScope() { CurrentRuntime = m_Previous; }
 
             RuntimeScope(const RuntimeScope&) = delete;
@@ -141,6 +140,7 @@ namespace Keire
 
           private:
             Impl* m_Previous;
+            Detail::ManagedRuntimeFoundationScope m_Foundation;
         };
 
         explicit Impl(ScriptSystemSpecification value, Ref<JobSystem> jobs)
@@ -3681,6 +3681,7 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimeSetUiText));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "ConsumeUiClickIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeConsumeUiClick));
+                Detail::RegisterManagedRuntimeFoundation(managedApi);
                 managedApi.UploadInternalCalls();
                 behaviourType = &managedApi.GetLocalType("Keire.Behaviour");
                 if (!*behaviourType)
@@ -4498,8 +4499,7 @@ namespace Keire
             const auto managedType = type.Name;
             const auto properties = type.Properties;
             const std::weak_ptr<Detail::ManagedBehaviourComponentCallbacks> callbacks = m_Impl->ComponentCallbacks;
-            registration.Factory = [componentType, managedType, callbacks]
-            {
+            registration.Factory = [componentType, managedType, callbacks] {
                 return Ref<Component>(
                     CreateRef<Detail::ManagedBehaviourComponent>(componentType, managedType, callbacks));
             };

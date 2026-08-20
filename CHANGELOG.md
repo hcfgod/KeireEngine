@@ -5,6 +5,10 @@ versions.
 
 ## Unreleased
 
+- Added the managed runtime foundation: immutable `Application` identity and persistent-data paths, safe Play-mode
+  exit, validated time scale and pause, logical/pixel `Screen` state with transactional resolution/fullscreen changes,
+  and typed `PlayerPreferences` persisted through bounded versioned JSON and atomic replacement. A maintained managed
+  API capability matrix now records production support and named Unity/Unreal workflow-parity gaps.
 - Fixed newly added Collider and Character Controller components retaining generic dimensions on built-in meshes.
   Primitive colliders now select the exact built-in primitive dimensions, mesh-backed shapes use the rendered mesh,
   and capsule gizmos share the runtime's total-height convention. VFX cable-knot edits now end the current draw pass

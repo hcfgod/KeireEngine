@@ -23,7 +23,113 @@ var tests = new (string Name, Action Run)[]
     ("Native UI button dispatch advances with the player clock", NativeUiButtonDispatchClockContract),
     ("Managed jobs execute delegates and publish terminal states", ManagedJobExecutionContract),
     ("Managed jobs preserve terminal dependency semantics", ManagedJobDependencyContract),
+    ("Application, time, and screen use the native foundation contract", RuntimeFoundationContract),
+    ("Player preferences persist typed values atomically", PlayerPreferencesPersistenceContract),
+    ("Player preferences reject invalid and corrupt data", PlayerPreferencesValidationContract),
 };
+
+static unsafe void RuntimeFoundationContract()
+{
+    NativeFoundationFixture.Install();
+    try
+    {
+        Assert(System.Runtime.InteropServices.Marshal.SizeOf<Keire.NativeScreenState>() == 28,
+               "Managed screen state must preserve the native 28-byte ABI layout.");
+        Assert(Keire.Application.ProductName == "Nightglass" && Keire.Application.Version == "1.2.3" &&
+                   Keire.Application.Identifier == "games.keire.nightglass" && Keire.Application.IsEditor,
+               "Application metadata must flow through the native runtime foundation.");
+        Assert(Path.IsPathFullyQualified(Keire.Application.PersistentDataPath),
+               "Application.PersistentDataPath must be absolute.");
+
+        Keire.Time.TimeScale = 0.35f;
+        Keire.Time.Paused = true;
+        Assert(MathF.Abs(Keire.Time.TimeScale - 0.35f) < 0.0001f && Keire.Time.Paused,
+               "Managed time scale and pause state must round-trip through native services.");
+        AssertThrows<ArgumentOutOfRangeException>(() => Keire.Time.TimeScale = float.NaN,
+                                                  "Time scale must reject non-finite values before native dispatch.");
+
+        Keire.Resolution resolution = Keire.Screen.CurrentResolution;
+        Assert(resolution == new Keire.Resolution(1920, 1080, 3840, 2160, 2.0f) && Keire.Screen.Focused &&
+                   Keire.Screen.VSyncEnabled,
+               "Screen state must preserve logical and pixel extents, scale, focus, and presentation mode.");
+        Assert(Keire.Screen.TrySetResolution(2560, 1440, Keire.FullscreenMode.BorderlessFullscreen) &&
+                   NativeFoundationFixture.LastWidth == 2560 && NativeFoundationFixture.LastHeight == 1440 &&
+                   NativeFoundationFixture.LastMode == Keire.FullscreenMode.BorderlessFullscreen,
+               "Screen changes must reach native services without narrowing dimensions.");
+
+        Keire.Application.Quit(17);
+        Assert(NativeFoundationFixture.ExitCode == 17,
+               "Application.Quit must preserve the requested process exit code.");
+    }
+    finally
+    {
+        NativeFoundationFixture.Uninstall();
+    }
+}
+
+static void PlayerPreferencesPersistenceContract()
+{
+    string directory = Path.Combine(Path.GetTempPath(), $"keire-player-preferences-{Guid.NewGuid():N}");
+    try
+    {
+        Keire.PlayerPreferences.ResetForTests(directory);
+        Keire.PlayerPreferences.SetString("profile.name", "Astra");
+        Keire.PlayerPreferences.SetInt("video.quality", 4);
+        Keire.PlayerPreferences.SetFloat("audio.master", 0.625f);
+        Keire.PlayerPreferences.SetBool("accessibility.subtitles", true);
+        Keire.PlayerPreferences.Save();
+
+        Keire.PlayerPreferences.ResetForTests(directory);
+        Assert(Keire.PlayerPreferences.GetString("profile.name") == "Astra" &&
+                   Keire.PlayerPreferences.GetInt("video.quality") == 4 &&
+                   MathF.Abs(Keire.PlayerPreferences.GetFloat("audio.master") - 0.625f) < 0.0001f &&
+                   Keire.PlayerPreferences.GetBool("accessibility.subtitles"),
+               "Typed player preferences must survive a complete managed cache reset.");
+        Assert(Keire.PlayerPreferences.GetInt("profile.name", 91) == 91,
+               "Reading a preference through the wrong type must return the caller's default.");
+        Assert(Keire.PlayerPreferences.DeleteKey("video.quality") &&
+                   !Keire.PlayerPreferences.HasKey("video.quality"),
+               "Preference deletion must update the in-memory transaction.");
+        Keire.PlayerPreferences.Save();
+        Assert(!Directory.EnumerateFiles(directory, "*.tmp-*", SearchOption.TopDirectoryOnly).Any(),
+               "Atomic preference saves must not leave temporary files behind.");
+    }
+    finally
+    {
+        Keire.PlayerPreferences.ResetForTests();
+        if (Directory.Exists(directory))
+            Directory.Delete(directory, recursive: true);
+    }
+}
+
+static void PlayerPreferencesValidationContract()
+{
+    string directory = Path.Combine(Path.GetTempPath(), $"keire-player-preferences-invalid-{Guid.NewGuid():N}");
+    try
+    {
+        Keire.PlayerPreferences.ResetForTests(directory);
+        AssertThrows<ArgumentException>(() => Keire.PlayerPreferences.SetString("", "value"),
+                                        "Empty preference keys must be rejected.");
+        AssertThrows<ArgumentOutOfRangeException>(() => Keire.PlayerPreferences.SetFloat("invalid", float.NaN),
+                                                  "Non-finite preference floats must be rejected.");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, "player-preferences.json"), "{not-json");
+        Keire.PlayerPreferences.ResetForTests(directory);
+        AssertThrows<InvalidDataException>(() => Keire.PlayerPreferences.HasKey("profile.name"),
+                                           "Corrupt preference files must fail explicitly instead of resetting data.");
+        File.WriteAllText(Path.Combine(directory, "player-preferences.json"),
+                          "{\"version\":1,\"values\":{\"broken\":{\"kind\":2,\"value\":\"NaN\"}}}");
+        Keire.PlayerPreferences.ResetForTests(directory);
+        AssertThrows<InvalidDataException>(() => Keire.PlayerPreferences.HasKey("broken"),
+                                           "Malformed typed preference values must be rejected transactionally.");
+    }
+    finally
+    {
+        Keire.PlayerPreferences.ResetForTests();
+        if (Directory.Exists(directory))
+            Directory.Delete(directory, recursive: true);
+    }
+}
 
 static void AnimatorFootGroundingContract()
 {
@@ -578,6 +684,130 @@ static void Advance(ProductionWeaponRuntime runtime, float seconds, uint firstTi
     int steps = (int)MathF.Ceiling(seconds / step);
     for (int index = 0; index < steps; ++index)
         runtime.Tick(step, default, unchecked(firstTick + (uint)index));
+}
+
+file static unsafe class NativeFoundationFixture
+{
+    private static double s_timeScale;
+    private static byte s_paused;
+    private static string s_persistentDataPath = string.Empty;
+
+    public static int ExitCode { get; private set; }
+    public static uint LastWidth { get; private set; }
+    public static uint LastHeight { get; private set; }
+    public static Keire.FullscreenMode LastMode { get; private set; }
+
+    public static void Install()
+    {
+        s_timeScale = 1.0;
+        s_paused = 0;
+        s_persistentDataPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "keire-native-foundation"));
+        ExitCode = 0;
+        LastWidth = 0;
+        LastHeight = 0;
+        LastMode = Keire.FullscreenMode.Windowed;
+        Keire.NativeFoundation.GetApplicationTextIcall = &GetApplicationText;
+        Keire.NativeFoundation.IsEditorIcall = &IsEditor;
+        Keire.NativeFoundation.RequestExitIcall = &RequestExit;
+        Keire.NativeFoundation.GetTimeScaleIcall = &GetTimeScale;
+        Keire.NativeFoundation.SetTimeScaleIcall = &SetTimeScale;
+        Keire.NativeFoundation.IsTimePausedIcall = &IsTimePaused;
+        Keire.NativeFoundation.SetTimePausedIcall = &SetTimePaused;
+        Keire.NativeFoundation.GetScreenStateIcall = &GetScreenState;
+        Keire.NativeFoundation.SetScreenIcall = &SetScreen;
+    }
+
+    public static void Uninstall()
+    {
+        Keire.NativeFoundation.GetApplicationTextIcall = null;
+        Keire.NativeFoundation.IsEditorIcall = null;
+        Keire.NativeFoundation.RequestExitIcall = null;
+        Keire.NativeFoundation.GetTimeScaleIcall = null;
+        Keire.NativeFoundation.SetTimeScaleIcall = null;
+        Keire.NativeFoundation.IsTimePausedIcall = null;
+        Keire.NativeFoundation.SetTimePausedIcall = null;
+        Keire.NativeFoundation.GetScreenStateIcall = null;
+        Keire.NativeFoundation.SetScreenIcall = null;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static int GetApplicationText(byte field, byte* destination, int capacity)
+    {
+        string value = (Keire.ApplicationText)field switch
+        {
+            Keire.ApplicationText.ProductName => "Nightglass",
+            Keire.ApplicationText.Version => "1.2.3",
+            Keire.ApplicationText.Identifier => "games.keire.nightglass",
+            Keire.ApplicationText.PersistentDataPath => s_persistentDataPath,
+            _ => string.Empty
+        };
+        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(value);
+        if (destination == null || capacity == 0)
+            return bytes.Length;
+        if (capacity < bytes.Length)
+            return -1;
+        for (int index = 0; index < bytes.Length; ++index)
+            destination[index] = bytes[index];
+        return bytes.Length;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte IsEditor() => 1;
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static void RequestExit(int exitCode) => ExitCode = exitCode;
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static double GetTimeScale() => s_timeScale;
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetTimeScale(double value)
+    {
+        if (!double.IsFinite(value) || value is < 0.0 or > 100.0)
+            return 0;
+        s_timeScale = value;
+        return 1;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte IsTimePaused() => s_paused;
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetTimePaused(byte value)
+    {
+        s_paused = value == 0 ? (byte)0 : (byte)1;
+        return 1;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte GetScreenState(Keire.NativeScreenState* state)
+    {
+        if (state == null)
+            return 0;
+        *state = new Keire.NativeScreenState
+        {
+            LogicalWidth = 1920,
+            LogicalHeight = 1080,
+            PixelWidth = 3840,
+            PixelHeight = 2160,
+            DisplayScale = 2.0f,
+            Mode = (byte)Keire.FullscreenMode.Windowed,
+            FocusedValue = 1,
+            VisibleValue = 1,
+            MinimizedValue = 0,
+            VSyncValue = 1
+        };
+        return 1;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetScreen(uint width, uint height, byte mode)
+    {
+        LastWidth = width;
+        LastHeight = height;
+        LastMode = (Keire.FullscreenMode)mode;
+        return 1;
+    }
 }
 
 file static unsafe class NativeUiDispatchFixture

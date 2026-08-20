@@ -95,6 +95,35 @@ namespace Keire
         float DurationSeconds = 0.0F;
     };
 
+    struct ManagedApplicationInfo
+    {
+        std::string ProductName;
+        std::string Version;
+        std::string Identifier;
+        std::filesystem::path PersistentDataPath;
+        bool IsEditor = false;
+    };
+
+    enum class ManagedScreenMode : std::uint8_t
+    {
+        Windowed,
+        BorderlessFullscreen
+    };
+
+    struct ManagedScreenState
+    {
+        std::uint32_t LogicalWidth = 0;
+        std::uint32_t LogicalHeight = 0;
+        std::uint32_t PixelWidth = 0;
+        std::uint32_t PixelHeight = 0;
+        float DisplayScale = 1.0F;
+        ManagedScreenMode Mode = ManagedScreenMode::Windowed;
+        bool Focused = false;
+        bool Visible = false;
+        bool Minimized = false;
+        bool VSync = true;
+    };
+
     class KEIRE_API IScriptRuntimeServices
     {
       public:
@@ -107,6 +136,17 @@ namespace Keire
         [[nodiscard]] virtual float ManagedFixedDeltaTime() const noexcept { return 1.0F / 60.0F; }
         [[nodiscard]] virtual float ManagedUnscaledDeltaTime() const noexcept { return ManagedDeltaTime(); }
         [[nodiscard]] virtual double ManagedElapsedTime() const noexcept { return 0.0; }
+        [[nodiscard]] virtual ManagedApplicationInfo ManagedApplication() const { return {}; }
+        virtual void RequestManagedExit(int) noexcept {}
+        [[nodiscard]] virtual double ManagedTimeScale() const noexcept { return 1.0; }
+        [[nodiscard]] virtual bool SetManagedTimeScale(double) noexcept { return false; }
+        [[nodiscard]] virtual bool ManagedTimePaused() const noexcept { return false; }
+        [[nodiscard]] virtual bool SetManagedTimePaused(bool) noexcept { return false; }
+        [[nodiscard]] virtual ManagedScreenState ManagedScreen() const noexcept { return {}; }
+        [[nodiscard]] virtual bool SetManagedScreen(std::uint32_t, std::uint32_t, ManagedScreenMode) noexcept
+        {
+            return false;
+        }
         [[nodiscard]] virtual Vector2 ReadManagedInput(std::string_view action) noexcept = 0;
         [[nodiscard]] virtual ManagedInputState ReadManagedInputState(std::string_view) noexcept
         {

@@ -5,6 +5,7 @@
 #include "KeireInternal/Build/PlayerPackage.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/RenderInternal.h"
+#include "KeireInternal/Scripting/ManagedRuntimeApplicationServices.h"
 #include "KeireInternal/WindowInternal.h"
 
 #include <nlohmann/json.hpp>
@@ -494,22 +495,24 @@ namespace
         state.ReportWritten = true;
     }
 
-    class RuntimeLayer final : public Keire::Layer, public Keire::IScriptRuntimeServices
+    class RuntimeLayer final : public Keire::Layer, public Keire::Detail::ManagedRuntimeApplicationServices
     {
       public:
         RuntimeLayer(const Keire::AssetId startupScene, const Keire::AssetId defaultInput,
                      const Keire::AssetId defaultMixer, const Keire::RenderEnvironmentSettings rendering,
                      RuntimeCommandLine commandLine, Keire::ReplayFingerprints fingerprints,
                      std::shared_ptr<RuntimeReplayState> replayState)
-            : Layer("Runtime"), m_StartupScene(startupScene), m_DefaultInput(defaultInput),
-              m_DefaultMixer(defaultMixer), m_Rendering(rendering), m_CommandLine(std::move(commandLine)),
-              m_ReplayFingerprints(std::move(fingerprints)), m_ReplayState(std::move(replayState))
+            : Layer("Runtime"), ManagedRuntimeApplicationServices(false), m_StartupScene(startupScene),
+              m_DefaultInput(defaultInput), m_DefaultMixer(defaultMixer), m_Rendering(rendering),
+              m_CommandLine(std::move(commandLine)), m_ReplayFingerprints(std::move(fingerprints)),
+              m_ReplayState(std::move(replayState))
         {
         }
 
       protected:
         void OnAttach() override
         {
+            BindManagedApplication(Owner());
             m_Load = Owner().Scenes()->Load(m_StartupScene);
             Keire::RenderSurfaceSpecification surface;
             surface.Name = "Runtime";
@@ -559,6 +562,7 @@ namespace
             }
             if (const auto scripts = Owner().Scripts())
                 scripts->SetRuntimeServices(nullptr);
+            UnbindManagedApplication();
             if (const auto renderer = Owner().Renderer())
                 Keire::RenderSystemInternalAccess::SetPresentationSurface(*renderer, {});
             if (m_Presentation)
