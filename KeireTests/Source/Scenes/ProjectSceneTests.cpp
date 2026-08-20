@@ -222,6 +222,7 @@ TEST_CASE("Projects create isolated starter assets and hold exclusive editor loc
     rendering.DirectionalShadowCascadeCount = 3;
     rendering.DirectionalShadowResolution = 4096;
     rendering.DirectionalShadowSplitLambda = 0.8F;
+    CHECK_NOTHROW(Keire::ValidateRenderEnvironmentSettings(rendering));
     Keire::SaveRenderEnvironmentSettings(created->Root(), rendering);
     CHECK(Keire::LoadRenderEnvironmentSettings(created->Root()) == rendering);
     for (int revision = 1; revision <= 16; ++revision)
@@ -231,6 +232,7 @@ TEST_CASE("Projects create isolated starter assets and hold exclusive editor loc
         CHECK(Keire::LoadRenderEnvironmentSettings(created->Root()) == rendering);
     }
     rendering.Exposure = 0.0F;
+    CHECK_THROWS_AS(Keire::ValidateRenderEnvironmentSettings(rendering), std::invalid_argument);
     CHECK_THROWS_AS(Keire::SaveRenderEnvironmentSettings(created->Root(), rendering), std::invalid_argument);
     rendering.Exposure = 1.0F;
     rendering.DirectionalShadowResolution = 3000;

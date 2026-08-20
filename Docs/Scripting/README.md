@@ -64,6 +64,7 @@ drag the script onto the Inspector, or drop it onto a GameObject in the Hierarch
 | [Audio](Audio.md) | Clip references, Audio Sources, one-call playback, mixers, buses, and status |
 | [Animation](Animation.md) | Animator states, parameters, layers, events, playback, and IK |
 | [Rendering And Materials](RenderingAndMaterials.md) | Cameras, Mesh Renderers, lights, material slots, and shader property overrides |
+| [Scenes And Render Settings](ScenesAndRenderSettings.md) | Active-scene handles, transactional player replacement, progress, cancellation, and transient environments |
 | [UI And Events](UiAndEvents.md) | Scene UI, buttons, `KeireEvent`, text, and cursor ownership |
 | [Async, Reload, And Diagnostics](AsyncReloadAndDiagnostics.md) | Cancellation, hot reload, failure isolation, logging, and troubleshooting |
 | [Managed API Index](ApiIndex.md) | Quick type, callback, component, and attribute lookup |
@@ -105,6 +106,7 @@ The managed API source is the final authority:
 - [`RuntimeFoundation.cs`](../../KeireManaged/RuntimeFoundation.cs) defines application, time, and screen services.
 - [`PlayerPreferences.cs`](../../KeireManaged/PlayerPreferences.cs) defines per-application persistent preferences.
 - [`Rendering.cs`](../../KeireManaged/Rendering.cs) defines cameras, renderers, lights, and material property blocks.
+- [`RuntimeWorld.cs`](../../KeireManaged/RuntimeWorld.cs) defines scene operations and runtime render settings.
 - [`RuntimeUi.cs`](../../KeireManaged/RuntimeUi.cs) and [`Events.cs`](../../KeireManaged/Events.cs) define UI and events.
 - [`SerializationAttributes.cs`](../../KeireManaged/SerializationAttributes.cs) defines Inspector metadata.
 

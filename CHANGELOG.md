@@ -5,6 +5,10 @@ versions.
 
 ## Unreleased
 
+- Added managed active/loaded scene handles and coroutine-compatible packaged-player scene replacement with bounded
+  status, progress, cancellation, diagnostics, camera validation, and activation rollback that keeps the previous
+  runtime live on failure. Added atomic transient render-environment controls for ambient lighting, exposure,
+  environment textures, sky visibility, and directional shadows without mutating project settings.
 - Added managed Camera, Mesh Renderer, and directional/point/spot light handles with typed mesh, material, texture, and
   shader asset references. Material-slot replacement is transactional, and bounded per-renderer material property
   blocks now drive matching numeric, vector, color, and texture bindings from Material/Shader Graph without mutating

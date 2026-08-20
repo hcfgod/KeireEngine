@@ -25,8 +25,8 @@ Status meanings:
 | Audio | **Production** | Clips, sources, listeners, reverb zones, mixers/buses, playback status and spatial options | DSP graph scripting and microphone input |
 | VFX | **Production** | Effect playback, lifetime, events, and typed parameter ranges | Managed graph construction is not a runtime goal |
 | Runtime UI | **Partial** | Scene-backed buttons, sliders, toggles, input fields and scroll views; typed polling events, focus/navigation, safe-area scaling and accessibility metadata | Localization, data binding, animated transitions, and platform screen-reader adapters |
-| Scenes and prefabs | **Partial** | Transactional prefab instantiate; native scene system has async load/unload/activate | Typed managed scene operations, progress, cancellation, additive loading |
-| Rendering and materials | **Partial** | Typed Camera, Mesh Renderer, directional/point/spot light handles; mesh/material/texture/shader references; bounded per-renderer numeric, color, vector, and texture property blocks consumed by Material/Shader Graph output | Runtime render settings, dynamic material instances, and managed global parameter collections |
+| Scenes and prefabs | **Partial** | Transactional prefab instantiate; active/loaded scene handles; coroutine-compatible packaged-player `Single` replacement with progress, cancellation, diagnostics, and activation rollback | Unified additive worlds, unload, active-scene selection, and Editor Play replacement |
+| Rendering and materials | **Partial** | Typed Camera, Mesh Renderer, directional/point/spot light handles; mesh/material/texture/shader references; bounded per-renderer numeric, color, vector, and texture property blocks consumed by Material/Shader Graph output; atomic transient render-environment settings | Dynamic material instances and managed global parameter collections |
 | Jobs and async | **Production** | Managed jobs, dependencies, priorities, cancellation, synchronization context, lifetime token | Parallel-for convenience APIs |
 | Diagnostics | **Production** | Structured logs, exceptions, assertions, profiler spans/counters, debug lines | In-game diagnostic overlay controls |
 

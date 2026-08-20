@@ -505,6 +505,10 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] Keire::ManagedScreenState ManagedScreen() const noexcept override;
     [[nodiscard]] bool SetManagedScreen(std::uint32_t width, std::uint32_t height,
                                         Keire::ManagedScreenMode mode) noexcept override;
+    [[nodiscard]] Keire::AssetId ActiveManagedScene() const noexcept override;
+    [[nodiscard]] std::vector<Keire::AssetId> LoadedManagedScenes() const override;
+    [[nodiscard]] std::optional<Keire::RenderEnvironmentSettings> ManagedRenderEnvironment() const noexcept override;
+    [[nodiscard]] bool SetManagedRenderEnvironment(Keire::RenderEnvironmentSettings settings) noexcept override;
     [[nodiscard]] Keire::Vector2 ReadManagedInput(std::string_view action) noexcept override;
     [[nodiscard]] Keire::ManagedInputState ReadManagedInputState(std::string_view action) noexcept override;
     [[nodiscard]] std::optional<Keire::ManagedRaycastHit>
@@ -708,6 +712,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::optional<Keire::InputCaptureOverride> m_ManagedInputCaptureOverride;
     bool m_ManagedCursorVisible = true;
     bool m_ManagedCursorLocked = false;
+    std::optional<Keire::RenderEnvironmentSettings> m_ManagedRenderEnvironmentOverride;
     bool m_GameViewportInputActive = false;
     bool m_GameViewportCaptureSuspended = false;
     std::uint32_t m_SuppressManagedLookFrames = 0;

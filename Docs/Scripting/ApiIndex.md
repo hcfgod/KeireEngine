@@ -16,6 +16,8 @@ This index is a discovery map, not a replacement for the workflow guides or sour
 | `CameraHandle`, `MeshRendererHandle` | Runtime camera and renderable state | [Rendering](RenderingAndMaterials.md) |
 | `DirectionalLightHandle`, `PointLightHandle`, `SpotLightHandle` | Typed realtime and baked-light controls | [Rendering](RenderingAndMaterials.md) |
 | `MaterialPropertyBlock` | Bounded per-renderer shader property overrides | [Rendering](RenderingAndMaterials.md) |
+| `SceneHandle`, `SceneLoadOperation` | Active/loaded scene identity and transactional replacement status | [Scenes](ScenesAndRenderSettings.md) |
+| `RenderEnvironmentSettings` | Atomic transient lighting, environment, exposure, and shadow state | [Scenes](ScenesAndRenderSettings.md) |
 | `AssetId` | Stable untyped asset identity | [Assets](AssetsAndScriptableObjects.md) |
 | `AssetReference<T>` | Typed serialized asset identity | [Assets](AssetsAndScriptableObjects.md) |
 | `ScriptableObject` | Managed data base type and transient clone API | [Assets](AssetsAndScriptableObjects.md) |
@@ -152,6 +154,8 @@ These types identify native components. Their layout is intentionally not expose
 | `Physics` | `TryRaycast`, `Raycast` |
 | `Navigation` | `FindPathAsync` |
 | `Prefab` | `Instantiate` |
+| `SceneManager` | `ActiveScene`, `LoadedScenes`, `LoadSceneAsync` |
+| `RenderSettings` | `Current`, ambient/exposure/environment convenience properties |
 | `Cursor` | `Visible`, `Locked`, `VisibilityRequested`, `RequestCapture`, `RequestVisible`, `Hide`, `Show`, `Lock`, `Unlock` |
 | `Debug` | `Log`, `Warn`, `Error`, `LogException`, `Assert`, `DrawLine` |
 | `Log` | `Trace`, `Debug`, `Info`, `Warning`, `Error`, `Critical` |
@@ -160,6 +164,10 @@ These types identify native components. Their layout is intentionally not expose
 Result values include `RaycastHit`, `NavigationPath`, `PrefabInstance`, and `ProfileSample`.
 
 Physics motion and force values include `RigidBodyMotion` and `ForceMode`. Logging filters use `LogLevel`.
+
+`SceneLoadOperation` is a `CustomYieldInstruction` with state, progress, cancellation, and failure diagnostics.
+Standalone players support transactional `Single` replacement; see
+[Scenes And Render Settings](ScenesAndRenderSettings.md) for current Editor and additive-mode constraints.
 
 ## Managed Jobs
 
@@ -408,6 +416,7 @@ Gameplay code should not replace the engine-installed bridge.
 | [`Handles.cs`](../../KeireManaged/Handles.cs) | Entity, component, transform, asset handles |
 | [`RuntimeApi.cs`](../../KeireManaged/RuntimeApi.cs) | Time, input, physics, navigation, animation, audio, VFX, prefab, cursor, diagnostics |
 | [`Rendering.cs`](../../KeireManaged/Rendering.cs) | Camera, renderer, light, material-slot, and shader-property handles |
+| [`RuntimeWorld.cs`](../../KeireManaged/RuntimeWorld.cs) | Scene handles, async replacement, and render-environment settings |
 | [`RuntimeUi.cs`](../../KeireManaged/RuntimeUi.cs) | UI wrappers and in-memory layout |
 | [`Events.cs`](../../KeireManaged/Events.cs) | Persistent and runtime events |
 | [`ScriptableObject.cs`](../../KeireManaged/ScriptableObject.cs) | Managed data lifecycle |

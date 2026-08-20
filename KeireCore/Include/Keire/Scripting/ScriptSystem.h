@@ -4,6 +4,8 @@
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/ECS/Component.h"
 #include "Keire/Ref.h"
+#include "Keire/Rendering/RenderSystem.h"
+#include "Keire/Scenes/SceneSystem.h"
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
 #include "Keire/Scripting/ManagedDataAsset.h"
 
@@ -127,6 +129,15 @@ namespace Keire
         bool VSync = true;
     };
 
+    struct ManagedSceneLoadStatus
+    {
+        AssetId Scene;
+        SceneLoadMode Mode = SceneLoadMode::Single;
+        SceneLoadState State = SceneLoadState::Cancelled;
+        float Progress = 0.0F;
+        std::string Diagnostic;
+    };
+
     enum class ManagedUiScalarProperty : std::uint8_t
     {
         Minimum,
@@ -239,6 +250,19 @@ namespace Keire
         {
             return false;
         }
+        [[nodiscard]] virtual std::uint64_t BeginManagedSceneLoad(AssetId, SceneLoadMode) noexcept { return 0; }
+        [[nodiscard]] virtual std::optional<ManagedSceneLoadStatus> ManagedSceneLoad(std::uint64_t) const noexcept
+        {
+            return std::nullopt;
+        }
+        [[nodiscard]] virtual bool CancelManagedSceneLoad(std::uint64_t) noexcept { return false; }
+        [[nodiscard]] virtual AssetId ActiveManagedScene() const noexcept { return {}; }
+        [[nodiscard]] virtual std::vector<AssetId> LoadedManagedScenes() const { return {}; }
+        [[nodiscard]] virtual std::optional<RenderEnvironmentSettings> ManagedRenderEnvironment() const noexcept
+        {
+            return std::nullopt;
+        }
+        [[nodiscard]] virtual bool SetManagedRenderEnvironment(RenderEnvironmentSettings) noexcept { return false; }
         [[nodiscard]] virtual Vector2 ReadManagedInput(std::string_view action) noexcept = 0;
         [[nodiscard]] virtual ManagedInputState ReadManagedInputState(std::string_view) noexcept
         {

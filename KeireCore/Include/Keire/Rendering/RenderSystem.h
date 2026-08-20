@@ -123,6 +123,7 @@ namespace Keire
 
     [[nodiscard]] KEIRE_API RenderEnvironmentSettings
     LoadRenderEnvironmentSettings(const std::filesystem::path& projectRoot);
+    KEIRE_API void ValidateRenderEnvironmentSettings(const RenderEnvironmentSettings& settings);
     KEIRE_API void SaveRenderEnvironmentSettings(const std::filesystem::path& projectRoot,
                                                  const RenderEnvironmentSettings& settings);
 

@@ -17,10 +17,8 @@
 #include "KeireInternal/Scripting/ManagedBuildWorkspace.h"
 #include "KeireInternal/Scripting/ManagedGenerationSequence.h"
 #include "KeireInternal/Scripting/ManagedReflection.h"
-#include "KeireInternal/Scripting/ManagedRuntimeFoundation.h"
+#include "KeireInternal/Scripting/ManagedRuntimeBindings.h"
 #include "KeireInternal/Scripting/ManagedRuntimeInterop.h"
-#include "KeireInternal/Scripting/ManagedRuntimeRendering.h"
-#include "KeireInternal/Scripting/ManagedRuntimeUi.h"
 #include "KeireInternal/Scripting/ManagedSdk.h"
 #if defined(_MSC_VER)
 #pragma warning(push)
@@ -126,8 +124,7 @@ namespace Keire
         {
           public:
             explicit RuntimeScope(Impl& runtime) noexcept
-                : m_Previous(CurrentRuntime), m_Foundation(runtime.Specification.RuntimeServices),
-                  m_Rendering(runtime.Specification.RuntimeServices), m_Ui(runtime.Specification.RuntimeServices)
+                : m_Previous(CurrentRuntime), m_Bindings(runtime.Specification.RuntimeServices)
             {
                 CurrentRuntime = &runtime;
             }
@@ -137,9 +134,7 @@ namespace Keire
 
           private:
             Impl* m_Previous;
-            Detail::ManagedRuntimeFoundationScope m_Foundation;
-            Detail::ManagedRuntimeRenderingScope m_Rendering;
-            Detail::ManagedRuntimeUiScope m_Ui;
+            Detail::ManagedRuntimeBindingsScope m_Bindings;
         };
         explicit Impl(ScriptSystemSpecification value, Ref<JobSystem> jobs)
             : Specification(std::move(value)), Owner(std::this_thread::get_id()),
@@ -3679,9 +3674,7 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimeSetUiText));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "ConsumeUiClickIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeConsumeUiClick));
-                Detail::RegisterManagedRuntimeFoundation(managedApi);
-                Detail::RegisterManagedRuntimeRendering(managedApi);
-                Detail::RegisterManagedRuntimeUi(managedApi);
+                Detail::RegisterManagedRuntimeBindings(managedApi);
                 managedApi.UploadInternalCalls();
                 behaviourType = &managedApi.GetLocalType("Keire.Behaviour");
                 if (!*behaviourType)
