@@ -24,7 +24,7 @@ Status meanings:
 | Animation | **Production** | State playback, transitions, parameters, layers, IK, events, procedural locomotion | Animation-rig authoring remains editor/native |
 | Audio | **Production** | Clips, sources, listeners, reverb zones, mixers/buses, playback status and spatial options | DSP graph scripting and microphone input |
 | VFX | **Production** | Effect playback, lifetime, events, and typed parameter ranges | Managed graph construction is not a runtime goal |
-| Runtime UI | **Partial** | Canvas/layout value model, text, images, button click events, safe-area scaling | Slider, toggle, input field, scroll view, focus/navigation, accessibility |
+| Runtime UI | **Partial** | Scene-backed buttons, sliders, toggles, input fields and scroll views; typed polling events, focus/navigation, safe-area scaling and accessibility metadata | Localization, data binding, animated transitions, and platform screen-reader adapters |
 | Scenes and prefabs | **Partial** | Transactional prefab instantiate; native scene system has async load/unload/activate | Typed managed scene operations, progress, cancellation, additive loading |
 | Rendering and materials | **Planned** | Native renderer, material assets, Material Graph and Shader Graph are available | Camera/light/mesh/material handles, property blocks, render settings |
 | Jobs and async | **Production** | Managed jobs, dependencies, priorities, cancellation, synchronization context, lifetime token | Parallel-for convenience APIs |

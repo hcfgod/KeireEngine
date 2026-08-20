@@ -1258,24 +1258,25 @@ namespace Keire
                 ImGui::IsMouseReleased(ImGuiMouseButton_Middle),
                 ImGui::IsMouseReleased(ImGuiMouseButton_Right)};
     }
-
     void UiFrame::CapturePointerWheel()
     {
         m_Impl->RequireActive("CapturePointerWheel");
         (void)ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
     }
-
     bool UiFrame::KeyDown(const UiKey key) const
     {
         m_Impl->RequireActive("KeyDown");
         return Detail::UiBackendKeyDown(key);
     }
-
-    bool UiFrame::ControlDown() const
+    bool UiFrame::KeyPressed(const UiKey key) const
     {
-        m_Impl->RequireActive("ControlDown");
-        return ImGui::GetIO().KeyCtrl;
+        return (m_Impl->RequireActive(__func__), Detail::UiBackendKeyPressed(key));
     }
+    std::string UiFrame::TextInput() const
+    {
+        return (m_Impl->RequireActive("TextInput"), Detail::UiBackendTextInput());
+    }
+    bool UiFrame::ControlDown() const { return (m_Impl->RequireActive(__func__), ImGui::GetIO().KeyCtrl); }
     bool UiFrame::ShiftDown() const
     {
         m_Impl->RequireActive("ShiftDown");
@@ -1286,7 +1287,6 @@ namespace Keire
         m_Impl->RequireActive("AltDown");
         return ImGui::GetIO().KeyAlt;
     }
-
     void UiFrame::SetTooltip(const std::string_view text) { SetTooltip(text, {}); }
 
     void UiFrame::SetTooltip(const std::string_view text, const UiTooltipOptions options)

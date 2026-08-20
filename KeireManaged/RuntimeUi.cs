@@ -289,4 +289,8 @@ public static class RuntimeUi
     public static bool SetText(Entity entity, string text) => NativeRuntime.SetUiText(entity, text);
     public static bool WasClicked(Entity entity) => NativeRuntime.ConsumeUiClick(entity);
     public static UiButton? GetButton(Entity entity) => UiButton.FromEntity(entity);
+    public static UiSlider? GetSlider(Entity entity) => UiSlider.FromEntity(entity);
+    public static UiToggle? GetToggle(Entity entity) => UiToggle.FromEntity(entity);
+    public static UiInputField? GetInputField(Entity entity) => UiInputField.FromEntity(entity);
+    public static UiScrollView? GetScrollView(Entity entity) => UiScrollView.FromEntity(entity);
 }

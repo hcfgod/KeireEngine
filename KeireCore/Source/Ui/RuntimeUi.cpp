@@ -51,6 +51,8 @@ namespace Keire
                 style.FontSize,
                 style.GridCellSize.X,
                 style.GridCellSize.Y,
+                style.ContentOffset.X,
+                style.ContentOffset.Y,
             };
             if (!std::ranges::all_of(values, Finite) || style.Width < 0.0F || style.Height < 0.0F ||
                 style.AnchorMinimum.X < 0.0F || style.AnchorMinimum.Y < 0.0F || style.AnchorMaximum.X > 1.0F ||
@@ -61,10 +63,20 @@ namespace Keire
                 style.MinimumWidth < 0.0F || style.MinimumHeight < 0.0F || style.MaximumWidth < style.MinimumWidth ||
                 style.MaximumHeight < style.MinimumHeight || style.FlexGrow < 0.0F || style.Gap < 0.0F ||
                 style.BorderWidth < 0.0F || style.CornerRadius < 0.0F || style.Opacity < 0.0F || style.Opacity > 1.0F ||
-                style.FontSize <= 0.0F)
+                style.FontSize <= 0.0F || style.ContentOffset.X < 0.0F || style.ContentOffset.Y < 0.0F ||
+                style.NavigationOrder < 0)
                 throw std::invalid_argument("Runtime UI style contains invalid dimensions.");
             ValidateInsets(style.Margin);
             ValidateInsets(style.Padding);
+        }
+
+        void ValidateControl(const RuntimeUiControlState& control)
+        {
+            if (!Finite(control.Minimum) || !Finite(control.Maximum) || !Finite(control.Value) ||
+                !Finite(control.ContentSize.X) || !Finite(control.ContentSize.Y) ||
+                control.Minimum >= control.Maximum || control.Value < control.Minimum ||
+                control.Value > control.Maximum || control.ContentSize.X < 0.0F || control.ContentSize.Y < 0.0F)
+                throw std::invalid_argument("Runtime UI control state is invalid.");
         }
 
         [[nodiscard]] Color WithOpacity(Color color, const float opacity) noexcept
@@ -216,6 +228,8 @@ namespace Keire
                 std::max(0.0F, rect.Width - (style.Padding.Left + style.Padding.Right) * scale),
                 std::max(0.0F, rect.Height - (style.Padding.Top + style.Padding.Bottom) * scale),
             };
+            content.X -= style.ContentOffset.X * scale;
+            content.Y -= style.ContentOffset.Y * scale;
             const auto childClip = style.ClipChildren ? state.ClipRect : inheritedClip;
             if (style.ClipChildren)
                 Draws.push_back({.Type = RuntimeUiDrawType::PushClip,
@@ -224,7 +238,8 @@ namespace Keire
                                  .ClipRect = state.ClipRect});
 
             const bool horizontal = state.Type == RuntimeUiElementType::HorizontalLayout;
-            const bool vertical = state.Type == RuntimeUiElementType::VerticalLayout;
+            const bool vertical =
+                state.Type == RuntimeUiElementType::VerticalLayout || state.Type == RuntimeUiElementType::ScrollView;
             const bool grid = state.Type == RuntimeUiElementType::GridLayout;
             float cursor = horizontal ? content.X : content.Y;
             std::size_t flowingChildren = 0;
@@ -354,6 +369,101 @@ namespace Keire
                                  .BorderColor = WithOpacity(state.Style.Border, state.Style.Opacity),
                                  .CornerRadius = state.Style.CornerRadius,
                                  .BorderWidth = state.Style.BorderWidth});
+            if (state.Type == RuntimeUiElementType::Slider)
+            {
+                const float normalized = std::clamp((state.Control.Value - state.Control.Minimum) /
+                                                        (state.Control.Maximum - state.Control.Minimum),
+                                                    0.0F, 1.0F);
+                const float position = state.Control.Reversed ? 1.0F - normalized : normalized;
+                const float inset = std::min(6.0F * LastScale, std::min(state.Rect.Width, state.Rect.Height) * 0.25F);
+                RuntimeUiRect fill = state.Rect;
+                RuntimeUiRect handle = state.Rect;
+                if (state.Control.Vertical)
+                {
+                    const float y =
+                        state.Rect.Y + (state.Control.Reversed ? normalized : 1.0F - normalized) * state.Rect.Height;
+                    fill.X += inset;
+                    fill.Width = std::max(0.0F, fill.Width - inset * 2.0F);
+                    fill.Y = state.Control.Reversed ? state.Rect.Y : y;
+                    fill.Height = state.Control.Reversed ? std::max(0.0F, y - state.Rect.Y)
+                                                         : std::max(0.0F, state.Rect.Y + state.Rect.Height - y);
+                    handle = {state.Rect.X + inset * 0.5F, y - inset, std::max(0.0F, state.Rect.Width - inset),
+                              inset * 2.0F};
+                }
+                else
+                {
+                    const float x = state.Rect.X + position * state.Rect.Width;
+                    fill.Y += inset;
+                    fill.Height = std::max(0.0F, fill.Height - inset * 2.0F);
+                    fill.X = state.Control.Reversed ? x : state.Rect.X;
+                    fill.Width = state.Control.Reversed ? std::max(0.0F, state.Rect.X + state.Rect.Width - x)
+                                                        : std::max(0.0F, x - state.Rect.X);
+                    handle = {x - inset, state.Rect.Y + inset * 0.5F, inset * 2.0F,
+                              std::max(0.0F, state.Rect.Height - inset)};
+                }
+                Draws.push_back({.Type = RuntimeUiDrawType::Quad,
+                                 .Element = id,
+                                 .Rect = fill,
+                                 .ClipRect = state.ClipRect,
+                                 .ColorValue = WithOpacity(state.Style.Foreground, state.Style.Opacity),
+                                 .CornerRadius = state.Style.CornerRadius});
+                Draws.push_back({.Type = RuntimeUiDrawType::Quad,
+                                 .Element = id,
+                                 .Rect = handle,
+                                 .ClipRect = state.ClipRect,
+                                 .ColorValue = WithOpacity(Color{0.94F, 0.98F, 1.0F, 1.0F}, state.Style.Opacity),
+                                 .CornerRadius = state.Style.CornerRadius});
+            }
+            else if (state.Type == RuntimeUiElementType::Toggle && state.Control.Checked)
+            {
+                const float inset = std::min(7.0F * LastScale, std::min(state.Rect.Width, state.Rect.Height) * 0.3F);
+                Draws.push_back({.Type = RuntimeUiDrawType::Quad,
+                                 .Element = id,
+                                 .Rect = {state.Rect.X + inset, state.Rect.Y + inset,
+                                          std::max(0.0F, state.Rect.Width - inset * 2.0F),
+                                          std::max(0.0F, state.Rect.Height - inset * 2.0F)},
+                                 .ClipRect = state.ClipRect,
+                                 .ColorValue = WithOpacity(state.Style.Foreground, state.Style.Opacity),
+                                 .CornerRadius = std::max(0.0F, state.Style.CornerRadius - inset * 0.5F)});
+            }
+            else if (state.Type == RuntimeUiElementType::ScrollView)
+            {
+                const float contentWidth = state.Control.ContentSize.X * LastScale;
+                const float contentHeight = state.Control.ContentSize.Y * LastScale;
+                const float widthOverflow = std::max(0.0F, contentWidth - state.Rect.Width);
+                const float heightOverflow = std::max(0.0F, contentHeight - state.Rect.Height);
+                if (heightOverflow > 0.0F)
+                {
+                    const float thumbHeight =
+                        std::max(12.0F * LastScale, state.Rect.Height * state.Rect.Height / contentHeight);
+                    const float track = std::max(0.0F, state.Rect.Height - thumbHeight);
+                    const float fraction =
+                        std::clamp(state.Style.ContentOffset.Y * LastScale / heightOverflow, 0.0F, 1.0F);
+                    Draws.push_back({.Type = RuntimeUiDrawType::Quad,
+                                     .Element = id,
+                                     .Rect = {state.Rect.X + state.Rect.Width - 5.0F * LastScale,
+                                              state.Rect.Y + track * fraction, 4.0F * LastScale, thumbHeight},
+                                     .ClipRect = state.ClipRect,
+                                     .ColorValue = WithOpacity(state.Style.Foreground, state.Style.Opacity),
+                                     .CornerRadius = 2.0F * LastScale});
+                }
+                if (widthOverflow > 0.0F)
+                {
+                    const float thumbWidth =
+                        std::max(12.0F * LastScale, state.Rect.Width * state.Rect.Width / contentWidth);
+                    const float track = std::max(0.0F, state.Rect.Width - thumbWidth);
+                    const float fraction =
+                        std::clamp(state.Style.ContentOffset.X * LastScale / widthOverflow, 0.0F, 1.0F);
+                    Draws.push_back(
+                        {.Type = RuntimeUiDrawType::Quad,
+                         .Element = id,
+                         .Rect = {state.Rect.X + track * fraction, state.Rect.Y + state.Rect.Height - 5.0F * LastScale,
+                                  thumbWidth, 4.0F * LastScale},
+                         .ClipRect = state.ClipRect,
+                         .ColorValue = WithOpacity(state.Style.Foreground, state.Style.Opacity),
+                         .CornerRadius = 2.0F * LastScale});
+                }
+            }
             if (state.Content.Image)
                 Draws.push_back({.Type = RuntimeUiDrawType::Image,
                                  .Element = id,
@@ -417,7 +527,9 @@ namespace Keire
         auto& node = m_Impl->Nodes[index];
         node.Alive = true;
         node.State = {.Type = type, .Parent = parent};
-        node.State.Interactable = type == RuntimeUiElementType::Button;
+        node.State.Interactable = type == RuntimeUiElementType::Button || type == RuntimeUiElementType::Slider ||
+                                  type == RuntimeUiElementType::Toggle || type == RuntimeUiElementType::InputField ||
+                                  type == RuntimeUiElementType::ScrollView;
         node.Children.clear();
         const auto id = m_Impl->MakeId(index);
         if (parent)
@@ -517,9 +629,20 @@ namespace Keire
     bool RuntimeUiTree::SetContent(const RuntimeUiElementId element, RuntimeUiContent content)
     {
         const auto index = m_Impl->Index(element);
-        if (!index || content.Text.size() > 1'048'576 || content.AccessibilityLabel.size() > 16'384)
+        if (!index || content.Text.size() > 1'048'576 || content.AccessibilityLabel.size() > 16'384 ||
+            content.AccessibilityHint.size() > 16'384)
             return false;
         m_Impl->Nodes[*index].State.Content = std::move(content);
+        return true;
+    }
+
+    bool RuntimeUiTree::SetControl(const RuntimeUiElementId element, const RuntimeUiControlState control)
+    {
+        ValidateControl(control);
+        const auto index = m_Impl->Index(element);
+        if (!index)
+            return false;
+        m_Impl->Nodes[*index].State.Control = control;
         return true;
     }
 
@@ -715,11 +838,28 @@ namespace Keire
         }
         if (focusable.empty())
             return;
+        std::ranges::stable_sort(focusable,
+                                 [this](const RuntimeUiElementId left, const RuntimeUiElementId right)
+                                 {
+                                     const auto leftOrder =
+                                         m_Impl->Nodes[*m_Impl->Index(left)].State.Style.NavigationOrder;
+                                     const auto rightOrder =
+                                         m_Impl->Nodes[*m_Impl->Index(right)].State.Style.NavigationOrder;
+                                     if (leftOrder == 0 || rightOrder == 0)
+                                         return leftOrder != 0 && rightOrder == 0;
+                                     return leftOrder < rightOrder;
+                                 });
         const auto current = std::ranges::find(focusable, m_Impl->Focused);
         const bool backwards = navigation == RuntimeUiNavigation::Previous || navigation == RuntimeUiNavigation::Left ||
                                navigation == RuntimeUiNavigation::Up;
-        std::size_t index = current == focusable.end() ? 0 : static_cast<std::size_t>(current - focusable.begin());
-        index = backwards ? (index + focusable.size() - 1) % focusable.size() : (index + 1) % focusable.size();
+        std::size_t index = 0;
+        if (current == focusable.end())
+            index = backwards ? focusable.size() - 1 : 0;
+        else
+        {
+            index = static_cast<std::size_t>(current - focusable.begin());
+            index = backwards ? (index + focusable.size() - 1) % focusable.size() : (index + 1) % focusable.size();
+        }
         (void)SetFocus(focusable[index]);
     }
 
@@ -767,7 +907,7 @@ namespace Keire
             throw std::length_error("Runtime UI event checkpoint exceeds the configured event capacity.");
         for (const auto& event : events)
         {
-            if (!m_Impl->Index(event.Target) || event.Type > RuntimeUiEventType::Cancel ||
+            if (!m_Impl->Index(event.Target) || event.Type > RuntimeUiEventType::TextChanged ||
                 event.Button > RuntimeUiPointerButton::Middle || !std::isfinite(event.PointerX) ||
                 !std::isfinite(event.PointerY))
             {
@@ -800,6 +940,7 @@ namespace Keire
         result.ClippedElements = m_Impl->ClippedElements;
         result.PendingEvents = m_Impl->Events.size();
         result.DroppedEvents = m_Impl->DroppedEvents;
+        result.Scale = m_Impl->LastScale;
         return result;
     }
 } // namespace Keire

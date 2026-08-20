@@ -59,3 +59,18 @@ public sealed class UiButtonComponent;
 
 [StableComponentId("4b454952-4555-494c-4159-4f5554000001")]
 public sealed class UiLayoutComponent;
+
+[StableComponentId("4b454952-4555-4953-4c49-444552000001")]
+public sealed class UiSliderComponent;
+
+[StableComponentId("4b454952-4555-4954-4f47-474c45000001")]
+public sealed class UiToggleComponent;
+
+[StableComponentId("4b454952-4555-4949-4e50-5554464c4401")]
+public sealed class UiInputFieldComponent;
+
+[StableComponentId("4b454952-4555-4953-4352-4f4c4c000001")]
+public sealed class UiScrollViewComponent;
+
+[StableComponentId("4b454952-4555-4941-4343-455353000001")]
+public sealed class UiAccessibilityComponent;

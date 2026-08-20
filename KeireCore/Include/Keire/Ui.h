@@ -620,6 +620,8 @@ namespace Keire
         /// controls use this to prevent the containing panel from scrolling in the same frame.
         void CapturePointerWheel();
         [[nodiscard]] bool KeyDown(UiKey key) const;
+        [[nodiscard]] bool KeyPressed(UiKey key) const;
+        [[nodiscard]] std::string TextInput() const;
         [[nodiscard]] bool ControlDown() const;
         [[nodiscard]] bool ShiftDown() const;
         [[nodiscard]] bool AltDown() const;

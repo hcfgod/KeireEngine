@@ -23,6 +23,15 @@
 
 namespace Keire
 {
+    namespace
+    {
+        [[nodiscard]] std::size_t Utf8CodePointCount(const std::string_view value) noexcept
+        {
+            return static_cast<std::size_t>(std::ranges::count_if(
+                value, [](const char byte) { return (static_cast<unsigned char>(byte) & 0xc0U) != 0x80U; }));
+        }
+    } // namespace
+
     class ScenePresentationRuntime::Impl final
     {
       public:
@@ -74,6 +83,14 @@ namespace Keire
                 else
                     type = RuntimeUiElementType::VerticalLayout;
             }
+            if (entity.GetComponent<UiSliderComponent>())
+                type = RuntimeUiElementType::Slider;
+            else if (entity.GetComponent<UiToggleComponent>())
+                type = RuntimeUiElementType::Toggle;
+            else if (entity.GetComponent<UiInputFieldComponent>())
+                type = RuntimeUiElementType::InputField;
+            else if (entity.GetComponent<UiScrollViewComponent>())
+                type = RuntimeUiElementType::ScrollView;
             const auto found = UiNodes.find(entity.Id());
             RuntimeUiElementId node;
             if (found == UiNodes.end() || !UiTree->Exists(found->second))
@@ -141,6 +158,44 @@ namespace Keire
                 style.DisabledBackground = button->DisabledColor();
                 style.CornerRadius = 10.0F;
             }
+            if (const auto slider = entity.GetComponent<UiSliderComponent>())
+            {
+                style.Background = {0.10F, 0.14F, 0.20F, 1.0F};
+                style.HoverBackground = {0.13F, 0.19F, 0.27F, 1.0F};
+                style.PressedBackground = {0.08F, 0.12F, 0.18F, 1.0F};
+                style.DisabledBackground = {0.11F, 0.12F, 0.14F, 0.55F};
+                style.Foreground = {0.12F, 0.72F, 0.96F, 1.0F};
+                style.CornerRadius = 10.0F;
+            }
+            if (const auto toggle = entity.GetComponent<UiToggleComponent>())
+            {
+                style.Background = toggle->IsOn() ? toggle->OnColor() : toggle->OffColor();
+                style.HoverBackground = toggle->IsOn() ? toggle->OnColor() : Color{0.22F, 0.27F, 0.34F, 1.0F};
+                style.PressedBackground = {0.07F, 0.11F, 0.16F, 1.0F};
+                style.DisabledBackground = {0.11F, 0.12F, 0.14F, 0.55F};
+                style.Foreground = {0.94F, 0.98F, 1.0F, 1.0F};
+                style.CornerRadius = 8.0F;
+            }
+            if (entity.GetComponent<UiInputFieldComponent>())
+            {
+                style.Background = {0.035F, 0.055F, 0.085F, 0.96F};
+                style.HoverBackground = {0.055F, 0.09F, 0.13F, 1.0F};
+                style.DisabledBackground = {0.07F, 0.08F, 0.10F, 0.55F};
+                style.Foreground = {0.92F, 0.96F, 1.0F, 1.0F};
+                style.Border = {0.18F, 0.48F, 0.72F, 0.9F};
+                style.BorderWidth = 1.0F;
+                style.CornerRadius = 8.0F;
+                style.Padding = {12.0F, 8.0F, 12.0F, 8.0F};
+                style.VerticalAlignment = RuntimeUiAlignment::Center;
+            }
+            if (const auto scroll = entity.GetComponent<UiScrollViewComponent>())
+            {
+                style.Background = {0.025F, 0.035F, 0.055F, 0.72F};
+                style.Foreground = {0.20F, 0.66F, 0.88F, 0.82F};
+                style.ContentOffset = scroll->Offset();
+                style.ClipChildren = true;
+                style.CornerRadius = 8.0F;
+            }
             if (const auto layout = entity.GetComponent<UiLayoutComponent>())
             {
                 const auto padding = layout->Padding();
@@ -163,6 +218,8 @@ namespace Keire
             }
             if (const auto canvas = entity.GetComponent<CanvasComponent>())
                 style.SortingOrder = canvas->SortingOrder();
+            if (const auto accessibility = entity.GetComponent<UiAccessibilityComponent>())
+                style.NavigationOrder = accessibility->NavigationOrder();
             (void)UiTree->SetStyle(node, style);
 
             RuntimeUiContent content;
@@ -176,11 +233,50 @@ namespace Keire
                 content.Image = image->Sprite();
             if (const auto button = entity.GetComponent<UiButtonComponent>(); button && !button->Action().empty())
                 content.AccessibilityLabel = button->Action();
+            if (const auto input = entity.GetComponent<UiInputFieldComponent>())
+            {
+                content.Text = input->Text().empty() ? input->Placeholder() : input->Text();
+                if (input->ContentType() == UiInputContentType::Password && !input->Text().empty())
+                    content.Text.assign(Utf8CodePointCount(input->Text()), '*');
+                content.AccessibilityLabel = input->Placeholder();
+            }
+            if (const auto accessibility = entity.GetComponent<UiAccessibilityComponent>())
+            {
+                if (!accessibility->Label().empty())
+                    content.AccessibilityLabel = accessibility->Label();
+                content.AccessibilityHint = accessibility->Hint();
+                content.AccessibilityRole = static_cast<std::uint8_t>(accessibility->Role());
+            }
             (void)UiTree->SetContent(node, std::move(content));
+
+            RuntimeUiControlState control;
+            if (const auto slider = entity.GetComponent<UiSliderComponent>())
+            {
+                control.Minimum = slider->Minimum();
+                control.Maximum = slider->Maximum();
+                control.Value = slider->Value();
+                control.Vertical = slider->Direction() == UiSliderDirection::BottomToTop ||
+                                   slider->Direction() == UiSliderDirection::TopToBottom;
+                control.Reversed = slider->Direction() == UiSliderDirection::RightToLeft ||
+                                   slider->Direction() == UiSliderDirection::TopToBottom;
+            }
+            if (const auto toggle = entity.GetComponent<UiToggleComponent>())
+                control.Checked = toggle->IsOn();
+            if (const auto scroll = entity.GetComponent<UiScrollViewComponent>())
+                control.ContentSize = scroll->ContentSize();
+            (void)UiTree->SetControl(node, control);
             (void)UiTree->SetVisible(node, entity.ActiveInHierarchy());
             const auto button = entity.GetComponent<UiButtonComponent>();
-            (void)UiTree->SetEnabled(node, !button || button->Interactable());
-            (void)UiTree->SetInteractable(node, button && button->Interactable());
+            const auto slider = entity.GetComponent<UiSliderComponent>();
+            const auto toggle = entity.GetComponent<UiToggleComponent>();
+            const auto input = entity.GetComponent<UiInputFieldComponent>();
+            const auto scroll = entity.GetComponent<UiScrollViewComponent>();
+            const bool hasControl = button || slider || toggle || input || scroll;
+            const bool interactable = (button && button->Interactable()) || (slider && slider->Interactable()) ||
+                                      (toggle && toggle->Interactable()) || (input && input->Interactable()) ||
+                                      (scroll && scroll->Interactable());
+            (void)UiTree->SetEnabled(node, !hasControl || interactable);
+            (void)UiTree->SetInteractable(node, hasControl && interactable);
         }
 
         void TraverseUi(const Entity& entity, const RuntimeUiElementId parent)
@@ -238,7 +334,172 @@ namespace Keire
                 else
                     ++iterator;
             }
+            if (ActiveSlider && !SeenUi.contains(ActiveSlider))
+                ActiveSlider = {};
             UiTree->Layout(viewportWidth, viewportHeight, safeArea, settings);
+        }
+
+        [[nodiscard]] Entity UiEntity(const RuntimeUiElementId node) const
+        {
+            const auto found = NodeEntities.find(node.Value());
+            return found != NodeEntities.end() && ActiveScene ? ActiveScene->FindEntity(found->second) : Entity{};
+        }
+
+        template <typename ComponentType>
+        [[nodiscard]] std::pair<Entity, RuntimeUiElementId> FindUiControl(RuntimeUiElementId node) const
+        {
+            while (node)
+            {
+                const auto entity = UiEntity(node);
+                if (entity && entity.GetComponent<ComponentType>())
+                    return {entity, node};
+                const auto state = UiTree->State(node);
+                node = state ? state->Parent : RuntimeUiElementId{};
+            }
+            return {};
+        }
+
+        void QueueUiEvent(const EntityId entity, const RuntimeUiEventType type)
+        {
+            const auto found = UiNodes.find(entity);
+            if (found != UiNodes.end())
+                DeferredUiEvents.push_back({.Type = type, .Target = found->second});
+        }
+
+        void DrainUiEvents()
+        {
+            RuntimeUiEvent event;
+            while (UiTree->PollEvent(event))
+            {
+                if (event.Type == RuntimeUiEventType::Click)
+                {
+                    const auto entity = UiEntity(event.Target);
+                    if (const auto toggle =
+                            entity ? entity.GetComponent<UiToggleComponent>() : Ref<UiToggleComponent>{};
+                        toggle && toggle->Interactable())
+                    {
+                        toggle->SetIsOn(!toggle->IsOn());
+                        DeferredUiEvents.push_back({.Type = RuntimeUiEventType::ValueChanged,
+                                                    .Target = event.Target,
+                                                    .PointerX = event.PointerX,
+                                                    .PointerY = event.PointerY,
+                                                    .Button = event.Button});
+                    }
+                }
+                DeferredUiEvents.push_back(std::move(event));
+            }
+        }
+
+        void UpdateSlider(const float x, const float y)
+        {
+            if (!ActiveSlider || !ActiveScene)
+                return;
+            const auto entity = ActiveScene->FindEntity(ActiveSlider);
+            const auto slider = entity ? entity.GetComponent<UiSliderComponent>() : Ref<UiSliderComponent>{};
+            const auto found = UiNodes.find(ActiveSlider);
+            const auto state = found != UiNodes.end() ? UiTree->State(found->second) : std::nullopt;
+            if (!slider || !slider->Interactable() || !state || state->Rect.Empty())
+                return;
+            float normalized = 0.0F;
+            switch (slider->Direction())
+            {
+            case UiSliderDirection::LeftToRight:
+                normalized = (x - state->Rect.X) / state->Rect.Width;
+                break;
+            case UiSliderDirection::RightToLeft:
+                normalized = 1.0F - (x - state->Rect.X) / state->Rect.Width;
+                break;
+            case UiSliderDirection::BottomToTop:
+                normalized = 1.0F - (y - state->Rect.Y) / state->Rect.Height;
+                break;
+            case UiSliderDirection::TopToBottom:
+                normalized = (y - state->Rect.Y) / state->Rect.Height;
+                break;
+            }
+            const float previous = slider->Value();
+            slider->SetValue(slider->Minimum() +
+                             std::clamp(normalized, 0.0F, 1.0F) * (slider->Maximum() - slider->Minimum()));
+            if (slider->Value() != previous)
+                QueueUiEvent(entity.Id(), RuntimeUiEventType::ValueChanged);
+        }
+
+        void ScrollAt(const float x, const float y, const float horizontal, const float vertical)
+        {
+            const auto hit = UiTree->HitTest(x, y);
+            if (!hit)
+                return;
+            const auto [entity, node] = FindUiControl<UiScrollViewComponent>(*hit);
+            const auto scroll = entity ? entity.GetComponent<UiScrollViewComponent>() : Ref<UiScrollViewComponent>{};
+            const auto state = UiTree->State(node);
+            if (!scroll || !scroll->Interactable() || !state)
+                return;
+            const float scale = std::max(UiTree->Statistics().Scale, 0.0001F);
+            const auto content = scroll->ContentSize();
+            const Vector2 maximum{std::max(0.0F, content.X - state->Rect.Width / scale),
+                                  std::max(0.0F, content.Y - state->Rect.Height / scale)};
+            const auto previous = scroll->Offset();
+            const Vector2 candidate{
+                scroll->Horizontal() ? std::clamp(previous.X - horizontal * scroll->Sensitivity(), 0.0F, maximum.X)
+                                     : previous.X,
+                scroll->Vertical() ? std::clamp(previous.Y - vertical * scroll->Sensitivity(), 0.0F, maximum.Y)
+                                   : previous.Y};
+            if (candidate == previous)
+                return;
+            scroll->SetOffset(candidate);
+            QueueUiEvent(entity.Id(), RuntimeUiEventType::ValueChanged);
+        }
+
+        void AppendText(const std::string_view text)
+        {
+            const auto focus = UiTree->Focus();
+            const auto entity = UiEntity(focus);
+            const auto input = entity ? entity.GetComponent<UiInputFieldComponent>() : Ref<UiInputFieldComponent>{};
+            if (!input || !input->Interactable() || text.empty())
+                return;
+            auto candidate = input->Text();
+            if (candidate.size() + text.size() > input->CharacterLimit())
+                return;
+            candidate.append(text);
+            try
+            {
+                input->SetText(std::move(candidate));
+                QueueUiEvent(entity.Id(), RuntimeUiEventType::TextChanged);
+            }
+            catch (const std::invalid_argument&)
+            {
+            }
+        }
+
+        [[nodiscard]] bool InputKey(const RuntimeUiKey key)
+        {
+            const auto focus = UiTree->Focus();
+            const auto entity = UiEntity(focus);
+            const auto input = entity ? entity.GetComponent<UiInputFieldComponent>() : Ref<UiInputFieldComponent>{};
+            if (!input || !input->Interactable())
+                return false;
+            if (key == RuntimeUiKey::Enter)
+            {
+                if (input->Multiline())
+                    AppendText("\n");
+                else
+                    QueueUiEvent(entity.Id(), RuntimeUiEventType::Submit);
+                return true;
+            }
+            if (key == RuntimeUiKey::Escape)
+            {
+                QueueUiEvent(entity.Id(), RuntimeUiEventType::Cancel);
+                return true;
+            }
+            if (key != RuntimeUiKey::Backspace || input->Text().empty())
+                return true;
+            auto candidate = input->Text();
+            std::size_t start = candidate.size() - 1;
+            while (start > 0 && (static_cast<unsigned char>(candidate[start]) & 0xc0U) == 0x80U)
+                --start;
+            candidate.erase(start);
+            input->SetText(std::move(candidate));
+            QueueUiEvent(entity.Id(), RuntimeUiEventType::TextChanged);
+            return true;
         }
 
         [[nodiscard]] AudioPlaybackRequest PlaybackRequest(const Entity& entity, const AudioSourceComponent& source,
@@ -474,7 +735,7 @@ namespace Keire
                 throw std::invalid_argument("Scene presentation UI focus checkpoint is stale.");
             for (const auto& event : checkpoint.PendingUiEvents)
             {
-                if (!UiNodes.contains(event.Target) || event.Type > RuntimeUiEventType::Cancel ||
+                if (!UiNodes.contains(event.Target) || event.Type > RuntimeUiEventType::TextChanged ||
                     event.Button > RuntimeUiPointerButton::Middle || !std::isfinite(event.PointerX) ||
                     !std::isfinite(event.PointerY))
                 {
@@ -757,6 +1018,7 @@ namespace Keire
         std::map<std::uint64_t, EntityId> NodeEntities;
         std::set<EntityId> SeenUi;
         std::deque<RuntimeUiEvent> DeferredUiEvents;
+        EntityId ActiveSlider;
         std::map<EntityId, AudioSourceState> AudioSources;
         std::map<AssetId, AudioMixerState> AudioMixers;
         std::set<EntityId> SeenAudio;
@@ -828,6 +1090,7 @@ namespace Keire
         m_Impl->NodeEntities.clear();
         m_Impl->SeenUi.clear();
         m_Impl->DeferredUiEvents.clear();
+        m_Impl->ActiveSlider = {};
         m_Impl->SeenAudio.clear();
         m_Impl->SeenMixers.clear();
         m_Impl->UiTree->Clear();
@@ -941,50 +1204,110 @@ namespace Keire
 
     bool ScenePresentationRuntime::ConsumeClick(const EntityId entity)
     {
+        return ConsumeUiEvent(entity, RuntimeUiEventType::Click);
+    }
+
+    bool ScenePresentationRuntime::ConsumeUiEvent(const EntityId entity, const RuntimeUiEventType type)
+    {
         const auto found = m_Impl->UiNodes.find(entity);
         if (found == m_Impl->UiNodes.end())
             return false;
+        m_Impl->DrainUiEvents();
         const auto target = found->second;
-        const auto deferred =
-            std::ranges::find_if(m_Impl->DeferredUiEvents, [target](const RuntimeUiEvent& event)
-                                 { return event.Type == RuntimeUiEventType::Click && event.Target == target; });
+        const auto deferred = std::ranges::find_if(m_Impl->DeferredUiEvents, [target, type](const RuntimeUiEvent& event)
+                                                   { return event.Type == type && event.Target == target; });
         if (deferred != m_Impl->DeferredUiEvents.end())
         {
             m_Impl->DeferredUiEvents.erase(deferred);
             return true;
         }
-        RuntimeUiEvent event;
-        while (m_Impl->UiTree->PollEvent(event))
-        {
-            if (event.Type == RuntimeUiEventType::Click && event.Target == target)
-                return true;
-            m_Impl->DeferredUiEvents.push_back(event);
-        }
         return false;
     }
 
-    void ScenePresentationRuntime::PointerMove(const float x, const float y) { m_Impl->UiTree->PointerMove(x, y); }
+    void ScenePresentationRuntime::PointerMove(const float x, const float y)
+    {
+        m_Impl->UiTree->PointerMove(x, y);
+        m_Impl->UpdateSlider(x, y);
+        m_Impl->DrainUiEvents();
+    }
 
     void ScenePresentationRuntime::PointerButton(const float x, const float y, const RuntimeUiPointerButton button,
                                                  const bool pressed)
     {
         m_Impl->UiTree->PointerButton(x, y, button, pressed);
+        if (button == RuntimeUiPointerButton::Primary)
+        {
+            if (pressed)
+            {
+                const auto hit = m_Impl->UiTree->HitTest(x, y);
+                if (hit)
+                {
+                    const auto slider = m_Impl->FindUiControl<UiSliderComponent>(*hit);
+                    m_Impl->ActiveSlider = slider.first ? slider.first.Id() : EntityId{};
+                }
+            }
+            m_Impl->UpdateSlider(x, y);
+            if (!pressed)
+                m_Impl->ActiveSlider = {};
+        }
+        m_Impl->DrainUiEvents();
+    }
+
+    void ScenePresentationRuntime::PointerWheel(const float x, const float y, const float horizontal,
+                                                const float vertical)
+    {
+        if (!std::isfinite(horizontal) || !std::isfinite(vertical))
+            throw std::invalid_argument("Runtime UI pointer wheel must be finite.");
+        m_Impl->ScrollAt(x, y, horizontal, vertical);
+    }
+
+    void ScenePresentationRuntime::TextInput(const std::string_view text) { m_Impl->AppendText(text); }
+
+    bool ScenePresentationRuntime::KeyInput(const RuntimeUiKey key) { return m_Impl->InputKey(key); }
+
+    bool ScenePresentationRuntime::TextInputFocused() const noexcept
+    {
+        try
+        {
+            const auto entity = m_Impl->UiEntity(m_Impl->UiTree->Focus());
+            const auto input = entity ? entity.GetComponent<UiInputFieldComponent>() : Ref<UiInputFieldComponent>{};
+            return input && input->Interactable();
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    EntityId ScenePresentationRuntime::FocusedUiEntity() const noexcept
+    {
+        try
+        {
+            const auto entity = m_Impl->UiEntity(m_Impl->UiTree->Focus());
+            return entity ? entity.Id() : EntityId{};
+        }
+        catch (...)
+        {
+            return {};
+        }
     }
 
     void ScenePresentationRuntime::Navigate(const RuntimeUiNavigation navigation)
     {
         m_Impl->UiTree->Navigate(navigation);
+        m_Impl->DrainUiEvents();
     }
 
     bool ScenePresentationRuntime::PollUiEvent(RuntimeUiEvent& event)
     {
+        m_Impl->DrainUiEvents();
         if (!m_Impl->DeferredUiEvents.empty())
         {
             event = m_Impl->DeferredUiEvents.front();
             m_Impl->DeferredUiEvents.pop_front();
             return true;
         }
-        return m_Impl->UiTree->PollEvent(event);
+        return false;
     }
 
     ScenePresentationCheckpoint ScenePresentationRuntime::CaptureCheckpoint() const

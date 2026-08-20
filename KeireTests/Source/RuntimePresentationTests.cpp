@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <stdexcept>
 #include <string_view>
 #include <thread>
@@ -83,6 +84,36 @@ TEST_CASE("retained runtime UI lays out, draws, hit-tests, and emits clicks")
     while (tree->PollEvent(event))
         clicked = clicked || (event.Type == Keire::RuntimeUiEventType::Click && event.Target == button);
     CHECK(clicked);
+}
+
+TEST_CASE("retained runtime UI navigation honors explicit order and starts at the nearest endpoint")
+{
+    auto tree = Keire::CreateRef<Keire::RuntimeUiTree>();
+    const auto automatic = tree->Create(Keire::RuntimeUiElementType::Button);
+    const auto second = tree->Create(Keire::RuntimeUiElementType::Button);
+    const auto first = tree->Create(Keire::RuntimeUiElementType::Button);
+
+    Keire::RuntimeUiStyle secondStyle;
+    secondStyle.NavigationOrder = 20;
+    REQUIRE(tree->SetStyle(second, secondStyle));
+    Keire::RuntimeUiStyle firstStyle;
+    firstStyle.NavigationOrder = 10;
+    REQUIRE(tree->SetStyle(first, firstStyle));
+
+    tree->Navigate(Keire::RuntimeUiNavigation::Next);
+    REQUIRE(tree->State(first));
+    CHECK(tree->State(first)->Focused);
+    tree->Navigate(Keire::RuntimeUiNavigation::Next);
+    REQUIRE(tree->State(second));
+    CHECK(tree->State(second)->Focused);
+    tree->Navigate(Keire::RuntimeUiNavigation::Next);
+    REQUIRE(tree->State(automatic));
+    CHECK(tree->State(automatic)->Focused);
+
+    REQUIRE(tree->SetFocus({}));
+    tree->Navigate(Keire::RuntimeUiNavigation::Previous);
+    REQUIRE(tree->State(automatic));
+    CHECK(tree->State(automatic)->Focused);
 }
 
 TEST_CASE("retained runtime UI resolves anchors pivots size deltas and local scale against its parent")
@@ -199,6 +230,107 @@ TEST_CASE("retained buttons render their hover pressed and disabled visual state
     REQUIRE(tree->SetEnabled(button, false));
     tree->Layout(320.0F, 180.0F, {}, settings);
     CHECK(tree->DrawCommands().front().ColorValue.Red == doctest::Approx(style.DisabledBackground.Red));
+}
+
+TEST_CASE("scene runtime UI controls synchronize native values and emit typed interaction events")
+{
+    auto assets = Keire::CreateRef<Keire::AssetSystem>(Keire::AssetSystemSpecification{});
+    auto presentation = Keire::CreateRef<Keire::ScenePresentationRuntime>(assets, Keire::Ref<Keire::AudioSystem>{});
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                Keire::SceneAsset::EmptyDefinition("Runtime UI controls"));
+    auto canvas = scene->CreateEntity("Canvas");
+    const auto canvasComponent = canvas.AddComponent<Keire::CanvasComponent>();
+    REQUIRE(canvasComponent);
+    canvasComponent->SetScaleMode(Keire::CanvasScaleMode::ConstantPixels);
+
+    const auto control = [&](const std::string_view name, const Keire::Vector2 position, const Keire::Vector2 size)
+    {
+        auto entity = scene->CreateEntity(std::string(name), canvas);
+        const auto rect = entity.AddComponent<Keire::RectTransformComponent>();
+        if (!rect)
+            throw std::runtime_error("Runtime UI test control has no Rect Transform.");
+        rect->SetAnchorMinimum({});
+        rect->SetAnchorMaximum({});
+        rect->SetPivot({});
+        rect->SetAnchoredPosition(position);
+        rect->SetSizeDelta(size);
+        return entity;
+    };
+
+    auto sliderEntity = control("Slider", {10.0F, 10.0F}, {100.0F, 20.0F});
+    const auto slider = sliderEntity.AddComponent<Keire::UiSliderComponent>();
+    REQUIRE(slider);
+    slider->SetRange(0.0F, 100.0F);
+    auto toggleEntity = control("Toggle", {10.0F, 45.0F}, {30.0F, 30.0F});
+    const auto toggle = toggleEntity.AddComponent<Keire::UiToggleComponent>();
+    REQUIRE(toggle);
+    auto inputEntity = control("Input", {10.0F, 90.0F}, {120.0F, 30.0F});
+    const auto input = inputEntity.AddComponent<Keire::UiInputFieldComponent>();
+    REQUIRE(input);
+    auto scrollEntity = control("Scroll", {160.0F, 10.0F}, {100.0F, 100.0F});
+    const auto scroll = scrollEntity.AddComponent<Keire::UiScrollViewComponent>();
+    REQUIRE(scroll);
+    scroll->SetContentSize({100.0F, 300.0F});
+
+    presentation->Synchronize(scene, 320.0F, 180.0F, true);
+    presentation->PointerButton(85.0F, 20.0F, Keire::RuntimeUiPointerButton::Primary, true);
+    presentation->PointerButton(85.0F, 20.0F, Keire::RuntimeUiPointerButton::Primary, false);
+    CHECK(slider->Value() == doctest::Approx(75.0F));
+    CHECK(presentation->ConsumeUiEvent(sliderEntity.Id(), Keire::RuntimeUiEventType::ValueChanged));
+
+    presentation->PointerButton(20.0F, 55.0F, Keire::RuntimeUiPointerButton::Primary, true);
+    presentation->PointerButton(20.0F, 55.0F, Keire::RuntimeUiPointerButton::Primary, false);
+    CHECK(toggle->IsOn());
+    CHECK(presentation->ConsumeUiEvent(toggleEntity.Id(), Keire::RuntimeUiEventType::ValueChanged));
+
+    presentation->PointerButton(20.0F, 100.0F, Keire::RuntimeUiPointerButton::Primary, true);
+    presentation->PointerButton(20.0F, 100.0F, Keire::RuntimeUiPointerButton::Primary, false);
+    CHECK(presentation->TextInputFocused());
+    CHECK(presentation->FocusedUiEntity() == inputEntity.Id());
+    presentation->TextInput("Astra");
+    CHECK(input->Text() == "Astra");
+    CHECK(presentation->ConsumeUiEvent(inputEntity.Id(), Keire::RuntimeUiEventType::TextChanged));
+    CHECK(presentation->KeyInput(Keire::RuntimeUiKey::Enter));
+    CHECK(presentation->ConsumeUiEvent(inputEntity.Id(), Keire::RuntimeUiEventType::Submit));
+
+    presentation->PointerWheel(180.0F, 30.0F, 0.0F, -1.0F);
+    CHECK(scroll->Offset().Y == doctest::Approx(scroll->Sensitivity()));
+    CHECK(presentation->ConsumeUiEvent(scrollEntity.Id(), Keire::RuntimeUiEventType::ValueChanged));
+
+    presentation->Clear();
+    scene->Close();
+    assets->Close();
+}
+
+TEST_CASE("runtime UI control components reject invalid state without partial mutation and round-trip properties")
+{
+    auto slider = Keire::CreateRef<Keire::UiSliderComponent>();
+    slider->SetStep(0.5F);
+    CHECK_THROWS_AS(slider->SetRange(0.0F, 0.25F), std::invalid_argument);
+    CHECK(slider->Minimum() == 0.0F);
+    CHECK(slider->Maximum() == 1.0F);
+    CHECK(slider->Step() == 0.5F);
+    CHECK_THROWS_AS(slider->SetValue(std::numeric_limits<float>::quiet_NaN()), std::invalid_argument);
+
+    auto input = Keire::CreateRef<Keire::UiInputFieldComponent>();
+    input->SetContentType(Keire::UiInputContentType::Integer);
+    input->SetText("-42");
+    CHECK_THROWS_AS(input->SetText("4.2"), std::invalid_argument);
+    CHECK(input->Text() == "-42");
+    CHECK_THROWS_AS(input->SetCharacterLimit(2), std::invalid_argument);
+
+    const auto registration = Keire::CreateUiInputFieldComponentRegistration();
+    const auto encoded = registration.Serialize(*input);
+    const auto decoded = registration.Factory();
+    REQUIRE(decoded);
+    CHECK_NOTHROW(registration.Deserialize(*decoded, encoded, registration.SchemaVersion));
+    const auto& decodedInput = dynamic_cast<const Keire::UiInputFieldComponent&>(*decoded);
+    CHECK(decodedInput.Text() == "-42");
+    CHECK(decodedInput.ContentType() == Keire::UiInputContentType::Integer);
+
+    auto scroll = Keire::CreateRef<Keire::UiScrollViewComponent>();
+    CHECK_THROWS_AS(scroll->SetOffset({-1.0F, 0.0F}), std::invalid_argument);
+    CHECK(scroll->Offset() == Keire::Vector2{});
 }
 
 TEST_CASE("audio clip assets round-trip deterministic PCM payloads")

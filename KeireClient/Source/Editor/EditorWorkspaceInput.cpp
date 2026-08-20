@@ -11,6 +11,8 @@
 #include "Keire/ECS/Components/RuntimeUiComponents.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/PlatformDirectories.h"
+#include "KeireInternal/Scripting/ManagedRuntimeUiServices.h"
+#include "KeireInternal/WindowInternal.h"
 
 #include <algorithm>
 #include <cmath>
@@ -499,6 +501,81 @@ bool EditorWorkspaceLayer::ConsumeManagedUiClick(const Keire::AssetId entity) no
     }
 }
 
+std::optional<float> EditorWorkspaceLayer::ReadManagedUiScalar(const Keire::AssetId entity,
+                                                               const Keire::ManagedUiScalarProperty property) noexcept
+{
+    const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+    return Keire::Detail::ReadManagedUiScalar(scene, entity, property);
+}
+
+bool EditorWorkspaceLayer::SetManagedUiScalar(const Keire::AssetId entity,
+                                              const Keire::ManagedUiScalarProperty property, const float value) noexcept
+{
+    const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+    return Keire::Detail::SetManagedUiScalar(scene, entity, property, value);
+}
+
+std::optional<bool> EditorWorkspaceLayer::ReadManagedUiFlag(const Keire::AssetId entity,
+                                                            const Keire::ManagedUiFlagProperty property) noexcept
+{
+    const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+    const auto session = m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+    const auto presentation = session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{};
+    return Keire::Detail::ReadManagedUiFlag(scene, presentation, entity, property);
+}
+
+bool EditorWorkspaceLayer::SetManagedUiFlag(const Keire::AssetId entity, const Keire::ManagedUiFlagProperty property,
+                                            const bool value) noexcept
+{
+    const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+    const auto session = m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+    const auto presentation = session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{};
+    return Keire::Detail::SetManagedUiFlag(scene, presentation, entity, property, value);
+}
+
+std::optional<Keire::Vector2>
+EditorWorkspaceLayer::ReadManagedUiVector(const Keire::AssetId entity,
+                                          const Keire::ManagedUiVectorProperty property) noexcept
+{
+    const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+    return Keire::Detail::ReadManagedUiVector(scene, entity, property);
+}
+
+bool EditorWorkspaceLayer::SetManagedUiVector(const Keire::AssetId entity,
+                                              const Keire::ManagedUiVectorProperty property,
+                                              const Keire::Vector2 value) noexcept
+{
+    const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+    return Keire::Detail::SetManagedUiVector(scene, entity, property, value);
+}
+
+std::optional<std::string> EditorWorkspaceLayer::ReadManagedUiInputText(const Keire::AssetId entity) noexcept
+{
+    const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+    return Keire::Detail::ReadManagedUiInputText(scene, entity);
+}
+
+bool EditorWorkspaceLayer::SetManagedUiInputText(const Keire::AssetId entity, const std::string_view text) noexcept
+{
+    const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+    return Keire::Detail::SetManagedUiInputText(scene, entity, text);
+}
+
+bool EditorWorkspaceLayer::ConsumeManagedUiEvent(const Keire::AssetId entity,
+                                                 const Keire::RuntimeUiEventType type) noexcept
+{
+    const auto session = m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+    const auto presentation = session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{};
+    return Keire::Detail::ConsumeManagedUiEvent(presentation, entity, type);
+}
+
+bool EditorWorkspaceLayer::FocusManagedUi(const Keire::AssetId entity) noexcept
+{
+    const auto session = m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+    const auto presentation = session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{};
+    return Keire::Detail::FocusManagedUi(presentation, entity);
+}
+
 std::optional<Keire::ManagedRaycastHit>
 EditorWorkspaceLayer::RaycastManaged(const Keire::ManagedRaycastQuery& query) noexcept
 {
@@ -570,6 +647,17 @@ void EditorWorkspaceLayer::SetGameViewportInputActive(const bool active) noexcep
     if (m_GameViewportInputActive == active)
         return;
     m_GameViewportInputActive = active;
+    if (!active)
+    {
+        try
+        {
+            if (const auto windows = Owner().Windows(); windows && Owner().MainWindow())
+                (void)Keire::WindowSystemInternalAccess::SetTextInput(*windows, Owner().MainWindow()->Id(), false);
+        }
+        catch (...)
+        {
+        }
+    }
     ApplyManagedCursorMode();
 }
 

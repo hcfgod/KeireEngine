@@ -1,3 +1,4 @@
+#include "EditorRuntimeUiInput.h"
 #include "KeireClient/EditorWorkspaceLayer.h"
 
 #include "KeireClient/Editor/AssetBrowserPanel.h"
@@ -1369,6 +1370,13 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
                     presentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Secondary, false);
                 if (pointer.MiddleReleased)
                     presentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Middle, false);
+                if (imageRect.Contains(pointer.Position) && pointer.Wheel != 0.0F)
+                {
+                    presentation->PointerWheel(localX, localY, 0.0F, pointer.Wheel);
+                    ui.CapturePointerWheel();
+                }
+                if (m_GameViewportInputActive)
+                    KeireEditor::RouteRuntimeUiKeyboard(ui, presentation, Owner().Windows(), mainWindow);
             }
         }
         if (playActive)

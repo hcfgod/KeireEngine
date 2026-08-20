@@ -390,6 +390,11 @@ namespace Keire
         result->Register(CreateUiImageComponentRegistration());
         result->Register(CreateUiButtonComponentRegistration());
         result->Register(CreateUiLayoutComponentRegistration());
+        result->Register(CreateUiSliderComponentRegistration());
+        result->Register(CreateUiToggleComponentRegistration());
+        result->Register(CreateUiInputFieldComponentRegistration());
+        result->Register(CreateUiScrollViewComponentRegistration());
+        result->Register(CreateUiAccessibilityComponentRegistration());
         return result;
     }
 } // namespace Keire

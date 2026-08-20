@@ -20,6 +20,7 @@ namespace Keire
 {
     class JobSystem;
     struct VfxParameterOverride;
+    enum class RuntimeUiEventType : std::uint8_t;
 
     enum class ManagedLogLevel : std::uint8_t
     {
@@ -124,6 +125,26 @@ namespace Keire
         bool VSync = true;
     };
 
+    enum class ManagedUiScalarProperty : std::uint8_t
+    {
+        Minimum,
+        Maximum,
+        Value
+    };
+
+    enum class ManagedUiFlagProperty : std::uint8_t
+    {
+        Interactable,
+        Checked,
+        Focused
+    };
+
+    enum class ManagedUiVectorProperty : std::uint8_t
+    {
+        ScrollOffset,
+        ContentSize
+    };
+
     class KEIRE_API IScriptRuntimeServices
     {
       public:
@@ -184,6 +205,34 @@ namespace Keire
         }
         [[nodiscard]] virtual bool SetManagedUiText(AssetId, std::string_view) noexcept { return false; }
         [[nodiscard]] virtual bool ConsumeManagedUiClick(AssetId) noexcept { return false; }
+        [[nodiscard]] virtual std::optional<float> ReadManagedUiScalar(AssetId, ManagedUiScalarProperty) noexcept
+        {
+            return std::nullopt;
+        }
+        [[nodiscard]] virtual bool SetManagedUiScalar(AssetId, ManagedUiScalarProperty, float) noexcept
+        {
+            return false;
+        }
+        [[nodiscard]] virtual std::optional<bool> ReadManagedUiFlag(AssetId, ManagedUiFlagProperty) noexcept
+        {
+            return std::nullopt;
+        }
+        [[nodiscard]] virtual bool SetManagedUiFlag(AssetId, ManagedUiFlagProperty, bool) noexcept { return false; }
+        [[nodiscard]] virtual std::optional<Vector2> ReadManagedUiVector(AssetId, ManagedUiVectorProperty) noexcept
+        {
+            return std::nullopt;
+        }
+        [[nodiscard]] virtual bool SetManagedUiVector(AssetId, ManagedUiVectorProperty, Vector2) noexcept
+        {
+            return false;
+        }
+        [[nodiscard]] virtual std::optional<std::string> ReadManagedUiInputText(AssetId) noexcept
+        {
+            return std::nullopt;
+        }
+        [[nodiscard]] virtual bool SetManagedUiInputText(AssetId, std::string_view) noexcept { return false; }
+        [[nodiscard]] virtual bool ConsumeManagedUiEvent(AssetId, RuntimeUiEventType) noexcept { return false; }
+        [[nodiscard]] virtual bool FocusManagedUi(AssetId) noexcept { return false; }
     };
 
     enum class ScriptMode : std::uint8_t

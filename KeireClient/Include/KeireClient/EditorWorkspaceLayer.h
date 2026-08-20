@@ -527,6 +527,22 @@ class EditorWorkspaceLayer final : public Keire::Layer,
                                               const Keire::VfxParameterOverride& value) noexcept override;
     [[nodiscard]] bool SetManagedUiText(Keire::AssetId entity, std::string_view text) noexcept override;
     [[nodiscard]] bool ConsumeManagedUiClick(Keire::AssetId entity) noexcept override;
+    [[nodiscard]] std::optional<float> ReadManagedUiScalar(Keire::AssetId entity,
+                                                           Keire::ManagedUiScalarProperty property) noexcept override;
+    [[nodiscard]] bool SetManagedUiScalar(Keire::AssetId entity, Keire::ManagedUiScalarProperty property,
+                                          float value) noexcept override;
+    [[nodiscard]] std::optional<bool> ReadManagedUiFlag(Keire::AssetId entity,
+                                                        Keire::ManagedUiFlagProperty property) noexcept override;
+    [[nodiscard]] bool SetManagedUiFlag(Keire::AssetId entity, Keire::ManagedUiFlagProperty property,
+                                        bool value) noexcept override;
+    [[nodiscard]] std::optional<Keire::Vector2>
+    ReadManagedUiVector(Keire::AssetId entity, Keire::ManagedUiVectorProperty property) noexcept override;
+    [[nodiscard]] bool SetManagedUiVector(Keire::AssetId entity, Keire::ManagedUiVectorProperty property,
+                                          Keire::Vector2 value) noexcept override;
+    [[nodiscard]] std::optional<std::string> ReadManagedUiInputText(Keire::AssetId entity) noexcept override;
+    [[nodiscard]] bool SetManagedUiInputText(Keire::AssetId entity, std::string_view text) noexcept override;
+    [[nodiscard]] bool ConsumeManagedUiEvent(Keire::AssetId entity, Keire::RuntimeUiEventType type) noexcept override;
+    [[nodiscard]] bool FocusManagedUi(Keire::AssetId entity) noexcept override;
     void AddConsoleMessage(std::string category, std::string message, Keire::UiColor color,
                            Keire::LogLevel level = Keire::LogLevel::Info) noexcept;
     void ReportError(std::string category, std::string message) noexcept;

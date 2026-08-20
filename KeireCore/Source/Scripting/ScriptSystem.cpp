@@ -19,6 +19,7 @@
 #include "KeireInternal/Scripting/ManagedReflection.h"
 #include "KeireInternal/Scripting/ManagedRuntimeFoundation.h"
 #include "KeireInternal/Scripting/ManagedRuntimeInterop.h"
+#include "KeireInternal/Scripting/ManagedRuntimeUi.h"
 #include "KeireInternal/Scripting/ManagedSdk.h"
 #if defined(_MSC_VER)
 #pragma warning(push)
@@ -118,31 +119,29 @@ namespace Keire
             std::uint64_t Generation = 0;
         };
 
-        static constexpr std::uint32_t FixedUpdateCallback = 1U << 0;
-        static constexpr std::uint32_t UpdateCallback = 1U << 1;
+        static constexpr std::uint32_t FixedUpdateCallback = 1U << 0, UpdateCallback = 1U << 1;
         static constexpr std::uint32_t LateUpdateCallback = 1U << 2;
         static constexpr std::uint32_t AnimatorIkCallback = 1U << 3;
         static constexpr std::uint32_t AnimationEventCallback = 1U << 4;
         static constexpr std::uint32_t ProceduralMotionEventCallback = 1U << 5;
-
         class RuntimeScope final
         {
           public:
             explicit RuntimeScope(Impl& runtime) noexcept
-                : m_Previous(CurrentRuntime), m_Foundation(runtime.Specification.RuntimeServices)
+                : m_Previous(CurrentRuntime), m_Foundation(runtime.Specification.RuntimeServices),
+                  m_Ui(runtime.Specification.RuntimeServices)
             {
                 CurrentRuntime = &runtime;
             }
             ~RuntimeScope() { CurrentRuntime = m_Previous; }
-
             RuntimeScope(const RuntimeScope&) = delete;
             RuntimeScope& operator=(const RuntimeScope&) = delete;
 
           private:
             Impl* m_Previous;
             Detail::ManagedRuntimeFoundationScope m_Foundation;
+            Detail::ManagedRuntimeUiScope m_Ui;
         };
-
         explicit Impl(ScriptSystemSpecification value, Ref<JobSystem> jobs)
             : Specification(std::move(value)), Owner(std::this_thread::get_id()),
               Lifetime(std::make_shared<Impl*>(this)), Scheduler(std::move(jobs))
@@ -3682,6 +3681,7 @@ namespace Keire
                 managedApi.AddInternalCall("Keire.NativeRuntime", "ConsumeUiClickIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeConsumeUiClick));
                 Detail::RegisterManagedRuntimeFoundation(managedApi);
+                Detail::RegisterManagedRuntimeUi(managedApi);
                 managedApi.UploadInternalCalls();
                 behaviourType = &managedApi.GetLocalType("Keire.Behaviour");
                 if (!*behaviourType)

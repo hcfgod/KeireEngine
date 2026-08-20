@@ -50,6 +50,34 @@ namespace Keire
         Grid
     };
 
+    enum class UiSliderDirection : std::uint8_t
+    {
+        LeftToRight,
+        RightToLeft,
+        BottomToTop,
+        TopToBottom
+    };
+
+    enum class UiInputContentType : std::uint8_t
+    {
+        Standard,
+        Integer,
+        Decimal,
+        Password
+    };
+
+    enum class UiAccessibilityRole : std::uint8_t
+    {
+        Automatic,
+        Button,
+        Slider,
+        Toggle,
+        TextBox,
+        ScrollView,
+        Text,
+        Image
+    };
+
     class KEIRE_API CanvasComponent final : public Component
     {
       public:
@@ -284,10 +312,175 @@ namespace Keire
         bool m_ForceExpandHeight = false;
     };
 
+    class KEIRE_API UiSliderComponent final : public Component
+    {
+      public:
+        UiSliderComponent();
+
+        [[nodiscard]] static constexpr ComponentTypeId StaticType() noexcept
+        {
+            return ComponentTypeId(AssetId(0x4b45495245554953ULL, 0x4c49444552000001ULL));
+        }
+
+        [[nodiscard]] float Minimum() const noexcept { return m_Minimum; }
+        [[nodiscard]] float Maximum() const noexcept { return m_Maximum; }
+        [[nodiscard]] float Value() const noexcept { return m_Value; }
+        [[nodiscard]] float Step() const noexcept { return m_Step; }
+        [[nodiscard]] UiSliderDirection Direction() const noexcept { return m_Direction; }
+        [[nodiscard]] bool WholeNumbers() const noexcept { return m_WholeNumbers; }
+        [[nodiscard]] bool Interactable() const noexcept { return m_Interactable; }
+
+        void SetRange(float minimum, float maximum);
+        void SetValue(float value);
+        void SetStep(float value);
+        void SetDirection(UiSliderDirection value);
+        void SetWholeNumbers(bool value);
+        void SetInteractable(bool value);
+
+      private:
+        friend ComponentRegistration CreateUiSliderComponentRegistration();
+        float m_Minimum = 0.0F;
+        float m_Maximum = 1.0F;
+        float m_Value = 0.5F;
+        float m_Step = 0.0F;
+        UiSliderDirection m_Direction = UiSliderDirection::LeftToRight;
+        bool m_WholeNumbers = false;
+        bool m_Interactable = true;
+    };
+
+    class KEIRE_API UiToggleComponent final : public Component
+    {
+      public:
+        UiToggleComponent();
+
+        [[nodiscard]] static constexpr ComponentTypeId StaticType() noexcept
+        {
+            return ComponentTypeId(AssetId(0x4b45495245554954ULL, 0x4f47474c45000001ULL));
+        }
+
+        [[nodiscard]] bool IsOn() const noexcept { return m_IsOn; }
+        [[nodiscard]] bool Interactable() const noexcept { return m_Interactable; }
+        [[nodiscard]] Color OnColor() const noexcept { return m_OnColor; }
+        [[nodiscard]] Color OffColor() const noexcept { return m_OffColor; }
+
+        void SetIsOn(bool value);
+        void SetInteractable(bool value);
+        void SetOnColor(Color value);
+        void SetOffColor(Color value);
+
+      private:
+        friend ComponentRegistration CreateUiToggleComponentRegistration();
+        bool m_IsOn = false;
+        bool m_Interactable = true;
+        Color m_OnColor{0.08F, 0.72F, 0.55F, 1.0F};
+        Color m_OffColor{0.16F, 0.19F, 0.24F, 1.0F};
+    };
+
+    class KEIRE_API UiInputFieldComponent final : public Component
+    {
+      public:
+        UiInputFieldComponent();
+
+        [[nodiscard]] static constexpr ComponentTypeId StaticType() noexcept
+        {
+            return ComponentTypeId(AssetId(0x4b45495245554949ULL, 0x4e505554464c4401ULL));
+        }
+
+        [[nodiscard]] const std::string& Text() const noexcept { return m_Text; }
+        [[nodiscard]] const std::string& Placeholder() const noexcept { return m_Placeholder; }
+        [[nodiscard]] std::uint32_t CharacterLimit() const noexcept { return m_CharacterLimit; }
+        [[nodiscard]] UiInputContentType ContentType() const noexcept { return m_ContentType; }
+        [[nodiscard]] bool Multiline() const noexcept { return m_Multiline; }
+        [[nodiscard]] bool Interactable() const noexcept { return m_Interactable; }
+
+        void SetText(std::string value);
+        void SetPlaceholder(std::string value);
+        void SetCharacterLimit(std::uint32_t value);
+        void SetContentType(UiInputContentType value);
+        void SetMultiline(bool value);
+        void SetInteractable(bool value);
+
+      private:
+        friend ComponentRegistration CreateUiInputFieldComponentRegistration();
+        std::string m_Text;
+        std::string m_Placeholder = "Enter text";
+        std::uint32_t m_CharacterLimit = 256;
+        UiInputContentType m_ContentType = UiInputContentType::Standard;
+        bool m_Multiline = false;
+        bool m_Interactable = true;
+    };
+
+    class KEIRE_API UiScrollViewComponent final : public Component
+    {
+      public:
+        UiScrollViewComponent();
+
+        [[nodiscard]] static constexpr ComponentTypeId StaticType() noexcept
+        {
+            return ComponentTypeId(AssetId(0x4b45495245554953ULL, 0x43524f4c4c000001ULL));
+        }
+
+        [[nodiscard]] Vector2 ContentSize() const noexcept { return m_ContentSize; }
+        [[nodiscard]] Vector2 Offset() const noexcept { return m_Offset; }
+        [[nodiscard]] float Sensitivity() const noexcept { return m_Sensitivity; }
+        [[nodiscard]] bool Horizontal() const noexcept { return m_Horizontal; }
+        [[nodiscard]] bool Vertical() const noexcept { return m_Vertical; }
+        [[nodiscard]] bool Interactable() const noexcept { return m_Interactable; }
+
+        void SetContentSize(Vector2 value);
+        void SetOffset(Vector2 value);
+        void SetSensitivity(float value);
+        void SetHorizontal(bool value);
+        void SetVertical(bool value);
+        void SetInteractable(bool value);
+
+      private:
+        friend ComponentRegistration CreateUiScrollViewComponentRegistration();
+        Vector2 m_ContentSize{1920.0F, 1080.0F};
+        Vector2 m_Offset;
+        float m_Sensitivity = 48.0F;
+        bool m_Horizontal = false;
+        bool m_Vertical = true;
+        bool m_Interactable = true;
+    };
+
+    class KEIRE_API UiAccessibilityComponent final : public Component
+    {
+      public:
+        UiAccessibilityComponent();
+
+        [[nodiscard]] static constexpr ComponentTypeId StaticType() noexcept
+        {
+            return ComponentTypeId(AssetId(0x4b45495245554941ULL, 0x4343455353000001ULL));
+        }
+
+        [[nodiscard]] const std::string& Label() const noexcept { return m_Label; }
+        [[nodiscard]] const std::string& Hint() const noexcept { return m_Hint; }
+        [[nodiscard]] UiAccessibilityRole Role() const noexcept { return m_Role; }
+        [[nodiscard]] std::int32_t NavigationOrder() const noexcept { return m_NavigationOrder; }
+
+        void SetLabel(std::string value);
+        void SetHint(std::string value);
+        void SetRole(UiAccessibilityRole value);
+        void SetNavigationOrder(std::int32_t value);
+
+      private:
+        friend ComponentRegistration CreateUiAccessibilityComponentRegistration();
+        std::string m_Label;
+        std::string m_Hint;
+        UiAccessibilityRole m_Role = UiAccessibilityRole::Automatic;
+        std::int32_t m_NavigationOrder = 0;
+    };
+
     [[nodiscard]] KEIRE_API ComponentRegistration CreateCanvasComponentRegistration();
     [[nodiscard]] KEIRE_API ComponentRegistration CreateRectTransformComponentRegistration();
     [[nodiscard]] KEIRE_API ComponentRegistration CreateUiTextComponentRegistration();
     [[nodiscard]] KEIRE_API ComponentRegistration CreateUiImageComponentRegistration();
     [[nodiscard]] KEIRE_API ComponentRegistration CreateUiButtonComponentRegistration();
     [[nodiscard]] KEIRE_API ComponentRegistration CreateUiLayoutComponentRegistration();
+    [[nodiscard]] KEIRE_API ComponentRegistration CreateUiSliderComponentRegistration();
+    [[nodiscard]] KEIRE_API ComponentRegistration CreateUiToggleComponentRegistration();
+    [[nodiscard]] KEIRE_API ComponentRegistration CreateUiInputFieldComponentRegistration();
+    [[nodiscard]] KEIRE_API ComponentRegistration CreateUiScrollViewComponentRegistration();
+    [[nodiscard]] KEIRE_API ComponentRegistration CreateUiAccessibilityComponentRegistration();
 } // namespace Keire
