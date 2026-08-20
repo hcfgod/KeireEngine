@@ -943,6 +943,18 @@ namespace KeireEditor
                     });
     }
 
+    bool VfxEffectDocument::SetConnectionRouting(const Keire::AssetId system, const Keire::AssetId connection,
+                                                 std::vector<Keire::Vector2> routingPoints)
+    {
+        auto candidate = Definition();
+        auto& connections = RequireSystem(candidate, system).Connections;
+        const auto found = std::ranges::find(connections, connection, &Keire::VfxGraphConnection::Id);
+        if (found == connections.end())
+            throw std::invalid_argument("VFX graph connection is unavailable.");
+        found->RoutingPoints = std::move(routingPoints);
+        return m_Host.EditMetadata("Route VFX graph connection", std::move(candidate));
+    }
+
     VfxGraphConnectionCheck VfxEffectDocument::CheckConnection(const Keire::AssetId system,
                                                                const Keire::AssetId outputNode,
                                                                const Keire::AssetId outputPin,

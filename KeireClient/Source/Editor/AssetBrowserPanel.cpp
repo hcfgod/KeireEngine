@@ -17,7 +17,6 @@
 #include <cmath>
 #include <optional>
 #include <ranges>
-#include <set>
 #include <unordered_map>
 #include <utility>
 
@@ -34,20 +33,9 @@ namespace KeireEditor
             Grid
         };
 
-        enum class ClipboardMode : std::uint8_t
-        {
-            Empty,
-            Copy,
-            Cut
-        };
-
         using NamedCreateKind = NamedAssetCreationKind;
-
-        struct ClipboardEntry final
-        {
-            Keire::AssetId Asset;
-            std::filesystem::path Folder;
-        };
+        using ClipboardMode = AssetBrowserClipboardMode;
+        using ClipboardEntry = AssetBrowserClipboardEntry;
 
         void SetProjectRoot(const std::filesystem::path& root)
         {
@@ -98,6 +86,8 @@ namespace KeireEditor
         }
         void InvalidateThumbnail(const Keire::AssetId asset)
         {
+            if (Thumbnails)
+                Thumbnails->Invalidate(asset);
             Images.erase(asset);
             ImageDigests.erase(asset);
         }
@@ -118,8 +108,11 @@ namespace KeireEditor
             AudioMixerFallbackImage.Reset();
             AnimationFallbackImage.Reset();
             Selection.clear();
+            FolderSelection.clear();
             VisibleSelectionOrder.clear();
+            VisibleFolderOrder.clear();
             SelectionAnchor = {};
+            FolderSelectionAnchor.clear();
             PendingVariantBase = {};
             Clipboard.clear();
             Undo.Reset();
@@ -133,6 +126,8 @@ namespace KeireEditor
             PendingCreateKind = NamedCreateKind::None;
             ResetPackageCreate();
             OpenPackageCreatePopup = false;
+            FocusCreateName = false;
+            FocusRenameName = false;
             CurrentFolder.clear();
             ProjectRoot.clear();
             AssetRoot.clear();
@@ -165,16 +160,7 @@ namespace KeireEditor
 
         void Select(const Keire::AssetId asset, const bool additive, IAssetBrowserController& editor)
         {
-            if (!additive)
-                Selection.clear();
-            const auto found = std::ranges::find(Selection, asset);
-            if (additive && found != Selection.end())
-                Selection.erase(found);
-            else if (found == Selection.end())
-                Selection.push_back(asset);
-            SelectionAnchor = asset;
-            editor.SetAssetBrowserSelected(Selection.empty() ? Keire::AssetId{} : Selection.back());
-            editor.ClearAssetBrowserSceneSelection();
+            SelectAssetBrowserAsset(Selection, FolderSelection, SelectionAnchor, asset, additive, editor);
         }
 
         void SelectFromClick(const Keire::AssetId asset, Keire::UiFrame& ui, IAssetBrowserController& editor)
@@ -184,9 +170,50 @@ namespace KeireEditor
                 Select(asset, ui.ControlDown(), editor);
                 return;
             }
+            if (!ui.ControlDown())
+                FolderSelection.clear();
             Selection = BuildRangeSelection(VisibleSelectionOrder, SelectionAnchor, asset, Selection, ui.ControlDown());
             editor.SetAssetBrowserSelected(Selection.empty() ? Keire::AssetId{} : Selection.back());
             editor.ClearAssetBrowserSceneSelection();
+        }
+
+        void SelectFolder(const std::filesystem::path& folder, const bool additive, IAssetBrowserController& editor)
+        {
+            if (!additive)
+            {
+                Selection.clear();
+                FolderSelection.clear();
+            }
+            const auto found = std::ranges::find(FolderSelection, folder);
+            if (additive && found != FolderSelection.end())
+                FolderSelection.erase(found);
+            else if (found == FolderSelection.end())
+                FolderSelection.push_back(folder);
+            FolderSelectionAnchor = folder;
+            editor.SetAssetBrowserSelected(Selection.empty() ? Keire::AssetId{} : Selection.back());
+            editor.ClearAssetBrowserSceneSelection();
+        }
+
+        void SelectFolderFromClick(const std::filesystem::path& folder, Keire::UiFrame& ui,
+                                   IAssetBrowserController& editor)
+        {
+            if (!ui.ShiftDown() || FolderSelectionAnchor.empty())
+            {
+                SelectFolder(folder, ui.ControlDown(), editor);
+                return;
+            }
+            if (!ui.ControlDown())
+                Selection.clear();
+            FolderSelection = BuildFolderRangeSelection(VisibleFolderOrder, FolderSelectionAnchor, folder,
+                                                        FolderSelection, ui.ControlDown());
+            editor.SetAssetBrowserSelected(Selection.empty() ? Keire::AssetId{} : Selection.back());
+            editor.ClearAssetBrowserSceneSelection();
+        }
+
+        void SelectFolderOnlyIfNeeded(const std::filesystem::path& folder, IAssetBrowserController& editor)
+        {
+            if (std::ranges::find(FolderSelection, folder) == FolderSelection.end())
+                SelectFolder(folder, false, editor);
         }
 
         void SelectOnlyIfNeeded(const Keire::AssetId asset, IAssetBrowserController& editor)
@@ -387,120 +414,32 @@ namespace KeireEditor
             }
         }
 
+        void DuplicateFolders(IAssetBrowserController& editor)
+        {
+            DuplicateAssetBrowserFolders(FolderSelection, AssetRoot, editor);
+        }
+
         void MoveAssets(const std::span<const Keire::AssetId> assets, const std::filesystem::path& folder,
                         IAssetBrowserController& editor)
         {
-            std::vector<std::pair<Keire::AssetSourceRecord, std::filesystem::path>> moves;
-            std::set<std::string> destinations;
-            for (const auto asset : assets)
-            {
-                const auto record = editor.AssetBrowserDatabase()->Find(asset);
-                if (!record)
-                    throw std::invalid_argument("Cannot move an asset that no longer exists.");
-                const auto destination = (folder / record->RelativePath.filename()).lexically_normal();
-                if (destination == record->RelativePath)
-                    continue;
-                if (editor.AssetBrowserDatabase()->Find(destination) ||
-                    !destinations.insert(destination.generic_string()).second)
-                    throw std::runtime_error("Asset move destination already exists: " + destination.generic_string());
-                moves.emplace_back(*record, destination);
-            }
-            for (const auto& [record, destination] : moves)
-            {
-                editor.MutateAssetBrowser({.Kind = Keire::Detail::AssetWorkerMutationKind::MoveAsset,
-                                           .Asset = record.Id,
-                                           .Destination = destination},
-                                          {.Kind = Keire::Detail::AssetWorkerMutationKind::MoveAsset,
-                                           .Asset = record.Id,
-                                           .Destination = record.RelativePath},
-                                          "Move Asset");
-            }
-            editor.SetAssetBrowserStatus("Queued " + std::to_string(moves.size()) + " asset move(s).");
+            MoveAssetBrowserAssets(assets, folder, editor);
         }
 
         void SetClipboard(const ClipboardMode mode, const std::span<const Keire::AssetId> assets)
         {
             ClipboardModeValue = mode;
-            Clipboard.clear();
-            for (const auto asset : assets)
-                Clipboard.push_back({asset, {}});
+            SetAssetBrowserClipboard(assets, Clipboard);
         }
 
-        void SetFolderClipboard(const ClipboardMode mode, const std::filesystem::path& folder)
+        void SetFolderClipboard(const ClipboardMode mode, const std::span<const std::filesystem::path> folders)
         {
             ClipboardModeValue = mode;
-            Clipboard = {{Keire::AssetId{}, folder}};
+            SetAssetBrowserFolderClipboard(folders, Clipboard);
         }
 
         void Paste(const std::filesystem::path& folder, IAssetBrowserController& editor)
         {
-            if (ClipboardModeValue == ClipboardMode::Empty || Clipboard.empty())
-                return;
-            try
-            {
-                for (const auto& entry : Clipboard)
-                {
-                    if (entry.Asset)
-                    {
-                        const auto record = editor.AssetBrowserDatabase()->Find(entry.Asset);
-                        if (!record)
-                            throw std::runtime_error("Clipboard asset no longer exists.");
-                        if (ClipboardModeValue == ClipboardMode::Cut)
-                        {
-                            const auto destination = folder / record->RelativePath.filename();
-                            editor.MutateAssetBrowser({.Kind = Keire::Detail::AssetWorkerMutationKind::MoveAsset,
-                                                       .Asset = entry.Asset,
-                                                       .Destination = destination},
-                                                      {.Kind = Keire::Detail::AssetWorkerMutationKind::MoveAsset,
-                                                       .Asset = entry.Asset,
-                                                       .Destination = record->RelativePath},
-                                                      "Move Asset");
-                        }
-                        else
-                        {
-                            const auto destination =
-                                UniqueAssetBrowserPath(*record, folder, *editor.AssetBrowserDatabase());
-                            editor.MutateAssetBrowser({.Kind = Keire::Detail::AssetWorkerMutationKind::DuplicateAsset,
-                                                       .Asset = entry.Asset,
-                                                       .Destination = destination},
-                                                      {}, "Paste Asset", true);
-                        }
-                    }
-                    else
-                    {
-                        const auto destinationBase = folder / entry.Folder.filename();
-                        if (ClipboardModeValue == ClipboardMode::Cut)
-                        {
-                            editor.MutateAssetBrowser({.Kind = Keire::Detail::AssetWorkerMutationKind::MoveFolder,
-                                                       .Source = entry.Folder,
-                                                       .Destination = destinationBase},
-                                                      {.Kind = Keire::Detail::AssetWorkerMutationKind::MoveFolder,
-                                                       .Source = destinationBase,
-                                                       .Destination = entry.Folder},
-                                                      "Move Folder");
-                        }
-                        else
-                        {
-                            const auto destination = UniqueAssetBrowserFolder(AssetRoot, destinationBase);
-                            editor.MutateAssetBrowser({.Kind = Keire::Detail::AssetWorkerMutationKind::DuplicateFolder,
-                                                       .Source = entry.Folder,
-                                                       .Destination = destination},
-                                                      {}, "Paste Folder");
-                        }
-                    }
-                }
-                if (ClipboardModeValue == ClipboardMode::Cut)
-                {
-                    Clipboard.clear();
-                    ClipboardModeValue = ClipboardMode::Empty;
-                }
-                editor.SetAssetBrowserStatus("Pasted asset selection into " +
-                                             (folder.empty() ? std::string("Assets") : folder.generic_string()) + ".");
-            }
-            catch (const std::exception& error)
-            {
-                editor.ReportAssetBrowserError(std::string("Asset paste failed: ") + error.what());
-            }
+            PasteAssetBrowserClipboard(ClipboardModeValue, Clipboard, AssetRoot, folder, editor);
         }
 
         void RequestDeleteAssets(IAssetBrowserController& editor)
@@ -514,14 +453,14 @@ namespace KeireEditor
                 return;
             }
             PendingDeleteAssets = Selection;
-            PendingDeleteFolder.clear();
+            PendingDeleteFolders.clear();
             OpenDeletePopup = true;
         }
 
-        void RequestDeleteFolder(const std::filesystem::path& folder)
+        void RequestDeleteFolders(const std::span<const std::filesystem::path> folders)
         {
-            PendingDeleteAssets.clear();
-            PendingDeleteFolder = folder;
+            PendingDeleteAssets = Selection;
+            PendingDeleteFolders.assign(folders.begin(), folders.end());
             OpenDeletePopup = true;
         }
 
@@ -536,32 +475,28 @@ namespace KeireEditor
             {
                 ui.TextColored(editor.AssetBrowserTheme().Warning,
                                "Move the selected content to recoverable project trash?");
-                ui.Text(PendingDeleteFolder.empty() ? std::to_string(PendingDeleteAssets.size()) + " asset(s) selected"
-                                                    : PendingDeleteFolder.generic_string());
+                ui.Text(std::to_string(PendingDeleteAssets.size()) + " asset(s), " +
+                        std::to_string(PendingDeleteFolders.size()) + " folder(s) selected");
                 if (ui.Button("Move to Trash"))
                 {
                     try
                     {
-                        if (!PendingDeleteFolder.empty())
+                        for (const auto& folder : PendingDeleteFolders)
+                            editor.MutateAssetBrowser(
+                                {.Kind = Keire::Detail::AssetWorkerMutationKind::TrashFolder, .Source = folder}, {},
+                                "Delete Folder");
+                        for (const auto asset : PendingDeleteAssets)
                         {
-                            editor.MutateAssetBrowser({.Kind = Keire::Detail::AssetWorkerMutationKind::TrashFolder,
-                                                       .Source = PendingDeleteFolder},
-                                                      {}, "Delete Folder");
-                        }
-                        else
-                        {
-                            for (const auto asset : PendingDeleteAssets)
-                            {
-                                editor.MutateAssetBrowser(
-                                    {.Kind = Keire::Detail::AssetWorkerMutationKind::TrashAsset, .Asset = asset}, {},
-                                    "Delete Asset");
-                            }
+                            editor.MutateAssetBrowser(
+                                {.Kind = Keire::Detail::AssetWorkerMutationKind::TrashAsset, .Asset = asset}, {},
+                                "Delete Asset");
                         }
                         Selection.clear();
+                        FolderSelection.clear();
                         editor.SetAssetBrowserSelected({});
                         editor.SetAssetBrowserStatus("Moved selection to recoverable project trash.");
                         PendingDeleteAssets.clear();
-                        PendingDeleteFolder.clear();
+                        PendingDeleteFolders.clear();
                         ui.CloseCurrentPopup();
                     }
                     catch (const std::exception& error)
@@ -573,7 +508,7 @@ namespace KeireEditor
                 if (ui.Button("Cancel"))
                 {
                     PendingDeleteAssets.clear();
-                    PendingDeleteFolder.clear();
+                    PendingDeleteFolders.clear();
                     ui.CloseCurrentPopup();
                 }
             }
@@ -692,12 +627,15 @@ namespace KeireEditor
                     FocusCreateName = false;
                 }
                 (void)ui.InputText("Name", CreateNameBuffer, true);
+                const bool submitCreate = ui.Shortcut({.Key = Keire::UiKey::Enter, .Global = true});
                 if (PendingCreateKind == NamedCreateKind::MaterialGraph)
                     MaterialGraphCreation.Draw(ui, editor.AssetBrowserRecords(), editor.AssetBrowserTheme());
                 const auto canCreate = PendingCreateKind != NamedCreateKind::MaterialGraph ||
                                        static_cast<bool>(MaterialGraphCreation.Shader());
                 if (auto disabled = ui.BeginDisabled(!canCreate); disabled)
-                    if (ui.Button("Create"))
+                {
+                    const bool createButton = ui.Button("Create");
+                    if (canCreate && (createButton || submitCreate))
                     {
                         try
                         {
@@ -784,6 +722,7 @@ namespace KeireEditor
                             editor.ReportAssetBrowserError(std::string("Asset creation failed: ") + error.what());
                         }
                     }
+                }
                 ui.SameLine();
                 if (ui.Button("Cancel"))
                 {
@@ -802,12 +741,19 @@ namespace KeireEditor
             {
                 ui.OpenPopup("Rename Asset");
                 OpenRenamePopup = false;
+                FocusRenameName = true;
             }
             if (auto rename = ui.BeginPopupModal("Rename Asset"); rename)
             {
                 ui.Text("Asset name (the extension is preserved)");
-                (void)ui.InputText("Name", RenameBuffer);
-                if (ui.Button("Rename"))
+                if (FocusRenameName)
+                {
+                    ui.RequestKeyboardFocus();
+                    FocusRenameName = false;
+                }
+                (void)ui.InputText("Name", RenameBuffer, true);
+                const bool submitRename = ui.Shortcut({.Key = Keire::UiKey::Enter, .Global = true});
+                if (ui.Button("Rename") || submitRename)
                 {
                     try
                     {
@@ -849,12 +795,19 @@ namespace KeireEditor
             {
                 ui.OpenPopup("Rename Folder");
                 OpenFolderRenamePopup = false;
+                FocusRenameName = true;
             }
             if (auto rename = ui.BeginPopupModal("Rename Folder"); rename)
             {
                 ui.Text("Folder name");
-                (void)ui.InputText("Name", RenameBuffer);
-                if (ui.Button("Rename"))
+                if (FocusRenameName)
+                {
+                    ui.RequestKeyboardFocus();
+                    FocusRenameName = false;
+                }
+                (void)ui.InputText("Name", RenameBuffer, true);
+                const bool submitRename = ui.Shortcut({.Key = Keire::UiKey::Enter, .Global = true});
+                if (ui.Button("Rename") || submitRename)
                 {
                     try
                     {
@@ -1004,6 +957,7 @@ namespace KeireEditor
         {
             if (auto context = ui.BeginItemContextMenu(id); context)
             {
+                SelectFolderOnlyIfNeeded(folder, editor);
                 if (ui.MenuItem("Open"))
                     CurrentFolder = folder;
                 if (auto create = ui.BeginMenu("Create"); create)
@@ -1012,35 +966,20 @@ namespace KeireEditor
                     DrawCreateItems(ui, editor);
                     CurrentFolder = previous;
                 }
-                if (ui.MenuItem("Rename"))
+                if (ui.MenuItem("Rename", false, FolderSelection.size() == 1))
                     BeginFolderRename(folder);
                 if (ui.MenuItem("Duplicate"))
-                {
-                    try
-                    {
-                        const auto destination = UniqueAssetBrowserFolder(
-                            AssetRoot, folder.parent_path() / (folder.filename().string() + " Copy"));
-                        editor.MutateAssetBrowser({.Kind = Keire::Detail::AssetWorkerMutationKind::DuplicateFolder,
-                                                   .Source = folder,
-                                                   .Destination = destination},
-                                                  {}, "Duplicate Folder");
-                        editor.SetAssetBrowserStatus("Duplicated folder.");
-                    }
-                    catch (const std::exception& error)
-                    {
-                        editor.ReportAssetBrowserError(std::string("Folder duplication failed: ") + error.what());
-                    }
-                }
+                    DuplicateFolders(editor);
                 if (ui.MenuItem("Cut"))
-                    SetFolderClipboard(ClipboardMode::Cut, folder);
+                    SetFolderClipboard(ClipboardMode::Cut, FolderSelection);
                 if (ui.MenuItem("Copy"))
-                    SetFolderClipboard(ClipboardMode::Copy, folder);
-                if (ui.MenuItem("Create Asset Package..."))
+                    SetFolderClipboard(ClipboardMode::Copy, FolderSelection);
+                if (ui.MenuItem("Create Asset Package...", false, FolderSelection.size() == 1))
                     RequestPackageCreate({.Folder = folder}, folder.filename().string());
                 if (ui.MenuItem("Paste Into", false, ClipboardModeValue != ClipboardMode::Empty))
                     Paste(folder, editor);
                 if (ui.MenuItem("Delete"))
-                    RequestDeleteFolder(folder);
+                    RequestDeleteFolders(FolderSelection);
                 ui.Separator();
                 if (ui.MenuItem("Reimport Recursively"))
                     editor.ImportAssetBrowserAssets();
@@ -1054,6 +993,8 @@ namespace KeireEditor
         void DrawAssetTooltip(Keire::UiFrame& ui, const Keire::AssetSourceRecord& record,
                               IAssetBrowserController& editor)
         {
+            if (!ui.LastItemState().Hovered)
+                return;
             std::error_code error;
             const auto bytes = std::filesystem::file_size(AssetRoot / record.RelativePath, error);
             const auto status = editor.AssetBrowserDatabase()->ImportStatus(record.Id);
@@ -1105,15 +1046,20 @@ namespace KeireEditor
                     image = AnimationFallbackImage;
             }
             const bool selected = std::ranges::find(Selection, record.Id) != Selection.end();
+            const auto fullName = DisplayName(record.RelativePath);
             bool open = false;
             if (grid)
             {
                 if (ui.ImageButton("Thumbnail", image, {ThumbnailSize, ThumbnailSize}))
                     SelectFromClick(record.Id, ui, editor);
                 open = ui.LastItemState().DoubleClicked;
+                DrawAssetTooltip(ui, record, editor);
                 DrawAssetDragSource(ui, record);
                 DrawAssetContext(ui, record, editor, "ThumbnailContext");
-                if (ui.Selectable(DisplayName(record.RelativePath), selected))
+                const auto visibleName =
+                    ElideAssetDisplayName(fullName, std::max(ui.ContentAvailable().Width - 8.0F, 1.0F),
+                                          [&ui](const std::string_view text) { return ui.MeasureText(text).Width; });
+                if (ui.Selectable(visibleName, selected))
                     SelectFromClick(record.Id, ui, editor);
                 open |= ui.LastItemState().DoubleClicked;
                 DrawAssetDragSource(ui, record);
@@ -1125,10 +1071,14 @@ namespace KeireEditor
                 if (ui.ImageButton("Thumbnail", image, {32.0F, 32.0F}))
                     SelectFromClick(record.Id, ui, editor);
                 open = ui.LastItemState().DoubleClicked;
+                DrawAssetTooltip(ui, record, editor);
                 DrawAssetDragSource(ui, record);
                 DrawAssetContext(ui, record, editor, "ThumbnailContext");
                 ui.SameLine();
-                if (ui.Selectable(DisplayName(record.RelativePath), selected))
+                const auto visibleName =
+                    ElideAssetDisplayName(fullName, std::max(ui.ContentAvailable().Width - 8.0F, 1.0F),
+                                          [&ui](const std::string_view text) { return ui.MeasureText(text).Width; });
+                if (ui.Selectable(visibleName, selected))
                     SelectFromClick(record.Id, ui, editor);
                 open |= ui.LastItemState().DoubleClicked;
                 DrawAssetDragSource(ui, record);
@@ -1159,21 +1109,23 @@ namespace KeireEditor
                 }
             }
             payload.clear();
-            if (ui.AcceptDragPayload("KEIRE_FOLDER", payload))
+            if (ui.AcceptDragPayload("KEIRE_FOLDERS", payload))
             {
                 try
                 {
-                    const std::string text(reinterpret_cast<const char*>(payload.data()), payload.size());
-                    const std::filesystem::path source(text);
-                    const auto destination = folder / source.filename();
-                    editor.MutateAssetBrowser({.Kind = Keire::Detail::AssetWorkerMutationKind::MoveFolder,
-                                               .Source = source,
-                                               .Destination = destination},
-                                              {.Kind = Keire::Detail::AssetWorkerMutationKind::MoveFolder,
-                                               .Source = destination,
-                                               .Destination = source},
-                                              "Move Folder");
-                    editor.SetAssetBrowserStatus("Moved folder.");
+                    const auto sources = DecodeFolderPayload(payload);
+                    for (const auto& source : sources)
+                    {
+                        const auto destination = folder / source.filename();
+                        editor.MutateAssetBrowser({.Kind = Keire::Detail::AssetWorkerMutationKind::MoveFolder,
+                                                   .Source = source,
+                                                   .Destination = destination},
+                                                  {.Kind = Keire::Detail::AssetWorkerMutationKind::MoveFolder,
+                                                   .Source = destination,
+                                                   .Destination = source},
+                                                  "Move Folder");
+                    }
+                    editor.SetAssetBrowserStatus("Queued " + std::to_string(sources.size()) + " folder move(s).");
                 }
                 catch (const std::exception& error)
                 {
@@ -1212,24 +1164,32 @@ namespace KeireEditor
                         const bool grid)
         {
             auto id = ui.PushId(folder.generic_string());
+            const bool selected = std::ranges::find(FolderSelection, folder) != FolderSelection.end();
             const auto drawDragSource = [&]
             {
                 if (auto source = ui.BeginDragSource(); source)
                 {
-                    const auto value = folder.generic_string();
-                    ui.SetDragPayload("KEIRE_FOLDER", std::as_bytes(std::span(value.data(), value.size())));
-                    ui.Text(folder.filename().string());
+                    const auto payloadFolders = selected ? FolderSelection : std::vector<std::filesystem::path>{folder};
+                    const auto value = EncodeFolderPayload(payloadFolders);
+                    ui.SetDragPayload("KEIRE_FOLDERS", std::as_bytes(std::span(value.data(), value.size())));
+                    ui.Text(payloadFolders.size() == 1 ? folder.filename().string()
+                                                       : std::to_string(payloadFolders.size()) + " folders");
                 }
             };
+            bool open = false;
             if (grid)
             {
                 if (ui.ImageButton("Folder", FolderImage, {ThumbnailSize, ThumbnailSize}))
-                    CurrentFolder = folder;
+                    SelectFolderFromClick(folder, ui, editor);
+                open = ui.LastItemState().DoubleClicked;
                 auto area = ui.LastItemRect();
+                if (selected)
+                    ui.DrawRectangle(area, editor.AssetBrowserTheme().Accent, 2.0F, 4.0F);
                 drawDragSource();
                 DrawFolderContext(ui, folder, editor, "FolderImageContext");
-                if (ui.Selectable(folder.filename().string()))
-                    CurrentFolder = folder;
+                if (ui.Selectable(folder.filename().string(), selected))
+                    SelectFolderFromClick(folder, ui, editor);
+                open |= ui.LastItemState().DoubleClicked;
                 const auto labelArea = ui.LastItemRect();
                 area.Minimum.X = std::min(area.Minimum.X, labelArea.Minimum.X);
                 area.Minimum.Y = std::min(area.Minimum.Y, labelArea.Minimum.Y);
@@ -1249,13 +1209,17 @@ namespace KeireEditor
             else
             {
                 if (ui.ImageButton("Folder", FolderImage, {32.0F, 32.0F}))
-                    CurrentFolder = folder;
+                    SelectFolderFromClick(folder, ui, editor);
+                open = ui.LastItemState().DoubleClicked;
                 auto area = ui.LastItemRect();
+                if (selected)
+                    ui.DrawRectangle(area, editor.AssetBrowserTheme().Accent, 2.0F, 4.0F);
                 drawDragSource();
                 DrawFolderContext(ui, folder, editor, "FolderImageContext");
                 ui.SameLine();
-                if (ui.Selectable(folder.filename().string()))
-                    CurrentFolder = folder;
+                if (ui.Selectable(folder.filename().string(), selected))
+                    SelectFolderFromClick(folder, ui, editor);
+                open |= ui.LastItemState().DoubleClicked;
                 const auto labelArea = ui.LastItemRect();
                 area.Minimum.X = std::min(area.Minimum.X, labelArea.Minimum.X);
                 area.Minimum.Y = std::min(area.Minimum.Y, labelArea.Minimum.Y);
@@ -1272,6 +1236,8 @@ namespace KeireEditor
                 AcceptFolderDrop(ui, area, folder, editor);
                 ui.SetTooltip((std::filesystem::path("Assets") / folder).generic_string(), {.Delayed = true});
             }
+            if (open)
+                CurrentFolder = folder;
         }
 
         void DrawFolderTree(Keire::UiFrame& ui, const std::filesystem::path& relative, IAssetBrowserController& editor)
@@ -1335,26 +1301,49 @@ namespace KeireEditor
             if (ui.Shortcut({.Key = Keire::UiKey::A, .Primary = true}))
             {
                 Selection.clear();
+                FolderSelection = VisibleFolderOrder;
                 for (const auto* record : visible)
                     Selection.push_back(record->Id);
                 editor.SetAssetBrowserSelected(Selection.empty() ? Keire::AssetId{} : Selection.back());
             }
             if (ui.Shortcut({.Key = Keire::UiKey::D, .Primary = true}))
+            {
                 DuplicateAssets(editor);
+                DuplicateFolders(editor);
+            }
             if (ui.Shortcut({.Key = Keire::UiKey::X, .Primary = true}))
+            {
                 SetClipboard(ClipboardMode::Cut, Selection);
+                for (const auto& folder : FolderSelection)
+                    Clipboard.push_back({Keire::AssetId{}, folder});
+            }
             if (ui.Shortcut({.Key = Keire::UiKey::C, .Primary = true}))
+            {
                 SetClipboard(ClipboardMode::Copy, Selection);
+                for (const auto& folder : FolderSelection)
+                    Clipboard.push_back({Keire::AssetId{}, folder});
+            }
             if (ui.Shortcut({.Key = Keire::UiKey::V, .Primary = true}))
                 Paste(CurrentFolder, editor);
             if (ui.Shortcut({Keire::UiKey::Delete}))
-                RequestDeleteAssets(editor);
-            if (ui.Shortcut({Keire::UiKey::F2}) && Selection.size() == 1)
+            {
+                if (FolderSelection.empty())
+                    RequestDeleteAssets(editor);
+                else
+                    RequestDeleteFolders(FolderSelection);
+            }
+            if (ui.Shortcut({Keire::UiKey::F2}) && Selection.size() == 1 && FolderSelection.empty())
                 if (const auto record = editor.AssetBrowserDatabase()->Find(Selection.front()))
                     BeginAssetRename(*record);
-            if (ui.Shortcut({Keire::UiKey::Enter}) && Selection.size() == 1)
-                if (const auto record = editor.AssetBrowserDatabase()->Find(Selection.front()))
+            if (ui.Shortcut({Keire::UiKey::F2}) && FolderSelection.size() == 1 && Selection.empty())
+                BeginFolderRename(FolderSelection.front());
+            if (ui.Shortcut({Keire::UiKey::Enter}) && Selection.size() + FolderSelection.size() == 1)
+            {
+                if (!FolderSelection.empty())
+                    CurrentFolder = FolderSelection.front();
+                else if (const auto record = editor.AssetBrowserDatabase()->Find(Selection.front()))
                     Open(*record, editor);
+            }
             if (ui.Shortcut({Keire::UiKey::Backspace}) && !CurrentFolder.empty())
                 CurrentFolder = CurrentFolder.parent_path();
         }
@@ -1386,6 +1375,10 @@ namespace KeireEditor
             DrawBreadcrumbs(ui, editor);
 
             const auto folders = DirectChildAssetFolders(FolderCache.Folders(), CurrentFolder);
+            VisibleFolderOrder.clear();
+            for (const auto& folder : folders)
+                if (Search.empty() || folder.filename().string().find(Search) != std::string::npos)
+                    VisibleFolderOrder.push_back(folder);
             (void)VisibleRecords.Refresh(editor.AssetBrowserRecords(), editor.AssetBrowserRecordRevision(),
                                          CurrentFolder, Search);
             const auto assets = VisibleRecords.Records();
@@ -1534,7 +1527,8 @@ namespace KeireEditor
                     if (assets && record.Type == Keire::Texture2DAsset::StaticType())
                     {
                         const auto handle = assets->Load<Keire::Texture2DAsset>(record.Id, Keire::AssetPriority::Low);
-                        request.PreviewAsset = handle.TryGetLoaded();
+                        if (handle.State() != Keire::AssetState::Reloading)
+                            request.PreviewAsset = handle.TryGetLoaded();
                         request.Missing = handle.State() == Keire::AssetState::Failed;
                         if (!request.PreviewAsset && request.Missing)
                             request.PreviewAsset = handle.Get();
@@ -1543,7 +1537,8 @@ namespace KeireEditor
                     else if (assets && record.Type == Keire::MeshAsset::StaticType())
                     {
                         const auto handle = assets->Load<Keire::MeshAsset>(record.Id, Keire::AssetPriority::Low);
-                        request.PreviewAsset = handle.TryGetLoaded();
+                        if (handle.State() != Keire::AssetState::Reloading)
+                            request.PreviewAsset = handle.TryGetLoaded();
                         request.Missing = handle.State() == Keire::AssetState::Failed;
                         if (!request.PreviewAsset && request.Missing)
                             request.PreviewAsset = handle.Get();
@@ -1552,7 +1547,8 @@ namespace KeireEditor
                     else if (assets && record.Type == Keire::AudioClipAsset::StaticType())
                     {
                         const auto handle = assets->Load<Keire::AudioClipAsset>(record.Id, Keire::AssetPriority::Low);
-                        request.PreviewAsset = handle.TryGetLoaded();
+                        if (handle.State() != Keire::AssetState::Reloading)
+                            request.PreviewAsset = handle.TryGetLoaded();
                         request.Missing = handle.State() == Keire::AssetState::Failed;
                         if (!request.PreviewAsset && request.Missing)
                             request.PreviewAsset = handle.Get();
@@ -1689,7 +1685,7 @@ namespace KeireEditor
                 if (!editor.AssetBrowserStatus().empty())
                     ui.TextColored(editor.AssetBrowserTheme().MutedText, editor.AssetBrowserStatus());
                 ui.TextColored(editor.AssetBrowserTheme().MutedText,
-                               std::to_string(Selection.size()) + " selected  |  " +
+                               std::to_string(Selection.size() + FolderSelection.size()) + " selected  |  " +
                                    std::to_string(Thumbnails->PendingCount()) + " thumbnail request(s)");
             }
         }
@@ -1704,7 +1700,7 @@ namespace KeireEditor
         AssetBrowserRecordViewCache VisibleRecords;
         std::chrono::steady_clock::time_point NextFolderRefresh;
         std::filesystem::path RenamingFolder;
-        std::filesystem::path PendingDeleteFolder;
+        std::vector<std::filesystem::path> PendingDeleteFolders;
         std::unique_ptr<ThumbnailService> Thumbnails;
         Keire::Ref<Keire::JobSystem> Scheduler;
         std::unordered_map<Keire::AssetId, Keire::Ref<Keire::UiImage>> Images;
@@ -1721,6 +1717,8 @@ namespace KeireEditor
         Keire::Ref<Keire::UndoContext> Undo;
         std::vector<Keire::AssetId> Selection;
         std::vector<Keire::AssetId> VisibleSelectionOrder;
+        std::vector<std::filesystem::path> FolderSelection;
+        std::vector<std::filesystem::path> VisibleFolderOrder;
         std::vector<Keire::AssetId> PendingDeleteAssets;
         std::vector<Keire::AssetTrashRecord> TrashEntries;
         std::vector<ClipboardEntry> Clipboard;
@@ -1728,6 +1726,7 @@ namespace KeireEditor
         Keire::AssetId Renaming;
         Keire::AssetId RevealAsset;
         Keire::AssetId SelectionAnchor;
+        std::filesystem::path FolderSelectionAnchor;
         Keire::AssetId PendingVariantBase;
         MaterialGraphCreationPicker MaterialGraphCreation;
         std::string Search;
@@ -1748,6 +1747,7 @@ namespace KeireEditor
         bool OpenRenamePopup = false;
         bool OpenNamedCreatePopup = false;
         bool FocusCreateName = false;
+        bool FocusRenameName = false;
         bool OpenFolderRenamePopup = false;
         bool OpenPackageCreatePopup = false;
         bool OpenDeletePopup = false;

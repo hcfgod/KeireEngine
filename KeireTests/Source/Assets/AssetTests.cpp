@@ -189,13 +189,19 @@ TEST_CASE("Asset worker protocol and published source index round trip without r
     importer.Name = "Test.WorkerProtocol";
     importer.Type = Keire::TextAsset::StaticType();
     importer.Extensions = {".worker"};
-    importer.Import = [](const std::span<const std::byte> bytes)
-    { return std::vector<std::byte>(bytes.begin(), bytes.end()); };
+    std::atomic_size_t importCalls = 0;
+    importer.Import = [&importCalls](const std::span<const std::byte> bytes)
+    {
+        ++importCalls;
+        return std::vector<std::byte>(bytes.begin(), bytes.end());
+    };
     auto database = Keire::CreateRef<Keire::AssetDatabase>(
         Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
     const std::string source = "worker protocol source";
     const auto id =
         database->CreateAsset("Unicode-é.worker", importer, std::as_bytes(std::span(source.data(), source.size())));
+    const auto initialImport = database->ImportAll();
+    CHECK(initialImport.Imported == 1);
 
     const auto operationId = Keire::AssetId::Generate().ToString();
     const auto operation = project.Root / "Library/AssetOperations" / operationId;
@@ -207,11 +213,27 @@ TEST_CASE("Asset worker protocol and published source index round trip without r
     REQUIRE(database->Find(id));
     CHECK(database->Find(id)->RelativePath == std::filesystem::path("Unicode-é.worker"));
 
+    project.Write("Unicode-é.worker", "worker protocol source changed");
+    project.Write("Unindexed.worker", "must not be scanned");
+    project.Write("Unindexed.worker.keiremeta", "{");
+    auto indexedDatabase = Keire::Detail::AssetDatabaseWorkerAccess::CreateFromSourceIndex(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}}, sourceIndex);
+    CHECK(indexedDatabase->Records().size() == 1);
+    CHECK_FALSE(indexedDatabase->Find("Unindexed.worker"));
+    const std::array indexedTargets{id};
+    const auto indexedImport = Keire::Detail::AssetDatabaseWorkerAccess::ImportAssetsFromSourceIndex(
+        *indexedDatabase, indexedTargets, Keire::AssetImportPolicy::FailFast);
+    CHECK(indexedImport.Imported == 1);
+    CHECK(indexedImport.CacheHits == 0);
+    CHECK(importCalls.load() == 2);
+
     Keire::Detail::AssetWorkerRequest request;
     request.OperationId = operationId;
     request.ProjectRoot = project.Root;
     request.SourceIndexPath = sourceIndex;
-    request.Kind = Keire::Detail::AssetWorkerOperationKind::Cook;
+    request.Kind = Keire::Detail::AssetWorkerOperationKind::ImportAssets;
+    request.Reason = "protocol-test";
+    request.ImportAssets = {id};
     request.CreateRelativePath = "Scenes/Created.keirescene";
     request.CreatePayloadPath = operation / "source.keirescene";
     request.CreateSettings = {{"quality", std::int64_t{2}}};
@@ -243,6 +265,10 @@ TEST_CASE("Asset worker protocol and published source index round trip without r
     Keire::Detail::WriteAssetWorkerRequest(requestPath, request);
     const auto restored = Keire::Detail::ReadAssetWorkerRequest(requestPath);
     CHECK(restored.OperationId == request.OperationId);
+    CHECK(restored.Kind == Keire::Detail::AssetWorkerOperationKind::ImportAssets);
+    CHECK(Keire::Detail::AssetWorkerOperationName(restored.Kind) == "import-assets");
+    CHECK(restored.Reason == request.Reason);
+    CHECK(restored.ImportAssets == request.ImportAssets);
     CHECK(restored.ProjectRoot == request.ProjectRoot);
     CHECK(restored.SourceIndexPath == request.SourceIndexPath);
     CHECK(restored.CookOutput == request.CookOutput);
@@ -501,6 +527,8 @@ TEST_CASE("External asset imports persist normalized options and preserve identi
     REQUIRE(unique.Entries.size() == 1);
     CHECK(unique.Entries.front().Id != id);
     CHECK(unique.Entries.front().RelativeDestination == std::filesystem::path("Imported/Incoming 2.opt"));
+    REQUIRE(unique.Import.Statuses.size() == 1);
+    CHECK(unique.Import.Statuses.front().Id == unique.Entries.front().Id);
 
     {
         std::ofstream stream(incoming, std::ios::binary | std::ios::trunc);
@@ -557,6 +585,40 @@ TEST_CASE("External asset imports persist normalized options and preserve identi
     CHECK(folderImport.Entries.front().RelativeDestination == std::filesystem::path("Folder/Supported.opt"));
     CHECK(std::filesystem::is_regular_file(project.Root / "Assets/Folder/Supported.opt"));
     CHECK_FALSE(std::filesystem::exists(project.Root / "Assets/Folder/Unsupported.unknown"));
+}
+
+TEST_CASE("created assets consume their validated import during immediate targeted publication")
+{
+    TemporaryAssetProject project;
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.ImmediateCreate";
+    importer.Type = Keire::TextAsset::StaticType();
+    importer.Extensions = {".immediate"};
+    std::size_t importCalls = 0;
+    importer.Import = [&importCalls](const std::span<const std::byte> bytes)
+    {
+        ++importCalls;
+        return std::vector<std::byte>(bytes.begin(), bytes.end());
+    };
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
+    const std::string baseline = "baseline";
+    (void)database->CreateAsset("Baseline.immediate", importer,
+                                std::as_bytes(std::span(baseline.data(), baseline.size())));
+    (void)database->ImportAll();
+    CHECK(importCalls == 1);
+
+    const std::string source = "created source";
+    const auto created =
+        database->CreateAsset("Created.immediate", importer, std::as_bytes(std::span(source.data(), source.size())));
+    CHECK(importCalls == 2);
+    const std::array targets{created};
+    const auto imported = Keire::Detail::AssetDatabaseWorkerAccess::ImportAssetsFromSourceIndex(
+        *database, targets, Keire::AssetImportPolicy::FailFast);
+    CHECK(importCalls == 2);
+    REQUIRE(imported.Statuses.size() == 1);
+    CHECK(imported.Statuses.front().Id == created);
+    CHECK(std::filesystem::is_regular_file(imported.CatalogPath));
 }
 
 TEST_CASE("Development catalog publication preserves packs that are still in use")
@@ -842,6 +904,122 @@ TEST_CASE("Dependency-free importers restore unchanged cached output without rer
     const auto second = database->ImportAll();
     CHECK(second.CacheHits == 1);
     CHECK(importCalls.load() == 1);
+}
+
+TEST_CASE("Fresh asset workers restore complete graph outputs and reimport only dependency-affected assets")
+{
+    TemporaryAssetProject project;
+    const auto parent = Keire::AssetId::Generate();
+    const auto child = Keire::AssetId::Generate();
+    const auto unrelated = Keire::AssetId::Generate();
+    const auto type = Keire::AssetTypeId::Parse("f1000000-0000-4000-8000-000000000030");
+    const auto writeMetadata = [&](const std::filesystem::path& path, const Keire::AssetId id)
+    {
+        project.Write(path, std::string("{\n") +
+                                "  \"schemaVersion\": 1,\n"
+                                "  \"id\": \"" +
+                                id.ToString() +
+                                "\",\n"
+                                "  \"type\": \"" +
+                                type.ToString() +
+                                "\",\n"
+                                "  \"importer\": \"Test.GraphCache\",\n"
+                                "  \"importerVersion\": 1,\n"
+                                "  \"dependencies\": [],\n"
+                                "  \"subAssets\": []\n"
+                                "}\n");
+    };
+    project.Write("Parent.graphcache", "parent-v1");
+    project.Write("Child.graphcache", "child");
+    project.Write("Unrelated.graphcache", "unrelated");
+    writeMetadata("Parent.graphcache.keiremeta", parent);
+    writeMetadata("Child.graphcache.keiremeta", child);
+    writeMetadata("Unrelated.graphcache.keiremeta", unrelated);
+
+    std::atomic_size_t importCalls = 0;
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.GraphCache";
+    importer.Type = type;
+    importer.Extensions = {".graphcache"};
+    importer.ContextualImport = [&](const Keire::AssetImportContext& context, const std::span<const std::byte> bytes)
+    {
+        ++importCalls;
+        Keire::AssetImportOutput output;
+        output.Bytes.assign(bytes.begin(), bytes.end());
+        const std::string source(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        if (source.starts_with("parent"))
+        {
+            const auto generated = context.ResolveSubAssetId("generated");
+            output.SubAssets.push_back(
+                {generated, type, "generated", "Generated", output.Bytes, {}, Keire::AssetDerivedMetadata{}});
+        }
+        else if (source == "child")
+        {
+            (void)context.ReadProjectFile("Assets/Parent.graphcache");
+            output.AssetDependencies.push_back(parent);
+        }
+        else if (source == "unrelated")
+            output.AssetDependencies.push_back(parent);
+        return output;
+    };
+
+    const auto sourceIndex = project.Root / "Library/AssetCache/Runtime/source-index.json";
+    std::filesystem::path unrelatedPack;
+    {
+        auto database = Keire::CreateRef<Keire::AssetDatabase>(
+            Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
+        const auto first = database->ImportAll();
+        CHECK(first.Imported == 3);
+        CHECK(importCalls.load() == 3);
+        const auto catalog = Keire::Detail::LoadCatalog(first.CatalogPath);
+        const auto entry = std::ranges::find(catalog.Entries, unrelated, &Keire::Detail::CatalogEntry::Id);
+        REQUIRE(entry != catalog.Entries.end());
+        unrelatedPack = entry->PackPath;
+        Keire::Detail::AssetDatabaseWorkerAccess::PublishSourceIndex(*database, sourceIndex);
+    }
+
+    project.Write("Parent.graphcache", "parent-v2");
+    {
+        auto database = Keire::CreateRef<Keire::AssetDatabase>(
+            Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
+        REQUIRE(Keire::Detail::AssetDatabaseWorkerAccess::ReloadSourceIndex(*database, sourceIndex) == 3);
+        std::size_t importTotal = 0;
+        std::size_t cookTotal = 0;
+        const std::array targets{parent};
+        const auto second =
+            database->ImportAssets(targets, Keire::AssetImportPolicy::FailFast, {},
+                                   [&](const Keire::AssetOperationProgress& progress)
+                                   {
+                                       if (progress.Phase == Keire::AssetOperationPhase::Importing)
+                                           importTotal = importTotal < progress.Total ? progress.Total : importTotal;
+                                       if (progress.Phase == Keire::AssetOperationPhase::Cooking)
+                                           cookTotal = cookTotal < progress.Total ? progress.Total : cookTotal;
+                                   });
+        CHECK(second.Imported == 2);
+        CHECK(second.CacheHits == 0);
+        CHECK(second.Statuses.size() == 2);
+        CHECK(importTotal == 2);
+        CHECK(cookTotal == 2);
+        CHECK(importCalls.load() == 5);
+        CHECK_NOTHROW(Keire::AssetCooker::Validate(second.CatalogPath));
+        const auto catalog = Keire::Detail::LoadCatalog(second.CatalogPath);
+        CHECK(catalog.Entries.size() == 4);
+        const auto entry = std::ranges::find(catalog.Entries, unrelated, &Keire::Detail::CatalogEntry::Id);
+        REQUIRE(entry != catalog.Entries.end());
+        CHECK(entry->PackPath == unrelatedPack);
+        Keire::Detail::AssetDatabaseWorkerAccess::PublishSourceIndex(*database, sourceIndex);
+    }
+
+    {
+        auto database = Keire::CreateRef<Keire::AssetDatabase>(
+            Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
+        REQUIRE(Keire::Detail::AssetDatabaseWorkerAccess::ReloadSourceIndex(*database, sourceIndex) == 3);
+        const auto unchanged = database->ImportAll();
+        CHECK(unchanged.Imported == 0);
+        CHECK(unchanged.CacheHits == 3);
+        CHECK(importCalls.load() == 5);
+        CHECK_NOTHROW(Keire::AssetCooker::Validate(unchanged.CatalogPath));
+    }
 }
 
 TEST_CASE("Cooking restores dependency-free outputs cached by a separate importer process")

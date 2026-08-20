@@ -15,7 +15,7 @@ namespace Keire::RenderBackend
         {
             std::uint32_t count = 1;
             const auto& key = keys[first];
-            if (key.SupportsInstancing && key.AlphaMode != MaterialAlphaMode::Blend)
+            if (key.SupportsInstancing && !IsTransparentMaterial(key.AlphaMode))
             {
                 while (first + count < keys.size() && keys[first + count] == key)
                     ++count;

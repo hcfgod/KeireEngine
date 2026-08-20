@@ -121,8 +121,8 @@ function Get-CMakeExecutable {
 }
 
 function Get-PythonInvocation {
-    foreach ($candidate in @(@{ Name = "py"; PrefixArguments = @("-3") },
-            @{ Name = "python"; PrefixArguments = @() })) {
+    foreach ($candidate in @(@{ Name = "python"; PrefixArguments = @() },
+            @{ Name = "py"; PrefixArguments = @("-3") })) {
         $command = Get-Command $candidate.Name -ErrorAction SilentlyContinue
         if (-not $command) { continue }
         $prefixArguments = @($candidate.PrefixArguments)

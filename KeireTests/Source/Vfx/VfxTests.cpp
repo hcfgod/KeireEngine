@@ -413,6 +413,56 @@ TEST_CASE("VFX schema round trips deterministically and preserves stable module 
     CHECK(renamed->Definition().Modules[0].Id == Id(2));
 }
 
+TEST_CASE("VFX Kill Shape round trips and applies solid and inverted CPU volume semantics")
+{
+    const auto createDefinition = [](const Keire::VfxKillShapeMode mode)
+    {
+        Keire::VfxEffectDefinition definition;
+        definition.EmitterId = Id(mode == Keire::VfxKillShapeMode::Solid ? 2'500 : 2'510);
+        definition.Name = "Kill Shape";
+        definition.Loop = false;
+        definition.Duration = 10.0F;
+        definition.Space = Keire::VfxSimulationSpace::Local;
+        definition.Capacity = 4;
+        definition.ExecutionSource = Keire::VfxExecutionSource::LegacyModules;
+        definition.Modules = {
+            {Id(2'501), true, Keire::VfxBurstModule{0.0F, 1}},
+            {Id(2'502), true, Keire::VfxShapeModule{}},
+            {Id(2'503), true,
+             Keire::VfxInitializeModule{5.0F, 5.0F, Keire::Vector3{}, Keire::Vector3{}, Keire::Vector3{},
+                                        Keire::Vector3{}}},
+            {Id(2'504), true, Keire::VfxKillShapeModule{Keire::VfxShape::Sphere, {}, {0.5F, 0.5F, 0.5F}, 1.0F, mode}},
+            {Id(2'505), true, Keire::VfxRendererModule{}},
+        };
+        return definition;
+    };
+
+    const auto solidDefinition = createDefinition(Keire::VfxKillShapeMode::Solid);
+    const auto encoded = Keire::VfxEffectAsset::Encode(solidDefinition);
+    const auto decoded = Keire::VfxEffectAsset::Decode(encoded);
+    REQUIRE(decoded);
+    CHECK(decoded->Definition() == solidDefinition);
+    CHECK(Keire::VfxEffectAsset::Encode(decoded->Definition()) == encoded);
+
+    const auto simulate = [](Keire::VfxEffectDefinition definition)
+    {
+        auto world =
+            Keire::CreateRef<Keire::VfxWorld>(Keire::VfxWorldSpecification{.MaximumEffects = 1, .MaximumParticles = 4});
+        REQUIRE(world->Activate({Keire::CreateRef<Keire::VfxEffectAsset>(std::move(definition))}));
+        world->Update(0.01F);
+        REQUIRE(world->Statistics().ActiveParticles == 1);
+        world->Update(0.01F);
+        return world->Statistics().ActiveParticles;
+    };
+
+    CHECK(simulate(solidDefinition) == 0);
+    CHECK(simulate(createDefinition(Keire::VfxKillShapeMode::Inverted)) == 1);
+
+    auto invalid = solidDefinition;
+    std::get<Keire::VfxKillShapeModule>(invalid.Modules[3].Payload).Shape = Keire::VfxShape::Cone;
+    CHECK_THROWS_WITH_AS(Keire::ValidateVfxEffect(invalid), "VFX kill-shape module is invalid.", std::invalid_argument);
+}
+
 TEST_CASE("VFX schema four round trips every persisted value property block and endpoint field")
 {
     auto definition = EffectDefinition();
@@ -520,6 +570,7 @@ TEST_CASE("VFX schema four round trips every persisted value property block and 
     system.Nodes = {source, context, sink};
     system.Connections = {{Id(2241), source.Id, Id(2202), context.Id, Id(2211), {}, block.Id},
                           {Id(2242), context.Id, Id(2212), sink.Id, Id(2231), block.Id, {}}};
+    system.Connections.front().RoutingPoints = {{180.0F, 72.0F}, {260.0F, 104.0F}};
     definition.Systems.push_back(std::move(system));
 
     const auto encoded = Keire::VfxEffectAsset::Encode(definition);
@@ -530,6 +581,7 @@ TEST_CASE("VFX schema four round trips every persisted value property block and 
     CHECK(document.at("systems").at(0).at("nodes").at(0).at("properties").at(1).at("type") == "integer");
     CHECK(document.at("systems").at(0).at("nodes").at(1).at("blocks").at(0).at("typeId") == "keire.block.force");
     CHECK(document.at("systems").at(0).at("connections").at(0).at("inputBlock") == Id(2210).ToString());
+    CHECK(document.at("systems").at(0).at("connections").at(0).at("routing").size() == 2);
 
     const auto decoded = Keire::VfxEffectAsset::Decode(encoded);
     REQUIRE(decoded);

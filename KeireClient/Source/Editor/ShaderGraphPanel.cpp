@@ -7,6 +7,7 @@
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <ranges>
 #include <set>
 #include <stdexcept>
@@ -241,6 +242,7 @@ namespace KeireEditor
         m_SelectedConnection.reset();
         m_InspectorNode.reset();
         m_NodeCreationPosition.reset();
+        m_GraphContext.reset();
         m_NodeSearch.clear();
         m_NodeMenuOpen = false;
         m_Canvas.CancelInteractions();
@@ -850,7 +852,9 @@ namespace KeireEditor
         }
     }
 
-    bool ShaderGraphPanel::DrawNodeCreationMenu(Keire::UiFrame& ui, const std::optional<Keire::Vector2> graphPosition)
+    bool ShaderGraphPanel::DrawNodeCreationMenu(Keire::UiFrame& ui, const std::optional<Keire::Vector2> graphPosition,
+                                                const Keire::ShaderGraphNode* compatibleNode,
+                                                const Keire::ShaderGraphPin* compatiblePin)
     {
         if (m_NodeMenuSelection.ConsumeFocusRequest())
             ui.RequestKeyboardFocus();
@@ -859,6 +863,24 @@ namespace KeireEditor
 
         const auto search = Lower(m_NodeSearch);
         const auto& entries = NodeEntries();
+        const auto compatible = [&](const Keire::ShaderGraphNode& candidate)
+        {
+            if (compatiblePin)
+                return std::ranges::any_of(candidate.Pins, [&](const Keire::ShaderGraphPin& pin)
+                                           { return ShaderGraphPinsCanConnect(*compatiblePin, pin); });
+            return !compatibleNode || ShaderGraphNodesCanConnect(*compatibleNode, candidate);
+        };
+        const auto entryCompatible = [&](const NodeEntry& entry)
+        {
+            try
+            {
+                return compatible(Keire::CreateShaderGraphNode(entry.Kind, entry.Type));
+            }
+            catch (...)
+            {
+                return false;
+            }
+        };
         std::vector<const Keire::AssetSourceRecord*> reusableGraphs;
         for (const auto& record : m_Controller.ShaderGraphAssetRecords())
         {
@@ -866,8 +888,22 @@ namespace KeireEditor
                                   record.Type == Keire::ShaderFunctionAsset::StaticType() ||
                                   record.Type == Keire::MaterialLayerAsset::StaticType() ||
                                   record.Type == Keire::MaterialLayerBlendAsset::StaticType();
-            if (reusable && record.Id != m_Controller.ShaderGraphState().Asset())
+            if (!reusable || record.Id == m_Controller.ShaderGraphState().Asset())
+                continue;
+            if (!compatibleNode && !compatiblePin)
+            {
                 reusableGraphs.push_back(&record);
+                continue;
+            }
+            try
+            {
+                const auto function = m_Controller.ResolveShaderGraphFunction(record.Id);
+                if (function && compatible(Keire::CreateShaderGraphFunctionCallNode(record.Id, *function)))
+                    reusableGraphs.push_back(&record);
+            }
+            catch (...)
+            {
+            }
         }
         std::vector<std::string> paths;
         paths.reserve(entries.size());
@@ -878,7 +914,7 @@ namespace KeireEditor
         if (!search.empty())
         {
             for (std::size_t index = 0; index < entries.size(); ++index)
-                if (Lower(paths[index]).find(search) != std::string::npos)
+                if (entryCompatible(entries[index]) && Lower(paths[index]).find(search) != std::string::npos)
                     visible.push_back(index);
         }
         else
@@ -892,7 +928,11 @@ namespace KeireEditor
             {
                 const auto found = std::ranges::find(paths, recent);
                 if (found != paths.end())
-                    append(static_cast<std::size_t>(found - paths.begin()));
+                {
+                    const auto index = static_cast<std::size_t>(found - paths.begin());
+                    if (entryCompatible(entries[index]))
+                        append(index);
+                }
             }
             constexpr std::array common{std::string_view("Scalar Parameter"),
                                         std::string_view("Color Parameter"),
@@ -904,7 +944,11 @@ namespace KeireEditor
             {
                 const auto found = std::ranges::find(entries, name, &NodeEntry::Name);
                 if (found != entries.end())
-                    append(static_cast<std::size_t>(found - entries.begin()));
+                {
+                    const auto index = static_cast<std::size_t>(found - entries.begin());
+                    if (entryCompatible(entries[index]))
+                        append(index);
+                }
             }
         }
 
@@ -956,7 +1000,9 @@ namespace KeireEditor
                 }
             }
         }
-        if (visible.empty() && !visibleFunction)
+        const bool hasCompatibleEntry = std::ranges::any_of(entries, entryCompatible);
+        if ((!search.empty() && visible.empty() && !visibleFunction) ||
+            (search.empty() && !hasCompatibleEntry && reusableGraphs.empty()))
             ui.TextColored(m_Controller.ShaderGraphTheme().MutedText, "No nodes match this search.");
 
         if (search.empty())
@@ -964,14 +1010,15 @@ namespace KeireEditor
             ui.Separator();
             std::vector<std::string_view> categories;
             for (const auto& entry : entries)
-                if (std::ranges::find(categories, entry.Category) == categories.end())
+                if (entryCompatible(entry) && std::ranges::find(categories, entry.Category) == categories.end())
                     categories.push_back(entry.Category);
             for (const auto category : categories)
             {
                 if (auto categoryMenu = ui.BeginMenu(category); categoryMenu)
                 {
                     for (std::size_t index = 0; index < entries.size(); ++index)
-                        if (entries[index].Category == category && addEntry(index, entries[index].Name))
+                        if (entries[index].Category == category && entryCompatible(entries[index]) &&
+                            addEntry(index, entries[index].Name))
                             return true;
                 }
             }
@@ -1015,7 +1062,7 @@ namespace KeireEditor
         ui.SameLine();
         ui.TextColored(
             m_Controller.ShaderGraphTheme().MutedText,
-            "Right-click to add  |  drag pins to connect  |  middle-drag to pan  |  wheel to zoom  |  Delete removes");
+            "Right-click canvas or items for actions  |  drag pins to connect  |  double-click cable routes");
 
         const auto findCanvasNode = [&](const Keire::AssetId id) -> std::optional<StableNodeId>
         {
@@ -1028,6 +1075,23 @@ namespace KeireEditor
             const auto found = std::ranges::find_if(model.ConnectionIdentities,
                                                     [id](const auto& identity) { return identity.second == id; });
             return found == model.ConnectionIdentities.end() ? std::nullopt : std::optional<StableNodeId>(found->first);
+        };
+        const auto findDefinitionNode = [&](const StableNodeId canvasId) -> const Keire::ShaderGraphNode*
+        {
+            const auto id = model.Node(canvasId);
+            if (!id)
+                return nullptr;
+            const auto found = std::ranges::find(document.Definition().Nodes, *id, &Keire::ShaderGraphNode::Id);
+            return found == document.Definition().Nodes.end() ? nullptr : &*found;
+        };
+        const auto findDefinitionPin = [&](const Keire::ShaderGraphNode& node,
+                                           const StableNodeId canvasId) -> const Keire::ShaderGraphPin*
+        {
+            const auto id = model.Pin(canvasId);
+            if (!id)
+                return nullptr;
+            const auto found = std::ranges::find(node.Pins, *id, &Keire::ShaderGraphPin::Id);
+            return found == node.Pins.end() ? nullptr : &*found;
         };
         m_Canvas.Select(m_SelectedNode ? findCanvasNode(*m_SelectedNode) : std::nullopt);
         m_Canvas.SelectConnection(m_SelectedConnection ? findCanvasConnection(*m_SelectedConnection) : std::nullopt);
@@ -1046,8 +1110,60 @@ namespace KeireEditor
                                                          "A Shader Graph connection endpoint is unavailable."};
                 return document.CheckConnection({*outputNode, *outputPin}, {*inputNode, *inputPin});
             },
+            .EditableReroutes = true,
         };
         const auto canvas = m_Canvas.Draw(ui, "ShaderGraphCanvas", model.Nodes, model.Connections, options);
+        const auto setRouting = [&](const StableNodeId canvasConnection, std::vector<Keire::Vector2> routing)
+        {
+            const auto connection = model.Connection(canvasConnection);
+            if (!connection)
+                return;
+            try
+            {
+                (void)document.SetConnectionRouting(*connection, std::move(routing));
+            }
+            catch (const std::exception& error)
+            {
+                Report(error.what());
+            }
+        };
+        if (canvas.AddRerouteRequested)
+        {
+            const auto connection =
+                std::ranges::find(model.Connections, canvas.AddRerouteRequested->Connection, &NodeGraphConnection::Id);
+            if (connection != model.Connections.end() &&
+                canvas.AddRerouteRequested->Index <= connection->RoutingPoints.size())
+            {
+                auto routing = connection->RoutingPoints;
+                routing.insert(routing.begin() + static_cast<std::ptrdiff_t>(canvas.AddRerouteRequested->Index),
+                               canvas.AddRerouteRequested->GraphPosition);
+                setRouting(connection->Id, std::move(routing));
+            }
+        }
+        if (canvas.MoveRerouteRequested)
+        {
+            const auto connection =
+                std::ranges::find(model.Connections, canvas.MoveRerouteRequested->Connection, &NodeGraphConnection::Id);
+            if (connection != model.Connections.end() &&
+                canvas.MoveRerouteRequested->Index < connection->RoutingPoints.size())
+            {
+                auto routing = connection->RoutingPoints;
+                routing[canvas.MoveRerouteRequested->Index] = canvas.MoveRerouteRequested->GraphPosition;
+                setRouting(connection->Id, std::move(routing));
+            }
+        }
+        if (canvas.DeleteRerouteRequested)
+        {
+            const auto connection = std::ranges::find(model.Connections, canvas.DeleteRerouteRequested->Connection,
+                                                      &NodeGraphConnection::Id);
+            if (connection != model.Connections.end() &&
+                canvas.DeleteRerouteRequested->Index < connection->RoutingPoints.size())
+            {
+                auto routing = connection->RoutingPoints;
+                routing.erase(routing.begin() + static_cast<std::ptrdiff_t>(canvas.DeleteRerouteRequested->Index));
+                setRouting(connection->Id, std::move(routing));
+            }
+        }
         if (canvas.ActivatedNode)
             m_SelectedNode = model.Node(*canvas.ActivatedNode);
         if (canvas.ActivatedConnection)
@@ -1059,11 +1175,20 @@ namespace KeireEditor
         }
         if (canvas.ContextRequested)
         {
-            m_NodeCreationPosition = canvas.ContextRequested->GraphPosition;
+            m_GraphContext = canvas.ContextRequested;
             m_NodeSearch.clear();
-            m_NodeMenuSelection.Open();
-            ui.SetNextWindowSize({380.0F, 440.0F}, true);
-            ui.OpenPopup("ShaderGraphNodePalette");
+            if (canvas.ContextRequested->Kind == NodeGraphContextTargetKind::Background)
+            {
+                m_NodeCreationPosition = canvas.ContextRequested->GraphPosition;
+                m_NodeMenuSelection.Open();
+                ui.SetNextWindowSize({380.0F, 440.0F}, true);
+                ui.OpenPopup("ShaderGraphNodePalette");
+            }
+            else
+            {
+                m_NodeCreationPosition.reset();
+                ui.OpenPopup("ShaderGraphItemContext");
+            }
         }
         if (canvas.MoveCompletedNode)
         {
@@ -1123,6 +1248,120 @@ namespace KeireEditor
                     Report(error.what());
                 }
         }
+        if (auto popup = ui.BeginPopup("ShaderGraphItemContext"); popup)
+        {
+            if (!m_GraphContext)
+            {
+                ui.TextColored(m_Controller.ShaderGraphTheme().MutedText, "The graph item is no longer available.");
+            }
+            else if (m_GraphContext->Kind == NodeGraphContextTargetKind::Node ||
+                     m_GraphContext->Kind == NodeGraphContextTargetKind::Pin)
+            {
+                const auto* node = findDefinitionNode(m_GraphContext->Node);
+                const auto* pin = node && m_GraphContext->Kind == NodeGraphContextTargetKind::Pin
+                                      ? findDefinitionPin(*node, m_GraphContext->Pin)
+                                      : nullptr;
+                if (!node || (m_GraphContext->Kind == NodeGraphContextTargetKind::Pin && !pin))
+                {
+                    ui.TextColored(m_Controller.ShaderGraphTheme().MutedText, "The graph item is no longer available.");
+                }
+                else
+                {
+                    ui.TextColored(m_Controller.ShaderGraphTheme().Accent, pin ? pin->Name : node->Name);
+                    ui.TextColored(m_Controller.ShaderGraphTheme().MutedText, pin ? node->Name : "SHADER GRAPH NODE");
+                    ui.Separator();
+                    if (ui.MenuItem("Inspect Node"))
+                    {
+                        m_SelectedNode = node->Id;
+                        m_SelectedConnection.reset();
+                    }
+                    if (auto addMenu = ui.BeginMenu("Add Compatible Node"); addMenu)
+                    {
+                        if (DrawNodeCreationMenu(ui, m_GraphContext->GraphPosition, pin ? nullptr : node, pin))
+                            return;
+                    }
+                    const bool connected = std::ranges::any_of(
+                        document.Definition().Connections,
+                        [&](const Keire::ShaderGraphConnection& connection)
+                        {
+                            if (pin)
+                                return connection.Output.Pin == pin->Id || connection.Input.Pin == pin->Id;
+                            return connection.Output.Node == node->Id || connection.Input.Node == node->Id;
+                        });
+                    if (ui.MenuItem(pin ? "Unlink Pin" : "Unlink All Cables", false, connected))
+                    {
+                        const auto nodeId = node->Id;
+                        const auto pinId = pin ? pin->Id : Keire::AssetId{};
+                        try
+                        {
+                            (void)document.Edit(pin ? "Disconnect Shader Graph pin" : "Disconnect Shader Graph node",
+                                                [nodeId, pinId](auto& definition)
+                                                {
+                                                    std::erase_if(definition.Connections,
+                                                                  [&](const Keire::ShaderGraphConnection& connection)
+                                                                  {
+                                                                      return pinId
+                                                                                 ? connection.Output.Pin == pinId ||
+                                                                                       connection.Input.Pin == pinId
+                                                                                 : connection.Output.Node == nodeId ||
+                                                                                       connection.Input.Node == nodeId;
+                                                                  });
+                                                });
+                            m_SelectedConnection.reset();
+                        }
+                        catch (const std::exception& error)
+                        {
+                            Report(error.what());
+                        }
+                    }
+                    if (!pin)
+                    {
+                        ui.Separator();
+                        if (ui.MenuItem("Delete Node", false, node->Kind != Keire::ShaderGraphNodeKind::Master))
+                            try
+                            {
+                                (void)document.RemoveNode(node->Id);
+                                m_SelectedNode.reset();
+                            }
+                            catch (const std::exception& error)
+                            {
+                                Report(error.what());
+                            }
+                    }
+                }
+            }
+            else if (m_GraphContext->Kind == NodeGraphContextTargetKind::Connection)
+            {
+                const auto id = model.Connection(m_GraphContext->Connection);
+                const auto connection =
+                    id ? std::ranges::find(document.Definition().Connections, *id, &Keire::ShaderGraphConnection::Id)
+                       : document.Definition().Connections.end();
+                if (connection == document.Definition().Connections.end())
+                {
+                    ui.TextColored(m_Controller.ShaderGraphTheme().MutedText,
+                                   "The graph cable is no longer available.");
+                }
+                else
+                {
+                    ui.TextColored(m_Controller.ShaderGraphTheme().Accent, "SHADER GRAPH CABLE");
+                    ui.Separator();
+                    if (ui.MenuItem("Select Source Node"))
+                        m_SelectedNode = connection->Output.Node;
+                    if (ui.MenuItem("Select Target Node"))
+                        m_SelectedNode = connection->Input.Node;
+                    if (ui.MenuItem("Unlink Cable"))
+                        try
+                        {
+                            (void)document.RemoveConnection(connection->Id);
+                            m_SelectedConnection.reset();
+                        }
+                        catch (const std::exception& error)
+                        {
+                            Report(error.what());
+                        }
+                }
+            }
+        }
         bool contextMenuOpen = false;
         if (auto popup = ui.BeginPopup("ShaderGraphNodePalette"); popup)
         {
@@ -1133,6 +1372,9 @@ namespace KeireEditor
                 m_NodeMenuOpen = false;
                 return;
             }
+            ui.Separator();
+            if (ui.MenuItem("Frame All Nodes"))
+                m_Canvas.Focus(model.Nodes, ui.ContentAvailable());
         }
         if (!contextMenuOpen)
             m_NodeCreationPosition.reset();

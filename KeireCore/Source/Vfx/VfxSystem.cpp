@@ -1,24 +1,28 @@
 #include "Keire/Vfx/VfxSystem.h"
 
+#include "KeireInternal/Vfx/VfxCheckpointInternal.h"
 #include "KeireInternal/Vfx/VfxExecutionInternal.h"
 #include "KeireInternal/Vfx/VfxExpressionInternal.h"
 
 #include <algorithm>
 #include <atomic>
-#include <bit>
 #include <cmath>
 #include <cstring>
 #include <limits>
 #include <numbers>
 #include <set>
 #include <stdexcept>
-#include <type_traits>
 #include <utility>
 
 namespace Keire
 {
     namespace
     {
+        using Detail::VfxCheckpointMagic;
+        using Detail::VfxCheckpointReader;
+        using Detail::VfxCheckpointVersion;
+        using Detail::VfxCheckpointWriter;
+
         template <typename... Ts> struct Overloaded : Ts...
         {
             using Ts::operator()...;
@@ -27,65 +31,6 @@ namespace Keire
 
         constexpr Vector3 Gravity{0.0F, -9.81F, 0.0F};
         constexpr std::uint32_t MaximumRuntimeBurstCycles = 1024;
-        constexpr std::array<char, 8> VfxCheckpointMagic{'K', 'R', 'V', 'F', 'X', 'C', 'P', '\0'};
-        constexpr std::uint32_t VfxCheckpointVersion = 1;
-
-        class VfxCheckpointWriter final
-        {
-          public:
-            template <typename T> void Unsigned(const T value)
-            {
-                static_assert(std::is_unsigned_v<T>);
-                for (std::size_t index = 0; index < sizeof(T); ++index)
-                    Bytes.push_back(static_cast<std::byte>(value >> (index * 8U)));
-            }
-
-            void Boolean(const bool value) { Unsigned<std::uint8_t>(value ? 1U : 0U); }
-            void Float(const float value) { Unsigned(std::bit_cast<std::uint32_t>(value)); }
-            void Double(const double value) { Unsigned(std::bit_cast<std::uint64_t>(value)); }
-            void Id(const AssetId value)
-            {
-                Unsigned(value.High());
-                Unsigned(value.Low());
-            }
-
-            std::vector<std::byte> Bytes;
-        };
-
-        class VfxCheckpointReader final
-        {
-          public:
-            explicit VfxCheckpointReader(const std::span<const std::byte> bytes) : Bytes(bytes) {}
-
-            template <typename T> [[nodiscard]] T Unsigned()
-            {
-                static_assert(std::is_unsigned_v<T>);
-                if (Offset > Bytes.size() || sizeof(T) > Bytes.size() - Offset)
-                    throw std::runtime_error("VFX checkpoint is truncated.");
-                std::uintmax_t result = 0;
-                for (std::size_t index = 0; index < sizeof(T); ++index)
-                    result |= static_cast<std::uintmax_t>(std::to_integer<std::uint8_t>(Bytes[Offset++]))
-                              << (index * 8U);
-                return static_cast<T>(result);
-            }
-
-            [[nodiscard]] bool Boolean()
-            {
-                const auto value = Unsigned<std::uint8_t>();
-                if (value > 1U)
-                    throw std::runtime_error("VFX checkpoint contains an invalid Boolean.");
-                return value != 0U;
-            }
-            [[nodiscard]] float Float() { return std::bit_cast<float>(Unsigned<std::uint32_t>()); }
-            [[nodiscard]] double Double() { return std::bit_cast<double>(Unsigned<std::uint64_t>()); }
-            [[nodiscard]] AssetId Id() { return {Unsigned<std::uint64_t>(), Unsigned<std::uint64_t>()}; }
-            [[nodiscard]] bool Complete() const noexcept { return Offset == Bytes.size(); }
-
-          private:
-            std::span<const std::byte> Bytes;
-            std::size_t Offset = 0;
-        };
-
         [[nodiscard]] bool ValidRuntimeBurst(const VfxEffectDefinition& definition,
                                              const VfxBurstModule& burst) noexcept
         {
@@ -225,6 +170,8 @@ namespace Keire
                         return VfxGpuEmitter::ParticleOperationKind::Collision;
                     else if constexpr (std::is_same_v<T, VfxRendererModule>)
                         return VfxGpuEmitter::ParticleOperationKind::Renderer;
+                    else if constexpr (std::is_same_v<T, VfxKillShapeModule>)
+                        return VfxGpuEmitter::ParticleOperationKind::KillShape;
                     else
                         return std::nullopt;
                 },
@@ -251,6 +198,10 @@ namespace Keire
             case VfxModuleProperty::ColorConstant:
             case VfxModuleProperty::CollisionRestitution:
             case VfxModuleProperty::CollisionKillOnCollision:
+            case VfxModuleProperty::KillShapeCenter:
+            case VfxModuleProperty::KillShapeBoxHalfExtent:
+            case VfxModuleProperty::KillShapeRadius:
+            case VfxModuleProperty::KillShapeInverted:
                 return true;
             case VfxModuleProperty::None:
             case VfxModuleProperty::EmissionParticlesPerSecond:
@@ -583,6 +534,18 @@ namespace Keire
                                            VfxValueType::Scalar, value.Restitution);
                             appendProperty(operation.Node, VfxModuleProperty::CollisionKillOnCollision,
                                            VfxValueType::Boolean, value.KillOnCollision);
+                        },
+                        [&](const VfxKillShapeModule& value)
+                        {
+                            gpuOperation.Setting = static_cast<std::uint32_t>(value.Shape);
+                            appendProperty(operation.Node, VfxModuleProperty::KillShapeCenter, VfxValueType::Vector3,
+                                           value.Center);
+                            appendProperty(operation.Node, VfxModuleProperty::KillShapeBoxHalfExtent,
+                                           VfxValueType::Vector3, value.BoxHalfExtent);
+                            appendProperty(operation.Node, VfxModuleProperty::KillShapeRadius, VfxValueType::Scalar,
+                                           value.Radius);
+                            appendProperty(operation.Node, VfxModuleProperty::KillShapeInverted, VfxValueType::Boolean,
+                                           value.Mode == VfxKillShapeMode::Inverted);
                         },
                         [&](const VfxRendererModule& value)
                         { gpuOperation.Setting = static_cast<std::uint32_t>(value.Type); },
@@ -1718,6 +1681,21 @@ namespace Keire
                     if (!moveParticle(collision))
                         return;
                     moved = true;
+                }
+                else if (const auto* killShape = std::get_if<VfxKillShapeModule>(&module->Payload))
+                {
+                    const auto relative = Subtract(particle.Position, killShape->Center);
+                    const auto inside = killShape->Shape == VfxShape::Box
+                                            ? std::abs(relative.X) <= killShape->BoxHalfExtent.X &&
+                                                  std::abs(relative.Y) <= killShape->BoxHalfExtent.Y &&
+                                                  std::abs(relative.Z) <= killShape->BoxHalfExtent.Z
+                                            : Dot(relative, relative) <= killShape->Radius * killShape->Radius;
+                    const auto kill = killShape->Mode == VfxKillShapeMode::Solid ? inside : !inside;
+                    if (kill)
+                    {
+                        ReleaseParticle(particleIndex);
+                        return;
+                    }
                 }
             }
             if (!moved && !moveParticle(nullptr))

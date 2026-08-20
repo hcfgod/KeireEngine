@@ -1,7 +1,6 @@
 #include "KeireClient/Editor/AssetBrowserFolderCache.h"
 #include "KeireClient/Editor/AssetBrowserUtilities.h"
 #include "KeireClient/Editor/AssetOperationService.h"
-#include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
 #include "KeireClient/Editor/EditorRendererCapabilities.h"
 #include "KeireClient/Editor/EditorWindowPlacement.h"
@@ -44,6 +43,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iterator>
 #include <ranges>
 #include <stdexcept>
@@ -258,6 +258,13 @@ TEST_CASE("asset browser record views cache a sorted 50000-asset project slice")
 
 TEST_CASE("asset browser utilities preserve preferences and deterministic folder routing")
 {
+    const auto measureCharacters = [](const std::string_view text) { return static_cast<float>(text.size()); };
+    CHECK(KeireEditor::ElideAssetDisplayName("Short", 10.0F, measureCharacters) == "Short");
+    CHECK(KeireEditor::ElideAssetDisplayName("LongAssetDisplayName", 10.0F, measureCharacters) == "LongAss...");
+    CHECK(KeireEditor::ElideAssetDisplayName("Long", 2.0F, measureCharacters).empty());
+    CHECK(KeireEditor::ElideAssetDisplayName("Long", 0.0F, measureCharacters).empty());
+    CHECK_THROWS_AS((void)KeireEditor::ElideAssetDisplayName("Asset", 20.0F, {}), std::invalid_argument);
+
     const auto root = std::filesystem::temp_directory_path() /
                       ("Keire-AssetBrowserUtilities-" + Keire::AssetId::Generate().ToString());
     std::error_code error;
@@ -285,6 +292,18 @@ TEST_CASE("asset browser utilities preserve preferences and deterministic folder
         KeireEditor::AssetBrowserDropTarget{.Rect = {{5.0F, 5.0F}, {15.0F, 15.0F}}, .Folder = "Inner"}};
     CHECK(KeireEditor::ResolveAssetBrowserDropFolder(targets, {10.0F, 10.0F}, "Fallback") == "Inner");
     CHECK(KeireEditor::ResolveAssetBrowserDropFolder(targets, {30.0F, 30.0F}, "Fallback") == "Fallback");
+
+    const std::array visibleFolders{std::filesystem::path("Audio"), std::filesystem::path("Models"),
+                                    std::filesystem::path("Textures"), std::filesystem::path("Vfx")};
+    const auto selectedFolders =
+        KeireEditor::BuildFolderRangeSelection(visibleFolders, visibleFolders[1], visibleFolders[3]);
+    REQUIRE(selectedFolders.size() == 3);
+    CHECK(selectedFolders.front() == visibleFolders[1]);
+    CHECK(selectedFolders.back() == visibleFolders[3]);
+    const auto encodedFolders = KeireEditor::EncodeFolderPayload(selectedFolders);
+    CHECK(KeireEditor::DecodeFolderPayload(std::as_bytes(std::span(encodedFolders))) == selectedFolders);
+    const std::array invalidFolderPayload{std::byte{'.'}, std::byte{'.'}, std::byte{'/'}, std::byte{'x'}};
+    CHECK_THROWS_AS((void)KeireEditor::DecodeFolderPayload(invalidFolderPayload), std::invalid_argument);
 
     std::filesystem::remove_all(root, error);
     CHECK_FALSE(error);
@@ -448,6 +467,32 @@ TEST_CASE("scene document owns selection and deterministic close state")
     CHECK_FALSE(document.Asset());
     CHECK_FALSE(document.RecoveryAvailable());
     CHECK_FALSE(scene->IsOpen());
+}
+
+TEST_CASE("new physics components fit the rendered built-in capsule")
+{
+    KeireEditor::SceneDocument document;
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                Keire::SceneAsset::EmptyDefinition("Built-in capsule fit"));
+    auto entity = scene->CreateEntity("Capsule");
+    const auto renderer = entity.AddComponent<Keire::MeshRendererComponent>();
+    REQUIRE(renderer);
+    renderer->SetMesh(Keire::MeshAsset::CapsuleId());
+    document.Open(scene);
+
+    const auto collider = Keire::DynamicRefCast<Keire::ColliderComponent>(
+        document.AddComponent(entity.Id(), Keire::ColliderComponent::StaticType()));
+    REQUIRE(collider);
+    CHECK(collider->Shape() == Keire::ColliderShape::Capsule);
+    CHECK(collider->Radius() == doctest::Approx(0.25F));
+    CHECK(collider->Height() == doctest::Approx(1.0F));
+
+    const auto controller = Keire::DynamicRefCast<Keire::CharacterControllerComponent>(
+        document.AddComponent(entity.Id(), Keire::CharacterControllerComponent::StaticType()));
+    REQUIRE(controller);
+    CHECK(controller->Radius() == doctest::Approx(0.25F));
+    CHECK(controller->Height() == doctest::Approx(1.0F));
+    document.Close();
 }
 
 TEST_CASE("created prefabs connect existing scene objects and can be unpacked")
@@ -1480,9 +1525,93 @@ TEST_CASE("Material Graph documents separate the surface canvas from compatibili
     CHECK(document.Definition().Connections.empty());
     CHECK(document.Redo());
     CHECK(document.Definition().Connections.size() == 1);
-    document.Save();
+    CHECK_FALSE(document.AdvanceAutosave(0.49));
+    CHECK(document.Dirty());
+    CHECK(persisted.empty());
+    CHECK(document.AdvanceAutosave(0.02));
     CHECK_FALSE(persisted.empty());
     CHECK_FALSE(document.Dirty());
+}
+
+TEST_CASE("Material Graph autosave validates frame deltas and restarts after later edits")
+{
+    const auto graph = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000036");
+    const auto runtimeShader = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000037");
+    Keire::ShaderInterfaceDefinition shaderInterface;
+    Keire::MaterialShaderReference shaderReference;
+    shaderReference.Kind = Keire::MaterialShaderSourceKind::ShaderGraph;
+    shaderReference.Asset = graph;
+    auto definition = Keire::CreateMaterialGraph(shaderReference, shaderInterface);
+    std::size_t saves = 0;
+    KeireEditor::MaterialGraphDocument document({
+        .ResolveInterface = [&](const Keire::MaterialShaderReference& reference)
+        { return reference == shaderReference ? std::optional(shaderInterface) : std::nullopt; },
+        .ResolveShader = [&](const Keire::MaterialShaderReference& reference)
+        { return reference == shaderReference ? runtimeShader : Keire::AssetId{}; },
+        .Persist = [&](const Keire::AssetId, const std::span<const std::byte>) { ++saves; },
+    });
+    document.Open(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000038"),
+                  Keire::MaterialGraphAsset::EncodeSource(definition), 1);
+    auto surface = document.Definition().Surface;
+    surface.DoubleSided = !surface.DoubleSided;
+    REQUIRE(document.SetSurface(surface));
+    CHECK_THROWS_AS(static_cast<void>(document.AdvanceAutosave(-0.01)), std::invalid_argument);
+    CHECK_FALSE(document.AdvanceAutosave(0.5 - 0.001));
+    CHECK(document.AdvanceAutosave(0.001));
+    CHECK(saves == 1);
+    surface.DoubleSided = !surface.DoubleSided;
+    REQUIRE(document.SetSurface(surface));
+    CHECK_FALSE(document.AdvanceAutosave(0.25));
+    CHECK_FALSE(document.AdvanceAutosave(0.24));
+    CHECK(document.AdvanceAutosave(0.01));
+    CHECK(saves == 2);
+    document.Save();
+    CHECK(saves == 2);
+}
+
+TEST_CASE("Material Graph surface parameter edits publish live material properties")
+{
+    const auto graph = Keire::AssetId::Generate();
+    const auto runtimeShader = Keire::AssetId::Generate();
+    auto shaderTemplate = Keire::CreateDefaultShaderGraph();
+    Keire::ShaderInterfaceDefinition shaderInterface;
+    Keire::MaterialShaderReference shaderReference;
+    shaderReference.Kind = Keire::MaterialShaderSourceKind::ShaderGraph;
+    shaderReference.Asset = graph;
+    auto definition = Keire::CreateMaterialGraph(shaderReference, shaderInterface);
+    definition.SurfaceGraph = Keire::CreateMaterialSurfaceGraph(shaderTemplate);
+    auto roughness =
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Parameter, Keire::ShaderGraphValueType::Scalar);
+    roughness.Name = "Live Roughness";
+    roughness.Symbol = "LiveRoughness";
+    roughness.Value = 0.35F;
+    const auto roughnessNode = roughness.Id;
+    const auto roughnessOutput = roughness.Pins.front().Id;
+    const auto materialOutput = definition.SurfaceGraph.Nodes.front().Id;
+    const auto materialRoughness =
+        std::ranges::find(definition.SurfaceGraph.Nodes.front().Pins, "Roughness", &Keire::ShaderGraphPin::Name);
+    REQUIRE(materialRoughness != definition.SurfaceGraph.Nodes.front().Pins.end());
+    const auto materialRoughnessPin = materialRoughness->Id;
+    definition.SurfaceGraph.Nodes.push_back(std::move(roughness));
+    definition.SurfaceGraph.Connections.push_back(
+        {Keire::AssetId::Generate(), {roughnessNode, roughnessOutput}, {materialOutput, materialRoughnessPin}});
+
+    std::optional<Keire::MaterialAssetDefinition> preview;
+    KeireEditor::MaterialGraphDocument document({
+        .ResolveInterface = [&](const Keire::MaterialShaderReference&) { return std::optional(shaderInterface); },
+        .ResolveTemplate = [&](const Keire::MaterialShaderReference&) { return std::optional(shaderTemplate); },
+        .ResolveShader = [&](const Keire::MaterialShaderReference&) { return runtimeShader; },
+        .Preview = [&](const Keire::AssetId, const Keire::MaterialAssetDefinition& material) { preview = material; },
+        .Persist = [](const Keire::AssetId, const std::span<const std::byte>) {},
+    });
+    document.Open(Keire::AssetId::Generate(), Keire::MaterialGraphAsset::EncodeSource(definition), 1);
+    REQUIRE(preview);
+    CHECK(preview->Shader == runtimeShader);
+    CHECK(std::get<float>(preview->Properties.at("LiveRoughness")) == doctest::Approx(0.35F));
+
+    REQUIRE(document.EditExpressionNode(roughnessNode, [](Keire::ShaderGraphNode& node) { node.Value = 0.8F; }));
+    REQUIRE(preview);
+    CHECK(std::get<float>(preview->Properties.at("LiveRoughness")) == doctest::Approx(0.8F));
 }
 
 TEST_CASE("scene picker selects transform-only and rendered entities by nearest viewport hit")
@@ -1813,6 +1942,108 @@ TEST_CASE("editor window restoration selects visible displays and clamps removed
     CHECK(small.Position == Keire::WindowPosition{0, 0});
 }
 
+TEST_CASE("thumbnail invalidation supersedes an in-flight revision of the same asset")
+{
+    const auto root = std::filesystem::temp_directory_path() / "Keire-ThumbnailInvalidation-Test";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    {
+        KeireEditor::ThumbnailService thumbnails(root);
+        std::atomic_uint32_t calls = 0;
+        std::promise<void> firstEntered;
+        auto firstEnteredFuture = firstEntered.get_future();
+        std::promise<void> releaseFirst;
+        const auto releaseFirstFuture = releaseFirst.get_future().share();
+        thumbnails.RegisterProvider(
+            ".refresh", 1,
+            [&](const KeireEditor::ThumbnailRequest&, const std::uint32_t width, const std::uint32_t height)
+            {
+                const auto call = ++calls;
+                if (call == 1)
+                {
+                    firstEntered.set_value();
+                    releaseFirstFuture.wait();
+                }
+                return std::vector<std::byte>(static_cast<std::size_t>(width) * height * 4U,
+                                              static_cast<std::byte>(call));
+            });
+        const auto asset = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000078");
+        REQUIRE(thumbnails.Request({.Asset = asset, .RelativePath = "Preview.refresh", .Digest = "same-digest"}));
+        if (firstEnteredFuture.wait_for(std::chrono::seconds(2)) != std::future_status::ready)
+        {
+            releaseFirst.set_value();
+            FAIL("The first thumbnail job did not start.");
+        }
+        thumbnails.Invalidate(asset);
+        REQUIRE(thumbnails.Request({.Asset = asset, .RelativePath = "Preview.refresh", .Digest = "same-digest"}));
+        releaseFirst.set_value();
+
+        KeireEditor::ThumbnailResult completed;
+        for (int attempt = 0; attempt < 200 && completed.Pixels.empty(); ++attempt)
+        {
+            auto results = thumbnails.DrainCompleted();
+            if (!results.empty())
+                completed = std::move(results.front());
+            else
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        REQUIRE(completed.Pixels.size() == 96U * 96U * 4U);
+        CHECK(std::to_integer<unsigned>(completed.Pixels.front()) == 2U);
+        CHECK(calls.load() == 2U);
+    }
+    std::filesystem::remove_all(root, error);
+}
+
+TEST_CASE("thumbnail invalidation bypasses a stale persistent cache entry")
+{
+    const auto root = std::filesystem::temp_directory_path() / "Keire-ThumbnailCacheInvalidation-Test";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    {
+        KeireEditor::ThumbnailService thumbnails(root);
+        std::atomic_uint32_t calls = 0;
+        thumbnails.RegisterProvider(
+            ".refreshcache", 1,
+            [&](const KeireEditor::ThumbnailRequest&, const std::uint32_t width, const std::uint32_t height)
+            {
+                const auto call = ++calls;
+                return std::vector<std::byte>(static_cast<std::size_t>(width) * height * 4U,
+                                              static_cast<std::byte>(call));
+            });
+        const auto await = [&thumbnails]
+        {
+            for (int attempt = 0; attempt < 200; ++attempt)
+            {
+                auto completed = thumbnails.DrainCompleted();
+                if (!completed.empty())
+                    return std::move(completed.front());
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+            return KeireEditor::ThumbnailResult{};
+        };
+        const auto asset = Keire::AssetId::Generate();
+        const KeireEditor::ThumbnailRequest request{
+            .Asset = asset, .RelativePath = "Preview.refreshcache", .Digest = "stable-digest"};
+        REQUIRE(thumbnails.Request(request));
+        REQUIRE(await().Pixels.size() == 96U * 96U * 4U);
+        CHECK(calls.load() == 1U);
+
+        thumbnails.Invalidate(asset);
+        REQUIRE(thumbnails.Request(request));
+        const auto refreshed = await();
+        REQUIRE(refreshed.Pixels.size() == 96U * 96U * 4U);
+        CHECK(std::to_integer<unsigned>(refreshed.Pixels.front()) == 2U);
+        CHECK(calls.load() == 2U);
+
+        REQUIRE(thumbnails.Request(request));
+        const auto cached = await();
+        REQUIRE(cached.Pixels.size() == 96U * 96U * 4U);
+        CHECK(std::to_integer<unsigned>(cached.Pixels.front()) == 2U);
+        CHECK(calls.load() == 2U);
+    }
+    std::filesystem::remove_all(root, error);
+}
+
 TEST_CASE("content previews use immutable loaded assets without blocking shutdown")
 {
     const auto root = std::filesystem::temp_directory_path() / "Keire-ThumbnailService-Test";
@@ -2047,6 +2278,25 @@ TEST_CASE("Asset operation service runs the isolated worker and publishes a sour
         CHECK(std::filesystem::is_regular_file(project->Root() / "Assets/Scenes/WorkerCreated.keirescene"));
         CHECK(std::filesystem::is_regular_file(project->Root() / "Assets/Shaders/WorkerAuxiliary.hlsl"));
 
+        operations.QueueAssetImport(created->Result.CreatedAsset, KeireEditor::AssetOperationPriority::ExplicitAction,
+                                    {.Reason = "isolated-worker-targeted-test"});
+        const auto targetedDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (operations.Busy() && std::chrono::steady_clock::now() < targetedDeadline)
+        {
+            operations.Update();
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        operations.Update();
+        const auto targeted = operations.TakeCompletion();
+        REQUIRE(targeted);
+        INFO(targeted->Result.Diagnostic);
+        CHECK(targeted->Result.Success);
+        CHECK(targeted->Kind == Keire::Detail::AssetWorkerOperationKind::ImportAssets);
+        CHECK(targeted->Result.Import.Statuses.size() == 1);
+        CHECK(targeted->WorkerOutput.find("kind=import-assets") != std::string::npos);
+        CHECK(targeted->WorkerOutput.find("reason='isolated-worker-targeted-test'") != std::string::npos);
+        CHECK(targeted->WorkerOutput.find("targets=1") != std::string::npos);
+
         operations.QueueMutation({.Kind = Keire::Detail::AssetWorkerMutationKind::MoveAsset,
                                   .Asset = created->Result.CreatedAsset,
                                   .Destination = "Scenes/WorkerRenamed.keirescene"});
@@ -2157,10 +2407,12 @@ TEST_CASE("Asset operation service coalesces material refresh generations before
     auto project = Keire::Project::Create(
         {.Location = location, .Name = "Worker Queue Project", .Template = Keire::ProjectTemplate::Empty});
     KeireEditor::AssetOperationService operations(KeireEditorTests::ExecutablePath, project->Root());
-    operations.QueueImport(KeireEditor::AssetOperationPriority::MaterialRefresh,
-                           {.ReloadAsset = Keire::AssetId::Generate(), .Generation = 1});
-    operations.QueueImport(KeireEditor::AssetOperationPriority::MaterialRefresh,
-                           {.ReloadAsset = Keire::AssetId::Generate(), .Generation = 2});
+    const auto first = Keire::AssetId::Generate();
+    const auto second = Keire::AssetId::Generate();
+    operations.QueueAssetImport(first, KeireEditor::AssetOperationPriority::MaterialRefresh,
+                                {.ReloadAsset = first, .Generation = 1});
+    operations.QueueAssetImport(second, KeireEditor::AssetOperationPriority::MaterialRefresh,
+                                {.ReloadAsset = second, .Generation = 2});
     operations.QueueCook({.Name = "Test"}, project->Root() / "Build/Cooked");
     operations.QueueImport(KeireEditor::AssetOperationPriority::ExplicitAction);
     CHECK(operations.QueuedCount() == 3);
@@ -2205,86 +2457,4 @@ TEST_CASE("Scene document views become inert after the underlying scene closes")
     CHECK_FALSE(document.EditingScene());
     CHECK_FALSE(document.Dirty());
     CHECK_NOTHROW(document.SynchronizeSelection());
-}
-
-TEST_CASE("Asset picker filters environment textures without exposing raw asset IDs")
-{
-    Keire::AssetSourceRecord hdr;
-    hdr.Id = Keire::AssetId::Generate();
-    hdr.Type = Keire::Texture2DAsset::StaticType();
-    hdr.RelativePath = "Sky/Studio.hdr";
-    CHECK(KeireEditor::AssetPicker::AcceptsEnvironmentTexture(hdr));
-
-    auto color = hdr;
-    color.Id = Keire::AssetId::Generate();
-    color.RelativePath = "Textures/Albedo.png";
-    CHECK_FALSE(KeireEditor::AssetPicker::AcceptsEnvironmentTexture(color));
-
-    color.ImportSettings["semantic"] = std::string("environment");
-    CHECK(KeireEditor::AssetPicker::AcceptsEnvironmentTexture(color));
-
-    KeireEditor::AssetPickerOptions options;
-    options.Label = "Skybox";
-    options.ExpectedType = Keire::Texture2DAsset::StaticType();
-    options.Filter = &KeireEditor::AssetPicker::AcceptsEnvironmentTexture;
-    CHECK(KeireEditor::AssetPicker::Accepts(hdr, options));
-    CHECK(KeireEditor::AssetPicker::Accepts(color, options));
-
-    auto mesh = hdr;
-    mesh.Type = Keire::MeshAsset::StaticType();
-    CHECK_FALSE(KeireEditor::AssetPicker::Accepts(mesh, options));
-}
-
-TEST_CASE("Asset picker resolves material authoring sources but hides Shader Graph preview materials")
-{
-    Keire::AssetSourceRecord shaderGraph;
-    shaderGraph.Id = Keire::AssetId::Generate();
-    shaderGraph.Type = Keire::ShaderGraphAsset::StaticType();
-    shaderGraph.RelativePath = "Shaders/Layered.keireshadergraph";
-    const auto compiledShader = Keire::AssetId::Generate();
-    const auto previewMaterial = Keire::AssetId::Generate();
-    shaderGraph.SubAssets = {compiledShader, previewMaterial};
-    Keire::AssetSourceRecord graph;
-    graph.Id = Keire::AssetId::Generate();
-    graph.Type = Keire::MaterialGraphAsset::StaticType();
-    graph.RelativePath = "Materials/Layered.keirematerialgraph";
-    const auto runtimeMaterial = Keire::AssetId::Generate();
-    graph.SubAssets = {runtimeMaterial};
-    Keire::AssetSourceRecord instance;
-    instance.Id = Keire::AssetId::Generate();
-    instance.Type = Keire::MaterialInstanceAsset::StaticType();
-    instance.RelativePath = "Materials/LayeredInstance.keirematerialinstance";
-    const auto instanceMaterial = Keire::AssetId::Generate();
-    instance.SubAssets = {instanceMaterial};
-    const std::array records{shaderGraph, graph, instance};
-
-    KeireEditor::AssetPickerOptions materialOptions;
-    materialOptions.Label = "Material";
-    materialOptions.ExpectedType = Keire::MaterialAsset::StaticType();
-    materialOptions.ResolveType = [previewMaterial, runtimeMaterial,
-                                   instanceMaterial](const Keire::AssetId asset) -> std::optional<Keire::AssetTypeId>
-    {
-        return asset == previewMaterial || asset == runtimeMaterial || asset == instanceMaterial
-                   ? std::optional{Keire::MaterialAsset::StaticType()}
-                   : std::nullopt;
-    };
-    CHECK_FALSE(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, shaderGraph.Id, materialOptions));
-    CHECK_FALSE(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, previewMaterial, materialOptions));
-    CHECK(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, graph.Id, materialOptions) == runtimeMaterial);
-    CHECK(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, runtimeMaterial, materialOptions) ==
-          runtimeMaterial);
-    CHECK(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, instance.Id, materialOptions) == instanceMaterial);
-    CHECK(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, instanceMaterial, materialOptions) ==
-          instanceMaterial);
-    materialOptions.ResolveType = {};
-    CHECK_FALSE(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, graph.Id, materialOptions));
-
-    KeireEditor::AssetPickerOptions meshOptions;
-    meshOptions.Label = "Mesh";
-    meshOptions.ExpectedType = Keire::MeshAsset::StaticType();
-    CHECK(KeireEditor::AssetPicker::ResolveCompatibleAsset({}, Keire::MeshAsset::CubeId(), meshOptions) ==
-          Keire::MeshAsset::CubeId());
-    CHECK(KeireEditor::AssetPicker::ResolveCompatibleAsset({}, Keire::MeshAsset::TorusId(), meshOptions) ==
-          Keire::MeshAsset::TorusId());
-    CHECK_FALSE(KeireEditor::AssetPicker::ResolveCompatibleAsset({}, Keire::AssetId::Generate(), meshOptions));
 }

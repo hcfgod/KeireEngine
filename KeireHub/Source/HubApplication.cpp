@@ -43,7 +43,6 @@
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
 #include <algorithm>
-#include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -1279,6 +1278,9 @@ namespace
         {
             try
             {
+                auto editors = m_ProductSnapshot.Editors;
+                KeireHub::AddDevelopmentEditorFallback(editors, m_Executable, inspection.SchemaVersion,
+                                                       preferredEditorId, requirePreferred);
                 if (preferredEditorId.empty() && m_Registry)
                 {
                     const auto entries = m_Registry->Entries();
@@ -1286,9 +1288,8 @@ namespace
                     if (recent != entries.end())
                         preferredEditorId = recent->PreferredEditorInstallation;
                 }
-                auto launched =
-                    KeireHub::LaunchProjectEditor(m_ProductSnapshot.Editors, m_EditorProcesses, inspection,
-                                                  preferredEditorId, requirePreferred, KeireHub::HubNowUnixSeconds());
+                auto launched = KeireHub::LaunchProjectEditor(editors, m_EditorProcesses, inspection, preferredEditorId,
+                                                              requirePreferred, KeireHub::HubNowUnixSeconds());
                 if (!launched)
                 {
                     if (!launched.Error().TechnicalDetails.empty())
@@ -1491,10 +1492,9 @@ namespace
 namespace KeireHub::Detail
 {
     std::unique_ptr<Keire::Layer> CreateHubLayer(std::filesystem::path executable, const bool smoke,
-                                                 std::optional<HubActivationRequest> pendingStartupActivation,
+                                                 std::optional<HubActivationRequest> activation,
                                                  std::shared_ptr<HubInstanceCoordinator> instance)
     {
-        return std::make_unique<HubLayer>(std::move(executable), smoke, std::move(pendingStartupActivation),
-                                          std::move(instance));
+        return std::make_unique<HubLayer>(std::move(executable), smoke, std::move(activation), std::move(instance));
     }
 } // namespace KeireHub::Detail

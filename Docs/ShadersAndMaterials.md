@@ -42,8 +42,9 @@ shaders without exposing generated code and cook to the same immutable `Material
 
 ## Shader Graph Authoring
 
-Create **Shader Graph** in the Project panel, choose Lit/PBR, Unlit, Transparent, Decal, Fullscreen, Hair, or Eye, and
-open the resulting `NewShaderGraph.keireshadergraph` asset in the dockable editor. Nodes,
+Create **Shader Graph** in the Project panel, choose Lit/PBR, Unlit, Transparent, Decal, Fullscreen, Hair, or Eye. The
+isolated worker restores the published source index instead of rescanning unrelated assets, validates the new source,
+and opens the resulting `NewShaderGraph.keireshadergraph` directly in the dockable editor. Nodes,
 pins, connections, and parameter properties use stable opaque identities. Validated cable replacement, bounded
 undo/redo, deterministic schema upgrades, and last-good compilation make incomplete edits recoverable.
 The header deliberately uses **Shader Target**, **Shader Output**, and **Live Shader Preview** terminology so shader
@@ -53,6 +54,15 @@ The shared search-first node palette is available from the toolbar and the canva
 and categories; Up/Down wraps through results; Enter creates at the requested canvas position. The current catalog has
 120 stable operations organized under Parameters, Constants, Inputs, Coordinates, Texture, Surface,
 Attributes, BSDF, Color, Vector, Math, Procedural, Scene, Utility, Logic & Variants, and Advanced.
+Right-clicking a node opens target-specific actions for inspection, cable removal, deletion, and adding a categorized
+type-compatible node. Pin context menus provide the same compatible picker plus pin-level unlinking; cable context
+menus select either endpoint or unlink that cable. Output nodes remain protected from deletion.
+Double-click any Shader or Material Graph cable to insert a persistent routing knot without changing graph evaluation.
+Each cable accepts multiple knots; drag a knot to reshape the cable, and select it then press **Delete** or double-click
+it to remove only that knot. Routing edits participate in document undo/redo and survive save/reopen.
+Wheel zoom claims the pointer wheel while the canvas is hovered, so its containing dock panel does not scroll too.
+Pins and their labels remain visible down to 50% zoom. Input and output labels use separate clipped halves of each node
+or block row, and block labels reserve the state badge area, so the additional zoom range does not create overlaps.
 
 Supported authoring includes:
 
@@ -86,7 +96,8 @@ the same reflection and ABI validation as raw shaders.
 
 ## Materials Using Custom Shader Graphs
 
-Creating a Material Graph opens an explicit shader picker. Selecting a Shader Graph creates a clean Material Output
+Creating a Material Graph opens an explicit shader picker and opens the new graph as soon as its validated creation
+transaction completes. Selecting a Shader Graph creates a clean Material Output
 whose pins inherit that template's actual Lit, Unlit, Transparent, Decal, Fullscreen, Hair, or Eye contract. A raw
 Shader remains supported for the compact compatibility-value workflow, but full surface expressions deliberately
 require a Shader Graph template so renderer-specific implementation details remain behind a versioned boundary. The
@@ -99,16 +110,22 @@ source stores a tagged shader reference:
 The Material Inspector edits Direct Materials with separate **Shader Graph** and **Raw Shader** pickers. Material Graph
 uses the same production expression catalog as Shader Graph: texture sampling, UV and coordinate operations, math,
 masks, normals, scene inputs, procedural nodes, Material Attributes, BSDF composition, confined custom functions, and
-120 typed operations. Right-click or the toolbar opens a searchable palette. Material Output owns
-surface state and receives the final surface branches.
+120 typed operations. Right-clicking empty canvas space or using the toolbar opens a searchable palette grouped by node
+category. Node, pin, and cable context menus expose the same targeted inspection, compatible-add, unlink, and deletion
+workflow as Shader Graph. Material Output owns surface state and receives the final surface branches.
 
 Parameter nodes become Material Instance properties and expose a stable symbol, display name, group, description,
 sort priority, optional range, step, and typed default. Keyword nodes provide static parameters backed by deterministic
 bounded variants. Node properties, pin defaults, positions, connections, duplication, deletion, surface state,
 undo/redo, and fallback recovery are serialized deterministically. The optional **Template Defaults** view exposes old
 reflected uniform bindings without crowding the primary surface canvas. Composition is validated against the selected
-Shader Graph while editing; saving compiles and hot-reloads the material-owned variants while a failed import leaves
-the previously published material usable.
+Shader Graph while editing. Edits autosave after 500 ms of inactivity; the normal source-change monitor then performs
+one targeted compile and hot reload, so the Save button is only an immediate flush for a still-dirty document.
+Parameter and texture defaults are also baked into an immutable development material immediately and published to the
+loaded runtime-material identity used by scene renderers; topology changes still complete through the validated
+background shader compile. Asset Browser thumbnails are invalidated with the live revision, bypass an unchanged-digest
+disk-cache entry, and regenerate after the replacement runtime material is ready. A failed import leaves the previously
+published material usable.
 
 Shader Graph parameters publish stable property IDs. Compatibility bindings resolve those IDs before display names,
 so a template rename retains its value. Unknown properties, type changes, output-contract mismatches, duplicate
@@ -147,8 +164,10 @@ the current runtime contract does not silently treat collection values as ordina
 
 The immutable runtime material source schema version 3 includes alpha mode, alpha cutoff, double-sided state,
 baked-emission contribution, emissive GI intensity, and validated property overrides. Opaque and masked materials
-write depth; masked surfaces apply the cutoff; blended surfaces use premultiplied alpha, retain depth testing, disable
-depth writes, and submit back-to-front.
+write depth; masked surfaces apply the cutoff. Blend uses straight source alpha, Additive accumulates source color,
+Modulate multiplies the destination, Alpha Composite consumes premultiplied source color, and Alpha Holdout removes
+destination coverage. These transparent modes retain depth testing, disable depth writes, bypass opaque instancing,
+and submit back-to-front.
 
 ## Safe Legacy Migration
 

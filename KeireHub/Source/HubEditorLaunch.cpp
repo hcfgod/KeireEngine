@@ -2,6 +2,8 @@
 
 #include "KeireHubRuntime/EditorSelection.h"
 
+#include "Keire/Log.h"
+#include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
 
 #include <array>
@@ -118,6 +120,9 @@ namespace KeireHub
                                    std::string(reinterpret_cast<const char*>(pathBytes.data()), pathBytes.size())};
         std::string diagnostic;
         std::uint64_t processId = 0;
+        KEIRE_CLIENT_INFO("[Project Hub] Launching editor installation '{}' from '{}' for project '{}'.",
+                          editor.Value().InstallationId, Keire::Detail::PathToUtf8(editor.Value().Executable),
+                          Keire::Detail::PathToUtf8(inspection.Root));
         if (!Keire::Detail::LaunchDetachedProcessAtDesktopUserIntegrity(editor.Value().Executable, arguments,
                                                                         inspection.Root, diagnostic, &processId))
         {

@@ -51,8 +51,8 @@
     "Context": 5,
     "Output": 13,
     "Total": 278,
-    "Disabled": 33,
-    "WithKeireImplementation": 245
+    "Disabled": 30,
+    "WithKeireImplementation": 248
   },
   "entries": [
     {
@@ -470,13 +470,19 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "priority": "P0",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "priority": "Complete",
+        "implementation": "keire.block.kill-shape",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Block implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireRenderTests/Source/VfxKillShapeRenderedOutputTests.cpp",
+          "KeireTests/Source/Vfx/VfxGpuCapabilityTests.cpp",
+          "KeireTests/Source/Vfx/VfxTests.cpp"
+        ],
+        "documentation": [
+          "Docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -1010,13 +1016,19 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "priority": "P0",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "priority": "Complete",
+        "implementation": "keire.block.kill-shape",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Block implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireRenderTests/Source/VfxKillShapeRenderedOutputTests.cpp",
+          "KeireTests/Source/Vfx/VfxGpuCapabilityTests.cpp",
+          "KeireTests/Source/Vfx/VfxTests.cpp"
+        ],
+        "documentation": [
+          "Docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -1039,13 +1051,19 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "priority": "P0",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "priority": "Complete",
+        "implementation": "keire.block.kill-shape",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Block implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireRenderTests/Source/VfxKillShapeRenderedOutputTests.cpp",
+          "KeireTests/Source/Vfx/VfxGpuCapabilityTests.cpp",
+          "KeireTests/Source/Vfx/VfxTests.cpp"
+        ],
+        "documentation": [
+          "Docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -9312,6 +9330,7 @@
         "keire.block.collision",
         "keire.block.emission-rate",
         "keire.block.force",
+        "keire.block.kill-shape",
         "keire.block.portable-hlsl",
         "keire.block.shape",
         "keire.context.event",
@@ -9336,12 +9355,12 @@
   ],
   "firstMajorParityMilestone": {
     "target": 50,
-    "completedParityRows": 245,
-    "remainingParityRows": 33,
+    "completedParityRows": 248,
+    "remainingParityRows": 30,
     "achieved": true,
     "measurement": "Enabled frozen Unity parity rows with a runtime catalog implementation, focused tests, documentation, and production-slice coverage.",
     "remainingPriorities": {
-      "P0": 18,
+      "P0": 15,
       "P1": 8,
       "P2": 3,
       "Deferred": 4
@@ -9351,7 +9370,7 @@
     "baselineParityRows": 125,
     "targetAdditionalRows": 120,
     "targetTotalRows": 245,
-    "completedAdditionalRows": 120,
+    "completedAdditionalRows": 123,
     "remainingAdditionalRows": 0,
     "achieved": true,
     "measurement": "Additional enabled frozen Unity parity rows above the validated 125-row baseline; each row requires a live runtime descriptor, focused test, documentation, and production slice."

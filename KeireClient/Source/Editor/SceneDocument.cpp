@@ -1,5 +1,9 @@
 #include "KeireClient/Editor/SceneDocument.h"
 
+#include "Keire/Assets/RenderingAssets.h"
+#include "Keire/ECS/Components/CharacterControllerComponent.h"
+#include "Keire/ECS/Components/ColliderComponent.h"
+#include "Keire/ECS/Components/MeshRendererComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "KeireInternal/FileSystem.h"
 
@@ -11,6 +15,66 @@
 
 namespace KeireEditor
 {
+    namespace
+    {
+        void FitColliderToBuiltinMesh(const Keire::Ref<Keire::ColliderComponent>& collider,
+                                      const Keire::BuiltinMesh mesh, const Keire::AssetId meshAsset)
+        {
+            switch (mesh)
+            {
+            case Keire::BuiltinMesh::Cube:
+                collider->SetShape(Keire::ColliderShape::Box);
+                collider->SetHalfExtent({0.5F, 0.5F, 0.5F});
+                break;
+            case Keire::BuiltinMesh::Sphere:
+                collider->SetShape(Keire::ColliderShape::Sphere);
+                collider->SetRadius(0.5F);
+                break;
+            case Keire::BuiltinMesh::Capsule:
+                collider->SetShape(Keire::ColliderShape::Capsule);
+                collider->SetRadius(0.25F);
+                collider->SetHeight(1.0F);
+                break;
+            case Keire::BuiltinMesh::Cylinder:
+            case Keire::BuiltinMesh::Cone:
+                collider->SetShape(Keire::ColliderShape::ConvexMesh);
+                collider->SetCollisionMesh(meshAsset);
+                break;
+            case Keire::BuiltinMesh::Plane:
+            case Keire::BuiltinMesh::Quad:
+            case Keire::BuiltinMesh::Torus:
+                collider->SetShape(Keire::ColliderShape::TriangleMesh);
+                collider->SetCollisionMesh(meshAsset);
+                break;
+            case Keire::BuiltinMesh::Error:
+                break;
+            }
+        }
+
+        void FitNewPhysicsComponentToBuiltinMesh(const Keire::Entity& entity,
+                                                 const Keire::Ref<Keire::Component>& component)
+        {
+            const auto renderer = entity.GetComponent<Keire::MeshRendererComponent>();
+            if (!renderer)
+                return;
+            const auto mesh = Keire::MeshAsset::BuiltinKind(renderer->Mesh());
+            if (!mesh || *mesh == Keire::BuiltinMesh::Error)
+                return;
+            if (const auto collider = Keire::DynamicRefCast<Keire::ColliderComponent>(component))
+            {
+                FitColliderToBuiltinMesh(collider, *mesh, renderer->Mesh());
+                return;
+            }
+            if (const auto controller = Keire::DynamicRefCast<Keire::CharacterControllerComponent>(component))
+            {
+                if (*mesh == Keire::BuiltinMesh::Capsule)
+                    controller->ConfigureCapsule(0.25F, 1.0F, 0.3F, 0.05F);
+                else if (*mesh == Keire::BuiltinMesh::Sphere)
+                    controller->ConfigureCapsule(0.5F, 1.0F, 0.3F, 0.05F);
+            }
+        }
+    } // namespace
+
     Keire::Ref<Keire::Scene> SceneDocument::ActiveScene() const noexcept
     {
         if (m_PlaySession && m_PlaySession->State() != Keire::ScenePlayState::Stopped)
@@ -303,7 +367,10 @@ namespace KeireEditor
         auto target = scene ? scene->FindEntity(entity) : Keire::Entity{};
         if (!target)
             throw std::invalid_argument("Cannot add a component outside the active scene.");
-        return target.AddComponent(type);
+        auto component = target.AddComponent(type);
+        if (component)
+            FitNewPhysicsComponentToBuiltinMesh(target, component);
+        return component;
     }
 
     void SceneDocument::RemoveComponent(const Keire::EntityId entity, const Keire::ComponentTypeId type)

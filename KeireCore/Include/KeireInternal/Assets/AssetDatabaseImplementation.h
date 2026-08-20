@@ -6,6 +6,7 @@
 #include "Keire/Log.h"
 
 #include "KeireInternal/Assets/AssetDatabaseWorkerAccess.h"
+#include "KeireInternal/Assets/AssetImportOutputCache.h"
 #include "KeireInternal/Assets/AssetInternal.h"
 #include "KeireInternal/Assets/AssetWorkerProtocol.h"
 #include "KeireInternal/FileSystem.h"
@@ -583,10 +584,20 @@ namespace Keire
             {
                 const auto source = temporary / relative;
                 const auto target = destination / relative;
+                const bool sourceExists = std::filesystem::exists(source, error);
+                if (error)
+                    throw std::runtime_error("Could not inspect the prepared asset pack: " + error.message());
+                if (!sourceExists)
+                {
+                    if (!std::filesystem::is_regular_file(target, error) || error ||
+                        std::filesystem::is_symlink(target, error))
+                        throw std::runtime_error("Reused asset pack is missing or invalid: " +
+                                                 Detail::PathToUtf8(target));
+                    continue;
+                }
                 if (!std::filesystem::is_regular_file(source, error) || error ||
                     std::filesystem::is_symlink(source, error))
-                    throw std::runtime_error("Prepared asset pack is missing or invalid: " +
-                                             Detail::PathToUtf8(source));
+                    throw std::runtime_error("Prepared asset pack is invalid: " + Detail::PathToUtf8(source));
                 std::filesystem::create_directories(target.parent_path());
                 if (std::filesystem::exists(target, error))
                 {
@@ -964,7 +975,36 @@ namespace Keire
             if (importer)
             {
                 if (importer->ContextualImport)
-                    result = importer->ContextualImport(CreateImportContext(record), source);
+                {
+                    auto context = CreateImportContext(record);
+                    const auto readProjectFile = context.ReadProjectFile;
+                    std::vector<AssetSourceDependency> observedDependencies;
+                    context.ReadProjectFile =
+                        [readProjectFile, &observedDependencies](const std::filesystem::path& path)
+                    {
+                        const auto normalized = path.lexically_normal();
+                        auto bytes = readProjectFile(normalized);
+                        const auto digest = Detail::DigestToString(Detail::Sha256(bytes));
+                        const auto existing =
+                            std::ranges::find(observedDependencies, normalized, &AssetSourceDependency::RelativePath);
+                        if (existing == observedDependencies.end())
+                            observedDependencies.push_back({normalized, digest});
+                        else
+                            existing->Digest = digest;
+                        return bytes;
+                    };
+                    result = importer->ContextualImport(context, source);
+                    for (auto& dependency : observedDependencies)
+                    {
+                        const auto existing = std::ranges::find(result.SourceDependencies, dependency.RelativePath,
+                                                                &AssetSourceDependency::RelativePath);
+                        if (existing == result.SourceDependencies.end())
+                            result.SourceDependencies.push_back(std::move(dependency));
+                        else
+                            existing->Digest = std::move(dependency.Digest);
+                    }
+                    std::ranges::sort(result.SourceDependencies, {}, &AssetSourceDependency::RelativePath);
+                }
                 else
                     result.Bytes = importer->Import(source);
             }
@@ -1009,20 +1049,104 @@ namespace Keire
                     ".bin");
         }
 
+        [[nodiscard]] static std::filesystem::path ImportOutputPath(const std::filesystem::path& object,
+                                                                    const AssetId asset)
+        {
+            const auto identity = asset.ToString() + '\n' + Detail::PathToUtf8(object.filename());
+            const auto digest = Detail::DigestToString(Detail::Sha256(std::as_bytes(std::span(identity))));
+            return object.parent_path().parent_path() / "ImportOutputs" / (digest + ".cbor");
+        }
+
+        [[nodiscard]] bool RefreshSourceDependencies(std::vector<AssetSourceDependency>& dependencies) const
+        {
+            try
+            {
+                for (auto& dependency : dependencies)
+                {
+                    const auto path = ConfinedPath(Specification.ProjectRoot, dependency.RelativePath);
+                    if (std::filesystem::is_symlink(path))
+                        return false;
+                    dependency.Digest = Detail::DigestToString(Detail::Sha256File(
+                        path, std::min(Specification.MaximumSourceBytes, std::size_t{64U} * 1024U * 1024U)));
+                }
+                return true;
+            }
+            catch (const std::exception&)
+            {
+                return false;
+            }
+        }
+
+        void StoreCachedImport(const AssetSourceRecord& record, const AssetImportOutput& output) const
+        {
+            try
+            {
+                const auto object = ObjectPath(record, ImportDigest(record, output));
+                const auto encoded = Json::to_cbor(Detail::EncodeCachedImportOutput(output));
+                constexpr std::size_t maximumCacheDocumentBytes = std::size_t{512U} * 1024U * 1024U;
+                if (encoded.size() > maximumCacheDocumentBytes)
+                {
+                    KEIRE_CORE_WARN("Skipping oversized import-output cache for '{}'.",
+                                    Detail::PathToUtf8(record.RelativePath));
+                    return;
+                }
+                Detail::WriteFileAtomically(ImportOutputPath(object, record.Id), std::as_bytes(std::span(encoded)));
+            }
+            catch (const std::exception& error)
+            {
+                KEIRE_CORE_WARN("Could not persist import-output cache for '{}': {}",
+                                Detail::PathToUtf8(record.RelativePath), error.what());
+            }
+        }
+
         [[nodiscard]] std::optional<AssetImportOutput> RestoreCachedImport(const AssetSourceRecord& record) const
         {
-            const auto* importer = FindImporter(record);
-            if (!importer || !importer->RestoreCachedOutput)
+            auto sourceDependencies = record.SourceDependencies;
+            if (!RefreshSourceDependencies(sourceDependencies))
                 return std::nullopt;
-            const AssetImportOutput dependencyFree;
-            const auto object = ObjectPath(record, ImportDigest(record, dependencyFree));
+            AssetImportOutput priorOutput;
+            priorOutput.SourceDependencies = sourceDependencies;
+            priorOutput.AssetDependencies = record.Dependencies;
+            const auto object = ObjectPath(record, ImportDigest(record, priorOutput));
             if (!std::filesystem::is_regular_file(object))
                 return std::nullopt;
-            auto restored = importer->RestoreCachedOutput(ReadSource(object, Specification.MaximumSourceBytes));
-            ValidateImportOutput(importer, restored);
-            if (!restored.SourceDependencies.empty())
-                throw std::logic_error("A dependency-free cached importer restored source dependencies.");
-            return restored;
+            const auto* importer = FindImporter(record);
+            if (importer && importer->RestoreCachedOutput && record.SourceDependencies.empty() &&
+                record.SubAssets.empty())
+            {
+                auto restored = importer->RestoreCachedOutput(ReadSource(object, Specification.MaximumSourceBytes));
+                ValidateImportOutput(importer, restored);
+                if (!restored.SourceDependencies.empty())
+                    throw std::logic_error("A dependency-free cached importer restored source dependencies.");
+                return restored;
+            }
+            const auto outputPath = ImportOutputPath(object, record.Id);
+            if (std::filesystem::is_regular_file(outputPath))
+            {
+                try
+                {
+                    constexpr std::size_t maximumCacheDocumentBytes = std::size_t{512U} * 1024U * 1024U;
+                    const auto encoded = ReadSource(outputPath, maximumCacheDocumentBytes);
+                    auto restored = Detail::DecodeCachedImportOutput(
+                        Json::from_cbor(reinterpret_cast<const std::uint8_t*>(encoded.data()),
+                                        reinterpret_cast<const std::uint8_t*>(encoded.data() + encoded.size())),
+                        ReadSource(object, Specification.MaximumSourceBytes));
+                    if (!RefreshSourceDependencies(restored.SourceDependencies) ||
+                        ObjectPath(record, ImportDigest(record, restored)) != object)
+                    {
+                        return std::nullopt;
+                    }
+                    ValidateImportOutput(importer, restored);
+                    return restored;
+                }
+                catch (const std::exception& error)
+                {
+                    KEIRE_CORE_WARN("Ignoring invalid import-output cache for '{}': {}",
+                                    Detail::PathToUtf8(record.RelativePath), error.what());
+                    return std::nullopt;
+                }
+            }
+            return std::nullopt;
         }
 
         struct PreparedImport final

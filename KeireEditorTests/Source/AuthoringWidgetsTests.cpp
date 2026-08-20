@@ -52,6 +52,41 @@ TEST_CASE("Node menu recent entries are unique, newest-first, and bounded")
     CHECK(std::ranges::count(selection.Recent(), std::string("node-4")) == 1);
 }
 
+TEST_CASE("Shader Graph context compatibility respects direction and supported coercions")
+{
+    const auto pin = [](const Keire::ShaderGraphValueType type, const Keire::ShaderGraphPinDirection direction)
+    {
+        Keire::ShaderGraphPin result;
+        result.Type = type;
+        result.Direction = direction;
+        return result;
+    };
+
+    const auto scalarOutput = pin(Keire::ShaderGraphValueType::Scalar, Keire::ShaderGraphPinDirection::Output);
+    const auto vectorInput = pin(Keire::ShaderGraphValueType::Vector3, Keire::ShaderGraphPinDirection::Input);
+    const auto vectorOutput = pin(Keire::ShaderGraphValueType::Vector3, Keire::ShaderGraphPinDirection::Output);
+    const auto scalarInput = pin(Keire::ShaderGraphValueType::Scalar, Keire::ShaderGraphPinDirection::Input);
+    const auto textureInput = pin(Keire::ShaderGraphValueType::Texture2D, Keire::ShaderGraphPinDirection::Input);
+    const auto colorInput = pin(Keire::ShaderGraphValueType::Color, Keire::ShaderGraphPinDirection::Input);
+    const auto vector4Output = pin(Keire::ShaderGraphValueType::Vector4, Keire::ShaderGraphPinDirection::Output);
+
+    CHECK(KeireEditor::ShaderGraphPinsCanConnect(scalarOutput, vectorInput));
+    CHECK(KeireEditor::ShaderGraphPinsCanConnect(vectorInput, scalarOutput));
+    CHECK_FALSE(KeireEditor::ShaderGraphPinsCanConnect(vectorOutput, scalarInput));
+    CHECK_FALSE(KeireEditor::ShaderGraphPinsCanConnect(scalarOutput, textureInput));
+    CHECK(KeireEditor::ShaderGraphPinsCanConnect(vector4Output, colorInput));
+    CHECK_FALSE(KeireEditor::ShaderGraphPinsCanConnect(vectorOutput, vector4Output));
+
+    Keire::ShaderGraphNode source;
+    source.Pins.push_back(scalarOutput);
+    Keire::ShaderGraphNode compatible;
+    compatible.Pins.push_back(vectorInput);
+    Keire::ShaderGraphNode incompatible;
+    incompatible.Pins.push_back(textureInput);
+    CHECK(KeireEditor::ShaderGraphNodesCanConnect(source, compatible));
+    CHECK_FALSE(KeireEditor::ShaderGraphNodesCanConnect(source, incompatible));
+}
+
 TEST_CASE("Stable node graph validation protects local identity and references")
 {
     const std::vector<KeireEditor::NodeGraphNode> nodes{{1, "Entry", {0.0F, 0.0F}}, {2, "Locomotion", {200.0F, 0.0F}}};
@@ -277,6 +312,32 @@ TEST_CASE("Stable node graph canvas tracks node and cable selections independent
     CHECK_FALSE(canvas.ConnectionDragActive());
 }
 
+TEST_CASE("Stable node graph cable routing points are ordered, bounded, and finite")
+{
+    KeireEditor::NodeGraphNode producer{1, "Producer", {0.0F, 0.0F}};
+    producer.Pins.push_back({11, "Output", KeireEditor::NodeGraphPinDirection::Output, 7});
+    KeireEditor::NodeGraphNode consumer{2, "Consumer", {240.0F, 0.0F}};
+    consumer.Pins.push_back({12, "Input", KeireEditor::NodeGraphPinDirection::Input, 7});
+    const std::vector nodes{producer, consumer};
+    KeireEditor::NodeGraphConnection routed{3, 1, 2, "", 11, 12};
+    routed.RoutingPoints = {{80.0F, 20.0F}, {160.0F, -20.0F}};
+    CHECK_NOTHROW(KeireEditor::StableNodeGraphCanvas::Validate(nodes, std::span{&routed, std::size_t{1}}));
+
+    const KeireEditor::NodeGraphRerouteRequest insert{routed.Id, 1, {120.0F, 40.0F}};
+    CHECK(insert.Connection == routed.Id);
+    CHECK(insert.Index == 1);
+    CHECK((insert.GraphPosition == Keire::Vector2{120.0F, 40.0F}));
+
+    auto invalid = routed;
+    invalid.RoutingPoints.front().X = std::numeric_limits<float>::quiet_NaN();
+    CHECK_THROWS_AS(KeireEditor::StableNodeGraphCanvas::Validate(nodes, std::span{&invalid, std::size_t{1}}),
+                    std::invalid_argument);
+    invalid = routed;
+    invalid.RoutingPoints.resize(65, {});
+    CHECK_THROWS_AS(KeireEditor::StableNodeGraphCanvas::Validate(nodes, std::span{&invalid, std::size_t{1}}),
+                    std::invalid_argument);
+}
+
 TEST_CASE("Stable node graph focus deterministically frames authored nodes")
 {
     const std::vector<KeireEditor::NodeGraphNode> nodes{{41, "First", {100.0F, 50.0F}, {100.0F, 50.0F}},
@@ -293,18 +354,22 @@ TEST_CASE("Stable node graph zoom detail prevents labels from overlapping scaled
 {
     const auto overview = KeireEditor::StableNodeGraphCanvas::DetailForZoom(0.5F);
     CHECK_FALSE(overview.NodeSubtitle);
-    CHECK_FALSE(overview.BlockLabels);
-    CHECK_FALSE(overview.PinLabels);
+    CHECK(overview.BlockLabels);
+    CHECK(overview.PinLabels);
     CHECK_FALSE(overview.ConnectionLabels);
 
+    const auto distant = KeireEditor::StableNodeGraphCanvas::DetailForZoom(0.49F);
+    CHECK_FALSE(distant.BlockLabels);
+    CHECK_FALSE(distant.PinLabels);
+
     const auto compact = KeireEditor::StableNodeGraphCanvas::DetailForZoom(0.7F);
-    CHECK_FALSE(compact.NodeSubtitle);
+    CHECK(compact.NodeSubtitle);
     CHECK(compact.BlockLabels);
-    CHECK_FALSE(compact.PinLabels);
+    CHECK(compact.PinLabels);
     CHECK(compact.ConnectionLabels);
 
     const auto readablePins = KeireEditor::StableNodeGraphCanvas::DetailForZoom(0.8F);
-    CHECK_FALSE(readablePins.NodeSubtitle);
+    CHECK(readablePins.NodeSubtitle);
     CHECK(readablePins.PinLabels);
 
     const auto full = KeireEditor::StableNodeGraphCanvas::DetailForZoom(0.9F);

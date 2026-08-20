@@ -18,7 +18,7 @@
   "shader": "b1b2c3d4-1000-4000-8000-000000000001",
   "surface": {
     "alphaCutoff": 0.01,
-    "alphaMode": 2,
+    "alphaMode": 3,
     "doubleSided": true
   }
 }

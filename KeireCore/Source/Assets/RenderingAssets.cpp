@@ -204,7 +204,7 @@ namespace Keire
         {
             if (definition.SchemaVersion < 1 || definition.SchemaVersion > 3 ||
                 definition.Properties.size() > MaximumShaderProperties ||
-                definition.Surface.AlphaMode > MaterialAlphaMode::Blend ||
+                definition.Surface.AlphaMode > MaterialAlphaMode::AlphaHoldout ||
                 !std::isfinite(definition.Surface.AlphaCutoff) || definition.Surface.AlphaCutoff < 0.0F ||
                 definition.Surface.AlphaCutoff > 1.0F || !std::isfinite(definition.EmissiveGIIntensity) ||
                 definition.EmissiveGIIntensity < 0.0F || definition.EmissiveGIIntensity > 100'000.0F)

@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Keire::Detail
@@ -12,6 +13,7 @@ namespace Keire::Detail
     enum class AssetWorkerOperationKind : std::uint8_t
     {
         ImportAll,
+        ImportAssets,
         ExternalImport,
         CreateAsset,
         ExtractMaterials,
@@ -21,6 +23,8 @@ namespace Keire::Detail
         RedoExternalImport,
         BakeLighting
     };
+
+    [[nodiscard]] std::string_view AssetWorkerOperationName(AssetWorkerOperationKind kind) noexcept;
 
     enum class AssetWorkerMutationKind : std::uint8_t
     {
@@ -56,6 +60,8 @@ namespace Keire::Detail
         AssetWorkerOperationKind Kind = AssetWorkerOperationKind::ImportAll;
         std::filesystem::path ProjectRoot;
         std::filesystem::path SourceIndexPath;
+        std::string Reason;
+        std::vector<AssetId> ImportAssets;
         std::vector<ExternalAssetImportItem> ExternalItems;
         std::filesystem::path CreateRelativePath;
         std::filesystem::path CreatePayloadPath;

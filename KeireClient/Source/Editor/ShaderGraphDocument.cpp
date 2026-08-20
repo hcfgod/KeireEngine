@@ -588,6 +588,17 @@ namespace KeireEditor
                     });
     }
 
+    bool ShaderGraphDocument::SetConnectionRouting(const Keire::AssetId connection,
+                                                   std::vector<Keire::Vector2> routingPoints)
+    {
+        auto candidate = m_Host.Draft();
+        const auto found = std::ranges::find(candidate.Connections, connection, &Keire::ShaderGraphConnection::Id);
+        if (found == candidate.Connections.end())
+            throw std::invalid_argument("Shader Graph connection is unavailable.");
+        found->RoutingPoints = std::move(routingPoints);
+        return m_Host.EditMetadata("Route Shader Graph connection", std::move(candidate));
+    }
+
     NodeGraphConnectionValidation ShaderGraphDocument::CheckConnection(const Keire::ShaderGraphEndpoint output,
                                                                        const Keire::ShaderGraphEndpoint input) const
     {
@@ -661,7 +672,8 @@ namespace KeireEditor
             const auto inputPin = pinIds.Find(source.Input.Pin);
             if (!outputNode || !inputNode || !outputPin || !inputPin)
                 throw std::logic_error("Validated Shader Graph canvas identities became unavailable.");
-            result.Connections.push_back({connectionId, *outputNode, *inputNode, {}, *outputPin, *inputPin});
+            result.Connections.push_back(
+                {connectionId, *outputNode, *inputNode, {}, *outputPin, *inputPin, 0, 0, source.RoutingPoints});
         }
         StableNodeGraphCanvas::Validate(result.Nodes, result.Connections);
         return result;

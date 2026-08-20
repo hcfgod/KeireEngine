@@ -132,6 +132,7 @@ static const uint VfxParticleOperationColor = 4;
 static const uint VfxParticleOperationCollision = 5;
 static const uint VfxParticleOperationRenderer = 6;
 static const uint VfxParticleOperationCustomHlsl = 7;
+static const uint VfxParticleOperationKillShape = 8;
 static const uint VfxRendererRibbon = 2;
 
 static const uint VfxModulePropertyShapeBoxHalfExtent = 6;
@@ -150,6 +151,10 @@ static const uint VfxModulePropertySizeConstant = 20;
 static const uint VfxModulePropertyColorConstant = 21;
 static const uint VfxModulePropertyCollisionRestitution = 22;
 static const uint VfxModulePropertyCollisionKillOnCollision = 23;
+static const uint VfxModulePropertyKillShapeCenter = 27;
+static const uint VfxModulePropertyKillShapeBoxHalfExtent = 28;
+static const uint VfxModulePropertyKillShapeRadius = 29;
+static const uint VfxModulePropertyKillShapeInverted = 30;
 
 static const uint VfxModulePropertySourceDefault = 0;
 static const uint VfxModulePropertySourceLiteral = 1;
@@ -2437,6 +2442,39 @@ bool ApplyParticleOperation(inout GpuParticle particle, uint operationIndex, flo
     }
     else if (kind == VfxParticleOperationRenderer)
     {
+    }
+    else if (kind == VfxParticleOperationKillShape)
+    {
+        float3 center;
+        float3 boxHalfExtent;
+        float radius;
+        bool inverted;
+        bool ignoredBound = false;
+        if (!ResolveModuleVector3(operation, VfxModulePropertyKillShapeCenter, registers, center, ignoredBound) ||
+            !ResolveModuleVector3(operation, VfxModulePropertyKillShapeBoxHalfExtent, registers, boxHalfExtent,
+                                  ignoredBound) ||
+            !ResolveModuleScalar(operation, VfxModulePropertyKillShapeRadius, registers, radius, ignoredBound) ||
+            !ResolveModuleBoolean(operation, VfxModulePropertyKillShapeInverted, registers, inverted, ignoredBound))
+            return false;
+
+        const bool localSpace = asuint(SizeParameters.z) == 0U;
+        float3 relative = particle.PositionAge.xyz - center;
+        if (localSpace)
+        {
+            const float4 inverseEmitterRotation = float4(-EmitterRotation.xyz, EmitterRotation.w);
+            relative = RotateByQuaternion(particle.PositionAge.xyz - EmitterPosition.xyz, inverseEmitterRotation) -
+                       center;
+        }
+
+        bool inside = false;
+        if (operation.Metadata.w == 1U)
+            inside = all(abs(relative) <= boxHalfExtent);
+        else if (operation.Metadata.w == 2U)
+            inside = dot(relative, relative) <= radius * radius;
+        else
+            return false;
+        if (inverted ? !inside : inside)
+            particle.PositionAge.w = -1.0F;
     }
     else if (kind == VfxParticleOperationCustomHlsl)
     {

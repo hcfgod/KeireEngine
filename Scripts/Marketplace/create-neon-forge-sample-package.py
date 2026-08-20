@@ -57,6 +57,11 @@ def canonical_json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
 
+def write_utf8_lf(path: pathlib.Path, content: str) -> None:
+    with path.open("w", encoding="utf-8", newline="\n") as stream:
+        stream.write(content)
+
+
 def sha256(path: pathlib.Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -117,7 +122,8 @@ def write_managed_sample(payload: pathlib.Path) -> None:
     runtime = scripts / "Runtime"
     runtime.mkdir(parents=True, exist_ok=True)
     assembly = scripts / "NeonForgeSample.keireasm"
-    assembly.write_text(
+    write_utf8_lf(
+        assembly,
         json.dumps(
             {
                 "classification": "runtime",
@@ -131,10 +137,9 @@ def write_managed_sample(payload: pathlib.Path) -> None:
             sort_keys=True,
         )
         + "\n",
-        encoding="utf-8",
-        newline="\n",
     )
-    pathlib.Path(f"{assembly}.keiremeta").write_text(
+    write_utf8_lf(
+        pathlib.Path(f"{assembly}.keiremeta"),
         json.dumps(
             {
                 "dependencies": [],
@@ -149,11 +154,10 @@ def write_managed_sample(payload: pathlib.Path) -> None:
             sort_keys=True,
         )
         + "\n",
-        encoding="utf-8",
-        newline="\n",
     )
     script = runtime / "NeonForgePulse.cs"
-    script.write_text(
+    write_utf8_lf(
+        script,
         """using Keire;
 
 namespace KeireMarketplaceSamples;
@@ -191,10 +195,9 @@ public sealed class NeonForgePulse : Behaviour
     }
 }
 """,
-        encoding="utf-8",
-        newline="\n",
     )
-    pathlib.Path(f"{script}.keiremeta").write_text(
+    write_utf8_lf(
+        pathlib.Path(f"{script}.keiremeta"),
         json.dumps(
             {
                 "dependencies": [],
@@ -209,8 +212,6 @@ public sealed class NeonForgePulse : Behaviour
             sort_keys=True,
         )
         + "\n",
-        encoding="utf-8",
-        newline="\n",
     )
 
 
@@ -346,17 +347,14 @@ def create_package(
             )
         write_managed_sample(payload)
         readme = payload / CONTENT_ROOT / "README.md"
-        readme.write_text(
+        write_utf8_lf(
+            readme,
             "# Neon Forge Creator Pack\n\n"
             "Upload-validation sample containing two VFX graphs, two Shader Graphs, two Material Graphs, "
             "and the NeonForgePulse runtime C# behaviour.\n",
-            encoding="utf-8",
-            newline="\n",
         )
         shutil.copyfile(repository / "LICENSE.txt", payload / "LICENSE.txt")
-        manifest_path.write_text(
-            canonical_json(create_manifest(payload)), encoding="utf-8", newline="\n"
-        )
+        write_utf8_lf(manifest_path, canonical_json(create_manifest(payload)))
         run(
             asset_tool,
             [
@@ -390,7 +388,8 @@ def create_package(
             raise RuntimeError(
                 "The generated package hash did not survive independent verification."
             )
-        (staging / "artifact.json").write_text(
+        write_utf8_lf(
+            staging / "artifact.json",
             json.dumps(
                 {
                     "archiveSha256": archive["sha256"],
@@ -405,8 +404,6 @@ def create_package(
                 sort_keys=True,
             )
             + "\n",
-            encoding="utf-8",
-            newline="\n",
         )
         shutil.move(str(staging), str(output_directory))
         return output_directory / package.name

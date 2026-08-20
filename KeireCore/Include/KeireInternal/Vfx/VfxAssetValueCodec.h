@@ -27,6 +27,8 @@ namespace Keire
         [[nodiscard]] Matrix4 DecodeVfxMatrix(const nlohmann::json& value);
         [[nodiscard]] nlohmann::json EncodeVfxColor(Color value);
         [[nodiscard]] Color DecodeVfxColor(const nlohmann::json& value);
+        [[nodiscard]] std::string_view VfxKillShapeModeName(VfxKillShapeMode mode);
+        [[nodiscard]] VfxKillShapeMode ParseVfxKillShapeMode(std::string_view value);
         [[nodiscard]] std::string_view VfxCurveInterpolationName(CurveInterpolation interpolation);
         [[nodiscard]] CurveInterpolation ParseVfxCurveInterpolation(std::string_view value);
         [[nodiscard]] nlohmann::json EncodeVfxCurve(const Curve1D& curve);

@@ -17,6 +17,26 @@ namespace KeireEditor
         {
             return std::filesystem::absolute(path).lexically_normal();
         }
+
+        [[nodiscard]] std::string_view PriorityName(const AssetOperationPriority priority) noexcept
+        {
+            switch (priority)
+            {
+            case AssetOperationPriority::ExternalImport:
+                return "external-import";
+            case AssetOperationPriority::ExplicitAction:
+                return "explicit-action";
+            case AssetOperationPriority::UndoRedo:
+                return "undo-redo";
+            case AssetOperationPriority::Cook:
+                return "cook";
+            case AssetOperationPriority::AutomaticRefresh:
+                return "automatic-refresh";
+            case AssetOperationPriority::MaterialRefresh:
+                return "material-refresh";
+            }
+            return "unknown";
+        }
     } // namespace
 
     AssetOperationService::AssetOperationService(std::filesystem::path workerExecutable,
@@ -29,6 +49,8 @@ namespace KeireEditor
                                      Keire::Detail::PathToUtf8(m_WorkerExecutable));
         if (!std::filesystem::is_directory(m_ProjectRoot / "Assets"))
             throw std::invalid_argument("Asset operation service requires a valid project root.");
+        KEIRE_CLIENT_INFO("[Asset Operations] Using worker '{}' for project '{}'.",
+                          Keire::Detail::PathToUtf8(m_WorkerExecutable), Keire::Detail::PathToUtf8(m_ProjectRoot));
     }
 
     AssetOperationService::~AssetOperationService() { Shutdown(); }
@@ -56,6 +78,51 @@ namespace KeireEditor
         operation.Request.Kind = Keire::Detail::AssetWorkerOperationKind::ImportAll;
         operation.Priority = priority;
         operation.Context = context;
+        Queue(std::move(operation));
+    }
+
+    void AssetOperationService::QueueAssetImport(const Keire::AssetId asset, const AssetOperationPriority priority,
+                                                 AssetOperationContext context)
+    {
+        if (!asset)
+            throw std::invalid_argument("Targeted asset import requires a valid asset identity.");
+        QueueAssetImport(std::vector{asset}, priority, std::move(context));
+    }
+
+    void AssetOperationService::QueueAssetImport(std::vector<Keire::AssetId> assets,
+                                                 const AssetOperationPriority priority, AssetOperationContext context)
+    {
+        if (assets.empty() || std::ranges::any_of(assets, [](const Keire::AssetId asset) { return !asset; }))
+            throw std::invalid_argument("Targeted asset import requires valid asset identities.");
+        std::ranges::sort(assets);
+        const auto unique = std::ranges::unique(assets);
+        assets.erase(unique.begin(), unique.end());
+        if (priority == AssetOperationPriority::AutomaticRefresh || priority == AssetOperationPriority::MaterialRefresh)
+        {
+            const auto queued = std::ranges::find_if(
+                m_Queue,
+                [priority](const PendingOperation& item)
+                {
+                    return item.Priority == priority &&
+                           item.Request.Kind == Keire::Detail::AssetWorkerOperationKind::ImportAssets;
+                });
+            if (queued != m_Queue.end())
+            {
+                queued->Request.ImportAssets.insert(queued->Request.ImportAssets.end(), assets.begin(), assets.end());
+                std::ranges::sort(queued->Request.ImportAssets);
+                const auto merged = std::ranges::unique(queued->Request.ImportAssets);
+                queued->Request.ImportAssets.erase(merged.begin(), merged.end());
+                queued->Context.Generation = std::max(queued->Context.Generation, context.Generation);
+                if (queued->Context.ReloadAsset != context.ReloadAsset)
+                    queued->Context.ReloadAsset = {};
+                return;
+            }
+        }
+        PendingOperation operation;
+        operation.Request.Kind = Keire::Detail::AssetWorkerOperationKind::ImportAssets;
+        operation.Request.ImportAssets = std::move(assets);
+        operation.Priority = priority;
+        operation.Context = std::move(context);
         Queue(std::move(operation));
     }
 
@@ -171,9 +238,18 @@ namespace KeireEditor
     {
         if (m_ShuttingDown)
             throw std::logic_error("Asset operation service is shutting down.");
+        if (operation.Request.Reason.empty())
+        {
+            operation.Request.Reason = operation.Context.Reason.empty() ? std::string(PriorityName(operation.Priority))
+                                                                        : operation.Context.Reason;
+        }
         operation.Request.ProjectRoot = m_ProjectRoot;
         operation.Request.OperationId = Keire::AssetId::Generate().ToString();
         operation.Sequence = m_NextSequence++;
+        KEIRE_CLIENT_INFO("[Asset Operations] Queued {} operation {} (reason='{}', targets={}).",
+                          Keire::Detail::AssetWorkerOperationName(operation.Request.Kind),
+                          operation.Request.OperationId, operation.Request.Reason,
+                          operation.Request.ImportAssets.size());
         const auto position = std::ranges::find_if(
             m_Queue, [&operation](const PendingOperation& queued)
             { return static_cast<unsigned>(queued.Priority) > static_cast<unsigned>(operation.Priority); });
@@ -209,13 +285,15 @@ namespace KeireEditor
                       {
                           return (operation.Priority == AssetOperationPriority::AutomaticRefresh ||
                                   operation.Priority == AssetOperationPriority::MaterialRefresh) &&
-                                 operation.Request.Kind == Keire::Detail::AssetWorkerOperationKind::ImportAll;
+                                 (operation.Request.Kind == Keire::Detail::AssetWorkerOperationKind::ImportAll ||
+                                  operation.Request.Kind == Keire::Detail::AssetWorkerOperationKind::ImportAssets);
                       });
         bool preempted = m_Queue.size() != queuedBefore;
         if (m_Running &&
             (m_Running->Pending.Priority == AssetOperationPriority::AutomaticRefresh ||
              m_Running->Pending.Priority == AssetOperationPriority::MaterialRefresh) &&
-            m_Running->Pending.Request.Kind == Keire::Detail::AssetWorkerOperationKind::ImportAll)
+            (m_Running->Pending.Request.Kind == Keire::Detail::AssetWorkerOperationKind::ImportAll ||
+             m_Running->Pending.Request.Kind == Keire::Detail::AssetWorkerOperationKind::ImportAssets))
         {
             CancelCurrent();
             constexpr auto interactivePreemptionTimeout = std::chrono::milliseconds(25);
@@ -276,6 +354,10 @@ namespace KeireEditor
         }
         pending.Request.SourceIndexPath = m_ProjectRoot / "Library/AssetCache/Runtime/source-index.json";
         Keire::Detail::WriteAssetWorkerRequest(requestPath, pending.Request);
+        KEIRE_CLIENT_INFO("[Asset Operations] Starting {} operation {} with worker '{}' (reason='{}', targets={}).",
+                          Keire::Detail::AssetWorkerOperationName(pending.Request.Kind), pending.Request.OperationId,
+                          Keire::Detail::PathToUtf8(m_WorkerExecutable), pending.Request.Reason,
+                          pending.Request.ImportAssets.size());
         std::vector<std::string> arguments{
             "--request", Keire::Detail::PathToUtf8(requestPath), "--progress", Keire::Detail::PathToUtf8(progressPath),
             "--result",  Keire::Detail::PathToUtf8(resultPath),  "--cancel",   Keire::Detail::PathToUtf8(cancelPath)};

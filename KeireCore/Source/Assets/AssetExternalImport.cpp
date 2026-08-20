@@ -186,10 +186,20 @@ namespace Keire
                                         item.Destination);
             }
             (void)RefreshUnlocked();
+            std::vector<AssetId> importedAssets;
+            importedAssets.reserve(planned.size());
             for (auto& item : planned)
+            {
                 if (const auto record = Find(item.Id))
+                {
                     m_Impl->StoreValidatedImport(*record, std::move(item.Validated));
-            result.Import = ImportAllUnlocked(AssetImportPolicy::FailFast, {}, progress);
+                    importedAssets.push_back(item.Id);
+                }
+            }
+            if (importedAssets.size() != planned.size())
+                throw std::logic_error("Published external imports must remain present in the source database.");
+            result.Import =
+                ImportAssetsUnlocked(importedAssets, AssetImportPolicy::FailFast, cancellation, progress, false);
 
             Json receipt{{"schemaVersion", 1}, {"entries", Json::array()}};
             for (std::size_t index = 0; index < planned.size(); ++index)

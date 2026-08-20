@@ -49,6 +49,7 @@ namespace KeireEditor
                     [](const Keire::VfxColorOverLifetimeModule&) -> std::string_view { return "Color over Lifetime"; },
                     [](const Keire::VfxCollisionModule&) -> std::string_view { return "Collision"; },
                     [](const Keire::VfxRendererModule&) -> std::string_view { return "Renderer"; },
+                    [](const Keire::VfxKillShapeModule&) -> std::string_view { return "Kill Shape"; },
                 },
                 payload);
         }
@@ -225,6 +226,7 @@ namespace KeireEditor
                     { return context == Keire::VfxContextType::Update; },
                     [context](const Keire::VfxCollisionModule&) { return context == Keire::VfxContextType::Update; },
                     [context](const Keire::VfxRendererModule&) { return context == Keire::VfxContextType::Output; },
+                    [context](const Keire::VfxKillShapeModule&) { return context == Keire::VfxContextType::Update; },
                 },
                 payload);
         }

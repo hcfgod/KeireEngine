@@ -2,6 +2,9 @@
 
 #include "KeireHub/HubChromeLayout.h"
 
+#include "Keire/BuildInfo.h"
+#include "Keire/Log.h"
+
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
 
@@ -135,6 +138,38 @@ namespace KeireHub
     std::filesystem::path ResolveAssetToolExecutable(const std::filesystem::path& hubExecutable)
     {
         return Keire::Detail::ResolveCompanionExecutable(hubExecutable, "KeireAssetTool");
+    }
+
+    void AddDevelopmentEditorFallback(std::vector<HubEditorUiRecord>& editors,
+                                      const std::filesystem::path& hubExecutable, const std::uint32_t projectSchema,
+                                      std::string& preferredEditorId, const bool requirePreferred)
+    {
+#if !defined(KEIRE_DISTRIBUTION)
+        if (requirePreferred)
+            return;
+        const auto executable = ResolveEditorExecutable(hubExecutable);
+        constexpr std::string_view developmentId = "source-development-editor";
+        editors.push_back({.Id = std::string(developmentId),
+                           .Version = std::string(Keire::GetBuildInfo().Version),
+                           .Channel = "Development",
+                           .Platform = std::string(Keire::GetBuildInfo().Platform),
+                           .Architecture = std::string(Keire::GetBuildInfo().Architecture),
+                           .Root = executable.parent_path(),
+                           .Entrypoint = executable,
+                           .MinimumProjectSchema = projectSchema,
+                           .MaximumProjectSchema = projectSchema,
+                           .Healthy = true,
+                           .HealthLabel = "Development build"});
+        preferredEditorId = developmentId;
+        KEIRE_CLIENT_INFO("[Project Hub] Source-build Hub will launch source-build editor '{}'.",
+                          Keire::Detail::PathToUtf8(executable));
+#else
+        static_cast<void>(editors);
+        static_cast<void>(hubExecutable);
+        static_cast<void>(projectSchema);
+        static_cast<void>(preferredEditorId);
+        static_cast<void>(requirePreferred);
+#endif
     }
 
     void UpdateHubChromeLayout(Keire::Window& window, const Keire::LogicalExtent size,

@@ -36,4 +36,19 @@ namespace Keire::RenderBackend
         return {std::round(lightSpaceCenter.X / texelSize) * texelSize,
                 std::round(lightSpaceCenter.Y / texelSize) * texelSize};
     }
+
+    Vector3 StabilizeShadowCenter(const Vector3 worldCenter, const Vector3 lightRight, const Vector3 lightUp,
+                                  const float cascadeDiameter, const std::uint32_t resolution)
+    {
+        const auto dot = [](const Vector3 left, const Vector3 right) noexcept
+        { return left.X * right.X + left.Y * right.Y + left.Z * right.Z; };
+        const Vector2 lightSpaceCenter{dot(worldCenter, lightRight), dot(worldCenter, lightUp)};
+        const auto stabilized = StabilizeShadowCenter(lightSpaceCenter, cascadeDiameter, resolution);
+        const auto addScaled = [](const Vector3 value, const Vector3 direction, const float scale) noexcept
+        {
+            return Vector3{value.X + direction.X * scale, value.Y + direction.Y * scale, value.Z + direction.Z * scale};
+        };
+        return addScaled(addScaled(worldCenter, lightRight, stabilized.X - lightSpaceCenter.X), lightUp,
+                         stabilized.Y - lightSpaceCenter.Y);
+    }
 } // namespace Keire::RenderBackend

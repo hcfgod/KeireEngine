@@ -173,7 +173,9 @@ namespace Keire
     AssetCookResult AssetCooker::CookUnlocked(const AssetDatabase& database, const AssetBuildProfile& profile,
                                               const std::filesystem::path& outputDirectory,
                                               const std::stop_token cancellation,
-                                              AssetOperationProgressCallback progress)
+                                              AssetOperationProgressCallback progress,
+                                              const std::span<const AssetId> sourceAssets,
+                                              const std::span<const AssetId> replacedAssets)
     {
         ThrowIfOperationCancelled(cancellation);
         if (profile.Name.empty() || profile.CompressionLevel < ZSTD_minCLevel() ||
@@ -181,6 +183,27 @@ namespace Keire
             throw std::invalid_argument("Asset build profile contains invalid compression or shard settings.");
         if (profile.StreamPageBytes < 4096U || profile.StreamPageBytes > 16U * 1024U * 1024U)
             throw std::invalid_argument("Asset stream page size must be in the range 4 KiB..16 MiB.");
+        const bool incremental = !sourceAssets.empty();
+        if (incremental && profile.Strict)
+            throw std::invalid_argument("Strict asset builds require a complete cook.");
+        const auto destination = std::filesystem::absolute(outputDirectory).lexically_normal();
+        std::unordered_set<AssetId> selectedSources(sourceAssets.begin(), sourceAssets.end());
+        std::vector<Detail::CatalogEntry> previousEntries;
+        std::unordered_map<AssetId, AssetTypeId> availableTypes;
+        if (incremental)
+        {
+            const auto previous = Detail::LoadCatalog(destination / "catalog.json");
+            previousEntries = std::move(previous.Entries);
+            for (auto& entry : previousEntries)
+            {
+                const auto relative = entry.PackPath.lexically_relative(destination).lexically_normal();
+                if (relative.empty() || relative.is_absolute() ||
+                    relative.native().starts_with(std::filesystem::path("..").native()))
+                    throw std::runtime_error("Existing asset pack escapes the development catalog directory.");
+                entry.PackPath = relative;
+                availableTypes.insert_or_assign(entry.Id, entry.Type);
+            }
+        }
         auto jobs = database.m_Impl->Specification.Jobs;
         if (!jobs)
         {
@@ -201,13 +224,16 @@ namespace Keire
             std::vector<AssetId> Dependencies;
         };
         std::vector<PreparedAsset> prepared;
-        prepared.reserve(records.size());
+        prepared.reserve(incremental ? selectedSources.size() : records.size());
         std::unordered_map<AssetId, std::size_t> indices;
-        ReportOperationProgress(progress, AssetOperationPhase::Cooking, 0, records.size());
+        const auto cookingTotal = incremental ? selectedSources.size() : records.size();
+        ReportOperationProgress(progress, AssetOperationPhase::Cooking, 0, cookingTotal);
         std::size_t preparedCount = 0;
         for (const auto& record : records)
         {
             ThrowIfOperationCancelled(cancellation);
+            if (incremental && !selectedSources.contains(record.Id))
+                continue;
             if (profile.Strict && record.Importer != ImporterName(record.Type) &&
                 !database.m_Impl->FindImporter(record))
                 throw std::runtime_error("Strict cooking rejected an unsupported importer: " + record.Importer);
@@ -242,9 +268,11 @@ namespace Keire
                     {subAsset.Id, subAsset.Type, nullptr, std::move(generated), subAsset.AssetDependencies});
             }
             ++preparedCount;
-            ReportOperationProgress(progress, AssetOperationPhase::Cooking, preparedCount, records.size(),
+            ReportOperationProgress(progress, AssetOperationPhase::Cooking, preparedCount, cookingTotal,
                                     record.RelativePath);
         }
+        for (const auto& asset : prepared)
+            availableTypes.insert_or_assign(asset.Id, asset.Type);
         if (profile.Strict)
         {
             std::vector<std::pair<AssetId, Ref<ManagedDataAsset>>> managedData;
@@ -346,8 +374,8 @@ namespace Keire
         if (!profile.Strict)
         {
             for (auto& asset : prepared)
-                std::erase_if(asset.Dependencies,
-                              [&indices](const AssetId dependency) { return !indices.contains(dependency); });
+                std::erase_if(asset.Dependencies, [&availableTypes](const AssetId dependency)
+                              { return !availableTypes.contains(dependency); });
         }
         for (auto& asset : prepared)
         {
@@ -357,7 +385,15 @@ namespace Keire
             if (!material->Definition().Shader)
                 throw std::runtime_error("Material asset must reference a shader: " + asset.Id.ToString());
             const auto shaderIndex = indices.find(material->Definition().Shader);
-            if (shaderIndex == indices.end() || prepared[shaderIndex->second].Type != ShaderAsset::StaticType())
+            if (shaderIndex == indices.end())
+            {
+                const auto existing = availableTypes.find(material->Definition().Shader);
+                if (existing == availableTypes.end() || existing->second != ShaderAsset::StaticType())
+                    throw std::runtime_error("Material shader dependency is missing or has the wrong type: " +
+                                             material->Definition().Shader.ToString());
+                continue;
+            }
+            if (prepared[shaderIndex->second].Type != ShaderAsset::StaticType())
                 throw std::runtime_error("Material shader dependency is missing or has the wrong type: " +
                                          material->Definition().Shader.ToString());
             const auto shader = ShaderAsset::Decode(prepared[shaderIndex->second].Imported.Bytes);
@@ -380,6 +416,9 @@ namespace Keire
                 const auto textureIndex = indices.find(texture);
                 if (textureIndex == indices.end())
                 {
+                    const auto existing = availableTypes.find(texture);
+                    if (existing != availableTypes.end() && existing->second == Texture2DAsset::StaticType())
+                        continue;
                     if (profile.Strict)
                         throw std::runtime_error("Material texture property '" + property.Name +
                                                  "' is missing or has the wrong asset type.");
@@ -432,7 +471,6 @@ namespace Keire
                 pending.insert(pending.end(), dependencies.begin(), dependencies.end());
             }
         }
-        const auto destination = std::filesystem::absolute(outputDirectory).lexically_normal();
         auto temporaryToken = AssetId::Generate().ToString();
         std::erase(temporaryToken, '-');
         temporaryToken.resize(20);
@@ -441,6 +479,15 @@ namespace Keire
 
         AssetCookResult result;
         std::vector<Detail::CatalogEntry> entries;
+        if (incremental)
+        {
+            std::unordered_set<AssetId> replaced(replacedAssets.begin(), replacedAssets.end());
+            for (const auto& asset : prepared)
+                replaced.insert(asset.Id);
+            for (auto& entry : previousEntries)
+                if (!replaced.contains(entry.Id))
+                    entries.push_back(std::move(entry));
+        }
         std::ofstream pack;
         std::filesystem::path packPath;
         std::uint64_t packBytes = 0;

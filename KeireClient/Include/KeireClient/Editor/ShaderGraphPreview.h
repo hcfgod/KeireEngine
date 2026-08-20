@@ -10,6 +10,12 @@
 
 namespace KeireEditor
 {
+    struct ShaderGraphPreviewTexture
+    {
+        Keire::AssetId Asset;
+        Keire::Ref<const Keire::Texture2DAsset> Texture;
+    };
+
     struct ShaderGraphPreviewRequest
     {
         Keire::ShaderGraphOutput Output = Keire::ShaderGraphOutput::Surface;
@@ -17,6 +23,7 @@ namespace KeireEditor
         Keire::Ref<const Keire::MeshAsset> CustomMesh;
         const Keire::ShaderGraphDefinition* Definition = nullptr;
         std::span<const Keire::ShaderPropertyDefinition> Properties;
+        std::span<const ShaderGraphPreviewTexture> Textures;
         std::uint32_t Width = 320;
         std::uint32_t Height = 220;
         float Exposure = 1.0F;

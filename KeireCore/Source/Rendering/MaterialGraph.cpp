@@ -25,6 +25,7 @@ namespace Keire
         constexpr std::size_t MaximumMaterialKeywords = 16;
         constexpr std::size_t MaximumMaterialGraphNodes = 256;
         constexpr std::size_t MaximumMaterialGraphConnections = 256;
+        constexpr std::size_t MaximumGraphRoutingPointsPerConnection = 64;
         constexpr std::size_t MaximumMaterialInstanceDepth = 16;
 
         [[nodiscard]] std::string
@@ -285,12 +286,15 @@ namespace Keire
             Json connections = Json::array();
             for (const auto& connection : definition.Connections)
             {
+                Json routing = Json::array();
+                for (const auto point : connection.RoutingPoints)
+                    routing.push_back({point.X, point.Y});
                 connections.push_back(
                     {{"id", connection.Id.ToString()},
                      {"output",
                       {{"node", connection.Output.Node.ToString()}, {"pin", connection.Output.Pin.ToString()}}},
-                     {"input",
-                      {{"node", connection.Input.Node.ToString()}, {"pin", connection.Input.Pin.ToString()}}}});
+                     {"input", {{"node", connection.Input.Node.ToString()}, {"pin", connection.Input.Pin.ToString()}}},
+                     {"routing", std::move(routing)}});
             }
             const auto surfaceGraphSource = ShaderGraphAsset::EncodeSource(definition.SurfaceGraph);
             const auto surfaceGraph = Json::parse(Text(surfaceGraphSource));
@@ -386,6 +390,15 @@ namespace Keire
                     connection.Output.Pin = AssetId::Parse(encoded.at("output").at("pin").get<std::string>());
                     connection.Input.Node = AssetId::Parse(encoded.at("input").at("node").get<std::string>());
                     connection.Input.Pin = AssetId::Parse(encoded.at("input").at("pin").get<std::string>());
+                    const auto& routing = encoded.value("routing", Json::array());
+                    if (!routing.is_array() || routing.size() > MaximumGraphRoutingPointsPerConnection)
+                        throw std::invalid_argument("Material Graph cable routing points exceed their bounds.");
+                    for (const auto& point : routing)
+                    {
+                        if (!point.is_array() || point.size() != 2)
+                            throw std::invalid_argument("Material Graph cable routing point is invalid.");
+                        connection.RoutingPoints.push_back({point.at(0).get<float>(), point.at(1).get<float>()});
+                    }
                     result.Connections.push_back(std::move(connection));
                 }
             }
@@ -793,8 +806,12 @@ namespace Keire
         for (const auto& node : m_Definition.Nodes)
             result += sizeof(node) + node.Name.size();
         result += m_Definition.Connections.size() * sizeof(MaterialGraphConnection);
+        for (const auto& connection : m_Definition.Connections)
+            result += connection.RoutingPoints.capacity() * sizeof(Vector2);
         result += m_Definition.SurfaceGraph.Nodes.size() * sizeof(ShaderGraphNode);
         result += m_Definition.SurfaceGraph.Connections.size() * sizeof(ShaderGraphConnection);
+        for (const auto& connection : m_Definition.SurfaceGraph.Connections)
+            result += connection.RoutingPoints.capacity() * sizeof(Vector2);
         return result;
     }
 
@@ -893,10 +910,11 @@ namespace Keire
             definition.Nodes.size() > MaximumMaterialGraphNodes ||
             definition.Connections.size() > MaximumMaterialGraphConnections || !definition.OutputNode ||
             definition.Shader.Keywords.size() > MaximumMaterialKeywords ||
-            definition.Surface.AlphaMode > MaterialAlphaMode::Blend || !std::isfinite(definition.Surface.AlphaCutoff) ||
-            definition.Surface.AlphaCutoff < 0.0F || definition.Surface.AlphaCutoff > 1.0F ||
-            !std::isfinite(definition.EmissiveGIIntensity) || definition.EmissiveGIIntensity < 0.0F ||
-            definition.EmissiveGIIntensity > 100'000.0F || !Math::IsFinite(definition.OutputPosition))
+            definition.Surface.AlphaMode > MaterialAlphaMode::AlphaHoldout ||
+            !std::isfinite(definition.Surface.AlphaCutoff) || definition.Surface.AlphaCutoff < 0.0F ||
+            definition.Surface.AlphaCutoff > 1.0F || !std::isfinite(definition.EmissiveGIIntensity) ||
+            definition.EmissiveGIIntensity < 0.0F || definition.EmissiveGIIntensity > 100'000.0F ||
+            !Math::IsFinite(definition.OutputPosition))
             throw std::invalid_argument("Material Graph definition is invalid or exceeds a portable bound.");
         if (!definition.Shader.Asset ||
             (definition.Shader.Kind == MaterialShaderSourceKind::ShaderGraph && !ValidTarget(definition.Shader.Target)))
@@ -938,7 +956,11 @@ namespace Keire
         for (const auto& connection : definition.Connections)
         {
             if (!connection.Id || !connectionIds.insert(connection.Id).second ||
-                connection.Input.Node != definition.OutputNode || !connectedInputs.insert(connection.Input.Pin).second)
+                connection.Input.Node != definition.OutputNode ||
+                !connectedInputs.insert(connection.Input.Pin).second ||
+                connection.RoutingPoints.size() > MaximumGraphRoutingPointsPerConnection ||
+                std::ranges::any_of(connection.RoutingPoints,
+                                    [](const Vector2 point) { return !Math::IsFinite(point); }))
                 throw std::invalid_argument("Material Graph connections require unique output inputs.");
             const auto property =
                 std::ranges::find(definition.Properties, connection.Input.Pin, &MaterialGraphPropertyBinding::Pin);
@@ -1023,7 +1045,7 @@ namespace Keire
         if (definition.SchemaVersion != MaterialInstanceSourceSchemaVersion || !definition.Parent ||
             definition.Properties.size() > MaximumMaterialProperties)
             throw std::invalid_argument("Material Instance definition is invalid or exceeds a portable bound.");
-        if (definition.Surface && (definition.Surface->AlphaMode > MaterialAlphaMode::Blend ||
+        if (definition.Surface && (definition.Surface->AlphaMode > MaterialAlphaMode::AlphaHoldout ||
                                    !std::isfinite(definition.Surface->AlphaCutoff) ||
                                    definition.Surface->AlphaCutoff < 0.0F || definition.Surface->AlphaCutoff > 1.0F))
             throw std::invalid_argument("Material Instance surface override is invalid.");

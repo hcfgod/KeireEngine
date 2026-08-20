@@ -105,6 +105,27 @@ namespace Keire
                     value.at(3).get<float>()};
         }
 
+        [[nodiscard]] std::string_view VfxKillShapeModeName(const VfxKillShapeMode mode)
+        {
+            switch (mode)
+            {
+            case VfxKillShapeMode::Solid:
+                return "solid";
+            case VfxKillShapeMode::Inverted:
+                return "inverted";
+            }
+            throw std::invalid_argument("VFX kill-shape mode is unsupported.");
+        }
+
+        [[nodiscard]] VfxKillShapeMode ParseVfxKillShapeMode(const std::string_view value)
+        {
+            if (value == "solid")
+                return VfxKillShapeMode::Solid;
+            if (value == "inverted")
+                return VfxKillShapeMode::Inverted;
+            throw std::runtime_error("VFX kill-shape mode is unsupported.");
+        }
+
         [[nodiscard]] std::string_view VfxCurveInterpolationName(const CurveInterpolation interpolation)
         {
             switch (interpolation)

@@ -8,6 +8,7 @@
 #include "KeireClient/Editor/MaterialDocument.h"
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
 #include "KeireClient/Editor/SceneDocument.h"
+#include "KeireClient/Editor/ThumbnailService.h"
 
 #include "Keire/Audio/AudioAssets.h"
 #include "Keire/Rendering/ShaderGraph.h"
@@ -51,6 +52,48 @@ namespace
         result += diagnostic.Message;
         return result;
     }
+
+    [[nodiscard]] Keire::AssetImportSettings EditableImportSettings(const Keire::AssetImporterRegistration& importer,
+                                                                    const Keire::AssetImportSettings& persisted)
+    {
+        Keire::AssetImportSettings result;
+        for (const auto& option : importer.ImportOptions)
+            result.emplace(option.Key, option.DefaultValue);
+        for (const auto& [key, value] : persisted)
+            if (std::ranges::find(importer.ImportOptions, key, &Keire::AssetImportOptionDescriptor::Key) !=
+                importer.ImportOptions.end())
+                result[key] = value;
+        return result;
+    }
+
+    bool DrawImportOption(Keire::UiFrame& ui, const Keire::AssetImportOptionDescriptor& option,
+                          Keire::AssetImportOptionValue& value)
+    {
+        if (auto* boolean = std::get_if<bool>(&value))
+            return ui.Checkbox(option.DisplayName, *boolean);
+        if (auto* integer = std::get_if<std::int64_t>(&value))
+        {
+            return ui.DragInteger(
+                option.DisplayName, *integer, option.Step,
+                option.Minimum ? std::optional<std::int64_t>(static_cast<std::int64_t>(*option.Minimum)) : std::nullopt,
+                option.Maximum ? std::optional<std::int64_t>(static_cast<std::int64_t>(*option.Maximum))
+                               : std::nullopt);
+        }
+        if (auto* scalar = std::get_if<double>(&value))
+            return ui.DragScalar(option.DisplayName, *scalar, option.Step, option.Minimum, option.Maximum);
+        auto* choice = std::get_if<std::string>(&value);
+        if (!choice)
+            return false;
+        bool changed = false;
+        if (auto combo = ui.BeginCombo(option.DisplayName, *choice); combo)
+            for (const auto& candidate : option.Choices)
+                if (ui.Selectable(candidate, candidate == *choice))
+                {
+                    *choice = candidate;
+                    changed = true;
+                }
+        return changed;
+    }
 } // namespace
 
 KeireEditor::AssetInspectorPanel::AssetInspectorPanel(IInspectorController& controller)
@@ -64,6 +107,10 @@ KeireEditor::AssetInspectorPanel::~AssetInspectorPanel() = default;
 void KeireEditor::AssetInspectorPanel::ClearState() noexcept
 {
     m_EditingAsset = {};
+    m_OriginalImportSettings.clear();
+    m_ImportSettings.clear();
+    m_PreviewImage.Reset();
+    m_PreviewDigest.clear();
     m_AssetName.clear();
     m_MaterialParameterCollection.reset();
     m_ProceduralMotionProfile.reset();
@@ -97,15 +144,83 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
         ui.TextColored(theme.Warning, "The selected asset no longer exists.");
         return;
     }
+    const auto importer = database->FindImporterForPath(record->RelativePath);
     if (m_EditingAsset != record->Id)
     {
         m_EditingAsset = record->Id;
         m_AssetName = record->RelativePath.filename().string();
+        m_OriginalImportSettings = importer && importer->Name == record->Importer
+                                       ? EditableImportSettings(*importer, record->ImportSettings)
+                                       : Keire::AssetImportSettings{};
+        m_ImportSettings = m_OriginalImportSettings;
+        m_PreviewImage.Reset();
+        m_PreviewDigest.clear();
         m_MaterialParameterCollection.reset();
         m_ProceduralMotionProfile.reset();
         m_MaterialParameterCollectionDirty = false;
         m_ProceduralMotionProfileDirty = false;
     }
+
+    const auto projectRoot = database->Specification().ProjectRoot;
+    if (!m_Thumbnails || m_PreviewProjectRoot != projectRoot)
+    {
+        m_Thumbnails = std::make_unique<KeireEditor::ThumbnailService>(projectRoot / "Library" / "Thumbnails", 8);
+        m_PreviewProjectRoot = projectRoot;
+        m_PreviewImage.Reset();
+        m_PreviewDigest.clear();
+    }
+    for (auto& completed : m_Thumbnails->DrainCompleted(8))
+        if (completed.Asset == record->Id)
+            m_PreviewImage = ui.CreateImage(completed.Width, completed.Height, completed.Pixels);
+    if (!m_PreviewImage)
+    {
+        const auto fallback = KeireEditor::MakeAssetFallbackThumbnail(record->Type, 96, 96);
+        m_PreviewImage = ui.CreateImage(96, 96, fallback);
+    }
+    const auto previewDigest = record->Id.ToString() + record->SourceDigest + record->MetadataDigest;
+    if (m_PreviewDigest != previewDigest)
+    {
+        KeireEditor::ThumbnailRequest request{
+            .Asset = record->Id, .Type = record->Type, .RelativePath = record->RelativePath, .Digest = previewDigest};
+        bool ready = true;
+        if (assets && record->Type == Keire::Texture2DAsset::StaticType())
+        {
+            const auto handle = assets->Load<Keire::Texture2DAsset>(record->Id, Keire::AssetPriority::Low);
+            request.PreviewAsset = handle.TryGetLoaded();
+            request.Missing = handle.State() == Keire::AssetState::Failed;
+            if (!request.PreviewAsset && request.Missing)
+                request.PreviewAsset = handle.Get();
+            ready = static_cast<bool>(request.PreviewAsset);
+        }
+        else if (assets && record->Type == Keire::MeshAsset::StaticType())
+        {
+            const auto handle = assets->Load<Keire::MeshAsset>(record->Id, Keire::AssetPriority::Low);
+            request.PreviewAsset = handle.TryGetLoaded();
+            request.Missing = handle.State() == Keire::AssetState::Failed;
+            if (!request.PreviewAsset && request.Missing)
+                request.PreviewAsset = handle.Get();
+            ready = static_cast<bool>(request.PreviewAsset);
+        }
+        else if (assets && record->Type == Keire::AudioClipAsset::StaticType())
+        {
+            const auto handle = assets->Load<Keire::AudioClipAsset>(record->Id, Keire::AssetPriority::Low);
+            request.PreviewAsset = handle.TryGetLoaded();
+            request.Missing = handle.State() == Keire::AssetState::Failed;
+            if (!request.PreviewAsset && request.Missing)
+                request.PreviewAsset = handle.Get();
+            ready = static_cast<bool>(request.PreviewAsset);
+        }
+        else if (const auto generated = KeireEditor::PrepareGeneratedAssetThumbnail(assets, *record, request))
+        {
+            ready = *generated;
+        }
+        if (ready && m_Thumbnails->Request(std::move(request)))
+            m_PreviewDigest = previewDigest;
+    }
+
+    ui.TextColored(theme.Accent, "PREVIEW");
+    const float previewSize = std::clamp(ui.ContentAvailable().Width, 96.0F, 220.0F);
+    ui.Image(m_PreviewImage, {previewSize, previewSize});
     ui.Text(record->RelativePath.generic_string());
     ui.TextColored(theme.MutedText, "Asset ID");
     ui.Text(record->Id.ToString());
@@ -113,6 +228,44 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
     ui.Text(record->Importer + " v" + std::to_string(record->ImporterVersion));
     ui.TextColored(theme.MutedText, "Content SHA-256");
     ui.Text(record->SourceDigest);
+    if (importer && importer->Name == record->Importer && !importer->ImportOptions.empty())
+    {
+        ui.Separator();
+        ui.TextColored(theme.Accent, "IMPORT SETTINGS");
+        ui.TextColored(theme.MutedText, "Changes are stored with this source asset and applied on reimport.");
+        std::string activeGroup;
+        for (const auto& option : importer->ImportOptions)
+        {
+            if (option.Group != activeGroup)
+            {
+                activeGroup = option.Group;
+                if (!activeGroup.empty())
+                    ui.TextColored(theme.MutedText, activeGroup);
+            }
+            (void)DrawImportOption(ui, option, m_ImportSettings.at(option.Key));
+        }
+        const bool changed = m_ImportSettings != m_OriginalImportSettings;
+        if (auto disabled = ui.BeginDisabled(!changed); disabled)
+        {
+            if (ui.Button("Apply and Reimport"))
+            {
+                try
+                {
+                    m_Controller.ApplyInspectorImportSettings(record->Id, m_ImportSettings);
+                    m_OriginalImportSettings = m_ImportSettings;
+                    m_PreviewDigest.clear();
+                }
+                catch (const std::exception& error)
+                {
+                    m_Controller.ReportInspectorAssetError(std::string("Import settings failed: ") + error.what());
+                }
+            }
+        }
+        ui.SameLine();
+        if (auto disabled = ui.BeginDisabled(!changed); disabled)
+            if (ui.Button("Revert Import Settings"))
+                m_ImportSettings = m_OriginalImportSettings;
+    }
     if (record->RelativePath.extension() == ".keireinput")
     {
         ui.Separator();

@@ -954,123 +954,6 @@ void EditorWorkspaceLayer::OnAttach()
     }
 }
 
-void EditorWorkspaceLayer::OnDetach() noexcept
-{
-    if (m_SceneDocument && m_SceneDocument->Asset())
-        PersistEditorSessionScene(m_SceneDocument->Asset());
-    ShutdownPlayerBuild();
-    m_PackageManagerPanel->Shutdown();
-    if (m_AssetOperations)
-        m_AssetOperations->Shutdown();
-    try
-    {
-        if (const auto scripts = Owner().Scripts())
-            scripts->SetRuntimeServices(nullptr);
-    }
-    catch (...)
-    {
-    }
-    CommitMaterialDraft();
-    CancelMaterialCatalogRefresh();
-    const auto projectRoot = Owner().GetProject() ? Owner().GetProject()->Root() : std::filesystem::path{};
-    m_SceneViewportPanel->Shutdown(projectRoot);
-    if (m_ProjectSettingsDocument && m_ProjectSettingsDocument->Dirty())
-    {
-        try
-        {
-            if (const auto project = Owner().GetProject(); project && project->Writable())
-                m_ProjectSettingsDocument->Save();
-        }
-        catch (const std::exception& error)
-        {
-            KEIRE_CLIENT_ERROR("[Rendering] Could not save project settings during shutdown: {}", error.what());
-        }
-    }
-    if (m_ProjectSettingsDocument)
-        m_ProjectSettingsDocument->Close();
-    EndInputTest();
-    m_ManagedInputCaptureOverride.reset();
-    m_GameplayInputContext.Reset();
-    m_ManagedCursorLocked = false;
-    m_ManagedCursorVisible = true;
-    m_GameViewportCaptureSuspended = false;
-    ApplyManagedCursorMode();
-    StopInspectorAudioPreview();
-    m_InspectorPanel->ClearSceneState();
-    m_SceneDocument->EndPlay();
-    m_GameEditPresentation.Reset();
-    m_GameRenderView.Reset();
-    m_InputActionsPanel->ResetTransientState();
-    m_AudioMixerPanel->StopTransientPreview();
-    m_VfxEffectPanel->StopTransientPreview();
-    StopEditModeVfxPreviews();
-    ResetEditorVfxPreviewWorld();
-    m_InputContext.Reset();
-    if (m_InputActionsDocument->UndoContext())
-        m_InputActionsDocument->UndoContext()->Close();
-    if (m_AudioMixerDocument->UndoContext())
-        m_AudioMixerDocument->UndoContext()->Close();
-    if (m_VfxEffectDocument->UndoContext())
-        m_VfxEffectDocument->UndoContext()->Close();
-    if (m_ShaderGraphDocument->UndoContext())
-        m_ShaderGraphDocument->UndoContext()->Close();
-    if (m_MaterialGraphDocument->UndoContext())
-        m_MaterialGraphDocument->UndoContext()->Close();
-    if (m_SceneDocument->UndoContext())
-        m_SceneDocument->UndoContext()->Close();
-    if (m_ThemeUndoContext)
-        m_ThemeUndoContext->Close();
-    if (m_ManagedDataUndoContext)
-        m_ManagedDataUndoContext->Close();
-    m_ActiveUndoContext.Reset();
-    m_ThemeUndoContext.Reset();
-    m_ManagedDataUndoContext.Reset();
-    if (m_SceneDocument->EditingScene() && m_SceneDocument->EditingScene()->Dirty())
-    {
-        try
-        {
-            WriteSceneRecovery();
-        }
-        catch (...)
-        {
-        }
-    }
-    m_InputActionsDocument->Close();
-    m_AudioMixerDocument->Close();
-    m_VfxEffectDocument->Close();
-    m_ShaderGraphDocument->Close();
-    m_MaterialGraphDocument->Close();
-    m_SceneDocument->Close();
-    if (m_PrefabReturnDocument)
-        m_PrefabReturnDocument->Close();
-    m_PrefabReturnDocument.reset();
-    m_PrefabEditingStage.reset();
-    m_PendingAssetPackageDialog.reset();
-    if (m_AssetPackageExport.valid())
-    {
-        try
-        {
-            static_cast<void>(m_AssetPackageExport.get());
-        }
-        catch (const std::exception& error)
-        {
-            KEIRE_CLIENT_ERROR("[Assets] Asset-package export failed during shutdown: {}", error.what());
-        }
-    }
-    m_AssetPackageOutput.clear();
-    m_AssetBrowserPanel->Close();
-    m_AssetDatabase.Reset();
-}
-
-void EditorWorkspaceLayer::OnFixedUpdate(const Keire::Time& time)
-{
-    if (m_SceneDocument->PlaySession())
-    {
-        Keire::ProfileScope playFixed(Owner().GetProfiler(), Keire::ProfileCategory::Physics, "Play fixed + physics");
-        m_SceneDocument->PlaySession()->FixedUpdate(static_cast<float>(time.FixedDeltaTime().Seconds()));
-    }
-}
-
 void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
 {
     m_ConsolePanel->CaptureEngineLogs(time.FrameCount(), m_Theme);
@@ -1193,6 +1076,7 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
     }
     if (m_MaterialDocument->Dirty() && m_SelectedAsset != m_MaterialDocument->Asset())
         CommitMaterialDraft();
+    UpdateMaterialGraphAutosave(time);
     m_ShaderGraphDocument->AdvanceCompilation(time.UnscaledDeltaTime().Seconds());
     UpdateMaterialCatalogRefresh(time);
     if (m_SceneDocument->LoadOperation() && m_SceneDocument->LoadOperation()->State() == Keire::SceneLoadState::Failed)
@@ -1237,7 +1121,8 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
         const auto changed = m_AssetDatabase->PollChangedAssets();
         if (!changed.empty())
         {
-            bool requiresAssetImport = false;
+            bool requiresFullAssetImport = false;
+            std::vector<Keire::AssetId> changedAssetSources;
             for (const auto id : changed)
             {
                 const auto record = m_AssetDatabase->Find(id);
@@ -1245,16 +1130,36 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
                 const auto path = record                             ? record->RelativePath
                                   : previous != m_AssetRecords.end() ? previous->RelativePath
                                                                      : std::filesystem::path{};
+                KEIRE_CLIENT_INFO("[Asset Hot Reload] Change detected: asset={} path='{}' indexed={}.", id.ToString(),
+                                  Keire::Detail::PathToUtf8(path), record.has_value());
                 if (path.extension() == ".cs" || path.extension() == ".keireasm")
                 {
                     m_ManagedBuildDebounceSeconds = 0.1;
                 }
                 if (path.extension() != ".cs")
-                    requiresAssetImport = true;
+                {
+                    if (record)
+                        changedAssetSources.push_back(id);
+                    else
+                        requiresFullAssetImport = true;
+                }
             }
             RefreshAssetBrowserRecords();
-            if (requiresAssetImport)
-                ImportAssets(KeireEditor::AssetOperationPriority::AutomaticRefresh);
+            if (requiresFullAssetImport && m_AssetOperations)
+            {
+                KEIRE_CLIENT_WARN("[Asset Hot Reload] Scheduling full import because a removed or unindexed "
+                                  "non-script source cannot be targeted safely.");
+                m_AssetOperations->QueueImport(KeireEditor::AssetOperationPriority::AutomaticRefresh,
+                                               {.Reason = "automatic-refresh: removed or unindexed non-script source"});
+            }
+            else if (!changedAssetSources.empty() && m_AssetOperations)
+            {
+                KEIRE_CLIENT_INFO("[Asset Hot Reload] Scheduling targeted import for {} changed source(s).",
+                                  changedAssetSources.size());
+                m_AssetOperations->QueueAssetImport(std::move(changedAssetSources),
+                                                    KeireEditor::AssetOperationPriority::AutomaticRefresh,
+                                                    {.Reason = "automatic-refresh: changed indexed sources"});
+            }
             if (const auto assets = Owner().Assets())
             {
                 for (const auto id : changed)

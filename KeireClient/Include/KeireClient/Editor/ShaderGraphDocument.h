@@ -107,6 +107,7 @@ namespace KeireEditor
         [[nodiscard]] bool MoveNode(Keire::AssetId node, Keire::Vector2 position);
         [[nodiscard]] bool RemoveNode(Keire::AssetId node);
         [[nodiscard]] bool AddConnection(Keire::ShaderGraphConnection connection);
+        [[nodiscard]] bool SetConnectionRouting(Keire::AssetId connection, std::vector<Keire::Vector2> routingPoints);
         [[nodiscard]] bool RemoveConnection(Keire::AssetId connection);
         [[nodiscard]] NodeGraphConnectionValidation CheckConnection(Keire::ShaderGraphEndpoint output,
                                                                     Keire::ShaderGraphEndpoint input) const;

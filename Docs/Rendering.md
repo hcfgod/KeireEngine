@@ -9,6 +9,9 @@ rendering settings. Local-light tile requests are allocated deterministically in
 resolution hint, stable entity identity, and point-light face. To keep local-light cost bounded, the renderer selects at
 most eight shadowed spot lights and two shadowed point lights; requests that do not fit remain fully lit. Point and spot
 components expose Disabled, Hard, and Soft authoring modes plus strength, bias, and resolution.
+Directional cascade centers snap in the light-space basis to whole shadow texels, and each projection reserves a
+two-texel filter guard band. PCF taps outside a map are treated as lit instead of clamping an edge depth, preventing
+camera or light rotation from exposing rectangular cascade borders.
 The engine-owned default material uses the same receiver contract, so primitives without an assigned material receive
 directional, point, and spot shadows instead of falling through an unshadowed compatibility path.
 Shadow layer, quality, strength, and receiver bias occupy a dedicated shadow uniform block; enabling shadows never
@@ -76,9 +79,14 @@ defaults, and creates a deterministic draw order. Opaque and
 masked work is state sorted; premultiplied blend work remains depth-tested, disables depth writes, and sorts
 back-to-front with stable entity/submesh tie breaking.
 
-Material schema v2 owns `Opaque`, `Mask`, and `Blend` alpha mode, alpha cutoff, and double-sided state. Mask surfaces
-write depth and reject fragments below their cutoff. A shader schema-v1 blend flag remains a compatibility default.
-Failed material or shader revisions retain the complete last-good binding.
+Material schema v2 owns `Opaque`, `Mask`, `Blend`, `Additive`, `Modulate`, `Alpha Composite`, and `Alpha Holdout`
+alpha modes, alpha cutoff, and double-sided state. Mask surfaces
+write depth and reject fragments below their cutoff. Blend uses straight source alpha, Additive accumulates source color
+weighted by source alpha, Modulate multiplies destination color, Alpha Composite expects premultiplied source color,
+and Alpha Holdout removes destination coverage without contributing source color. Every transparent mode remains
+depth-tested, disables depth writes, bypasses opaque instancing, and participates in stable back-to-front submission. A
+shader schema-v1 blend flag remains a compatibility default. Failed material or shader revisions retain the complete
+last-good binding.
 
 The private frame graph executes resource upload, directional-shadow, Forward+ culling, opaque/mask, sky,
 transparency, ACES tone-map, overlay, readback, and presentation passes. Its compiler validates transient reads,

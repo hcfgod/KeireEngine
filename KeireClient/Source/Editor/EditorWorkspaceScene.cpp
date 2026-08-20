@@ -1158,7 +1158,8 @@ void EditorWorkspaceLayer::AssignDroppedMaterial(const Keire::EntityId entity, c
             if (!m_AssetOperations)
                 throw std::runtime_error(
                     "The material source runtime material is not available in the mounted catalog.");
-            m_AssetOperations->QueueImport(KeireEditor::AssetOperationPriority::ExplicitAction, {.ReloadAsset = asset});
+            m_AssetOperations->QueueAssetImport(asset, KeireEditor::AssetOperationPriority::ExplicitAction,
+                                                {.ReloadAsset = asset});
             m_PendingMaterialAssignment = PendingMaterialAssignment{entity, asset};
             m_SceneDocument->SetStatus("Compiling " + record->RelativePath.stem().string() + " before assigning it...");
             return;

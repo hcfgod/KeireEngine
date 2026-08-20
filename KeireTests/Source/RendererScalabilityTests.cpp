@@ -1,4 +1,5 @@
 #include "KeireInternal/Rendering/InstanceBatchInternal.h"
+#include "KeireInternal/Rendering/MaterialBlendingInternal.h"
 
 #include <doctest/doctest.h>
 
@@ -41,4 +42,44 @@ TEST_CASE("blended and incompatible draws preserve deterministic submission orde
     CHECK(batches[2].Count == 1);
     CHECK(batches[1].First == 2);
     CHECK(batches[1].GpuFirstInstance() == 0);
+}
+
+TEST_CASE("production material blend modes have explicit deterministic policies")
+{
+    using enum Keire::MaterialAlphaMode;
+    using enum Keire::RenderBackend::MaterialBlendFactor;
+
+    CHECK(Keire::RenderBackend::MaterialBlending(Opaque) ==
+          Keire::RenderBackend::MaterialBlendPolicy{One, Zero, One, Zero, false, true});
+    CHECK(Keire::RenderBackend::MaterialBlending(Mask) ==
+          Keire::RenderBackend::MaterialBlendPolicy{One, Zero, One, Zero, false, true});
+    CHECK(Keire::RenderBackend::MaterialBlending(Blend) ==
+          Keire::RenderBackend::MaterialBlendPolicy{SourceAlpha, OneMinusSourceAlpha, One, OneMinusSourceAlpha, true,
+                                                    false});
+    CHECK(Keire::RenderBackend::MaterialBlending(Additive) ==
+          Keire::RenderBackend::MaterialBlendPolicy{SourceAlpha, One, One, One, true, false});
+    CHECK(Keire::RenderBackend::MaterialBlending(Modulate) ==
+          Keire::RenderBackend::MaterialBlendPolicy{DestinationColor, Zero, Zero, One, true, false});
+    CHECK(Keire::RenderBackend::MaterialBlending(AlphaComposite) ==
+          Keire::RenderBackend::MaterialBlendPolicy{One, OneMinusSourceAlpha, One, OneMinusSourceAlpha, true, false});
+    CHECK(Keire::RenderBackend::MaterialBlending(AlphaHoldout) ==
+          Keire::RenderBackend::MaterialBlendPolicy{Zero, OneMinusSourceAlpha, Zero, OneMinusSourceAlpha, true, false});
+}
+
+TEST_CASE("all transparent material modes bypass opaque instancing")
+{
+    using namespace Keire::RenderBackend;
+    for (const auto mode :
+         {Keire::MaterialAlphaMode::Blend, Keire::MaterialAlphaMode::Additive, Keire::MaterialAlphaMode::Modulate,
+          Keire::MaterialAlphaMode::AlphaComposite, Keire::MaterialAlphaMode::AlphaHoldout})
+    {
+        InstanceBatchKey key;
+        key.SupportsInstancing = true;
+        key.AlphaMode = mode;
+        const std::vector objects{key, key};
+        const auto batches = BuildInstanceBatches(objects);
+        REQUIRE(batches.size() == 2);
+        CHECK(batches[0].Count == 1);
+        CHECK(batches[1].Count == 1);
+    }
 }

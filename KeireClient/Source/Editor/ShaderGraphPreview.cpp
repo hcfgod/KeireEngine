@@ -2,10 +2,10 @@
 
 #include "KeireClient/Editor/ShaderGraphPreviewGeometry.h"
 #include "KeireClient/Editor/ShaderGraphPreviewRaster.h"
+#include "KeireClient/Editor/ShaderGraphPreviewTextureSampling.h"
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <cmath>
 #include <concepts>
 #include <cstddef>
@@ -27,12 +27,6 @@ namespace KeireEditor
 {
     namespace
     {
-        void CheckPreviewCancellation(const ShaderGraphPreviewRequest& request)
-        {
-            if (request.CancellationRequested && request.CancellationRequested())
-                throw std::runtime_error("Shader Graph preview rendering was superseded.");
-        }
-
         using Detail::PreviewMaterial;
 
         struct ProjectedVertex
@@ -44,14 +38,6 @@ namespace KeireEditor
             Keire::Vector3 Normal;
             Keire::Vector2 UV;
         };
-
-        [[nodiscard]] std::string Lower(std::string_view value)
-        {
-            std::string result(value);
-            std::ranges::transform(result, result.begin(), [](const unsigned char character)
-                                   { return static_cast<char>(std::tolower(character)); });
-            return result;
-        }
 
         [[nodiscard]] float Clamp01(const float value) noexcept { return std::clamp(value, 0.0F, 1.0F); }
 
@@ -240,8 +226,10 @@ namespace KeireEditor
         {
           public:
             GraphPreviewEvaluator(const Keire::ShaderGraphDefinition& definition,
-                                  const std::span<const Keire::ShaderPropertyDefinition> properties)
-                : m_Definition(definition), m_Properties(properties), m_Visiting(definition.Nodes.size(), 0)
+                                  const std::span<const Keire::ShaderPropertyDefinition> properties,
+                                  const std::span<const ShaderGraphPreviewTexture> textures)
+                : m_Definition(definition), m_Properties(properties), m_Textures(textures),
+                  m_Visiting(definition.Nodes.size(), 0)
             {
                 for (std::size_t index = 0; index < definition.Nodes.size(); ++index)
                 {
@@ -385,6 +373,9 @@ namespace KeireEditor
             [[nodiscard]] PreviewGraphValue TextureSample(const PreviewGraphValue texture,
                                                           const Keire::Vector2 uv) const noexcept
             {
+                if (texture.Texture)
+                    if (const auto sample = Detail::SampleShaderGraphPreviewTexture(m_Textures, texture.Texture, uv))
+                        return {.Data = *sample, .Type = Keire::ShaderGraphValueType::Color};
                 const bool alternate =
                     ((static_cast<int>(std::floor(uv.X * 10.0F)) + static_cast<int>(std::floor(uv.Y * 10.0F))) & 1) !=
                     0;
@@ -1664,6 +1655,7 @@ namespace KeireEditor
 
             const Keire::ShaderGraphDefinition& m_Definition;
             std::span<const Keire::ShaderPropertyDefinition> m_Properties;
+            std::span<const ShaderGraphPreviewTexture> m_Textures;
             std::map<Keire::AssetId, std::size_t> m_Nodes;
             std::map<std::pair<Keire::AssetId, Keire::AssetId>, Keire::ShaderGraphEndpoint> m_Incoming;
             std::map<std::pair<Keire::AssetId, Keire::AssetId>, std::size_t> m_CacheIndices;
@@ -1686,7 +1678,7 @@ namespace KeireEditor
             bool foundColor = false;
             for (const auto& property : request.Properties)
             {
-                const auto name = Lower(property.Name);
+                const auto name = Detail::LowerShaderGraphPreviewText(property.Name);
                 if (property.Type == Keire::ShaderPropertyType::Texture2D)
                 {
                     result.HasBaseTexture |= property.TextureSemantic == Keire::ShaderTextureSemantic::BaseColor;
@@ -1832,7 +1824,7 @@ namespace KeireEditor
             { return (x - first.X) * (second.Y - first.Y) - (y - first.Y) * (second.X - first.X); };
             for (std::size_t index = 0; index + 2 < geometry.Indices.size(); index += 3)
             {
-                CheckPreviewCancellation(request);
+                Detail::CheckShaderGraphPreviewCancellation(request);
                 const auto i0 = geometry.Indices[index];
                 const auto i1 = geometry.Indices[index + 1];
                 const auto i2 = geometry.Indices[index + 2];
@@ -1852,7 +1844,7 @@ namespace KeireEditor
                                               static_cast<int>(std::ceil(std::max({first.Y, second.Y, third.Y}))));
                 for (int y = minimumY; y <= maximumY; ++y)
                 {
-                    CheckPreviewCancellation(request);
+                    Detail::CheckShaderGraphPreviewCancellation(request);
                     for (int x = minimumX; x <= maximumX; ++x)
                     {
                         const float sampleX = static_cast<float>(x) + 0.5F;
@@ -1905,7 +1897,7 @@ namespace KeireEditor
         std::vector<std::byte> pixels(static_cast<std::size_t>(request.Width) * request.Height * 4U);
         for (std::uint32_t y = 0; y < request.Height; ++y)
         {
-            CheckPreviewCancellation(request);
+            Detail::CheckShaderGraphPreviewCancellation(request);
             for (std::uint32_t x = 0; x < request.Width; ++x)
             {
                 const auto background = Detail::PreviewBackground(x, y);
@@ -1936,7 +1928,8 @@ namespace KeireEditor
         }
         std::unique_ptr<GraphPreviewEvaluator> evaluator;
         if (request.Definition)
-            evaluator = std::make_unique<GraphPreviewEvaluator>(*request.Definition, request.Properties);
+            evaluator =
+                std::make_unique<GraphPreviewEvaluator>(*request.Definition, request.Properties, request.Textures);
         Rasterize(geometry, request, evaluator.get(), request.Width, request.Height, request.Exposure,
                   request.EnvironmentIntensity, request.RotationDegrees, pixels);
         return pixels;

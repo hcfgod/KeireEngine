@@ -378,6 +378,12 @@ the Hub records the project, installation ID, and last-opened time. Depending on
 to the tray/taskbar, or exits normally. A Hub hidden automatically for a tracked editor restores its window when the
 final tracked editor exits; a manual close-to-tray remains hidden until the user explicitly shows it.
 
+A non-distribution Hub launched from a source build uses the sibling editor from the same configuration for ordinary
+project opens. The Hub build depends on that editor, which in turn depends on the Asset Worker, so building or starting
+the Hub from Visual Studio first updates the complete development launch chain. This prevents a project's persisted
+packaged-editor preference from silently launching an older distribution. An explicit **Open with** choice still honors
+the selected registered installation. Packaged Hubs continue to use only verified registered editors.
+
 Only one Hub process owns a window and tray entry for each canonical installed executable. Secondary processes send a
 bounded, versioned activation request for show, open-project, install-version, import-package, navigation, or legacy
 Build Support actions, authorize the primary process to take foreground focus, then exit without initializing window or

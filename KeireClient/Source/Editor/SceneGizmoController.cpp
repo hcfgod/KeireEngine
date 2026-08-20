@@ -347,9 +347,9 @@ namespace KeireEditor
                 break;
             case Keire::ColliderShape::Capsule:
             {
-                const float halfHeight = collider.Height() * 0.5F;
-                const auto top = Add(center, {0.0F, halfHeight, 0.0F});
-                const auto bottom = Add(center, {0.0F, -halfHeight, 0.0F});
+                const float halfSegment = std::max(collider.Height() * 0.5F - collider.Radius(), 0.0F);
+                const auto top = Add(center, {0.0F, halfSegment, 0.0F});
+                const auto bottom = Add(center, {0.0F, -halfSegment, 0.0F});
                 DrawLocalCircle(ui, world, top, {1.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, collider.Radius(),
                                 viewProjection, viewport, color, thickness);
                 DrawLocalCircle(ui, world, bottom, {1.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, collider.Radius(),
@@ -952,7 +952,7 @@ namespace KeireEditor
                     appendHandle(ColliderHandle::CapsuleRadius, Add(center, Multiply(direction, collider->Radius())),
                                  direction);
                 }
-                const float end = collider->Height() * 0.5F + collider->Radius();
+                const float end = collider->Height() * 0.5F;
                 appendHandle(ColliderHandle::CapsuleHeight, Add(center, {0.0F, end, 0.0F}), {0.0F, 1.0F, 0.0F});
                 appendHandle(ColliderHandle::CapsuleHeight, Add(center, {0.0F, -end, 0.0F}), {0.0F, -1.0F, 0.0F});
                 break;

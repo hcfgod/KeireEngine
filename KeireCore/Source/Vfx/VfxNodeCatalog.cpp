@@ -300,6 +300,13 @@ namespace Keire
                             Input("Velocity Maximum", "velocityMaximum", VfxValueType::Vector3, Vector3{}),
                             Input("Rotation Minimum", "rotationMinimum", VfxValueType::Vector3, Vector3{}),
                             Input("Rotation Maximum", "rotationMaximum", VfxValueType::Vector3, Vector3{})}));
+            result.push_back(Structural(
+                "keire.block.kill-shape", "Kill Shape", "Block/Update", VfxNodeClass::Block, {VfxContextType::Update},
+                {Input("Center", "center", VfxValueType::Vector3, Vector3{}),
+                 Input("Box Half Extent", "boxHalfExtent", VfxValueType::Vector3, Vector3{0.5F, 0.5F, 0.5F}),
+                 Input("Radius", "radius", VfxValueType::Scalar, 0.5F),
+                 Input("Inverted", "inverted", VfxValueType::Boolean, false)},
+                {{"Shape", std::uint64_t{2}}}, VfxNodeSupportTier::KeireEquivalent));
             result.push_back(Structural("keire.block.portable-hlsl", "Portable Custom HLSL", "Block/Custom",
                                         VfxNodeClass::Block, {VfxContextType::Initialize, VfxContextType::Update}, {},
                                         {{"Source", std::string{}}}, VfxNodeSupportTier::KeireEquivalent));

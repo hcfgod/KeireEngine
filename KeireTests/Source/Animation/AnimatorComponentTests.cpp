@@ -255,6 +255,24 @@ TEST_CASE("Procedural gait derives natural strides and gives grounding only to t
     CHECK(hanging == (Keire::Vector3{0.0F, 0.9F, 0.0F}));
 }
 
+TEST_CASE("Procedural response and pre-landing controls are elapsed-time based and bounded")
+{
+    CHECK(Keire::Detail::ProceduralResponseBlend(1.0F / 60.0F, 0.0F) == doctest::Approx(1.0F));
+    CHECK(Keire::Detail::ProceduralResponseBlend(0.0F, 0.1F) == doctest::Approx(0.0F));
+
+    const auto oneStep = Keire::Detail::ProceduralResponseBlend(1.0F / 30.0F, 0.12F);
+    const auto halfStep = Keire::Detail::ProceduralResponseBlend(1.0F / 60.0F, 0.12F);
+    const auto twoHalfSteps = halfStep + (1.0F - halfStep) * halfStep;
+    CHECK(twoHalfSteps == doctest::Approx(oneStep));
+
+    CHECK(Keire::Detail::ProceduralPreLandingAmount(2.0F, 4.0F, 0.25F) == doctest::Approx(0.0F));
+    const auto approaching = Keire::Detail::ProceduralPreLandingAmount(0.5F, 4.0F, 0.25F);
+    CHECK(approaching > 0.0F);
+    CHECK(approaching < 1.0F);
+    CHECK(Keire::Detail::ProceduralPreLandingAmount(0.0F, 4.0F, 0.25F) == doctest::Approx(1.0F));
+    CHECK(Keire::Detail::ProceduralPreLandingAmount(0.5F, -1.0F, 0.25F) == doctest::Approx(0.0F));
+}
+
 TEST_CASE("Procedural Animator assignments serialize and jump intent is consumed exactly once")
 {
     Keire::AnimatorComponent animator;

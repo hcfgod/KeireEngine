@@ -1,3 +1,4 @@
+#include "KeireInternal/Rendering/MaterialBlendingInternal.h"
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 
 #include "Keire/Log.h"
@@ -882,13 +883,31 @@ namespace Keire::RenderBackend
             fragment = CreateAssetShader(definition, false);
             SDL_GPUColorTargetDescription color{};
             color.format = SceneColorFormat;
-            color.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
-            color.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+            const auto blending = MaterialBlending(surface.AlphaMode);
+            const auto blendFactor = [](const MaterialBlendFactor factor) noexcept
+            {
+                switch (factor)
+                {
+                case MaterialBlendFactor::Zero:
+                    return SDL_GPU_BLENDFACTOR_ZERO;
+                case MaterialBlendFactor::SourceAlpha:
+                    return SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+                case MaterialBlendFactor::OneMinusSourceAlpha:
+                    return SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+                case MaterialBlendFactor::DestinationColor:
+                    return SDL_GPU_BLENDFACTOR_DST_COLOR;
+                case MaterialBlendFactor::One:
+                default:
+                    return SDL_GPU_BLENDFACTOR_ONE;
+                }
+            };
+            color.blend_state.src_color_blendfactor = blendFactor(blending.SourceColor);
+            color.blend_state.dst_color_blendfactor = blendFactor(blending.DestinationColor);
             color.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
-            color.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
-            color.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+            color.blend_state.src_alpha_blendfactor = blendFactor(blending.SourceAlpha);
+            color.blend_state.dst_alpha_blendfactor = blendFactor(blending.DestinationAlpha);
             color.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
-            color.blend_state.enable_blend = surface.AlphaMode == MaterialAlphaMode::Blend;
+            color.blend_state.enable_blend = blending.Enabled;
 
             SDL_GPUVertexBufferDescription buffer{};
             buffer.slot = 0;
@@ -926,8 +945,7 @@ namespace Keire::RenderBackend
             information.multisample_state.sample_count = samples;
             information.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
             information.depth_stencil_state.enable_depth_test = definition.DepthTest;
-            information.depth_stencil_state.enable_depth_write =
-                definition.DepthWrite && surface.AlphaMode != MaterialAlphaMode::Blend;
+            information.depth_stencil_state.enable_depth_write = definition.DepthWrite && blending.WritesDepth;
             information.target_info.color_target_descriptions = &color;
             information.target_info.num_color_targets = 1;
             information.target_info.depth_stencil_format = DepthFormat;

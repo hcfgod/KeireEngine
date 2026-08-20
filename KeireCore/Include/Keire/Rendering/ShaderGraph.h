@@ -291,6 +291,8 @@ namespace Keire
         AssetId Id;
         ShaderGraphEndpoint Output;
         ShaderGraphEndpoint Input;
+        /// Editor-only cable routing knots in graph space. They do not affect shader evaluation.
+        std::vector<Vector2> RoutingPoints;
 
         bool operator==(const ShaderGraphConnection&) const = default;
     };

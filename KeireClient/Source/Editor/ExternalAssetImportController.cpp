@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <stdexcept>
+#include <system_error>
 
 namespace KeireEditor
 {
@@ -38,14 +39,22 @@ namespace KeireEditor
         m_ViewportTarget = viewportTarget;
         m_Diagnostic.clear();
         m_Failed = false;
+        std::vector<Keire::ExternalAssetImportItem> pendingItems;
+        std::vector<bool> pendingIncluded;
+        std::vector<std::optional<Keire::AssetImporterRegistration>> pendingImporters;
         bool requiresDialog = paths.size() > 1;
-        for (const auto& source : paths)
+        std::size_t unsupportedFolderFiles = 0;
+        const auto appendFile = [&](const std::filesystem::path& source,
+                                    const std::filesystem::path& relativeDestination, const bool fromFolder)
         {
             const auto importer = database->FindImporterForPath(source);
-            const bool directory = std::filesystem::is_directory(source);
-            if (!directory && !importer)
+            if (!importer)
             {
-                if (IsMediaContainer(source))
+                if (fromFolder)
+                {
+                    ++unsupportedFolderFiles;
+                }
+                else if (IsMediaContainer(source))
                 {
                     m_Diagnostic += "Unsupported media container: " + source.filename().string() +
                                     ". Extract its audio track as WAV, Ogg Vorbis, FLAC, or MP3 before import.\n";
@@ -54,25 +63,64 @@ namespace KeireEditor
                 {
                     m_Diagnostic += "Unsupported asset: " + source.filename().string() + "\n";
                 }
-                continue;
+                return;
             }
             Keire::ExternalAssetImportItem item;
             item.SourcePath = source;
-            item.RelativeDestination = destinationFolder / source.filename();
+            item.RelativeDestination = relativeDestination;
             item.Conflict = Keire::ExternalAssetConflictPolicy::UniqueName;
-            if (importer)
+            for (const auto& option : importer->ImportOptions)
+                item.Settings.emplace(option.Key, option.DefaultValue);
+            if (importer->SuggestImportSettings)
+                item.Settings = importer->SuggestImportSettings(source, item.Settings);
+            requiresDialog |= fromFolder || !importer->ImportOptions.empty();
+            requiresDialog |= static_cast<bool>(database->Find(item.RelativeDestination));
+            pendingItems.push_back(std::move(item));
+            pendingIncluded.push_back(true);
+            pendingImporters.push_back(importer);
+        };
+        for (const auto& source : paths)
+        {
+            if (!std::filesystem::is_directory(source))
             {
-                for (const auto& option : importer->ImportOptions)
-                    item.Settings.emplace(option.Key, option.DefaultValue);
-                if (importer->SuggestImportSettings)
-                    item.Settings = importer->SuggestImportSettings(source, item.Settings);
-                requiresDialog |= !importer->ImportOptions.empty();
+                appendFile(source, destinationFolder / source.filename(), false);
+                continue;
             }
-            requiresDialog |= directory || static_cast<bool>(database->Find(item.RelativeDestination));
-            m_Items.push_back(std::move(item));
-            m_Included.push_back(true);
-            m_Importers.push_back(importer);
+
+            requiresDialog = true;
+            std::vector<std::filesystem::path> files;
+            std::error_code iteratorError;
+            for (std::filesystem::recursive_directory_iterator
+                     iterator(source, std::filesystem::directory_options::skip_permission_denied, iteratorError),
+                 end;
+                 !iteratorError && iterator != end; iterator.increment(iteratorError))
+            {
+                if (iterator->is_symlink(iteratorError))
+                {
+                    iterator.disable_recursion_pending();
+                    continue;
+                }
+                if (iterator->is_regular_file(iteratorError) && iterator->path().extension() != ".keiremeta")
+                    files.push_back(iterator->path());
+                if (files.size() > 4096)
+                    throw std::invalid_argument("Folder import exceeds the 4096-file review limit.");
+            }
+            if (iteratorError)
+                throw std::runtime_error("Could not enumerate dropped folder '" + source.filename().string() +
+                                         "': " + iteratorError.message());
+            std::ranges::sort(files, {}, [](const auto& path) { return path.generic_string(); });
+            for (const auto& file : files)
+            {
+                const auto relative = file.lexically_relative(source);
+                appendFile(file, destinationFolder / source.filename() / relative, true);
+            }
         }
+        if (unsupportedFolderFiles != 0)
+            m_Diagnostic += "Skipped " + std::to_string(unsupportedFolderFiles) +
+                            " unsupported file(s) while reviewing dropped folders.\n";
+        m_Items = std::move(pendingItems);
+        m_Included = std::move(pendingIncluded);
+        m_Importers = std::move(pendingImporters);
         if (m_Items.empty())
         {
             m_Failed = true;

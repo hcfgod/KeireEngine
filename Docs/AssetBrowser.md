@@ -12,7 +12,9 @@ launch fails closed with an actionable Hub notice. A directly elevated Editor st
 Project panel before any import is attempted.
 
 A single unambiguous asset imports directly. Texture files, batches, directories, and destination conflicts open the
-**Import Assets** dialog. Texture settings include semantic, color space, environment layout, mip policy, maximum size,
+**Import Assets** dialog. Dropped directories are expanded deterministically so every supported source file has its own
+Include toggle, destination, conflict policy, and importer-specific settings while retaining the directory hierarchy.
+Texture settings include semantic, color space, environment layout, mip policy, maximum size,
 normal green-channel flip, filters, address modes, and anisotropy. Radiance HDR files default to linear equirectangular
 environments; LDR environment images can use equirectangular, horizontal/vertical cross, or horizontal/vertical strip
 layouts. Conflicts default to a unique name; Replace is explicit and preserves a
@@ -28,13 +30,21 @@ mesh or texture import cannot leave a cached cube or checkerboard preview from a
 The Asset Browser is a focused editor panel backed by `AssetDatabase`. It presents a persistent folder tree,
 breadcrumbs, search, List and Grid modes, adjustable thumbnail size, multi-selection, double-click open, drag payloads,
 rename, stable-identity duplicate, and recoverable Move to Trash operations.
+Names that do not fit their List or Grid cell are shortened with a measured `...` suffix. Hover either the shortened
+label or its thumbnail to see the complete filename, type, project-relative path, size, stable ID, importer, and any
+import failure diagnostic.
 Published source-index changes advance an editor-owned record revision. The panel rebuilds thumbnail dependency digests
 and its transactional folder snapshot only when that revision changes; a one-second fallback scan discovers externally
 created empty folders. The sorted visible record view is cached by revision, folder, and search query, and thumbnail
 preparation is limited to that view instead of walking the complete project. Ordinary frames perform no asset-record
 copy, catalog-wide resort, or filesystem traversal. A 50,000-record regression protects this large-project contract.
-Click establishes a selection anchor; Shift-click selects the inclusive visible asset range to the next item, while
-Ctrl/Cmd+Shift-click adds that range to the current selection.
+Single-click establishes an asset or folder selection anchor; Shift-click selects the inclusive visible range and
+Ctrl/Cmd+Shift-click adds that range to the current selection. Content-area folders open on double-click, so ordinary
+clicks can build a folder selection. Copy, cut, duplicate, delete, and drag moves act on the complete selected set.
+
+Selecting an importable source displays its type-aware preview and persistent importer options in the Inspector.
+**Apply and Reimport** validates the edited values, writes them to that asset's `.keiremeta`, and rebuilds only its
+reverse dependency closure. **Revert Import Settings** discards the Inspector draft without touching project files.
 
 Both the thumbnail and extension-free label are drag handles. Folder targets retain move semantics; Scene-view targets
 dispatch by asset type. Scenes open through the normal dirty-document guard, Input Actions open in their editor, and a

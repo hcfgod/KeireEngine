@@ -9,6 +9,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace KeireEditor
 {
@@ -108,6 +109,8 @@ namespace KeireEditor
         [[nodiscard]] bool AddConnection(Keire::AssetId system, Keire::VfxGraphConnection connection);
         [[nodiscard]] bool EditConnection(Keire::AssetId system, Keire::AssetId connection,
                                           const std::function<void(Keire::VfxGraphConnection&)>& operation);
+        [[nodiscard]] bool SetConnectionRouting(Keire::AssetId system, Keire::AssetId connection,
+                                                std::vector<Keire::Vector2> routingPoints);
         [[nodiscard]] bool RemoveConnection(Keire::AssetId system, Keire::AssetId connection);
         [[nodiscard]] VfxGraphConnectionCheck CheckConnection(Keire::AssetId system, Keire::AssetId outputNode,
                                                               Keire::AssetId outputPin, Keire::AssetId inputNode,

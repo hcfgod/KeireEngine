@@ -174,8 +174,17 @@ namespace Keire
     {
         Opaque,
         Mask,
-        Blend
+        Blend,
+        Additive,
+        Modulate,
+        AlphaComposite,
+        AlphaHoldout
     };
+
+    [[nodiscard]] constexpr bool IsTransparentMaterial(const MaterialAlphaMode mode) noexcept
+    {
+        return mode >= MaterialAlphaMode::Blend && mode <= MaterialAlphaMode::AlphaHoldout;
+    }
 
     struct MaterialSurfaceState
     {

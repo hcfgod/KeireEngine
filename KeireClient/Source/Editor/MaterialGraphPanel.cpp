@@ -6,6 +6,7 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <cstddef>
 #include <ranges>
 #include <set>
 #include <stdexcept>
@@ -71,6 +72,27 @@ namespace KeireEditor
             std::ranges::transform(result, result.begin(), [](const unsigned char character)
                                    { return static_cast<char>(std::tolower(character)); });
             return result;
+        }
+
+        [[nodiscard]] constexpr Keire::ShaderGraphValueType
+        GraphValueType(const Keire::ShaderPropertyType type) noexcept
+        {
+            switch (type)
+            {
+            case Keire::ShaderPropertyType::Scalar:
+                return Keire::ShaderGraphValueType::Scalar;
+            case Keire::ShaderPropertyType::Vector2:
+                return Keire::ShaderGraphValueType::Vector2;
+            case Keire::ShaderPropertyType::Vector3:
+                return Keire::ShaderGraphValueType::Vector3;
+            case Keire::ShaderPropertyType::Vector4:
+                return Keire::ShaderGraphValueType::Vector4;
+            case Keire::ShaderPropertyType::Color:
+                return Keire::ShaderGraphValueType::Color;
+            case Keire::ShaderPropertyType::Texture2D:
+                return Keire::ShaderGraphValueType::Texture2D;
+            }
+            return Keire::ShaderGraphValueType::Scalar;
         }
 
         [[nodiscard]] std::string UniqueExpressionSymbol(const Keire::MaterialGraphDefinition& definition,
@@ -160,6 +182,7 @@ namespace KeireEditor
         m_SelectedConnection.reset();
         m_InspectorNode.reset();
         m_NodeCreationPosition.reset();
+        m_GraphContext.reset();
         m_Canvas.CancelInteractions();
         m_Canvas.Select(std::nullopt);
         m_Canvas.SelectConnection(std::nullopt);
@@ -336,6 +359,36 @@ namespace KeireEditor
                 composed =
                     Keire::ExpandShaderGraphFunctions(composed, [this](const Keire::AssetId asset)
                                                       { return m_Controller.ResolveMaterialGraphFunction(asset); });
+                std::vector<ShaderGraphPreviewTexture> textures;
+                bool waitingForTexture = false;
+                const auto addTexture =
+                    [&](const Keire::ShaderGraphValue& value, const Keire::ShaderGraphValueType type)
+                {
+                    if (type != Keire::ShaderGraphValueType::Texture2D)
+                        return;
+                    const auto* textureAsset = std::get_if<Keire::AssetId>(&value);
+                    if (!textureAsset || !*textureAsset ||
+                        std::ranges::find(textures, *textureAsset, &ShaderGraphPreviewTexture::Asset) != textures.end())
+                        return;
+                    auto texture = m_Controller.ResolveMaterialGraphTexture(*textureAsset);
+                    if (!texture)
+                    {
+                        waitingForTexture = true;
+                        return;
+                    }
+                    textures.push_back({*textureAsset, std::move(texture)});
+                };
+                for (const auto& node : composed.Nodes)
+                {
+                    addTexture(node.Value, node.ValueType);
+                    for (const auto& pin : node.Pins)
+                        addTexture(pin.DefaultValue, pin.Type);
+                }
+                if (waitingForTexture)
+                {
+                    ui.TextColored(theme.MutedText, "Loading material preview textures...");
+                    return;
+                }
                 const auto generation = m_PreviewGeneration;
                 const auto cancellation = m_PreviewCancellation;
                 m_PreviewRenderState = std::make_shared<PreviewRenderState>();
@@ -345,7 +398,8 @@ namespace KeireEditor
                      .Priority = Keire::JobPriority::Low,
                      .Class = Keire::JobClass::Compute,
                      .Domain = Keire::JobDomain::Tooling},
-                    [generation, definition = std::move(composed), cancellation, state](Keire::JobContext& context)
+                    [generation, definition = std::move(composed), textures = std::move(textures), cancellation,
+                     state](Keire::JobContext& context)
                     {
                         PreviewRenderResult result{.Generation = generation};
                         const auto stop = context.StopToken();
@@ -356,6 +410,7 @@ namespace KeireEditor
                                 .Output = definition.Output,
                                 .Mesh = Keire::ShaderGraphPreviewMesh::Sphere,
                                 .Definition = &definition,
+                                .Textures = textures,
                                 .Width = previewSize,
                                 .Height = previewSize,
                                 .CancellationRequested =
@@ -411,49 +466,132 @@ namespace KeireEditor
     }
 
     bool MaterialGraphPanel::DrawExpressionCreationMenu(Keire::UiFrame& ui,
-                                                        const std::optional<Keire::Vector2> position)
+                                                        const std::optional<Keire::Vector2> position,
+                                                        const Keire::ShaderGraphNode* compatibleNode,
+                                                        const Keire::ShaderGraphPin* compatiblePin)
     {
         (void)ui.InputTextWithHint("##MaterialExpressionSearch", "Search expressions and categories...", m_NodeSearch);
         ui.Separator();
         const auto search = Lower(m_NodeSearch);
-        std::size_t visible = 0;
-        for (const auto& entry : ExpressionEntries())
+        const auto compatible = [&](const Keire::ShaderGraphNode& candidate)
         {
-            const auto path = std::string(entry.Category) + " / " + std::string(entry.Name);
-            if (!search.empty() && Lower(path).find(search) == std::string::npos)
-                continue;
-            ++visible;
-            if (!ui.MenuItem(path))
-                continue;
+            if (compatiblePin)
+                return std::ranges::any_of(candidate.Pins, [&](const Keire::ShaderGraphPin& pin)
+                                           { return ShaderGraphPinsCanConnect(*compatiblePin, pin); });
+            return !compatibleNode || ShaderGraphNodesCanConnect(*compatibleNode, candidate);
+        };
+        const auto entryCompatible = [&](const ExpressionEntry& entry)
+        {
+            try
+            {
+                return compatible(Keire::CreateShaderGraphNode(entry.Kind, entry.Type));
+            }
+            catch (...)
+            {
+                return false;
+            }
+        };
+        const auto functionCompatible = [&](const Keire::AssetSourceRecord& record)
+        {
+            if (!compatibleNode && !compatiblePin)
+                return true;
+            try
+            {
+                const auto function = m_Controller.ResolveMaterialGraphFunction(record.Id);
+                return function && compatible(Keire::CreateShaderGraphFunctionCallNode(record.Id, *function));
+            }
+            catch (...)
+            {
+                return false;
+            }
+        };
+        const auto addEntry = [&](const ExpressionEntry& entry, const std::string_view label)
+        {
+            if (!ui.MenuItem(label))
+                return false;
             if (!AddExpressionNode(entry.Kind, entry.Type, position))
                 return false;
             m_NodeSearch.clear();
             ui.CloseCurrentPopup();
             return true;
+        };
+
+        std::size_t visible = 0;
+        if (!search.empty())
+        {
+            for (const auto& entry : ExpressionEntries())
+            {
+                const auto path = std::string(entry.Category) + " / " + std::string(entry.Name);
+                if (!entryCompatible(entry) || Lower(path).find(search) == std::string::npos)
+                    continue;
+                ++visible;
+                if (addEntry(entry, path))
+                    return true;
+            }
         }
+        else
+        {
+            std::vector<std::string_view> categories;
+            for (const auto& entry : ExpressionEntries())
+                if (entryCompatible(entry) && std::ranges::find(categories, entry.Category) == categories.end())
+                    categories.push_back(entry.Category);
+            visible = static_cast<std::size_t>(std::ranges::count_if(ExpressionEntries(), entryCompatible));
+            for (const auto category : categories)
+            {
+                if (auto categoryMenu = ui.BeginMenu(category); categoryMenu)
+                    for (const auto& entry : ExpressionEntries())
+                        if (entry.Category == category && entryCompatible(entry))
+                        {
+                            if (addEntry(entry, entry.Name))
+                                return true;
+                        }
+            }
+        }
+
+        std::vector<const Keire::AssetSourceRecord*> reusableGraphs;
         for (const auto& record : m_Controller.MaterialGraphAssetRecords())
         {
             const bool reusable = record.Type == Keire::MaterialFunctionAsset::StaticType() ||
                                   record.Type == Keire::ShaderFunctionAsset::StaticType() ||
                                   record.Type == Keire::MaterialLayerAsset::StaticType() ||
                                   record.Type == Keire::MaterialLayerBlendAsset::StaticType();
-            if (!reusable)
-                continue;
-            const auto name = record.RelativePath.stem().string();
-            const auto path = "Functions & Layers / " + name;
-            if (!search.empty() && Lower(path).find(search) == std::string::npos)
-                continue;
-            ++visible;
-            if (!ui.MenuItem(path))
-                continue;
-            if (!AddFunctionNode(record.Id, name, position))
-                return false;
-            m_NodeSearch.clear();
-            ui.CloseCurrentPopup();
-            return true;
+            if (reusable && functionCompatible(record))
+                reusableGraphs.push_back(&record);
+        }
+        if (!search.empty())
+            for (const auto* record : reusableGraphs)
+            {
+                const auto name = record->RelativePath.stem().string();
+                const auto path = "Functions & Layers / " + name;
+                if (Lower(path).find(search) == std::string::npos)
+                    continue;
+                ++visible;
+                if (ui.MenuItem(path) && AddFunctionNode(record->Id, name, position))
+                {
+                    m_NodeSearch.clear();
+                    ui.CloseCurrentPopup();
+                    return true;
+                }
+            }
+        if (search.empty() && !reusableGraphs.empty())
+        {
+            visible += reusableGraphs.size();
+            if (auto functions = ui.BeginMenu("Functions & Layers"); functions)
+                for (const auto* record : reusableGraphs)
+                {
+                    const auto name = record->RelativePath.stem().string();
+                    if (ui.MenuItem(name) && AddFunctionNode(record->Id, name, position))
+                    {
+                        m_NodeSearch.clear();
+                        ui.CloseCurrentPopup();
+                        return true;
+                    }
+                }
         }
         if (visible == 0)
-            ui.TextColored(m_Controller.MaterialGraphTheme().MutedText, "No expressions match this search.");
+            ui.TextColored(m_Controller.MaterialGraphTheme().MutedText, search.empty()
+                                                                            ? "No compatible expressions are available."
+                                                                            : "No expressions match this search.");
         return false;
     }
 
@@ -485,14 +623,57 @@ namespace KeireEditor
         if (ui.Button("Frame All"))
             m_Canvas.Focus(model.Nodes, ui.ContentAvailable());
         ui.SameLine();
-        ui.TextColored(m_Controller.MaterialGraphTheme().MutedText,
-                       "Right-click to add  |  drag pins to connect  |  middle-drag to pan  |  wheel to zoom");
+        ui.TextColored(
+            m_Controller.MaterialGraphTheme().MutedText,
+            "Right-click canvas or items for actions  |  drag pins to connect  |  double-click cable routes");
 
         const auto findCanvas = [](const auto& identities, const Keire::AssetId id) -> std::optional<StableNodeId>
         {
             const auto found =
                 std::ranges::find_if(identities, [id](const auto& identity) { return identity.second == id; });
             return found == identities.end() ? std::nullopt : std::optional(found->first);
+        };
+        const auto buildContextNode = [&](const StableNodeId canvasId) -> std::optional<Keire::ShaderGraphNode>
+        {
+            const auto id = model.Node(canvasId);
+            if (!id)
+                return std::nullopt;
+            const auto expression =
+                std::ranges::find(document.Definition().SurfaceGraph.Nodes, *id, &Keire::ShaderGraphNode::Id);
+            if (expression != document.Definition().SurfaceGraph.Nodes.end())
+                return *expression;
+
+            Keire::ShaderGraphNode result;
+            result.Id = *id;
+            if (*id == document.Definition().OutputNode)
+            {
+                result.Kind = Keire::ShaderGraphNodeKind::Master;
+                result.Name = "Template Defaults";
+                for (const auto& property : document.Definition().Properties)
+                    result.Pins.push_back({property.Pin,
+                                           property.Name,
+                                           GraphValueType(property.Type),
+                                           Keire::ShaderGraphPinDirection::Input,
+                                           {}});
+                return result;
+            }
+            const auto value = std::ranges::find(document.Definition().Nodes, *id, &Keire::MaterialGraphValueNode::Id);
+            if (value == document.Definition().Nodes.end())
+                return std::nullopt;
+            result.Kind = Keire::ShaderGraphNodeKind::Constant;
+            result.Name = value->Name;
+            result.Pins.push_back(
+                {value->OutputPin, "Value", GraphValueType(value->Type), Keire::ShaderGraphPinDirection::Output, {}});
+            return result;
+        };
+        const auto findContextPin = [&](const Keire::ShaderGraphNode& node,
+                                        const StableNodeId canvasId) -> const Keire::ShaderGraphPin*
+        {
+            const auto id = model.Pin(canvasId);
+            if (!id)
+                return nullptr;
+            const auto found = std::ranges::find(node.Pins, *id, &Keire::ShaderGraphPin::Id);
+            return found == node.Pins.end() ? nullptr : &*found;
         };
         m_Canvas.Select(m_SelectedNode ? findCanvas(model.NodeIdentities, *m_SelectedNode) : std::nullopt);
         m_Canvas.SelectConnection(m_SelectedConnection ? findCanvas(model.ConnectionIdentities, *m_SelectedConnection)
@@ -512,8 +693,60 @@ namespace KeireEditor
                                                          "Material Graph endpoint is unavailable."};
                 return document.CheckConnection({*outputNode, *outputPin}, {*inputNode, *inputPin});
             },
+            .EditableReroutes = true,
         };
         const auto canvas = m_Canvas.Draw(ui, "MaterialGraphCanvas", model.Nodes, model.Connections, options);
+        const auto setRouting = [&](const StableNodeId canvasConnection, std::vector<Keire::Vector2> routing)
+        {
+            const auto connection = model.Connection(canvasConnection);
+            if (!connection)
+                return;
+            try
+            {
+                (void)document.SetConnectionRouting(*connection, std::move(routing));
+            }
+            catch (const std::exception& error)
+            {
+                Report(error.what());
+            }
+        };
+        if (canvas.AddRerouteRequested)
+        {
+            const auto connection =
+                std::ranges::find(model.Connections, canvas.AddRerouteRequested->Connection, &NodeGraphConnection::Id);
+            if (connection != model.Connections.end() &&
+                canvas.AddRerouteRequested->Index <= connection->RoutingPoints.size())
+            {
+                auto routing = connection->RoutingPoints;
+                routing.insert(routing.begin() + static_cast<std::ptrdiff_t>(canvas.AddRerouteRequested->Index),
+                               canvas.AddRerouteRequested->GraphPosition);
+                setRouting(connection->Id, std::move(routing));
+            }
+        }
+        if (canvas.MoveRerouteRequested)
+        {
+            const auto connection =
+                std::ranges::find(model.Connections, canvas.MoveRerouteRequested->Connection, &NodeGraphConnection::Id);
+            if (connection != model.Connections.end() &&
+                canvas.MoveRerouteRequested->Index < connection->RoutingPoints.size())
+            {
+                auto routing = connection->RoutingPoints;
+                routing[canvas.MoveRerouteRequested->Index] = canvas.MoveRerouteRequested->GraphPosition;
+                setRouting(connection->Id, std::move(routing));
+            }
+        }
+        if (canvas.DeleteRerouteRequested)
+        {
+            const auto connection = std::ranges::find(model.Connections, canvas.DeleteRerouteRequested->Connection,
+                                                      &NodeGraphConnection::Id);
+            if (connection != model.Connections.end() &&
+                canvas.DeleteRerouteRequested->Index < connection->RoutingPoints.size())
+            {
+                auto routing = connection->RoutingPoints;
+                routing.erase(routing.begin() + static_cast<std::ptrdiff_t>(canvas.DeleteRerouteRequested->Index));
+                setRouting(connection->Id, std::move(routing));
+            }
+        }
         if (canvas.ActivatedNode)
             m_SelectedNode = model.Node(*canvas.ActivatedNode);
         if (canvas.ActivatedConnection)
@@ -579,10 +812,162 @@ namespace KeireEditor
 
         if (canvas.ContextRequested)
         {
-            m_NodeCreationPosition = canvas.ContextRequested->GraphPosition;
+            m_GraphContext = canvas.ContextRequested;
             m_NodeSearch.clear();
-            ui.SetNextWindowSize({380.0F, 440.0F}, true);
-            ui.OpenPopup("MaterialGraphExpressionPalette");
+            if (canvas.ContextRequested->Kind == NodeGraphContextTargetKind::Background)
+            {
+                m_NodeCreationPosition = canvas.ContextRequested->GraphPosition;
+                ui.SetNextWindowSize({380.0F, 440.0F}, true);
+                ui.OpenPopup("MaterialGraphExpressionPalette");
+            }
+            else
+            {
+                m_NodeCreationPosition.reset();
+                ui.OpenPopup("MaterialGraphItemContext");
+            }
+        }
+        if (auto popup = ui.BeginPopup("MaterialGraphItemContext"); popup)
+        {
+            if (!m_GraphContext)
+            {
+                ui.TextColored(m_Controller.MaterialGraphTheme().MutedText, "The graph item is no longer available.");
+            }
+            else if (m_GraphContext->Kind == NodeGraphContextTargetKind::Node ||
+                     m_GraphContext->Kind == NodeGraphContextTargetKind::Pin)
+            {
+                const auto node = buildContextNode(m_GraphContext->Node);
+                const auto* pin = node && m_GraphContext->Kind == NodeGraphContextTargetKind::Pin
+                                      ? findContextPin(*node, m_GraphContext->Pin)
+                                      : nullptr;
+                if (!node || (m_GraphContext->Kind == NodeGraphContextTargetKind::Pin && !pin))
+                {
+                    ui.TextColored(m_Controller.MaterialGraphTheme().MutedText,
+                                   "The graph item is no longer available.");
+                }
+                else
+                {
+                    ui.TextColored(m_Controller.MaterialGraphTheme().Accent, pin ? pin->Name : node->Name);
+                    ui.TextColored(m_Controller.MaterialGraphTheme().MutedText,
+                                   pin ? node->Name : "MATERIAL GRAPH NODE");
+                    ui.Separator();
+                    if (ui.MenuItem("Inspect Node"))
+                    {
+                        m_SelectedNode = node->Id;
+                        m_SelectedConnection.reset();
+                    }
+                    if (auto addMenu = ui.BeginMenu("Add Compatible Node"); addMenu)
+                    {
+                        if (DrawExpressionCreationMenu(ui, m_GraphContext->GraphPosition, pin ? nullptr : &*node, pin))
+                            return;
+                    }
+                    const auto valueConnected = std::ranges::any_of(
+                        document.Definition().Connections,
+                        [&](const Keire::MaterialGraphConnection& connection)
+                        {
+                            if (pin)
+                                return connection.Output.Pin == pin->Id || connection.Input.Pin == pin->Id;
+                            return connection.Output.Node == node->Id || connection.Input.Node == node->Id;
+                        });
+                    const auto expressionConnected = std::ranges::any_of(
+                        document.Definition().SurfaceGraph.Connections,
+                        [&](const Keire::ShaderGraphConnection& connection)
+                        {
+                            if (pin)
+                                return connection.Output.Pin == pin->Id || connection.Input.Pin == pin->Id;
+                            return connection.Output.Node == node->Id || connection.Input.Node == node->Id;
+                        });
+                    if (ui.MenuItem(pin ? "Unlink Pin" : "Unlink All Cables", false,
+                                    valueConnected || expressionConnected))
+                    {
+                        const auto nodeId = node->Id;
+                        const auto pinId = pin ? pin->Id : Keire::AssetId{};
+                        try
+                        {
+                            (void)document.Edit(
+                                pin ? "Disconnect Material Graph pin" : "Disconnect Material Graph node",
+                                [nodeId, pinId](auto& definition)
+                                {
+                                    const auto disconnected = [&](const auto& connection)
+                                    {
+                                        return pinId ? connection.Output.Pin == pinId || connection.Input.Pin == pinId
+                                                     : connection.Output.Node == nodeId ||
+                                                           connection.Input.Node == nodeId;
+                                    };
+                                    std::erase_if(definition.Connections, disconnected);
+                                    std::erase_if(definition.SurfaceGraph.Connections, disconnected);
+                                });
+                            m_SelectedConnection.reset();
+                        }
+                        catch (const std::exception& error)
+                        {
+                            Report(error.what());
+                        }
+                    }
+                    if (!pin)
+                    {
+                        const bool removable = node->Id != document.Definition().OutputNode &&
+                                               node->Kind != Keire::ShaderGraphNodeKind::Master;
+                        ui.Separator();
+                        if (ui.MenuItem("Delete Node", false, removable))
+                            try
+                            {
+                                (void)document.RemoveNode(node->Id);
+                                m_SelectedNode.reset();
+                            }
+                            catch (const std::exception& error)
+                            {
+                                Report(error.what());
+                            }
+                    }
+                }
+            }
+            else if (m_GraphContext->Kind == NodeGraphContextTargetKind::Connection)
+            {
+                const auto id = model.Connection(m_GraphContext->Connection);
+                std::optional<Keire::AssetId> source;
+                std::optional<Keire::AssetId> target;
+                if (id)
+                {
+                    const auto value =
+                        std::ranges::find(document.Definition().Connections, *id, &Keire::MaterialGraphConnection::Id);
+                    if (value != document.Definition().Connections.end())
+                    {
+                        source = value->Output.Node;
+                        target = value->Input.Node;
+                    }
+                    const auto expression = std::ranges::find(document.Definition().SurfaceGraph.Connections, *id,
+                                                              &Keire::ShaderGraphConnection::Id);
+                    if (expression != document.Definition().SurfaceGraph.Connections.end())
+                    {
+                        source = expression->Output.Node;
+                        target = expression->Input.Node;
+                    }
+                }
+                if (!id || !source || !target)
+                {
+                    ui.TextColored(m_Controller.MaterialGraphTheme().MutedText,
+                                   "The graph cable is no longer available.");
+                }
+                else
+                {
+                    ui.TextColored(m_Controller.MaterialGraphTheme().Accent, "MATERIAL GRAPH CABLE");
+                    ui.Separator();
+                    if (ui.MenuItem("Select Source Node"))
+                        m_SelectedNode = *source;
+                    if (ui.MenuItem("Select Target Node"))
+                        m_SelectedNode = *target;
+                    if (ui.MenuItem("Unlink Cable"))
+                        try
+                        {
+                            (void)document.RemoveConnection(*id);
+                            m_SelectedConnection.reset();
+                        }
+                        catch (const std::exception& error)
+                        {
+                            Report(error.what());
+                        }
+                }
+            }
         }
         bool paletteOpen = false;
         if (auto popup = ui.BeginPopup("MaterialGraphExpressionPalette"); popup)
@@ -593,6 +978,9 @@ namespace KeireEditor
                 m_NodeCreationPosition.reset();
                 return;
             }
+            ui.Separator();
+            if (ui.MenuItem("Frame All Nodes"))
+                m_Canvas.Focus(model.Nodes, ui.ContentAvailable());
         }
         if (!paletteOpen)
             m_NodeCreationPosition.reset();
@@ -792,8 +1180,10 @@ namespace KeireEditor
             if (materialOutput)
             {
                 auto surface = document.Definition().Surface;
-                constexpr std::array modes{std::string_view("Opaque"), std::string_view("Masked"),
-                                           std::string_view("Transparent")};
+                constexpr std::array modes{std::string_view("Opaque"),       std::string_view("Masked"),
+                                           std::string_view("Transparent"),  std::string_view("Additive"),
+                                           std::string_view("Modulate"),     std::string_view("Alpha Composite"),
+                                           std::string_view("Alpha Holdout")};
                 const auto mode = static_cast<std::size_t>(surface.AlphaMode);
                 if (auto combo = ui.BeginCombo("Surface", modes[mode]); combo)
                     for (std::size_t index = 0; index < modes.size(); ++index)

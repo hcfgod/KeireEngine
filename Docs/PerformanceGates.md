@@ -26,6 +26,26 @@ timestamps and fail clearly on that backend; they never relabel completion or co
 future backend timestamp implementation can populate the existing statistics contract without changing capture files
 or gate definitions.
 
+### 2026-08-16 acceptance audit
+
+The available reference host matches `keire-win-rtx3060-i7-12700f`: NVIDIA GeForce RTX 3060, driver
+`32.0.15.9597`, and 12th Gen Intel Core i7-12700F on Windows 11 x86-64. The repository is locked to SDL revision
+`8e37db5e797b6167f3a00d697d816a684bd259c7`; its public GPU API exposes fence completion queries but no timestamp-query
+or timestamp-frequency contract. SDL's upstream [GPU timestamp-query request](https://github.com/libsdl-org/SDL/issues/11696)
+also remains open. Consequently, this host cannot produce the required `GPU timing supported = 1` counter through the
+maintained backend boundary. No snapshot/history triplet was retained or labelled as passing reference evidence,
+because completion latency would not satisfy the profile.
+
+Functional rendered-output acceptance on the same host passed all 22 Debug cases on both D3D12 (2,987 assertions)
+and Vulkan (3,149 assertions), including CPU/GPU VFX, shader/material readback, and the Solid/Inverted Kill Shape
+differential. The local ignored evidence bundle records the raw logs, SHA-256 hashes, hardware identity, and this
+timestamp limitation under `Build/TestLogs/RenderRepeat`; it is renderer correctness evidence, not performance-gate
+evidence.
+
+This Windows audit is not native macOS, Metal, or ARM64 acceptance. Those lanes require their own native hosts and raw
+build, test, rendered-output, package-consumer, and player-smoke artifacts. Platform claims remain unchanged until that
+evidence exists.
+
 ## Capture metadata
 
 Store metadata beside the snapshot and history:

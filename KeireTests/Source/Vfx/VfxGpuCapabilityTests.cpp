@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -159,6 +160,43 @@ TEST_CASE("GPU VFX capability validation preserves the exact supported baseline 
     CHECK(emitter.RotationMaximum.Z == doctest::Approx(30.0F));
     CHECK(emitter.ConeAngleDegrees == doctest::Approx(25.0F));
     CHECK(emitter.ConeLength == doctest::Approx(1.0F));
+}
+
+TEST_CASE("GPU VFX lowers Kill Shape as a validated particle-stage operation")
+{
+    auto definition = Keire::VfxEffectAsset::DefaultDefinition();
+    AppendModule(
+        definition, Keire::VfxContextType::Update,
+        Keire::VfxKillShapeModule{
+            Keire::VfxShape::Sphere, {1.0F, 2.0F, 3.0F}, {4.0F, 5.0F, 6.0F}, 7.0F, Keire::VfxKillShapeMode::Inverted});
+
+    const auto cpuProgram = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Cpu);
+    const auto gpuProgram = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Gpu);
+    REQUIRE(cpuProgram.Valid);
+    REQUIRE(gpuProgram.Valid);
+
+    auto world = Keire::CreateRef<Keire::VfxWorld>(
+        Keire::VfxWorldSpecification{.MaximumEffects = 1, .MaximumParticles = 32, .Backend = Keire::VfxBackend::Gpu});
+    REQUIRE(world->Activate({Keire::CreateRef<Keire::VfxEffectAsset>(definition)}));
+    world->Update(0.1F);
+    const auto snapshot = world->CaptureRenderSnapshot();
+    REQUIRE(snapshot.GpuEmitters().size() == 1);
+    REQUIRE(snapshot.GpuEmitters().front().Execution);
+    const auto& execution = *snapshot.GpuEmitters().front().Execution;
+    const auto operation =
+        std::ranges::find(execution.ParticleOperations, Keire::VfxGpuParticleOperationKind::KillShape,
+                          &Keire::VfxGpuParticleOperation::Kind);
+    REQUIRE(operation != execution.ParticleOperations.end());
+    CHECK(operation->Context == Keire::VfxContextType::Update);
+    CHECK(operation->Setting == static_cast<std::uint32_t>(Keire::VfxShape::Sphere));
+    CHECK(operation->PropertyCount == 4);
+    REQUIRE(operation->FirstProperty + operation->PropertyCount <= execution.ModuleProperties.size());
+    const auto properties =
+        std::span(execution.ModuleProperties).subspan(operation->FirstProperty, operation->PropertyCount);
+    CHECK(properties[0].Property == Keire::VfxModuleProperty::KillShapeCenter);
+    CHECK(properties[1].Property == Keire::VfxModuleProperty::KillShapeBoxHalfExtent);
+    CHECK(properties[2].Property == Keire::VfxModuleProperty::KillShapeRadius);
+    CHECK(properties[3].Property == Keire::VfxModuleProperty::KillShapeInverted);
 }
 
 TEST_CASE("GPU VFX compiles resource-backed spawn shapes into stable execution resources")

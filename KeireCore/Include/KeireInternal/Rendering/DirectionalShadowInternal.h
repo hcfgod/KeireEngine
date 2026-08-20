@@ -15,4 +15,6 @@ namespace Keire::RenderBackend
                                                                  std::uint32_t cascadeCount, float splitLambda);
     [[nodiscard]] Vector2 StabilizeShadowCenter(Vector2 lightSpaceCenter, float cascadeDiameter,
                                                 std::uint32_t resolution);
+    [[nodiscard]] Vector3 StabilizeShadowCenter(Vector3 worldCenter, Vector3 lightRight, Vector3 lightUp,
+                                                float cascadeDiameter, std::uint32_t resolution);
 } // namespace Keire::RenderBackend

@@ -1154,6 +1154,7 @@ code {
     min-width: 0;
     min-height: 410px;
     flex-direction: column;
+    overflow: visible;
 }
 
 .download-card.recommended {
@@ -1241,6 +1242,7 @@ code {
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+    flex-wrap: wrap;
 }
 
 .variant-row strong {
@@ -1293,6 +1295,7 @@ code {
     font: inherit;
     font-size: 0.7rem;
     cursor: pointer;
+    white-space: nowrap;
 }
 
 .copy-button:hover {

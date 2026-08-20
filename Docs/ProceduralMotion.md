@@ -44,6 +44,19 @@ Idle, Locomotion, Turn In Place, Takeoff, Rising, Falling, and Landing. A confir
 walking off an edge enters Falling without a Takeoff event. Unsupported legs use bounded symmetric airborne posing and
 do not run ground IK.
 
+The profile's response controls have separate ownership. Velocity response filters the realized horizontal velocity
+used to build the pose without hiding the raw post-physics velocity reported in `ProceduralLocomotionState`. Facing
+response filters a non-zero requested world heading and drives turn-in-place stepping plus the visual pelvis heading;
+a zero facing vector continues to follow the character root. Pose response filters the completed procedural bone
+solution, while grounding response filters contact acquisition, support motion, normals, IK weight, and release. All four controls use
+elapsed-time exponential response, and zero selects immediate response.
+
+While Falling, the runtime probes down from the Character Controller and ignores the character hierarchy, triggers,
+masked geometry, and surfaces steeper than the profile permits. When a walkable surface is reachable within **Pre
+Landing Probe Time**, the legs transition from airborne tuck into the authored falling extension before contact. No
+pre-landing pose is applied over an unsupported drop or when the probe time is zero; the authoritative state remains
+Falling until physics confirms contact, then Landing compression and recovery begin.
+
 Override `OnProceduralMotionEvent` on a Behaviour attached to the animated entity to receive `FootLift`, `FootPlant`,
 `Takeoff`, `Apex`, `Land`, and `StateChanged`. Foot events include side, phase, contact, support entity, and physics
 material when available. Foot plants also emit the legacy `Footstep` animation event.
@@ -76,6 +89,11 @@ C# exposes `Transform.PresentationPosition` and `PresentationRotation`. Call `Re
 a teleport or other discontinuous move. Scene replacement, physics-body recreation, and Play Mode initialization snap
 both interpolation samples automatically. `SceneRuntimeSession::Update(delta, alpha)` accepts a render interpolation
 alpha in `0..1`; the original one-argument overload remains compatible and presents the current sample.
+
+Procedural bind, target, solved, and presentation poses are retained per Animator. Model matrices, skin palettes,
+grounding request storage, and two immutable debug-snapshot buffers are also reused after dependency warm-up. A
+consumer that retains both published debug snapshots receives a fresh replacement rather than allowing an older
+snapshot to be mutated in place.
 
 ## Diagnostics
 

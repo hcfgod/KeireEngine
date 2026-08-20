@@ -34,7 +34,8 @@ namespace KeireEditor
         bool changed = false;
         auto surface = document.Surface();
         std::int64_t alphaMode = static_cast<std::int64_t>(surface.AlphaMode);
-        constexpr std::array<std::string_view, 3> alphaModes{"Opaque", "Mask", "Blend"};
+        constexpr std::array<std::string_view, 7> alphaModes{
+            "Opaque", "Mask", "Blend", "Additive", "Modulate", "Alpha Composite", "Alpha Holdout"};
         bool surfaceChanged = editor.EditChoice("Surface Mode", alphaMode, alphaModes);
         if (surfaceChanged)
             surface.AlphaMode = static_cast<Keire::MaterialAlphaMode>(alphaMode);

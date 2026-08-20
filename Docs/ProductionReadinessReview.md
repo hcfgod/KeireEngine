@@ -16,6 +16,9 @@ validated workflow, and a validated preview is not equivalent to a production-pr
 
 - Kéire 0.3.2 is now the active Windows and Linux x86-64 public preview. The immutable sequence-14 snapshot publishes
   Windows Editor/Hub packages and Linux Editor, DEB Hub, and RPM Hub packages from the same exact release commit.
+- ARM64 Linux acceptance is currently limited to emulated Ubuntu 24.04 toolchain coverage: a QEMU-driven ARM64 shader and
+  dependency pipeline is running again from the prior attempt and has now passed the vkd3d install phase, but no native
+  end-to-end ARM64 Hub runtime or distribution acceptance exists yet in this refresh.
 - The clean Windows package gate passed 647 Core tests/48,377 assertions, 147 Editor tests/2,300 assertions, and 370
   Hub tests/3,789 assertions, together with SDK/package consumers, smoke, cooking, and inventory validation.
 - The clean Rocky Linux package gate passed 641 Core tests/48,343 assertions, 147 Editor tests/2,290 assertions, and

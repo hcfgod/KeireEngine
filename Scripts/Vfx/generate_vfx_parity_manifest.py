@@ -164,6 +164,9 @@ KEIRE_IMPLEMENTATIONS = {
     "Context|Spawn": "keire.context.spawn",
     "Context|Update": "keire.context.update",
     "Collide with Depth Buffer": "keire.block.collision",
+    "Kill Shape": "keire.block.kill-shape",
+    "Kill (AABox)": "keire.block.kill-shape",
+    "Kill (Sphere)": "keire.block.kill-shape",
     "Set Position (Mesh)": "keire.block.shape",
     "Output Particle Line": "keire.output.renderer",
     "Output Particle Mesh": "keire.output.renderer",
@@ -173,6 +176,7 @@ KEIRE_IMPLEMENTATIONS = {
 
 KEIRE_ENABLED_EQUIVALENTS = {
     "keire.block.collision",
+    "keire.block.kill-shape",
     "keire.block.shape",
     "keire.context.event",
     "keire.context.initialize",
@@ -559,6 +563,11 @@ KEIRE_TESTS = {
         "KeireTests/Source/Vfx/VfxTests.cpp",
     ],
     "keire.block.collision": ["KeireTests/Source/Vfx/VfxGpuCapabilityTests.cpp"],
+    "keire.block.kill-shape": [
+        "KeireRenderTests/Source/VfxKillShapeRenderedOutputTests.cpp",
+        "KeireTests/Source/Vfx/VfxGpuCapabilityTests.cpp",
+        "KeireTests/Source/Vfx/VfxTests.cpp",
+    ],
     "keire.block.emission-rate": ["KeireTests/Source/Vfx/VfxTests.cpp"],
     "keire.block.force": [
         "KeireTests/Source/Vfx/VfxGpuCapabilityTests.cpp",

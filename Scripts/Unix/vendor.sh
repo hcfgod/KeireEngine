@@ -61,15 +61,23 @@ header_dependency_files=(Scripts/Premake/HeaderDependencies.lua Vendor/entt/src/
 for file in "${header_dependency_files[@]}"; do
     [[ -f "$ROOT/$file" ]] || { printf 'ECS/math dependency integration is incomplete: %s\n' "$file" >&2; exit 1; }
 done
-declare -A shadercross_gitlinks=(
-  [external/DirectXShaderCompiler]="$(config_value "$LOCK" SDL_SHADERCROSS_DXC_COMMIT)"
-  [external/SPIRV-Cross]="$(config_value "$LOCK" SDL_SHADERCROSS_SPIRV_CROSS_COMMIT)"
-  [external/SPIRV-Headers]="$(config_value "$LOCK" SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT)"
-  [external/SPIRV-Tools]="$(config_value "$LOCK" SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT)"
+shadercross_gitlink_paths=(
+  external/DirectXShaderCompiler
+  external/SPIRV-Cross
+  external/SPIRV-Headers
+  external/SPIRV-Tools
 )
-for path in "${!shadercross_gitlinks[@]}"; do
+shadercross_gitlink_commits=(
+  "$(config_value "$LOCK" SDL_SHADERCROSS_DXC_COMMIT)"
+  "$(config_value "$LOCK" SDL_SHADERCROSS_SPIRV_CROSS_COMMIT)"
+  "$(config_value "$LOCK" SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT)"
+  "$(config_value "$LOCK" SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT)"
+)
+for ((index = 0; index < ${#shadercross_gitlink_paths[@]}; ++index)); do
+  path="${shadercross_gitlink_paths[$index]}"
+  expected="${shadercross_gitlink_commits[$index]}"
   actual="$(git -C "$ROOT/Vendor/SDL_shadercross" rev-parse "HEAD:$path")"
-  [[ "$actual" == "${shadercross_gitlinks[$path]}" ]] || { printf 'SDL_shadercross gitlink %s is %s; expected %s.\n' "$path" "$actual" "${shadercross_gitlinks[$path]}" >&2; exit 1; }
+  [[ "$actual" == "$expected" ]] || { printf 'SDL_shadercross gitlink %s is %s; expected %s.\n' "$path" "$actual" "$expected" >&2; exit 1; }
 done
 shadercross_files=(CMakeLists.txt LICENSE.txt src/cli.c include/SDL3_shadercross/SDL_shadercross.h)
 for file in "${shadercross_files[@]}"; do
