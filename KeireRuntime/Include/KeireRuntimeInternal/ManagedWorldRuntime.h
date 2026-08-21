@@ -85,6 +85,17 @@ namespace KeireRuntime
         [[nodiscard]] bool CancelManagedSceneLoad(std::uint64_t operation) noexcept final;
         [[nodiscard]] Keire::AssetId ActiveManagedScene() const noexcept final;
         [[nodiscard]] std::vector<Keire::AssetId> LoadedManagedScenes() const final;
+        [[nodiscard]] std::vector<std::string> ManagedEntityTags(Keire::ManagedEntityHandle entity) const final;
+        [[nodiscard]] bool AddManagedEntityTag(Keire::ManagedEntityHandle entity, std::string_view tag) noexcept final;
+        [[nodiscard]] bool RemoveManagedEntityTag(Keire::ManagedEntityHandle entity,
+                                                  std::string_view tag) noexcept final;
+        [[nodiscard]] bool ClearManagedEntityTags(Keire::ManagedEntityHandle entity) noexcept final;
+        [[nodiscard]] std::vector<Keire::ManagedEntityHandle> QueryManagedEntityNames(std::string_view name,
+                                                                                      std::size_t maximum) const final;
+        [[nodiscard]] std::vector<Keire::ManagedEntityHandle> QueryManagedEntityTags(std::string_view tag,
+                                                                                     std::size_t maximum) const final;
+        [[nodiscard]] std::vector<Keire::ManagedEntityHandle>
+        QueryManagedEntityComponents(Keire::ComponentTypeId component, std::size_t maximum) const final;
         [[nodiscard]] std::optional<Keire::RenderEnvironmentSettings> ManagedRenderEnvironment() const noexcept final;
         [[nodiscard]] bool SetManagedRenderEnvironment(Keire::RenderEnvironmentSettings settings) noexcept final;
         [[nodiscard]] std::vector<Keire::ManagedInputDevice> ManagedInputDevices() const final;

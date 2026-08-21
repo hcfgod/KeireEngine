@@ -1,4 +1,6 @@
-namespace Keire;
+using Keire;
+
+namespace KeireSandbox;
 
 public enum ProjectileSimulationMode
 {
@@ -53,7 +55,9 @@ public sealed class AmmunitionDefinition : ScriptableObject
     public float MuzzleEnergyJoules =>
         0.5f * (MassGrams / 1000.0f) * MuzzleVelocity * MuzzleVelocity;
 
-    protected override void OnValidate()
+    protected override void OnValidate() => Normalize();
+
+    public void Normalize()
     {
         MassGrams = MathF.Max(0.01f, MassGrams);
         DiameterMillimeters = MathF.Max(0.1f, DiameterMillimeters);
@@ -71,7 +75,9 @@ public sealed class MagazineDefinition : ScriptableObject
     public string Caliber = "5.56x45mm";
     public int Capacity = 30;
 
-    protected override void OnValidate() => Capacity = Math.Max(1, Capacity);
+    protected override void OnValidate() => Normalize();
+
+    public void Normalize() => Capacity = Math.Max(1, Capacity);
 }
 
 [CreateAssetMenu("Combat/Recoil Rig", "RecoilRig")]
@@ -87,6 +93,19 @@ public sealed class RecoilRigDefinition : ScriptableObject
     public float AimMultiplier = 0.55f;
     public float Sway = 0.002f;
     public float Bob = 0.012f;
+
+    protected override void OnValidate() => Normalize();
+
+    public void Normalize()
+    {
+        PositionFrequency = MathF.Max(0.01f, PositionFrequency);
+        PositionDamping = MathF.Max(0.0f, PositionDamping);
+        RotationFrequency = MathF.Max(0.01f, RotationFrequency);
+        RotationDamping = MathF.Max(0.0f, RotationDamping);
+        AimMultiplier = Math.Clamp(AimMultiplier, 0.0f, 1.0f);
+        Sway = MathF.Max(0.0f, Sway);
+        Bob = MathF.Max(0.0f, Bob);
+    }
 }
 
 [CreateAssetMenu("Combat/Weapon", "Weapon")]
@@ -115,7 +134,9 @@ public sealed class WeaponDefinition : ScriptableObject
 
     public float SecondsPerShot => 60.0f / MathF.Max(1.0f, RoundsPerMinute);
 
-    protected override void OnValidate()
+    protected override void OnValidate() => Normalize();
+
+    public void Normalize()
     {
         RoundsPerMinute = MathF.Max(1.0f, RoundsPerMinute);
         ProjectilesPerShot = Math.Max(1, ProjectilesPerShot);
@@ -124,9 +145,9 @@ public sealed class WeaponDefinition : ScriptableObject
         HipSpreadDegrees = MathF.Max(0.0f, HipSpreadDegrees);
         AimSpreadDegrees = MathF.Max(0.0f, AimSpreadDegrees);
         FireModes = FireModes.Length == 0 ? [WeaponFireMode.SemiAutomatic] : FireModes;
-        Ammunition.Validate();
-        Magazine.Validate();
-        Recoil.Validate();
+        Ammunition.Normalize();
+        Magazine.Normalize();
+        Recoil.Normalize();
     }
 }
 
@@ -253,7 +274,7 @@ public sealed class WeaponRuntime
     {
         Definition = definition ?? throw new ArgumentNullException(nameof(definition));
         Inventory = inventory ?? throw new ArgumentNullException(nameof(inventory));
-        Definition.Validate();
+        Definition.Normalize();
         State = WeaponState.Holstered;
     }
 

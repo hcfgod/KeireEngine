@@ -479,6 +479,19 @@ public static class Assets
 
 internal static class ManagedAssetRuntimeSelfTests
 {
+    [StableAssetTypeId("6b656972-652d-4077-8000-000000002001")]
+    private sealed class SelfTestAsset : ScriptableObject
+    {
+        public float Value = 123.0f;
+        public int[] Modes = [1, 2, 3];
+    }
+
+    [StableAssetTypeId("6b656972-652d-4077-8000-000000002002")]
+    private sealed class SelfTestInlineAsset : ScriptableObject
+    {
+        public SelfTestAsset Inline = ScriptableObject.CreateInstance<SelfTestAsset>();
+    }
+
     [SerializableType]
     private sealed class SelfTestLeaf
     {
@@ -490,7 +503,7 @@ internal static class ManagedAssetRuntimeSelfTests
     {
         public string Label = string.Empty;
         public List<SelfTestLeaf> Leaves = [];
-        public AssetReference<AmmunitionDefinition> Ammunition;
+        public AssetReference<SelfTestAsset> Asset;
         public SelfTestNode? Next;
     }
 
@@ -522,7 +535,7 @@ internal static class ManagedAssetRuntimeSelfTests
 
         const ulong generation = ulong.MaxValue - 1;
         var id = new AssetId(0x6b656972652d4077, 0x8000000000001001);
-        var reference = new AssetReference<AmmunitionDefinition>(id);
+        var reference = new AssetReference<SelfTestAsset>(id);
         var release = new TaskCompletionSource<ScriptableObject?>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         int providerCalls = 0;
@@ -536,42 +549,42 @@ internal static class ManagedAssetRuntimeSelfTests
                                                    maximumInFlightLoads: 2, provider);
         try
         {
-            Task<AmmunitionDefinition> first = Assets.LoadAsync(reference).AsTask();
-            Task<AmmunitionDefinition> second = Assets.LoadAsync(reference).AsTask();
+            Task<SelfTestAsset> first = Assets.LoadAsync(reference).AsTask();
+            Task<SelfTestAsset> second = Assets.LoadAsync(reference).AsTask();
             using var canceled = new CancellationTokenSource();
-            Task<AmmunitionDefinition> canceledWaiter = Assets.LoadAsync(reference, canceled.Token).AsTask();
+            Task<SelfTestAsset> canceledWaiter = Assets.LoadAsync(reference, canceled.Token).AsTask();
             canceled.Cancel();
             RequireCanceled(canceledWaiter);
             if (Volatile.Read(ref providerCalls) != 1)
                 throw new InvalidOperationException("Managed asset asynchronous requests were not deduplicated.");
 
-            AmmunitionDefinition asset = ScriptableObject.CreateInstance<AmmunitionDefinition>();
+            SelfTestAsset asset = ScriptableObject.CreateInstance<SelfTestAsset>();
             asset.Name = "Self Test";
-            asset.MuzzleVelocity = 777.0f;
+            asset.Value = 777.0f;
             release.SetResult(asset);
-            AmmunitionDefinition firstResult = first.GetAwaiter().GetResult();
-            AmmunitionDefinition secondResult = second.GetAwaiter().GetResult();
+            SelfTestAsset firstResult = first.GetAwaiter().GetResult();
+            SelfTestAsset secondResult = second.GetAwaiter().GetResult();
             if (!ReferenceEquals(firstResult, secondResult) || !ReferenceEquals(firstResult, asset))
                 throw new InvalidOperationException("Managed asset asynchronous waiters did not retain identity.");
 
-            AmmunitionDefinition replacement = ScriptableObject.CreateInstance<AmmunitionDefinition>();
+            SelfTestAsset replacement = ScriptableObject.CreateInstance<SelfTestAsset>();
             replacement.Name = "Reloaded Self Test";
-            replacement.MuzzleVelocity = 654.0f;
+            replacement.Value = 654.0f;
             if (!NativeRuntime.ManagedAssets!.Reload(id, replacement) ||
                 !ReferenceEquals(Assets.Load(reference), asset) ||
-                asset.Name != replacement.Name || asset.MuzzleVelocity != replacement.MuzzleVelocity)
+                asset.Name != replacement.Name || asset.Value != replacement.Value)
                 throw new InvalidOperationException("Managed asset hot reload did not retain object identity.");
 
-            AmmunitionDefinition clone = ScriptableObject.Instantiate(asset);
+            SelfTestAsset clone = ScriptableObject.Instantiate(asset);
             if (clone.RuntimeInstanceId == asset.RuntimeInstanceId || clone.Name != asset.Name ||
-                clone.MuzzleVelocity != asset.MuzzleVelocity)
+                clone.Value != asset.Value)
                 throw new InvalidOperationException(
                     "Managed asset serialization clone did not preserve authored data.");
 
-            var arraySource = ScriptableObject.CreateInstance<Production.Weapons.ProductionWeaponDefinition>();
+            var arraySource = ScriptableObject.CreateInstance<SelfTestAsset>();
             var arrayClone = ScriptableObject.Instantiate(arraySource);
-            var sourceModes = (Production.Weapons.WeaponFireMode[])arraySource.AvailableFireModes;
-            var cloneModes = (Production.Weapons.WeaponFireMode[])arrayClone.AvailableFireModes;
+            int[] sourceModes = arraySource.Modes;
+            int[] cloneModes = arrayClone.Modes;
             if (ReferenceEquals(sourceModes, cloneModes) || !sourceModes.SequenceEqual(cloneModes))
                 throw new InvalidOperationException("Managed asset serialization clone did not deep-copy arrays.");
 
@@ -579,12 +592,12 @@ internal static class ManagedAssetRuntimeSelfTests
             {
                 Label = "nested",
                 Leaves = [new SelfTestLeaf { Value = 42 }],
-                Ammunition = reference
+                Asset = reference
             };
             SelfTestNode nestedClone = ManagedObjectSerializer.CloneSerializableValueForTests(nested);
             if (ReferenceEquals(nested, nestedClone) || ReferenceEquals(nested.Leaves, nestedClone.Leaves) ||
                 ReferenceEquals(nested.Leaves[0], nestedClone.Leaves[0]) ||
-                nestedClone.Leaves[0].Value != 42 || nestedClone.Ammunition != reference)
+                nestedClone.Leaves[0].Value != 42 || nestedClone.Asset != reference)
                 throw new InvalidOperationException(
                     "Managed asset serialization clone did not deep-copy nested values and lists.");
 
@@ -597,7 +610,7 @@ internal static class ManagedAssetRuntimeSelfTests
                 () => ManagedObjectSerializer.CloneSerializableValueForTests(new SelfTestPolymorphic()),
                 "polymorphic");
 
-            var unsupported = ScriptableObject.CreateInstance<WeaponDefinition>();
+            var unsupported = ScriptableObject.CreateInstance<SelfTestInlineAsset>();
             RequireFailure(() => ScriptableObject.Instantiate(unsupported), "inline ScriptableObjects");
 
             if (!Assets.Unload(id) || Assets.TryLoad(reference, out _))

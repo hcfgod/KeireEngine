@@ -5,15 +5,18 @@ mutable authoring/runtime instance; `SceneSystem` coordinates asynchronous loadi
 
 ## Source Format
 
-The current source format is schema version 5. It stores stable entities and versioned component records, prefab
-instance mappings and typed overrides, a validated entity layer, scene lighting-bake settings, and an optional baked
-`LightingSet` identity. Schema 1 inline transforms, schema 2 component records, schema 3 prefab state, and schema 4
-entity layers remain readable and migrate in memory; every save emits canonical schema 5.
+The current source format is schema version 6. It stores stable entities and versioned component records, prefab
+instance mappings and typed overrides, a validated entity layer, bounded entity tags, scene lighting-bake settings,
+and an optional baked `LightingSet` identity. Schema 1 inline transforms, schema 2 component records, schema 3 prefab
+state, schema 4 entity layers, and schema 5 lighting state remain readable and migrate in memory; every save emits
+canonical schema 6.
 
-Every entity has a stable UUID, optional parent UUID, name, active flag, finite transform, layer, and bounded component
-list. Parents must precede children, quaternions must be normalized, prefab targets and overrides must resolve, and
-lighting settings must stay inside their published limits. Validation also bounds document size, entity count, name
-size, and hierarchy depth. Encoding is canonical and deterministic for import caching and source control.
+Every entity has a stable UUID, optional parent UUID, name, active flag, finite transform, layer, bounded tag set, and
+bounded component list. Tags are unique, case-sensitive ASCII identifiers containing letters, digits, `_`, `-`, or
+`.`; each tag begins with a letter, uses at most 64 bytes, and an entity carries at most 16. Parents must precede
+children, quaternions must be normalized, prefab targets and overrides must resolve, and lighting settings must stay
+inside their published limits. Validation also bounds document size, entity count, name size, and hierarchy depth.
+Encoding is canonical and deterministic for import caching and source control.
 
 ## Runtime Loading
 
@@ -35,10 +38,11 @@ without exposing JSON or backend types.
 
 ## Mutable Scene Contract
 
-`Scene` supports stable-ID lookup, create, subtree duplicate, subtree delete, rename, active state, transform, and safe
-reparenting. Reparent rejects cycles and restores parent-before-child order. Mutations validate a candidate definition
-before commit, preserve state on failure, and mark the scene dirty. `SceneObjectHandle` contains a weak reference; it
-becomes inert after object deletion or scene close and cannot extend the scene lifetime.
+`Scene` supports stable-ID lookup, deterministic indexed name/tag queries, create, subtree duplicate, subtree delete,
+rename, active state, tags, transform, and safe reparenting. Reparent rejects cycles and restores parent-before-child
+order. Mutations validate a candidate definition before commit, preserve state on failure, update indexes as one
+transaction, and mark the scene dirty. `SceneObjectHandle` contains a weak reference; it becomes inert after object
+deletion or scene close and cannot extend the scene lifetime.
 
 All mutations are owner-thread-affine. The editor records snapshots for its bounded undo/redo stack, while the runtime
 observes immutable state at frame boundaries.

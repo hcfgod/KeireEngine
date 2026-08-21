@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cstring>
 #include <limits>
+#include <utility>
 
 namespace Keire::Detail
 {
@@ -33,6 +34,14 @@ namespace Keire::Detail
             std::uint64_t Low = 0;
         };
         static_assert(sizeof(NativeAssetId) == 16);
+
+        struct NativeEntityHandle
+        {
+            std::uint64_t World = 0;
+            std::uint64_t High = 0;
+            std::uint64_t Low = 0;
+        };
+        static_assert(sizeof(NativeEntityHandle) == 24);
 
         struct NativeRenderEnvironment
         {
@@ -141,6 +150,158 @@ namespace Keire::Detail
             }
         }
 
+        [[nodiscard]] ManagedEntityHandle EntityHandle(const std::uint64_t world, const std::uint64_t high,
+                                                       const std::uint64_t low) noexcept
+        {
+            return {world, AssetId(high, low)};
+        }
+
+        [[nodiscard]] int GetEntityTagCount(const std::uint64_t world, const std::uint64_t high,
+                                            const std::uint64_t low) noexcept
+        {
+            if (!ActiveServices)
+                return 0;
+            try
+            {
+                const auto tags = ActiveServices->ManagedEntityTags(EntityHandle(world, high, low));
+                return tags.size() <= MaximumEntityTagCount ? static_cast<int>(tags.size()) : -1;
+            }
+            catch (...)
+            {
+                return -1;
+            }
+        }
+
+        [[nodiscard]] int GetEntityTag(const std::uint64_t world, const std::uint64_t high, const std::uint64_t low,
+                                       const int index, std::uint8_t* destination, const int capacity) noexcept
+        {
+            if (!ActiveServices || index < 0)
+                return -1;
+            try
+            {
+                const auto tags = ActiveServices->ManagedEntityTags(EntityHandle(world, high, low));
+                return static_cast<std::size_t>(index) < tags.size()
+                           ? CopyText(tags[static_cast<std::size_t>(index)], destination, capacity)
+                           : -1;
+            }
+            catch (...)
+            {
+                return -1;
+            }
+        }
+
+        [[nodiscard]] std::uint8_t AddEntityTag(const std::uint64_t world, const std::uint64_t high,
+                                                const std::uint64_t low, const Coral::String tag) noexcept
+        {
+            try
+            {
+                return ActiveServices && ActiveServices->AddManagedEntityTag(EntityHandle(world, high, low),
+                                                                             static_cast<std::string>(tag))
+                           ? 1
+                           : 0;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] std::uint8_t RemoveEntityTag(const std::uint64_t world, const std::uint64_t high,
+                                                   const std::uint64_t low, const Coral::String tag) noexcept
+        {
+            try
+            {
+                return ActiveServices && ActiveServices->RemoveManagedEntityTag(EntityHandle(world, high, low),
+                                                                                static_cast<std::string>(tag))
+                           ? 1
+                           : 0;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] std::uint8_t ClearEntityTags(const std::uint64_t world, const std::uint64_t high,
+                                                   const std::uint64_t low) noexcept
+        {
+            try
+            {
+                return ActiveServices && ActiveServices->ClearManagedEntityTags(EntityHandle(world, high, low)) ? 1 : 0;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        template <typename Query>
+        [[nodiscard]] int QueryEntities(const int maximum, NativeEntityHandle* destination, const int capacity,
+                                        Query&& query) noexcept
+        {
+            if (!ActiveServices || maximum <= 0 || maximum > 4096 || capacity < 0)
+                return -1;
+            try
+            {
+                const auto entities = std::forward<Query>(query)(static_cast<std::size_t>(maximum));
+                if (entities.size() > static_cast<std::size_t>(maximum))
+                    return -1;
+                const auto size = static_cast<int>(entities.size());
+                if (!destination || capacity == 0)
+                    return size;
+                if (capacity < size)
+                    return -1;
+                for (int index = 0; index < size; ++index)
+                {
+                    const auto& entity = entities[static_cast<std::size_t>(index)];
+                    destination[index] = {entity.World, entity.Entity.High(), entity.Entity.Low()};
+                }
+                return size;
+            }
+            catch (...)
+            {
+                return -1;
+            }
+        }
+
+        [[nodiscard]] int QueryEntityNames(const Coral::String name, const int maximum, NativeEntityHandle* destination,
+                                           const int capacity) noexcept
+        {
+            try
+            {
+                const auto value = static_cast<std::string>(name);
+                return QueryEntities(maximum, destination, capacity, [&](const std::size_t limit)
+                                     { return ActiveServices->QueryManagedEntityNames(value, limit); });
+            }
+            catch (...)
+            {
+                return -1;
+            }
+        }
+
+        [[nodiscard]] int QueryEntityTags(const Coral::String tag, const int maximum, NativeEntityHandle* destination,
+                                          const int capacity) noexcept
+        {
+            try
+            {
+                const auto value = static_cast<std::string>(tag);
+                return QueryEntities(maximum, destination, capacity, [&](const std::size_t limit)
+                                     { return ActiveServices->QueryManagedEntityTags(value, limit); });
+            }
+            catch (...)
+            {
+                return -1;
+            }
+        }
+
+        [[nodiscard]] int QueryEntityComponents(const std::uint64_t high, const std::uint64_t low, const int maximum,
+                                                NativeEntityHandle* destination, const int capacity) noexcept
+        {
+            return QueryEntities(
+                maximum, destination, capacity, [&](const std::size_t limit)
+                { return ActiveServices->QueryManagedEntityComponents(ComponentTypeId(AssetId(high, low)), limit); });
+        }
+
         [[nodiscard]] NativeRenderEnvironment ToNative(const RenderEnvironmentSettings& value) noexcept
         {
             return {.AmbientColor = value.AmbientColor,
@@ -213,6 +374,20 @@ namespace Keire::Detail
         assembly.AddInternalCall("Keire.NativeWorld", "GetActiveSceneIcall", reinterpret_cast<void*>(&GetActiveScene));
         assembly.AddInternalCall("Keire.NativeWorld", "GetLoadedScenesIcall",
                                  reinterpret_cast<void*>(&GetLoadedScenes));
+        assembly.AddInternalCall("Keire.NativeWorld", "GetEntityTagCountIcall",
+                                 reinterpret_cast<void*>(&GetEntityTagCount));
+        assembly.AddInternalCall("Keire.NativeWorld", "GetEntityTagIcall", reinterpret_cast<void*>(&GetEntityTag));
+        assembly.AddInternalCall("Keire.NativeWorld", "AddEntityTagIcall", reinterpret_cast<void*>(&AddEntityTag));
+        assembly.AddInternalCall("Keire.NativeWorld", "RemoveEntityTagIcall",
+                                 reinterpret_cast<void*>(&RemoveEntityTag));
+        assembly.AddInternalCall("Keire.NativeWorld", "ClearEntityTagsIcall",
+                                 reinterpret_cast<void*>(&ClearEntityTags));
+        assembly.AddInternalCall("Keire.NativeWorld", "QueryEntityNamesIcall",
+                                 reinterpret_cast<void*>(&QueryEntityNames));
+        assembly.AddInternalCall("Keire.NativeWorld", "QueryEntityTagsIcall",
+                                 reinterpret_cast<void*>(&QueryEntityTags));
+        assembly.AddInternalCall("Keire.NativeWorld", "QueryEntityComponentsIcall",
+                                 reinterpret_cast<void*>(&QueryEntityComponents));
         assembly.AddInternalCall("Keire.NativeWorld", "GetRenderEnvironmentIcall",
                                  reinterpret_cast<void*>(&GetRenderEnvironment));
         assembly.AddInternalCall("Keire.NativeWorld", "SetRenderEnvironmentIcall",

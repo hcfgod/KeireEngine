@@ -299,6 +299,110 @@ namespace KeireRuntime
         return active ? std::vector{active} : std::vector<Keire::AssetId>{};
     }
 
+    std::vector<std::string>
+    ManagedWorldRuntimeServices::ManagedEntityTags(const Keire::ManagedEntityHandle entity) const
+    {
+        const auto scene = m_Scene && *m_Scene ? *m_Scene : Keire::Ref<Keire::Scene>{};
+        const auto target = scene ? scene->FindEntity(Keire::EntityId(entity.Entity)) : Keire::Entity{};
+        return target && target.World() == entity.World ? target.Tags() : std::vector<std::string>{};
+    }
+
+    bool ManagedWorldRuntimeServices::AddManagedEntityTag(const Keire::ManagedEntityHandle entity,
+                                                          const std::string_view tag) noexcept
+    {
+        try
+        {
+            const auto scene = m_Scene && *m_Scene ? *m_Scene : Keire::Ref<Keire::Scene>{};
+            auto target = scene ? scene->FindEntity(Keire::EntityId(entity.Entity)) : Keire::Entity{};
+            return target && target.World() == entity.World && target.AddTag(std::string(tag));
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    bool ManagedWorldRuntimeServices::RemoveManagedEntityTag(const Keire::ManagedEntityHandle entity,
+                                                             const std::string_view tag) noexcept
+    {
+        try
+        {
+            const auto scene = m_Scene && *m_Scene ? *m_Scene : Keire::Ref<Keire::Scene>{};
+            auto target = scene ? scene->FindEntity(Keire::EntityId(entity.Entity)) : Keire::Entity{};
+            return target && target.World() == entity.World && target.RemoveTag(tag);
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    bool ManagedWorldRuntimeServices::ClearManagedEntityTags(const Keire::ManagedEntityHandle entity) noexcept
+    {
+        try
+        {
+            const auto scene = m_Scene && *m_Scene ? *m_Scene : Keire::Ref<Keire::Scene>{};
+            auto target = scene ? scene->FindEntity(Keire::EntityId(entity.Entity)) : Keire::Entity{};
+            if (!target || target.World() != entity.World)
+                return false;
+            target.SetTags({});
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    std::vector<Keire::ManagedEntityHandle>
+    ManagedWorldRuntimeServices::QueryManagedEntityNames(const std::string_view name, const std::size_t maximum) const
+    {
+        const auto scene = m_Scene && *m_Scene ? *m_Scene : Keire::Ref<Keire::Scene>{};
+        const auto entities = scene ? scene->QueryName(name) : std::vector<Keire::Entity>{};
+        std::vector<Keire::ManagedEntityHandle> result;
+        result.reserve(std::min(entities.size(), maximum));
+        for (const auto& entity : entities)
+        {
+            if (result.size() == maximum)
+                break;
+            result.push_back({entity.World(), entity.Id().Value()});
+        }
+        return result;
+    }
+
+    std::vector<Keire::ManagedEntityHandle>
+    ManagedWorldRuntimeServices::QueryManagedEntityTags(const std::string_view tag, const std::size_t maximum) const
+    {
+        const auto scene = m_Scene && *m_Scene ? *m_Scene : Keire::Ref<Keire::Scene>{};
+        const auto entities = scene ? scene->QueryTag(tag) : std::vector<Keire::Entity>{};
+        std::vector<Keire::ManagedEntityHandle> result;
+        result.reserve(std::min(entities.size(), maximum));
+        for (const auto& entity : entities)
+        {
+            if (result.size() == maximum)
+                break;
+            result.push_back({entity.World(), entity.Id().Value()});
+        }
+        return result;
+    }
+
+    std::vector<Keire::ManagedEntityHandle>
+    ManagedWorldRuntimeServices::QueryManagedEntityComponents(const Keire::ComponentTypeId component,
+                                                              const std::size_t maximum) const
+    {
+        const auto scene = m_Scene && *m_Scene ? *m_Scene : Keire::Ref<Keire::Scene>{};
+        const auto entities = scene ? scene->Query(component) : std::vector<Keire::Entity>{};
+        std::vector<Keire::ManagedEntityHandle> result;
+        result.reserve(std::min(entities.size(), maximum));
+        for (const auto& entity : entities)
+        {
+            if (result.size() == maximum)
+                break;
+            result.push_back({entity.World(), entity.Id().Value()});
+        }
+        return result;
+    }
+
     std::optional<Keire::RenderEnvironmentSettings>
     ManagedWorldRuntimeServices::ManagedRenderEnvironment() const noexcept
     {

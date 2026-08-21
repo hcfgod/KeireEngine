@@ -8,7 +8,7 @@ $root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $dotnet = Join-Path $root "Build\Dependencies\dotnet-sdk\dotnet.exe"
 
 if (-not (Test-Path -LiteralPath $dotnet)) {
-    throw "The bundled .NET SDK was not found. Generate dependencies before running managed weapon tests."
+    throw "The bundled .NET SDK was not found. Generate dependencies before running managed API tests."
 }
 
 & $dotnet run `
@@ -16,5 +16,5 @@ if (-not (Test-Path -LiteralPath $dotnet)) {
     --configuration $Configuration `
     --nologo
 if ($LASTEXITCODE -ne 0) {
-    throw "Managed production tests failed with exit code $LASTEXITCODE."
+    throw "Managed API tests failed with exit code $LASTEXITCODE."
 }

@@ -71,10 +71,11 @@ for one ambient-plus-Lambert light. Shadow mode, strength, and bias remain seria
 
 ## Scene Serialization
 
-Scene schema v5 stores entities with stable IDs, a validated layer index, and component records containing stable type
-ID, schema version, enabled state, and bounded JSON data. It also carries prefab instance/override state plus scene
-lighting settings and the optional baked-lighting identity. Schemas v1-v4 remain readable. Legacy inline transforms are
-migrated automatically, and a v2/v3 entity without an entity layer inherits the first valid Collider or Character
-Controller collision layer before falling back to Default. Schema v4 layers carry forward unchanged, and saves are
-always canonical v5. Unregistered records remain attached as Missing Components and round-trip their type, version,
-enabled state, and complete data; cooking can reject unresolved types without destroying editor content.
+Scene schema v6 stores entities with stable IDs, a validated layer index, bounded tags, and component records containing
+stable type ID, schema version, enabled state, and bounded JSON data. It also carries prefab instance/override state plus
+scene lighting settings and the optional baked-lighting identity. Schemas v1-v5 remain readable. Legacy inline
+transforms are migrated automatically, and a v2/v3 entity without an entity layer inherits the first valid Collider or
+Character Controller collision layer before falling back to Default. Schema v4 layers and schema v5 lighting state
+carry forward unchanged, and saves are always canonical v6. Unregistered records remain attached as Missing Components
+and round-trip their type, version, enabled state, and complete data; cooking can reject unresolved types without
+destroying editor content.

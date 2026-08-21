@@ -299,6 +299,9 @@ namespace KeireEditor
                     result.push_back({.Kind = Keire::PrefabOverrideKind::SetObjectLayer,
                                       .Object = object.Id,
                                       .Layer = object.Layer});
+                if (object.Tags != original->Tags)
+                    result.push_back(
+                        {.Kind = Keire::PrefabOverrideKind::SetObjectTags, .Object = object.Id, .Tags = object.Tags});
                 if (object.Transform != original->Transform)
                     result.push_back({.Kind = Keire::PrefabOverrideKind::SetObjectTransform,
                                       .Object = object.Id,

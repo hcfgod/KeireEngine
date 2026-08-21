@@ -228,6 +228,52 @@ TEST_CASE("Entities own required Transforms and stale handles become inert after
     CHECK_FALSE(root.GetComponent<Keire::TransformComponent>());
 }
 
+TEST_CASE("Entity tags and scene queries stay indexed deterministic and serialized")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
+    auto player = scene->CreateEntity("Actor");
+    auto enemy = scene->CreateEntity("Actor");
+    auto objective = scene->CreateEntity("Objective");
+
+    REQUIRE(player.AddTag("Player"));
+    REQUIRE(player.AddTag("Faction.Friendly"));
+    CHECK_FALSE(player.AddTag("Player"));
+    enemy.SetTags({"Enemy", "Faction.Hostile"});
+    objective.SetTags({"Objective", "Enemy"});
+
+    CHECK(player.HasTag("Player"));
+    CHECK(player.Tags() == std::vector<std::string>{"Player", "Faction.Friendly"});
+    CHECK(scene->QueryName("Actor") == std::vector<Keire::Entity>{player, enemy});
+    CHECK(scene->QueryTag("Enemy") == std::vector<Keire::Entity>{enemy, objective});
+    CHECK_THROWS_AS(player.SetTags({"Player", "Player"}), std::invalid_argument);
+    CHECK_THROWS_AS(player.SetTags({"_Invalid"}), std::invalid_argument);
+    CHECK_THROWS_AS(player.SetTags({std::string("\xC3\xA9")}), std::invalid_argument);
+    CHECK(player.Tags() == std::vector<std::string>{"Player", "Faction.Friendly"});
+    CHECK_THROWS_AS((void)scene->QueryTag("invalid tag"), std::invalid_argument);
+
+    player.SetName("PlayerRoot");
+    CHECK(scene->QueryName("Actor") == std::vector<Keire::Entity>{enemy});
+    CHECK(scene->QueryName("PlayerRoot") == std::vector<Keire::Entity>{player});
+    const auto duplicate = scene->DuplicateEntity(player.Id());
+    REQUIRE(duplicate);
+    CHECK(duplicate.Tags() == player.Tags());
+    CHECK(scene->QueryTag("Player") == std::vector<Keire::Entity>{player, duplicate});
+
+    const auto encoded = Keire::SceneAsset::Encode(scene->Snapshot());
+    const auto decoded = Keire::SceneAsset::Decode(encoded);
+    REQUIRE(decoded);
+    REQUIRE(decoded->Definition().SchemaVersion == Keire::CurrentSceneSchemaVersion);
+    const auto found = decoded->FindObject(player.Id().Value());
+    REQUIRE(found);
+    CHECK(found->Tags == player.Tags());
+
+    CHECK(scene->DestroyEntity(enemy.Id()));
+    CHECK(scene->QueryTag("Enemy") == std::vector<Keire::Entity>{objective});
+    CHECK(player.RemoveTag("Faction.Friendly"));
+    CHECK_FALSE(player.RemoveTag("Faction.Friendly"));
+    CHECK(player.Tags() == std::vector<std::string>{"Player"});
+}
+
 TEST_CASE("Presentation transforms interpolate roots while children preserve their current local hierarchy")
 {
     auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
@@ -622,7 +668,7 @@ TEST_CASE("Entity layer schema fixtures migrate and round-trip canonically")
         REQUIRE(roundTrip->Definition().Objects.size() == 1);
         CHECK(roundTrip->Definition().Objects.front().Layer == fixture.Layer);
         const std::string canonicalText(reinterpret_cast<const char*>(canonical.data()), canonical.size());
-        CHECK(canonicalText.find("\"schemaVersion\": 5") != std::string::npos);
+        CHECK(canonicalText.find("\"schemaVersion\": 6") != std::string::npos);
         CHECK(canonicalText.find("\"layer\": " + std::to_string(fixture.Layer)) != std::string::npos);
     }
 }

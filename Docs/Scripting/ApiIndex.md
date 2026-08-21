@@ -94,6 +94,7 @@ Name
 Active
 ActiveInHierarchy
 Layer
+Tags
 Parent
 Children
 Transform
@@ -117,6 +118,7 @@ GetComponent / TryGetComponent / GetComponentHandle
 HasComponent / AddComponent / RemoveComponent
 GetBehaviour / TryGetBehaviour
 SetParent
+HasTag / AddTag / RemoveTag / ClearTags
 FindChild / Find
 Instantiate
 Destroy
@@ -154,7 +156,7 @@ These types identify native components. Their layout is intentionally not expose
 | `Physics` | `TryRaycast`, `Raycast`, `TryCapsuleCast`, `OverlapSphere` |
 | `Navigation` | `FindPathAsync` |
 | `Prefab` | `Instantiate` |
-| `SceneManager` | `ActiveScene`, `LoadedScenes`, `LoadSceneAsync` |
+| `SceneManager` | `ActiveScene`, `LoadedScenes`, `FindByName`, `FindAllByName`, `FindWithTag`, `FindAllWithTag`, `FindAllWithComponent<T>`, `LoadSceneAsync` |
 | `RenderSettings` | `Current`, ambient/exposure/environment convenience properties |
 | `Cursor` | `Visible`, `Locked`, `VisibilityRequested`, `RequestCapture`, `RequestVisible`, `Hide`, `Show`, `Lock`, `Unlock` |
 | `Debug` | `Log`, `Warn`, `Error`, `LogException`, `Assert`, `DrawLine` |
@@ -385,22 +387,13 @@ Project panel or `ScriptableObject.CreateInstance`.
 
 See [Assets And ScriptableObjects](AssetsAndScriptableObjects.md).
 
-## Weapons, Damage, And Ballistics
+## Game-Owned Gameplay Systems
 
-Kéire includes two related managed gameplay surfaces:
-
-- the `Keire` namespace contains `WeaponDefinition`, `WeaponRuntime`, `WeaponInventory`, `BallisticWorld`, `Damage`,
-  `IDamageReceiver`, `WeaponPresentationRig`, and `WeaponHudModel`, which are used by the sandbox sample;
-- `Keire.Production.Weapons` contains the production authoring/runtime split:
-  `ProductionAmmoDefinition`, `ProductionMagazineDefinition`, `ProductionRecoilDefinition`,
-  `ProductionWeaponDefinition`, `PhysicalAmmunitionInventory`, `ProductionWeaponRuntime`,
-  `ProductionBallisticWorld`, `WeaponLoadout`, `ProductionWeaponPresentation`, feedback pooling/commands, HUD adapters,
-  pickup transactions, and `ProductionWeaponValidator`.
-
-Use [Weapon Authoring](../WeaponAuthoring.md) for the production ownership and validation contract. The declarations
-live in [`WeaponSystem.cs`](../../KeireManaged/WeaponSystem.cs),
-[`ProductionWeapons.cs`](../../KeireManaged/ProductionWeapons.cs), and
-[`WeaponPresentation.cs`](../../KeireManaged/WeaponPresentation.cs).
+Weapons, damage, ballistics, recoil, inventory, and other game rules are intentionally absent from the supported
+managed API. Define them in the project's C# assembly and compose the generic APIs indexed above. The Sandbox's
+[`WeaponGameplay.cs`](../../Samples/KeireSandbox/Assets/Scripts/Runtime/WeaponGameplay.cs) and
+[`WeaponController.cs`](../../Samples/KeireSandbox/Assets/Scripts/Runtime/WeaponController.cs) are editable project
+examples, not engine declarations. See [Game-Owned Weapon Example](../WeaponAuthoring.md).
 
 ## Advanced Runtime Bridge
 

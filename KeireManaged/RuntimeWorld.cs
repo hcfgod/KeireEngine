@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace Keire;
 
 public sealed class SceneAsset;
@@ -51,6 +53,32 @@ public static class SceneManager
     public static IReadOnlyList<SceneHandle> LoadedScenes =>
         Array.ConvertAll(NativeWorld.GetLoadedScenes(), static scene => new SceneHandle(scene));
 
+    public static Entity FindByName(string name) => FindAllByName(name, 1).FirstOrDefault();
+
+    public static IReadOnlyList<Entity> FindAllByName(string name, int maximumResults = 256)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        if (Encoding.UTF8.GetByteCount(name) > 256)
+            throw new ArgumentException("Entity names cannot exceed 256 UTF-8 bytes.", nameof(name));
+        ValidateMaximum(maximumResults);
+        return NativeWorld.QueryEntityNames(name, maximumResults);
+    }
+
+    public static Entity FindWithTag(string tag) => FindAllWithTag(tag, 1).FirstOrDefault();
+
+    public static IReadOnlyList<Entity> FindAllWithTag(string tag, int maximumResults = 256)
+    {
+        EntityTag.Validate(tag, nameof(tag));
+        ValidateMaximum(maximumResults);
+        return NativeWorld.QueryEntityTags(tag, maximumResults);
+    }
+
+    public static IReadOnlyList<Entity> FindAllWithComponent<T>(int maximumResults = 256)
+    {
+        ValidateMaximum(maximumResults);
+        return NativeWorld.QueryEntityComponents(ComponentType.Of<T>(), maximumResults);
+    }
+
     public static SceneLoadOperation LoadSceneAsync(AssetReference<SceneAsset> scene,
                                                      SceneLoadMode mode = SceneLoadMode.Single) =>
         LoadSceneAsync(scene.Id, mode);
@@ -66,6 +94,12 @@ public static class SceneManager
             throw new InvalidOperationException(
                 "The current player context rejected the scene load. Standalone runtime transitions currently require Single mode.");
         return new SceneLoadOperation(operation);
+    }
+
+    private static void ValidateMaximum(int maximumResults)
+    {
+        if (maximumResults is < 1 or > 4096)
+            throw new ArgumentOutOfRangeException(nameof(maximumResults), "Scene queries support 1..4096 results.");
     }
 }
 

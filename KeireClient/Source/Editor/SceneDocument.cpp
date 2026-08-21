@@ -237,6 +237,15 @@ namespace KeireEditor
             target.SetLayer(layer);
     }
 
+    void SceneDocument::SetEntityTags(const Keire::EntityId entity, std::vector<std::string> tags)
+    {
+        const auto scene = ActiveScene();
+        auto target = scene ? scene->FindEntity(entity) : Keire::Entity{};
+        if (!target)
+            throw std::invalid_argument("Cannot change tags on an entity outside the active scene.");
+        target.SetTags(std::move(tags));
+    }
+
     void SceneDocument::ReparentEntity(const Keire::EntityId entity, const Keire::EntityId parent,
                                        const bool keepWorldTransform)
     {
