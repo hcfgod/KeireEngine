@@ -557,7 +557,8 @@ namespace KeireEditor
 
     void SceneDocument::BeginPlay(Keire::Ref<Keire::UndoContext> playUndo, Keire::Ref<Keire::AssetSystem> assets,
                                   Keire::Ref<Keire::AudioSystem> audio, Keire::Ref<Keire::PhysicsSystem> physics,
-                                  const Keire::AssetId defaultMixer, Keire::Ref<Keire::SceneRuntimeWorld> runtimeWorld)
+                                  const Keire::AssetId defaultMixer,
+                                  const Keire::Ref<Keire::SceneRuntimeWorld>& runtimeWorld)
     {
         if (!m_Scene)
             throw std::logic_error("SceneDocument cannot enter Play without an editing scene.");

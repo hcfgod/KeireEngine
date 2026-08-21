@@ -432,6 +432,23 @@ internal sealed class ManagedAssetRegistry : IDisposable
 
 public static class Assets
 {
+    public static AssetHandle<T> LoadRuntime<T>(AssetReference<T> reference,
+                                                AssetLoadPriority priority = AssetLoadPriority.Normal)
+        where T : class
+    {
+        if (!reference.Id.IsValid)
+            throw new ArgumentException("Runtime asset loading requires a valid asset reference.", nameof(reference));
+        if (priority is < AssetLoadPriority.Critical or > AssetLoadPriority.Background)
+            throw new ArgumentOutOfRangeException(nameof(priority));
+        ulong generation = NativeRuntime.ManagedAssets?.Generation ??
+            throw new InvalidOperationException("No managed asset generation is installed for this application.");
+        ulong handle = NativeAssets.BeginRuntimeAssetLoad(generation, reference.Id, RuntimeAssetType<T>.Id, priority);
+        return handle != 0
+            ? new AssetHandle<T>(reference, handle)
+            : throw new InvalidOperationException(
+                $"Runtime asset {reference.Id} could not enter the application asset pipeline.");
+    }
+
     public static void Register<T>(AssetId id, T asset) where T : ScriptableObject =>
         RequireRegistry().Register(id, asset);
 

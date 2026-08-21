@@ -72,7 +72,7 @@ namespace Keire
                                                           AssetPriority priority = AssetPriority::High);
         [[nodiscard]] bool Unload(SceneHandle scene);
         [[nodiscard]] bool SetActive(SceneHandle scene);
-        [[nodiscard]] bool MakePersistent(Entity entity);
+        [[nodiscard]] bool MakePersistent(const Entity& entity);
 
         void Process(SceneValidator validator = nullptr);
         void FixedUpdate(float deltaSeconds);
@@ -82,7 +82,7 @@ namespace Keire
 
         [[nodiscard]] SceneHandle Active() const noexcept;
         [[nodiscard]] bool IsLoaded(SceneHandle scene) const noexcept;
-        [[nodiscard]] bool IsPersistent(Entity entity) const noexcept;
+        [[nodiscard]] bool IsPersistent(const Entity& entity) const noexcept;
         [[nodiscard]] AssetId Asset(SceneHandle scene) const noexcept;
         [[nodiscard]] Ref<Scene> Find(SceneHandle scene) const noexcept;
         [[nodiscard]] Ref<Scene> FindWorld(std::uint64_t world) const noexcept;

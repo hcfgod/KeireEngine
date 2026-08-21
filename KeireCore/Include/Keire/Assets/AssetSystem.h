@@ -158,6 +158,12 @@ namespace Keire
             return AssetHandle<T>(LoadErased(id, T::StaticType(), priority));
         }
 
+        [[nodiscard]] AssetHandle<Asset> Load(const AssetId id, const AssetTypeId type,
+                                              const AssetPriority priority = AssetPriority::Normal)
+        {
+            return AssetHandle<Asset>(LoadErased(id, type, priority));
+        }
+
         void Mount(const AssetMountSpecification& specification);
         [[nodiscard]] bool Unmount(const std::filesystem::path& catalogPath);
         [[nodiscard]] bool PublishDevelopmentAsset(AssetId id, Ref<Asset> asset);

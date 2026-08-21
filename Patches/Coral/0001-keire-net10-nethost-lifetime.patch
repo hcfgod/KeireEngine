@@ -426,13 +426,6 @@ index fa432a9..21d778e 100644
  
  if(CORAL_EXAMPLE)
  	set(EXAMPLE_ROOT ${CORAL_ROOT}/Example)
-@@ -147,4 +149,4 @@ if(CORAL_TESTING)
- 
- 	file(GLOB TESTING_SRC ${TESTING_ROOT}/Testing.Native/Source/*.cpp)
- 	target_sources(Testing.Native PRIVATE ${TESTING_SRC})
--endif()
-\ No newline at end of file
-+endif()
 diff --git a/cmake/Dotnet.cmake b/cmake/Dotnet.cmake
 index 28dd6e1..1ab7ecd 100644
 --- a/cmake/Dotnet.cmake

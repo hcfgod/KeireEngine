@@ -336,6 +336,9 @@ assert_true grep -F -q 'install_gcc_toolchain' "$ROOT/Scripts/Linux/bootstrap.sh
 assert_true grep -F -q 'ensure_host_clang_toolchain' "$ROOT/Scripts/Linux/bootstrap.sh"
 assert_true grep -F -q 'version_at_least "$clang_version" 14' "$ROOT/Scripts/Linux/bootstrap.sh"
 assert_true grep -F -q 'version_at_least "$clang_version" 16' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'brew list --versions bison' "$ROOT/Scripts/Mac/bootstrap.sh"
+assert_true grep -F -q 'check_version Bison "$("$bison_executable" --version | extract_version)" 3.0' \
+  "$ROOT/Scripts/Mac/bootstrap.sh"
 assert_true grep -F -q 'gcc-environment.sh' "$ROOT/Scripts/Linux/bootstrap.sh"
 assert_true grep -F -q 'activate_linux_toolchain' "$ROOT/Scripts/Linux/build.sh" \
   "$ROOT/Scripts/Linux/generate.sh" "$ROOT/Scripts/Unix/run-target.sh" "$ROOT/Scripts/Unix/package.sh" \
@@ -425,6 +428,10 @@ assert_true grep -F -q 'reinterpret_cast<const UCChar*>(UINTPTR_MAX)' "$coral_wa
 assert_true grep -F -q 'target_compile_options(Coral.Native PRIVATE /wd4996)' "$coral_warning_patch"
 assert_true grep -F -q 'PERL5LIB="$ROOT/Scripts/Dependencies${PERL5LIB:+:$PERL5LIB}"' \
   "$ROOT/Scripts/Unix/shader-compiler.sh"
+assert_true grep -F -q 'bison_prefix="$(brew --prefix bison 2>/dev/null || true)"' \
+  "$ROOT/Scripts/Unix/shader-compiler.sh"
+assert_true grep -F -q 'export PATH="$bison_prefix/bin:$PATH"' "$ROOT/Scripts/Unix/shader-compiler.sh"
+assert_true grep -F -q 'version_at_least "$host_bison_version" 3.0' "$ROOT/Scripts/Unix/shader-compiler.sh"
 assert_true env PERL5LIB="$ROOT/Scripts/Dependencies" perl -MJSON -e \
   'die unless decode_json("{\"ready\":true}")->{ready}'
 assert_true grep -q 'SDL3DebugLibrary' "$ROOT/Scripts/Premake/Common.lua"
@@ -704,6 +711,8 @@ assert_true grep -F -q -- '-exec cp -L {} "$stage/bin/"' "$ROOT/Scripts/Unix/pac
 assert_true grep -q 'developmentArtifact' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q 'manifest commit does not match' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -F -q 'package_worktree_policy "$ROOT" "$ALLOW_DIRTY" "$CI"' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq 'ManagedApiConsumer.csproj' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq 'KeireManagedAssembly=' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q 'package-editor' "$ROOT/Scripts/project.sh"
 assert_true grep -q -- '-Configuration Dist' "$ROOT/Scripts/Windows/package-editor.ps1"
 assert_true grep -q -- '--configuration Dist' "$ROOT/Scripts/Unix/package-editor.sh"
@@ -746,7 +755,7 @@ package_stage="$(mktemp -d)"
 ! grep -Fq 'include;${_core_sdk_prefix}/third-party' "$ROOT/Config/PackageConfig.cmake.in" || fail 'SDK package must not export a general third-party include path'
 ! grep -Eq 'spdlog/|fmt::' "$ROOT/KeireCore/Include/Keire/Log.h" || fail 'Public logging header must not expose spdlog or fmt'
 grep -Fq KEIRE_COMPILED_LOG_LEVEL "$ROOT/KeireCore/Include/Keire/Log.h" || fail 'Public logging header must use the Kéire compile level'
-for path in bin/Client bin/Hub lib/libCore.a lib/libCoreImGui.a Config/Client.json include/Core/Core.h include/Core/Log.h include/Core/Api.h include/Core/Application.h include/Core/Assert.h include/Core/BuildInfo.h include/Core/EntryPoint.h include/Core/Event.h include/Core/Layer.h include/Core/Ref.h include/Core/Time.h include/Core/Project/Project.h include/Core/Scenes/Scene.h include/Core/Scenes/SceneAsset.h include/Core/Scenes/SceneSystem.h include/Core/Window.h include/Core/WindowConfig.h samples/KeireSandbox/ProjectSettings/Project.keireproject samples/KeireSandbox/ProjectSettings/Rendering.keiresettings samples/KeireSandbox/Assets/Input/DefaultInput.keireinput samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene examples/consumer/Source/Main.cpp examples/consumer/Client.json examples/consumer/CMakeLists.txt examples/consumer/README.md examples/managed-consumer/Source/ClientApplication.cpp examples/managed-consumer/CMakeLists.txt examples/managed-consumer/README.md lib/cmake/CrossPlatformCoreClientTemplate/CrossPlatformCoreClientTemplateConfig.cmake third-party/spdlog/spdlog.h third-party/SDL3/include/SDL3/SDL.h third-party/SDL3/lib/libSDL3.a third-party/SDL3/cmake/SDL3Config.cmake third-party/SDL3/licenses/SDL3/LICENSE.txt third-party/licenses/spdlog-LICENSE.txt third-party/licenses/fmt-LICENSE.rst third-party/licenses/doctest-LICENSE.txt third-party/licenses/nlohmann-json-LICENSE.MIT.txt third-party/licenses/dear-imgui-LICENSE.txt README.md LICENSE.txt THIRD_PARTY_NOTICES.md build-manifest.json; do
+for path in bin/Client bin/Hub lib/libCore.a lib/libCoreImGui.a Config/Client.json include/Core/Core.h include/Core/Log.h include/Core/Api.h include/Core/Application.h include/Core/Assert.h include/Core/BuildInfo.h include/Core/EntryPoint.h include/Core/Event.h include/Core/Layer.h include/Core/Ref.h include/Core/Time.h include/Core/Project/Project.h include/Core/Scenes/Scene.h include/Core/Scenes/SceneAsset.h include/Core/Scenes/SceneSystem.h include/Core/Window.h include/Core/WindowConfig.h samples/KeireSandbox/ProjectSettings/Project.keireproject samples/KeireSandbox/ProjectSettings/Rendering.keiresettings samples/KeireSandbox/Assets/Input/DefaultInput.keireinput samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene examples/consumer/Source/Main.cpp examples/consumer/Client.json examples/consumer/CMakeLists.txt examples/consumer/README.md examples/managed-consumer/Source/ClientApplication.cpp examples/managed-consumer/CMakeLists.txt examples/managed-consumer/ManagedApiConsumer.csproj examples/managed-consumer/ManagedPresentationAssets.cs examples/managed-consumer/README.md lib/cmake/CrossPlatformCoreClientTemplate/CrossPlatformCoreClientTemplateConfig.cmake third-party/spdlog/spdlog.h third-party/SDL3/include/SDL3/SDL.h third-party/SDL3/lib/libSDL3.a third-party/SDL3/cmake/SDL3Config.cmake third-party/SDL3/licenses/SDL3/LICENSE.txt third-party/licenses/spdlog-LICENSE.txt third-party/licenses/fmt-LICENSE.rst third-party/licenses/doctest-LICENSE.txt third-party/licenses/nlohmann-json-LICENSE.MIT.txt third-party/licenses/dear-imgui-LICENSE.txt README.md LICENSE.txt THIRD_PARTY_NOTICES.md build-manifest.json; do
   mkdir -p "$package_stage/$(dirname "$path")"; : > "$package_stage/$path"
 done
 for path in bin/CoreAssetTool bin/CoreAssetWorker lib/libCoreZstd.a include/Core/Math/Math.h include/Core/ECS/Component.h include/Core/ECS/Entity.h include/Core/ECS/Components/TransformComponent.h include/Core/ECS/Components/DirectionalLightComponent.h include/Core/ECS/Components/AudioComponents.h include/Core/ECS/Components/RuntimeUiComponents.h include/Core/Assets/Asset.h include/Core/Assets/AssetSystem.h include/Core/Assets/AssetPipeline.h include/Core/Assets/InputActionAsset.h include/Core/Input/Input.h samples/KeireSandbox/Assets/Input/DefaultInput.keireinput.keiremeta third-party/licenses/zstandard-LICENSE.txt third-party/licenses/entt-LICENSE.txt third-party/licenses/glm-COPYING.txt; do

@@ -305,6 +305,12 @@ $coralRoot = Join-Path (Get-RepositoryRoot) "Patches\Coral"
 $coralScript = Get-Content (Join-Path $Windows "coral.ps1") -Raw
 Assert-True ($coralScript.Contains('git -C $TemporarySource config core.autocrlf false')) `
     "Coral source cache uses deterministic LF checkouts"
+$coralPatchPath = "Patches/Coral/0001-keire-net10-nethost-lifetime.patch"
+$coralPatchEol = ([string](& git -C (Get-RepositoryRoot) check-attr eol -- $coralPatchPath)).Trim()
+Assert-Equal $coralPatchEol "$coralPatchPath`: eol: lf" "Coral patch LF checkout policy"
+$coralHostPatch = Get-Content (Join-Path (Get-RepositoryRoot) $coralPatchPath) -Raw
+Assert-True (-not $coralHostPatch.Contains('\ No newline at end of file')) `
+    "Coral host patch avoids cross-EOL end-of-file context"
 $coralBootstrapPatch = Get-Content (Join-Path $coralRoot "0004-keire-apply-host-settings-before-discovery.patch") -Raw
 Assert-True ($coralBootstrapPatch.IndexOf('m_Settings = std::move(InSettings);') -lt
              $coralBootstrapPatch.IndexOf('if (!LoadHostFXR())')) "Bundled .NET root is installed before Coral host discovery"
@@ -607,6 +613,9 @@ Assert-True ($packageScript.Contains('entt-LICENSE.txt') -and $packageScript.Con
 Assert-True ($packageScript.Contains('KeireShaderCompiler.exe') -and $packageScript.Contains('SDL-shadercross-LICENSE.txt') -and $packageScript.Contains('$Lock.SDL_SHADERCROSS_COMMIT')) "Shader compiler package metadata and attribution"
 Assert-True ($packageScript.Contains('assimp-LICENSE.txt') -and $packageScript.Contains('stb-LICENSE.txt') -and $packageScript.Contains('$Lock.ASSIMP_COMMIT') -and $packageScript.Contains('$Lock.STB_COMMIT')) "Asset importer package metadata and attribution"
 Assert-True ($packageScript.Contains('$assetWorkerName') -and $packageScript.Contains('developmentArtifact') -and $packageScript.Contains('AllowDirty') -and $packageScript.Contains('manifest commit does not match')) "Asset worker and clean package policy"
+Assert-True ($packageScript.Contains('ManagedApiConsumer.csproj') -and
+    $packageScript.Contains('KeireManagedAssembly') -and $packageScript.Contains('Managed API SDK consumer compilation failed')) `
+    "Packaged managed API consumer compilation"
 $editorPackageScript = Get-Content (Join-Path $Windows "package-editor.ps1") -Raw
 Assert-True ($editorPackageScript.Contains('-Configuration Dist') -and $editorPackageScript.Contains('-StageOnly') -and
     $editorPackageScript.Contains('Build\Dependencies\dotnet-sdk') -and

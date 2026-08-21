@@ -5,10 +5,22 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
+host_bison_version=""
 if [[ "$(uname -s)" == Darwin ]]; then
   export PERL5LIB="$ROOT/Scripts/Dependencies${PERL5LIB:+:$PERL5LIB}"
   perl -MJSON -e 1 || {
     printf 'The bundled Perl JSON compatibility module is unavailable.\n' >&2
+    exit 1
+  }
+  bison_prefix="$(brew --prefix bison 2>/dev/null || true)"
+  [[ -n "$bison_prefix" && -x "$bison_prefix/bin/bison" ]] || {
+    printf 'Homebrew Bison is required to build the macOS host shader compiler. Run the platform bootstrap first.\n' >&2
+    exit 1
+  }
+  export PATH="$bison_prefix/bin:$PATH"
+  host_bison_version="$(bison --version | extract_version)"
+  version_at_least "$host_bison_version" 3.0 || {
+    printf 'Bison %s is older than the required 3.0 for the macOS host shader compiler.\n' "$host_bison_version" >&2
     exit 1
   }
 fi
@@ -36,7 +48,7 @@ stamp="$cache_root/keire-shader-compiler.stamp"
 configure_stamp="$cache_root/keire-shader-compiler.configure"
 lock="$ROOT/Config/Dependencies.lock"
 macos_deployment_target="$(config_value "$lock" MACOS_DEPLOYMENT_TARGET)"
-key="$(config_value "$lock" SDL_SHADERCROSS_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_DXC_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_SPIRV_CROSS_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT)|$(config_value "$lock" SDL_COMMIT)|flat-runtime-v4|$macos_deployment_target|$architecture|$toolset|$($CXX --version | head -n 1)"
+key="$(config_value "$lock" SDL_SHADERCROSS_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_DXC_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_SPIRV_CROSS_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT)|$(config_value "$lock" SDL_COMMIT)|flat-runtime-v4|$macos_deployment_target|$architecture|$toolset|$host_bison_version|$($CXX --version | head -n 1)"
 if [[ "$force" != 1 && -x "$published_compiler" && -f "$stamp" && "$(tr -d '\r\n' < "$stamp")" == "$key" ]] &&
    "$published_compiler" --help >/dev/null 2>&1; then
   printf '==> KeireShaderCompiler cache is current\n'

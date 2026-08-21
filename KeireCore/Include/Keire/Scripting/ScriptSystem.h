@@ -204,6 +204,14 @@ namespace Keire
         bool VSync = true;
     };
 
+    struct ManagedRuntimeAssetStatus
+    {
+        AssetState State = AssetState::Cancelled;
+        bool UsingFallback = true;
+        std::uint64_t Revision = 0;
+        AssetDiagnostic Diagnostic;
+    };
+
     struct ManagedSceneLoadStatus
     {
         AssetId Scene;
@@ -344,6 +352,17 @@ namespace Keire
         {
             return false;
         }
+        [[nodiscard]] virtual std::uint64_t BeginManagedRuntimeAssetLoad(std::uint64_t, AssetId, AssetTypeId,
+                                                                         AssetPriority) noexcept
+        {
+            return 0;
+        }
+        [[nodiscard]] virtual std::optional<ManagedRuntimeAssetStatus> ManagedRuntimeAsset(std::uint64_t) const noexcept
+        {
+            return std::nullopt;
+        }
+        [[nodiscard]] virtual bool ReleaseManagedRuntimeAsset(std::uint64_t) noexcept { return false; }
+        virtual void ReleaseManagedRuntimeAssets(std::uint64_t) noexcept {}
         [[nodiscard]] virtual std::uint64_t BeginManagedSceneLoad(AssetId, SceneLoadMode) noexcept { return 0; }
         [[nodiscard]] virtual std::optional<ManagedSceneLoadStatus> ManagedSceneLoad(std::uint64_t) const noexcept
         {

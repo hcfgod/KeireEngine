@@ -241,6 +241,9 @@ generations publish assemblies for editor discovery and player builds. Gameplay 
 use stable component and field identities, and access runtime systems through validated handles.
 Camera, Mesh Renderer, and typed light handles expose live presentation state, while bounded material property blocks
 override Material/Shader Graph properties per renderer without mutating shared asset definitions.
+Native presentation assets remain behind typed references. Scripts may pass those references directly to Audio, VFX,
+rendering, and UI APIs or retain an explicit `AssetHandle<T>` residency lease for load priority, readiness,
+fallback/revision state, structured diagnostics, and deterministic disposal.
 Packaged-player scripts can replace the active scene transactionally with coroutine progress, cancellation, and
 diagnostics, while atomic runtime render settings support transient environment, exposure, and shadow changes.
 

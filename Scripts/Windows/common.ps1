@@ -318,7 +318,7 @@ function Get-WindowsRequiredPackagePaths {
         "third-party\SDL3\lib\SDL3-static.lib", "third-party\SDL3\cmake\SDL3Config.cmake",
         "third-party\SDL3\licenses\SDL3\LICENSE.txt",
         "examples\consumer\Source\Main.cpp", "examples\consumer\Client.json", "examples\consumer\CMakeLists.txt", "examples\consumer\README.md",
-        "examples\managed-consumer\Source\ClientApplication.cpp", "examples\managed-consumer\CMakeLists.txt", "examples\managed-consumer\README.md",
+        "examples\managed-consumer\Source\ClientApplication.cpp", "examples\managed-consumer\CMakeLists.txt", "examples\managed-consumer\ManagedApiConsumer.csproj", "examples\managed-consumer\ManagedPresentationAssets.cs", "examples\managed-consumer\README.md",
         "examples\source-module\Source\ClientApplication.cpp", "examples\source-module\Source\GameplayModule.cpp", "examples\source-module\Include\GameplayModule.h", "examples\source-module\CMakeLists.txt", "examples\source-module\README.md",
         "Config\SourceModules.premake.lua", "Docs\PlayerBuilds.md", "Docs\Diagnostics\KEIRE-AUDIO-0001.md", "Docs\Diagnostics\KEIRE-REPLAY-0001.md", "Docs\Diagnostics\KEIRE-REPLAY-0002.md",
         "README.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json"

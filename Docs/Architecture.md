@@ -1293,6 +1293,13 @@ while `ScriptSystem` hydrates objects in generation order and transactionally re
 generation on failure. Asset-only reload copies supported serialized state into the active object so cached managed
 references retain identity.
 
+Native presentation assets cross the managed boundary as `AssetReference<T>` values plus optional explicit residency
+leases. `ManagedRuntimeApplicationServices` owns a bounded token table whose entries retain ordinary untyped
+`AssetHandle<Asset>` values requested with the marker's stable native type ID. The bridge publishes only state,
+fallback use, revision, and a copied diagnostic; it never publishes an `Asset`, decoder, or graphics/audio resource.
+Managed `AssetHandle<T>.Dispose` removes one token idempotently, application unbind clears the table, and retiring a
+script generation releases all tokens tagged with that generation before the collectible context is discarded.
+
 Strict cooking builds and loads runtime managed assemblies before decoding the managed type catalog and validating
 managed-data semantics. Scene Behaviour and managed-data references participate in the normal cook graph, so closure
 is scene to managed data to referenced managed/native assets. Test assemblies are excluded from runtime discovery.

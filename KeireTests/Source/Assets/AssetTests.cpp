@@ -1776,9 +1776,13 @@ TEST_CASE("Asset handles use fallbacks asynchronously and preserve last-good dat
     specification.Mounts.push_back({imported.CatalogPath});
     auto assets = Keire::CreateRef<Keire::AssetSystem>(specification, events);
     const auto handle = assets->Load<Keire::TextAsset>(record.Id);
+    const auto runtimeHandle = assets->Load(record.Id, Keire::TextAsset::StaticType(), Keire::AssetPriority::High);
     REQUIRE(handle.Get());
+    REQUIRE(runtimeHandle.Get());
     CHECK(handle.Get()->Text().empty());
+    CHECK(runtimeHandle.Get()->Type() == Keire::TextAsset::StaticType());
     CHECK(handle.UsingFallback());
+    CHECK(runtimeHandle.UsingFallback());
 
     WaitFor(*assets, [&handle] { return handle.State() == Keire::AssetState::Ready; });
     REQUIRE(handle.Get());
@@ -1786,6 +1790,11 @@ TEST_CASE("Asset handles use fallbacks asynchronously and preserve last-good dat
     CHECK_FALSE(handle.UsingFallback());
     CHECK(handle.Revision() == 1);
     CHECK(handle.Require()->Text() == "hello assets");
+    CHECK(runtimeHandle.State() == Keire::AssetState::Ready);
+    CHECK_FALSE(runtimeHandle.UsingFallback());
+    CHECK(runtimeHandle.Revision() == 1);
+    REQUIRE(Keire::DynamicRefCast<const Keire::TextAsset>(runtimeHandle.Require()));
+    CHECK(Keire::DynamicRefCast<const Keire::TextAsset>(runtimeHandle.Require())->Text() == "hello assets");
 
     const auto catalog = Keire::Detail::LoadCatalog(imported.CatalogPath);
     REQUIRE(!catalog.Entries.empty());

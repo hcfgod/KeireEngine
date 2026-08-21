@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>14</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <KeireManagedAssembly Condition="Exists('..\..\bin\Managed\Keire.Managed.dll')">..\..\bin\Managed\Keire.Managed.dll</KeireManagedAssembly>
+    <KeireManagedAssembly Condition="'$(KeireManagedAssembly)' == ''">..\..\Build\Managed\Keire.Managed.dll</KeireManagedAssembly>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="ManagedPresentationAssets.cs" />
+    <Reference Include="Keire.Managed">
+      <HintPath>$(KeireManagedAssembly)</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>
