@@ -21,7 +21,7 @@ namespace KeireEditor
 {
     namespace
     {
-        constexpr std::size_t MaximumVisibleRawBytes = 8U * 1024U;
+        constexpr std::size_t MaximumVisibleRawBytes = std::size_t{8U} * 1024U;
         constexpr std::size_t MaximumEditableCollectionElements = 4096;
 
         [[nodiscard]] std::vector<std::byte> ReadBytes(const std::filesystem::path& path)

@@ -12,7 +12,7 @@ namespace Keire
 {
     namespace
     {
-        constexpr std::uintmax_t MaximumConfigurationBytes = 1024U * 1024U;
+        constexpr std::uintmax_t MaximumConfigurationBytes = 1024ULL * 1024U;
         constexpr std::uint32_t MaximumDimension = 16384;
 
         std::string BuildConfigurationMessage(const std::filesystem::path& path, const std::string& location,

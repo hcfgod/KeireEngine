@@ -92,7 +92,7 @@ namespace Keire::RenderBackend
             {
                 GpuTextureResources retired;
                 retired.Texture = texture;
-                Retire(std::move(retired));
+                Retire(retired);
                 texture = nullptr;
             }
             SDL_GPUTextureCreateInfo information{};

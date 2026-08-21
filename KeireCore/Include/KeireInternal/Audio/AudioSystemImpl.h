@@ -600,17 +600,17 @@ namespace Keire
                 result->Splitters.push_back(std::move(splitter));
                 return base;
             };
-            const auto makeDucking = [&](const AudioMixerDuckingDefinition& definition)
+            const auto makeDucking = [&](const AudioMixerDuckingDefinition& duckingDefinition)
             {
                 auto node = std::make_unique<NativeDuckingNode>();
                 node->SampleRate = SampleRate;
                 node->Channels = Channels;
-                node->ThresholdDb = definition.ThresholdDb;
-                node->Ratio = definition.Ratio;
-                node->AttackSeconds = definition.AttackSeconds;
-                node->HoldSeconds = definition.HoldSeconds;
-                node->ReleaseSeconds = definition.ReleaseSeconds;
-                node->MaximumAttenuationDb = definition.MaximumAttenuationDb;
+                node->ThresholdDb = duckingDefinition.ThresholdDb;
+                node->Ratio = duckingDefinition.Ratio;
+                node->AttackSeconds = duckingDefinition.AttackSeconds;
+                node->HoldSeconds = duckingDefinition.HoldSeconds;
+                node->ReleaseSeconds = duckingDefinition.ReleaseSeconds;
+                node->MaximumAttenuationDb = duckingDefinition.MaximumAttenuationDb;
                 const std::array<ma_uint32, 2> inputChannels{Channels, Channels};
                 const ma_uint32 outputChannels = Channels;
                 auto configuration = ma_node_config_init();

@@ -13,7 +13,7 @@ namespace Keire
     {
         using Json = nlohmann::json;
 
-        constexpr std::size_t MaximumSettingsBytes = 64U * 1024U;
+        constexpr std::size_t MaximumSettingsBytes = 64ULL * 1024U;
 
         [[nodiscard]] std::filesystem::path SettingsPath(const std::filesystem::path& projectRoot)
         {

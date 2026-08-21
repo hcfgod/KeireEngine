@@ -38,12 +38,6 @@ namespace Keire::Internal
             return left.X * right.X + left.Y * right.Y + left.Z * right.Z;
         }
 
-        [[nodiscard]] Vector3 Cross(const Vector3 left, const Vector3 right) noexcept
-        {
-            return {left.Y * right.Z - left.Z * right.Y, left.Z * right.X - left.X * right.Z,
-                    left.X * right.Y - left.Y * right.X};
-        }
-
         [[nodiscard]] float Length(const Vector3 value) noexcept
         {
             return std::sqrt(std::max(0.0F, Dot(value, value)));

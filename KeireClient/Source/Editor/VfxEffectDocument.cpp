@@ -519,7 +519,7 @@ namespace KeireEditor
         return Reload(Keire::VfxEffectAsset::Decode(bytes)->Definition(), revision);
     }
 
-    AssetDocumentReloadResult VfxEffectDocument::Reload(Keire::VfxEffectDefinition definition,
+    AssetDocumentReloadResult VfxEffectDocument::Reload(const Keire::VfxEffectDefinition& definition,
                                                         const std::uint64_t revision)
     {
         Keire::ValidateVfxEffect(definition);
@@ -528,7 +528,7 @@ namespace KeireEditor
             m_Host.AcknowledgeRevision(revision);
             return AssetDocumentReloadResult::Unchanged;
         }
-        return m_Host.Reload(std::move(definition), revision);
+        return m_Host.Reload(definition, revision);
     }
 
     bool VfxEffectDocument::Undo() { return m_Host.Undo(); }

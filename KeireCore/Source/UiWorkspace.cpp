@@ -32,7 +32,7 @@ namespace Keire
         using Json = nlohmann::json;
 
         constexpr std::uint32_t WorkspaceSchemaVersion = 1;
-        constexpr std::uintmax_t MaximumDocumentBytes = 1024U * 1024U;
+        constexpr std::uintmax_t MaximumDocumentBytes = 1024ULL * 1024U;
         constexpr std::uint64_t DefaultLayoutValue = 1;
         constexpr std::uint64_t DarkThemeValue = 1;
         constexpr std::uint64_t LightThemeValue = 2;
@@ -1284,7 +1284,7 @@ namespace Keire
         return m_Impl->RequireTheme(id).Definition;
     }
 
-    UiPanelRegistration UiWorkspace::RegisterPanel(UiPanelSpecification specification)
+    UiPanelRegistration UiWorkspace::RegisterPanel(const UiPanelSpecification& specification)
     {
         m_Impl->RequireOwner("RegisterPanel");
         ValidateProfileName(specification.Id);
@@ -1402,7 +1402,7 @@ namespace Keire
     {
         m_Impl->RequireOwner("PreviewTheme");
         ValidateTheme(definition);
-        m_Impl->PendingTheme = std::move(definition);
+        m_Impl->PendingTheme = definition;
     }
 
     void UiWorkspace::CancelThemePreview()
@@ -1417,7 +1417,7 @@ namespace Keire
         m_Impl->ValidateUniqueName(name, true);
         ValidateTheme(definition);
         const UiThemeId id(m_Impl->NextThemeId++);
-        m_Impl->ThemeRecords.push_back({id, std::move(name), false, std::move(definition)});
+        m_Impl->ThemeRecords.push_back({id, std::move(name), false, definition});
         m_Impl->ActiveThemeId = id;
         m_Impl->PendingTheme = m_Impl->ThemeRecords.back().Definition;
         if (!m_Impl->Specification.Ephemeral)
@@ -1435,7 +1435,7 @@ namespace Keire
         if (record.BuiltIn)
             throw std::invalid_argument("Built-in UI themes cannot be overwritten.");
         ValidateTheme(definition);
-        record.Definition = std::move(definition);
+        record.Definition = definition;
         if (id == m_Impl->ActiveThemeId)
             m_Impl->PendingTheme = record.Definition;
         if (!m_Impl->Specification.Ephemeral)

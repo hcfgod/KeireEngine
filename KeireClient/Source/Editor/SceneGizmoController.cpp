@@ -699,8 +699,8 @@ namespace KeireEditor
     SceneGizmoResult SceneGizmoController::UpdateAndDraw(Keire::UiFrame& ui, const Keire::Ref<Keire::Scene>& scene,
                                                          Keire::EntityId selected, const Keire::RenderCamera& camera,
                                                          const Keire::UiItemRect viewport, const bool allowManipulation,
-                                                         const bool pointerBlocked, BeginUndo beginUndo,
-                                                         MeshBoundsResolver resolveMeshBounds,
+                                                         const bool pointerBlocked, const BeginUndo& beginUndo,
+                                                         const MeshBoundsResolver& resolveMeshBounds,
                                                          const std::span<const Keire::AssetId> selections)
     {
         if (!scene || viewport.Size().Width <= 1.0F || viewport.Size().Height <= 1.0F)

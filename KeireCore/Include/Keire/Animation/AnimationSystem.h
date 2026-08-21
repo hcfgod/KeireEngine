@@ -513,14 +513,14 @@ namespace Keire
         using AvatarMaskResolver = std::function<Ref<const AvatarMaskAsset>(AssetId)>;
         AnimatorInstance(Ref<const SkeletonAsset> skeleton, Ref<const AnimationGraphAsset> graph, ClipResolver resolver,
                          AvatarMaskResolver maskResolver = {});
-        void SetFloat(std::string parameter, float value);
+        void SetFloat(const std::string& parameter, float value);
         [[nodiscard]] float Float(std::string_view parameter) const;
-        void SetInteger(std::string parameter, std::int32_t value);
+        void SetInteger(const std::string& parameter, std::int32_t value);
         [[nodiscard]] std::int32_t Integer(std::string_view parameter) const;
-        void SetBool(std::string parameter, bool value);
+        void SetBool(const std::string& parameter, bool value);
         [[nodiscard]] bool Bool(std::string_view parameter) const;
-        void SetTrigger(std::string parameter);
-        void ResetTrigger(std::string parameter);
+        void SetTrigger(const std::string& parameter);
+        void ResetTrigger(const std::string& parameter);
         [[nodiscard]] bool Trigger(std::string_view parameter) const;
         void SetLayerWeight(std::string layer, float value);
         [[nodiscard]] float LayerWeight(std::string_view layer) const;

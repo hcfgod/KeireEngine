@@ -92,7 +92,7 @@ TEST_CASE("Shader Graph import resolves reusable function assets and publishes t
     context.ReadProjectFile = [&](const std::filesystem::path& path)
     {
         if (path == std::filesystem::path("Assets/Functions/Common.keirematerialfunction"))
-            return functionBytes;
+            return std::vector<std::byte>(functionBytes);
         throw std::runtime_error("Unexpected reusable graph dependency path: " + path.generic_string());
     };
     context.ResolveAssetSource = [&](const Keire::AssetId asset) -> std::optional<Keire::AssetImportSource>

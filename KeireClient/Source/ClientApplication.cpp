@@ -164,7 +164,7 @@ namespace
       public:
         EditorWindowPlacementLayer(std::filesystem::path path,
                                    std::optional<KeireEditor::EditorWindowPlacement> placement)
-            : Layer("EditorWindowPlacement"), m_Path(std::move(path)), m_Placement(std::move(placement))
+            : Layer("EditorWindowPlacement"), m_Path(std::move(path)), m_Placement(placement)
         {
         }
 
@@ -302,7 +302,7 @@ namespace
                           std::filesystem::path executablePath)
             : Application(std::move(specification)), m_SmokeWindow(smokeWindow), m_SmokeUi(smokeUi),
               m_SmokeProject(smokeProject), m_SmokePlay(smokePlay),
-              m_WindowPlacementPath(std::move(windowPlacementPath)), m_WindowPlacement(std::move(windowPlacement)),
+              m_WindowPlacementPath(std::move(windowPlacementPath)), m_WindowPlacement(windowPlacement),
               m_ExecutablePath(std::move(executablePath))
         {
         }
@@ -319,8 +319,8 @@ namespace
             else
             {
                 if (!m_WindowPlacementPath.empty())
-                    (void)Layers().PushLayer(std::make_unique<EditorWindowPlacementLayer>(
-                        m_WindowPlacementPath, std::move(m_WindowPlacement)));
+                    (void)Layers().PushLayer(
+                        std::make_unique<EditorWindowPlacementLayer>(m_WindowPlacementPath, m_WindowPlacement));
                 (void)Layers().PushOverlay(std::make_unique<EditorWorkspaceLayer>(
                     m_SmokeUi || m_SmokeProject || m_SmokePlay, m_SmokeProject || m_SmokePlay, m_SmokePlay,
                     m_ExecutablePath));
@@ -422,9 +422,8 @@ namespace Keire
             if (windowPlacement)
                 KeireEditor::PrepareEditorWindow(*windowPlacement, specification.MainWindow);
         }
-        return std::make_unique<ClientApplication>(std::move(specification), commandLine.SmokeWindow,
-                                                   commandLine.SmokeUi, commandLine.SmokeProject, commandLine.SmokePlay,
-                                                   std::move(windowPlacementPath), std::move(windowPlacement),
-                                                   std::move(commandLine.ExecutablePath));
+        return std::make_unique<ClientApplication>(
+            std::move(specification), commandLine.SmokeWindow, commandLine.SmokeUi, commandLine.SmokeProject,
+            commandLine.SmokePlay, std::move(windowPlacementPath), windowPlacement, commandLine.ExecutablePath);
     }
 } // namespace Keire

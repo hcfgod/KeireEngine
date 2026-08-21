@@ -20,7 +20,7 @@ namespace Keire::Detail
     {
         using Json = nlohmann::json;
 
-        constexpr std::size_t MaximumManifestBytes = 4U * 1024U * 1024U;
+        constexpr std::size_t MaximumManifestBytes = 4ULL * 1024ULL * 1024U;
 
         template <typename Enum>
         [[nodiscard]] Enum ParseEnum(const std::string& value,

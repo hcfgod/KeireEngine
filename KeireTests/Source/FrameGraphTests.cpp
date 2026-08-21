@@ -144,7 +144,7 @@ TEST_CASE("frame graph snapshot exports are deterministic and explicit")
     const std::string dotText(std::istreambuf_iterator<char>(dotStream), {});
     CHECK(jsonText.find("\"savedAliasingBytes\": 1024") != std::string::npos);
     CHECK(dotText.find("0: Opaque") != std::string::npos);
-    const auto firstJson = jsonText;
+    const auto& firstJson = jsonText;
     Keire::ExportFrameGraphJson(snapshot, json);
     std::ifstream secondJsonStream(json, std::ios::binary);
     CHECK(std::string(std::istreambuf_iterator<char>(secondJsonStream), {}) == firstJson);

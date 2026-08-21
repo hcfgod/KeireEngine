@@ -519,7 +519,7 @@ namespace Keire
                  existing != m_Impl->Overrides.end() && existing->second == value)
             return;
         else
-            m_Impl->Overrides.insert_or_assign(std::move(name), std::move(value));
+            m_Impl->Overrides.insert_or_assign(std::move(name), value);
         m_Impl->Revision.fetch_add(1, std::memory_order_release);
     }
 
@@ -605,7 +605,7 @@ namespace Keire
         const auto current = m_Impl->Values.find(parameter);
         if (current != m_Impl->Values.end() && current->second == value)
             return;
-        m_Impl->Values.insert_or_assign(parameter, std::move(value));
+        m_Impl->Values.insert_or_assign(parameter, value);
         m_Impl->Revision.fetch_add(1, std::memory_order_release);
     }
 

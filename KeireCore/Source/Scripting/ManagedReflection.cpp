@@ -259,7 +259,12 @@ namespace Keire::Detail
             }
             typeStack.push_back(fieldType.GetTypeId());
             const auto nestedDisplayName = displayName.empty() ? ManagedFieldDisplayName(name) : std::move(displayName);
-            const auto nestedGroup = group.empty() ? nestedDisplayName : group + " / " + nestedDisplayName;
+            auto nestedGroup = group.empty() ? nestedDisplayName : group;
+            if (!group.empty())
+            {
+                nestedGroup += " / ";
+                nestedGroup += nestedDisplayName;
+            }
             ReflectManagedFieldSet(fieldType, attributeTypes, key, nestedGroup, depth + 1, typeStack, result);
             typeStack.pop_back();
         }

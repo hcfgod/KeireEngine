@@ -14,7 +14,7 @@
 
 namespace Keire::Detail
 {
-    [[nodiscard]] inline bool IsSameOrDescendantOf(Entity entity, const Entity root) noexcept
+    [[nodiscard]] inline bool IsSameOrDescendantOf(const Entity& entity, const Entity& root) noexcept
     {
         if (!entity || !root)
             return false;
@@ -26,7 +26,7 @@ namespace Keire::Detail
         return false;
     }
 
-    [[nodiscard]] inline Entity FindCharacterControllerRoot(Entity entity) noexcept
+    [[nodiscard]] inline Entity FindCharacterControllerRoot(const Entity& entity) noexcept
     {
         for (auto current = entity; current; current = current.Parent())
         {

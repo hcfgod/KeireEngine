@@ -3363,7 +3363,7 @@ float4 PSMain(VertexOutput input) : SV_Target0
                         }
                         else
                             binding.Source = mappedEndpoint(connection.Output);
-                        outputs.emplace(outputPin.Name, std::move(binding));
+                        outputs.emplace(outputPin.Name, binding);
                         continue;
                     }
 

@@ -361,7 +361,7 @@ bool EditorWorkspaceLayer::SetManagedRenderEnvironment(Keire::RenderEnvironmentS
         if (!m_SceneDocument || !m_SceneDocument->PlaySession())
             return false;
         Keire::ValidateRenderEnvironmentSettings(settings);
-        m_ManagedRenderEnvironmentOverride = std::move(settings);
+        m_ManagedRenderEnvironmentOverride = settings;
         return true;
     }
     catch (...)
@@ -389,7 +389,7 @@ bool EditorWorkspaceLayer::SetManagedMaterialParameter(const Keire::AssetId coll
     try
     {
         return m_SceneDocument && m_SceneDocument->PlaySession() &&
-               m_ManagedMaterialParameters.Set(Owner().Assets(), collection, name, std::move(value));
+               m_ManagedMaterialParameters.Set(Owner().Assets(), collection, name, value);
     }
     catch (...)
     {

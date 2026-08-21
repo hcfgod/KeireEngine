@@ -169,7 +169,7 @@ namespace Keire
             throw std::length_error("Mesh Renderer material property block exceeds its 64-property limit.");
         if (existing != m_MaterialProperties.end() && existing->second == value)
             return;
-        m_MaterialProperties.insert_or_assign(std::move(name), std::move(value));
+        m_MaterialProperties.insert_or_assign(std::move(name), value);
         NotifyChanged();
     }
 
@@ -204,7 +204,7 @@ namespace Keire
             throw std::length_error("Dynamic Material Instance exceeds its 64-property limit.");
         if (existing != properties.end() && existing->second == value)
             return;
-        properties.insert_or_assign(std::move(name), std::move(value));
+        properties.insert_or_assign(std::move(name), value);
         NotifyChanged();
     }
 

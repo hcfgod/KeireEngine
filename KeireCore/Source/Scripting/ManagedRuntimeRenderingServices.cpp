@@ -84,7 +84,7 @@ namespace Keire::Detail
             std::ranges::find(definition.Parameters, name, &MaterialParameterCollectionParameter::Name);
         if (parameter == definition.Parameters.end())
             return false;
-        entry.State->Set(parameter->Id, std::move(value));
+        entry.State->Set(parameter->Id, value);
         return true;
     }
 
@@ -891,7 +891,7 @@ namespace Keire::Detail
             const auto renderer = Find<MeshRendererComponent>(scene, entity);
             if (!renderer)
                 return false;
-            renderer->SetMaterialProperty(std::string(name), std::move(value));
+            renderer->SetMaterialProperty(std::string(name), value);
             return true;
         }
         catch (...)
@@ -938,7 +938,7 @@ namespace Keire::Detail
             const auto renderer = Find<MeshRendererComponent>(scene, entity);
             if (!renderer)
                 return false;
-            renderer->SetMaterialInstanceProperty(slot, std::string(name), std::move(value));
+            renderer->SetMaterialInstanceProperty(slot, std::string(name), value);
             return true;
         }
         catch (...)
@@ -1089,7 +1089,7 @@ namespace Keire::Detail
     bool ManagedRuntimeSceneServices::SetManagedMaterialProperty(const AssetId entity, const std::string_view name,
                                                                  MaterialPropertyValue value) noexcept
     {
-        return Detail::SetManagedMaterialProperty(ManagedRuntimeScene(entity), entity, name, std::move(value));
+        return Detail::SetManagedMaterialProperty(ManagedRuntimeScene(entity), entity, name, value);
     }
 
     bool ManagedRuntimeSceneServices::ResetManagedMaterialProperty(const AssetId entity,
@@ -1107,8 +1107,7 @@ namespace Keire::Detail
                                                                          const std::string_view name,
                                                                          MaterialPropertyValue value) noexcept
     {
-        return Detail::SetManagedMaterialInstanceProperty(ManagedRuntimeScene(entity), entity, slot, name,
-                                                          std::move(value));
+        return Detail::SetManagedMaterialInstanceProperty(ManagedRuntimeScene(entity), entity, slot, name, value);
     }
 
     bool ManagedRuntimeSceneServices::ResetManagedMaterialInstanceProperty(const AssetId entity, const std::size_t slot,

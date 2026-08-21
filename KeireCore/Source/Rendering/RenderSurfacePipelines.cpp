@@ -56,7 +56,7 @@ namespace
 
                 const auto offset = (static_cast<std::size_t>(y) * width + x) * 4U;
                 const auto channel = [](const float value)
-                { return std::byte{static_cast<std::uint8_t>(std::clamp(value, 0.0F, 1.0F) * 255.0F + 0.5F)}; };
+                { return std::byte{static_cast<std::uint8_t>(std::lround(std::clamp(value, 0.0F, 1.0F) * 255.0F))}; };
                 pixels[offset] = channel(color.X);
                 pixels[offset + 1U] = channel(color.Y);
                 pixels[offset + 2U] = channel(color.Z);
@@ -251,11 +251,9 @@ namespace Keire::RenderBackend
     {
         if (resources.Empty())
             return;
-        if (!Open || !Device)
-            ReleaseForwardPlusResources(resources);
-        else if (FrameActive)
+        if (Open && Device && FrameActive)
             PendingRetiredForwardPlus.push_back(resources);
-        else if (!InFlight.empty())
+        else if (Open && Device && !InFlight.empty())
             InFlight.back().RetiredForwardPlus.push_back(resources);
         else
             ReleaseForwardPlusResources(resources);
@@ -265,9 +263,7 @@ namespace Keire::RenderBackend
     {
         if (resources.Empty())
             return;
-        if (!Open || !Device)
-            ReleaseTextureResources(resources);
-        else if (FrameActive)
+        if (Open && Device && FrameActive)
         {
             PendingRetiredBytes += resources.EstimatedBytes;
             Statistics.FenceRetiredBytes += resources.EstimatedBytes;
@@ -275,7 +271,7 @@ namespace Keire::RenderBackend
                 Streaming->ReportRetired(StreamingClass::Texture, 0, resources.EstimatedBytes);
             PendingRetiredTextures.push_back(resources);
         }
-        else if (!InFlight.empty())
+        else if (Open && Device && !InFlight.empty())
         {
             InFlight.back().RetiredBytes += resources.EstimatedBytes;
             Statistics.FenceRetiredBytes += resources.EstimatedBytes;
@@ -291,11 +287,9 @@ namespace Keire::RenderBackend
     {
         if (!pipeline)
             return;
-        if (!Open || !Device)
-            SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
-        else if (FrameActive)
+        if (Open && Device && FrameActive)
             PendingRetiredPipelines.push_back(pipeline);
-        else if (!InFlight.empty())
+        else if (Open && Device && !InFlight.empty())
             InFlight.back().RetiredPipelines.push_back(pipeline);
         else
             SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
@@ -835,12 +829,24 @@ namespace Keire::RenderBackend
             const auto found = std::ranges::find(definition.Variants, requested, &ShaderVariant::Format);
             return found == definition.Variants.end() ? nullptr : &*found;
         };
-        if ((supported & SDL_GPU_SHADERFORMAT_DXIL) && (variant = findVariant(ShaderBinaryFormat::Dxil)))
-            format = SDL_GPU_SHADERFORMAT_DXIL;
-        else if ((supported & SDL_GPU_SHADERFORMAT_MSL) && (variant = findVariant(ShaderBinaryFormat::Msl)))
-            format = SDL_GPU_SHADERFORMAT_MSL;
-        else if ((supported & SDL_GPU_SHADERFORMAT_SPIRV) && (variant = findVariant(ShaderBinaryFormat::SpirV)))
-            format = SDL_GPU_SHADERFORMAT_SPIRV;
+        if (supported & SDL_GPU_SHADERFORMAT_DXIL)
+        {
+            variant = findVariant(ShaderBinaryFormat::Dxil);
+            if (variant)
+                format = SDL_GPU_SHADERFORMAT_DXIL;
+        }
+        if (!variant && (supported & SDL_GPU_SHADERFORMAT_MSL))
+        {
+            variant = findVariant(ShaderBinaryFormat::Msl);
+            if (variant)
+                format = SDL_GPU_SHADERFORMAT_MSL;
+        }
+        if (!variant && (supported & SDL_GPU_SHADERFORMAT_SPIRV))
+        {
+            variant = findVariant(ShaderBinaryFormat::SpirV);
+            if (variant)
+                format = SDL_GPU_SHADERFORMAT_SPIRV;
+        }
         if (!variant)
             throw std::runtime_error("Shader asset lacks a variant for the active GPU backend.");
 

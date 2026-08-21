@@ -37,9 +37,9 @@ namespace Keire
     {
         struct AssetFileSignature final
         {
-            std::filesystem::file_time_type Modified{};
+            std::filesystem::file_time_type Modified;
             std::uintmax_t Size = 0;
-            std::filesystem::file_time_type MetadataModified{};
+            std::filesystem::file_time_type MetadataModified;
             std::uintmax_t MetadataSize = 0;
 
             [[nodiscard]] bool operator==(const AssetFileSignature&) const noexcept = default;
@@ -241,7 +241,7 @@ namespace Keire
             const auto path = root / "trash.json";
             std::error_code error;
             if (!std::filesystem::is_regular_file(path, error) ||
-                std::filesystem::file_size(path, error) > 1024U * 1024U)
+                std::filesystem::file_size(path, error) > 1024ULL * 1024U)
                 throw std::runtime_error("Asset trash manifest is missing or exceeds the 1 MiB limit.");
             std::ifstream stream(path, std::ios::binary);
             Json manifest;
@@ -324,7 +324,7 @@ namespace Keire
                                                                         const std::string_view importer,
                                                                         const std::uint32_t importerVersion)
         {
-            auto metadata = ReadJsonFile(path, 1024U * 1024U);
+            auto metadata = ReadJsonFile(path, 1024ULL * 1024U);
             if (!metadata.is_object() || metadata.value("schemaVersion", 0) != 1 ||
                 metadata.value("importer", std::string{}) != importer)
                 throw std::runtime_error("Asset metadata cannot be upgraded by a different importer: " +
@@ -340,7 +340,7 @@ namespace Keire
         [[maybe_unused]] void UpdateMetadataSubAssets(const std::filesystem::path& path,
                                                       const std::span<const AssetGeneratedSubAsset> generated)
         {
-            auto metadata = ReadJsonFile(path, 1024U * 1024U);
+            auto metadata = ReadJsonFile(path, 1024ULL * 1024U);
             Json subAssets = Json::array();
             for (const auto& subAsset : generated)
                 subAssets.push_back(subAsset.Id.ToString());
@@ -354,7 +354,7 @@ namespace Keire
         [[maybe_unused]] void UpdateMetadataImportOutput(const std::filesystem::path& path, const AssetTypeId type,
                                                          const std::span<const AssetGeneratedSubAsset> generated)
         {
-            auto metadata = ReadJsonFile(path, 1024U * 1024U);
+            auto metadata = ReadJsonFile(path, 1024ULL * 1024U);
             Json subAssets = Json::array();
             for (const auto& subAsset : generated)
                 subAssets.push_back(subAsset.Id.ToString());
@@ -371,7 +371,7 @@ namespace Keire
         [[maybe_unused]] void UpdateMetadataImportSettings(const std::filesystem::path& path,
                                                            const AssetImportSettings& settings)
         {
-            auto metadata = ReadJsonFile(path, 1024U * 1024U);
+            auto metadata = ReadJsonFile(path, 1024ULL * 1024U);
             const auto encoded = EncodeImportSettings(settings);
             if (!metadata.contains("importSettings") || metadata["importSettings"] != encoded)
             {
@@ -382,7 +382,7 @@ namespace Keire
 
         [[maybe_unused]] void IncrementMetadataImportRevision(const std::filesystem::path& path)
         {
-            auto metadata = ReadJsonFile(path, 1024U * 1024U);
+            auto metadata = ReadJsonFile(path, 1024ULL * 1024U);
             const auto current = metadata.value("importRevision", std::uint64_t{0});
             metadata["importRevision"] =
                 current == std::numeric_limits<std::uint64_t>::max() ? std::uint64_t{1} : current + 1;
@@ -407,7 +407,7 @@ namespace Keire
             }
             if (std::filesystem::is_symlink(source) || std::filesystem::is_symlink(record.MetadataPath))
                 throw std::runtime_error("Asset sources and metadata may not be symbolic links.");
-            if (std::filesystem::file_size(record.MetadataPath) > 1024U * 1024U)
+            if (std::filesystem::file_size(record.MetadataPath) > 1024ULL * 1024U)
                 throw std::runtime_error("Asset metadata exceeds the 1 MiB safety limit.");
 
             std::ifstream stream(record.MetadataPath, std::ios::binary);
@@ -440,7 +440,7 @@ namespace Keire
             {
                 const auto bytes = ReadSource(source, maximumSourceBytes);
                 record.SourceDigest = Detail::DigestToString(Detail::Sha256(bytes));
-                const auto metadataBytes = ReadSource(record.MetadataPath, 1024U * 1024U);
+                const auto metadataBytes = ReadSource(record.MetadataPath, 1024ULL * 1024U);
                 record.MetadataDigest = Detail::DigestToString(Detail::Sha256(metadataBytes));
             }
             return record;
@@ -479,7 +479,7 @@ namespace Keire
                 return;
             }
 
-            const auto journal = ReadJsonFile(journalPath, 1024U * 1024U);
+            const auto journal = ReadJsonFile(journalPath, 1024ULL * 1024U);
             if (journal.value("schemaVersion", 0) != 1 || !journal.contains("temporary") ||
                 !journal.contains("destination") || !journal.contains("backup") || !journal.contains("state") ||
                 !journal.contains("hadDestination"))
@@ -630,10 +630,10 @@ namespace Keire
             {
                 const auto source = temporary / relative;
                 const auto target = destination / relative;
-                WriteFileAtomically(target, ReadSource(source, 64U * 1024U * 1024U));
+                WriteFileAtomically(target, ReadSource(source, 64ULL * 1024ULL * 1024U));
             }
 
-            WriteFileAtomically(destination / "catalog.json", ReadSource(preparedCatalogPath, 64U * 1024U * 1024U));
+            WriteFileAtomically(destination / "catalog.json", ReadSource(preparedCatalogPath, 64ULL * 1024ULL * 1024U));
 
             constexpr auto retirementGrace = std::chrono::minutes(10);
             std::vector<std::filesystem::path> retiredPacks;
@@ -774,7 +774,7 @@ namespace Keire
                 const auto journalPath = iterator->path() / "journal.json";
                 if (!std::filesystem::is_regular_file(journalPath, error))
                     continue;
-                const auto journal = ReadJsonFile(journalPath, 16U * 1024U * 1024U);
+                const auto journal = ReadJsonFile(journalPath, 16ULL * 1024ULL * 1024U);
                 if (journal.value("schemaVersion", 0) != 1 || !journal.contains("state"))
                     throw std::runtime_error("External asset import journal is invalid: " +
                                              Detail::PathToUtf8(journalPath));
@@ -797,9 +797,9 @@ namespace Keire
                             WriteFileAtomically(destination,
                                                 ReadSource(iterator->path() / "before" / (prefix + ".source"),
                                                            Specification.MaximumSourceBytes));
-                            WriteFileAtomically(
-                                metadata,
-                                ReadSource(iterator->path() / "before" / (prefix + ".metadata"), 16U * 1024U * 1024U));
+                            WriteFileAtomically(metadata,
+                                                ReadSource(iterator->path() / "before" / (prefix + ".metadata"),
+                                                           16ULL * 1024ULL * 1024U));
                         }
                         else
                         {
@@ -844,7 +844,7 @@ namespace Keire
             context.MetadataPath = record.MetadataPath;
             context.RelativePath = record.RelativePath;
             context.MaximumDependencyBytes =
-                std::min(Specification.MaximumSourceBytes, std::size_t{64U * 1024U * 1024U});
+                std::min(Specification.MaximumSourceBytes, std::size_t{64ULL * 1024ULL * 1024U});
             context.ReadProjectFile = [root = Specification.ProjectRoot,
                                        maximum = context.MaximumDependencyBytes](const std::filesystem::path& relative)
             {
@@ -960,7 +960,7 @@ namespace Keire
             for (const auto& diagnostic : result.Diagnostics)
             {
                 const auto normalized = diagnostic.RelativePath.lexically_normal();
-                if (diagnostic.Message.empty() || diagnostic.Message.size() > 16U * 1024U ||
+                if (diagnostic.Message.empty() || diagnostic.Message.size() > 16ULL * 1024U ||
                     diagnostic.RelativePath.is_absolute() ||
                     normalized.native().starts_with(std::filesystem::path("..").native()))
                     throw std::runtime_error("Contextual importer returned an invalid diagnostic.");

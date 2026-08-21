@@ -26,9 +26,10 @@ namespace KeireEditor
         }
     } // namespace
 
-    PlayerBuildService::PlayerBuildService(std::filesystem::path editorExecutable, std::filesystem::path projectRoot)
+    PlayerBuildService::PlayerBuildService(std::filesystem::path editorExecutable,
+                                           const std::filesystem::path& projectRoot)
         : m_BuilderExecutable(ResolveBuilderExecutable(editorExecutable)),
-          m_ProjectRoot(std::filesystem::absolute(std::move(projectRoot)).lexically_normal())
+          m_ProjectRoot(std::filesystem::absolute(projectRoot).lexically_normal())
     {
         if (!std::filesystem::is_regular_file(m_BuilderExecutable))
             throw std::runtime_error("Kéire player builder was not found: " +

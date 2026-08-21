@@ -239,9 +239,9 @@ TEST_CASE("Animation state-machine subgraphs round trip and execute through stab
                                      [&](const Keire::AssetId id)
                                      {
                                          if (id == idleId)
-                                             return idleClip;
+                                             return Keire::Ref<Keire::AnimationClipAsset>(idleClip);
                                          if (id == attackId)
-                                             return attackClip;
+                                             return Keire::Ref<Keire::AnimationClipAsset>(attackClip);
                                          return Keire::Ref<Keire::AnimationClipAsset>{};
                                      });
     const auto sample = animator.Update(0.0F);
@@ -283,9 +283,9 @@ TEST_CASE("Animator evaluates typed transitions with crossfade bookkeeping and c
                                      [&](const Keire::AssetId id)
                                      {
                                          if (id == idleId)
-                                             return idleClip;
+                                             return Keire::Ref<Keire::AnimationClipAsset>(idleClip);
                                          if (id == runId)
-                                             return runClip;
+                                             return Keire::Ref<Keire::AnimationClipAsset>(runClip);
                                          return Keire::Ref<Keire::AnimationClipAsset>{};
                                      });
 
@@ -382,11 +382,11 @@ TEST_CASE("Animator samples deterministic blend trees and applies masked layer w
         [&](const Keire::AssetId id)
         {
             if (id == clipAId)
-                return clipA;
+                return Keire::Ref<Keire::AnimationClipAsset>(clipA);
             if (id == clipBId)
-                return clipB;
+                return Keire::Ref<Keire::AnimationClipAsset>(clipB);
             if (id == overlayId)
-                return overlayClip;
+                return Keire::Ref<Keire::AnimationClipAsset>(overlayClip);
             return Keire::Ref<Keire::AnimationClipAsset>{};
         },
         [&](const Keire::AssetId id) { return id == maskId ? mask : Keire::Ref<Keire::AvatarMaskAsset>{}; });
@@ -419,11 +419,11 @@ TEST_CASE("Animator samples deterministic blend trees and applies masked layer w
                                        [&](const Keire::AssetId id)
                                        {
                                            if (id == clipAId)
-                                               return clipA;
+                                               return Keire::Ref<Keire::AnimationClipAsset>(clipA);
                                            if (id == clipBId)
-                                               return clipB;
+                                               return Keire::Ref<Keire::AnimationClipAsset>(clipB);
                                            if (id == overlayId)
-                                               return overlayClip;
+                                               return Keire::Ref<Keire::AnimationClipAsset>(overlayClip);
                                            return Keire::Ref<Keire::AnimationClipAsset>{};
                                        });
     CHECK(animator2D.Update(0.0F).LocalPose[1].Translation.X == doctest::Approx(10.0F));
@@ -516,9 +516,9 @@ TEST_CASE("Animator blend-tree rotation accumulation treats opposite quaternion 
                                      [&](const Keire::AssetId id)
                                      {
                                          if (id == firstId)
-                                             return first;
+                                             return Keire::Ref<Keire::AnimationClipAsset>(first);
                                          if (id == secondId)
-                                             return second;
+                                             return Keire::Ref<Keire::AnimationClipAsset>(second);
                                          return Keire::Ref<Keire::AnimationClipAsset>{};
                                      });
 
@@ -628,9 +628,9 @@ TEST_CASE("Animator supports explicit play, cross-fade, stop, and restart contro
                                      [&](const Keire::AssetId id)
                                      {
                                          if (id == idleId)
-                                             return idleClip;
+                                             return Keire::Ref<Keire::AnimationClipAsset>(idleClip);
                                          if (id == runId)
-                                             return runClip;
+                                             return Keire::Ref<Keire::AnimationClipAsset>(runClip);
                                          return Keire::Ref<Keire::AnimationClipAsset>{};
                                      });
 

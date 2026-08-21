@@ -377,7 +377,7 @@ namespace Keire::RenderBackend
         RenderThreadId = {};
     }
 
-    void RenderSharedState::DispatchRender(std::function<void()> work)
+    void RenderSharedState::DispatchRender(const std::function<void()>& work)
     {
         if (!RenderThread.joinable())
         {

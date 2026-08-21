@@ -24,7 +24,7 @@ namespace Keire::Detail
 
         [[nodiscard]] Json ReadJson(const std::filesystem::path& path)
         {
-            constexpr std::uintmax_t maximumDocumentBytes = 64U * 1024U * 1024U;
+            constexpr std::uintmax_t maximumDocumentBytes = 64ULL * 1024ULL * 1024U;
             std::error_code error;
             if (std::filesystem::file_size(path, error) > maximumDocumentBytes || error)
                 throw std::runtime_error("Asset-worker document is missing or exceeds the size limit: " +

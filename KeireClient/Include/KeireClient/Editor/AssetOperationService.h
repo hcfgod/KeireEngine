@@ -87,13 +87,13 @@ namespace KeireEditor
     class AssetOperationService final
     {
       public:
-        AssetOperationService(std::filesystem::path workerExecutable, std::filesystem::path projectRoot);
+        AssetOperationService(const std::filesystem::path& workerExecutable, const std::filesystem::path& projectRoot);
         ~AssetOperationService();
 
         AssetOperationService(const AssetOperationService&) = delete;
         AssetOperationService& operator=(const AssetOperationService&) = delete;
 
-        void QueueImport(AssetOperationPriority priority, AssetOperationContext context = {});
+        void QueueImport(AssetOperationPriority priority, const AssetOperationContext& context = {});
         void QueueAssetImport(Keire::AssetId asset, AssetOperationPriority priority,
                               AssetOperationContext context = {});
         void QueueAssetImport(std::vector<Keire::AssetId> assets, AssetOperationPriority priority,

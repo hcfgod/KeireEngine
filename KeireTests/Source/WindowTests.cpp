@@ -57,7 +57,7 @@ namespace
         REQUIRE(windows != nullptr);
         REQUIRE(count == 1);
         const auto id = SDL_GetWindowID(windows[0]);
-        SDL_free(windows);
+        SDL_free(reinterpret_cast<void*>(windows));
         return id;
     }
 

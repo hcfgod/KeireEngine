@@ -54,7 +54,8 @@ namespace KeireEditor
         void Save();
         void Discard();
         [[nodiscard]] AssetDocumentReloadResult Reload(std::span<const std::byte> bytes, std::uint64_t revision);
-        [[nodiscard]] AssetDocumentReloadResult Reload(Keire::AudioMixerDefinition definition, std::uint64_t revision);
+        [[nodiscard]] AssetDocumentReloadResult Reload(const Keire::AudioMixerDefinition& definition,
+                                                       std::uint64_t revision);
         [[nodiscard]] bool Undo();
         [[nodiscard]] bool Redo();
         void Close() noexcept;

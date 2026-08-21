@@ -34,8 +34,8 @@ namespace Keire::Detail
         constexpr std::uint64_t MaximumFileBytes = 16ULL * 1024ULL * 1024ULL * 1024ULL;
         constexpr std::uint64_t MaximumPackageBytes = 32ULL * 1024ULL * 1024ULL * 1024ULL;
         constexpr std::size_t MaximumFiles = 32768;
-        constexpr std::size_t BufferBytes = 256U * 1024U;
-        constexpr std::size_t MaximumRemovalJournalBytes = 16U * 1024U;
+        constexpr std::size_t BufferBytes = 256ULL * 1024U;
+        constexpr std::size_t MaximumRemovalJournalBytes = 16ULL * 1024U;
         constexpr std::size_t MaximumRemovalJournals = 128;
 
         struct ContextDeleter final

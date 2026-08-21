@@ -122,7 +122,7 @@ namespace Keire
 
     std::vector<Entity> Scene::Entities() const { return m_Impl->State->Entities(); }
     Entity Scene::FindEntity(const EntityId id) const noexcept { return m_Impl->State->Find(id); }
-    Entity Scene::CreateEntity(std::string name, const Entity parent)
+    Entity Scene::CreateEntity(std::string name, const Entity& parent)
     {
         return m_Impl->State->Create(std::move(name), parent.Id());
     }

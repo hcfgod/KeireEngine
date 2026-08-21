@@ -1079,7 +1079,7 @@ namespace Keire
                  (matchingVector(sourceBind.Translation, targetBind.Translation) &&
                   matchingRotation(sourceBind.Rotation, targetBind.Rotation) &&
                   matchingVector(sourceBind.Scale, targetBind.Scale)));
-            mapping.TargetBone = *targetIndex;
+            mapping.TargetBone = targetIndex;
             mapping.TargetName = targetSkeleton.Bones()[*targetIndex].Name;
             mapping.Match = exactNameMatch ? AnimationRetargetMatch::ExactName : AnimationRetargetMatch::Semantic;
             mapping.TranslationScale = translationScale;

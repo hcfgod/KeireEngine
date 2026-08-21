@@ -26,7 +26,9 @@ versions.
   compiler builds use a short Unicode-safe workspace, Linux builds use Clang for the LLVM-derived host shader tool,
   Windows Coral sources and patch inputs preserve patch-compatible line endings, macOS supplies the shader tool's Perl
   JSON dependency and selects its keg-only modern Bison, and macOS dependency builds avoid Xcode 16.4's obsolete zlib
-  platform macro. Windows fast checks fall back to `git grep` when `rg` is unavailable, and the strict
+  platform macro. Dependency locks now track the committed SDL, EnTT, GLM, stb, and FFmpeg revisions; Apple Silicon
+  Coral setup recognizes CMake's lowercase `arm64` processor name; and quality analysis generates its required headers.
+  Windows fast checks fall back to `git grep` when `rg` is unavailable, and the strict
   GCC/Clang/TSan/coverage warnings exposed by the hosted matrix are clean. Cleared the clang-tidy, ShellCheck, and
   pinned Ruff blockers exposed after the earlier failures were fixed.
 - Added managed per-material-slot Dynamic Material Instance handles and world-owned global Material Parameter

@@ -69,6 +69,12 @@ jobs:
         run: bash Scripts/project.sh generate --generator compilecommands --architecture x86_64 --toolset clang --ci
       - name: Validate compile database coverage
         run: python3 Scripts/Tests/validate-compile-database.py
+      - name: Generate clang-tidy inputs
+        run: |
+          bash Scripts/Unix/build-info.sh
+          bash Scripts/Unix/builtin-shaders.sh
+          bash Scripts/Unix/builtin-skinning.sh
+          bash Scripts/Unix/builtin-vfx.sh
       - name: Run clang-tidy
         run: |
           first_party=(AssetTool KeireAssetWorker KeireClient KeireCore KeireEditorTests KeireHub KeireHubPackagePublisher KeireHubRuntime KeireHubTests KeireHubWorker KeireRenderTests KeireRuntime KeireTests Scripts/Premake SourceModules)

@@ -86,7 +86,7 @@ namespace Keire
 
         [[nodiscard]] std::vector<Entity> Entities() const;
         [[nodiscard]] Entity FindEntity(EntityId id) const noexcept;
-        [[nodiscard]] Entity CreateEntity(std::string name = "GameObject", Entity parent = {});
+        [[nodiscard]] Entity CreateEntity(std::string name = "GameObject", const Entity& parent = {});
         [[nodiscard]] Entity DuplicateEntity(EntityId id);
         [[nodiscard]] bool DestroyEntity(EntityId id);
         void MoveEntity(EntityId id, EntityId parent = {}, EntityId beforeSibling = {},

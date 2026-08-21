@@ -115,7 +115,7 @@ TEST_CASE("Player support installation cancellation removes staging and preserve
 {
     TemporaryDirectory directory;
     const auto payload = directory.Path / "payload";
-    Write(payload / "Development/Player.exe", std::string(1024 * 1024, 'x'));
+    Write(payload / "Development/Player.exe", std::string(std::size_t{1024} * 1024, 'x'));
     const auto package = directory.Path / "cancel.keireplayersupport";
     const auto created = Keire::Detail::CreatePlayerSupportPackage(Manifest(), payload, package, 1);
     const auto storage = directory.Path / "installed";
@@ -159,8 +159,8 @@ TEST_CASE("Player support inventory completes or rolls back bounded removal jour
     CHECK(Keire::Detail::InstalledPlayerSupport(storage).empty());
     CHECK_FALSE(std::filesystem::exists(tombstone));
     CHECK_FALSE(std::filesystem::exists(journal));
-    CHECK(Keire::Detail::ReadTextFile(versionRoot / "registry.json", 64U * 1024U).find(installed.Manifest.Id) ==
-          std::string::npos);
+    CHECK(Keire::Detail::ReadTextFile(versionRoot / "registry.json", std::size_t{64} * 1024)
+              .find(installed.Manifest.Id) == std::string::npos);
 
     (void)Keire::Detail::InstallPlayerSupportPackage(package, "test-modules", {}, storage);
     const auto preRenameName = std::string(".remove-before-rename");

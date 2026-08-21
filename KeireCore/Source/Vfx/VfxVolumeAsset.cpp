@@ -16,8 +16,8 @@ namespace Keire
     {
         using Json = nlohmann::json;
 
-        constexpr std::size_t MaximumDocumentBytes = 64U * 1024U * 1024U;
-        constexpr std::size_t MaximumVolumeCells = 1U * 1024U * 1024U;
+        constexpr std::size_t MaximumDocumentBytes = 64ULL * 1024ULL * 1024U;
+        constexpr std::size_t MaximumVolumeCells = 1ULL * 1024ULL * 1024U;
 
         [[nodiscard]] std::uint32_t Hash(std::uint32_t value) noexcept
         {

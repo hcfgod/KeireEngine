@@ -528,7 +528,7 @@ namespace KeireEditor
     {
         if (!m_Scene || m_RecoveryPath.empty() || !std::filesystem::is_regular_file(m_RecoveryPath))
             throw std::logic_error("SceneDocument has no recovery snapshot to restore.");
-        const auto source = Keire::Detail::ReadTextFile(m_RecoveryPath, 64U * 1024U * 1024U);
+        const auto source = Keire::Detail::ReadTextFile(m_RecoveryPath, std::size_t{64U} * 1024U * 1024U);
         const auto bytes = std::as_bytes(std::span(source.data(), source.size()));
         auto restored = Keire::CreateRef<Keire::Scene>(m_Asset, Keire::SceneAsset::Decode(bytes)->Definition(),
                                                        m_Scene->Components());

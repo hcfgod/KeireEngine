@@ -307,9 +307,10 @@ namespace Keire::Detail
             allocation.X = static_cast<std::uint16_t>(selectedX * m_MinimumTileSize);
             allocation.Y = static_cast<std::uint16_t>(selectedY * m_MinimumTileSize);
             allocation.Size = request.Resolution;
-            const auto scale = static_cast<float>(allocation.Size) / m_AtlasSize;
-            allocation.ScaleOffset = {scale, scale, static_cast<float>(allocation.X) / m_AtlasSize,
-                                      static_cast<float>(allocation.Y) / m_AtlasSize};
+            const auto atlasSize = static_cast<float>(m_AtlasSize);
+            const auto scale = static_cast<float>(allocation.Size) / atlasSize;
+            allocation.ScaleOffset = {scale, scale, static_cast<float>(allocation.X) / atlasSize,
+                                      static_cast<float>(allocation.Y) / atlasSize};
             m_Allocations.push_back(allocation);
         }
         m_Previous.clear();

@@ -37,9 +37,7 @@ namespace Keire
                         return Json::array({current.X, current.Y});
                     else if constexpr (std::same_as<T, Vector3>)
                         return Json::array({current.X, current.Y, current.Z});
-                    else if constexpr (std::same_as<T, Vector4>)
-                        return Json::array({current.X, current.Y, current.Z, current.W});
-                    else if constexpr (std::same_as<T, Quaternion>)
+                    else if constexpr (std::same_as<T, Vector4> || std::same_as<T, Quaternion>)
                         return Json::array({current.X, current.Y, current.Z, current.W});
                     else if constexpr (std::same_as<T, Color>)
                         return Json::array({current.Red, current.Green, current.Blue, current.Alpha});
@@ -680,10 +678,10 @@ namespace Keire
             auto commit = [this, id, parent, name = std::move(name), transform]() mutable
             {
                 const auto native = m_Impl->Registry.create();
-                typename Impl::EntityRecord record{id, parent, std::move(name), true};
+                Impl::EntityRecord record{id, parent, std::move(name), true};
                 transform->Attach(m_Impl->Self, id);
                 record.Components.push_back(transform);
-                m_Impl->Registry.emplace<typename Impl::EntityRecord>(native, std::move(record));
+                m_Impl->Registry.emplace<Impl::EntityRecord>(native, std::move(record));
                 m_Impl->Entities.emplace(id, native);
                 m_Impl->IndexIdentity(id, *m_Impl->Find(id));
                 m_Impl->IndexComponent(id, transform);
@@ -1195,7 +1193,7 @@ namespace Keire
                                                     [&](const auto& component) { return component->Type() == type; });
             if (found == record->Components.end())
                 return false;
-            const auto component = *found;
+            const auto& component = *found;
             const auto commit = [this, id, component]
             {
                 if (auto* target = m_Impl->Find(id))

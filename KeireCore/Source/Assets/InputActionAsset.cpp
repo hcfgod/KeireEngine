@@ -17,7 +17,7 @@ namespace Keire
     namespace
     {
         using Json = nlohmann::json;
-        constexpr std::size_t MaximumDocumentBytes = 4U * 1024U * 1024U;
+        constexpr std::size_t MaximumDocumentBytes = 4ULL * 1024ULL * 1024U;
 
         [[nodiscard]] AssetId Id(const std::string_view value) { return AssetId::Parse(value); }
 
@@ -110,7 +110,7 @@ namespace Keire
         {
             if (value.size() < 4 || value.front() != '<')
                 return false;
-            const auto separator = value.find("/", 2);
+            const auto separator = value.find('/', 2);
             return separator != std::string_view::npos && separator > 2 && value[separator - 1] == '>' &&
                    separator + 1 < value.size() && value.find_first_of("\r\n\t") == std::string_view::npos;
         }

@@ -32,7 +32,7 @@ namespace KeireEditor
     class PlayerBuildService final
     {
       public:
-        PlayerBuildService(std::filesystem::path editorExecutable, std::filesystem::path projectRoot);
+        PlayerBuildService(std::filesystem::path editorExecutable, const std::filesystem::path& projectRoot);
         ~PlayerBuildService();
 
         PlayerBuildService(const PlayerBuildService&) = delete;

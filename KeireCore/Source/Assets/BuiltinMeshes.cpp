@@ -98,7 +98,7 @@ namespace Keire::Detail
             constexpr std::uint32_t latitudeSegments = 16;
             constexpr std::uint32_t longitudeSegments = 24;
             std::vector<MeshVertex> vertices;
-            vertices.reserve((latitudeSegments + 1) * (longitudeSegments + 1));
+            vertices.reserve(static_cast<std::size_t>(latitudeSegments + 1) * (longitudeSegments + 1));
             for (std::uint32_t latitude = 0; latitude <= latitudeSegments; ++latitude)
             {
                 const float v = static_cast<float>(latitude) / static_cast<float>(latitudeSegments);
@@ -249,7 +249,7 @@ namespace Keire::Detail
                     {{0.5F, 0.5F, 0.0F}, {0.0F, 0.0F, 1.0F}, {1.0F, 0.0F}, White},
                     {{-0.5F, 0.5F, 0.0F}, {0.0F, 0.0F, 1.0F}, {0.0F, 0.0F}, White},
                 };
-                return {std::move(vertices), {0, 1, 2, 0, 2, 3}};
+                return {vertices, {0, 1, 2, 0, 2, 3}};
             }
             std::vector<MeshVertex> vertices{
                 {{-0.5F, 0.0F, 0.5F}, {0.0F, 1.0F, 0.0F}, {0.0F, 1.0F}, White},
@@ -257,7 +257,7 @@ namespace Keire::Detail
                 {{0.5F, 0.0F, -0.5F}, {0.0F, 1.0F, 0.0F}, {1.0F, 0.0F}, White},
                 {{-0.5F, 0.0F, -0.5F}, {0.0F, 1.0F, 0.0F}, {0.0F, 0.0F}, White},
             };
-            return {std::move(vertices), {0, 1, 2, 0, 2, 3}};
+            return {vertices, {0, 1, 2, 0, 2, 3}};
         }
 
         [[nodiscard]] Geometry TorusGeometry()
@@ -267,7 +267,7 @@ namespace Keire::Detail
             constexpr float majorRadius = 0.35F;
             constexpr float minorRadius = 0.15F;
             std::vector<MeshVertex> vertices;
-            vertices.reserve((majorSegments + 1) * (minorSegments + 1));
+            vertices.reserve(static_cast<std::size_t>(majorSegments + 1) * (minorSegments + 1));
             for (std::uint32_t major = 0; major <= majorSegments; ++major)
             {
                 const float u = static_cast<float>(major) / static_cast<float>(majorSegments);

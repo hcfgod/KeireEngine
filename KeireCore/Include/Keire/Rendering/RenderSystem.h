@@ -246,9 +246,9 @@ namespace Keire
         RenderSystem(const RenderSystem&) = delete;
         RenderSystem& operator=(const RenderSystem&) = delete;
 
-        [[nodiscard]] Ref<RenderSurface> CreateSurface(RenderSurfaceSpecification specification = {});
-        [[nodiscard]] Ref<RenderView> CreateView(RenderSurfaceSpecification specification = {});
-        void Submit(SceneRenderRequest request);
+        [[nodiscard]] Ref<RenderSurface> CreateSurface(const RenderSurfaceSpecification& specification = {});
+        [[nodiscard]] Ref<RenderView> CreateView(const RenderSurfaceSpecification& specification = {});
+        void Submit(const SceneRenderRequest& request);
         void SubmitRuntimeUi(const Ref<RuntimeUiTree>& tree);
         void RequestGpuVfxPipelineWarmup();
 

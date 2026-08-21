@@ -4,7 +4,7 @@ namespace Keire
 {
     ExternalAssetImportResult AssetDatabase::ImportExternal(const std::span<const ExternalAssetImportItem> items,
                                                             const std::stop_token cancellation,
-                                                            AssetOperationProgressCallback progress)
+                                                            const AssetOperationProgressCallback& progress)
     {
         std::scoped_lock operation(*m_Impl->OperationMutex);
         const auto throwIfCancelled = [&cancellation] { ThrowIfOperationCancelled(cancellation); };
@@ -113,7 +113,11 @@ namespace Keire
                     const auto extension = Detail::PathToUtf8(destination.extension());
                     for (std::size_t copy = 2; existing || reservedDestinations.contains(destinationKey); ++copy)
                     {
-                        destination = parent / Detail::PathFromUtf8(stem + " " + std::to_string(copy) + extension);
+                        auto candidate = stem;
+                        candidate += ' ';
+                        candidate += std::to_string(copy);
+                        candidate += extension;
+                        destination = parent / Detail::PathFromUtf8(candidate);
                         existing = Find(destination);
                         destinationKey = Detail::PathToUtf8(destination);
                     }
@@ -133,7 +137,7 @@ namespace Keire
                     const auto destinationPath = ConfinedPath(m_Impl->SourceRoot, destination);
                     item.PreviousSource = ReadSource(destinationPath, m_Impl->Specification.MaximumSourceBytes);
                     item.PreviousMetadata =
-                        ReadSource(Detail::PathWithSuffix(destinationPath, ".keiremeta"), 16U * 1024U * 1024U);
+                        ReadSource(Detail::PathWithSuffix(destinationPath, ".keiremeta"), 16ULL * 1024ULL * 1024U);
                 }
             }
             std::erase_if(planned, [](const PlannedItem& item) { return !item.Id; });
@@ -181,7 +185,7 @@ namespace Keire
                 WriteFileAtomically(
                     Detail::PathWithSuffix(destination, ".keiremeta"),
                     ReadSource(Detail::PathWithSuffix(ConfinedPath(stagingRoot, item.Destination), ".keiremeta"),
-                               16U * 1024U * 1024U));
+                               16ULL * 1024ULL * 1024U));
                 ReportOperationProgress(progress, AssetOperationPhase::Publishing, index + 1, planned.size(),
                                         item.Destination);
             }
@@ -210,7 +214,7 @@ namespace Keire
                 WriteFileAtomically(
                     transactionRoot / (prefix + ".after.keiremeta"),
                     ReadSource(Detail::PathWithSuffix(ConfinedPath(stagingRoot, item.Destination), ".keiremeta"),
-                               16U * 1024U * 1024U));
+                               16ULL * 1024ULL * 1024U));
                 if (item.Replaced)
                 {
                     WriteFileAtomically(transactionRoot / (prefix + ".before"), item.PreviousSource);
@@ -280,7 +284,7 @@ namespace Keire
             throw std::invalid_argument("External import receipt is invalid.");
         const auto receiptRoot = ConfinedPath(m_Impl->Specification.ProjectRoot,
                                               std::filesystem::path("Library/AssetImport") / receipt.ToString());
-        const auto manifest = ReadJsonFile(receiptRoot / "receipt.json", 16U * 1024U * 1024U);
+        const auto manifest = ReadJsonFile(receiptRoot / "receipt.json", 16ULL * 1024ULL * 1024U);
         if (manifest.value("schemaVersion", 0) != 1 || !manifest.contains("entries") || !manifest["entries"].is_array())
             throw std::runtime_error("External import receipt is invalid.");
 
@@ -313,12 +317,12 @@ namespace Keire
             {
                 const auto prefix = std::to_string(index) + (applied ? ".after" : ".before");
                 state.DesiredSource = ReadSource(receiptRoot / prefix, m_Impl->Specification.MaximumSourceBytes);
-                state.DesiredMetadata = ReadSource(receiptRoot / (prefix + ".keiremeta"), 16U * 1024U * 1024U);
+                state.DesiredMetadata = ReadSource(receiptRoot / (prefix + ".keiremeta"), 16ULL * 1024ULL * 1024U);
             }
             if (state.Previous)
             {
                 state.PreviousSource = ReadSource(destination, m_Impl->Specification.MaximumSourceBytes);
-                state.PreviousMetadata = ReadSource(metadata, 16U * 1024U * 1024U);
+                state.PreviousMetadata = ReadSource(metadata, 16ULL * 1024ULL * 1024U);
             }
             replay.push_back(std::move(state));
             ++index;

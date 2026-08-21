@@ -24,6 +24,7 @@
 *.h text eol=lf
 *.hpp text eol=lf
 *.patch text eol=lf
+Patches/Coral/*.patch whitespace=-space-before-tab
 
 KeireHubContent/Templates/** text eol=lf
 Samples/KeireSandbox/** text eol=lf

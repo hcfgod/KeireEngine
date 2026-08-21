@@ -1075,7 +1075,7 @@ namespace KeireEditor
             std::ranges::find(document.Definition().SurfaceGraph.Nodes, *m_SelectedNode, &Keire::ShaderGraphNode::Id);
         if (expressionFound != document.Definition().SurfaceGraph.Nodes.end())
         {
-            const auto expression = *expressionFound;
+            const auto& expression = *expressionFound;
             const bool materialOutput = expression.Kind == Keire::ShaderGraphNodeKind::Master;
             if (m_InspectorNode != expression.Id)
             {
@@ -1208,8 +1208,7 @@ namespace KeireEditor
                     try
                     {
                         (void)document.EditExpressionNode(expression.Id,
-                                                          [value = std::move(value)](auto& candidate) mutable
-                                                          { candidate.Value = std::move(value); });
+                                                          [value](auto& candidate) { candidate.Value = value; });
                     }
                     catch (const std::exception& error)
                     {
@@ -1262,13 +1261,13 @@ namespace KeireEditor
                     {
                         (void)document.EditExpressionNode(
                             expression.Id,
-                            [pinId = pin.Id, value = std::move(value)](auto& candidate) mutable
+                            [pinId = pin.Id, value](auto& candidate)
                             {
                                 const auto edited =
                                     std::ranges::find(candidate.Pins, pinId, &Keire::ShaderGraphPin::Id);
                                 if (edited == candidate.Pins.end())
                                     throw std::invalid_argument("Material expression input is unavailable.");
-                                edited->DefaultValue = std::move(value);
+                                edited->DefaultValue = value;
                             });
                     }
                     catch (const std::exception& error)
@@ -1336,7 +1335,7 @@ namespace KeireEditor
                 if (DrawValueEditor(ui, property.Name + "##" + property.Pin.ToString(), value))
                     try
                     {
-                        (void)document.SetInputValue(property.Pin, std::move(value));
+                        (void)document.SetInputValue(property.Pin, value);
                     }
                     catch (const std::exception& error)
                     {
@@ -1355,8 +1354,7 @@ namespace KeireEditor
         if (DrawValueEditor(ui, "Value", value))
             try
             {
-                (void)document.EditNode(node->Id, [value = std::move(value)](auto& candidate) mutable
-                                        { candidate.Value = std::move(value); });
+                (void)document.EditNode(node->Id, [value](auto& candidate) { candidate.Value = value; });
             }
             catch (const std::exception& error)
             {

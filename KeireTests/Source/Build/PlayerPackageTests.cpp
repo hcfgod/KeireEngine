@@ -274,12 +274,12 @@ TEST_CASE("Windows player branding writes only within manifest-declared bounded 
 {
     TemporaryDirectory directory;
     const auto supportRoot = directory.Path / "support";
-    WritePortableExecutable(supportRoot / "KeireRuntime.exe", 2U * 1024U * 1024U);
+    WritePortableExecutable(supportRoot / "KeireRuntime.exe", std::size_t{2} * 1024 * 1024);
     Write(supportRoot / "Managed/hostfxr.dll");
     const auto profile = Profile(Keire::PlayerPlatform::Windows);
     auto support = Support(supportRoot, profile.Platform, "KeireRuntime.exe");
     support.Manifest.BrandingSlots = {
-        {.Path = "KeireRuntime.exe", .Kind = "windows-icon", .Offset = 1024, .Size = 1024U * 1024U},
+        {.Path = "KeireRuntime.exe", .Kind = "windows-icon", .Offset = 1024, .Size = std::uint64_t{1024} * 1024},
         {.Path = "KeireRuntime.exe", .Kind = "windows-version", .Offset = 1024U * 1024U + 1024U, .Size = 4096}};
     const auto layout = Keire::Detail::AssemblePlayerPackage(support, Settings(), profile, directory.Path / "stage");
     std::ifstream executable(layout.Executable, std::ios::binary);

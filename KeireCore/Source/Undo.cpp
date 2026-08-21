@@ -455,8 +455,7 @@ namespace Keire
     class UndoService::Impl final
     {
       public:
-        explicit Impl(UndoSpecification value)
-            : Specification(std::move(value)), OwnerThread(std::this_thread::get_id())
+        explicit Impl(UndoSpecification value) : Specification(value), OwnerThread(std::this_thread::get_id())
         {
             if (Specification.DefaultMaximumCommands == 0 || Specification.DefaultMaximumBytes == 0 ||
                 Specification.MaximumContexts == 0 || Specification.MaximumTransactionDepth == 0 ||
@@ -483,9 +482,7 @@ namespace Keire
         bool Open = true;
     };
 
-    UndoService::UndoService(UndoSpecification specification) : m_Impl(std::make_unique<Impl>(std::move(specification)))
-    {
-    }
+    UndoService::UndoService(UndoSpecification specification) : m_Impl(std::make_unique<Impl>(specification)) {}
     UndoService::~UndoService() { Close(); }
 
     Ref<UndoContext> UndoService::CreateContext(UndoContextSpecification specification)

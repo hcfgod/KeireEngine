@@ -916,7 +916,7 @@ namespace Keire
             }
 
             auto& request = runtimeState.FootGroundingRequestCache;
-            request.Pelvis = *pelvis;
+            request.Pelvis = pelvis;
             request.Torso.reset();
             request.Contacts.clear();
             request.FootHeight = 0.0F;
@@ -1262,7 +1262,7 @@ namespace Keire
                 const auto effectiveBlend = chainRuntimeWeight * smoothed->Blend;
                 maximumGroundingBlend = std::max(maximumGroundingBlend, effectiveBlend);
                 minimumGroundingBlend = std::min(minimumGroundingBlend, effectiveBlend);
-                request.Contacts.push_back(std::move(grounded));
+                request.Contacts.push_back(grounded);
             }
             if (!request.Contacts.empty())
             {

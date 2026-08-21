@@ -90,8 +90,8 @@ namespace KeireEditor
         [[nodiscard]] SceneGizmoResult UpdateAndDraw(Keire::UiFrame& ui, const Keire::Ref<Keire::Scene>& scene,
                                                      Keire::EntityId selected, const Keire::RenderCamera& camera,
                                                      Keire::UiItemRect viewport, bool allowManipulation,
-                                                     bool pointerBlocked, BeginUndo beginUndo,
-                                                     MeshBoundsResolver resolveMeshBounds = {},
+                                                     bool pointerBlocked, const BeginUndo& beginUndo,
+                                                     const MeshBoundsResolver& resolveMeshBounds = {},
                                                      std::span<const Keire::AssetId> selections = {});
 
         void Load(const std::filesystem::path& projectRoot);

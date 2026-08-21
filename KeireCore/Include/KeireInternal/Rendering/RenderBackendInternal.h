@@ -1219,7 +1219,7 @@ namespace Keire::RenderBackend
         void ExecuteFrame(ImDrawData* drawData);
         void StartRenderThread();
         void StopRenderThread() noexcept;
-        void DispatchRender(std::function<void()> work);
+        void DispatchRender(const std::function<void()>& work);
         void Close() noexcept;
 
         void CreateGeometryResources();

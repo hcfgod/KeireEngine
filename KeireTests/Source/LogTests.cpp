@@ -126,7 +126,7 @@ TEST_CASE("Logger handles provide copyable lifecycle-safe operations")
         Keire::Log::Shutdown();
 
         auto logger = Keire::Log::GetClientLogger();
-        auto copiedLogger = logger;
+        auto copiedLogger = [](const Keire::LoggerHandle& source) { return Keire::LoggerHandle(source); }(logger);
         REQUIRE(copiedLogger);
         copiedLogger.SetLevel(Keire::LogLevel::Error);
         copiedLogger.Write(Keire::LogLevel::Info, "filtered handle message");

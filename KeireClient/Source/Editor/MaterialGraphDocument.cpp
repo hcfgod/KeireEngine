@@ -315,13 +315,13 @@ namespace KeireEditor
     bool MaterialGraphDocument::SetInputValue(const Keire::AssetId pin, Keire::MaterialPropertyValue value)
     {
         return Edit("Edit Material Graph input",
-                    [pin, value = std::move(value)](auto& definition) mutable
+                    [pin, value](auto& definition)
                     {
                         const auto property =
                             std::ranges::find(definition.Properties, pin, &Keire::MaterialGraphPropertyBinding::Pin);
                         if (property == definition.Properties.end())
                             throw std::invalid_argument("Material Graph output input is unavailable.");
-                        property->Value = std::move(value);
+                        property->Value = value;
                     });
     }
 

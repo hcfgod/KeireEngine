@@ -444,11 +444,11 @@ TEST_CASE("VFX Kill Shape round trips and applies solid and inverted CPU volume 
     CHECK(decoded->Definition() == solidDefinition);
     CHECK(Keire::VfxEffectAsset::Encode(decoded->Definition()) == encoded);
 
-    const auto simulate = [](Keire::VfxEffectDefinition definition)
+    const auto simulate = [](const Keire::VfxEffectDefinition& definition)
     {
         auto world =
             Keire::CreateRef<Keire::VfxWorld>(Keire::VfxWorldSpecification{.MaximumEffects = 1, .MaximumParticles = 4});
-        REQUIRE(world->Activate({Keire::CreateRef<Keire::VfxEffectAsset>(std::move(definition))}));
+        REQUIRE(world->Activate({Keire::CreateRef<Keire::VfxEffectAsset>(definition)}));
         world->Update(0.01F);
         REQUIRE(world->Statistics().ActiveParticles == 1);
         world->Update(0.01F);

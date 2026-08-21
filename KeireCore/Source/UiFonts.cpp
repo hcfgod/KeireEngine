@@ -14,7 +14,7 @@ namespace Keire::Detail
 {
     namespace
     {
-        constexpr std::uintmax_t MaximumFontBytes = 16U * 1024U * 1024U;
+        constexpr std::uintmax_t MaximumFontBytes = 16ULL * 1024ULL * 1024U;
         constexpr std::size_t MaximumFonts = 8;
         constexpr std::array<ImWchar, 3> IconGlyphRanges{0xE000, 0xF8FF, 0};
 

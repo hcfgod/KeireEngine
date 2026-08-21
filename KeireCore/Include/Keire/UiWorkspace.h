@@ -241,7 +241,7 @@ namespace Keire
         [[nodiscard]] UiThemeId ActiveTheme() const noexcept;
         [[nodiscard]] UiThemeDefinition ThemeDefinition(UiThemeId id) const;
 
-        [[nodiscard]] UiPanelRegistration RegisterPanel(UiPanelSpecification specification);
+        [[nodiscard]] UiPanelRegistration RegisterPanel(const UiPanelSpecification& specification);
 
         void LoadLayout(UiLayoutId id);
         void SaveLayoutAs(std::string name);

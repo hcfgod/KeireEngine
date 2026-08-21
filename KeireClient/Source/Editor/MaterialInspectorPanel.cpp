@@ -89,7 +89,7 @@ namespace KeireEditor
                 break;
             }
             if (edited)
-                changed = document.SetProperty(property.Name, std::move(value)) || changed;
+                changed = document.SetProperty(property.Name, value) || changed;
         }
         return changed;
     }

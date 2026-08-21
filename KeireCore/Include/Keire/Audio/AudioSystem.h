@@ -257,7 +257,7 @@ namespace Keire
     class KEIRE_API AudioSystem final : public RefCounted
     {
       public:
-        explicit AudioSystem(AudioSystemSpecification specification = {});
+        explicit AudioSystem(const AudioSystemSpecification& specification = {});
         ~AudioSystem() override;
         [[nodiscard]] bool IsOpen() const noexcept;
         void SubmitGraph(std::shared_ptr<const AudioGraphSnapshot> snapshot);

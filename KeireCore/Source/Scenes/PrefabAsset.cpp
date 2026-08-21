@@ -17,7 +17,7 @@ namespace Keire
     namespace
     {
         using Json = nlohmann::json;
-        constexpr std::size_t MaximumDocumentBytes = 64U * 1024U * 1024U;
+        constexpr std::size_t MaximumDocumentBytes = 64ULL * 1024ULL * 1024U;
         constexpr std::size_t MaximumPrefabDepth = 128;
 
         [[nodiscard]] Json EncodeProperty(const ComponentPropertyValue& value)
@@ -30,9 +30,7 @@ namespace Keire
                         return Json::array({current.X, current.Y});
                     else if constexpr (std::same_as<T, Vector3>)
                         return Json::array({current.X, current.Y, current.Z});
-                    else if constexpr (std::same_as<T, Vector4>)
-                        return Json::array({current.X, current.Y, current.Z, current.W});
-                    else if constexpr (std::same_as<T, Quaternion>)
+                    else if constexpr (std::same_as<T, Vector4> || std::same_as<T, Quaternion>)
                         return Json::array({current.X, current.Y, current.Z, current.W});
                     else if constexpr (std::same_as<T, Color>)
                         return Json::array({current.Red, current.Green, current.Blue, current.Alpha});

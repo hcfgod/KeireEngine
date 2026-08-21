@@ -14,7 +14,7 @@ namespace Keire
 {
     namespace
     {
-        constexpr std::size_t MaximumSettingsBytes = 1024U * 1024U;
+        constexpr std::size_t MaximumSettingsBytes = 1024ULL * 1024U;
 
         [[nodiscard]] std::filesystem::path SettingsPath(const std::filesystem::path& projectRoot)
         {

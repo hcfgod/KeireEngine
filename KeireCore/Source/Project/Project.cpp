@@ -44,8 +44,8 @@ namespace Keire
     namespace
     {
         using Json = nlohmann::json;
-        constexpr std::size_t MaximumProjectFileBytes = 1024U * 1024U;
-        constexpr std::size_t MaximumRegistryBytes = 4U * 1024U * 1024U;
+        constexpr std::size_t MaximumProjectFileBytes = 1024ULL * 1024U;
+        constexpr std::size_t MaximumRegistryBytes = 4ULL * 1024ULL * 1024U;
         constexpr std::size_t MaximumRecentProjects = 50;
 
         struct EngineVersion

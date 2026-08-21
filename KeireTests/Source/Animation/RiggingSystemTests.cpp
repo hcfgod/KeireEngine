@@ -276,6 +276,7 @@ TEST_CASE("Two bone and FABRIK solvers reject malformed chains and move valid ch
                                                  {"End", 1, {{0.0F, 1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}}};
     const auto skeleton = Keire::CreateRef<Keire::SkeletonAsset>(bones);
     std::vector<Keire::BoneTransform> pose;
+    pose.reserve(bones.size());
     for (const auto& bone : bones)
         pose.push_back(bone.BindPose);
 
@@ -297,6 +298,7 @@ TEST_CASE("Two bone IK preserves model-space targets under rotated parents and o
         {"Hand", 2, {{0.0F, 1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}}};
     const Keire::SkeletonAsset skeleton(bones);
     std::vector<Keire::BoneTransform> pose;
+    pose.reserve(bones.size());
     for (const auto& bone : bones)
         pose.push_back(bone.BindPose);
 
@@ -317,6 +319,7 @@ TEST_CASE("Two bone IK preserves model-space targets under rotated parents and o
     CHECK(rotationDot > 0.999F);
 
     std::vector<Keire::BoneTransform> rotationOnlyPose;
+    rotationOnlyPose.reserve(bones.size());
     for (const auto& bone : bones)
         rotationOnlyPose.push_back(bone.BindPose);
     const auto initialHandPosition = Keire::Math::TransformPoint(ModelMatrices(skeleton, rotationOnlyPose)[3], {});
@@ -342,6 +345,7 @@ TEST_CASE("Two bone IK stays finite and bent at its folded and extended reach li
     const auto solve = [&](const Keire::Vector3 target)
     {
         std::vector<Keire::BoneTransform> pose;
+        pose.reserve(bones.size());
         for (const auto& bone : bones)
             pose.push_back(bone.BindPose);
         REQUIRE(Keire::SolveTwoBoneIk(skeleton, pose, {0, 1, 2, target, {0.0F, 0.0F, 1.0F}}));
@@ -367,6 +371,7 @@ TEST_CASE("Foot grounding adapts pelvis and legs transactionally to validated co
                                                  {"Foot", 2, {{0.0F, 1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}}};
     const Keire::SkeletonAsset skeleton(bones);
     std::vector<Keire::BoneTransform> pose;
+    pose.reserve(bones.size());
     for (const auto& bone : bones)
         pose.push_back(bone.BindPose);
 
@@ -397,6 +402,7 @@ TEST_CASE("Foot grounding reach diagnostics use the caller's model-space toleran
     const auto bindPose = [&]
     {
         std::vector<Keire::BoneTransform> result;
+        result.reserve(bones.size());
         for (const auto& bone : bones)
             result.push_back(bone.BindPose);
         return result;
@@ -434,6 +440,7 @@ TEST_CASE("Foot grounding lowers the pelvis once and plants both feet on uneven 
         {"RightFoot", 5, {{0.0F, -1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}}};
     const Keire::SkeletonAsset skeleton(bones);
     std::vector<Keire::BoneTransform> pose;
+    pose.reserve(bones.size());
     for (const auto& bone : bones)
         pose.push_back(bone.BindPose);
 
@@ -479,6 +486,7 @@ TEST_CASE("Foot grounding solves imported FBX leg chains containing transform he
     CHECK(rig.Bones[11].Semantic == Keire::RigBoneSemantic::LeftFoot);
 
     std::vector<Keire::BoneTransform> pose;
+    pose.reserve(bones.size());
     for (const auto& bone : bones)
         pose.push_back(bone.BindPose);
 
@@ -507,6 +515,7 @@ TEST_CASE("Foot grounding uses imported bind axes to flatten animated foot pitch
     auto sampledPose = [&]
     {
         std::vector<Keire::BoneTransform> result;
+        result.reserve(bones.size());
         for (const auto& bone : bones)
             result.push_back(bone.BindPose);
         return result;
@@ -554,6 +563,7 @@ TEST_CASE("Foot grounding restores a discovered toe control to its planted bind 
                                                  {"ToeControl", 3, {{0.0F, -0.1F, 0.3F}, {}, {1.0F, 1.0F, 1.0F}}, {}}};
     const Keire::SkeletonAsset skeleton(bones);
     std::vector<Keire::BoneTransform> pose;
+    pose.reserve(bones.size());
     for (const auto& bone : bones)
         pose.push_back(bone.BindPose);
     pose[4].Rotation = Keire::Math::EulerDegreesToQuaternion({-35.0F, 0.0F, 0.0F});
@@ -578,6 +588,7 @@ TEST_CASE("Foot grounding restores the rig's bind-neutral pelvis offset over two
                                                  {"RightFoot", 5, {{0.0F, -1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}}};
     const Keire::SkeletonAsset skeleton(bones);
     std::vector<Keire::BoneTransform> pose;
+    pose.reserve(bones.size());
     for (const auto& bone : bones)
         pose.push_back(bone.BindPose);
 
@@ -606,6 +617,7 @@ TEST_CASE("Foot grounding shifts the pelvis toward a single ledge support")
                                                  {"LeftFoot", 2, {{0.0F, -1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}}};
     const Keire::SkeletonAsset skeleton(bones);
     std::vector<Keire::BoneTransform> pose;
+    pose.reserve(bones.size());
     for (const auto& bone : bones)
         pose.push_back(bone.BindPose);
 
@@ -636,6 +648,7 @@ TEST_CASE("Foot grounding removes bounded pelvis pitch using the rig's own torso
                                                  {"RightFoot", 6, {{0.0F, -1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}}};
     const Keire::SkeletonAsset skeleton(bones);
     std::vector<Keire::BoneTransform> pose;
+    pose.reserve(bones.size());
     for (const auto& bone : bones)
         pose.push_back(bone.BindPose);
     pose[0].Rotation = Keire::Math::EulerDegreesToQuaternion({25.0F, 0.0F, 0.0F});

@@ -276,7 +276,7 @@ namespace Keire
             std::set<std::uint32_t> trackedBones;
             for (const auto& track : tracks)
             {
-                if (track.Keys.empty() || track.Keys.size() > 4U * 1024U * 1024U ||
+                if (track.Keys.empty() || track.Keys.size() > 4ULL * 1024ULL * 1024U ||
                     !trackedBones.insert(track.Bone).second)
                     throw std::invalid_argument("Animation clip contains an empty or duplicate bone track.");
                 float previous = -1.0F;
@@ -436,7 +436,7 @@ namespace Keire
                                                     const std::span<const SkinVertexInfluence8> influences,
                                                     const SkinningMethod method)
     {
-        if (!mesh || !skeleton || influences.empty() || influences.size() > 64U * 1024U * 1024U)
+        if (!mesh || !skeleton || influences.empty() || influences.size() > 64ULL * 1024ULL * 1024U)
             throw std::invalid_argument("Skinned mesh asset header is invalid.");
         std::vector<std::uint8_t> encoded;
         encoded.reserve(influences.size() * PackedSkinInfluenceStride);
@@ -494,8 +494,8 @@ namespace Keire
             const auto vertexCount = document.value("vertexCount", std::size_t{0});
             const auto influenceStride = document.value("influenceStride", std::size_t{0});
             const auto& encoded = document.at("influences");
-            if (vertexCount == 0 || vertexCount > 64U * 1024U * 1024U || influenceStride != PackedSkinInfluenceStride ||
-                !encoded.is_binary())
+            if (vertexCount == 0 || vertexCount > 64ULL * 1024ULL * 1024U ||
+                influenceStride != PackedSkinInfluenceStride || !encoded.is_binary())
                 throw std::invalid_argument("Packed skinned mesh asset header is invalid.");
             const auto& packed = encoded.get_binary();
             if (packed.size() != vertexCount * PackedSkinInfluenceStride)
@@ -534,7 +534,7 @@ namespace Keire
                 influences.push_back(influence);
             }
         }
-        if (!mesh || !skeleton || influences.empty() || influences.size() > 64U * 1024U * 1024U)
+        if (!mesh || !skeleton || influences.empty() || influences.size() > 64ULL * 1024ULL * 1024U)
             throw std::invalid_argument("Skinned mesh asset header is invalid.");
         for (const auto& influence : influences)
         {
@@ -619,7 +619,7 @@ namespace Keire
         std::set<std::uint32_t> bones;
         for (const auto& source : tracks)
         {
-            if (source.Keys.empty() || source.Keys.size() > 4U * 1024U * 1024U || !bones.insert(source.Bone).second)
+            if (source.Keys.empty() || source.Keys.size() > 4ULL * 1024ULL * 1024U || !bones.insert(source.Bone).second)
                 throw std::invalid_argument("Animation compression received an empty, oversized, or duplicate track.");
             float previousTime = -1.0F;
             for (const auto& key : source.Keys)
@@ -1130,7 +1130,7 @@ namespace Keire
             {
                 std::array<const AnimationBlendTreeChild*, 3> Children{};
                 std::array<double, 3> Weights{};
-                std::tuple<double, double, double> Score{};
+                std::tuple<double, double, double> Score;
             };
 
             TriangleCandidate bestTriangle;
@@ -1192,7 +1192,7 @@ namespace Keire
                 const AnimationBlendTreeChild* First = nullptr;
                 const AnimationBlendTreeChild* Second = nullptr;
                 double Amount = 0.0;
-                std::pair<double, double> Score{};
+                std::pair<double, double> Score;
             };
 
             SegmentCandidate bestSegment;
@@ -1780,7 +1780,7 @@ namespace Keire
         Reset();
     }
 
-    void AnimatorInstance::SetFloat(std::string parameter, const float value)
+    void AnimatorInstance::SetFloat(const std::string& parameter, const float value)
     {
         const auto found = m_Parameters.find(parameter);
         if (!std::isfinite(value) || found == m_Parameters.end() || found->second.Type != AnimationParameterType::Float)
@@ -1797,7 +1797,7 @@ namespace Keire
         return found->second.FloatValue;
     }
 
-    void AnimatorInstance::SetInteger(std::string parameter, const std::int32_t value)
+    void AnimatorInstance::SetInteger(const std::string& parameter, const std::int32_t value)
     {
         const auto found = m_Parameters.find(parameter);
         if (found == m_Parameters.end() || found->second.Type != AnimationParameterType::Integer)
@@ -1814,7 +1814,7 @@ namespace Keire
         return found->second.IntegerValue;
     }
 
-    void AnimatorInstance::SetBool(std::string parameter, const bool value)
+    void AnimatorInstance::SetBool(const std::string& parameter, const bool value)
     {
         const auto found = m_Parameters.find(parameter);
         if (found == m_Parameters.end() || found->second.Type != AnimationParameterType::Boolean)
@@ -1831,7 +1831,7 @@ namespace Keire
         return found->second.BooleanValue;
     }
 
-    void AnimatorInstance::SetTrigger(std::string parameter)
+    void AnimatorInstance::SetTrigger(const std::string& parameter)
     {
         const auto found = m_Parameters.find(parameter);
         if (found == m_Parameters.end() || found->second.Type != AnimationParameterType::Trigger)
@@ -1840,7 +1840,7 @@ namespace Keire
         PublishDebugSnapshot();
     }
 
-    void AnimatorInstance::ResetTrigger(std::string parameter)
+    void AnimatorInstance::ResetTrigger(const std::string& parameter)
     {
         const auto found = m_Parameters.find(parameter);
         if (found == m_Parameters.end() || found->second.Type != AnimationParameterType::Trigger)
@@ -2146,7 +2146,10 @@ namespace Keire
             Ref<const AvatarMaskAsset> mask;
             if (layer->AvatarMask)
             {
-                if (!m_MaskResolver || !(mask = m_MaskResolver(layer->AvatarMask)))
+                if (!m_MaskResolver)
+                    throw std::runtime_error("Animator could not resolve an avatar mask.");
+                mask = m_MaskResolver(layer->AvatarMask);
+                if (!mask)
                     throw std::runtime_error("Animator could not resolve an avatar mask.");
             }
             for (std::size_t bone = 0; bone < result.LocalPose.size(); ++bone)

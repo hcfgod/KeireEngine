@@ -162,8 +162,8 @@ namespace KeireEditor
         m_Drawers.insert_or_assign(kind, std::move(drawer));
     }
 
-    void PropertyDrawerRegistry::RegisterOverride(const Keire::ComponentTypeId component, std::string propertyKey,
-                                                  Drawer drawer)
+    void PropertyDrawerRegistry::RegisterOverride(const Keire::ComponentTypeId component,
+                                                  const std::string& propertyKey, Drawer drawer)
     {
         if (!component || propertyKey.empty() || !drawer)
             throw std::invalid_argument("A component, property key, and drawer callback are required.");

@@ -336,7 +336,7 @@ namespace Keire
         FindImporterForPath(const std::filesystem::path& path) const;
         [[nodiscard]] ExternalAssetImportResult ImportExternal(std::span<const ExternalAssetImportItem> items,
                                                                std::stop_token cancellation = {},
-                                                               AssetOperationProgressCallback progress = {});
+                                                               const AssetOperationProgressCallback& progress = {});
         void UndoExternalImport(ExternalAssetImportReceiptId receipt);
         void RedoExternalImport(ExternalAssetImportReceiptId receipt);
 
@@ -352,7 +352,7 @@ namespace Keire
                                               const std::filesystem::path& relativePath);
         [[nodiscard]] std::vector<AssetId> ExtractMaterials(AssetId model,
                                                             const std::filesystem::path& relativeDirectory);
-        void Rename(AssetId id, std::string newName);
+        void Rename(AssetId id, const std::string& newName);
         void MoveAsset(AssetId id, const std::filesystem::path& destination);
         [[nodiscard]] AssetId Duplicate(AssetId id, const std::filesystem::path& destination);
         void MoveFolder(const std::filesystem::path& source, const std::filesystem::path& destination);
@@ -436,7 +436,7 @@ namespace Keire
         [[nodiscard]] static AssetCookResult
         CookUnlocked(const AssetDatabase& database, const AssetBuildProfile& profile,
                      const std::filesystem::path& outputDirectory, std::stop_token cancellation,
-                     AssetOperationProgressCallback progress, std::span<const AssetId> sourceAssets = {},
+                     const AssetOperationProgressCallback& progress, std::span<const AssetId> sourceAssets = {},
                      std::span<const AssetId> replacedAssets = {});
     };
 

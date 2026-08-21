@@ -25,7 +25,7 @@ namespace Keire
     {
         using Json = nlohmann::json;
         constexpr std::string_view PackageMinimumEngineVersion = "0.3.1";
-        constexpr std::size_t MaximumReceiptBytes = 16U * 1024U * 1024U;
+        constexpr std::size_t MaximumReceiptBytes = 16ULL * 1024ULL * 1024U;
 
         [[nodiscard]] std::string PathText(const std::filesystem::path& path)
         {
@@ -223,7 +223,7 @@ namespace Keire
         {
             try
             {
-                const auto document = Json::parse(Detail::ReadTextFile(path, 2U * 1024U * 1024U));
+                const auto document = Json::parse(Detail::ReadTextFile(path, 2ULL * 1024ULL * 1024U));
                 return document.value("id", std::string{});
             }
             catch (const std::exception&)
@@ -446,13 +446,11 @@ namespace Keire
                 entry.Disposition = ProjectAssetImportDisposition::Install;
             else if (entry.LocalSha256 == entry.IncomingSha256)
                 entry.Disposition = ProjectAssetImportDisposition::ReuseIdentical;
-            else if (resolution == ProjectAssetImportResolution::Replace)
+            else if (resolution == ProjectAssetImportResolution::Replace ||
+                     (prior != previousEntries.end() && entry.LocalSha256 == prior->second.PackageSha256))
                 entry.Disposition = ProjectAssetImportDisposition::Replace;
-            else if (resolution == ProjectAssetImportResolution::KeepLocal)
-                entry.Disposition = ProjectAssetImportDisposition::KeepLocal;
-            else if (prior != previousEntries.end() && entry.LocalSha256 == prior->second.PackageSha256)
-                entry.Disposition = ProjectAssetImportDisposition::Replace;
-            else if (prior != previousEntries.end() && entry.IncomingSha256 == prior->second.PackageSha256)
+            else if (resolution == ProjectAssetImportResolution::KeepLocal ||
+                     (prior != previousEntries.end() && entry.IncomingSha256 == prior->second.PackageSha256))
                 entry.Disposition = ProjectAssetImportDisposition::KeepLocal;
             else
             {

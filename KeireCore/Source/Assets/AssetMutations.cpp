@@ -112,7 +112,7 @@ namespace Keire
         const auto destination = ConfinedPath(m_Impl->SourceRoot, existing->RelativePath);
         const auto metadata = Detail::PathWithSuffix(destination, ".keiremeta");
         const auto originalSource = ReadSource(destination, m_Impl->Specification.MaximumSourceBytes);
-        const auto originalMetadata = ReadSource(metadata, 16U * 1024U * 1024U);
+        const auto originalMetadata = ReadSource(metadata, 16ULL * 1024ULL * 1024U);
         auto originalImport = m_Impl->Import(*existing);
         auto validated = m_Impl->ImportSource(*existing, sourceBytes);
 
@@ -164,7 +164,7 @@ namespace Keire
             return;
         const auto source = ConfinedPath(m_Impl->SourceRoot, existing->RelativePath);
         const auto metadata = Detail::PathWithSuffix(source, ".keiremeta");
-        const auto originalMetadata = ReadSource(metadata, 16U * 1024U * 1024U);
+        const auto originalMetadata = ReadSource(metadata, 16ULL * 1024ULL * 1024U);
         try
         {
             UpdateMetadataImportSettings(metadata, settings);
@@ -201,7 +201,7 @@ namespace Keire
 
         const auto source = ConfinedPath(m_Impl->SourceRoot, existing->RelativePath);
         const auto metadata = Detail::PathWithSuffix(source, ".keiremeta");
-        const auto originalMetadata = ReadSource(metadata, 16U * 1024U * 1024U);
+        const auto originalMetadata = ReadSource(metadata, 16ULL * 1024ULL * 1024U);
         try
         {
             IncrementMetadataImportRevision(metadata);
@@ -308,7 +308,7 @@ namespace Keire
         return result;
     }
 
-    void AssetDatabase::Rename(const AssetId id, std::string newName)
+    void AssetDatabase::Rename(const AssetId id, const std::string& newName)
     {
         std::scoped_lock operation(*m_Impl->OperationMutex);
         if (newName.empty() || newName == "." || newName == ".." || newName.find('/') != std::string::npos ||

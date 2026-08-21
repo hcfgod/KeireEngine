@@ -21,7 +21,7 @@ namespace Keire
 
         template <typename T>
         [[nodiscard]] T ReadVfxProperty(const ComponentPropertyBag& values, const std::string_view key,
-                                        const T fallback)
+                                        const T& fallback)
         {
             const auto found = values.find(key);
             if (found == values.end())

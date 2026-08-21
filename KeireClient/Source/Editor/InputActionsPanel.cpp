@@ -17,7 +17,7 @@ namespace KeireEditor
     namespace
     {
         template <typename Range, typename Projection>
-        [[nodiscard]] std::string UniqueInputName(const Range& values, std::string base, Projection projection)
+        [[nodiscard]] std::string UniqueInputName(const Range& values, const std::string& base, Projection projection)
         {
             std::string candidate = base;
             for (std::size_t copy = 2; std::ranges::any_of(values, [&](const auto& value)

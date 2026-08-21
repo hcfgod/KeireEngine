@@ -47,7 +47,7 @@ namespace
         auto result = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Parameter, type);
         result.Name = std::string(symbol);
         result.Symbol = symbol;
-        result.Value = std::move(value);
+        result.Value = value;
         return result;
     }
 
@@ -885,9 +885,9 @@ TEST_CASE("Shader Graph instance import publishes an assignable runtime material
     {
         const auto normalized = path.lexically_normal().generic_string();
         if (normalized == "Assets/Graphs/Parent.keireshadergraph")
-            return graphBytes;
+            return std::vector<std::byte>(graphBytes);
         if (normalized == "Assets/Instances/Root.keireshadergraphinstance")
-            return rootBytes;
+            return std::vector<std::byte>(rootBytes);
         throw std::runtime_error("Unexpected Shader Graph instance test dependency.");
     };
     context.ResolveAssetSource = [&](const Keire::AssetId asset) -> std::optional<Keire::AssetImportSource>

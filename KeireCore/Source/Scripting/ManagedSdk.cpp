@@ -38,7 +38,7 @@ namespace Keire::Detail
         if (!std::filesystem::is_regular_file(settingsPath))
             return fallback;
 
-        const auto document = nlohmann::json::parse(ReadTextFile(settingsPath, 1024U * 1024U));
+        const auto document = nlohmann::json::parse(ReadTextFile(settingsPath, 1024ULL * 1024U));
         const auto selection = document.value("sdkSelection", std::string{"bundled"});
         if (selection == "systemPath")
             fallback.Selection = ManagedSdkSelection::SystemPath;
@@ -60,7 +60,7 @@ namespace Keire::Detail
         const auto settingsPath = projectRoot / "ProjectSettings" / "Scripting.keiresettings";
         nlohmann::json document = nlohmann::json::object();
         if (std::filesystem::is_regular_file(settingsPath))
-            document = nlohmann::json::parse(ReadTextFile(settingsPath, 1024U * 1024U));
+            document = nlohmann::json::parse(ReadTextFile(settingsPath, 1024ULL * 1024U));
 
         switch (configuration.Selection)
         {

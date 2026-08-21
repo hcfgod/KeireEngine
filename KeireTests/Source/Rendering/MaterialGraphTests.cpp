@@ -263,7 +263,7 @@ TEST_CASE("Material Graph importer publishes composed shader variants and instan
     context.ReadProjectFile = [shaderBytes](const std::filesystem::path& path)
     {
         CHECK(path.generic_string() == "Assets/Graphs/Surface.keireshadergraph");
-        return shaderBytes;
+        return std::vector<std::byte>(shaderBytes);
     };
     context.ResolveAssetSource =
         [graphAsset = definition.Shader.Asset](const Keire::AssetId asset) -> std::optional<Keire::AssetImportSource>
@@ -355,9 +355,9 @@ TEST_CASE("Material Instances override parameters exposed by composed Material G
     context.ReadProjectFile = [graphBytes, shaderBytes](const std::filesystem::path& path)
     {
         if (path.generic_string() == "Assets/Materials/Parent.keirematerialgraph")
-            return graphBytes;
+            return std::vector<std::byte>(graphBytes);
         if (path.generic_string() == "Assets/Graphs/Surface.keireshadergraph")
-            return shaderBytes;
+            return std::vector<std::byte>(shaderBytes);
         throw std::logic_error("Unexpected composed Material Instance source: " + path.generic_string());
     };
     context.ResolveAssetSource = [parentGraph, shaderGraph = definition.Shader.Asset](
@@ -523,9 +523,9 @@ TEST_CASE("Material Instance importing resolves inherited Material roots without
     context.ReadProjectFile = [&](const std::filesystem::path& path)
     {
         if (path.generic_string() == "Assets/Materials/Root.keirematerial")
-            return rootBytes;
+            return std::vector<std::byte>(rootBytes);
         if (path.generic_string() == "Assets/Materials/Parent.keirematerialinstance")
-            return parentBytes;
+            return std::vector<std::byte>(parentBytes);
         throw std::runtime_error("Unexpected Material Instance test path: " + path.generic_string());
     };
     context.ResolveAssetSource = [&](const Keire::AssetId asset) -> std::optional<Keire::AssetImportSource>
@@ -562,7 +562,7 @@ TEST_CASE("Material Instance importing resolves inherited Material roots without
     context.ReadProjectFile = [cycleBytes](const std::filesystem::path& path)
     {
         if (path.generic_string() == "Assets/Materials/Parent.keirematerialinstance")
-            return cycleBytes;
+            return std::vector<std::byte>(cycleBytes);
         throw std::runtime_error("Unexpected Material Instance cycle path: " + path.generic_string());
     };
     CHECK_THROWS_AS(Keire::CreateMaterialInstanceAssetImporter().ContextualImport(
@@ -602,7 +602,7 @@ TEST_CASE("Material Graph baking resolves an exact Shader Graph variant and publ
     context.ReadProjectFile = [shaderGraphBytes](const std::filesystem::path& path)
     {
         CHECK(path.generic_string() == "Assets/Graphs/Surface.keireshadergraph");
-        return shaderGraphBytes;
+        return std::vector<std::byte>(shaderGraphBytes);
     };
     context.ResolveAssetSource =
         [graphAsset = definition.Shader.Asset](const Keire::AssetId asset) -> std::optional<Keire::AssetImportSource>
@@ -655,7 +655,7 @@ TEST_CASE("Direct material authoring supports tagged raw and Shader Graph refere
     context.ReadProjectFile = [shaderGraphBytes](const std::filesystem::path& path)
     {
         CHECK(path.generic_string() == "Assets/Graphs/Surface.keireshadergraph");
-        return shaderGraphBytes;
+        return std::vector<std::byte>(shaderGraphBytes);
     };
     context.ResolveAssetSource =
         [graphAsset = source.Shader.Asset](const Keire::AssetId asset) -> std::optional<Keire::AssetImportSource>

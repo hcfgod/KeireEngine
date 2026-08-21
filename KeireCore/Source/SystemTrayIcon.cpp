@@ -3,6 +3,7 @@
 #include <stb_image.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <fstream>
 #include <vector>
@@ -19,7 +20,7 @@ namespace Keire::Detail
             if (!input)
                 return {nullptr, SDL_DestroySurface};
             const auto size = input.tellg();
-            if (size <= 0 || size > 16 * 1024 * 1024)
+            if (size <= 0 || size > std::streamoff{16} * 1024 * 1024)
                 return {nullptr, SDL_DestroySurface};
             std::vector<std::byte> encoded(static_cast<std::size_t>(size));
             input.seekg(0);
@@ -39,8 +40,9 @@ namespace Keire::Detail
             TrayIcon result(SDL_CreateSurface(width, height, SDL_PIXELFORMAT_RGBA32), SDL_DestroySurface);
             if (result)
                 for (int row = 0; row < height; ++row)
-                    std::memcpy(static_cast<std::byte*>(result->pixels) + row * result->pitch,
-                                decoded + row * width * 4, static_cast<std::size_t>(width * 4));
+                    std::memcpy(
+                        static_cast<std::byte*>(result->pixels) + static_cast<std::ptrdiff_t>(row) * result->pitch,
+                        decoded + static_cast<std::ptrdiff_t>(row) * width * 4, static_cast<std::size_t>(width) * 4);
             stbi_image_free(decoded);
             if (!result || maximumDimension <= 0 || (width <= maximumDimension && height <= maximumDimension))
                 return result;

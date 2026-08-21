@@ -21,8 +21,9 @@ namespace KeireEditor
     void DiagnosticsPanel::Draw(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme,
                                 const std::uint64_t frameNumber, const double deltaMilliseconds,
                                 const Keire::UiSize windowSize, Keire::UiCaptureState capture,
-                                Keire::Ref<Keire::DiagnosticCatalog> catalog, Keire::Ref<Keire::DiagnosticSink> reports,
-                                Keire::Ref<Keire::WindowSystem> windows)
+                                const Keire::Ref<Keire::DiagnosticCatalog>& catalog,
+                                const Keire::Ref<Keire::DiagnosticSink>& reports,
+                                const Keire::Ref<Keire::WindowSystem>& windows)
     {
         if (auto diagnostics = ui.BeginPanel(m_Registration); diagnostics)
         {
@@ -58,7 +59,11 @@ namespace KeireEditor
                     ui.Text(diagnostic.Location->File.generic_string() + ':' +
                             std::to_string(diagnostic.Location->Line));
                 for (const auto& [key, value] : diagnostic.Context)
-                    ui.TextColored(theme.MutedText, key + ": " + value);
+                {
+                    auto context = key;
+                    context.append(": ").append(value);
+                    ui.TextColored(theme.MutedText, context);
+                }
                 if (ui.Button("Learn more"))
                 {
                     try

@@ -59,7 +59,12 @@ namespace Keire
             if (option == "true")
                 enabled.push_back(name);
             else if (option != "false")
-                enabled.push_back(name + '_' + option);
+            {
+                auto keyword = name;
+                keyword += '_';
+                keyword += option;
+                enabled.push_back(std::move(keyword));
+            }
         }
         return MakeShaderGraphVariantSubAssetKey(target, enabled);
     }

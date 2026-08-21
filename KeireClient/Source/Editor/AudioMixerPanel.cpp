@@ -99,7 +99,7 @@ namespace KeireEditor
         }
 
         template <typename Range, typename Projection>
-        [[nodiscard]] std::string UniqueName(const Range& values, std::string base, Projection projection)
+        [[nodiscard]] std::string UniqueName(const Range& values, const std::string& base, Projection projection)
         {
             std::string candidate = base;
             for (std::size_t suffix = 2; std::ranges::any_of(values, [&](const auto& value)
@@ -838,7 +838,7 @@ namespace KeireEditor
                     .Stage = Keire::AudioMixerSendStage::PostFader,
                     .Gain = 1.0F,
                 };
-                run("Added Audio Mixer send", [&] { return document.AddSend(bus.Id, std::move(send)); });
+                run("Added Audio Mixer send", [&] { return document.AddSend(bus.Id, send); });
             }
         }
     }
@@ -906,7 +906,7 @@ namespace KeireEditor
                 ui.Text("Select or create a snapshot.");
                 return;
             }
-            const auto snapshot = *current;
+            const auto& snapshot = *current;
             std::string name = snapshot.Name;
             if (ui.InputText("Name", name))
                 (void)ApplyEdit("Rename Audio Mixer snapshot",
@@ -1206,7 +1206,7 @@ namespace KeireEditor
                 ui.Text("Select or create a ducking rule.");
                 return;
             }
-            const auto ducking = *found;
+            const auto& ducking = *found;
             std::string name = ducking.Name;
             if (ui.InputText("Name", name))
                 (void)ApplyEdit("Rename Audio Mixer ducking",

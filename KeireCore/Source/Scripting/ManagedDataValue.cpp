@@ -15,7 +15,7 @@ namespace Keire
     {
         using Json = nlohmann::json;
 
-        constexpr std::size_t MaximumCollectionElements = 16U * 1024U;
+        constexpr std::size_t MaximumCollectionElements = 16ULL * 1024U;
 
         [[nodiscard]] const Json* Member(const Json& value, const std::string_view primary,
                                          const std::string_view fallback)

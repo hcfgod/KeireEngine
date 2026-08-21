@@ -45,12 +45,8 @@ namespace Keire
         const auto DecodeColor = Detail::DecodeVfxColor;
         const auto KillShapeModeName = Detail::VfxKillShapeModeName;
         const auto ParseKillShapeMode = Detail::ParseVfxKillShapeMode;
-        const auto CurveInterpolationName = Detail::VfxCurveInterpolationName;
-        const auto ParseCurveInterpolation = Detail::ParseVfxCurveInterpolation;
         const auto EncodeCurve = Detail::EncodeVfxCurve;
         const auto DecodeCurve = Detail::DecodeVfxCurve;
-        const auto GradientInterpolationName = Detail::VfxGradientInterpolationName;
-        const auto ParseGradientInterpolation = Detail::ParseVfxGradientInterpolation;
         const auto EncodeGradient = Detail::EncodeVfxGradient;
         const auto DecodeGradient = Detail::DecodeVfxGradient;
 

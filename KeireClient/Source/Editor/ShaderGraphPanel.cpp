@@ -701,8 +701,7 @@ namespace KeireEditor
         {
             try
             {
-                (void)document.EditNode(node->Id, [value = std::move(value)](auto& candidate) mutable
-                                        { candidate.Value = std::move(value); });
+                (void)document.EditNode(node->Id, [value](auto& candidate) { candidate.Value = value; });
             }
             catch (const std::exception& error)
             {
@@ -779,12 +778,12 @@ namespace KeireEditor
                 {
                     (void)document.EditNode(
                         node->Id,
-                        [pinId, value = std::move(value)](auto& candidate) mutable
+                        [pinId, value](auto& candidate)
                         {
                             const auto pin = std::ranges::find(candidate.Pins, pinId, &Keire::ShaderGraphPin::Id);
                             if (pin == candidate.Pins.end())
                                 throw std::invalid_argument("Shader Graph input pin is unavailable.");
-                            pin->DefaultValue = std::move(value);
+                            pin->DefaultValue = value;
                         });
                 }
                 catch (const std::exception& error)

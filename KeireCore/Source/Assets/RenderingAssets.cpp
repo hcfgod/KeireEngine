@@ -683,7 +683,13 @@ namespace Keire
                 arguments.push_back(Utf8Path(root));
             }
             for (const auto& [name, value] : defines)
-                arguments.push_back("-D" + name + "=" + value);
+            {
+                auto argument = std::string("-D");
+                argument += name;
+                argument += '=';
+                argument += value;
+                arguments.push_back(std::move(argument));
+            }
             RunCompiler(compiler, std::move(arguments), workingDirectory, specification.Timeout);
             return ReadFile(output, specification.MaximumOutputBytes);
         }
@@ -1291,7 +1297,7 @@ namespace Keire
     AssetImporterRegistration CreateShaderAssetImporter(ShaderImporterSpecification specification)
     {
         if (specification.Timeout.count() <= 0 || specification.MaximumOutputBytes == 0 ||
-            specification.MaximumOutputBytes > 256U * 1024U * 1024U)
+            specification.MaximumOutputBytes > 256ULL * 1024ULL * 1024U)
             throw std::invalid_argument("Shader importer limits are invalid.");
         if (specification.Formats.empty() || specification.Formats.size() > 3 ||
             !std::ranges::all_of(specification.Formats,

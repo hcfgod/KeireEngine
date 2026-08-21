@@ -44,8 +44,8 @@ namespace Keire::Detail
         };
         mixInteger(source.High());
         mixInteger(source.Low());
-        for (const unsigned char character : role)
-            mix(character);
+        for (const char character : role)
+            mix(static_cast<unsigned char>(character));
         high = (high & 0xffffffffffff0fffULL) | 0x0000000000005000ULL;
         low = (low & 0x3fffffffffffffffULL) | 0x8000000000000000ULL;
         if ((high | low) == 0U)

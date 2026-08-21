@@ -1386,7 +1386,7 @@ namespace Keire
         [[nodiscard]] bool SendEvent(VfxHandle handle, std::string_view eventName, std::uint32_t spawnCount = 1);
         /// Replaces the retained effect only when revision is newer. Matching EmitterId values preserve compatible
         /// simulation state; a changed EmitterId restarts only this handle and preserves unrelated world effects.
-        [[nodiscard]] bool Reload(VfxHandle handle, Ref<const VfxEffectAsset> effect, std::uint64_t revision);
+        [[nodiscard]] bool Reload(VfxHandle handle, const Ref<const VfxEffectAsset>& effect, std::uint64_t revision);
         /// Advances all active effects. deltaSeconds must be finite and in the range 0..10 seconds.
         void Update(float deltaSeconds);
         /// Returns current bounded world counters.

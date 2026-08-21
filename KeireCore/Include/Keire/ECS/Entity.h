@@ -39,7 +39,7 @@ namespace Keire
         void SetActive(bool active);
         [[nodiscard]] Entity Parent() const noexcept;
         [[nodiscard]] std::vector<Entity> Children() const;
-        void SetParent(Entity parent = {}, bool preserveWorldTransform = true);
+        void SetParent(const Entity& parent = {}, bool preserveWorldTransform = true);
 
         [[nodiscard]] Ref<Component> AddComponent(ComponentTypeId type);
         [[nodiscard]] Ref<Component> GetComponent(ComponentTypeId type) const noexcept;

@@ -751,7 +751,7 @@ TEST_CASE("Kéire owns bounded UI layout persistence")
 
     {
         std::ofstream oversized(layout, std::ios::binary | std::ios::trunc);
-        oversized.seekp(1024U * 1024U);
+        oversized.seekp(std::streamoff{1024} * 1024);
         oversized.put('x');
     }
     LayoutUiApplication oversized(layout);

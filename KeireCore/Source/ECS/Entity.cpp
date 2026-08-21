@@ -129,7 +129,7 @@ namespace Keire
         return state ? state->Children(m_Id) : std::vector<Entity>{};
     }
 
-    void Entity::SetParent(Entity parent, const bool preserveWorldTransform)
+    void Entity::SetParent(const Entity& parent, const bool preserveWorldTransform)
     {
         const auto state = m_State.Lock();
         if (!state)

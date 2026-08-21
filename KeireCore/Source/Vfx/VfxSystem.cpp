@@ -1913,7 +1913,7 @@ namespace Keire
         return consumed;
     }
 
-    bool VfxWorld::Reload(const VfxHandle handle, Ref<const VfxEffectAsset> effect, const std::uint64_t revision)
+    bool VfxWorld::Reload(const VfxHandle handle, const Ref<const VfxEffectAsset>& effect, const std::uint64_t revision)
     {
         if (!m_Impl->IsAlive(handle) || !effect)
             return false;
@@ -1955,7 +1955,7 @@ namespace Keire
                     "VFX hot reload cannot replace live system identities; stop and reactivate the effect.");
             }
 
-        const auto retainedEffect = effect;
+        const auto& retainedEffect = effect;
         for (const auto effectIndex : root.SystemEffects)
         {
             auto& slot = m_Impl->Effects[effectIndex];

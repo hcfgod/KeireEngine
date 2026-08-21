@@ -173,7 +173,7 @@ namespace Keire
     AssetCookResult AssetCooker::CookUnlocked(const AssetDatabase& database, const AssetBuildProfile& profile,
                                               const std::filesystem::path& outputDirectory,
                                               const std::stop_token cancellation,
-                                              AssetOperationProgressCallback progress,
+                                              const AssetOperationProgressCallback& progress,
                                               const std::span<const AssetId> sourceAssets,
                                               const std::span<const AssetId> replacedAssets)
     {
@@ -181,7 +181,7 @@ namespace Keire
         if (profile.Name.empty() || profile.CompressionLevel < ZSTD_minCLevel() ||
             profile.CompressionLevel > ZSTD_maxCLevel() || profile.MaximumPackBytes <= Detail::PackHeaderBytes)
             throw std::invalid_argument("Asset build profile contains invalid compression or shard settings.");
-        if (profile.StreamPageBytes < 4096U || profile.StreamPageBytes > 16U * 1024U * 1024U)
+        if (profile.StreamPageBytes < 4096U || profile.StreamPageBytes > 16ULL * 1024ULL * 1024U)
             throw std::invalid_argument("Asset stream page size must be in the range 4 KiB..16 MiB.");
         const bool incremental = !sourceAssets.empty();
         if (incremental && profile.Strict)
@@ -193,7 +193,7 @@ namespace Keire
         if (incremental)
         {
             const auto previous = Detail::LoadCatalog(destination / "catalog.json");
-            previousEntries = std::move(previous.Entries);
+            previousEntries = previous.Entries;
             for (auto& entry : previousEntries)
             {
                 const auto relative = entry.PackPath.lexically_relative(destination).lexically_normal();
@@ -648,7 +648,7 @@ namespace Keire
             ValidateDependencies(entries);
             const auto catalogPath = temporary / "catalog.json";
             Detail::WriteCatalog(catalogPath, entries);
-            auto generationSeed = ReadSource(catalogPath, 64U * 1024U * 1024U);
+            auto generationSeed = ReadSource(catalogPath, 64ULL * 1024ULL * 1024U);
             const auto profileIdentity = buildProfile.dump();
             const auto profileBytes = std::as_bytes(std::span(profileIdentity));
             generationSeed.insert(generationSeed.end(), profileBytes.begin(), profileBytes.end());

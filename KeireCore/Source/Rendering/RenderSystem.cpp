@@ -124,8 +124,8 @@ namespace Keire
     class RenderSystem::Impl final
     {
       public:
-        Impl(RenderSpecification specification, Ref<WindowSystem> windows, Ref<Window> window, Ref<AssetSystem> assets,
-             Ref<JobSystem> jobs, Ref<StreamingSystem> streaming)
+        Impl(RenderSpecification specification, const Ref<WindowSystem>& windows, const Ref<Window>& window,
+             const Ref<AssetSystem>& assets, const Ref<JobSystem>& jobs, const Ref<StreamingSystem>& streaming)
             : State(std::make_shared<RenderSharedState>(std::move(specification), std::move(windows), std::move(window),
                                                         std::move(assets), std::move(jobs), std::move(streaming)))
         {
@@ -142,7 +142,7 @@ namespace Keire
 
     RenderSystem::~RenderSystem() = default;
 
-    Ref<RenderSurface> RenderSystem::CreateSurface(RenderSurfaceSpecification specification)
+    Ref<RenderSurface> RenderSystem::CreateSurface(const RenderSurfaceSpecification& specification)
     {
         m_Impl->State->RequireOwner("CreateSurface");
         if (specification.Name.empty() || specification.Name.size() > 128)
@@ -164,12 +164,12 @@ namespace Keire
         return CreateRef<RenderSurface>(std::make_unique<RenderSurface::Impl>(std::move(state)));
     }
 
-    Ref<RenderView> RenderSystem::CreateView(RenderSurfaceSpecification specification)
+    Ref<RenderView> RenderSystem::CreateView(const RenderSurfaceSpecification& specification)
     {
         return CreateRef<RenderView>(std::make_unique<RenderView::Impl>(CreateSurface(std::move(specification))));
     }
 
-    void RenderSystem::Submit(SceneRenderRequest request) { m_Impl->State->Submit(std::move(request)); }
+    void RenderSystem::Submit(const SceneRenderRequest& request) { m_Impl->State->Submit(std::move(request)); }
     void RenderSystem::SubmitRuntimeUi(const Ref<RuntimeUiTree>& tree)
     {
         auto& state = *m_Impl->State;
@@ -539,7 +539,7 @@ namespace Keire
         auto release = releaseWorker.get_future().share();
         std::exception_ptr producerFailure;
         std::mutex failureMutex;
-        const auto produce = [&](std::function<void()> work)
+        const auto produce = [&](const std::function<void()>& work)
         {
             try
             {

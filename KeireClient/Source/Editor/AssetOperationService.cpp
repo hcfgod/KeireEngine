@@ -39,10 +39,9 @@ namespace KeireEditor
         }
     } // namespace
 
-    AssetOperationService::AssetOperationService(std::filesystem::path workerExecutable,
-                                                 std::filesystem::path projectRoot)
-        : m_WorkerExecutable(AbsoluteNormalized(std::move(workerExecutable))),
-          m_ProjectRoot(AbsoluteNormalized(std::move(projectRoot)))
+    AssetOperationService::AssetOperationService(const std::filesystem::path& workerExecutable,
+                                                 const std::filesystem::path& projectRoot)
+        : m_WorkerExecutable(AbsoluteNormalized(workerExecutable)), m_ProjectRoot(AbsoluteNormalized(projectRoot))
     {
         if (!std::filesystem::is_regular_file(m_WorkerExecutable))
             throw std::runtime_error("Kéire asset worker was not found: " +
@@ -55,7 +54,7 @@ namespace KeireEditor
 
     AssetOperationService::~AssetOperationService() { Shutdown(); }
 
-    void AssetOperationService::QueueImport(const AssetOperationPriority priority, AssetOperationContext context)
+    void AssetOperationService::QueueImport(const AssetOperationPriority priority, const AssetOperationContext& context)
     {
         if (priority == AssetOperationPriority::AutomaticRefresh || priority == AssetOperationPriority::MaterialRefresh)
         {
@@ -135,7 +134,7 @@ namespace KeireEditor
         operation.Request.Kind = Keire::Detail::AssetWorkerOperationKind::ExternalImport;
         operation.Request.ExternalItems = std::move(items);
         operation.Priority = AssetOperationPriority::ExternalImport;
-        operation.Context = context;
+        operation.Context = std::move(context);
         Queue(std::move(operation));
     }
 
@@ -465,7 +464,7 @@ namespace KeireEditor
 #else
         constexpr std::string_view workerName = "KeireAssetWorker";
 #endif
-        const auto sibling = editor.parent_path() / workerName;
+        auto sibling = editor.parent_path() / workerName;
         if (std::filesystem::is_regular_file(sibling))
             return sibling;
         const auto configurationRoot = editor.parent_path().parent_path();

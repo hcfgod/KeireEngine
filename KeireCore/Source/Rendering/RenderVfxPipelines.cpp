@@ -51,6 +51,8 @@ namespace
     if (format == SDL_GPU_SHADERFORMAT_MSL)                                                                            \
         return {Keire::Detail::BuiltinVfx##StageName##Msl, sizeof(Keire::Detail::BuiltinVfx##StageName##Msl)};         \
     break
+        // Every generated branch selects different embedded shader symbols despite sharing the same control flow.
+        // NOLINTNEXTLINE(bugprone-branch-clone)
         switch (stage)
         {
         case BuiltinVfxShaderStage::Initialize:

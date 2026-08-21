@@ -129,7 +129,7 @@ namespace KeireEditor
         replacement.Properties.insert_or_assign(std::string(property), value);
         Keire::ValidateMaterialAgainstShader(replacement, *m_ShaderDefinition);
         m_Definition = std::move(replacement);
-        m_AuthoringDefinition.Properties.insert_or_assign(std::string(property), std::move(value));
+        m_AuthoringDefinition.Properties.insert_or_assign(std::string(property), value);
         m_LastChangedProperty = property;
         return true;
     }

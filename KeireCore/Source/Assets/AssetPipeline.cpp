@@ -381,7 +381,7 @@ namespace Keire
                 const auto effectiveType = imported.PrimaryType.value_or(record.Type);
                 UpdateMetadataImportOutput(record.MetadataPath, effectiveType, imported.SubAssets);
                 record.Type = effectiveType;
-                const auto metadataBytes = ReadSource(record.MetadataPath, 16U * 1024U * 1024U);
+                const auto metadataBytes = ReadSource(record.MetadataPath, 16ULL * 1024ULL * 1024U);
                 record.MetadataDigest = Detail::DigestToString(Detail::Sha256(metadataBytes));
                 status.Diagnostics = imported.Diagnostics;
                 for (const auto& diagnostic : status.Diagnostics)
@@ -464,7 +464,7 @@ namespace Keire
                 continue;
             auto upgraded = *record;
             upgraded.ImporterVersion = version;
-            const auto metadataBytes = ReadSource(upgraded.MetadataPath, 1024U * 1024U);
+            const auto metadataBytes = ReadSource(upgraded.MetadataPath, 1024ULL * 1024U);
             upgraded.MetadataDigest = Detail::DigestToString(Detail::Sha256(metadataBytes));
             auto imported = m_Impl->TakeCookInput(previous);
             if (!imported)

@@ -205,7 +205,7 @@ namespace Keire
         }
     }
 
-    AudioSystem::AudioSystem(const AudioSystemSpecification specification)
+    AudioSystem::AudioSystem(const AudioSystemSpecification& specification)
     {
         if (specification.Mode == AudioMode::Disabled || specification.MaximumVoices == 0 ||
             specification.MaximumVoices > 65536 || specification.MaximumVirtualVoices < specification.MaximumVoices ||

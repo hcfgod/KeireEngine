@@ -13,7 +13,7 @@ namespace Keire
     namespace
     {
         using Json = nlohmann::json;
-        constexpr std::size_t MaximumDocumentBytes = 64U * 1024U;
+        constexpr std::size_t MaximumDocumentBytes = 64ULL * 1024U;
 
         [[nodiscard]] const char* CombineModeName(const PhysicsMaterialCombineMode mode) noexcept
         {

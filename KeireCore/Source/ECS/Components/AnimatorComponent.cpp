@@ -19,8 +19,7 @@ namespace Keire
         constexpr std::uint32_t AnimatorSchemaVersion = 7;
 
         template <typename T>
-        [[nodiscard]] T ReadAnimatorProperty(const ComponentPropertyBag& values, const std::string_view key,
-                                             const T fallback)
+        [[nodiscard]] T ReadAnimatorProperty(const ComponentPropertyBag& values, const std::string_view key, T fallback)
         {
             const auto found = values.find(key);
             if (found == values.end())
@@ -656,8 +655,8 @@ namespace Keire
             foot.MaximumLeanCorrectionDegrees =
                 static_cast<float>(ReadAnimatorProperty(values, "footMaximumLeanCorrectionDegrees", 35.0));
             foot.MaximumSlopeDegrees = static_cast<float>(ReadAnimatorProperty(values, "footMaximumSlope", 60.0));
-            const auto collisionMask =
-                ReadAnimatorProperty(values, "footCollisionMask", static_cast<std::int64_t>(~0U));
+            const auto collisionMask = ReadAnimatorProperty(
+                values, "footCollisionMask", static_cast<std::int64_t>(std::numeric_limits<std::uint32_t>::max()));
             if (collisionMask < 0 ||
                 collisionMask > static_cast<std::int64_t>(std::numeric_limits<std::uint32_t>::max()))
                 throw std::invalid_argument("Animator foot-grounding collision mask is invalid.");

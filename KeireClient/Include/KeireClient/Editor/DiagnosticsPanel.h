@@ -17,8 +17,8 @@ namespace KeireEditor
                   double deltaMilliseconds, Keire::UiSize windowSize, Keire::UiCaptureState capture);
         void Draw(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme, std::uint64_t frame,
                   double deltaMilliseconds, Keire::UiSize windowSize, Keire::UiCaptureState capture,
-                  Keire::Ref<Keire::DiagnosticCatalog> catalog, Keire::Ref<Keire::DiagnosticSink> reports,
-                  Keire::Ref<Keire::WindowSystem> windows);
+                  const Keire::Ref<Keire::DiagnosticCatalog>& catalog, const Keire::Ref<Keire::DiagnosticSink>& reports,
+                  const Keire::Ref<Keire::WindowSystem>& windows);
         [[nodiscard]] Keire::UiPanelRegistration& Registration() noexcept { return m_Registration; }
 
       private:

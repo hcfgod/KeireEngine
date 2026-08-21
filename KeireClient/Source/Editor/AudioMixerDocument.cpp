@@ -96,7 +96,7 @@ namespace KeireEditor
         return Reload(Keire::AudioMixerAsset::Decode(bytes)->Definition(), revision);
     }
 
-    AssetDocumentReloadResult AudioMixerDocument::Reload(Keire::AudioMixerDefinition definition,
+    AssetDocumentReloadResult AudioMixerDocument::Reload(const Keire::AudioMixerDefinition& definition,
                                                          const std::uint64_t revision)
     {
         if (definition == m_Host.Draft())
@@ -104,7 +104,7 @@ namespace KeireEditor
             m_Host.AcknowledgeRevision(revision);
             return AssetDocumentReloadResult::Unchanged;
         }
-        const auto result = m_Host.Reload(std::move(definition), revision);
+        const auto result = m_Host.Reload(definition, revision);
         if (result == AssetDocumentReloadResult::Applied)
             ReconcileSelection();
         return result;
@@ -268,9 +268,8 @@ namespace KeireEditor
 
     bool AudioMixerDocument::AddSend(const Keire::AssetId bus, Keire::AudioMixerSendDefinition send)
     {
-        return Edit("Add Audio Mixer send",
-                    [bus, send = std::move(send)](Keire::AudioMixerDefinition& definition) mutable
-                    { RequireBus(definition, bus).Sends.push_back(std::move(send)); });
+        return Edit("Add Audio Mixer send", [bus, send](Keire::AudioMixerDefinition& definition)
+                    { RequireBus(definition, bus).Sends.push_back(send); });
     }
 
     bool AudioMixerDocument::RemoveSend(const Keire::AssetId send)

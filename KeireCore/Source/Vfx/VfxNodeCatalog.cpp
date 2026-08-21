@@ -1149,9 +1149,7 @@ namespace Keire
                 if constexpr (std::same_as<T, float>)
                     return std::isfinite(item);
                 else if constexpr (std::same_as<T, Vector2> || std::same_as<T, Vector3> || std::same_as<T, Vector4> ||
-                                   std::same_as<T, Quaternion> || std::same_as<T, Color>)
-                    return Math::IsFinite(item);
-                else if constexpr (std::same_as<T, Matrix4>)
+                                   std::same_as<T, Quaternion> || std::same_as<T, Color> || std::same_as<T, Matrix4>)
                     return Math::IsFinite(item);
                 else if constexpr (std::same_as<T, VfxScalarRange>)
                     return std::isfinite(item.Minimum) && std::isfinite(item.Maximum);

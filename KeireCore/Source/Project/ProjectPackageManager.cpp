@@ -26,7 +26,7 @@ namespace Keire
     namespace
     {
         using Json = nlohmann::json;
-        constexpr std::size_t MaximumProjectPackageDocumentBytes = 16U * 1024U * 1024U;
+        constexpr std::size_t MaximumProjectPackageDocumentBytes = 16ULL * 1024ULL * 1024U;
         constexpr std::string_view PackageMinimumEngineVersion = "0.3.1";
 
         struct SemanticVersion final
@@ -576,7 +576,7 @@ namespace Keire
             const auto lower = ParseSemanticVersion(Trim(range.substr(1)));
             auto upper = lower;
             upper.Suffix.clear();
-            if (kind == '~')
+            if (kind == '~' || (lower.Major == 0 && lower.Minor != 0))
             {
                 ++upper.Minor;
                 upper.Patch = 0;
@@ -585,11 +585,6 @@ namespace Keire
             {
                 ++upper.Major;
                 upper.Minor = 0;
-                upper.Patch = 0;
-            }
-            else if (lower.Minor != 0)
-            {
-                ++upper.Minor;
                 upper.Patch = 0;
             }
             else
