@@ -1,12 +1,14 @@
 # Material Ecosystem Parity Matrix
 
-Review date: 2026-08-10
+Review date: 2026-08-21
 Comparison model: Unreal-inspired material workflow, adapted to Kéire's renderer-neutral asset and runtime boundaries
 
 This matrix is the acceptance authority for the Material Ecosystem initiative. `Complete` means the capability has an
 implemented engine/editor path and focused evidence. `Partial` means the shipped subset rejects unsupported behavior
 instead of silently degrading. `Planned` is not a supported feature. Counts are useful for planning, but production
 scenarios and executable validation decide milestone acceptance.
+
+Current ledger: **145 rows — 98 Complete, 8 Partial, and 39 Planned**.
 
 ## Capability Matrix
 
@@ -85,14 +87,14 @@ scenarios and executable validation decide milestone acceptance.
 | ME-RT-001 | Immutable runtime MaterialAsset | Complete | P0 | All authoring workflows converge before RenderSystem. |
 | ME-RT-002 | Persistent Material Instance resolution | Complete | P0 | Bounded parent resolution publishes one runtime material. |
 | ME-RT-003 | Dynamic Material Instance snapshots | Complete | P0 | Thread-safe typed overrides, resets, revisions, and close. |
-| ME-RT-004 | Dynamic instance render upload | Planned | P0 | Needs renderer-owned coalesced upload and lifetime fencing. |
+| ME-RT-004 | Dynamic instance render upload | Complete | P0 | Per-slot instances publish bounded immutable snapshots through the render request; shared-material changes clear incompatible slot state. |
 | ME-RT-005 | Parameter Collection runtime snapshots | Complete | P0 | Stable-ID values, typed mutation, reset, revision, and close. |
-| ME-RT-006 | Renderer-wide collection buffer | Planned | P0 | Needs renderer ABI, dirty-range upload, and per-frame binding. |
-| ME-RT-007 | World-scoped collection state | Planned | P0 | Needs scene/runtime ownership and Play Mode isolation. |
+| ME-RT-006 | Renderer-wide collection buffer | Partial | P0 | One bounded immutable global-property snapshot binds per render request; a dedicated dirty-range GPU buffer remains an optimization milestone. |
+| ME-RT-007 | World-scoped collection state | Complete | P0 | Editor Play and packaged players own isolated state, preserve compatible hot-reload overrides, and discard it with the runtime world. |
 | ME-RT-008 | Collection access nodes | Planned | P0 | Must bind stable collection/parameter IDs through the renderer ABI. |
-| ME-RT-009 | Managed collection API | Planned | P1 | Requires generated C# value contracts and reload-safe handles. |
-| ME-RT-010 | Managed dynamic instance API | Planned | P1 | Requires lifetime-safe managed wrappers and render handoff. |
-| ME-RT-011 | Material render proxies | Planned | P0 | Needed for scalable immutable-parent plus override binding. |
+| ME-RT-009 | Managed collection API | Complete | P1 | Reload-safe value handles expose open/readiness, typed setters, reset, and world-bounded lifetime. |
+| ME-RT-010 | Managed dynamic instance API | Complete | P1 | Material-slot value handles expose typed set/reset operations without native or GPU ownership. |
+| ME-RT-011 | Material render proxies | Partial | P0 | Shared material plus global/renderer/slot snapshots bind deterministically; the 10,000-instance scalability gate remains. |
 | ME-RT-012 | Uniform-expression cache | Planned | P0 | Requires dependency-aware per-world cache invalidation. |
 | ME-RT-013 | Pipeline state sorting | Complete | P0 | Opaque/masked/transparent submissions preserve deterministic policy. |
 | ME-RT-014 | Transparent sorting | Complete | P0 | Back-to-front view-depth order is tested. |
@@ -171,6 +173,7 @@ scenarios and executable validation decide milestone acceptance.
 5. **Cross-platform cook:** Windows, Linux, and macOS packages include only target formats and the complete transitive
    function/layer/material dependency closure.
 
-The current slice closes the reusable-asset and deterministic-compiler foundation. It does not claim full Unreal
-Engine parity: the `Partial` and `Planned` rows above remain release-visible work, especially renderer-backed
-collections, dynamic-instance render proxies, resource breadth, performance gates, and cross-platform release proof.
+The current slice closes the reusable-asset, deterministic-compiler, world-scoped collection, and managed dynamic
+override foundations. It does not claim full Unreal Engine parity: the `Partial` and `Planned` rows above remain
+release-visible work, especially dedicated collection-buffer optimization, render-proxy scalability, resource breadth,
+performance gates, and cross-platform release proof.

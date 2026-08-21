@@ -21,15 +21,15 @@ export const roadmapHorizons: readonly RoadmapHorizon[] = [
     {
         id: "now",
         label: "Now",
-        timeframe: "0.3.2 release train",
-        statement: "Turn the current Windows technology preview into a dependable daily-development foundation.",
+        timeframe: "Current source after 0.3.2",
+        statement: "Harden the published Windows and Linux preview while validating the newer source-tree workflows.",
         initiatives: [
             {
-                title: "Windows release reliability",
-                outcome: "A trustworthy Hub-to-Editor installation, upgrade, project, and player-build path.",
+                title: "Windows and Linux release reliability",
+                outcome: "Trustworthy Hub-to-Editor installation, upgrade, project, and player-build paths on published hosts.",
                 status: "Available",
                 capabilities: [
-                    "Catalog-verified Hub and Editor packages",
+                    "Catalog-verified Windows, DEB, and RPM packages",
                     "Safe project upgrades and transactional publication",
                     "Direct3D 12 and Vulkan validation",
                     "Actionable launch, installation, and recovery diagnostics",
@@ -41,7 +41,7 @@ export const roadmapHorizons: readonly RoadmapHorizon[] = [
                 outcome: "Signed content can move from publisher quarantine to a verified project import without losing provenance.",
                 status: "In validation",
                 capabilities: [
-                    "Publisher validation, moderation, and offline signing",
+                    "Publisher validation, moderation, and automatic metadata signing",
                     "Personal and organization entitlements",
                     "Hub download and signature verification",
                     "Editor Package Manager installation and recovery",
@@ -51,12 +51,12 @@ export const roadmapHorizons: readonly RoadmapHorizon[] = [
             {
                 title: "Production authoring foundations",
                 outcome: "Artists and gameplay teams can build, preview, diagnose, and reuse content without editing generated code.",
-                status: "In development",
+                status: "In validation",
                 capabilities: [
                     "Shader Graph and Material Graph interoperability",
                     "VFX authoring, diagnostics, and sample effects",
-                    "Animation, automatic IK, and ground adaptation",
-                    "Audio mixing, routing, spatial playback, and profiling",
+                    "Procedural animation, automatic IK, and ground adaptation",
+                    "Multi-scene C# gameplay, runtime UI, and native-asset residency",
                 ],
                 evidenceUrl: "/docs/reference/production-readiness-review/",
             },
@@ -69,11 +69,11 @@ export const roadmapHorizons: readonly RoadmapHorizon[] = [
         statement: "Close the evidence and capability gaps that prevent representative teams from shipping confidently.",
         initiatives: [
             {
-                title: "Supported native Linux releases",
-                outcome: "Reproducible Hub, Editor, package, and player workflows on declared Ubuntu and Rocky/Fedora baselines.",
+                title: "Complete native Linux acceptance",
+                outcome: "Extend published DEB/RPM evidence into repeatable graphical update, repair, removal, and player workflows.",
                 status: "In validation",
                 capabilities: [
-                    "Clean DEB and RPM release artifacts",
+                    "Published DEB and RPM release artifacts",
                     "Desktop protocol and secure-session integration",
                     "Vulkan rendered-output acceptance",
                     "Install, update, remove, and Sandbox validation",

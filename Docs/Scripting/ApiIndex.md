@@ -164,7 +164,7 @@ These types identify native components. Their layout is intentionally not expose
 | `Physics` | `TryRaycast`, `Raycast`, `TryCapsuleCast`, `OverlapSphere` |
 | `Navigation` | `FindPathAsync` |
 | `Prefab` | `Instantiate` |
-| `SceneManager` | `ActiveScene`, `LoadedScenes`, `FindByName`, `FindAllByName`, `FindWithTag`, `FindAllWithTag`, `FindAllWithComponent<T>`, `LoadSceneAsync` |
+| `SceneManager` | Active/loaded scene snapshots, scoped queries, `LoadSceneAsync`, `SetActiveScene`, `UnloadScene`, `Preserve` |
 | `RenderSettings` | `Current`, ambient/exposure/environment convenience properties |
 | `Cursor` | `Visible`, `Locked`, `VisibilityRequested`, `RequestCapture`, `RequestVisible`, `Hide`, `Show`, `Lock`, `Unlock` |
 | `Debug` | `Log`, `Warn`, `Error`, `LogException`, `Assert`, `DrawLine` |
@@ -175,9 +175,10 @@ Result values include `RaycastHit`, `NavigationPath`, `PrefabInstance`, and `Pro
 
 Physics motion and force values include `RigidBodyMotion` and `ForceMode`. Logging filters use `LogLevel`.
 
-`SceneLoadOperation` is a `CustomYieldInstruction` with state, progress, cancellation, and failure diagnostics.
-Standalone players support transactional `Single` replacement; see
-[Scenes And Render Settings](ScenesAndRenderSettings.md) for current Editor and additive-mode constraints.
+`SceneLoadOperation` is a `CustomYieldInstruction` with state, progress, cancellation, failure diagnostics, and the
+stable loaded-scene handle. Packaged players and Editor Play Mode share transactional `Single` replacement, additive
+load/unload/activation, active/loaded/specific/persistent query scopes, and hierarchy-root persistence. See
+[Scenes And Render Settings](ScenesAndRenderSettings.md) for lifecycle and failure rules.
 
 ## Managed Jobs
 
@@ -421,10 +422,15 @@ Gameplay code should not replace the engine-installed bridge.
 | --- | --- |
 | [`Behaviour.cs`](../../KeireManaged/Behaviour.cs) | Lifecycle, callbacks, synchronization context integration |
 | [`Handles.cs`](../../KeireManaged/Handles.cs) | Entity, component, transform, asset handles |
-| [`RuntimeApi.cs`](../../KeireManaged/RuntimeApi.cs) | Time, input, physics, navigation, animation, audio, VFX, prefab, cursor, diagnostics |
+| [`RuntimeFoundation.cs`](../../KeireManaged/RuntimeFoundation.cs) | Application identity, time, screen, and display state |
+| [`PlayerPreferences.cs`](../../KeireManaged/PlayerPreferences.cs) | Typed persistent application preferences |
+| [`RuntimeApi.cs`](../../KeireManaged/RuntimeApi.cs) | Input, physics, navigation, animation, audio, VFX, prefab, cursor, diagnostics |
+| [`RuntimeAssets.cs`](../../KeireManaged/RuntimeAssets.cs) | Native presentation-asset residency handles and load status |
 | [`Rendering.cs`](../../KeireManaged/Rendering.cs) | Camera, renderer, light, material-slot, and shader-property handles |
-| [`RuntimeWorld.cs`](../../KeireManaged/RuntimeWorld.cs) | Scene handles, async replacement, and render-environment settings |
+| [`RuntimeWorld.cs`](../../KeireManaged/RuntimeWorld.cs) | Multi-scene handles, transitions, query scopes, persistence, and render settings |
 | [`RuntimeUi.cs`](../../KeireManaged/RuntimeUi.cs) | UI wrappers and in-memory layout |
+| [`RuntimeUiControls.cs`](../../KeireManaged/RuntimeUiControls.cs) | Scene-backed slider, toggle, input, and scroll controls |
+| [`Coroutines.cs`](../../KeireManaged/Coroutines.cs) | Coroutine handles and built-in yield instructions |
 | [`Events.cs`](../../KeireManaged/Events.cs) | Persistent and runtime events |
 | [`ScriptableObject.cs`](../../KeireManaged/ScriptableObject.cs) | Managed data lifecycle |
 | [`ManagedAssetRuntime.cs`](../../KeireManaged/ManagedAssetRuntime.cs) | Managed data registry and load façade |

@@ -1,16 +1,18 @@
 # Changelog
 
-## Unreleased
-
-- Refresh the Asset Tool and player-runtime managed hosts when editor or Hub builds compile those executable
-  dependencies, preventing packaged gameplay builds from using a stale managed API assembly.
-- Add the public `PrefabAsset` managed marker so serialized prefab references retain their native stable asset type
-  through strict player-build discovery.
-
 All notable Kéire changes are documented here. The format follows Keep a Changelog, and releases use semantic
 versions.
 
 ## Unreleased
+
+- Audited every first-party documentation and website surface against current schemas, APIs, release artifacts,
+  Marketplace publication, parity ledgers, and rendered navigation. Corrected website headings, metadata, roadmap and
+  readiness labels, static guide counts, and stale capability claims; added cross-source drift checks and a weighted
+  production-readiness review that records the current rendered-output compile blocker without weakening release claims.
+- Refresh the Asset Tool and player-runtime managed hosts when editor or Hub builds compile those executable
+  dependencies, preventing packaged gameplay builds from using a stale managed API assembly.
+- Add the public `PrefabAsset` managed marker so serialized prefab references retain their native stable asset type
+  through strict player-build discovery.
 
 - Fixed Editor Play Mode startup with the multi-scene runtime by activating the cloned runtime scene before adopting
   its session into the runtime world.

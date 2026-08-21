@@ -117,10 +117,10 @@ All 62 published guides are listed below in the same groups used by the document
 | Guide | Use it for |
 | --- | --- |
 | [Structured Diagnostics Overview](Diagnostics/README.md) | Diagnostic identity, registration, packaged remediation, links, validation, and authoring rules. |
-| [KEIRE-AUDIO-0001](Diagnostics/KEIRE-AUDIO-0001.md) | Diagnose and remediate audio-device initialization failure. |
+| [KEIRE-AUDIO-0001](Diagnostics/KEIRE-AUDIO-0001.md) | Diagnose and remediate an audio streaming underrun. |
 | [KEIRE-EXAMPLE-0001](Diagnostics/KEIRE-EXAMPLE-0001.md) | Reference diagnostic showing the required remediation-page structure. |
-| [KEIRE-REPLAY-0001](Diagnostics/KEIRE-REPLAY-0001.md) | Diagnose replay compatibility or validation rejection. |
-| [KEIRE-REPLAY-0002](Diagnostics/KEIRE-REPLAY-0002.md) | Diagnose replay integrity or read failure. |
+| [KEIRE-REPLAY-0001](Diagnostics/KEIRE-REPLAY-0001.md) | Diagnose the first deterministic replay state divergence. |
+| [KEIRE-REPLAY-0002](Diagnostics/KEIRE-REPLAY-0002.md) | Diagnose recording, decoding, restoration, capture, or publication failure. |
 
 ## Sources of Truth
 

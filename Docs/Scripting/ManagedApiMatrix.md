@@ -17,12 +17,12 @@ calls, focused managed/native tests, and the SDK package consumers as evidence:
 
 | Requested area | Existing public evidence | Audit decision |
 | --- | --- | --- |
-| Audio | `Audio`, `AudioSourceHandle`, `AudioListenerHandle`, `AudioReverbZoneHandle`, typed clip/mixer references, mixer buses and playback status | Production surface already exists; add explicit clip/mixer prewarming through the common residency handle |
-| VFX | `Vfx`, `VfxEmitterHandle`, typed Blackboard/range setters, events and playback status | Production playback already exists; add effect/volume residency markers and keep graph construction editor/native-owned |
-| Materials and shaders | Camera, Mesh Renderer, light, property-block, dynamic material-instance, and global parameter-collection handles | Production runtime mutation already exists; add native readiness for Material, Shader, Texture, Mesh, and collection assets |
-| Shader/Material/VFX graphs | Immutable native graph assets and compiled runtime consumers; managed graph construction is intentionally absent | Expose typed identities and residency status only, without mutable graph objects or speculative node APIs |
-| Runtime UI | Scene-backed controls, focus/navigation, safe-area scaling, accessibility metadata, and bounded event polling | Existing hooks remain authoritative; Texture/Material residency fills the shared asset-readiness need |
-| Runtime assets | Managed data has bounded `LoadAsync`; presentation systems load native assets internally | Highest-value coherent gap: explicit typed native leases with priority, state, fallback, revision, structured errors, coroutine/async waiting, disposal, and hot-reload generation cleanup |
+| Audio | `Audio`, `AudioSourceHandle`, `AudioListenerHandle`, `AudioReverbZoneHandle`, typed clip/mixer references, mixer buses and playback status | Production playback plus explicit Audio Clip/Mixer residency, priority, readiness, fallback, revision, diagnostics, and deterministic release |
+| VFX | `Vfx`, `VfxEmitterHandle`, typed Blackboard/range setters, events and playback status | Production playback plus VFX Effect/Volume residency; graph construction remains editor/native-owned |
+| Materials and shaders | Camera, Mesh Renderer, light, property-block, dynamic material-instance, and global parameter-collection handles | Production mutation plus typed Material, Shader, Texture, Mesh, collection, and graph residency |
+| Shader/Material/VFX graphs | Immutable native graph assets and compiled runtime consumers; managed graph construction is intentionally absent | Typed graph identities and residency status ship without mutable graph objects or speculative node APIs |
+| Runtime UI | Scene-backed controls, focus/navigation, safe-area scaling, accessibility metadata, and bounded event polling | Existing hooks remain authoritative; Texture/Material residency supplies the shared asset-readiness contract |
+| Runtime assets | Managed data has bounded `LoadAsync`; presentation assets use `AssetHandle<T>` | Typed native leases ship with priority, state, fallback, revision, structured errors, coroutine/async waiting, disposal, and hot-reload generation cleanup |
 
 | Area | Status | Current Kéire surface | Next parity work |
 | --- | --- | --- | --- |
@@ -30,7 +30,7 @@ calls, focused managed/native tests, and the SDK package consumers as evidence:
 | Frame time | **Production** | Scaled, fixed, unscaled, and elapsed time; validated time scale and pause | Capture/replay time domains remain native tooling |
 | Screen | **Production** | Logical/pixel resolution, display scale, focus/visibility/minimize state, fullscreen mode, safe area, VSync state, transactional resize | Dynamic present-mode selection and multi-display placement |
 | Behaviour lifecycle | **Production** | Enable/start/update/fixed/late, physics, animation, destroy, reload, coroutines, execution order | — |
-| Entities and transforms | **Production** | Identity, hierarchy, active/layer/name/tags, clone/destroy, component handles, deterministic bounded name/tag/component queries, local/world/presentation transforms | Multi-scene query scopes |
+| Entities and transforms | **Production** | Identity, hierarchy, active/layer/name/tags, clone/destroy, component handles, active/loaded/specific/persistent query scopes, local/world/presentation transforms | Spatial query predicates and streaming-cell filters |
 | Inspector serialization | **Production** | Stable fields; custom labels, headers, groups, and tooltips; true sliders; one-sided bounds and drag steps; multiline and read-only fields; nested data, asset references, reload-only state | Arbitrary editor-code property drawers |
 | Assets and managed data | **Production** | Typed asset IDs/references; bounded async managed-data loading; `ScriptableObject` clone and hot reload; explicit native presentation-asset residency handles with priority, state, fallback, revision, diagnostics, coroutine/async waiting, and generation-safe release | Streamed range access and custom project asset marker registration |
 | Input and cursor | **Partial** | Named actions and phases; device snapshots; control schemes; persistent interactive rebinding; paired gamepad rumble; cursor visibility and capture | Touch, pen, sensors, XR, advanced haptics |
@@ -39,7 +39,7 @@ calls, focused managed/native tests, and the SDK package consumers as evidence:
 | Audio | **Production** | Clips, sources, listeners, reverb zones, mixers/buses, playback status and spatial options | DSP graph scripting and microphone input |
 | VFX | **Production** | Effect playback, lifetime, events, and typed parameter ranges | Managed graph construction is not a runtime goal |
 | Runtime UI | **Partial** | Scene-backed buttons, sliders, toggles, input fields and scroll views; typed polling events, focus/navigation, safe-area scaling and accessibility metadata | Localization, data binding, animated transitions, and platform screen-reader adapters |
-| Scenes and prefabs | **Partial** | Transactional prefab instantiate; active/loaded scene handles; coroutine-compatible packaged-player `Single` replacement with progress, cancellation, diagnostics, and activation rollback | Unified additive worlds, unload, active-scene selection, and Editor Play replacement |
+| Scenes and prefabs | **Partial** | Transactional prefab instantiate; stable active/loaded scene handles; shared packaged-player and Editor Play `Single`/`Additive` loads, unload, activation, scoped queries, persistent roots, progress, cancellation, diagnostics, and rollback | Deferred activation/preload controls, load priorities, and Edit-mode multi-scene authoring |
 | Rendering and materials | **Partial** | Typed Camera, Mesh Renderer, directional/point/spot light handles; mesh/material/texture/shader references; bounded renderer-wide and per-slot dynamic overrides; hot-reload-safe global Material Parameter Collections; atomic transient render-environment settings | Render textures and custom render-pass scripting |
 | Jobs and async | **Production** | Managed jobs, dependencies, priorities, cancellation, synchronization context, lifetime token | Parallel-for convenience APIs |
 | Diagnostics | **Production** | Structured logs, exceptions, assertions, profiler spans/counters, debug lines | In-game diagnostic overlay controls |

@@ -124,9 +124,9 @@ ownership. Local Packages remains a deliberate developer workflow and never clai
 OAuth access tokens, organization authorization, and signed Storage URLs remain in Hub memory. Refresh tokens may be
 persisted only through the operating system's protected credential facility together with their authentication-flow
 identity. None of these credentials are serialized into the marketplace cache or passed to the Editor. The packaged
-Hub and Editor both carry the public marketplace trust document and the pinned libsodium verifier; only the offline
-publication boundary has the private signing key. Supabase stores and returns the immutable signed envelope, but the
-download-grant service cannot mint or alter a trusted publication proof.
+Hub and Editor both carry the public marketplace trust document and the pinned libsodium verifier; only the isolated,
+least-privileged publication signer has the private signing key. Supabase stores and returns the immutable signed
+envelope, but the download-grant service cannot mint or alter a trusted publication proof.
 
 Package C# must be explicitly declared as runtime, Editor, or test code. Import requires explicit executable-code
 consent. The receipt binds that consent to the package's executable-code fingerprint, so a version that changes code
@@ -149,7 +149,7 @@ Kéire's five first-party launch products are prepared with
 roots, proves that selected asset dependencies remain closed, explicitly declares managed assemblies, rejects links and
 nonportable paths, refuses to overwrite an output release set, and inspects every generated archive through the
 authoritative Asset Tool. The resulting packages are still unsigned quarantine inputs: official content must pass the
-same Publisher upload, isolated validation, staff moderation, and offline publication boundary as any other product.
+same Publisher upload, isolated validation, staff moderation, and automatic publication queue as any other product.
 
 The Publisher portal accepts the public product name, category, approved license, and card summary together with the
 first package upload. That reservation transaction creates a private draft product and version before issuing the
@@ -166,13 +166,13 @@ projects pin the SDK, clear NuGet sources, disable analyzers and source generato
 The worker must run behind OS-enforced outbound denial; its environment marker is an additional launch assertion, not
 a substitute for that sandbox.
 
-After staff approval, `prepare-marketplace-publication.ps1` creates an exact, independently verified Ed25519 release
-envelope on the offline signing workstation. The administrator uploads only that bounded JSON envelope. The publication
-Edge boundary verifies its signature against the active public trust root, rechecks the validator and moderation hashes,
-copies the same quarantine object into a content-addressed path in private release Storage, and then commits the
-publication, product/version state, and audit event through one service-only transaction. If that transaction fails,
-the promoted object is removed. Neither the private signing key nor an unsigned replacement package enters the online
-publication path.
+After staff approval, the service transaction atomically creates a durable publication job bound to the immutable
+upload, validator attestation, moderation decision, and intended release metadata. A separately scoped signer leases
+metadata only, verifies the validator's Ed25519 attestation and the active publication key, signs the existing object
+identity without receiving a Storage download grant, and commits publication through the service-only transition.
+Retries are leased and audited; neither an administrator's browser nor a replacement package carries the private key.
+The older offline-envelope workflow remains an administrator-only recovery boundary until automatic publication has
+completed its staging and recovery gates.
 
 See [Package Archives](PackageArchives.md) for Editor distribution packages and [Asset Pipeline](AssetPipeline.md) for
 asset import, cache, and cooking behavior.

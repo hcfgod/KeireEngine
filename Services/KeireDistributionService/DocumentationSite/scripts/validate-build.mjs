@@ -53,7 +53,7 @@ for (const htmlPath of htmlFiles) {
     assert(/<title>[^<]+<\/title>/i.test(html), `Missing page title in ${htmlPath}.`);
     assert(/<meta\s+name="description"\s+content="[^"]+/i.test(html), `Missing page description in ${htmlPath}.`);
     assert(/<main\b/i.test(html), `Missing main landmark in ${htmlPath}.`);
-    assert(/<h1\b/i.test(html), `Missing level-one heading in ${htmlPath}.`);
+    assert((html.match(/<h1\b/gi) ?? []).length === 1, `Page must contain exactly one level-one heading: ${htmlPath}.`);
     assert(!/<style(?:\s|>)/i.test(html), `Inline style block violates the production CSP in ${htmlPath}.`);
     for (const script of html.matchAll(/<script(?![^>]*\bsrc=)([^>]*)>([\s\S]*?)<\/script>/gi)) {
         const type = /\btype=["']([^"']+)["']/i.exec(script[1])?.[1] ?? "text/javascript";

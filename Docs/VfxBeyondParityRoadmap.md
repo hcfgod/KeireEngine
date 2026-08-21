@@ -1,6 +1,6 @@
 # Kéire VFX Beyond-Parity Roadmap
 
-Review date: 2026-08-02
+Review date: 2026-08-21
 Scope: production capabilities that are not rows in the frozen Unity 6.3 Operator, Block, Context, and Output manifest
 
 The [parity manifest](VfxParityManifest.json) measures node-catalog compatibility. It does not measure whether Kéire
@@ -12,7 +12,7 @@ must not change a manifest row or inflate the Unity parity score.
 | Priority | Kéire production feature | Current evidence | Production acceptance |
 | --- | --- | --- | --- |
 | P0 | Runtime scalability manager | `VfxEmitterComponent` persists Quality Tier, Culling Mode, and bounds, but runtime policy does not consume them. Worlds have hard effect/particle budgets and report drops. | Per-camera visibility, distance and fixed-bounds culling; priority/budget groups; deterministic tier selection; sleep/wake hysteresis; configurable CPU/GPU degradation; counters and tests proving that overload reduces quality without random effect loss. |
-| P0 | Deterministic checkpoints, simulation cache, and replay | Seeds and simulation steps are deterministic, but no versioned world-state checkpoint or seekable cache is public. | Capture/restore every live system, particle, strip, event queue, parameter, RNG input, and generation; frame seeking and editor scrubbing; CPU/GPU replay validation; migration, memory bounds, and corrupt-cache rejection. |
+| P0 | Deterministic checkpoints, simulation cache, and replay | `.keirereplay` v1 records bounded world checkpoints, restores and seeks from the closest checkpoint, captures CPU VFX emitter/random/spawn/particle state, and retains GPU emitter progress without claiming cross-device bit identity. It is a runtime verification format, not an authorable VFX simulation cache. | Extend capture/restore to every live strip, event queue, parameter, and GPU state needed for differential replay; add editor scrubbing and reusable simulation caches; retain migration, memory bounds, and corrupt-cache rejection. |
 | P0 | Network replication and rollback contract | Stable effect/parameter IDs and deterministic events exist, but there is no wire protocol or reconciliation API. | Versioned spawn/event/parameter command stream, tick and seed agreement, state checksums, prediction/rollback hooks, late-join snapshots, bandwidth budgets, and differential tests under loss/reordering. |
 | P0 | Frame-exact queued GPU simulation handoff | Spawn work accumulates safely when render snapshots are skipped, but coalesced work uses the latest Time, Delta Time, and Simulation Step tuple. | Bounded per-step queue or mathematically equivalent batching that preserves fixed-step timing and random identity; explicit overflow policy; no simulation-path allocations; CPU/GPU differential tests during render stalls. |
 | P0 | GPU particle and expression inspection | CPU debug snapshots expose bounded particle samples. GPU per-particle samples and intermediate register/attribute inspection are unavailable. | Asynchronous bounded readback, particle/strip selection, node-register and attribute history, NaN/non-finite provenance, source-node correlation, zero forced synchronization in normal frames, and editor visualization. |
@@ -30,7 +30,8 @@ must not change a manifest row or inflate the Unity parity score.
 ## Recommended Delivery Order
 
 1. Consume the already-persisted quality, culling, and bounds data in a deterministic scalability manager.
-2. Fix the queued GPU step contract, then build checkpoints/cache/replay on the resulting exact timeline.
+2. Fix the queued GPU step contract, then extend runtime replay checkpoints into a VFX simulation cache and editor
+   scrubbing workflow on the resulting exact timeline.
 3. Add true device timing and GPU inspection so later optimization work has attributable evidence.
 4. Define networking and asynchronous gameplay channels against the checkpoint and identity contracts.
 5. Add streaming, multi-view/XR, warm-start, and shipping telemetry as complete game-facing vertical slices.

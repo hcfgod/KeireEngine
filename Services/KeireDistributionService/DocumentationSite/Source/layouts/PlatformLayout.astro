@@ -41,11 +41,15 @@ if (Astro.locals.user && Astro.locals.supabase) {
         <meta name="description" content={description} />
         <meta name="robots" content={robots} />
         <meta property="og:type" content="website" />
+        <meta property="og:site_name" content="Kéire Engine" />
         <meta property="og:title" content={fullTitle} />
         <meta property="og:description" content={description} />
         <meta property="og:image" content={new URL(image, Astro.site)} />
         <meta property="og:url" content={canonical} />
         <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content={fullTitle} />
+        <meta name="twitter:description" content={description} />
+        <meta name="twitter:image" content={new URL(image, Astro.site)} />
         <link rel="canonical" href={canonical} />
         <link rel="icon" href="/assets/keire.png" />
         <link rel="manifest" href="/site.webmanifest" />

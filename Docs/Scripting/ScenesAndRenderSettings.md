@@ -121,7 +121,7 @@ Runtime settings are transient:
 
 - a packaged player retains them for its current process and uses them across scene replacements;
 - Editor Play Mode applies them to the Game/Scene presentation for that Play session and discards them on Stop;
-- neither path writes `Config/ProjectSettings/Rendering.keiresettings`.
+- neither path writes `ProjectSettings/Rendering.keiresettings`.
 
 Use the Project Settings authoring surface for persisted defaults. Use `RenderSettings` for gameplay transitions such
 as interiors, weather, damage states, cinematics, and accessibility exposure presets.

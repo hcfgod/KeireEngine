@@ -129,6 +129,15 @@ assert(
     !/github\.com\/hcfgod\/KeireEngine\/(?:blob|tree)\/master\/Docs/.test(fallbackLanding),
     "Fallback documentation must not redirect guide navigation to GitHub.",
 );
+assert(fallbackLanding.includes(`<span data-doc-count>${allDocSources.length} documents</span>`),
+    "Fallback documentation count is stale.");
+for (const [fragment, count] of [
+    ["getting-projects", 5], ["editor-authoring", 10], ["engine-systems", 11], ["assets-builds", 4],
+    ["vfx", 4], ["csharp", 16], ["production", 7], ["diagnostics", 5],
+]) {
+    assert(new RegExp(`<a href="#${fragment}">[^<]*<span>[^<]+</span><b>${count}</b></a>`).test(fallbackLanding),
+    `Fallback documentation category count is stale: ${fragment}.`);
+}
 
 for (const sourcePath of allDocSources) {
     const sourceAbsolute = path.join(docsRoot, ...sourcePath.split("/"));
@@ -201,6 +210,71 @@ const versionContracts = [
 for (const [sourcePath, contract] of versionContracts) {
     const source = await readMarkdown(path.join(docsRoot, ...sourcePath.split("/")));
     assert(contract.test(source), `Documentation schema contract is stale: Docs/${sourcePath} (${contract}).`);
+}
+
+const assetPipelineGuide = await readMarkdown(path.join(docsRoot, "AssetPipeline.md"));
+assert(assetPipelineGuide.includes(`## Static mesh version ${meshSchema}`),
+    "Asset Pipeline heading does not identify the current mesh version.");
+const renderingGuide = await readMarkdown(path.join(docsRoot, "Rendering.md"));
+assert(renderingGuide.includes(`Material schema v${materialSchema} owns`) &&
+    !renderingGuide.includes("authored transparency requires a future explicit surface mode"),
+    "Rendering guide contains a stale material schema or transparency claim.");
+
+const materialMatrix = await readMarkdown(path.join(docsRoot, "MaterialParityMatrix.md"));
+const materialRows = [...materialMatrix.matchAll(/^\| ME-[A-Z]{2}-\d{3} \|.*?\| (Complete|Partial|Planned) \|/gm)];
+const materialCounts = { Complete: 0, Partial: 0, Planned: 0 };
+for (const row of materialRows) {
+    materialCounts[row[1]] += 1;
+}
+assert(materialRows.length === 145, `Expected 145 material capability rows, found ${materialRows.length}.`);
+const materialSummary = `${materialRows.length} rows — ${materialCounts.Complete} Complete, ` +
+    `${materialCounts.Partial} Partial, and ${materialCounts.Planned} Planned`;
+assert(materialMatrix.includes(materialSummary), "Material capability summary does not match its rows.");
+
+const productionReview = await readMarkdown(path.join(docsRoot, "ProductionReadinessReview.md"));
+assert(productionReview.includes(`contains ${allDocSources.length} guides`),
+    "Production-readiness documentation count is stale.");
+assert(productionReview.includes(`${materialRows.length} rows: ${materialCounts.Complete} Complete, ` +
+    `${materialCounts.Partial} Partial, and ${materialCounts.Planned} Planned`),
+    "Production-readiness material counts do not match the capability matrix.");
+const readinessReviewDate = /^Review date: (\d{4}-\d{2}-\d{2})$/m.exec(productionReview)?.[1];
+assert(readinessReviewDate, "Production-readiness review date is missing or invalid.");
+const readinessAuditLabel = `Audited ${new Intl.DateTimeFormat("en-GB", {
+    day: "numeric", month: "short", year: "numeric", timeZone: "UTC",
+}).format(new Date(`${readinessReviewDate}T00:00:00Z`))}`;
+const readinessScoreRows = [...productionReview.matchAll(/^\| [^|]+ \| (\d+)% \| [A-C][+-]? \| (\d+)\/100 \|/gm)];
+assert(readinessScoreRows.length === 10, "Production-readiness weighted rubric must contain ten scored domains.");
+const readinessWeight = readinessScoreRows.reduce((sum, row) => sum + Number.parseInt(row[1], 10), 0);
+const readinessWeightedScore = Math.round(readinessScoreRows.reduce((sum, row) =>
+    sum + Number.parseInt(row[1], 10) * Number.parseInt(row[2], 10), 0) / readinessWeight);
+assert(readinessWeight === 100 &&
+    productionReview.includes(`| Weighted current-source readiness | **100%** | **B+** | **${readinessWeightedScore}/100** |`),
+    "Production-readiness overall score does not match its weighted domain scores.");
+
+const vfxManifest = JSON.parse(await readFile(path.join(docsRoot, "VfxParityManifest.json"), "utf8"));
+const vfxImplemented = vfxManifest.counts?.WithKeireImplementation;
+const vfxDisabled = vfxManifest.counts?.Disabled;
+const vfxTotal = vfxManifest.counts?.Total;
+assert(Number.isInteger(vfxImplemented) && Number.isInteger(vfxDisabled) && vfxTotal === vfxImplemented + vfxDisabled,
+    "VFX parity manifest counts are invalid.");
+assert(productionReview.includes(`${vfxImplemented} implemented and ${vfxDisabled} disabled`) &&
+    productionReview.includes(`cover ${vfxImplemented}/${vfxTotal} rows`),
+    "Production-readiness VFX counts do not match the parity manifest.");
+const visualInitiatives = await readMarkdown(path.join(docsRoot, "VisualAuthoringInitiatives.md"));
+assert(visualInitiatives.includes(`${vfxImplemented} enabled Kéire-equivalent rows, ${vfxDisabled} disabled rows`) &&
+    visualInitiatives.includes("Schema-v3 JSON") && visualInitiatives.includes("Twelve paired Sandbox"),
+    "Visual-authoring baseline is stale.");
+
+const managedMatrix = await readMarkdown(path.join(docsRoot, "Scripting", "ManagedApiMatrix.md"));
+for (const staleClaim of ["Multi-scene query scopes", "Unified additive worlds", "add native readiness for"]) {
+    assert(!managedMatrix.includes(staleClaim), `Managed API matrix contains a completed feature as future work: ${staleClaim}.`);
+}
+const assetPackagesGuide = await readMarkdown(path.join(docsRoot, "AssetPackages.md"));
+assert(!assetPackagesGuide.includes("prepare-marketplace-publication.ps1"),
+    "Asset Packages guide references the retired browser-envelope publication workflow.");
+const vfxGuide = await readMarkdown(path.join(docsRoot, "Vfx.md"));
+for (const sourcePath of ["RenderVfxRecording.cpp", "RenderVfxPipelines.cpp", "RenderVfxDrawing.cpp", "SceneRuntimeVfx.cpp"]) {
+    assert(vfxGuide.includes(sourcePath), `VFX implementation map is missing ${sourcePath}.`);
 }
 
 const rootReadme = await readFile(path.join(repositoryRoot, "README.md"), "utf8");
@@ -416,14 +490,20 @@ assert(roadmapPage.includes("roadmapHorizons") && roadmapPage.includes("Directio
 for (const horizon of ['id: "now"', 'id: "next"', 'id: "later"']) {
     assert(roadmapModel.includes(horizon), `The public roadmap is missing ${horizon}.`);
 }
+assert(roadmapPage.includes("Windows + Linux x86-64") &&
+    !roadmapModel.includes("current Windows technology preview") && !roadmapModel.includes("offline signing"),
+    "The roadmap contains stale platform or Marketplace publication labels.");
 const marketplaceProgress = launchReadiness.split('id: "marketplace"', 2)[1]?.split('id: "operations"', 1)[0] ?? "";
 const operationsProgress = launchReadiness.split('id: "operations"', 2)[1] ?? "";
-assert(marketplaceProgress.includes("completed: 9") && operationsProgress.includes("completed: 11") &&
+assert(marketplaceProgress.includes("completed: 10") && operationsProgress.includes("completed: 11") &&
+    !launchReadiness.includes("offline-signed") &&
     platformStyles.includes(".readiness-progress progress::-webkit-progress-value") &&
     platformStyles.includes(".readiness-progress progress::-moz-progress-bar"),
     "Staff readiness must retain current evidence and cross-browser native-meter styling.");
 assert(platformHeader.includes('href="/roadmap/"') && platformHeader.includes('active === "roadmap"'),
     "Roadmap must be discoverable from primary navigation and expose current-page state.");
+assert(platformHeader.includes("Engine &amp; Editor"),
+    "Primary navigation must use the current Engine and Editor product label.");
 assert(platformHeader.includes('href="/changelog/"') && platformHeader.includes('active === "changelog"') &&
     !platformHeader.includes('href="/community/"'),
     "Changelog must be primary navigation while Community moves to the footer.");
@@ -448,6 +528,8 @@ assert(changelogFeed.includes('Content-Type": "application/rss+xml; charset=utf-
     "The changelog RSS endpoint must publish the canonical release archive.");
 
 const publisherPage = await readFile(path.join(siteRoot, "Source", "pages", "publisher", "index.astro"), "utf8");
+assert(!publisherPage.includes("offline signing") && publisherPage.includes("queued metadata signing"),
+    "Publisher copy must describe the automatic metadata-only publication workflow.");
 for (const contract of [
     'import { Upload } from "tus-js-client"',
     'import { sha256 } from "@noble/hashes/sha2.js"',
@@ -515,6 +597,9 @@ assert(staffPage.includes("launchReadinessTracks") && staffPage.includes('id="re
     staffPage.includes('href="/docs/reference/production-readiness-review/"') &&
     !staffPage.includes('href="/roadmap/"'),
     "Staff operations must retain detailed launch evidence independently of the public roadmap.");
+assert(staffPage.includes(readinessAuditLabel) &&
+    staffPage.includes("Marketplace launch checklist · current source"),
+    "Staff readiness labels are stale.");
 assert(staffPage.includes('activeSubmissions') && staffPage.includes('signingSubmissions') &&
     staffPage.includes('submissionHistory') && staffPage.includes('id="review-history"'),
     "Terminal package decisions must leave the active staff queue while remaining available as review history.");
@@ -546,6 +631,9 @@ assert(staffPage.includes("Withdraw approval") && staffPage.includes("staff-with
 assert(!staffPage.includes("app_metadata"),
     "Staff page authorization must use current database roles instead of browser JWT metadata.");
 const platformLayout = await readFile(path.join(siteRoot, "Source", "layouts", "PlatformLayout.astro"), "utf8");
+for (const metadata of ["og:site_name", "twitter:title", "twitter:description", "twitter:image"]) {
+    assert(platformLayout.includes(metadata), `Platform metadata is missing ${metadata}.`);
+}
 const staffAwareHeader = await readFile(path.join(siteRoot, "Source", "components", "PlatformHeader.astro"), "utf8");
 assert(platformLayout.includes('from("platform_staff_members")') &&
     staffAwareHeader.includes('href="/admin/marketplace/"'),
@@ -564,6 +652,17 @@ assert(!staffPage.includes('/admin/marketplace/v1/publications/') &&
     staffPublicationRoute.includes("requireAal2") &&
     staffPublicationRoute.includes('functions.invoke("marketplace-publication"'),
     "The legacy offline recovery route must remain an administrator-only publication boundary, not a staff UI path.");
+for (const relativePath of [
+    "Source/pages/contact/index.astro",
+    "Source/pages/account/create/index.astro",
+    "Source/pages/account/recover/index.astro",
+    "Source/pages/account/sign-in.astro",
+    "Source/pages/account/update-password/index.astro",
+]) {
+    const page = await readFile(path.join(siteRoot, ...relativePath.split("/")), "utf8");
+    assert((page.match(/<h1\b/g) ?? []).length === 1,
+        `Website page must expose exactly one primary heading: ${relativePath}.`);
+}
 const marketplaceApi = await readFile(path.join(siteRoot, "Source", "lib", "api.ts"), "utf8");
 const marketplaceCatalogRoute = await readFile(path.join(siteRoot, "Source", "pages", "marketplace", "v1", "catalog",
     "index.ts"), "utf8");

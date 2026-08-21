@@ -105,9 +105,11 @@ The managed API source is the final authority:
 - [`RuntimeApi.cs`](../../KeireManaged/RuntimeApi.cs) defines gameplay service façades.
 - [`RuntimeFoundation.cs`](../../KeireManaged/RuntimeFoundation.cs) defines application, time, and screen services.
 - [`PlayerPreferences.cs`](../../KeireManaged/PlayerPreferences.cs) defines per-application persistent preferences.
+- [`RuntimeAssets.cs`](../../KeireManaged/RuntimeAssets.cs) defines typed native-asset residency handles and status.
 - [`Rendering.cs`](../../KeireManaged/Rendering.cs) defines cameras, renderers, lights, and material property blocks.
 - [`RuntimeWorld.cs`](../../KeireManaged/RuntimeWorld.cs) defines scene operations and runtime render settings.
-- [`RuntimeUi.cs`](../../KeireManaged/RuntimeUi.cs) and [`Events.cs`](../../KeireManaged/Events.cs) define UI and events.
+- [`RuntimeUi.cs`](../../KeireManaged/RuntimeUi.cs), [`RuntimeUiControls.cs`](../../KeireManaged/RuntimeUiControls.cs),
+  and [`Events.cs`](../../KeireManaged/Events.cs) define UI and events.
 - [`SerializationAttributes.cs`](../../KeireManaged/SerializationAttributes.cs) defines Inspector metadata.
 
 When a guide and the source disagree, update the guide with the API change.

@@ -40,10 +40,10 @@ export const launchReadinessTracks: readonly LaunchReadinessTrack[] = [
         id: "marketplace",
         status: "Release candidate",
         title: "Marketplace and publishing workflows",
-        completed: 9,
+        completed: 10,
         total: 12,
-        delivered: "Forced-RLS data model, private Storage boundaries, versioned APIs, official draft products, resumable uploads, isolated validation, publisher submission, staff moderation, and free-entitlement contracts.",
-        remaining: "Publish the first offline-signed official release, complete public catalog and claim acceptance, and approve the marketplace legal policies.",
+        delivered: "Forced-RLS data model, private Storage boundaries, versioned APIs, official draft products, resumable uploads, isolated validation, publisher submission, staff moderation, automatic metadata-only signing, immutable publication, and free-entitlement contracts.",
+        remaining: "Publish and claim the first official package through the complete live path, then approve the marketplace legal policies.",
     },
     {
         id: "operations",
@@ -51,7 +51,7 @@ export const launchReadinessTracks: readonly LaunchReadinessTrack[] = [
         title: "Validation and release operations",
         completed: 11,
         total: 12,
-        delivered: "Atomic validator leases, scoped broker boundary, isolated worker, archive validation, malware and secret scanning, no-network C# compilation, real quarantine and moderation evidence, deterministic first-party package artifacts, a dedicated offline Ed25519 trust root, and a signature-verifying immutable publication boundary.",
+        delivered: "Atomic validator leases, scoped broker boundary, isolated worker, archive validation, malware and secret scanning, no-network C# compilation, real quarantine and moderation evidence, deterministic first-party package artifacts, dedicated Ed25519 trust roots, a durable publication queue, and a least-privileged metadata signer.",
         remaining: "Publish the official package set, rehearse restore and key rotation, and complete the native platform acceptance matrix as one release-operations gate.",
     },
 ] as const;

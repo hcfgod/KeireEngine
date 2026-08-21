@@ -75,11 +75,10 @@ The renderer consumes mesh schema v5 as ordered LOD, submesh, material-slot, UV1
 Schema v1 and v2 meshes decode as one LOD with one submesh and one slot; schema v3 carries the production LOD structure
 without UV1, and schema v4 adds UV1 while implying triangle-list topology. Submission
 selects a projected-height LOD, frustum-tests its submesh bounds, resolves indexed material overrides or imported
-defaults, and creates a deterministic draw order. Opaque and
-masked work is state sorted; premultiplied blend work remains depth-tested, disables depth writes, and sorts
-back-to-front with stable entity/submesh tie breaking.
+defaults, and creates a deterministic draw order. Opaque and masked work is state sorted; transparent work remains
+depth-tested, disables depth writes, and sorts back-to-front with stable entity/submesh tie breaking.
 
-Material schema v2 owns `Opaque`, `Mask`, `Blend`, `Additive`, `Modulate`, `Alpha Composite`, and `Alpha Holdout`
+Material schema v3 owns `Opaque`, `Mask`, `Blend`, `Additive`, `Modulate`, `Alpha Composite`, and `Alpha Holdout`
 alpha modes, alpha cutoff, and double-sided state. Mask surfaces
 write depth and reject fragments below their cutoff. Blend uses straight source alpha, Additive accumulates source color
 weighted by source alpha, Modulate multiplies destination color, Alpha Composite expects premultiplied source color,
@@ -173,7 +172,8 @@ uses Cook-Torrance GGX directional lighting with base color, normal, metallic-ro
 ambient, and exposure inputs. Null semantic slots bind renderer-owned white, flat-normal, neutral-ORM, or black
 textures; missing non-null textures retain the checkerboard diagnostic. Tangent normals, light direction, and view
 direction are evaluated in world space. Opaque pipelines write opaque alpha even when a source base-color image carries
-transparent texels; authored transparency requires a future explicit surface mode instead of accidental compositing.
+transparent texels; authored transparency uses one of the explicit transparent surface modes described above rather
+than accidental compositing.
 The PBR vertex path applies the normal matrix to normals and the model matrix to tangents, orthogonalizes the tangent,
 multiplies stored tangent handedness by the model determinant sign, and reconstructs a normalized bitangent. Degenerate
 or nonfinite inputs use a deterministic axis fallback. D3D12 and Vulkan pixel cases cover +Y normal perturbation under

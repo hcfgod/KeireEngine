@@ -4,7 +4,7 @@ export const prerender = false;
 if (Astro.locals.user) return Astro.redirect("/account/", 303);
 ---
 <PlatformLayout title="Create account" description="Create a verified Kéire account for Hub authorization, organizations, Marketplace assets, and publishing." robots="noindex">
-    <section class="platform-shell account-shell"><div><p class="eyebrow">One account</p><h1 class="display-title">Build.<br /><span>Publish. Belong.</span></h1><p class="lead">Claim free assets, authorize Hub without sharing browser tokens, and collaborate through personal or organization ownership.</p></div><div class="auth-card"><h1>Create account</h1><form class="form-stack" data-create-account>
+    <section class="platform-shell account-shell"><div><p class="eyebrow">One account</p><h1 class="display-title">Build.<br /><span>Publish. Belong.</span></h1><p class="lead">Claim free assets, authorize Hub without sharing browser tokens, and collaborate through personal or organization ownership.</p></div><div class="auth-card"><h2>Create account</h2><form class="form-stack" data-create-account>
         <label class="field"><span>Display name</span><input name="displayName" minlength="1" maxlength="64" autocomplete="name" required /></label>
         <label class="field"><span>Email address</span><input type="email" name="email" maxlength="254" autocomplete="email" required /></label>
         <label class="field"><span>Password</span><input type="password" name="password" minlength="10" maxlength="256" autocomplete="new-password" required /></label>

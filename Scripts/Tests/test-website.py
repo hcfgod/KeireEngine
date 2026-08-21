@@ -37,6 +37,7 @@ class PageParser(HTMLParser):
         self.images: list[dict[str, str | None]] = []
         self.inline_scripts = 0
         self.inline_styles = 0
+        self.doc_paths: list[str] = []
         self._in_title = False
 
     def handle_starttag(
@@ -55,6 +56,8 @@ class PageParser(HTMLParser):
                 self.links.append((attribute, str(values[attribute])))
         if tag == "img":
             self.images.append(values)
+        if values.get("data-doc-path"):
+            self.doc_paths.append(str(values["data-doc-path"]))
         if tag == "h1":
             self.h1_count += 1
         if tag == "main":
@@ -161,13 +164,18 @@ def main() -> int:
         )
     docs_parser = PageParser()
     docs_parser.feed(docs_landing)
-    native_doc_links = [
-        value for _, value in docs_parser.links if value.startswith("/docs/reference/")
-    ]
-    if len(native_doc_links) < 55:
+    canonical_doc_paths = {
+        f"Docs/{path.relative_to(ROOT / 'Docs').as_posix()}"
+        for path in (ROOT / "Docs").rglob("*.md")
+    }
+    if set(docs_parser.doc_paths) != canonical_doc_paths or len(
+        docs_parser.doc_paths
+    ) != len(canonical_doc_paths):
         raise ValueError(
-            "Documentation fallback must retain first-party routes for every guide card."
+            "Documentation fallback cards must exactly cover the canonical guide inventory."
         )
+    if f"<span data-doc-count>{len(canonical_doc_paths)} documents</span>" not in docs_landing:
+        raise ValueError("Documentation fallback guide count is stale.")
 
     manifest = json.loads((WEBSITE / "site.webmanifest").read_text(encoding="utf-8"))
     if (

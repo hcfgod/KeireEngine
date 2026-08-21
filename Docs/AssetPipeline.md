@@ -1,12 +1,13 @@
 # Asset Database And Cook Pipeline
 
-## Static mesh version 4
+## Static mesh version 5
 
-`.keiremesh` version 4 adds a separate UV1 channel for baked lighting. Version 3 introduced ordered LODs, submesh index
-ranges and bounds, and named material slots with optional default material identities. Versions 1 and 2 remain readable
-as their implied single LOD/submesh/slot, with missing tangent or UV1 data generated or defaulted deterministically.
-Importers keep submeshes deterministic, preserve Assimp slot indices and names, and group names ending in `_LOD0`,
-`_LOD1`, and so on into contiguous LOD ranges with monotonically decreasing default thresholds.
+`.keiremesh` version 5 records every submesh as TriangleList, LineList, or PointList. Version 4 added a separate UV1
+channel for baked lighting, while version 3 introduced ordered LODs, submesh index ranges and bounds, and named material
+slots with optional default material identities. Versions 1 and 2 remain readable as their implied single
+LOD/submesh/slot, with missing tangent or UV1 data generated or defaulted deterministically. Importers keep submeshes
+deterministic, preserve Assimp slot indices and names, and group names ending in `_LOD0`, `_LOD1`, and so on into
+contiguous LOD ranges with monotonically decreasing default thresholds.
 
 Asset cache objects, metadata, catalogs, and cooked build profiles publish through the shared atomic-file boundary.
 Cooked payloads use deterministic content-addressed pack names. Publication installs new immutable packs first and

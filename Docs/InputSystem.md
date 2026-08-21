@@ -42,6 +42,11 @@ before rebuilding and preserve enabled map IDs, users, schemes, subscriptions, a
 reload stays on the last-good asset revision. A press and release received within one outer frame still publishes its
 phase transitions even though the final polled value is released.
 
+Fixed-tick capture is also the bridge to the application-owned Replay service. `CaptureFixedTick()` produces the
+stable, sorted action snapshot and input-map fingerprint recorded in `.keirereplay`; verified playback applies that
+snapshot back to gameplay contexts while leaving editor-control contexts live. Replay file ownership, checkpoints,
+seeking, and verification remain Replay responsibilities rather than action-map APIs.
+
 ## Rebinding And Cursor Control
 
 `BeginInteractiveRebind` targets a stable binding ID and user context. Its bounded operation supports device filters,
@@ -61,6 +66,6 @@ contains no SDL window or mouse types.
 
 ## Deliberate Limits
 
-Text entry/IME, touch, pen, sensors, generic joysticks, XR, advanced trigger/adaptive haptics, networking,
-recording/replay, and generated C++ wrappers are outside this milestone. Source assets currently accept the built-in
+Text entry/IME, touch, pen, sensors, generic joysticks, XR, advanced trigger/adaptive haptics, networking, and generated
+C++ wrappers are outside this milestone. Source assets currently accept the built-in
 Press, Tap, Hold, MultiTap, Deadzone, Scale, Invert, and Normalize behaviors.

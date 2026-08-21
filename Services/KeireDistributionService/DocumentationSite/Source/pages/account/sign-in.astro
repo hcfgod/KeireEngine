@@ -20,7 +20,7 @@ const reference = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a
 <PlatformLayout title="Sign in" description="Sign in to your Kéire account for website, Hub authorization, organizations, and Marketplace library access." robots="noindex">
     <section class="platform-shell account-shell">
         <div><p class="eyebrow">One identity, separate sessions</p><h1 class="display-title">Your Kéire account.<br /><span>Your devices.</span></h1><p class="lead">The website and Hub use the same identity authority, while each keeps an independently revocable session. Browser cookies and refresh tokens never transfer to Hub.</p></div>
-        <div class="auth-card"><h1>Sign in</h1><p>Continue to your library, organizations, and connected devices.</p>
+        <div class="auth-card"><h2>Sign in</h2><p>Continue to your library, organizations, and connected devices.</p>
             {oauthMessage && <div class="auth-alert" role="alert"><strong>GitHub sign-in was not completed.</strong><p>{oauthMessage}</p>{reference && <p class="auth-alert__reference">Reference <code>{reference}</code></p>}</div>}
             <a class="button button--secondary" href={`/account/github/?next=${encodeURIComponent(safeNext)}`}>Continue with GitHub</a>
             <div class="divider">or use email</div>

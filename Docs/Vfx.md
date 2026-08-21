@@ -2447,12 +2447,14 @@ Use these files as the final source of truth:
 | Shared compiled-binding resolution and executable payload materialization | `KeireCore/Include/KeireInternal/Vfx/VfxExecutionInternal.h` |
 | CPU execution, parameter resolution, pooling, reload, statistics, and snapshots | `KeireCore/Source/Vfx/VfxSystem.cpp` |
 | GPU portable-instruction implementation | `KeireCore/Shaders/BuiltinVfx.hlsl` |
-| GPU operation schedule upload, per-emitter dispatch, and render handoff | `KeireCore/Source/Rendering/RenderSceneRecording.cpp` |
+| GPU payload validation, operation schedule upload, and per-emitter dispatch | `KeireCore/Source/Rendering/RenderVfxRecording.cpp` |
+| GPU pipeline creation and asynchronous warmup | `KeireCore/Source/Rendering/RenderVfxPipelines.cpp` |
+| CPU/GPU particle, ribbon, volume, and mesh draw handoff | `KeireCore/Source/Rendering/RenderVfxDrawing.cpp` |
 | Scene component API | `KeireCore/Include/Keire/ECS/Components/VfxEmitterComponent.h` |
 | Component validation and serialized Inspector fields | `KeireCore/Source/ECS/Components/VfxEmitterComponent.cpp` |
 | Scene and override dependency extraction | `KeireCore/Source/Scenes/SceneAsset.cpp` |
 | Play Mode VFX session API | `KeireCore/Include/Keire/Scenes/Scene.h` |
-| Play Mode emitter synchronization and C++ control | `KeireCore/Source/Scenes/SceneRuntime.cpp` |
+| Play Mode emitter synchronization and C++ control | `KeireCore/Source/Scenes/SceneRuntimeVfx.cpp` |
 | Transactional editor document | `KeireClient/Include/KeireClient/Editor/VfxEffectDocument.h` |
 | Ranked context/type/backend-aware palette search | `KeireClient/Include/KeireClient/Editor/VfxNodeCatalog.h`, `KeireClient/Source/Editor/VfxNodeCatalog.cpp` |
 | Graph, module, blackboard, settings, and preview UI | `KeireClient/Source/Editor/VfxEffectPanel.cpp` |

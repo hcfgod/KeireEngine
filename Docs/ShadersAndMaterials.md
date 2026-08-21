@@ -159,8 +159,11 @@ Material Parameter Collections open in the Inspector. Parameters have stable IDs
 descriptions, categories, sort order, types, and finite defaults. The editor supports explicit add, edit, remove,
 save, and revert actions. `MaterialParameterCollectionState` provides revisioned, thread-safe runtime snapshots and
 typed overrides; `DynamicMaterialInstance` provides the same bounded override/reset lifecycle for transient materials.
-Renderer-wide collection-buffer binding and scene/world scoping remain tracked work in the material parity matrix;
-the current runtime contract does not silently treat collection values as ordinary per-material properties.
+Editor Play Mode and packaged players own collection state per runtime world, retain compatible overrides across asset
+reloads by stable parameter ID, and submit one bounded immutable global-property snapshot per render request. Mesh
+Renderer material-slot instances provide narrower transient overrides. The renderer applies shared material, global
+collection, renderer property-block, and material-slot instance values in that order; duplicate global names resolve by
+stable collection asset ID, while renderer and slot scopes always win.
 
 The immutable runtime material source schema version 3 includes alpha mode, alpha cutoff, double-sided state,
 baked-emission contribution, emissive GI intensity, and validated property overrides. Opaque and masked materials
