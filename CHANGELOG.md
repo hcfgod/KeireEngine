@@ -5,6 +5,8 @@ versions.
 
 ## Unreleased
 
+- Fixed Editor Play Mode startup with the multi-scene runtime by activating the cloned runtime scene before adopting
+  its session into the runtime world.
 - Fixed command-line player builds with managed data assets by making `KeireAssetTool` build, stage, and initialize its
   Coral/.NET host before strict managed type discovery, and by staging the same host in every packaged-player template.
   Project type catalogs now exclude Kéire's private managed API self-test types and accept repeated instances of the

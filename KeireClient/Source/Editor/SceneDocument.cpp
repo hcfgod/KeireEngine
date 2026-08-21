@@ -569,9 +569,9 @@ namespace KeireEditor
         if (const auto presentation = m_PlaySession->Presentation())
             presentation->SetDefaultMixer(defaultMixer);
         m_PlayUndo = std::move(playUndo);
+        m_PlaySession->Play();
         if (runtimeWorld)
             (void)runtimeWorld->Adopt(m_PlaySession);
-        m_PlaySession->Play();
         SynchronizeSelection();
     }
 
