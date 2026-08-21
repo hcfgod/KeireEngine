@@ -5,6 +5,10 @@ versions.
 
 ## Unreleased
 
+- Fixed command-line player builds with managed data assets by making `KeireAssetTool` build, stage, and initialize its
+  Coral/.NET host before strict managed type discovery, and by staging the same host in every packaged-player template.
+  Project type catalogs now exclude Kéire's private managed API self-test types and accept repeated instances of the
+  same nested serializable type without weakening duplicate-ID rejection between distinct fields.
 - Added consistent Unity-style managed Inspector controls for `Behaviour` and managed-data members: true `[Range]`
   sliders, `[Min]`/`[Max]` bounds, `[InspectorStep]`, `[Multiline]`, `[InspectorName]`, headers, and visible read-only
   fields. Metadata validation, hot reload, type catalogs, and 64-bit signed/unsigned editor controls share the same

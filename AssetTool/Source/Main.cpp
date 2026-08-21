@@ -357,7 +357,10 @@ namespace
         Keire::ScriptSystemSpecification specification;
         specification.Mode = Keire::ScriptMode::Enabled;
         specification.ProjectRoot = project.Root();
-        specification.ManagedApiAssembly = executable.parent_path() / "Managed" / "Keire.Managed.dll";
+        const auto managedHost = executable.parent_path() / "Managed";
+        specification.RuntimeHostDirectory = managedHost;
+        specification.RuntimeRootDirectory = managedHost / "Dotnet";
+        specification.ManagedApiAssembly = managedHost / "Keire.Managed.dll";
 #if defined(_WIN32)
         const auto developmentDotnet =
             executable.parent_path().parent_path().parent_path().parent_path().parent_path() /

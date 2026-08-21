@@ -26,6 +26,8 @@ project(RuntimeTarget)
     LinkKeireSourceModules()
     LinkKeireCore()
     LinkSDL3()
+    AddKeireManagedRuntimeDependency()
+    AddKeireManagedHostStaging()
 
     filter { "system:windows", "configurations:Dist" }
         kind "WindowedApp"

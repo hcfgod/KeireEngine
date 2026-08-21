@@ -12,6 +12,9 @@ $root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $premakePolicy = Get-Content (Join-Path $root "Scripts\Premake\Common.lua") -Raw
 $managedPremake = Get-Content (Join-Path $root "Scripts\Premake\Managed.lua") -Raw
 $clientPremake = Get-Content (Join-Path $root "KeireClient\premake5.lua") -Raw
+$assetToolPremake = Get-Content (Join-Path $root "AssetTool\premake5.lua") -Raw
+$runtimePremake = Get-Content (Join-Path $root "KeireRuntime\premake5.lua") -Raw
+$assetToolSource = Get-Content (Join-Path $root "AssetTool\Source\Main.cpp") -Raw
 Assert-StagingState ($premakePolicy.Contains("DependencyManifest.CoralNetHostRuntime") -and
                      $premakePolicy.Contains("postbuildcommands")) `
     "KeireCore consumers do not stage the Windows nethost runtime."
@@ -20,6 +23,15 @@ Assert-StagingState ($managedPremake.Contains("stage-managed-host.ps1") -and
     "Generated IDE projects do not use the shared managed-host staging script."
 Assert-StagingState ($clientPremake.Contains("AddKeireManagedHostStaging()")) `
     "The editor project does not stage its managed host."
+Assert-StagingState ($assetToolPremake.Contains("AddKeireManagedRuntimeDependency()") -and
+                     $assetToolPremake.Contains("AddKeireManagedHostStaging()")) `
+    "The Asset Tool project does not build and stage its managed host."
+Assert-StagingState ($runtimePremake.Contains("AddKeireManagedRuntimeDependency()") -and
+                     $runtimePremake.Contains("AddKeireManagedHostStaging()")) `
+    "The packaged player template does not build and stage its managed host."
+Assert-StagingState ($assetToolSource.Contains("specification.RuntimeHostDirectory = managedHost;") -and
+                     $assetToolSource.Contains('specification.RuntimeRootDirectory = managedHost / "Dotnet";')) `
+    "The Asset Tool does not initialize managed type discovery from its staged host."
 
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ("keire-managed-host-" + [guid]::NewGuid().ToString("N"))
 try {

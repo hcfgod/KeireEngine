@@ -485,6 +485,8 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                   "throw new System.InvalidOperationException(\"intentional before-reload failure\"); } "
                   "protected override void OnAfterReload() { "
                   "throw new System.InvalidOperationException(\"intentional after-reload failure\"); } } "
+                  "[SerializableType] public sealed class ReusedNestedTuning { "
+                  "[StableFieldId(\"73616e64-626f-4078-8000-000000000195\")] public float Value = 1.0f; } "
                   "[CreateAssetMenu(\"Gameplay/Player Tuning\", \"PlayerTuning\")] "
                   "[StableAssetTypeId(\"73616e64-626f-4078-8000-000000000190\")] "
                   "public sealed class PlayerTuning : ScriptableObject { "
@@ -495,9 +497,17 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                   "[StableFieldId(\"73616e64-626f-4078-8000-000000000192\"), ReadOnlyInInspector] "
                   "public AssetReference<PlayerTuning> Parent; "
                   "[StableFieldId(\"73616e64-626f-4078-8000-000000000194\"), Multiline(5), "
-                  "InspectorName(\"Design Notes\")] public string Notes = string.Empty; } "
+                  "InspectorName(\"Design Notes\")] public string Notes = string.Empty; "
+                  "[StableFieldId(\"73616e64-626f-4078-8000-000000000196\")] "
+                  "public ReusedNestedTuning Primary = new(); "
+                  "[StableFieldId(\"73616e64-626f-4078-8000-000000000197\")] "
+                  "public ReusedNestedTuning Secondary = new(); } "
                   "[StableAssetTypeId(\"73616e64-626f-4078-8000-000000000193\")] "
-                  "public sealed class InvalidTuning : ScriptableObject { public float MissingStableId = 1.0f; }\n";
+                  "public sealed class InvalidTuning : ScriptableObject { public float MissingStableId = 1.0f; } "
+                  "[StableAssetTypeId(\"73616e64-626f-4078-8000-000000000198\")] "
+                  "public sealed class DuplicateFieldTuning : ScriptableObject { "
+                  "[StableFieldId(\"73616e64-626f-4078-8000-000000000199\")] public float First = 1.0f; "
+                  "[StableFieldId(\"73616e64-626f-4078-8000-000000000199\")] public float Second = 2.0f; }\n";
     }
 
     Keire::ScriptSystemSpecification specification;
@@ -542,11 +552,13 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     CHECK(scripts->ReloadStatus().State == Keire::ManagedReloadState::Active);
     CHECK(scripts->ReloadStatus().Generation == 1);
     const auto managedAssetTypes = scripts->ManagedAssetTypes();
+    CHECK_FALSE(std::ranges::any_of(managedAssetTypes, [](const Keire::ManagedAssetTypeDescriptor& descriptor)
+                                    { return descriptor.FullName.starts_with("Keire."); }));
     const auto playerTuning = std::ranges::find(managedAssetTypes, std::string("Game.PlayerTuning"),
                                                 &Keire::ManagedAssetTypeDescriptor::FullName);
     REQUIRE(playerTuning != managedAssetTypes.end());
     CHECK(playerTuning->MenuPath == "Gameplay/Player Tuning");
-    CHECK(playerTuning->Properties.size() == 3);
+    REQUIRE(playerTuning->Properties.size() == 5);
     CHECK(playerTuning->Properties[0].Kind == Keire::ManagedAssetPropertyKind::Scalar);
     CHECK(playerTuning->Properties[0].DisplayName == "Movement Speed");
     CHECK(playerTuning->Properties[0].Minimum == 0.0);
@@ -564,9 +576,17 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     CHECK(playerTuning->Properties[2].Kind == Keire::ManagedAssetPropertyKind::Text);
     CHECK(playerTuning->Properties[2].DisplayName == "Design Notes");
     CHECK(playerTuning->Properties[2].TextLines == 5);
+    REQUIRE(playerTuning->Properties[3].Children.size() == 1);
+    REQUIRE(playerTuning->Properties[4].Children.size() == 1);
+    CHECK(playerTuning->Properties[3].Children[0].StableFieldId ==
+          playerTuning->Properties[4].Children[0].StableFieldId);
     const auto assetDiagnostics = scripts->ManagedAssetTypeDiagnostics();
+    CHECK_FALSE(std::ranges::any_of(assetDiagnostics, [](const Keire::ManagedAssetTypeDiagnostic& diagnostic)
+                                    { return diagnostic.TypeName.starts_with("Keire."); }));
     CHECK(std::ranges::any_of(assetDiagnostics, [](const Keire::ManagedAssetTypeDiagnostic& diagnostic)
                               { return diagnostic.TypeName == "Game.InvalidTuning"; }));
+    CHECK(std::ranges::any_of(assetDiagnostics, [](const Keire::ManagedAssetTypeDiagnostic& diagnostic)
+                              { return diagnostic.TypeName == "Game.DuplicateFieldTuning"; }));
     const auto componentType = Keire::ComponentTypeId::Parse("73616e64-626f-4078-8000-000000000099");
     const auto dependencyType = Keire::ComponentTypeId::Parse("73616e64-626f-4078-8000-000000000097");
     auto registry = Keire::ComponentRegistry::CreateDefault();
