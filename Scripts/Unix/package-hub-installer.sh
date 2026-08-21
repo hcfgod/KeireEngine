@@ -207,6 +207,8 @@ resolve_linux_installer_format() {
 
     local identities=""
     if [[ -r /etc/os-release ]]; then
+        # The installer deliberately probes the target distribution at runtime.
+        # shellcheck disable=SC1091
         identities="$(. /etc/os-release; printf '%s %s' "${ID:-}" "${ID_LIKE:-}")"
     fi
     identities="${identities,,}"

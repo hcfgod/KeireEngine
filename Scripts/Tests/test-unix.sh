@@ -333,6 +333,9 @@ assert_true grep -F -q 'ensure_command cmp diffutils' "$ROOT/Scripts/Linux/boots
 assert_true grep -F -q 'perl -Mopen=:std -e 1' "$ROOT/Scripts/Linux/bootstrap.sh"
 assert_true grep -F -q 'install_dotnet_sdk' "$ROOT/Scripts/Linux/bootstrap.sh"
 assert_true grep -F -q 'install_gcc_toolchain' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'ensure_host_clang_toolchain' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'version_at_least "$clang_version" 14' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'version_at_least "$clang_version" 16' "$ROOT/Scripts/Linux/bootstrap.sh"
 assert_true grep -F -q 'gcc-environment.sh' "$ROOT/Scripts/Linux/bootstrap.sh"
 assert_true grep -F -q 'activate_linux_toolchain' "$ROOT/Scripts/Linux/build.sh" \
   "$ROOT/Scripts/Linux/generate.sh" "$ROOT/Scripts/Unix/run-target.sh" "$ROOT/Scripts/Unix/package.sh" \
@@ -378,6 +381,10 @@ assert_true grep -F -q -- 'bash Scripts/project.sh run "${project_arguments[@]}"
 assert_true grep -F -q -- 'matrix_arguments+=(--ci)' "$ROOT/Scripts/Tests/test-linux-distros.sh"
 assert_true grep -F -q -- '-DCMAKE_INSTALL_BINDIR=. -DCMAKE_INSTALL_LIBDIR=.' "$ROOT/Scripts/Unix/shader-compiler.sh"
 assert_true grep -F -q -- '-DSPIRV_WERROR=OFF' "$ROOT/Scripts/Unix/shader-compiler.sh"
+assert_true grep -F -q 'export CC=clang CXX=clang++' "$ROOT/Scripts/Unix/shader-compiler.sh"
+assert_true grep -F -q 'flat-runtime-v4' "$ROOT/Scripts/Unix/shader-compiler.sh"
+assert_true grep -F -q 'target_compile_options(zlibstatic PRIVATE -UTARGET_OS_MAC)' \
+  "$ROOT/Scripts/Dependencies/CMakeLists.txt"
 assert_true grep -F -q 'readelf -d "$published_compiler"' "$ROOT/Scripts/Unix/shader-compiler.sh"
 assert_true grep -F -q "install_name_tool -add_rpath '@executable_path'" "$ROOT/Scripts/Unix/shader-compiler.sh"
 assert_true grep -F -q 'cp -L "$runtime_library"' "$ROOT/Scripts/Unix/shader-compiler.sh"

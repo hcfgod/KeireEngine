@@ -441,7 +441,7 @@ namespace Keire
             WindowId m_Id;
         };
 
-        explicit Impl(WindowSystemSpecification specification) : m_OwnerThread(std::this_thread::get_id())
+        explicit Impl(const WindowSystemSpecification& specification) : m_OwnerThread(std::this_thread::get_id())
         {
             bool expected = false;
             if (!HasActiveSystem.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
@@ -574,7 +574,8 @@ namespace Keire
                 }
             }
 
-            (void)native.release();
+            SDL_Window* const registeredNative = native.release();
+            (void)registeredNative;
             return handle;
         }
 
@@ -944,7 +945,7 @@ namespace Keire
             return {};
         }
 
-        [[nodiscard]] bool GetFlag(const WindowId id, const bool CachedWindow::*member) const
+        [[nodiscard]] bool GetFlag(const WindowId id, const bool CachedWindow::* member) const
         {
             std::scoped_lock lock(m_StateMutex);
             if (const auto iterator = m_Windows.find(id.Value()); iterator != m_Windows.end())
@@ -1331,6 +1332,8 @@ namespace Keire
         std::vector<std::weak_ptr<TrayDispatchState>> m_TrayDispatch;
     };
 
+    // Preserve the public by-value constructor ABI.
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     WindowSystem::WindowSystem(WindowSystemSpecification specification)
         : m_Impl(CreateRef<Impl>(std::move(specification)))
     {

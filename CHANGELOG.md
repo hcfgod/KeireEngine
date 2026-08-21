@@ -5,6 +5,11 @@ versions.
 
 ## Unreleased
 
+- Restored hosted CI parity with local launchers: quality checks use the pinned Clang 22 formatter, Windows shader
+  compiler builds use a short Unicode-safe workspace, Linux builds use Clang for the LLVM-derived host shader tool,
+  macOS dependency builds avoid Xcode 16.4's obsolete zlib platform macro, and Windows fast checks fall back to
+  `git grep` when `rg` is unavailable. Cleared the clang-tidy, ShellCheck, and pinned Ruff blockers exposed after the
+  earlier quality failures were fixed.
 - Added managed active/loaded scene handles and coroutine-compatible packaged-player scene replacement with bounded
   status, progress, cancellation, diagnostics, camera validation, and activation rollback that keeps the previous
   runtime live on failure. Added atomic transient render-environment controls for ambient lighting, exposure,

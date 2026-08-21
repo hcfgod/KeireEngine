@@ -23,6 +23,11 @@ add_subdirectory("${KEIRE_JOLT_SOURCE}/Build" Jolt)
 add_subdirectory("${KEIRE_RECAST_SOURCE}" RecastNavigation)
 add_subdirectory("${KEIRE_MINIAUDIO_SOURCE}" miniaudio)
 
+if(APPLE AND TARGET zlibstatic)
+    # Xcode 16.4 defines TARGET_OS_MAC, which triggers zlib's obsolete classic-Mac fdopen replacement.
+    target_compile_options(zlibstatic PRIVATE -UTARGET_OS_MAC)
+endif()
+
 add_library(KeireSDLDependency INTERFACE)
 target_link_libraries(KeireSDLDependency INTERFACE SDL3::SDL3-static)
 

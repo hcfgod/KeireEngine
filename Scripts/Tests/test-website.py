@@ -235,7 +235,9 @@ def main() -> int:
     release_status = previews.get("releaseStatus")
     project_version = next(
         line.removeprefix("PROJECT_VERSION=")
-        for line in (ROOT / "Config" / "Project.conf").read_text(encoding="utf-8").splitlines()
+        for line in (ROOT / "Config" / "Project.conf")
+        .read_text(encoding="utf-8")
+        .splitlines()
         if line.startswith("PROJECT_VERSION=")
     )
     valid_release_status = (

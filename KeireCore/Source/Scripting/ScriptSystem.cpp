@@ -152,7 +152,7 @@ namespace Keire
             ManagedJobs = Scheduler->CreateScope("Managed assembly jobs");
             ComponentCallbacks = std::make_shared<Detail::ManagedBehaviourComponentCallbacks>();
             ComponentCallbacks->Create = [this](const ComponentTypeId componentType, const std::string_view managedType,
-                                                const Entity owner) -> ManagedBehaviourInstanceId
+                                                const Entity& owner) -> ManagedBehaviourInstanceId
             {
                 if (!Open.load(std::memory_order_acquire))
                     return {};
@@ -4492,7 +4492,8 @@ namespace Keire
             const auto managedType = type.Name;
             const auto properties = type.Properties;
             const std::weak_ptr<Detail::ManagedBehaviourComponentCallbacks> callbacks = m_Impl->ComponentCallbacks;
-            registration.Factory = [componentType, managedType, callbacks] {
+            registration.Factory = [componentType, managedType, callbacks]
+            {
                 return Ref<Component>(
                     CreateRef<Detail::ManagedBehaviourComponent>(componentType, managedType, callbacks));
             };
