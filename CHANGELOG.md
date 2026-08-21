@@ -9,6 +9,9 @@ versions.
   Coral/.NET host before strict managed type discovery, and by staging the same host in every packaged-player template.
   Project type catalogs now exclude Kéire's private managed API self-test types and accept repeated instances of the
   same nested serializable type without weakening duplicate-ID rejection between distinct fields.
+- Added stable runtime scene handles, additive load/unload/activation, explicit active/loaded/specific/persistent query
+  scopes, and hierarchy-root persistence across scene transitions. Packaged runtime and Editor Play Mode now share the
+  same multi-scene lifecycle and managed C# API while single-scene activation remains transactional.
 - Added consistent Unity-style managed Inspector controls for `Behaviour` and managed-data members: true `[Range]`
   sliders, `[Min]`/`[Max]` bounds, `[InspectorStep]`, `[Multiline]`, `[InspectorName]`, headers, and visible read-only
   fields. Metadata validation, hot reload, type catalogs, and 64-bit signed/unsigned editor controls share the same

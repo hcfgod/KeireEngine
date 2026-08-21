@@ -36,6 +36,30 @@ capacity. A failed/cancelled load leaves the active and already-loaded scenes un
 `SceneLoadFailedEvent`, and `ActiveSceneChangedEvent`. The service closes before Assets and invalidates mutable scenes
 without exposing JSON or backend types.
 
+## Playable Runtime Worlds
+
+`SceneRuntimeWorld` is the C++20 owner used by the packaged player and Editor Play Mode. It turns loaded scene assets
+into independent `SceneRuntimeSession` instances and assigns a `SceneHandle` whose value is never reused during that
+world's lifetime. A handle is an opaque identity, not an asset ID: a retired handle cannot accidentally address a
+later load of the same asset.
+
+Single and additive activation share one safe-boundary pipeline. Additive activation leaves the active handle
+unchanged; `SetActive` changes it at the next boundary. `Unload` retires exactly the addressed handle. Single activation
+starts and validates the candidate runtime before publishing it, so asset, Play-lifecycle, subsystem, or player
+validation failure leaves all committed runtime sessions running. Unloading the only regular active scene is rejected;
+load its replacement with Single mode instead. Every loaded session receives fixed/update ticks and
+owns its own physics, audio, VFX, UI, and managed-behaviour state; all sessions participate in rendering.
+
+Queries require an explicit `SceneQueryScope`: `Active`, all `Loaded` scenes, a `Specific` stable handle, or
+`Persistent` carriers. This prevents a lookup from silently changing meaning when additive content is present.
+
+`MakePersistent` marks an entity's hierarchy root. When its loaded scene is unloaded or replaced, non-persistent roots
+are destroyed normally while the marked root and its original runtime session remain alive in an unloaded persistent
+carrier. Entity/world IDs, component instances, managed behaviours, and lifecycle state are therefore preserved rather
+than serialized and recreated. Unloading the last regular scene does not destroy persistent carriers; closing the
+runtime world stops every remaining session deterministically. All mutation, processing, and scoped-query operations
+are owner-thread-affine.
+
 ## Mutable Scene Contract
 
 `Scene` supports stable-ID lookup, deterministic indexed name/tag queries, create, subtree duplicate, subtree delete,

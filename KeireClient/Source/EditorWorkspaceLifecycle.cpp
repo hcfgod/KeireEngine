@@ -59,6 +59,10 @@ void EditorWorkspaceLayer::OnDetach() noexcept
     ApplyManagedCursorMode();
     StopInspectorAudioPreview();
     m_InspectorPanel->ClearSceneState();
+    if (m_PlayRuntimeWorld)
+        m_PlayRuntimeWorld->Close();
+    m_PlayRuntimeWorld.Reset();
+    m_ManagedSceneOperations.clear();
     m_SceneDocument->EndPlay();
     m_GameEditPresentation.Reset();
     m_GameRenderView.Reset();
@@ -126,9 +130,9 @@ void EditorWorkspaceLayer::OnDetach() noexcept
 
 void EditorWorkspaceLayer::OnFixedUpdate(const Keire::Time& time)
 {
-    if (m_SceneDocument->PlaySession())
+    if (m_PlayRuntimeWorld)
     {
         Keire::ProfileScope playFixed(Owner().GetProfiler(), Keire::ProfileCategory::Physics, "Play fixed + physics");
-        m_SceneDocument->PlaySession()->FixedUpdate(static_cast<float>(time.FixedDeltaTime().Seconds()));
+        m_PlayRuntimeWorld->FixedUpdate(static_cast<float>(time.FixedDeltaTime().Seconds()));
     }
 }

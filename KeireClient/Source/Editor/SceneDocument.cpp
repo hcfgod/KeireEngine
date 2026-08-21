@@ -557,7 +557,7 @@ namespace KeireEditor
 
     void SceneDocument::BeginPlay(Keire::Ref<Keire::UndoContext> playUndo, Keire::Ref<Keire::AssetSystem> assets,
                                   Keire::Ref<Keire::AudioSystem> audio, Keire::Ref<Keire::PhysicsSystem> physics,
-                                  const Keire::AssetId defaultMixer)
+                                  const Keire::AssetId defaultMixer, Keire::Ref<Keire::SceneRuntimeWorld> runtimeWorld)
     {
         if (!m_Scene)
             throw std::logic_error("SceneDocument cannot enter Play without an editing scene.");
@@ -568,7 +568,17 @@ namespace KeireEditor
         if (const auto presentation = m_PlaySession->Presentation())
             presentation->SetDefaultMixer(defaultMixer);
         m_PlayUndo = std::move(playUndo);
+        if (runtimeWorld)
+            (void)runtimeWorld->Adopt(m_PlaySession);
         m_PlaySession->Play();
+        SynchronizeSelection();
+    }
+
+    void SceneDocument::SetPlaySession(Keire::Ref<Keire::SceneRuntimeSession> session)
+    {
+        if (!m_PlaySession || !session)
+            throw std::logic_error("SceneDocument can only replace an active Play session.");
+        m_PlaySession = std::move(session);
         SynchronizeSelection();
     }
 

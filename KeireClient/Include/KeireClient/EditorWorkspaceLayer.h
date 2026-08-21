@@ -506,8 +506,18 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] Keire::ManagedScreenState ManagedScreen() const noexcept override;
     [[nodiscard]] bool SetManagedScreen(std::uint32_t width, std::uint32_t height,
                                         Keire::ManagedScreenMode mode) noexcept override;
+    [[nodiscard]] std::uint64_t BeginManagedSceneLoad(Keire::AssetId scene,
+                                                      Keire::SceneLoadMode mode) noexcept override;
+    [[nodiscard]] std::optional<Keire::ManagedSceneLoadStatus>
+    ManagedSceneLoad(std::uint64_t operation) const noexcept override;
+    [[nodiscard]] bool CancelManagedSceneLoad(std::uint64_t operation) noexcept override;
+    [[nodiscard]] bool UnloadManagedScene(Keire::SceneHandle scene) noexcept override;
+    [[nodiscard]] bool SetActiveManagedScene(Keire::SceneHandle scene) noexcept override;
+    [[nodiscard]] bool MakeManagedEntityPersistent(Keire::ManagedEntityHandle entity) noexcept override;
     [[nodiscard]] Keire::AssetId ActiveManagedScene() const noexcept override;
     [[nodiscard]] std::vector<Keire::AssetId> LoadedManagedScenes() const override;
+    [[nodiscard]] Keire::ManagedSceneHandle ActiveManagedSceneHandle() const noexcept override;
+    [[nodiscard]] std::vector<Keire::ManagedSceneHandle> LoadedManagedSceneHandles() const override;
     [[nodiscard]] std::vector<std::string> ManagedEntityTags(Keire::ManagedEntityHandle entity) const override;
     [[nodiscard]] bool AddManagedEntityTag(Keire::ManagedEntityHandle entity, std::string_view tag) noexcept override;
     [[nodiscard]] bool RemoveManagedEntityTag(Keire::ManagedEntityHandle entity,
@@ -519,6 +529,15 @@ class EditorWorkspaceLayer final : public Keire::Layer,
                                                                                  std::size_t maximum) const override;
     [[nodiscard]] std::vector<Keire::ManagedEntityHandle>
     QueryManagedEntityComponents(Keire::ComponentTypeId component, std::size_t maximum) const override;
+    [[nodiscard]] std::vector<Keire::ManagedEntityHandle>
+    QueryManagedEntityNamesScoped(std::string_view name, Keire::ManagedSceneQuery query,
+                                  std::size_t maximum) const override;
+    [[nodiscard]] std::vector<Keire::ManagedEntityHandle>
+    QueryManagedEntityTagsScoped(std::string_view tag, Keire::ManagedSceneQuery query,
+                                 std::size_t maximum) const override;
+    [[nodiscard]] std::vector<Keire::ManagedEntityHandle>
+    QueryManagedEntityComponentsScoped(Keire::ComponentTypeId component, Keire::ManagedSceneQuery query,
+                                       std::size_t maximum) const override;
     [[nodiscard]] std::optional<Keire::RenderEnvironmentSettings> ManagedRenderEnvironment() const noexcept override;
     [[nodiscard]] bool SetManagedRenderEnvironment(Keire::RenderEnvironmentSettings settings) noexcept override;
     [[nodiscard]] bool ManagedMaterialParameterCollectionReady(Keire::AssetId collection) noexcept override;
@@ -586,7 +605,9 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] bool SetManagedUiInputText(Keire::AssetId entity, std::string_view text) noexcept override;
     [[nodiscard]] bool ConsumeManagedUiEvent(Keire::AssetId entity, Keire::RuntimeUiEventType type) noexcept override;
     [[nodiscard]] bool FocusManagedUi(Keire::AssetId entity) noexcept override;
-    [[nodiscard]] Keire::Ref<Keire::Scene> ManagedRuntimeScene() const noexcept override;
+    [[nodiscard]] Keire::Ref<Keire::Scene> ManagedRuntimeScene(Keire::AssetId entity = {}) const noexcept override;
+    [[nodiscard]] Keire::Ref<Keire::SceneRuntimeSession>
+    ManagedRuntimeSession(Keire::AssetId entity = {}) const noexcept;
     void AddConsoleMessage(std::string category, std::string message, Keire::UiColor color,
                            Keire::LogLevel level = Keire::LogLevel::Info) noexcept;
     void ReportError(std::string category, std::string message) noexcept;
@@ -747,6 +768,14 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::string m_PlayerSigningEnvironmentText;
     Keire::Ref<Keire::InputActionContext> m_InputContext;
     Keire::Ref<Keire::InputActionContext> m_GameplayInputContext;
+    Keire::Ref<Keire::SceneRuntimeWorld> m_PlayRuntimeWorld;
+    struct ManagedSceneOperation final
+    {
+        std::uint64_t Id = 0;
+        Keire::Ref<Keire::SceneRuntimeLoadOperation> Load;
+    };
+    std::vector<ManagedSceneOperation> m_ManagedSceneOperations;
+    std::uint64_t m_NextManagedSceneOperation = 1;
     Keire::Detail::ManagedInputOperationStore m_ManagedInputOperations;
     std::optional<Keire::InputCaptureOverride> m_ManagedInputCaptureOverride;
     bool m_ManagedCursorVisible = true;

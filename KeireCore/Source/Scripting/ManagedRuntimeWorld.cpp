@@ -22,18 +22,20 @@ namespace Keire::Detail
         {
             std::uint64_t SceneHigh = 0;
             std::uint64_t SceneLow = 0;
+            std::uint64_t Handle = 0;
             float Progress = 0.0F;
             std::uint8_t Mode = 0;
             std::uint8_t State = 0;
         };
-        static_assert(sizeof(NativeSceneLoadStatus) == 24);
+        static_assert(sizeof(NativeSceneLoadStatus) == 32);
 
-        struct NativeAssetId
+        struct NativeSceneHandle
         {
             std::uint64_t High = 0;
             std::uint64_t Low = 0;
+            std::uint64_t Handle = 0;
         };
-        static_assert(sizeof(NativeAssetId) == 16);
+        static_assert(sizeof(NativeSceneHandle) == 24);
 
         struct NativeEntityHandle
         {
@@ -95,6 +97,7 @@ namespace Keire::Detail
                 return 0;
             destination->SceneHigh = status->Scene.High();
             destination->SceneLow = status->Scene.Low();
+            destination->Handle = status->Handle.Value();
             destination->Progress = std::clamp(status->Progress, 0.0F, 1.0F);
             destination->Mode = static_cast<std::uint8_t>(status->Mode);
             destination->State = static_cast<std::uint8_t>(status->State);
@@ -115,23 +118,40 @@ namespace Keire::Detail
             return ActiveServices && ActiveServices->CancelManagedSceneLoad(operation) ? 1 : 0;
         }
 
-        [[nodiscard]] std::uint8_t GetActiveScene(NativeAssetId* destination) noexcept
+        [[nodiscard]] std::uint8_t UnloadScene(const std::uint64_t handle) noexcept
+        {
+            return ActiveServices && ActiveServices->UnloadManagedScene(SceneHandle::FromValue(handle)) ? 1 : 0;
+        }
+
+        [[nodiscard]] std::uint8_t SetActiveScene(const std::uint64_t handle) noexcept
+        {
+            return ActiveServices && ActiveServices->SetActiveManagedScene(SceneHandle::FromValue(handle)) ? 1 : 0;
+        }
+
+        [[nodiscard]] std::uint8_t MakeEntityPersistent(const std::uint64_t world, const std::uint64_t high,
+                                                        const std::uint64_t low) noexcept
+        {
+            return ActiveServices && ActiveServices->MakeManagedEntityPersistent({world, AssetId(high, low)}) ? 1 : 0;
+        }
+
+        [[nodiscard]] std::uint8_t GetActiveScene(NativeSceneHandle* destination) noexcept
         {
             if (!ActiveServices || !destination)
                 return 0;
-            const auto scene = ActiveServices->ActiveManagedScene();
-            destination->High = scene.High();
-            destination->Low = scene.Low();
-            return scene ? 1 : 0;
+            const auto scene = ActiveServices->ActiveManagedSceneHandle();
+            destination->High = scene.Scene.High();
+            destination->Low = scene.Scene.Low();
+            destination->Handle = scene.Handle.Value();
+            return scene.Handle ? 1 : 0;
         }
 
-        [[nodiscard]] int GetLoadedScenes(NativeAssetId* destination, const int capacity) noexcept
+        [[nodiscard]] int GetLoadedScenes(NativeSceneHandle* destination, const int capacity) noexcept
         {
             if (!ActiveServices || capacity < 0)
                 return -1;
             try
             {
-                const auto scenes = ActiveServices->LoadedManagedScenes();
+                const auto scenes = ActiveServices->LoadedManagedSceneHandles();
                 if (scenes.size() > 1024 || scenes.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
                     return -1;
                 const auto size = static_cast<int>(scenes.size());
@@ -140,8 +160,9 @@ namespace Keire::Detail
                 if (capacity < size)
                     return -1;
                 for (int index = 0; index < size; ++index)
-                    destination[index] = {scenes[static_cast<std::size_t>(index)].High(),
-                                          scenes[static_cast<std::size_t>(index)].Low()};
+                    destination[index] = {scenes[static_cast<std::size_t>(index)].Scene.High(),
+                                          scenes[static_cast<std::size_t>(index)].Scene.Low(),
+                                          scenes[static_cast<std::size_t>(index)].Handle.Value()};
                 return size;
             }
             catch (...)
@@ -264,14 +285,21 @@ namespace Keire::Detail
             }
         }
 
-        [[nodiscard]] int QueryEntityNames(const Coral::String name, const int maximum, NativeEntityHandle* destination,
-                                           const int capacity) noexcept
+        [[nodiscard]] ManagedSceneQuery SceneQuery(const std::uint8_t scope, const std::uint64_t scene) noexcept
+        {
+            return {static_cast<SceneQueryScope>(scope), SceneHandle::FromValue(scene)};
+        }
+
+        [[nodiscard]] int QueryEntityNames(const Coral::String name, const std::uint8_t scope,
+                                           const std::uint64_t scene, const int maximum,
+                                           NativeEntityHandle* destination, const int capacity) noexcept
         {
             try
             {
                 const auto value = static_cast<std::string>(name);
-                return QueryEntities(maximum, destination, capacity, [&](const std::size_t limit)
-                                     { return ActiveServices->QueryManagedEntityNames(value, limit); });
+                return QueryEntities(
+                    maximum, destination, capacity, [&](const std::size_t limit)
+                    { return ActiveServices->QueryManagedEntityNamesScoped(value, SceneQuery(scope, scene), limit); });
             }
             catch (...)
             {
@@ -279,14 +307,16 @@ namespace Keire::Detail
             }
         }
 
-        [[nodiscard]] int QueryEntityTags(const Coral::String tag, const int maximum, NativeEntityHandle* destination,
+        [[nodiscard]] int QueryEntityTags(const Coral::String tag, const std::uint8_t scope, const std::uint64_t scene,
+                                          const int maximum, NativeEntityHandle* destination,
                                           const int capacity) noexcept
         {
             try
             {
                 const auto value = static_cast<std::string>(tag);
-                return QueryEntities(maximum, destination, capacity, [&](const std::size_t limit)
-                                     { return ActiveServices->QueryManagedEntityTags(value, limit); });
+                return QueryEntities(
+                    maximum, destination, capacity, [&](const std::size_t limit)
+                    { return ActiveServices->QueryManagedEntityTagsScoped(value, SceneQuery(scope, scene), limit); });
             }
             catch (...)
             {
@@ -294,12 +324,16 @@ namespace Keire::Detail
             }
         }
 
-        [[nodiscard]] int QueryEntityComponents(const std::uint64_t high, const std::uint64_t low, const int maximum,
+        [[nodiscard]] int QueryEntityComponents(const std::uint64_t high, const std::uint64_t low,
+                                                const std::uint8_t scope, const std::uint64_t scene, const int maximum,
                                                 NativeEntityHandle* destination, const int capacity) noexcept
         {
-            return QueryEntities(
-                maximum, destination, capacity, [&](const std::size_t limit)
-                { return ActiveServices->QueryManagedEntityComponents(ComponentTypeId(AssetId(high, low)), limit); });
+            return QueryEntities(maximum, destination, capacity,
+                                 [&](const std::size_t limit)
+                                 {
+                                     return ActiveServices->QueryManagedEntityComponentsScoped(
+                                         ComponentTypeId(AssetId(high, low)), SceneQuery(scope, scene), limit);
+                                 });
         }
 
         [[nodiscard]] NativeRenderEnvironment ToNative(const RenderEnvironmentSettings& value) noexcept
@@ -371,6 +405,10 @@ namespace Keire::Detail
                                  reinterpret_cast<void*>(&GetSceneLoadDiagnostic));
         assembly.AddInternalCall("Keire.NativeWorld", "CancelSceneLoadIcall",
                                  reinterpret_cast<void*>(&CancelSceneLoad));
+        assembly.AddInternalCall("Keire.NativeWorld", "UnloadSceneIcall", reinterpret_cast<void*>(&UnloadScene));
+        assembly.AddInternalCall("Keire.NativeWorld", "SetActiveSceneIcall", reinterpret_cast<void*>(&SetActiveScene));
+        assembly.AddInternalCall("Keire.NativeWorld", "MakeEntityPersistentIcall",
+                                 reinterpret_cast<void*>(&MakeEntityPersistent));
         assembly.AddInternalCall("Keire.NativeWorld", "GetActiveSceneIcall", reinterpret_cast<void*>(&GetActiveScene));
         assembly.AddInternalCall("Keire.NativeWorld", "GetLoadedScenesIcall",
                                  reinterpret_cast<void*>(&GetLoadedScenes));
