@@ -39,6 +39,11 @@ if (_openSound.IsValid)
     Audio.Play(Entity, _openSound);
 ```
 
+Playback starts its ordinary asset load automatically. When a transition needs explicit prewarming or readiness
+diagnostics, retain `Assets.LoadRuntime(_openSound)` in an `AssetHandle<AudioClip>` and dispose it when that transition
+or owning `Behaviour` ends. The same contract applies to `AudioMixer` references; the lease never exposes decoded audio
+or a native voice.
+
 Equivalent ID form:
 
 ```csharp

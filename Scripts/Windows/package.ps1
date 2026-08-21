@@ -288,6 +288,14 @@ try {
     & $managedExe --managed-smoke
     if ($LASTEXITCODE -ne 0) { throw "Managed SDK consumer failed with exit code $LASTEXITCODE." }
 
+    $managedApiProject = Join-Path $sdkRoot "examples\managed-consumer\ManagedApiConsumer.csproj"
+    $managedApiOutput = Join-Path $validationRoot "managed-api-bin"
+    $managedApiIntermediate = Join-Path $validationRoot "managed-api-obj"
+    & (Join-Path $Root "Build\Dependencies\dotnet-sdk\dotnet.exe") build $managedApiProject --configuration Release `
+        --nologo "-p:KeireManagedAssembly=$(Join-Path $sdkRoot 'bin\Managed\Keire.Managed.dll')" `
+        "-p:BaseOutputPath=$managedApiOutput\" "-p:BaseIntermediateOutputPath=$managedApiIntermediate\"
+    if ($LASTEXITCODE -ne 0) { throw "Managed API SDK consumer compilation failed with exit code $LASTEXITCODE." }
+
     $cmakeBuild = Join-Path $validationRoot "cmake-build"
     & $CMake -S (Join-Path $sdkRoot "examples\consumer") -B $cmakeBuild "-DCMAKE_PREFIX_PATH=$sdkRoot"
     if ($LASTEXITCODE -ne 0) { throw "SDK CMake configuration failed with exit code $LASTEXITCODE." }

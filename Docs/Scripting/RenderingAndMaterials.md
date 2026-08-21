@@ -160,5 +160,8 @@ light.ContactShadows = true;
 ```
 
 Material/Shader Graph authoring remains editor-owned. Managed runtime graph construction is intentionally outside the
-gameplay contract. Render textures and custom render-pass scripting remain tracked in the
+gameplay contract. Scripts can hold `AssetReference<ShaderGraph>`, `AssetReference<ShaderGraphInstance>`,
+`AssetReference<MaterialGraph>`, and `AssetReference<MaterialInstance>` and use `Assets.LoadRuntime` to observe
+compiled graph readiness without receiving or mutating the graph object. Render textures and custom render-pass
+scripting remain tracked in the
 [Managed API Capability Matrix](ManagedApiMatrix.md).

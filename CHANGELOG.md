@@ -9,6 +9,12 @@ versions.
   Coral/.NET host before strict managed type discovery, and by staging the same host in every packaged-player template.
   Project type catalogs now exclude Kéire's private managed API self-test types and accept repeated instances of the
   same nested serializable type without weakening duplicate-ID rejection between distinct fields.
+- Added explicit typed C# residency handles for native Audio, VFX, Material, Shader/Material Graph, and rendering
+  assets. Managed code can now request load priority, yield or await readiness, inspect fallback/revision/structured
+  failure state, and deterministically release a generation-scoped lease without receiving a native resource object.
+  The packaged managed consumer compiles the new presentation-asset surface against the shipped managed assembly.
+  GPU VFX signature validation also rejects out-of-range opcodes through an explicit portable fallback, and streaming
+  SHA-256 finalization now enforces its buffered-byte invariant in optimized builds.
 - Added stable runtime scene handles, additive load/unload/activation, explicit active/loaded/specific/persistent query
   scopes, and hierarchy-root persistence across scene transitions. Packaged runtime and Editor Play Mode now share the
   same multi-scene lifecycle and managed C# API while single-scene activation remains transactional.

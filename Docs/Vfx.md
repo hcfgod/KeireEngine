@@ -1365,8 +1365,13 @@ effect becomes non-looping.
 
 ## Managed C# Usage
 
-The managed API defines the typed `VfxEffect` asset marker, entity-scoped `VfxEmitterHandle`, and static `Vfx` service
-in the `Keire` namespace.
+The managed API defines typed `VfxEffect` and `VfxVolume` asset markers, entity-scoped `VfxEmitterHandle`, and the
+static `Vfx` service in the `Keire` namespace.
+
+Playback starts ordinary asset loading. Code that must prewarm an effect or volume can retain
+`Assets.LoadRuntime(reference)` and inspect the resulting `AssetHandle<T>` readiness, fallback, revision, and structured
+diagnostic before issuing presentation calls. Disposing the handle releases only that residency lease; graph authoring
+and mutation remain editor/native responsibilities.
 
 ### Serialized Effect And Playback
 

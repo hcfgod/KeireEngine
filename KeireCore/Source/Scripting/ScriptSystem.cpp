@@ -306,7 +306,6 @@ namespace Keire
                                              static_cast<std::int32_t>(Specification.MaximumManagedDataAssets),
                                              static_cast<std::int32_t>(Specification.MaximumManagedDataLoads));
         }
-
         void ResetManagedAssetGeneration(const Coral::Type* nativeRuntime, const std::uint64_t generation) noexcept
         {
             if (!nativeRuntime || generation == 0)
@@ -319,8 +318,9 @@ namespace Keire
             catch (...)
             {
             }
+            if (Specification.RuntimeServices)
+                Specification.RuntimeServices->ReleaseManagedRuntimeAssets(generation);
         }
-
         void ResumeGenerationSequence() { NextOperation = Detail::NextManagedGeneration(OutputRoot); }
 
         [[nodiscard]] std::filesystem::path FindManagedApiProject() const

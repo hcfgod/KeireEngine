@@ -10,6 +10,20 @@ Status meanings:
 - **Partial** — useful production functionality exists, with named gaps still to close.
 - **Planned** — intentionally absent from the supported managed contract today.
 
+## Presentation Gap Audit
+
+The production presentation audit used the public declarations in `KeireManaged`, their registered native internal
+calls, focused managed/native tests, and the SDK package consumers as evidence:
+
+| Requested area | Existing public evidence | Audit decision |
+| --- | --- | --- |
+| Audio | `Audio`, `AudioSourceHandle`, `AudioListenerHandle`, `AudioReverbZoneHandle`, typed clip/mixer references, mixer buses and playback status | Production surface already exists; add explicit clip/mixer prewarming through the common residency handle |
+| VFX | `Vfx`, `VfxEmitterHandle`, typed Blackboard/range setters, events and playback status | Production playback already exists; add effect/volume residency markers and keep graph construction editor/native-owned |
+| Materials and shaders | Camera, Mesh Renderer, light, property-block, dynamic material-instance, and global parameter-collection handles | Production runtime mutation already exists; add native readiness for Material, Shader, Texture, Mesh, and collection assets |
+| Shader/Material/VFX graphs | Immutable native graph assets and compiled runtime consumers; managed graph construction is intentionally absent | Expose typed identities and residency status only, without mutable graph objects or speculative node APIs |
+| Runtime UI | Scene-backed controls, focus/navigation, safe-area scaling, accessibility metadata, and bounded event polling | Existing hooks remain authoritative; Texture/Material residency fills the shared asset-readiness need |
+| Runtime assets | Managed data has bounded `LoadAsync`; presentation systems load native assets internally | Highest-value coherent gap: explicit typed native leases with priority, state, fallback, revision, structured errors, coroutine/async waiting, disposal, and hot-reload generation cleanup |
+
 | Area | Status | Current Kéire surface | Next parity work |
 | --- | --- | --- | --- |
 | Application and persistence | **Production** | `Application` identity, editor detection, persistent-data path, safe quit; typed atomic `PlayerPreferences` | Cloud/platform save providers remain game-service scope |
@@ -18,7 +32,7 @@ Status meanings:
 | Behaviour lifecycle | **Production** | Enable/start/update/fixed/late, physics, animation, destroy, reload, coroutines, execution order | — |
 | Entities and transforms | **Production** | Identity, hierarchy, active/layer/name/tags, clone/destroy, component handles, deterministic bounded name/tag/component queries, local/world/presentation transforms | Multi-scene query scopes |
 | Inspector serialization | **Production** | Stable fields; custom labels, headers, groups, and tooltips; true sliders; one-sided bounds and drag steps; multiline and read-only fields; nested data, asset references, reload-only state | Arbitrary editor-code property drawers |
-| Assets and managed data | **Production** | Typed asset IDs/references, bounded async managed-data loading, `ScriptableObject` clone and hot reload | General native asset async handles for every asset class |
+| Assets and managed data | **Production** | Typed asset IDs/references; bounded async managed-data loading; `ScriptableObject` clone and hot reload; explicit native presentation-asset residency handles with priority, state, fallback, revision, diagnostics, coroutine/async waiting, and generation-safe release | Streamed range access and custom project asset marker registration |
 | Input and cursor | **Partial** | Named actions and phases; device snapshots; control schemes; persistent interactive rebinding; paired gamepad rumble; cursor visibility and capture | Touch, pen, sensors, XR, advanced haptics |
 | Physics | **Partial** | Nearest raycast and capsule cast, bounded sphere overlaps, rigid bodies, character controller, collision/trigger callbacks | Additional shapes, joints, batched queries |
 | Animation | **Production** | State playback, transitions, parameters, layers, IK, events, procedural locomotion | Animation-rig authoring remains editor/native |

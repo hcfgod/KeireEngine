@@ -57,6 +57,46 @@ The common compiler error
 `cannot convert from 'Keire.AudioClip' to 'Keire.AssetId'` means an asset marker object was passed where stable asset
 identity was required.
 
+## Loading Native Runtime Assets
+
+Presentation APIs normally accept `AssetReference<T>` directly and start their own load. Use `Assets.LoadRuntime` when
+game code must explicitly prewarm an engine-owned asset, observe readiness, or keep it resident across several system
+calls:
+
+```csharp
+[SerializeField, StableFieldId("65e12766-9948-4078-841e-c8bdb6710001")]
+private AssetReference<Material> _surface;
+
+private AssetHandle<Material>? _surfaceLease;
+
+protected override void OnEnable()
+{
+    if (_surface.IsValid)
+        _surfaceLease = Assets.LoadRuntime(_surface, AssetLoadPriority.High);
+}
+
+protected override void OnDisable()
+{
+    _surfaceLease?.Dispose();
+    _surfaceLease = null;
+}
+```
+
+`AssetHandle<T>` is a residency lease, not a managed wrapper around the native resource. Keep using its `Reference`
+with renderer, audio, VFX, and UI presentation APIs. The handle exposes `State`, `IsReady`, `UsingFallback`, `Revision`,
+and a structured `Diagnostic`; it can be yielded from a coroutine or awaited with `WaitUntilReadyAsync`. Call
+`RequireReady` where failure must become a deterministic `AssetLoadException`.
+
+Dispose every lease when its owning `Behaviour` or service is disabled. Disposal is idempotent. A managed assembly
+reload also releases every lease that belongs to the retiring generation, so a missed cleanup cannot pin native assets
+across hot reload. A single generation may hold at most 4,096 native runtime handles.
+
+Built-in runtime markers include `AnimationClip`, `AnimatorController`, `AudioClip`, `AudioMixer`, `Mesh`, `Texture`,
+`Shader`, `Material`,
+`MaterialParameterCollection`, `ShaderGraph`, `ShaderGraphInstance`, `MaterialGraph`, `MaterialInstance`,
+`VfxEffect`, and `VfxVolume`. Their `[StableAssetTypeId]` values match the native asset types. Managed
+`ScriptableObject` types deliberately use `Assets.LoadAsync` instead; `Assets.LoadRuntime` rejects them.
+
 ## Managed Data Assets
 
 Derive authorable data from `ScriptableObject`:

@@ -4,8 +4,83 @@
 #include "Keire/BuildInfo.h"
 #include "Keire/PlatformDirectories.h"
 
+#include <map>
+
 namespace Keire::Detail
 {
+    class ManagedRuntimeApplicationServices::RuntimeAssets final
+    {
+      public:
+        struct Entry final
+        {
+            std::uint64_t Generation = 0;
+            AssetHandle<Asset> Handle;
+        };
+
+        [[nodiscard]] std::uint64_t Load(Application* application, const std::uint64_t generation, const AssetId id,
+                                         const AssetTypeId type, const AssetPriority priority) noexcept
+        {
+            constexpr std::size_t MaximumHandles = 4096;
+            if (!application || generation == 0 || !id || !type || priority > AssetPriority::Background ||
+                m_Handles.size() >= MaximumHandles)
+                return 0;
+            const auto assets = application->Assets();
+            if (!assets || !assets->IsOpen())
+                return 0;
+            try
+            {
+                std::uint64_t token = m_Next++;
+                if (token == 0)
+                    token = m_Next++;
+                if (token == 0 || m_Handles.contains(token))
+                    return 0;
+                m_Handles.emplace(token, Entry{generation, assets->Load(id, type, priority)});
+                return token;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] std::optional<ManagedRuntimeAssetStatus> Status(const std::uint64_t token) const noexcept
+        {
+            const auto found = m_Handles.find(token);
+            if (found == m_Handles.end())
+                return std::nullopt;
+            try
+            {
+                const auto& handle = found->second.Handle;
+                return ManagedRuntimeAssetStatus{handle.State(), handle.UsingFallback(), handle.Revision(),
+                                                 handle.Diagnostic()};
+            }
+            catch (...)
+            {
+                return std::nullopt;
+            }
+        }
+
+        [[nodiscard]] bool Release(const std::uint64_t token) noexcept { return m_Handles.erase(token) != 0; }
+
+        void ReleaseGeneration(const std::uint64_t generation) noexcept
+        {
+            std::erase_if(m_Handles, [generation](const auto& entry) { return entry.second.Generation == generation; });
+        }
+
+        void Clear() noexcept { m_Handles.clear(); }
+
+      private:
+        std::map<std::uint64_t, Entry> m_Handles;
+        std::uint64_t m_Next = 1;
+    };
+
+    ManagedRuntimeApplicationServices::ManagedRuntimeApplicationServices(const bool editor)
+        : m_RuntimeAssets(std::make_unique<RuntimeAssets>()), m_Editor(editor)
+    {
+    }
+
+    ManagedRuntimeApplicationServices::~ManagedRuntimeApplicationServices() = default;
+
     ManagedApplicationInfo ManagedRuntimeApplicationServices::ManagedApplication() const
     {
         if (!m_Application)
@@ -133,10 +208,38 @@ namespace Keire::Detail
         }
     }
 
+    std::uint64_t ManagedRuntimeApplicationServices::BeginManagedRuntimeAssetLoad(const std::uint64_t generation,
+                                                                                  const AssetId id,
+                                                                                  const AssetTypeId type,
+                                                                                  const AssetPriority priority) noexcept
+    {
+        return m_RuntimeAssets->Load(m_Application, generation, id, type, priority);
+    }
+
+    std::optional<ManagedRuntimeAssetStatus>
+    ManagedRuntimeApplicationServices::ManagedRuntimeAsset(const std::uint64_t handle) const noexcept
+    {
+        return m_RuntimeAssets->Status(handle);
+    }
+
+    bool ManagedRuntimeApplicationServices::ReleaseManagedRuntimeAsset(const std::uint64_t handle) noexcept
+    {
+        return m_RuntimeAssets->Release(handle);
+    }
+
+    void ManagedRuntimeApplicationServices::ReleaseManagedRuntimeAssets(const std::uint64_t generation) noexcept
+    {
+        m_RuntimeAssets->ReleaseGeneration(generation);
+    }
+
     void ManagedRuntimeApplicationServices::BindManagedApplication(Application& application) noexcept
     {
         m_Application = &application;
     }
 
-    void ManagedRuntimeApplicationServices::UnbindManagedApplication() noexcept { m_Application = nullptr; }
+    void ManagedRuntimeApplicationServices::UnbindManagedApplication() noexcept
+    {
+        m_RuntimeAssets->Clear();
+        m_Application = nullptr;
+    }
 } // namespace Keire::Detail

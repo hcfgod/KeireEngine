@@ -204,6 +204,12 @@ managed_compile=("$cxx" -std=c++20 -Wall -Wextra -Werror -DKEIRE_STATIC "-I$vali
 managed_help="$("$validation_root/managed-consumer" --help)"
 [[ "$managed_help" == *--managed-smoke* ]] || { printf 'Managed SDK consumer help validation failed.\n' >&2; exit 1; }
 (cd "$validation_root" && ./managed-consumer --managed-smoke)
+"$ROOT/Build/Dependencies/dotnet-sdk/dotnet" build \
+  "$validation_root/sdk/examples/managed-consumer/ManagedApiConsumer.csproj" \
+  --configuration Release --nologo \
+  "-p:KeireManagedAssembly=$validation_root/sdk/bin/Managed/Keire.Managed.dll" \
+  "-p:BaseOutputPath=$validation_root/managed-api-bin/" \
+  "-p:BaseIntermediateOutputPath=$validation_root/managed-api-obj/"
 cmake_platform_options=()
 [[ "$PLATFORM" == Mac ]] && cmake_platform_options+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=$macos_deployment_target")
 cmake -S "$validation_root/sdk/examples/consumer" -B "$validation_root/cmake-build" -DCMAKE_PREFIX_PATH="$validation_root/sdk" -DCMAKE_BUILD_TYPE=Release "${cmake_platform_options[@]}"

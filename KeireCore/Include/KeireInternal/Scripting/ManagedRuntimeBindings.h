@@ -1,5 +1,6 @@
 #pragma once
 
+#include "KeireInternal/Scripting/ManagedRuntimeAssets.h"
 #include "KeireInternal/Scripting/ManagedRuntimeFoundation.h"
 #include "KeireInternal/Scripting/ManagedRuntimeInput.h"
 #include "KeireInternal/Scripting/ManagedRuntimePhysics.h"
@@ -18,6 +19,7 @@ namespace Keire::Detail
         ManagedRuntimeBindingsScope& operator=(const ManagedRuntimeBindingsScope&) = delete;
 
       private:
+        ManagedRuntimeAssetsScope m_Assets;
         ManagedRuntimeFoundationScope m_Foundation;
         ManagedRuntimeInputScope m_Input;
         ManagedRuntimePhysicsScope m_Physics;

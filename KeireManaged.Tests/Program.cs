@@ -3,6 +3,7 @@ var tests = new (string Name, Action Run)[]
     ("VFX ranges normalize and validate", VfxRangesNormalizeAndValidate),
     ("Inspector attributes validate production editing metadata", InspectorAttributeContract),
     ("VFX range setters expose every supported type", VfxRangeSettersExposeEverySupportedType),
+    ("Runtime asset handles preserve typed state diagnostics and explicit leases", RuntimeAssetHandleContract),
     ("Character Controller uses the native stable component contract", CharacterControllerStableContract),
     ("Entity exposes the production layer contract", EntityLayerContract),
     ("Behaviour lifecycle contracts are synchronized", BehaviourLifecycleContract),
@@ -729,7 +730,7 @@ foreach ((string name, Action run) in tests)
     catch (Exception exception)
     {
         ++failed;
-        Console.Error.WriteLine($"FAIL {name}: {exception.Message}");
+        Console.Error.WriteLine($"FAIL {name}: {exception.GetBaseException().Message}");
     }
 }
 
@@ -798,6 +799,68 @@ static void VfxRangeSettersExposeEverySupportedType()
     }
 }
 
+static unsafe void RuntimeAssetHandleContract()
+{
+    NativeAssetFixture.Install();
+    try
+    {
+        var reference = new Keire.AssetReference<Keire.Material>(new Keire.AssetId(101, 201));
+        using var handle = Keire.Assets.LoadRuntime(reference, Keire.AssetLoadPriority.High);
+        Assert(NativeAssetFixture.Generation == 7001 && NativeAssetFixture.Asset == reference.Id &&
+                   NativeAssetFixture.Type == new Keire.AssetId(0x4b454952454d4154, 0x455249414c000001) &&
+                   NativeAssetFixture.Priority == Keire.AssetLoadPriority.High,
+               "Runtime asset loads must preserve generation, asset type, identity, and priority.");
+        Assert(handle.State == Keire.AssetLoadState.Queued && handle.UsingFallback && handle.Revision == 0 &&
+                   handle.KeepWaiting,
+               "Queued runtime asset handles must expose fallback state and remain coroutine-waitable.");
+
+        NativeAssetFixture.Publish(Keire.AssetLoadState.Ready, usingFallback: false, revision: 4);
+        handle.RequireReady();
+        Assert(handle.IsReady && handle.IsDone && !handle.KeepWaiting && handle.Revision == 4 &&
+                   handle.Diagnostic.IsEmpty,
+               "Ready runtime asset handles must expose their resident revision without a native object.");
+        Assert(handle.WaitUntilReadyAsync().IsCompletedSuccessfully,
+               "Already-ready runtime asset handles must complete asynchronous waits synchronously.");
+
+        NativeAssetFixture.Publish(Keire.AssetLoadState.Reloading, usingFallback: false, revision: 4);
+        Assert(handle.IsReady && handle.IsDone && !handle.KeepWaiting && handle.Revision == 4,
+               "Reloading runtime asset handles must keep their last-good revision usable.");
+
+        NativeAssetFixture.Publish(Keire.AssetLoadState.Failed, usingFallback: true, revision: 4,
+                                   operation: "decode", message: "material payload is invalid");
+        try
+        {
+            handle.RequireReady();
+            throw new InvalidOperationException("A failed runtime asset handle completed successfully.");
+        }
+        catch (Keire.AssetLoadException exception)
+        {
+            Assert(exception.Asset == reference.Id && exception.Diagnostic.Operation == "decode" &&
+                       exception.Message.Contains("material payload is invalid", StringComparison.Ordinal),
+                   "Runtime asset failures must retain typed identity and structured native diagnostics.");
+        }
+
+        AssertThrows<NotSupportedException>(
+            () => Keire.Assets.LoadRuntime(new Keire.AssetReference<object>(new Keire.AssetId(1, 2))),
+            "Unregistered runtime asset marker types must be rejected before native dispatch.");
+        AssertThrows<NotSupportedException>(
+            () => Keire.Assets.LoadRuntime(
+                new Keire.AssetReference<ManagedRuntimeAssetProbe>(new Keire.AssetId(1, 3))),
+            "Managed data assets must use their managed loading pipeline.");
+
+        handle.Dispose();
+        handle.Dispose();
+        Assert(NativeAssetFixture.ReleaseCount == 1,
+               "Runtime asset handle disposal must release its native residency lease exactly once.");
+        AssertThrows<ObjectDisposedException>(() => _ = handle.State,
+                                              "Disposed runtime asset handles must reject further state access.");
+    }
+    finally
+    {
+        NativeAssetFixture.Uninstall();
+    }
+}
+
 static void Assert(bool condition, string message)
 {
     if (!condition)
@@ -817,6 +880,99 @@ static void AssertThrows<TException>(Action action, string message)
     }
 
     throw new InvalidOperationException(message);
+}
+
+file static unsafe class NativeAssetFixture
+{
+    private const ulong Handle = 41;
+    private static Keire.NativeRuntimeAssetStatus s_status;
+    private static string s_operation = string.Empty;
+    private static string s_message = string.Empty;
+
+    internal static ulong Generation { get; private set; }
+    internal static Keire.AssetId Asset { get; private set; }
+    internal static Keire.AssetId Type { get; private set; }
+    internal static Keire.AssetLoadPriority Priority { get; private set; }
+    internal static int ReleaseCount { get; private set; }
+
+    internal static void Install()
+    {
+        Generation = 0;
+        Asset = default;
+        Type = default;
+        Priority = default;
+        ReleaseCount = 0;
+        Publish(Keire.AssetLoadState.Queued, usingFallback: true, revision: 0);
+        Keire.NativeRuntime.InstallManagedAssetsForTests(7001, maximumLoadedAssets: 1,
+                                                        maximumInFlightLoads: 1, provider: null);
+        Keire.NativeAssets.BeginRuntimeAssetLoadIcall = &BeginRuntimeAssetLoad;
+        Keire.NativeAssets.GetRuntimeAssetStatusIcall = &GetRuntimeAssetStatus;
+        Keire.NativeAssets.GetRuntimeAssetDiagnosticIcall = &GetRuntimeAssetDiagnostic;
+        Keire.NativeAssets.ReleaseRuntimeAssetIcall = &ReleaseRuntimeAsset;
+    }
+
+    internal static void Uninstall()
+    {
+        Keire.NativeAssets.BeginRuntimeAssetLoadIcall = null;
+        Keire.NativeAssets.GetRuntimeAssetStatusIcall = null;
+        Keire.NativeAssets.GetRuntimeAssetDiagnosticIcall = null;
+        Keire.NativeAssets.ReleaseRuntimeAssetIcall = null;
+        _ = Keire.NativeRuntime.ResetManagedAssets(7001);
+    }
+
+    internal static void Publish(Keire.AssetLoadState state, bool usingFallback, ulong revision,
+                                 string operation = "", string message = "")
+    {
+        s_status.Revision = revision;
+        s_status.State = (byte)state;
+        s_status.UsingFallbackValue = usingFallback ? (byte)1 : (byte)0;
+        s_operation = operation;
+        s_message = message;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static ulong BeginRuntimeAssetLoad(ulong generation, ulong assetHigh, ulong assetLow, ulong typeHigh,
+                                               ulong typeLow, byte priority)
+    {
+        Generation = generation;
+        Asset = new Keire.AssetId(assetHigh, assetLow);
+        Type = new Keire.AssetId(typeHigh, typeLow);
+        Priority = (Keire.AssetLoadPriority)priority;
+        return Handle;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte GetRuntimeAssetStatus(ulong handle, Keire.NativeRuntimeAssetStatus* destination)
+    {
+        if (handle != Handle || destination == null)
+            return 0;
+        *destination = s_status;
+        return 1;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static int GetRuntimeAssetDiagnostic(ulong handle, byte field, byte* destination, int capacity)
+    {
+        if (handle != Handle || field > 1 || capacity < 0)
+            return -1;
+        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(field == 0 ? s_operation : s_message);
+        if (destination == null || capacity == 0)
+            return bytes.Length;
+        if (capacity < bytes.Length)
+            return -1;
+        for (int index = 0; index < bytes.Length; ++index)
+            destination[index] = bytes[index];
+        return bytes.Length;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte ReleaseRuntimeAsset(ulong handle)
+    {
+        if (handle != Handle)
+            return 0;
+        ++ReleaseCount;
+        return 1;
+    }
 }
 
 file static unsafe class NativeWorldFixture
@@ -1660,6 +1816,9 @@ file static unsafe class NativeRenderingFixture
 }
 
 file sealed class DetachedManagedContractProbe : Keire.Behaviour;
+
+[Keire.StableAssetTypeId("d3762027-3016-4ec9-b315-67d654f46443")]
+file sealed class ManagedRuntimeAssetProbe : Keire.ScriptableObject;
 
 [Keire.StableComponentId("d3762027-3016-4ec9-b315-67d654f46442")]
 file sealed class ReloadLifecycleProbe : Keire.Behaviour
