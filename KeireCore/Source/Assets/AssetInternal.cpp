@@ -141,6 +141,7 @@ namespace Keire::Detail
             {
                 if (m_Buffered >= m_Buffer.size())
                     std::terminate();
+
                 std::array<std::byte, 128> tail{};
                 if (m_Buffered > 0)
                     std::copy_n(m_Buffer.data(), m_Buffered, tail.data());
