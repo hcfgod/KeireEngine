@@ -274,7 +274,7 @@ namespace Keire
         return true;
     }
 
-    bool SceneRuntimeWorld::MakePersistent(const Entity entity)
+    bool SceneRuntimeWorld::MakePersistent(const Entity& entity)
     {
         m_Impl->RequireOwner("MakePersistent");
         if (!entity)
@@ -430,7 +430,7 @@ namespace Keire
         return m_Impl->Open && found != m_Impl->Entries.end() && found->Loaded;
     }
 
-    bool SceneRuntimeWorld::IsPersistent(const Entity entity) const noexcept
+    bool SceneRuntimeWorld::IsPersistent(const Entity& entity) const noexcept
     {
         if (!m_Impl->Open || !entity)
             return false;
