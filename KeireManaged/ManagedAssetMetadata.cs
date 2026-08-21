@@ -62,7 +62,7 @@ internal static class ManagedAssetMetadata
 
     private sealed class DiscoveryContext
     {
-        public HashSet<Guid> StableFieldIds { get; } = [];
+        public Dictionary<Guid, string> StableFieldOwners { get; } = [];
         public HashSet<Type> ActiveTypes { get; } = [];
     }
 
@@ -72,7 +72,8 @@ internal static class ManagedAssetMetadata
         IEnumerable<Type> candidates = AppDomain.CurrentDomain.GetAssemblies()
             .Where(assembly => !assembly.IsDynamic)
             .SelectMany(SafeTypes)
-            .Where(type => type != typeof(ScriptableObject) && !type.IsAbstract &&
+            .Where(type => type.Assembly != typeof(ScriptableObject).Assembly &&
+                           type != typeof(ScriptableObject) && !type.IsAbstract &&
                            typeof(ScriptableObject).IsAssignableFrom(type))
             .OrderBy(type => type.FullName, StringComparer.Ordinal);
 
@@ -144,8 +145,10 @@ internal static class ManagedAssetMetadata
             throw Invalid(ownerType, $"member '{member.Member.Name}' exceeds the supported nesting depth");
         StableFieldIdAttribute stable = member.Member.GetCustomAttribute<StableFieldIdAttribute>(true) ??
             throw Invalid(ownerType, $"serialized member '{member.Member.Name}' requires StableFieldId");
-        if (!context.StableFieldIds.Add(stable.Id))
+        string stableOwner = $"{member.Member.Module.ModuleVersionId:D}:{member.Member.MetadataToken}";
+        if (context.StableFieldOwners.TryGetValue(stable.Id, out string? existingOwner) && existingOwner != stableOwner)
             throw Invalid(ownerType, $"stable field ID '{stable.Id:D}' is duplicated");
+        context.StableFieldOwners[stable.Id] = stableOwner;
 
         Type valueType = member.ValueType;
         var result = new PropertyDocument

@@ -52,6 +52,10 @@ and mixer; copies an immutable native template and managed runtime into
 profile output. Failure and cancellation remove staging while preserving the previous successful build. A locked
 previous build fails explicitly.
 
+Player templates are managed-host consumers. Their generated projects therefore build the managed API and stage Coral,
+`nethost`, and the private .NET runtime for every configuration; direct IDE builds have the same packaging contract as
+launcher builds.
+
 ## Output Layouts
 
 Windows players contain `<Product>.exe`, `PlayerBuild.json`, `Content/`, `Managed/`, native dependencies, a generated
@@ -115,6 +119,11 @@ and Dist templates, creates and verifies the archive, and writes a catalog entry
 SHA-256. Passing an output directory, signing-key ID, and channel additionally publishes the verified archive as a
 signed generic `.keirepackage` component for editor-install dependency resolution. Publishing the six
 Windows/Linux/macOS × x86_64/ARM64 modules remains an explicit release operation.
+
+`KeireAssetTool` is a managed-host consumer. Repository launchers and generated IDE projects build the managed API and
+stage Coral plus the bundled .NET runtime beside the tool. `build-player` initializes that host before reflecting
+managed data types for strict cooking; invoking an unstaged tool binary is rejected instead of silently omitting type
+validation.
 
 ### Supported Linux matrix
 
