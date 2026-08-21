@@ -20,6 +20,7 @@ var tests = new (string Name, Action Run)[]
     ("Transform and rigid body gameplay handles expose writable runtime state", GameplayHandleContract),
     ("Animator exposes transient foot-grounding control", AnimatorFootGroundingContract),
     ("Managed physics shape queries validate and preserve native results", ManagedPhysicsQueryContract),
+    ("Managed input devices rebinding persistence and rumble preserve native contracts", ManagedInputDeviceContract),
     ("Native UI button dispatch advances with the player clock", NativeUiButtonDispatchClockContract),
     ("Native runtime UI controls preserve values text focus and events", NativeRuntimeUiControlContract),
     ("Managed rendering handles preserve camera lights materials and shader overrides", ManagedRenderingContract),
@@ -201,6 +202,63 @@ static unsafe void ManagedPhysicsQueryContract()
     finally
     {
         NativePhysicsFixture.Uninstall();
+    }
+}
+
+static unsafe void ManagedInputDeviceContract()
+{
+    Assert(System.Runtime.InteropServices.Marshal.SizeOf<Keire.NativeInputDevice>() == 8 &&
+               System.Runtime.InteropServices.Marshal.SizeOf<Keire.NativeInputRebindSnapshot>() == 32,
+           "Managed input structs must preserve their native ABI layouts.");
+    NativeInputFixture.Install();
+    try
+    {
+        IReadOnlyList<Keire.InputDevice> devices = Keire.Input.Devices;
+        Assert(devices.Count == 2 && devices[0] == new Keire.InputDevice(
+                   1, Keire.InputDeviceType.Keyboard, "Keyboard", true, true) &&
+                   devices[1] == new Keire.InputDevice(7, Keire.InputDeviceType.Gamepad, "Pro Controller", true, true),
+               "Managed input must preserve deterministic device metadata and UTF-8 names.");
+        Assert(Keire.Input.ControlScheme == "Gamepad" && Keire.Input.TrySetControlScheme("Gamepad") &&
+                   NativeInputFixture.SetSchemeCalls == 1 && Keire.Input.ClearControlSchemeLock(),
+               "Managed control schemes must preserve native automatic and locked state changes.");
+
+        Assert(Keire.Input.TrySetGamepadRumble(7, 0.25f, 0.75f, 1.5f) && NativeInputFixture.RumbleCalls == 1 &&
+                   NativeInputFixture.LowFrequency == 0.25f && NativeInputFixture.HighFrequency == 0.75f &&
+                   NativeInputFixture.DurationSeconds == 1.5f,
+               "Managed rumble must preserve normalized motor strengths and bounded duration.");
+
+        var options = new Keire.InputRebindOptions(0.65f, 8.0, Keire.InputDeviceMask.Gamepad);
+        Keire.InputRebindOperation operation = Keire.Input.BeginInteractiveRebind(new Keire.AssetId(71, 73), options);
+        Keire.InputRebindSnapshot snapshot = operation.Snapshot;
+        Assert(operation.IsValid && NativeInputFixture.BeginRebindCalls == 1 &&
+                   snapshot.Binding == new Keire.AssetId(71, 73) &&
+                   snapshot.Status == Keire.InputRebindStatus.Candidate &&
+                   snapshot.CandidatePath == "<Gamepad>/buttonSouth" && snapshot.RemainingSeconds == 3.5 &&
+                   snapshot.ConflictCount == 2 && operation.Apply(Keire.InputRebindResolution.KeepBoth) &&
+                   NativeInputFixture.ResolveCalls == 1 &&
+                   NativeInputFixture.Resolution == Keire.InputRebindResolution.KeepBoth,
+               "Managed interactive rebinding must preserve candidates conflicts timing and resolution.");
+
+        Assert(Keire.Input.SaveBindingOverrides("Player_1") && Keire.Input.LoadBindingOverrides("Player_1") == 3 &&
+                   Keire.Input.ClearBindingOverrides() && NativeInputFixture.PersistenceCalls == 3,
+               "Managed binding override profiles must preserve native save load and clear transactions.");
+
+        int nativeCalls = NativeInputFixture.RumbleCalls + NativeInputFixture.BeginRebindCalls;
+        AssertThrows<ArgumentOutOfRangeException>(() => Keire.Input.TrySetGamepadRumble(7, -0.1f, 0.5f, 1.0f),
+                                                  "Rumble strengths must be normalized before native dispatch.");
+        AssertThrows<ArgumentOutOfRangeException>(
+            () => Keire.Input.BeginInteractiveRebind(new Keire.AssetId(71, 73),
+                                                     new Keire.InputRebindOptions(0.5f, 0.0,
+                                                                                  Keire.InputDeviceMask.Gamepad)),
+            "Interactive rebind timeouts must be positive and bounded.");
+        AssertThrows<ArgumentException>(() => Keire.Input.SaveBindingOverrides("../escape"),
+                                        "Binding profiles must reject traversal before native dispatch.");
+        Assert(nativeCalls == NativeInputFixture.RumbleCalls + NativeInputFixture.BeginRebindCalls,
+               "Invalid managed input operations must not reach native code.");
+    }
+    finally
+    {
+        NativeInputFixture.Uninstall();
     }
 }
 

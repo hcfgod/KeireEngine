@@ -1,6 +1,7 @@
 #include "KeireTests/TestSupport.h"
 
 #include "Keire/Core.h"
+#include "KeireInternal/Scripting/ManagedRuntimeInput.h"
 
 #include <SDL3/SDL.h>
 #include <doctest/doctest.h>
@@ -133,15 +134,18 @@ namespace
             {
                 m_Result->SawCancel = true;
                 const auto binding = Keire::AssetId::Parse("e3afdb73-a3ec-43a7-96bb-871fe3007209");
-                m_Rebind = Owner().Input()->BeginInteractiveRebind(m_RebindContext, binding);
+                m_ManagedRebind = m_ManagedRebinds.Begin(Owner().Input(), m_RebindContext, binding, {});
+                REQUIRE(m_ManagedRebind != 0);
                 PushKey(true, SDL_SCANCODE_A);
                 return;
             }
-            if (m_Rebind && m_Rebind->Status() == Keire::RebindStatus::Candidate)
+            const auto rebind = m_ManagedRebinds.Status(m_ManagedRebind);
+            if (rebind && rebind->Status == Keire::ManagedInputRebindStatus::Candidate)
             {
-                CHECK(m_Rebind->CandidatePath() == "<Keyboard>/a");
-                m_Rebind->Apply(Keire::RebindConflictResolution::KeepBoth);
-                m_Result->Rebound = m_Rebind->Status() == Keire::RebindStatus::Completed;
+                CHECK(rebind->CandidatePath == "<Keyboard>/a");
+                REQUIRE(m_ManagedRebinds.Resolve(m_ManagedRebind, Keire::ManagedInputRebindResolution::KeepBoth));
+                const auto completed = m_ManagedRebinds.Status(m_ManagedRebind);
+                m_Result->Rebound = completed && completed->Status == Keire::ManagedInputRebindStatus::Completed;
                 m_RebindContext->SaveBindingOverrides("TestProfile");
                 m_RebindContext->ClearBindingOverrides();
                 m_Result->ReloadedOverrides = m_RebindContext->LoadBindingOverrides("TestProfile");
@@ -176,7 +180,8 @@ namespace
         Keire::InputActionHandle m_Move;
         Keire::InputActionSubscription m_Subscription;
         Keire::InputCaptureOverride m_CaptureOverride;
-        Keire::Ref<Keire::InteractiveRebindOperation> m_Rebind;
+        Keire::Detail::ManagedInputOperationStore m_ManagedRebinds;
+        std::uint64_t m_ManagedRebind = 0;
         bool m_AwaitingRebindRelease = false;
         int m_Update = 0;
     };
@@ -443,6 +448,128 @@ namespace
       private:
         std::shared_ptr<MixedDeviceInputResult> m_Result;
     };
+
+    struct GamepadRumbleResult final
+    {
+        Keire::InputDeviceId Device;
+        bool RumbleAccepted = false;
+        bool KeyboardRejected = false;
+    };
+
+    struct VirtualGamepad final
+    {
+        VirtualGamepad()
+        {
+            Initialized = SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD);
+            if (!Initialized)
+            {
+                Diagnostic = SDL_GetError();
+                return;
+            }
+            SDL_VirtualJoystickDesc specification;
+            SDL_INIT_INTERFACE(&specification);
+            specification.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+            specification.vendor_id = 0x045E;
+            specification.product_id = 0x028E;
+            specification.naxes = SDL_GAMEPAD_AXIS_COUNT;
+            specification.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+            specification.button_mask = (1U << SDL_GAMEPAD_BUTTON_SOUTH) | (1U << SDL_GAMEPAD_BUTTON_START);
+            specification.axis_mask = (1U << SDL_GAMEPAD_AXIS_LEFTX) | (1U << SDL_GAMEPAD_AXIS_LEFTY);
+            specification.name = "Kéire Virtual Gamepad";
+            specification.userdata = this;
+            specification.Rumble = RecordRumble;
+            Device = SDL_AttachVirtualJoystick(&specification);
+            if (Device == 0)
+                Diagnostic = SDL_GetError();
+        }
+
+        ~VirtualGamepad()
+        {
+            if (Device != 0)
+                (void)SDL_DetachVirtualJoystick(Device);
+            if (Initialized)
+                SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+        }
+
+        VirtualGamepad(const VirtualGamepad&) = delete;
+        VirtualGamepad& operator=(const VirtualGamepad&) = delete;
+
+        static bool SDLCALL RecordRumble(void* context, const Uint16 low, const Uint16 high)
+        {
+            auto& probe = *static_cast<VirtualGamepad*>(context);
+            ++probe.RumbleCalls;
+            probe.LowFrequency = low;
+            probe.HighFrequency = high;
+            return true;
+        }
+
+        SDL_JoystickID Device = 0;
+        bool Initialized = false;
+        std::string Diagnostic;
+        std::uint32_t RumbleCalls = 0;
+        std::uint16_t LowFrequency = 0;
+        std::uint16_t HighFrequency = 0;
+    };
+
+    class GamepadRumbleLayer final : public Keire::Layer
+    {
+      public:
+        explicit GamepadRumbleLayer(std::shared_ptr<GamepadRumbleResult> result)
+            : Layer("GamepadRumble"), m_Result(std::move(result))
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            const auto input = Owner().Input();
+            REQUIRE(input);
+            const auto devices = input->Devices();
+            const auto gamepad =
+                std::ranges::find_if(devices, [](const Keire::InputDeviceDescriptor& device)
+                                     { return device.Type == Keire::InputDeviceType::Gamepad && device.Connected; });
+            m_Result->KeyboardRejected =
+                !input->SetGamepadRumble(Keire::InputDeviceId(1), 0.25F, 0.75F, Keire::TimeStep::FromSeconds(0.125));
+            const auto validationDevice = gamepad == devices.end() ? Keire::InputDeviceId(1) : gamepad->Id;
+            CHECK_THROWS_AS(
+                (void)input->SetGamepadRumble(validationDevice, -0.1F, 0.5F, Keire::TimeStep::FromSeconds(1.0)),
+                std::invalid_argument);
+            CHECK_THROWS_AS(
+                (void)input->SetGamepadRumble(validationDevice, 0.1F, 0.5F, Keire::TimeStep::FromSeconds(61.0)),
+                std::invalid_argument);
+            if (gamepad == devices.end())
+            {
+                Owner().RequestExit();
+                return;
+            }
+            CHECK(gamepad->Name == "Kéire Virtual Gamepad");
+            const auto user = input->CreateUser("Rumble player");
+            REQUIRE(input->PairDevice(user, gamepad->Id));
+            m_Result->Device = gamepad->Id;
+            m_Result->RumbleAccepted =
+                input->SetGamepadRumble(gamepad->Id, 0.25F, 0.75F, Keire::TimeStep::FromSeconds(0.125));
+            Owner().RequestExit();
+        }
+
+      private:
+        std::shared_ptr<GamepadRumbleResult> m_Result;
+    };
+
+    class GamepadRumbleApplication final : public Keire::Application
+    {
+      public:
+        GamepadRumbleApplication(Keire::ApplicationSpecification specification,
+                                 std::shared_ptr<GamepadRumbleResult> result)
+            : Application(std::move(specification)), m_Result(std::move(result))
+        {
+        }
+
+      protected:
+        void OnInitialize() override { (void)PushLayer(std::make_unique<GamepadRumbleLayer>(m_Result)); }
+
+      private:
+        std::shared_ptr<GamepadRumbleResult> m_Result;
+    };
 } // namespace
 
 TEST_CASE("Input action assets validate and serialize canonically")
@@ -560,6 +687,44 @@ TEST_CASE("Input switches a mixed-device standalone user to the active mouse con
     CHECK(result->SwitchedToKeyboardMouse);
     CHECK(result->FireHeld);
     CHECK(result->FirePerformed);
+}
+
+TEST_CASE("Input gamepad rumble validates requests and reaches the owned native device")
+{
+    UseDummyVideoDriver();
+    VirtualGamepad gamepad;
+    if (gamepad.Device == 0)
+        MESSAGE("Virtual gamepad unavailable: " << gamepad.Diagnostic);
+    InputProject project;
+    Keire::ApplicationSpecification specification;
+    specification.MainWindow.Title = "Gamepad rumble test";
+    specification.MainWindow.Visible = false;
+    specification.Assets.Mode = Keire::AssetMode::Development;
+    specification.Assets.DevelopmentCatalog = project.Catalog;
+    specification.Input.Mode = Keire::InputMode::Enabled;
+    specification.Input.AutoJoin = false;
+    specification.Ui.Mode = Keire::UiMode::Disabled;
+    specification.ManageLogging = false;
+    specification.TargetFrameRate = 240;
+
+    auto result = std::make_shared<GamepadRumbleResult>();
+    GamepadRumbleApplication application(std::move(specification), result);
+    CHECK(application.Run() == 0);
+    CHECK(result->KeyboardRejected);
+    if (gamepad.Device != 0)
+    {
+        CHECK(result->Device);
+        CHECK(result->RumbleAccepted);
+        CHECK(gamepad.RumbleCalls == 1);
+        CHECK(gamepad.LowFrequency == 16384);
+        CHECK(gamepad.HighFrequency == 49151);
+    }
+    else
+    {
+        CHECK_FALSE(result->Device);
+        CHECK_FALSE(result->RumbleAccepted);
+        CHECK(gamepad.RumbleCalls == 0);
+    }
 }
 
 TEST_CASE("Application rejects enabled input without assets")

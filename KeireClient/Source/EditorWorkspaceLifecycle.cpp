@@ -50,6 +50,7 @@ void EditorWorkspaceLayer::OnDetach() noexcept
     if (m_ProjectSettingsDocument)
         m_ProjectSettingsDocument->Close();
     EndInputTest();
+    m_ManagedInputOperations.CancelAll();
     m_ManagedInputCaptureOverride.reset();
     m_GameplayInputContext.Reset();
     m_ManagedCursorLocked = false;

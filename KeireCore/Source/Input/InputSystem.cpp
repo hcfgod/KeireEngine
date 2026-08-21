@@ -3,6 +3,7 @@
 #include "Keire/BuildInfo.h"
 #include "KeireInternal/Assets/AssetInternal.h"
 #include "KeireInternal/FileSystem.h"
+#include "KeireInternal/InputInternal.h"
 #include "KeireInternal/WindowInternal.h"
 
 #include <SDL3/SDL.h>
@@ -30,6 +31,11 @@ namespace Keire
     namespace
     {
         using Json = nlohmann::json;
+        using Detail::AxisInputValue;
+        using Detail::BooleanInputValue;
+        using Detail::NormalizeInputAxis;
+        using Detail::NormalizeInputTrigger;
+        using Detail::VectorInputValue;
 
         template <typename Range, typename Value> [[nodiscard]] bool Contains(const Range& range, const Value& value)
         {
@@ -61,25 +67,6 @@ namespace Keire
             InputUserDescriptor Descriptor;
             bool SchemeLocked = false;
         };
-
-        [[nodiscard]] InputValue BooleanValue(const bool value) noexcept
-        {
-            return {InputValueType::Boolean, value ? 1.0F : 0.0F, 0.0F};
-        }
-        [[nodiscard]] InputValue AxisValue(const float value) noexcept { return {InputValueType::Axis1D, value, 0.0F}; }
-
-        [[nodiscard]] InputValue VectorValue(const float x, const float y) noexcept
-        {
-            return {InputValueType::Axis2D, x, y};
-        }
-        [[nodiscard]] float NormalizeAxis(const std::int16_t value) noexcept
-        {
-            return value < 0 ? static_cast<float>(value) / 32768.0F : static_cast<float>(value) / 32767.0F;
-        }
-        [[nodiscard]] float NormalizeTrigger(const std::int16_t value) noexcept
-        {
-            return std::clamp((NormalizeAxis(value) + 1.0F) * 0.5F, 0.0F, 1.0F);
-        }
 
         [[nodiscard]] std::string KeyboardPath(const SDL_Scancode scancode)
         {
@@ -157,11 +144,6 @@ namespace Keire
             }
         }
 
-        [[nodiscard]] bool DeviceAllowed(const InteractiveRebindOptions& options, const InputDeviceType type)
-        {
-            return options.AllowedDevices.empty() || Contains(options.AllowedDevices, type);
-        }
-
         [[nodiscard]] double Parameter(const std::vector<InputParameter>& parameters, const std::string_view name,
                                        const double fallback) noexcept
         {
@@ -217,27 +199,7 @@ namespace Keire
             return value;
         }
 
-        [[nodiscard]] std::filesystem::path SafeProfilePath(const std::filesystem::path& root,
-                                                            const std::string_view profile)
-        {
-            if (profile.empty() || profile.size() > 128 ||
-                std::ranges::any_of(profile, [](const unsigned char value)
-                                    { return !std::isalnum(value) && value != '-' && value != '_'; }))
-                throw std::invalid_argument(
-                    "Input binding profile names may contain only letters, digits, '-' and '_'.");
-            return root / (std::string(profile) + ".json");
-        }
     } // namespace
-
-    bool InputValue::AsBoolean(const float threshold) const noexcept { return Magnitude() >= threshold; }
-    float InputValue::Magnitude() const noexcept
-    {
-        return Type == InputValueType::Axis2D ? std::sqrt(X * X + Y * Y) : std::abs(X);
-    }
-    bool InputValue::NearlyEquals(const InputValue& other, const float epsilon) const noexcept
-    {
-        return Type == other.Type && std::abs(X - other.X) <= epsilon && std::abs(Y - other.Y) <= epsilon;
-    }
 
     namespace Detail
     {
@@ -411,15 +373,15 @@ namespace Keire
                         return;
                     const auto path = KeyboardPath(event.key.scancode);
                     if (!path.empty())
-                        Queue({InputDeviceId(1), InputDeviceType::Keyboard, path, BooleanValue(event.key.down),
+                        Queue({InputDeviceId(1), InputDeviceType::Keyboard, path, BooleanInputValue(event.key.down),
                                event.key.timestamp, event.key.down});
                     break;
                 }
                 case SDL_EVENT_MOUSE_MOTION:
                     Queue({InputDeviceId(2), InputDeviceType::Mouse, "<Mouse>/position",
-                           VectorValue(event.motion.x, event.motion.y), event.motion.timestamp, false});
+                           VectorInputValue(event.motion.x, event.motion.y), event.motion.timestamp, false});
                     Queue({InputDeviceId(2), InputDeviceType::Mouse, "<Mouse>/delta",
-                           VectorValue(event.motion.xrel, event.motion.yrel), event.motion.timestamp,
+                           VectorInputValue(event.motion.xrel, event.motion.yrel), event.motion.timestamp,
                            std::abs(event.motion.xrel) + std::abs(event.motion.yrel) > 0.0F});
                     break;
                 case SDL_EVENT_MOUSE_BUTTON_DOWN:
@@ -434,12 +396,12 @@ namespace Keire
                         path = "<Mouse>/middleButton";
                     if (!path.empty())
                         Queue({InputDeviceId(2), InputDeviceType::Mouse, std::move(path),
-                               BooleanValue(event.button.down), event.button.timestamp, event.button.down});
+                               BooleanInputValue(event.button.down), event.button.timestamp, event.button.down});
                     break;
                 }
                 case SDL_EVENT_MOUSE_WHEEL:
                     Queue({InputDeviceId(2), InputDeviceType::Mouse, "<Mouse>/scroll",
-                           VectorValue(event.wheel.x, event.wheel.y), event.wheel.timestamp,
+                           VectorInputValue(event.wheel.x, event.wheel.y), event.wheel.timestamp,
                            std::abs(event.wheel.x) + std::abs(event.wheel.y) > 0.0F});
                     break;
                 case SDL_EVENT_GAMEPAD_ADDED:
@@ -455,7 +417,7 @@ namespace Keire
                     const auto path = GamepadButtonPath(static_cast<SDL_GamepadButton>(event.gbutton.button));
                     if (found != NativeDevices.end() && !path.empty())
                     {
-                        Queue({found->second, InputDeviceType::Gamepad, path, BooleanValue(event.gbutton.down),
+                        Queue({found->second, InputDeviceType::Gamepad, path, BooleanInputValue(event.gbutton.down),
                                event.gbutton.timestamp, event.gbutton.down});
                         if (path.starts_with("<Gamepad>/dpad/"))
                         {
@@ -596,9 +558,9 @@ namespace Keire
                     value = controls[path];
                     value.Type = InputValueType::Axis2D;
                     if (event.axis == SDL_GAMEPAD_AXIS_LEFTX)
-                        value.X = NormalizeAxis(event.value);
+                        value.X = NormalizeInputAxis(event.value);
                     else
-                        value.Y = -NormalizeAxis(event.value);
+                        value.Y = -NormalizeInputAxis(event.value);
                     break;
                 }
                 case SDL_GAMEPAD_AXIS_RIGHTX:
@@ -608,18 +570,18 @@ namespace Keire
                     value = controls[path];
                     value.Type = InputValueType::Axis2D;
                     if (event.axis == SDL_GAMEPAD_AXIS_RIGHTX)
-                        value.X = NormalizeAxis(event.value);
+                        value.X = NormalizeInputAxis(event.value);
                     else
-                        value.Y = -NormalizeAxis(event.value);
+                        value.Y = -NormalizeInputAxis(event.value);
                     break;
                 }
                 case SDL_GAMEPAD_AXIS_LEFT_TRIGGER:
                     path = "<Gamepad>/leftTrigger";
-                    value = AxisValue(NormalizeTrigger(event.value));
+                    value = AxisInputValue(NormalizeInputTrigger(event.value));
                     break;
                 case SDL_GAMEPAD_AXIS_RIGHT_TRIGGER:
                     path = "<Gamepad>/rightTrigger";
-                    value = AxisValue(NormalizeTrigger(event.value));
+                    value = AxisInputValue(NormalizeInputTrigger(event.value));
                     break;
                 default:
                     return;
@@ -763,8 +725,8 @@ namespace Keire
                 }
                 TickRebind(delta.Seconds());
                 EventsBuffer.clear();
-                Devices.at(InputDeviceId(2)).Controls["<Mouse>/delta"] = VectorValue(0.0F, 0.0F);
-                Devices.at(InputDeviceId(2)).Controls["<Mouse>/scroll"] = VectorValue(0.0F, 0.0F);
+                Devices.at(InputDeviceId(2)).Controls["<Mouse>/delta"] = VectorInputValue(0.0F, 0.0F);
+                Devices.at(InputDeviceId(2)).Controls["<Mouse>/scroll"] = VectorInputValue(0.0F, 0.0F);
                 for (auto& [id, device] : Devices)
                 {
                     (void)id;
@@ -1129,7 +1091,8 @@ namespace Keire
                     rebind->Status = RebindStatus::Cancelled;
                     return;
                 }
-                if (!DeviceAllowed(rebind->Options, event.Type) ||
+                if ((!rebind->Options.AllowedDevices.empty() &&
+                     !Contains(rebind->Options.AllowedDevices, event.Type)) ||
                     Contains(rebind->Options.ExcludedControls, event.Path) ||
                     event.Value.Magnitude() < rebind->Options.MagnitudeThreshold)
                     return;
@@ -1578,7 +1541,7 @@ namespace Keire
         if (!runtime)
             throw std::logic_error("Input context is no longer attached to a runtime.");
         runtime->RequireOwner("SaveBindingOverrides");
-        const auto path = SafeProfilePath(runtime->Specification.BindingOverrideDirectory, profile);
+        const auto path = Detail::InputBindingProfilePath(runtime->Specification.BindingOverrideDirectory, profile);
         Json overrides = Json::array();
         for (const auto& [binding, value] : m_Impl->State->Overrides)
             overrides.push_back({{"binding", binding.ToString()}, {"path", value}});
@@ -1597,7 +1560,7 @@ namespace Keire
         if (!runtime)
             throw std::logic_error("Input context is no longer attached to a runtime.");
         runtime->RequireOwner("LoadBindingOverrides");
-        const auto path = SafeProfilePath(runtime->Specification.BindingOverrideDirectory, profile);
+        const auto path = Detail::InputBindingProfilePath(runtime->Specification.BindingOverrideDirectory, profile);
         if (!std::filesystem::exists(path))
             return 0;
         std::ifstream stream(path, std::ios::binary);
@@ -1638,7 +1601,9 @@ namespace Keire
     RebindStatus InteractiveRebindOperation::Status() const noexcept { return m_Impl->State->Status; }
     AssetId InteractiveRebindOperation::TargetBinding() const noexcept
     {
-        return m_Impl->State->Targets.empty() ? AssetId{} : m_Impl->State->Targets[m_Impl->State->TargetIndex];
+        if (m_Impl->State->Targets.empty())
+            return {};
+        return m_Impl->State->Targets[std::min(m_Impl->State->TargetIndex, m_Impl->State->Targets.size() - 1)];
     }
     std::string InteractiveRebindOperation::CandidatePath() const { return m_Impl->State->Candidate; }
     std::vector<RebindConflict> InteractiveRebindOperation::Conflicts() const { return m_Impl->State->Conflicts; }
@@ -1769,6 +1734,28 @@ namespace Keire
         found->second.SchemeLocked = false;
         m_Impl->State->SelectScheme(found->second);
         return true;
+    }
+    bool InputSystem::SetGamepadRumble(const InputDeviceId device, const float lowFrequency, const float highFrequency,
+                                       const TimeStep duration)
+    {
+        m_Impl->State->RequireOwner("SetGamepadRumble");
+        if (!std::isfinite(lowFrequency) || !std::isfinite(highFrequency) || lowFrequency < 0.0F ||
+            lowFrequency > 1.0F || highFrequency < 0.0F || highFrequency > 1.0F || !std::isfinite(duration.Seconds()) ||
+            duration.Seconds() < 0.0 || duration.Seconds() > 60.0)
+        {
+            throw std::invalid_argument("Gamepad rumble strengths must be normalized and duration must be bounded.");
+        }
+        const auto found = m_Impl->State->Devices.find(device);
+        if (found == m_Impl->State->Devices.end() || found->second.Descriptor.Type != InputDeviceType::Gamepad ||
+            !found->second.Descriptor.Connected || !found->second.Gamepad)
+        {
+            return false;
+        }
+        constexpr float maximumMotorValue = static_cast<float>(std::numeric_limits<std::uint16_t>::max());
+        const auto low = static_cast<std::uint16_t>(std::lround(lowFrequency * maximumMotorValue));
+        const auto high = static_cast<std::uint16_t>(std::lround(highFrequency * maximumMotorValue));
+        const auto milliseconds = static_cast<std::uint32_t>(std::ceil(duration.Milliseconds()));
+        return SDL_RumbleGamepad(found->second.Gamepad, low, high, milliseconds);
     }
     Ref<InputActionContext> InputSystem::CreateActionContext(const AssetId asset, const InputUserId user,
                                                              const InputContextRole role)
