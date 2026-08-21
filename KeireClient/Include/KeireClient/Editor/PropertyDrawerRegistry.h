@@ -4,6 +4,7 @@
 #include "Keire/ECS/Component.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <optional>
@@ -21,11 +22,27 @@ namespace KeireEditor
         [[nodiscard]] virtual bool EditBoolean(std::string_view label, bool& value) = 0;
         [[nodiscard]] virtual bool EditInteger(std::string_view label, std::int64_t& value, double step,
                                                std::optional<double> minimum, std::optional<double> maximum) = 0;
+        [[nodiscard]] virtual bool EditIntegerSlider(std::string_view label, std::int64_t& value, double minimum,
+                                                     double maximum)
+        {
+            return EditInteger(label, value, 1.0, minimum, maximum);
+        }
         [[nodiscard]] virtual bool EditChoice(std::string_view label, std::int64_t& value,
                                               std::span<const std::string_view> choices) = 0;
         [[nodiscard]] virtual bool EditScalar(std::string_view label, double& value, double step,
                                               std::optional<double> minimum, std::optional<double> maximum) = 0;
+        [[nodiscard]] virtual bool EditScalarSlider(std::string_view label, double& value, double minimum,
+                                                    double maximum)
+        {
+            return EditScalar(label, value, 0.1, minimum, maximum);
+        }
         [[nodiscard]] virtual bool EditText(std::string_view label, std::string& value) = 0;
+        [[nodiscard]] virtual bool EditTextMultiline(std::string_view label, std::string& value,
+                                                     std::uint32_t visibleLines)
+        {
+            (void)visibleLines;
+            return EditText(label, value);
+        }
         [[nodiscard]] virtual bool EditVector2(std::string_view label, Keire::Vector2& value, double step) = 0;
         [[nodiscard]] virtual bool EditVector3(std::string_view label, Keire::Vector3& value, double step) = 0;
         [[nodiscard]] virtual bool EditVector4(std::string_view label, Keire::Vector4& value, double step) = 0;

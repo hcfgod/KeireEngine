@@ -6,11 +6,22 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <limits>
 #include <ranges>
 #include <string>
 
 namespace KeireEditor
 {
+    namespace
+    {
+        [[nodiscard]] std::int64_t InspectorIntegerBound(const double value)
+        {
+            return static_cast<std::int64_t>(std::clamp(
+                static_cast<long double>(value), static_cast<long double>(std::numeric_limits<std::int64_t>::min()),
+                static_cast<long double>(std::numeric_limits<std::int64_t>::max())));
+        }
+    } // namespace
+
     InspectorPropertyEditor::InspectorPropertyEditor(Keire::UiFrame& ui,
                                                      const std::span<const Keire::AssetSourceRecord> assets,
                                                      const Keire::Ref<Keire::AssetSystem>& assetSystem,
@@ -29,9 +40,15 @@ namespace KeireEditor
     bool InspectorPropertyEditor::EditInteger(const std::string_view label, std::int64_t& value, const double step,
                                               const std::optional<double> minimum, const std::optional<double> maximum)
     {
-        const auto lower = minimum ? std::optional<std::int64_t>(static_cast<std::int64_t>(*minimum)) : std::nullopt;
-        const auto upper = maximum ? std::optional<std::int64_t>(static_cast<std::int64_t>(*maximum)) : std::nullopt;
+        const auto lower = minimum ? std::optional<std::int64_t>(InspectorIntegerBound(*minimum)) : std::nullopt;
+        const auto upper = maximum ? std::optional<std::int64_t>(InspectorIntegerBound(*maximum)) : std::nullopt;
         return Track(m_Ui.DragInteger(label, value, step, lower, upper));
+    }
+
+    bool InspectorPropertyEditor::EditIntegerSlider(const std::string_view label, std::int64_t& value,
+                                                    const double minimum, const double maximum)
+    {
+        return Track(m_Ui.SliderInteger(label, value, InspectorIntegerBound(minimum), InspectorIntegerBound(maximum)));
     }
 
     bool InspectorPropertyEditor::EditChoice(const std::string_view label, std::int64_t& value,
@@ -61,9 +78,21 @@ namespace KeireEditor
         return Track(m_Ui.DragScalar(label, value, step, minimum, maximum));
     }
 
+    bool InspectorPropertyEditor::EditScalarSlider(const std::string_view label, double& value, const double minimum,
+                                                   const double maximum)
+    {
+        return Track(m_Ui.SliderScalar(label, value, minimum, maximum));
+    }
+
     bool InspectorPropertyEditor::EditText(const std::string_view label, std::string& value)
     {
         return Track(m_Ui.InputText(label, value));
+    }
+
+    bool InspectorPropertyEditor::EditTextMultiline(const std::string_view label, std::string& value,
+                                                    const std::uint32_t visibleLines)
+    {
+        return Track(m_Ui.InputTextMultiline(label, value, visibleLines));
     }
 
     bool InspectorPropertyEditor::EditVector2(const std::string_view label, Keire::Vector2& value, const double step)

@@ -5,14 +5,16 @@ versions.
 
 ## Unreleased
 
-<<<<<<< HEAD
+- Added consistent Unity-style managed Inspector controls for `Behaviour` and managed-data members: true `[Range]`
+  sliders, `[Min]`/`[Max]` bounds, `[InspectorStep]`, `[Multiline]`, `[InspectorName]`, headers, and visible read-only
+  fields. Metadata validation, hot reload, type catalogs, and 64-bit signed/unsigned editor controls share the same
+  bounded contracts.
 - Restored hosted CI parity with local launchers: quality checks use the pinned Clang 22 formatter, Windows shader
   compiler builds use a short Unicode-safe workspace, Linux builds use Clang for the LLVM-derived host shader tool,
   Windows Coral sources preserve patch-compatible line endings, macOS supplies the shader tool's Perl JSON dependency,
   and macOS dependency builds avoid Xcode 16.4's obsolete zlib platform macro. Windows fast checks fall back to
   `git grep` when `rg` is unavailable, and the strict GCC/Clang/TSan/coverage warnings exposed by the hosted matrix are
   clean. Cleared the clang-tidy, ShellCheck, and pinned Ruff blockers exposed after the earlier failures were fixed.
-=======
 - Added managed per-material-slot Dynamic Material Instance handles and world-owned global Material Parameter
   Collections. Global defaults and hot-reload-compatible overrides now feed numeric, vector, color, and texture graph
   bindings before renderer-wide and slot-specific values, with bounded deterministic precedence and no mutable GPU
@@ -23,12 +25,6 @@ versions.
 - Added schema-v6 entity tags with deterministic name, tag, and component indexes; canonical prefab tag overrides;
   Inspector tag authoring with undo; and managed `Entity` tag mutation plus bounded `SceneManager` queries. Runtime and
   Editor Play queries share stable hierarchy ordering and reject invalid or oversized tag data transactionally.
-- Restored hosted CI parity with local launchers: quality checks use the pinned Clang 22 formatter, Windows shader
-  compiler builds use a short Unicode-safe workspace, Linux builds use Clang for the LLVM-derived host shader tool,
-  macOS dependency builds avoid Xcode 16.4's obsolete zlib platform macro, and Windows fast checks fall back to
-  `git grep` when `rg` is unavailable. Cleared the clang-tidy, ShellCheck, and pinned Ruff blockers exposed after the
-  earlier quality failures were fixed.
->>>>>>> bf1cb4e1254eb9fe98a97346001ecd09c534023c
 - Added managed input device discovery, automatic and locked control-scheme access, bounded interactive rebinding,
   persistent binding profiles, and normalized gamepad rumble. Completed rebind polling is now safe after the final
   composite target, and platforms without joystick support reject rumble without affecting keyboard or mouse input.

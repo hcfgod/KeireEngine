@@ -402,7 +402,9 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                   "[StableComponentId(\"73616e64-626f-4078-8000-000000000099\")] "
                   "[RequireComponent(typeof(PlayerDependency))] "
                   "[ExecutionOrder(-50)] public sealed class Player : ReloadBehaviourBase { "
-                  "[SerializeField, StableFieldId(\"73616e64-626f-4078-8000-000000000098\")] "
+                  "[SerializeField, StableFieldId(\"73616e64-626f-4078-8000-000000000098\"), "
+                  "Range(0.0, 20.0), InspectorName(\"Move Speed\"), Header(\"Movement\"), "
+                  "Tooltip(\"Maximum movement speed in metres per second.\")] "
                   "public float Speed = 7.5f; "
                   "[SerializeField] public float ConsumedSpeed = -1.0f; "
                   "[SerializeField] public bool SeekFailureObserved = false; "
@@ -418,10 +420,13 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                   "[SerializeField] public bool DisableThroughProperty = false; "
                   "[SerializeField] public bool DisableObserved = false; "
                   "[SerializeField] public bool AnimatorIkObserved = false; "
-                  "[SerializeField] public float AnimatorIkWeight = -1.0f; "
+                  "[SerializeField, Min(0.0), Max(1.0), InspectorStep(0.05)] "
+                  "public float AnimatorIkWeight = -1.0f; "
                   "[SerializeField] public bool AnimationEventObserved = false; "
                   "[SerializeField] public string AnimationEventName = string.Empty; "
-                  "[SerializeField] public string AnimationEventText = string.Empty; "
+                  "[SerializeField, Multiline(6), InspectorName(\"Last Animation Event\"), "
+                  "Header(\"Diagnostics\"), ReadOnlyInInspector] "
+                  "public string AnimationEventText = string.Empty; "
                   "[SerializeField] public bool ProceduralMotionEventObserved = false; "
                   "[SerializeField] public byte ProceduralMotionEventState = 0; "
                   "protected override void Awake() { Speed += ReloadBonus; } "
@@ -483,10 +488,14 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                   "[CreateAssetMenu(\"Gameplay/Player Tuning\", \"PlayerTuning\")] "
                   "[StableAssetTypeId(\"73616e64-626f-4078-8000-000000000190\")] "
                   "public sealed class PlayerTuning : ScriptableObject { "
-                  "[StableFieldId(\"73616e64-626f-4078-8000-000000000191\"), Range(0.0, 100.0)] "
+                  "[StableFieldId(\"73616e64-626f-4078-8000-000000000191\"), Range(0.0, 100.0), "
+                  "InspectorStep(0.25), InspectorName(\"Movement Speed\"), Header(\"Movement\"), "
+                  "Tooltip(\"Base movement speed.\")] "
                   "public float Speed = 7.5f; "
-                  "[StableFieldId(\"73616e64-626f-4078-8000-000000000192\")] "
-                  "public AssetReference<PlayerTuning> Parent; } "
+                  "[StableFieldId(\"73616e64-626f-4078-8000-000000000192\"), ReadOnlyInInspector] "
+                  "public AssetReference<PlayerTuning> Parent; "
+                  "[StableFieldId(\"73616e64-626f-4078-8000-000000000194\"), Multiline(5), "
+                  "InspectorName(\"Design Notes\")] public string Notes = string.Empty; } "
                   "[StableAssetTypeId(\"73616e64-626f-4078-8000-000000000193\")] "
                   "public sealed class InvalidTuning : ScriptableObject { public float MissingStableId = 1.0f; }\n";
     }
@@ -537,16 +546,24 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                                                 &Keire::ManagedAssetTypeDescriptor::FullName);
     REQUIRE(playerTuning != managedAssetTypes.end());
     CHECK(playerTuning->MenuPath == "Gameplay/Player Tuning");
-    CHECK(playerTuning->Properties.size() == 2);
+    CHECK(playerTuning->Properties.size() == 3);
     CHECK(playerTuning->Properties[0].Kind == Keire::ManagedAssetPropertyKind::Scalar);
+    CHECK(playerTuning->Properties[0].DisplayName == "Movement Speed");
     CHECK(playerTuning->Properties[0].Minimum == 0.0);
     CHECK(playerTuning->Properties[0].Maximum == 100.0);
+    CHECK(playerTuning->Properties[0].Step == doctest::Approx(0.25));
+    CHECK(playerTuning->Properties[0].Slider);
+    CHECK(playerTuning->Properties[0].Header == "Movement");
     CHECK(playerTuning->Properties[1].Kind == Keire::ManagedAssetPropertyKind::AssetReference);
+    CHECK(playerTuning->Properties[1].ReadOnly);
     REQUIRE(playerTuning->Properties[1].ExpectedAssetType);
     CHECK(*playerTuning->Properties[1].ExpectedAssetType == Keire::ManagedDataAsset::StaticType());
     REQUIRE(playerTuning->Properties[1].ExpectedManagedType);
     CHECK(playerTuning->Properties[1].ExpectedManagedType->Value() ==
           Keire::AssetId::Parse("73616e64-626f-4078-8000-000000000190"));
+    CHECK(playerTuning->Properties[2].Kind == Keire::ManagedAssetPropertyKind::Text);
+    CHECK(playerTuning->Properties[2].DisplayName == "Design Notes");
+    CHECK(playerTuning->Properties[2].TextLines == 5);
     const auto assetDiagnostics = scripts->ManagedAssetTypeDiagnostics();
     CHECK(std::ranges::any_of(assetDiagnostics, [](const Keire::ManagedAssetTypeDiagnostic& diagnostic)
                               { return diagnostic.TypeName == "Game.InvalidTuning"; }));
@@ -560,6 +577,28 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     const auto registration = registry->Find(componentType);
     REQUIRE(registration);
     CHECK(registration->RequiredComponents == std::vector<Keire::ComponentTypeId>{dependencyType});
+    const auto speedProperty =
+        std::ranges::find(registration->Properties, std::string("Speed"), &Keire::ComponentProperty::Key);
+    REQUIRE(speedProperty != registration->Properties.end());
+    CHECK(speedProperty->DisplayName == "Move Speed");
+    CHECK(speedProperty->Header == "Movement");
+    CHECK(speedProperty->Slider);
+    CHECK(speedProperty->Minimum == 0.0);
+    CHECK(speedProperty->Maximum == 20.0);
+    const auto ikProperty =
+        std::ranges::find(registration->Properties, std::string("AnimatorIkWeight"), &Keire::ComponentProperty::Key);
+    REQUIRE(ikProperty != registration->Properties.end());
+    CHECK(ikProperty->Minimum == 0.0);
+    CHECK(ikProperty->Maximum == 1.0);
+    CHECK(ikProperty->Step == doctest::Approx(0.05));
+    CHECK_FALSE(ikProperty->Slider);
+    const auto eventTextProperty =
+        std::ranges::find(registration->Properties, std::string("AnimationEventText"), &Keire::ComponentProperty::Key);
+    REQUIRE(eventTextProperty != registration->Properties.end());
+    CHECK(eventTextProperty->DisplayName == "Last Animation Event");
+    CHECK(eventTextProperty->ReadOnly);
+    CHECK(eventTextProperty->Header == "Diagnostics");
+    CHECK(eventTextProperty->TextLines == 6);
 
     const std::string duplicateState =
         R"({"Version":1,"Fields":[{"StableId":"","Name":"Speed","Type":"System.Single","Aliases":[],"Value":3.0},)"

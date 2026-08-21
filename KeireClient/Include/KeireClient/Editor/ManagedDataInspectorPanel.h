@@ -8,7 +8,6 @@
 #include <optional>
 #include <span>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace Keire
@@ -47,6 +46,5 @@ namespace KeireEditor
         std::unique_ptr<AssetPicker> m_AssetPicker;
         Keire::AssetId m_Asset;
         std::uint64_t m_Revision = 0;
-        std::unordered_map<std::string, std::string> m_TextBuffers;
     };
 } // namespace KeireEditor

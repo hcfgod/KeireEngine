@@ -59,13 +59,13 @@ namespace Keire
         using Detail::GenerateProject;
         using Detail::GenerateSolution;
         using Detail::ManagedApiSourceFingerprint;
+        using Detail::ManagedInspectorAttributeTypes, Detail::ResolveManagedInspectorAttributeTypes;
         using Detail::ManagedTypeName;
         using Detail::ParseDiagnostics;
         using Detail::ParseManagedAssetMetadata;
         using Detail::PathText;
         using Detail::ProjectManagedState;
-        using Detail::ReflectManagedMethods;
-        using Detail::ReflectManagedProperties;
+        using Detail::ReflectManagedMethods, Detail::ReflectManagedProperties;
         using Detail::WriteText;
     } // namespace
     class ScriptSystem::Impl final
@@ -3432,12 +3432,7 @@ namespace Keire
             Coral::Type* stableComponentIdType = nullptr;
             Coral::Type* executionOrderType = nullptr;
             Coral::Type* requireComponentType = nullptr;
-            Coral::Type* serializeFieldType = nullptr;
-            Coral::Type* hideInInspectorType = nullptr;
-            Coral::Type* serializableType = nullptr;
-            Coral::Type* rangeType = nullptr;
-            Coral::Type* tooltipType = nullptr;
-            Coral::Type* groupType = nullptr;
+            ManagedInspectorAttributeTypes inspectorAttributeTypes;
             Coral::Type* managedAssetMetadataType = nullptr;
             Coral::Type* nativeRuntimeType = nullptr;
             std::map<std::string, const Coral::Type*, std::less<>> managedRuntimeTypesByName;
@@ -3708,15 +3703,10 @@ namespace Keire
                 stableComponentIdType = &managedApi.GetLocalType("Keire.StableComponentIdAttribute");
                 executionOrderType = &managedApi.GetLocalType("Keire.ExecutionOrderAttribute");
                 requireComponentType = &managedApi.GetLocalType("Keire.RequireComponentAttribute");
-                serializeFieldType = &managedApi.GetLocalType("Keire.SerializeFieldAttribute");
-                hideInInspectorType = &managedApi.GetLocalType("Keire.HideInInspectorAttribute");
-                serializableType = &managedApi.GetLocalType("Keire.SerializableTypeAttribute");
-                rangeType = &managedApi.GetLocalType("Keire.RangeAttribute");
-                tooltipType = &managedApi.GetLocalType("Keire.TooltipAttribute");
-                groupType = &managedApi.GetLocalType("Keire.InspectorGroupAttribute");
+                inspectorAttributeTypes = ResolveManagedInspectorAttributeTypes(managedApi);
                 managedAssetMetadataType = &managedApi.GetLocalType("Keire.ManagedAssetMetadata");
                 nativeRuntimeType = &managedApi.GetLocalType("Keire.NativeRuntime");
-                if (!*stableComponentIdType || !*executionOrderType || !*requireComponentType || !*serializeFieldType)
+                if (!*stableComponentIdType || !*executionOrderType || !*requireComponentType)
                     throw std::runtime_error("Keire.Managed does not expose managed component metadata.");
                 if (!*managedAssetMetadataType)
                     throw std::runtime_error("Keire.Managed does not expose managed asset metadata.");
@@ -3786,11 +3776,8 @@ namespace Keire
                             behaviour.ComponentType = componentType;
                             behaviour.ExecutionOrder = executionOrder;
                             behaviour.Type = std::addressof(type);
-                            behaviour.Properties = ReflectManagedProperties(
-                                type, *behaviourType, *serializeFieldType,
-                                *hideInInspectorType ? hideInInspectorType : nullptr,
-                                *serializableType ? serializableType : nullptr, *rangeType ? rangeType : nullptr,
-                                *tooltipType ? tooltipType : nullptr, *groupType ? groupType : nullptr);
+                            behaviour.Properties =
+                                ReflectManagedProperties(type, *behaviourType, inspectorAttributeTypes);
                             behaviour.Methods = ReflectManagedMethods(type);
                             behaviour.RequiredComponents = std::move(requiredComponents);
                             candidateTypes.push_back(std::move(behaviour));

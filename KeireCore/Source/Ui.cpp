@@ -359,6 +359,8 @@ namespace Keire
 
     UiFrame::UiFrame() : m_Impl(std::make_unique<Impl>()) {}
     UiFrame::~UiFrame() = default;
+
+    void UiFrame::RequireActive(const char* operation) const { m_Impl->RequireActive(operation); }
     UiWindowScope UiFrame::BeginWindow(std::string_view title, bool* open, const UiWindowOptions options)
     {
         m_Impl->RequireActive("BeginWindow");
@@ -1004,28 +1006,13 @@ namespace Keire
         const std::string safeLabel(label);
         return ImGui::DragFloat4(safeLabel.c_str(), &value.X, speed, -1.0F, 1.0F, "%.4f");
     }
-    bool UiFrame::SliderFloat(std::string_view label, float& value, const float minimum, const float maximum)
-    {
-        m_Impl->RequireActive("SliderFloat");
-        if (!(minimum < maximum))
-            throw std::invalid_argument("SliderFloat minimum must be less than maximum.");
-        const std::string safeLabel(label);
-        return ImGui::SliderFloat(safeLabel.c_str(), &value, minimum, maximum);
-    }
-    bool UiFrame::SliderInt(std::string_view label, int& value, const int minimum, const int maximum)
-    {
-        m_Impl->RequireActive("SliderInt");
-        if (minimum > maximum)
-            throw std::invalid_argument("SliderInt minimum must not exceed maximum.");
-        const std::string safeLabel(label);
-        return ImGui::SliderInt(safeLabel.c_str(), &value, minimum, maximum);
-    }
     bool UiFrame::InputText(std::string_view label, std::string& value, const bool selectAllOnFocus)
     {
         m_Impl->RequireActive("InputText");
         return ImGui::InputText(std::string(label).c_str(), &value,
                                 selectAllOnFocus ? ImGuiInputTextFlags_AutoSelectAll : ImGuiInputTextFlags_None);
     }
+
     bool UiFrame::InputPassword(std::string_view label, std::string& value)
     {
         m_Impl->RequireActive("InputPassword");

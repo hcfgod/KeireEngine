@@ -6,7 +6,6 @@
 #include "KeireClient/Editor/ManagedDataDocument.h"
 
 #include <algorithm>
-#include <charconv>
 #include <cmath>
 #include <cstddef>
 #include <fstream>
@@ -36,29 +35,42 @@ namespace KeireEditor
             return result;
         }
 
-        [[nodiscard]] std::string ValueBufferKey(const Keire::ManagedAssetPropertyDescriptor& property,
-                                                 const Keire::ManagedAssetValueNode& value)
-        {
-            return property.StableFieldId.ToString() + ':' +
-                   std::to_string(reinterpret_cast<std::uintptr_t>(std::addressof(value)));
-        }
-
         [[nodiscard]] std::int64_t MinimumInteger(const Keire::ManagedAssetPropertyDescriptor& property)
         {
             if (!property.Minimum)
                 return std::numeric_limits<std::int64_t>::min();
-            return static_cast<std::int64_t>(std::clamp(*property.Minimum,
-                                                        static_cast<double>(std::numeric_limits<std::int64_t>::min()),
-                                                        static_cast<double>(std::numeric_limits<std::int64_t>::max())));
+            return static_cast<std::int64_t>(
+                std::clamp(static_cast<long double>(*property.Minimum),
+                           static_cast<long double>(std::numeric_limits<std::int64_t>::min()),
+                           static_cast<long double>(std::numeric_limits<std::int64_t>::max())));
         }
 
         [[nodiscard]] std::int64_t MaximumInteger(const Keire::ManagedAssetPropertyDescriptor& property)
         {
             if (!property.Maximum)
                 return std::numeric_limits<std::int64_t>::max();
-            return static_cast<std::int64_t>(std::clamp(*property.Maximum,
-                                                        static_cast<double>(std::numeric_limits<std::int64_t>::min()),
-                                                        static_cast<double>(std::numeric_limits<std::int64_t>::max())));
+            return static_cast<std::int64_t>(
+                std::clamp(static_cast<long double>(*property.Maximum),
+                           static_cast<long double>(std::numeric_limits<std::int64_t>::min()),
+                           static_cast<long double>(std::numeric_limits<std::int64_t>::max())));
+        }
+
+        [[nodiscard]] std::uint64_t MinimumUnsignedInteger(const Keire::ManagedAssetPropertyDescriptor& property)
+        {
+            if (!property.Minimum)
+                return 0;
+            return static_cast<std::uint64_t>(
+                std::clamp(static_cast<long double>(*property.Minimum), 0.0L,
+                           static_cast<long double>(std::numeric_limits<std::uint64_t>::max())));
+        }
+
+        [[nodiscard]] std::uint64_t MaximumUnsignedInteger(const Keire::ManagedAssetPropertyDescriptor& property)
+        {
+            if (!property.Maximum)
+                return std::numeric_limits<std::uint64_t>::max();
+            return static_cast<std::uint64_t>(
+                std::clamp(static_cast<long double>(*property.Maximum), 0.0L,
+                           static_cast<long double>(std::numeric_limits<std::uint64_t>::max())));
         }
     } // namespace
 
@@ -79,7 +91,6 @@ namespace KeireEditor
     {
         m_Document->Close();
         m_AssetPicker->Clear();
-        m_TextBuffers.clear();
         m_Asset = {};
         m_Revision = 0;
     }
@@ -262,6 +273,7 @@ namespace KeireEditor
                                                  const std::span<const Keire::ManagedAssetTypeDescriptor> types)
     {
         const auto& theme = m_Controller.InspectorTheme();
+        const auto disabled = ui.BeginDisabled(property.ReadOnly);
         const auto label = property.DisplayName.empty() ? property.Name : property.DisplayName;
         if (!property.Header.empty())
             ui.TextColored(theme.Accent, property.Header);
@@ -322,32 +334,28 @@ namespace KeireEditor
         case Keire::ManagedAssetPropertyKind::Enum:
         {
             auto& integer = std::get<std::int64_t>(value.Value);
-            return ui.DragInteger(label, integer, 1.0, MinimumInteger(property), MaximumInteger(property));
+            if (property.Slider)
+                return ui.SliderInteger(label, integer, MinimumInteger(property), MaximumInteger(property));
+            return ui.DragInteger(label, integer, property.Step, MinimumInteger(property), MaximumInteger(property));
         }
         case Keire::ManagedAssetPropertyKind::UnsignedInteger:
         {
             auto& integer = std::get<std::uint64_t>(value.Value);
-            const auto key = ValueBufferKey(property, value);
-            auto [buffer, inserted] = m_TextBuffers.try_emplace(key, std::to_string(integer));
-            if (!inserted && buffer->second != std::to_string(integer))
-                buffer->second = std::to_string(integer);
-            if (!ui.InputText(label, buffer->second))
-                return false;
-            std::uint64_t candidate = 0;
-            const auto [end, error] =
-                std::from_chars(buffer->second.data(), buffer->second.data() + buffer->second.size(), candidate);
-            if (error != std::errc{} || end != buffer->second.data() + buffer->second.size())
-                return false;
-            integer = candidate;
-            return true;
+            const auto minimum = MinimumUnsignedInteger(property);
+            const auto maximum = MaximumUnsignedInteger(property);
+            return property.Slider ? ui.SliderUnsignedInteger(label, integer, minimum, maximum)
+                                   : ui.DragUnsignedInteger(label, integer, property.Step, minimum, maximum);
         }
         case Keire::ManagedAssetPropertyKind::Scalar:
         {
             auto& scalar = std::get<double>(value.Value);
-            return ui.DragScalar(label, scalar, 0.1, property.Minimum, property.Maximum);
+            return property.Slider ? ui.SliderScalar(label, scalar, *property.Minimum, *property.Maximum)
+                                   : ui.DragScalar(label, scalar, property.Step, property.Minimum, property.Maximum);
         }
         case Keire::ManagedAssetPropertyKind::Text:
-            return ui.InputText(label, std::get<std::string>(value.Value));
+            return property.TextLines > 1
+                       ? ui.InputTextMultiline(label, std::get<std::string>(value.Value), property.TextLines)
+                       : ui.InputText(label, std::get<std::string>(value.Value));
         case Keire::ManagedAssetPropertyKind::Vector2:
             return ui.DragVector2(label, std::get<Keire::Vector2>(value.Value));
         case Keire::ManagedAssetPropertyKind::Vector3:

@@ -145,11 +145,23 @@ namespace Keire
                 throw std::invalid_argument("Managed asset property names and managed types must be non-empty.");
             }
 
-            if (property.Minimum.has_value() != property.Maximum.has_value() ||
-                (property.Minimum && (!IsNumericProperty(property.Kind) || !std::isfinite(*property.Minimum) ||
-                                      !std::isfinite(*property.Maximum) || *property.Minimum > *property.Maximum)))
+            if ((property.Minimum && (!IsNumericProperty(property.Kind) || !std::isfinite(*property.Minimum))) ||
+                (property.Maximum && (!IsNumericProperty(property.Kind) || !std::isfinite(*property.Maximum))) ||
+                (property.Minimum && property.Maximum && *property.Minimum > *property.Maximum))
             {
-                throw std::invalid_argument("Managed asset property ranges must be finite, ordered, and numeric.");
+                throw std::invalid_argument("Managed asset property bounds must be finite, ordered, and numeric.");
+            }
+            if (property.Slider && (!property.Minimum || !property.Maximum || *property.Minimum >= *property.Maximum ||
+                                    !IsNumericProperty(property.Kind)))
+            {
+                throw std::invalid_argument("Managed asset property sliders require an increasing numeric range.");
+            }
+            if (!std::isfinite(property.Step) || property.Step <= 0.0)
+                throw std::invalid_argument("Managed asset property drag steps must be finite and positive.");
+            if (property.TextLines < 1 || property.TextLines > 32 ||
+                (property.TextLines > 1 && property.Kind != ManagedAssetPropertyKind::Text))
+            {
+                throw std::invalid_argument("Managed asset multiline fields must be text with 1..32 visible lines.");
             }
             if ((!property.Header.empty() && !HasVisibleText(property.Header)) ||
                 (!property.Tooltip.empty() && !HasVisibleText(property.Tooltip)))
@@ -203,6 +215,9 @@ namespace Keire
                         {"hidden", property.Hidden},
                         {"header", property.Header},
                         {"tooltip", property.Tooltip},
+                        {"step", property.Step},
+                        {"slider", property.Slider},
+                        {"textLines", property.TextLines},
                         {"includeDerivedAssetTypes", property.IncludeDerivedAssetTypes}};
             if (property.Minimum)
                 result["minimum"] = *property.Minimum;
@@ -239,6 +254,9 @@ namespace Keire
                 result.Maximum = found->get<double>();
             result.Header = source.value("header", std::string{});
             result.Tooltip = source.value("tooltip", std::string{});
+            result.Step = source.value("step", result.Step);
+            result.Slider = source.value("slider", false);
+            result.TextLines = source.value("textLines", result.TextLines);
             if (const auto found = source.find("expectedAssetType"); found != source.end())
                 result.ExpectedAssetType = AssetTypeId::Parse(found->get<std::string>());
             if (const auto found = source.find("expectedManagedType"); found != source.end())

@@ -200,7 +200,10 @@ TEST_CASE("managed asset type metadata validates property trees without editor i
                               .Kind = Keire::ManagedAssetPropertyKind::Integer,
                               .Minimum = 1.0,
                               .Maximum = 256.0,
-                              .Tooltip = "Maximum number of entries."},
+                              .Header = "Inventory Limits",
+                              .Tooltip = "Maximum number of entries.",
+                              .Step = 2.0,
+                              .Slider = true},
                              {.StableFieldId = Keire::AssetId::Parse("61000000-0000-4000-8000-000000000002"),
                               .Name = "Icon",
                               .DisplayName = "Icon",
@@ -222,6 +225,23 @@ TEST_CASE("managed asset type metadata validates property trees without editor i
     invalidArray.Properties[0].Minimum.reset();
     invalidArray.Properties[0].Maximum.reset();
     CHECK_THROWS_AS(Keire::ValidateManagedAssetTypeDescriptor(invalidArray), std::invalid_argument);
+
+    auto oneSidedBound = descriptor;
+    oneSidedBound.Properties[0].Maximum.reset();
+    oneSidedBound.Properties[0].Slider = false;
+    CHECK_NOTHROW(Keire::ValidateManagedAssetTypeDescriptor(oneSidedBound));
+
+    auto invalidSlider = descriptor;
+    invalidSlider.Properties[0].Maximum.reset();
+    CHECK_THROWS_AS(Keire::ValidateManagedAssetTypeDescriptor(invalidSlider), std::invalid_argument);
+
+    auto invalidStep = descriptor;
+    invalidStep.Properties[0].Step = 0.0;
+    CHECK_THROWS_AS(Keire::ValidateManagedAssetTypeDescriptor(invalidStep), std::invalid_argument);
+
+    auto invalidMultiline = descriptor;
+    invalidMultiline.Properties[0].TextLines = 4;
+    CHECK_THROWS_AS(Keire::ValidateManagedAssetTypeDescriptor(invalidMultiline), std::invalid_argument);
 }
 
 TEST_CASE("managed type catalogs round trip deterministically and reject incompatible metadata")

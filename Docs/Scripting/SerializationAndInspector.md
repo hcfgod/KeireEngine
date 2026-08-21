@@ -18,6 +18,8 @@ Prefer private serialized fields:
 
 ```csharp
 [SerializeField, StableFieldId("8a802089-1236-4370-9c9c-133c251305f2")]
+[Header("Locomotion")]
+[InspectorName("Maximum Speed")]
 [InspectorGroup("Movement")]
 [Range(0.0, 20.0)]
 [Tooltip("Maximum horizontal speed in metres per second.")]
@@ -82,11 +84,15 @@ Name-based restoration produces a migration warning. Add a stable ID so future r
 | `[HotReloadState]` | Migrate a non-persistent `Behaviour` field during Play Mode reload |
 | `[StableFieldId("uuid")]` | Give a serialized member durable identity |
 | `[FormerlySerializedAs("name")]` | Add a legacy name fallback |
-| `[Header("text")]` | Add a heading before a managed-data member |
+| `[Header("text")]` | Add a heading before a `Behaviour` or managed-data member |
+| `[InspectorName("name")]` | Replace the generated member label without changing serialized identity |
 | `[InspectorGroup("name")]` | Group related members where the Inspector supports grouped presentation |
 | `[Tooltip("text")]` | Describe a member in the Inspector |
-| `[Range(min, max)]` | Constrain numeric Inspector editing to finite ordered bounds |
-| `[ReadOnlyInInspector]` | Show a managed-data member without allowing Inspector edits |
+| `[Range(min, max)]` | Render a numeric slider with finite increasing bounds |
+| `[Min(value)]` / `[Max(value)]` | Apply one or both bounds to a numeric drag field without converting it to a slider |
+| `[InspectorStep(value)]` | Set the positive drag increment for a numeric field |
+| `[Multiline(lines)]` | Render a string field with 2–32 visible lines |
+| `[ReadOnlyInInspector]` | Show a `Behaviour` or managed-data member without allowing Inspector edits |
 | `[HideInInspector]` | Serialize a member without displaying it |
 | `[SerializableType]` | Allow a nested inline type in managed data |
 | `[StableComponentId("uuid")]` | Identify an attachable managed component |
@@ -95,8 +101,22 @@ Name-based restoration produces a migration warning. Add a stable ID so future r
 | `[RequireComponent(typeof(T))]` | Enforce an automatically attached, non-removable-while-required dependency |
 | `[ExecutionOrder(value)]` | Define relative managed callback order |
 
-`Range` validates its bounds when the attribute is created. It does not replace runtime validation for values loaded
-from another source or computed by code.
+`Range`, `Min`, `Max`, `InspectorStep`, and `Multiline` validate their constructor values. Discovery also rejects
+numeric attributes on non-numeric members and `Multiline` on non-string members. These authoring controls do not
+replace runtime validation for values loaded from another source or computed by code.
+
+Use a slider for a deliberately bounded choice and a bounded drag for values that may need precise keyboard entry:
+
+```csharp
+[SerializeField, Range(0.0, 1.0)]
+private float _masterVolume = 0.8f;
+
+[SerializeField, Min(0.0), Max(500.0), InspectorStep(0.25)]
+private float _acceleration = 12.0f;
+
+[SerializeField, Multiline(6), InspectorName("Designer Notes")]
+private string _notes = string.Empty;
+```
 
 ## Common Supported Values
 
@@ -117,9 +137,9 @@ If the editor reports a serialization diagnostic, change the field shape rather 
 
 The current `Behaviour` Inspector directly edits scalar/string/enum values, engine math values, `Entity`, `UiButton`,
 `KeireEvent`, and `AssetReference<T>` fields, plus supported nested `[SerializableType]` values. Arrays and lists may
-participate in state migration without receiving the same direct component-Inspector editing surface. `Header` and
-`ReadOnlyInInspector` currently apply to managed data; use `InspectorGroup`, `Tooltip`, `Range`, and
-`HideInInspector` for `Behaviour` presentation.
+participate in state migration without receiving the same direct component-Inspector editing surface. Display names,
+headers, groups, tooltips, sliders, drag bounds and steps, multiline strings, read-only state, and hidden state use the
+same validated metadata semantics for `Behaviour` and managed-data members.
 
 ## Entity And Asset References
 

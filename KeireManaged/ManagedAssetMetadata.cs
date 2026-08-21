@@ -47,6 +47,9 @@ internal static class ManagedAssetMetadata
         public string? ExpectedManagedType { get; set; }
         public bool IncludeDerivedAssetTypes { get; init; } = true;
         public List<PropertyDocument> Children { get; } = [];
+        public double Step { get; set; } = 0.1;
+        public bool Slider { get; set; }
+        public int TextLines { get; set; } = 1;
     }
 
     private sealed class DiagnosticDocument
@@ -149,7 +152,8 @@ internal static class ManagedAssetMetadata
         {
             StableFieldId = stable.Id.ToString("D"),
             Name = member.Member.Name,
-            DisplayName = SplitName(member.Member.Name.TrimStart('_')),
+            DisplayName = member.Member.GetCustomAttribute<InspectorNameAttribute>(true)?.Name ??
+                          SplitName(member.Member.Name.TrimStart('_')),
             ManagedTypeName = valueType.FullName ?? valueType.Name,
             Kind = PropertyKind(valueType),
             ReadOnly = !member.CanWrite || member.Member.IsDefined(typeof(ReadOnlyInInspectorAttribute), true),
@@ -157,11 +161,36 @@ internal static class ManagedAssetMetadata
             Header = member.Member.GetCustomAttribute<HeaderAttribute>(true)?.Text ?? string.Empty,
             Tooltip = member.Member.GetCustomAttribute<TooltipAttribute>(true)?.Text ?? string.Empty,
         };
-        if (member.Member.GetCustomAttribute<RangeAttribute>(true) is { } range)
+        RangeAttribute? range = member.Member.GetCustomAttribute<RangeAttribute>(true);
+        MinAttribute? minimum = member.Member.GetCustomAttribute<MinAttribute>(true);
+        MaxAttribute? maximum = member.Member.GetCustomAttribute<MaxAttribute>(true);
+        InspectorStepAttribute? step = member.Member.GetCustomAttribute<InspectorStepAttribute>(true);
+        MultilineAttribute? multiline = member.Member.GetCustomAttribute<MultilineAttribute>(true);
+        if (range is not null && (minimum is not null || maximum is not null))
+            throw Invalid(ownerType, $"member '{member.Member.Name}' combines Range with Min or Max");
+        if ((range is not null || minimum is not null || maximum is not null || step is not null) &&
+            !IsNumeric(valueType))
+        {
+            throw Invalid(ownerType,
+                          $"member '{member.Member.Name}' uses numeric Inspector attributes on a non-numeric type");
+        }
+        if (multiline is not null && valueType != typeof(string))
+            throw Invalid(ownerType, $"member '{member.Member.Name}' uses Multiline on a non-string type");
+        if (range is not null)
         {
             result.Minimum = range.Minimum;
             result.Maximum = range.Maximum;
+            result.Slider = true;
         }
+        else
+        {
+            result.Minimum = minimum?.Minimum;
+            result.Maximum = maximum?.Maximum;
+        }
+        if (result.Minimum is not null && result.Maximum is not null && result.Minimum > result.Maximum)
+            throw Invalid(ownerType, $"member '{member.Member.Name}' has unordered Inspector bounds");
+        result.Step = step?.Step ?? (IsInteger(valueType) ? 1.0 : 0.1);
+        result.TextLines = multiline?.Lines ?? 1;
 
         if (IsAssetReference(valueType, out Type? referencedType))
         {
@@ -345,6 +374,14 @@ internal static class ManagedAssetMetadata
             throw new InvalidOperationException("inline ScriptableObjects are unsupported; use AssetReference<T>");
         return 11;
     }
+
+    private static bool IsInteger(Type type) =>
+        type == typeof(sbyte) || type == typeof(byte) || type == typeof(short) || type == typeof(ushort) ||
+        type == typeof(int) || type == typeof(uint) || type == typeof(long) || type == typeof(ulong) ||
+        type == typeof(char);
+
+    private static bool IsNumeric(Type type) =>
+        IsInteger(type) || type == typeof(float) || type == typeof(double) || type == typeof(decimal);
 
     private static bool IsList(Type type, out Type elementType)
     {

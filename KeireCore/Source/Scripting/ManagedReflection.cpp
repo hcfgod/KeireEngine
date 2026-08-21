@@ -59,6 +59,31 @@ namespace Keire::Detail
         return static_cast<std::string>(scopedName);
     }
 
+    [[nodiscard]] ManagedInspectorAttributeTypes ResolveManagedInspectorAttributeTypes(Coral::ManagedAssembly& api)
+    {
+        const auto required = [&api](const std::string_view name) -> const Coral::Type*
+        {
+            auto& type = api.GetLocalType(name);
+            if (!type)
+                throw std::runtime_error("Keire.Managed does not expose managed component metadata type '" +
+                                         std::string(name) + "'.");
+            return std::addressof(type);
+        };
+        return {.SerializeField = required("Keire.SerializeFieldAttribute"),
+                .HideInInspector = required("Keire.HideInInspectorAttribute"),
+                .Serializable = required("Keire.SerializableTypeAttribute"),
+                .Range = required("Keire.RangeAttribute"),
+                .Minimum = required("Keire.MinAttribute"),
+                .Maximum = required("Keire.MaxAttribute"),
+                .Step = required("Keire.InspectorStepAttribute"),
+                .Multiline = required("Keire.MultilineAttribute"),
+                .InspectorName = required("Keire.InspectorNameAttribute"),
+                .ReadOnly = required("Keire.ReadOnlyInInspectorAttribute"),
+                .Header = required("Keire.HeaderAttribute"),
+                .Tooltip = required("Keire.TooltipAttribute"),
+                .Group = required("Keire.InspectorGroupAttribute")};
+    }
+
     [[nodiscard]] bool ManagedTypeIsEnum(Coral::Type& type)
     {
         auto& baseType = type.GetBaseType();
@@ -122,35 +147,62 @@ namespace Keire::Detail
         return static_cast<std::string>(value);
     }
 
-    void ReflectManagedFieldSet(Coral::Type& ownerType, const Coral::Type& serializeFieldType,
-                                const Coral::Type* hideInInspectorType, const Coral::Type* serializableType,
-                                const Coral::Type* rangeType, const Coral::Type* tooltipType,
-                                const Coral::Type* groupType, const std::string_view prefix,
-                                const std::string_view inheritedGroup, const std::size_t depth,
-                                std::vector<std::int32_t>& typeStack, std::vector<ComponentProperty>& result)
+    void ReflectManagedFieldSet(Coral::Type& ownerType, const ManagedInspectorAttributeTypes& attributeTypes,
+                                const std::string_view prefix, const std::string_view inheritedGroup,
+                                const std::size_t depth, std::vector<std::int32_t>& typeStack,
+                                std::vector<ComponentProperty>& result)
     {
         for (auto field : ownerType.GetFields())
         {
             bool serialized = field.GetAccessibility() == Coral::TypeAccessibility::Public;
             bool hidden = false;
+            bool readOnly = false;
+            bool slider = false;
+            bool minimumAttribute = false;
+            bool maximumAttribute = false;
             std::optional<double> minimum;
             std::optional<double> maximum;
+            std::optional<double> step;
+            std::uint32_t textLines = 1;
+            std::string displayName;
+            std::string header;
             std::string tooltip;
             std::string group(inheritedGroup);
             for (auto attribute : field.GetAttributes())
             {
-                if (attribute.GetType() == serializeFieldType)
+                if (attributeTypes.SerializeField && attribute.GetType() == *attributeTypes.SerializeField)
                     serialized = true;
-                else if (hideInInspectorType && attribute.GetType() == *hideInInspectorType)
+                else if (attributeTypes.HideInInspector && attribute.GetType() == *attributeTypes.HideInInspector)
                     hidden = true;
-                else if (rangeType && attribute.GetType() == *rangeType)
+                else if (attributeTypes.Range && attribute.GetType() == *attributeTypes.Range)
                 {
                     minimum = attribute.GetFieldValue<double>("Minimum");
                     maximum = attribute.GetFieldValue<double>("Maximum");
+                    slider = true;
                 }
-                else if (tooltipType && attribute.GetType() == *tooltipType)
+                else if (attributeTypes.Minimum && attribute.GetType() == *attributeTypes.Minimum)
+                {
+                    minimum = attribute.GetFieldValue<double>("Minimum");
+                    minimumAttribute = true;
+                }
+                else if (attributeTypes.Maximum && attribute.GetType() == *attributeTypes.Maximum)
+                {
+                    maximum = attribute.GetFieldValue<double>("Maximum");
+                    maximumAttribute = true;
+                }
+                else if (attributeTypes.Step && attribute.GetType() == *attributeTypes.Step)
+                    step = attribute.GetFieldValue<double>("Step");
+                else if (attributeTypes.Multiline && attribute.GetType() == *attributeTypes.Multiline)
+                    textLines = static_cast<std::uint32_t>(attribute.GetFieldValue<std::int32_t>("Lines"));
+                else if (attributeTypes.InspectorName && attribute.GetType() == *attributeTypes.InspectorName)
+                    displayName = ManagedAttributeText(attribute, "Name");
+                else if (attributeTypes.ReadOnly && attribute.GetType() == *attributeTypes.ReadOnly)
+                    readOnly = true;
+                else if (attributeTypes.Header && attribute.GetType() == *attributeTypes.Header)
+                    header = ManagedAttributeText(attribute, "Value");
+                else if (attributeTypes.Tooltip && attribute.GetType() == *attributeTypes.Tooltip)
                     tooltip = ManagedAttributeText(attribute, "Text");
-                else if (groupType && attribute.GetType() == *groupType)
+                else if (attributeTypes.Group && attribute.GetType() == *attributeTypes.Group)
                     group = ManagedAttributeText(attribute, "Name");
             }
             if (!serialized || hidden)
@@ -164,15 +216,31 @@ namespace Keire::Detail
             {
                 if (std::ranges::find(result, key, &ComponentProperty::Key) != result.end())
                     continue;
+                const bool numeric = (*kind == ComponentPropertyKind::Integer && !ManagedTypeIsEnum(fieldType)) ||
+                                     *kind == ComponentPropertyKind::Scalar;
+                if (slider && (minimumAttribute || maximumAttribute))
+                    throw std::runtime_error("Managed Inspector Range cannot be combined with Min or Max: " + key);
+                if ((minimum || maximum || step || slider) && !numeric)
+                    throw std::runtime_error("Managed Inspector numeric attributes require a numeric field: " + key);
+                if (minimum && maximum && *minimum > *maximum)
+                    throw std::runtime_error("Managed Inspector bounds are unordered for field: " + key);
+                if (slider && (!minimum || !maximum || *minimum >= *maximum))
+                    throw std::runtime_error("Managed Inspector sliders require an increasing range for field: " + key);
+                if (textLines != 1 && *kind != ComponentPropertyKind::Text)
+                    throw std::runtime_error("Managed Inspector multiline fields must be strings: " + key);
                 ComponentProperty property;
                 property.Key = key;
-                property.DisplayName = ManagedFieldDisplayName(name);
+                property.DisplayName = displayName.empty() ? ManagedFieldDisplayName(name) : std::move(displayName);
                 property.Group = std::move(group);
                 property.Kind = *kind;
+                property.ReadOnly = readOnly;
                 property.Minimum = minimum;
                 property.Maximum = maximum;
-                property.Step = *kind == ComponentPropertyKind::Integer ? 1.0 : 0.1;
+                property.Step = step.value_or(*kind == ComponentPropertyKind::Integer ? 1.0 : 0.1);
                 property.Tooltip = std::move(tooltip);
+                property.Header = std::move(header);
+                property.Slider = slider;
+                property.TextLines = textLines;
                 if (*kind == ComponentPropertyKind::Event)
                     property.EventArgumentCount = ManagedEventArgumentCount(ManagedTypeName(fieldType));
                 if (*kind == ComponentPropertyKind::Asset &&
@@ -183,26 +251,23 @@ namespace Keire::Detail
                 result.push_back(std::move(property));
                 continue;
             }
-            if (!serializableType || depth >= 4 || fieldType.IsSZArray() ||
-                !fieldType.HasAttribute(*serializableType) ||
+            if (!attributeTypes.Serializable || depth >= 4 || fieldType.IsSZArray() ||
+                !fieldType.HasAttribute(*attributeTypes.Serializable) ||
                 std::ranges::find(typeStack, fieldType.GetTypeId()) != typeStack.end())
             {
                 continue;
             }
             typeStack.push_back(fieldType.GetTypeId());
-            const auto nestedGroup =
-                group.empty() ? ManagedFieldDisplayName(name) : group + " / " + ManagedFieldDisplayName(name);
-            ReflectManagedFieldSet(fieldType, serializeFieldType, hideInInspectorType, serializableType, rangeType,
-                                   tooltipType, groupType, key, nestedGroup, depth + 1, typeStack, result);
+            const auto nestedDisplayName = displayName.empty() ? ManagedFieldDisplayName(name) : std::move(displayName);
+            const auto nestedGroup = group.empty() ? nestedDisplayName : group + " / " + nestedDisplayName;
+            ReflectManagedFieldSet(fieldType, attributeTypes, key, nestedGroup, depth + 1, typeStack, result);
             typeStack.pop_back();
         }
     }
 
     [[nodiscard]] std::vector<ComponentProperty>
     ReflectManagedProperties(const Coral::Type& concreteType, const Coral::Type& behaviourType,
-                             const Coral::Type& serializeFieldType, const Coral::Type* hideInInspectorType,
-                             const Coral::Type* serializableType, const Coral::Type* rangeType,
-                             const Coral::Type* tooltipType, const Coral::Type* groupType)
+                             const ManagedInspectorAttributeTypes& attributeTypes)
     {
         std::vector<ComponentProperty> result;
         std::vector<std::int32_t> typeStack;
@@ -210,8 +275,7 @@ namespace Keire::Detail
         while (*current && !(*current == behaviourType))
         {
             typeStack.push_back(current->GetTypeId());
-            ReflectManagedFieldSet(*current, serializeFieldType, hideInInspectorType, serializableType, rangeType,
-                                   tooltipType, groupType, {}, {}, 0, typeStack, result);
+            ReflectManagedFieldSet(*current, attributeTypes, {}, {}, 0, typeStack, result);
             typeStack.pop_back();
             current = std::addressof(current->GetBaseType());
         }
@@ -637,6 +701,9 @@ namespace Keire::Detail
             result.Maximum = found->get<double>();
         result.Header = source.value("header", std::string{});
         result.Tooltip = source.value("tooltip", std::string{});
+        result.Step = source.value("step", result.Step);
+        result.Slider = source.value("slider", false);
+        result.TextLines = source.value("textLines", result.TextLines);
         if (const auto found = source.find("expectedAssetType"); found != source.end())
             result.ExpectedAssetType = AssetTypeId(AssetId::Parse(found->get<std::string>()));
         if (const auto found = source.find("expectedManagedType"); found != source.end())

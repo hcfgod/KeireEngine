@@ -573,8 +573,9 @@ context after hot reload.
 
 Managed field discovery projects primitives, enums, entities, typed asset references, and bounded nested
 `[SerializableType]` members into ordinary `ComponentProperty` descriptors. Stable field IDs remain the serialized
-identity while dotted property paths address nested Inspector leaves. Range, tooltip, and group metadata flow through
-the same descriptor path used by native components. Canonical state JSON stores entity IDs without runtime-world
+identity while dotted property paths address nested Inspector leaves. Validated display labels, headers, groups,
+tooltips, slider intent, one-sided bounds, drag steps, multiline height, and read-only state flow through the same
+descriptor path used by native components and managed data assets. Canonical state JSON stores entity IDs without runtime-world
 identity; restoration rebinds them to the owning Behaviour's current world before lifecycle callbacks run.
 
 Audio playback crosses `IScriptRuntimeServices` as a value request containing the validated clip asset ID, output bus,
