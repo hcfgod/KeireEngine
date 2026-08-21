@@ -13,7 +13,8 @@ versions.
   assets. Managed code can now request load priority, yield or await readiness, inspect fallback/revision/structured
   failure state, and deterministically release a generation-scoped lease without receiving a native resource object.
   The packaged managed consumer compiles the new presentation-asset surface against the shipped managed assembly.
-  GPU VFX signature validation also rejects out-of-range opcodes through an explicit portable fallback.
+  GPU VFX signature validation also rejects out-of-range opcodes through an explicit portable fallback, and streaming
+  SHA-256 finalization now enforces its buffered-byte invariant in optimized builds.
 - Added consistent Unity-style managed Inspector controls for `Behaviour` and managed-data members: true `[Range]`
   sliders, `[Min]`/`[Max]` bounds, `[InspectorStep]`, `[Multiline]`, `[InspectorName]`, headers, and visible read-only
   fields. Metadata validation, hot reload, type catalogs, and 64-bit signed/unsigned editor controls share the same
