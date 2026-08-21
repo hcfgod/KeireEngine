@@ -228,9 +228,10 @@ namespace Keire
         {
             if (value.empty() || value == "." || value == ".." || value.back() == '.' || value.back() == ' ')
                 return false;
-            for (const unsigned char character : value)
+            for (const char character : value)
             {
-                if (!(std::isalnum(character) || character == '.' || character == '_' || character == '-'))
+                const auto byte = static_cast<unsigned char>(character);
+                if (!(std::isalnum(byte) || byte == '.' || byte == '_' || byte == '-'))
                     return false;
             }
             auto stem = std::string(value.substr(0, value.find('.')));
