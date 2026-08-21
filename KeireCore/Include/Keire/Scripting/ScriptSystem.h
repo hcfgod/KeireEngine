@@ -50,6 +50,55 @@ namespace Keire
         return static_cast<ManagedInputState>(static_cast<std::uint8_t>(left) | static_cast<std::uint8_t>(right));
     }
 
+    enum class ManagedInputDeviceType : std::uint8_t
+    {
+        Keyboard,
+        Mouse,
+        Gamepad
+    };
+
+    struct ManagedInputDevice
+    {
+        std::uint32_t Id = 0;
+        ManagedInputDeviceType Type = ManagedInputDeviceType::Keyboard;
+        std::string Name;
+        bool Connected = false;
+        bool Paired = false;
+    };
+
+    enum class ManagedInputRebindStatus : std::uint8_t
+    {
+        Listening,
+        Candidate,
+        Completed,
+        Cancelled,
+        TimedOut
+    };
+
+    enum class ManagedInputRebindResolution : std::uint8_t
+    {
+        Replace,
+        KeepBoth,
+        Cancel
+    };
+
+    struct ManagedInputRebindOptions
+    {
+        float MagnitudeThreshold = 0.5F;
+        double TimeoutSeconds = 5.0;
+        std::uint8_t AllowedDeviceMask = 0x07;
+    };
+
+    struct ManagedInputRebindSnapshot
+    {
+        std::uint64_t Operation = 0;
+        AssetId Binding;
+        ManagedInputRebindStatus Status = ManagedInputRebindStatus::Cancelled;
+        std::string CandidatePath;
+        double RemainingSeconds = 0.0;
+        std::uint32_t ConflictCount = 0;
+    };
+
     struct ManagedRaycastQuery
     {
         std::uint64_t World = 0;
@@ -67,6 +116,31 @@ namespace Keire
         Vector3 Point;
         Vector3 Normal;
         float Distance = 0.0F;
+    };
+
+    struct ManagedCapsuleCastQuery
+    {
+        std::uint64_t World = 0;
+        AssetId ContextEntity;
+        Vector3 Origin;
+        Quaternion Rotation;
+        float Radius = 0.5F;
+        float Height = 1.0F;
+        Vector3 Displacement;
+        std::uint32_t Mask = ~0U;
+        AssetId IgnoredEntity;
+        bool IncludeTriggers = false;
+    };
+
+    struct ManagedSphereOverlapQuery
+    {
+        std::uint64_t World = 0;
+        AssetId ContextEntity;
+        Vector3 Center;
+        float Radius = 0.5F;
+        std::uint32_t Mask = ~0U;
+        AssetId IgnoredEntity;
+        bool IncludeTriggers = true;
     };
 
     struct ManagedAudioPlayback
@@ -268,10 +342,40 @@ namespace Keire
         {
             return ManagedInputState::None;
         }
+        [[nodiscard]] virtual std::vector<ManagedInputDevice> ManagedInputDevices() const { return {}; }
+        [[nodiscard]] virtual std::string ManagedInputControlScheme() const { return {}; }
+        [[nodiscard]] virtual bool SetManagedInputControlScheme(std::string_view, bool) noexcept { return false; }
+        [[nodiscard]] virtual bool ClearManagedInputControlSchemeLock() noexcept { return false; }
+        [[nodiscard]] virtual bool SetManagedGamepadRumble(std::uint32_t, float, float, float) noexcept
+        {
+            return false;
+        }
+        [[nodiscard]] virtual std::uint64_t BeginManagedInputRebind(AssetId, ManagedInputRebindOptions) noexcept
+        {
+            return 0;
+        }
+        [[nodiscard]] virtual std::optional<ManagedInputRebindSnapshot> ManagedInputRebind(std::uint64_t) const noexcept
+        {
+            return std::nullopt;
+        }
+        [[nodiscard]] virtual bool ResolveManagedInputRebind(std::uint64_t, ManagedInputRebindResolution) noexcept
+        {
+            return false;
+        }
+        [[nodiscard]] virtual bool CancelManagedInputRebind(std::uint64_t) noexcept { return false; }
+        [[nodiscard]] virtual bool SaveManagedInputBindings(std::string_view) noexcept { return false; }
+        [[nodiscard]] virtual int LoadManagedInputBindings(std::string_view) noexcept { return -1; }
+        [[nodiscard]] virtual bool ClearManagedInputBindings() noexcept { return false; }
         [[nodiscard]] virtual std::optional<ManagedRaycastHit> RaycastManaged(const ManagedRaycastQuery&) noexcept
         {
             return std::nullopt;
         }
+        [[nodiscard]] virtual std::optional<ManagedRaycastHit>
+        CapsuleCastManaged(const ManagedCapsuleCastQuery&) noexcept
+        {
+            return std::nullopt;
+        }
+        [[nodiscard]] virtual std::vector<AssetId> OverlapSphereManaged(const ManagedSphereOverlapQuery&) { return {}; }
         virtual void SetManagedCursorVisible(bool) noexcept {}
         virtual void SetManagedCursorLocked(bool) noexcept {}
         [[nodiscard]] virtual bool IsManagedCursorVisible() const noexcept { return true; }

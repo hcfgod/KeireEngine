@@ -150,8 +150,8 @@ These types identify native components. Their layout is intentionally not expose
 | `Time` | `DeltaTime`, `FixedDeltaTime`, `UnscaledDeltaTime`, `Elapsed`, `TimeScale`, `Paused` |
 | `Screen` | Resolution, display scale, safe area, focus, fullscreen mode, VSync state, `TrySetResolution` |
 | `PlayerPreferences` | Typed get/set, `HasKey`, `DeleteKey`, `DeleteAll`, atomic `Save` |
-| `Input` | `Axis2D`, `Axis`, `Held`, `Pressed`, `Released`, `Button` |
-| `Physics` | `TryRaycast`, `Raycast` |
+| `Input` | Actions, device snapshots, control schemes, interactive rebinding, binding profiles, gamepad rumble |
+| `Physics` | `TryRaycast`, `Raycast`, `TryCapsuleCast`, `OverlapSphere` |
 | `Navigation` | `FindPathAsync` |
 | `Prefab` | `Instantiate` |
 | `SceneManager` | `ActiveScene`, `LoadedScenes`, `LoadSceneAsync` |

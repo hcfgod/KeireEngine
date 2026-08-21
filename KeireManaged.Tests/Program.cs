@@ -19,7 +19,8 @@ var tests = new (string Name, Action Run)[]
     ("Coroutines schedule phases and dispose deterministically", CoroutineContract),
     ("Transform and rigid body gameplay handles expose writable runtime state", GameplayHandleContract),
     ("Animator exposes transient foot-grounding control", AnimatorFootGroundingContract),
-    ("Physics rejects non-finite raycasts before native dispatch", PhysicsRaycastValidationContract),
+    ("Managed physics shape queries validate and preserve native results", ManagedPhysicsQueryContract),
+    ("Managed input devices rebinding persistence and rumble preserve native contracts", ManagedInputDeviceContract),
     ("Native UI button dispatch advances with the player clock", NativeUiButtonDispatchClockContract),
     ("Native runtime UI controls preserve values text focus and events", NativeRuntimeUiControlContract),
     ("Managed rendering handles preserve camera lights materials and shader overrides", ManagedRenderingContract),
@@ -143,7 +144,7 @@ static void AnimatorFootGroundingContract()
            "Animator must expose a model-agnostic runtime foot-grounding weight.");
 }
 
-static void PhysicsRaycastValidationContract()
+static unsafe void ManagedPhysicsQueryContract()
 {
     AssertThrows<ArgumentException>(
         () => Keire.Physics.TryRaycast(default, new Keire.Vector3(float.NaN, 0.0f, 0.0f),
@@ -156,6 +157,109 @@ static void PhysicsRaycastValidationContract()
     AssertThrows<ArgumentOutOfRangeException>(
         () => Keire.Physics.TryRaycast(default, default, new Keire.Vector3(0.0f, -1.0f, 0.0f), out _, float.NaN),
         "Raycasts must reject non-finite maximum distances before calling native code.");
+
+    Assert(System.Runtime.InteropServices.Marshal.SizeOf<Keire.NativeRaycastHit>() == 48 &&
+               System.Runtime.InteropServices.Marshal.SizeOf<Keire.NativeEntityId>() == 16,
+           "Managed physics query structs must preserve their native ABI layouts.");
+    NativePhysicsFixture.Install();
+    try
+    {
+        var context = new Keire.Entity(17, new Keire.EntityId(23, 29));
+        var ignored = new Keire.Entity(17, new Keire.EntityId(31, 37));
+        Assert(Keire.Physics.TryCapsuleCast(context, new Keire.Vector3(1.0f, 2.0f, 3.0f),
+                                            new Keire.Quaternion(0.0f, 0.0f, 0.0f, 2.0f), 0.5f, 1.8f,
+                                            new Keire.Vector3(0.0f, 0.0f, 4.0f), out Keire.RaycastHit capsuleHit,
+                                            0x40u, true, ignored),
+               "A valid capsule cast must reach the native runtime.");
+        Assert(capsuleHit.Entity == new Keire.Entity(17, new Keire.EntityId(41, 43)) &&
+                   capsuleHit.Distance == 2.5f && NativePhysicsFixture.CapsuleCalls == 1 &&
+                   NativePhysicsFixture.Rotation == Keire.Quaternion.Identity && NativePhysicsFixture.IncludeTriggers,
+               "Capsule casts must normalize rotation and preserve the native hit and trigger policy.");
+
+        IReadOnlyList<Keire.Entity> overlaps = Keire.Physics.OverlapSphere(
+            context, new Keire.Vector3(8.0f, 9.0f, 10.0f), 3.0f, 0x80u, false, ignored);
+        Assert(overlaps.Count == 2 && overlaps[0] == new Keire.Entity(17, new Keire.EntityId(47, 53)) &&
+                   overlaps[1] == new Keire.Entity(17, new Keire.EntityId(59, 61)) &&
+                   NativePhysicsFixture.OverlapCalls == 2 && !NativePhysicsFixture.IncludeTriggers,
+               "Sphere overlaps must perform one bounded count/copy transaction and preserve world identity.");
+
+        int calls = NativePhysicsFixture.CapsuleCalls + NativePhysicsFixture.OverlapCalls;
+        AssertThrows<ArgumentOutOfRangeException>(
+            () => Keire.Physics.TryCapsuleCast(context, default, Keire.Quaternion.Identity, 1.0f, 1.5f,
+                                                new Keire.Vector3(0.0f, 1.0f, 0.0f), out _),
+            "Capsule height must contain the complete diameter.");
+        AssertThrows<ArgumentException>(
+            () => Keire.Physics.TryCapsuleCast(context, default, Keire.Quaternion.Identity, 0.5f, 1.0f, default,
+                                                out _),
+            "Capsule displacement cannot be zero.");
+        AssertThrows<ArgumentException>(
+            () => Keire.Physics.OverlapSphere(context, default, 1.0f, ignoredEntity: new Keire.Entity(
+                                                  19, new Keire.EntityId(31, 37))),
+            "Ignored overlap entities must belong to the query world.");
+        Assert(calls == NativePhysicsFixture.CapsuleCalls + NativePhysicsFixture.OverlapCalls,
+               "Invalid managed shape queries must fail before native dispatch.");
+    }
+    finally
+    {
+        NativePhysicsFixture.Uninstall();
+    }
+}
+
+static unsafe void ManagedInputDeviceContract()
+{
+    Assert(System.Runtime.InteropServices.Marshal.SizeOf<Keire.NativeInputDevice>() == 8 &&
+               System.Runtime.InteropServices.Marshal.SizeOf<Keire.NativeInputRebindSnapshot>() == 32,
+           "Managed input structs must preserve their native ABI layouts.");
+    NativeInputFixture.Install();
+    try
+    {
+        IReadOnlyList<Keire.InputDevice> devices = Keire.Input.Devices;
+        Assert(devices.Count == 2 && devices[0] == new Keire.InputDevice(
+                   1, Keire.InputDeviceType.Keyboard, "Keyboard", true, true) &&
+                   devices[1] == new Keire.InputDevice(7, Keire.InputDeviceType.Gamepad, "Pro Controller", true, true),
+               "Managed input must preserve deterministic device metadata and UTF-8 names.");
+        Assert(Keire.Input.ControlScheme == "Gamepad" && Keire.Input.TrySetControlScheme("Gamepad") &&
+                   NativeInputFixture.SetSchemeCalls == 1 && Keire.Input.ClearControlSchemeLock(),
+               "Managed control schemes must preserve native automatic and locked state changes.");
+
+        Assert(Keire.Input.TrySetGamepadRumble(7, 0.25f, 0.75f, 1.5f) && NativeInputFixture.RumbleCalls == 1 &&
+                   NativeInputFixture.LowFrequency == 0.25f && NativeInputFixture.HighFrequency == 0.75f &&
+                   NativeInputFixture.DurationSeconds == 1.5f,
+               "Managed rumble must preserve normalized motor strengths and bounded duration.");
+
+        var options = new Keire.InputRebindOptions(0.65f, 8.0, Keire.InputDeviceMask.Gamepad);
+        Keire.InputRebindOperation operation = Keire.Input.BeginInteractiveRebind(new Keire.AssetId(71, 73), options);
+        Keire.InputRebindSnapshot snapshot = operation.Snapshot;
+        Assert(operation.IsValid && NativeInputFixture.BeginRebindCalls == 1 &&
+                   snapshot.Binding == new Keire.AssetId(71, 73) &&
+                   snapshot.Status == Keire.InputRebindStatus.Candidate &&
+                   snapshot.CandidatePath == "<Gamepad>/buttonSouth" && snapshot.RemainingSeconds == 3.5 &&
+                   snapshot.ConflictCount == 2 && operation.Apply(Keire.InputRebindResolution.KeepBoth) &&
+                   NativeInputFixture.ResolveCalls == 1 &&
+                   NativeInputFixture.Resolution == Keire.InputRebindResolution.KeepBoth,
+               "Managed interactive rebinding must preserve candidates conflicts timing and resolution.");
+
+        Assert(Keire.Input.SaveBindingOverrides("Player_1") && Keire.Input.LoadBindingOverrides("Player_1") == 3 &&
+                   Keire.Input.ClearBindingOverrides() && NativeInputFixture.PersistenceCalls == 3,
+               "Managed binding override profiles must preserve native save load and clear transactions.");
+
+        int nativeCalls = NativeInputFixture.RumbleCalls + NativeInputFixture.BeginRebindCalls;
+        AssertThrows<ArgumentOutOfRangeException>(() => Keire.Input.TrySetGamepadRumble(7, -0.1f, 0.5f, 1.0f),
+                                                  "Rumble strengths must be normalized before native dispatch.");
+        AssertThrows<ArgumentOutOfRangeException>(
+            () => Keire.Input.BeginInteractiveRebind(new Keire.AssetId(71, 73),
+                                                     new Keire.InputRebindOptions(0.5f, 0.0,
+                                                                                  Keire.InputDeviceMask.Gamepad)),
+            "Interactive rebind timeouts must be positive and bounded.");
+        AssertThrows<ArgumentException>(() => Keire.Input.SaveBindingOverrides("../escape"),
+                                        "Binding profiles must reject traversal before native dispatch.");
+        Assert(nativeCalls == NativeInputFixture.RumbleCalls + NativeInputFixture.BeginRebindCalls,
+               "Invalid managed input operations must not reach native code.");
+    }
+    finally
+    {
+        NativeInputFixture.Uninstall();
+    }
 }
 
 static unsafe void NativeUiButtonDispatchClockContract()

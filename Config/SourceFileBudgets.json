@@ -33,7 +33,7 @@
     "KeireCore/Include/KeireInternal/Scenes/SceneRuntimeSessionImpl.h": 1990,
     "KeireCore/Source/Animation/AnimationSystem.cpp": 2644,
     "KeireCore/Source/Assets/RenderableAssets.cpp": 2254,
-    "KeireCore/Source/Input/InputSystem.cpp": 1993,
+    "KeireCore/Source/Input/InputSystem.cpp": 1980,
     "KeireCore/Source/Rendering/ShaderGraph.cpp": 4199,
     "KeireCore/Source/Scripting/ScriptSystem.cpp": 4551,
     "KeireCore/Source/Ui.cpp": 1635,

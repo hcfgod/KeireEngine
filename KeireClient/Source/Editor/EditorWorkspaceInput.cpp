@@ -12,6 +12,7 @@
 #include "Keire/ECS/Components/RuntimeUiComponents.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/PlatformDirectories.h"
+#include "KeireInternal/Scripting/ManagedRuntimePhysics.h"
 #include "KeireInternal/Scripting/ManagedRuntimeUiServices.h"
 #include "KeireInternal/WindowInternal.h"
 
@@ -296,6 +297,142 @@ Keire::ManagedInputState EditorWorkspaceLayer::ReadManagedInputState(const std::
     catch (...)
     {
         return Keire::ManagedInputState::None;
+    }
+}
+
+std::vector<Keire::ManagedInputDevice> EditorWorkspaceLayer::ManagedInputDevices() const
+{
+    const auto input = Owner().Input();
+    if (!input)
+        return {};
+    std::vector<Keire::ManagedInputDevice> result;
+    for (const auto& device : input->Devices())
+    {
+        result.push_back({device.Id.Value(), static_cast<Keire::ManagedInputDeviceType>(device.Type), device.Name,
+                          device.Connected, device.Paired});
+    }
+    return result;
+}
+
+std::string EditorWorkspaceLayer::ManagedInputControlScheme() const
+{
+    const auto input = Owner().Input();
+    if (!input || !m_EditorInputUser)
+        return {};
+    const auto users = input->Users();
+    const auto found = std::ranges::find(users, m_EditorInputUser, &Keire::InputUserDescriptor::Id);
+    return found == users.end() ? std::string{} : found->ControlScheme;
+}
+
+bool EditorWorkspaceLayer::SetManagedInputControlScheme(const std::string_view scheme, const bool locked) noexcept
+{
+    try
+    {
+        const auto input = Owner().Input();
+        return input && m_EditorInputUser && input->SetControlScheme(m_EditorInputUser, std::string(scheme), locked);
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+bool EditorWorkspaceLayer::ClearManagedInputControlSchemeLock() noexcept
+{
+    try
+    {
+        const auto input = Owner().Input();
+        return input && m_EditorInputUser && input->ClearControlSchemeLock(m_EditorInputUser);
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+bool EditorWorkspaceLayer::SetManagedGamepadRumble(const std::uint32_t device, const float lowFrequency,
+                                                   const float highFrequency, const float durationSeconds) noexcept
+{
+    try
+    {
+        const auto input = Owner().Input();
+        if (!input || !m_EditorInputUser)
+            return false;
+        const auto users = input->Users();
+        const auto user = std::ranges::find(users, m_EditorInputUser, &Keire::InputUserDescriptor::Id);
+        const auto id = Keire::InputDeviceId(device);
+        if (user == users.end() || std::ranges::find(user->Devices, id) == user->Devices.end())
+            return false;
+        return input->SetGamepadRumble(id, lowFrequency, highFrequency, Keire::TimeStep::FromSeconds(durationSeconds));
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+std::uint64_t EditorWorkspaceLayer::BeginManagedInputRebind(const Keire::AssetId binding,
+                                                            const Keire::ManagedInputRebindOptions options) noexcept
+{
+    return m_ManagedInputOperations.Begin(Owner().Input(), m_GameplayInputContext, binding, options);
+}
+
+std::optional<Keire::ManagedInputRebindSnapshot>
+EditorWorkspaceLayer::ManagedInputRebind(const std::uint64_t operation) const noexcept
+{
+    return m_ManagedInputOperations.Status(operation);
+}
+
+bool EditorWorkspaceLayer::ResolveManagedInputRebind(const std::uint64_t operation,
+                                                     const Keire::ManagedInputRebindResolution resolution) noexcept
+{
+    return m_ManagedInputOperations.Resolve(operation, resolution);
+}
+
+bool EditorWorkspaceLayer::CancelManagedInputRebind(const std::uint64_t operation) noexcept
+{
+    return m_ManagedInputOperations.Cancel(operation);
+}
+
+bool EditorWorkspaceLayer::SaveManagedInputBindings(const std::string_view profile) noexcept
+{
+    try
+    {
+        if (!m_GameplayInputContext)
+            return false;
+        m_GameplayInputContext->SaveBindingOverrides(profile);
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+int EditorWorkspaceLayer::LoadManagedInputBindings(const std::string_view profile) noexcept
+{
+    try
+    {
+        return m_GameplayInputContext ? static_cast<int>(m_GameplayInputContext->LoadBindingOverrides(profile)) : -1;
+    }
+    catch (...)
+    {
+        return -1;
+    }
+}
+
+bool EditorWorkspaceLayer::ClearManagedInputBindings() noexcept
+{
+    try
+    {
+        if (!m_GameplayInputContext)
+            return false;
+        m_GameplayInputContext->ClearBindingOverrides();
+        return true;
+    }
+    catch (...)
+    {
+        return false;
     }
 }
 
@@ -640,6 +777,19 @@ EditorWorkspaceLayer::RaycastManaged(const Keire::ManagedRaycastQuery& query) no
     {
     }
     return std::nullopt;
+}
+
+std::optional<Keire::ManagedRaycastHit>
+EditorWorkspaceLayer::CapsuleCastManaged(const Keire::ManagedCapsuleCastQuery& query) noexcept
+{
+    const auto play = m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+    return Keire::Detail::QueryManagedCapsule(play, query);
+}
+
+std::vector<Keire::AssetId> EditorWorkspaceLayer::OverlapSphereManaged(const Keire::ManagedSphereOverlapQuery& query)
+{
+    const auto play = m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+    return Keire::Detail::QueryManagedSphereOverlap(play, query);
 }
 
 void EditorWorkspaceLayer::ApplyManagedCursorMode() noexcept

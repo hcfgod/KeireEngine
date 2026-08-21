@@ -654,6 +654,7 @@ void EditorWorkspaceLayer::BeginPlayMode()
     }
     m_ManagedInputCaptureOverride.reset();
     m_ManagedRenderEnvironmentOverride.reset();
+    m_ManagedInputOperations.CancelAll();
     m_GameplayInputContext.Reset();
     if (const auto input = Owner().Input(); input && m_EditorInputUser)
     {
@@ -793,6 +794,7 @@ void EditorWorkspaceLayer::FinishPlayMode(const bool apply)
             applied = m_PlayChanges->BuildAppliedDefinition();
         m_SceneDocument->EndPlay();
         m_ManagedInputCaptureOverride.reset();
+        m_ManagedInputOperations.CancelAll();
         m_GameplayInputContext.Reset();
         m_ManagedCursorLocked = false;
         m_ManagedCursorVisible = true;

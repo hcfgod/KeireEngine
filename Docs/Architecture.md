@@ -924,6 +924,11 @@ rebinding. Action definitions are immutable `InputActionAsset` revisions; runtim
 outside source assets. Stable IDs preserve context state across rename and hot reload. Input shuts down before Windowing
 and Assets. Full contracts live in [Input System](InputSystem.md).
 
+Managed gameplay observes bounded device snapshots and the active player control scheme through callback-local runtime
+services. Rebind operations retain native action contexts until completion or cancellation, expose immutable polling
+snapshots, and are cancelled before Play Mode or player teardown. Rumble accepts normalized motor strengths for paired
+gamepads only and degrades to a rejected operation when the platform SDL build has no joystick backend.
+
 `.keireinput` is the first registered typed source importer. It validates bounded versioned JSON and emits deterministic
 canonical bytes into the normal content-addressed cache and cooker. The dockable editor exposes every schema-owned
 action type, value type, control scheme, composite, interaction, and processor while owning only mutable authoring
@@ -1207,6 +1212,10 @@ the configured 32-slot collision matrix in body broad-phase filters and query pa
 The editor writes collider handle changes through `SceneDocument`, so a drag is one undoable authoring operation.
 `PhysicsDebugSnapshot` copies bounded body, contact, and query-ring state only when capture is enabled; the shipping
 default records nothing. Physics Material and collision-mesh references remain ordinary asset dependencies.
+
+Managed ray and capsule casts plus sphere overlaps enter through owner-thread runtime services and resolve native body
+IDs back to stable scene entity IDs. Capsule self-filtering is applied as a native body filter so a cast can reach the
+next surface. Managed overlap copies are deterministic, unique, and capped at 256 entities inside one callback scope.
 
 Character movement queues value displacements from scripts and consumes them at the scene physics boundary. The runtime
 uses closest-hit capsule casts with the controller body excluded, skin padding, bounded sweep/slide iterations,

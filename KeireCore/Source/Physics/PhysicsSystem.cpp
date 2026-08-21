@@ -809,8 +809,15 @@ namespace Keire
         case ColliderShape::Capsule:
             if (definition.Height < definition.Radius * 2.0F)
                 throw std::invalid_argument("Physics capsule height must contain the capsule diameter.");
-            shape =
-                new JPH::CapsuleShape(std::max(0.0F, definition.Height * 0.5F - definition.Radius), definition.Radius);
+            if (const auto halfCylinder = definition.Height * 0.5F - definition.Radius;
+                halfCylinder <= std::numeric_limits<float>::epsilon())
+            {
+                shape = new JPH::SphereShape(definition.Radius);
+            }
+            else
+            {
+                shape = new JPH::CapsuleShape(halfCylinder, definition.Radius);
+            }
             break;
         case ColliderShape::ConvexMesh:
         case ColliderShape::TriangleMesh:
@@ -1007,8 +1014,17 @@ namespace Keire
 
         if (query.Height < query.Radius * 2.0F)
             throw std::invalid_argument("Physics capsule cast height must contain the capsule diameter.");
-        const JPH::CapsuleShape capsule(std::max(0.0F, query.Height * 0.5F - query.Radius), query.Radius);
-        const JPH::RShapeCast cast(&capsule, JPH::Vec3::sOne(),
+        JPH::ShapeRefC shape;
+        if (const auto halfCylinder = query.Height * 0.5F - query.Radius;
+            halfCylinder <= std::numeric_limits<float>::epsilon())
+        {
+            shape = new JPH::SphereShape(query.Radius);
+        }
+        else
+        {
+            shape = new JPH::CapsuleShape(halfCylinder, query.Radius);
+        }
+        const JPH::RShapeCast cast(shape.GetPtr(), JPH::Vec3::sOne(),
                                    JPH::RMat44::sRotationTranslation(ToJolt(query.Rotation), ToJolt(query.Origin)),
                                    ToJolt(query.Displacement));
         JPH::ShapeCastSettings settings;
@@ -1035,19 +1051,21 @@ namespace Keire
         return result;
     }
 
-    std::vector<PhysicsBodyId> PhysicsWorld::OverlapSphere(const Vector3 center, const float radius,
-                                                           const std::uint32_t mask, const std::uint32_t layer) const
+    std::vector<PhysicsBodyId> PhysicsWorld::OverlapSphere(const PhysicsSphereOverlapQuery& query) const
     {
         m_Impl->RequireOwner("OverlapSphere");
-        if (!Math::IsFinite(center) || !std::isfinite(radius) || radius <= 0.0F || !std::has_single_bit(layer))
+        if (!Math::IsFinite(query.Center) || !std::isfinite(query.Radius) || query.Radius <= 0.0F ||
+            !std::has_single_bit(query.Layer))
+        {
             throw std::invalid_argument("Physics sphere overlap is invalid.");
+        }
 
-        const JPH::SphereShape queryShape(radius);
+        const JPH::SphereShape queryShape(query.Radius);
         JPH::CollideShapeSettings settings;
         JPH::AllHitCollisionCollector<JPH::CollideShapeCollector> collector;
-        const QueryBodyFilter bodyFilter(mask, layer, true);
+        const QueryBodyFilter bodyFilter(query.Mask, query.Layer, query.IncludeTriggers, query.IgnoreBody.m_Value);
         m_Impl->Native.GetNarrowPhaseQuery().CollideShape(&queryShape, JPH::Vec3::sOne(),
-                                                          JPH::RMat44::sTranslation(ToJolt(center)), settings,
+                                                          JPH::RMat44::sTranslation(ToJolt(query.Center)), settings,
                                                           JPH::RVec3::sZero(), collector, {}, {}, bodyFilter);
 
         std::set<PhysicsBodyId> unique;
@@ -1059,8 +1077,14 @@ namespace Keire
         }
         std::vector<PhysicsBodyId> result;
         result.assign(unique.begin(), unique.end());
-        m_Impl->RecordOverlapQuery(center, radius, mask, layer, result);
+        m_Impl->RecordOverlapQuery(query.Center, query.Radius, query.Mask, query.Layer, result);
         return result;
+    }
+
+    std::vector<PhysicsBodyId> PhysicsWorld::OverlapSphere(const Vector3 center, const float radius,
+                                                           const std::uint32_t mask, const std::uint32_t layer) const
+    {
+        return OverlapSphere({.Center = center, .Radius = radius, .Mask = mask, .Layer = layer});
     }
 
     void PhysicsWorld::Step(const float deltaSeconds)

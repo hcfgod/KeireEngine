@@ -4,6 +4,7 @@
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/Scene.h"
 #include "Keire/Scenes/ScenePresentationRuntime.h"
+#include "KeireInternal/Scripting/ManagedRuntimePhysics.h"
 
 #include <algorithm>
 #include <ranges>
@@ -217,14 +218,24 @@ namespace KeireRuntime
         m_DefaultMixer = defaultMixer;
     }
 
+    void ManagedWorldRuntimeServices::BindManagedInput(Keire::Ref<Keire::InputActionContext>& context,
+                                                       const Keire::InputUserId user) noexcept
+    {
+        m_InputContext = &context;
+        m_InputUser = user;
+    }
+
     void ManagedWorldRuntimeServices::UnbindManagedWorld() noexcept
     {
         m_ManagedWorld.CancelAll();
+        m_ManagedInputOperations.CancelAll();
         m_Application = nullptr;
         m_Runtime = nullptr;
         m_Scene = nullptr;
         m_Presentation = nullptr;
         m_ReplaySession = nullptr;
+        m_InputContext = nullptr;
+        m_InputUser = {};
         m_ReplayStarted = nullptr;
         m_DefaultMixer = {};
         m_ActivatingScene = {};
@@ -306,5 +317,161 @@ namespace KeireRuntime
         {
             return false;
         }
+    }
+
+    std::vector<Keire::ManagedInputDevice> ManagedWorldRuntimeServices::ManagedInputDevices() const
+    {
+        if (!m_Application || !m_Application->Input())
+            return {};
+        std::vector<Keire::ManagedInputDevice> result;
+        for (const auto& device : m_Application->Input()->Devices())
+        {
+            result.push_back({device.Id.Value(), static_cast<Keire::ManagedInputDeviceType>(device.Type), device.Name,
+                              device.Connected, device.Paired});
+        }
+        return result;
+    }
+
+    std::string ManagedWorldRuntimeServices::ManagedInputControlScheme() const
+    {
+        if (!m_Application || !m_Application->Input() || !m_InputUser)
+            return {};
+        const auto users = m_Application->Input()->Users();
+        const auto found = std::ranges::find(users, m_InputUser, &Keire::InputUserDescriptor::Id);
+        return found == users.end() ? std::string{} : found->ControlScheme;
+    }
+
+    bool ManagedWorldRuntimeServices::SetManagedInputControlScheme(const std::string_view scheme,
+                                                                   const bool locked) noexcept
+    {
+        try
+        {
+            return m_Application && m_Application->Input() && m_InputUser &&
+                   m_Application->Input()->SetControlScheme(m_InputUser, std::string(scheme), locked);
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    bool ManagedWorldRuntimeServices::ClearManagedInputControlSchemeLock() noexcept
+    {
+        try
+        {
+            return m_Application && m_Application->Input() && m_InputUser &&
+                   m_Application->Input()->ClearControlSchemeLock(m_InputUser);
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    bool ManagedWorldRuntimeServices::SetManagedGamepadRumble(const std::uint32_t device, const float lowFrequency,
+                                                              const float highFrequency,
+                                                              const float durationSeconds) noexcept
+    {
+        try
+        {
+            if (!m_Application || !m_Application->Input() || !m_InputUser)
+                return false;
+            const auto input = m_Application->Input();
+            const auto users = input->Users();
+            const auto user = std::ranges::find(users, m_InputUser, &Keire::InputUserDescriptor::Id);
+            const auto id = Keire::InputDeviceId(device);
+            if (user == users.end() || std::ranges::find(user->Devices, id) == user->Devices.end())
+                return false;
+            return input->SetGamepadRumble(id, lowFrequency, highFrequency,
+                                           Keire::TimeStep::FromSeconds(durationSeconds));
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    std::uint64_t
+    ManagedWorldRuntimeServices::BeginManagedInputRebind(const Keire::AssetId binding,
+                                                         const Keire::ManagedInputRebindOptions options) noexcept
+    {
+        return m_ManagedInputOperations.Begin(
+            m_Application ? m_Application->Input() : Keire::Ref<Keire::InputSystem>{},
+            m_InputContext ? *m_InputContext : Keire::Ref<Keire::InputActionContext>{}, binding, options);
+    }
+
+    std::optional<Keire::ManagedInputRebindSnapshot>
+    ManagedWorldRuntimeServices::ManagedInputRebind(const std::uint64_t operation) const noexcept
+    {
+        return m_ManagedInputOperations.Status(operation);
+    }
+
+    bool ManagedWorldRuntimeServices::ResolveManagedInputRebind(
+        const std::uint64_t operation, const Keire::ManagedInputRebindResolution resolution) noexcept
+    {
+        return m_ManagedInputOperations.Resolve(operation, resolution);
+    }
+
+    bool ManagedWorldRuntimeServices::CancelManagedInputRebind(const std::uint64_t operation) noexcept
+    {
+        return m_ManagedInputOperations.Cancel(operation);
+    }
+
+    bool ManagedWorldRuntimeServices::SaveManagedInputBindings(const std::string_view profile) noexcept
+    {
+        try
+        {
+            if (!m_InputContext || !*m_InputContext)
+                return false;
+            (*m_InputContext)->SaveBindingOverrides(profile);
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    int ManagedWorldRuntimeServices::LoadManagedInputBindings(const std::string_view profile) noexcept
+    {
+        try
+        {
+            return m_InputContext && *m_InputContext
+                       ? static_cast<int>((*m_InputContext)->LoadBindingOverrides(profile))
+                       : -1;
+        }
+        catch (...)
+        {
+            return -1;
+        }
+    }
+
+    bool ManagedWorldRuntimeServices::ClearManagedInputBindings() noexcept
+    {
+        try
+        {
+            if (!m_InputContext || !*m_InputContext)
+                return false;
+            (*m_InputContext)->ClearBindingOverrides();
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    std::optional<Keire::ManagedRaycastHit>
+    ManagedWorldRuntimeServices::CapsuleCastManaged(const Keire::ManagedCapsuleCastQuery& query) noexcept
+    {
+        return Keire::Detail::QueryManagedCapsule(m_Runtime ? *m_Runtime : Keire::Ref<Keire::SceneRuntimeSession>{},
+                                                  query);
+    }
+
+    std::vector<Keire::AssetId>
+    ManagedWorldRuntimeServices::OverlapSphereManaged(const Keire::ManagedSphereOverlapQuery& query)
+    {
+        return Keire::Detail::QueryManagedSphereOverlap(
+            m_Runtime ? *m_Runtime : Keire::Ref<Keire::SceneRuntimeSession>{}, query);
     }
 } // namespace KeireRuntime

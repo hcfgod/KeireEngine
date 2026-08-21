@@ -92,7 +92,33 @@ for one-shot commands and `Held` for continuous behavior.
 Action names are strings and must match authoring exactly. Configure actions, maps, bindings, and UI-capture policy in
 the [Input Actions Editor](../InputActionsEditor.md).
 
-## Physics Raycasts
+Device and control-scheme metadata can drive prompts without exposing SDL handles:
+
+```csharp
+InputDevice? gamepad = Input.Devices.FirstOrDefault(device =>
+    device.Type == InputDeviceType.Gamepad && device.Connected && device.Paired);
+
+if (Input.ControlScheme == "Gamepad" && gamepad is { } controller)
+    Input.TrySetGamepadRumble(controller.Id, 0.25f, 0.7f, 0.12f);
+```
+
+Runtime rebinding is a bounded polling operation. Store it across frames, present the candidate and conflict count, then
+resolve it explicitly:
+
+```csharp
+InputRebindOperation rebind = Input.BeginInteractiveRebind(
+    fireBinding,
+    new InputRebindOptions(0.5f, 5.0, InputDeviceMask.All));
+
+InputRebindSnapshot state = rebind.Snapshot;
+if (state.Status == InputRebindStatus.Candidate)
+    rebind.Apply(state.ConflictCount == 0 ? InputRebindResolution.KeepBoth : InputRebindResolution.Replace);
+```
+
+Use `SaveBindingOverrides`, `LoadBindingOverrides`, and `ClearBindingOverrides` with an ASCII profile name to persist
+player-specific overrides atomically. Rebinds cancel on timeout, device loss, explicit cancellation, or runtime teardown.
+
+## Physics Queries
 
 Use the calling entity as the query context:
 
@@ -119,6 +145,46 @@ The returned hit contains the hit entity, point, normal, and distance.
 
 `Physics.Raycast` currently returns either an empty collection or the same nearest hit as `TryRaycast`; use
 `TryRaycast` when only one result is needed.
+
+Use a capsule cast for character clearance, camera obstruction, and swept melee volumes:
+
+```csharp
+Vector3 motion = Entity.Transform.Forward * 2.0f;
+if (Physics.TryCapsuleCast(
+        Entity,
+        Entity.Transform.Position,
+        Entity.Transform.Rotation,
+        radius: 0.35f,
+        height: 1.8f,
+        displacement: motion,
+        out RaycastHit obstruction,
+        mask: uint.MaxValue,
+        includeTriggers: false,
+        ignoredEntity: Entity))
+{
+    Debug.DrawLine(Entity.Transform.Position, obstruction.Point, Color.RedColor, 0.25f);
+}
+```
+
+`TryCapsuleCast` normalizes a finite non-zero rotation, requires the height to contain the full capsule diameter, and
+returns the nearest hit across the complete displacement. `ignoredEntity` is resolved to its live physics body before
+the native cast, so the query can continue to the next blocking surface instead of discarding a self-hit afterward.
+
+Sphere overlaps are useful for spawn validation, explosions, pickups, and area triggers:
+
+```csharp
+IReadOnlyList<Entity> targets = Physics.OverlapSphere(
+    Entity,
+    impactPoint,
+    radius: 4.0f,
+    mask: damageableMask,
+    includeTriggers: false,
+    ignoredEntity: Entity);
+```
+
+Overlap results are deterministic, contain unique entities, and are bounded to 256 entries at the managed boundary.
+The count and copy happen inside one script callback scope; if the native result changes between those two phases, the
+call fails instead of returning a partial collection.
 
 Layer masks use the project's 32-layer collision configuration.
 

@@ -3,6 +3,7 @@
 #include "Keire/Ref.h"
 #include "Keire/Scripting/ScriptSystem.h"
 #include "KeireInternal/Scripting/ManagedRuntimeApplicationServices.h"
+#include "KeireInternal/Scripting/ManagedRuntimeInput.h"
 
 #include <memory>
 #include <optional>
@@ -71,6 +72,7 @@ namespace KeireRuntime
                               Keire::Ref<Keire::ScenePresentationRuntime>& presentation,
                               Keire::Ref<Keire::SceneRuntimeSession>& replaySession, bool& replayStarted,
                               Keire::AssetId defaultMixer) noexcept;
+        void BindManagedInput(Keire::Ref<Keire::InputActionContext>& context, Keire::InputUserId user) noexcept;
         void UnbindManagedWorld() noexcept;
         [[nodiscard]] bool ProcessManagedSceneTransition(bool deterministic, ManagedSceneValidator validator) noexcept;
         [[nodiscard]] const Keire::RenderEnvironmentSettings& RenderEnvironment() const noexcept;
@@ -85,14 +87,37 @@ namespace KeireRuntime
         [[nodiscard]] std::vector<Keire::AssetId> LoadedManagedScenes() const final;
         [[nodiscard]] std::optional<Keire::RenderEnvironmentSettings> ManagedRenderEnvironment() const noexcept final;
         [[nodiscard]] bool SetManagedRenderEnvironment(Keire::RenderEnvironmentSettings settings) noexcept final;
+        [[nodiscard]] std::vector<Keire::ManagedInputDevice> ManagedInputDevices() const final;
+        [[nodiscard]] std::string ManagedInputControlScheme() const final;
+        [[nodiscard]] bool SetManagedInputControlScheme(std::string_view scheme, bool locked) noexcept final;
+        [[nodiscard]] bool ClearManagedInputControlSchemeLock() noexcept final;
+        [[nodiscard]] bool SetManagedGamepadRumble(std::uint32_t device, float lowFrequency, float highFrequency,
+                                                   float durationSeconds) noexcept final;
+        [[nodiscard]] std::uint64_t BeginManagedInputRebind(Keire::AssetId binding,
+                                                            Keire::ManagedInputRebindOptions options) noexcept final;
+        [[nodiscard]] std::optional<Keire::ManagedInputRebindSnapshot>
+        ManagedInputRebind(std::uint64_t operation) const noexcept final;
+        [[nodiscard]] bool ResolveManagedInputRebind(std::uint64_t operation,
+                                                     Keire::ManagedInputRebindResolution resolution) noexcept final;
+        [[nodiscard]] bool CancelManagedInputRebind(std::uint64_t operation) noexcept final;
+        [[nodiscard]] bool SaveManagedInputBindings(std::string_view profile) noexcept final;
+        [[nodiscard]] int LoadManagedInputBindings(std::string_view profile) noexcept final;
+        [[nodiscard]] bool ClearManagedInputBindings() noexcept final;
+        [[nodiscard]] std::optional<Keire::ManagedRaycastHit>
+        CapsuleCastManaged(const Keire::ManagedCapsuleCastQuery& query) noexcept final;
+        [[nodiscard]] std::vector<Keire::AssetId>
+        OverlapSphereManaged(const Keire::ManagedSphereOverlapQuery& query) final;
 
         ManagedWorldRuntime m_ManagedWorld;
+        Keire::Detail::ManagedInputOperationStore m_ManagedInputOperations;
         Keire::RenderEnvironmentSettings m_Rendering;
         Keire::Application* m_Application = nullptr;
         Keire::Ref<Keire::SceneRuntimeSession>* m_Runtime = nullptr;
         Keire::Ref<Keire::Scene>* m_Scene = nullptr;
         Keire::Ref<Keire::ScenePresentationRuntime>* m_Presentation = nullptr;
         Keire::Ref<Keire::SceneRuntimeSession>* m_ReplaySession = nullptr;
+        Keire::Ref<Keire::InputActionContext>* m_InputContext = nullptr;
+        Keire::InputUserId m_InputUser;
         bool* m_ReplayStarted = nullptr;
         Keire::AssetId m_DefaultMixer;
         Keire::AssetId m_ActivatingScene;

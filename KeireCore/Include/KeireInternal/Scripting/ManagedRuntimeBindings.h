@@ -1,6 +1,8 @@
 #pragma once
 
 #include "KeireInternal/Scripting/ManagedRuntimeFoundation.h"
+#include "KeireInternal/Scripting/ManagedRuntimeInput.h"
+#include "KeireInternal/Scripting/ManagedRuntimePhysics.h"
 #include "KeireInternal/Scripting/ManagedRuntimeRendering.h"
 #include "KeireInternal/Scripting/ManagedRuntimeUi.h"
 #include "KeireInternal/Scripting/ManagedRuntimeWorld.h"
@@ -17,6 +19,8 @@ namespace Keire::Detail
 
       private:
         ManagedRuntimeFoundationScope m_Foundation;
+        ManagedRuntimeInputScope m_Input;
+        ManagedRuntimePhysicsScope m_Physics;
         ManagedRuntimeWorldScope m_World;
         ManagedRuntimeRenderingScope m_Rendering;
         ManagedRuntimeUiScope m_Ui;

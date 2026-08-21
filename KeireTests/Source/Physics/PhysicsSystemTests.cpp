@@ -43,6 +43,14 @@ TEST_CASE("physics queries use narrow-phase geometry and bounded opt-in traces")
     const auto overlaps = world->OverlapSphere({0.9F, 0.0F, 0.0F}, 0.2F, 1U);
     REQUIRE(overlaps.size() == 1);
     CHECK(overlaps.front() == sphereBody);
+    CHECK(world->OverlapSphere({.Center = {0.9F, 0.0F, 0.0F}, .Radius = 0.2F, .Mask = 1U, .IgnoreBody = sphereBody})
+              .empty());
+    CHECK(world->OverlapSphere({.Center = {3.0F, 0.0F, 0.0F}, .Radius = 0.25F, .Mask = 2U, .IncludeTriggers = false})
+              .empty());
+    const auto triggerOverlap =
+        world->OverlapSphere({.Center = {3.0F, 0.0F, 0.0F}, .Radius = 0.25F, .Mask = 2U, .IncludeTriggers = true});
+    REQUIRE(triggerOverlap.size() == 1);
+    CHECK(triggerOverlap.front() == triggerBody);
     CHECK(world
               ->RayCast({.Origin = {2.0F, 0.0F, 0.0F},
                          .Direction = {1.0F, 0.0F, 0.0F},
@@ -107,6 +115,13 @@ TEST_CASE("capsule casts return walkable surface normals and can ignore the cont
     REQUIRE(selfHit);
     CHECK(selfHit->Body == characterBody);
     CHECK_THROWS_AS((void)world->CastCapsule({.Radius = -1.0F, .Displacement = {1.0F, 0.0F}}), std::invalid_argument);
+    CHECK_THROWS_AS((void)world->OverlapSphere({.Radius = -1.0F}), std::invalid_argument);
+
+    character.Position = {-3.0F, 1.0F, 0.0F};
+    character.Radius = 0.5F;
+    character.Height = 1.0F;
+    const auto sphereLikeCapsule = world->CreateBody(character);
+    CHECK(world->TryGetBody(sphereLikeCapsule).has_value());
 }
 
 TEST_CASE("physics contacts expose narrow-phase data and enforce reciprocal masks")
