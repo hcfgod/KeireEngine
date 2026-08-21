@@ -284,8 +284,9 @@ namespace Keire::RenderBackend
                 return output == VfxValueType::Vector3 && inputs.size() == 4 && inputs[0] == VfxValueType::Vector3 &&
                        inputs[1] == VfxValueType::Vector3 && inputs[2] == VfxValueType::Vector3 &&
                        inputs[3] == VfxValueType::Scalar;
+            default:
+                return false;
             }
-            return false;
         }
 
         [[nodiscard]] std::string IndexedGpuPayloadError(const std::string_view table, const std::size_t index,
