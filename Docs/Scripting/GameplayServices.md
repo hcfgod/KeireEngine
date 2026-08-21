@@ -118,6 +118,25 @@ if (state.Status == InputRebindStatus.Candidate)
 Use `SaveBindingOverrides`, `LoadBindingOverrides`, and `ClearBindingOverrides` with an ASCII profile name to persist
 player-specific overrides atomically. Rebinds cancel on timeout, device loss, explicit cancellation, or runtime teardown.
 
+## Entities And Scene Queries
+
+Entity tags are validated, case-sensitive identifiers authored in the Inspector or changed at runtime:
+
+```csharp
+if (!Entity.HasTag("Player"))
+    Entity.AddTag("Player");
+
+Entity objective = SceneManager.FindWithTag("Objective");
+IReadOnlyList<Entity> enemies = SceneManager.FindAllWithTag("Enemy", maximumResults: 128);
+IReadOnlyList<Entity> lights = SceneManager.FindAllWithComponent<PointLightComponent>();
+```
+
+`FindByName` and `FindAllByName` provide exact-name lookup. All scene queries are bounded from 1 through 4096 results,
+return active-scene entities in deterministic hierarchy order, and return an empty collection when no entity matches.
+The indexed native scene state is updated transactionally by rename, tag mutation, duplication, destruction, prefab
+composition, and scene activation. A tag begins with a letter, contains only ASCII letters, digits, `_`, `-`, or `.`,
+uses at most 64 bytes, and each entity holds at most 16 unique tags.
+
 ## Physics Queries
 
 Use the calling entity as the query context:
@@ -466,8 +485,8 @@ Quaternion facing = Quaternion.Euler(pitchDegrees, yawDegrees);
 
 Vector normalization returns zero for a near-zero vector. `Vector3.Lerp` clamps its amount to `[0, 1]`.
 
-## Production Gameplay Libraries
+## Game-Owned Gameplay Systems
 
-`Keire.Managed` also contains the first-party weapon, damage, ballistics, recoil, and weapon-presentation foundations.
-Their data-authoring workflow is covered by [Weapon Authoring](../WeaponAuthoring.md), while the sandbox
-`WeaponController.cs` demonstrates composition from a `Behaviour`.
+`Keire.Managed` stops at reusable engine capabilities. Weapons, damage, ballistics, recoil, inventory, and combat HUD
+policy belong to each game's C# assembly. The [game-owned weapon example](../WeaponAuthoring.md) shows how the Sandbox
+composes Input, Physics, Audio, VFX, animation, transforms, assets, and runtime UI from an ordinary `Behaviour`.

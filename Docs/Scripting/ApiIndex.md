@@ -16,6 +16,8 @@ This index is a discovery map, not a replacement for the workflow guides or sour
 | `CameraHandle`, `MeshRendererHandle` | Runtime camera and renderable state | [Rendering](RenderingAndMaterials.md) |
 | `DirectionalLightHandle`, `PointLightHandle`, `SpotLightHandle` | Typed realtime and baked-light controls | [Rendering](RenderingAndMaterials.md) |
 | `MaterialPropertyBlock` | Bounded per-renderer shader property overrides | [Rendering](RenderingAndMaterials.md) |
+| `MaterialInstanceHandle` | Transient per-material-slot shader overrides | [Rendering](RenderingAndMaterials.md) |
+| `MaterialParameterCollectionHandle`, `GlobalMaterialParameters` | World-owned global shader values | [Rendering](RenderingAndMaterials.md) |
 | `SceneHandle`, `SceneLoadOperation` | Active/loaded scene identity and transactional replacement status | [Scenes](ScenesAndRenderSettings.md) |
 | `RenderEnvironmentSettings` | Atomic transient lighting, environment, exposure, and shadow state | [Scenes](ScenesAndRenderSettings.md) |
 | `AssetId` | Stable untyped asset identity | [Assets](AssetsAndScriptableObjects.md) |
@@ -94,6 +96,7 @@ Name
 Active
 ActiveInHierarchy
 Layer
+Tags
 Parent
 Children
 Transform
@@ -117,6 +120,7 @@ GetComponent / TryGetComponent / GetComponentHandle
 HasComponent / AddComponent / RemoveComponent
 GetBehaviour / TryGetBehaviour
 SetParent
+HasTag / AddTag / RemoveTag / ClearTags
 FindChild / Find
 Instantiate
 Destroy
@@ -154,7 +158,7 @@ These types identify native components. Their layout is intentionally not expose
 | `Physics` | `TryRaycast`, `Raycast`, `TryCapsuleCast`, `OverlapSphere` |
 | `Navigation` | `FindPathAsync` |
 | `Prefab` | `Instantiate` |
-| `SceneManager` | `ActiveScene`, `LoadedScenes`, `LoadSceneAsync` |
+| `SceneManager` | `ActiveScene`, `LoadedScenes`, `FindByName`, `FindAllByName`, `FindWithTag`, `FindAllWithTag`, `FindAllWithComponent<T>`, `LoadSceneAsync` |
 | `RenderSettings` | `Current`, ambient/exposure/environment convenience properties |
 | `Cursor` | `Visible`, `Locked`, `VisibilityRequested`, `RequestCapture`, `RequestVisible`, `Hide`, `Show`, `Lock`, `Unlock` |
 | `Debug` | `Log`, `Warn`, `Error`, `LogException`, `Assert`, `DrawLine` |
@@ -228,6 +232,7 @@ Mesh
 Material
 Shader
 Texture
+MaterialParameterCollection
 ```
 
 Runtime handles and values:
@@ -239,6 +244,9 @@ DirectionalLightHandle
 PointLightHandle
 SpotLightHandle
 MaterialPropertyBlock
+MaterialInstanceHandle
+MaterialParameterCollectionHandle
+GlobalMaterialParameters
 CameraProjection
 CameraClearMode
 GIReceiveMode
@@ -249,7 +257,9 @@ ShadowResolution
 
 `MeshRendererHandle.Materials` replaces the complete bounded material-slot array transactionally.
 `MeshRendererHandle.PropertyBlock` writes transient per-renderer float, vector, color, and texture overrides without
-mutating or cloning the shared material asset. See [Rendering And Materials](RenderingAndMaterials.md).
+mutating or cloning the shared material asset. `GetMaterialInstance(slot)` narrows overrides to one material slot, and
+`GlobalMaterialParameters.Open(...)` resolves a collection into world-owned frame values. See
+[Rendering And Materials](RenderingAndMaterials.md).
 
 ## Animation
 
@@ -385,22 +395,13 @@ Project panel or `ScriptableObject.CreateInstance`.
 
 See [Assets And ScriptableObjects](AssetsAndScriptableObjects.md).
 
-## Weapons, Damage, And Ballistics
+## Game-Owned Gameplay Systems
 
-Kéire includes two related managed gameplay surfaces:
-
-- the `Keire` namespace contains `WeaponDefinition`, `WeaponRuntime`, `WeaponInventory`, `BallisticWorld`, `Damage`,
-  `IDamageReceiver`, `WeaponPresentationRig`, and `WeaponHudModel`, which are used by the sandbox sample;
-- `Keire.Production.Weapons` contains the production authoring/runtime split:
-  `ProductionAmmoDefinition`, `ProductionMagazineDefinition`, `ProductionRecoilDefinition`,
-  `ProductionWeaponDefinition`, `PhysicalAmmunitionInventory`, `ProductionWeaponRuntime`,
-  `ProductionBallisticWorld`, `WeaponLoadout`, `ProductionWeaponPresentation`, feedback pooling/commands, HUD adapters,
-  pickup transactions, and `ProductionWeaponValidator`.
-
-Use [Weapon Authoring](../WeaponAuthoring.md) for the production ownership and validation contract. The declarations
-live in [`WeaponSystem.cs`](../../KeireManaged/WeaponSystem.cs),
-[`ProductionWeapons.cs`](../../KeireManaged/ProductionWeapons.cs), and
-[`WeaponPresentation.cs`](../../KeireManaged/WeaponPresentation.cs).
+Weapons, damage, ballistics, recoil, inventory, and other game rules are intentionally absent from the supported
+managed API. Define them in the project's C# assembly and compose the generic APIs indexed above. The Sandbox's
+[`WeaponGameplay.cs`](../../Samples/KeireSandbox/Assets/Scripts/Runtime/WeaponGameplay.cs) and
+[`WeaponController.cs`](../../Samples/KeireSandbox/Assets/Scripts/Runtime/WeaponController.cs) are editable project
+examples, not engine declarations. See [Game-Owned Weapon Example](../WeaponAuthoring.md).
 
 ## Advanced Runtime Bridge
 

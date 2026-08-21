@@ -66,7 +66,7 @@ TEST_CASE("lighting sets preserve eight-channel mixed-light assignments")
     CHECK_THROWS_AS((void)Keire::LightingSetAsset::Encode(definition), std::invalid_argument);
 }
 
-TEST_CASE("scene schema v5 persists bake settings and generated lighting reference")
+TEST_CASE("scene schema v6 persists bake settings and generated lighting reference")
 {
     auto definition = Keire::SceneAsset::EmptyDefinition("LightingScene");
     definition.Lighting.Backend = Keire::LightingBakeBackend::CPU;
@@ -74,7 +74,7 @@ TEST_CASE("scene schema v5 persists bake settings and generated lighting referen
     definition.Lighting.SamplesPerTexel = 1024;
     definition.BakedLighting = Keire::AssetId::Parse("30000000-0000-4000-8000-000000000001");
     const auto decoded = Keire::SceneAsset::Decode(Keire::SceneAsset::Encode(definition));
-    CHECK(decoded->Definition().SchemaVersion == 5);
+    CHECK(decoded->Definition().SchemaVersion == 6);
     CHECK(decoded->Definition().Lighting.Backend == Keire::LightingBakeBackend::CPU);
     CHECK(decoded->Definition().Lighting.Quality == Keire::LightingBakeQuality::Production);
     CHECK(decoded->Definition().Lighting.SamplesPerTexel == 1024);

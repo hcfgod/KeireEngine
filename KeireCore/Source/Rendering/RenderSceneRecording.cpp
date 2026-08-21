@@ -187,7 +187,8 @@ namespace Keire::RenderBackend
                 instanceKeys.push_back({draw.Item->Mesh, draw.Material, draw.SubmeshIndex, draw.Surface.AlphaMode,
                                         draw.Item->ReceiveShadows, draw.Item->CastShadows,
                                         material && material->UsesInstancing && !draw.Item->SkinnedAssetVertices &&
-                                            draw.Item->MaterialProperties.empty()});
+                                            draw.Item->MaterialProperties.empty() &&
+                                            draw.Item->MaterialInstanceProperties.empty()});
             }
             const auto batches = BuildInstanceBatches(instanceKeys);
             list.Batches.reserve(batches.size());
@@ -220,13 +221,23 @@ namespace Keire::RenderBackend
 
         if (packet.Environment.Environment)
             (void)ResolveTexture(packet.Environment.Environment);
-        for (const auto& item : packet.DrawItems)
+        const auto resolvePropertyTextures = [&](const auto& properties)
         {
-            for (const auto& [name, value] : item.MaterialProperties)
+            for (const auto& [name, value] : properties)
             {
                 (void)name;
                 if (const auto* texture = std::get_if<AssetId>(&value); texture && *texture)
                     (void)ResolveTexture(*texture);
+            }
+        };
+        resolvePropertyTextures(packet.GlobalMaterialProperties);
+        for (const auto& item : packet.DrawItems)
+        {
+            resolvePropertyTextures(item.MaterialProperties);
+            for (const auto& [slot, properties] : item.MaterialInstanceProperties)
+            {
+                (void)slot;
+                resolvePropertyTextures(properties);
             }
         }
         for (const auto& particle : packet.Vfx.Particles())
@@ -500,15 +511,24 @@ namespace Keire::RenderBackend
                 SDL_PushGPUFragmentUniformData(commands, 0, &scene, sizeof(scene));
                 std::array<Vector4, 64> numericProperties{};
                 std::ranges::copy(material->NumericProperties, numericProperties.begin());
-                for (const auto& [name, value] : item.MaterialProperties)
+                const auto applyNumericProperties = [&](const auto& properties)
                 {
-                    const auto binding = material->Properties.find(name);
-                    if (binding != material->Properties.end() && binding->second.Type != ShaderPropertyType::Texture2D)
+                    for (const auto& [name, value] : properties)
                     {
-                        (void)PackMaterialProperty(value, binding->second.Type,
-                                                   numericProperties[binding->second.Slot]);
+                        const auto binding = material->Properties.find(name);
+                        if (binding != material->Properties.end() &&
+                            binding->second.Type != ShaderPropertyType::Texture2D)
+                        {
+                            (void)PackMaterialProperty(value, binding->second.Type,
+                                                       numericProperties[binding->second.Slot]);
+                        }
                     }
-                }
+                };
+                applyNumericProperties(packet.GlobalMaterialProperties);
+                applyNumericProperties(item.MaterialProperties);
+                const auto materialInstance = item.MaterialInstanceProperties.find(draw.Submesh.MaterialSlot);
+                if (materialInstance != item.MaterialInstanceProperties.end())
+                    applyNumericProperties(materialInstance->second);
                 if (material->TintSlot && !material->UsesInstancing)
                 {
                     auto& tint = numericProperties[*material->TintSlot];
@@ -547,19 +567,26 @@ namespace Keire::RenderBackend
                 {
                     std::array<SDL_GPUTextureSamplerBinding, 40> bindings{};
                     std::ranges::copy(material->Textures, bindings.begin());
-                    for (const auto& [name, value] : item.MaterialProperties)
+                    const auto applyTextureProperties = [&](const auto& properties)
                     {
-                        const auto binding = material->Properties.find(name);
-                        const auto* texture = std::get_if<AssetId>(&value);
-                        if (binding == material->Properties.end() ||
-                            binding->second.Type != ShaderPropertyType::Texture2D || !texture)
+                        for (const auto& [name, value] : properties)
                         {
-                            continue;
+                            const auto binding = material->Properties.find(name);
+                            const auto* texture = std::get_if<AssetId>(&value);
+                            if (binding == material->Properties.end() ||
+                                binding->second.Type != ShaderPropertyType::Texture2D || !texture)
+                            {
+                                continue;
+                            }
+                            const auto& resolved =
+                                *texture ? ResolveTexture(*texture) : DefaultTexture(binding->second.TextureSemantic);
+                            bindings[binding->second.Slot] = {resolved.Texture, resolved.Sampler};
                         }
-                        const auto& resolved =
-                            *texture ? ResolveTexture(*texture) : DefaultTexture(binding->second.TextureSemantic);
-                        bindings[binding->second.Slot] = {resolved.Texture, resolved.Sampler};
-                    }
+                    };
+                    applyTextureProperties(packet.GlobalMaterialProperties);
+                    applyTextureProperties(item.MaterialProperties);
+                    if (materialInstance != item.MaterialInstanceProperties.end())
+                        applyTextureProperties(materialInstance->second);
                     auto bindingCount = material->Textures.size();
                     if (material->ReceivesShadows)
                     {

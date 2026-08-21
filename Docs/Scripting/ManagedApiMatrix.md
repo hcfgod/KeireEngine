@@ -16,7 +16,7 @@ Status meanings:
 | Frame time | **Production** | Scaled, fixed, unscaled, and elapsed time; validated time scale and pause | Capture/replay time domains remain native tooling |
 | Screen | **Production** | Logical/pixel resolution, display scale, focus/visibility/minimize state, fullscreen mode, safe area, VSync state, transactional resize | Dynamic present-mode selection and multi-display placement |
 | Behaviour lifecycle | **Production** | Enable/start/update/fixed/late, physics, animation, destroy, reload, coroutines, execution order | — |
-| Entities and transforms | **Production** | Identity, hierarchy, active/layer/name, clone/destroy, component handles, local/world/presentation transforms | Tags and indexed scene queries |
+| Entities and transforms | **Production** | Identity, hierarchy, active/layer/name/tags, clone/destroy, component handles, deterministic bounded name/tag/component queries, local/world/presentation transforms | Multi-scene query scopes |
 | Inspector serialization | **Production** | Stable fields, ranges, tooltips, groups, nested data, asset references, reload-only state | Custom managed property drawers |
 | Assets and managed data | **Production** | Typed asset IDs/references, bounded async managed-data loading, `ScriptableObject` clone and hot reload | General native asset async handles for every asset class |
 | Input and cursor | **Partial** | Named actions and phases; device snapshots; control schemes; persistent interactive rebinding; paired gamepad rumble; cursor visibility and capture | Touch, pen, sensors, XR, advanced haptics |
@@ -26,7 +26,7 @@ Status meanings:
 | VFX | **Production** | Effect playback, lifetime, events, and typed parameter ranges | Managed graph construction is not a runtime goal |
 | Runtime UI | **Partial** | Scene-backed buttons, sliders, toggles, input fields and scroll views; typed polling events, focus/navigation, safe-area scaling and accessibility metadata | Localization, data binding, animated transitions, and platform screen-reader adapters |
 | Scenes and prefabs | **Partial** | Transactional prefab instantiate; active/loaded scene handles; coroutine-compatible packaged-player `Single` replacement with progress, cancellation, diagnostics, and activation rollback | Unified additive worlds, unload, active-scene selection, and Editor Play replacement |
-| Rendering and materials | **Partial** | Typed Camera, Mesh Renderer, directional/point/spot light handles; mesh/material/texture/shader references; bounded per-renderer numeric, color, vector, and texture property blocks consumed by Material/Shader Graph output; atomic transient render-environment settings | Dynamic material instances and managed global parameter collections |
+| Rendering and materials | **Partial** | Typed Camera, Mesh Renderer, directional/point/spot light handles; mesh/material/texture/shader references; bounded renderer-wide and per-slot dynamic overrides; hot-reload-safe global Material Parameter Collections; atomic transient render-environment settings | Render textures and custom render-pass scripting |
 | Jobs and async | **Production** | Managed jobs, dependencies, priorities, cancellation, synchronization context, lifetime token | Parallel-for convenience APIs |
 | Diagnostics | **Production** | Structured logs, exceptions, assertions, profiler spans/counters, debug lines | In-game diagnostic overlay controls |
 

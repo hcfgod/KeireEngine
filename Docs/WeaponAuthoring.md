@@ -1,71 +1,50 @@
-# Weapon Authoring
+# Game-Owned Weapon Example
 
-Kéire's production weapon runtime separates authored data, physical inventory state, deterministic simulation, and
-presentation. Gameplay code should not keep an independently editable reserve-ammunition or magazine-count field.
-Those values are derived from physical inventory contents.
+Weapons are gameplay, not an engine subsystem. `Keire.Managed` intentionally does not define weapon, ammunition,
+magazine, damage, ballistics, recoil, loadout, or weapon-HUD abstractions. A game owns those concepts in its C#
+assembly so it can choose its simulation, networking, inventory, and presentation rules without inheriting an engine
+opinion.
 
-## Definitions
+## Sandbox Example
 
-Create one `ProductionAmmoDefinition` for each cartridge or shell. Its compatibility ID is the durable link used by
-weapons, magazines, pickups, and cook validation. Projectile mass is authored in grams and converted to kilograms at
-runtime. Muzzle velocity, drag, gravity, radius, damage, penetration energy, collision mask, lifetime, and pellet count
-define the ballistic request.
+The Sandbox project includes an editable example in
+`Samples/KeireSandbox/Assets/Scripts/Runtime/WeaponGameplay.cs`. It demonstrates ordinary game-owned definitions and
+runtime state. `WeaponController.cs` composes that code from a `Behaviour` and uses generic Kéire services for input,
+scene entities, transforms, physics queries, audio, VFX, animation, and runtime UI.
 
-Create one `ProductionMagazineDefinition` for each detachable magazine. Its magazine compatibility ID identifies the
-weapons that accept it. Its ammunition compatibility ID identifies the cartridge it contains.
+The Hub Sandbox template contains the same scripts as starter project content. They are copied into a new project and
+can be changed or deleted like any other gameplay script; they are not part of `Keire.Managed` and do not expand the
+engine API.
 
-Create one `ProductionWeaponDefinition` for each weapon. Select detachable-magazine or internal-tube feed, configure
-the supported fire modes, and author state durations that match the presentation animation. The runtime supports a
-closed-bolt chamber, capacity-plus-one behavior, tactical retention, empty reloads, per-shell reloads, interruption,
-semi-automatic, automatic, burst, and pump-action workflows.
+## Recommended Ownership
 
-`ProductionRecoilDefinition` configures deterministic viewmodel and camera impulses. Camera recoil is only a share of
-the total impulse; the rest drives the physical viewmodel spring.
+Keep authored tuning in game-defined `ScriptableObject` types and runtime state in game-defined C# objects or
+components. Treat inventory, firing, damage, hit response, camera recoil, effects, and HUD presentation as separate
+gameplay policies. Use stable asset references for content, fixed simulation time when determinism matters, bounded
+pools for presentation-heavy objects, and explicit identities when shots must be reproduced across replay or a future
+network layer.
 
-## Runtime Ownership
+Kéire supplies the reusable capabilities beneath those policies:
 
-Each equipped weapon owns a `ProductionWeaponRuntime`. The loadout owns weapon instances and serializes switching.
-`PhysicalAmmunitionInventory` owns magazine objects and loose shells. A magazine has a stable item ID and retains its
-remaining rounds when removed. `ReserveRounds` and `MagazineCount` are derived from compatible inventory objects.
-Detachable reloads reserve the selected replacement magazine transactionally. Interrupting a reload by unequipping
-returns any replacement that has not been inserted, including after the old magazine has already been removed.
-
-Call `Tick` once per simulation update with a `WeaponInputFrame`. Feed `ProductionShotId` and the provided spread seed
-into deterministic direction generation. Never substitute frame time or a process-global random generator.
-
-Ballistic projectiles live in a fixed-capacity `ProductionBallisticWorld`. Collision implementations must sweep a
-sphere from the old position to the new position and ignore the shooter's hierarchy. The world bounds interaction
-iterations, projectile lifetime, and capacity so malformed content cannot create unbounded collision loops. `Step`
-accepts finite, non-negative fixed time only; a zero-time step is an explicit no-op.
-
-## Presentation and HUD
-
-`ProductionWeaponPresentation` evaluates recoil, ADS blending, sway, movement bob, breathing, and sprint offsets. Apply
-its position and rotation offsets to the viewmodel root and its camera recoil to the gameplay camera after normal look
-input. Use the field-of-view multiplier for ADS rather than changing the authored base field of view.
-
-`WeaponHudPresenter` only pushes changed state through `IWeaponHudSink`. Implement `IWeaponRuntimeHud` with the retained
-runtime UI system and connect it through `ProductionWeaponHudAdapter`. HUD rendering must not use editor ImGui.
-
-Effects and audio are emitted through a bounded `WeaponFeedbackCommandBuffer`. Consumers acquire muzzle flashes,
-tracers, impacts, casings, and one-shot voices from pools. Commands may be dropped under pressure; gameplay simulation
-must never block or allocate to wait for presentation capacity. Pool activation is transactional when consumer
-callbacks fail, and leases are generation-bound so stale copies cannot release a newer acquisition.
+- Input Actions and device APIs for intent;
+- scene queries, prefabs, transforms, and animation for composition;
+- ray, capsule, and overlap queries for collision decisions;
+- audio, VFX, materials, and runtime UI for presentation;
+- profiling, logging, time, and asset APIs for production diagnostics and data.
 
 ## Validation
 
-Run:
+The managed API regression suite confirms that the generic engine surface remains usable without any built-in weapon
+types:
 
 ```powershell
-./Scripts/Tests/test-managed-weapons.ps1
+./Scripts/Tests/test-managed-api.ps1
 ```
 
 On Unix:
 
 ```bash
-bash Scripts/Tests/test-managed-weapons.sh
+bash Scripts/Tests/test-managed-api.sh
 ```
 
-`ProductionWeaponValidator` verifies ammunition and magazine compatibility, fire-mode configuration, fire interval,
-and muzzle energy. Cooked builds should reject error diagnostics and may publish warnings for physically unusual but
-valid values.
+Game projects should add focused tests for their own weapon rules alongside their gameplay assembly.

@@ -24,6 +24,8 @@ namespace
             return "Set transform";
         case Keire::PrefabOverrideKind::SetObjectLayer:
             return "Set layer";
+        case Keire::PrefabOverrideKind::SetObjectTags:
+            return "Set tags";
         case Keire::PrefabOverrideKind::SetComponentProperty:
             return "Set component property";
         case Keire::PrefabOverrideKind::AddComponent:

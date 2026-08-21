@@ -29,6 +29,11 @@ namespace Keire
         void SetName(std::string name);
         [[nodiscard]] std::uint32_t Layer() const;
         void SetLayer(std::uint32_t layer);
+        [[nodiscard]] std::vector<std::string> Tags() const;
+        [[nodiscard]] bool HasTag(std::string_view tag) const;
+        void SetTags(std::vector<std::string> tags);
+        [[nodiscard]] bool AddTag(std::string tag);
+        [[nodiscard]] bool RemoveTag(std::string_view tag);
         [[nodiscard]] bool ActiveSelf() const;
         [[nodiscard]] bool ActiveInHierarchy() const;
         void SetActive(bool active);

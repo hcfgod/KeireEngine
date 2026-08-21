@@ -547,7 +547,7 @@ last-good loaded set.
 The editor owns authoring selection, undo/redo, atomic source writes, dirty decisions, and recovery files. Runtime scene
 activation is refreshed only after source validation/import succeeds. JSON remains private to the scene importer.
 
-Scene schema v5 stores stable entities and component records, prefab instance/override state, entity layers, scene
+Scene schema v6 stores stable entities and component records, prefab instance/override state, entity layers and tags, scene
 lighting-bake settings, and an optional baked-lighting identity. The public ECS surface owns stable IDs, weak `Entity`
 handles, reference-counted `Component` instances, registration metadata, and Kéire math values. EnTT owns native entity
 storage privately and GLM implements matrix/quaternion operations privately. A component registry is application-owned
@@ -587,11 +587,10 @@ media containers are normalized to lossless FLAC by an injected asset-worker bac
 libraries. Custom AVIO callbacks avoid process creation and temporary source/output files; packet decoding and
 resampling remain bounded, stream selection is explicit, and only the asset worker loads FFmpeg.
 
-Weapon simulation is data-driven and split between deterministic command/state logic, a bounded ballistic projectile
-pool, collision/damage adapters, and presentation springs. Physical magazine instances and loose-shell inventories are
-runtime state; reserve counts are derived views rather than independently serialized values. Stable shot IDs include
-shooter, weapon instance, sequence, and simulation tick so a future authority layer can reuse the same commands
-without moving networking into the weapon implementation.
+Game-specific simulation such as weapons, ammunition, damage, ballistics, recoil, inventory, and combat HUD policy
+lives in each project's managed assembly. The engine exposes generic input, time, scene, physics, audio, VFX, material,
+animation, asset, and UI services without owning a combat model. Starter-project examples are copied project content,
+not part of `Keire.Managed`, so games can replace their rules without depending on an engine gameplay framework.
 
 `SceneDocument::ActiveScene` is the editor authoring target: it resolves to the clone during Play and the edit scene
 otherwise. Play edits have an isolated undo context. A snapshot-derived change set compares entity identity, hierarchy,
@@ -783,6 +782,14 @@ consumers. Material Parameter Collections remain renderer-neutral asset/value de
 thread-safe runtime state object; renderer-wide collection buffers and world ownership are deliberately not hidden in
 the asset layer. Dynamic Material Instances similarly expose typed snapshots and revisions without exposing GPU or
 backend handles.
+The managed runtime world in Editor Play and packaged players owns loaded collection states, carries compatible
+overrides across asset revisions by stable parameter ID, and contributes one bounded immutable property snapshot to
+each render request. Collection defaults are therefore asset-owned while mutable values die with the world. Both hosts
+use the same state owner and precedence contract. The renderer applies shared-material, global-collection,
+renderer-block, and material-slot-instance values in that order. Duplicate global names resolve by stable collection
+asset order; narrower renderer and slot scopes always win. Mesh Renderer slot instances remain transient component
+state and are cleared when their shared slot material changes, preventing incompatible values from crossing an asset
+assignment.
 Successful graph revisions bake parameter defaults into the stable generated material and publish that material through
 the owner-thread development-asset boundary, giving scene renderers immediate immutable revisions without accepting an
 invalid graph. Save stages the complete deterministic shader directory under `Library/Transactions`, preserves metadata

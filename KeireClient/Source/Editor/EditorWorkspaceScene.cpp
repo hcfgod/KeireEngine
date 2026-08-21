@@ -654,6 +654,7 @@ void EditorWorkspaceLayer::BeginPlayMode()
     }
     m_ManagedInputCaptureOverride.reset();
     m_ManagedRenderEnvironmentOverride.reset();
+    m_ManagedMaterialParameters.Close();
     m_ManagedInputOperations.CancelAll();
     m_GameplayInputContext.Reset();
     if (const auto input = Owner().Input(); input && m_EditorInputUser)
@@ -799,6 +800,7 @@ void EditorWorkspaceLayer::FinishPlayMode(const bool apply)
         m_ManagedCursorLocked = false;
         m_ManagedCursorVisible = true;
         m_ManagedRenderEnvironmentOverride.reset();
+        m_ManagedMaterialParameters.Close();
         m_GameViewportCaptureSuspended = false;
         ApplyManagedCursorMode();
         if (applied)
@@ -1303,7 +1305,9 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         camera.NearPlane = selected->Camera->NearPlane();
         camera.FarPlane = selected->Camera->FarPlane();
         m_GameRenderView->SetCamera(camera);
-        auto environment = m_ProjectSettingsDocument->Settings();
+        const auto playSession = m_SceneDocument->PlaySession();
+        const bool playActive = playSession && playSession->State() != Keire::ScenePlayState::Stopped;
+        auto environment = SceneViewportSettings();
         environment.SkyVisible =
             environment.SkyVisible && selected->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
         Keire::SceneRenderRequest renderRequest{scene, m_GameRenderView, false, environment};
@@ -1311,9 +1315,12 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         renderRequest.MaterialTimeSeconds = static_cast<float>(materialTime.TimeSinceStartup().Seconds());
         renderRequest.MaterialDeltaSeconds = static_cast<float>(materialTime.DeltaTime().Seconds());
         renderRequest.FrameIndex = materialTime.FrameCount();
-        if (const auto play = m_SceneDocument->PlaySession(); play && play->State() != Keire::ScenePlayState::Stopped)
-            if (const auto vfx = play->Vfx())
+        if (playActive)
+        {
+            renderRequest.GlobalMaterialProperties = m_ManagedMaterialParameters.Snapshot();
+            if (const auto vfx = playSession->Vfx())
                 renderRequest.Vfx = vfx->CaptureRenderSnapshot();
+        }
         Owner().Renderer()->Submit(std::move(renderRequest));
         ui.Image(m_GameRenderView->Surface(), size);
         const auto imageState = ui.LastItemState();
@@ -1321,8 +1328,6 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         m_GameViewportRect = imageRect;
 
         Keire::Ref<Keire::ScenePresentationRuntime> presentation;
-        const auto playSession = m_SceneDocument->PlaySession();
-        const bool playActive = playSession && playSession->State() != Keire::ScenePlayState::Stopped;
         if (playActive && m_GameViewportCaptureSuspended && imageState.Hovered && ui.PointerState().LeftPressed)
             m_GameViewportCaptureSuspended = false;
         const auto mainWindow = Owner().MainWindow();

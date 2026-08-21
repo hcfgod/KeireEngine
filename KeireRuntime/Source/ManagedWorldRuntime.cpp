@@ -228,6 +228,7 @@ namespace KeireRuntime
     void ManagedWorldRuntimeServices::UnbindManagedWorld() noexcept
     {
         m_ManagedWorld.CancelAll();
+        m_MaterialParameters.Close();
         m_ManagedInputOperations.CancelAll();
         m_Application = nullptr;
         m_Runtime = nullptr;
@@ -269,6 +270,11 @@ namespace KeireRuntime
         return m_Rendering;
     }
 
+    std::map<std::string, Keire::MaterialPropertyValue, std::less<>> ManagedWorldRuntimeServices::MaterialParameters()
+    {
+        return m_MaterialParameters.Snapshot();
+    }
+
     std::uint64_t ManagedWorldRuntimeServices::BeginManagedSceneLoad(const Keire::AssetId scene,
                                                                      const Keire::SceneLoadMode mode) noexcept
     {
@@ -299,6 +305,110 @@ namespace KeireRuntime
         return active ? std::vector{active} : std::vector<Keire::AssetId>{};
     }
 
+    std::vector<std::string>
+    ManagedWorldRuntimeServices::ManagedEntityTags(const Keire::ManagedEntityHandle entity) const
+    {
+        const auto scene = m_Scene && *m_Scene ? *m_Scene : Keire::Ref<Keire::Scene>{};
+        const auto target = scene ? scene->FindEntity(Keire::EntityId(entity.Entity)) : Keire::Entity{};
+        return target && target.World() == entity.World ? target.Tags() : std::vector<std::string>{};
+    }
+
+    bool ManagedWorldRuntimeServices::AddManagedEntityTag(const Keire::ManagedEntityHandle entity,
+                                                          const std::string_view tag) noexcept
+    {
+        try
+        {
+            const auto scene = m_Scene && *m_Scene ? *m_Scene : Keire::Ref<Keire::Scene>{};
+            auto target = scene ? scene->FindEntity(Keire::EntityId(entity.Entity)) : Keire::Entity{};
+            return target && target.World() == entity.World && target.AddTag(std::string(tag));
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    bool ManagedWorldRuntimeServices::RemoveManagedEntityTag(const Keire::ManagedEntityHandle entity,
+                                                             const std::string_view tag) noexcept
+    {
+        try
+        {
+            const auto scene = m_Scene && *m_Scene ? *m_Scene : Keire::Ref<Keire::Scene>{};
+            auto target = scene ? scene->FindEntity(Keire::EntityId(entity.Entity)) : Keire::Entity{};
+            return target && target.World() == entity.World && target.RemoveTag(tag);
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    bool ManagedWorldRuntimeServices::ClearManagedEntityTags(const Keire::ManagedEntityHandle entity) noexcept
+    {
+        try
+        {
+            const auto scene = m_Scene && *m_Scene ? *m_Scene : Keire::Ref<Keire::Scene>{};
+            auto target = scene ? scene->FindEntity(Keire::EntityId(entity.Entity)) : Keire::Entity{};
+            if (!target || target.World() != entity.World)
+                return false;
+            target.SetTags({});
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    std::vector<Keire::ManagedEntityHandle>
+    ManagedWorldRuntimeServices::QueryManagedEntityNames(const std::string_view name, const std::size_t maximum) const
+    {
+        const auto scene = m_Scene && *m_Scene ? *m_Scene : Keire::Ref<Keire::Scene>{};
+        const auto entities = scene ? scene->QueryName(name) : std::vector<Keire::Entity>{};
+        std::vector<Keire::ManagedEntityHandle> result;
+        result.reserve(std::min(entities.size(), maximum));
+        for (const auto& entity : entities)
+        {
+            if (result.size() == maximum)
+                break;
+            result.push_back({entity.World(), entity.Id().Value()});
+        }
+        return result;
+    }
+
+    std::vector<Keire::ManagedEntityHandle>
+    ManagedWorldRuntimeServices::QueryManagedEntityTags(const std::string_view tag, const std::size_t maximum) const
+    {
+        const auto scene = m_Scene && *m_Scene ? *m_Scene : Keire::Ref<Keire::Scene>{};
+        const auto entities = scene ? scene->QueryTag(tag) : std::vector<Keire::Entity>{};
+        std::vector<Keire::ManagedEntityHandle> result;
+        result.reserve(std::min(entities.size(), maximum));
+        for (const auto& entity : entities)
+        {
+            if (result.size() == maximum)
+                break;
+            result.push_back({entity.World(), entity.Id().Value()});
+        }
+        return result;
+    }
+
+    std::vector<Keire::ManagedEntityHandle>
+    ManagedWorldRuntimeServices::QueryManagedEntityComponents(const Keire::ComponentTypeId component,
+                                                              const std::size_t maximum) const
+    {
+        const auto scene = m_Scene && *m_Scene ? *m_Scene : Keire::Ref<Keire::Scene>{};
+        const auto entities = scene ? scene->Query(component) : std::vector<Keire::Entity>{};
+        std::vector<Keire::ManagedEntityHandle> result;
+        result.reserve(std::min(entities.size(), maximum));
+        for (const auto& entity : entities)
+        {
+            if (result.size() == maximum)
+                break;
+            result.push_back({entity.World(), entity.Id().Value()});
+        }
+        return result;
+    }
+
     std::optional<Keire::RenderEnvironmentSettings>
     ManagedWorldRuntimeServices::ManagedRenderEnvironment() const noexcept
     {
@@ -312,6 +422,58 @@ namespace KeireRuntime
             Keire::ValidateRenderEnvironmentSettings(settings);
             m_Rendering = std::move(settings);
             return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    bool ManagedWorldRuntimeServices::ManagedMaterialParameterCollectionReady(const Keire::AssetId collection) noexcept
+    {
+        try
+        {
+            return m_Application && m_MaterialParameters.Ready(m_Application->Assets(), collection);
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    bool ManagedWorldRuntimeServices::SetManagedMaterialParameter(const Keire::AssetId collection,
+                                                                  const std::string_view name,
+                                                                  Keire::MaterialPropertyValue value) noexcept
+    {
+        try
+        {
+            return m_Application &&
+                   m_MaterialParameters.Set(m_Application->Assets(), collection, name, std::move(value));
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    bool ManagedWorldRuntimeServices::ResetManagedMaterialParameter(const Keire::AssetId collection,
+                                                                    const std::string_view name) noexcept
+    {
+        try
+        {
+            return m_Application && m_MaterialParameters.Reset(m_Application->Assets(), collection, name);
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    bool ManagedWorldRuntimeServices::ClearManagedMaterialParameters(const Keire::AssetId collection) noexcept
+    {
+        try
+        {
+            return m_Application && m_MaterialParameters.Clear(m_Application->Assets(), collection);
         }
         catch (...)
         {

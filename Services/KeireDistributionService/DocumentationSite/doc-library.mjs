@@ -129,7 +129,10 @@ export const docAuthorities = {
     "UndoRedo.md": ["KeireCore/Include/Keire/Undo.h", "KeireCore/Source/Undo.cpp"],
     "AnimationRigging.md": ["KeireCore/Include/Keire/Animation/RiggingSystem.h", "KeireClient/Include/KeireClient/Editor/RiggingStudioPanel.h"],
     "ProceduralMotion.md": ["KeireCore/Include/Keire/Animation/ProceduralMotion.h", "KeireCore/Source/Animation/ProceduralMotion.cpp"],
-    "WeaponAuthoring.md": ["KeireManaged/ProductionWeapons.cs", "KeireManaged/WeaponSystem.cs"],
+    "WeaponAuthoring.md": [
+        "Samples/KeireSandbox/Assets/Scripts/Runtime/WeaponGameplay.cs",
+        "Samples/KeireSandbox/Assets/Scripts/Runtime/WeaponController.cs",
+    ],
     "AssetRuntime.md": ["KeireCore/Include/Keire/Assets/AssetSystem.h", "KeireCore/Source/Assets"],
     "AssetPipeline.md": ["KeireCore/Include/Keire/Assets/AssetSystem.h", "KeireCore/Source/Assets/RenderableAssets.cpp"],
     "AudioProduction.md": ["KeireCore/Include/Keire/Audio/AudioSystem.h", "KeireClient/Source/Editor/AudioMixerPanel.cpp"],

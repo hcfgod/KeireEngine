@@ -5,6 +5,8 @@
 #include <doctest/doctest.h>
 
 #include <limits>
+#include <stdexcept>
+#include <utility>
 #include <vector>
 
 TEST_CASE("managed rendering services expose validated camera renderer and light state")
@@ -90,9 +92,13 @@ TEST_CASE("managed material property blocks are bounded transient renderer state
     CHECK(Keire::Detail::SetManagedMaterialProperty(scene, id, "Wind", Keire::Vector3{1.0F, 2.0F, 3.0F}));
     CHECK(Keire::Detail::SetManagedMaterialProperty(scene, id, "BaseColor", Keire::Color{0.1F, 0.2F, 0.3F, 1.0F}));
     CHECK(Keire::Detail::SetManagedMaterialProperty(scene, id, "Albedo", texture));
+    CHECK(Keire::Detail::SetManagedMaterialInstanceProperty(scene, id, 1, "Roughness", 0.18F));
+    CHECK(Keire::Detail::SetManagedMaterialInstanceProperty(scene, id, 1, "Albedo", texture));
     REQUIRE(renderer->MaterialProperties().size() == 4);
     CHECK(std::get<float>(renderer->MaterialProperties().at("Roughness")) == doctest::Approx(0.42F));
     CHECK(std::get<Keire::AssetId>(renderer->MaterialProperties().at("Albedo")) == texture);
+    REQUIRE(renderer->MaterialInstanceProperties(1).size() == 2);
+    CHECK(std::get<float>(renderer->MaterialInstanceProperties(1).at("Roughness")) == doctest::Approx(0.18F));
     CHECK_FALSE(
         Keire::Detail::SetManagedMaterialProperty(scene, id, "Invalid", std::numeric_limits<float>::quiet_NaN()));
     CHECK_FALSE(renderer->MaterialProperties().contains("Invalid"));
@@ -101,9 +107,57 @@ TEST_CASE("managed material property blocks are bounded transient renderer state
     CHECK_FALSE(Keire::Detail::ResetManagedMaterialProperty(scene, id, "Wind"));
     CHECK(Keire::Detail::ClearManagedMaterialProperties(scene, id));
     CHECK(renderer->MaterialProperties().empty());
+    CHECK(Keire::Detail::ResetManagedMaterialInstanceProperty(scene, id, 1, "Roughness"));
+    CHECK(Keire::Detail::ClearManagedMaterialInstanceProperties(scene, id, 1));
+    CHECK(renderer->MaterialInstanceProperties(1).empty());
 
     renderer->SetMaterialProperty("RuntimeOnly", 1.0F);
     const auto registration = scene->Components()->Find(Keire::MeshRendererComponent::StaticType());
     REQUIRE(registration);
     CHECK_FALSE(registration->Serialize(*renderer).contains("RuntimeOnly"));
+}
+
+TEST_CASE("managed material parameter collections preserve compatible overrides across hot reload")
+{
+    Keire::AssetSystemSpecification specification;
+    specification.Mode = Keire::AssetMode::Development;
+    specification.Decoders.push_back(Keire::CreateMaterialParameterCollectionAssetDecoder());
+    auto assets = Keire::CreateRef<Keire::AssetSystem>(std::move(specification));
+    const auto collection = Keire::AssetId::Parse("32b82dcb-c795-42bf-b33f-9eb5d4dc5e38");
+    const auto wind = Keire::AssetId::Parse("51625c39-209d-47aa-a6d4-f42b1d3a1e14");
+    const auto snow = Keire::AssetId::Parse("955cb44f-8fbc-43bb-a080-fac27311270d");
+
+    Keire::MaterialParameterCollectionDefinition definition;
+    definition.Parameters.push_back(
+        {.Id = wind, .Name = "WindStrength", .DisplayName = "Wind Strength", .DefaultValue = 0.25F});
+    REQUIRE(assets->PublishDevelopmentAsset(collection,
+                                            Keire::CreateRef<Keire::MaterialParameterCollectionAsset>(definition)));
+
+    Keire::Detail::ManagedMaterialParameterStore parameters;
+    REQUIRE(parameters.Ready(assets, collection));
+    REQUIRE(parameters.Set(assets, collection, "WindStrength", 0.75F));
+    CHECK(std::get<float>(parameters.Snapshot().at("WindStrength")) == doctest::Approx(0.75F));
+    CHECK_FALSE(parameters.Set(assets, collection, "Missing", 1.0F));
+    CHECK_THROWS_AS((void)parameters.Set(assets, collection, "WindStrength", Keire::Color{}), std::invalid_argument);
+
+    definition.Parameters.front().DefaultValue = 0.5F;
+    definition.Parameters.push_back(
+        {.Id = snow, .Name = "SnowAmount", .DisplayName = "Snow Amount", .DefaultValue = 0.1F});
+    REQUIRE(assets->PublishDevelopmentAsset(collection,
+                                            Keire::CreateRef<Keire::MaterialParameterCollectionAsset>(definition)));
+    const auto reloaded = parameters.Snapshot();
+    CHECK(std::get<float>(reloaded.at("WindStrength")) == doctest::Approx(0.75F));
+    CHECK(std::get<float>(reloaded.at("SnowAmount")) == doctest::Approx(0.1F));
+
+    CHECK(parameters.Reset(assets, collection, "WindStrength"));
+    CHECK(std::get<float>(parameters.Snapshot().at("WindStrength")) == doctest::Approx(0.5F));
+    REQUIRE(parameters.Set(assets, collection, "SnowAmount", 0.9F));
+    REQUIRE(parameters.Clear(assets, collection));
+    const auto cleared = parameters.Snapshot();
+    CHECK(std::get<float>(cleared.at("WindStrength")) == doctest::Approx(0.5F));
+    CHECK(std::get<float>(cleared.at("SnowAmount")) == doctest::Approx(0.1F));
+
+    parameters.Close();
+    CHECK(parameters.Snapshot().empty());
+    assets->Close();
 }

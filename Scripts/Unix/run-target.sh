@@ -81,7 +81,7 @@ if [[ "$MODE" == test ]]; then
 fi
 if [[ "$MODE" == test && "$CONFIGURATION" =~ ^(Debug|Release)$ ]]; then
     printf '==> Running managed production API tests\n'
-    bash "$ROOT/Scripts/Tests/test-managed-weapons.sh" "$CONFIGURATION"
+    bash "$ROOT/Scripts/Tests/test-managed-api.sh" "$CONFIGURATION"
     printf '==> Running distribution service tests\n'
     bash "$ROOT/Scripts/Tests/test-distribution-service.sh" "$CONFIGURATION"
 fi

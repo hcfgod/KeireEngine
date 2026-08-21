@@ -2,13 +2,39 @@
 
 #include "Keire/Scripting/ScriptSystem.h"
 
+#include <map>
+#include <memory>
+
 namespace Keire
 {
+    class AssetSystem;
     class Scene;
-}
+} // namespace Keire
 
 namespace Keire::Detail
 {
+    class ManagedMaterialParameterStore final
+    {
+      public:
+        ManagedMaterialParameterStore();
+        ~ManagedMaterialParameterStore();
+
+        ManagedMaterialParameterStore(const ManagedMaterialParameterStore&) = delete;
+        ManagedMaterialParameterStore& operator=(const ManagedMaterialParameterStore&) = delete;
+
+        [[nodiscard]] bool Ready(const Ref<AssetSystem>& assets, AssetId collection);
+        [[nodiscard]] bool Set(const Ref<AssetSystem>& assets, AssetId collection, std::string_view name,
+                               MaterialPropertyValue value);
+        [[nodiscard]] bool Reset(const Ref<AssetSystem>& assets, AssetId collection, std::string_view name);
+        [[nodiscard]] bool Clear(const Ref<AssetSystem>& assets, AssetId collection);
+        [[nodiscard]] std::map<std::string, MaterialPropertyValue, std::less<>> Snapshot();
+        void Close() noexcept;
+
+      private:
+        class Impl;
+        std::unique_ptr<Impl> m_Impl;
+    };
+
     class ManagedRuntimeSceneServices : public IScriptRuntimeServices
     {
       public:
@@ -57,6 +83,11 @@ namespace Keire::Detail
                                                       MaterialPropertyValue value) noexcept override;
         [[nodiscard]] bool ResetManagedMaterialProperty(AssetId entity, std::string_view name) noexcept override;
         [[nodiscard]] bool ClearManagedMaterialProperties(AssetId entity) noexcept override;
+        [[nodiscard]] bool SetManagedMaterialInstanceProperty(AssetId entity, std::size_t slot, std::string_view name,
+                                                              MaterialPropertyValue value) noexcept override;
+        [[nodiscard]] bool ResetManagedMaterialInstanceProperty(AssetId entity, std::size_t slot,
+                                                                std::string_view name) noexcept override;
+        [[nodiscard]] bool ClearManagedMaterialInstanceProperties(AssetId entity, std::size_t slot) noexcept override;
 
       protected:
         [[nodiscard]] virtual Ref<Scene> ManagedRuntimeScene() const noexcept = 0;
@@ -108,4 +139,10 @@ namespace Keire::Detail
     [[nodiscard]] bool ResetManagedMaterialProperty(const Ref<Scene>& scene, AssetId entity,
                                                     std::string_view name) noexcept;
     [[nodiscard]] bool ClearManagedMaterialProperties(const Ref<Scene>& scene, AssetId entity) noexcept;
+    [[nodiscard]] bool SetManagedMaterialInstanceProperty(const Ref<Scene>& scene, AssetId entity, std::size_t slot,
+                                                          std::string_view name, MaterialPropertyValue value) noexcept;
+    [[nodiscard]] bool ResetManagedMaterialInstanceProperty(const Ref<Scene>& scene, AssetId entity, std::size_t slot,
+                                                            std::string_view name) noexcept;
+    [[nodiscard]] bool ClearManagedMaterialInstanceProperties(const Ref<Scene>& scene, AssetId entity,
+                                                              std::size_t slot) noexcept;
 } // namespace Keire::Detail

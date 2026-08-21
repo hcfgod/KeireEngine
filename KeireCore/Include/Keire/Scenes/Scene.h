@@ -92,6 +92,8 @@ namespace Keire
         void MoveEntity(EntityId id, EntityId parent = {}, EntityId beforeSibling = {},
                         bool preserveWorldTransform = true);
         [[nodiscard]] std::vector<Entity> Query(ComponentTypeId type) const;
+        [[nodiscard]] std::vector<Entity> QueryName(std::string_view name) const;
+        [[nodiscard]] std::vector<Entity> QueryTag(std::string_view tag) const;
 
         template <std::derived_from<Component> T> [[nodiscard]] std::vector<Entity> Query() const
         {

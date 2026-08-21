@@ -66,7 +66,8 @@ Kéire already includes substantial, integrated engine and authoring foundations
   sampling, asynchronous graph thumbnails, and stable built-in prototype meshes.
 - Managed assemblies, component discovery, serialized Inspector fields, lifecycle callbacks, hot reload, gameplay APIs,
   diagnostics, packaged CoreCLR publication, and scene-backed runtime UI with buttons, sliders, toggles, UTF-8 input,
-  scrolling, focus/navigation, accessibility metadata, and mouse/keyboard/gamepad routing.
+  scrolling, focus/navigation, accessibility metadata, mouse/keyboard/gamepad routing, per-slot dynamic materials,
+  and global Material Parameter Collection controls.
 - Focused native and managed tests, sanitizer configurations, source-budget enforcement, reproducible dependency locks,
   SDK consumers, distribution validation, signed catalog support, and native installer workflows.
 
@@ -222,7 +223,7 @@ Current authoring and runtime contracts include:
 | Contract | Current schema | Compatibility policy |
 | --- | ---: | --- |
 | Project descriptor | 3 | Older descriptors are inspected and upgraded transactionally before mutation. |
-| Scene source | 5 | Schemas 1–4 migrate in memory; saves emit canonical schema 5. |
+| Scene source | 6 | Schemas 1–5 migrate in memory; saves emit canonical schema 6. |
 | Static mesh | 5 | Earlier payloads remain readable; schema 5 preserves triangle-, line-, and point-list submeshes. |
 | VFX source | 4 | Graph and compatibility payloads are validated as related, distinct execution sources. |
 | Cooked runtime manifest | 4 | Older builds require a recook; newer unsupported schemas fail before partial startup. |

@@ -11,6 +11,7 @@
 
 #include <chrono>
 #include <compare>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -212,6 +213,12 @@ namespace Keire
         std::string Diagnostic;
     };
 
+    struct ManagedEntityHandle
+    {
+        std::uint64_t World = 0;
+        AssetId Entity;
+    };
+
     enum class ManagedUiScalarProperty : std::uint8_t
     {
         Minimum,
@@ -332,6 +339,28 @@ namespace Keire
         [[nodiscard]] virtual bool CancelManagedSceneLoad(std::uint64_t) noexcept { return false; }
         [[nodiscard]] virtual AssetId ActiveManagedScene() const noexcept { return {}; }
         [[nodiscard]] virtual std::vector<AssetId> LoadedManagedScenes() const { return {}; }
+        [[nodiscard]] virtual std::vector<std::string> ManagedEntityTags(ManagedEntityHandle) const { return {}; }
+        [[nodiscard]] virtual bool AddManagedEntityTag(ManagedEntityHandle, std::string_view) noexcept { return false; }
+        [[nodiscard]] virtual bool RemoveManagedEntityTag(ManagedEntityHandle, std::string_view) noexcept
+        {
+            return false;
+        }
+        [[nodiscard]] virtual bool ClearManagedEntityTags(ManagedEntityHandle) noexcept { return false; }
+        [[nodiscard]] virtual std::vector<ManagedEntityHandle> QueryManagedEntityNames(std::string_view,
+                                                                                       std::size_t) const
+        {
+            return {};
+        }
+        [[nodiscard]] virtual std::vector<ManagedEntityHandle> QueryManagedEntityTags(std::string_view,
+                                                                                      std::size_t) const
+        {
+            return {};
+        }
+        [[nodiscard]] virtual std::vector<ManagedEntityHandle> QueryManagedEntityComponents(ComponentTypeId,
+                                                                                            std::size_t) const
+        {
+            return {};
+        }
         [[nodiscard]] virtual std::optional<RenderEnvironmentSettings> ManagedRenderEnvironment() const noexcept
         {
             return std::nullopt;
@@ -506,6 +535,27 @@ namespace Keire
         }
         [[nodiscard]] virtual bool ResetManagedMaterialProperty(AssetId, std::string_view) noexcept { return false; }
         [[nodiscard]] virtual bool ClearManagedMaterialProperties(AssetId) noexcept { return false; }
+        [[nodiscard]] virtual bool SetManagedMaterialInstanceProperty(AssetId, std::size_t, std::string_view,
+                                                                      MaterialPropertyValue) noexcept
+        {
+            return false;
+        }
+        [[nodiscard]] virtual bool ResetManagedMaterialInstanceProperty(AssetId, std::size_t, std::string_view) noexcept
+        {
+            return false;
+        }
+        [[nodiscard]] virtual bool ClearManagedMaterialInstanceProperties(AssetId, std::size_t) noexcept
+        {
+            return false;
+        }
+        [[nodiscard]] virtual bool ManagedMaterialParameterCollectionReady(AssetId) noexcept { return false; }
+        [[nodiscard]] virtual bool SetManagedMaterialParameter(AssetId, std::string_view,
+                                                               MaterialPropertyValue) noexcept
+        {
+            return false;
+        }
+        [[nodiscard]] virtual bool ResetManagedMaterialParameter(AssetId, std::string_view) noexcept { return false; }
+        [[nodiscard]] virtual bool ClearManagedMaterialParameters(AssetId) noexcept { return false; }
     };
 
     enum class ScriptMode : std::uint8_t

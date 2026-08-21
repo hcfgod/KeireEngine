@@ -1,15 +1,5 @@
-using System.Numerics;
-using Keire.Production.Weapons;
-
 var tests = new (string Name, Action Run)[]
 {
-    ("Physical magazine and chamber", PhysicalMagazineAndChamber),
-    ("Deterministic shot identity", DeterministicShotIdentity),
-    ("Pickup transaction", PickupTransaction),
-    ("Bounded ballistic lifecycle", BoundedBallisticLifecycle),
-    ("Reload interruption returns reserved magazines", ReloadInterruptionReturnsReservedMagazine),
-    ("Feedback pool acquisition is transactional", FeedbackPoolAcquisitionIsTransactional),
-    ("Ballistic zero-time and invalid steps", BallisticZeroTimeAndInvalidSteps),
     ("VFX ranges normalize and validate", VfxRangesNormalizeAndValidate),
     ("VFX range setters expose every supported type", VfxRangeSettersExposeEverySupportedType),
     ("Character Controller uses the native stable component contract", CharacterControllerStableContract),
@@ -359,11 +349,20 @@ static unsafe void ManagedRenderingContract()
         renderer.PropertyBlock.SetFloat("Roughness", 0.37f);
         renderer.PropertyBlock.SetTexture(
             "Albedo", new Keire.AssetReference<Keire.Texture>(NativeRenderingFixture.ReplacementTexture));
+        Keire.MaterialInstanceHandle instance = renderer.GetMaterialInstance(1);
+        instance.SetColor("Emission", new Keire.Color(0.2f, 0.4f, 0.8f, 1.0f));
+        var collection = new Keire.AssetReference<Keire.MaterialParameterCollection>(new Keire.AssetId(301, 401));
+        Keire.MaterialParameterCollectionHandle globals = Keire.GlobalMaterialParameters.Open(collection);
+        Assert(globals.IsReady, "Material Parameter Collections must expose their asynchronous readiness.");
+        globals.SetFloat("Rain", 0.85f);
         Assert(NativeRenderingFixture.MaterialCount == 1 &&
                    NativeRenderingFixture.FirstMaterial == NativeRenderingFixture.ReplacementMaterial &&
                    MathF.Abs(NativeRenderingFixture.MaterialFloat - 0.37f) < 0.0001f &&
-                   NativeRenderingFixture.MaterialTexture == NativeRenderingFixture.ReplacementTexture,
-               "Material slots and typed shader property overrides must reach native renderer state.");
+                   NativeRenderingFixture.MaterialTexture == NativeRenderingFixture.ReplacementTexture &&
+                   NativeRenderingFixture.InstanceSlot == 1 &&
+                   NativeRenderingFixture.GlobalCollection == collection.Id &&
+                   MathF.Abs(NativeRenderingFixture.GlobalFloat - 0.85f) < 0.0001f,
+               "Material slots, dynamic instances, and global parameters must reach native renderer state.");
         AssertThrows<ArgumentOutOfRangeException>(() => renderer.PropertyBlock.SetFloat("Invalid", float.NaN),
                                                   "Material property blocks must reject non-finite values early.");
 
@@ -389,6 +388,7 @@ static unsafe void ManagedWorldContract()
     {
         Assert(System.Runtime.InteropServices.Marshal.SizeOf<Keire.NativeSceneLoadStatus>() == 24 &&
                    System.Runtime.InteropServices.Marshal.SizeOf<Keire.NativeAssetId>() == 16 &&
+                   System.Runtime.InteropServices.Marshal.SizeOf<Keire.NativeEntityHandle>() == 24 &&
                    System.Runtime.InteropServices.Marshal.SizeOf<Keire.NativeRenderEnvironment>() == 72,
                "Managed world structs must preserve their native ABI layouts.");
         Assert(Keire.SceneManager.ActiveScene.Asset == NativeWorldFixture.CurrentScene &&
@@ -424,6 +424,25 @@ static unsafe void ManagedWorldContract()
             "Render settings must reject non-finite values before native dispatch.");
         Assert(NativeWorldFixture.RenderSetCount == 1,
                "Rejected render settings must leave native state unchanged.");
+
+        var player = new Keire.Entity(99, new Keire.EntityId(1, 2));
+        Assert(player.Tags.SequenceEqual(["Player", "Faction.Friendly"]) && player.HasTag("Player"),
+               "Entity tags must preserve bounded native ordering and exact matching.");
+        Assert(player.AddTag("Objective.Carrier") && player.RemoveTag("Faction.Friendly"),
+               "Validated entity tag mutations must reach the active native world.");
+        player.ClearTags();
+        Assert(NativeWorldFixture.TagMutationCount == 3,
+               "Add, remove, and clear tag mutations must each dispatch exactly once.");
+        AssertThrows<ArgumentException>(() => player.AddTag("invalid tag"),
+                                        "Managed tags must reject invalid identifiers before native dispatch.");
+
+        Assert(Keire.SceneManager.FindByName("PlayerSpawn") == player &&
+                   Keire.SceneManager.FindAllWithTag("Enemy").Count == 2 &&
+                   Keire.SceneManager.FindAllWithComponent<Keire.CharacterControllerComponent>() is [{ } controller] &&
+                   controller == player,
+               "Scene queries must preserve stable world/entity handles across name, tag, and component indexes.");
+        AssertThrows<ArgumentOutOfRangeException>(() => Keire.SceneManager.FindAllWithTag("Enemy", 0),
+                                                  "Scene queries must reject unbounded or empty result limits.");
     }
     finally
     {
@@ -673,175 +692,6 @@ foreach ((string name, Action run) in tests)
 
 return failed == 0 ? 0 : 1;
 
-static void PhysicalMagazineAndChamber()
-{
-    var weapon = new ProductionWeaponDefinition();
-    var ammo = new ProductionAmmoDefinition();
-    var magazineDefinition = new ProductionMagazineDefinition();
-    var inventory = new PhysicalAmmunitionInventory();
-    var sink = new RecordingSink();
-    var inserted = new PhysicalMagazine(1, magazineDefinition, 30);
-    var replacement = new PhysicalMagazine(2, magazineDefinition, 20);
-    inventory.AddMagazine(replacement);
-    var runtime = new ProductionWeaponRuntime(100, weapon, ammo, inventory, sink);
-    runtime.SetInitialMagazine(inserted, chamberRound: true);
-    Assert(runtime.Snapshot.ChamberedRounds == 1, "Closed-bolt setup must chamber one round.");
-    Assert(runtime.Snapshot.MagazineRounds == 29, "Chambering must remove a round from the magazine.");
-
-    runtime.Equip();
-    Advance(runtime, 1.0f, 1);
-    runtime.Tick(0.0f, new WeaponInputFrame(false, true, false, false, false, false, false), 10);
-    Assert(sink.ShotCount == 1, "Semi-automatic press must emit exactly one shot.");
-    Assert(runtime.Snapshot.ChamberedRounds == 0, "The fired chamber must be empty until cycling.");
-    runtime.Tick(1.0f, default, 11);
-    Assert(runtime.Snapshot.ChamberedRounds == 1, "Cycling must feed the next cartridge.");
-    Assert(runtime.Snapshot.MagazineRounds == 28, "Cycling must consume one magazine cartridge.");
-}
-
-static void DeterministicShotIdentity()
-{
-    var weapon = new ProductionWeaponDefinition();
-    var ammo = new ProductionAmmoDefinition();
-    var magazineDefinition = new ProductionMagazineDefinition();
-    var inventory = new PhysicalAmmunitionInventory();
-    var sink = new RecordingSink();
-    var runtime = new ProductionWeaponRuntime(0xabc, weapon, ammo, inventory, sink);
-    runtime.SetInitialMagazine(new PhysicalMagazine(1, magazineDefinition, 3), chamberRound: true);
-    runtime.Equip();
-    Advance(runtime, 1.0f, 1);
-    runtime.Tick(0.0f, new WeaponInputFrame(false, true, false, false, false, false, false), 7);
-    ProductionShotId first = sink.LastShot.Id;
-    Assert(first.WeaponInstance == 0xabc, "Shot identity must retain its weapon instance.");
-    Assert(first.Sequence == 1, "The first shot sequence must be one.");
-    Assert(first.Pellet == 0, "Single-projectile ammunition must use pellet zero.");
-}
-
-static void PickupTransaction()
-{
-    var inventory = new PhysicalAmmunitionInventory();
-    var magazineDefinition = new ProductionMagazineDefinition();
-    var magazine = new PhysicalMagazine(42, magazineDefinition, 12);
-    var pickup = new WeaponPickupTransaction(
-        new WeaponPickupContents("ammo.556", 18, magazine));
-    Assert(pickup.TryCollect(inventory), "The first pickup collection must succeed.");
-    Assert(!pickup.TryCollect(inventory), "A pickup transaction must be idempotent.");
-    Assert(inventory.CountLooseRounds("ammo.556") == 18, "Loose ammunition must transfer.");
-    Assert(inventory.CountNonEmptyMagazines("mag.stanag") == 1, "Magazine must transfer.");
-}
-
-static void BoundedBallisticLifecycle()
-{
-    var collision = new EmptyCollisionWorld();
-    var impacts = new RecordingImpactSink();
-    var world = new ProductionBallisticWorld(2, collision, impacts);
-    var request = new WeaponShotRequest(
-        new ProductionShotId(1, 1, 0),
-        100.0f,
-        0.004f,
-        0.003f,
-        0.0f,
-        1.0f,
-        0.01f,
-        10.0f,
-        10.0f,
-        uint.MaxValue,
-        1);
-    Assert(world.Spawn(request, 9, Vector3.Zero, Vector3.UnitZ), "First projectile must spawn.");
-    Assert(world.Spawn(request, 9, Vector3.Zero, Vector3.UnitZ), "Second projectile must spawn.");
-    Assert(!world.Spawn(request, 9, Vector3.Zero, Vector3.UnitZ), "Capacity must be bounded.");
-    Assert(world.DroppedProjectiles == 1, "Pool pressure must be observable.");
-    world.Step(0.02f);
-    Assert(world.ActiveCount == 0, "Expired projectiles must return to the pool.");
-}
-
-static void ReloadInterruptionReturnsReservedMagazine()
-{
-    var weapon = new ProductionWeaponDefinition();
-    var ammo = new ProductionAmmoDefinition();
-    var magazineDefinition = new ProductionMagazineDefinition();
-    var inventory = new PhysicalAmmunitionInventory();
-    var sink = new RecordingSink();
-    var inserted = new PhysicalMagazine(1, magazineDefinition, 10);
-    var replacement = new PhysicalMagazine(2, magazineDefinition, 20);
-    inventory.AddMagazine(replacement);
-    var runtime = new ProductionWeaponRuntime(100, weapon, ammo, inventory, sink);
-    runtime.SetInitialMagazine(inserted, chamberRound: true);
-    runtime.Equip();
-    Advance(runtime, 1.0f, 1);
-
-    runtime.Tick(0.0f, new WeaponInputFrame(false, false, false, false, true, false, false), 20);
-    Advance(runtime, 0.8f, 21);
-    Assert(runtime.Snapshot.State == WeaponRuntimeState.InsertingMagazine,
-        "The reload must hold the replacement after removing the current magazine.");
-    Assert(runtime.InsertedMagazine is null, "The old magazine must be removed before replacement insertion.");
-    Assert(inventory.CountNonEmptyMagazines("mag.stanag") == 1,
-        "Only the retained old magazine should be in inventory while the replacement is reserved.");
-
-    runtime.Unequip();
-    Assert(runtime.Snapshot.State == WeaponRuntimeState.Unequipping, "Unequip must interrupt the reload.");
-    Assert(runtime.Snapshot.ReloadKind == WeaponReloadKind.None, "Interrupted reload metadata must be cleared.");
-    Assert(inventory.CountNonEmptyMagazines("mag.stanag") == 2,
-        "Unequip must return the reserved replacement magazine to inventory.");
-    Assert(inventory.CountMagazineRounds("mag.stanag") == 29,
-        "Reload interruption must preserve every round outside the chamber.");
-}
-
-static void FeedbackPoolAcquisitionIsTransactional()
-{
-    var item = new object();
-    bool rejectAcquire = true;
-    var pool = new WeaponFeedbackPool<object>(
-        new[] { item },
-        _ =>
-        {
-            if (rejectAcquire)
-                throw new InvalidOperationException("activation failed");
-        });
-
-    AssertThrows<InvalidOperationException>(
-        () => pool.TryAcquire(out _),
-        "Activation callback failures must be observable.");
-    Assert(pool.ActiveCount == 0, "A failed activation callback must release its reserved slot.");
-
-    rejectAcquire = false;
-    Assert(pool.TryAcquire(out WeaponFeedbackLease<object> first), "The rolled-back slot must remain reusable.");
-    WeaponFeedbackLease<object> staleCopy = first;
-    first.Dispose();
-    Assert(pool.TryAcquire(out WeaponFeedbackLease<object> second), "A released slot must be reacquirable.");
-    staleCopy.Dispose();
-    Assert(pool.ActiveCount == 1, "A stale copied lease must not release a newer acquisition.");
-    second.Dispose();
-    Assert(pool.ActiveCount == 0, "The current lease must release its acquisition.");
-}
-
-static void BallisticZeroTimeAndInvalidSteps()
-{
-    var world = new ProductionBallisticWorld(1, new EmptyCollisionWorld(), new RecordingImpactSink());
-    var request = new WeaponShotRequest(
-        new ProductionShotId(1, 1, 0),
-        100.0f,
-        0.004f,
-        0.003f,
-        0.0f,
-        1.0f,
-        0.00005f,
-        10.0f,
-        10.0f,
-        uint.MaxValue,
-        1);
-    Assert(world.Spawn(request, 9, Vector3.Zero, Vector3.UnitZ), "The test projectile must spawn.");
-    world.Step(0.0f);
-    Assert(world.ActiveCount == 1, "A zero-time step must not advance projectile lifetime.");
-    AssertThrows<ArgumentOutOfRangeException>(
-        () => world.Step(-0.01f),
-        "Negative ballistic steps must be rejected.");
-    AssertThrows<ArgumentOutOfRangeException>(
-        () => world.Step(float.NaN),
-        "Non-finite ballistic steps must be rejected.");
-    world.Step(0.0001f);
-    Assert(world.ActiveCount == 0, "A positive step must continue advancing projectile lifetime.");
-}
-
 static void VfxRangesNormalizeAndValidate()
 {
     var scalar = new Keire.VfxRange<float>(5.0f, -2.0f);
@@ -926,14 +776,6 @@ static void AssertThrows<TException>(Action action, string message)
     throw new InvalidOperationException(message);
 }
 
-static void Advance(ProductionWeaponRuntime runtime, float seconds, uint firstTick)
-{
-    const float step = 0.1f;
-    int steps = (int)MathF.Ceiling(seconds / step);
-    for (int index = 0; index < steps; ++index)
-        runtime.Tick(step, default, unchecked(firstTick + (uint)index));
-}
-
 file static unsafe class NativeWorldFixture
 {
     internal static readonly Keire.AssetId CurrentScene = new(301, 401);
@@ -942,6 +784,7 @@ file static unsafe class NativeWorldFixture
 
     internal static Keire.NativeRenderEnvironment Environment { get; private set; }
     internal static int RenderSetCount { get; private set; }
+    internal static int TagMutationCount { get; private set; }
 
     internal static void Install()
     {
@@ -962,12 +805,21 @@ file static unsafe class NativeWorldFixture
             DirectionalShadowSplitLambda = 0.65f
         };
         RenderSetCount = 0;
+        TagMutationCount = 0;
         Keire.NativeWorld.BeginSceneLoadIcall = &BeginSceneLoad;
         Keire.NativeWorld.GetSceneLoadStatusIcall = &GetSceneLoadStatus;
         Keire.NativeWorld.GetSceneLoadDiagnosticIcall = &GetSceneLoadDiagnostic;
         Keire.NativeWorld.CancelSceneLoadIcall = &CancelSceneLoad;
         Keire.NativeWorld.GetActiveSceneIcall = &GetActiveScene;
         Keire.NativeWorld.GetLoadedScenesIcall = &GetLoadedScenes;
+        Keire.NativeWorld.GetEntityTagCountIcall = &GetEntityTagCount;
+        Keire.NativeWorld.GetEntityTagIcall = &GetEntityTag;
+        Keire.NativeWorld.AddEntityTagIcall = &AddEntityTag;
+        Keire.NativeWorld.RemoveEntityTagIcall = &RemoveEntityTag;
+        Keire.NativeWorld.ClearEntityTagsIcall = &ClearEntityTags;
+        Keire.NativeWorld.QueryEntityNamesIcall = &QueryEntityNames;
+        Keire.NativeWorld.QueryEntityTagsIcall = &QueryEntityTags;
+        Keire.NativeWorld.QueryEntityComponentsIcall = &QueryEntityComponents;
         Keire.NativeWorld.GetRenderEnvironmentIcall = &GetRenderEnvironment;
         Keire.NativeWorld.SetRenderEnvironmentIcall = &SetRenderEnvironment;
     }
@@ -982,6 +834,14 @@ file static unsafe class NativeWorldFixture
         Keire.NativeWorld.CancelSceneLoadIcall = null;
         Keire.NativeWorld.GetActiveSceneIcall = null;
         Keire.NativeWorld.GetLoadedScenesIcall = null;
+        Keire.NativeWorld.GetEntityTagCountIcall = null;
+        Keire.NativeWorld.GetEntityTagIcall = null;
+        Keire.NativeWorld.AddEntityTagIcall = null;
+        Keire.NativeWorld.RemoveEntityTagIcall = null;
+        Keire.NativeWorld.ClearEntityTagsIcall = null;
+        Keire.NativeWorld.QueryEntityNamesIcall = null;
+        Keire.NativeWorld.QueryEntityTagsIcall = null;
+        Keire.NativeWorld.QueryEntityComponentsIcall = null;
         Keire.NativeWorld.GetRenderEnvironmentIcall = null;
         Keire.NativeWorld.SetRenderEnvironmentIcall = null;
     }
@@ -1048,6 +908,77 @@ file static unsafe class NativeWorldFixture
             return -1;
         destination[0] = new Keire.NativeAssetId { High = CurrentScene.High, Low = CurrentScene.Low };
         return 1;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static int GetEntityTagCount(ulong world, ulong high, ulong low) => world == 99 && high == 1 && low == 2 ? 2 : 0;
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static int GetEntityTag(ulong world, ulong high, ulong low, int index, byte* destination, int capacity) =>
+        world == 99 && high == 1 && low == 2
+            ? CopyText(index == 0 ? "Player" : index == 1 ? "Faction.Friendly" : null, destination, capacity)
+            : -1;
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte AddEntityTag(ulong world, ulong high, ulong low, Keire.NativeString tag)
+    {
+        ++TagMutationCount;
+        return world == 99 && high == 1 && low == 2 ? (byte)1 : (byte)0;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte RemoveEntityTag(ulong world, ulong high, ulong low, Keire.NativeString tag)
+    {
+        ++TagMutationCount;
+        return world == 99 && high == 1 && low == 2 ? (byte)1 : (byte)0;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte ClearEntityTags(ulong world, ulong high, ulong low)
+    {
+        ++TagMutationCount;
+        return world == 99 && high == 1 && low == 2 ? (byte)1 : (byte)0;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static int QueryEntityNames(Keire.NativeString name, int maximum, Keire.NativeEntityHandle* destination,
+                                        int capacity) => WriteEntities([new(99, 1, 2)], maximum, destination, capacity);
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static int QueryEntityTags(Keire.NativeString tag, int maximum, Keire.NativeEntityHandle* destination,
+                                       int capacity) =>
+        WriteEntities([new(99, 3, 4), new(99, 5, 6)], maximum, destination, capacity);
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static int QueryEntityComponents(ulong high, ulong low, int maximum,
+                                             Keire.NativeEntityHandle* destination, int capacity) =>
+        WriteEntities([new(99, 1, 2)], maximum, destination, capacity);
+
+    private static int WriteEntities(Keire.NativeEntityHandle[] values, int maximum,
+                                     Keire.NativeEntityHandle* destination, int capacity)
+    {
+        int count = Math.Min(values.Length, maximum);
+        if (destination == null || capacity == 0)
+            return count;
+        if (capacity < count)
+            return -1;
+        for (int index = 0; index < count; ++index)
+            destination[index] = values[index];
+        return count;
+    }
+
+    private static int CopyText(string? value, byte* destination, int capacity)
+    {
+        if (value == null || capacity < 0)
+            return -1;
+        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(value);
+        if (destination == null || capacity == 0)
+            return bytes.Length;
+        if (capacity < bytes.Length)
+            return -1;
+        for (int index = 0; index < bytes.Length; ++index)
+            destination[index] = bytes[index];
+        return bytes.Length;
     }
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly]
@@ -1393,6 +1324,9 @@ file static unsafe class NativeRenderingFixture
     internal static Keire.AssetId FirstMaterial;
     internal static float MaterialFloat;
     internal static Keire.AssetId MaterialTexture;
+    internal static uint InstanceSlot;
+    internal static Keire.AssetId GlobalCollection;
+    internal static float GlobalFloat;
 
     internal static void Install()
     {
@@ -1405,6 +1339,9 @@ file static unsafe class NativeRenderingFixture
         FirstMaterial = default;
         MaterialFloat = default;
         MaterialTexture = default;
+        InstanceSlot = default;
+        GlobalCollection = default;
+        GlobalFloat = default;
         Keire.NativeRuntimeRendering.GetScalarIcall = &GetScalar;
         Keire.NativeRuntimeRendering.SetScalarIcall = &SetScalar;
         Keire.NativeRuntimeRendering.GetIntegerIcall = &GetInteger;
@@ -1427,6 +1364,9 @@ file static unsafe class NativeRenderingFixture
         Keire.NativeRuntimeRendering.SetMaterialTextureIcall = &SetMaterialTexture;
         Keire.NativeRuntimeRendering.ResetMaterialPropertyIcall = &ResetMaterialProperty;
         Keire.NativeRuntimeRendering.ClearMaterialPropertiesIcall = &ClearMaterialProperties;
+        Keire.NativeRuntimeRendering.SetMaterialInstanceColorIcall = &SetMaterialInstanceColor;
+        Keire.NativeRuntimeRendering.MaterialParameterCollectionReadyIcall = &MaterialParameterCollectionReady;
+        Keire.NativeRuntimeRendering.SetMaterialParameterFloatIcall = &SetMaterialParameterFloat;
     }
 
     internal static void Uninstall()
@@ -1453,6 +1393,9 @@ file static unsafe class NativeRenderingFixture
         Keire.NativeRuntimeRendering.SetMaterialTextureIcall = null;
         Keire.NativeRuntimeRendering.ResetMaterialPropertyIcall = null;
         Keire.NativeRuntimeRendering.ClearMaterialPropertiesIcall = null;
+        Keire.NativeRuntimeRendering.SetMaterialInstanceColorIcall = null;
+        Keire.NativeRuntimeRendering.MaterialParameterCollectionReadyIcall = null;
+        Keire.NativeRuntimeRendering.SetMaterialParameterFloatIcall = null;
     }
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly]
@@ -1607,46 +1550,28 @@ file static unsafe class NativeRenderingFixture
     [System.Runtime.InteropServices.UnmanagedCallersOnly]
     private static byte ClearMaterialProperties(ulong high, ulong low) =>
         high == 23 && low == 29 ? (byte)1 : (byte)0;
-}
 
-file sealed class RecordingSink : IWeaponRuntimeSink
-{
-    public int ShotCount { get; private set; }
-    public WeaponShotRequest LastShot { get; private set; }
-
-    public void OnStateChanged(in WeaponRuntimeSnapshot snapshot)
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetMaterialInstanceColor(ulong high, ulong low, uint slot, Keire.NativeString name,
+                                                 Keire.Color value)
     {
+        InstanceSlot = slot;
+        return high == 23 && low == 29 ? (byte)1 : (byte)0;
     }
 
-    public void OnShot(in WeaponShotRequest request)
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte MaterialParameterCollectionReady(ulong high, ulong low)
     {
-        ++ShotCount;
-        LastShot = request;
+        GlobalCollection = new Keire.AssetId(high, low);
+        return 1;
     }
 
-    public void OnDryFire()
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetMaterialParameterFloat(ulong high, ulong low, Keire.NativeString name, float value)
     {
-    }
-
-    public void OnMagazineRemoved(PhysicalMagazine magazine)
-    {
-    }
-
-    public void OnMagazineInserted(PhysicalMagazine magazine)
-    {
-    }
-
-    public void OnShellInserted(int tubeRounds)
-    {
-    }
-}
-
-file sealed class EmptyCollisionWorld : IBallisticCollisionWorld
-{
-    public bool SweepSphere(in BallisticSweepRequest request, out BallisticSweepHit hit)
-    {
-        hit = default;
-        return false;
+        GlobalCollection = new Keire.AssetId(high, low);
+        GlobalFloat = value;
+        return 1;
     }
 }
 
@@ -1672,17 +1597,4 @@ file sealed class ManagedStateMathProbe : Keire.Behaviour
 
     [Keire.StableFieldId("73616e64-626f-4078-8000-00000000a003")]
     public Keire.Quaternion Rotation;
-}
-
-file sealed class RecordingImpactSink : IBallisticImpactSink
-{
-    public WeaponDamageResponse ApplyDamage(in WeaponDamagePacket damage) => default;
-
-    public void OnImpact(in WeaponDamagePacket damage, bool penetrated, bool ricocheted)
-    {
-    }
-
-    public void OnTracer(in ProductionShotId shotId, Vector3 start, Vector3 end)
-    {
-    }
 }

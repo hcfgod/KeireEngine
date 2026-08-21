@@ -101,6 +101,109 @@ std::vector<Keire::AssetId> EditorWorkspaceLayer::LoadedManagedScenes() const
     return active ? std::vector{active} : std::vector<Keire::AssetId>{};
 }
 
+std::vector<std::string> EditorWorkspaceLayer::ManagedEntityTags(const Keire::ManagedEntityHandle entity) const
+{
+    const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+    const auto target = scene ? scene->FindEntity(Keire::EntityId(entity.Entity)) : Keire::Entity{};
+    return target && target.World() == entity.World ? target.Tags() : std::vector<std::string>{};
+}
+
+bool EditorWorkspaceLayer::AddManagedEntityTag(const Keire::ManagedEntityHandle entity,
+                                               const std::string_view tag) noexcept
+{
+    try
+    {
+        const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+        auto target = scene ? scene->FindEntity(Keire::EntityId(entity.Entity)) : Keire::Entity{};
+        return target && target.World() == entity.World && target.AddTag(std::string(tag));
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+bool EditorWorkspaceLayer::RemoveManagedEntityTag(const Keire::ManagedEntityHandle entity,
+                                                  const std::string_view tag) noexcept
+{
+    try
+    {
+        const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+        auto target = scene ? scene->FindEntity(Keire::EntityId(entity.Entity)) : Keire::Entity{};
+        return target && target.World() == entity.World && target.RemoveTag(tag);
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+bool EditorWorkspaceLayer::ClearManagedEntityTags(const Keire::ManagedEntityHandle entity) noexcept
+{
+    try
+    {
+        const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+        auto target = scene ? scene->FindEntity(Keire::EntityId(entity.Entity)) : Keire::Entity{};
+        if (!target || target.World() != entity.World)
+            return false;
+        target.SetTags({});
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+std::vector<Keire::ManagedEntityHandle> EditorWorkspaceLayer::QueryManagedEntityNames(const std::string_view name,
+                                                                                      const std::size_t maximum) const
+{
+    const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+    const auto entities = scene ? scene->QueryName(name) : std::vector<Keire::Entity>{};
+    std::vector<Keire::ManagedEntityHandle> result;
+    result.reserve(std::min(entities.size(), maximum));
+    for (const auto& entity : entities)
+    {
+        if (result.size() == maximum)
+            break;
+        result.push_back({entity.World(), entity.Id().Value()});
+    }
+    return result;
+}
+
+std::vector<Keire::ManagedEntityHandle> EditorWorkspaceLayer::QueryManagedEntityTags(const std::string_view tag,
+                                                                                     const std::size_t maximum) const
+{
+    const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+    const auto entities = scene ? scene->QueryTag(tag) : std::vector<Keire::Entity>{};
+    std::vector<Keire::ManagedEntityHandle> result;
+    result.reserve(std::min(entities.size(), maximum));
+    for (const auto& entity : entities)
+    {
+        if (result.size() == maximum)
+            break;
+        result.push_back({entity.World(), entity.Id().Value()});
+    }
+    return result;
+}
+
+std::vector<Keire::ManagedEntityHandle>
+EditorWorkspaceLayer::QueryManagedEntityComponents(const Keire::ComponentTypeId component,
+                                                   const std::size_t maximum) const
+{
+    const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+    const auto entities = scene ? scene->Query(component) : std::vector<Keire::Entity>{};
+    std::vector<Keire::ManagedEntityHandle> result;
+    result.reserve(std::min(entities.size(), maximum));
+    for (const auto& entity : entities)
+    {
+        if (result.size() == maximum)
+            break;
+        result.push_back({entity.World(), entity.Id().Value()});
+    }
+    return result;
+}
+
 std::optional<Keire::RenderEnvironmentSettings> EditorWorkspaceLayer::ManagedRenderEnvironment() const noexcept
 {
     if (m_ManagedRenderEnvironmentOverride)
@@ -117,6 +220,60 @@ bool EditorWorkspaceLayer::SetManagedRenderEnvironment(Keire::RenderEnvironmentS
         Keire::ValidateRenderEnvironmentSettings(settings);
         m_ManagedRenderEnvironmentOverride = std::move(settings);
         return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+bool EditorWorkspaceLayer::ManagedMaterialParameterCollectionReady(const Keire::AssetId collection) noexcept
+{
+    try
+    {
+        return m_SceneDocument && m_SceneDocument->PlaySession() &&
+               m_ManagedMaterialParameters.Ready(Owner().Assets(), collection);
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+bool EditorWorkspaceLayer::SetManagedMaterialParameter(const Keire::AssetId collection, const std::string_view name,
+                                                       Keire::MaterialPropertyValue value) noexcept
+{
+    try
+    {
+        return m_SceneDocument && m_SceneDocument->PlaySession() &&
+               m_ManagedMaterialParameters.Set(Owner().Assets(), collection, name, std::move(value));
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+bool EditorWorkspaceLayer::ResetManagedMaterialParameter(const Keire::AssetId collection,
+                                                         const std::string_view name) noexcept
+{
+    try
+    {
+        return m_SceneDocument && m_SceneDocument->PlaySession() &&
+               m_ManagedMaterialParameters.Reset(Owner().Assets(), collection, name);
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+bool EditorWorkspaceLayer::ClearManagedMaterialParameters(const Keire::AssetId collection) noexcept
+{
+    try
+    {
+        return m_SceneDocument && m_SceneDocument->PlaySession() &&
+               m_ManagedMaterialParameters.Clear(Owner().Assets(), collection);
     }
     catch (...)
     {

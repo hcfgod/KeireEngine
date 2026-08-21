@@ -25,6 +25,18 @@ internal struct NativeAssetId
 }
 
 [StructLayout(LayoutKind.Sequential)]
+internal struct NativeEntityHandle
+{
+    internal ulong World;
+    internal ulong High;
+    internal ulong Low;
+
+    internal NativeEntityHandle(ulong world, ulong high, ulong low) => (World, High, Low) = (world, high, low);
+
+    internal readonly Entity Value => new(World, new EntityId(High, Low));
+}
+
+[StructLayout(LayoutKind.Sequential)]
 internal struct NativeRenderEnvironment
 {
     internal Color AmbientColor;
@@ -84,6 +96,14 @@ internal static unsafe class NativeWorld
     internal static delegate* unmanaged<ulong, byte> CancelSceneLoadIcall;
     internal static delegate* unmanaged<NativeAssetId*, byte> GetActiveSceneIcall;
     internal static delegate* unmanaged<NativeAssetId*, int, int> GetLoadedScenesIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, int> GetEntityTagCountIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, int, byte*, int, int> GetEntityTagIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, byte> AddEntityTagIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, byte> RemoveEntityTagIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, byte> ClearEntityTagsIcall;
+    internal static delegate* unmanaged<NativeString, int, NativeEntityHandle*, int, int> QueryEntityNamesIcall;
+    internal static delegate* unmanaged<NativeString, int, NativeEntityHandle*, int, int> QueryEntityTagsIcall;
+    internal static delegate* unmanaged<ulong, ulong, int, NativeEntityHandle*, int, int> QueryEntityComponentsIcall;
     internal static delegate* unmanaged<NativeRenderEnvironment*, byte> GetRenderEnvironmentIcall;
     internal static delegate* unmanaged<NativeRenderEnvironment*, byte> SetRenderEnvironmentIcall;
 #pragma warning restore CS0649
@@ -154,6 +174,115 @@ internal static unsafe class NativeWorld
                 throw new InvalidOperationException("The loaded-scene list changed while it was being read.");
         }
         var result = new AssetId[native.Length];
+        for (int index = 0; index < native.Length; ++index)
+            result[index] = native[index].Value;
+        return result;
+    }
+
+    internal static string[] GetEntityTags(Entity entity)
+    {
+        if (GetEntityTagCountIcall == null || GetEntityTagIcall == null)
+            throw Unbound();
+        int count = GetEntityTagCountIcall(entity.World, entity.Id.High, entity.Id.Low);
+        if (count < 0 || count > 16)
+            throw new InvalidOperationException("The native runtime returned an invalid entity-tag count.");
+        var result = new string[count];
+        for (int index = 0; index < count; ++index)
+        {
+            int length = GetEntityTagIcall(entity.World, entity.Id.High, entity.Id.Low, index, null, 0);
+            if (length < 0 || length > 64)
+                throw new InvalidOperationException("The native runtime returned an invalid entity tag.");
+            var bytes = new byte[length];
+            fixed (byte* destination = bytes)
+            {
+                if (GetEntityTagIcall(entity.World, entity.Id.High, entity.Id.Low, index, destination, bytes.Length) !=
+                    bytes.Length)
+                    throw new InvalidOperationException("The entity tag changed while it was being read.");
+            }
+            result[index] = Encoding.UTF8.GetString(bytes);
+        }
+        return result;
+    }
+
+    internal static bool AddEntityTag(Entity entity, string tag)
+    {
+        if (AddEntityTagIcall == null)
+            throw Unbound();
+        using NativeString value = tag;
+        return AddEntityTagIcall(entity.World, entity.Id.High, entity.Id.Low, value) != 0;
+    }
+
+    internal static bool RemoveEntityTag(Entity entity, string tag)
+    {
+        if (RemoveEntityTagIcall == null)
+            throw Unbound();
+        using NativeString value = tag;
+        return RemoveEntityTagIcall(entity.World, entity.Id.High, entity.Id.Low, value) != 0;
+    }
+
+    internal static void ClearEntityTags(Entity entity)
+    {
+        if (ClearEntityTagsIcall == null)
+            throw Unbound();
+        if (ClearEntityTagsIcall(entity.World, entity.Id.High, entity.Id.Low) == 0)
+            throw new InvalidOperationException("The entity tags could not be cleared.");
+    }
+
+    internal static Entity[] QueryEntityNames(string name, int maximum)
+    {
+        if (QueryEntityNamesIcall == null)
+            throw Unbound();
+        using NativeString value = name;
+        int count = QueryEntityNamesIcall(value, maximum, null, 0);
+        NativeEntityHandle[] native = AllocateEntityQuery(count, maximum);
+        fixed (NativeEntityHandle* destination = native)
+        {
+            if (QueryEntityNamesIcall(value, maximum, destination, native.Length) != native.Length)
+                throw new InvalidOperationException("The scene query changed while it was being read.");
+        }
+        return ConvertEntityQuery(native);
+    }
+
+    internal static Entity[] QueryEntityTags(string tag, int maximum)
+    {
+        if (QueryEntityTagsIcall == null)
+            throw Unbound();
+        using NativeString value = tag;
+        int count = QueryEntityTagsIcall(value, maximum, null, 0);
+        NativeEntityHandle[] native = AllocateEntityQuery(count, maximum);
+        fixed (NativeEntityHandle* destination = native)
+        {
+            if (QueryEntityTagsIcall(value, maximum, destination, native.Length) != native.Length)
+                throw new InvalidOperationException("The scene query changed while it was being read.");
+        }
+        return ConvertEntityQuery(native);
+    }
+
+    internal static Entity[] QueryEntityComponents(ComponentTypeId component, int maximum)
+    {
+        if (QueryEntityComponentsIcall == null)
+            throw Unbound();
+        int count = QueryEntityComponentsIcall(component.High, component.Low, maximum, null, 0);
+        NativeEntityHandle[] native = AllocateEntityQuery(count, maximum);
+        fixed (NativeEntityHandle* destination = native)
+        {
+            if (QueryEntityComponentsIcall(component.High, component.Low, maximum, destination, native.Length) !=
+                native.Length)
+                throw new InvalidOperationException("The scene query changed while it was being read.");
+        }
+        return ConvertEntityQuery(native);
+    }
+
+    private static NativeEntityHandle[] AllocateEntityQuery(int count, int maximum)
+    {
+        if (count < 0 || count > maximum)
+            throw new InvalidOperationException("The native runtime returned an invalid scene-query count.");
+        return new NativeEntityHandle[count];
+    }
+
+    private static Entity[] ConvertEntityQuery(NativeEntityHandle[] native)
+    {
+        var result = new Entity[native.Length];
         for (int index = 0; index < native.Length; ++index)
             result[index] = native[index].Value;
         return result;

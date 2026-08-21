@@ -3,6 +3,7 @@
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <string>
@@ -47,6 +48,17 @@ namespace Keire
                 },
                 value);
         }
+
+        void ValidateMaterialProperty(const std::string_view name, const MaterialPropertyValue& value)
+        {
+            constexpr std::size_t maximumPropertyNameBytes = 128;
+            if (name.empty() || name.size() > maximumPropertyNameBytes)
+                throw std::invalid_argument("Material property names must contain 1..128 UTF-8 bytes.");
+            if (!FiniteMaterialProperty(value))
+                throw std::invalid_argument("Material property values must be finite.");
+        }
+
+        const std::map<std::string, MaterialPropertyValue, std::less<>> EmptyMaterialProperties;
     } // namespace
 
     MeshRendererComponent::MeshRendererComponent() : Component(StaticType()), m_Mesh(MeshAsset::CubeId()) {}
@@ -65,9 +77,12 @@ namespace Keire
     {
         if (slot >= 256U)
             throw std::out_of_range("Mesh Renderer material slot exceeds its limit.");
+        if (Material(slot) == material)
+            return;
         if (m_Materials.size() <= slot)
             m_Materials.resize(slot + 1U);
         m_Materials[slot] = material;
+        m_MaterialInstanceProperties.erase(slot);
         while (!m_Materials.empty() && !m_Materials.back())
             m_Materials.pop_back();
         NotifyChanged();
@@ -77,10 +92,20 @@ namespace Keire
     {
         if (materials.size() > 256U)
             throw std::invalid_argument("Mesh Renderer material overrides exceed their limit.");
+        if (std::ranges::equal(m_Materials, materials))
+            return;
         m_Materials.assign(materials.begin(), materials.end());
         while (!m_Materials.empty() && !m_Materials.back())
             m_Materials.pop_back();
+        m_MaterialInstanceProperties.clear();
         NotifyChanged();
+    }
+
+    const std::map<std::string, MaterialPropertyValue, std::less<>>&
+    MeshRendererComponent::MaterialInstanceProperties(const std::size_t slot) const noexcept
+    {
+        const auto found = m_MaterialInstanceProperties.find(slot);
+        return found == m_MaterialInstanceProperties.end() ? EmptyMaterialProperties : found->second;
     }
 
     void MeshRendererComponent::SetTint(const Color tint)
@@ -138,11 +163,7 @@ namespace Keire
     void MeshRendererComponent::SetMaterialProperty(std::string name, MaterialPropertyValue value)
     {
         constexpr std::size_t maximumPropertyCount = 64;
-        constexpr std::size_t maximumPropertyNameBytes = 128;
-        if (name.empty() || name.size() > maximumPropertyNameBytes)
-            throw std::invalid_argument("Material property names must contain 1..128 UTF-8 bytes.");
-        if (!FiniteMaterialProperty(value))
-            throw std::invalid_argument("Material property values must be finite.");
+        ValidateMaterialProperty(name, value);
         const auto existing = m_MaterialProperties.find(name);
         if (existing == m_MaterialProperties.end() && m_MaterialProperties.size() >= maximumPropertyCount)
             throw std::length_error("Mesh Renderer material property block exceeds its 64-property limit.");
@@ -170,6 +191,45 @@ namespace Keire
         NotifyChanged();
     }
 
+    void MeshRendererComponent::SetMaterialInstanceProperty(const std::size_t slot, std::string name,
+                                                            MaterialPropertyValue value)
+    {
+        constexpr std::size_t maximumPropertyCount = 64;
+        if (slot >= 256U)
+            throw std::out_of_range("Dynamic Material Instance slot exceeds its limit.");
+        ValidateMaterialProperty(name, value);
+        auto& properties = m_MaterialInstanceProperties[slot];
+        const auto existing = properties.find(name);
+        if (existing == properties.end() && properties.size() >= maximumPropertyCount)
+            throw std::length_error("Dynamic Material Instance exceeds its 64-property limit.");
+        if (existing != properties.end() && existing->second == value)
+            return;
+        properties.insert_or_assign(std::move(name), std::move(value));
+        NotifyChanged();
+    }
+
+    bool MeshRendererComponent::ResetMaterialInstanceProperty(const std::size_t slot, const std::string_view name)
+    {
+        const auto instance = m_MaterialInstanceProperties.find(slot);
+        if (instance == m_MaterialInstanceProperties.end())
+            return false;
+        const auto existing = instance->second.find(name);
+        if (existing == instance->second.end())
+            return false;
+        instance->second.erase(existing);
+        if (instance->second.empty())
+            m_MaterialInstanceProperties.erase(instance);
+        NotifyChanged();
+        return true;
+    }
+
+    void MeshRendererComponent::ClearMaterialInstanceProperties(const std::size_t slot)
+    {
+        if (m_MaterialInstanceProperties.erase(slot) == 0)
+            return;
+        NotifyChanged();
+    }
+
     void MeshRendererComponent::Reset()
     {
         m_Mesh = MeshAsset::CubeId();
@@ -183,6 +243,7 @@ namespace Keire
         m_LightmapScale = 1.0F;
         m_PreserveLightmapUVs = true;
         m_MaterialProperties.clear();
+        m_MaterialInstanceProperties.clear();
         NotifyChanged();
     }
 

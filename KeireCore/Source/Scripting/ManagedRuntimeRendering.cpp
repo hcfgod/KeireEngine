@@ -249,6 +249,18 @@ namespace Keire::Detail
                        : 0;
         }
 
+        template <typename T>
+        [[nodiscard]] std::uint8_t SetMaterialInstanceProperty(const std::uint64_t high, const std::uint64_t low,
+                                                               const std::uint32_t slot, const Coral::String name,
+                                                               const T value) noexcept
+        {
+            return ActiveServices && slot < 256U &&
+                           ActiveServices->SetManagedMaterialInstanceProperty(AssetId(high, low), slot,
+                                                                              static_cast<std::string>(name), value)
+                       ? 1
+                       : 0;
+        }
+
         [[nodiscard]] std::uint8_t ResetMaterialProperty(const std::uint64_t high, const std::uint64_t low,
                                                          const Coral::String name) noexcept
         {
@@ -261,6 +273,57 @@ namespace Keire::Detail
         [[nodiscard]] std::uint8_t ClearMaterialProperties(const std::uint64_t high, const std::uint64_t low) noexcept
         {
             return ActiveServices && ActiveServices->ClearManagedMaterialProperties(AssetId(high, low)) ? 1 : 0;
+        }
+
+        [[nodiscard]] std::uint8_t ResetMaterialInstanceProperty(const std::uint64_t high, const std::uint64_t low,
+                                                                 const std::uint32_t slot,
+                                                                 const Coral::String name) noexcept
+        {
+            return ActiveServices && slot < 256U &&
+                           ActiveServices->ResetManagedMaterialInstanceProperty(AssetId(high, low), slot,
+                                                                                static_cast<std::string>(name))
+                       ? 1
+                       : 0;
+        }
+
+        [[nodiscard]] std::uint8_t ClearMaterialInstanceProperties(const std::uint64_t high, const std::uint64_t low,
+                                                                   const std::uint32_t slot) noexcept
+        {
+            return ActiveServices && slot < 256U &&
+                           ActiveServices->ClearManagedMaterialInstanceProperties(AssetId(high, low), slot)
+                       ? 1
+                       : 0;
+        }
+
+        [[nodiscard]] std::uint8_t MaterialParameterCollectionReady(const std::uint64_t high,
+                                                                    const std::uint64_t low) noexcept
+        {
+            return ActiveServices && ActiveServices->ManagedMaterialParameterCollectionReady(AssetId(high, low)) ? 1
+                                                                                                                 : 0;
+        }
+
+        template <typename T>
+        [[nodiscard]] std::uint8_t SetMaterialParameter(const std::uint64_t high, const std::uint64_t low,
+                                                        const Coral::String name, const T value) noexcept
+        {
+            return ActiveServices && ActiveServices->SetManagedMaterialParameter(AssetId(high, low),
+                                                                                 static_cast<std::string>(name), value)
+                       ? 1
+                       : 0;
+        }
+
+        [[nodiscard]] std::uint8_t ResetMaterialParameter(const std::uint64_t high, const std::uint64_t low,
+                                                          const Coral::String name) noexcept
+        {
+            return ActiveServices && ActiveServices->ResetManagedMaterialParameter(AssetId(high, low),
+                                                                                   static_cast<std::string>(name))
+                       ? 1
+                       : 0;
+        }
+
+        [[nodiscard]] std::uint8_t ClearMaterialParameters(const std::uint64_t high, const std::uint64_t low) noexcept
+        {
+            return ActiveServices && ActiveServices->ClearManagedMaterialParameters(AssetId(high, low)) ? 1 : 0;
         }
     } // namespace
 
@@ -308,5 +371,39 @@ namespace Keire::Detail
                                  reinterpret_cast<void*>(&ResetMaterialProperty));
         assembly.AddInternalCall("Keire.NativeRuntimeRendering", "ClearMaterialPropertiesIcall",
                                  reinterpret_cast<void*>(&ClearMaterialProperties));
+        assembly.AddInternalCall("Keire.NativeRuntimeRendering", "SetMaterialInstanceFloatIcall",
+                                 reinterpret_cast<void*>(&SetMaterialInstanceProperty<float>));
+        assembly.AddInternalCall("Keire.NativeRuntimeRendering", "SetMaterialInstanceVector2Icall",
+                                 reinterpret_cast<void*>(&SetMaterialInstanceProperty<Vector2>));
+        assembly.AddInternalCall("Keire.NativeRuntimeRendering", "SetMaterialInstanceVector3Icall",
+                                 reinterpret_cast<void*>(&SetMaterialInstanceProperty<Vector3>));
+        assembly.AddInternalCall("Keire.NativeRuntimeRendering", "SetMaterialInstanceVector4Icall",
+                                 reinterpret_cast<void*>(&SetMaterialInstanceProperty<Vector4>));
+        assembly.AddInternalCall("Keire.NativeRuntimeRendering", "SetMaterialInstanceColorIcall",
+                                 reinterpret_cast<void*>(&SetMaterialInstanceProperty<Color>));
+        assembly.AddInternalCall("Keire.NativeRuntimeRendering", "SetMaterialInstanceTextureIcall",
+                                 reinterpret_cast<void*>(&SetMaterialInstanceProperty<AssetId>));
+        assembly.AddInternalCall("Keire.NativeRuntimeRendering", "ResetMaterialInstancePropertyIcall",
+                                 reinterpret_cast<void*>(&ResetMaterialInstanceProperty));
+        assembly.AddInternalCall("Keire.NativeRuntimeRendering", "ClearMaterialInstancePropertiesIcall",
+                                 reinterpret_cast<void*>(&ClearMaterialInstanceProperties));
+        assembly.AddInternalCall("Keire.NativeRuntimeRendering", "MaterialParameterCollectionReadyIcall",
+                                 reinterpret_cast<void*>(&MaterialParameterCollectionReady));
+        assembly.AddInternalCall("Keire.NativeRuntimeRendering", "SetMaterialParameterFloatIcall",
+                                 reinterpret_cast<void*>(&SetMaterialParameter<float>));
+        assembly.AddInternalCall("Keire.NativeRuntimeRendering", "SetMaterialParameterVector2Icall",
+                                 reinterpret_cast<void*>(&SetMaterialParameter<Vector2>));
+        assembly.AddInternalCall("Keire.NativeRuntimeRendering", "SetMaterialParameterVector3Icall",
+                                 reinterpret_cast<void*>(&SetMaterialParameter<Vector3>));
+        assembly.AddInternalCall("Keire.NativeRuntimeRendering", "SetMaterialParameterVector4Icall",
+                                 reinterpret_cast<void*>(&SetMaterialParameter<Vector4>));
+        assembly.AddInternalCall("Keire.NativeRuntimeRendering", "SetMaterialParameterColorIcall",
+                                 reinterpret_cast<void*>(&SetMaterialParameter<Color>));
+        assembly.AddInternalCall("Keire.NativeRuntimeRendering", "SetMaterialParameterTextureIcall",
+                                 reinterpret_cast<void*>(&SetMaterialParameter<AssetId>));
+        assembly.AddInternalCall("Keire.NativeRuntimeRendering", "ResetMaterialParameterIcall",
+                                 reinterpret_cast<void*>(&ResetMaterialParameter));
+        assembly.AddInternalCall("Keire.NativeRuntimeRendering", "ClearMaterialParametersIcall",
+                                 reinterpret_cast<void*>(&ClearMaterialParameters));
     }
 } // namespace Keire::Detail
