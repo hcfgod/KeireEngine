@@ -782,6 +782,14 @@ consumers. Material Parameter Collections remain renderer-neutral asset/value de
 thread-safe runtime state object; renderer-wide collection buffers and world ownership are deliberately not hidden in
 the asset layer. Dynamic Material Instances similarly expose typed snapshots and revisions without exposing GPU or
 backend handles.
+The managed runtime world in Editor Play and packaged players owns loaded collection states, carries compatible
+overrides across asset revisions by stable parameter ID, and contributes one bounded immutable property snapshot to
+each render request. Collection defaults are therefore asset-owned while mutable values die with the world. Both hosts
+use the same state owner and precedence contract. The renderer applies shared-material, global-collection,
+renderer-block, and material-slot-instance values in that order. Duplicate global names resolve by stable collection
+asset order; narrower renderer and slot scopes always win. Mesh Renderer slot instances remain transient component
+state and are cleared when their shared slot material changes, preventing incompatible values from crossing an asset
+assignment.
 Successful graph revisions bake parameter defaults into the stable generated material and publish that material through
 the owner-thread development-asset boundary, giving scene renderers immediate immutable revisions without accepting an
 invalid graph. Save stages the complete deterministic shader directory under `Library/Transactions`, preserves metadata

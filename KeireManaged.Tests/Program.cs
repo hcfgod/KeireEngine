@@ -349,11 +349,20 @@ static unsafe void ManagedRenderingContract()
         renderer.PropertyBlock.SetFloat("Roughness", 0.37f);
         renderer.PropertyBlock.SetTexture(
             "Albedo", new Keire.AssetReference<Keire.Texture>(NativeRenderingFixture.ReplacementTexture));
+        Keire.MaterialInstanceHandle instance = renderer.GetMaterialInstance(1);
+        instance.SetColor("Emission", new Keire.Color(0.2f, 0.4f, 0.8f, 1.0f));
+        var collection = new Keire.AssetReference<Keire.MaterialParameterCollection>(new Keire.AssetId(301, 401));
+        Keire.MaterialParameterCollectionHandle globals = Keire.GlobalMaterialParameters.Open(collection);
+        Assert(globals.IsReady, "Material Parameter Collections must expose their asynchronous readiness.");
+        globals.SetFloat("Rain", 0.85f);
         Assert(NativeRenderingFixture.MaterialCount == 1 &&
                    NativeRenderingFixture.FirstMaterial == NativeRenderingFixture.ReplacementMaterial &&
                    MathF.Abs(NativeRenderingFixture.MaterialFloat - 0.37f) < 0.0001f &&
-                   NativeRenderingFixture.MaterialTexture == NativeRenderingFixture.ReplacementTexture,
-               "Material slots and typed shader property overrides must reach native renderer state.");
+                   NativeRenderingFixture.MaterialTexture == NativeRenderingFixture.ReplacementTexture &&
+                   NativeRenderingFixture.InstanceSlot == 1 &&
+                   NativeRenderingFixture.GlobalCollection == collection.Id &&
+                   MathF.Abs(NativeRenderingFixture.GlobalFloat - 0.85f) < 0.0001f,
+               "Material slots, dynamic instances, and global parameters must reach native renderer state.");
         AssertThrows<ArgumentOutOfRangeException>(() => renderer.PropertyBlock.SetFloat("Invalid", float.NaN),
                                                   "Material property blocks must reject non-finite values early.");
 
@@ -1315,6 +1324,9 @@ file static unsafe class NativeRenderingFixture
     internal static Keire.AssetId FirstMaterial;
     internal static float MaterialFloat;
     internal static Keire.AssetId MaterialTexture;
+    internal static uint InstanceSlot;
+    internal static Keire.AssetId GlobalCollection;
+    internal static float GlobalFloat;
 
     internal static void Install()
     {
@@ -1327,6 +1339,9 @@ file static unsafe class NativeRenderingFixture
         FirstMaterial = default;
         MaterialFloat = default;
         MaterialTexture = default;
+        InstanceSlot = default;
+        GlobalCollection = default;
+        GlobalFloat = default;
         Keire.NativeRuntimeRendering.GetScalarIcall = &GetScalar;
         Keire.NativeRuntimeRendering.SetScalarIcall = &SetScalar;
         Keire.NativeRuntimeRendering.GetIntegerIcall = &GetInteger;
@@ -1349,6 +1364,9 @@ file static unsafe class NativeRenderingFixture
         Keire.NativeRuntimeRendering.SetMaterialTextureIcall = &SetMaterialTexture;
         Keire.NativeRuntimeRendering.ResetMaterialPropertyIcall = &ResetMaterialProperty;
         Keire.NativeRuntimeRendering.ClearMaterialPropertiesIcall = &ClearMaterialProperties;
+        Keire.NativeRuntimeRendering.SetMaterialInstanceColorIcall = &SetMaterialInstanceColor;
+        Keire.NativeRuntimeRendering.MaterialParameterCollectionReadyIcall = &MaterialParameterCollectionReady;
+        Keire.NativeRuntimeRendering.SetMaterialParameterFloatIcall = &SetMaterialParameterFloat;
     }
 
     internal static void Uninstall()
@@ -1375,6 +1393,9 @@ file static unsafe class NativeRenderingFixture
         Keire.NativeRuntimeRendering.SetMaterialTextureIcall = null;
         Keire.NativeRuntimeRendering.ResetMaterialPropertyIcall = null;
         Keire.NativeRuntimeRendering.ClearMaterialPropertiesIcall = null;
+        Keire.NativeRuntimeRendering.SetMaterialInstanceColorIcall = null;
+        Keire.NativeRuntimeRendering.MaterialParameterCollectionReadyIcall = null;
+        Keire.NativeRuntimeRendering.SetMaterialParameterFloatIcall = null;
     }
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly]
@@ -1529,6 +1550,29 @@ file static unsafe class NativeRenderingFixture
     [System.Runtime.InteropServices.UnmanagedCallersOnly]
     private static byte ClearMaterialProperties(ulong high, ulong low) =>
         high == 23 && low == 29 ? (byte)1 : (byte)0;
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetMaterialInstanceColor(ulong high, ulong low, uint slot, Keire.NativeString name,
+                                                 Keire.Color value)
+    {
+        InstanceSlot = slot;
+        return high == 23 && low == 29 ? (byte)1 : (byte)0;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte MaterialParameterCollectionReady(ulong high, ulong low)
+    {
+        GlobalCollection = new Keire.AssetId(high, low);
+        return 1;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetMaterialParameterFloat(ulong high, ulong low, Keire.NativeString name, float value)
+    {
+        GlobalCollection = new Keire.AssetId(high, low);
+        GlobalFloat = value;
+        return 1;
+    }
 }
 
 file sealed class DetachedManagedContractProbe : Keire.Behaviour;

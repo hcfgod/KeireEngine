@@ -2,6 +2,7 @@
 
 #include "Keire/Api.h"
 #include "Keire/Assets/Asset.h"
+#include "Keire/Assets/RenderingAssets.h"
 #include "Keire/Math/Math.h"
 #include "Keire/Ref.h"
 #include "Keire/Rendering/FrameGraphSnapshot.h"
@@ -10,6 +11,7 @@
 #include <compare>
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <string>
 
@@ -150,6 +152,7 @@ namespace Keire
         Ref<RenderView> View;
         bool DrawGrid = false;
         RenderEnvironmentSettings Environment;
+        std::map<std::string, MaterialPropertyValue, std::less<>> GlobalMaterialProperties;
         VfxRenderSnapshot Vfx;
         float MaterialTimeSeconds = 0.0F;
         float MaterialDeltaSeconds = 0.0F;

@@ -16,6 +16,8 @@ This index is a discovery map, not a replacement for the workflow guides or sour
 | `CameraHandle`, `MeshRendererHandle` | Runtime camera and renderable state | [Rendering](RenderingAndMaterials.md) |
 | `DirectionalLightHandle`, `PointLightHandle`, `SpotLightHandle` | Typed realtime and baked-light controls | [Rendering](RenderingAndMaterials.md) |
 | `MaterialPropertyBlock` | Bounded per-renderer shader property overrides | [Rendering](RenderingAndMaterials.md) |
+| `MaterialInstanceHandle` | Transient per-material-slot shader overrides | [Rendering](RenderingAndMaterials.md) |
+| `MaterialParameterCollectionHandle`, `GlobalMaterialParameters` | World-owned global shader values | [Rendering](RenderingAndMaterials.md) |
 | `SceneHandle`, `SceneLoadOperation` | Active/loaded scene identity and transactional replacement status | [Scenes](ScenesAndRenderSettings.md) |
 | `RenderEnvironmentSettings` | Atomic transient lighting, environment, exposure, and shadow state | [Scenes](ScenesAndRenderSettings.md) |
 | `AssetId` | Stable untyped asset identity | [Assets](AssetsAndScriptableObjects.md) |
@@ -230,6 +232,7 @@ Mesh
 Material
 Shader
 Texture
+MaterialParameterCollection
 ```
 
 Runtime handles and values:
@@ -241,6 +244,9 @@ DirectionalLightHandle
 PointLightHandle
 SpotLightHandle
 MaterialPropertyBlock
+MaterialInstanceHandle
+MaterialParameterCollectionHandle
+GlobalMaterialParameters
 CameraProjection
 CameraClearMode
 GIReceiveMode
@@ -251,7 +257,9 @@ ShadowResolution
 
 `MeshRendererHandle.Materials` replaces the complete bounded material-slot array transactionally.
 `MeshRendererHandle.PropertyBlock` writes transient per-renderer float, vector, color, and texture overrides without
-mutating or cloning the shared material asset. See [Rendering And Materials](RenderingAndMaterials.md).
+mutating or cloning the shared material asset. `GetMaterialInstance(slot)` narrows overrides to one material slot, and
+`GlobalMaterialParameters.Open(...)` resolves a collection into world-owned frame values. See
+[Rendering And Materials](RenderingAndMaterials.md).
 
 ## Animation
 

@@ -14,9 +14,29 @@
 #include <cmath>
 #include <cstring>
 #include <stdexcept>
+#include <type_traits>
 
 namespace Keire::RenderBackend
 {
+    namespace
+    {
+        [[nodiscard]] bool ValidGlobalMaterialProperty(const MaterialPropertyValue& value) noexcept
+        {
+            return std::visit(
+                [](const auto& property) noexcept
+                {
+                    using Value = std::decay_t<decltype(property)>;
+                    if constexpr (std::is_same_v<Value, AssetId>)
+                        return true;
+                    else if constexpr (std::is_same_v<Value, float>)
+                        return std::isfinite(property);
+                    else
+                        return Math::IsFinite(property);
+                },
+                value);
+        }
+    } // namespace
+
     void RenderSharedState::CollectCompletedFrames()
     {
         if (!Device)
@@ -212,6 +232,13 @@ namespace Keire::RenderBackend
             !std::isfinite(request.MaterialDeltaSeconds) || request.MaterialDeltaSeconds < 0.0F ||
             request.MaterialDeltaSeconds > 1.0F)
             throw std::invalid_argument("SceneRenderRequest material timing contains invalid values.");
+        if (request.GlobalMaterialProperties.size() > 256U)
+            throw std::invalid_argument("SceneRenderRequest exceeds the 256 global material property bound.");
+        for (const auto& [name, value] : request.GlobalMaterialProperties)
+        {
+            if (name.empty() || name.size() > 128U || !ValidGlobalMaterialProperty(value))
+                throw std::invalid_argument("SceneRenderRequest contains an invalid global material property.");
+        }
         if (request.Vfx.Particles().size() > VfxRenderSnapshot::MaximumParticles)
             throw std::invalid_argument("SceneRenderRequest exceeds the VFX particle packet bound.");
         for (const auto& particle : request.Vfx.Particles())
@@ -267,6 +294,7 @@ namespace Keire::RenderBackend
         packet.Scene = request.Scene->Asset();
         packet.Camera = camera;
         packet.Environment = request.Environment;
+        packet.GlobalMaterialProperties = std::move(request.GlobalMaterialProperties);
         packet.Lighting = ResolveLighting(request.Scene);
         packet.LocalLights = ResolveLocalLights(request.Scene);
         packet.BakedLighting = request.Scene->BakedLighting();
@@ -306,6 +334,7 @@ namespace Keire::RenderBackend
             packet.DrawItems.push_back({renderer->Mesh(),
                                         {renderer->Materials().begin(), renderer->Materials().end()},
                                         renderer->MaterialProperties(),
+                                        {},
                                         transform->PresentationWorldMatrix(),
                                         renderer->Tint(),
                                         entity.Id(),
@@ -314,6 +343,7 @@ namespace Keire::RenderBackend
                                         std::move(skinPalette),
                                         renderer->CastShadows(),
                                         renderer->ReceiveShadows()});
+            packet.DrawItems.back().MaterialInstanceProperties = renderer->AllMaterialInstanceProperties();
         }
         for (const auto& particle : packet.Vfx.Particles())
         {

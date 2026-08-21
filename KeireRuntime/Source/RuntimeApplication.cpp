@@ -674,7 +674,7 @@ namespace
             auto environment = RenderEnvironment();
             environment.SkyVisible =
                 environment.SkyVisible && selected->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
-            Keire::SceneRenderRequest renderRequest{m_Scene, m_View, false, environment};
+            Keire::SceneRenderRequest renderRequest{m_Scene, m_View, false, environment, MaterialParameters()};
             if (const auto vfx = m_Runtime->Vfx())
                 renderRequest.Vfx = vfx->CaptureRenderSnapshot();
             Owner().Renderer()->SubmitRuntimeUi(m_Presentation->Ui());

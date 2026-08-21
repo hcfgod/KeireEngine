@@ -535,6 +535,27 @@ namespace Keire
         }
         [[nodiscard]] virtual bool ResetManagedMaterialProperty(AssetId, std::string_view) noexcept { return false; }
         [[nodiscard]] virtual bool ClearManagedMaterialProperties(AssetId) noexcept { return false; }
+        [[nodiscard]] virtual bool SetManagedMaterialInstanceProperty(AssetId, std::size_t, std::string_view,
+                                                                      MaterialPropertyValue) noexcept
+        {
+            return false;
+        }
+        [[nodiscard]] virtual bool ResetManagedMaterialInstanceProperty(AssetId, std::size_t, std::string_view) noexcept
+        {
+            return false;
+        }
+        [[nodiscard]] virtual bool ClearManagedMaterialInstanceProperties(AssetId, std::size_t) noexcept
+        {
+            return false;
+        }
+        [[nodiscard]] virtual bool ManagedMaterialParameterCollectionReady(AssetId) noexcept { return false; }
+        [[nodiscard]] virtual bool SetManagedMaterialParameter(AssetId, std::string_view,
+                                                               MaterialPropertyValue) noexcept
+        {
+            return false;
+        }
+        [[nodiscard]] virtual bool ResetManagedMaterialParameter(AssetId, std::string_view) noexcept { return false; }
+        [[nodiscard]] virtual bool ClearManagedMaterialParameters(AssetId) noexcept { return false; }
     };
 
     enum class ScriptMode : std::uint8_t

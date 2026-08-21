@@ -66,7 +66,8 @@ Kéire already includes substantial, integrated engine and authoring foundations
   sampling, asynchronous graph thumbnails, and stable built-in prototype meshes.
 - Managed assemblies, component discovery, serialized Inspector fields, lifecycle callbacks, hot reload, gameplay APIs,
   diagnostics, packaged CoreCLR publication, and scene-backed runtime UI with buttons, sliders, toggles, UTF-8 input,
-  scrolling, focus/navigation, accessibility metadata, and mouse/keyboard/gamepad routing.
+  scrolling, focus/navigation, accessibility metadata, mouse/keyboard/gamepad routing, per-slot dynamic materials,
+  and global Material Parameter Collection controls.
 - Focused native and managed tests, sanitizer configurations, source-budget enforcement, reproducible dependency locks,
   SDK consumers, distribution validation, signed catalog support, and native installer workflows.
 

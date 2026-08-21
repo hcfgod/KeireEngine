@@ -1,17 +1,147 @@
 #include "KeireInternal/Scripting/ManagedRuntimeRenderingServices.h"
 
+#include "Keire/Assets/AssetSystem.h"
 #include "Keire/ECS/Components/CameraComponent.h"
 #include "Keire/ECS/Components/DirectionalLightComponent.h"
 #include "Keire/ECS/Components/MeshRendererComponent.h"
 #include "Keire/ECS/Components/PointLightComponent.h"
 #include "Keire/ECS/Components/SpotLightComponent.h"
 #include "Keire/ECS/Entity.h"
+#include "Keire/Rendering/MaterialEcosystem.h"
 #include "Keire/Scenes/Scene.h"
 
+#include <algorithm>
 #include <utility>
 
 namespace Keire::Detail
 {
+    class ManagedMaterialParameterStore::Impl final
+    {
+      public:
+        static constexpr std::size_t MaximumGlobalMaterialParameters = 256;
+
+        struct CollectionEntry final
+        {
+            AssetHandle<MaterialParameterCollectionAsset> Handle;
+            Ref<MaterialParameterCollectionState> State;
+            std::uint64_t Revision = 0;
+        };
+
+        static void Refresh(CollectionEntry& entry)
+        {
+            const auto loaded = entry.Handle.TryGetLoaded();
+            const auto revision = entry.Handle.Revision();
+            if (!loaded || entry.Handle.UsingFallback() || revision == 0 || revision == entry.Revision)
+                return;
+            const auto previous = entry.State ? entry.State->Snapshot() : std::map<AssetId, MaterialPropertyValue>{};
+            auto replacement = CreateRef<MaterialParameterCollectionState>(loaded->Definition());
+            for (const auto& parameter : loaded->Definition().Parameters)
+            {
+                const auto value = previous.find(parameter.Id);
+                if (value == previous.end())
+                    continue;
+                try
+                {
+                    replacement->Set(parameter.Id, value->second);
+                }
+                catch (...)
+                {
+                    // Hot reload deliberately drops an override whose stable parameter changed to an incompatible type.
+                }
+            }
+            if (entry.State)
+                entry.State->Close();
+            entry.State = std::move(replacement);
+            entry.Revision = revision;
+        }
+
+        std::map<AssetId, CollectionEntry> Collections;
+    };
+
+    ManagedMaterialParameterStore::ManagedMaterialParameterStore() : m_Impl(std::make_unique<Impl>()) {}
+
+    ManagedMaterialParameterStore::~ManagedMaterialParameterStore() { Close(); }
+
+    bool ManagedMaterialParameterStore::Ready(const Ref<AssetSystem>& assets, const AssetId collection)
+    {
+        if (!assets || !collection)
+            return false;
+        auto [entry, inserted] = m_Impl->Collections.try_emplace(collection);
+        if (inserted)
+            entry->second.Handle = assets->Load<MaterialParameterCollectionAsset>(collection, AssetPriority::High);
+        Impl::Refresh(entry->second);
+        return static_cast<bool>(entry->second.State);
+    }
+
+    bool ManagedMaterialParameterStore::Set(const Ref<AssetSystem>& assets, const AssetId collection,
+                                            const std::string_view name, MaterialPropertyValue value)
+    {
+        if (!Ready(assets, collection))
+            return false;
+        auto& entry = m_Impl->Collections.at(collection);
+        const auto definition = entry.State->Definition();
+        const auto parameter =
+            std::ranges::find(definition.Parameters, name, &MaterialParameterCollectionParameter::Name);
+        if (parameter == definition.Parameters.end())
+            return false;
+        entry.State->Set(parameter->Id, std::move(value));
+        return true;
+    }
+
+    bool ManagedMaterialParameterStore::Reset(const Ref<AssetSystem>& assets, const AssetId collection,
+                                              const std::string_view name)
+    {
+        if (!Ready(assets, collection))
+            return false;
+        auto& entry = m_Impl->Collections.at(collection);
+        const auto definition = entry.State->Definition();
+        const auto parameter =
+            std::ranges::find(definition.Parameters, name, &MaterialParameterCollectionParameter::Name);
+        return parameter != definition.Parameters.end() && entry.State->Reset(parameter->Id);
+    }
+
+    bool ManagedMaterialParameterStore::Clear(const Ref<AssetSystem>& assets, const AssetId collection)
+    {
+        if (!Ready(assets, collection))
+            return false;
+        auto& entry = m_Impl->Collections.at(collection);
+        for (const auto& parameter : entry.State->Definition().Parameters)
+            (void)entry.State->Reset(parameter.Id);
+        return true;
+    }
+
+    std::map<std::string, MaterialPropertyValue, std::less<>> ManagedMaterialParameterStore::Snapshot()
+    {
+        std::map<std::string, MaterialPropertyValue, std::less<>> result;
+        for (auto& [asset, entry] : m_Impl->Collections)
+        {
+            (void)asset;
+            Impl::Refresh(entry);
+            if (!entry.State)
+                continue;
+            const auto values = entry.State->Snapshot();
+            for (const auto& parameter : entry.State->Definition().Parameters)
+            {
+                const auto value = values.find(parameter.Id);
+                if (value != values.end() &&
+                    (result.contains(parameter.Name) || result.size() < Impl::MaximumGlobalMaterialParameters))
+                    result.insert_or_assign(parameter.Name, value->second);
+            }
+        }
+        return result;
+    }
+
+    void ManagedMaterialParameterStore::Close() noexcept
+    {
+        for (auto& [asset, entry] : m_Impl->Collections)
+        {
+            (void)asset;
+            if (entry.State)
+                entry.State->Close();
+        }
+        m_Impl->Collections.clear();
+    }
+
     namespace
     {
         template <typename T> [[nodiscard]] Ref<T> Find(const Ref<Scene>& scene, const AssetId entity)
@@ -800,6 +930,54 @@ namespace Keire::Detail
         }
     }
 
+    bool SetManagedMaterialInstanceProperty(const Ref<Scene>& scene, const AssetId entity, const std::size_t slot,
+                                            const std::string_view name, MaterialPropertyValue value) noexcept
+    {
+        try
+        {
+            const auto renderer = Find<MeshRendererComponent>(scene, entity);
+            if (!renderer)
+                return false;
+            renderer->SetMaterialInstanceProperty(slot, std::string(name), std::move(value));
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    bool ResetManagedMaterialInstanceProperty(const Ref<Scene>& scene, const AssetId entity, const std::size_t slot,
+                                              const std::string_view name) noexcept
+    {
+        try
+        {
+            const auto renderer = Find<MeshRendererComponent>(scene, entity);
+            return renderer && renderer->ResetMaterialInstanceProperty(slot, name);
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    bool ClearManagedMaterialInstanceProperties(const Ref<Scene>& scene, const AssetId entity,
+                                                const std::size_t slot) noexcept
+    {
+        try
+        {
+            const auto renderer = Find<MeshRendererComponent>(scene, entity);
+            if (!renderer)
+                return false;
+            renderer->ClearMaterialInstanceProperties(slot);
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
     std::optional<float>
     ManagedRuntimeSceneServices::ReadManagedRenderingScalar(const AssetId entity,
                                                             const ManagedRenderingComponent component,
@@ -923,5 +1101,24 @@ namespace Keire::Detail
     bool ManagedRuntimeSceneServices::ClearManagedMaterialProperties(const AssetId entity) noexcept
     {
         return Detail::ClearManagedMaterialProperties(ManagedRuntimeScene(), entity);
+    }
+
+    bool ManagedRuntimeSceneServices::SetManagedMaterialInstanceProperty(const AssetId entity, const std::size_t slot,
+                                                                         const std::string_view name,
+                                                                         MaterialPropertyValue value) noexcept
+    {
+        return Detail::SetManagedMaterialInstanceProperty(ManagedRuntimeScene(), entity, slot, name, std::move(value));
+    }
+
+    bool ManagedRuntimeSceneServices::ResetManagedMaterialInstanceProperty(const AssetId entity, const std::size_t slot,
+                                                                           const std::string_view name) noexcept
+    {
+        return Detail::ResetManagedMaterialInstanceProperty(ManagedRuntimeScene(), entity, slot, name);
+    }
+
+    bool ManagedRuntimeSceneServices::ClearManagedMaterialInstanceProperties(const AssetId entity,
+                                                                             const std::size_t slot) noexcept
+    {
+        return Detail::ClearManagedMaterialInstanceProperties(ManagedRuntimeScene(), entity, slot);
     }
 } // namespace Keire::Detail
