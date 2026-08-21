@@ -5,8 +5,10 @@
 #include "KeireInternal/Scripting/ManagedRuntimeApplicationServices.h"
 #include "KeireInternal/Scripting/ManagedRuntimeInput.h"
 
+#include <map>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace Keire
@@ -76,6 +78,7 @@ namespace KeireRuntime
         void UnbindManagedWorld() noexcept;
         [[nodiscard]] bool ProcessManagedSceneTransition(bool deterministic, ManagedSceneValidator validator) noexcept;
         [[nodiscard]] const Keire::RenderEnvironmentSettings& RenderEnvironment() const noexcept;
+        [[nodiscard]] std::map<std::string, Keire::MaterialPropertyValue, std::less<>> MaterialParameters();
 
       private:
         [[nodiscard]] std::uint64_t BeginManagedSceneLoad(Keire::AssetId scene,
@@ -98,6 +101,12 @@ namespace KeireRuntime
         QueryManagedEntityComponents(Keire::ComponentTypeId component, std::size_t maximum) const final;
         [[nodiscard]] std::optional<Keire::RenderEnvironmentSettings> ManagedRenderEnvironment() const noexcept final;
         [[nodiscard]] bool SetManagedRenderEnvironment(Keire::RenderEnvironmentSettings settings) noexcept final;
+        [[nodiscard]] bool ManagedMaterialParameterCollectionReady(Keire::AssetId collection) noexcept final;
+        [[nodiscard]] bool SetManagedMaterialParameter(Keire::AssetId collection, std::string_view name,
+                                                       Keire::MaterialPropertyValue value) noexcept final;
+        [[nodiscard]] bool ResetManagedMaterialParameter(Keire::AssetId collection,
+                                                         std::string_view name) noexcept final;
+        [[nodiscard]] bool ClearManagedMaterialParameters(Keire::AssetId collection) noexcept final;
         [[nodiscard]] std::vector<Keire::ManagedInputDevice> ManagedInputDevices() const final;
         [[nodiscard]] std::string ManagedInputControlScheme() const final;
         [[nodiscard]] bool SetManagedInputControlScheme(std::string_view scheme, bool locked) noexcept final;
@@ -120,6 +129,7 @@ namespace KeireRuntime
         OverlapSphereManaged(const Keire::ManagedSphereOverlapQuery& query) final;
 
         ManagedWorldRuntime m_ManagedWorld;
+        Keire::Detail::ManagedMaterialParameterStore m_MaterialParameters;
         Keire::Detail::ManagedInputOperationStore m_ManagedInputOperations;
         Keire::RenderEnvironmentSettings m_Rendering;
         Keire::Application* m_Application = nullptr;

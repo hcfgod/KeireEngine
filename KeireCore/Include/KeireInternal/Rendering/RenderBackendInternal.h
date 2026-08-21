@@ -642,6 +642,7 @@ namespace Keire::RenderBackend
         AssetId Mesh;
         std::vector<AssetId> Materials;
         std::map<std::string, MaterialPropertyValue, std::less<>> MaterialProperties;
+        std::map<std::size_t, std::map<std::string, MaterialPropertyValue, std::less<>>> MaterialInstanceProperties;
         Matrix4 World;
         Color Tint;
         EntityId Entity;
@@ -661,6 +662,7 @@ namespace Keire::RenderBackend
             return std::nullopt;
         return SceneDrawItem{particle.Mesh,
                              particle.Material ? std::vector<AssetId>{particle.Material} : std::vector<AssetId>{},
+                             {},
                              {},
                              Math::ComposeTransform(particle.Position,
                                                     Math::EulerDegreesToQuaternion(particle.Rotation),
@@ -706,6 +708,7 @@ namespace Keire::RenderBackend
         AssetId Scene;
         RenderCamera Camera;
         RenderEnvironmentSettings Environment;
+        std::map<std::string, MaterialPropertyValue, std::less<>> GlobalMaterialProperties;
         SceneLighting Lighting;
         std::vector<SceneDrawItem> DrawItems;
         std::vector<SceneLocalLight> LocalLights;

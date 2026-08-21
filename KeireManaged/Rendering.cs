@@ -2,6 +2,7 @@ namespace Keire;
 
 public sealed class Mesh;
 public sealed class Material;
+public sealed class MaterialParameterCollection;
 public sealed class Shader;
 public sealed class Texture;
 
@@ -168,6 +169,13 @@ public readonly record struct MeshRendererHandle(Entity Entity)
                                                 value);
     }
     public MaterialPropertyBlock PropertyBlock => new(Entity);
+
+    public MaterialInstanceHandle GetMaterialInstance(int materialSlot = 0)
+    {
+        if (materialSlot is < 0 or > 255)
+            throw new ArgumentOutOfRangeException(nameof(materialSlot), "Material slots must be in the range 0..255.");
+        return new MaterialInstanceHandle(Entity, (uint)materialSlot);
+    }
 }
 
 public readonly record struct MaterialPropertyBlock(Entity Entity)
@@ -187,6 +195,72 @@ public readonly record struct MaterialPropertyBlock(Entity Entity)
         NativeRuntimeRendering.SetMaterialProperty(Entity, name, value.Id);
     public bool Reset(string name) => NativeRuntimeRendering.ResetMaterialProperty(Entity, name);
     public void Clear() => NativeRuntimeRendering.ClearMaterialProperties(Entity);
+}
+
+public readonly record struct MaterialInstanceHandle(Entity Entity, uint MaterialSlot)
+{
+    public AssetReference<Material> SharedMaterial
+    {
+        get
+        {
+            IReadOnlyList<AssetReference<Material>> materials = NativeRuntimeRendering.GetMaterials(Entity);
+            return MaterialSlot < (uint)materials.Count ? materials[(int)MaterialSlot] : default;
+        }
+    }
+
+    public void SetFloat(string name, float value)
+    {
+        if (!float.IsFinite(value))
+            throw new ArgumentOutOfRangeException(nameof(value), "Material floats must be finite.");
+        NativeRuntimeRendering.SetMaterialInstanceProperty(Entity, MaterialSlot, name, value);
+    }
+
+    public void SetVector(string name, Vector2 value) =>
+        NativeRuntimeRendering.SetMaterialInstanceProperty(Entity, MaterialSlot, name, value);
+    public void SetVector(string name, Vector3 value) =>
+        NativeRuntimeRendering.SetMaterialInstanceProperty(Entity, MaterialSlot, name, value);
+    public void SetVector(string name, Vector4 value) =>
+        NativeRuntimeRendering.SetMaterialInstanceProperty(Entity, MaterialSlot, name, value);
+    public void SetColor(string name, Color value) =>
+        NativeRuntimeRendering.SetMaterialInstanceProperty(Entity, MaterialSlot, name, value);
+    public void SetTexture(string name, AssetReference<Texture> value) =>
+        NativeRuntimeRendering.SetMaterialInstanceProperty(Entity, MaterialSlot, name, value.Id);
+    public bool Reset(string name) =>
+        NativeRuntimeRendering.ResetMaterialInstanceProperty(Entity, MaterialSlot, name);
+    public void Clear() => NativeRuntimeRendering.ClearMaterialInstanceProperties(Entity, MaterialSlot);
+}
+
+public readonly record struct MaterialParameterCollectionHandle(AssetReference<MaterialParameterCollection> Asset)
+{
+    public bool IsReady => Asset.IsValid && NativeRuntimeRendering.MaterialParameterCollectionReady(Asset.Id);
+
+    public void SetFloat(string name, float value)
+    {
+        if (!float.IsFinite(value))
+            throw new ArgumentOutOfRangeException(nameof(value), "Material parameters must be finite.");
+        NativeRuntimeRendering.SetMaterialParameter(Asset.Id, name, value);
+    }
+
+    public void SetVector(string name, Vector2 value) => NativeRuntimeRendering.SetMaterialParameter(Asset.Id, name, value);
+    public void SetVector(string name, Vector3 value) => NativeRuntimeRendering.SetMaterialParameter(Asset.Id, name, value);
+    public void SetVector(string name, Vector4 value) => NativeRuntimeRendering.SetMaterialParameter(Asset.Id, name, value);
+    public void SetColor(string name, Color value) => NativeRuntimeRendering.SetMaterialParameter(Asset.Id, name, value);
+    public void SetTexture(string name, AssetReference<Texture> value) =>
+        NativeRuntimeRendering.SetMaterialParameter(Asset.Id, name, value.Id);
+    public bool Reset(string name) => NativeRuntimeRendering.ResetMaterialParameter(Asset.Id, name);
+    public void Clear() => NativeRuntimeRendering.ClearMaterialParameters(Asset.Id);
+}
+
+public static class GlobalMaterialParameters
+{
+    public static MaterialParameterCollectionHandle Open(
+        AssetReference<MaterialParameterCollection> collection)
+    {
+        if (!collection.IsValid)
+            throw new ArgumentException("A valid Material Parameter Collection asset is required.", nameof(collection));
+        _ = NativeRuntimeRendering.MaterialParameterCollectionReady(collection.Id);
+        return new MaterialParameterCollectionHandle(collection);
+    }
 }
 
 internal readonly record struct LightHandle(Entity Entity, NativeRenderingComponent Component)

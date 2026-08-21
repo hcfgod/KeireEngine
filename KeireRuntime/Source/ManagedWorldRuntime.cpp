@@ -228,6 +228,7 @@ namespace KeireRuntime
     void ManagedWorldRuntimeServices::UnbindManagedWorld() noexcept
     {
         m_ManagedWorld.CancelAll();
+        m_MaterialParameters.Close();
         m_ManagedInputOperations.CancelAll();
         m_Application = nullptr;
         m_Runtime = nullptr;
@@ -267,6 +268,11 @@ namespace KeireRuntime
     const Keire::RenderEnvironmentSettings& ManagedWorldRuntimeServices::RenderEnvironment() const noexcept
     {
         return m_Rendering;
+    }
+
+    std::map<std::string, Keire::MaterialPropertyValue, std::less<>> ManagedWorldRuntimeServices::MaterialParameters()
+    {
+        return m_MaterialParameters.Snapshot();
     }
 
     std::uint64_t ManagedWorldRuntimeServices::BeginManagedSceneLoad(const Keire::AssetId scene,
@@ -416,6 +422,58 @@ namespace KeireRuntime
             Keire::ValidateRenderEnvironmentSettings(settings);
             m_Rendering = std::move(settings);
             return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    bool ManagedWorldRuntimeServices::ManagedMaterialParameterCollectionReady(const Keire::AssetId collection) noexcept
+    {
+        try
+        {
+            return m_Application && m_MaterialParameters.Ready(m_Application->Assets(), collection);
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    bool ManagedWorldRuntimeServices::SetManagedMaterialParameter(const Keire::AssetId collection,
+                                                                  const std::string_view name,
+                                                                  Keire::MaterialPropertyValue value) noexcept
+    {
+        try
+        {
+            return m_Application &&
+                   m_MaterialParameters.Set(m_Application->Assets(), collection, name, std::move(value));
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    bool ManagedWorldRuntimeServices::ResetManagedMaterialParameter(const Keire::AssetId collection,
+                                                                    const std::string_view name) noexcept
+    {
+        try
+        {
+            return m_Application && m_MaterialParameters.Reset(m_Application->Assets(), collection, name);
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    bool ManagedWorldRuntimeServices::ClearManagedMaterialParameters(const Keire::AssetId collection) noexcept
+    {
+        try
+        {
+            return m_Application && m_MaterialParameters.Clear(m_Application->Assets(), collection);
         }
         catch (...)
         {

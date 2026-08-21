@@ -4,6 +4,7 @@
 #include "Keire/ECS/Component.h"
 #include "Keire/Rendering/Lighting.h"
 
+#include <cstddef>
 #include <map>
 #include <span>
 #include <string>
@@ -42,6 +43,12 @@ namespace Keire
         {
             return m_MaterialProperties;
         }
+        [[nodiscard]] const std::map<std::string, MaterialPropertyValue, std::less<>>&
+        MaterialInstanceProperties(std::size_t slot) const noexcept;
+        [[nodiscard]] const auto& AllMaterialInstanceProperties() const noexcept
+        {
+            return m_MaterialInstanceProperties;
+        }
 
         void SetMesh(AssetId mesh);
         void SetMaterial(AssetId material);
@@ -58,6 +65,9 @@ namespace Keire
         void SetMaterialProperty(std::string name, MaterialPropertyValue value);
         [[nodiscard]] bool ResetMaterialProperty(std::string_view name);
         void ClearMaterialProperties();
+        void SetMaterialInstanceProperty(std::size_t slot, std::string name, MaterialPropertyValue value);
+        [[nodiscard]] bool ResetMaterialInstanceProperty(std::size_t slot, std::string_view name);
+        void ClearMaterialInstanceProperties(std::size_t slot);
         void Reset();
 
       private:
@@ -74,6 +84,7 @@ namespace Keire
         bool m_PreserveLightmapUVs = true;
         // Property blocks are transient runtime state and intentionally do not participate in scene serialization.
         std::map<std::string, MaterialPropertyValue, std::less<>> m_MaterialProperties;
+        std::map<std::size_t, std::map<std::string, MaterialPropertyValue, std::less<>>> m_MaterialInstanceProperties;
     };
 
     [[nodiscard]] KEIRE_API ComponentRegistration CreateMeshRendererComponentRegistration();

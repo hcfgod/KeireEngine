@@ -1037,6 +1037,11 @@ TEST_CASE("camera and mesh renderer components validate renderer-neutral authori
     CHECK(renderer->Mesh() == Keire::MeshAsset::CubeId());
     CHECK(renderer->Materials().size() == 3);
     CHECK(renderer->Material(2) == Keire::AssetId::Parse("b1b2c3d4-1000-4000-8000-000000000003"));
+    renderer->SetMaterialInstanceProperty(2, "EmissiveStrength", 4.0F);
+    CHECK(std::get<float>(renderer->MaterialInstanceProperties(2).at("EmissiveStrength")) == doctest::Approx(4.0F));
+    renderer->SetMaterial(2, Keire::AssetId::Parse("b1b2c3d4-1000-4000-8000-000000000004"));
+    CHECK(renderer->MaterialInstanceProperties(2).empty());
+    CHECK_THROWS_AS(renderer->SetMaterialInstanceProperty(256, "Invalid", 1.0F), std::out_of_range);
     CHECK_THROWS_AS(renderer->SetTint({2.0F, 0.0F, 0.0F, 1.0F}), std::invalid_argument);
 
     auto light = Keire::CreateRef<Keire::DirectionalLightComponent>();

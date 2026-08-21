@@ -5,6 +5,10 @@ versions.
 
 ## Unreleased
 
+- Added managed per-material-slot Dynamic Material Instance handles and world-owned global Material Parameter
+  Collections. Global defaults and hot-reload-compatible overrides now feed numeric, vector, color, and texture graph
+  bindings before renderer-wide and slot-specific values, with bounded deterministic precedence and no mutable GPU
+  handles exposed to C#.
 - Removed the built-in managed weapon, ammunition, magazine, damage, ballistics, recoil, loadout, presentation, and HUD
   frameworks. Combat policy now lives in each game's C# assembly; the Sandbox and Hub starter keep an editable project
   example that composes generic Kéire services. Renamed the managed regression harness to `test-managed-api`.

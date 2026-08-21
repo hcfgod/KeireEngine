@@ -521,6 +521,12 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     QueryManagedEntityComponents(Keire::ComponentTypeId component, std::size_t maximum) const override;
     [[nodiscard]] std::optional<Keire::RenderEnvironmentSettings> ManagedRenderEnvironment() const noexcept override;
     [[nodiscard]] bool SetManagedRenderEnvironment(Keire::RenderEnvironmentSettings settings) noexcept override;
+    [[nodiscard]] bool ManagedMaterialParameterCollectionReady(Keire::AssetId collection) noexcept override;
+    [[nodiscard]] bool SetManagedMaterialParameter(Keire::AssetId collection, std::string_view name,
+                                                   Keire::MaterialPropertyValue value) noexcept override;
+    [[nodiscard]] bool ResetManagedMaterialParameter(Keire::AssetId collection,
+                                                     std::string_view name) noexcept override;
+    [[nodiscard]] bool ClearManagedMaterialParameters(Keire::AssetId collection) noexcept override;
     [[nodiscard]] Keire::Vector2 ReadManagedInput(std::string_view action) noexcept override;
     [[nodiscard]] Keire::ManagedInputState ReadManagedInputState(std::string_view action) noexcept override;
     [[nodiscard]] std::vector<Keire::ManagedInputDevice> ManagedInputDevices() const override;
@@ -746,6 +752,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     bool m_ManagedCursorVisible = true;
     bool m_ManagedCursorLocked = false;
     std::optional<Keire::RenderEnvironmentSettings> m_ManagedRenderEnvironmentOverride;
+    Keire::Detail::ManagedMaterialParameterStore m_ManagedMaterialParameters;
     bool m_GameViewportInputActive = false;
     bool m_GameViewportCaptureSuspended = false;
     std::uint32_t m_SuppressManagedLookFrames = 0;

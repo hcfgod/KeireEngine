@@ -94,6 +94,23 @@ internal static unsafe class NativeRuntimeRendering
     internal static delegate* unmanaged<ulong, ulong, NativeString, AssetId, byte> SetMaterialTextureIcall;
     internal static delegate* unmanaged<ulong, ulong, NativeString, byte> ResetMaterialPropertyIcall;
     internal static delegate* unmanaged<ulong, ulong, byte> ClearMaterialPropertiesIcall;
+    internal static delegate* unmanaged<ulong, ulong, uint, NativeString, float, byte> SetMaterialInstanceFloatIcall;
+    internal static delegate* unmanaged<ulong, ulong, uint, NativeString, Vector2, byte> SetMaterialInstanceVector2Icall;
+    internal static delegate* unmanaged<ulong, ulong, uint, NativeString, Vector3, byte> SetMaterialInstanceVector3Icall;
+    internal static delegate* unmanaged<ulong, ulong, uint, NativeString, Vector4, byte> SetMaterialInstanceVector4Icall;
+    internal static delegate* unmanaged<ulong, ulong, uint, NativeString, Color, byte> SetMaterialInstanceColorIcall;
+    internal static delegate* unmanaged<ulong, ulong, uint, NativeString, AssetId, byte> SetMaterialInstanceTextureIcall;
+    internal static delegate* unmanaged<ulong, ulong, uint, NativeString, byte> ResetMaterialInstancePropertyIcall;
+    internal static delegate* unmanaged<ulong, ulong, uint, byte> ClearMaterialInstancePropertiesIcall;
+    internal static delegate* unmanaged<ulong, ulong, byte> MaterialParameterCollectionReadyIcall;
+    internal static delegate* unmanaged<ulong, ulong, NativeString, float, byte> SetMaterialParameterFloatIcall;
+    internal static delegate* unmanaged<ulong, ulong, NativeString, Vector2, byte> SetMaterialParameterVector2Icall;
+    internal static delegate* unmanaged<ulong, ulong, NativeString, Vector3, byte> SetMaterialParameterVector3Icall;
+    internal static delegate* unmanaged<ulong, ulong, NativeString, Vector4, byte> SetMaterialParameterVector4Icall;
+    internal static delegate* unmanaged<ulong, ulong, NativeString, Color, byte> SetMaterialParameterColorIcall;
+    internal static delegate* unmanaged<ulong, ulong, NativeString, AssetId, byte> SetMaterialParameterTextureIcall;
+    internal static delegate* unmanaged<ulong, ulong, NativeString, byte> ResetMaterialParameterIcall;
+    internal static delegate* unmanaged<ulong, ulong, byte> ClearMaterialParametersIcall;
 #pragma warning restore CS0649
 
     internal static float GetScalar(Entity entity, NativeRenderingComponent component,
@@ -252,6 +269,71 @@ internal static unsafe class NativeRuntimeRendering
             throw new InvalidOperationException("The Mesh Renderer material property block could not be cleared.");
     }
 
+    internal static void SetMaterialInstanceProperty(Entity entity, uint slot, string name, float value) =>
+        SetMaterialInstanceProperty(entity, slot, name, value, SetMaterialInstanceFloatIcall);
+
+    internal static void SetMaterialInstanceProperty(Entity entity, uint slot, string name, Vector2 value) =>
+        SetMaterialInstanceProperty(entity, slot, name, value, SetMaterialInstanceVector2Icall);
+
+    internal static void SetMaterialInstanceProperty(Entity entity, uint slot, string name, Vector3 value) =>
+        SetMaterialInstanceProperty(entity, slot, name, value, SetMaterialInstanceVector3Icall);
+
+    internal static void SetMaterialInstanceProperty(Entity entity, uint slot, string name, Vector4 value) =>
+        SetMaterialInstanceProperty(entity, slot, name, value, SetMaterialInstanceVector4Icall);
+
+    internal static void SetMaterialInstanceProperty(Entity entity, uint slot, string name, Color value) =>
+        SetMaterialInstanceProperty(entity, slot, name, value, SetMaterialInstanceColorIcall);
+
+    internal static void SetMaterialInstanceProperty(Entity entity, uint slot, string name, AssetId value) =>
+        SetMaterialInstanceProperty(entity, slot, name, value, SetMaterialInstanceTextureIcall);
+
+    internal static bool ResetMaterialInstanceProperty(Entity entity, uint slot, string name)
+    {
+        ValidatePropertyName(name);
+        using NativeString nativeName = name;
+        return ResetMaterialInstancePropertyIcall(entity.Id.High, entity.Id.Low, slot, nativeName) != 0;
+    }
+
+    internal static void ClearMaterialInstanceProperties(Entity entity, uint slot)
+    {
+        if (ClearMaterialInstancePropertiesIcall(entity.Id.High, entity.Id.Low, slot) == 0)
+            throw new InvalidOperationException("The Dynamic Material Instance could not be cleared.");
+    }
+
+    internal static bool MaterialParameterCollectionReady(AssetId collection) =>
+        MaterialParameterCollectionReadyIcall(collection.High, collection.Low) != 0;
+
+    internal static void SetMaterialParameter(AssetId collection, string name, float value) =>
+        SetMaterialParameter(collection, name, value, SetMaterialParameterFloatIcall);
+
+    internal static void SetMaterialParameter(AssetId collection, string name, Vector2 value) =>
+        SetMaterialParameter(collection, name, value, SetMaterialParameterVector2Icall);
+
+    internal static void SetMaterialParameter(AssetId collection, string name, Vector3 value) =>
+        SetMaterialParameter(collection, name, value, SetMaterialParameterVector3Icall);
+
+    internal static void SetMaterialParameter(AssetId collection, string name, Vector4 value) =>
+        SetMaterialParameter(collection, name, value, SetMaterialParameterVector4Icall);
+
+    internal static void SetMaterialParameter(AssetId collection, string name, Color value) =>
+        SetMaterialParameter(collection, name, value, SetMaterialParameterColorIcall);
+
+    internal static void SetMaterialParameter(AssetId collection, string name, AssetId value) =>
+        SetMaterialParameter(collection, name, value, SetMaterialParameterTextureIcall);
+
+    internal static bool ResetMaterialParameter(AssetId collection, string name)
+    {
+        ValidatePropertyName(name);
+        using NativeString nativeName = name;
+        return ResetMaterialParameterIcall(collection.High, collection.Low, nativeName) != 0;
+    }
+
+    internal static void ClearMaterialParameters(AssetId collection)
+    {
+        if (ClearMaterialParametersIcall(collection.High, collection.Low) == 0)
+            throw new InvalidOperationException("The Material Parameter Collection could not be cleared.");
+    }
+
     private static void SetMaterialProperty<T>(Entity entity, string name, T value,
                                                 delegate* unmanaged<ulong, ulong, NativeString, T, byte> setter)
         where T : unmanaged
@@ -260,6 +342,24 @@ internal static unsafe class NativeRuntimeRendering
         using NativeString nativeName = name;
         if (setter(entity.Id.High, entity.Id.Low, nativeName, value) == 0)
             throw new InvalidOperationException($"Material property '{name}' could not be changed.");
+    }
+
+    private static void SetMaterialInstanceProperty<T>(Entity entity, uint slot, string name, T value,
+        delegate* unmanaged<ulong, ulong, uint, NativeString, T, byte> setter) where T : unmanaged
+    {
+        ValidatePropertyName(name);
+        using NativeString nativeName = name;
+        if (setter(entity.Id.High, entity.Id.Low, slot, nativeName, value) == 0)
+            throw new InvalidOperationException($"Dynamic Material Instance property '{name}' could not be changed.");
+    }
+
+    private static void SetMaterialParameter<T>(AssetId collection, string name, T value,
+        delegate* unmanaged<ulong, ulong, NativeString, T, byte> setter) where T : unmanaged
+    {
+        ValidatePropertyName(name);
+        using NativeString nativeName = name;
+        if (setter(collection.High, collection.Low, nativeName, value) == 0)
+            throw new InvalidOperationException($"Global material parameter '{name}' could not be changed.");
     }
 
     private static void ValidatePropertyName(string name)

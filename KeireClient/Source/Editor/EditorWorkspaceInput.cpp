@@ -227,6 +227,60 @@ bool EditorWorkspaceLayer::SetManagedRenderEnvironment(Keire::RenderEnvironmentS
     }
 }
 
+bool EditorWorkspaceLayer::ManagedMaterialParameterCollectionReady(const Keire::AssetId collection) noexcept
+{
+    try
+    {
+        return m_SceneDocument && m_SceneDocument->PlaySession() &&
+               m_ManagedMaterialParameters.Ready(Owner().Assets(), collection);
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+bool EditorWorkspaceLayer::SetManagedMaterialParameter(const Keire::AssetId collection, const std::string_view name,
+                                                       Keire::MaterialPropertyValue value) noexcept
+{
+    try
+    {
+        return m_SceneDocument && m_SceneDocument->PlaySession() &&
+               m_ManagedMaterialParameters.Set(Owner().Assets(), collection, name, std::move(value));
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+bool EditorWorkspaceLayer::ResetManagedMaterialParameter(const Keire::AssetId collection,
+                                                         const std::string_view name) noexcept
+{
+    try
+    {
+        return m_SceneDocument && m_SceneDocument->PlaySession() &&
+               m_ManagedMaterialParameters.Reset(Owner().Assets(), collection, name);
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+bool EditorWorkspaceLayer::ClearManagedMaterialParameters(const Keire::AssetId collection) noexcept
+{
+    try
+    {
+        return m_SceneDocument && m_SceneDocument->PlaySession() &&
+               m_ManagedMaterialParameters.Clear(Owner().Assets(), collection);
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
 Keire::ManagedApplicationInfo EditorWorkspaceLayer::ManagedApplication() const
 {
     const auto& specification = Owner().Specification();
