@@ -97,8 +97,10 @@ switch ($Generator) {
     }
 }
 
-& (Join-Path $PSScriptRoot "stage-managed-host.ps1") -Root $Root -Configuration $Configuration `
-    -Architecture $Architecture -Target $Target -IfPresent
+foreach ($managedHostTarget in @(Get-ManagedHostStagingTargets -Project $Project -Target $Target)) {
+    & (Join-Path $PSScriptRoot "stage-managed-host.ps1") -Root $Root -Configuration $Configuration `
+        -Architecture $Architecture -Target $managedHostTarget -IfPresent
+}
 
 if ($Target -in @($Project.HUB_TARGET, $Project.CLIENT_TARGET)) {
     $outputArchitecture = Get-ArchitectureOutputName $Architecture

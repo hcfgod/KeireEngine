@@ -32,7 +32,9 @@ case "$GENERATOR" in
     gmake) printf '==> Building %s %s for %s with GNU Make\n' "$TARGET" "$CONFIGURATION" "$ARCHITECTURE"; make -j "$(build_parallel_jobs)" -C "$ROOT" "config=$(printf '%s' "$CONFIGURATION" | tr '[:upper:]' '[:lower:]')" "$TARGET" ;;
     *) printf "Unsupported build generator '%s'.\n" "$GENERATOR" >&2; exit 1 ;;
 esac
-bash "$ROOT/Scripts/Unix/stage-managed-host.sh" "$ROOT" "$CONFIGURATION" linux "$ARCHITECTURE" "$TARGET"
+while IFS= read -r managed_host_target; do
+    bash "$ROOT/Scripts/Unix/stage-managed-host.sh" "$ROOT" "$CONFIGURATION" linux "$ARCHITECTURE" "$managed_host_target"
+done < <(managed_host_staging_targets "$TARGET" "$CLIENT_TARGET" "$HUB_TARGET" "$PROJECT_NAMESPACE")
 if [[ "$TARGET" == "$HUB_TARGET" || "$TARGET" == "$CLIENT_TARGET" ]]; then
     output_architecture="$(architecture_output_name "$ARCHITECTURE")"
     dependency_configuration=Debug

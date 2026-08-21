@@ -784,3 +784,19 @@ function Enter-WindowsToolEnvironment {
     }
     return $resolved
 }
+
+function Get-ManagedHostStagingTargets {
+    param(
+        [Parameter(Mandatory = $true)]$Project,
+        [Parameter(Mandatory = $true)][string]$Target
+    )
+
+    $targets = [System.Collections.Generic.List[string]]::new()
+    if ($Target -in @($Project.CLIENT_TARGET, $Project.HUB_TARGET)) {
+        $targets.Add("$($Project.PROJECT_NAMESPACE)AssetTool")
+        $targets.Add("$($Project.PROJECT_NAMESPACE)Runtime")
+        $targets.Add($Project.CLIENT_TARGET)
+    }
+    $targets.Add($Target)
+    return @($targets | Select-Object -Unique)
+}

@@ -9,6 +9,7 @@ function Assert-StagingState {
 }
 
 $root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
+. (Join-Path $root "Scripts\Windows\common.ps1")
 $premakePolicy = Get-Content (Join-Path $root "Scripts\Premake\Common.lua") -Raw
 $managedPremake = Get-Content (Join-Path $root "Scripts\Premake\Managed.lua") -Raw
 $clientPremake = Get-Content (Join-Path $root "KeireClient\premake5.lua") -Raw
@@ -32,6 +33,21 @@ Assert-StagingState ($runtimePremake.Contains("AddKeireManagedRuntimeDependency(
 Assert-StagingState ($assetToolSource.Contains("specification.RuntimeHostDirectory = managedHost;") -and
                      $assetToolSource.Contains('specification.RuntimeRootDirectory = managedHost / "Dotnet";')) `
     "The Asset Tool does not initialize managed type discovery from its staged host."
+
+$stagingProject = [pscustomobject]@{
+    PROJECT_NAMESPACE = "Keire"
+    CLIENT_TARGET = "KeireClient"
+    HUB_TARGET = "KeireHub"
+}
+$clientTargets = @(Get-ManagedHostStagingTargets -Project $stagingProject -Target "KeireClient")
+Assert-StagingState (($clientTargets -join ",") -eq "KeireAssetTool,KeireRuntime,KeireClient") `
+    "Editor builds do not refresh managed hosts for their executable dependencies."
+$hubTargets = @(Get-ManagedHostStagingTargets -Project $stagingProject -Target "KeireHub")
+Assert-StagingState (($hubTargets -join ",") -eq "KeireAssetTool,KeireRuntime,KeireClient,KeireHub") `
+    "Hub builds do not refresh the editor dependency managed hosts."
+$toolTargets = @(Get-ManagedHostStagingTargets -Project $stagingProject -Target "KeireAssetTool")
+Assert-StagingState (($toolTargets -join ",") -eq "KeireAssetTool") `
+    "Direct managed-host target staging changed unexpectedly."
 
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ("keire-managed-host-" + [guid]::NewGuid().ToString("N"))
 try {

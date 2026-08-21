@@ -837,3 +837,13 @@ parse_build_arguments() {
         esac
     done
 }
+
+managed_host_staging_targets() {
+    local target="$1" client_target="$2" hub_target="$3" project_namespace="$4"
+    {
+        if [[ "$target" == "$client_target" || "$target" == "$hub_target" ]]; then
+            printf '%s\n' "${project_namespace}AssetTool" "${project_namespace}Runtime" "$client_target"
+        fi
+        printf '%s\n' "$target"
+    } | awk '!seen[$0]++'
+}
