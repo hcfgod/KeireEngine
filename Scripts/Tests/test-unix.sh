@@ -336,6 +336,9 @@ assert_true grep -F -q 'install_gcc_toolchain' "$ROOT/Scripts/Linux/bootstrap.sh
 assert_true grep -F -q 'ensure_host_clang_toolchain' "$ROOT/Scripts/Linux/bootstrap.sh"
 assert_true grep -F -q 'version_at_least "$clang_version" 14' "$ROOT/Scripts/Linux/bootstrap.sh"
 assert_true grep -F -q 'version_at_least "$clang_version" 16' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'brew list --versions bison' "$ROOT/Scripts/Mac/bootstrap.sh"
+assert_true grep -F -q 'check_version Bison "$("$bison_executable" --version | extract_version)" 3.0' \
+  "$ROOT/Scripts/Mac/bootstrap.sh"
 assert_true grep -F -q 'gcc-environment.sh' "$ROOT/Scripts/Linux/bootstrap.sh"
 assert_true grep -F -q 'activate_linux_toolchain' "$ROOT/Scripts/Linux/build.sh" \
   "$ROOT/Scripts/Linux/generate.sh" "$ROOT/Scripts/Unix/run-target.sh" "$ROOT/Scripts/Unix/package.sh" \
@@ -425,6 +428,10 @@ assert_true grep -F -q 'reinterpret_cast<const UCChar*>(UINTPTR_MAX)' "$coral_wa
 assert_true grep -F -q 'target_compile_options(Coral.Native PRIVATE /wd4996)' "$coral_warning_patch"
 assert_true grep -F -q 'PERL5LIB="$ROOT/Scripts/Dependencies${PERL5LIB:+:$PERL5LIB}"' \
   "$ROOT/Scripts/Unix/shader-compiler.sh"
+assert_true grep -F -q 'bison_prefix="$(brew --prefix bison 2>/dev/null || true)"' \
+  "$ROOT/Scripts/Unix/shader-compiler.sh"
+assert_true grep -F -q 'export PATH="$bison_prefix/bin:$PATH"' "$ROOT/Scripts/Unix/shader-compiler.sh"
+assert_true grep -F -q 'version_at_least "$host_bison_version" 3.0' "$ROOT/Scripts/Unix/shader-compiler.sh"
 assert_true env PERL5LIB="$ROOT/Scripts/Dependencies" perl -MJSON -e \
   'die unless decode_json("{\"ready\":true}")->{ready}'
 assert_true grep -q 'SDL3DebugLibrary' "$ROOT/Scripts/Premake/Common.lua"

@@ -983,7 +983,7 @@ namespace Keire::Detail
                                                             const ManagedRenderingComponent component,
                                                             const ManagedRenderingScalarProperty property) noexcept
     {
-        return Detail::ReadManagedRenderingScalar(ManagedRuntimeScene(), entity, component, property);
+        return Detail::ReadManagedRenderingScalar(ManagedRuntimeScene(entity), entity, component, property);
     }
 
     bool ManagedRuntimeSceneServices::SetManagedRenderingScalar(const AssetId entity,
@@ -991,7 +991,7 @@ namespace Keire::Detail
                                                                 const ManagedRenderingScalarProperty property,
                                                                 const float value) noexcept
     {
-        return Detail::SetManagedRenderingScalar(ManagedRuntimeScene(), entity, component, property, value);
+        return Detail::SetManagedRenderingScalar(ManagedRuntimeScene(entity), entity, component, property, value);
     }
 
     std::optional<std::int32_t>
@@ -999,7 +999,7 @@ namespace Keire::Detail
                                                              const ManagedRenderingComponent component,
                                                              const ManagedRenderingIntegerProperty property) noexcept
     {
-        return Detail::ReadManagedRenderingInteger(ManagedRuntimeScene(), entity, component, property);
+        return Detail::ReadManagedRenderingInteger(ManagedRuntimeScene(entity), entity, component, property);
     }
 
     bool ManagedRuntimeSceneServices::SetManagedRenderingInteger(const AssetId entity,
@@ -1007,7 +1007,7 @@ namespace Keire::Detail
                                                                  const ManagedRenderingIntegerProperty property,
                                                                  const std::int32_t value) noexcept
     {
-        return Detail::SetManagedRenderingInteger(ManagedRuntimeScene(), entity, component, property, value);
+        return Detail::SetManagedRenderingInteger(ManagedRuntimeScene(entity), entity, component, property, value);
     }
 
     std::optional<bool>
@@ -1015,7 +1015,7 @@ namespace Keire::Detail
                                                           const ManagedRenderingComponent component,
                                                           const ManagedRenderingFlagProperty property) noexcept
     {
-        return Detail::ReadManagedRenderingFlag(ManagedRuntimeScene(), entity, component, property);
+        return Detail::ReadManagedRenderingFlag(ManagedRuntimeScene(entity), entity, component, property);
     }
 
     bool ManagedRuntimeSceneServices::SetManagedRenderingFlag(const AssetId entity,
@@ -1023,7 +1023,7 @@ namespace Keire::Detail
                                                               const ManagedRenderingFlagProperty property,
                                                               const bool value) noexcept
     {
-        return Detail::SetManagedRenderingFlag(ManagedRuntimeScene(), entity, component, property, value);
+        return Detail::SetManagedRenderingFlag(ManagedRuntimeScene(entity), entity, component, property, value);
     }
 
     std::optional<Vector2>
@@ -1031,7 +1031,7 @@ namespace Keire::Detail
                                                             const ManagedRenderingComponent component,
                                                             const ManagedRenderingVectorProperty property) noexcept
     {
-        return Detail::ReadManagedRenderingVector(ManagedRuntimeScene(), entity, component, property);
+        return Detail::ReadManagedRenderingVector(ManagedRuntimeScene(entity), entity, component, property);
     }
 
     bool ManagedRuntimeSceneServices::SetManagedRenderingVector(const AssetId entity,
@@ -1039,7 +1039,7 @@ namespace Keire::Detail
                                                                 const ManagedRenderingVectorProperty property,
                                                                 const Vector2 value) noexcept
     {
-        return Detail::SetManagedRenderingVector(ManagedRuntimeScene(), entity, component, property, value);
+        return Detail::SetManagedRenderingVector(ManagedRuntimeScene(entity), entity, component, property, value);
     }
 
     std::optional<Color>
@@ -1047,7 +1047,7 @@ namespace Keire::Detail
                                                            const ManagedRenderingComponent component,
                                                            const ManagedRenderingColorProperty property) noexcept
     {
-        return Detail::ReadManagedRenderingColor(ManagedRuntimeScene(), entity, component, property);
+        return Detail::ReadManagedRenderingColor(ManagedRuntimeScene(entity), entity, component, property);
     }
 
     bool ManagedRuntimeSceneServices::SetManagedRenderingColor(const AssetId entity,
@@ -1055,7 +1055,7 @@ namespace Keire::Detail
                                                                const ManagedRenderingColorProperty property,
                                                                const Color value) noexcept
     {
-        return Detail::SetManagedRenderingColor(ManagedRuntimeScene(), entity, component, property, value);
+        return Detail::SetManagedRenderingColor(ManagedRuntimeScene(entity), entity, component, property, value);
     }
 
     std::optional<AssetId>
@@ -1063,7 +1063,7 @@ namespace Keire::Detail
                                                            const ManagedRenderingComponent component,
                                                            const ManagedRenderingAssetProperty property) noexcept
     {
-        return Detail::ReadManagedRenderingAsset(ManagedRuntimeScene(), entity, component, property);
+        return Detail::ReadManagedRenderingAsset(ManagedRuntimeScene(entity), entity, component, property);
     }
 
     bool ManagedRuntimeSceneServices::SetManagedRenderingAsset(const AssetId entity,
@@ -1071,54 +1071,55 @@ namespace Keire::Detail
                                                                const ManagedRenderingAssetProperty property,
                                                                const AssetId value) noexcept
     {
-        return Detail::SetManagedRenderingAsset(ManagedRuntimeScene(), entity, component, property, value);
+        return Detail::SetManagedRenderingAsset(ManagedRuntimeScene(entity), entity, component, property, value);
     }
 
     std::optional<std::vector<AssetId>>
     ManagedRuntimeSceneServices::ReadManagedRendererMaterials(const AssetId entity) noexcept
     {
-        return Detail::ReadManagedRendererMaterials(ManagedRuntimeScene(), entity);
+        return Detail::ReadManagedRendererMaterials(ManagedRuntimeScene(entity), entity);
     }
 
     bool ManagedRuntimeSceneServices::SetManagedRendererMaterials(const AssetId entity,
                                                                   const std::span<const AssetId> materials) noexcept
     {
-        return Detail::SetManagedRendererMaterials(ManagedRuntimeScene(), entity, materials);
+        return Detail::SetManagedRendererMaterials(ManagedRuntimeScene(entity), entity, materials);
     }
 
     bool ManagedRuntimeSceneServices::SetManagedMaterialProperty(const AssetId entity, const std::string_view name,
                                                                  MaterialPropertyValue value) noexcept
     {
-        return Detail::SetManagedMaterialProperty(ManagedRuntimeScene(), entity, name, std::move(value));
+        return Detail::SetManagedMaterialProperty(ManagedRuntimeScene(entity), entity, name, std::move(value));
     }
 
     bool ManagedRuntimeSceneServices::ResetManagedMaterialProperty(const AssetId entity,
                                                                    const std::string_view name) noexcept
     {
-        return Detail::ResetManagedMaterialProperty(ManagedRuntimeScene(), entity, name);
+        return Detail::ResetManagedMaterialProperty(ManagedRuntimeScene(entity), entity, name);
     }
 
     bool ManagedRuntimeSceneServices::ClearManagedMaterialProperties(const AssetId entity) noexcept
     {
-        return Detail::ClearManagedMaterialProperties(ManagedRuntimeScene(), entity);
+        return Detail::ClearManagedMaterialProperties(ManagedRuntimeScene(entity), entity);
     }
 
     bool ManagedRuntimeSceneServices::SetManagedMaterialInstanceProperty(const AssetId entity, const std::size_t slot,
                                                                          const std::string_view name,
                                                                          MaterialPropertyValue value) noexcept
     {
-        return Detail::SetManagedMaterialInstanceProperty(ManagedRuntimeScene(), entity, slot, name, std::move(value));
+        return Detail::SetManagedMaterialInstanceProperty(ManagedRuntimeScene(entity), entity, slot, name,
+                                                          std::move(value));
     }
 
     bool ManagedRuntimeSceneServices::ResetManagedMaterialInstanceProperty(const AssetId entity, const std::size_t slot,
                                                                            const std::string_view name) noexcept
     {
-        return Detail::ResetManagedMaterialInstanceProperty(ManagedRuntimeScene(), entity, slot, name);
+        return Detail::ResetManagedMaterialInstanceProperty(ManagedRuntimeScene(entity), entity, slot, name);
     }
 
     bool ManagedRuntimeSceneServices::ClearManagedMaterialInstanceProperties(const AssetId entity,
                                                                              const std::size_t slot) noexcept
     {
-        return Detail::ClearManagedMaterialInstanceProperties(ManagedRuntimeScene(), entity, slot);
+        return Detail::ClearManagedMaterialInstanceProperties(ManagedRuntimeScene(entity), entity, slot);
     }
 } // namespace Keire::Detail

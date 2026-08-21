@@ -305,6 +305,12 @@ $coralRoot = Join-Path (Get-RepositoryRoot) "Patches\Coral"
 $coralScript = Get-Content (Join-Path $Windows "coral.ps1") -Raw
 Assert-True ($coralScript.Contains('git -C $TemporarySource config core.autocrlf false')) `
     "Coral source cache uses deterministic LF checkouts"
+$coralPatchPath = "Patches/Coral/0001-keire-net10-nethost-lifetime.patch"
+$coralPatchEol = ([string](& git -C (Get-RepositoryRoot) check-attr eol -- $coralPatchPath)).Trim()
+Assert-Equal $coralPatchEol "$coralPatchPath`: eol: lf" "Coral patch LF checkout policy"
+$coralHostPatch = Get-Content (Join-Path (Get-RepositoryRoot) $coralPatchPath) -Raw
+Assert-True (-not $coralHostPatch.Contains('\ No newline at end of file')) `
+    "Coral host patch avoids cross-EOL end-of-file context"
 $coralBootstrapPatch = Get-Content (Join-Path $coralRoot "0004-keire-apply-host-settings-before-discovery.patch") -Raw
 Assert-True ($coralBootstrapPatch.IndexOf('m_Settings = std::move(InSettings);') -lt
              $coralBootstrapPatch.IndexOf('if (!LoadHostFXR())')) "Bundled .NET root is installed before Coral host discovery"

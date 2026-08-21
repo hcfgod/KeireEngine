@@ -990,14 +990,21 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
         else if (m_FrameCount >= 8)
             Owner().RequestExit();
     }
-    if (m_SceneDocument->PlaySession())
+    if (m_PlayRuntimeWorld)
     {
         Keire::ProfileScope playUpdate(Owner().GetProfiler(), Keire::ProfileCategory::Scripting, "Play update");
-        m_SceneDocument->PlaySession()->Update(static_cast<float>(time.DeltaTime().Seconds()),
-                                               static_cast<float>(time.InterpolationAlpha()));
-        if (m_SceneDocument->PlaySession()->State() == Keire::ScenePlayState::Faulted && !m_PlayFaultReported)
+        m_PlayRuntimeWorld->Process();
+        const auto active = m_PlayRuntimeWorld->Session(m_PlayRuntimeWorld->Active());
+        if (active && active != m_SceneDocument->PlaySession())
+            m_SceneDocument->SetPlaySession(active);
+        m_PlayRuntimeWorld->Update(static_cast<float>(time.DeltaTime().Seconds()),
+                                   static_cast<float>(time.InterpolationAlpha()));
+        const auto sessions = m_PlayRuntimeWorld->Sessions();
+        const auto faulted = std::ranges::find_if(sessions, [](const auto& session)
+                                                  { return session->State() == Keire::ScenePlayState::Faulted; });
+        if (faulted != sessions.end() && !m_PlayFaultReported)
         {
-            const auto diagnostic = m_SceneDocument->PlaySession()->Diagnostic();
+            const auto diagnostic = (*faulted)->Diagnostic();
             m_SceneDocument->SetStatus(diagnostic.Callback + " failed: " + diagnostic.Message);
             ReportError("Play Mode", m_SceneDocument->Status());
             m_PlayFaultReported = true;

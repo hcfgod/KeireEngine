@@ -5,7 +5,7 @@
 #include "Keire/ECS/Component.h"
 #include "Keire/Ref.h"
 #include "Keire/Rendering/RenderSystem.h"
-#include "Keire/Scenes/SceneSystem.h"
+#include "Keire/Scenes/SceneRuntimeWorld.h"
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
 #include "Keire/Scripting/ManagedDataAsset.h"
 
@@ -211,6 +211,19 @@ namespace Keire
         SceneLoadState State = SceneLoadState::Cancelled;
         float Progress = 0.0F;
         std::string Diagnostic;
+        SceneHandle Handle;
+    };
+
+    struct ManagedSceneHandle
+    {
+        AssetId Scene;
+        SceneHandle Handle;
+    };
+
+    struct ManagedSceneQuery
+    {
+        SceneQueryScope Scope = SceneQueryScope::Active;
+        SceneHandle Scene;
     };
 
     struct ManagedEntityHandle
@@ -337,8 +350,22 @@ namespace Keire
             return std::nullopt;
         }
         [[nodiscard]] virtual bool CancelManagedSceneLoad(std::uint64_t) noexcept { return false; }
+        [[nodiscard]] virtual bool UnloadManagedScene(SceneHandle) noexcept { return false; }
+        [[nodiscard]] virtual bool SetActiveManagedScene(SceneHandle) noexcept { return false; }
+        [[nodiscard]] virtual bool MakeManagedEntityPersistent(ManagedEntityHandle) noexcept { return false; }
         [[nodiscard]] virtual AssetId ActiveManagedScene() const noexcept { return {}; }
         [[nodiscard]] virtual std::vector<AssetId> LoadedManagedScenes() const { return {}; }
+        [[nodiscard]] virtual ManagedSceneHandle ActiveManagedSceneHandle() const noexcept
+        {
+            return {ActiveManagedScene(), {}};
+        }
+        [[nodiscard]] virtual std::vector<ManagedSceneHandle> LoadedManagedSceneHandles() const
+        {
+            std::vector<ManagedSceneHandle> result;
+            for (const auto scene : LoadedManagedScenes())
+                result.push_back({scene, {}});
+            return result;
+        }
         [[nodiscard]] virtual std::vector<std::string> ManagedEntityTags(ManagedEntityHandle) const { return {}; }
         [[nodiscard]] virtual bool AddManagedEntityTag(ManagedEntityHandle, std::string_view) noexcept { return false; }
         [[nodiscard]] virtual bool RemoveManagedEntityTag(ManagedEntityHandle, std::string_view) noexcept
@@ -360,6 +387,25 @@ namespace Keire
                                                                                             std::size_t) const
         {
             return {};
+        }
+        [[nodiscard]] virtual std::vector<ManagedEntityHandle>
+        QueryManagedEntityNamesScoped(std::string_view name, ManagedSceneQuery query, std::size_t maximum) const
+        {
+            return query.Scope == SceneQueryScope::Active ? QueryManagedEntityNames(name, maximum)
+                                                          : std::vector<ManagedEntityHandle>{};
+        }
+        [[nodiscard]] virtual std::vector<ManagedEntityHandle>
+        QueryManagedEntityTagsScoped(std::string_view tag, ManagedSceneQuery query, std::size_t maximum) const
+        {
+            return query.Scope == SceneQueryScope::Active ? QueryManagedEntityTags(tag, maximum)
+                                                          : std::vector<ManagedEntityHandle>{};
+        }
+        [[nodiscard]] virtual std::vector<ManagedEntityHandle>
+        QueryManagedEntityComponentsScoped(ComponentTypeId component, ManagedSceneQuery query,
+                                           std::size_t maximum) const
+        {
+            return query.Scope == SceneQueryScope::Active ? QueryManagedEntityComponents(component, maximum)
+                                                          : std::vector<ManagedEntityHandle>{};
         }
         [[nodiscard]] virtual std::optional<RenderEnvironmentSettings> ManagedRenderEnvironment() const noexcept
         {

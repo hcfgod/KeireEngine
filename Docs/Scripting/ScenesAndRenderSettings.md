@@ -14,10 +14,13 @@ if (active.IsValid)
     Debug.Log($"Active scene: {active.Asset}");
 ```
 
-`SceneHandle` contains only an `AssetId`. Its `IsLoaded` and `IsActive` properties query the current world, so a retained
-handle can become inactive after a scene transition.
+`SceneHandle` contains an asset ID for inspection and an opaque stable runtime identity. Handles returned by the
+runtime are never reused within that Play/runtime world. Its `IsLoaded` and `IsActive` properties query the current
+world, so a retained handle becomes stale after unload rather than addressing a later load of the same asset. The
+one-argument `SceneHandle(AssetId)` constructor remains source-compatible for asset inspection, but only handles
+returned by `SceneManager` have `HasStableIdentity` and can address a specific loaded scene.
 
-## Replace A Scene
+## Load, Activate, And Unload Scenes
 
 Scene loads integrate with Kéire coroutines through `SceneLoadOperation`:
 
@@ -32,7 +35,7 @@ public sealed class LevelExit : Behaviour
 
     private IEnumerator ChangeLevel()
     {
-        SceneLoadOperation load = SceneManager.LoadSceneAsync(_destination);
+        SceneLoadOperation load = SceneManager.LoadSceneAsync(_destination, SceneLoadMode.Additive);
         yield return load;
 
         if (!load.Succeeded)
@@ -41,7 +44,8 @@ public sealed class LevelExit : Behaviour
             yield break;
         }
 
-        Debug.Log($"Activated {load.Scene.Asset}");
+        if (!SceneManager.SetActiveScene(load.Scene))
+            Debug.Error("The loaded scene could not be queued for activation.");
     }
 }
 ```
@@ -50,31 +54,43 @@ The operation exposes `Scene`, `Mode`, `State`, `Progress`, `IsDone`, `Succeeded
 succeeds only while the native asset operation is queued or loading. A terminal operation is retained for bounded
 status inspection; the player reclaims old terminal operations as new transitions are requested.
 
-Packaged-player replacement is transactional:
+`SceneLoadMode.Additive` keeps all existing loaded sessions and does not implicitly change the active scene.
+`SetActiveScene` and `UnloadScene` accept only stable handles returned by the runtime, and take effect at the next safe
+boundary. Unloading the only regular active scene is rejected; use a Single load to replace it transactionally:
 
 1. Kéire loads and validates the destination scene without stopping the current runtime session.
 2. It creates the replacement physics, audio, VFX, UI, and managed-behaviour worlds and starts Play.
 3. It verifies that the replacement has an active camera.
 4. Only then does it publish the replacement and stop the previous session.
 
-During the destination's `Awake`, `OnEnable`, and `Start` callbacks, `SceneManager.ActiveScene` resolves to that
-destination through the callback scope. Outside those callbacks, the previous world remains the committed active scene
-until the complete activation transaction succeeds.
+During the destination's `Awake`, `OnEnable`, and `Start` callbacks, the previous world remains the committed active
+scene until the complete activation transaction succeeds.
 
 An asset, startup, script, subsystem, or camera failure leaves the current gameplay scene running and reports the
 diagnostic through `Error`. Only one managed transition may be pending at a time. Replay-driven players reject runtime
 scene transitions because replacing their recorded world would invalidate deterministic replay ownership.
 
-### Current Loading Modes
+Editor Play Mode and the packaged player use the same runtime-world implementation. Loads, active-handle changes,
+unloads, query scopes, persistent objects, ticking, and per-scene subsystem ownership therefore follow the same
+lifecycle. Stopping Play still discards the complete runtime world and never mutates an authored additive scene.
 
-`SceneLoadMode.Single` is supported by the standalone player. `SceneLoadMode.Additive` is represented for source
-compatibility with the native scene system but is rejected by the managed player today. Kéire will not claim additive
-support until multiple scenes can share and unload render, physics, audio, UI, VFX, and script worlds as one explicit
-transaction.
+## Query Scopes And Persistent Objects
 
-Editor Play Mode reports its active and loaded scene through the same handles. Managed scene replacement is currently
-rejected in Editor Play Mode; test packaged-player transitions in a player build. This avoids silently replacing the
-editor's authored scene or bypassing its Play-session ownership.
+Existing query overloads remain active-scene queries. Pass an explicit `SceneQuery` when additive content is involved:
+
+```csharp
+IReadOnlyList<Entity> allEnemies = SceneManager.FindAllWithTag("Enemy", SceneQuery.Loaded);
+IReadOnlyList<Entity> roomEnemies = SceneManager.FindAllWithTag("Enemy", SceneQuery.In(room.Scene));
+IReadOnlyList<Entity> carried = SceneManager.FindAllWithComponent<PlayerState>(SceneQuery.Persistent);
+```
+
+`SceneQuery.Active` searches only the committed active scene, `Loaded` searches regular loaded scenes in stable load
+order, `In(handle)` addresses one exact scene, and `Persistent` searches only unloaded carrier sessions.
+
+Use `SceneManager.Preserve(entity)` to retain an entity across single transitions or unloads. Kéire promotes the
+entity's hierarchy root, preserving that root, its descendants, their world/entity identities, managed instances, and
+current lifecycle state. Other roots in the retiring scene receive their normal disable/destroy lifecycle. Persistent
+objects finally stop when Play Mode or the player runtime world closes.
 
 ## Runtime Render Environment
 
@@ -113,7 +129,10 @@ as interiors, weather, damage states, cinematics, and accessibility exposure pre
 ## Failure And Lifetime Rules
 
 - Call these APIs only from an active managed gameplay callback or continuation owned by that generation.
-- Treat every `SceneHandle` as non-owning and recheck it after replacement.
+- Treat every `SceneHandle` as non-owning and recheck `IsLoaded` after a safe boundary.
+- Use `SceneQuery.Loaded` or `SceneQuery.In(handle)` deliberately; compatibility query overloads search only the active
+  scene.
+- Preserve an entity once. Preserving a child retains its complete hierarchy root; it does not detach or clone it.
 - Preserve the operation until its coroutine completes if failure diagnostics matter.
 - Do not busy-wait on `Progress`; yield the operation or sample it once per frame.
 - A render-settings assignment is complete or rejected. There is no partially applied environment.
