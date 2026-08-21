@@ -348,6 +348,8 @@ namespace Keire
         [[nodiscard]] bool UnpairDevice(InputUserId user, InputDeviceId device);
         [[nodiscard]] bool SetControlScheme(InputUserId user, std::string scheme, bool locked = true);
         [[nodiscard]] bool ClearControlSchemeLock(InputUserId user);
+        [[nodiscard]] bool SetGamepadRumble(InputDeviceId device, float lowFrequency, float highFrequency,
+                                            TimeStep duration);
         [[nodiscard]] Ref<InputActionContext> CreateActionContext(AssetId asset, InputUserId user,
                                                                   InputContextRole role = InputContextRole::Gameplay);
         [[nodiscard]] Ref<InputActionContext> CreateActionContext(InputActionAssetDefinition definition,

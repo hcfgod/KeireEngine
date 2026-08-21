@@ -542,6 +542,7 @@ namespace
                     m_InputContext = input->CreateActionContext(m_DefaultInput, m_InputUser);
                 }
             }
+            BindManagedInput(m_InputContext, m_InputUser);
         }
 
         void OnDetach() noexcept override

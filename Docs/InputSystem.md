@@ -50,12 +50,17 @@ Replace, Keep Both, or Cancel completion. Destroying the operation, timing out, 
 Profile overrides are separate versioned JSON files, written atomically below the configured preference directory;
 unknown stale binding IDs are ignored.
 
+`SetGamepadRumble` targets a connected logical gamepad with normalized low- and high-frequency motor strengths and a
+duration from zero through 60 seconds. A zero-strength request stops the effect. Keyboard, mouse, disconnected, and
+unsupported gamepad requests return `false`; invalid strengths or durations are rejected before SDL dispatch. The
+managed runtime additionally restricts rumble to devices paired to the active player.
+
 `WindowSystem::SetCursorMode` supports `Normal`, `Hidden`, `Confined`, and `RelativeLocked`. Focus loss temporarily
 releases confinement or relative mode while preserving the requested mode for focus restoration. The public boundary
 contains no SDL window or mouse types.
 
 ## Deliberate Limits
 
-Text entry/IME, touch, pen, sensors, generic joysticks, XR, haptics, networking, recording/replay, and generated C++
-wrappers are outside this milestone. Source assets currently accept the built-in Press, Tap, Hold, MultiTap, Deadzone,
-Scale, Invert, and Normalize behaviors.
+Text entry/IME, touch, pen, sensors, generic joysticks, XR, advanced trigger/adaptive haptics, networking,
+recording/replay, and generated C++ wrappers are outside this milestone. Source assets currently accept the built-in
+Press, Tap, Hold, MultiTap, Deadzone, Scale, Invert, and Normalize behaviors.

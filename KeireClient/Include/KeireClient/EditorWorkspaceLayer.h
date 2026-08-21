@@ -13,6 +13,7 @@
 #include "KeireClient/Editor/ShaderGraphPanel.h"
 #include "KeireClient/Editor/VfxEffectPanel.h"
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
+#include "KeireInternal/Scripting/ManagedRuntimeInput.h"
 #include "KeireInternal/Scripting/ManagedRuntimeRenderingServices.h"
 
 #include <cstddef>
@@ -511,6 +512,22 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] bool SetManagedRenderEnvironment(Keire::RenderEnvironmentSettings settings) noexcept override;
     [[nodiscard]] Keire::Vector2 ReadManagedInput(std::string_view action) noexcept override;
     [[nodiscard]] Keire::ManagedInputState ReadManagedInputState(std::string_view action) noexcept override;
+    [[nodiscard]] std::vector<Keire::ManagedInputDevice> ManagedInputDevices() const override;
+    [[nodiscard]] std::string ManagedInputControlScheme() const override;
+    [[nodiscard]] bool SetManagedInputControlScheme(std::string_view scheme, bool locked) noexcept override;
+    [[nodiscard]] bool ClearManagedInputControlSchemeLock() noexcept override;
+    [[nodiscard]] bool SetManagedGamepadRumble(std::uint32_t device, float lowFrequency, float highFrequency,
+                                               float durationSeconds) noexcept override;
+    [[nodiscard]] std::uint64_t BeginManagedInputRebind(Keire::AssetId binding,
+                                                        Keire::ManagedInputRebindOptions options) noexcept override;
+    [[nodiscard]] std::optional<Keire::ManagedInputRebindSnapshot>
+    ManagedInputRebind(std::uint64_t operation) const noexcept override;
+    [[nodiscard]] bool ResolveManagedInputRebind(std::uint64_t operation,
+                                                 Keire::ManagedInputRebindResolution resolution) noexcept override;
+    [[nodiscard]] bool CancelManagedInputRebind(std::uint64_t operation) noexcept override;
+    [[nodiscard]] bool SaveManagedInputBindings(std::string_view profile) noexcept override;
+    [[nodiscard]] int LoadManagedInputBindings(std::string_view profile) noexcept override;
+    [[nodiscard]] bool ClearManagedInputBindings() noexcept override;
     [[nodiscard]] std::optional<Keire::ManagedRaycastHit>
     RaycastManaged(const Keire::ManagedRaycastQuery& query) noexcept override;
     [[nodiscard]] std::optional<Keire::ManagedRaycastHit>
@@ -713,6 +730,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::string m_PlayerSigningEnvironmentText;
     Keire::Ref<Keire::InputActionContext> m_InputContext;
     Keire::Ref<Keire::InputActionContext> m_GameplayInputContext;
+    Keire::Detail::ManagedInputOperationStore m_ManagedInputOperations;
     std::optional<Keire::InputCaptureOverride> m_ManagedInputCaptureOverride;
     bool m_ManagedCursorVisible = true;
     bool m_ManagedCursorLocked = false;

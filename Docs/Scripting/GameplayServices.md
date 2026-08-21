@@ -92,6 +92,32 @@ for one-shot commands and `Held` for continuous behavior.
 Action names are strings and must match authoring exactly. Configure actions, maps, bindings, and UI-capture policy in
 the [Input Actions Editor](../InputActionsEditor.md).
 
+Device and control-scheme metadata can drive prompts without exposing SDL handles:
+
+```csharp
+InputDevice? gamepad = Input.Devices.FirstOrDefault(device =>
+    device.Type == InputDeviceType.Gamepad && device.Connected && device.Paired);
+
+if (Input.ControlScheme == "Gamepad" && gamepad is { } controller)
+    Input.TrySetGamepadRumble(controller.Id, 0.25f, 0.7f, 0.12f);
+```
+
+Runtime rebinding is a bounded polling operation. Store it across frames, present the candidate and conflict count, then
+resolve it explicitly:
+
+```csharp
+InputRebindOperation rebind = Input.BeginInteractiveRebind(
+    fireBinding,
+    new InputRebindOptions(0.5f, 5.0, InputDeviceMask.All));
+
+InputRebindSnapshot state = rebind.Snapshot;
+if (state.Status == InputRebindStatus.Candidate)
+    rebind.Apply(state.ConflictCount == 0 ? InputRebindResolution.KeepBoth : InputRebindResolution.Replace);
+```
+
+Use `SaveBindingOverrides`, `LoadBindingOverrides`, and `ClearBindingOverrides` with an ASCII profile name to persist
+player-specific overrides atomically. Rebinds cancel on timeout, device loss, explicit cancellation, or runtime teardown.
+
 ## Physics Queries
 
 Use the calling entity as the query context:

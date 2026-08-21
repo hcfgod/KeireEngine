@@ -924,6 +924,11 @@ rebinding. Action definitions are immutable `InputActionAsset` revisions; runtim
 outside source assets. Stable IDs preserve context state across rename and hot reload. Input shuts down before Windowing
 and Assets. Full contracts live in [Input System](InputSystem.md).
 
+Managed gameplay observes bounded device snapshots and the active player control scheme through callback-local runtime
+services. Rebind operations retain native action contexts until completion or cancellation, expose immutable polling
+snapshots, and are cancelled before Play Mode or player teardown. Rumble accepts normalized motor strengths for paired
+gamepads only and degrades to a rejected operation when the platform SDL build has no joystick backend.
+
 `.keireinput` is the first registered typed source importer. It validates bounded versioned JSON and emits deterministic
 canonical bytes into the normal content-addressed cache and cooker. The dockable editor exposes every schema-owned
 action type, value type, control scheme, composite, interaction, and processor while owning only mutable authoring

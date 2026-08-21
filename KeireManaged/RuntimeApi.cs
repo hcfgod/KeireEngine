@@ -112,14 +112,142 @@ public static partial class Time
     public static double Elapsed => NativeRuntime.ElapsedTime;
 }
 
+public enum InputDeviceType : byte
+{
+    Keyboard,
+    Mouse,
+    Gamepad
+}
+
+[Flags]
+public enum InputDeviceMask : byte
+{
+    None = 0,
+    Keyboard = 1 << 0,
+    Mouse = 1 << 1,
+    Gamepad = 1 << 2,
+    All = Keyboard | Mouse | Gamepad
+}
+
+public readonly record struct InputDevice(uint Id, InputDeviceType Type, string Name, bool Connected, bool Paired);
+
+public enum InputRebindStatus : byte
+{
+    Listening,
+    Candidate,
+    Completed,
+    Cancelled,
+    TimedOut
+}
+
+public enum InputRebindResolution : byte
+{
+    Replace,
+    KeepBoth,
+    Cancel
+}
+
+public readonly record struct InputRebindOptions(float MagnitudeThreshold, double TimeoutSeconds,
+                                                 InputDeviceMask AllowedDevices)
+{
+    public static InputRebindOptions Default => new(0.5f, 5.0, InputDeviceMask.All);
+}
+
+public readonly record struct InputRebindSnapshot(AssetId Binding, InputRebindStatus Status, string CandidatePath,
+                                                  double RemainingSeconds, uint ConflictCount);
+
+public readonly struct InputRebindOperation
+{
+    private readonly ulong _id;
+
+    internal InputRebindOperation(ulong id) => _id = id;
+
+    public bool IsValid => _id != 0;
+    public InputRebindSnapshot Snapshot =>
+        IsValid ? NativeInput.RebindSnapshot(_id) : throw new InvalidOperationException("Input rebind is invalid.");
+    public bool Apply(InputRebindResolution resolution) =>
+        IsValid && NativeInput.ResolveRebind(_id, resolution);
+    public bool Cancel() => IsValid && NativeInput.CancelRebind(_id);
+}
+
 public static class Input
 {
+    public static IReadOnlyList<InputDevice> Devices => NativeInput.Devices;
+    public static string ControlScheme => NativeInput.ControlScheme;
     public static Vector2 Axis2D(string action) => NativeRuntime.ReadInputAxis2D(action);
     public static bool Held(string action) => (NativeRuntime.ReadInputState(action) & 1) != 0;
     public static bool Pressed(string action) => (NativeRuntime.ReadInputState(action) & 2) != 0;
     public static bool Released(string action) => (NativeRuntime.ReadInputState(action) & 4) != 0;
     public static bool Button(string action) => Held(action);
     public static float Axis(string action) => Axis2D(action).X;
+
+    public static bool TrySetControlScheme(string scheme, bool locked = true)
+    {
+        if (string.IsNullOrWhiteSpace(scheme) || Encoding.UTF8.GetByteCount(scheme) > 128)
+            throw new ArgumentException("Control scheme names must contain between 1 and 128 UTF-8 bytes.", nameof(scheme));
+        return NativeInput.SetControlScheme(scheme, locked);
+    }
+
+    public static bool ClearControlSchemeLock() => NativeInput.ClearControlSchemeLock();
+
+    public static bool TrySetGamepadRumble(uint device, float lowFrequency, float highFrequency, float durationSeconds)
+    {
+        if (device == 0)
+            throw new ArgumentOutOfRangeException(nameof(device));
+        if (!float.IsFinite(lowFrequency) || lowFrequency < 0.0f || lowFrequency > 1.0f)
+            throw new ArgumentOutOfRangeException(nameof(lowFrequency));
+        if (!float.IsFinite(highFrequency) || highFrequency < 0.0f || highFrequency > 1.0f)
+            throw new ArgumentOutOfRangeException(nameof(highFrequency));
+        if (!float.IsFinite(durationSeconds) || durationSeconds < 0.0f || durationSeconds > 60.0f)
+            throw new ArgumentOutOfRangeException(nameof(durationSeconds));
+        return NativeInput.SetGamepadRumble(device, lowFrequency, highFrequency, durationSeconds);
+    }
+
+    public static InputRebindOperation BeginInteractiveRebind(AssetId binding) =>
+        BeginInteractiveRebind(binding, InputRebindOptions.Default);
+
+    public static InputRebindOperation BeginInteractiveRebind(AssetId binding, InputRebindOptions options)
+    {
+        if (!binding.IsValid)
+            throw new ArgumentException("Interactive rebinding requires a valid binding ID.", nameof(binding));
+        if (!float.IsFinite(options.MagnitudeThreshold) || options.MagnitudeThreshold <= 0.0f ||
+            options.MagnitudeThreshold > 1.0f)
+            throw new ArgumentOutOfRangeException(nameof(options));
+        if (!double.IsFinite(options.TimeoutSeconds) || options.TimeoutSeconds <= 0.0 || options.TimeoutSeconds > 60.0)
+            throw new ArgumentOutOfRangeException(nameof(options));
+        if (options.AllowedDevices == InputDeviceMask.None ||
+            (options.AllowedDevices & ~InputDeviceMask.All) != InputDeviceMask.None)
+            throw new ArgumentOutOfRangeException(nameof(options));
+        ulong operation = NativeInput.BeginRebind(binding, options);
+        return operation != 0 ? new InputRebindOperation(operation) : default;
+    }
+
+    public static bool SaveBindingOverrides(string profile)
+    {
+        ValidateBindingProfile(profile);
+        return NativeInput.SaveBindings(profile);
+    }
+
+    public static int LoadBindingOverrides(string profile)
+    {
+        ValidateBindingProfile(profile);
+        int applied = NativeInput.LoadBindings(profile);
+        if (applied < 0)
+            throw new InvalidOperationException("The native runtime could not load the input binding profile.");
+        return applied;
+    }
+
+    public static bool ClearBindingOverrides() => NativeInput.ClearBindings();
+
+    private static void ValidateBindingProfile(string profile)
+    {
+        if (string.IsNullOrEmpty(profile) || Encoding.UTF8.GetByteCount(profile) > 128 ||
+            profile.Any(character => !char.IsAsciiLetterOrDigit(character) && character != '-' && character != '_'))
+        {
+            throw new ArgumentException("Binding profile names may contain only ASCII letters, digits, '-' and '_'.",
+                                        nameof(profile));
+        }
+    }
 }
 
 public static class Physics

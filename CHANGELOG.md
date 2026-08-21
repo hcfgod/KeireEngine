@@ -5,6 +5,9 @@ versions.
 
 ## Unreleased
 
+- Added managed input device discovery, automatic and locked control-scheme access, bounded interactive rebinding,
+  persistent binding profiles, and normalized gamepad rumble. Completed rebind polling is now safe after the final
+  composite target, and platforms without joystick support reject rumble without affecting keyboard or mouse input.
 - Added managed capsule casts and deterministic bounded sphere overlaps with finite-input validation, trigger and layer
   filtering, native ignored-body resolution, stable scene entity results, and matching Editor Play support.
 - Added managed active/loaded scene handles and coroutine-compatible packaged-player scene replacement with bounded
