@@ -34,6 +34,11 @@ Startup is transactional inside the top-level exception boundary:
 
 If any step fails, shutdown runs for the resources that were acquired. The original exception is rethrown after cleanup.
 
+The standalone player and Editor Play Mode create a `SceneRuntimeWorld` after these services are available. It owns one
+runtime session per additive scene plus any unloaded persistent carriers. Scene load, unload, and active-handle changes
+commit only at application safe boundaries. Fixed/update traversal covers every session in stable load order; closing
+the world stops all sessions in reverse ownership teardown before application services close.
+
 ## Frame Order
 
 ```mermaid

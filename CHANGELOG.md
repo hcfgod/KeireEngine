@@ -15,17 +15,20 @@ versions.
   The packaged managed consumer compiles the new presentation-asset surface against the shipped managed assembly.
   GPU VFX signature validation also rejects out-of-range opcodes through an explicit portable fallback, and streaming
   SHA-256 finalization now enforces its buffered-byte invariant in optimized builds.
+- Added stable runtime scene handles, additive load/unload/activation, explicit active/loaded/specific/persistent query
+  scopes, and hierarchy-root persistence across scene transitions. Packaged runtime and Editor Play Mode now share the
+  same multi-scene lifecycle and managed C# API while single-scene activation remains transactional.
 - Added consistent Unity-style managed Inspector controls for `Behaviour` and managed-data members: true `[Range]`
   sliders, `[Min]`/`[Max]` bounds, `[InspectorStep]`, `[Multiline]`, `[InspectorName]`, headers, and visible read-only
   fields. Metadata validation, hot reload, type catalogs, and 64-bit signed/unsigned editor controls share the same
   bounded contracts.
 - Restored hosted CI parity with local launchers: quality checks use the pinned Clang 22 formatter, Windows shader
   compiler builds use a short Unicode-safe workspace, Linux builds use Clang for the LLVM-derived host shader tool,
-  Windows Coral sources preserve patch-compatible line endings, macOS supplies the shader tool's Perl JSON dependency
-  and selects its keg-only modern Bison, and macOS dependency builds avoid Xcode 16.4's obsolete zlib platform macro.
-  Windows fast checks fall back to `git grep` when `rg` is unavailable, and the strict GCC/Clang/TSan/coverage warnings
-  exposed by the hosted matrix are clean. Cleared the clang-tidy, ShellCheck, and pinned Ruff blockers exposed after the
-  earlier failures were fixed.
+  Windows Coral sources and patch inputs preserve patch-compatible line endings, macOS supplies the shader tool's Perl
+  JSON dependency and selects its keg-only modern Bison, and macOS dependency builds avoid Xcode 16.4's obsolete zlib
+  platform macro. Windows fast checks fall back to `git grep` when `rg` is unavailable, and the strict
+  GCC/Clang/TSan/coverage warnings exposed by the hosted matrix are clean. Cleared the clang-tidy, ShellCheck, and
+  pinned Ruff blockers exposed after the earlier failures were fixed.
 - Added managed per-material-slot Dynamic Material Instance handles and world-owned global Material Parameter
   Collections. Global defaults and hot-reload-compatible overrides now feed numeric, vector, color, and texture graph
   bindings before renderer-wide and slot-specific values, with bounded deterministic precedence and no mutable GPU

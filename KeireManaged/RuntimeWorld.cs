@@ -21,9 +21,52 @@ public enum SceneLoadState : byte
 
 public readonly record struct SceneHandle(AssetId Asset)
 {
+    public SceneHandle(AssetId asset, ulong id) : this(asset) => Id = id;
+
+    public ulong Id { get; init; }
+
     public bool IsValid => Asset.IsValid;
-    public bool IsLoaded => IsValid && SceneManager.LoadedScenes.Contains(this);
-    public bool IsActive => IsValid && SceneManager.ActiveScene.Asset == Asset;
+    public bool HasStableIdentity => IsValid && Id != 0;
+    public bool IsLoaded
+    {
+        get
+        {
+            AssetId asset = Asset;
+            return HasStableIdentity
+                ? SceneManager.LoadedScenes.Contains(this)
+                : IsValid && SceneManager.LoadedScenes.Any(scene => scene.Asset == asset);
+        }
+    }
+    public bool IsActive => HasStableIdentity
+        ? SceneManager.ActiveScene == this
+        : IsValid && SceneManager.ActiveScene.Asset == Asset;
+}
+
+public enum SceneQueryScope : byte
+{
+    Active,
+    Loaded,
+    Persistent,
+    Specific
+}
+
+public readonly record struct SceneQuery
+{
+    private SceneQuery(SceneQueryScope scope, SceneHandle scene) => (Scope, Scene) = (scope, scene);
+
+    public SceneQueryScope Scope { get; }
+    public SceneHandle Scene { get; }
+
+    public static SceneQuery Active => new(SceneQueryScope.Active, default);
+    public static SceneQuery Loaded => new(SceneQueryScope.Loaded, default);
+    public static SceneQuery Persistent => new(SceneQueryScope.Persistent, default);
+
+    public static SceneQuery In(SceneHandle scene)
+    {
+        if (!scene.HasStableIdentity)
+            throw new ArgumentException("A specific scene query requires a valid loaded-scene handle.", nameof(scene));
+        return new SceneQuery(SceneQueryScope.Specific, scene);
+    }
 }
 
 public sealed class SceneLoadOperation : CustomYieldInstruction
@@ -35,7 +78,7 @@ public sealed class SceneLoadOperation : CustomYieldInstruction
 
     private NativeSceneLoadStatus Status => NativeWorld.GetSceneLoadStatus(_operation);
 
-    public SceneHandle Scene => new(Status.Scene);
+    public SceneHandle Scene => new(Status.Scene, Status.Handle);
     public SceneLoadMode Mode => (SceneLoadMode)Status.Mode;
     public SceneLoadState State => (SceneLoadState)Status.State;
     public float Progress => Status.Progress;
@@ -49,34 +92,45 @@ public sealed class SceneLoadOperation : CustomYieldInstruction
 
 public static class SceneManager
 {
-    public static SceneHandle ActiveScene => new(NativeWorld.GetActiveScene());
-    public static IReadOnlyList<SceneHandle> LoadedScenes =>
-        Array.ConvertAll(NativeWorld.GetLoadedScenes(), static scene => new SceneHandle(scene));
+    public static SceneHandle ActiveScene => NativeWorld.GetActiveScene();
+    public static IReadOnlyList<SceneHandle> LoadedScenes => NativeWorld.GetLoadedScenes();
 
     public static Entity FindByName(string name) => FindAllByName(name, 1).FirstOrDefault();
 
     public static IReadOnlyList<Entity> FindAllByName(string name, int maximumResults = 256)
+        => FindAllByName(name, SceneQuery.Active, maximumResults);
+
+    public static IReadOnlyList<Entity> FindAllByName(string name, SceneQuery query, int maximumResults = 256)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         if (Encoding.UTF8.GetByteCount(name) > 256)
             throw new ArgumentException("Entity names cannot exceed 256 UTF-8 bytes.", nameof(name));
         ValidateMaximum(maximumResults);
-        return NativeWorld.QueryEntityNames(name, maximumResults);
+        ValidateQuery(query);
+        return NativeWorld.QueryEntityNames(name, query, maximumResults);
     }
 
     public static Entity FindWithTag(string tag) => FindAllWithTag(tag, 1).FirstOrDefault();
 
     public static IReadOnlyList<Entity> FindAllWithTag(string tag, int maximumResults = 256)
+        => FindAllWithTag(tag, SceneQuery.Active, maximumResults);
+
+    public static IReadOnlyList<Entity> FindAllWithTag(string tag, SceneQuery query, int maximumResults = 256)
     {
         EntityTag.Validate(tag, nameof(tag));
         ValidateMaximum(maximumResults);
-        return NativeWorld.QueryEntityTags(tag, maximumResults);
+        ValidateQuery(query);
+        return NativeWorld.QueryEntityTags(tag, query, maximumResults);
     }
 
     public static IReadOnlyList<Entity> FindAllWithComponent<T>(int maximumResults = 256)
+        => FindAllWithComponent<T>(SceneQuery.Active, maximumResults);
+
+    public static IReadOnlyList<Entity> FindAllWithComponent<T>(SceneQuery query, int maximumResults = 256)
     {
         ValidateMaximum(maximumResults);
-        return NativeWorld.QueryEntityComponents(ComponentType.Of<T>(), maximumResults);
+        ValidateQuery(query);
+        return NativeWorld.QueryEntityComponents(ComponentType.Of<T>(), query, maximumResults);
     }
 
     public static SceneLoadOperation LoadSceneAsync(AssetReference<SceneAsset> scene,
@@ -91,9 +145,36 @@ public static class SceneManager
             throw new ArgumentOutOfRangeException(nameof(mode));
         ulong operation = NativeWorld.BeginSceneLoad(scene, mode);
         if (operation == 0)
-            throw new InvalidOperationException(
-                "The current player context rejected the scene load. Standalone runtime transitions currently require Single mode.");
+            throw new InvalidOperationException("The current runtime context rejected the scene load.");
         return new SceneLoadOperation(operation);
+    }
+
+    public static bool UnloadScene(SceneHandle scene)
+    {
+        if (!scene.HasStableIdentity)
+            return false;
+        return NativeWorld.UnloadScene(scene);
+    }
+
+    public static bool SetActiveScene(SceneHandle scene)
+    {
+        if (!scene.HasStableIdentity)
+            return false;
+        return NativeWorld.SetActiveScene(scene);
+    }
+
+    public static bool Preserve(Entity entity)
+    {
+        if (entity.World == 0 || !entity.Id.IsValid)
+            return false;
+        return NativeWorld.MakeEntityPersistent(entity);
+    }
+
+    private static void ValidateQuery(SceneQuery query)
+    {
+        if (!Enum.IsDefined(query.Scope) ||
+            (query.Scope == SceneQueryScope.Specific ? !query.Scene.HasStableIdentity : query.Scene.Id != 0))
+            throw new ArgumentException("The scene query scope and handle are inconsistent.", nameof(query));
     }
 
     private static void ValidateMaximum(int maximumResults)

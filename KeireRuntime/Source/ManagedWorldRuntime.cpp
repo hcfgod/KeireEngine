@@ -20,7 +20,7 @@ namespace KeireRuntime
         struct ManagedSceneTransition final
         {
             std::uint64_t Operation = 0;
-            Keire::Ref<Keire::SceneLoadOperation> Load;
+            Keire::Ref<Keire::SceneRuntimeLoadOperation> Load;
             std::string Diagnostic;
             bool Activated = false;
             bool ActivationFailed = false;
@@ -40,12 +40,13 @@ namespace KeireRuntime
 
     ManagedWorldRuntime::~ManagedWorldRuntime() { CancelAll(); }
 
-    std::uint64_t ManagedWorldRuntime::Begin(const Keire::Ref<Keire::SceneSystem>& scenes, const Keire::AssetId scene,
-                                             const Keire::SceneLoadMode mode, const bool allowed) noexcept
+    std::uint64_t ManagedWorldRuntime::Begin(const Keire::Ref<Keire::SceneRuntimeWorld>& world,
+                                             const Keire::AssetId scene, const Keire::SceneLoadMode mode,
+                                             const bool allowed) noexcept
     {
         try
         {
-            if (!allowed || !scenes || !scene || mode != Keire::SceneLoadMode::Single)
+            if (!allowed || !world || !world->IsOpen() || !scene)
                 return 0;
             const auto pending = std::ranges::find_if(m_Impl->Transitions,
                                                       [](const ManagedSceneTransition& transition)
@@ -76,7 +77,7 @@ namespace KeireRuntime
             const auto operation = m_Impl->NextOperation++;
             if (m_Impl->NextOperation == 0)
                 ++m_Impl->NextOperation;
-            m_Impl->Transitions.push_back({operation, scenes->Load(scene, mode)});
+            m_Impl->Transitions.push_back({operation, world->Load(scene, mode)});
             return operation;
         }
         catch (...)
@@ -115,8 +116,8 @@ namespace KeireRuntime
                 if (state == Keire::SceneLoadState::Failed)
                     diagnostic = found->Load->Diagnostic().Message;
             }
-            return Keire::ManagedSceneLoadStatus{found->Load->Asset(), found->Load->Mode(), state, progress,
-                                                 std::move(diagnostic)};
+            return Keire::ManagedSceneLoadStatus{found->Load->Asset(),  found->Load->Mode(),  state, progress,
+                                                 std::move(diagnostic), found->Load->Result()};
         }
         catch (...)
         {
@@ -143,11 +144,32 @@ namespace KeireRuntime
         m_Impl->Transitions.clear();
     }
 
-    std::optional<ManagedWorldActivation> ManagedWorldRuntime::Process(
-        const Keire::Ref<Keire::AssetSystem>& assets, const Keire::Ref<Keire::AudioSystem>& audio,
-        const Keire::Ref<Keire::PhysicsSystem>& physics, const Keire::AssetId defaultMixer, const bool deterministic,
-        Keire::AssetId& activatingScene, const ManagedSceneValidator validator) noexcept
+    std::optional<ManagedWorldActivation>
+    ManagedWorldRuntime::Process(const Keire::Ref<Keire::SceneRuntimeWorld>& world, Keire::AssetId& activatingScene,
+                                 const ManagedSceneValidator validator) noexcept
     {
+        if (!world || !world->IsOpen())
+            return std::nullopt;
+        const auto pending =
+            std::ranges::find_if(m_Impl->Transitions,
+                                 [](const ManagedSceneTransition& transition)
+                                 {
+                                     return !transition.Activated && !transition.ActivationFailed &&
+                                            transition.Load->State() != Keire::SceneLoadState::Failed &&
+                                            transition.Load->State() != Keire::SceneLoadState::Cancelled;
+                                 });
+        if (pending != m_Impl->Transitions.end())
+            activatingScene = pending->Load->Asset();
+        try
+        {
+            world->Process(validator);
+        }
+        catch (...)
+        {
+            activatingScene = {};
+            return std::nullopt;
+        }
+        activatingScene = {};
         const auto found = std::ranges::find_if(m_Impl->Transitions,
                                                 [](const ManagedSceneTransition& transition)
                                                 {
@@ -156,30 +178,14 @@ namespace KeireRuntime
                                                 });
         if (found == m_Impl->Transitions.end())
             return std::nullopt;
-        struct ActivationScope final
-        {
-            explicit ActivationScope(Keire::AssetId& current, const Keire::AssetId scene) noexcept : Current(current)
-            {
-                Current = scene;
-            }
-            ~ActivationScope() { Current = {}; }
-            Keire::AssetId& Current;
-        } activationScope(activatingScene, found->Load->Asset());
         try
         {
-            auto replacement =
-                Keire::CreateRef<Keire::SceneRuntimeSession>(found->Load->Result(), assets, audio, physics);
-            if (const auto presentation = replacement->Presentation())
-                presentation->SetDefaultMixer(defaultMixer);
-            replacement->SetDeterministicSimulation(deterministic);
-            replacement->Play();
-            if (replacement->State() == Keire::ScenePlayState::Faulted)
-                throw std::runtime_error("Scene Play failed: " + replacement->Diagnostic().Message);
-            const auto scene = replacement->RuntimeScene();
-            if (!validator || !validator(scene))
-                throw std::runtime_error("The loaded scene has no active camera.");
+            const auto replacement = world->Session(found->Load->Result());
+            const auto scene = replacement ? replacement->RuntimeScene() : Keire::Ref<Keire::Scene>{};
+            if (!replacement || !scene)
+                throw std::runtime_error("The activated scene runtime is unavailable.");
             found->Activated = true;
-            return ManagedWorldActivation{std::move(replacement), scene, replacement->Presentation()};
+            return ManagedWorldActivation{replacement, scene, replacement->Presentation(), found->Load->Mode()};
         }
         catch (const std::exception& error)
         {
@@ -216,6 +222,19 @@ namespace KeireRuntime
         m_ReplaySession = &replaySession;
         m_ReplayStarted = &replayStarted;
         m_DefaultMixer = defaultMixer;
+        try
+        {
+            m_RuntimeWorld = Keire::CreateRef<Keire::SceneRuntimeWorld>(
+                Keire::SceneRuntimeWorldSpecification{.Scenes = application.Scenes(),
+                                                      .Assets = application.Assets(),
+                                                      .Audio = application.Audio(),
+                                                      .Physics = application.Physics(),
+                                                      .DefaultMixer = defaultMixer});
+        }
+        catch (...)
+        {
+            m_RuntimeWorld.Reset();
+        }
     }
 
     void ManagedWorldRuntimeServices::BindManagedInput(Keire::Ref<Keire::InputActionContext>& context,
@@ -228,6 +247,9 @@ namespace KeireRuntime
     void ManagedWorldRuntimeServices::UnbindManagedWorld() noexcept
     {
         m_ManagedWorld.CancelAll();
+        if (m_RuntimeWorld)
+            m_RuntimeWorld->Close();
+        m_RuntimeWorld.Reset();
         m_MaterialParameters.Close();
         m_ManagedInputOperations.CancelAll();
         m_Application = nullptr;
@@ -242,27 +264,40 @@ namespace KeireRuntime
         m_ActivatingScene = {};
     }
 
+    Keire::SceneHandle ManagedWorldRuntimeServices::AdoptManagedScene(Keire::Ref<Keire::SceneRuntimeSession> runtime)
+    {
+        return m_RuntimeWorld ? m_RuntimeWorld->Adopt(std::move(runtime)) : Keire::SceneHandle{};
+    }
+
+    Keire::Ref<Keire::SceneRuntimeWorld> ManagedWorldRuntimeServices::RuntimeWorld() const noexcept
+    {
+        return m_RuntimeWorld;
+    }
+
     bool ManagedWorldRuntimeServices::ProcessManagedSceneTransition(const bool deterministic,
                                                                     const ManagedSceneValidator validator) noexcept
     {
         if (!m_Application || !m_Runtime || !m_Scene || !m_Presentation || !m_ReplaySession)
             return false;
-        auto activation =
-            m_ManagedWorld.Process(m_Application->Assets(), m_Application->Audio(), m_Application->Physics(),
-                                   m_DefaultMixer, deterministic, m_ActivatingScene, validator);
-        if (!activation)
+        try
+        {
+            m_RuntimeWorld->SetDeterministicSimulation(deterministic);
+        }
+        catch (...)
+        {
             return false;
-        const auto previous = std::move(*m_Runtime);
-        const auto previousPresentation = std::move(*m_Presentation);
-        *m_Runtime = std::move(activation->Runtime);
-        *m_Scene = std::move(activation->Scene);
-        *m_Presentation = std::move(activation->Presentation);
-        *m_ReplaySession = *m_Runtime;
-        if (previousPresentation)
-            previousPresentation->Clear();
-        if (previous)
-            previous->Stop();
-        return true;
+        }
+        const auto previous = *m_Runtime;
+        auto activation = m_ManagedWorld.Process(m_RuntimeWorld, m_ActivatingScene, validator);
+        const auto active = m_RuntimeWorld->Session(m_RuntimeWorld->Active());
+        if (active && active != *m_Runtime)
+        {
+            *m_Runtime = active;
+            *m_Scene = active->RuntimeScene();
+            *m_Presentation = active->Presentation();
+            *m_ReplaySession = *m_Runtime;
+        }
+        return activation.has_value() || previous != *m_Runtime;
     }
 
     const Keire::RenderEnvironmentSettings& ManagedWorldRuntimeServices::RenderEnvironment() const noexcept
@@ -279,7 +314,7 @@ namespace KeireRuntime
                                                                      const Keire::SceneLoadMode mode) noexcept
     {
         const bool allowed = m_Application && m_Runtime && *m_Runtime && m_ReplayStarted && !*m_ReplayStarted;
-        return m_ManagedWorld.Begin(allowed ? m_Application->Scenes() : Keire::Ref<Keire::SceneSystem>{}, scene, mode,
+        return m_ManagedWorld.Begin(allowed ? m_RuntimeWorld : Keire::Ref<Keire::SceneRuntimeWorld>{}, scene, mode,
                                     allowed);
     }
 
@@ -294,21 +329,77 @@ namespace KeireRuntime
         return m_ManagedWorld.Cancel(operation);
     }
 
+    bool ManagedWorldRuntimeServices::UnloadManagedScene(const Keire::SceneHandle scene) noexcept
+    {
+        try
+        {
+            return m_RuntimeWorld && m_RuntimeWorld->Unload(scene);
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    bool ManagedWorldRuntimeServices::SetActiveManagedScene(const Keire::SceneHandle scene) noexcept
+    {
+        try
+        {
+            return m_RuntimeWorld && m_RuntimeWorld->SetActive(scene);
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    bool ManagedWorldRuntimeServices::MakeManagedEntityPersistent(const Keire::ManagedEntityHandle entity) noexcept
+    {
+        try
+        {
+            const auto scene = m_RuntimeWorld ? m_RuntimeWorld->FindWorld(entity.World) : Keire::Ref<Keire::Scene>{};
+            const auto target = scene ? scene->FindEntity(Keire::EntityId(entity.Entity)) : Keire::Entity{};
+            return target && m_RuntimeWorld->MakePersistent(target);
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    Keire::ManagedSceneHandle ManagedWorldRuntimeServices::ActiveManagedSceneHandle() const noexcept
+    {
+        const auto handle = m_RuntimeWorld ? m_RuntimeWorld->Active() : Keire::SceneHandle{};
+        return {m_RuntimeWorld ? m_RuntimeWorld->Asset(handle) : Keire::AssetId{}, handle};
+    }
+
     Keire::AssetId ManagedWorldRuntimeServices::ActiveManagedScene() const noexcept
     {
-        return m_ActivatingScene ? m_ActivatingScene : (m_Scene && *m_Scene ? (*m_Scene)->Asset() : Keire::AssetId{});
+        return ActiveManagedSceneHandle().Scene;
+    }
+
+    std::vector<Keire::ManagedSceneHandle> ManagedWorldRuntimeServices::LoadedManagedSceneHandles() const
+    {
+        std::vector<Keire::ManagedSceneHandle> result;
+        if (!m_RuntimeWorld)
+            return result;
+        for (const auto handle : m_RuntimeWorld->LoadedScenes())
+            result.push_back({m_RuntimeWorld->Asset(handle), handle});
+        return result;
     }
 
     std::vector<Keire::AssetId> ManagedWorldRuntimeServices::LoadedManagedScenes() const
     {
-        const auto active = ActiveManagedScene();
-        return active ? std::vector{active} : std::vector<Keire::AssetId>{};
+        std::vector<Keire::AssetId> result;
+        for (const auto scene : LoadedManagedSceneHandles())
+            result.push_back(scene.Scene);
+        return result;
     }
 
     std::vector<std::string>
     ManagedWorldRuntimeServices::ManagedEntityTags(const Keire::ManagedEntityHandle entity) const
     {
-        const auto scene = m_Scene && *m_Scene ? *m_Scene : Keire::Ref<Keire::Scene>{};
+        const auto scene = m_RuntimeWorld ? m_RuntimeWorld->FindWorld(entity.World) : Keire::Ref<Keire::Scene>{};
         const auto target = scene ? scene->FindEntity(Keire::EntityId(entity.Entity)) : Keire::Entity{};
         return target && target.World() == entity.World ? target.Tags() : std::vector<std::string>{};
     }
@@ -318,7 +409,7 @@ namespace KeireRuntime
     {
         try
         {
-            const auto scene = m_Scene && *m_Scene ? *m_Scene : Keire::Ref<Keire::Scene>{};
+            const auto scene = m_RuntimeWorld ? m_RuntimeWorld->FindWorld(entity.World) : Keire::Ref<Keire::Scene>{};
             auto target = scene ? scene->FindEntity(Keire::EntityId(entity.Entity)) : Keire::Entity{};
             return target && target.World() == entity.World && target.AddTag(std::string(tag));
         }
@@ -333,7 +424,7 @@ namespace KeireRuntime
     {
         try
         {
-            const auto scene = m_Scene && *m_Scene ? *m_Scene : Keire::Ref<Keire::Scene>{};
+            const auto scene = m_RuntimeWorld ? m_RuntimeWorld->FindWorld(entity.World) : Keire::Ref<Keire::Scene>{};
             auto target = scene ? scene->FindEntity(Keire::EntityId(entity.Entity)) : Keire::Entity{};
             return target && target.World() == entity.World && target.RemoveTag(tag);
         }
@@ -347,7 +438,7 @@ namespace KeireRuntime
     {
         try
         {
-            const auto scene = m_Scene && *m_Scene ? *m_Scene : Keire::Ref<Keire::Scene>{};
+            const auto scene = m_RuntimeWorld ? m_RuntimeWorld->FindWorld(entity.World) : Keire::Ref<Keire::Scene>{};
             auto target = scene ? scene->FindEntity(Keire::EntityId(entity.Entity)) : Keire::Entity{};
             if (!target || target.World() != entity.World)
                 return false;
@@ -360,11 +451,33 @@ namespace KeireRuntime
         }
     }
 
+    std::vector<Keire::ManagedEntityHandle> ManagedWorldRuntimeServices::QueryManagedEntityNamesScoped(
+        const std::string_view name, const Keire::ManagedSceneQuery query, const std::size_t maximum) const
+    {
+        const auto entities = m_RuntimeWorld ? m_RuntimeWorld->QueryName(name, query.Scope, query.Scene, maximum)
+                                             : std::vector<Keire::Entity>{};
+        std::vector<Keire::ManagedEntityHandle> result;
+        result.reserve(std::min(entities.size(), maximum));
+        for (const auto& entity : entities)
+        {
+            if (result.size() == maximum)
+                break;
+            result.push_back({entity.World(), entity.Id().Value()});
+        }
+        return result;
+    }
+
     std::vector<Keire::ManagedEntityHandle>
     ManagedWorldRuntimeServices::QueryManagedEntityNames(const std::string_view name, const std::size_t maximum) const
     {
-        const auto scene = m_Scene && *m_Scene ? *m_Scene : Keire::Ref<Keire::Scene>{};
-        const auto entities = scene ? scene->QueryName(name) : std::vector<Keire::Entity>{};
+        return QueryManagedEntityNamesScoped(name, {}, maximum);
+    }
+
+    std::vector<Keire::ManagedEntityHandle> ManagedWorldRuntimeServices::QueryManagedEntityTagsScoped(
+        const std::string_view tag, const Keire::ManagedSceneQuery query, const std::size_t maximum) const
+    {
+        const auto entities = m_RuntimeWorld ? m_RuntimeWorld->QueryTag(tag, query.Scope, query.Scene, maximum)
+                                             : std::vector<Keire::Entity>{};
         std::vector<Keire::ManagedEntityHandle> result;
         result.reserve(std::min(entities.size(), maximum));
         for (const auto& entity : entities)
@@ -379,8 +492,14 @@ namespace KeireRuntime
     std::vector<Keire::ManagedEntityHandle>
     ManagedWorldRuntimeServices::QueryManagedEntityTags(const std::string_view tag, const std::size_t maximum) const
     {
-        const auto scene = m_Scene && *m_Scene ? *m_Scene : Keire::Ref<Keire::Scene>{};
-        const auto entities = scene ? scene->QueryTag(tag) : std::vector<Keire::Entity>{};
+        return QueryManagedEntityTagsScoped(tag, {}, maximum);
+    }
+
+    std::vector<Keire::ManagedEntityHandle> ManagedWorldRuntimeServices::QueryManagedEntityComponentsScoped(
+        const Keire::ComponentTypeId component, const Keire::ManagedSceneQuery query, const std::size_t maximum) const
+    {
+        const auto entities = m_RuntimeWorld ? m_RuntimeWorld->Query(component, query.Scope, query.Scene, maximum)
+                                             : std::vector<Keire::Entity>{};
         std::vector<Keire::ManagedEntityHandle> result;
         result.reserve(std::min(entities.size(), maximum));
         for (const auto& entity : entities)
@@ -396,17 +515,7 @@ namespace KeireRuntime
     ManagedWorldRuntimeServices::QueryManagedEntityComponents(const Keire::ComponentTypeId component,
                                                               const std::size_t maximum) const
     {
-        const auto scene = m_Scene && *m_Scene ? *m_Scene : Keire::Ref<Keire::Scene>{};
-        const auto entities = scene ? scene->Query(component) : std::vector<Keire::Entity>{};
-        std::vector<Keire::ManagedEntityHandle> result;
-        result.reserve(std::min(entities.size(), maximum));
-        for (const auto& entity : entities)
-        {
-            if (result.size() == maximum)
-                break;
-            result.push_back({entity.World(), entity.Id().Value()});
-        }
-        return result;
+        return QueryManagedEntityComponentsScoped(component, {}, maximum);
     }
 
     std::optional<Keire::RenderEnvironmentSettings>
@@ -626,14 +735,16 @@ namespace KeireRuntime
     std::optional<Keire::ManagedRaycastHit>
     ManagedWorldRuntimeServices::CapsuleCastManaged(const Keire::ManagedCapsuleCastQuery& query) noexcept
     {
-        return Keire::Detail::QueryManagedCapsule(m_Runtime ? *m_Runtime : Keire::Ref<Keire::SceneRuntimeSession>{},
-                                                  query);
+        const auto runtime =
+            m_RuntimeWorld ? m_RuntimeWorld->SessionForWorld(query.World) : Keire::Ref<Keire::SceneRuntimeSession>{};
+        return Keire::Detail::QueryManagedCapsule(runtime, query);
     }
 
     std::vector<Keire::AssetId>
     ManagedWorldRuntimeServices::OverlapSphereManaged(const Keire::ManagedSphereOverlapQuery& query)
     {
-        return Keire::Detail::QueryManagedSphereOverlap(
-            m_Runtime ? *m_Runtime : Keire::Ref<Keire::SceneRuntimeSession>{}, query);
+        const auto runtime =
+            m_RuntimeWorld ? m_RuntimeWorld->SessionForWorld(query.World) : Keire::Ref<Keire::SceneRuntimeSession>{};
+        return Keire::Detail::QueryManagedSphereOverlap(runtime, query);
     }
 } // namespace KeireRuntime

@@ -20,6 +20,7 @@ namespace Keire
     class Scene;
     class ScenePresentationRuntime;
     class SceneRuntimeSession;
+    class SceneRuntimeWorld;
     class SceneSystem;
 } // namespace Keire
 
@@ -30,6 +31,7 @@ namespace KeireRuntime
         Keire::Ref<Keire::SceneRuntimeSession> Runtime;
         Keire::Ref<Keire::Scene> Scene;
         Keire::Ref<Keire::ScenePresentationRuntime> Presentation;
+        Keire::SceneLoadMode Mode = Keire::SceneLoadMode::Single;
     };
 
     using ManagedSceneValidator = bool (*)(const Keire::Ref<Keire::Scene>& scene);
@@ -43,16 +45,15 @@ namespace KeireRuntime
         ManagedWorldRuntime(const ManagedWorldRuntime&) = delete;
         ManagedWorldRuntime& operator=(const ManagedWorldRuntime&) = delete;
 
-        [[nodiscard]] std::uint64_t Begin(const Keire::Ref<Keire::SceneSystem>& scenes, Keire::AssetId scene,
+        [[nodiscard]] std::uint64_t Begin(const Keire::Ref<Keire::SceneRuntimeWorld>& world, Keire::AssetId scene,
                                           Keire::SceneLoadMode mode, bool allowed) noexcept;
         [[nodiscard]] std::optional<Keire::ManagedSceneLoadStatus> Status(std::uint64_t operation) const noexcept;
         [[nodiscard]] bool Cancel(std::uint64_t operation) noexcept;
         void CancelAll() noexcept;
 
-        [[nodiscard]] std::optional<ManagedWorldActivation>
-        Process(const Keire::Ref<Keire::AssetSystem>& assets, const Keire::Ref<Keire::AudioSystem>& audio,
-                const Keire::Ref<Keire::PhysicsSystem>& physics, Keire::AssetId defaultMixer, bool deterministic,
-                Keire::AssetId& activatingScene, ManagedSceneValidator validator) noexcept;
+        [[nodiscard]] std::optional<ManagedWorldActivation> Process(const Keire::Ref<Keire::SceneRuntimeWorld>& world,
+                                                                    Keire::AssetId& activatingScene,
+                                                                    ManagedSceneValidator validator) noexcept;
 
       private:
         class Impl;
@@ -76,7 +77,9 @@ namespace KeireRuntime
                               Keire::AssetId defaultMixer) noexcept;
         void BindManagedInput(Keire::Ref<Keire::InputActionContext>& context, Keire::InputUserId user) noexcept;
         void UnbindManagedWorld() noexcept;
+        [[nodiscard]] Keire::SceneHandle AdoptManagedScene(Keire::Ref<Keire::SceneRuntimeSession> runtime);
         [[nodiscard]] bool ProcessManagedSceneTransition(bool deterministic, ManagedSceneValidator validator) noexcept;
+        [[nodiscard]] Keire::Ref<Keire::SceneRuntimeWorld> RuntimeWorld() const noexcept;
         [[nodiscard]] const Keire::RenderEnvironmentSettings& RenderEnvironment() const noexcept;
         [[nodiscard]] std::map<std::string, Keire::MaterialPropertyValue, std::less<>> MaterialParameters();
 
@@ -86,8 +89,13 @@ namespace KeireRuntime
         [[nodiscard]] std::optional<Keire::ManagedSceneLoadStatus>
         ManagedSceneLoad(std::uint64_t operation) const noexcept final;
         [[nodiscard]] bool CancelManagedSceneLoad(std::uint64_t operation) noexcept final;
+        [[nodiscard]] bool UnloadManagedScene(Keire::SceneHandle scene) noexcept final;
+        [[nodiscard]] bool SetActiveManagedScene(Keire::SceneHandle scene) noexcept final;
+        [[nodiscard]] bool MakeManagedEntityPersistent(Keire::ManagedEntityHandle entity) noexcept final;
         [[nodiscard]] Keire::AssetId ActiveManagedScene() const noexcept final;
         [[nodiscard]] std::vector<Keire::AssetId> LoadedManagedScenes() const final;
+        [[nodiscard]] Keire::ManagedSceneHandle ActiveManagedSceneHandle() const noexcept final;
+        [[nodiscard]] std::vector<Keire::ManagedSceneHandle> LoadedManagedSceneHandles() const final;
         [[nodiscard]] std::vector<std::string> ManagedEntityTags(Keire::ManagedEntityHandle entity) const final;
         [[nodiscard]] bool AddManagedEntityTag(Keire::ManagedEntityHandle entity, std::string_view tag) noexcept final;
         [[nodiscard]] bool RemoveManagedEntityTag(Keire::ManagedEntityHandle entity,
@@ -99,6 +107,15 @@ namespace KeireRuntime
                                                                                      std::size_t maximum) const final;
         [[nodiscard]] std::vector<Keire::ManagedEntityHandle>
         QueryManagedEntityComponents(Keire::ComponentTypeId component, std::size_t maximum) const final;
+        [[nodiscard]] std::vector<Keire::ManagedEntityHandle>
+        QueryManagedEntityNamesScoped(std::string_view name, Keire::ManagedSceneQuery query,
+                                      std::size_t maximum) const final;
+        [[nodiscard]] std::vector<Keire::ManagedEntityHandle>
+        QueryManagedEntityTagsScoped(std::string_view tag, Keire::ManagedSceneQuery query,
+                                     std::size_t maximum) const final;
+        [[nodiscard]] std::vector<Keire::ManagedEntityHandle>
+        QueryManagedEntityComponentsScoped(Keire::ComponentTypeId component, Keire::ManagedSceneQuery query,
+                                           std::size_t maximum) const final;
         [[nodiscard]] std::optional<Keire::RenderEnvironmentSettings> ManagedRenderEnvironment() const noexcept final;
         [[nodiscard]] bool SetManagedRenderEnvironment(Keire::RenderEnvironmentSettings settings) noexcept final;
         [[nodiscard]] bool ManagedMaterialParameterCollectionReady(Keire::AssetId collection) noexcept final;
@@ -129,6 +146,7 @@ namespace KeireRuntime
         OverlapSphereManaged(const Keire::ManagedSphereOverlapQuery& query) final;
 
         ManagedWorldRuntime m_ManagedWorld;
+        Keire::Ref<Keire::SceneRuntimeWorld> m_RuntimeWorld;
         Keire::Detail::ManagedMaterialParameterStore m_MaterialParameters;
         Keire::Detail::ManagedInputOperationStore m_ManagedInputOperations;
         Keire::RenderEnvironmentSettings m_Rendering;

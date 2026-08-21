@@ -413,14 +413,19 @@ static unsafe void ManagedWorldContract()
     NativeWorldFixture.Install();
     try
     {
-        Assert(System.Runtime.InteropServices.Marshal.SizeOf<Keire.NativeSceneLoadStatus>() == 24 &&
-                   System.Runtime.InteropServices.Marshal.SizeOf<Keire.NativeAssetId>() == 16 &&
+        Assert(System.Runtime.InteropServices.Marshal.SizeOf<Keire.NativeSceneLoadStatus>() == 32 &&
+                   System.Runtime.InteropServices.Marshal.SizeOf<Keire.NativeSceneHandle>() == 24 &&
                    System.Runtime.InteropServices.Marshal.SizeOf<Keire.NativeEntityHandle>() == 24 &&
                    System.Runtime.InteropServices.Marshal.SizeOf<Keire.NativeRenderEnvironment>() == 72,
                "Managed world structs must preserve their native ABI layouts.");
+        var legacyScene = new Keire.SceneHandle(NativeWorldFixture.CurrentScene);
+        legacyScene.Deconstruct(out var legacyAsset);
+        Assert(legacyScene.IsValid && !legacyScene.HasStableIdentity && legacyAsset == NativeWorldFixture.CurrentScene,
+               "The original asset-only SceneHandle constructor and deconstruction contract must remain compatible.");
         Assert(Keire.SceneManager.ActiveScene.Asset == NativeWorldFixture.CurrentScene &&
-                   Keire.SceneManager.LoadedScenes is [{ Asset: var loaded }] &&
-                   loaded == NativeWorldFixture.CurrentScene,
+                   Keire.SceneManager.ActiveScene.Id == NativeWorldFixture.CurrentHandle &&
+                   Keire.SceneManager.LoadedScenes is [{ Asset: var loaded, Id: var loadedHandle }] &&
+                   loaded == NativeWorldFixture.CurrentScene && loadedHandle == NativeWorldFixture.CurrentHandle,
                "Scene Manager must expose the native active and loaded scene state.");
 
         Keire.SceneLoadOperation load = Keire.SceneManager.LoadSceneAsync(
@@ -430,7 +435,8 @@ static unsafe void ManagedWorldContract()
                "Scene load operations must expose progress and remain coroutine-compatible while loading.");
         NativeWorldFixture.CompleteLoad();
         Assert(load.Succeeded && load.IsDone && !load.KeepWaiting &&
-                   load.Scene.Asset == NativeWorldFixture.ReplacementScene,
+                    load.Scene.Asset == NativeWorldFixture.ReplacementScene &&
+                    load.Scene.Id == NativeWorldFixture.ReplacementHandle,
                "A committed native scene transition must publish a successful terminal operation.");
 
         Keire.RenderEnvironmentSettings environment = Keire.RenderSettings.Current;
@@ -467,7 +473,18 @@ static unsafe void ManagedWorldContract()
                    Keire.SceneManager.FindAllWithTag("Enemy").Count == 2 &&
                    Keire.SceneManager.FindAllWithComponent<Keire.CharacterControllerComponent>() is [{ } controller] &&
                    controller == player,
-               "Scene queries must preserve stable world/entity handles across name, tag, and component indexes.");
+                "Scene queries must preserve stable world/entity handles across name, tag, and component indexes.");
+        Assert(Keire.SceneManager.FindAllWithTag("Enemy", Keire.SceneQuery.Loaded).Count == 2 &&
+                   NativeWorldFixture.LastQueryScope == Keire.SceneQueryScope.Loaded,
+               "Scene queries must forward explicit loaded-scene scopes.");
+        Assert(Keire.SceneManager.FindAllByName("PlayerSpawn", Keire.SceneQuery.In(Keire.SceneManager.ActiveScene))
+                       .Single() == player &&
+                   NativeWorldFixture.LastQueryHandle == NativeWorldFixture.CurrentHandle,
+               "Specific-scene queries must preserve the opaque stable handle.");
+        Assert(Keire.SceneManager.SetActiveScene(Keire.SceneManager.ActiveScene) &&
+                   Keire.SceneManager.UnloadScene(Keire.SceneManager.ActiveScene) &&
+                   Keire.SceneManager.Preserve(player),
+               "Activation, unloading, and persistent-object requests must reach the native runtime.");
         AssertThrows<ArgumentOutOfRangeException>(() => Keire.SceneManager.FindAllWithTag("Enemy", 0),
                                                   "Scene queries must reject unbounded or empty result limits.");
     }
@@ -962,11 +979,15 @@ file static unsafe class NativeWorldFixture
 {
     internal static readonly Keire.AssetId CurrentScene = new(301, 401);
     internal static readonly Keire.AssetId ReplacementScene = new(302, 402);
+    internal const ulong CurrentHandle = 11;
+    internal const ulong ReplacementHandle = 22;
     private static byte s_loadState;
 
     internal static Keire.NativeRenderEnvironment Environment { get; private set; }
     internal static int RenderSetCount { get; private set; }
     internal static int TagMutationCount { get; private set; }
+    internal static Keire.SceneQueryScope LastQueryScope { get; private set; }
+    internal static ulong LastQueryHandle { get; private set; }
 
     internal static void Install()
     {
@@ -992,6 +1013,9 @@ file static unsafe class NativeWorldFixture
         Keire.NativeWorld.GetSceneLoadStatusIcall = &GetSceneLoadStatus;
         Keire.NativeWorld.GetSceneLoadDiagnosticIcall = &GetSceneLoadDiagnostic;
         Keire.NativeWorld.CancelSceneLoadIcall = &CancelSceneLoad;
+        Keire.NativeWorld.UnloadSceneIcall = &UnloadScene;
+        Keire.NativeWorld.SetActiveSceneIcall = &SetActiveScene;
+        Keire.NativeWorld.MakeEntityPersistentIcall = &MakeEntityPersistent;
         Keire.NativeWorld.GetActiveSceneIcall = &GetActiveScene;
         Keire.NativeWorld.GetLoadedScenesIcall = &GetLoadedScenes;
         Keire.NativeWorld.GetEntityTagCountIcall = &GetEntityTagCount;
@@ -1014,6 +1038,9 @@ file static unsafe class NativeWorldFixture
         Keire.NativeWorld.GetSceneLoadStatusIcall = null;
         Keire.NativeWorld.GetSceneLoadDiagnosticIcall = null;
         Keire.NativeWorld.CancelSceneLoadIcall = null;
+        Keire.NativeWorld.UnloadSceneIcall = null;
+        Keire.NativeWorld.SetActiveSceneIcall = null;
+        Keire.NativeWorld.MakeEntityPersistentIcall = null;
         Keire.NativeWorld.GetActiveSceneIcall = null;
         Keire.NativeWorld.GetLoadedScenesIcall = null;
         Keire.NativeWorld.GetEntityTagCountIcall = null;
@@ -1043,6 +1070,7 @@ file static unsafe class NativeWorldFixture
         {
             SceneHigh = ReplacementScene.High,
             SceneLow = ReplacementScene.Low,
+            Handle = s_loadState == (byte)Keire.SceneLoadState.Ready ? ReplacementHandle : 0,
             Progress = s_loadState == (byte)Keire.SceneLoadState.Ready ? 1.0f : 0.5f,
             Mode = (byte)Keire.SceneLoadMode.Single,
             State = s_loadState
@@ -1073,22 +1101,42 @@ file static unsafe class NativeWorldFixture
     }
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly]
-    private static byte GetActiveScene(Keire.NativeAssetId* destination)
+    private static byte UnloadScene(ulong handle) => handle == CurrentHandle ? (byte)1 : (byte)0;
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetActiveScene(ulong handle) => handle == CurrentHandle ? (byte)1 : (byte)0;
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte MakeEntityPersistent(ulong world, ulong high, ulong low) =>
+        world == 99 && high == 1 && low == 2 ? (byte)1 : (byte)0;
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte GetActiveScene(Keire.NativeSceneHandle* destination)
     {
         if (destination == null)
             return 0;
-        *destination = new Keire.NativeAssetId { High = CurrentScene.High, Low = CurrentScene.Low };
+        *destination = new Keire.NativeSceneHandle
+        {
+            High = CurrentScene.High,
+            Low = CurrentScene.Low,
+            Handle = CurrentHandle
+        };
         return 1;
     }
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly]
-    private static int GetLoadedScenes(Keire.NativeAssetId* destination, int capacity)
+    private static int GetLoadedScenes(Keire.NativeSceneHandle* destination, int capacity)
     {
         if (destination == null || capacity == 0)
             return 1;
         if (capacity < 1)
             return -1;
-        destination[0] = new Keire.NativeAssetId { High = CurrentScene.High, Low = CurrentScene.Low };
+        destination[0] = new Keire.NativeSceneHandle
+        {
+            High = CurrentScene.High,
+            Low = CurrentScene.Low,
+            Handle = CurrentHandle
+        };
         return 1;
     }
 
@@ -1123,18 +1171,28 @@ file static unsafe class NativeWorldFixture
     }
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly]
-    private static int QueryEntityNames(Keire.NativeString name, int maximum, Keire.NativeEntityHandle* destination,
-                                        int capacity) => WriteEntities([new(99, 1, 2)], maximum, destination, capacity);
+    private static int QueryEntityNames(Keire.NativeString name, byte scope, ulong scene, int maximum,
+                                        Keire.NativeEntityHandle* destination, int capacity)
+    {
+        (LastQueryScope, LastQueryHandle) = ((Keire.SceneQueryScope)scope, scene);
+        return WriteEntities([new(99, 1, 2)], maximum, destination, capacity);
+    }
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly]
-    private static int QueryEntityTags(Keire.NativeString tag, int maximum, Keire.NativeEntityHandle* destination,
-                                       int capacity) =>
-        WriteEntities([new(99, 3, 4), new(99, 5, 6)], maximum, destination, capacity);
+    private static int QueryEntityTags(Keire.NativeString tag, byte scope, ulong scene, int maximum,
+                                       Keire.NativeEntityHandle* destination, int capacity)
+    {
+        (LastQueryScope, LastQueryHandle) = ((Keire.SceneQueryScope)scope, scene);
+        return WriteEntities([new(99, 3, 4), new(99, 5, 6)], maximum, destination, capacity);
+    }
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly]
-    private static int QueryEntityComponents(ulong high, ulong low, int maximum,
-                                             Keire.NativeEntityHandle* destination, int capacity) =>
-        WriteEntities([new(99, 1, 2)], maximum, destination, capacity);
+    private static int QueryEntityComponents(ulong high, ulong low, byte scope, ulong scene, int maximum,
+                                             Keire.NativeEntityHandle* destination, int capacity)
+    {
+        (LastQueryScope, LastQueryHandle) = ((Keire.SceneQueryScope)scope, scene);
+        return WriteEntities([new(99, 1, 2)], maximum, destination, capacity);
+    }
 
     private static int WriteEntities(Keire.NativeEntityHandle[] values, int maximum,
                                      Keire.NativeEntityHandle* destination, int capacity)

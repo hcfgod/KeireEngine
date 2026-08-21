@@ -8,6 +8,7 @@ internal struct NativeSceneLoadStatus
 {
     internal ulong SceneHigh;
     internal ulong SceneLow;
+    internal ulong Handle;
     internal float Progress;
     internal byte Mode;
     internal byte State;
@@ -16,12 +17,13 @@ internal struct NativeSceneLoadStatus
 }
 
 [StructLayout(LayoutKind.Sequential)]
-internal struct NativeAssetId
+internal struct NativeSceneHandle
 {
     internal ulong High;
     internal ulong Low;
+    internal ulong Handle;
 
-    internal readonly AssetId Value => new(High, Low);
+    internal readonly SceneHandle Value => new(new AssetId(High, Low), Handle);
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -94,16 +96,22 @@ internal static unsafe class NativeWorld
     internal static delegate* unmanaged<ulong, NativeSceneLoadStatus*, byte> GetSceneLoadStatusIcall;
     internal static delegate* unmanaged<ulong, byte*, int, int> GetSceneLoadDiagnosticIcall;
     internal static delegate* unmanaged<ulong, byte> CancelSceneLoadIcall;
-    internal static delegate* unmanaged<NativeAssetId*, byte> GetActiveSceneIcall;
-    internal static delegate* unmanaged<NativeAssetId*, int, int> GetLoadedScenesIcall;
+    internal static delegate* unmanaged<ulong, byte> UnloadSceneIcall;
+    internal static delegate* unmanaged<ulong, byte> SetActiveSceneIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, byte> MakeEntityPersistentIcall;
+    internal static delegate* unmanaged<NativeSceneHandle*, byte> GetActiveSceneIcall;
+    internal static delegate* unmanaged<NativeSceneHandle*, int, int> GetLoadedScenesIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, int> GetEntityTagCountIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, int, byte*, int, int> GetEntityTagIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, byte> AddEntityTagIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, byte> RemoveEntityTagIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte> ClearEntityTagsIcall;
-    internal static delegate* unmanaged<NativeString, int, NativeEntityHandle*, int, int> QueryEntityNamesIcall;
-    internal static delegate* unmanaged<NativeString, int, NativeEntityHandle*, int, int> QueryEntityTagsIcall;
-    internal static delegate* unmanaged<ulong, ulong, int, NativeEntityHandle*, int, int> QueryEntityComponentsIcall;
+    internal static delegate* unmanaged<NativeString, byte, ulong, int, NativeEntityHandle*, int, int>
+        QueryEntityNamesIcall;
+    internal static delegate* unmanaged<NativeString, byte, ulong, int, NativeEntityHandle*, int, int>
+        QueryEntityTagsIcall;
+    internal static delegate* unmanaged<ulong, ulong, byte, ulong, int, NativeEntityHandle*, int, int>
+        QueryEntityComponentsIcall;
     internal static delegate* unmanaged<NativeRenderEnvironment*, byte> GetRenderEnvironmentIcall;
     internal static delegate* unmanaged<NativeRenderEnvironment*, byte> SetRenderEnvironmentIcall;
 #pragma warning restore CS0649
@@ -150,15 +158,36 @@ internal static unsafe class NativeWorld
         return CancelSceneLoadIcall(operation) != 0;
     }
 
-    internal static AssetId GetActiveScene()
+    internal static bool UnloadScene(SceneHandle scene)
+    {
+        if (UnloadSceneIcall == null)
+            throw Unbound();
+        return UnloadSceneIcall(scene.Id) != 0;
+    }
+
+    internal static bool SetActiveScene(SceneHandle scene)
+    {
+        if (SetActiveSceneIcall == null)
+            throw Unbound();
+        return SetActiveSceneIcall(scene.Id) != 0;
+    }
+
+    internal static bool MakeEntityPersistent(Entity entity)
+    {
+        if (MakeEntityPersistentIcall == null)
+            throw Unbound();
+        return MakeEntityPersistentIcall(entity.World, entity.Id.High, entity.Id.Low) != 0;
+    }
+
+    internal static SceneHandle GetActiveScene()
     {
         if (GetActiveSceneIcall == null)
             throw Unbound();
-        NativeAssetId scene = default;
+        NativeSceneHandle scene = default;
         return GetActiveSceneIcall(&scene) != 0 ? scene.Value : default;
     }
 
-    internal static AssetId[] GetLoadedScenes()
+    internal static SceneHandle[] GetLoadedScenes()
     {
         if (GetLoadedScenesIcall == null)
             throw Unbound();
@@ -167,13 +196,13 @@ internal static unsafe class NativeWorld
             throw new InvalidOperationException("The native runtime returned an invalid loaded-scene count.");
         if (count == 0)
             return [];
-        var native = new NativeAssetId[count];
-        fixed (NativeAssetId* destination = native)
+        var native = new NativeSceneHandle[count];
+        fixed (NativeSceneHandle* destination = native)
         {
             if (GetLoadedScenesIcall(destination, native.Length) != native.Length)
                 throw new InvalidOperationException("The loaded-scene list changed while it was being read.");
         }
-        var result = new AssetId[native.Length];
+        var result = new SceneHandle[native.Length];
         for (int index = 0; index < native.Length; ++index)
             result[index] = native[index].Value;
         return result;
@@ -228,46 +257,49 @@ internal static unsafe class NativeWorld
             throw new InvalidOperationException("The entity tags could not be cleared.");
     }
 
-    internal static Entity[] QueryEntityNames(string name, int maximum)
+    internal static Entity[] QueryEntityNames(string name, SceneQuery query, int maximum)
     {
         if (QueryEntityNamesIcall == null)
             throw Unbound();
         using NativeString value = name;
-        int count = QueryEntityNamesIcall(value, maximum, null, 0);
+        int count = QueryEntityNamesIcall(value, (byte)query.Scope, query.Scene.Id, maximum, null, 0);
         NativeEntityHandle[] native = AllocateEntityQuery(count, maximum);
         fixed (NativeEntityHandle* destination = native)
         {
-            if (QueryEntityNamesIcall(value, maximum, destination, native.Length) != native.Length)
+            if (QueryEntityNamesIcall(value, (byte)query.Scope, query.Scene.Id, maximum, destination, native.Length) !=
+                native.Length)
                 throw new InvalidOperationException("The scene query changed while it was being read.");
         }
         return ConvertEntityQuery(native);
     }
 
-    internal static Entity[] QueryEntityTags(string tag, int maximum)
+    internal static Entity[] QueryEntityTags(string tag, SceneQuery query, int maximum)
     {
         if (QueryEntityTagsIcall == null)
             throw Unbound();
         using NativeString value = tag;
-        int count = QueryEntityTagsIcall(value, maximum, null, 0);
+        int count = QueryEntityTagsIcall(value, (byte)query.Scope, query.Scene.Id, maximum, null, 0);
         NativeEntityHandle[] native = AllocateEntityQuery(count, maximum);
         fixed (NativeEntityHandle* destination = native)
         {
-            if (QueryEntityTagsIcall(value, maximum, destination, native.Length) != native.Length)
+            if (QueryEntityTagsIcall(value, (byte)query.Scope, query.Scene.Id, maximum, destination, native.Length) !=
+                native.Length)
                 throw new InvalidOperationException("The scene query changed while it was being read.");
         }
         return ConvertEntityQuery(native);
     }
 
-    internal static Entity[] QueryEntityComponents(ComponentTypeId component, int maximum)
+    internal static Entity[] QueryEntityComponents(ComponentTypeId component, SceneQuery query, int maximum)
     {
         if (QueryEntityComponentsIcall == null)
             throw Unbound();
-        int count = QueryEntityComponentsIcall(component.High, component.Low, maximum, null, 0);
+        int count = QueryEntityComponentsIcall(component.High, component.Low, (byte)query.Scope, query.Scene.Id,
+                                                maximum, null, 0);
         NativeEntityHandle[] native = AllocateEntityQuery(count, maximum);
         fixed (NativeEntityHandle* destination = native)
         {
-            if (QueryEntityComponentsIcall(component.High, component.Low, maximum, destination, native.Length) !=
-                native.Length)
+            if (QueryEntityComponentsIcall(component.High, component.Low, (byte)query.Scope, query.Scene.Id, maximum,
+                                           destination, native.Length) != native.Length)
                 throw new InvalidOperationException("The scene query changed while it was being read.");
         }
         return ConvertEntityQuery(native);

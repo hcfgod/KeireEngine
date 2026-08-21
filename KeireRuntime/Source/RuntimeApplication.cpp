@@ -585,9 +585,9 @@ namespace
 
         void OnFixedUpdate(const Keire::Time& time) override
         {
-            if (m_Runtime)
+            if (const auto world = RuntimeWorld(); world && m_Runtime)
             {
-                m_Runtime->FixedUpdate(static_cast<float>(time.FixedDeltaTime().Seconds()));
+                world->FixedUpdate(static_cast<float>(time.FixedDeltaTime().Seconds()));
                 if (m_CommandLine.TickLimit != 0 && ++m_FixedTicks >= m_CommandLine.TickLimit)
                     Owner().RequestExit();
             }
@@ -614,6 +614,8 @@ namespace
                     throw std::runtime_error("Startup scene Play failed: " + m_Runtime->Diagnostic().Message);
                 m_Scene = m_Runtime->RuntimeScene();
                 m_Presentation = m_Runtime->Presentation();
+                if (!AdoptManagedScene(m_Runtime))
+                    throw std::runtime_error("Startup scene runtime registration failed.");
                 m_ReplayState->Session = m_Runtime;
                 if (m_CommandLine.ReplayAction != RuntimeReplayAction::None)
                 {
@@ -654,8 +656,11 @@ namespace
             const auto pixels = Owner().MainWindow()->PixelSize();
             const auto width = std::max(pixels.Width, 1U);
             const auto height = std::max(pixels.Height, 1U);
-            m_Runtime->SetPresentationViewport(static_cast<float>(width), static_cast<float>(height));
-            m_Runtime->Update(static_cast<float>(time.DeltaTime().Seconds()));
+            const auto world = RuntimeWorld();
+            if (!world)
+                throw std::runtime_error("The scene runtime world is unavailable.");
+            world->SetPresentationViewport(static_cast<float>(width), static_cast<float>(height));
+            world->Update(static_cast<float>(time.DeltaTime().Seconds()));
             if (m_Runtime->State() == Keire::ScenePlayState::Faulted)
                 throw std::runtime_error("Startup scene runtime failed: " + m_Runtime->Diagnostic().Message);
             KeireRuntime::SynchronizeRuntimeUiTextInput(m_Presentation, Owner().Windows(), Owner().MainWindow());
@@ -674,11 +679,19 @@ namespace
             auto environment = RenderEnvironment();
             environment.SkyVisible =
                 environment.SkyVisible && selected->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
-            Keire::SceneRenderRequest renderRequest{m_Scene, m_View, false, environment, MaterialParameters()};
-            if (const auto vfx = m_Runtime->Vfx())
-                renderRequest.Vfx = vfx->CaptureRenderSnapshot();
-            Owner().Renderer()->SubmitRuntimeUi(m_Presentation->Ui());
-            Owner().Renderer()->Submit(std::move(renderRequest));
+            const auto materialParameters = MaterialParameters();
+            for (const auto& session : world->Sessions())
+            {
+                if (!session || !session->RuntimeScene())
+                    continue;
+                Keire::SceneRenderRequest renderRequest{session->RuntimeScene(), m_View, false, environment,
+                                                        materialParameters};
+                if (const auto vfx = session->Vfx())
+                    renderRequest.Vfx = vfx->CaptureRenderSnapshot();
+                if (const auto presentation = session->Presentation())
+                    Owner().Renderer()->SubmitRuntimeUi(presentation->Ui());
+                Owner().Renderer()->Submit(std::move(renderRequest));
+            }
             if (m_CommandLine.Frames != 0 && ++m_RenderedFrames >= m_CommandLine.Frames)
                 Owner().RequestExit();
         }
@@ -696,7 +709,8 @@ namespace
 
         void ProcessNativeEvent(const SDL_Event& event)
         {
-            if (!m_Presentation)
+            const auto world = RuntimeWorld();
+            if (!world)
                 return;
             const auto logical = Owner().MainWindow()->LogicalSize();
             const auto pixels = Owner().MainWindow()->PixelSize();
@@ -704,7 +718,11 @@ namespace
                 logical.Width == 0 ? 1.0F : static_cast<float>(pixels.Width) / static_cast<float>(logical.Width);
             const float scaleY =
                 logical.Height == 0 ? 1.0F : static_cast<float>(pixels.Height) / static_cast<float>(logical.Height);
-            KeireRuntime::ProcessRuntimeUiEvent(m_Presentation, event, scaleX, scaleY, m_UiPointer);
+            const auto sessions = world->Sessions();
+            for (auto current = sessions.rbegin(); current != sessions.rend(); ++current)
+                if (const auto presentation =
+                        *current ? (*current)->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{})
+                    KeireRuntime::ProcessRuntimeUiEvent(presentation, event, scaleX, scaleY, m_UiPointer);
             KeireRuntime::SynchronizeRuntimeUiTextInput(m_Presentation, Owner().Windows(), Owner().MainWindow());
         }
 
@@ -802,7 +820,8 @@ namespace
         {
             try
             {
-                if (!m_Runtime)
+                const auto runtime = RuntimeSessionForWorld(query.World);
+                if (!runtime)
                     return std::nullopt;
                 Keire::PhysicsRayQuery native;
                 native.Origin = query.Origin;
@@ -810,7 +829,7 @@ namespace
                 native.MaximumDistance = query.MaximumDistance;
                 native.Mask = query.Mask;
                 native.IncludeTriggers = query.IncludeTriggers;
-                const auto hits = m_Runtime->RayCast(native, Keire::EntityId(query.IgnoredEntity));
+                const auto hits = runtime->RayCast(native, Keire::EntityId(query.IgnoredEntity));
                 if (hits.empty())
                     return std::nullopt;
                 const auto& hit = hits.front();
@@ -832,8 +851,12 @@ namespace
         {
             try
             {
-                auto target = m_Scene ? m_Scene->FindEntity(Keire::EntityId(playback.Entity)) : Keire::Entity{};
-                if (!target || !m_Presentation || !playback.Clip)
+                const auto runtime = RuntimeSessionFor(playback.Entity);
+                const auto scene = runtime ? runtime->RuntimeScene() : Keire::Ref<Keire::Scene>{};
+                const auto presentation =
+                    runtime ? runtime->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{};
+                auto target = scene ? scene->FindEntity(Keire::EntityId(playback.Entity)) : Keire::Entity{};
+                if (!target || !presentation || !playback.Clip)
                     return false;
                 Keire::AudioSourceComponentState candidate{
                     .Clip = playback.Clip,
@@ -859,8 +882,8 @@ namespace
 
                 // Commit the component before replacing its voice. A newly added source may not be tracked until the
                 // next presentation synchronization, so PlayOnAwake remains the reliable deferred-play fallback.
-                (void)m_Presentation->Stop(target.Id());
-                (void)m_Presentation->Play(target.Id());
+                (void)presentation->Stop(target.Id());
+                (void)presentation->Play(target.Id());
                 return true;
             }
             catch (...)
@@ -873,12 +896,16 @@ namespace
         {
             try
             {
-                const auto target = m_Scene ? m_Scene->FindEntity(Keire::EntityId(entity)) : Keire::Entity{};
-                if (!target || !m_Presentation)
+                const auto runtime = RuntimeSessionFor(entity);
+                const auto scene = runtime ? runtime->RuntimeScene() : Keire::Ref<Keire::Scene>{};
+                const auto presentation =
+                    runtime ? runtime->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{};
+                const auto target = scene ? scene->FindEntity(Keire::EntityId(entity)) : Keire::Entity{};
+                if (!target || !presentation)
                     return false;
                 if (const auto source = target.GetComponent<Keire::AudioSourceComponent>())
                     source->SetPlayOnAwake(false);
-                return m_Presentation->Stop(target.Id());
+                return presentation->Stop(target.Id());
             }
             catch (...)
             {
@@ -890,8 +917,9 @@ namespace
         {
             try
             {
-                return m_Presentation && (paused ? m_Presentation->Pause(Keire::EntityId(entity))
-                                                 : m_Presentation->Resume(Keire::EntityId(entity)));
+                const auto presentation = PresentationFor(entity);
+                return presentation && (paused ? presentation->Pause(Keire::EntityId(entity))
+                                               : presentation->Resume(Keire::EntityId(entity)));
             }
             catch (...)
             {
@@ -903,7 +931,8 @@ namespace
         {
             try
             {
-                return m_Presentation && m_Presentation->Seek(Keire::EntityId(entity), positionSeconds);
+                const auto presentation = PresentationFor(entity);
+                return presentation && presentation->Seek(Keire::EntityId(entity), positionSeconds);
             }
             catch (...)
             {
@@ -916,9 +945,10 @@ namespace
         {
             try
             {
-                if (!m_Presentation)
+                const auto presentation = PresentationFor(entity);
+                if (!presentation)
                     return {};
-                const auto state = m_Presentation->Playback(Keire::EntityId(entity));
+                const auto state = presentation->Playback(Keire::EntityId(entity));
                 return {static_cast<Keire::ManagedAudioPlaybackState>(state.State), state.PositionSeconds,
                         state.DurationSeconds};
             }
@@ -933,7 +963,8 @@ namespace
         {
             try
             {
-                return m_Runtime && m_Runtime->PlayVfx(Keire::EntityId(entity), effect, restart);
+                const auto runtime = RuntimeSessionFor(entity);
+                return runtime && runtime->PlayVfx(Keire::EntityId(entity), effect, restart);
             }
             catch (...)
             {
@@ -945,7 +976,8 @@ namespace
         {
             try
             {
-                return m_Runtime && m_Runtime->StopVfx(Keire::EntityId(entity));
+                const auto runtime = RuntimeSessionFor(entity);
+                return runtime && runtime->StopVfx(Keire::EntityId(entity));
             }
             catch (...)
             {
@@ -957,7 +989,8 @@ namespace
         {
             try
             {
-                return m_Runtime && m_Runtime->PauseVfx(Keire::EntityId(entity), paused);
+                const auto runtime = RuntimeSessionFor(entity);
+                return runtime && runtime->PauseVfx(Keire::EntityId(entity), paused);
             }
             catch (...)
             {
@@ -969,7 +1002,8 @@ namespace
         {
             try
             {
-                return m_Runtime && m_Runtime->IsVfxAlive(Keire::EntityId(entity));
+                const auto runtime = RuntimeSessionFor(entity);
+                return runtime && runtime->IsVfxAlive(Keire::EntityId(entity));
             }
             catch (...)
             {
@@ -982,7 +1016,8 @@ namespace
         {
             try
             {
-                return m_Runtime && m_Runtime->SendVfxEvent(Keire::EntityId(entity), eventName, spawnCount);
+                const auto runtime = RuntimeSessionFor(entity);
+                return runtime && runtime->SendVfxEvent(Keire::EntityId(entity), eventName, spawnCount);
             }
             catch (...)
             {
@@ -995,7 +1030,8 @@ namespace
         {
             try
             {
-                return m_Runtime && m_Runtime->SetVfxParameter(Keire::EntityId(entity), value);
+                const auto runtime = RuntimeSessionFor(entity);
+                return runtime && runtime->SetVfxParameter(Keire::EntityId(entity), value);
             }
             catch (...)
             {
@@ -1007,7 +1043,8 @@ namespace
         {
             try
             {
-                const auto target = m_Scene ? m_Scene->FindEntity(Keire::EntityId(entity)) : Keire::Entity{};
+                const auto scene = RuntimeSceneFor(entity);
+                const auto target = scene ? scene->FindEntity(Keire::EntityId(entity)) : Keire::Entity{};
                 const auto component =
                     target ? target.GetComponent<Keire::UiTextComponent>() : Keire::Ref<Keire::UiTextComponent>{};
                 if (!component)
@@ -1025,7 +1062,8 @@ namespace
         {
             try
             {
-                return m_Presentation && m_Presentation->ConsumeClick(Keire::EntityId(entity));
+                const auto presentation = PresentationFor(entity);
+                return presentation && presentation->ConsumeClick(Keire::EntityId(entity));
             }
             catch (...)
             {
@@ -1037,67 +1075,104 @@ namespace
         ReadManagedUiScalar(const Keire::AssetId entity,
                             const Keire::ManagedUiScalarProperty property) noexcept override
         {
-            return Keire::Detail::ReadManagedUiScalar(m_Scene, entity, property);
+            return Keire::Detail::ReadManagedUiScalar(RuntimeSceneFor(entity), entity, property);
         }
 
         [[nodiscard]] bool SetManagedUiScalar(const Keire::AssetId entity,
                                               const Keire::ManagedUiScalarProperty property,
                                               const float value) noexcept override
         {
-            return Keire::Detail::SetManagedUiScalar(m_Scene, entity, property, value);
+            return Keire::Detail::SetManagedUiScalar(RuntimeSceneFor(entity), entity, property, value);
         }
 
         [[nodiscard]] std::optional<bool>
         ReadManagedUiFlag(const Keire::AssetId entity, const Keire::ManagedUiFlagProperty property) noexcept override
         {
-            return Keire::Detail::ReadManagedUiFlag(m_Scene, m_Presentation, entity, property);
+            return Keire::Detail::ReadManagedUiFlag(RuntimeSceneFor(entity), PresentationFor(entity), entity, property);
         }
 
         [[nodiscard]] bool SetManagedUiFlag(const Keire::AssetId entity, const Keire::ManagedUiFlagProperty property,
                                             const bool value) noexcept override
         {
-            return Keire::Detail::SetManagedUiFlag(m_Scene, m_Presentation, entity, property, value);
+            return Keire::Detail::SetManagedUiFlag(RuntimeSceneFor(entity), PresentationFor(entity), entity, property,
+                                                   value);
         }
 
         [[nodiscard]] std::optional<Keire::Vector2>
         ReadManagedUiVector(const Keire::AssetId entity,
                             const Keire::ManagedUiVectorProperty property) noexcept override
         {
-            return Keire::Detail::ReadManagedUiVector(m_Scene, entity, property);
+            return Keire::Detail::ReadManagedUiVector(RuntimeSceneFor(entity), entity, property);
         }
 
         [[nodiscard]] bool SetManagedUiVector(const Keire::AssetId entity,
                                               const Keire::ManagedUiVectorProperty property,
                                               const Keire::Vector2 value) noexcept override
         {
-            return Keire::Detail::SetManagedUiVector(m_Scene, entity, property, value);
+            return Keire::Detail::SetManagedUiVector(RuntimeSceneFor(entity), entity, property, value);
         }
 
         [[nodiscard]] std::optional<std::string> ReadManagedUiInputText(const Keire::AssetId entity) noexcept override
         {
-            return Keire::Detail::ReadManagedUiInputText(m_Scene, entity);
+            return Keire::Detail::ReadManagedUiInputText(RuntimeSceneFor(entity), entity);
         }
 
         [[nodiscard]] bool SetManagedUiInputText(const Keire::AssetId entity,
                                                  const std::string_view text) noexcept override
         {
-            return Keire::Detail::SetManagedUiInputText(m_Scene, entity, text);
+            return Keire::Detail::SetManagedUiInputText(RuntimeSceneFor(entity), entity, text);
         }
 
         [[nodiscard]] bool ConsumeManagedUiEvent(const Keire::AssetId entity,
                                                  const Keire::RuntimeUiEventType type) noexcept override
         {
-            return Keire::Detail::ConsumeManagedUiEvent(m_Presentation, entity, type);
+            return Keire::Detail::ConsumeManagedUiEvent(PresentationFor(entity), entity, type);
         }
 
         [[nodiscard]] bool FocusManagedUi(const Keire::AssetId entity) noexcept override
         {
-            return Keire::Detail::FocusManagedUi(m_Presentation, entity);
+            return Keire::Detail::FocusManagedUi(PresentationFor(entity), entity);
         }
 
-        [[nodiscard]] Keire::Ref<Keire::Scene> ManagedRuntimeScene() const noexcept override { return m_Scene; }
+        [[nodiscard]] Keire::Ref<Keire::Scene>
+        ManagedRuntimeScene(const Keire::AssetId entity = {}) const noexcept override
+        {
+            return RuntimeSceneFor(entity);
+        }
 
       private:
+        [[nodiscard]] Keire::Ref<Keire::SceneRuntimeSession>
+        RuntimeSessionFor(const Keire::AssetId entity) const noexcept
+        {
+            const auto world = RuntimeWorld();
+            if (world && entity)
+                if (const auto session = world->SessionForEntity(Keire::EntityId(entity)))
+                    return session;
+            return m_Runtime;
+        }
+
+        [[nodiscard]] Keire::Ref<Keire::SceneRuntimeSession>
+        RuntimeSessionForWorld(const std::uint64_t worldId) const noexcept
+        {
+            const auto world = RuntimeWorld();
+            if (worldId != 0)
+                return world ? world->SessionForWorld(worldId) : Keire::Ref<Keire::SceneRuntimeSession>{};
+            return m_Runtime;
+        }
+
+        [[nodiscard]] Keire::Ref<Keire::Scene> RuntimeSceneFor(const Keire::AssetId entity) const noexcept
+        {
+            const auto session = RuntimeSessionFor(entity);
+            return session ? session->RuntimeScene() : Keire::Ref<Keire::Scene>{};
+        }
+
+        [[nodiscard]] Keire::Ref<Keire::ScenePresentationRuntime>
+        PresentationFor(const Keire::AssetId entity) const noexcept
+        {
+            const auto session = RuntimeSessionFor(entity);
+            return session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{};
+        }
+
         void ApplyManagedCursorMode(const bool restore = false) noexcept
         {
             try

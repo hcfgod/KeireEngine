@@ -688,7 +688,24 @@ void EditorWorkspaceLayer::BeginPlayMode()
         playUndo = undo->CreateContext({.Name = "Play Mode"});
     const auto defaultMixer =
         m_ProjectSettingsDocument ? m_ProjectSettingsDocument->AuthoringSettings().DefaultMixer : Keire::AssetId{};
-    m_SceneDocument->BeginPlay(std::move(playUndo), Owner().Assets(), Owner().Audio(), Owner().Physics(), defaultMixer);
+    m_PlayRuntimeWorld =
+        Keire::CreateRef<Keire::SceneRuntimeWorld>(Keire::SceneRuntimeWorldSpecification{.Scenes = Owner().Scenes(),
+                                                                                         .Assets = Owner().Assets(),
+                                                                                         .Audio = Owner().Audio(),
+                                                                                         .Physics = Owner().Physics(),
+                                                                                         .DefaultMixer = defaultMixer});
+    m_ManagedSceneOperations.clear();
+    try
+    {
+        m_SceneDocument->BeginPlay(std::move(playUndo), Owner().Assets(), Owner().Audio(), Owner().Physics(),
+                                   defaultMixer, m_PlayRuntimeWorld);
+    }
+    catch (...)
+    {
+        m_PlayRuntimeWorld->Close();
+        m_PlayRuntimeWorld.Reset();
+        throw;
+    }
     m_PlayFaultReported = false;
     m_ActiveUndoContext = m_SceneDocument->History();
     m_GameViewportInputActive = false;
@@ -757,9 +774,16 @@ void EditorWorkspaceLayer::RequestStopPlayMode()
         m_SceneDocument->SetStatus("Queued Play request cancelled.");
         return;
     }
-    if (!m_SceneDocument->PlaySession() || m_SceneDocument->PlaySession()->State() == Keire::ScenePlayState::Stopped ||
-        m_PlayChanges || m_PendingPlayTransition != PendingPlayTransition::None)
+    if (!m_SceneDocument->PlaySession() || m_PlayChanges || m_PendingPlayTransition != PendingPlayTransition::None)
         return;
+    if (!m_SceneDocument->PlaySession()->RuntimeScene() ||
+        m_SceneDocument->PlaySession()->RuntimeScene()->Asset() != m_SceneDocument->Asset())
+    {
+        m_SceneDocument->SetStatus(
+            "Play Mode loaded another active scene; runtime changes will be discarded when Play stops.");
+        m_PendingPlayTransition = PendingPlayTransition::Discard;
+        return;
+    }
     FinalizePendingPlayEditorMutation();
     m_PlayResumeState = m_SceneDocument->PlaySession()->State();
     if (m_PlayResumeState == Keire::ScenePlayState::Playing)
@@ -793,6 +817,10 @@ void EditorWorkspaceLayer::FinishPlayMode(const bool apply)
         std::optional<Keire::SceneDefinition> applied;
         if (apply && m_PlayChanges && m_PlayChanges->HasSelectedChanges())
             applied = m_PlayChanges->BuildAppliedDefinition();
+        if (m_PlayRuntimeWorld)
+            m_PlayRuntimeWorld->Close();
+        m_PlayRuntimeWorld.Reset();
+        m_ManagedSceneOperations.clear();
         m_SceneDocument->EndPlay();
         m_ManagedInputCaptureOverride.reset();
         m_ManagedInputOperations.CancelAll();
@@ -1310,24 +1338,38 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         auto environment = SceneViewportSettings();
         environment.SkyVisible =
             environment.SkyVisible && selected->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
-        Keire::SceneRenderRequest renderRequest{scene, m_GameRenderView, false, environment};
         const auto& materialTime = Owner().GetTime();
-        renderRequest.MaterialTimeSeconds = static_cast<float>(materialTime.TimeSinceStartup().Seconds());
-        renderRequest.MaterialDeltaSeconds = static_cast<float>(materialTime.DeltaTime().Seconds());
-        renderRequest.FrameIndex = materialTime.FrameCount();
-        if (playActive)
+        const auto submitScene =
+            [&](const Keire::Ref<Keire::SceneRuntimeSession>& session, const Keire::Ref<Keire::Scene>& rendered)
         {
-            renderRequest.GlobalMaterialProperties = m_ManagedMaterialParameters.Snapshot();
-            if (const auto vfx = playSession->Vfx())
-                renderRequest.Vfx = vfx->CaptureRenderSnapshot();
+            Keire::SceneRenderRequest renderRequest{rendered, m_GameRenderView, false, environment};
+            renderRequest.MaterialTimeSeconds = static_cast<float>(materialTime.TimeSinceStartup().Seconds());
+            renderRequest.MaterialDeltaSeconds = static_cast<float>(materialTime.DeltaTime().Seconds());
+            renderRequest.FrameIndex = materialTime.FrameCount();
+            if (session)
+            {
+                renderRequest.GlobalMaterialProperties = m_ManagedMaterialParameters.Snapshot();
+                if (const auto vfx = session->Vfx())
+                    renderRequest.Vfx = vfx->CaptureRenderSnapshot();
+            }
+            Owner().Renderer()->Submit(std::move(renderRequest));
+        };
+        if (playActive && m_PlayRuntimeWorld)
+        {
+            for (const auto& session : m_PlayRuntimeWorld->Sessions())
+                if (session && session->RuntimeScene())
+                    submitScene(session, session->RuntimeScene());
         }
-        Owner().Renderer()->Submit(std::move(renderRequest));
+        else
+        {
+            submitScene({}, scene);
+        }
         ui.Image(m_GameRenderView->Surface(), size);
         const auto imageState = ui.LastItemState();
         const auto imageRect = ui.LastItemRect();
         m_GameViewportRect = imageRect;
 
-        Keire::Ref<Keire::ScenePresentationRuntime> presentation;
+        std::vector<Keire::Ref<Keire::ScenePresentationRuntime>> presentations;
         if (playActive && m_GameViewportCaptureSuspended && imageState.Hovered && ui.PointerState().LeftPressed)
             m_GameViewportCaptureSuspended = false;
         const auto mainWindow = Owner().MainWindow();
@@ -1336,8 +1378,14 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
             m_GameViewportCaptureSuspended));
         if (playActive)
         {
-            playSession->SetPresentationViewport(size.Width, size.Height);
-            presentation = playSession->Presentation();
+            if (m_PlayRuntimeWorld)
+            {
+                m_PlayRuntimeWorld->SetPresentationViewport(size.Width, size.Height);
+                for (const auto& session : m_PlayRuntimeWorld->Sessions())
+                    if (const auto presentation =
+                            session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{})
+                        presentations.push_back(presentation);
+            }
         }
         else
         {
@@ -1352,18 +1400,19 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
             if (m_GameEditPresentation)
             {
                 m_GameEditPresentation->Synchronize(scene, size.Width, size.Height, false);
-                presentation = m_GameEditPresentation;
+                presentations.push_back(m_GameEditPresentation);
             }
         }
 
-        if (presentation)
-        {
+        for (const auto& presentation : presentations)
             presentation->Draw(ui, imageRect.Minimum.X, imageRect.Minimum.Y);
-            if (playActive)
+        if (playActive && !presentations.empty())
+        {
+            const auto pointer = ui.PointerState();
+            const float localX = pointer.Position.X - imageRect.Minimum.X;
+            const float localY = pointer.Position.Y - imageRect.Minimum.Y;
+            for (const auto& presentation : presentations)
             {
-                const auto pointer = ui.PointerState();
-                const float localX = pointer.Position.X - imageRect.Minimum.X;
-                const float localY = pointer.Position.Y - imageRect.Minimum.Y;
                 presentation->PointerMove(localX, localY);
                 if (imageRect.Contains(pointer.Position))
                 {
@@ -1383,11 +1432,12 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
                 if (imageRect.Contains(pointer.Position) && pointer.Wheel != 0.0F)
                 {
                     presentation->PointerWheel(localX, localY, 0.0F, pointer.Wheel);
-                    ui.CapturePointerWheel();
                 }
-                if (m_GameViewportInputActive)
-                    KeireEditor::RouteRuntimeUiKeyboard(ui, presentation, Owner().Windows(), mainWindow);
             }
+            if (imageRect.Contains(pointer.Position) && pointer.Wheel != 0.0F)
+                ui.CapturePointerWheel();
+            if (m_GameViewportInputActive)
+                KeireEditor::RouteRuntimeUiKeyboard(ui, playSession->Presentation(), Owner().Windows(), mainWindow);
         }
         if (playActive)
             DrawPerformanceOverlay(ui, imageRect, "GAME");

@@ -90,7 +90,7 @@ namespace Keire::Detail
         [[nodiscard]] bool ClearManagedMaterialInstanceProperties(AssetId entity, std::size_t slot) noexcept override;
 
       protected:
-        [[nodiscard]] virtual Ref<Scene> ManagedRuntimeScene() const noexcept = 0;
+        [[nodiscard]] virtual Ref<Scene> ManagedRuntimeScene(AssetId entity = {}) const noexcept = 0;
     };
 
     [[nodiscard]] std::optional<float> ReadManagedRenderingScalar(const Ref<Scene>& scene, AssetId entity,

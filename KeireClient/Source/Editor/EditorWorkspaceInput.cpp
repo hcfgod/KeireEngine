@@ -90,20 +90,140 @@ double EditorWorkspaceLayer::ManagedElapsedTime() const noexcept
     return Owner().GetTime().TimeSinceStartup().Seconds();
 }
 
-Keire::AssetId EditorWorkspaceLayer::ActiveManagedScene() const noexcept
+std::uint64_t EditorWorkspaceLayer::BeginManagedSceneLoad(const Keire::AssetId scene,
+                                                          const Keire::SceneLoadMode mode) noexcept
 {
-    return m_SceneDocument && m_SceneDocument->ActiveScene() ? m_SceneDocument->Asset() : Keire::AssetId{};
+    try
+    {
+        if (!m_PlayRuntimeWorld || !scene)
+            return 0;
+        const auto pending = std::ranges::find_if(m_ManagedSceneOperations,
+                                                  [](const ManagedSceneOperation& operation)
+                                                  {
+                                                      const auto state = operation.Load->State();
+                                                      return state == Keire::SceneLoadState::Queued ||
+                                                             state == Keire::SceneLoadState::Loading;
+                                                  });
+        if (pending != m_ManagedSceneOperations.end())
+            return 0;
+        if (m_ManagedSceneOperations.size() >= 16)
+            m_ManagedSceneOperations.erase(m_ManagedSceneOperations.begin());
+        const auto operation = m_NextManagedSceneOperation++;
+        if (m_NextManagedSceneOperation == 0)
+            ++m_NextManagedSceneOperation;
+        m_ManagedSceneOperations.push_back({operation, m_PlayRuntimeWorld->Load(scene, mode)});
+        return operation;
+    }
+    catch (...)
+    {
+        return 0;
+    }
+}
+
+std::optional<Keire::ManagedSceneLoadStatus>
+EditorWorkspaceLayer::ManagedSceneLoad(const std::uint64_t operation) const noexcept
+{
+    try
+    {
+        const auto found = std::ranges::find(m_ManagedSceneOperations, operation, &ManagedSceneOperation::Id);
+        if (found == m_ManagedSceneOperations.end())
+            return std::nullopt;
+        const auto state = found->Load->State();
+        return Keire::ManagedSceneLoadStatus{found->Load->Asset(),
+                                             found->Load->Mode(),
+                                             state,
+                                             found->Load->Progress(),
+                                             found->Load->Diagnostic().Message,
+                                             found->Load->Result()};
+    }
+    catch (...)
+    {
+        return std::nullopt;
+    }
+}
+
+bool EditorWorkspaceLayer::CancelManagedSceneLoad(const std::uint64_t operation) noexcept
+{
+    const auto found = std::ranges::find(m_ManagedSceneOperations, operation, &ManagedSceneOperation::Id);
+    if (found == m_ManagedSceneOperations.end())
+        return false;
+    const auto state = found->Load->State();
+    if (state != Keire::SceneLoadState::Queued && state != Keire::SceneLoadState::Loading)
+        return false;
+    found->Load->Cancel();
+    return true;
+}
+
+bool EditorWorkspaceLayer::UnloadManagedScene(const Keire::SceneHandle scene) noexcept
+{
+    try
+    {
+        return m_PlayRuntimeWorld && m_PlayRuntimeWorld->Unload(scene);
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+bool EditorWorkspaceLayer::SetActiveManagedScene(const Keire::SceneHandle scene) noexcept
+{
+    try
+    {
+        return m_PlayRuntimeWorld && m_PlayRuntimeWorld->SetActive(scene);
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+bool EditorWorkspaceLayer::MakeManagedEntityPersistent(const Keire::ManagedEntityHandle entity) noexcept
+{
+    try
+    {
+        const auto scene =
+            m_PlayRuntimeWorld ? m_PlayRuntimeWorld->FindWorld(entity.World) : Keire::Ref<Keire::Scene>{};
+        const auto target = scene ? scene->FindEntity(Keire::EntityId(entity.Entity)) : Keire::Entity{};
+        return target && m_PlayRuntimeWorld->MakePersistent(target);
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+Keire::ManagedSceneHandle EditorWorkspaceLayer::ActiveManagedSceneHandle() const noexcept
+{
+    if (!m_PlayRuntimeWorld)
+        return {};
+    const auto active = m_PlayRuntimeWorld->Active();
+    return {m_PlayRuntimeWorld->Asset(active), active};
+}
+
+Keire::AssetId EditorWorkspaceLayer::ActiveManagedScene() const noexcept { return ActiveManagedSceneHandle().Scene; }
+
+std::vector<Keire::ManagedSceneHandle> EditorWorkspaceLayer::LoadedManagedSceneHandles() const
+{
+    std::vector<Keire::ManagedSceneHandle> result;
+    if (!m_PlayRuntimeWorld)
+        return result;
+    for (const auto handle : m_PlayRuntimeWorld->LoadedScenes())
+        result.push_back({m_PlayRuntimeWorld->Asset(handle), handle});
+    return result;
 }
 
 std::vector<Keire::AssetId> EditorWorkspaceLayer::LoadedManagedScenes() const
 {
-    const auto active = ActiveManagedScene();
-    return active ? std::vector{active} : std::vector<Keire::AssetId>{};
+    std::vector<Keire::AssetId> result;
+    for (const auto scene : LoadedManagedSceneHandles())
+        result.push_back(scene.Scene);
+    return result;
 }
 
 std::vector<std::string> EditorWorkspaceLayer::ManagedEntityTags(const Keire::ManagedEntityHandle entity) const
 {
-    const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+    const auto scene = m_PlayRuntimeWorld ? m_PlayRuntimeWorld->FindWorld(entity.World) : Keire::Ref<Keire::Scene>{};
     const auto target = scene ? scene->FindEntity(Keire::EntityId(entity.Entity)) : Keire::Entity{};
     return target && target.World() == entity.World ? target.Tags() : std::vector<std::string>{};
 }
@@ -113,7 +233,8 @@ bool EditorWorkspaceLayer::AddManagedEntityTag(const Keire::ManagedEntityHandle 
 {
     try
     {
-        const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+        const auto scene =
+            m_PlayRuntimeWorld ? m_PlayRuntimeWorld->FindWorld(entity.World) : Keire::Ref<Keire::Scene>{};
         auto target = scene ? scene->FindEntity(Keire::EntityId(entity.Entity)) : Keire::Entity{};
         return target && target.World() == entity.World && target.AddTag(std::string(tag));
     }
@@ -128,7 +249,8 @@ bool EditorWorkspaceLayer::RemoveManagedEntityTag(const Keire::ManagedEntityHand
 {
     try
     {
-        const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+        const auto scene =
+            m_PlayRuntimeWorld ? m_PlayRuntimeWorld->FindWorld(entity.World) : Keire::Ref<Keire::Scene>{};
         auto target = scene ? scene->FindEntity(Keire::EntityId(entity.Entity)) : Keire::Entity{};
         return target && target.World() == entity.World && target.RemoveTag(tag);
     }
@@ -142,7 +264,8 @@ bool EditorWorkspaceLayer::ClearManagedEntityTags(const Keire::ManagedEntityHand
 {
     try
     {
-        const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+        const auto scene =
+            m_PlayRuntimeWorld ? m_PlayRuntimeWorld->FindWorld(entity.World) : Keire::Ref<Keire::Scene>{};
         auto target = scene ? scene->FindEntity(Keire::EntityId(entity.Entity)) : Keire::Entity{};
         if (!target || target.World() != entity.World)
             return false;
@@ -155,11 +278,35 @@ bool EditorWorkspaceLayer::ClearManagedEntityTags(const Keire::ManagedEntityHand
     }
 }
 
+std::vector<Keire::ManagedEntityHandle>
+EditorWorkspaceLayer::QueryManagedEntityNamesScoped(const std::string_view name, const Keire::ManagedSceneQuery query,
+                                                    const std::size_t maximum) const
+{
+    const auto entities = m_PlayRuntimeWorld ? m_PlayRuntimeWorld->QueryName(name, query.Scope, query.Scene, maximum)
+                                             : std::vector<Keire::Entity>{};
+    std::vector<Keire::ManagedEntityHandle> result;
+    result.reserve(std::min(entities.size(), maximum));
+    for (const auto& entity : entities)
+    {
+        if (result.size() == maximum)
+            break;
+        result.push_back({entity.World(), entity.Id().Value()});
+    }
+    return result;
+}
+
 std::vector<Keire::ManagedEntityHandle> EditorWorkspaceLayer::QueryManagedEntityNames(const std::string_view name,
                                                                                       const std::size_t maximum) const
 {
-    const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
-    const auto entities = scene ? scene->QueryName(name) : std::vector<Keire::Entity>{};
+    return QueryManagedEntityNamesScoped(name, {}, maximum);
+}
+
+std::vector<Keire::ManagedEntityHandle>
+EditorWorkspaceLayer::QueryManagedEntityTagsScoped(const std::string_view tag, const Keire::ManagedSceneQuery query,
+                                                   const std::size_t maximum) const
+{
+    const auto entities = m_PlayRuntimeWorld ? m_PlayRuntimeWorld->QueryTag(tag, query.Scope, query.Scene, maximum)
+                                             : std::vector<Keire::Entity>{};
     std::vector<Keire::ManagedEntityHandle> result;
     result.reserve(std::min(entities.size(), maximum));
     for (const auto& entity : entities)
@@ -174,8 +321,14 @@ std::vector<Keire::ManagedEntityHandle> EditorWorkspaceLayer::QueryManagedEntity
 std::vector<Keire::ManagedEntityHandle> EditorWorkspaceLayer::QueryManagedEntityTags(const std::string_view tag,
                                                                                      const std::size_t maximum) const
 {
-    const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
-    const auto entities = scene ? scene->QueryTag(tag) : std::vector<Keire::Entity>{};
+    return QueryManagedEntityTagsScoped(tag, {}, maximum);
+}
+
+std::vector<Keire::ManagedEntityHandle> EditorWorkspaceLayer::QueryManagedEntityComponentsScoped(
+    const Keire::ComponentTypeId component, const Keire::ManagedSceneQuery query, const std::size_t maximum) const
+{
+    const auto entities = m_PlayRuntimeWorld ? m_PlayRuntimeWorld->Query(component, query.Scope, query.Scene, maximum)
+                                             : std::vector<Keire::Entity>{};
     std::vector<Keire::ManagedEntityHandle> result;
     result.reserve(std::min(entities.size(), maximum));
     for (const auto& entity : entities)
@@ -191,17 +344,7 @@ std::vector<Keire::ManagedEntityHandle>
 EditorWorkspaceLayer::QueryManagedEntityComponents(const Keire::ComponentTypeId component,
                                                    const std::size_t maximum) const
 {
-    const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
-    const auto entities = scene ? scene->Query(component) : std::vector<Keire::Entity>{};
-    std::vector<Keire::ManagedEntityHandle> result;
-    result.reserve(std::min(entities.size(), maximum));
-    for (const auto& entity : entities)
-    {
-        if (result.size() == maximum)
-            break;
-        result.push_back({entity.World(), entity.Id().Value()});
-    }
-    return result;
+    return QueryManagedEntityComponentsScoped(component, {}, maximum);
 }
 
 std::optional<Keire::RenderEnvironmentSettings> EditorWorkspaceLayer::ManagedRenderEnvironment() const noexcept
@@ -597,8 +740,7 @@ bool EditorWorkspaceLayer::PlayManagedAudio(const Keire::ManagedAudioPlayback& p
 {
     try
     {
-        const auto session =
-            m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+        const auto session = ManagedRuntimeSession(playback.Entity);
         const auto scene = session ? session->RuntimeScene() : Keire::Ref<Keire::Scene>{};
         const auto presentation = session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{};
         auto sourceEntity = scene ? scene->FindEntity(Keire::EntityId(playback.Entity)) : Keire::Entity{};
@@ -642,8 +784,7 @@ bool EditorWorkspaceLayer::StopManagedAudio(const Keire::AssetId entity) noexcep
 {
     try
     {
-        const auto session =
-            m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+        const auto session = ManagedRuntimeSession(entity);
         const auto scene = session ? session->RuntimeScene() : Keire::Ref<Keire::Scene>{};
         const auto presentation = session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{};
         const auto sourceEntity = scene ? scene->FindEntity(Keire::EntityId(entity)) : Keire::Entity{};
@@ -663,8 +804,7 @@ bool EditorWorkspaceLayer::PauseManagedAudio(const Keire::AssetId entity, const 
 {
     try
     {
-        const auto session =
-            m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+        const auto session = ManagedRuntimeSession(entity);
         const auto presentation = session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{};
         return presentation &&
                (paused ? presentation->Pause(Keire::EntityId(entity)) : presentation->Resume(Keire::EntityId(entity)));
@@ -679,8 +819,7 @@ bool EditorWorkspaceLayer::SeekManagedAudio(const Keire::AssetId entity, const f
 {
     try
     {
-        const auto session =
-            m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+        const auto session = ManagedRuntimeSession(entity);
         const auto presentation = session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{};
         return presentation && presentation->Seek(Keire::EntityId(entity), positionSeconds);
     }
@@ -694,8 +833,7 @@ Keire::ManagedAudioSourceStatus EditorWorkspaceLayer::ManagedAudioStatus(const K
 {
     try
     {
-        const auto session =
-            m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+        const auto session = ManagedRuntimeSession(entity);
         const auto presentation = session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{};
         if (!presentation)
             return {};
@@ -714,8 +852,7 @@ bool EditorWorkspaceLayer::PlayManagedVfx(const Keire::AssetId entity, const Kei
 {
     try
     {
-        const auto session =
-            m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+        const auto session = ManagedRuntimeSession(entity);
         return session && session->PlayVfx(Keire::EntityId(entity), effect, restart);
     }
     catch (...)
@@ -728,8 +865,7 @@ bool EditorWorkspaceLayer::StopManagedVfx(const Keire::AssetId entity) noexcept
 {
     try
     {
-        const auto session =
-            m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+        const auto session = ManagedRuntimeSession(entity);
         return session && session->StopVfx(Keire::EntityId(entity));
     }
     catch (...)
@@ -742,8 +878,7 @@ bool EditorWorkspaceLayer::PauseManagedVfx(const Keire::AssetId entity, const bo
 {
     try
     {
-        const auto session =
-            m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+        const auto session = ManagedRuntimeSession(entity);
         return session && session->PauseVfx(Keire::EntityId(entity), paused);
     }
     catch (...)
@@ -756,8 +891,7 @@ bool EditorWorkspaceLayer::IsManagedVfxAlive(const Keire::AssetId entity) const 
 {
     try
     {
-        const auto session =
-            m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+        const auto session = ManagedRuntimeSession(entity);
         return session && session->IsVfxAlive(Keire::EntityId(entity));
     }
     catch (...)
@@ -771,8 +905,7 @@ bool EditorWorkspaceLayer::SendManagedVfxEvent(const Keire::AssetId entity, cons
 {
     try
     {
-        const auto session =
-            m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+        const auto session = ManagedRuntimeSession(entity);
         return session && session->SendVfxEvent(Keire::EntityId(entity), eventName, spawnCount);
     }
     catch (...)
@@ -786,8 +919,7 @@ bool EditorWorkspaceLayer::SetManagedVfxParameter(const Keire::AssetId entity,
 {
     try
     {
-        const auto session =
-            m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+        const auto session = ManagedRuntimeSession(entity);
         return session && session->SetVfxParameter(Keire::EntityId(entity), value);
     }
     catch (...)
@@ -800,7 +932,7 @@ bool EditorWorkspaceLayer::SetManagedUiText(const Keire::AssetId entity, const s
 {
     try
     {
-        const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+        const auto scene = ManagedRuntimeScene(entity);
         const auto target = scene ? scene->FindEntity(Keire::EntityId(entity)) : Keire::Entity{};
         const auto component =
             target ? target.GetComponent<Keire::UiTextComponent>() : Keire::Ref<Keire::UiTextComponent>{};
@@ -819,8 +951,7 @@ bool EditorWorkspaceLayer::ConsumeManagedUiClick(const Keire::AssetId entity) no
 {
     try
     {
-        const auto session =
-            m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+        const auto session = ManagedRuntimeSession(entity);
         const auto presentation = session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{};
         return presentation && presentation->ConsumeClick(Keire::EntityId(entity));
     }
@@ -833,22 +964,22 @@ bool EditorWorkspaceLayer::ConsumeManagedUiClick(const Keire::AssetId entity) no
 std::optional<float> EditorWorkspaceLayer::ReadManagedUiScalar(const Keire::AssetId entity,
                                                                const Keire::ManagedUiScalarProperty property) noexcept
 {
-    const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+    const auto scene = ManagedRuntimeScene(entity);
     return Keire::Detail::ReadManagedUiScalar(scene, entity, property);
 }
 
 bool EditorWorkspaceLayer::SetManagedUiScalar(const Keire::AssetId entity,
                                               const Keire::ManagedUiScalarProperty property, const float value) noexcept
 {
-    const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+    const auto scene = ManagedRuntimeScene(entity);
     return Keire::Detail::SetManagedUiScalar(scene, entity, property, value);
 }
 
 std::optional<bool> EditorWorkspaceLayer::ReadManagedUiFlag(const Keire::AssetId entity,
                                                             const Keire::ManagedUiFlagProperty property) noexcept
 {
-    const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
-    const auto session = m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+    const auto scene = ManagedRuntimeScene(entity);
+    const auto session = ManagedRuntimeSession(entity);
     const auto presentation = session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{};
     return Keire::Detail::ReadManagedUiFlag(scene, presentation, entity, property);
 }
@@ -856,8 +987,8 @@ std::optional<bool> EditorWorkspaceLayer::ReadManagedUiFlag(const Keire::AssetId
 bool EditorWorkspaceLayer::SetManagedUiFlag(const Keire::AssetId entity, const Keire::ManagedUiFlagProperty property,
                                             const bool value) noexcept
 {
-    const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
-    const auto session = m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+    const auto scene = ManagedRuntimeScene(entity);
+    const auto session = ManagedRuntimeSession(entity);
     const auto presentation = session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{};
     return Keire::Detail::SetManagedUiFlag(scene, presentation, entity, property, value);
 }
@@ -866,7 +997,7 @@ std::optional<Keire::Vector2>
 EditorWorkspaceLayer::ReadManagedUiVector(const Keire::AssetId entity,
                                           const Keire::ManagedUiVectorProperty property) noexcept
 {
-    const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+    const auto scene = ManagedRuntimeScene(entity);
     return Keire::Detail::ReadManagedUiVector(scene, entity, property);
 }
 
@@ -874,40 +1005,52 @@ bool EditorWorkspaceLayer::SetManagedUiVector(const Keire::AssetId entity,
                                               const Keire::ManagedUiVectorProperty property,
                                               const Keire::Vector2 value) noexcept
 {
-    const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+    const auto scene = ManagedRuntimeScene(entity);
     return Keire::Detail::SetManagedUiVector(scene, entity, property, value);
 }
 
 std::optional<std::string> EditorWorkspaceLayer::ReadManagedUiInputText(const Keire::AssetId entity) noexcept
 {
-    const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+    const auto scene = ManagedRuntimeScene(entity);
     return Keire::Detail::ReadManagedUiInputText(scene, entity);
 }
 
 bool EditorWorkspaceLayer::SetManagedUiInputText(const Keire::AssetId entity, const std::string_view text) noexcept
 {
-    const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+    const auto scene = ManagedRuntimeScene(entity);
     return Keire::Detail::SetManagedUiInputText(scene, entity, text);
 }
 
 bool EditorWorkspaceLayer::ConsumeManagedUiEvent(const Keire::AssetId entity,
                                                  const Keire::RuntimeUiEventType type) noexcept
 {
-    const auto session = m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+    const auto session = ManagedRuntimeSession(entity);
     const auto presentation = session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{};
     return Keire::Detail::ConsumeManagedUiEvent(presentation, entity, type);
 }
 
 bool EditorWorkspaceLayer::FocusManagedUi(const Keire::AssetId entity) noexcept
 {
-    const auto session = m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+    const auto session = ManagedRuntimeSession(entity);
     const auto presentation = session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{};
     return Keire::Detail::FocusManagedUi(presentation, entity);
 }
 
-Keire::Ref<Keire::Scene> EditorWorkspaceLayer::ManagedRuntimeScene() const noexcept
+Keire::Ref<Keire::SceneRuntimeSession>
+EditorWorkspaceLayer::ManagedRuntimeSession(const Keire::AssetId entity) const noexcept
 {
-    return m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+    if (!m_PlayRuntimeWorld)
+        return {};
+    if (entity)
+        if (const auto session = m_PlayRuntimeWorld->SessionForEntity(Keire::EntityId(entity)))
+            return session;
+    return m_PlayRuntimeWorld->Session(m_PlayRuntimeWorld->Active());
+}
+
+Keire::Ref<Keire::Scene> EditorWorkspaceLayer::ManagedRuntimeScene(const Keire::AssetId entity) const noexcept
+{
+    const auto session = ManagedRuntimeSession(entity);
+    return session ? session->RuntimeScene() : Keire::Ref<Keire::Scene>{};
 }
 
 std::optional<Keire::ManagedRaycastHit>
@@ -915,7 +1058,8 @@ EditorWorkspaceLayer::RaycastManaged(const Keire::ManagedRaycastQuery& query) no
 {
     try
     {
-        const auto play = m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+        const auto play = m_PlayRuntimeWorld ? m_PlayRuntimeWorld->SessionForWorld(query.World)
+                                             : Keire::Ref<Keire::SceneRuntimeSession>{};
         if (!play)
             return std::nullopt;
         const auto hits = play->RayCast({.Origin = query.Origin,
@@ -939,13 +1083,15 @@ EditorWorkspaceLayer::RaycastManaged(const Keire::ManagedRaycastQuery& query) no
 std::optional<Keire::ManagedRaycastHit>
 EditorWorkspaceLayer::CapsuleCastManaged(const Keire::ManagedCapsuleCastQuery& query) noexcept
 {
-    const auto play = m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+    const auto play = m_PlayRuntimeWorld ? m_PlayRuntimeWorld->SessionForWorld(query.World)
+                                         : Keire::Ref<Keire::SceneRuntimeSession>{};
     return Keire::Detail::QueryManagedCapsule(play, query);
 }
 
 std::vector<Keire::AssetId> EditorWorkspaceLayer::OverlapSphereManaged(const Keire::ManagedSphereOverlapQuery& query)
 {
-    const auto play = m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+    const auto play = m_PlayRuntimeWorld ? m_PlayRuntimeWorld->SessionForWorld(query.World)
+                                         : Keire::Ref<Keire::SceneRuntimeSession>{};
     return Keire::Detail::QueryManagedSphereOverlap(play, query);
 }
 

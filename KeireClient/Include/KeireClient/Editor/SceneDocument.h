@@ -96,7 +96,8 @@ namespace KeireEditor
         void ResetRecoveryTimer() noexcept { m_RecoverySeconds = 0.0; }
         void BeginPlay(Keire::Ref<Keire::UndoContext> playUndo = {}, Keire::Ref<Keire::AssetSystem> assets = {},
                        Keire::Ref<Keire::AudioSystem> audio = {}, Keire::Ref<Keire::PhysicsSystem> physics = {},
-                       Keire::AssetId defaultMixer = {});
+                       Keire::AssetId defaultMixer = {}, const Keire::Ref<Keire::SceneRuntimeWorld>& runtimeWorld = {});
+        void SetPlaySession(Keire::Ref<Keire::SceneRuntimeSession> session);
         void EndPlay() noexcept;
         void SetRecoveryAvailable(bool available) noexcept { m_RecoveryAvailable = available; }
         void Close() noexcept;
