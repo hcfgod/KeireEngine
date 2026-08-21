@@ -44,6 +44,18 @@ brew_install() {
 }
 check_version() { version_at_least "$2" "$3" || { printf '%s %s is older than required %s; rerun with --update.\n' "$1" "$2" "$3" >&2; exit 1; }; }
 
+install_bison() {
+    ensure_brew
+    if ! brew list --versions bison >/dev/null 2>&1; then
+        brew install bison
+    elif [[ $UPDATE -eq 1 ]]; then
+        brew upgrade bison || true
+    fi
+    local bison_executable
+    bison_executable="$(brew --prefix bison)/bin/bison"
+    check_version Bison "$("$bison_executable" --version | extract_version)" 3.0
+}
+
 install_premake() {
     local version_output=""
     mkdir -p "$(dirname "$PREMAKE")"
@@ -100,6 +112,7 @@ brew_install cmake cmake
 check_version CMake "$(cmake --version | extract_version)" 3.24
 brew_install ninja ninja
 check_version Ninja "$(ninja --version)" 1.11
+install_bison
 [[ "$GENERATOR" == compilecommands ]] && brew_install python3 python
 [[ "$GENERATOR" == gmake ]] && { brew_install gmake make; check_version Make "$(gmake --version | extract_version)" 4.3; }
 case "$TOOLSET" in default|clang) check_version Clang "$(clang++ --version | extract_version)" 16;; *) printf 'macOS supports default or clang toolsets.\n' >&2; exit 1;; esac
