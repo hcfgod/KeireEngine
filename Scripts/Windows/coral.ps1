@@ -112,14 +112,17 @@ if ($Build) {
     $WorkspaceDotnet = Join-Path $Root "Build\Tools\dotnet10\dotnet.exe"
     $CachedDotnet = Join-Path $env:LOCALAPPDATA "KeireTools\dotnet10\dotnet.exe"
     if (Test-Path -LiteralPath $CachedDotnet) {
-        $env:DOTNET_ROOT = Split-Path $CachedDotnet
-        $env:PATH = "$(Split-Path $CachedDotnet);$env:PATH"
+        $DotnetExecutable = $CachedDotnet
     }
     elseif (Test-Path -LiteralPath $WorkspaceDotnet) {
-        $env:DOTNET_ROOT = Split-Path $WorkspaceDotnet
-        $env:PATH = "$(Split-Path $WorkspaceDotnet);$env:PATH"
+        $DotnetExecutable = $WorkspaceDotnet
     }
-    $SdkVersions = @(& dotnet --list-sdks | ForEach-Object {
+    else {
+        $DotnetExecutable = (Get-Command dotnet -CommandType Application -ErrorAction Stop).Source
+    }
+    $env:DOTNET_ROOT = Split-Path -Parent $DotnetExecutable
+    $env:PATH = "$env:DOTNET_ROOT;$env:PATH"
+    $SdkVersions = @(& $DotnetExecutable --list-sdks | ForEach-Object {
         if ($_ -match '^([0-9]+\.[0-9]+\.[0-9]+)') { [Version]$Matches[1] }
     })
     if ($LASTEXITCODE -ne 0 -or -not ($SdkVersions | Where-Object { $_.Major -eq 10 })) {
@@ -145,9 +148,17 @@ if ($Build) {
     if (-not (Test-Path -LiteralPath (Join-Path $NativeBuild "Coral.Managed.dll"))) {
         throw "Patched Coral build did not produce Coral.Managed.dll."
     }
-    $NetHostLibrary = Get-ChildItem -LiteralPath (Join-Path $env:DOTNET_ROOT "packs") -Filter "nethost.lib" `
-        -File -Recurse | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
-    if (-not $NetHostLibrary) {
+    $DotnetHostArchitecture = if ($Architecture -eq "ARM64") { "arm64" } else { "x64" }
+    $NetHostPack = Join-Path $env:DOTNET_ROOT "packs\Microsoft.NETCore.App.Host.win-$DotnetHostArchitecture"
+    $NetHostVersion = Get-ChildItem -LiteralPath $NetHostPack -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^10\.' } |
+        Sort-Object { [Version]$_.Name } -Descending |
+        Select-Object -First 1
+    if ($NetHostVersion) {
+        $NetHostLibrary = Join-Path $NetHostVersion.FullName `
+            "runtimes\win-$DotnetHostArchitecture\native\nethost.lib"
+    }
+    if (-not $NetHostLibrary -or -not (Test-Path -LiteralPath $NetHostLibrary -PathType Leaf)) {
         throw "The .NET 10 SDK does not contain the static nethost import library."
     }
     Write-Host "==> Patched Coral $Configuration build is ready"

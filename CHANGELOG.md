@@ -24,8 +24,9 @@ versions.
   bounded contracts.
 - Restored hosted CI parity with local launchers: quality checks use the pinned Clang 22 formatter, Windows shader
   compiler builds use a short Unicode-safe workspace, Linux builds use Clang for the LLVM-derived host shader tool,
-  Windows Coral sources and patch inputs preserve patch-compatible line endings, macOS supplies the shader tool's Perl
-  JSON dependency and selects its keg-only modern Bison, and macOS dependency builds avoid Xcode 16.4's obsolete zlib
+  Windows Coral sources and patch inputs preserve patch-compatible line endings, resolve the active SDK root, and use
+  the native .NET 10 host pack. macOS supplies the shader tool's Perl JSON dependency and selects its keg-only modern
+  Bison, and macOS dependency builds avoid Xcode 16.4's obsolete zlib
   platform macro. Dependency locks now track the committed SDL, EnTT, GLM, stb, and FFmpeg revisions; Apple Silicon
   Coral setup recognizes CMake's lowercase `arm64` processor name; and quality analysis generates its required headers.
   Windows fast checks fall back to `git grep` when `rg` is unavailable, and the strict

@@ -306,6 +306,12 @@ $coralRoot = Join-Path (Get-RepositoryRoot) "Patches\Coral"
 $coralScript = Get-Content (Join-Path $Windows "coral.ps1") -Raw
 Assert-True ($coralScript.Contains('git -C $TemporarySource config core.autocrlf false')) `
     "Coral source cache uses deterministic LF checkouts"
+Assert-True ($coralScript.Contains('Get-Command dotnet -CommandType Application') -and
+             $coralScript.Contains('$env:DOTNET_ROOT = Split-Path -Parent $DotnetExecutable')) `
+    "Coral resolves DOTNET_ROOT when the hosted SDK is available only through PATH"
+Assert-True ($coralScript.Contains('Microsoft.NETCore.App.Host.win-$DotnetHostArchitecture') -and
+             $coralScript.Contains("Where-Object { `$_.Name -match '^10\.' }")) `
+    "Coral selects the native architecture's .NET 10 nethost pack"
 $coralPatchPath = "Patches/Coral/0001-keire-net10-nethost-lifetime.patch"
 $coralPatchEol = ([string](& git -C (Get-RepositoryRoot) check-attr eol -- $coralPatchPath)).Trim()
 Assert-Equal $coralPatchEol "$coralPatchPath`: eol: lf" "Coral patch LF checkout policy"
