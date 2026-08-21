@@ -28,6 +28,7 @@
     "KeireClient/Source/Editor/AnimatorControllerPanel.cpp": 1970,
     "KeireClient/Source/Editor/AssetBrowserPanel.cpp": 1800,
     "KeireClient/Source/Editor/EditorWorkspaceAssets.cpp": 2512,
+    "KeireClient/Source/Editor/EditorWorkspaceScene.cpp": 1548,
     "KeireClient/Source/Editor/ShaderGraphPreview.cpp": 1937,
     "KeireClient/Source/Editor/VfxEffectPanel.cpp": 2750,
     "KeireCore/Include/KeireInternal/Scenes/SceneRuntimeSessionImpl.h": 1990,
@@ -41,6 +42,7 @@
     "KeireCore/Source/Vfx/VfxAssets.cpp": 4386,
     "KeireCore/Source/Vfx/VfxExpressions.cpp": 2000,
     "KeireCore/Source/Vfx/VfxSystem.cpp": 2489,
-    "KeireRenderTests/Source/RenderedOutputTests.cpp": 2605
+    "KeireRenderTests/Source/RenderedOutputTests.cpp": 2605,
+    "KeireRuntime/Source/RuntimeApplication.cpp": 1575
   }
 }
