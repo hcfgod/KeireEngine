@@ -1,5 +1,6 @@
 var tests = new (string Name, Action Run)[]
 {
+    ("Prefab assets expose typed stable identity", PrefabAssetMarkerContract),
     ("VFX ranges normalize and validate", VfxRangesNormalizeAndValidate),
     ("Inspector attributes validate production editing metadata", InspectorAttributeContract),
     ("VFX range setters expose every supported type", VfxRangeSettersExposeEverySupportedType),
@@ -23,6 +24,18 @@ var tests = new (string Name, Action Run)[]
     ("Player preferences persist typed values atomically", PlayerPreferencesPersistenceContract),
     ("Player preferences reject invalid and corrupt data", PlayerPreferencesValidationContract),
 };
+
+static void PrefabAssetMarkerContract()
+{
+    var marker = (Keire.StableAssetTypeIdAttribute?)Attribute.GetCustomAttribute(
+        typeof(Keire.PrefabAsset), typeof(Keire.StableAssetTypeIdAttribute));
+    Assert(marker?.Id == Guid.Parse("4b454952-4550-5245-4641-424153535401"),
+           "PrefabAsset must expose the native prefab asset type ID for serialized references.");
+
+    var reference = new Keire.AssetReference<Keire.PrefabAsset>(new Keire.AssetId(101, 202));
+    Assert(reference.IsValid && reference.Id == new Keire.AssetId(101, 202),
+           "PrefabAsset references must preserve stable prefab identity.");
+}
 
 static void InspectorAttributeContract()
 {

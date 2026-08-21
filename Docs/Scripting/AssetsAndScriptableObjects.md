@@ -19,6 +19,9 @@ private AssetReference<AnimatorController> _controller;
 
 [SerializeField, StableFieldId("5db8bbca-0d17-45af-85ae-5d42e35d5646")]
 private AssetReference<VfxEffect> _impactEffect;
+
+[SerializeField, StableFieldId("958d1968-d2df-4886-b50b-b6165bb7ace4")]
+private AssetReference<PrefabAsset> _prefab;
 ```
 
 `AssetReference<T>` is a `readonly record struct`, so its default value is an invalid reference. Test it with
@@ -38,8 +41,8 @@ if (_prefab.IsValid)
 
 ## Asset Markers Are Not Loaded Objects
 
-Types such as `AudioClip`, `AudioMixer`, `AnimationClip`, `AnimatorController`, and `VfxEffect` are asset type markers.
-They provide typed selection and API overloads; they are not clip or graph objects that scripts modify.
+Types such as `AudioClip`, `AudioMixer`, `AnimationClip`, `AnimatorController`, `PrefabAsset`, and `VfxEffect` are asset
+type markers. They provide typed selection and API overloads; they are not clip or graph objects that scripts modify.
 
 This declaration is incorrect for an asset field:
 

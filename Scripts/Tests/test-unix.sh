@@ -512,6 +512,12 @@ assert_true grep -q 'AddKeireManagedHostStaging()' "$ROOT/AssetTool/premake5.lua
 assert_true grep -q 'specification.RuntimeHostDirectory = managedHost' "$ROOT/AssetTool/Source/Main.cpp"
 assert_true grep -q 'specification.RuntimeRootDirectory = managedHost / "Dotnet"' "$ROOT/AssetTool/Source/Main.cpp"
 assert_true grep -q 'Scripts/Unix/stage-managed-host.sh' "$ROOT/Scripts/Premake/Managed.lua"
+assert_equal "$(managed_host_staging_targets KeireClient KeireClient KeireHub Keire | tr '\n' ',')" \
+  'KeireAssetTool,KeireRuntime,KeireClient,' \
+  'Editor builds refresh managed hosts for their executable dependencies'
+assert_equal "$(managed_host_staging_targets KeireHub KeireClient KeireHub Keire | tr '\n' ',')" \
+  'KeireAssetTool,KeireRuntime,KeireClient,KeireHub,' \
+  'Hub builds refresh managed hosts for the editor dependency chain'
 assert_true grep -q 'dependson { KeireManagedProject }' "$ROOT/Scripts/Premake/Managed.lua"
 assert_true grep -q 'links { KeireManagedProject }' "$ROOT/Scripts/Premake/Managed.lua"
 assert_true grep -q 'kind "StaticLib"' "$ROOT/Scripts/Premake/Managed.lua"

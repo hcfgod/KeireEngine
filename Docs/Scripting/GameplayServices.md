@@ -327,7 +327,7 @@ computed paths stale at the native service boundary. Re-query after relevant nav
 
 ```csharp
 [SerializeField, StableFieldId("92968407-4ebd-4092-90fb-7bb7f660a4e2")]
-private AssetReference<object> _projectilePrefab;
+private AssetReference<PrefabAsset> _projectilePrefab;
 
 private Entity SpawnProjectile(Vector3 position, Quaternion rotation)
 {
@@ -342,8 +342,8 @@ private Entity SpawnProjectile(Vector3 position, Quaternion rotation)
 `PrefabInstance` contains the root plus the complete instantiated entity list. Passing `default(Quaternion)` uses the
 identity rotation.
 
-Use the typed asset marker supplied by the API when one exists. The current managed surface does not define a dedicated
-prefab marker, so prefab calls use `AssetId`; the general serialized reference shown above retains stable identity.
+`PrefabAsset` is the typed marker for authored `.keireprefab` content. `Prefab.Instantiate` accepts its stable `AssetId`
+so project code retains explicit ownership of the resulting entities.
 
 ## VFX
 

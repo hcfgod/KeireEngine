@@ -1285,6 +1285,9 @@ public static class Vfx
                                                                                                         value);
 }
 
+[StableAssetTypeId("4b454952-4550-5245-4641-424153535401")]
+public sealed class PrefabAsset;
+
 public static class Prefab
 {
     public static PrefabInstance Instantiate(AssetId prefab, Vector3 position = default, Quaternion rotation = default) =>
