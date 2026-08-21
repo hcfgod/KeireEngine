@@ -1042,6 +1042,9 @@ public static class Audio
 [StableAssetTypeId("4b454952-4556-4658-4546-464543540001")]
 public sealed class VfxEffect;
 
+[StableAssetTypeId("4b454952-4556-4658-564f-4c554d450001")]
+public sealed class VfxVolume;
+
 /// <summary>A canonical inclusive range used by VFX Blackboard range parameters.</summary>
 /// <remarks>
 /// Endpoints may be supplied in either order. The constructor stores component-wise minima and maxima so the value

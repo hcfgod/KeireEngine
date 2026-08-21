@@ -1,10 +1,23 @@
 namespace Keire;
 
+[StableAssetTypeId("4b454952-454d-4553-4841-535345540001")]
 public sealed class Mesh;
+[StableAssetTypeId("4b454952-454d-4154-4552-49414c000001")]
 public sealed class Material;
+[StableAssetTypeId("4b454952-454d-5043-4f4c-4c4543540001")]
 public sealed class MaterialParameterCollection;
+[StableAssetTypeId("4b454952-4553-4841-4445-520000000001")]
 public sealed class Shader;
+[StableAssetTypeId("4b454952-4554-4558-5455-524532440001")]
 public sealed class Texture;
+[StableAssetTypeId("4b454952-4553-4752-4150-480000000001")]
+public sealed class ShaderGraph;
+[StableAssetTypeId("4b454952-4553-4749-4e53-540000000001")]
+public sealed class ShaderGraphInstance;
+[StableAssetTypeId("4b454952-454d-4752-4150-480000000001")]
+public sealed class MaterialGraph;
+[StableAssetTypeId("4b454952-454d-494e-5354-414e43450001")]
+public sealed class MaterialInstance;
 
 public enum CameraProjection
 {

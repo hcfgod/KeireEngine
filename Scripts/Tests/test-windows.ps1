@@ -607,6 +607,9 @@ Assert-True ($packageScript.Contains('entt-LICENSE.txt') -and $packageScript.Con
 Assert-True ($packageScript.Contains('KeireShaderCompiler.exe') -and $packageScript.Contains('SDL-shadercross-LICENSE.txt') -and $packageScript.Contains('$Lock.SDL_SHADERCROSS_COMMIT')) "Shader compiler package metadata and attribution"
 Assert-True ($packageScript.Contains('assimp-LICENSE.txt') -and $packageScript.Contains('stb-LICENSE.txt') -and $packageScript.Contains('$Lock.ASSIMP_COMMIT') -and $packageScript.Contains('$Lock.STB_COMMIT')) "Asset importer package metadata and attribution"
 Assert-True ($packageScript.Contains('$assetWorkerName') -and $packageScript.Contains('developmentArtifact') -and $packageScript.Contains('AllowDirty') -and $packageScript.Contains('manifest commit does not match')) "Asset worker and clean package policy"
+Assert-True ($packageScript.Contains('ManagedApiConsumer.csproj') -and
+    $packageScript.Contains('KeireManagedAssembly') -and $packageScript.Contains('Managed API SDK consumer compilation failed')) `
+    "Packaged managed API consumer compilation"
 $editorPackageScript = Get-Content (Join-Path $Windows "package-editor.ps1") -Raw
 Assert-True ($editorPackageScript.Contains('-Configuration Dist') -and $editorPackageScript.Contains('-StageOnly') -and
     $editorPackageScript.Contains('Build\Dependencies\dotnet-sdk') -and

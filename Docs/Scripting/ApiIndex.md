@@ -22,6 +22,8 @@ This index is a discovery map, not a replacement for the workflow guides or sour
 | `RenderEnvironmentSettings` | Atomic transient lighting, environment, exposure, and shadow state | [Scenes](ScenesAndRenderSettings.md) |
 | `AssetId` | Stable untyped asset identity | [Assets](AssetsAndScriptableObjects.md) |
 | `AssetReference<T>` | Typed serialized asset identity | [Assets](AssetsAndScriptableObjects.md) |
+| `AssetHandle<T>` | Explicit native runtime-asset residency lease and load status | [Assets](AssetsAndScriptableObjects.md) |
+| `AssetLoadState`, `AssetLoadPriority`, `AssetLoadDiagnostic`, `AssetLoadException` | Native runtime-asset loading contracts | [Assets](AssetsAndScriptableObjects.md) |
 | `ScriptableObject` | Managed data base type and transient clone API | [Assets](AssetsAndScriptableObjects.md) |
 | `Vector2`, `Vector3`, `Vector4` | Engine math values | [Gameplay Services](GameplayServices.md) |
 | `Quaternion`, `Color` | Rotation and color values | [Gameplay Services](GameplayServices.md) |
