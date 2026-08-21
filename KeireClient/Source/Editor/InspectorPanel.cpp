@@ -901,6 +901,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                 const bool rectTransform = registration->Type == Keire::RectTransformComponent::StaticType();
                 const float anchorPickerHeight = rectTransform ? 64.0F : 0.0F;
                 std::size_t groupRows = 0;
+                std::size_t headerRows = 0;
+                std::size_t additionalTextRows = 0;
                 std::string_view previousGroup;
                 for (const auto& property : registration->Properties)
                 {
@@ -911,6 +913,10 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                         ++groupRows;
                         previousGroup = property.Group;
                     }
+                    if (!property.Header.empty())
+                        ++headerRows;
+                    if (property.TextLines > 1)
+                        additionalTextRows += property.TextLines - 1;
                 }
                 const auto vfxEntries = vfxEffect ? KeireEditor::VfxEmitterInspector::VisibleEntryCount(
                                                         vfxEffect->Definition(), vfxEmitter->ParameterOverrides())
@@ -929,8 +935,9 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                 const float cardHeight =
                     expanded ? std::max(115.0F, 80.0F + anchorPickerHeight +
                                                     static_cast<float>(registration->Properties.size()) * 34.0F +
-                                                    static_cast<float>(groupRows) * 22.0F + vfxInspectorHeight +
-                                                    audioSetupHeight + proceduralDiagnosticsHeight)
+                                                    static_cast<float>(groupRows + headerRows) * 22.0F +
+                                                    static_cast<float>(additionalTextRows) * 20.0F +
+                                                    vfxInspectorHeight + audioSetupHeight + proceduralDiagnosticsHeight)
                              : 38.0F;
                 if (auto card = ui.BeginChild(cardId, {0.0F, cardHeight}, true); card)
                 {
@@ -1027,6 +1034,9 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                             activeGroup = property.Group;
                             ui.TextColored(theme.MutedText, activeGroup);
                         }
+                        if (!property.Header.empty())
+                            ui.TextColored(theme.Accent, property.Header);
+                        const auto propertyDisabled = ui.BeginDisabled(property.ReadOnly);
                         try
                         {
                             const auto found = values.find(property.Key);

@@ -82,6 +82,12 @@ namespace
             ++value;
             return true;
         }
+        bool EditIntegerSlider(std::string_view, std::int64_t& value, double, double) override
+        {
+            EditKinds.emplace_back("integer-slider");
+            ++value;
+            return true;
+        }
         bool EditChoice(std::string_view, std::int64_t& value, std::span<const std::string_view>) override
         {
             EditKinds.emplace_back("choice");
@@ -94,9 +100,21 @@ namespace
             value = Scalar;
             return true;
         }
+        bool EditScalarSlider(std::string_view, double& value, double, double) override
+        {
+            EditKinds.emplace_back("scalar-slider");
+            value = Scalar;
+            return true;
+        }
         bool EditText(std::string_view, std::string& value) override
         {
             EditKinds.emplace_back("text");
+            value = "edited";
+            return true;
+        }
+        bool EditTextMultiline(std::string_view, std::string& value, std::uint32_t visibleLines) override
+        {
+            EditKinds.emplace_back("multiline-" + std::to_string(visibleLines));
             value = "edited";
             return true;
         }
@@ -1121,12 +1139,34 @@ TEST_CASE("component property drawers give repeated display names stable widget 
                                                 Keire::ComponentPropertyKind::Boolean};
     const Keire::ComponentProperty rightProperty{"rightArmIkEnabled", "Enabled", "Right Arm IK",
                                                  Keire::ComponentPropertyKind::Boolean};
-
     CHECK(drawers.Draw(editor, Keire::AnimatorComponent::StaticType(), leftProperty, left));
     CHECK(drawers.Draw(editor, Keire::AnimatorComponent::StaticType(), rightProperty, right));
     REQUIRE(editor.Labels.size() == 2);
     CHECK(editor.Labels[0] == "Enabled##leftArmIkEnabled");
     CHECK(editor.Labels[1] == "Enabled##rightArmIkEnabled");
+}
+
+TEST_CASE("component property metadata selects sliders multiline fields and visible read-only drawers")
+{
+    KeireEditor::PropertyDrawerRegistry drawers;
+    TestPropertyEditor editor;
+    Keire::ComponentProperty integer{"count", "Count", {}, Keire::ComponentPropertyKind::Integer, false, 0.0, 10.0};
+    integer.Slider = true;
+    Keire::ComponentProperty scalar{"weight", "Weight", {}, Keire::ComponentPropertyKind::Scalar, false, 0.0, 1.0};
+    scalar.Slider = true;
+    Keire::ComponentProperty text{"notes", "Notes", {}, Keire::ComponentPropertyKind::Text};
+    text.TextLines = 6;
+    Keire::ComponentProperty readOnly{"status", "Status", {}, Keire::ComponentPropertyKind::Text, true};
+    Keire::ComponentPropertyValue integerValue = std::int64_t{2};
+    Keire::ComponentPropertyValue scalarValue = 0.5;
+    Keire::ComponentPropertyValue textValue = std::string("original");
+    Keire::ComponentPropertyValue readOnlyValue = std::string("stable");
+    CHECK(drawers.Draw(editor, CustomComponent::StaticType(), integer, integerValue));
+    CHECK(drawers.Draw(editor, CustomComponent::StaticType(), scalar, scalarValue));
+    CHECK(drawers.Draw(editor, CustomComponent::StaticType(), text, textValue));
+    CHECK_FALSE(drawers.Draw(editor, CustomComponent::StaticType(), readOnly, readOnlyValue));
+    CHECK(editor.EditKinds == std::vector<std::string>{"integer-slider", "scalar-slider", "multiline-6", "text"});
+    CHECK(std::get<std::string>(readOnlyValue) == "stable");
 }
 
 TEST_CASE("Editor package workflows advertise every supported renderer capability")

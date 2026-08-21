@@ -67,10 +67,14 @@ Callback payloads:
 | `HotReloadState` | `Behaviour` field |
 | `SerializableType` | Nested managed-data class or struct |
 | `HideInInspector` | Field or property |
-| `Range` | Numeric field or property |
+| `Range` | Numeric field or property; renders a bounded slider |
+| `Min` / `Max` | Numeric field or property; one-sided or paired drag bounds |
+| `InspectorStep` | Numeric field or property; positive drag increment |
+| `Multiline` | String field or property; 2–32 visible lines |
+| `InspectorName` | Field or property; custom display label |
 | `Tooltip` | Field or property |
 | `InspectorGroup` | Field or property |
-| `ReadOnlyInInspector` | Managed-data field or property |
+| `ReadOnlyInInspector` | `Behaviour` or managed-data field or property |
 | `FormerlySerializedAs` | Field or property; multiple allowed |
 | `StableFieldId` | Serialized field or property |
 | `RequireComponent` | `Behaviour` type; multiple allowed |
@@ -78,7 +82,7 @@ Callback payloads:
 | `StableComponentId` | Managed component type |
 | `StableAssetTypeId` | Managed data or asset marker type |
 | `CreateAssetMenu` | Concrete `ScriptableObject` type |
-| `Header` | Managed-data field or property |
+| `Header` | `Behaviour` or managed-data field or property |
 
 See [Serialization And The Inspector](SerializationAndInspector.md) for persistence rules.
 

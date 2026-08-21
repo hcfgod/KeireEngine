@@ -30,12 +30,20 @@ namespace KeireEditor
             Keire::ComponentPropertyKind::Integer,
             [](IPropertyEditor& editor, const Keire::ComponentProperty& property, Keire::ComponentPropertyValue& value)
             {
-                return DrawValue<std::int64_t>(value,
-                                               [&](std::int64_t& typed)
-                                               {
-                                                   return editor.EditInteger(property.DisplayName, typed, property.Step,
-                                                                             property.Minimum, property.Maximum);
-                                               });
+                return DrawValue<std::int64_t>(
+                    value,
+                    [&](std::int64_t& typed)
+                    {
+                        if (property.Slider)
+                        {
+                            if (!property.Minimum || !property.Maximum)
+                                throw std::logic_error("Integer sliders require minimum and maximum bounds.");
+                            return editor.EditIntegerSlider(property.DisplayName, typed, *property.Minimum,
+                                                            *property.Maximum);
+                        }
+                        return editor.EditInteger(property.DisplayName, typed, property.Step, property.Minimum,
+                                                  property.Maximum);
+                    });
             });
         Register(
             Keire::ComponentPropertyKind::Scalar,
@@ -44,6 +52,14 @@ namespace KeireEditor
                 return DrawValue<double>(value,
                                          [&](double& typed)
                                          {
+                                             if (property.Slider)
+                                             {
+                                                 if (!property.Minimum || !property.Maximum)
+                                                     throw std::logic_error(
+                                                         "Scalar sliders require minimum and maximum bounds.");
+                                                 return editor.EditScalarSlider(property.DisplayName, typed,
+                                                                                *property.Minimum, *property.Maximum);
+                                             }
                                              return editor.EditScalar(property.DisplayName, typed, property.Step,
                                                                       property.Minimum, property.Maximum);
                                          });
@@ -52,8 +68,14 @@ namespace KeireEditor
             Keire::ComponentPropertyKind::Text,
             [](IPropertyEditor& editor, const Keire::ComponentProperty& property, Keire::ComponentPropertyValue& value)
             {
-                return DrawValue<std::string>(value, [&](std::string& typed)
-                                              { return editor.EditText(property.DisplayName, typed); });
+                return DrawValue<std::string>(value,
+                                              [&](std::string& typed)
+                                              {
+                                                  return property.TextLines > 1
+                                                             ? editor.EditTextMultiline(property.DisplayName, typed,
+                                                                                        property.TextLines)
+                                                             : editor.EditText(property.DisplayName, typed);
+                                              });
             });
         Register(
             Keire::ComponentPropertyKind::Vector2,
@@ -152,16 +174,16 @@ namespace KeireEditor
                                       const Keire::ComponentProperty& property,
                                       Keire::ComponentPropertyValue& value) const
     {
-        if (property.ReadOnly)
-            return false;
         auto scopedProperty = property;
         scopedProperty.DisplayName += "##" + property.Key;
+        auto readOnlyCandidate = value;
+        auto& editableValue = property.ReadOnly ? readOnlyCandidate : value;
         if (const auto override = m_Overrides.find(OverrideKey(component, property.Key)); override != m_Overrides.end())
-            return override->second(editor, scopedProperty, value);
+            return override->second(editor, scopedProperty, editableValue) && !property.ReadOnly;
         const auto drawer = m_Drawers.find(property.Kind);
         if (drawer == m_Drawers.end())
             throw std::logic_error("No drawer is registered for this component property kind.");
-        return drawer->second(editor, scopedProperty, value);
+        return drawer->second(editor, scopedProperty, editableValue) && !property.ReadOnly;
     }
 
     bool PropertyDrawerRegistry::EditComponent(IPropertyEditor& editor,

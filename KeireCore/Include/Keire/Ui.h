@@ -579,6 +579,9 @@ namespace Keire
         [[nodiscard]] bool DragInteger(std::string_view label, std::int64_t& value, double speed = 1.0,
                                        std::optional<std::int64_t> minimum = {},
                                        std::optional<std::int64_t> maximum = {});
+        [[nodiscard]] bool DragUnsignedInteger(std::string_view label, std::uint64_t& value, double speed = 1.0,
+                                               std::optional<std::uint64_t> minimum = {},
+                                               std::optional<std::uint64_t> maximum = {});
         [[nodiscard]] bool DragScalar(std::string_view label, double& value, double speed = 0.1,
                                       std::optional<double> minimum = {}, std::optional<double> maximum = {});
         [[nodiscard]] bool DragVector2(std::string_view label, Vector2& value, float speed = 0.1F);
@@ -587,7 +590,14 @@ namespace Keire
         [[nodiscard]] bool DragQuaternion(std::string_view label, Quaternion& value, float speed = 0.01F);
         [[nodiscard]] bool SliderFloat(std::string_view label, float& value, float minimum, float maximum);
         [[nodiscard]] bool SliderInt(std::string_view label, int& value, int minimum, int maximum);
+        [[nodiscard]] bool SliderInteger(std::string_view label, std::int64_t& value, std::int64_t minimum,
+                                         std::int64_t maximum);
+        [[nodiscard]] bool SliderUnsignedInteger(std::string_view label, std::uint64_t& value, std::uint64_t minimum,
+                                                 std::uint64_t maximum);
+        [[nodiscard]] bool SliderScalar(std::string_view label, double& value, double minimum, double maximum);
         [[nodiscard]] bool InputText(std::string_view label, std::string& value, bool selectAllOnFocus = false);
+        [[nodiscard]] bool InputTextMultiline(std::string_view label, std::string& value,
+                                              std::uint32_t visibleLines = 4);
         [[nodiscard]] bool InputPassword(std::string_view label, std::string& value);
         [[nodiscard]] bool InputTextWithHint(std::string_view label, std::string_view hint, std::string& value);
         [[nodiscard]] bool Selectable(std::string_view label, bool selected = false);
@@ -641,6 +651,7 @@ namespace Keire
         class Impl;
 
         UiFrame();
+        void RequireActive(const char* operation) const;
         void OpenScope(UiScope::Kind kind);
         void CloseScope(UiScope::Kind kind, std::uint64_t generation) noexcept;
         [[nodiscard]] std::weak_ptr<void> Lifetime() const noexcept;

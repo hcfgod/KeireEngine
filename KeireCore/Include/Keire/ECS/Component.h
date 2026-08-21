@@ -119,6 +119,9 @@ namespace Keire
         std::optional<AssetTypeId> ExpectedAssetType;
         std::string Tooltip;
         std::size_t EventArgumentCount = 0;
+        std::string Header;
+        bool Slider = false;
+        std::uint32_t TextLines = 1;
     };
 
     struct ComponentMethod

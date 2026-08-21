@@ -1,6 +1,7 @@
 var tests = new (string Name, Action Run)[]
 {
     ("VFX ranges normalize and validate", VfxRangesNormalizeAndValidate),
+    ("Inspector attributes validate production editing metadata", InspectorAttributeContract),
     ("VFX range setters expose every supported type", VfxRangeSettersExposeEverySupportedType),
     ("Character Controller uses the native stable component contract", CharacterControllerStableContract),
     ("Entity exposes the production layer contract", EntityLayerContract),
@@ -21,6 +22,31 @@ var tests = new (string Name, Action Run)[]
     ("Player preferences persist typed values atomically", PlayerPreferencesPersistenceContract),
     ("Player preferences reject invalid and corrupt data", PlayerPreferencesValidationContract),
 };
+
+static void InspectorAttributeContract()
+{
+    var range = new Keire.RangeAttribute(-2.0, 8.0);
+    var minimum = new Keire.MinAttribute(0.0);
+    var maximum = new Keire.MaxAttribute(100.0);
+    var step = new Keire.InspectorStepAttribute(0.25);
+    var multiline = new Keire.MultilineAttribute(6);
+    var displayName = new Keire.InspectorNameAttribute("Movement Speed");
+    Assert(range.Minimum == -2.0 && range.Maximum == 8.0 && minimum.Minimum == 0.0 &&
+               maximum.Maximum == 100.0 && step.Step == 0.25 && multiline.Lines == 6 &&
+               displayName.Name == "Movement Speed",
+           "Inspector attributes must preserve validated authoring metadata exactly.");
+
+    AssertThrows<ArgumentOutOfRangeException>(() => _ = new Keire.RangeAttribute(1.0, 1.0),
+                                              "Inspector sliders require an increasing range.");
+    AssertThrows<ArgumentOutOfRangeException>(() => _ = new Keire.MinAttribute(double.NaN),
+                                              "Inspector minimums must reject non-finite values.");
+    AssertThrows<ArgumentOutOfRangeException>(() => _ = new Keire.InspectorStepAttribute(0.0),
+                                              "Inspector drag steps must be positive.");
+    AssertThrows<ArgumentOutOfRangeException>(() => _ = new Keire.MultilineAttribute(33),
+                                              "Inspector multiline fields must remain bounded.");
+    AssertThrows<ArgumentException>(() => _ = new Keire.InspectorNameAttribute(" "),
+                                    "Inspector labels must contain visible text.");
+}
 
 static unsafe void RuntimeFoundationContract()
 {

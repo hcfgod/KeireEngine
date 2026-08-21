@@ -4,6 +4,7 @@
 
 #include "Keire/Core.h"
 
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -24,11 +25,14 @@ namespace KeireEditor
         bool EditBoolean(std::string_view label, bool& value) override;
         bool EditInteger(std::string_view label, std::int64_t& value, double step, std::optional<double> minimum,
                          std::optional<double> maximum) override;
+        bool EditIntegerSlider(std::string_view label, std::int64_t& value, double minimum, double maximum) override;
         bool EditChoice(std::string_view label, std::int64_t& value,
                         std::span<const std::string_view> choices) override;
         bool EditScalar(std::string_view label, double& value, double step, std::optional<double> minimum,
                         std::optional<double> maximum) override;
+        bool EditScalarSlider(std::string_view label, double& value, double minimum, double maximum) override;
         bool EditText(std::string_view label, std::string& value) override;
+        bool EditTextMultiline(std::string_view label, std::string& value, std::uint32_t visibleLines) override;
         bool EditVector2(std::string_view label, Keire::Vector2& value, double step) override;
         bool EditVector3(std::string_view label, Keire::Vector3& value, double step) override;
         bool EditVector4(std::string_view label, Keire::Vector4& value, double step) override;

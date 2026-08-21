@@ -75,6 +75,9 @@ namespace Keire
         std::optional<ManagedTypeId> ExpectedManagedType;
         bool IncludeDerivedAssetTypes = true;
         std::vector<ManagedAssetPropertyDescriptor> Children;
+        double Step = 0.1;
+        bool Slider = false;
+        std::uint32_t TextLines = 1;
 
         [[nodiscard]] bool operator==(const ManagedAssetPropertyDescriptor&) const = default;
     };
