@@ -60,7 +60,7 @@ All 62 published guides are listed below in the same groups used by the document
 | [Undo and Redo](UndoRedo.md) | Contexts, commands, transactions, merging, limits, threading, and editor routing. |
 | [Animation and Rigging](AnimationRigging.md) | Skeleton/clip/graph assets, Animator authoring, rig constraints, preview, and runtime contracts. |
 | [Procedural Humanoid Motion](ProceduralMotion.md) | Zero-clip pose generation, motion profiles, terrain contacts, gameplay intent, events, and interpolation. |
-| [Weapon Authoring](WeaponAuthoring.md) | Production weapon definitions, managed runtime behavior, validation, and authoring workflow. |
+| [Game-Owned Weapon Example](WeaponAuthoring.md) | Why combat remains in project C# and how the Sandbox composes generic engine services. |
 
 ### Assets, Rendering, and Builds
 

@@ -48,10 +48,17 @@ namespace Keire::Detail
         [[nodiscard]] Entity Duplicate(EntityId id);
         [[nodiscard]] bool Destroy(EntityId id);
         [[nodiscard]] std::vector<Entity> Query(ComponentTypeId type) const;
+        [[nodiscard]] std::vector<Entity> QueryName(std::string_view name) const;
+        [[nodiscard]] std::vector<Entity> QueryTag(std::string_view tag) const;
         [[nodiscard]] std::string EntityName(EntityId id) const;
         void SetEntityName(EntityId id, std::string name);
         [[nodiscard]] std::uint32_t EntityLayer(EntityId id) const;
         void SetEntityLayer(EntityId id, std::uint32_t layer);
+        [[nodiscard]] std::vector<std::string> EntityTags(EntityId id) const;
+        [[nodiscard]] bool HasEntityTag(EntityId id, std::string_view tag) const;
+        void SetEntityTags(EntityId id, std::vector<std::string> tags);
+        [[nodiscard]] bool AddEntityTag(EntityId id, std::string tag);
+        [[nodiscard]] bool RemoveEntityTag(EntityId id, std::string_view tag);
         [[nodiscard]] bool ActiveSelf(EntityId id) const;
         [[nodiscard]] bool ActiveInHierarchy(EntityId id) const;
         void SetActive(EntityId id, bool active);

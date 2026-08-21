@@ -93,7 +93,7 @@ These C# guides focus on runtime code. Use the existing authoring documentation 
 - [VFX Authoring And Runtime](../Vfx.md)
 - [Scene Authoring](../SceneAuthoring.md)
 - [Asset Pipeline](../AssetPipeline.md)
-- [Weapon Authoring](../WeaponAuthoring.md)
+- [Game-Owned Weapon Example](../WeaponAuthoring.md)
 - [Profiling](../Profiling.md)
 
 ## Sources Of Truth

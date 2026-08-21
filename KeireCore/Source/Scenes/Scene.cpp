@@ -5,6 +5,7 @@
 #include "Keire/ECS/Components/ColliderComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "KeireInternal/SceneState.h"
+#include "KeireInternal/Scenes/SceneIdentityIndex.h"
 
 #include <entt/entt.hpp>
 #include <nlohmann/json.hpp>
@@ -247,6 +248,7 @@ namespace Keire
                 std::string Name;
                 bool Active = true;
                 std::uint32_t Layer = 0;
+                std::vector<std::string> Tags;
                 std::vector<Ref<Component>> Components;
                 std::vector<SceneComponentDefinition> MissingComponents;
                 mutable Matrix4 CachedWorld;
@@ -267,8 +269,9 @@ namespace Keire
                 for (const auto& object : definition.Objects)
                 {
                     const auto native = Registry.create();
-                    EntityRecord record{EntityId(object.Id), EntityId(object.Parent), object.Name, object.Active,
-                                        object.Layer};
+                    EntityRecord record{EntityId(object.Id), EntityId(object.Parent),
+                                        object.Name,         object.Active,
+                                        object.Layer,        object.Tags};
                     bool hasTransform = false;
                     for (const auto& serialized : object.Components)
                     {
@@ -404,6 +407,33 @@ namespace Keire
                 LifecycleComponentsDirty = true;
             }
 
+            void IndexIdentity(const EntityId id, const EntityRecord& record)
+            {
+                NameIndex[record.Name].insert(id);
+                for (const auto& tag : record.Tags)
+                    TagIndex[tag].insert(id);
+            }
+
+            void UnindexIdentity(const EntityId id, const EntityRecord& record)
+            {
+                const auto name = NameIndex.find(record.Name);
+                if (name != NameIndex.end())
+                {
+                    name->second.erase(id);
+                    if (name->second.empty())
+                        NameIndex.erase(name);
+                }
+                for (const auto& tag : record.Tags)
+                {
+                    const auto found = TagIndex.find(tag);
+                    if (found == TagIndex.end())
+                        continue;
+                    found->second.erase(id);
+                    if (found->second.empty())
+                        TagIndex.erase(found);
+                }
+            }
+
             [[nodiscard]] const std::vector<Ref<Component>>& LifecycleComponents() const
             {
                 if (!LifecycleComponentsDirty)
@@ -448,6 +478,8 @@ namespace Keire
             std::thread::id OwnerThread;
             entt::registry Registry;
             std::unordered_map<EntityId, entt::entity> Entities;
+            SceneIdentityIndex NameIndex;
+            SceneIdentityIndex TagIndex;
             std::unordered_map<ComponentTypeId, std::unordered_map<EntityId, std::vector<Ref<Component>>>>
                 ComponentPools;
             std::vector<EntityId> Order;
@@ -473,11 +505,14 @@ namespace Keire
             m_Impl->Self = std::move(self);
             for (const auto id : m_Impl->Order)
                 if (auto* record = m_Impl->Find(id))
+                {
+                    m_Impl->IndexIdentity(id, *record);
                     for (const auto& component : record->Components)
                     {
                         component->Attach(m_Impl->Self, id);
                         m_Impl->IndexComponent(id, component);
                     }
+                }
             for (const auto id : m_Impl->Order)
                 SynchronizeEntityLayer(id);
         }
@@ -551,6 +586,7 @@ namespace Keire
                 const auto* record = m_Impl->Find(id);
                 SceneObjectDefinition object{id.Value(), record->Parent.Value(), record->Name, record->Active};
                 object.Layer = record->Layer;
+                object.Tags = record->Tags;
                 object.Components.reserve(record->Components.size() + record->MissingComponents.size());
                 for (const auto& component : record->Components)
                 {
@@ -611,6 +647,7 @@ namespace Keire
                 auto& object =
                     result.Objects.emplace_back(id.Value(), record->Parent.Value(), record->Name, record->Active);
                 object.Layer = record->Layer;
+                object.Tags = record->Tags;
             }
             return result;
         }
@@ -648,6 +685,7 @@ namespace Keire
                 record.Components.push_back(transform);
                 m_Impl->Registry.emplace<typename Impl::EntityRecord>(native, std::move(record));
                 m_Impl->Entities.emplace(id, native);
+                m_Impl->IndexIdentity(id, *m_Impl->Find(id));
                 m_Impl->IndexComponent(id, transform);
                 m_Impl->Order.push_back(id);
                 m_Impl->Dirty = true;
@@ -687,6 +725,7 @@ namespace Keire
                 remapped.emplace(original, copy.Id());
                 SetActive(copy.Id(), object.Active);
                 SetEntityLayer(copy.Id(), object.Layer);
+                SetEntityTags(copy.Id(), object.Tags);
                 auto transform = copy.GetComponent<TransformComponent>();
                 transform->SetLocalPosition(object.Transform.Position);
                 transform->SetLocalRotation(object.Transform.Rotation);
@@ -758,6 +797,7 @@ namespace Keire
                         component->InvokeDestroy();
                         m_Impl->UnindexComponent(current, component);
                     }
+                    m_Impl->UnindexIdentity(current, *record);
                     const auto native = m_Impl->Entities.at(current);
                     m_Impl->Registry.destroy(native);
                     m_Impl->Entities.erase(current);
@@ -788,6 +828,36 @@ namespace Keire
             return result;
         }
 
+        std::vector<Entity> SceneState::QueryName(const std::string_view name) const
+        {
+            RequireOwner("QueryName");
+            const auto found = m_Impl->NameIndex.find(std::string(name));
+            if (found == m_Impl->NameIndex.end())
+                return {};
+            std::vector<Entity> result;
+            result.reserve(found->second.size());
+            for (const auto id : m_Impl->HierarchyOrder())
+                if (found->second.contains(id))
+                    result.push_back(Entity(m_Impl->Self, id));
+            return result;
+        }
+
+        std::vector<Entity> SceneState::QueryTag(const std::string_view tag) const
+        {
+            RequireOwner("QueryTag");
+            if (!SceneAsset::IsValidEntityTag(tag))
+                throw std::invalid_argument("Entity tag must be a valid ASCII identifier.");
+            const auto found = m_Impl->TagIndex.find(std::string(tag));
+            if (found == m_Impl->TagIndex.end())
+                return {};
+            std::vector<Entity> result;
+            result.reserve(found->second.size());
+            for (const auto id : m_Impl->HierarchyOrder())
+                if (found->second.contains(id))
+                    result.push_back(Entity(m_Impl->Self, id));
+            return result;
+        }
+
         std::string SceneState::EntityName(const EntityId id) const
         {
             RequireOwner("EntityName");
@@ -805,7 +875,9 @@ namespace Keire
             auto* record = m_Impl->Find(id);
             if (!record)
                 throw std::logic_error("Entity is stale.");
-            record->Name = std::move(name);
+            if (record->Name == name)
+                return;
+            ReplaceIndexedName(m_Impl->NameIndex, id, record->Name, std::move(name));
             m_Impl->Dirty = true;
         }
 
@@ -846,6 +918,69 @@ namespace Keire
             record->Layer = layer;
             SynchronizeEntityLayer(id);
             m_Impl->Dirty = true;
+        }
+
+        std::vector<std::string> SceneState::EntityTags(const EntityId id) const
+        {
+            RequireOwner("EntityTags");
+            const auto* record = m_Impl->Find(id);
+            if (!record)
+                throw std::logic_error("Entity is stale.");
+            return record->Tags;
+        }
+
+        bool SceneState::HasEntityTag(const EntityId id, const std::string_view tag) const
+        {
+            RequireOwner("HasEntityTag");
+            const auto* record = m_Impl->Find(id);
+            return record && std::ranges::find(record->Tags, tag) != record->Tags.end();
+        }
+
+        void SceneState::SetEntityTags(const EntityId id, std::vector<std::string> tags)
+        {
+            RequireOwner("SetEntityTags");
+            if (tags.size() > MaximumEntityTagCount)
+                throw std::invalid_argument("Entity exceeds the supported tag limit.");
+            std::unordered_set<std::string> unique;
+            for (const auto& tag : tags)
+                if (!SceneAsset::IsValidEntityTag(tag) || !unique.insert(tag).second)
+                    throw std::invalid_argument("Entity tag is invalid or duplicated.");
+            auto* record = m_Impl->Find(id);
+            if (!record)
+                throw std::logic_error("Entity is stale.");
+            if (record->Tags == tags)
+                return;
+            ReplaceIndexedTags(m_Impl->TagIndex, id, record->Tags, std::move(tags));
+            m_Impl->Dirty = true;
+        }
+
+        bool SceneState::AddEntityTag(const EntityId id, std::string tag)
+        {
+            RequireOwner("AddEntityTag");
+            if (!SceneAsset::IsValidEntityTag(tag))
+                throw std::invalid_argument("Entity tag must be a valid ASCII identifier.");
+            auto* record = m_Impl->Find(id);
+            if (!record)
+                throw std::logic_error("Entity is stale.");
+            if (std::ranges::find(record->Tags, tag) != record->Tags.end())
+                return false;
+            if (record->Tags.size() >= MaximumEntityTagCount)
+                throw std::invalid_argument("Entity exceeds the supported tag limit.");
+            AddIndexedTag(m_Impl->TagIndex, id, record->Tags, std::move(tag));
+            m_Impl->Dirty = true;
+            return true;
+        }
+
+        bool SceneState::RemoveEntityTag(const EntityId id, const std::string_view tag)
+        {
+            RequireOwner("RemoveEntityTag");
+            auto* record = m_Impl->Find(id);
+            if (!record)
+                return false;
+            if (!RemoveIndexedTag(m_Impl->TagIndex, id, record->Tags, tag))
+                return false;
+            m_Impl->Dirty = true;
+            return true;
         }
 
         bool SceneState::ActiveSelf(const EntityId id) const
@@ -1322,6 +1457,8 @@ namespace Keire
             m_Impl->Deferred.clear();
             m_Impl->Registry.clear();
             m_Impl->Entities.clear();
+            m_Impl->NameIndex.clear();
+            m_Impl->TagIndex.clear();
             m_Impl->ComponentPools.clear();
             m_Impl->Order.clear();
             m_Impl->Open = false;
@@ -1331,160 +1468,4 @@ namespace Keire
         Ref<ComponentRegistry> SceneState::Components() const noexcept { return m_Impl->ComponentsRegistry; }
     } // namespace Detail
 
-    SceneObjectHandle::SceneObjectHandle(WeakRef<Detail::SceneState> state, const AssetId id) noexcept
-        : m_State(std::move(state)), m_Id(id)
-    {
-    }
-
-    SceneObjectHandle::operator bool() const noexcept
-    {
-        const auto state = m_State.Lock();
-        return state && state->Contains(EntityId(m_Id));
-    }
-
-    std::optional<SceneObjectDefinition> SceneObjectHandle::Snapshot() const
-    {
-        const auto state = m_State.Lock();
-        return state ? state->SnapshotObject(EntityId(m_Id)) : std::nullopt;
-    }
-
-    class Scene::Impl final
-    {
-      public:
-        Impl(const AssetId asset, SceneDefinition definition, Ref<ComponentRegistry> components)
-            : State(CreateRef<Detail::SceneState>(asset, std::move(definition), std::move(components)))
-        {
-            State->Initialize(State);
-        }
-
-        Ref<Detail::SceneState> State;
-    };
-
-    Scene::Scene(const AssetId asset, SceneDefinition definition, Ref<ComponentRegistry> components)
-        : m_Impl(std::make_unique<Impl>(asset, std::move(definition), std::move(components)))
-    {
-    }
-
-    Scene::~Scene() { Close(); }
-    AssetId Scene::Asset() const noexcept { return m_Impl->State->Asset(); }
-    std::string Scene::Name() const { return m_Impl->State->Name(); }
-    void Scene::SetName(std::string name) { m_Impl->State->SetName(std::move(name)); }
-    bool Scene::IsOpen() const noexcept { return m_Impl->State->IsOpen(); }
-    bool Scene::Dirty() const noexcept { return m_Impl->State->Dirty(); }
-    void Scene::MarkDirty() noexcept { m_Impl->State->MarkDirty(); }
-    void Scene::MarkSaved() noexcept { m_Impl->State->MarkSaved(); }
-    std::size_t Scene::ObjectCount() const noexcept { return m_Impl->State->Count(); }
-    std::vector<SceneObjectDefinition> Scene::Objects() const { return m_Impl->State->Snapshot().Objects; }
-    SceneHierarchySnapshot Scene::HierarchySnapshot() const { return m_Impl->State->HierarchySnapshot(); }
-    SceneDefinition Scene::Snapshot() const { return m_Impl->State->Snapshot(); }
-    LightingBakeSettings Scene::LightingBakeConfiguration() const { return m_Impl->State->LightingBakeConfiguration(); }
-    void Scene::SetLightingBakeConfiguration(const LightingBakeSettings settings)
-    {
-        m_Impl->State->SetLightingBakeConfiguration(settings);
-    }
-    AssetId Scene::BakedLighting() const { return m_Impl->State->BakedLighting(); }
-    void Scene::SetBakedLighting(const AssetId asset) { m_Impl->State->SetBakedLighting(asset); }
-
-    SceneObjectHandle Scene::Find(const AssetId id) const noexcept
-    {
-        return m_Impl->State->Contains(EntityId(id)) ? SceneObjectHandle(m_Impl->State, id) : SceneObjectHandle{};
-    }
-
-    SceneObjectHandle Scene::CreateObject(std::string name, const AssetId parent)
-    {
-        const auto entity = m_Impl->State->Create(std::move(name), EntityId(parent));
-        return SceneObjectHandle(m_Impl->State, entity.Id().Value());
-    }
-
-    SceneObjectHandle Scene::DuplicateObject(const AssetId id)
-    {
-        const auto entity = m_Impl->State->Duplicate(EntityId(id));
-        return entity ? SceneObjectHandle(m_Impl->State, entity.Id().Value()) : SceneObjectHandle{};
-    }
-
-    bool Scene::DestroyObject(const AssetId id) { return m_Impl->State->Destroy(EntityId(id)); }
-    bool Scene::RenameObject(const AssetId id, std::string name)
-    {
-        if (!m_Impl->State->Contains(EntityId(id)))
-            return false;
-        m_Impl->State->SetEntityName(EntityId(id), std::move(name));
-        return true;
-    }
-    bool Scene::SetObjectActive(const AssetId id, const bool active)
-    {
-        if (!m_Impl->State->Contains(EntityId(id)))
-            return false;
-        m_Impl->State->SetActive(EntityId(id), active);
-        return true;
-    }
-    bool Scene::SetObjectLayer(const AssetId id, const std::uint32_t layer)
-    {
-        if (!m_Impl->State->Contains(EntityId(id)))
-            return false;
-        m_Impl->State->SetEntityLayer(EntityId(id), layer);
-        return true;
-    }
-    bool Scene::SetObjectTransform(const AssetId id, const SceneTransform transform)
-    {
-        auto entity = m_Impl->State->Find(EntityId(id));
-        if (!entity)
-            return false;
-        const auto component = entity.GetComponent<TransformComponent>();
-        component->SetLocalPosition(transform.Position);
-        component->SetLocalRotation(transform.Rotation);
-        component->SetLocalScale(transform.Scale);
-        return true;
-    }
-    bool Scene::ReparentObject(const AssetId id, const AssetId parent)
-    {
-        auto entity = m_Impl->State->Find(EntityId(id));
-        if (!entity || (parent && !m_Impl->State->Contains(EntityId(parent))))
-            return false;
-        entity.SetParent(m_Impl->State->Find(EntityId(parent)), true);
-        return true;
-    }
-
-    std::vector<Entity> Scene::Entities() const { return m_Impl->State->Entities(); }
-    Entity Scene::FindEntity(const EntityId id) const noexcept { return m_Impl->State->Find(id); }
-    Entity Scene::CreateEntity(std::string name, const Entity parent)
-    {
-        return m_Impl->State->Create(std::move(name), parent.Id());
-    }
-    Entity Scene::DuplicateEntity(const EntityId id) { return m_Impl->State->Duplicate(id); }
-    bool Scene::DestroyEntity(const EntityId id) { return m_Impl->State->Destroy(id); }
-    void Scene::MoveEntity(const EntityId id, const EntityId parent, const EntityId beforeSibling,
-                           const bool preserveWorldTransform)
-    {
-        m_Impl->State->Move(id, parent, beforeSibling, preserveWorldTransform);
-    }
-    std::vector<Entity> Scene::Query(const ComponentTypeId type) const { return m_Impl->State->Query(type); }
-    Ref<ComponentRegistry> Scene::Components() const noexcept { return m_Impl->State->Components(); }
-    void Scene::BeginPlay() { m_Impl->State->BeginPlay(); }
-    void Scene::FixedUpdate(const float deltaSeconds) { m_Impl->State->FixedUpdate(deltaSeconds); }
-    void Scene::Update(const float deltaSeconds) { m_Impl->State->Update(deltaSeconds); }
-    void Scene::LateUpdate() { m_Impl->State->LateUpdate(); }
-    void Scene::DispatchAnimationEvent(const EntityId entity, const AnimationEventMessage& event)
-    {
-        m_Impl->State->DispatchAnimationEvent(entity, event);
-    }
-    void Scene::DispatchProceduralMotionEvent(const EntityId entity, const ProceduralMotionEvent& event)
-    {
-        m_Impl->State->DispatchProceduralMotionEvent(entity, event);
-    }
-    void Scene::DispatchAnimatorIk(const EntityId entity, const AnimationIkMessage& context)
-    {
-        m_Impl->State->DispatchAnimatorIk(entity, context);
-    }
-    void Scene::DispatchPhysicsContact(const EntityId entity, const PhysicsContactPhase phase,
-                                       const PhysicsContactMessage& contact)
-    {
-        m_Impl->State->DispatchPhysicsContact(entity, phase, contact);
-    }
-    void Scene::EndPlay() noexcept { m_Impl->State->EndPlay(); }
-    void Scene::Close() noexcept { m_Impl->State->Close(); }
-
-    std::optional<SceneObjectDefinition> Scene::SnapshotObject(const AssetId id) const
-    {
-        return m_Impl->State->SnapshotObject(EntityId(id));
-    }
 } // namespace Keire

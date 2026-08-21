@@ -5,6 +5,12 @@ versions.
 
 ## Unreleased
 
+- Removed the built-in managed weapon, ammunition, magazine, damage, ballistics, recoil, loadout, presentation, and HUD
+  frameworks. Combat policy now lives in each game's C# assembly; the Sandbox and Hub starter keep an editable project
+  example that composes generic Kéire services. Renamed the managed regression harness to `test-managed-api`.
+- Added schema-v6 entity tags with deterministic name, tag, and component indexes; canonical prefab tag overrides;
+  Inspector tag authoring with undo; and managed `Entity` tag mutation plus bounded `SceneManager` queries. Runtime and
+  Editor Play queries share stable hierarchy ordering and reject invalid or oversized tag data transactionally.
 - Added managed input device discovery, automatic and locked control-scheme access, bounded interactive rebinding,
   persistent binding profiles, and normalized gamepad rumble. Completed rebind polling is now safe after the final
   composite target, and platforms without joystick support reject rumble without affecting keyboard or mouse input.

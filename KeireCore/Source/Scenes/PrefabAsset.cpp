@@ -135,6 +135,9 @@ namespace Keire
                 case PrefabOverrideKind::SetObjectLayer:
                     object->Layer = overrideValue.Layer;
                     break;
+                case PrefabOverrideKind::SetObjectTags:
+                    object->Tags = overrideValue.Tags;
+                    break;
                 case PrefabOverrideKind::SetComponentProperty:
                 {
                     const auto component =

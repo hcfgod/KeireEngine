@@ -41,6 +41,28 @@ public readonly record struct Entity(ulong World, EntityId Id)
         set => NativeRuntime.SetEntityLayer(this, value);
     }
 
+    public IReadOnlyList<string> Tags => NativeWorld.GetEntityTags(this);
+
+    public bool HasTag(string tag)
+    {
+        EntityTag.Validate(tag, nameof(tag));
+        return Tags.Contains(tag, StringComparer.Ordinal);
+    }
+
+    public bool AddTag(string tag)
+    {
+        EntityTag.Validate(tag, nameof(tag));
+        return NativeWorld.AddEntityTag(this, tag);
+    }
+
+    public bool RemoveTag(string tag)
+    {
+        EntityTag.Validate(tag, nameof(tag));
+        return NativeWorld.RemoveEntityTag(this, tag);
+    }
+
+    public void ClearTags() => NativeWorld.ClearEntityTags(this);
+
     public Entity Parent
     {
         get => NativeRuntime.GetEntityParent(this);
@@ -124,6 +146,21 @@ public readonly record struct Entity(ulong World, EntityId Id)
 
     public Entity Instantiate() => NativeRuntime.CloneEntity(this);
     public void Destroy() => NativeRuntime.DestroyEntity(this);
+}
+
+internal static class EntityTag
+{
+    internal static void Validate(string tag, string parameter)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tag, parameter);
+        if (tag.Length > 64 || !IsAsciiLetter(tag[0]) ||
+            tag.Any(static value => !IsAsciiLetterOrDigit(value) && value is not '_' and not '-' and not '.'))
+            throw new ArgumentException("Entity tags must be 1..64 byte ASCII identifiers beginning with a letter.",
+                                        parameter);
+    }
+
+    private static bool IsAsciiLetter(char value) => value is >= 'A' and <= 'Z' or >= 'a' and <= 'z';
+    private static bool IsAsciiLetterOrDigit(char value) => IsAsciiLetter(value) || value is >= '0' and <= '9';
 }
 
 public readonly record struct TransformHandle(Entity Entity)

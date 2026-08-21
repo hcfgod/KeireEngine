@@ -64,7 +64,7 @@
         {
           "path": "Assets/Scenes/StarterScene.keirescene.keiremeta",
           "sizeBytes": 241,
-          "sha256": "0399fdd3e21a5dc89c61a34fe0171a2ef05c2d53713542c5e0a8ee29d39cc1f9"
+          "sha256": "c9aab4ce486914c9c2974cdfff7316aa026ea6355ff85c11cff7fe11dd3d9c58"
         },
         {
           "path": "ProjectSettings/Rendering.keiresettings",
@@ -108,7 +108,7 @@
       "compatibleEditors": ">=0.3.0 <2.0.0",
       "projectSchema": 3,
       "platformTarget": "desktop",
-      "estimatedSizeBytes": 24794159,
+      "estimatedSizeBytes": 24822837,
       "payloadRoot": "Payloads/Sandbox",
       "payloadFiles": [
         {
@@ -514,7 +514,7 @@
         {
           "path": "Assets/Scenes/SampleScene.keirescene.keiremeta",
           "sizeBytes": 217,
-          "sha256": "3198f4dec3f32876b74c1805dc4b83eefa322756da035ca861ce33cf9504d8a6"
+          "sha256": "bc197e28f31c424889293a7ce891bb8ee6a9c9ba68b1dacf7323b38ca71b688d"
         },
         {
           "path": "Assets/Scenes/SandboxShowcase.keirescene",
@@ -524,7 +524,7 @@
         {
           "path": "Assets/Scenes/SandboxShowcase.keirescene.keiremeta",
           "sizeBytes": 217,
-          "sha256": "f5c6f4e3a549774495c5938b3a0b78331e141fd69eb1cb9c65f7da0b56ecb2a6"
+          "sha256": "fee47eabdc41f0eaad125c9f667f164ca0bce803a74d2079a3e2c776e7ddcbdf"
         },
         {
           "path": "Assets/Scenes/TestScene.keirescene",
@@ -534,7 +534,7 @@
         {
           "path": "Assets/Scenes/TestScene.keirescene.keiremeta",
           "sizeBytes": 217,
-          "sha256": "0ccc060eb311238e24766bf81c152ed956aae51bca060c6ec0a593bdb318da22"
+          "sha256": "6a9cafccd6cf2ad3d0f6571063c14a7a4200573a1eebbabb71b6bd5baa54b132"
         },
         {
           "path": "Assets/Scripts/Gameplay.keireasm",
@@ -625,6 +625,16 @@
           "path": "Assets/Scripts/Runtime/WeaponController.cs.keiremeta",
           "sizeBytes": 216,
           "sha256": "35ca1bf2e9193cb4ccdc7831a833a88bb133410eba6bd8a670d0da0e3ae485db"
+        },
+        {
+          "path": "Assets/Scripts/Runtime/WeaponGameplay.cs",
+          "sizeBytes": 28462,
+          "sha256": "ca5c4ca1c1a9b55a66d948065c2d4e732bed08b48cb52ce5f82fedf840369cd8"
+        },
+        {
+          "path": "Assets/Scripts/Runtime/WeaponGameplay.cs.keiremeta",
+          "sizeBytes": 216,
+          "sha256": "562468627d0f5790f7b11f23ae29614857e47b8981c2758a388ddae906cc3719"
         },
         {
           "path": "Assets/Shaders/DefaultUnlit.hlsl",

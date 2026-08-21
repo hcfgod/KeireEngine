@@ -22,7 +22,7 @@ namespace
     }
 } // namespace
 
-TEST_CASE("Scene schema v2 migrates to canonical v5 without prefab metadata")
+TEST_CASE("Scene schema v2 migrates to canonical v6 without prefab metadata")
 {
     const auto id = Keire::AssetId::Parse("10000000-0000-4000-8000-000000000001");
     const auto source = std::string("{\"schemaVersion\":2,\"name\":\"Legacy\",\"entities\":[{") + "\"id\":\"" +
@@ -34,10 +34,10 @@ TEST_CASE("Scene schema v2 migrates to canonical v5 without prefab metadata")
 
     const auto encoded = Keire::SceneAsset::Encode(asset->Definition());
     const std::string text(reinterpret_cast<const char*>(encoded.data()), encoded.size());
-    CHECK(text.find("\"schemaVersion\": 5") != std::string::npos);
+    CHECK(text.find("\"schemaVersion\": 6") != std::string::npos);
 }
 
-TEST_CASE("Prefab entity layer overrides round trip and compose")
+TEST_CASE("Prefab entity metadata overrides round trip and compose")
 {
     const auto prefabId = Keire::AssetId::Parse("20000000-0000-4000-8000-000000000011");
     const auto root = Keire::AssetId::Parse("20000000-0000-4000-8000-000000000012");
@@ -46,15 +46,20 @@ TEST_CASE("Prefab entity layer overrides round trip and compose")
     definition.Template.Objects.push_back(Object(root, "Root"));
     definition.Template.PrefabOverrides.push_back(
         {.Kind = Keire::PrefabOverrideKind::SetObjectLayer, .Object = root, .Layer = 12});
+    definition.Template.PrefabOverrides.push_back(
+        {.Kind = Keire::PrefabOverrideKind::SetObjectTags, .Object = root, .Tags = {"Enemy", "Targetable"}});
 
     const auto decoded = Keire::PrefabAsset::Decode(Keire::PrefabAsset::Encode(definition));
-    REQUIRE(decoded->Definition().Template.PrefabOverrides.size() == 1);
+    REQUIRE(decoded->Definition().Template.PrefabOverrides.size() == 2);
     CHECK(decoded->Definition().Template.PrefabOverrides.front().Layer == 12);
+    CHECK(decoded->Definition().Template.PrefabOverrides.back().Tags ==
+          std::vector<std::string>{"Enemy", "Targetable"});
     const auto composed =
         Keire::ComposePrefab(prefabId, [&](const Keire::AssetId id)
                              { return id == prefabId ? decoded : Keire::Ref<const Keire::PrefabAsset>{}; });
     REQUIRE(composed.Objects.size() == 1);
     CHECK(composed.Objects.front().Layer == 12);
+    CHECK(composed.Objects.front().Tags == std::vector<std::string>{"Enemy", "Targetable"});
 }
 
 TEST_CASE("Prefab source round trips variant and instance override metadata")

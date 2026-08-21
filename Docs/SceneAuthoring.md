@@ -59,7 +59,7 @@ Skybox/Solid Color background, and linear clear color. Mesh Renderer exposes mes
 cast/receive-shadow flags, and static lightmap/GI participation. Directional, point, and spot lights expose realtime,
 baked, or mixed operation, shadow quality and resolution, contact shadows, cookies, and indirect contribution. Use
 **Window > Lighting** to configure bake quality, lightmap density, padding, samples, bounces, AO, and denoising, then
-queue a cached bake or force a rebuild. The resulting lighting-set reference is saved with scene schema v5.
+queue a cached bake or force a rebuild. The resulting lighting-set reference is saved with scene schema v6.
 The entity header exposes a Unity-style **Layer** dropdown beside the common name/active controls. It reads the 32 names
 from Project Settings, applies one validated undoable edit, and edits every selected entity when the Inspector is not
 locked. A mixed selection displays **Mixed** until a layer is chosen. Layer edits persist through scene saves,

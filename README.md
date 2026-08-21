@@ -222,7 +222,7 @@ Current authoring and runtime contracts include:
 | Contract | Current schema | Compatibility policy |
 | --- | ---: | --- |
 | Project descriptor | 3 | Older descriptors are inspected and upgraded transactionally before mutation. |
-| Scene source | 5 | Schemas 1–4 migrate in memory; saves emit canonical schema 5. |
+| Scene source | 6 | Schemas 1–5 migrate in memory; saves emit canonical schema 6. |
 | Static mesh | 5 | Earlier payloads remain readable; schema 5 preserves triangle-, line-, and point-list submeshes. |
 | VFX source | 4 | Graph and compatibility payloads are validated as related, distinct execution sources. |
 | Cooked runtime manifest | 4 | Older builds require a recook; newer unsupported schemas fail before partial startup. |

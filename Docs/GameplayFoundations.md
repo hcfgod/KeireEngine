@@ -14,18 +14,19 @@ inert as soon as its application service closes.
 The profiler accepts typed native or managed spans and counters from worker threads. Frame begin/end and service/world
 mutation remain owner-thread operations.
 
-## Prefabs and scene schema v5
+## Prefabs and scene schema v6
 
 `.keireprefab` stores stable local object IDs, component data, nested prefab instances, an optional base prefab, and
 typed override records. Composition resolves bases recursively, applies variants deterministically, validates the
 canonical scene, and reports missing targets or cycles without mutating either source document.
 
-Scene schema v5 persists prefab object mappings, typed overrides, a validated entity layer index, lighting-bake
-settings, and an optional baked `LightingSet` reference. Readers migrate v1-v4 documents to v5; v2/v3
-physics-component layers become the entity layer instead of being discarded, while v4 layers carry forward. Writers
-always emit v5. Layer changes use a first-class prefab override and therefore survive variant composition and
-apply/revert. Editor authoring helpers implement create-from-selection, variant creation, transactional instantiation,
-and one-level or complete unpacking over `SceneDefinition` values, which makes undo/redo boundaries explicit.
+Scene schema v6 persists prefab object mappings, typed overrides, a validated entity layer index, bounded entity tags,
+lighting-bake settings, and an optional baked `LightingSet` reference. Readers migrate v1-v5 documents to v6; v2/v3
+physics-component layers become the entity layer instead of being discarded, while later fields carry forward.
+Writers always emit v6. Layer and tag changes use first-class prefab overrides and therefore survive variant
+composition and apply/revert. Editor authoring helpers implement create-from-selection, variant creation,
+transactional instantiation, and one-level or complete unpacking over `SceneDefinition` values, which makes undo/redo
+boundaries explicit.
 The Project panel exposes create-from-selection, prefab source opening, and drag-to-Scene instantiation. Instance
 override inspection, apply-to-source, revert, one-level unpack, and complete unpack remain explicit operations. Prefab
 sources open in an isolated document with Save/Discard boundaries. Root prefab updates replace their canonical template;

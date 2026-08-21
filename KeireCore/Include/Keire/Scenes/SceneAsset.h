@@ -19,7 +19,9 @@
 
 namespace Keire
 {
-    inline constexpr std::uint32_t CurrentSceneSchemaVersion = 5;
+    inline constexpr std::uint32_t CurrentSceneSchemaVersion = 6;
+    inline constexpr std::size_t MaximumEntityTagCount = 16;
+    inline constexpr std::size_t MaximumEntityTagBytes = 64;
 
     using SceneVector3 = Vector3;
     using SceneQuaternion = Quaternion;
@@ -49,6 +51,7 @@ namespace Keire
         SceneTransform Transform;
         std::vector<SceneComponentDefinition> Components;
         std::uint32_t Layer = 0;
+        std::vector<std::string> Tags;
     };
 
     enum class PrefabOverrideKind : std::uint8_t
@@ -61,7 +64,8 @@ namespace Keire
         RemoveComponent,
         AddObject,
         RemoveObject,
-        SetObjectLayer
+        SetObjectLayer,
+        SetObjectTags
     };
 
     struct PrefabOverrideDefinition
@@ -74,6 +78,7 @@ namespace Keire
         std::string Name;
         bool Active = true;
         std::uint32_t Layer = 0;
+        std::vector<std::string> Tags;
         SceneTransform Transform;
         std::optional<SceneComponentDefinition> AddedComponent;
         std::optional<SceneObjectDefinition> AddedObject;
@@ -124,6 +129,7 @@ namespace Keire
         [[nodiscard]] static SceneDefinition EmptyDefinition(std::string name = "Untitled");
         [[nodiscard]] static SceneDefinition SampleDefinition();
         [[nodiscard]] static SceneDefinition SampleDefinition(AssetId material);
+        [[nodiscard]] static bool IsValidEntityTag(std::string_view tag) noexcept;
         static void Validate(const SceneDefinition& definition);
 
       private:

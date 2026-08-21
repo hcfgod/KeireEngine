@@ -265,6 +265,9 @@ namespace KeireEditor
             m_EntityNameTarget = {};
             m_EntityNameDraft.clear();
             m_EntityNameEditing = false;
+            m_EntityTagTarget = {};
+            m_EntityTagDraft.clear();
+            m_EntityTagEditing = false;
             m_RotationTarget = {};
             m_RotationEditing = false;
         }
@@ -281,10 +284,13 @@ namespace KeireEditor
         Keire::AssetId m_LockedAsset;
         Keire::AssetId m_EntityNameTarget;
         std::string m_EntityNameDraft;
+        Keire::AssetId m_EntityTagTarget;
+        std::string m_EntityTagDraft;
         Keire::AssetId m_RotationTarget;
         Keire::Vector3 m_RotationEuler;
         Keire::Quaternion m_RotationOrientation;
         bool m_EntityNameEditing = false;
+        bool m_EntityTagEditing = false;
         bool m_RotationEditing = false;
         bool m_UniformScale = false;
     };

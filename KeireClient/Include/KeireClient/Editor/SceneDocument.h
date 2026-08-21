@@ -62,6 +62,7 @@ namespace KeireEditor
         void SetEntityActive(Keire::EntityId entity, bool active);
         void SetEntityLayer(Keire::EntityId entity, std::uint32_t layer);
         void SetEntitiesLayer(std::span<const Keire::AssetId> entities, std::uint32_t layer);
+        void SetEntityTags(Keire::EntityId entity, std::vector<std::string> tags);
         void ReparentEntity(Keire::EntityId entity, Keire::EntityId parent, bool keepWorldTransform = true);
         void MoveEntity(Keire::EntityId entity, Keire::EntityId parent, Keire::EntityId beforeSibling = {},
                         bool keepWorldTransform = true);

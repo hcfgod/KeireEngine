@@ -122,12 +122,12 @@ Windows, DEB, and RPM records and states the native-signing limitations explicit
   a complete Unity parity claim.
 - The Unreal-inspired Material Ecosystem matrix contains 145 rows: 93 Complete, 6 Partial, and 46 Planned after the
   exact Windows/Linux release and SDK-consumer evidence was recorded. Planned rows remain unsupported.
-- Current content authorities are project schema 3, scene schema 5, mesh schema 5, VFX schema 4, material source
+- Current content authorities are project schema 3, scene schema 6, mesh schema 5, VFX schema 4, material source
   schema 3, Animator component schema 7, procedural motion profile schema 1, and cooked runtime-manifest schema 4.
 
 ### Documentation and web platform
 
-All 59 canonical Markdown guides are mapped to implementation authorities. Source validation checks the exact
+All 62 canonical Markdown guides are mapped to implementation authorities. Source validation checks the exact
 inventory, headings, local links and fragments, schema statements, current product version, current release-platform
 claims, and prohibited unresolved markers. The Astro build synchronizes those sources into Starlight, renders Mermaid
 diagrams, builds local Pagefind search, and validates generated routes, assets, CSP-compatible output, sitemap content,

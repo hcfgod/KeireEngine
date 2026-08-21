@@ -49,7 +49,7 @@ environment falls back to the built-in studio environment as one complete lighti
 
 ## Spatial lighting
 
-Scene schema v5 can reference one baked `LightingSet` containing RGBE lightmap and directionality arrays, packed mixed
+Scene schema v6 can reference one baked `LightingSet` containing RGBE lightmap and directionality arrays, packed mixed
 shadow masks, a prefiltered reflection cubemap array, renderer UV transforms, reflection-probe bindings, and SH9
 light-probe volumes. Mesh schema v5 carries UV1 plus explicit primitive topology, and material schema v3 marks emissive
 radiance that contributes to offline GI. Static renderers use UV1 (with deterministic UV0 fallback); dynamic renderers

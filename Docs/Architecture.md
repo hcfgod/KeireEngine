@@ -547,7 +547,7 @@ last-good loaded set.
 The editor owns authoring selection, undo/redo, atomic source writes, dirty decisions, and recovery files. Runtime scene
 activation is refreshed only after source validation/import succeeds. JSON remains private to the scene importer.
 
-Scene schema v5 stores stable entities and component records, prefab instance/override state, entity layers, scene
+Scene schema v6 stores stable entities and component records, prefab instance/override state, entity layers and tags, scene
 lighting-bake settings, and an optional baked-lighting identity. The public ECS surface owns stable IDs, weak `Entity`
 handles, reference-counted `Component` instances, registration metadata, and Kéire math values. EnTT owns native entity
 storage privately and GLM implements matrix/quaternion operations privately. A component registry is application-owned
@@ -587,11 +587,10 @@ media containers are normalized to lossless FLAC by an injected asset-worker bac
 libraries. Custom AVIO callbacks avoid process creation and temporary source/output files; packet decoding and
 resampling remain bounded, stream selection is explicit, and only the asset worker loads FFmpeg.
 
-Weapon simulation is data-driven and split between deterministic command/state logic, a bounded ballistic projectile
-pool, collision/damage adapters, and presentation springs. Physical magazine instances and loose-shell inventories are
-runtime state; reserve counts are derived views rather than independently serialized values. Stable shot IDs include
-shooter, weapon instance, sequence, and simulation tick so a future authority layer can reuse the same commands
-without moving networking into the weapon implementation.
+Game-specific simulation such as weapons, ammunition, damage, ballistics, recoil, inventory, and combat HUD policy
+lives in each project's managed assembly. The engine exposes generic input, time, scene, physics, audio, VFX, material,
+animation, asset, and UI services without owning a combat model. Starter-project examples are copied project content,
+not part of `Keire.Managed`, so games can replace their rules without depending on an engine gameplay framework.
 
 `SceneDocument::ActiveScene` is the editor authoring target: it resolves to the clone during Play and the edit scene
 otherwise. Play edits have an isolated undo context. A snapshot-derived change set compares entity identity, hierarchy,

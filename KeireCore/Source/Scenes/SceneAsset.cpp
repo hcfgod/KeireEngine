@@ -36,7 +36,7 @@ namespace Keire
         constexpr std::size_t MaximumComponentDataBytes = 4U * 1024U * 1024U;
         constexpr std::size_t MaximumHierarchyDepth = 512;
         constexpr std::size_t MaximumNameBytes = 256;
-        constexpr std::uint32_t SceneAssetImporterVersion = 6;
+        constexpr std::uint32_t SceneAssetImporterVersion = 7;
 
         [[nodiscard]] const Json* FindMember(const Json& value, const std::string_view canonical,
                                              const std::string_view alternate = {})
@@ -360,6 +360,8 @@ namespace Keire
             for (const auto& object : definition.Objects)
             {
                 result += object.Name.size();
+                for (const auto& tag : object.Tags)
+                    result += tag.size();
                 for (const auto& component : object.Components)
                     result += component.Data.size() + sizeof(SceneComponentDefinition);
             }
@@ -374,6 +376,14 @@ namespace Keire
                 object.Parent = AssetId::Parse(value["parent"].get<std::string>());
             object.Name = value.at("name").get<std::string>();
             object.Active = value.value("active", true);
+            if (const auto found = value.find("tags"); found != value.end())
+            {
+                if (!found->is_array() || found->size() > MaximumEntityTagCount)
+                    throw std::runtime_error("Scene entity tags must be a bounded array.");
+                object.Tags.reserve(found->size());
+                for (const auto& tag : *found)
+                    object.Tags.push_back(tag.get<std::string>());
+            }
             if (requireLayer && !value.contains("layer"))
                 throw std::runtime_error("Scene schema v4 entity is missing its layer.");
             std::optional<std::uint32_t> legacyLayer;
@@ -605,11 +615,8 @@ namespace Keire
                                          {"data", Json::parse(transform.Data)}};
                 components.insert(components.begin(), std::move(serializedTransform));
             }
-            Json result{{"id", object.Id.ToString()},
-                        {"name", object.Name},
-                        {"active", object.Active},
-                        {"layer", object.Layer},
-                        {"components", std::move(components)}};
+            Json result{{"id", object.Id.ToString()}, {"name", object.Name}, {"active", object.Active},
+                        {"layer", object.Layer},      {"tags", object.Tags}, {"components", std::move(components)}};
             result["parent"] = object.Parent ? Json(object.Parent.ToString()) : Json(nullptr);
             return result;
         }
@@ -631,6 +638,9 @@ namespace Keire
                 break;
             case PrefabOverrideKind::SetObjectLayer:
                 result["layer"] = value.Layer;
+                break;
+            case PrefabOverrideKind::SetObjectTags:
+                result["tags"] = value.Tags;
                 break;
             case PrefabOverrideKind::SetComponentProperty:
                 result["component"] = value.Component.ToString();
@@ -674,6 +684,9 @@ namespace Keire
                 break;
             case PrefabOverrideKind::SetObjectLayer:
                 result.Layer = value.at("layer").get<std::uint32_t>();
+                break;
+            case PrefabOverrideKind::SetObjectTags:
+                result.Tags = value.at("tags").get<std::vector<std::string>>();
                 break;
             case PrefabOverrideKind::SetComponentProperty:
                 result.Component = ComponentTypeId::Parse(value.at("component").get<std::string>());
@@ -787,7 +800,7 @@ namespace Keire
         {
             definition = DecodeVersionOne(document);
         }
-        else if (version == 2 || version == 3 || version == 4 || version == CurrentSceneSchemaVersion)
+        else if (version == 2 || version == 3 || version == 4 || version == 5 || version == CurrentSceneSchemaVersion)
         {
             definition.SchemaVersion = CurrentSceneSchemaVersion;
             definition.Name = document.at("name").get<std::string>();
@@ -913,6 +926,22 @@ namespace Keire
         return result;
     }
 
+    bool SceneAsset::IsValidEntityTag(const std::string_view tag) noexcept
+    {
+        const auto isLetter = [](const unsigned char value)
+        { return (value >= 'A' && value <= 'Z') || (value >= 'a' && value <= 'z'); };
+        const auto isDigit = [](const unsigned char value) { return value >= '0' && value <= '9'; };
+        if (tag.empty() || tag.size() > MaximumEntityTagBytes || !isLetter(static_cast<unsigned char>(tag.front())))
+            return false;
+        return std::ranges::all_of(tag,
+                                   [&](const char character)
+                                   {
+                                       const auto value = static_cast<unsigned char>(character);
+                                       return isLetter(value) || isDigit(value) || character == '_' ||
+                                              character == '-' || character == '.';
+                                   });
+    }
+
     void SceneAsset::Validate(const SceneDefinition& definition)
     {
         if (definition.SchemaVersion != CurrentSceneSchemaVersion)
@@ -942,6 +971,12 @@ namespace Keire
                 throw std::invalid_argument("Scene entity has an invalid ID or name, or duplicates another entity.");
             if (!IsValidEntityLayer(object.Layer))
                 throw std::invalid_argument("Scene entity layer must be between 0 and 31.");
+            if (object.Tags.size() > MaximumEntityTagCount)
+                throw std::invalid_argument("Scene entity exceeds the supported tag limit.");
+            std::set<std::string, std::less<>> uniqueTags;
+            for (const auto& tag : object.Tags)
+                if (!IsValidEntityTag(tag) || !uniqueTags.insert(tag).second)
+                    throw std::invalid_argument("Scene entity tag is invalid or duplicated.");
             std::size_t depth = 1;
             if (object.Parent)
             {
@@ -1025,6 +1060,16 @@ namespace Keire
                     if (!value.Object || !IsValidEntityLayer(value.Layer))
                         throw std::invalid_argument("Prefab layer override is invalid.");
                     break;
+                case PrefabOverrideKind::SetObjectTags:
+                {
+                    std::set<std::string, std::less<>> uniqueTags;
+                    if (!value.Object || value.Tags.size() > MaximumEntityTagCount)
+                        throw std::invalid_argument("Prefab tag override is invalid.");
+                    for (const auto& tag : value.Tags)
+                        if (!SceneAsset::IsValidEntityTag(tag) || !uniqueTags.insert(tag).second)
+                            throw std::invalid_argument("Prefab tag override is invalid.");
+                    break;
+                }
                 case PrefabOverrideKind::SetComponentProperty:
                     if (!value.Object || !value.Component || value.Property.empty() || value.Property.size() > 256)
                         throw std::invalid_argument("Prefab component property override is invalid.");
@@ -1043,6 +1088,14 @@ namespace Keire
                     if (!value.AddedObject || !value.AddedObject->Id || value.AddedObject->Name.empty() ||
                         !IsValidEntityLayer(value.AddedObject->Layer))
                         throw std::invalid_argument("Prefab add-object override is invalid.");
+                    if (value.AddedObject->Tags.size() > MaximumEntityTagCount)
+                        throw std::invalid_argument("Prefab add-object override is invalid.");
+                    {
+                        std::set<std::string, std::less<>> uniqueTags;
+                        for (const auto& tag : value.AddedObject->Tags)
+                            if (!SceneAsset::IsValidEntityTag(tag) || !uniqueTags.insert(tag).second)
+                                throw std::invalid_argument("Prefab add-object override is invalid.");
+                    }
                     break;
                 case PrefabOverrideKind::RemoveObject:
                     if (!value.Object)

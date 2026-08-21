@@ -44,6 +44,19 @@ header and drives the owning entity's physics collision layer. Invalid values th
 Entity.Layer = 8;
 ```
 
+Tags provide indexed gameplay categories without coupling scripts to authoring names:
+
+```csharp
+Entity.AddTag("Interactable");
+if (Entity.HasTag("Locked"))
+    Entity.RemoveTag("Locked");
+```
+
+`Tags` is a read-only snapshot; `AddTag`, `RemoveTag`, and `ClearTags` perform validated mutations. Tags are
+case-sensitive ASCII identifiers, begin with a letter, use at most 64 bytes, and are limited to 16 per entity. Use
+`SceneManager` for bounded active-scene name, tag, and component queries; see
+[Gameplay Services](GameplayServices.md#entities-and-scene-queries).
+
 ## Parent And Children
 
 ```csharp

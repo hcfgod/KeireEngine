@@ -61,6 +61,42 @@ namespace Keire
         state->SetEntityLayer(m_Id, layer);
     }
 
+    std::vector<std::string> Entity::Tags() const
+    {
+        const auto state = m_State.Lock();
+        if (!state)
+            throw std::logic_error("Entity::Tags cannot inspect a stale entity.");
+        return state->EntityTags(m_Id);
+    }
+
+    bool Entity::HasTag(const std::string_view tag) const
+    {
+        const auto state = m_State.Lock();
+        return state && state->HasEntityTag(m_Id, tag);
+    }
+
+    void Entity::SetTags(std::vector<std::string> tags)
+    {
+        const auto state = m_State.Lock();
+        if (!state)
+            throw std::logic_error("Entity::SetTags cannot mutate a stale entity.");
+        state->SetEntityTags(m_Id, std::move(tags));
+    }
+
+    bool Entity::AddTag(std::string tag)
+    {
+        const auto state = m_State.Lock();
+        if (!state)
+            throw std::logic_error("Entity::AddTag cannot mutate a stale entity.");
+        return state->AddEntityTag(m_Id, std::move(tag));
+    }
+
+    bool Entity::RemoveTag(const std::string_view tag)
+    {
+        const auto state = m_State.Lock();
+        return state && state->RemoveEntityTag(m_Id, tag);
+    }
+
     bool Entity::ActiveSelf() const
     {
         const auto state = m_State.Lock();
