@@ -11,6 +11,11 @@ versions.
 - Added schema-v6 entity tags with deterministic name, tag, and component indexes; canonical prefab tag overrides;
   Inspector tag authoring with undo; and managed `Entity` tag mutation plus bounded `SceneManager` queries. Runtime and
   Editor Play queries share stable hierarchy ordering and reject invalid or oversized tag data transactionally.
+- Restored hosted CI parity with local launchers: quality checks use the pinned Clang 22 formatter, Windows shader
+  compiler builds use a short Unicode-safe workspace, Linux builds use Clang for the LLVM-derived host shader tool,
+  macOS dependency builds avoid Xcode 16.4's obsolete zlib platform macro, and Windows fast checks fall back to
+  `git grep` when `rg` is unavailable. Cleared the clang-tidy, ShellCheck, and pinned Ruff blockers exposed after the
+  earlier quality failures were fixed.
 - Added managed input device discovery, automatic and locked control-scheme access, bounded interactive rebinding,
   persistent binding profiles, and normalized gamepad rumble. Completed rebind polling is now safe after the final
   composite target, and platforms without joystick support reject rumble without affecting keyboard or mouse input.

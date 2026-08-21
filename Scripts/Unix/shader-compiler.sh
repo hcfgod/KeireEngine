@@ -10,10 +10,12 @@ toolset="${3:?toolset is required}"
 force="${4:-0}"
 system=linux; [[ "$platform" == Mac ]] && system=macosx
 output_arch="$(architecture_output_name "$architecture")"
-if [[ "$toolset" == clang ]]; then
-  export CC=clang CXX=clang++
-else
-  export CC=gcc CXX=g++
+# DirectXShaderCompiler is an LLVM-derived host tool. Building it with the bootstrapped Clang toolchain avoids
+# GCC-version-specific optimizer failures while leaving the requested project toolset unchanged.
+export CC=clang CXX=clang++
+if ! command -v "$CC" >/dev/null 2>&1 || ! command -v "$CXX" >/dev/null 2>&1; then
+  printf 'Clang is required to build the host shader compiler. Run the platform bootstrap first.\n' >&2
+  exit 1
 fi
 
 sdl_install="$ROOT/Build/Dependencies/$system-$output_arch-$toolset/Release/install"
@@ -26,7 +28,7 @@ stamp="$cache_root/keire-shader-compiler.stamp"
 configure_stamp="$cache_root/keire-shader-compiler.configure"
 lock="$ROOT/Config/Dependencies.lock"
 macos_deployment_target="$(config_value "$lock" MACOS_DEPLOYMENT_TARGET)"
-key="$(config_value "$lock" SDL_SHADERCROSS_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_DXC_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_SPIRV_CROSS_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT)|$(config_value "$lock" SDL_COMMIT)|flat-runtime-v3|$macos_deployment_target|$architecture|$toolset|$($CXX --version | head -n 1)"
+key="$(config_value "$lock" SDL_SHADERCROSS_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_DXC_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_SPIRV_CROSS_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT)|$(config_value "$lock" SDL_COMMIT)|flat-runtime-v4|$macos_deployment_target|$architecture|$toolset|$($CXX --version | head -n 1)"
 if [[ "$force" != 1 && -x "$published_compiler" && -f "$stamp" && "$(tr -d '\r\n' < "$stamp")" == "$key" ]] &&
    "$published_compiler" --help >/dev/null 2>&1; then
   printf '==> KeireShaderCompiler cache is current\n'

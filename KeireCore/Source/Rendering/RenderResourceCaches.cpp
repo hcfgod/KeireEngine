@@ -279,7 +279,8 @@ namespace Keire::RenderBackend
         packet.FrameIndex = request.FrameIndex;
         const auto renderEntities = request.Scene->Query<MeshRendererComponent>();
         const auto meshParticleCount = std::ranges::count_if(packet.Vfx.Particles(),
-                                                             [](const auto& particle) {
+                                                             [](const auto& particle)
+                                                             {
                                                                  return particle.Renderer == VfxRendererType::Mesh &&
                                                                         static_cast<bool>(particle.Mesh) &&
                                                                         particle.Size > 0.0F;

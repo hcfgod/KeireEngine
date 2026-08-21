@@ -484,6 +484,16 @@ install_gcc_toolchain() {
     step "Project-private GCC $actual shims are ready"
 }
 
+ensure_host_clang_toolchain() {
+    local clang_version
+    ensure_command clang++ clang
+    clang_version="$(clang++ --version | extract_version)"
+    version_at_least "$clang_version" 14 || {
+        printf 'Clang %s is older than required 14 for the host shader compiler.\n' "$clang_version" >&2
+        exit 1
+    }
+}
+
 ensure_command awk awk
 ensure_command find findutils
 ensure_command cmp diffutils
@@ -507,6 +517,7 @@ install_dotnet_sdk
 install_logical_packages curl-dev
 install_logical_packages sdl-video
 ensure_command zenity native-dialog
+ensure_host_clang_toolchain
 if ! pkg-config --exists x11 && ! pkg-config --exists wayland-client; then
     printf 'SDL video requires at least one available X11 or Wayland development backend.\n' >&2
     exit 1
@@ -520,7 +531,6 @@ case "$TOOLSET" in
         install_gcc_toolchain
         ;;
     clang)
-        ensure_command clang++ clang
         clang_version="$(clang++ --version | extract_version)"
         version_at_least "$clang_version" 16 || {
             printf 'Clang %s is older than required 16, and the configured repositories did not provide a newer version. ' "$clang_version" >&2

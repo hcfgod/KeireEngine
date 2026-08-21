@@ -29,7 +29,7 @@ $publishedRoot = Join-Path $Root "Build\Tools\ShaderCompiler"
 $publishedCompiler = Join-Path $publishedRoot "KeireShaderCompiler.exe"
 $stamp = Join-Path $cacheRoot "keire-shader-compiler.stamp"
 $configureStamp = Join-Path $cacheRoot "keire-shader-compiler.configure"
-$asciiRoot = Join-Path ([IO.Path]::GetTempPath()) "KeireShaderCompilerWorkspace"
+$asciiRoot = Join-Path ([IO.Path]::GetTempPath()) "kesc"
 if (Test-Path -LiteralPath $asciiRoot) {
     $junction = Get-Item -LiteralPath $asciiRoot -Force
     $target = @($junction.Target)[0]
@@ -49,7 +49,7 @@ $compilerIdentity = "MSVC $env:VCToolsVersion WindowsSDK $env:WindowsSDKVersion"
 $key = @($Lock.SDL_SHADERCROSS_COMMIT, $Lock.SDL_SHADERCROSS_DXC_COMMIT,
     $Lock.SDL_SHADERCROSS_SPIRV_CROSS_COMMIT, $Lock.SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT,
     $Lock.SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT, $Lock.SDL_COMMIT, $Architecture, $Toolset,
-    $compilerIdentity) -join "|"
+    $compilerIdentity, "short-workspace-v1") -join "|"
 
 $valid = -not $Force -and (Test-Path $publishedCompiler) -and (Test-Path $stamp) -and
     ((Get-Content $stamp -Raw).Trim() -eq $key)

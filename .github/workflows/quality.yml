@@ -20,15 +20,15 @@ jobs:
       - name: Install quality tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-format-18 clang-tidy-18 shellcheck yamllint
-          python3 -m pip install --user ruff==0.12.5 PyYAML==6.0.2
+          sudo apt-get install -y clang-tidy-18 shellcheck yamllint
+          python3 -m pip install --user clang-format==22.1.8 ruff==0.12.5 PyYAML==6.0.2
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
           pwsh -NoProfile -Command "Install-Module PSScriptAnalyzer -RequiredVersion 1.24.0 -Force -Scope CurrentUser"
       - name: Check C++ formatting
         run: |
           first_party=(AssetTool KeireAssetWorker KeireClient KeireCore KeireEditorTests KeireHub KeireHubPackagePublisher KeireHubRuntime KeireHubTests KeireHubWorker KeireRenderTests KeireRuntime KeireTests Examples Scripts/Premake SourceModules)
           find "${first_party[@]}" -type f \( -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \) -print0 |
-            xargs -0 clang-format-18 --dry-run --Werror
+            xargs -0 "$HOME/.local/bin/clang-format" --dry-run --Werror
       - name: Check shell scripts
         # Regression scripts intentionally grep shell source for literal $VARIABLE text.
         run: shellcheck --exclude=SC2034,SC2016 --source-path=SCRIPTDIR Scripts/project.sh Scripts/Tests/*.sh Scripts/Unix/*.sh Scripts/Linux/*.sh Scripts/Mac/*.sh

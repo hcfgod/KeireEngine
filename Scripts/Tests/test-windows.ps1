@@ -17,6 +17,34 @@ function Assert-Throws([scriptblock]$Action, [string]$Message) {
 function Assert-True([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw "$Message failed." }
 }
+function Invoke-RepositoryBatchSearch([bool]$FixedStrings, [string[]]$Patterns) {
+    $root = Get-RepositoryRoot
+    $ripgrep = Get-Command rg -ErrorAction SilentlyContinue
+    if ($ripgrep) {
+        $arguments = @("-n")
+        if ($FixedStrings) { $arguments += "-F" }
+        $arguments += @(
+            "--glob", "!.git/**", "--glob", "!.vs/**", "--glob", "!Vendor/**", "--glob", "!Tools/**",
+            "--glob", "!Build/**", "--glob", "!Logs/**", "--glob", "!Artifacts/**", "--glob", "!Scripts/Tests/**"
+        )
+        foreach ($pattern in $Patterns) { $arguments += @("-e", $pattern) }
+        $arguments += $root
+        $output = & $ripgrep.Source @arguments 2>&1
+    }
+    else {
+        $arguments = @("-C", $root, "grep", "-n")
+        if ($FixedStrings) { $arguments += "-F" } else { $arguments += "-E" }
+        foreach ($pattern in $Patterns) { $arguments += @("-e", $pattern) }
+        $arguments += @(
+            "--", ".", ":(exclude)Vendor/**", ":(exclude)Tools/**", ":(exclude)Build/**",
+            ":(exclude)Logs/**", ":(exclude)Artifacts/**", ":(exclude)Scripts/Tests/**"
+        )
+        $output = & git @arguments 2>&1
+    }
+    $exitCode = $LASTEXITCODE
+    $output | Write-Host
+    return $exitCode
+}
 
 $project = Get-ProjectConfig
 $python = Get-PythonInvocation
@@ -91,8 +119,19 @@ Assert-True ($windowsBuildScript.Contains('$Project.HUB_TARGET') -and
 $shaderCompilerScript = Get-Content (Join-Path $Windows "shader-compiler.ps1") -Raw
 Assert-True ($shaderCompilerScript.Contains('$hostToolset = "msc"') -and
              $shaderCompilerScript.Contains('"-DCMAKE_C_COMPILER=cl.exe"') -and
-             $shaderCompilerScript.Contains('-not $configuredKey')) `
-    "Windows host shader compiler uses the supported MSVC toolchain and replaces incomplete configuration"
+             $shaderCompilerScript.Contains('-not $configuredKey') -and
+             $shaderCompilerScript.Contains('"kesc"') -and
+             $shaderCompilerScript.Contains('"short-workspace-v1"')) `
+    "Windows host shader compiler uses MSVC, a short workspace, and deterministic cache replacement"
+$dependencyBridge = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Dependencies\CMakeLists.txt") -Raw
+Assert-True ($dependencyBridge.Contains('if(APPLE AND TARGET zlibstatic)') -and
+             $dependencyBridge.Contains('target_compile_options(zlibstatic PRIVATE -UTARGET_OS_MAC)')) `
+    "Apple dependency builds suppress zlib's obsolete classic-Mac branch"
+$qualityWorkflow = Get-Content (Join-Path (Get-RepositoryRoot) ".github\workflows\quality.yml") -Raw
+Assert-True ($qualityWorkflow.Contains('clang-format==22.1.8') -and
+             $qualityWorkflow.Contains('$HOME/.local/bin/clang-format') -and
+             -not $qualityWorkflow.Contains('clang-format-18')) `
+    "Hosted formatting matches the pinned local Clang 22 formatter"
 $processSource = Get-Content (Join-Path (Get-RepositoryRoot) "KeireCore\Source\Process.cpp") -Raw
 Assert-True ($processSource.Contains('CommandLineToArgvW(GetCommandLineW()') -and $processSource.Contains('WideCharToMultiByte(CP_UTF8')) "Shared UTF-8 Windows process command line"
 $menuScript = Get-Content (Join-Path $Windows "..\project.ps1") -Raw
@@ -799,11 +838,15 @@ Write-Host ("Windows script integration fixtures completed in {0:N2}s." -f $inte
 }
 
 if ($runFast) {
-    $searchExclusions = @("--glob", "!.git/**", "--glob", "!.vs/**", "--glob", "!Vendor/**", "--glob", "!Tools/**", "--glob", "!Build/**", "--glob", "!Logs/**", "--glob", "!Artifacts/**", "--glob", "!Scripts/Tests/**")
-    & rg -n @searchExclusions '\b(?:CORE|CLIENT)_(?:API|ASSERT|ASSERTIONS_ENABLED|TRACE|DEBUG|INFO|WARN|ERROR|CRITICAL)\b' (Get-RepositoryRoot)
-    Assert-Equal $LASTEXITCODE 1 "Deprecated public macro batch scan"
-    & rg -n -F @searchExclusions -e '#include "KeireCore/' -e 'Scripts/KeireTests' -e 'Scripts\KeireTests' -e 'Scripts/Windows/Tests' -e 'Scripts/Unix/Tests' -e 'KeireCore.log' -e 'KeireClient.log' (Get-RepositoryRoot)
-    Assert-Equal $LASTEXITCODE 1 "Stale repository identity batch scan"
+    $searchExitCode = Invoke-RepositoryBatchSearch $false @(
+        '\b(CORE|CLIENT)_(API|ASSERT|ASSERTIONS_ENABLED|TRACE|DEBUG|INFO|WARN|ERROR|CRITICAL)\b'
+    )
+    Assert-Equal $searchExitCode 1 "Deprecated public macro batch scan"
+    $searchExitCode = Invoke-RepositoryBatchSearch $true @(
+        '#include "KeireCore/', 'Scripts/KeireTests', 'Scripts\KeireTests', 'Scripts/Windows/Tests',
+        'Scripts/Unix/Tests', 'KeireCore.log', 'KeireClient.log'
+    )
+    Assert-Equal $searchExitCode 1 "Stale repository identity batch scan"
 }
 Write-Host ("Windows $Suite script regression tests passed in {0:N2}s." -f $started.Elapsed.TotalSeconds)
 $global:LASTEXITCODE = 0
