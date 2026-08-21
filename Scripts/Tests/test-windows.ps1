@@ -132,6 +132,15 @@ Assert-True ($qualityWorkflow.Contains('clang-format==22.1.8') -and
              $qualityWorkflow.Contains('$HOME/.local/bin/clang-format') -and
              -not $qualityWorkflow.Contains('clang-format-18')) `
     "Hosted formatting matches the pinned local Clang 22 formatter"
+Assert-True ($qualityWorkflow.Contains('Tools/Linux') -and
+             $qualityWorkflow.Contains('linux-${{ runner.arch }}-clang-dependencies-') -and
+             $qualityWorkflow.Contains('xargs -0 -n 1 -P "$(nproc)" clang-tidy-18')) `
+    "Hosted clang-tidy restores dependency caches and analyzes translation units in parallel"
+$ciWorkflow = Get-Content (Join-Path (Get-RepositoryRoot) ".github\workflows\ci.yml") -Raw
+Assert-True ($ciWorkflow.Contains("Scripts/Windows/coral.ps1") -and
+             $ciWorkflow.Contains("Scripts/Unix/shader-compiler.sh") -and
+             $ciWorkflow.Contains("Scripts/Dependencies/**")) `
+    "Hosted dependency caches include every build-pipeline input"
 $processSource = Get-Content (Join-Path (Get-RepositoryRoot) "KeireCore\Source\Process.cpp") -Raw
 Assert-True ($processSource.Contains('CommandLineToArgvW(GetCommandLineW()') -and $processSource.Contains('WideCharToMultiByte(CP_UTF8')) "Shared UTF-8 Windows process command line"
 $menuScript = Get-Content (Join-Path $Windows "..\project.ps1") -Raw
@@ -293,6 +302,9 @@ Assert-True ($dependencyScript.Contains('$Lock.LIBSODIUM_COMMIT') -and
              $dependencyScript.Contains('ReleaseDLL') -and
              $dependencyScript.Contains('libsodium.dll')) "Pinned private catalog verifier bootstrap"
 $coralRoot = Join-Path (Get-RepositoryRoot) "Patches\Coral"
+$coralScript = Get-Content (Join-Path $Windows "coral.ps1") -Raw
+Assert-True ($coralScript.Contains('git -C $TemporarySource config core.autocrlf false')) `
+    "Coral source cache uses deterministic LF checkouts"
 $coralBootstrapPatch = Get-Content (Join-Path $coralRoot "0004-keire-apply-host-settings-before-discovery.patch") -Raw
 Assert-True ($coralBootstrapPatch.IndexOf('m_Settings = std::move(InSettings);') -lt
              $coralBootstrapPatch.IndexOf('if (!LoadHostFXR())')) "Bundled .NET root is installed before Coral host discovery"

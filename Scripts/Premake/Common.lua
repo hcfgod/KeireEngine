@@ -284,6 +284,11 @@ function ApplySanitizerSettings()
         buildoptions { "-fsanitize=thread", "-fno-omit-frame-pointer" }
         linkoptions { "-fsanitize=thread" }
 
+    -- GCC reports that atomic_thread_fence is not modeled by TSan. Preserve the diagnostic without promoting this
+    -- instrumentation limitation to a compile error; the sanitizer remains enabled for the complete target.
+    filter { "configurations:DebugTSan", "toolset:gcc" }
+        buildoptions { "-Wno-error=tsan" }
+
     filter { "configurations:Coverage", "toolset:clang" }
         buildoptions { "-fprofile-instr-generate", "-fcoverage-mapping", "-fno-omit-frame-pointer" }
         linkoptions { "-fprofile-instr-generate", "-fcoverage-mapping" }

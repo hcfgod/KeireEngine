@@ -4,6 +4,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 source "$SCRIPT_DIR/common.sh"
+
+if [[ "$(uname -s)" == Darwin ]]; then
+  export PERL5LIB="$ROOT/Scripts/Dependencies${PERL5LIB:+:$PERL5LIB}"
+  perl -MJSON -e 1 || {
+    printf 'The bundled Perl JSON compatibility module is unavailable.\n' >&2
+    exit 1
+  }
+fi
 platform="${1:?platform is required}"
 architecture="${2:?architecture is required}"
 toolset="${3:?toolset is required}"

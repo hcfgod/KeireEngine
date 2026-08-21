@@ -182,6 +182,25 @@ TEST_CASE("File SHA-256 hashing streams safely on an Editor-sized caller stack")
         std::runtime_error);
 }
 
+TEST_CASE("SHA-256 padding remains correct across the single-block boundary")
+{
+    constexpr std::array Expected{
+        std::pair{std::size_t{55U},
+                  std::string_view{"9f4390f8d30c2dd92ec9f095b65e2b9ae9b0a925a5258e241c9f1e910f734318"}},
+        std::pair{std::size_t{56U},
+                  std::string_view{"b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a"}},
+        std::pair{std::size_t{63U},
+                  std::string_view{"7d3e74a05d7db15bce4ad9ec0658ea98e3f06eeecf16b4c6fff2da457ddc2f34"}},
+        std::pair{std::size_t{64U},
+                  std::string_view{"ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb"}}};
+
+    for (const auto& [size, digest] : Expected)
+    {
+        const std::string input(size, 'a');
+        CHECK(Keire::Detail::DigestToString(Keire::Detail::Sha256(std::as_bytes(std::span(input)))) == digest);
+    }
+}
+
 TEST_CASE("Asset worker protocol and published source index round trip without rescanning")
 {
     TemporaryAssetProject project;

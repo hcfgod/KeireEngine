@@ -38,7 +38,7 @@ jobs:
           path: |
             Tools/Windows
             Build/Dependencies
-          key: windows-${{ runner.arch }}-${{ matrix.toolset }}-dependencies-${{ hashFiles('Config/Dependencies.lock', 'Scripts/Windows/dependencies.ps1') }}
+          key: windows-${{ runner.arch }}-${{ matrix.toolset }}-dependencies-${{ hashFiles('Config/Dependencies.lock', 'Scripts/Windows/dependencies.ps1', 'Scripts/Windows/coral.ps1', 'Scripts/Windows/shader-compiler.ps1', 'Scripts/Dependencies/**') }}
       - name: Bootstrap and generate
         shell: pwsh
         run: |
@@ -100,7 +100,7 @@ jobs:
           path: |
             Tools/${{ startsWith(matrix.name, 'macOS') && 'Mac' || 'Linux' }}
             Build/Dependencies
-          key: ${{ runner.os }}-${{ runner.arch }}-${{ matrix.toolset }}-dependencies-${{ hashFiles('Config/Dependencies.lock', 'Scripts/Unix/dependencies.sh') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ matrix.toolset }}-dependencies-${{ hashFiles('Config/Dependencies.lock', 'Scripts/Unix/dependencies.sh', 'Scripts/Unix/coral.sh', 'Scripts/Unix/shader-compiler.sh', 'Scripts/Dependencies/**') }}
       - run: bash Scripts/project.sh bootstrap --generator ${{ matrix.generator }} --architecture ${{ matrix.architecture }} --toolset ${{ matrix.toolset }}
       - run: bash Scripts/project.sh generate --generator ${{ matrix.generator }} --architecture ${{ matrix.architecture }} --toolset ${{ matrix.toolset }} --ci
       - if: matrix.mode == 'test'

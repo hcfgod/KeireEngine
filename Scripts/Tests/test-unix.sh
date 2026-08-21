@@ -423,11 +423,16 @@ assert_true grep -F -q 'memcpy(buffer, InString.data(), InString.size() * sizeof
 assert_true grep -F -q 'buffer[InString.size()] = {};' "$coral_warning_patch"
 assert_true grep -F -q 'reinterpret_cast<const UCChar*>(UINTPTR_MAX)' "$coral_warning_patch"
 assert_true grep -F -q 'target_compile_options(Coral.Native PRIVATE /wd4996)' "$coral_warning_patch"
+assert_true grep -F -q 'PERL5LIB="$ROOT/Scripts/Dependencies${PERL5LIB:+:$PERL5LIB}"' \
+  "$ROOT/Scripts/Unix/shader-compiler.sh"
+assert_true env PERL5LIB="$ROOT/Scripts/Dependencies" perl -MJSON -e \
+  'die unless decode_json("{\"ready\":true}")->{ready}'
 assert_true grep -q 'SDL3DebugLibrary' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -q 'SDL3ReleaseLibrary' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'local directory, library = resolved:match("^(.*)/(lib[^/]+%.a)$")' \
   "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'return ":" .. library' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'buildoptions { "-Wno-error=tsan" }' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'DependencyLink(DependencyManifest.AssimpDebugLibrary)' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'DependencyLink(DependencyManifest.SDL3DebugLibrary)' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -q 'project_generation_fingerprint' "$ROOT/Scripts/Linux/generate.sh"

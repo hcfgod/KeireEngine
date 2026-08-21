@@ -63,7 +63,7 @@ jobs:
           path: |
             Tools/Windows
             Build/Dependencies
-          key: windows-${{ runner.arch }}-msc-dependencies-${{ hashFiles('Config/Dependencies.lock', 'Scripts/Windows/dependencies.ps1') }}
+          key: windows-${{ runner.arch }}-msc-dependencies-${{ hashFiles('Config/Dependencies.lock', 'Scripts/Windows/dependencies.ps1', 'Scripts/Windows/coral.ps1', 'Scripts/Windows/shader-compiler.ps1', 'Scripts/Dependencies/**') }}
       - shell: pwsh
         run: ./Scripts/project.ps1 bootstrap -Generator vs2022 -Architecture x86_64 -Toolset default
       - shell: pwsh
@@ -104,7 +104,7 @@ jobs:
           path: |
             Tools/Linux
             Build/Dependencies
-          key: linux-${{ runner.arch }}-gcc-dependencies-${{ hashFiles('Config/Dependencies.lock', 'Scripts/Unix/dependencies.sh') }}
+          key: linux-${{ runner.arch }}-gcc-dependencies-${{ hashFiles('Config/Dependencies.lock', 'Scripts/Unix/dependencies.sh', 'Scripts/Unix/coral.sh', 'Scripts/Unix/shader-compiler.sh', 'Scripts/Dependencies/**') }}
       - run: bash Scripts/project.sh bootstrap --generator ninja --architecture x86_64 --toolset default
       - run: bash Scripts/project.sh generate --generator ninja --architecture x86_64 --toolset default --ci
       - run: bash Scripts/project.sh test --generator ninja --configuration ${{ matrix.configuration }} --architecture x86_64 --toolset default --ci
@@ -140,7 +140,7 @@ jobs:
           path: |
             Tools/Mac
             Build/Dependencies
-          key: macos-${{ runner.arch }}-clang-dependencies-${{ hashFiles('Config/Dependencies.lock', 'Scripts/Unix/dependencies.sh') }}
+          key: macos-${{ runner.arch }}-clang-dependencies-${{ hashFiles('Config/Dependencies.lock', 'Scripts/Unix/dependencies.sh', 'Scripts/Unix/coral.sh', 'Scripts/Unix/shader-compiler.sh', 'Scripts/Dependencies/**') }}
       - run: bash Scripts/project.sh bootstrap --generator ninja --architecture x86_64 --toolset default
       - run: bash Scripts/project.sh generate --generator ninja --architecture x86_64 --toolset default --ci
       - run: bash Scripts/project.sh test --generator ninja --configuration ${{ matrix.configuration }} --architecture x86_64 --toolset default --ci
@@ -179,7 +179,7 @@ jobs:
           path: |
             Tools/${{ matrix.platform }}
             Build/Dependencies
-          key: ${{ runner.os }}-${{ runner.arch }}-${{ matrix.toolset }}-dependencies-${{ hashFiles('Config/Dependencies.lock', 'Scripts/Unix/dependencies.sh') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ matrix.toolset }}-dependencies-${{ hashFiles('Config/Dependencies.lock', 'Scripts/Unix/dependencies.sh', 'Scripts/Unix/coral.sh', 'Scripts/Unix/shader-compiler.sh', 'Scripts/Dependencies/**') }}
       - run: bash Scripts/project.sh bootstrap --generator ninja --architecture ARM64 --toolset default
       - run: bash Scripts/project.sh generate --generator ninja --architecture ARM64 --toolset default --ci
       - run: bash Scripts/project.sh test --generator ninja --configuration ${{ matrix.configuration }} --architecture ARM64 --toolset default --ci
@@ -207,7 +207,7 @@ jobs:
           path: |
             Tools/Linux
             Build/Dependencies
-          key: linux-${{ runner.arch }}-clang-dependencies-${{ hashFiles('Config/Dependencies.lock', 'Scripts/Unix/dependencies.sh') }}
+          key: linux-${{ runner.arch }}-clang-dependencies-${{ hashFiles('Config/Dependencies.lock', 'Scripts/Unix/dependencies.sh', 'Scripts/Unix/coral.sh', 'Scripts/Unix/shader-compiler.sh', 'Scripts/Dependencies/**') }}
       - run: bash Scripts/project.sh coverage --generator ninja --architecture x86_64 --toolset clang --ci
       - run: test -z "$(git status --porcelain)" || { git status --short; exit 1; }
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

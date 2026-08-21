@@ -45,6 +45,18 @@ namespace Keire::Detail
             bytes[3] = static_cast<std::byte>(value);
         }
 
+        void StoreBigEndian(const std::uint64_t value, std::byte* bytes) noexcept
+        {
+            bytes[0] = static_cast<std::byte>(value >> 56U);
+            bytes[1] = static_cast<std::byte>(value >> 48U);
+            bytes[2] = static_cast<std::byte>(value >> 40U);
+            bytes[3] = static_cast<std::byte>(value >> 32U);
+            bytes[4] = static_cast<std::byte>(value >> 24U);
+            bytes[5] = static_cast<std::byte>(value >> 16U);
+            bytes[6] = static_cast<std::byte>(value >> 8U);
+            bytes[7] = static_cast<std::byte>(value);
+        }
+
         void Transform(std::array<std::uint32_t, 8>& state, const std::byte* block) noexcept
         {
             std::array<std::uint32_t, 64> words{};
@@ -132,8 +144,7 @@ namespace Keire::Detail
                 tail[m_Buffered] = std::byte{0x80};
                 const std::size_t padded = m_Buffered < 56U ? 64U : 128U;
                 const auto bitLength = m_TotalBytes * 8U;
-                for (std::size_t index = 0; index < 8; ++index)
-                    tail[padded - 1U - index] = static_cast<std::byte>(bitLength >> (index * 8U));
+                StoreBigEndian(bitLength, tail.data() + padded - sizeof(bitLength));
                 Transform(m_State, tail.data());
                 if (padded == 128U)
                     Transform(m_State, tail.data() + 64U);
@@ -229,7 +240,7 @@ namespace Keire::Detail
 
     CatalogData LoadCatalog(const std::filesystem::path& path)
     {
-        const auto bytes = ReadBounded(path, 64U * 1024U * 1024U);
+        const auto bytes = ReadBounded(path, std::uintmax_t{64U} * 1024U * 1024U);
         const Json document = Json::parse(reinterpret_cast<const char*>(bytes.data()),
                                           reinterpret_cast<const char*>(bytes.data() + bytes.size()));
         const auto schemaVersion = document.value("schemaVersion", 0);

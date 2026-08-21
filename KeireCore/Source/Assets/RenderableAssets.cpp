@@ -135,7 +135,7 @@ namespace Keire
             for (std::size_t index = 0; index < sizeof(Unsigned); ++index)
             {
                 bytes.push_back(std::byte(value & 0xffU));
-                value >>= 8U;
+                value = static_cast<Unsigned>(value >> 8U);
             }
         }
 

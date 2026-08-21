@@ -746,10 +746,10 @@ TEST_CASE("Sandbox Shader and Material Graph gallery decodes every progressive m
     std::size_t vfxObjects = 0;
     for (const auto& object : scene->Definition().Objects)
     {
-        scriptedObjects +=
-            std::ranges::count(object.Components, showcaseScript, &Keire::SceneComponentDefinition::Type);
-        vfxObjects += std::ranges::count(object.Components, Keire::VfxEmitterComponent::StaticType(),
-                                         &Keire::SceneComponentDefinition::Type);
+        scriptedObjects += static_cast<std::size_t>(
+            std::ranges::count(object.Components, showcaseScript, &Keire::SceneComponentDefinition::Type));
+        vfxObjects += static_cast<std::size_t>(std::ranges::count(
+            object.Components, Keire::VfxEmitterComponent::StaticType(), &Keire::SceneComponentDefinition::Type));
     }
     CHECK(scriptedObjects == examples.size());
     CHECK(vfxObjects == 4);

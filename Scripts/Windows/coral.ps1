@@ -38,6 +38,8 @@ if (-not (Test-Path -LiteralPath (Join-Path $Source ".git"))) {
     try {
         & git clone --quiet --filter=blob:none --no-checkout $Lock.CORAL_URL $TemporarySource
         if ($LASTEXITCODE -ne 0) { throw "Could not clone Coral." }
+        & git -C $TemporarySource config core.autocrlf false
+        if ($LASTEXITCODE -ne 0) { throw "Could not configure deterministic Coral source line endings." }
         & git -C $TemporarySource fetch --quiet --depth 1 origin $Lock.CORAL_COMMIT
         if ($LASTEXITCODE -ne 0) { throw "Could not fetch locked Coral commit $($Lock.CORAL_COMMIT)." }
         & git -C $TemporarySource checkout --quiet --detach $Lock.CORAL_COMMIT

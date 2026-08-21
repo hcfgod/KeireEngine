@@ -28,13 +28,6 @@ namespace Keire
         constexpr std::size_t MaximumGraphRoutingPointsPerConnection = 64;
         constexpr std::size_t MaximumMaterialInstanceDepth = 16;
 
-        [[nodiscard]] std::string
-        MaterialGraphVariantKey(const std::string_view target,
-                                const std::map<std::string, std::string, std::less<>>& keywords)
-        {
-            return "material-graph/" + MakeShaderGraphVariantSubAssetKey(target, keywords);
-        }
-
         [[nodiscard]] std::string MaterialGraphVariantKey(const std::string_view target,
                                                           const std::span<const std::string> keywords)
         {
@@ -53,8 +46,8 @@ namespace Keire
             };
             const auto mixText = [&](const std::string_view value)
             {
-                for (const unsigned char character : value)
-                    mix(character);
+                for (const char character : value)
+                    mix(static_cast<std::uint8_t>(character));
             };
             const auto mixInteger = [&](const std::uint64_t value)
             {
@@ -656,7 +649,7 @@ namespace Keire
         result.EditorPosition = position;
         result.Type = type;
         result.OutputPin = AssetId::Generate();
-        result.Value = std::move(value);
+        result.Value = value;
         return result;
     }
 
@@ -679,7 +672,7 @@ namespace Keire
                     throw std::invalid_argument("Material Graph connection source is unavailable.");
                 value = node->Value;
             }
-            result.emplace(property.Name, std::move(value));
+            result.emplace(property.Name, value);
         }
         return result;
     }

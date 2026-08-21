@@ -5,19 +5,17 @@ versions.
 
 ## Unreleased
 
-<<<<<<< HEAD
 - Restored hosted CI parity with local launchers: quality checks use the pinned Clang 22 formatter, Windows shader
   compiler builds use a short Unicode-safe workspace, Linux builds use Clang for the LLVM-derived host shader tool,
-  macOS dependency builds avoid Xcode 16.4's obsolete zlib platform macro, and Windows fast checks fall back to
-  `git grep` when `rg` is unavailable. Cleared the clang-tidy, ShellCheck, and pinned Ruff blockers exposed after the
-  earlier quality failures were fixed.
-=======
+  Windows Coral sources preserve patch-compatible line endings, macOS supplies the shader tool's Perl JSON dependency,
+  and macOS dependency builds avoid Xcode 16.4's obsolete zlib platform macro. Windows fast checks fall back to
+  `git grep` when `rg` is unavailable, and the strict GCC/Clang/TSan/coverage warnings exposed by the hosted matrix are
+  clean. Cleared the clang-tidy, ShellCheck, and pinned Ruff blockers exposed after the earlier failures were fixed.
 - Added managed input device discovery, automatic and locked control-scheme access, bounded interactive rebinding,
   persistent binding profiles, and normalized gamepad rumble. Completed rebind polling is now safe after the final
   composite target, and platforms without joystick support reject rumble without affecting keyboard or mouse input.
 - Added managed capsule casts and deterministic bounded sphere overlaps with finite-input validation, trigger and layer
   filtering, native ignored-body resolution, stable scene entity results, and matching Editor Play support.
->>>>>>> 7f5f5067b71b9ad49889339411c93043fc93dcd6
 - Added managed active/loaded scene handles and coroutine-compatible packaged-player scene replacement with bounded
   status, progress, cancellation, diagnostics, camera validation, and activation rollback that keeps the previous
   runtime live on failure. Added atomic transient render-environment controls for ambient lighting, exposure,
