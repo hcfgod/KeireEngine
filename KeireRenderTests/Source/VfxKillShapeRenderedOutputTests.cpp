@@ -179,7 +179,7 @@ namespace
       private:
         void Submit()
         {
-            Owner().Renderer()->Submit({m_Scene, m_View, false, m_Environment, m_World->CaptureRenderSnapshot()});
+            Owner().Renderer()->Submit({m_Scene, m_View, false, m_Environment, {}, m_World->CaptureRenderSnapshot()});
         }
 
         Keire::Ref<Keire::VfxEffectAsset> m_Effect;

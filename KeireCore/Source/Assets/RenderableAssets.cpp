@@ -132,10 +132,11 @@ namespace Keire
         template <typename Unsigned> void AppendUnsigned(std::vector<std::byte>& bytes, Unsigned value)
         {
             static_assert(std::is_unsigned_v<Unsigned>);
+            std::uintmax_t remaining = value;
             for (std::size_t index = 0; index < sizeof(Unsigned); ++index)
             {
-                bytes.push_back(std::byte(value & 0xffU));
-                value = static_cast<Unsigned>(value >> 8U);
+                bytes.push_back(std::byte(remaining & 0xffU));
+                remaining >>= 8U;
             }
         }
 

@@ -934,9 +934,8 @@ namespace
 
         void Submit()
         {
-            Owner().Renderer()->Submit({m_Scene, m_View, false, m_Environment, m_World->CaptureRenderSnapshot()});
+            Owner().Renderer()->Submit({m_Scene, m_View, false, m_Environment, {}, m_World->CaptureRenderSnapshot()});
         }
-
         void CaptureStatistics() noexcept
         {
             const auto statistics = Owner().Renderer()->Statistics();
@@ -1034,7 +1033,8 @@ namespace
         {
             if (!m_Submitted)
             {
-                Owner().Renderer()->Submit({m_Scene, m_View, false, m_Environment, m_World->CaptureRenderSnapshot()});
+                Owner().Renderer()->Submit(
+                    {m_Scene, m_View, false, m_Environment, {}, m_World->CaptureRenderSnapshot()});
                 m_Submitted = true;
                 return;
             }
@@ -1054,7 +1054,7 @@ namespace
                 m_World->Update(1.0F / 60.0F);
             if (m_CollisionTransform && m_Results->Frames.size() == 35)
                 m_CollisionTransform->SetLocalPosition({3.0F, 0.0F, 0.0F});
-            Owner().Renderer()->Submit({m_Scene, m_View, false, m_Environment, m_World->CaptureRenderSnapshot()});
+            Owner().Renderer()->Submit({m_Scene, m_View, false, m_Environment, {}, m_World->CaptureRenderSnapshot()});
         }
 
       private:
