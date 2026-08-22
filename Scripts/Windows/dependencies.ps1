@@ -235,8 +235,8 @@ function Set-DependencyJunction {
     if ([string]::IsNullOrWhiteSpace($Target) -or -not (Test-Path -LiteralPath $Target -PathType Container)) {
         throw "Dependency junction target is not an existing directory: $Target"
     }
-    if (Test-Path -LiteralPath $Path) {
-        $Item = Get-Item -LiteralPath $Path -Force
+    $Item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if ($Item) {
         $LinkTarget = [string]($Item.Target | Select-Object -First 1)
         if (($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -and
             -not [string]::IsNullOrWhiteSpace($LinkTarget) -and
@@ -252,7 +252,13 @@ function Set-DependencyJunction {
         # Windows PowerShell 5 can throw an internal NullReferenceException while removing a directory junction with
         # Remove-Item. The checks above prove this exact path is a reparse point inside Build\Dependencies; a
         # non-recursive Directory.Delete removes the junction itself without traversing or deleting its target.
-        [IO.Directory]::Delete($Item.FullName, $false)
+        if ($Item -is [IO.DirectoryInfo]) {
+            [IO.Directory]::Delete($Item.FullName, $false)
+        }
+        else {
+            # Git and WSL can leave a dangling Linux symlink represented as a reparse-point FileInfo.
+            [IO.File]::Delete($Item.FullName)
+        }
     }
     New-Item -ItemType Directory -Force (Split-Path $Path) | Out-Null
     New-Item -ItemType Junction -Path $Path -Target $Target | Out-Null

@@ -28,7 +28,7 @@
     "KeireClient/Source/Editor/AnimatorControllerPanel.cpp": 1970,
     "KeireClient/Source/Editor/AssetBrowserPanel.cpp": 1799,
     "KeireClient/Source/Editor/EditorWorkspaceAssets.cpp": 2506,
-    "KeireClient/Source/Editor/EditorWorkspaceScene.cpp": 1534,
+    "KeireClient/Source/Editor/EditorWorkspaceScene.cpp": 1503,
     "KeireClient/Source/Editor/ShaderGraphPreview.cpp": 1937,
     "KeireClient/Source/Editor/VfxEffectPanel.cpp": 2721,
     "KeireCore/Include/KeireInternal/Scenes/SceneRuntimeSessionImpl.h": 1990,

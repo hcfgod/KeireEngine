@@ -68,7 +68,9 @@ $SourceArchive = Join-Path $Output "ffmpeg-source.tar"
 New-Item -ItemType Directory -Force -Path $Source | Out-Null
 # Git's locked object bytes are authoritative. A Windows checkout may translate FFmpeg's Makefiles and shell files to
 # CRLF, which changes continuation semantics under MSYS Make even though the C/C++ sources remain valid.
-& git -C $VendorSource archive --format=tar --output=$SourceArchive $Lock.FFMPEG_COMMIT
+# `git archive` applies the caller's core.autocrlf policy on Windows. Disable it for this transaction so the extracted
+# shell and Make sources retain the canonical LF bytes regardless of the user's global Git configuration.
+& git -c core.autocrlf=false -C $VendorSource archive --format=tar --output=$SourceArchive $Lock.FFMPEG_COMMIT
 if ($LASTEXITCODE -ne 0) { throw "Could not materialize the locked FFmpeg source archive." }
 & tar -xf $SourceArchive -C $Source
 if ($LASTEXITCODE -ne 0) { throw "Could not extract the locked FFmpeg source archive." }
@@ -76,6 +78,29 @@ Remove-Item -LiteralPath $SourceArchive -Force
 if (-not (Test-Path -LiteralPath (Join-Path $Source "configure"))) {
     throw "The canonical FFmpeg archive is missing its configure script."
 }
+
+# The locked FFmpeg revision predates upstream f101fce22d64db10f500242e23e43a251fe14414, which removed an orphaned
+# MSVC preprocessor here-document body. Apply that exact upstream correction only to the disposable build tree rather
+# than advancing or modifying the pinned vendor submodule.
+$ConfigurePath = Join-Path $Source "configure"
+$BrokenMsvcProbe = [string]::Join("`n", @(
+    "#ifdef WINAPI_FAMILY",
+    "#include <winapifamily.h>",
+    "#if !WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)",
+    "#error not desktop",
+    "#endif",
+    "#endif",
+    "EOF",
+    ""
+))
+$ConfigureText = [IO.File]::ReadAllText($ConfigurePath)
+$ProbeIndex = $ConfigureText.IndexOf($BrokenMsvcProbe, [StringComparison]::Ordinal)
+if ($ProbeIndex -lt 0 -or
+    $ConfigureText.LastIndexOf($BrokenMsvcProbe, [StringComparison]::Ordinal) -ne $ProbeIndex) {
+    throw "The locked FFmpeg MSVC configure defect no longer matches its validated upstream correction."
+}
+[IO.File]::WriteAllText($ConfigurePath, $ConfigureText.Replace($BrokenMsvcProbe, ""),
+    [Text.UTF8Encoding]::new($false))
 
 function Convert-ToBashPath([string]$Path) {
     $Escaped = $Path.Replace("'", "'\''")

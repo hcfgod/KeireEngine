@@ -316,6 +316,30 @@ namespace KeireEditor
                             static_cast<float>(std::max(comment.SummaryInputs, comment.SummaryOutputs)) * 20.0F);
     }
 
+    std::optional<StableNodeId> ToggleGraphCommentCollapseAtPointer(const std::span<NodeGraphComment> comments,
+                                                                    const Keire::UiItemRect canvas,
+                                                                    const Keire::Vector2 pan, const float zoom,
+                                                                    const Keire::UiPosition pointer)
+    {
+        for (auto comment = comments.rbegin(); comment != comments.rend(); ++comment)
+        {
+            const auto minimum = ToScreen(comment->Position, canvas, pan, zoom);
+            const float height = GraphCommentDisplayHeight(*comment) * zoom;
+            const Keire::UiItemRect rectangle{minimum, {minimum.X + comment->Size.X * zoom, minimum.Y + height}};
+            if (!rectangle.Contains(pointer))
+                continue;
+
+            const float headerHeight = std::min(HeaderHeight * zoom, height);
+            const float arrowHitWidth = std::clamp(28.0F * zoom, 22.0F, 28.0F);
+            if (pointer.Y > minimum.Y + headerHeight || pointer.X > minimum.X + arrowHitWidth)
+                return std::nullopt;
+
+            comment->Collapsed = !comment->Collapsed;
+            return comment->Id;
+        }
+        return std::nullopt;
+    }
+
     NodeGraphCommentLayerResult DrawNodeGraphComments(Keire::UiFrame& ui,
                                                       const std::span<const NodeGraphComment> comments,
                                                       const Keire::UiItemRect canvas, const Keire::Vector2 pan,

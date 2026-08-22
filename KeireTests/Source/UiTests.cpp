@@ -11,6 +11,7 @@
 #include <fstream>
 #include <limits>
 #include <memory>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -99,6 +100,13 @@ namespace
                 const auto& io = ImGui::GetIO();
                 CHECK((io.ConfigFlags & ImGuiConfigFlags_NavEnableKeyboard) != 0);
                 CHECK(io.ConfigDpiScaleFonts);
+                const auto iconFont =
+                    std::ranges::find_if(io.Fonts->Fonts, [](const ImFont* font)
+                                         { return std::string_view(font->GetDebugName()) == "Keire.Icons"; });
+                REQUIRE(iconFont != io.Fonts->Fonts.end());
+                CHECK((*iconFont)->IsGlyphInFont(0xE3EC));
+                CHECK((*iconFont)->IsGlyphInFont(0xE897));
+                CHECK((*iconFont)->IsGlyphInFont(0xE89F));
                 CHECK(Owner().CurrentUiTheme() == Keire::UiTheme::Dark);
                 Owner().SetUiTheme(Keire::UiTheme::Light);
                 CHECK(Owner().CurrentUiTheme() == Keire::UiTheme::Light);

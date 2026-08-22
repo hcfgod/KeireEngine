@@ -1,6 +1,5 @@
 #include "KeireClient/Editor/EditorPanels.h"
 
-#include "Keire/Scenes/ScenePresentationRuntime.h"
 #include "KeireClient/Editor/AssetBrowserPanel.h"
 #include "KeireClient/Editor/SceneCameraController.h"
 #include "KeireClient/Editor/SceneDocument.h"
@@ -107,9 +106,6 @@ void KeireEditor::SceneViewportPanel::Initialize(const std::filesystem::path& pr
         m_Gizmos->Load(projectRoot);
         (void)m_Camera->Load(projectRoot / "Library/Editor/SceneCamera.state");
     }
-    if (const auto assets = m_Controller.SceneViewportAssetSystem())
-        m_EditPresentation =
-            Keire::CreateRef<Keire::ScenePresentationRuntime>(assets, Keire::Ref<Keire::AudioSystem>{});
 }
 
 void KeireEditor::SceneViewportPanel::Shutdown(const std::filesystem::path& projectRoot) noexcept
@@ -131,9 +127,6 @@ void KeireEditor::SceneViewportPanel::Shutdown(const std::filesystem::path& proj
         }
         m_Camera->SetNavigationMode(Keire::Detail::EditorCameraNavigationMode::None);
     }
-    if (m_EditPresentation)
-        m_EditPresentation->Clear();
-    m_EditPresentation.Reset();
     m_RenderView.Reset();
     m_CameraPreviewView.Reset();
 }
@@ -227,25 +220,6 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         ui.Image(m_RenderView->Surface(), size);
         imageState = ui.LastItemState();
         imageRect = ui.LastItemRect();
-        Keire::Ref<Keire::ScenePresentationRuntime> presentation;
-        if (playActive)
-        {
-            const auto session = document.PlaySession();
-            presentation = session->Presentation();
-        }
-        else
-        {
-            if (!m_EditPresentation && assetSystem)
-                m_EditPresentation =
-                    Keire::CreateRef<Keire::ScenePresentationRuntime>(assetSystem, Keire::Ref<Keire::AudioSystem>{});
-            if (m_EditPresentation)
-            {
-                m_EditPresentation->Synchronize(renderScene, size.Width, size.Height, false);
-                presentation = m_EditPresentation;
-            }
-        }
-        if (presentation)
-            presentation->Draw(ui, imageRect.Minimum.X, imageRect.Minimum.Y);
     }
     m_ViewportRect = imageRect;
     m_LastCamera = camera;

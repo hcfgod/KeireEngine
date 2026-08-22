@@ -342,7 +342,8 @@ namespace Keire::RenderBackend
                                         skinSkeleton,
                                         std::move(skinPalette),
                                         renderer->CastShadows(),
-                                        renderer->ReceiveShadows()});
+                                        renderer->ReceiveShadows(),
+                                        renderer->AlwaysVisible()});
             packet.DrawItems.back().MaterialInstanceProperties = renderer->AllMaterialInstanceProperties();
         }
         for (const auto& particle : packet.Vfx.Particles())

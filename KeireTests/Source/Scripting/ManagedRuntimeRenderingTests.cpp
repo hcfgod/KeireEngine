@@ -52,10 +52,15 @@ TEST_CASE("managed rendering services expose validated camera renderer and light
     CHECK(Keire::Detail::SetManagedRendererMaterials(scene, id, materials));
     CHECK(Keire::Detail::SetManagedRenderingFlag(scene, id, Keire::ManagedRenderingComponent::MeshRenderer,
                                                  Keire::ManagedRenderingFlagProperty::CastShadows, false));
+    CHECK(Keire::Detail::SetManagedRenderingFlag(scene, id, Keire::ManagedRenderingComponent::MeshRenderer,
+                                                 Keire::ManagedRenderingFlagProperty::AlwaysVisible, true));
     REQUIRE(Keire::Detail::ReadManagedRendererMaterials(scene, id));
     CHECK(*Keire::Detail::ReadManagedRendererMaterials(scene, id) == materials);
     CHECK(renderer->Mesh() == mesh);
     CHECK_FALSE(renderer->CastShadows());
+    CHECK(renderer->AlwaysVisible());
+    CHECK(*Keire::Detail::ReadManagedRenderingFlag(scene, id, Keire::ManagedRenderingComponent::MeshRenderer,
+                                                   Keire::ManagedRenderingFlagProperty::AlwaysVisible));
 
     std::vector<Keire::AssetId> tooManyMaterials(257, Keire::AssetId::Generate());
     CHECK_FALSE(Keire::Detail::SetManagedRendererMaterials(scene, id, tooManyMaterials));

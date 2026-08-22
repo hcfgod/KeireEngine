@@ -122,6 +122,12 @@ namespace Keire
         NotifyChanged();
     }
 
+    void MeshRendererComponent::SetAlwaysVisible(const bool enabled)
+    {
+        m_AlwaysVisible = enabled;
+        NotifyChanged();
+    }
+
     void MeshRendererComponent::SetCastShadows(const bool enabled)
     {
         m_CastShadows = enabled;
@@ -236,6 +242,7 @@ namespace Keire
         m_Materials.clear();
         m_Tint = {0.25F, 0.55F, 1.0F, 1.0F};
         m_Visible = true;
+        m_AlwaysVisible = false;
         m_CastShadows = true;
         m_ReceiveShadows = true;
         m_StaticLighting = false;
@@ -253,7 +260,7 @@ namespace Keire
         result.Type = MeshRendererComponent::StaticType();
         result.Name = "Mesh Renderer";
         result.Category = "Rendering";
-        result.SchemaVersion = 3;
+        result.SchemaVersion = 4;
         result.RequiredComponents = {TransformComponent::StaticType()};
         result.Properties = {
             {"mesh", "Mesh", "Rendering", ComponentPropertyKind::Asset, false, {}, {}, 0.1, MeshAsset::StaticType()},
@@ -268,6 +275,7 @@ namespace Keire
              MaterialAsset::StaticType()},
             {"tint", "Tint", "Rendering", ComponentPropertyKind::Color},
             {"visible", "Visible", "Rendering", ComponentPropertyKind::Boolean},
+            {"alwaysVisible", "Always Visible", "Rendering", ComponentPropertyKind::Boolean},
             {"castShadows", "Cast Shadows", "Lighting", ComponentPropertyKind::Boolean},
             {"receiveShadows", "Receive Shadows", "Lighting", ComponentPropertyKind::Boolean},
             {"staticLighting", "Static Lighting", "Baked Lighting", ComponentPropertyKind::Boolean},
@@ -283,6 +291,7 @@ namespace Keire
                                         {"material", renderer.Material()},
                                         {"tint", renderer.m_Tint},
                                         {"visible", renderer.m_Visible},
+                                        {"alwaysVisible", renderer.m_AlwaysVisible},
                                         {"castShadows", renderer.m_CastShadows},
                                         {"receiveShadows", renderer.m_ReceiveShadows},
                                         {"staticLighting", renderer.m_StaticLighting},
@@ -295,7 +304,7 @@ namespace Keire
         };
         result.Deserialize = [](Component& component, const ComponentPropertyBag& values, const std::uint32_t version)
         {
-            if (version != 3)
+            if (version != 4)
                 throw std::invalid_argument("Unsupported Mesh Renderer component schema version.");
             auto& renderer = dynamic_cast<MeshRendererComponent&>(component);
             renderer.SetMesh(ReadMeshProperty(values, "mesh", AssetId{}));
@@ -315,6 +324,7 @@ namespace Keire
             }
             renderer.SetTint(ReadMeshProperty(values, "tint", Color{0.25F, 0.55F, 1.0F, 1.0F}));
             renderer.SetVisible(ReadMeshProperty(values, "visible", true));
+            renderer.SetAlwaysVisible(ReadMeshProperty(values, "alwaysVisible", false));
             renderer.SetCastShadows(ReadMeshProperty(values, "castShadows", true));
             renderer.SetReceiveShadows(ReadMeshProperty(values, "receiveShadows", true));
             renderer.SetStaticLighting(ReadMeshProperty(values, "staticLighting", false));
@@ -327,7 +337,7 @@ namespace Keire
         };
         result.Migrate = [](const ComponentPropertyBag& values, const std::uint32_t version)
         {
-            if (version != 1 && version != 2)
+            if (version != 1 && version != 2 && version != 3)
                 throw std::invalid_argument("Unsupported Mesh Renderer component schema migration.");
             auto migrated = values;
             if (version == 1)
@@ -335,10 +345,14 @@ namespace Keire
                 migrated.emplace("castShadows", true);
                 migrated.emplace("receiveShadows", true);
             }
-            migrated.emplace("staticLighting", false);
-            migrated.emplace("giReceive", std::int64_t{0});
-            migrated.emplace("lightmapScale", 1.0);
-            migrated.emplace("preserveLightmapUvs", true);
+            if (version < 3)
+            {
+                migrated.emplace("staticLighting", false);
+                migrated.emplace("giReceive", std::int64_t{0});
+                migrated.emplace("lightmapScale", 1.0);
+                migrated.emplace("preserveLightmapUvs", true);
+            }
+            migrated.emplace("alwaysVisible", false);
             return migrated;
         };
         return result;

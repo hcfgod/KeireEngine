@@ -651,6 +651,7 @@ namespace Keire::RenderBackend
         std::vector<Matrix4> SkinPalette;
         bool CastShadows = true;
         bool ReceiveShadows = true;
+        bool AlwaysVisible = false;
         SkinningMethod Skinning = SkinningMethod::LinearBlend;
         SDL_GPUBuffer* SkinnedAssetVertices = nullptr;
         SDL_GPUBuffer* SkinnedBuiltinVertices = nullptr;
@@ -673,7 +674,8 @@ namespace Keire::RenderBackend
                              {},
                              {},
                              false,
-                             true};
+                             true,
+                             false};
     }
 
     enum class SceneLocalLightType : std::uint8_t

@@ -1,7 +1,6 @@
 #include "Keire/Animation/AnimationSystem.h"
-#include "Keire/Assets/RenderingAssets.h"
-
 #include "Keire/Animation/RiggingSystem.h"
+#include "Keire/Assets/RenderingAssets.h"
 #include "KeireInternal/Assets/BuiltinMeshes.h"
 
 #include <assimp/GltfMaterial.h>

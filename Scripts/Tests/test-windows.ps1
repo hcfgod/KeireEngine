@@ -298,7 +298,9 @@ $dependencyScript = Get-Content (Join-Path $Windows "dependencies.ps1") -Raw
 Assert-True ($dependencyScript.Contains('$Lock.SDL_COMMIT') -and $dependencyScript.Contains('$compiler') -and $dependencyScript.Contains('keire-dependency.stamp')) "Dependency cache identity inputs"
 Assert-True ($dependencyScript.Contains('[string]::IsNullOrWhiteSpace($LinkTarget)') -and
              $dependencyScript.Contains('Dependency junction target is not an existing directory') -and
+             $dependencyScript.Contains('Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue') -and
              $dependencyScript.Contains('[IO.Directory]::Delete($Item.FullName, $false)') -and
+             $dependencyScript.Contains('[IO.File]::Delete($Item.FullName)') -and
              -not $dependencyScript.Contains('Remove-Item -LiteralPath $Path -Force')) `
     "Dependency bootstrap repairs dangling junctions without normalizing an empty target"
 Assert-True ($dependencyScript.Contains('"Debug", "Release"') -and $dependencyScript.Contains('SDL_DUMMYVIDEO=ON') -and $dependencyScript.Contains('SDL_OFFSCREEN=ON')) "SDL variants and headless drivers"
@@ -367,8 +369,11 @@ $canonicalFfmpegArchive = 'git -C "$VENDOR_SOURCE" archive --format=tar "$COMMIT
 Assert-True $unixFfmpegBuild.Contains($canonicalFfmpegArchive) `
     "Unix FFmpeg builds use canonical Git bytes instead of Windows-translated shell files"
 $windowsFfmpegBuild = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Windows\ffmpeg.ps1") -Raw
-Assert-True $windowsFfmpegBuild.Contains('git -C $VendorSource archive --format=tar') `
-    "Windows FFmpeg builds use canonical Git bytes instead of CRLF-translated Makefiles"
+Assert-True $windowsFfmpegBuild.Contains('git -c core.autocrlf=false -C $VendorSource archive --format=tar') `
+    "Windows FFmpeg builds disable caller line-ending conversion for canonical source archives"
+Assert-True ($windowsFfmpegBuild.Contains('f101fce22d64db10f500242e23e43a251fe14414') -and
+             $windowsFfmpegBuild.Contains('$ConfigureText.LastIndexOf($BrokenMsvcProbe')) `
+    "Windows FFmpeg builds apply the validated upstream MSVC configure correction exactly once"
 $windowsBuild = Get-Content (Join-Path $Windows "build.ps1") -Raw
 $windowsManagedBuild = Get-Content (Join-Path $Windows "build-managed.ps1") -Raw
 $windowsRun = Get-Content (Join-Path $Windows "run.ps1") -Raw

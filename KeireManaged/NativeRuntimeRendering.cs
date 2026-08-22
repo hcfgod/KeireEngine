@@ -47,7 +47,8 @@ internal enum NativeRenderingFlagProperty : byte
     StaticLighting,
     PreserveLightmapUVs,
     UseColorTemperature,
-    ContactShadows
+    ContactShadows,
+    AlwaysVisible
 }
 
 internal enum NativeRenderingVectorProperty : byte

@@ -202,7 +202,7 @@ namespace Keire
             case UiIcon::ColliderEdit:
                 return 0xE3C2;
             case UiIcon::Perspective:
-                return 0xEA81;
+                return 0xE9FE;
             case UiIcon::Orthographic:
                 return 0xE3C6;
             case UiIcon::AxisZ:

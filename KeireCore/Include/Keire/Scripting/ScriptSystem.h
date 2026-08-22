@@ -307,7 +307,8 @@ namespace Keire
         StaticLighting,
         PreserveLightmapUVs,
         UseColorTemperature,
-        ContactShadows
+        ContactShadows,
+        AlwaysVisible
     };
 
     enum class ManagedRenderingVectorProperty : std::uint8_t

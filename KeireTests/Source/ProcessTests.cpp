@@ -200,9 +200,8 @@ TEST_CASE("managed external editor targeting reuses an open solution session")
     std::ofstream(source) << "public sealed class NewBehaviour {}\n";
     std::ofstream(solution) << "Microsoft Visual Studio Solution File\n";
 
-    CHECK(Keire::Detail::ResolveManagedSolutionForExternalEditor(source, root, false) == solution);
-    CHECK(Keire::Detail::ResolveManagedSolutionForExternalEditor(source, root, true).empty());
-    CHECK(Keire::Detail::ResolveManagedSolutionForExternalEditor(root / "Texture.png", root, false).empty());
+    CHECK(Keire::Detail::ResolveManagedSolutionForExternalEditor(source, root) == solution);
+    CHECK(Keire::Detail::ResolveManagedSolutionForExternalEditor(root / "Texture.png", root).empty());
 
     std::error_code error;
     std::filesystem::remove_all(root, error);

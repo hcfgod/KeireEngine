@@ -791,7 +791,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                         ui.Spacing();
                         auto& rendererExpanded = expansion("mesh-renderer");
                         if (auto card =
-                                ui.BeginChild("MeshRendererCard", {0.0F, rendererExpanded ? 260.0F : 38.0F}, true);
+                                ui.BeginChild("MeshRendererCard", {0.0F, rendererExpanded ? 282.0F : 38.0F}, true);
                             card)
                         {
                             const auto registration = scene->Components()->Find(renderer->Type());
@@ -813,6 +813,19 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                     m_Controller.RecordInspectorUndo();
                                     sceneDocument.SetComponentProperty(entity.Id(), renderer->Type(), "visible",
                                                                        visible);
+                                }
+                                auto alwaysVisible = renderer->AlwaysVisible();
+                                if (ui.Checkbox("Always Visible", alwaysVisible))
+                                {
+                                    m_Controller.RecordInspectorUndo("Change Frustum Culling");
+                                    sceneDocument.SetComponentProperty(entity.Id(), renderer->Type(), "alwaysVisible",
+                                                                       alwaysVisible);
+                                }
+                                if (ui.LastItemState().Hovered)
+                                {
+                                    ui.SetTooltip("Skip camera-frustum bounds culling for camera-relative or "
+                                                  "deforming geometry.",
+                                                  {.Delayed = true});
                                 }
                                 auto tint = renderer->Tint();
                                 Keire::UiColor tintColor{tint.Red, tint.Green, tint.Blue, tint.Alpha};

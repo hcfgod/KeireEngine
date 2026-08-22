@@ -451,6 +451,11 @@ static unsafe void ManagedRenderingContract()
         var renderer = new Keire.MeshRenderer(entity);
         Assert(renderer.Materials.Count == 2 && renderer.Materials[1].Id == NativeRenderingFixture.SecondMaterial,
                "Mesh Renderer material arrays must round-trip through the bounded native ABI.");
+        renderer.AlwaysVisible = true;
+        Assert(renderer.AlwaysVisible &&
+                   NativeRenderingFixture.FlagProperty == Keire.NativeRenderingFlagProperty.AlwaysVisible &&
+                   NativeRenderingFixture.FlagValue,
+               "Mesh Renderer must expose the authored frustum-culling override through the managed ABI.");
         renderer.Materials = [Keire.Asset.FromId<Keire.Material>(NativeRenderingFixture.ReplacementMaterial)!];
         renderer.PropertyBlock.SetFloat("Roughness", 0.37f);
         renderer.PropertyBlock.SetTexture(
@@ -1643,6 +1648,8 @@ file static unsafe class NativeRenderingFixture
     internal static uint InstanceSlot;
     internal static Keire.AssetId GlobalCollection;
     internal static float GlobalFloat;
+    internal static Keire.NativeRenderingFlagProperty FlagProperty;
+    internal static bool FlagValue;
 
     internal static void Install()
     {
@@ -1658,6 +1665,8 @@ file static unsafe class NativeRenderingFixture
         InstanceSlot = default;
         GlobalCollection = default;
         GlobalFloat = default;
+        FlagProperty = default;
+        FlagValue = default;
         Keire.NativeRuntimeRendering.GetScalarIcall = &GetScalar;
         Keire.NativeRuntimeRendering.SetScalarIcall = &SetScalar;
         Keire.NativeRuntimeRendering.GetIntegerIcall = &GetInteger;
@@ -1762,8 +1771,12 @@ file static unsafe class NativeRenderingFixture
     }
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly]
-    private static byte SetFlag(ulong high, ulong low, byte component, byte property, byte value) =>
-        high == 23 && low == 29 ? (byte)1 : (byte)0;
+    private static byte SetFlag(ulong high, ulong low, byte component, byte property, byte value)
+    {
+        FlagProperty = (Keire.NativeRenderingFlagProperty)property;
+        FlagValue = value != 0;
+        return high == 23 && low == 29 ? (byte)1 : (byte)0;
+    }
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly]
     private static byte GetVector(ulong high, ulong low, byte component, byte property, Keire.Vector2* value)

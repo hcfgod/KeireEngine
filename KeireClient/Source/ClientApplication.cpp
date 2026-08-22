@@ -366,6 +366,17 @@ namespace Keire
         if (std::filesystem::is_regular_file(windowIcon))
             specification.MainWindow.Icon = std::move(windowIcon);
 
+        auto fontRoot = commandLine.ExecutablePath.parent_path().parent_path() / "content/Fonts";
+        if (!std::filesystem::is_regular_file(fontRoot / "Inter-Variable.ttf"))
+            fontRoot = std::filesystem::current_path() / "KeireHubContent/Fonts";
+        if (std::filesystem::is_regular_file(fontRoot / "Inter-Variable.ttf") &&
+            std::filesystem::is_regular_file(fontRoot / "MaterialSymbolsRounded-Subset.ttf"))
+        {
+            specification.Ui.Fonts = {{UiFontRole::Body, fontRoot / "Inter-Variable.ttf", 15.0F},
+                                      {UiFontRole::Heading, fontRoot / "Inter-Variable.ttf", 20.0F},
+                                      {UiFontRole::Icons, fontRoot / "MaterialSymbolsRounded-Subset.ttf", 20.0F}};
+        }
+
         specification.TargetFrameRate = commandLine.SmokeWindow ? 240 : commandLine.SmokePlay ? 120 : 0;
         specification.Ui.Mode = commandLine.SmokeWindow ? UiMode::Disabled : UiMode::Rendered;
         specification.Ui.PresentMode = UiPresentMode::Mailbox;

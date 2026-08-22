@@ -9,7 +9,6 @@
   `619eaa2f2e270723cf0cd06d2aba126ade66fee94e380c3e6a61e2e496279e0c`. It is distributed under the
   Apache License 2.0 in `Material-Symbols-Apache-2.0.txt`.
 
-The Material Symbols subset contains only the code points used by the Hub shell: add, build, cancel, close,
-construction, content copy, dark/light mode, dashboard, deployed code, description, download, favorite, folder,
-home, license, link, menu book, minimize, more, notifications, open in new, pause/play, refresh, rocket launch,
-school, search, settings, star, terminal, and bug report. The subset was generated with FontTools 4.59.0.
+The Material Symbols subset contains the code points used by the Hub and Editor shells, including the scene tools,
+orientation, snapping, camera, physics, collider-editing, and panel lock controls. The subset was generated with
+FontTools 4.63.0.

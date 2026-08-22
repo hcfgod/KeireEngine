@@ -1402,8 +1402,9 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
             }
         }
 
-        for (const auto& presentation : presentations)
-            presentation->Draw(ui, imageRect.Minimum.X, imageRect.Minimum.Y);
+        if (KeireEditor::CompositesRuntimeGameUi(KeireEditor::EditorViewportTarget::Game))
+            for (const auto& presentation : presentations)
+                presentation->Draw(ui, imageRect.Minimum.X, imageRect.Minimum.Y);
         if (playActive && !presentations.empty())
         {
             const auto pointer = ui.PointerState();
@@ -1442,38 +1443,6 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         return;
     }
     SetGameViewportInputActive(false);
-}
-
-void EditorWorkspaceLayer::DrawPerformanceOverlay(Keire::UiFrame& ui, const Keire::UiItemRect viewport,
-                                                  const std::string_view label)
-{
-    if (!m_ShowPerformanceOverlay || viewport.Size().Width < 220.0F || viewport.Size().Height < 80.0F)
-        return;
-    const auto profiler = Owner().GetProfiler();
-    if (!profiler || !profiler->IsOpen())
-        return;
-    const auto frame = profiler->LatestSummary();
-    if (frame.Sequence == 0 || frame.DurationMicroseconds <= 0.0)
-        return;
-
-    const auto decimal = [](const double value)
-    {
-        const auto scaled = static_cast<std::int64_t>(std::lround(std::max(0.0, value) * 10.0));
-        return std::to_string(scaled / 10) + "." + std::to_string(scaled % 10);
-    };
-    const double frameMilliseconds = frame.DurationMicroseconds / 1000.0;
-    const auto framesPerSecond = static_cast<std::uint32_t>(std::lround(1'000'000.0 / frame.DurationMicroseconds));
-    const auto performanceColor =
-        frameMilliseconds <= 16.7 ? m_Theme.Success : (frameMilliseconds <= 33.3 ? m_Theme.Warning : m_Theme.Error);
-    const Keire::UiItemRect overlay{{viewport.Minimum.X + 12.0F, viewport.Minimum.Y + 12.0F},
-                                    {viewport.Minimum.X + 178.0F, viewport.Minimum.Y + 56.0F}};
-    ui.DrawFilledRectangle(overlay, {0.018F, 0.024F, 0.035F, 0.88F}, 6.0F);
-    ui.DrawRectangle(overlay, {performanceColor.Red, performanceColor.Green, performanceColor.Blue, 0.72F}, 1.0F, 6.0F);
-    ui.DrawOverlayText({overlay.Minimum.X + 10.0F, overlay.Minimum.Y + 6.0F}, m_Theme.MutedText,
-                       std::string(label) + " VIEW", 10.0F, overlay);
-    ui.DrawOverlayText({overlay.Minimum.X + 10.0F, overlay.Minimum.Y + 21.0F}, performanceColor,
-                       std::to_string(framesPerSecond) + " FPS  |  " + decimal(frameMilliseconds) + " ms", 15.0F,
-                       overlay);
 }
 
 Keire::Ref<Keire::Scene> EditorWorkspaceLayer::ActiveHierarchyScene() const noexcept { return ActiveScene(); }

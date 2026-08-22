@@ -248,24 +248,6 @@ namespace
 
 namespace KeireEditor
 {
-    NodeGraphCanvasDetail StableNodeGraphCanvas::DetailForZoom(const float zoom) noexcept
-    {
-        const float boundedZoom = std::isfinite(zoom) ? std::clamp(zoom, 0.35F, 2.5F) : 1.0F;
-        return {.NodeSubtitle = boundedZoom >= 0.65F,
-                .BlockLabels = boundedZoom >= 0.5F,
-                .PinLabels = boundedZoom >= 0.5F,
-                .ConnectionLabels = boundedZoom >= 0.55F};
-    }
-
-    NodeGraphCanvasResult StableNodeGraphCanvas::Draw(Keire::UiFrame& ui, const std::string_view id,
-                                                      const std::span<NodeGraphNode> nodes,
-                                                      const std::span<const NodeGraphConnection> connections,
-                                                      const bool editable)
-    {
-        return Draw(ui, id, nodes, connections,
-                    NodeGraphCanvasOptions{.Editable = editable, .InteractiveConnections = editable});
-    }
-
     NodeGraphCanvasResult StableNodeGraphCanvas::Draw(Keire::UiFrame& ui, const std::string_view id,
                                                       const std::span<NodeGraphNode> nodes,
                                                       const std::span<const NodeGraphConnection> connections,
@@ -284,6 +266,17 @@ namespace KeireEditor
         if (canvasHovered)
             ui.CapturePointerWheel();
         result.PointerGraphPosition = ToGraph(pointer.Position, canvas);
+
+        std::optional<StableNodeId> immediateCommentCollapse;
+        if (canvasHovered && options.Editable && pointer.LeftPressed && !canvasItem.DoubleClicked)
+        {
+            immediateCommentCollapse =
+                ToggleGraphCommentCollapseAtPointer(options.Comments, canvas, m_Pan, m_Zoom, pointer.Position);
+            if (immediateCommentCollapse)
+            {
+                result.ToggleCommentCollapseRequested = immediateCommentCollapse;
+            }
+        }
 
         ui.DrawFilledRectangle(canvas, {0.055F, 0.06F, 0.073F, 1.0F}, 4.0F);
         if (canvasHovered && !m_DraggingPin)
@@ -797,10 +790,13 @@ namespace KeireEditor
         if (canvasHovered && canvasItem.DoubleClicked && hoveredComment && commentLayer.Header)
         {
             const auto comment = std::ranges::find(options.Comments, *hoveredComment, &NodeGraphComment::Id);
-            if (comment != options.Comments.end() && comment->Collapsed)
-                result.ToggleCommentCollapseRequested = hoveredComment;
-            else
-                result.RenameCommentRequested = hoveredComment;
+            if (!commentLayer.CollapseToggle)
+            {
+                if (comment != options.Comments.end() && comment->Collapsed)
+                    result.ToggleCommentCollapseRequested = hoveredComment;
+                else
+                    result.RenameCommentRequested = hoveredComment;
+            }
         }
 
         if (canvasHovered && pointer.LeftPressed)
@@ -909,7 +905,8 @@ namespace KeireEditor
                 {
                     if (commentLayer.CollapseToggle)
                     {
-                        result.ToggleCommentCollapseRequested = hoveredComment;
+                        if (!canvasItem.DoubleClicked && immediateCommentCollapse != hoveredComment)
+                            result.ToggleCommentCollapseRequested = hoveredComment;
                     }
                     else if (commentLayer.ResizeHandle)
                     {

@@ -5,6 +5,22 @@ versions.
 
 ## Unreleased
 
+### Fixed
+
+- Added a versioned Mesh Renderer `Always Visible` authoring flag and matching public C# property so explicitly marked
+  camera-relative or heavily deforming geometry bypasses static-bounds frustum rejection without disabling the
+  renderer, skinning, or ordinary visibility controls.
+- Made private Windows FFmpeg source archives ignore the caller's global `core.autocrlf` policy and apply the locked
+  revision's exact upstream MSVC configure correction, so packaging cannot corrupt or misconfigure its private audio
+  dependency before compilation.
+- Repaired dangling Windows dependency junctions even when their old target no longer exists, preventing a stale
+  cross-environment Coral link from hiding an otherwise valid managed runtime build.
+- Fixed multi-node Material Function extraction when generated boundary symbols collide with graph resources, made
+  comment collapse update in the click frame, kept repeated C# asset opens targeted at the generated solution, moved
+  advanced performance data into the viewport overlay, and replaced editor toolbar and panel-lock letters with the
+  packaged scene-control icon set. Runtime game UI is now composited only into Game view while Scene view retains its
+  editor workspace overlays.
+
 ## 0.4.0 - 2026-08-21
 
 ### Breaking: Unity-shaped C# scripting API

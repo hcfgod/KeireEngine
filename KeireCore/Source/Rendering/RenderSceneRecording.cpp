@@ -22,7 +22,7 @@
 
 namespace
 {
-    using Keire::RenderBackend::GeometryDetail::IntersectsFrustum;
+    using Keire::RenderBackend::GeometryDetail::IsFrustumVisible;
     using Keire::RenderBackend::GeometryDetail::ProjectedHeight;
 
     [[nodiscard]] bool PackMaterialProperty(const Keire::MaterialPropertyValue& value,
@@ -134,7 +134,7 @@ namespace Keire::RenderBackend
                 MaterialSurfaceState surfaceState;
                 if (const auto* material = materialId ? ResolveAssetMaterial(materialId, samples) : nullptr)
                     surfaceState = material->Surface;
-                if (!IntersectsFrustum(clipFromLocal, submesh.Bounds))
+                if (!IsFrustumVisible(clipFromLocal, submesh.Bounds, item.AlwaysVisible))
                 {
                     ++Statistics.CulledSubmeshes;
                     continue;

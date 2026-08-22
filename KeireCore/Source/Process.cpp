@@ -982,11 +982,8 @@ namespace Keire::Detail
     }
 
     std::filesystem::path ResolveManagedSolutionForExternalEditor(const std::filesystem::path& path,
-                                                                  const std::filesystem::path& workingDirectory,
-                                                                  const bool reuseManagedSession)
+                                                                  const std::filesystem::path& workingDirectory)
     {
-        if (reuseManagedSession)
-            return {};
         auto extension = path.extension().string();
         for (char& character : extension)
             character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
@@ -1005,6 +1002,8 @@ namespace Keire::Detail
                               const std::filesystem::path& workingDirectory, std::string& diagnostic,
                               const bool reuseManagedSession) noexcept
     {
+        // Visual Studio needs the solution target on both the initial and reuse paths to avoid Miscellaneous Files.
+        (void)reuseManagedSession;
         try
         {
             const auto source = std::filesystem::weakly_canonical(path);
@@ -1019,7 +1018,7 @@ namespace Keire::Detail
             auto extension = source.extension().string();
             for (char& character : extension)
                 character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
-            const auto managedSolution = ResolveManagedSolutionForExternalEditor(source, working, reuseManagedSession);
+            const auto managedSolution = ResolveManagedSolutionForExternalEditor(source, working);
             if (!preferredEditor.empty())
             {
                 auto editorName = preferredEditor.stem().string();

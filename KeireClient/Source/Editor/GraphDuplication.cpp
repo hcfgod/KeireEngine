@@ -227,6 +227,8 @@ namespace KeireEditor
             body.Nodes.push_back(master);
 
             std::set<std::string, std::less<>> inputNames;
+            for (const auto& resource : body.Resources)
+                inputNames.insert(resource.Symbol);
             for (std::size_t index = 0; index < incoming.size(); ++index)
             {
                 const auto& targetPin = RequireShaderPin(definition, incoming[index]->Input);

@@ -82,6 +82,11 @@ namespace KeireEditor
 
     [[nodiscard]] float GraphCommentDisplayHeight(const NodeGraphComment& comment) noexcept;
 
+    [[nodiscard]] std::optional<StableNodeId> ToggleGraphCommentCollapseAtPointer(std::span<NodeGraphComment> comments,
+                                                                                  Keire::UiItemRect canvas,
+                                                                                  Keire::Vector2 pan, float zoom,
+                                                                                  Keire::UiPosition pointer);
+
     [[nodiscard]] NodeGraphCommentLayerResult DrawNodeGraphComments(Keire::UiFrame& ui,
                                                                     std::span<const NodeGraphComment> comments,
                                                                     Keire::UiItemRect canvas, Keire::Vector2 pan,

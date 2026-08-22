@@ -149,6 +149,11 @@ public sealed class MeshRenderer : Component
         get => NativeRuntimeRendering.GetFlag(Entity, Component, NativeRenderingFlagProperty.Visible);
         set => NativeRuntimeRendering.SetFlag(Entity, Component, NativeRenderingFlagProperty.Visible, value);
     }
+    public bool AlwaysVisible
+    {
+        get => NativeRuntimeRendering.GetFlag(Entity, Component, NativeRenderingFlagProperty.AlwaysVisible);
+        set => NativeRuntimeRendering.SetFlag(Entity, Component, NativeRenderingFlagProperty.AlwaysVisible, value);
+    }
     public bool CastShadows
     {
         get => NativeRuntimeRendering.GetFlag(Entity, Component, NativeRenderingFlagProperty.CastShadows);

@@ -875,6 +875,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     bool m_VfxEffectPreviewPaused = false;
     bool m_VfxEffectPreviewAutoRestart = true;
     bool m_ShowPerformanceOverlay = false;
+    bool m_ShowAdvancedPerformanceOverlay = false;
     bool m_MaximizeGameOnPlay = false;
     bool m_ProfilerPaused = false;
     bool m_ProfilerShowAllManagedCallbacks = false;

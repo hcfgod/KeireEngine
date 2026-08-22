@@ -194,3 +194,47 @@ TEST_CASE("Material Graph extraction accepts expression selections and rejects v
                                                                      Keire::AssetId::Generate(), "Invalid"),
                     std::invalid_argument);
 }
+
+TEST_CASE("Material Graph extraction gives multi-node boundary inputs symbols distinct from graph resources")
+{
+    Keire::MaterialShaderReference shader;
+    shader.Kind = Keire::MaterialShaderSourceKind::ShaderGraph;
+    shader.Asset = Keire::AssetId::Generate();
+    auto definition = Keire::CreateMaterialGraph(shader, {});
+    auto constant =
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Constant, Keire::ShaderGraphValueType::Scalar);
+    auto add = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Add, Keire::ShaderGraphValueType::Scalar);
+    auto reroute =
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Reroute, Keire::ShaderGraphValueType::Scalar);
+    const auto outputPin = [](const Keire::ShaderGraphNode& node)
+    {
+        return std::ranges::find(node.Pins, Keire::ShaderGraphPinDirection::Output, &Keire::ShaderGraphPin::Direction)
+            ->Id;
+    };
+    const auto inputPin = [](const Keire::ShaderGraphNode& node, const std::string_view name)
+    { return std::ranges::find(node.Pins, name, &Keire::ShaderGraphPin::Name)->Id; };
+    const auto output = definition.SurfaceGraph.Nodes.front().Id;
+    const auto opacity = inputPin(definition.SurfaceGraph.Nodes.front(), "Opacity");
+    definition.SurfaceGraph.Resources.push_back(
+        {Keire::AssetId::Generate(), "A", "A", Keire::ShaderGraphResourceKind::Sampler, Keire::SamplerDescription{}});
+    definition.SurfaceGraph.Nodes.push_back(constant);
+    definition.SurfaceGraph.Nodes.push_back(add);
+    definition.SurfaceGraph.Nodes.push_back(reroute);
+    definition.SurfaceGraph.Connections.push_back(
+        {Keire::AssetId::Generate(), {constant.Id, outputPin(constant)}, {add.Id, inputPin(add, "A")}});
+    definition.SurfaceGraph.Connections.push_back(
+        {Keire::AssetId::Generate(), {add.Id, outputPin(add)}, {reroute.Id, inputPin(reroute, "Input")}});
+    definition.SurfaceGraph.Connections.push_back(
+        {Keire::AssetId::Generate(), {reroute.Id, outputPin(reroute)}, {output, opacity}});
+    const std::array selection{add.Id, reroute.Id};
+
+    const auto extracted =
+        KeireEditor::ExtractMaterialGraphSelection(definition, selection, Keire::AssetId::Generate(), "Combined");
+
+    CHECK_NOTHROW(Keire::ValidateGraphFunction(extracted.Function, Keire::ShaderGraphPurpose::MaterialFunction));
+    const auto parameter = std::ranges::find(extracted.Function.Body.Nodes, Keire::ShaderGraphNodeKind::Parameter,
+                                             &Keire::ShaderGraphNode::Kind);
+    REQUIRE(parameter != extracted.Function.Body.Nodes.end());
+    CHECK(parameter->Symbol == "A2");
+    CHECK_NOTHROW(Keire::ValidateMaterialGraph(extracted.Parent));
+}

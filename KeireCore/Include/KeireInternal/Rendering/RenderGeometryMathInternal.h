@@ -81,6 +81,12 @@ namespace Keire::RenderBackend::GeometryDetail
                !all([](const auto point) { return point.Z > point.W; });
     }
 
+    [[nodiscard]] inline bool IsFrustumVisible(const Matrix4& clipFromLocal, const MeshBounds bounds,
+                                               const bool alwaysVisible) noexcept
+    {
+        return alwaysVisible || IntersectsFrustum(clipFromLocal, bounds);
+    }
+
     [[nodiscard]] inline float ProjectedHeight(const Matrix4& viewFromLocal, const Matrix4& projection,
                                                const MeshBounds bounds) noexcept
     {

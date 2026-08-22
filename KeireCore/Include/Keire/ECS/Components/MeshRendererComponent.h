@@ -32,6 +32,7 @@ namespace Keire
         [[nodiscard]] std::span<const AssetId> Materials() const noexcept { return m_Materials; }
         [[nodiscard]] Color Tint() const noexcept { return m_Tint; }
         [[nodiscard]] bool Visible() const noexcept { return m_Visible; }
+        [[nodiscard]] bool AlwaysVisible() const noexcept { return m_AlwaysVisible; }
         [[nodiscard]] bool CastShadows() const noexcept { return m_CastShadows; }
         [[nodiscard]] bool ReceiveShadows() const noexcept { return m_ReceiveShadows; }
         [[nodiscard]] bool StaticLighting() const noexcept { return m_StaticLighting; }
@@ -56,6 +57,7 @@ namespace Keire
         void SetMaterials(std::span<const AssetId> materials);
         void SetTint(Color tint);
         void SetVisible(bool visible);
+        void SetAlwaysVisible(bool enabled);
         void SetCastShadows(bool enabled);
         void SetReceiveShadows(bool enabled);
         void SetStaticLighting(bool enabled);
@@ -76,6 +78,7 @@ namespace Keire
         std::vector<AssetId> m_Materials;
         Color m_Tint{0.25F, 0.55F, 1.0F, 1.0F};
         bool m_Visible = true;
+        bool m_AlwaysVisible = false;
         bool m_CastShadows = true;
         bool m_ReceiveShadows = true;
         bool m_StaticLighting = false;

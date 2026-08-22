@@ -17,6 +17,17 @@
 
 namespace KeireEditor
 {
+    enum class EditorViewportTarget : std::uint8_t
+    {
+        Scene,
+        Game
+    };
+
+    [[nodiscard]] constexpr bool CompositesRuntimeGameUi(const EditorViewportTarget target) noexcept
+    {
+        return target == EditorViewportTarget::Game;
+    }
+
     class ProjectSettingsDocument;
     class AssetPicker;
     class SceneDocument;
@@ -187,7 +198,6 @@ namespace KeireEditor
         std::unique_ptr<SceneCameraController> m_Camera;
         Keire::Ref<Keire::RenderView> m_RenderView;
         Keire::Ref<Keire::RenderView> m_CameraPreviewView;
-        Keire::Ref<Keire::ScenePresentationRuntime> m_EditPresentation;
         Keire::UiItemRect m_ViewportRect;
         Keire::RenderCamera m_LastCamera;
         std::filesystem::path m_ProjectRoot;

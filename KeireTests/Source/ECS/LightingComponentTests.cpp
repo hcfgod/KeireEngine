@@ -20,9 +20,32 @@ TEST_CASE("lighting component registrations expose versioned bake and probe auth
     CHECK(directional->SchemaVersion == 2);
     CHECK(point->SchemaVersion == 2);
     CHECK(spot->SchemaVersion == 2);
-    CHECK(renderer->SchemaVersion == 3);
+    CHECK(renderer->SchemaVersion == 4);
     CHECK(reflection->SchemaVersion == 1);
     CHECK(volume->SchemaVersion == 1);
+}
+
+TEST_CASE("mesh renderer always-visible authoring is versioned and defaults to bounded culling")
+{
+    const auto registry = Keire::ComponentRegistry::CreateDefault();
+    const auto registration = registry->Find(Keire::MeshRendererComponent::StaticType());
+    REQUIRE(registration);
+
+    const auto legacyValues = registration->Migrate({}, 3);
+    CHECK(std::get<bool>(legacyValues.at("alwaysVisible")) == false);
+
+    const auto source = Keire::CreateRef<Keire::MeshRendererComponent>();
+    source->SetAlwaysVisible(true);
+    const auto encoded = registration->Serialize(*source);
+    CHECK(std::get<bool>(encoded.at("alwaysVisible")));
+
+    const auto restored = registration->Factory();
+    registration->Deserialize(*restored, encoded, registration->SchemaVersion);
+    const auto renderer = Keire::DynamicRefCast<Keire::MeshRendererComponent>(restored);
+    REQUIRE(renderer);
+    CHECK(renderer->AlwaysVisible());
+    renderer->Reset();
+    CHECK_FALSE(renderer->AlwaysVisible());
 }
 
 TEST_CASE("legacy lights migrate without changing realtime behavior")

@@ -2,6 +2,7 @@
 #include "KeireClient/Editor/AssetBrowserUtilities.h"
 #include "KeireClient/Editor/AssetOperationService.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
+#include "KeireClient/Editor/EditorPanels.h"
 #include "KeireClient/Editor/EditorRendererCapabilities.h"
 #include "KeireClient/Editor/EditorWindowPlacement.h"
 #include "KeireClient/Editor/ExternalEditorProfiles.h"
@@ -211,6 +212,12 @@ namespace
         return result;
     }
 } // namespace
+
+TEST_CASE("runtime game UI is composited only into Game view")
+{
+    CHECK_FALSE(KeireEditor::CompositesRuntimeGameUi(KeireEditor::EditorViewportTarget::Scene));
+    CHECK(KeireEditor::CompositesRuntimeGameUi(KeireEditor::EditorViewportTarget::Game));
+}
 
 TEST_CASE("asset browser folder snapshots avoid steady-state filesystem traversal")
 {

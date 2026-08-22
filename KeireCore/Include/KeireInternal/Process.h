@@ -84,7 +84,7 @@ namespace Keire::Detail
                                                                    std::string_view companionTarget);
     [[nodiscard]] std::filesystem::path
     ResolveManagedSolutionForExternalEditor(const std::filesystem::path& path,
-                                            const std::filesystem::path& workingDirectory, bool reuseManagedSession);
+                                            const std::filesystem::path& workingDirectory);
     [[nodiscard]] bool OpenInExternalEditor(const std::filesystem::path& path,
                                             const std::filesystem::path& preferredEditor,
                                             const std::filesystem::path& workingDirectory, std::string& diagnostic,

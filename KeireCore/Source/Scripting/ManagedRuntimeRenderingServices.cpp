@@ -510,6 +510,8 @@ namespace Keire::Detail
                     return renderer->StaticLighting();
                 case ManagedRenderingFlagProperty::PreserveLightmapUVs:
                     return renderer->PreserveLightmapUVs();
+                case ManagedRenderingFlagProperty::AlwaysVisible:
+                    return renderer->AlwaysVisible();
                 default:
                     return std::nullopt;
                 }
@@ -578,6 +580,9 @@ namespace Keire::Detail
                     return true;
                 case ManagedRenderingFlagProperty::PreserveLightmapUVs:
                     renderer->SetPreserveLightmapUVs(value);
+                    return true;
+                case ManagedRenderingFlagProperty::AlwaysVisible:
+                    renderer->SetAlwaysVisible(value);
                     return true;
                 default:
                     return false;
