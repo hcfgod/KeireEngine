@@ -1,27 +1,11 @@
 # C# Scripting
 
-Kéire gameplay scripting targets .NET 10 and C# 14. Scripts use the `Keire` namespace, compile into project-defined
-managed assemblies, and interact with scenes through validated value handles rather than native pointers.
-
-This section is the starting point for writing, attaching, debugging, and shipping C# gameplay code. It documents the
-public managed API in `KeireManaged` and links to the editor guides that cover asset authoring.
-
-## Start Here
-
-If this is your first Kéire script, follow these guides in order:
-
-1. [Getting Started](GettingStarted.md) — create an assembly, write a `Behaviour`, attach it, and understand builds.
-2. [Behaviours And Lifecycle](BehavioursAndLifecycle.md) — choose the correct callback and clean up safely.
-3. [Serialization And The Inspector](SerializationAndInspector.md) — expose fields without breaking saved data.
-4. [Entities, Components, And Transforms](EntitiesComponentsAndTransforms.md) — work with scene objects safely.
-5. Continue with the system-specific guide you need.
-
-Experienced C# developers can use the [Managed API Index](ApiIndex.md) as a compact map of the available types.
-The [Managed API Capability Matrix](ManagedApiMatrix.md) records production support and the remaining parity roadmap.
+Kéire 0.4.0 gameplay scripting targets .NET 10 and C# 14. Scripts use canonical managed objects rather than public
+native handles: `Entity` represents a scene object, concrete `Component` subclasses represent attached functionality,
+and `Asset` subclasses represent project content. Unassigned references are `null`; destroyed scene wrappers remain
+non-null and report `IsValid == false`.
 
 ## Minimal Behaviour
-
-Create `Mover.cs` inside a source root declared by a `.keireasm` file:
 
 ```csharp
 using Keire;
@@ -32,84 +16,84 @@ namespace MyGame;
 public sealed class Mover : Behaviour
 {
     [SerializeField, StableFieldId("fa1cbb4f-a81e-4c0a-af58-315401454e04")]
-    [Range(0.0, 20.0), Tooltip("Movement speed in metres per second.")]
+    [Range(0.0, 20.0)]
     private float _speed = 5.0f;
+
+    [SerializeField, StableFieldId("122572ac-2a47-42e2-9bc6-c4309a517ca6")]
+    private AudioSource? _audioSource;
+
+    protected override void Awake()
+    {
+        _audioSource ??= GetComponent<AudioSource>();
+    }
 
     protected override void Update()
     {
         Vector2 input = Input.Axis2D("Move");
-        Vector3 direction = new(input.X, 0.0f, input.Y);
-        TransformHandle transform = Entity.Transform;
-        transform.LocalPosition += direction * (_speed * Time.DeltaTime);
+        Transform.LocalPosition += new Vector3(input.X, 0.0f, input.Y) * (_speed * Time.DeltaTime);
     }
 }
 ```
 
-The class name must match the filename. `StableComponentId` identifies the component in scenes and prefabs;
-`StableFieldId` keeps serialized values associated with the field through ordinary renames.
+The class name must match the filename. `StableComponentId` preserves the script component's identity in scenes and
+prefabs. Keep `StableFieldId` unchanged when a serialized field is renamed.
 
-After the editor publishes a successful script generation, attach the component through **Add Component > Scripts**,
-drag the script onto the Inspector, or drop it onto a GameObject in the Hierarchy.
+## Direct Inspector References
+
+Declare normal fields. Public fields serialize automatically; private and protected fields serialize only with
+`[SerializeField]`.
+
+```csharp
+public Entity? Target;
+public Prefab? Projectile;
+public AudioSource? Source;
+
+[SerializeField]
+private Gameplay? _gameplay;
+```
+
+The Inspector accepts Hierarchy drags for entities, entity or component-header drags for components/behaviours, and
+Project/Asset Browser drags for assets, prefabs, scenes, and persistent `ScriptableObject` assets. The same reference
+drawers work in supported `[Serializable]` objects. One-dimensional arrays and `List<T>` values participate in managed
+state serialization; collection authoring is currently available for persistent ScriptableObject data assets.
+
+## Core Rules
+
+- Use `GetComponent<T>`, `TryGetComponent<T>`, and the child/parent lookup families on either `Entity` or `Component`.
+- `AddComponent<T>()` returns the actual component or behaviour. `Destroy(component)` and `Destroy(entity)` commit
+  after the current update traversal.
+- Use instance operations such as `AudioSource.Play()`, `Animator.SetFloat(...)`, and `VfxEmitter.SendEvent(...)`.
+  Global facilities such as `Physics`, `Audio`, `SceneManager`, and `RenderSettings` remain static.
+- `Instantiate(Prefab, ...)` is available from a behaviour, and `prefab.Instantiate(...)` is available directly.
+- Use `TryGetComponent` when absence is expected. Generated gameplay projects suppress only the nullable warnings
+  required for Inspector injection and assignment from nullable lookup results.
+- `[HotReloadState]` migrates Play Mode state during a successful script reload; it does not author scene or prefab
+  state.
 
 ## Guide Map
 
 | Guide | Use it for |
 | --- | --- |
-| [Getting Started](GettingStarted.md) | Project layout, `.keireasm`, IDE generation, compilation, and attachment |
-| [Behaviours And Lifecycle](BehavioursAndLifecycle.md) | Callbacks, execution order, cleanup, reload, exceptions, and async lifetime |
-| [Serialization And The Inspector](SerializationAndInspector.md) | Serialized fields, attributes, stable IDs, events, and migration |
-| [Entities, Components, And Transforms](EntitiesComponentsAndTransforms.md) | Entity validity, hierarchy, transforms, components, cloning, and destruction |
-| [Assets And ScriptableObjects](AssetsAndScriptableObjects.md) | `AssetReference<T>`, managed data assets, loading, cloning, and validation |
-| [Gameplay Services](GameplayServices.md) | Time, input, physics, navigation, prefabs, VFX, cursor, logging, and profiling |
-| [Audio](Audio.md) | Clip references, Audio Sources, one-call playback, mixers, buses, and status |
-| [Animation](Animation.md) | Animator states, parameters, layers, events, playback, and IK |
-| [Rendering And Materials](RenderingAndMaterials.md) | Cameras, Mesh Renderers, lights, material slots, and shader property overrides |
-| [Scenes And Render Settings](ScenesAndRenderSettings.md) | Active-scene handles, transactional player replacement, progress, cancellation, and transient environments |
-| [UI And Events](UiAndEvents.md) | Scene UI, buttons, `KeireEvent`, text, and cursor ownership |
-| [Async, Reload, And Diagnostics](AsyncReloadAndDiagnostics.md) | Cancellation, hot reload, failure isolation, logging, and troubleshooting |
-| [Managed API Index](ApiIndex.md) | Quick type, callback, component, and attribute lookup |
-| [Managed API Capability Matrix](ManagedApiMatrix.md) | Production status and named parity gaps by engine area |
-
-## Core Mental Model
-
-The managed API becomes easier to reason about when four rules stay explicit:
-
-- A `Behaviour` belongs to one entity in one runtime scene. Its `Entity` handle is non-owning and must be treated as
-  invalid after the scene object is destroyed.
-- Handles such as `Entity`, `ComponentHandle`, `AssetReference<T>`, `AnimatorHandle`, `AudioSourceHandle`, and
-  `MeshRendererHandle` are small
-  values. They contain identity, not native ownership.
-- Inspector state and hot-reload-only state are different. `[SerializeField]` persists authoring state;
-  `[HotReloadState]` migrates transient Play Mode state without writing it into scenes or prefabs.
-- Runtime subscriptions, cursor requests, cancellation sources, and other external registrations must be released on
-  disable and before reload, then reacquired after reload when appropriate.
-
-## Authoring Guides
-
-These C# guides focus on runtime code. Use the existing authoring documentation for the other half of the workflow:
-
-- [Input System](../InputSystem.md) and [Input Actions Editor](../InputActionsEditor.md)
-- [Animation And Rigging](../AnimationRigging.md)
-- [VFX Authoring And Runtime](../Vfx.md)
-- [Scene Authoring](../SceneAuthoring.md)
-- [Asset Pipeline](../AssetPipeline.md)
-- [Game-Owned Weapon Example](../WeaponAuthoring.md)
-- [Profiling](../Profiling.md)
+| [Getting Started](GettingStarted.md) | Assemblies, IDE generation, compilation, and attachment |
+| [Behaviours And Lifecycle](BehavioursAndLifecycle.md) | Callback timing, reentrancy, cleanup, reload, and exceptions |
+| [Serialization And The Inspector](SerializationAndInspector.md) | Field eligibility, direct references, stable IDs, and migration |
+| [Entities, Components, And Transforms](EntitiesComponentsAndTransforms.md) | Lookup, hierarchy, cloning, activation, and destruction |
+| [Assets And ScriptableObjects](AssetsAndScriptableObjects.md) | Direct assets, prefabs, persistent data, and residency operations |
+| [Gameplay Services](GameplayServices.md) | Input, physics, navigation, prefabs, VFX, logging, and profiling |
+| [Audio](Audio.md) | Audio components, clips, mixers, buses, and one-shot playback |
+| [Animation](Animation.md) | Animator states, parameters, layers, events, and IK |
+| [Rendering And Materials](RenderingAndMaterials.md) | Cameras, renderers, lights, dynamic materials, and parameters |
+| [Scenes And Render Settings](ScenesAndRenderSettings.md) | Scene objects, loading, activation, queries, and environments |
+| [UI And Events](UiAndEvents.md) | Scene UI components, runtime overlays, events, and cursor ownership |
+| [Async, Reload, And Diagnostics](AsyncReloadAndDiagnostics.md) | `Job`, cancellation, hot reload, failures, and diagnostics |
+| [Managed API Index](ApiIndex.md) | Compact type and method lookup |
 
 ## Sources Of Truth
 
-The managed API source is the final authority:
-
+- [`Handles.cs`](../../KeireManaged/Handles.cs) defines the engine-object, entity, component, transform, and lookup API.
 - [`Behaviour.cs`](../../KeireManaged/Behaviour.cs) defines lifecycle callbacks.
-- [`Handles.cs`](../../KeireManaged/Handles.cs) defines entity, component, and asset handles.
-- [`RuntimeApi.cs`](../../KeireManaged/RuntimeApi.cs) defines gameplay service façades.
-- [`RuntimeFoundation.cs`](../../KeireManaged/RuntimeFoundation.cs) defines application, time, and screen services.
-- [`PlayerPreferences.cs`](../../KeireManaged/PlayerPreferences.cs) defines per-application persistent preferences.
-- [`RuntimeAssets.cs`](../../KeireManaged/RuntimeAssets.cs) defines typed native-asset residency handles and status.
-- [`Rendering.cs`](../../KeireManaged/Rendering.cs) defines cameras, renderers, lights, and material property blocks.
-- [`RuntimeWorld.cs`](../../KeireManaged/RuntimeWorld.cs) defines scene operations and runtime render settings.
-- [`RuntimeUi.cs`](../../KeireManaged/RuntimeUi.cs), [`RuntimeUiControls.cs`](../../KeireManaged/RuntimeUiControls.cs),
-  and [`Events.cs`](../../KeireManaged/Events.cs) define UI and events.
+- [`NativeAssets.cs`](../../KeireManaged/NativeAssets.cs) defines direct native asset objects.
+- [`RuntimeApi.cs`](../../KeireManaged/RuntimeApi.cs) defines gameplay components and global services.
+- [`Rendering.cs`](../../KeireManaged/Rendering.cs) defines cameras, renderers, lights, and dynamic materials.
+- [`RuntimeWorld.cs`](../../KeireManaged/RuntimeWorld.cs) defines `Scene`, `SceneManager`, and render settings.
 - [`SerializationAttributes.cs`](../../KeireManaged/SerializationAttributes.cs) defines Inspector metadata.
-
-When a guide and the source disagree, update the guide with the API change.

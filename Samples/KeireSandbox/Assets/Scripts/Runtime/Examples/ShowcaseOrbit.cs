@@ -33,7 +33,7 @@ public sealed class ShowcaseOrbit : Behaviour
             return;
 
         _elapsed += deltaTime;
-        TransformHandle transform = Entity.Transform;
+        Transform transform = Entity.Transform;
         transform.LocalRotation = Quaternion.Euler(0.0f, _elapsed * _rotationSpeed);
         transform.LocalPosition = _origin + (Vector3.Up * (MathF.Sin(_elapsed * _bobFrequency) * _bobHeight));
     }

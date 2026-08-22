@@ -49,21 +49,18 @@ public sealed class AssetLoadException : InvalidOperationException
 }
 
 /// <summary>An explicit native residency lease for a typed runtime asset.</summary>
-/// <remarks>
-/// The handle never exposes a native object. Dispose it to release the lease; assignment and playback APIs continue to
-/// consume the stable <see cref="AssetReference{T}"/> stored in <see cref="Reference"/>.
-/// </remarks>
-public sealed class AssetHandle<T> : CustomYieldInstruction, IDisposable where T : class
+/// <remarks>Dispose the operation to release its residency ownership. The direct <see cref="Asset"/> reference remains usable.</remarks>
+public sealed class AssetLoadOperation<T> : CustomYieldInstruction, IDisposable where T : Asset
 {
     private ulong _handle;
 
-    internal AssetHandle(AssetReference<T> reference, ulong handle)
+    internal AssetLoadOperation(T asset, ulong operation)
     {
-        Reference = reference;
-        _handle = handle;
+        Asset = asset;
+        _handle = operation;
     }
 
-    public AssetReference<T> Reference { get; }
+    public T Asset { get; }
     public bool IsValid => Volatile.Read(ref _handle) != 0;
     public AssetLoadState State => (AssetLoadState)Status().State;
     public bool IsReady => State is AssetLoadState.Ready or AssetLoadState.Reloading;
@@ -80,8 +77,8 @@ public sealed class AssetHandle<T> : CustomYieldInstruction, IDisposable where T
         if (state is AssetLoadState.Ready or AssetLoadState.Reloading)
             return;
         if (state is AssetLoadState.Failed or AssetLoadState.Cancelled)
-            throw new AssetLoadException(Reference.Id, Diagnostic);
-        throw new InvalidOperationException($"Runtime asset {Reference.Id} is still {state}.");
+            throw new AssetLoadException(Asset.Id, Diagnostic);
+        throw new InvalidOperationException($"Runtime asset {Asset.Id} is still {state}.");
     }
 
     public async ValueTask WaitUntilReadyAsync(CancellationToken cancellation = default)
@@ -93,7 +90,7 @@ public sealed class AssetHandle<T> : CustomYieldInstruction, IDisposable where T
             if (state is AssetLoadState.Ready or AssetLoadState.Reloading)
                 return;
             if (state is AssetLoadState.Failed or AssetLoadState.Cancelled)
-                throw new AssetLoadException(Reference.Id, Diagnostic);
+                throw new AssetLoadException(Asset.Id, Diagnostic);
             await Task.Yield();
         }
     }
@@ -110,11 +107,11 @@ public sealed class AssetHandle<T> : CustomYieldInstruction, IDisposable where T
     private ulong RequireHandle()
     {
         ulong handle = Volatile.Read(ref _handle);
-        return handle != 0 ? handle : throw new ObjectDisposedException(nameof(AssetHandle<T>));
+        return handle != 0 ? handle : throw new ObjectDisposedException(nameof(AssetLoadOperation<T>));
     }
 }
 
-internal static class RuntimeAssetType<T> where T : class
+internal static class RuntimeAssetType<T> where T : Asset
 {
     private static readonly Lazy<AssetId> s_id = new(Resolve, LazyThreadSafetyMode.ExecutionAndPublication);
 

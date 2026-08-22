@@ -6,15 +6,16 @@
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "KeireInternal/SceneState.h"
 #include "KeireInternal/Scenes/SceneIdentityIndex.h"
+#include "KeireInternal/Scenes/SceneSerialization.h"
 
 #include <entt/entt.hpp>
-#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <functional>
 #include <iterator>
 #include <ranges>
+#include <set>
 #include <stdexcept>
 #include <thread>
 #include <unordered_map>
@@ -23,216 +24,6 @@
 
 namespace Keire
 {
-    namespace
-    {
-        using Json = nlohmann::json;
-
-        [[nodiscard]] Json EncodeProperty(const ComponentPropertyValue& value)
-        {
-            return std::visit(
-                [](const auto& current) -> Json
-                {
-                    using T = std::remove_cvref_t<decltype(current)>;
-                    if constexpr (std::same_as<T, Vector2>)
-                        return Json::array({current.X, current.Y});
-                    else if constexpr (std::same_as<T, Vector3>)
-                        return Json::array({current.X, current.Y, current.Z});
-                    else if constexpr (std::same_as<T, Vector4> || std::same_as<T, Quaternion>)
-                        return Json::array({current.X, current.Y, current.Z, current.W});
-                    else if constexpr (std::same_as<T, Color>)
-                        return Json::array({current.Red, current.Green, current.Blue, current.Alpha});
-                    else if constexpr (std::same_as<T, AssetId> || std::same_as<T, EntityId>)
-                        return current ? Json(current.ToString()) : Json(nullptr);
-                    else if constexpr (std::same_as<T, ComponentEventValue>)
-                    {
-                        Json listeners = Json::array();
-                        for (const auto& listener : current.Listeners)
-                        {
-                            listeners.push_back(
-                                {{"enabled", listener.Enabled},
-                                 {"target", listener.Target ? Json(listener.Target.ToString()) : Json(nullptr)},
-                                 {"component",
-                                  listener.Component ? Json(listener.Component.ToString()) : Json(nullptr)},
-                                 {"method", listener.Method}});
-                        }
-                        return listeners;
-                    }
-                    else if constexpr (std::same_as<T, Curve1D>)
-                    {
-                        Json keys = Json::array();
-                        for (const auto& key : current.Keys())
-                        {
-                            keys.push_back({{"time", key.Time},
-                                            {"value", key.Value},
-                                            {"inTangent", key.InTangent},
-                                            {"outTangent", key.OutTangent},
-                                            {"interpolation", static_cast<std::uint8_t>(key.Interpolation)}});
-                        }
-                        return keys;
-                    }
-                    else if constexpr (std::same_as<T, ColorGradient>)
-                    {
-                        Json keys = Json::array();
-                        for (const auto& key : current.Keys())
-                        {
-                            keys.push_back(
-                                {{"time", key.Time},
-                                 {"color", {key.Value.Red, key.Value.Green, key.Value.Blue, key.Value.Alpha}}});
-                        }
-                        return Json{{"interpolation", static_cast<std::uint8_t>(current.Interpolation())},
-                                    {"keys", std::move(keys)}};
-                    }
-                    else
-                        return Json(current);
-                },
-                value);
-        }
-
-        [[nodiscard]] ComponentPropertyValue DecodeProperty(const Json& value, const ComponentPropertyKind kind)
-        {
-            const auto requireArray = [&](const std::size_t size)
-            {
-                if (!value.is_array() || value.size() != size)
-                    throw std::invalid_argument("Component vector property has an invalid shape.");
-            };
-            switch (kind)
-            {
-            case ComponentPropertyKind::Boolean:
-                return value.get<bool>();
-            case ComponentPropertyKind::Integer:
-                return value.get<std::int64_t>();
-            case ComponentPropertyKind::Scalar:
-                return value.get<double>();
-            case ComponentPropertyKind::Text:
-                return value.get<std::string>();
-            case ComponentPropertyKind::Vector2:
-                requireArray(2);
-                return Vector2{value[0].get<float>(), value[1].get<float>()};
-            case ComponentPropertyKind::Vector3:
-                requireArray(3);
-                return Vector3{value[0].get<float>(), value[1].get<float>(), value[2].get<float>()};
-            case ComponentPropertyKind::Vector4:
-                requireArray(4);
-                return Vector4{value[0].get<float>(), value[1].get<float>(), value[2].get<float>(),
-                               value[3].get<float>()};
-            case ComponentPropertyKind::Quaternion:
-                requireArray(4);
-                return Quaternion{value[0].get<float>(), value[1].get<float>(), value[2].get<float>(),
-                                  value[3].get<float>()};
-            case ComponentPropertyKind::Color:
-                requireArray(4);
-                return Color{value[0].get<float>(), value[1].get<float>(), value[2].get<float>(),
-                             value[3].get<float>()};
-            case ComponentPropertyKind::Asset:
-                return value.is_null() ? AssetId{} : AssetId::Parse(value.get<std::string>());
-            case ComponentPropertyKind::Entity:
-                return value.is_null() ? EntityId{} : EntityId::Parse(value.get<std::string>());
-            case ComponentPropertyKind::Event:
-            {
-                if (!value.is_array())
-                    throw std::runtime_error("Component event property must be an array.");
-                ComponentEventValue result;
-                result.Listeners.reserve(value.size());
-                for (const auto& serialized : value)
-                {
-                    if (!serialized.is_object())
-                        throw std::runtime_error("Component event listener must be an object.");
-                    ComponentEventListener listener;
-                    listener.Enabled = serialized.value("enabled", true);
-                    if (const auto found = serialized.find("target"); found != serialized.end() && !found->is_null())
-                        listener.Target = EntityId::Parse(found->get<std::string>());
-                    if (const auto found = serialized.find("component"); found != serialized.end() && !found->is_null())
-                    {
-                        listener.Component = ComponentTypeId::Parse(found->get<std::string>());
-                    }
-                    listener.Method = serialized.value("method", std::string{});
-                    result.Listeners.push_back(std::move(listener));
-                }
-                return result;
-            }
-            case ComponentPropertyKind::Curve:
-            {
-                if (!value.is_array())
-                    throw std::runtime_error("Component curve property must be an array.");
-                std::vector<CurveKey> keys;
-                keys.reserve(value.size());
-                for (const auto& serialized : value)
-                {
-                    if (!serialized.is_object())
-                        throw std::runtime_error("Component curve key must be an object.");
-                    const auto interpolation = serialized.value("interpolation", std::uint8_t{1});
-                    if (interpolation > static_cast<std::uint8_t>(CurveInterpolation::Cubic))
-                        throw std::runtime_error("Component curve interpolation is invalid.");
-                    keys.push_back({serialized.at("time").get<float>(), serialized.at("value").get<float>(),
-                                    serialized.value("inTangent", 0.0F), serialized.value("outTangent", 0.0F),
-                                    static_cast<CurveInterpolation>(interpolation)});
-                }
-                return Curve1D(std::move(keys));
-            }
-            case ComponentPropertyKind::Gradient:
-            {
-                if (!value.is_object())
-                    throw std::runtime_error("Component gradient property must be an object.");
-                const auto interpolation = value.value("interpolation", std::uint8_t{1});
-                if (interpolation > static_cast<std::uint8_t>(GradientInterpolation::Linear))
-                    throw std::runtime_error("Component gradient interpolation is invalid.");
-                const auto& serializedKeys = value.at("keys");
-                if (!serializedKeys.is_array())
-                    throw std::runtime_error("Component gradient keys must be an array.");
-                std::vector<ColorGradientKey> keys;
-                keys.reserve(serializedKeys.size());
-                for (const auto& serialized : serializedKeys)
-                {
-                    if (!serialized.is_object())
-                        throw std::runtime_error("Component gradient key must be an object.");
-                    const auto& color = serialized.at("color");
-                    if (!color.is_array() || color.size() != 4)
-                        throw std::runtime_error("Component gradient color must contain four channels.");
-                    keys.push_back(
-                        {serialized.at("time").get<float>(),
-                         {color[0].get<float>(), color[1].get<float>(), color[2].get<float>(), color[3].get<float>()}});
-                }
-                return ColorGradient(std::move(keys), static_cast<GradientInterpolation>(interpolation));
-            }
-            }
-            throw std::invalid_argument("Unsupported component property kind.");
-        }
-
-        [[nodiscard]] std::string EncodeBag(const ComponentPropertyBag& bag)
-        {
-            Json object = Json::object();
-            for (const auto& [key, value] : bag)
-                object[key] = EncodeProperty(value);
-            return object.dump();
-        }
-
-        [[nodiscard]] ComponentPropertyBag DecodeBag(const std::string_view data,
-                                                     const ComponentRegistration& registration)
-        {
-            const auto object = Json::parse(data);
-            if (!object.is_object())
-                throw std::invalid_argument("Component data must be a JSON object.");
-            ComponentPropertyBag result;
-            for (const auto& property : registration.Properties)
-            {
-                if (const auto found = object.find(property.Key); found != object.end())
-                    result.emplace(property.Key, DecodeProperty(*found, property.Kind));
-            }
-            if (const auto found = object.find("managedState"); found != object.end())
-            {
-                if (!found->is_string())
-                    throw std::invalid_argument("Managed component state must be text.");
-                result.insert_or_assign("managedState", found->get<std::string>());
-            }
-            return result;
-        }
-
-        [[nodiscard]] std::string LegacyTransformData(const SceneTransform& transform)
-        {
-            return EncodeBag(
-                {{"position", transform.Position}, {"rotation", transform.Rotation}, {"scale", transform.Scale}});
-        }
-    } // namespace
 
     namespace Detail
     {
@@ -280,7 +71,7 @@ namespace Keire
                             continue;
                         }
                         auto component = registration->Factory();
-                        auto values = DecodeBag(serialized.Data, *registration);
+                        auto values = DecodeComponentPropertyBag(serialized.Data, *registration);
                         if (serialized.SchemaVersion != registration->SchemaVersion)
                         {
                             if (!registration->Migrate)
@@ -296,9 +87,10 @@ namespace Keire
                     {
                         const auto registration = ComponentsRegistry->Find(TransformComponent::StaticType());
                         auto transform = registration->Factory();
-                        registration->Deserialize(*transform,
-                                                  DecodeBag(LegacyTransformData(object.Transform), *registration),
-                                                  registration->SchemaVersion);
+                        registration->Deserialize(
+                            *transform,
+                            DecodeComponentPropertyBag(EncodeLegacyTransform(object.Transform), *registration),
+                            registration->SchemaVersion);
                         record.Components.insert(record.Components.begin(), std::move(transform));
                     }
                     Registry.emplace<EntityRecord>(native, std::move(record));
@@ -483,6 +275,8 @@ namespace Keire
             std::vector<EntityId> Order;
             WeakRef<SceneState> Self;
             std::vector<std::function<void()>> Deferred;
+            std::set<EntityId> PendingDestroyedEntities;
+            std::set<std::pair<EntityId, ComponentTypeId>> PendingDestroyedComponents;
             mutable std::vector<Ref<Component>> CachedLifecycleComponents;
             std::size_t TraversalDepth = 0;
             mutable bool LifecycleComponentsDirty = true;
@@ -590,7 +384,7 @@ namespace Keire
                 {
                     const auto registration = m_Impl->ComponentsRegistry->Find(component->Type());
                     object.Components.push_back({component->Type(), registration->SchemaVersion, component->Enabled(),
-                                                 EncodeBag(registration->Serialize(*component))});
+                                                 EncodeComponentPropertyBag(registration->Serialize(*component))});
                     if (component->Type() == TransformComponent::StaticType())
                     {
                         const auto transform = DynamicRefCast<TransformComponent>(component);
@@ -694,10 +488,7 @@ namespace Keire
                         transform->InvokeEnable();
                 }
             };
-            if (m_Impl->TraversalDepth)
-                m_Impl->Deferred.push_back(commit);
-            else
-                commit();
+            commit();
             return Entity(m_Impl->Self, id);
         }
 
@@ -707,46 +498,201 @@ namespace Keire
             if (!Contains(id))
                 return {};
             const auto snapshot = Snapshot();
-            std::unordered_map<EntityId, EntityId> remapped;
-            EntityId rootCopy;
+            SceneDefinition duplicate = SceneAsset::EmptyDefinition("Duplicate");
+            const auto originalRoot = Find(id);
+            const auto originalParent = originalRoot.Parent();
+            const auto originalTransform = originalRoot.GetComponent<TransformComponent>();
             for (const auto& object : snapshot.Objects)
             {
                 const EntityId original(object.Id);
                 if (!m_Impl->DescendsFrom(original, id))
                     continue;
-                const auto copy =
-                    Create(original == id ? object.Name + " Copy" : object.Name,
-                           remapped.contains(EntityId(object.Parent)) ? remapped.at(EntityId(object.Parent))
-                                                                      : EntityId(object.Parent));
                 if (original == id)
-                    rootCopy = copy.Id();
-                remapped.emplace(original, copy.Id());
-                SetActive(copy.Id(), object.Active);
-                SetEntityLayer(copy.Id(), object.Layer);
-                SetEntityTags(copy.Id(), object.Tags);
-                auto transform = copy.GetComponent<TransformComponent>();
-                transform->SetLocalPosition(object.Transform.Position);
-                transform->SetLocalRotation(object.Transform.Rotation);
-                transform->SetLocalScale(object.Transform.Scale);
+                {
+                    auto root = object;
+                    root.Parent = {};
+                    root.Name += " Copy";
+                    duplicate.Objects.push_back(std::move(root));
+                }
+                else
+                    duplicate.Objects.push_back(object);
+            }
+            return InstantiatePrefab({}, std::move(duplicate), originalParent.Id(), originalTransform->WorldPosition(),
+                                     originalTransform->WorldRotation(), originalRoot.ActiveSelf());
+        }
+
+        Entity SceneState::InstantiatePrefab(const AssetId prefab, SceneDefinition definition, const EntityId parent,
+                                             const Vector3 position, const Quaternion rotation, const bool active)
+        {
+            RequireOwner("InstantiatePrefab");
+            SceneAsset::Validate(definition);
+            if (definition.Objects.empty() || (parent && !Contains(parent)))
+                throw std::invalid_argument("Prefab instance arguments are invalid.");
+
+            std::unordered_map<EntityId, EntityId> remapped;
+            remapped.reserve(definition.Objects.size());
+            for (const auto& object : definition.Objects)
+                remapped.emplace(EntityId(object.Id), EntityId::Generate());
+
+            struct PendingEntity final
+            {
+                EntityId Source;
+                Impl::EntityRecord Record;
+            };
+            std::vector<PendingEntity> pending;
+            pending.reserve(definition.Objects.size());
+            EntityId root;
+            for (const auto& object : definition.Objects)
+            {
+                const auto source = EntityId(object.Id);
+                const auto id = remapped.at(source);
+                const auto mappedParent = object.Parent ? remapped.at(EntityId(object.Parent)) : parent;
+                if (!object.Parent && !root)
+                    root = id;
+                Impl::EntityRecord record{
+                    id, mappedParent, object.Name, object.Parent ? object.Active : active, object.Layer, object.Tags};
+                bool hasTransform = false;
                 for (const auto& serialized : object.Components)
                 {
-                    if (serialized.Type == TransformComponent::StaticType())
-                        continue;
                     const auto registration = m_Impl->ComponentsRegistry->Find(serialized.Type);
                     if (!registration)
                     {
-                        m_Impl->Find(copy.Id())->MissingComponents.push_back(serialized);
+                        record.MissingComponents.push_back(serialized);
                         continue;
                     }
-                    auto component = AddComponent(copy.Id(), serialized.Type);
-                    registration->Deserialize(*component, DecodeBag(serialized.Data, *registration),
-                                              serialized.SchemaVersion);
-                    SetComponentEnabled(*component, serialized.Enabled);
+                    auto component = registration->Factory();
+                    auto values = DecodeComponentPropertyBag(serialized.Data, *registration);
+                    if (auto state = values.find("managedState"); state != values.end())
+                    {
+                        if (auto* text = std::get_if<std::string>(&state->second))
+                            *text = RemapManagedStateReferences(*text, remapped);
+                    }
+                    for (const auto& property : registration->Properties)
+                    {
+                        if (property.Kind != ComponentPropertyKind::Entity)
+                            continue;
+                        const auto value = values.find(property.Key);
+                        if (value == values.end())
+                            continue;
+                        if (auto* entity = std::get_if<EntityId>(&value->second))
+                            if (const auto mapped = remapped.find(*entity); mapped != remapped.end())
+                                *entity = mapped->second;
+                        if (auto* reference = std::get_if<ComponentReferenceValue>(&value->second))
+                            if (const auto mapped = remapped.find(reference->Entity); mapped != remapped.end())
+                                reference->Entity = mapped->second;
+                    }
+                    if (serialized.SchemaVersion != registration->SchemaVersion)
+                    {
+                        if (!registration->Migrate)
+                            throw std::invalid_argument("Component requires an unavailable schema migration.");
+                        values = registration->Migrate(values, serialized.SchemaVersion);
+                    }
+                    registration->Deserialize(*component, values, registration->SchemaVersion);
+                    component->ApplyEnabled(serialized.Enabled);
+                    hasTransform |= serialized.Type == TransformComponent::StaticType();
+                    record.Components.push_back(std::move(component));
                 }
-                // The entity field is canonical. Legacy component payloads may still carry an older layer bit.
-                SetEntityLayer(copy.Id(), object.Layer);
+                if (!hasTransform)
+                {
+                    const auto registration = m_Impl->ComponentsRegistry->Find(TransformComponent::StaticType());
+                    auto transform = registration->Factory();
+                    registration->Deserialize(
+                        *transform, DecodeComponentPropertyBag(EncodeLegacyTransform(object.Transform), *registration),
+                        registration->SchemaVersion);
+                    record.Components.insert(record.Components.begin(), std::move(transform));
+                }
+                pending.push_back({source, std::move(record)});
             }
-            return Find(rootCopy);
+            if (!root)
+                throw std::invalid_argument("Prefab instances require a root entity.");
+
+            std::vector<EntityId> committed;
+            try
+            {
+                for (auto& item : pending)
+                {
+                    const auto id = item.Record.Id;
+                    const auto native = m_Impl->Registry.create();
+                    m_Impl->Registry.emplace<Impl::EntityRecord>(native, std::move(item.Record));
+                    m_Impl->Entities.emplace(id, native);
+                    auto* record = m_Impl->Find(id);
+                    m_Impl->IndexIdentity(id, *record);
+                    for (const auto& component : record->Components)
+                    {
+                        component->Attach(m_Impl->Self, id);
+                        m_Impl->IndexComponent(id, component);
+                    }
+                    m_Impl->Order.push_back(id);
+                    committed.push_back(id);
+                    SynchronizeEntityLayer(id);
+                }
+
+                const auto rootEntity = Find(root);
+                const auto transform = rootEntity.GetComponent<TransformComponent>();
+                transform->SetWorldPosition(position);
+                transform->SetWorldRotation(rotation);
+
+                if (m_Impl->Playing)
+                {
+                    std::vector<Ref<Component>> components;
+                    for (const auto id : committed)
+                    {
+                        const auto* record = m_Impl->Find(id);
+                        components.insert(components.end(), record->Components.begin(), record->Components.end());
+                    }
+                    std::ranges::stable_sort(components,
+                                             [&](const auto& left, const auto& right)
+                                             {
+                                                 return m_Impl->ComponentsRegistry->Find(left->Type())->ExecutionOrder <
+                                                        m_Impl->ComponentsRegistry->Find(right->Type())->ExecutionOrder;
+                                             });
+                    for (const auto& component : components)
+                        component->InvokePrepare();
+                    for (const auto& component : components)
+                        if (ActiveInHierarchy(component->Owner().Id()))
+                            component->InvokeAwake();
+                    for (const auto& component : components)
+                        if (component->Enabled() && ActiveInHierarchy(component->Owner().Id()))
+                            component->InvokeEnable();
+                }
+
+                if (prefab)
+                {
+                    PrefabInstanceDefinition instance{.Prefab = prefab, .Root = root.Value()};
+                    for (const auto& item : pending)
+                        instance.Objects.push_back({item.Source.Value(), remapped.at(item.Source).Value()});
+                    m_Impl->PrefabInstances.push_back(std::move(instance));
+                }
+                m_Impl->Dirty = true;
+                return rootEntity;
+            }
+            catch (...)
+            {
+                for (auto iterator = committed.rbegin(); iterator != committed.rend(); ++iterator)
+                {
+                    if (auto* record = m_Impl->Find(*iterator))
+                    {
+                        for (const auto& component : record->Components)
+                        {
+                            try
+                            {
+                                component->InvokeDestroy();
+                            }
+                            catch (...)
+                            {
+                                component->Detach();
+                            }
+                            m_Impl->UnindexComponent(*iterator, component);
+                        }
+                        m_Impl->UnindexIdentity(*iterator, *record);
+                    }
+                    const auto native = m_Impl->Entities.at(*iterator);
+                    m_Impl->Registry.destroy(native);
+                    m_Impl->Entities.erase(*iterator);
+                    std::erase(m_Impl->Order, *iterator);
+                }
+                throw;
+            }
         }
 
         bool SceneState::Destroy(const EntityId id)
@@ -754,6 +700,8 @@ namespace Keire
             RequireOwner("DestroyEntity");
             if (!Contains(id))
                 return false;
+            if (!m_Impl->PendingDestroyedEntities.insert(id).second)
+                return true;
             const auto commit = [this, id]
             {
                 std::vector<EntityId> removed;
@@ -800,10 +748,13 @@ namespace Keire
                     m_Impl->Registry.destroy(native);
                     m_Impl->Entities.erase(current);
                     std::erase(m_Impl->Order, current);
+                    m_Impl->PendingDestroyedEntities.erase(current);
+                    std::erase_if(m_Impl->PendingDestroyedComponents,
+                                  [current](const auto& pending) { return pending.first == current; });
                 }
                 m_Impl->Dirty = true;
             };
-            if (m_Impl->TraversalDepth)
+            if (m_Impl->Playing || m_Impl->TraversalDepth)
                 m_Impl->Deferred.push_back(commit);
             else
                 commit();
@@ -1021,7 +972,11 @@ namespace Keire
                     for (const auto& component : m_Impl->Find(candidate)->Components)
                     {
                         if (shouldEnable && component->Enabled())
+                        {
+                            component->InvokePrepare();
+                            component->InvokeAwake();
                             component->InvokeEnable();
+                        }
                         else
                             component->InvokeDisable();
                     }
@@ -1135,15 +1090,26 @@ namespace Keire
                 m_Impl->Dirty = true;
                 if (m_Impl->Playing)
                 {
-                    component->InvokeAwake();
-                    if (component->Enabled() && ActiveInHierarchy(id))
-                        component->InvokeEnable();
+                    try
+                    {
+                        component->InvokePrepare();
+                        if (ActiveInHierarchy(id))
+                        {
+                            component->InvokeAwake();
+                            if (component->Enabled())
+                                component->InvokeEnable();
+                        }
+                    }
+                    catch (...)
+                    {
+                        m_Impl->UnindexComponent(id, component);
+                        std::erase(target->Components, component);
+                        component->Detach();
+                        throw;
+                    }
                 }
             };
-            if (m_Impl->TraversalDepth)
-                m_Impl->Deferred.push_back(commit);
-            else
-                commit();
+            commit();
             return component;
         }
 
@@ -1193,8 +1159,10 @@ namespace Keire
                                                     [&](const auto& component) { return component->Type() == type; });
             if (found == record->Components.end())
                 return false;
+            if (!m_Impl->PendingDestroyedComponents.insert({id, type}).second)
+                return true;
             const auto& component = *found;
-            const auto commit = [this, id, component]
+            const auto commit = [this, id, type, component]
             {
                 if (auto* target = m_Impl->Find(id))
                 {
@@ -1203,8 +1171,9 @@ namespace Keire
                     std::erase(target->Components, component);
                     m_Impl->Dirty = true;
                 }
+                m_Impl->PendingDestroyedComponents.erase({id, type});
             };
-            if (m_Impl->TraversalDepth)
+            if (m_Impl->Playing || m_Impl->TraversalDepth)
                 m_Impl->Deferred.push_back(commit);
             else
                 commit();
@@ -1263,7 +1232,10 @@ namespace Keire
                 {
                     const auto& components = m_Impl->LifecycleComponents();
                     for (const auto& component : components)
-                        component->InvokeAwake();
+                        component->InvokePrepare();
+                    for (const auto& component : components)
+                        if (ActiveInHierarchy(component->Owner().Id()))
+                            component->InvokeAwake();
                     for (const auto& component : components)
                         if (component->Enabled() && ActiveInHierarchy(component->Owner().Id()))
                             component->InvokeEnable();
@@ -1453,6 +1425,8 @@ namespace Keire
             {
             }
             m_Impl->Deferred.clear();
+            m_Impl->PendingDestroyedEntities.clear();
+            m_Impl->PendingDestroyedComponents.clear();
             m_Impl->Registry.clear();
             m_Impl->Entities.clear();
             m_Impl->NameIndex.clear();

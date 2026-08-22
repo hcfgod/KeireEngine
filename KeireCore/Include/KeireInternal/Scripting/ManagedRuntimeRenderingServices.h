@@ -88,9 +88,13 @@ namespace Keire::Detail
         [[nodiscard]] bool ResetManagedMaterialInstanceProperty(AssetId entity, std::size_t slot,
                                                                 std::string_view name) noexcept override;
         [[nodiscard]] bool ClearManagedMaterialInstanceProperties(AssetId entity, std::size_t slot) noexcept override;
+        [[nodiscard]] ManagedEntityHandle InstantiateManagedPrefab(AssetId prefab, ManagedEntityHandle parent,
+                                                                   Vector3 position, Quaternion rotation,
+                                                                   bool active) noexcept override;
 
       protected:
         [[nodiscard]] virtual Ref<Scene> ManagedRuntimeScene(AssetId entity = {}) const noexcept = 0;
+        [[nodiscard]] virtual Ref<AssetSystem> ManagedRuntimeAssets() const noexcept = 0;
     };
 
     [[nodiscard]] std::optional<float> ReadManagedRenderingScalar(const Ref<Scene>& scene, AssetId entity,

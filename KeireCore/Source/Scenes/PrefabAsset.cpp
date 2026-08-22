@@ -36,6 +36,10 @@ namespace Keire
                         return Json::array({current.Red, current.Green, current.Blue, current.Alpha});
                     else if constexpr (std::same_as<T, AssetId> || std::same_as<T, EntityId>)
                         return current ? Json(current.ToString()) : Json(nullptr);
+                    else if constexpr (std::same_as<T, ComponentReferenceValue>)
+                        return Json{
+                            {"entity", current.Entity ? Json(current.Entity.ToString()) : Json(nullptr)},
+                            {"component", current.Component ? Json(current.Component.ToString()) : Json(nullptr)}};
                     else if constexpr (std::same_as<T, ComponentEventValue>)
                     {
                         Json listeners = Json::array();

@@ -1,4 +1,5 @@
 #include "Keire/Vfx/VfxSystem.h"
+#include "Keire/Vfx/VfxSubgraph.h"
 
 #include "KeireInternal/Vfx/VfxCheckpointInternal.h"
 #include "KeireInternal/Vfx/VfxExecutionInternal.h"
@@ -560,7 +561,6 @@ namespace Keire
             }
             return payload;
         }
-
         [[nodiscard]] std::vector<VfxGpuEmitter::CustomInstruction>
         ResolveCustomInstructions(const VfxCompiledProgram& program,
                                   const std::span<const VfxParameterValue> parameters)
@@ -590,28 +590,30 @@ namespace Keire
             }
             return result;
         }
-
         struct ResolvedProgramState
         {
             VfxCompiledProgram Program;
+            std::shared_ptr<const VfxEffectDefinition> Source;
             VfxEffectDefinition Definition;
             std::vector<VfxParameterOverride> Overrides;
             std::vector<VfxParameterValue> Parameters;
             std::vector<VfxGpuEmitter::CustomInstruction> CustomInstructions;
             std::shared_ptr<const VfxGpuExecutionPayload> GpuExecution;
         };
-
         [[nodiscard]] std::vector<ResolvedProgramState>
         ResolvePrograms(const VfxEffectAsset& effect, const VfxBackend backend,
-                        const std::span<const VfxParameterOverride> overrides)
+                        const std::span<const VfxParameterOverride> overrides, const VfxSubgraphResolver& resolver)
         {
-            auto programs = CompileVfxEffectSystems(effect.Definition(), backend);
+            auto source =
+                std::make_shared<const VfxEffectDefinition>(ExpandVfxSubgraphs(effect.Definition(), resolver));
+            auto programs = CompileVfxEffectSystems(*source, backend);
             std::vector<ResolvedProgramState> results;
             results.reserve(programs.size());
             for (auto& program : programs)
             {
                 ResolvedProgramState result;
                 result.Program = std::move(program);
+                result.Source = source;
                 if (!result.Program.Valid)
                 {
                     const auto diagnostic =
@@ -624,12 +626,12 @@ namespace Keire
                 result.Overrides.assign(overrides.begin(), overrides.end());
                 result.Parameters = ResolveParameters(result.Program, result.Overrides);
                 result.Definition =
-                    Internal::ResolveVfxExecutableDefinition(effect.Definition(), result.Program, result.Parameters);
+                    Internal::ResolveVfxExecutableDefinition(*source, result.Program, result.Parameters);
                 Internal::ValidateVfxResolvedBackendCapabilities(
                     result.Definition, result.Program, backend,
-                    effect.Definition().SchemaVersion >= CurrentVfxSchemaVersion &&
-                        effect.Definition().ExecutionSource == VfxExecutionSource::Graph &&
-                        effect.Definition().CompatibilityMode == VfxCompatibilityMode::NativeSchema4);
+                    source->SchemaVersion >= CurrentVfxSchemaVersion &&
+                        source->ExecutionSource == VfxExecutionSource::Graph &&
+                        source->CompatibilityMode == VfxCompatibilityMode::NativeSchema4);
                 result.CustomInstructions = ResolveCustomInstructions(result.Program, result.Parameters);
                 result.GpuExecution = BuildGpuExecutionPayload(result.Program, result.Definition, result.Parameters,
                                                                result.CustomInstructions);
@@ -638,7 +640,6 @@ namespace Keire
             return results;
         }
     } // namespace
-
     class VfxWorld::Impl final
     {
       public:
@@ -652,6 +653,7 @@ namespace Keire
             std::uint32_t RootEffectIndex = ~std::uint32_t{0};
             std::vector<std::uint32_t> SystemEffects;
             Ref<const VfxEffectAsset> Effect;
+            std::shared_ptr<const VfxEffectDefinition> SourceDefinition;
             VfxCompiledProgram Program;
             VfxEffectDefinition RuntimeDefinition;
             std::vector<VfxParameterOverride> ParameterOverrides;
@@ -679,7 +681,6 @@ namespace Keire
             float SimulationSpeed = 1.0F;
             VfxRuntimeDiagnostic Diagnostics = VfxRuntimeDiagnostic::None;
         };
-
         struct Particle
         {
             bool Active = false;
@@ -698,7 +699,6 @@ namespace Keire
             std::uint64_t StripId = 0;
             std::uint32_t ParticleIndexInStrip = 0;
         };
-
         explicit Impl(VfxWorldSpecification specification) : Specification(std::move(specification))
         {
             if (Specification.MaximumEffects == 0 || Specification.MaximumEffects > 1'000'000 ||
@@ -709,7 +709,6 @@ namespace Keire
             {
                 throw std::invalid_argument("VFX world capacity is invalid.");
             }
-
             const auto maximumSystemSlots = Specification.MaximumEffects * Specification.MaximumSystemsPerEffect;
             Effects.resize(maximumSystemSlots);
             FreeEffects.reserve(maximumSystemSlots);
@@ -727,7 +726,6 @@ namespace Keire
             if (WorldId == 0)
                 WorldId = nextWorldId.fetch_add(1, std::memory_order_relaxed);
         }
-
         [[nodiscard]] bool IsAlive(const VfxHandle handle) const noexcept
         {
             return handle && handle.Index() < Effects.size() && Effects[handle.Index()].Active &&
@@ -788,18 +786,17 @@ namespace Keire
             slot.GpuSimulationDeltaSeconds = 0.0F;
             slot.GpuEffectTime = 0.0F;
         }
-
         void SetOverrides(EffectSlot& slot, const std::span<const VfxParameterOverride> overrides)
         {
             auto candidateOverrides = std::vector<VfxParameterOverride>(overrides.begin(), overrides.end());
             auto candidateParameters = ResolveParameters(slot.Program, candidateOverrides);
             auto candidateDefinition =
-                Internal::ResolveVfxExecutableDefinition(slot.Effect->Definition(), slot.Program, candidateParameters);
+                Internal::ResolveVfxExecutableDefinition(*slot.SourceDefinition, slot.Program, candidateParameters);
             Internal::ValidateVfxResolvedBackendCapabilities(
                 candidateDefinition, slot.Program, Specification.Backend,
-                slot.Effect->Definition().SchemaVersion >= CurrentVfxSchemaVersion &&
-                    slot.Effect->Definition().ExecutionSource == VfxExecutionSource::Graph &&
-                    slot.Effect->Definition().CompatibilityMode == VfxCompatibilityMode::NativeSchema4);
+                slot.SourceDefinition->SchemaVersion >= CurrentVfxSchemaVersion &&
+                    slot.SourceDefinition->ExecutionSource == VfxExecutionSource::Graph &&
+                    slot.SourceDefinition->CompatibilityMode == VfxCompatibilityMode::NativeSchema4);
             auto candidateInstructions = ResolveCustomInstructions(slot.Program, candidateParameters);
             auto candidateGpuExecution =
                 BuildGpuExecutionPayload(slot.Program, candidateDefinition, candidateParameters, candidateInstructions);
@@ -811,11 +808,11 @@ namespace Keire
             slot.GpuExecution = std::move(candidateGpuExecution);
             slot.Diagnostics = diagnostics;
         }
-
         void SetGroupOverrides(const std::uint32_t rootIndex, const std::span<const VfxParameterOverride> overrides)
         {
             auto& root = Effects[rootIndex];
-            auto resolved = ResolvePrograms(*root.Effect, Specification.Backend, overrides);
+            auto resolved =
+                ResolvePrograms(*root.Effect, Specification.Backend, overrides, Specification.SubgraphResolver);
             if (resolved.size() != root.SystemEffects.size())
                 throw std::logic_error("VFX system topology changed while applying parameter overrides.");
             std::vector<ResolvedProgramState*> ordered;
@@ -834,6 +831,7 @@ namespace Keire
                 auto& slot = Effects[root.SystemEffects[index]];
                 auto& state = *ordered[index];
                 slot.Program = std::move(state.Program);
+                slot.SourceDefinition = std::move(state.Source);
                 slot.RuntimeDefinition = std::move(state.Definition);
                 slot.ParameterOverrides = std::move(state.Overrides);
                 slot.Parameters = std::move(state.Parameters);
@@ -872,7 +870,7 @@ namespace Keire
         {
             if (slot.Program.ValueInstructions.empty())
                 return true;
-            const auto& source = slot.Effect->Definition();
+            const auto& source = *slot.SourceDefinition;
             Internal::VfxExpressionEvaluationContext evaluation;
             evaluation.EffectSeed = slot.RuntimeDefinition.Seed;
             evaluation.SeedOffset = slot.SeedOffset;
@@ -1187,6 +1185,7 @@ namespace Keire
             slot.Effect.Reset();
             slot.Program = {};
             slot.RuntimeDefinition = {};
+            slot.SourceDefinition.reset();
             slot.ParameterOverrides.clear();
             slot.Parameters.clear();
             slot.ExpressionRegisters.clear();
@@ -1746,13 +1745,10 @@ namespace Keire
         std::uint64_t WorldId = 0;
         float LastDeltaSeconds = 0.0F;
     };
-
     VfxWorld::VfxWorld(VfxWorldSpecification specification) : m_Impl(std::make_unique<Impl>(std::move(specification)))
     {
     }
-
     VfxWorld::~VfxWorld() = default;
-
     VfxHandle VfxWorld::Activate(const VfxActivation& activation)
     {
         if (!activation.Effect || activation.Revision == 0 || !Math::IsFinite(activation.Position) ||
@@ -1761,8 +1757,8 @@ namespace Keire
             throw std::invalid_argument("VFX activation is invalid.");
         }
         const auto normalizedRotation = Math::Normalize(activation.Rotation);
-        auto resolved =
-            ResolvePrograms(*activation.Effect, m_Impl->Specification.Backend, activation.ParameterOverrides);
+        auto resolved = ResolvePrograms(*activation.Effect, m_Impl->Specification.Backend,
+                                        activation.ParameterOverrides, m_Impl->Specification.SubgraphResolver);
         if (resolved.empty() || resolved.size() > m_Impl->Specification.MaximumSystemsPerEffect ||
             m_Impl->WorldStatistics.ActiveEffects >= m_Impl->Specification.MaximumEffects ||
             m_Impl->FreeEffects.size() < resolved.size())
@@ -1770,7 +1766,6 @@ namespace Keire
             SaturatingAdd(m_Impl->WorldStatistics.DroppedEffects, 1);
             return {};
         }
-
         std::vector<std::uint32_t> indices;
         indices.reserve(resolved.size());
         for (std::size_t offset = 0; offset < resolved.size(); ++offset)
@@ -1788,6 +1783,7 @@ namespace Keire
             slot.FirstUpdate = true;
             slot.RootEffectIndex = rootIndex;
             slot.Effect = activation.Effect;
+            slot.SourceDefinition = std::move(state.Source);
             slot.Program = std::move(state.Program);
             slot.RuntimeDefinition = std::move(state.Definition);
             slot.ParameterOverrides = std::move(state.Overrides);
@@ -1921,7 +1917,9 @@ namespace Keire
         if (revision <= root.Revision)
             return false;
 
-        const auto candidatePrograms = CompileVfxEffectSystems(effect->Definition(), m_Impl->Specification.Backend);
+        const auto candidateDefinition =
+            ExpandVfxSubgraphs(effect->Definition(), m_Impl->Specification.SubgraphResolver);
+        const auto candidatePrograms = CompileVfxEffectSystems(candidateDefinition, m_Impl->Specification.Backend);
         if (candidatePrograms.empty() ||
             std::ranges::any_of(candidatePrograms, [](const VfxCompiledProgram& program) { return !program.Valid; }))
             throw std::invalid_argument("Cannot reload an invalid VFX graph program.");
@@ -1942,7 +1940,8 @@ namespace Keire
                 rejectedOverride = true;
             }
         }
-        auto resolved = ResolvePrograms(*effect, m_Impl->Specification.Backend, preservedOverrides);
+        auto resolved = ResolvePrograms(*effect, m_Impl->Specification.Backend, preservedOverrides,
+                                        m_Impl->Specification.SubgraphResolver);
         if (resolved.size() != root.SystemEffects.size())
             throw std::invalid_argument(
                 "VFX hot reload cannot change the number of systems while an instance is active; stop and reactivate.");
@@ -1967,6 +1966,7 @@ namespace Keire
             if (rejectedOverride)
                 diagnostics |= VfxRuntimeDiagnostic::ParameterOverrideRejected;
             slot.Effect = retainedEffect;
+            slot.SourceDefinition = std::move(state->Source);
             slot.Program = std::move(state->Program);
             slot.RuntimeDefinition = std::move(state->Definition);
             slot.ParameterOverrides = std::move(state->Overrides);

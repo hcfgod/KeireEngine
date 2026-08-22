@@ -15,7 +15,7 @@
 
 namespace Keire
 {
-    inline constexpr std::uint32_t MaterialGraphSourceSchemaVersion = 3;
+    inline constexpr std::uint32_t MaterialGraphSourceSchemaVersion = 4;
     inline constexpr std::uint32_t MaterialInstanceSourceSchemaVersion = 2;
 
     struct MaterialGraphPropertyBinding
@@ -75,6 +75,7 @@ namespace Keire
         /// Artist-authored surface expressions. The Shader Graph supplies the reusable renderer/master template;
         /// connections to this graph's Master node override matching template outputs during material compilation.
         ShaderGraphDefinition SurfaceGraph;
+        GraphAuthoringMetadata Authoring;
 
         bool operator==(const MaterialGraphDefinition&) const = default;
     };

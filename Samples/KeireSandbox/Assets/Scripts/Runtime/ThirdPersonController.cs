@@ -15,7 +15,7 @@ public sealed class ThirdPersonController : Behaviour
     private float _footstepVolume = 0.65f;
 
     [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000013")]
-    private AssetReference<object> _footstepClip = default;
+    private AudioClip? _footstepClip;
 
     [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000014")]
     [Range(0.0, 40.0), Tooltip("How quickly locomotion parameters catch up with physical movement.")]
@@ -27,7 +27,8 @@ public sealed class ThirdPersonController : Behaviour
     [HotReloadState]
     private bool _moving;
 
-    private Entity _motorEntity;
+    private CharacterController _motor = null!;
+    private Animator _animator = null!;
 
     protected override void Awake()
     {
@@ -39,7 +40,7 @@ public sealed class ThirdPersonController : Behaviour
 
     protected override void FixedUpdate()
     {
-        CharacterControllerState state = _motorEntity.CharacterController.State;
+        CharacterControllerState state = _motor.State;
         float targetSpeed = MathF.Sqrt(
             (state.Velocity.X * state.Velocity.X) + (state.Velocity.Z * state.Velocity.Z));
         targetSpeed = Math.Clamp(targetSpeed, 0.0f, MathF.Max(0.0f, _maximumSpeed));
@@ -47,17 +48,17 @@ public sealed class ThirdPersonController : Behaviour
         float blend = 1.0f - MathF.Exp(-MathF.Max(0.0f, _animationSharpness) * deltaTime);
         _animationSpeed += (targetSpeed - _animationSpeed) * blend;
         _moving = _moving ? _animationSpeed > 0.12f : _animationSpeed > 0.22f;
-        Animator.SetFloat(Entity, "Speed", _animationSpeed);
-        Animator.SetBool(Entity, "Moving", _moving);
-        Animator.SetFloat(Entity, "VerticalSpeed", state.Velocity.Y);
-        Animator.SetBool(Entity, "Grounded", state.Grounded);
-        Animator.SetBool(Entity, "Falling", !state.Grounded && state.Velocity.Y < -0.5f);
+        _animator.SetFloat("Speed", _animationSpeed);
+        _animator.SetBool("Moving", _moving);
+        _animator.SetFloat("VerticalSpeed", state.Velocity.Y);
+        _animator.SetBool("Grounded", state.Grounded);
+        _animator.SetBool("Falling", !state.Grounded && state.Velocity.Y < -0.5f);
     }
 
     protected override void OnAnimationEvent(AnimationEvent animationEvent)
     {
-        if (animationEvent.Name == "Footstep" && _footstepClip.IsValid)
-            Audio.Play(Entity, _footstepClip.Id, _footstepVolume);
+        if (animationEvent.Name == "Footstep" && _footstepClip is not null)
+            Audio.Play(Entity, _footstepClip, new AudioPlaybackOptions { Gain = _footstepVolume });
     }
 
     protected override void OnCollisionEnter(CollisionContact contact) =>
@@ -72,13 +73,10 @@ public sealed class ThirdPersonController : Behaviour
 
     private void ResolveMotor()
     {
-        _motorEntity = Entity;
-        while (_motorEntity.IsValid && !_motorEntity.CharacterController.IsValid)
-            _motorEntity = _motorEntity.Parent;
-        if (!_motorEntity.IsValid)
-        {
+        _motor = GetComponentInParent<CharacterController>() ??
             throw new InvalidOperationException(
                 $"{nameof(ThirdPersonController)} requires a Character Controller on its Entity or an ancestor.");
-        }
+        _animator = GetComponent<Animator>() ??
+            throw new InvalidOperationException($"{nameof(ThirdPersonController)} requires an Animator.");
     }
 }

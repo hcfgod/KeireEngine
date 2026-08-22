@@ -14,6 +14,17 @@ namespace Keire
         { return QueryVfxCollision(start, end); };
         specification.ShapeSample = [this](const AssetId asset, const std::uint32_t randomValue)
         { return SampleVfxShape(asset, randomValue); };
+        specification.SubgraphResolver = [this](const AssetId asset) -> Ref<const VfxSubgraphAsset>
+        {
+            if (!Assets)
+                return {};
+            auto& handle = VfxSubgraphs[asset];
+            if (!handle)
+                handle = Assets->Load<VfxSubgraphAsset>(asset, AssetPriority::High);
+            if (handle.State() == AssetState::Failed || handle.State() == AssetState::Cancelled)
+                return handle.Require();
+            return handle.TryGetLoaded();
+        };
         VfxWorldService = CreateRef<VfxWorld>(std::move(specification));
         VfxBackendMode = backend;
     }
@@ -131,7 +142,9 @@ namespace Keire
                     VfxWorldService->Stop(state.Handle);
                     state.Handle = {};
                 }
-                state.RejectedRevision = revision;
+                const bool dependencyPending =
+                    std::string_view(exception.what()).starts_with("VFX Subgraph dependency is unavailable:");
+                state.RejectedRevision = dependencyPending ? 0 : revision;
                 state.RejectedOverrides = overrides;
                 if (state.Diagnostic != exception.what())
                 {
@@ -203,6 +216,7 @@ namespace Keire
     void SceneRuntimeSession::Impl::ClearVfx() noexcept
     {
         VfxEmitters.clear();
+        VfxSubgraphs.clear();
         VfxMeshShapes.clear();
         VfxVolumes.clear();
         if (VfxWorldService)

@@ -45,6 +45,8 @@ namespace KeireEditor
         bool EditTextureAsset(std::string_view label, Keire::AssetId& value,
                               Keire::ShaderTextureSemantic semantic) override;
         bool EditEntity(std::string_view label, Keire::EntityId& value) override;
+        bool EditComponentReference(std::string_view label, Keire::ComponentReferenceValue& value,
+                                    const Keire::ComponentProperty& property) override;
         bool EditEvent(std::string_view label, Keire::ComponentEventValue& value, std::size_t argumentCount) override;
 
       private:

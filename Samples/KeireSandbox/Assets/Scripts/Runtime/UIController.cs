@@ -10,12 +10,12 @@ public sealed class UIController : Behaviour
     public static event Action<bool>? VisibilityChanged;
     public static bool IsAnyUiVisible => s_VisibleControllerCount > 0;
 
-    [SerializeField] private Entity uiPanel = default;
+    [SerializeField] private Entity? uiPanel;
     [SerializeField] private UiButton? uiButton = null;
     [SerializeField] private KeireEvent uiOpened = new();
     [SerializeField] private KeireEvent uiClosed = new();
 
-    [SerializeField] private AssetReference<AudioClip> uiAudioClip = default;
+    [SerializeField] private AudioClip? uiAudioClip;
 
     private UiButton? _subscribedButton;
     private IDisposable? _cursorVisibility;
@@ -26,7 +26,7 @@ public sealed class UIController : Behaviour
     {
         BindButton();
         BindUiEvents();
-        ApplyUiVisibility(uiPanel.Id.IsValid && uiPanel.Active);
+        ApplyUiVisibility(uiPanel is { IsValid: true, Active: true });
     }
 
     private void UIButtonClicked()
@@ -34,7 +34,8 @@ public sealed class UIController : Behaviour
         Debug.Log("Button Clicked");
         ToggleUi();
 
-        Audio.Play(Entity, uiAudioClip);
+        if (uiAudioClip is not null)
+            Audio.Play(Entity, uiAudioClip);
     }
 
     protected override void OnDisable()
@@ -55,7 +56,7 @@ public sealed class UIController : Behaviour
     {
         BindButton();
         BindUiEvents();
-        ApplyUiVisibility(uiPanel.Id.IsValid && uiPanel.Active);
+        ApplyUiVisibility(uiPanel is { IsValid: true, Active: true });
     }
 
     protected override void Update()
@@ -66,7 +67,7 @@ public sealed class UIController : Behaviour
 
     private void ToggleUi()
     {
-        if (!uiPanel.Id.IsValid)
+        if (uiPanel is not { IsValid: true })
             return;
 
         SetUiOpen(!uiPanel.Active);
@@ -74,7 +75,7 @@ public sealed class UIController : Behaviour
 
     private void SetUiOpen(bool open)
     {
-        if (!uiPanel.Id.IsValid || uiPanel.Active == open)
+        if (uiPanel is not { IsValid: true } || uiPanel.Active == open)
             return;
         uiPanel.Active = open;
         if (open)

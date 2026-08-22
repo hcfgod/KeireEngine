@@ -3,6 +3,7 @@
 #include "Keire/Scripting/ScriptSystem.h"
 
 #include <filesystem>
+#include <map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -36,6 +37,8 @@ namespace Keire::Detail
         const Coral::Type* Header = nullptr;
         const Coral::Type* Tooltip = nullptr;
         const Coral::Type* Group = nullptr;
+        const Coral::Type* StableComponentId = nullptr;
+        const Coral::Type* StableAssetTypeId = nullptr;
     };
 
     [[nodiscard]] std::string PathText(const std::filesystem::path& path);
@@ -45,6 +48,33 @@ namespace Keire::Detail
     ReflectManagedProperties(const Coral::Type& concreteType, const Coral::Type& behaviourType,
                              const ManagedInspectorAttributeTypes& attributeTypes);
     [[nodiscard]] std::vector<ComponentMethod> ReflectManagedMethods(const Coral::Type& concreteType);
+
+    template <typename BehaviourRange>
+    void PopulateManagedBehaviourReferenceCompatibility(
+        BehaviourRange& behaviours, const std::map<std::string, const Coral::Type*, std::less<>>& runtimeTypes)
+    {
+        for (auto& behaviour : behaviours)
+        {
+            for (auto& property : behaviour.Properties)
+            {
+                if (property.ReferenceKind != ManagedReferenceKind::Behaviour ||
+                    !property.CompatibleComponentTypes.empty())
+                    continue;
+                const auto declared = runtimeTypes.find(property.DeclaredManagedType);
+                if (declared == runtimeTypes.end() || !declared->second)
+                    continue;
+                for (const auto& compatible : behaviours)
+                {
+                    if (compatible.Type && compatible.Type->IsAssignableTo(*declared->second))
+                    {
+                        property.CompatibleComponentTypes.push_back(compatible.ComponentType);
+                        property.CompatibleBehaviourTypes.push_back(compatible.Name);
+                    }
+                }
+            }
+        }
+    }
+
     [[nodiscard]] ComponentPropertyBag ProjectManagedState(const std::string& state,
                                                            const std::vector<ComponentProperty>& properties);
     [[nodiscard]] std::string ApplyManagedState(const std::string& state, const ComponentPropertyBag& values,

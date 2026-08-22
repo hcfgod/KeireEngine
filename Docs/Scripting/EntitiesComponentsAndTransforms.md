@@ -1,262 +1,104 @@
 # Entities, Components, And Transforms
 
-Managed scripts access scene state through stable value handles. An `Entity` identifies an object within one runtime
-world; component and subsystem handles pair that identity with validated operations.
+`Entity` is a sealed reference object for one scene object in one runtime world. Repeated lookup of the same stable
+identity returns the same wrapper during a runtime generation. An unassigned reference is `null`; after destruction,
+the existing wrapper remains non-null and `IsValid` becomes false.
 
-## Entity Validity
+## Component Lookup
 
-`Entity` contains a world identity and an `EntityId`:
+Every `Entity`, `Component`, and `Behaviour` exposes the same lookup family:
 
 ```csharp
-if (!target.IsValid)
-    return;
+AudioSource? source = GetComponent<AudioSource>();
+
+if (Target is not null && Target.TryGetComponent(out Animator? animator))
+    animator.SetBool("Alert", true);
+
+Collider[] colliders = GetComponentsInChildren<Collider>(includeInactive: true);
+RigidBody? body = GetComponentInParent<RigidBody>();
+
+var results = new List<IReloadable>();
+GetComponentsInChildren(results);
 ```
 
-Choose the validity check that matches the question:
+Available forms include `GetComponent`, `TryGetComponent`, and `GetComponents`, plus singular, array-returning, and
+allocation-free `List<T>` child/parent variants. Each also has a `Type` overload. Behaviour queries match assignable
+base classes and interfaces; built-in components use their stable exact type. Results follow stable component and
+hierarchy order.
 
-- `entity.Id.IsValid` checks whether an identity was assigned.
-- `entity.IsValid` also asks the active runtime whether that entity still exists.
+Same-entity lookup ignores active state. Hierarchy lookup includes self and excludes inactive ancestors or descendants
+unless `includeInactive` is true.
 
-Use `Id.IsValid` for cheap serialized-reference presence checks when the lifetime is already controlled. Use
-`IsValid` before operating on a reference that may have been destroyed or may belong to an expired runtime scene.
-`default(Entity)` is the invalid sentinel.
-
-Handles do not own entities. Copying one does not keep the target alive.
-
-## Names And Active State
+## Adding And Removing
 
 ```csharp
-Entity target = _target;
-if (!target.IsValid)
-    return;
+AudioSource source = Entity.AddComponent<AudioSource>();
+Gameplay gameplay = Entity.AddComponent<Gameplay>();
 
-target.Name = "Activated Door";
-target.Active = true;
-Debug.Log($"{target.Name}: hierarchy active = {target.ActiveInHierarchy}");
+Destroy(source);       // delayed until the current update traversal ends
+Destroy(Entity);       // destroys the hierarchy at the same safe boundary
 ```
 
-`Active` is the object's local setting. `ActiveInHierarchy` is read-only and also reflects inactive parents.
+Adding a behaviour to an active entity performs native binding, `Awake`, and (when enabled) `OnEnable` before
+`AddComponent` returns. An inactive entity defers `Awake` until its first activation. Native binding failure rolls the
+addition back; a user callback exception is reported and disables the offending behaviour.
 
-`Layer` is a readable/writable unsigned index from 0 through 31. It is the same value shown in the Inspector entity
-header and drives the owning entity's physics collision layer. Invalid values throw before native scene state changes:
+Native component cardinality is one component per stable built-in type. Multiple matches remain possible when looking
+up behaviours through a base class or interface.
 
-```csharp
-Entity.Layer = 8;
-```
-
-Tags provide indexed gameplay categories without coupling scripts to authoring names:
+## Hierarchy And Activation
 
 ```csharp
-Entity.AddTag("Interactable");
-if (Entity.HasTag("Locked"))
-    Entity.RemoveTag("Locked");
-```
-
-`Tags` is a read-only snapshot; `AddTag`, `RemoveTag`, and `ClearTags` perform validated mutations. Tags are
-case-sensitive ASCII identifiers, begin with a letter, use at most 64 bytes, and are limited to 16 per entity. Use
-`SceneManager` for bounded active-scene name, tag, and component queries; see
-[Gameplay Services](GameplayServices.md#entities-and-scene-queries).
-
-## Parent And Children
-
-```csharp
-Entity parent = Entity.Parent;
+Entity? parent = Entity.Parent;
 IReadOnlyList<Entity> children = Entity.Children;
 
-child.SetParent(Entity, preserveWorldTransform: true);
+Entity.SetParent(newParent, preserveWorldTransform: true);
+Entity.SetActive(false);
+Entity.Tag = "Enemy";
+
+Entity? muzzle = Entity.Find("Weapon/Muzzle");
 ```
 
-Assigning `Parent` preserves the world transform. `SetParent` lets the caller choose. The children collection is a
-runtime snapshot; do not assume it updates after later hierarchy changes.
+Parenting rejects cycles and cross-world relationships. Child enumeration and hierarchy searches are stable. Scene
+queries and tags are provided by `SceneManager`; `DontDestroyOnLoad(Entity)` moves a root hierarchy to persistent
+scene ownership.
 
-Search by name or path:
+## Transform
+
+`Entity.Transform` and `Component.Transform` return the concrete `Transform` attached to the entity:
 
 ```csharp
-Entity muzzle = Entity.Find("Visuals/Weapon/Muzzle");
-Entity nestedCamera = Entity.FindChild("Camera", recursive: true);
-Entity sibling = Entity.Find("../Sibling");
+Transform.Position = spawnPosition;
+Transform.Rotation = Quaternion.Euler(0.0f, headingDegrees);
+Transform.LocalScale = new Vector3(2.0f, 2.0f, 2.0f);
+
+Transform.Translate(Vector3.Forward * speed * Time.DeltaTime);
+Transform.Rotate(Quaternion.Euler(0.0f, turn * Time.DeltaTime));
 ```
 
-`Find` supports `/`-separated segments plus `.` and `..`. A missing result is `default`, so check validity.
-Name search is ordinal and case-sensitive.
+`Position` and `Rotation` are world-space. `LocalPosition`, `LocalRotation`, and `LocalScale` are parent-relative.
+`Forward`, `Right`, and `Up` derive from world rotation. Presentation interpolation is read-only unless explicitly
+reset for teleportation.
 
-For important gameplay relationships, prefer serialized `Entity` fields over repeated name lookup. Names are authoring
-labels, not durable IDs.
-
-## Transforms
-
-`Entity.Transform` returns a `TransformHandle`:
+## Cloning And Prefabs
 
 ```csharp
-TransformHandle transform = Entity.Transform;
-transform.LocalPosition = new Vector3(0.0f, 2.0f, 0.0f);
-transform.LocalRotation = Quaternion.Euler(0.0f, 90.0f);
-transform.LocalScale = new Vector3(2.0f, 2.0f, 2.0f);
-
-Vector3 worldPosition = transform.Position;
-transform.Position = new Vector3(4.0f, 2.0f, -1.0f);
-transform.Rotation = Quaternion.Euler(0.0f, 180.0f);
-transform.Translate(Vector3.Forward * Time.DeltaTime, worldSpace: false);
-Vector3 forward = transform.Forward;
-
-Vector3 renderedPosition = transform.PresentationPosition;
-Quaternion renderedRotation = transform.PresentationRotation;
-transform.ResetPresentationInterpolation(); // Call after a teleport.
+Entity duplicate = Instantiate(Entity);
+Entity projectile = Instantiate(Projectile, Transform.Position, Transform.Rotation);
+Entity child = Projectile.Instantiate(position, rotation, Entity, active: true);
 ```
 
-Available properties:
+The entire cloned graph is registered and hydrated before callbacks. Internal entity/component references remap to
+the clone, same-scene external references stay external, and asset references remain shared. Active prefab graphs run
+their required `Awake` and `OnEnable` callbacks before instantiation returns. A binding failure rolls back the complete
+graph.
 
-| Property | Access | Space |
-| --- | --- | --- |
-| `LocalPosition` | Read/write | Parent-local |
-| `LocalRotation` | Read/write | Parent-local |
-| `LocalScale` | Read/write | Parent-local |
-| `Position` | Read/write | World |
-| `Rotation` | Read/write | World |
-| `PresentationPosition` | Read | Interpolated world presentation |
-| `PresentationRotation` | Read | Interpolated world presentation |
-| `Forward`, `Right`, `Up` | Read | Derived from world rotation |
+Prefab creation rejects references from the selected hierarchy to unrelated scene entities. Persisted 0.3.x entity
+and asset-reference records are read by the legacy state reader and normalize to tagged v2 records when next saved.
 
-`Translate` and `Rotate` accept an optional `worldSpace` flag. World setters preserve the authored parent relation by
-converting the requested value through the parent's inverse world transform.
+## Built-In Components
 
-Physics, collision, and gameplay use the authoritative `Position` and `Rotation`. Rendering and camera-follow code can
-read the presentation properties to follow fixed-step Character Controllers and dynamic bodies smoothly. Call
-`ResetPresentationInterpolation()` immediately after a teleport or other discontinuous move so the previous and
-current presentation samples snap together; ordinary continuous movement must not reset interpolation every frame.
-
-Use `Time.DeltaTime` or `Time.FixedDeltaTime` when applying rates:
-
-```csharp
-transform.LocalPosition += transform.Forward * (_speed * Time.DeltaTime);
-```
-
-## Component Queries
-
-Built-in and managed component types declare `StableComponentId`, which supports generic queries:
-
-```csharp
-if (Entity.HasComponent<AudioSourceComponent>())
-{
-    ComponentHandle source = Entity.GetComponent<AudioSourceComponent>();
-    source.Enabled = false;
-}
-```
-
-Other forms:
-
-```csharp
-ComponentTypeId type = ComponentType.Of<ColliderComponent>();
-ComponentHandle untyped = Entity.GetComponent(type);
-ComponentHandle<ColliderComponent> typed = Entity.GetComponentHandle<ColliderComponent>();
-
-if (Entity.TryGetComponent<ColliderComponent>(out ComponentHandle collider))
-    collider.Enabled = true;
-```
-
-`GetComponentHandle<T>()` creates a typed identity view even when the component is absent; check its `IsValid` property
-before using it.
-
-## Adding And Removing Components
-
-```csharp
-if (!Entity.HasComponent<AudioSourceComponent>())
-{
-    ComponentHandle added = Entity.AddComponent<AudioSourceComponent>();
-    if (!added.IsValid)
-        Debug.Error("Could not add the Audio Source.");
-}
-
-Entity.RemoveComponent<AudioSourceComponent>();
-```
-
-`AddComponent` returns an invalid handle when the operation is rejected. `RemoveComponent` and `ComponentHandle.Remove`
-return whether removal succeeded. Do not remove a component while another part of the current callback assumes it
-exists.
-
-`RequireComponent` declares a permanent type-level dependency. Adding the dependent component adds missing
-dependencies first; removing a dependency is rejected while any attached component requires it. Duplicate,
-self-referential, unresolved, and cyclic dependency graphs fail managed registration without replacing the last-good
-registry.
-
-## Accessing Managed Behaviours
-
-Retrieve another managed component on an entity:
-
-```csharp
-if (target.TryGetBehaviour<DoorController>(out DoorController? door) && door is not null)
-    door.Open();
-```
-
-The non-`Try` form returns `null` when the component is unavailable:
-
-```csharp
-DoorController? door = target.GetBehaviour<DoorController>();
-```
-
-The registry holds weak references. A returned object belongs to the current managed generation and runtime scene; do
-not retain it across reload. Store an `Entity` relationship and resolve the `Behaviour` when needed.
-
-## Cloning And Destruction
-
-Clone an existing scene entity:
-
-```csharp
-Entity clone = template.Instantiate();
-if (clone.IsValid)
-{
-    TransformHandle transform = clone.Transform;
-    transform.LocalPosition = spawnPosition;
-}
-```
-
-Request destruction:
-
-```csharp
-Entity.Destroy();
-```
-
-Destruction is deferred by the runtime. After requesting it, stop using the entity in gameplay logic even if a
-subsequent validity check in the same callback has not observed teardown yet.
-
-Prefab assets use the separate `Prefab.Instantiate` API described in [Gameplay Services](GameplayServices.md).
-
-## Built-In Component Markers
-
-Managed marker types support presence, enabled-state, add, and remove operations without exposing native component
-layout. They include:
-
-- transform, camera, mesh renderer, and animator;
-- collider, rigid body, and character controller;
-- audio source and listener;
-- VFX emitter;
-- directional, point, and spot lights;
-- canvas, rectangle transform, UI text, UI image, UI button, and UI layout.
-
-These markers are deliberately empty. System-specific state uses façades such as `Entity.Animator`,
-`Entity.AudioSource`, `RuntimeUi`, and `Vfx`.
-
-`Entity.CharacterController` is the typed movement façade. It queues collision-resolved displacement and reads the
-last grounded, ground-normal, and velocity state without exposing native physics ownership.
-
-## Safe Reference Pattern
-
-```csharp
-[SerializeField, StableFieldId("82fc175d-d1a3-421e-8b33-2d7a550345e5")]
-private Entity _target;
-
-private void ActivateTarget()
-{
-    Entity target = _target;
-    if (!target.IsValid)
-    {
-        Debug.Warn("Target is missing or no longer exists.");
-        return;
-    }
-
-    target.Active = true;
-}
-```
-
-Copy the value locally when a method performs several operations. This makes it clear that all checks and mutations
-refer to the same serialized handle.
+Kéire exposes concrete managed classes for every native registry entry: `Transform`, `Camera`, directional/point/spot
+lights, reflection/light probes, `MeshRenderer`, `Animator`, `Collider`, `RigidBody`, `CharacterController`, fixed,
+hinge, distance, and spring joints, `AudioSource`, `AudioListener`, `AudioReverbZone`, `VfxEmitter`, `Canvas`,
+`RectTransform`, and all `Ui*` scene controls. Use the component instance for entity-scoped operations.

@@ -4,6 +4,7 @@
 #include "Keire/Assets/PhysicsMaterialAsset.h"
 #include "Keire/Audio/AudioAssets.h"
 #include "Keire/Scripting/ManagedDataAsset.h"
+#include "Keire/Vfx/VfxSubgraph.h"
 #include "Keire/Vfx/VfxSystem.h"
 
 #include <doctest/doctest.h>
@@ -34,6 +35,7 @@ TEST_CASE("Built-in asset registration is deterministic and covers authored prod
     CHECK(extensions.contains(".keirephysicsmaterial"));
     CHECK(extensions.contains(".keiredata"));
     CHECK(extensions.contains(".keirevfx"));
+    CHECK(extensions.contains(".keirevfxsubgraph"));
     CHECK(extensions.contains(".mp3"));
     CHECK(extensions.contains(".aac"));
     CHECK(extensions.contains(".m4a"));
@@ -69,4 +71,6 @@ TEST_CASE("Built-in asset registration is deterministic and covers authored prod
                               { return value.Type == Keire::ManagedDataAsset::StaticType(); }));
     CHECK(std::ranges::any_of(decoders, [](const Keire::AssetDecoderRegistration& value)
                               { return value.Type == Keire::VfxEffectAsset::StaticType(); }));
+    CHECK(std::ranges::any_of(decoders, [](const Keire::AssetDecoderRegistration& value)
+                              { return value.Type == Keire::VfxSubgraphAsset::StaticType(); }));
 }

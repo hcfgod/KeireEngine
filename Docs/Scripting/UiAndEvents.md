@@ -31,7 +31,7 @@ private UiInputField? _profileName;
 `UiButton`, `UiSlider`, `UiToggle`, `UiInputField`, and `UiScrollView` are managed reference types and may be `null`.
 Their `IsValid` properties also verify that the entity still has the corresponding native component.
 
-This differs from `AssetReference<T>`, which is a value type and uses only `.IsValid`.
+Direct asset and scene-object references are likewise `null` when unassigned and expose `IsValid` once resolved.
 
 ## Button Events
 
@@ -120,7 +120,7 @@ D-pad/accept/cancel are routed through the retained UI tree. Input-field length 
 the native and managed contracts remain identical.
 
 The Inspector exposes accessibility label, hint, semantic role, and explicit navigation order through the
-`UiAccessibilityComponent`. Navigation order is stable; equal or automatic values retain scene order.
+`UiAccessibility`. Navigation order is stable; equal or automatic values retain scene order.
 
 ## Polling UI
 
@@ -290,7 +290,7 @@ public sealed class PauseMenu : Behaviour
     private UiButton? _resumeButton;
 
     [SerializeField, StableFieldId("c90f0583-8c4f-418d-a159-4b014b1efeed")]
-    private AssetReference<AudioClip> _toggleSound;
+    private AudioClip? _toggleSound;
 
     [SerializeField, StableFieldId("98f8428b-f8e9-4621-b280-f2a3cd5fe153")]
     private KeireEvent _opened = new();

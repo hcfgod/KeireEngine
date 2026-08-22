@@ -70,3 +70,54 @@ internal static unsafe class NativeAssets
 
     private static InvalidOperationException Unbound() => new("Kéire managed asset services are not attached.");
 }
+
+[StableAssetTypeId("4b454952-4542-494e-4152-590000000001")]
+public sealed class BinaryAsset : Asset;
+
+[StableAssetTypeId("4b454952-4554-4558-5441-535345540001")]
+public sealed class TextAsset : Asset;
+
+[StableAssetTypeId("4b454952-4549-4e50-5554-414354494f01")]
+public sealed class InputActionAsset : Asset;
+
+[StableAssetTypeId("4b454952-4553-4b45-4c45-544f4e000001")]
+public sealed class Skeleton : Asset;
+
+[StableAssetTypeId("4b454952-4553-4b49-4e4d-455348000001")]
+public sealed class SkinnedMesh : Asset;
+
+[StableAssetTypeId("4b454952-4541-4e49-4d53-4f5552434501")]
+public sealed class AnimationSource : Asset;
+
+[StableAssetTypeId("4b454952-4541-5641-5441-524d41534b01")]
+public sealed class AvatarMask : Asset;
+
+[StableAssetTypeId("4b454952-4552-4947-4445-460000000001")]
+public sealed class RigDefinition : Asset;
+
+[StableAssetTypeId("4b454952-4550-524f-434d-4f54494f4e01")]
+public sealed class ProceduralMotionProfile : Asset;
+
+[StableAssetTypeId("4b454952-454c-5441-5252-415900000001")]
+public sealed class LightingTextureArray : Asset;
+
+[StableAssetTypeId("4b454952-454c-5056-4153-534554000001")]
+public sealed class LightProbeData : Asset;
+
+[StableAssetTypeId("4b454952-454c-5345-5441-535345540001")]
+public sealed class LightingSet : Asset;
+
+[StableAssetTypeId("4b454952-454d-4655-4e43-54494f4e0001")]
+public sealed class MaterialFunction : Asset;
+
+[StableAssetTypeId("4b454952-4553-4655-4e43-54494f4e0001")]
+public sealed class ShaderFunction : Asset;
+
+[StableAssetTypeId("4b454952-454d-4c41-5945-520000000001")]
+public sealed class MaterialLayer : Asset;
+
+[StableAssetTypeId("4b454952-454d-4c42-4c45-4e4400000001")]
+public sealed class MaterialLayerBlend : Asset;
+
+[StableAssetTypeId("4b454952-4556-4658-5355-424752410001")]
+public sealed class VfxSubgraph : Asset;

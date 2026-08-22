@@ -209,7 +209,7 @@ internal static unsafe class NativeRuntimeRendering
             throw Unchanged(component, property);
     }
 
-    internal static IReadOnlyList<AssetReference<Material>> GetMaterials(Entity entity)
+    internal static IReadOnlyList<Material> GetMaterials(Entity entity)
     {
         int count = GetMaterialsIcall(entity.Id.High, entity.Id.Low, null, 0);
         if (count < 0)
@@ -220,10 +220,10 @@ internal static unsafe class NativeRuntimeRendering
             if (GetMaterialsIcall(entity.Id.High, entity.Id.Low, destination, values.Length) != count)
                 throw new InvalidOperationException("The Mesh Renderer materials changed while they were read.");
         }
-        return values.Select(static value => new AssetReference<Material>(value)).ToArray();
+        return values.Select(static value => Asset.FromId<Material>(value)).OfType<Material>().ToArray();
     }
 
-    internal static void SetMaterials(Entity entity, IReadOnlyList<AssetReference<Material>> materials)
+    internal static void SetMaterials(Entity entity, IReadOnlyList<Material> materials)
     {
         ArgumentNullException.ThrowIfNull(materials);
         if (materials.Count > 256)

@@ -2,7 +2,7 @@ using System.Text;
 
 namespace Keire;
 
-public sealed class SceneAsset;
+public sealed class SceneAsset : Asset;
 
 public enum SceneLoadMode : byte
 {
@@ -19,27 +19,29 @@ public enum SceneLoadState : byte
     Cancelled
 }
 
-public readonly record struct SceneHandle(AssetId Asset)
+public sealed class Scene : EngineObject, IEquatable<Scene>
 {
-    public SceneHandle(AssetId asset, ulong id) : this(asset) => Id = id;
+    internal Scene(SceneAsset asset, ulong id) => (Asset, Id) = (asset, id);
 
-    public ulong Id { get; init; }
+    public SceneAsset Asset { get; }
+    public ulong Id { get; }
 
-    public bool IsValid => Asset.IsValid;
-    public bool HasStableIdentity => IsValid && Id != 0;
+    public override bool IsValid => Asset.IsValid && Id != 0 && IsLoaded;
+    public bool HasStableIdentity => Asset.IsValid && Id != 0;
     public bool IsLoaded
     {
         get
         {
-            AssetId asset = Asset;
-            return HasStableIdentity
-                ? SceneManager.LoadedScenes.Contains(this)
-                : IsValid && SceneManager.LoadedScenes.Any(scene => scene.Asset == asset);
+            return HasStableIdentity && SceneManager.LoadedScenes.Contains(this);
         }
     }
     public bool IsActive => HasStableIdentity
         ? SceneManager.ActiveScene == this
-        : IsValid && SceneManager.ActiveScene.Asset == Asset;
+        : false;
+
+    public bool Equals(Scene? other) => other is not null && Id == other.Id && Asset == other.Asset;
+    public override bool Equals(object? value) => value is Scene other && Equals(other);
+    public override int GetHashCode() => HashCode.Combine(Asset, Id);
 }
 
 public enum SceneQueryScope : byte
@@ -52,16 +54,16 @@ public enum SceneQueryScope : byte
 
 public readonly record struct SceneQuery
 {
-    private SceneQuery(SceneQueryScope scope, SceneHandle scene) => (Scope, Scene) = (scope, scene);
+    private SceneQuery(SceneQueryScope scope, Scene? scene) => (Scope, Scene) = (scope, scene);
 
     public SceneQueryScope Scope { get; }
-    public SceneHandle Scene { get; }
+    public Scene? Scene { get; }
 
-    public static SceneQuery Active => new(SceneQueryScope.Active, default);
-    public static SceneQuery Loaded => new(SceneQueryScope.Loaded, default);
-    public static SceneQuery Persistent => new(SceneQueryScope.Persistent, default);
+    public static SceneQuery Active => new(SceneQueryScope.Active, null);
+    public static SceneQuery Loaded => new(SceneQueryScope.Loaded, null);
+    public static SceneQuery Persistent => new(SceneQueryScope.Persistent, null);
 
-    public static SceneQuery In(SceneHandle scene)
+    public static SceneQuery In(Scene scene)
     {
         if (!scene.HasStableIdentity)
             throw new ArgumentException("A specific scene query requires a valid loaded-scene handle.", nameof(scene));
@@ -78,7 +80,7 @@ public sealed class SceneLoadOperation : CustomYieldInstruction
 
     private NativeSceneLoadStatus Status => NativeWorld.GetSceneLoadStatus(_operation);
 
-    public SceneHandle Scene => new(Status.Scene, Status.Handle);
+    public Scene? Scene => Status.Handle == 0 ? null : new Scene(Asset.FromId<SceneAsset>(Status.Scene)!, Status.Handle);
     public SceneLoadMode Mode => (SceneLoadMode)Status.Mode;
     public SceneLoadState State => (SceneLoadState)Status.State;
     public float Progress => Status.Progress;
@@ -92,10 +94,10 @@ public sealed class SceneLoadOperation : CustomYieldInstruction
 
 public static class SceneManager
 {
-    public static SceneHandle ActiveScene => NativeWorld.GetActiveScene();
-    public static IReadOnlyList<SceneHandle> LoadedScenes => NativeWorld.GetLoadedScenes();
+    public static Scene? ActiveScene => NativeWorld.GetActiveScene();
+    public static IReadOnlyList<Scene> LoadedScenes => NativeWorld.GetLoadedScenes();
 
-    public static Entity FindByName(string name) => FindAllByName(name, 1).FirstOrDefault();
+    public static Entity? FindByName(string name) => FindAllByName(name, 1).FirstOrDefault();
 
     public static IReadOnlyList<Entity> FindAllByName(string name, int maximumResults = 256)
         => FindAllByName(name, SceneQuery.Active, maximumResults);
@@ -110,7 +112,7 @@ public static class SceneManager
         return NativeWorld.QueryEntityNames(name, query, maximumResults);
     }
 
-    public static Entity FindWithTag(string tag) => FindAllWithTag(tag, 1).FirstOrDefault();
+    public static Entity? FindWithTag(string tag) => FindAllWithTag(tag, 1).FirstOrDefault();
 
     public static IReadOnlyList<Entity> FindAllWithTag(string tag, int maximumResults = 256)
         => FindAllWithTag(tag, SceneQuery.Active, maximumResults);
@@ -133,7 +135,7 @@ public static class SceneManager
         return NativeWorld.QueryEntityComponents(ComponentType.Of<T>(), query, maximumResults);
     }
 
-    public static SceneLoadOperation LoadSceneAsync(AssetReference<SceneAsset> scene,
+    public static SceneLoadOperation LoadSceneAsync(SceneAsset scene,
                                                      SceneLoadMode mode = SceneLoadMode.Single) =>
         LoadSceneAsync(scene.Id, mode);
 
@@ -149,14 +151,14 @@ public static class SceneManager
         return new SceneLoadOperation(operation);
     }
 
-    public static bool UnloadScene(SceneHandle scene)
+    public static bool UnloadScene(Scene scene)
     {
         if (!scene.HasStableIdentity)
             return false;
         return NativeWorld.UnloadScene(scene);
     }
 
-    public static bool SetActiveScene(SceneHandle scene)
+    public static bool SetActiveScene(Scene scene)
     {
         if (!scene.HasStableIdentity)
             return false;
@@ -165,7 +167,7 @@ public static class SceneManager
 
     public static bool Preserve(Entity entity)
     {
-        if (entity.World == 0 || !entity.Id.IsValid)
+        if (entity is null || entity.World == 0 || !entity.Id.IsValid)
             return false;
         return NativeWorld.MakeEntityPersistent(entity);
     }
@@ -173,7 +175,8 @@ public static class SceneManager
     private static void ValidateQuery(SceneQuery query)
     {
         if (!Enum.IsDefined(query.Scope) ||
-            (query.Scope == SceneQueryScope.Specific ? !query.Scene.HasStableIdentity : query.Scene.Id != 0))
+            (query.Scope == SceneQueryScope.Specific ? query.Scene is null || !query.Scene.HasStableIdentity
+                                                     : query.Scene is not null))
             throw new ArgumentException("The scene query scope and handle are inconsistent.", nameof(query));
     }
 
@@ -203,7 +206,7 @@ public readonly record struct RenderEnvironmentSettings
     public Color AmbientColor { get; init; }
     public float AmbientIntensity { get; init; }
     public float Exposure { get; init; }
-    public AssetReference<Texture> Environment { get; init; }
+    public Texture? Environment { get; init; }
     public float EnvironmentRotationDegrees { get; init; }
     public float EnvironmentDiffuseIntensity { get; init; }
     public float EnvironmentSpecularIntensity { get; init; }
@@ -244,7 +247,7 @@ public static class RenderSettings
         set => Current = Current with { Exposure = value };
     }
 
-    public static AssetReference<Texture> Environment
+    public static Texture? Environment
     {
         get => Current.Environment;
         set => Current = Current with { Environment = value };

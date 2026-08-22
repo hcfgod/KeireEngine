@@ -25,14 +25,6 @@ internal static class ManagedObjectSerializer
         public void SetValue(object owner, object? value) => fieldInfo.SetValue(owner, value);
     }
 
-    private sealed class SerializableProperty(PropertyInfo property) : ISerializableMember
-    {
-        public string Name => property.Name;
-        public Type ValueType => property.PropertyType;
-        public object? GetValue(object owner) => property.GetValue(owner);
-        public void SetValue(object owner, object? value) => property.SetValue(owner, value);
-    }
-
     private sealed class CloneContext
     {
         public readonly HashSet<object> Active = new(ReferenceEqualityComparer.Instance);
@@ -152,13 +144,10 @@ internal static class ManagedObjectSerializer
     {
         RejectUnsupportedContainer(declaredType, path);
 
-        if (typeof(ScriptableObject).IsAssignableFrom(declaredType))
-            throw Unsupported(declaredType, path, "inline ScriptableObjects must use AssetReference<T>");
-
-        if (IsImmutableValue(declaredType))
+        if (typeof(EngineObject).IsAssignableFrom(declaredType))
             return value;
 
-        if (IsAssetReference(declaredType))
+        if (IsImmutableValue(declaredType))
             return value;
 
         if (declaredType.IsEnum)
@@ -288,15 +277,6 @@ internal static class ManagedObjectSerializer
                 members.Add((depth, field.MetadataToken, new SerializableField(field)));
             }
 
-            foreach (PropertyInfo property in current.GetProperties(flags))
-            {
-                bool serialized = (property.GetMethod?.IsPublic == true && property.SetMethod?.IsPublic == true) ||
-                                  property.IsDefined(typeof(SerializeFieldAttribute), true);
-                if (!serialized || property.GetIndexParameters().Length != 0 || property.GetMethod is null ||
-                    property.SetMethod is null)
-                    continue;
-                members.Add((depth, property.MetadataToken, new SerializableProperty(property)));
-            }
         }
 
         return members.OrderByDescending(member => member.Depth).ThenBy(member => member.Token)
@@ -313,8 +293,9 @@ internal static class ManagedObjectSerializer
 
     private static void ValidateSerializableShape(Type type, string path)
     {
-        if (!type.IsDefined(typeof(SerializableTypeAttribute), false))
-            throw Unsupported(type, path, "inline types must declare SerializableType");
+        if (!type.IsDefined(typeof(SerializableAttribute), false) &&
+            !type.IsDefined(typeof(SerializableTypeAttribute), false))
+            throw Unsupported(type, path, "inline types must declare Serializable");
         if (type.IsInterface || type.IsAbstract)
             throw Unsupported(type, path, "abstract and interface inline values are not supported");
     }
@@ -329,20 +310,10 @@ internal static class ManagedObjectSerializer
     private static void ValidateElementType(Type type, string path)
     {
         RejectUnsupportedContainer(type, path);
-        if (typeof(ScriptableObject).IsAssignableFrom(type))
-            throw Unsupported(type, path, "inline ScriptableObjects must use AssetReference<T>");
-        if (IsImmutableValue(type) || IsAssetReference(type) || type.IsEnum)
+        if (typeof(EngineObject).IsAssignableFrom(type) || IsImmutableValue(type) || type.IsEnum)
             return;
-        if (type.IsArray)
-        {
-            ValidateArrayType(type, path);
-            return;
-        }
-        if (IsList(type, out Type? elementType))
-        {
-            ValidateElementType(elementType, $"{path}[]");
-            return;
-        }
+        if (type.IsArray || IsList(type, out _))
+            throw Unsupported(type, path, "nested collection containers are not supported");
         ValidateSerializableShape(type, path);
     }
 
@@ -356,9 +327,6 @@ internal static class ManagedObjectSerializer
         elementType = null!;
         return false;
     }
-
-    private static bool IsAssetReference(Type type) =>
-        type.IsGenericType && type.GetGenericTypeDefinition() == typeof(AssetReference<>);
 
     private static bool IsImmutableValue(Type type) =>
         type == typeof(bool) || type == typeof(sbyte) || type == typeof(byte) ||

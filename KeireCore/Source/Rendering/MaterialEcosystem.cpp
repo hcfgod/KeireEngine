@@ -585,6 +585,39 @@ namespace Keire
         return m_Impl->Values;
     }
 
+    MaterialNumericUniformSnapshot MaterialParameterCollectionState::NumericUniformSnapshot() const
+    {
+        std::shared_lock lock(m_Impl->Mutex);
+        if (m_Impl->Closed)
+            throw std::logic_error("Material Parameter Collection state is closed.");
+        MaterialNumericUniformSnapshot result;
+        result.Revision = m_Impl->Revision.load(std::memory_order_relaxed);
+        result.Values.reserve(m_Impl->Definition.Parameters.size());
+        for (const auto& parameter : m_Impl->Definition.Parameters)
+        {
+            const auto& value = m_Impl->Values.at(parameter.Id);
+            result.Values.push_back(std::visit(
+                [](const auto& typed) -> Vector4
+                {
+                    using T = std::decay_t<decltype(typed)>;
+                    if constexpr (std::same_as<T, float>)
+                        return {typed, 0.0F, 0.0F, 0.0F};
+                    else if constexpr (std::same_as<T, Vector2>)
+                        return {typed.X, typed.Y, 0.0F, 0.0F};
+                    else if constexpr (std::same_as<T, Vector3>)
+                        return {typed.X, typed.Y, typed.Z, 0.0F};
+                    else if constexpr (std::same_as<T, Vector4>)
+                        return typed;
+                    else if constexpr (std::same_as<T, Color>)
+                        return {typed.Red, typed.Green, typed.Blue, typed.Alpha};
+                    else
+                        throw std::logic_error("Material Parameter Collection contains a non-numeric value.");
+                },
+                value));
+        }
+        return result;
+    }
+
     std::uint64_t MaterialParameterCollectionState::Revision() const noexcept
     {
         return m_Impl->Revision.load(std::memory_order_acquire);

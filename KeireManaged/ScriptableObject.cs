@@ -2,11 +2,12 @@ using System.Runtime.ExceptionServices;
 
 namespace Keire;
 
-public abstract class ScriptableObject
+public abstract class ScriptableObject : Asset
 {
     private Guid _runtimeInstanceId = Guid.NewGuid();
     private object _lifecycleGate = new();
     private LifecycleState _lifecycleState;
+    private bool _destroyed;
 
     private enum LifecycleState
     {
@@ -17,8 +18,10 @@ public abstract class ScriptableObject
     }
 
     public Guid RuntimeInstanceId => _runtimeInstanceId;
-    public string Name { get; set; } = string.Empty;
+    public override bool IsValid => !_destroyed;
+    public override string Name { get; set; } = string.Empty;
 
+    protected virtual void Awake() { }
     protected virtual void OnEnable() { }
     protected virtual void OnDisable() { }
     protected virtual void OnValidate() { }
@@ -29,6 +32,7 @@ public abstract class ScriptableObject
         bool enabled = false;
         try
         {
+            value.Awake();
             enabled = value.Enable();
             value.OnValidate();
         }
@@ -43,6 +47,7 @@ public abstract class ScriptableObject
     {
         ArgumentNullException.ThrowIfNull(source);
         var clone = ManagedObjectSerializer.Clone(source);
+        clone.Awake();
         clone.Enable();
         return clone;
     }
@@ -52,8 +57,11 @@ public abstract class ScriptableObject
     internal void RuntimeHydrateManagedData(string document) =>
         ManagedDataHydrator.Restore(this, document);
 
-    internal bool RuntimeRegisterManagedAsset(ulong generation, ulong high, ulong low) =>
-        NativeRuntime.RegisterManagedAsset(generation, high, low, this);
+    internal bool RuntimeRegisterManagedAsset(ulong generation, ulong high, ulong low)
+    {
+        BindAsset(new AssetId(high, low));
+        return NativeRuntime.RegisterManagedAsset(generation, high, low, this);
+    }
 
     internal bool RuntimeReloadManagedAsset(ulong generation, ulong high, ulong low) =>
         NativeRuntime.ReloadManagedAsset(generation, high, low, this);
@@ -112,6 +120,15 @@ public abstract class ScriptableObject
         _runtimeInstanceId = Guid.NewGuid();
         _lifecycleGate = new object();
         _lifecycleState = LifecycleState.Disabled;
+        _destroyed = false;
+    }
+
+    internal void DestroyTransient()
+    {
+        if (IsPersistent)
+            throw new InvalidOperationException("Persistent ScriptableObject assets cannot be destroyed at runtime.");
+        Disable();
+        _destroyed = true;
     }
 
     private static void RollBackActivation(ScriptableObject value, bool enabled, Exception exception)

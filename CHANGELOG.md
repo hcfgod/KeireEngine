@@ -5,14 +5,69 @@ versions.
 
 ## Unreleased
 
+## 0.4.0 - 2026-08-21
+
+### Breaking: Unity-shaped C# scripting API
+
+- Replaced public managed handles and marker components with canonical `EngineObject`, `Entity`, `Component`,
+  `Behaviour`, and `Asset` reference objects. `Entity` and every supported native component now expose direct
+  Unity-shaped lookup, hierarchy, mutation, cloning, activation, and delayed-destruction APIs; component operations
+  live on `AudioSource`, `Animator`, `VfxEmitter`, renderer, light, camera, physics, joint, and scene-UI instances.
+- Replaced `AssetReference<T>`, `PrefabAsset`, `SceneHandle`, `JobHandle`, `AssetHandle<T>`, material-instance handles,
+  and material-collection handles with direct asset objects, `Prefab`, `Scene`, `Job`, `AssetLoadOperation<T>`,
+  `DynamicMaterial`, and `MaterialParameterCollectionInstance`. Runtime UI overlay objects use `RuntimeUi*` names so
+  `UiText`, `UiImage`, `UiButton`, and their peers unambiguously name entity components.
+- Added managed-state format v2 with tagged entity, component/behaviour, native asset, prefab, scene, and persistent
+  `ScriptableObject` references. References work recursively in supported `[Serializable]` objects, arrays, and
+  `List<T>` values; the v1 entity and asset-reference reader remains available and normalizes content on its next save.
+- Inspector fields now follow C# field eligibility: public instance fields and non-public instance fields marked
+  `[SerializeField]` are serialized; static, const, readonly, property, and plain private fields are ignored. Entity,
+  component, behaviour, prefab, scene, native asset, and ScriptableObject fields accept compatible hierarchy,
+  component-header, and project drags with missing-reference preservation, undo/redo, and Play Mode Changes support.
+- Scene and prefab graph binding is transactional and reference-aware. The complete graph is registered and hydrated
+  before `Awake`; active additions and instantiation run `Awake`/`OnEnable` before returning, inactive entities defer
+  `Awake`, `Start` runs before the first enabled update, and destruction commits after the current update traversal.
+- Migrated the Sandbox, Hub starter template, SDK consumer, managed API probes, and scripting documentation. This is a
+  source-breaking API: old C# handle, marker, `GetComponentHandle`, `GetBehaviour`, and static prefab call sites must be
+  updated, while persisted 0.3.x scenes and managed data continue to load through the legacy reader.
+
+- Unified editable Shader, Material, and VFX graph selection around an ordered multi-selection and primary item.
+  Graphs now support Ctrl-toggle, additive marquee, Ctrl+A, group dragging, protected-anchor diagnostics, and atomic
+  multi-node deletion with one undo operation; Audio Mixer and Animator retain their existing single-selection model.
+- Added shared editor-only graph authoring metadata with bounded canonical serialization for node annotations and
+  nested comment regions. Comments support selection or empty creation, title/description/color/alpha/font editing,
+  resize, group or visual-only movement, automatic membership updates, container-only deletion, and collapsed
+  topology-preserving presentation with typed boundary summaries.
+- Added the schema-4 renderer-neutral Shader Graph resource contract for explicit portable sampler values,
+  Texture2D-array/cube/3D references, and bounded read-only structured/byte-address buffer views. Source/cooked graph
+  round trips, HLSL declarations, manifest reflection counts, dependency extraction, and typed material overrides are
+  validated; runtime import rejects these resources until matching cross-platform GPU asset/binding backends ship.
+- Added deterministic quality-tier/keyword variant pruning, enforceable graph-analysis and per-node preview request
+  bounds, plus ordered Material Parameter Collection snapshots and a numeric-uniform cache that coalesces dirty ranges.
+- Added pinned and zoom-scaled node comment bubbles, selection framing (`F`), graph framing (`Shift+F`), bookmarks,
+  diagnostic navigation, mixed-selection inspection, and align/distribute/straighten commands. Ctrl+C/X/V uses a
+  bounded, versioned canonical fragment format and remaps node, pin, block, cable, comment, and annotation identities;
+  Ctrl+D duplication shares the same topology-preserving, offset, single-transaction behavior.
+- Advanced Shader Graph and Material Graph source schemas from 3 to 4 and VFX source schema from 4 to 5. Historical
+  sources migrate in memory, explicit publication writes the current schema, future schemas fail before mutation, and
+  authoring-only metadata remains outside generated shader and runtime material ABIs.
+- Added the public schema-1 `VfxSubgraphDefinition`, `VfxSubgraphPurpose`, typed boundary ports, immutable
+  `VfxSubgraphAsset`, and `.keirevfxsubgraph` importer/decoder registration. Operator, Block, and complete System
+  bodies receive purpose-specific validation, stable dependency discovery, bounded decoding, and direct-recursion
+  rejection.
+- Added deterministic runtime expansion for Operator, ordered Block, and complete System VFX Subgraphs. Expansion
+  remaps instance identities, rejects missing assets, purpose drift, indirect cycles, and bounded-depth overflow, and
+  is consumed transactionally by CPU and GPU VFX activation/reload through an explicit dependency resolver.
+- Renamed the VFX migration entry point to `MigrateVfxEffectToCurrentSchema`; retained
+  `MigrateVfxEffectToSchema4` as a source-compatible 0.3.x alias.
+
 - Audited every first-party documentation and website surface against current schemas, APIs, release artifacts,
   Marketplace publication, parity ledgers, and rendered navigation. Corrected website headings, metadata, roadmap and
   readiness labels, static guide counts, and stale capability claims; added cross-source drift checks and a weighted
   production-readiness review that records the current rendered-output compile blocker without weakening release claims.
 - Refresh the Asset Tool and player-runtime managed hosts when editor or Hub builds compile those executable
   dependencies, preventing packaged gameplay builds from using a stale managed API assembly.
-- Add the public `PrefabAsset` managed marker so serialized prefab references retain their native stable asset type
-  through strict player-build discovery.
+- Added strict player-build discovery for direct `Prefab` asset references.
 
 - Fixed Editor Play Mode startup with the multi-scene runtime by activating the cloned runtime scene before adopting
   its session into the runtime world.
@@ -20,13 +75,13 @@ versions.
   Coral/.NET host before strict managed type discovery, and by staging the same host in every packaged-player template.
   Project type catalogs now exclude Kéire's private managed API self-test types and accept repeated instances of the
   same nested serializable type without weakening duplicate-ID rejection between distinct fields.
-- Added explicit typed C# residency handles for native Audio, VFX, Material, Shader/Material Graph, and rendering
+- Added explicit typed C# residency operations for native Audio, VFX, Material, Shader/Material Graph, and rendering
   assets. Managed code can now request load priority, yield or await readiness, inspect fallback/revision/structured
   failure state, and deterministically release a generation-scoped lease without receiving a native resource object.
   The packaged managed consumer compiles the new presentation-asset surface against the shipped managed assembly.
   GPU VFX signature validation also rejects out-of-range opcodes through an explicit portable fallback, and streaming
   SHA-256 finalization now enforces its buffered-byte invariant in optimized builds.
-- Added stable runtime scene handles, additive load/unload/activation, explicit active/loaded/specific/persistent query
+- Added stable runtime `Scene` objects, additive load/unload/activation, explicit active/loaded/specific/persistent query
   scopes, and hierarchy-root persistence across scene transitions. Packaged runtime and Editor Play Mode now share the
   same multi-scene lifecycle and managed C# API while single-scene activation remains transactional.
 - Added consistent Unity-style managed Inspector controls for `Behaviour` and managed-data members: true `[Range]`
@@ -43,7 +98,7 @@ versions.
   Windows fast checks fall back to `git grep` when `rg` is unavailable, and the strict
   GCC/Clang/TSan/coverage warnings exposed by the hosted matrix are clean. Cleared the clang-tidy, ShellCheck, and
   pinned Ruff blockers exposed after the earlier failures were fixed.
-- Added managed per-material-slot Dynamic Material Instance handles and world-owned global Material Parameter
+- Added managed per-material-slot `DynamicMaterial` objects and world-owned global Material Parameter
   Collections. Global defaults and hot-reload-compatible overrides now feed numeric, vector, color, and texture graph
   bindings before renderer-wide and slot-specific values, with bounded deterministic precedence and no mutable GPU
   handles exposed to C#.
@@ -58,11 +113,11 @@ versions.
   composite target, and platforms without joystick support reject rumble without affecting keyboard or mouse input.
 - Added managed capsule casts and deterministic bounded sphere overlaps with finite-input validation, trigger and layer
   filtering, native ignored-body resolution, stable scene entity results, and matching Editor Play support.
-- Added managed active/loaded scene handles and coroutine-compatible packaged-player scene replacement with bounded
+- Added managed active/loaded `Scene` objects and coroutine-compatible packaged-player scene replacement with bounded
   status, progress, cancellation, diagnostics, camera validation, and activation rollback that keeps the previous
   runtime live on failure. Added atomic transient render-environment controls for ambient lighting, exposure,
   environment textures, sky visibility, and directional shadows without mutating project settings.
-- Added managed Camera, Mesh Renderer, and directional/point/spot light handles with typed mesh, material, texture, and
+- Added managed Camera, Mesh Renderer, and directional/point/spot light components with typed mesh, material, texture, and
   shader asset references. Material-slot replacement is transactional, and bounded per-renderer material property
   blocks now drive matching numeric, vector, color, and texture bindings from Material/Shader Graph without mutating
   shared material assets or serializing transient runtime overrides.

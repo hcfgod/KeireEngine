@@ -571,17 +571,18 @@ pointers. Managed physics queries are routed through the application-owned runti
 while the Play adapter owns the isolated physics world and tears it down before the runtime scene closes.
 
 The same boundary owns entity names, active-in-hierarchy state, hierarchy traversal, component registration lookup,
-enabled state, and deferred component mutations. Managed native-component classes are stable-ID markers whose
-`ComponentHandle<T>` values contain only world, entity, and component identities. Managed Behaviour lookup is resolved
-from a generation-local weak registry, so one Behaviour can reference another without retaining an obsolete load
-context after hot reload.
+enabled state, and deferred component mutations. Managed `Entity` and concrete `Component` wrappers are canonical for
+one runtime generation, carry only stable identity, and become non-null invalid objects after destruction. Managed
+Behaviour lookup is resolved from a generation-local weak registry, so one Behaviour can reference another without
+retaining an obsolete load context after hot reload.
 
-Managed field discovery projects primitives, enums, entities, typed asset references, and bounded nested
-`[SerializableType]` members into ordinary `ComponentProperty` descriptors. Stable field IDs remain the serialized
+Managed field discovery projects primitives, enums, direct engine-object references, and bounded nested
+`[Serializable]` members into ordinary `ComponentProperty` descriptors. Stable field IDs remain the serialized
 identity while dotted property paths address nested Inspector leaves. Validated display labels, headers, groups,
 tooltips, slider intent, one-sided bounds, drag steps, multiline height, and read-only state flow through the same
 descriptor path used by native components and managed data assets. Canonical state JSON stores entity IDs without runtime-world
-identity; restoration rebinds them to the owning Behaviour's current world before lifecycle callbacks run.
+identity. Tagged state-v2 references record entity identity, concrete component type, or stable asset identity;
+restoration rebinds scene objects to the destination world before any lifecycle callback runs.
 
 Audio playback crosses `IScriptRuntimeServices` as a value request containing the validated clip asset ID, output bus,
 gain, pitch, priority, loop/spatial flags, and attenuation distances. The Play adapter creates or updates the scene
@@ -907,6 +908,14 @@ host runtime format plus SPIR-V reflection, while ordinary asset imports continu
 format. CPU preview jobs own immutable graph/property snapshots, are canceled by a shared generation token, publish a
 quick reduced-resolution image first, and refine only when the graph remains unchanged; UI resources are created only
 on the editor thread.
+
+Schema-4 Shader Graphs may carry an independently versioned renderer-neutral resource contract. It preserves portable
+sampler values, array/cube/3D texture references, and aligned bounded read-only buffer views; validation shares graph
+identity/symbol and sampler limits, generated manifests retain reflection counts, and dependency cooking includes every
+referenced resource. Offline HLSL declaration generation is explicit. Runtime Shader Graph import fails closed while
+generic GPU texture-dimension and material storage-buffer assets/bindings remain unavailable, so portable schema support
+cannot be mistaken for backend realization. Material Parameter Collections expose ordered revision-matched numeric
+snapshots, and a renderer-neutral cache converts stable extents into coalesced dirty ranges without owning GPU memory.
 
 Windowing translates SDL drop sessions into an engine-owned event containing only opaque window identity, logical
 position, and filesystem paths. Editor hit-test adapters resolve Project folders or the Scene viewport. External import
@@ -1234,7 +1243,7 @@ Character movement queues value displacements from scripts and consumes them at 
 uses closest-hit capsule casts with the controller body excluded, skin padding, bounded sweep/slide iterations,
 walkable-normal tests, and an up/forward/down stair transaction. Authored capsule height is total tip-to-tip height;
 Jolt receives the derived cylinder half-height. Ground state and resolved velocity are copied back to the component
-after stepping. Managed code receives only values through `CharacterControllerHandle`; no Jolt shape or body handle
+after stepping. Managed code receives only values through the concrete `CharacterController`; no Jolt shape or body handle
 crosses the scripting boundary.
 
 Character Controllers and dynamic rigid bodies retain previous/current authoritative world samples after physics.
@@ -1250,10 +1259,10 @@ does not introduce a job-system or physics ownership dependency into Transform.
 instances, and the native call bridge. Private `ManagedSdk` support owns persisted SDK selection and cross-platform
 dotnet discovery, keeping filesystem and process-environment policy out of the runtime implementation. Configuration
 writes preserve unrelated scripting settings, and custom SDK resolution requires a .NET 10 SDK before it can become an
-active build dependency. Managed Behaviours own a phase-aware coroutine scheduler. Coroutine handles are
+active build dependency. Managed Behaviours own a phase-aware coroutine scheduler. Coroutine tokens are
 generation-local values, nested iterators are disposed in LIFO order, and disable, destruction, or reload stops all
-pending routines. Transform handles support parent-aware world setters, while the Rigid Body handle maps validated value
-properties and force modes through internal calls; neither API exposes an ECS component pointer or physics body handle.
+pending routines. Concrete `Transform` and `RigidBody` objects support parent-aware world setters and validated force
+modes through internal calls; neither API exposes an ECS component pointer or physics body handle.
 The reflected ECS component adapter is compiled separately as `ManagedBehaviourComponent`. It retains only a weak
 callback table and value IDs, so components become inert when `ScriptSystem` closes without exposing Coral objects or
 the runtime implementation. Creation, callback invocation, state capture/restore, and exception-preserving destruction
@@ -1293,11 +1302,11 @@ while `ScriptSystem` hydrates objects in generation order and transactionally re
 generation on failure. Asset-only reload copies supported serialized state into the active object so cached managed
 references retain identity.
 
-Native presentation assets cross the managed boundary as `AssetReference<T>` values plus optional explicit residency
-leases. `ManagedRuntimeApplicationServices` owns a bounded token table whose entries retain ordinary untyped
-`AssetHandle<Asset>` values requested with the marker's stable native type ID. The bridge publishes only state,
+Native presentation assets cross the managed boundary as canonical `Asset` subclasses plus optional explicit
+`AssetLoadOperation<T>` residency leases. `ManagedRuntimeApplicationServices` owns a bounded token table whose entries retain ordinary untyped
+`AssetHandle<Asset>` values requested with the direct asset's stable native type ID. The bridge publishes only state,
 fallback use, revision, and a copied diagnostic; it never publishes an `Asset`, decoder, or graphics/audio resource.
-Managed `AssetHandle<T>.Dispose` removes one token idempotently, application unbind clears the table, and retiring a
+Managed `AssetLoadOperation<T>.Dispose` removes one token idempotently, application unbind clears the table, and retiring a
 script generation releases all tokens tagged with that generation before the collectible context is discarded.
 
 Strict cooking builds and loads runtime managed assemblies before decoding the managed type catalog and validating
@@ -1342,8 +1351,8 @@ the listener in local space, so entity rotation and non-uniform scale affect the
 selected by priority and blend weight. Native spatial voices use the authored distance curve for both audibility
 virtualization and output gain while miniaudio retains speaker positioning and Doppler behavior.
 
-The managed API exposes transactional `AudioSourceHandle`, `AudioListenerHandle`, and `AudioReverbZoneHandle` value
-surfaces. Managed and native boundaries validate routing identities, gains, pitch, distance ranges, priorities, shapes,
+The managed API exposes transactional `AudioSource`, `AudioListener`, and `AudioReverbZone` component objects.
+Managed and native boundaries validate routing identities, gains, pitch, distance ranges, priorities, shapes,
 volume dimensions, blend distances, and wet levels before mutating a component. The Profiler reports device format,
 fallback state, voice capacity and virtualization, mixer/effect counts, listener selection, active zones, pending
 assets, per-voice state, and bounded peak/RMS/clipping readings.

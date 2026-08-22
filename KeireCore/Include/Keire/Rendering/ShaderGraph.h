@@ -2,6 +2,8 @@
 
 #include "Keire/Api.h"
 #include "Keire/Assets/RenderingAssets.h"
+#include "Keire/Authoring/GraphAuthoring.h"
+#include "Keire/Rendering/ShaderGraphResources.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -18,7 +20,7 @@
 namespace Keire
 {
     /// Latest canonical source schema emitted by ShaderGraphAsset::EncodeSource.
-    inline constexpr std::uint32_t ShaderGraphSourceSchemaVersion = 3;
+    inline constexpr std::uint32_t ShaderGraphSourceSchemaVersion = 4;
     /// Version of the deterministic HLSL generator contract embedded in every generated shader manifest.
     inline constexpr std::uint32_t ShaderGraphGeneratedShaderVersion = 3;
     /// Renderer-facing vertex input and interpolator contract required by generated Shader Graph shaders.
@@ -316,6 +318,9 @@ namespace Keire
         std::vector<ShaderGraphConnection> Connections;
         std::vector<ShaderGraphKeyword> Keywords;
         std::vector<std::filesystem::path> IncludeRoots{"Assets"};
+        /// Optional renderer-neutral resources. Runtime GPU publication requires backend support for the resource kind.
+        std::vector<ShaderGraphResourceDefinition> Resources;
+        GraphAuthoringMetadata Authoring;
         /// Optional migration anchor used to retain generated shader subasset IDs after graph extraction.
         AssetId GeneratedAssetOwner;
 
@@ -376,6 +381,8 @@ namespace Keire
         std::size_t MaximumNodes = 1024;
         std::size_t MaximumConnections = 4096;
         std::size_t MaximumCustomIncludes = 64;
+        /// Offline generation only. Runtime import keeps this false until the backend can bind every declared kind.
+        bool AllowOfflineResourceDeclarations = false;
         std::function<std::optional<std::string>(const std::filesystem::path&)> ReadInclude;
         /// Resolves reusable function/layer graph bodies without exposing asset-system ownership to the compiler.
         std::function<std::optional<ShaderGraphDefinition>(AssetId)> ResolveFunction;

@@ -17,12 +17,12 @@ calls, focused managed/native tests, and the SDK package consumers as evidence:
 
 | Requested area | Existing public evidence | Audit decision |
 | --- | --- | --- |
-| Audio | `Audio`, `AudioSourceHandle`, `AudioListenerHandle`, `AudioReverbZoneHandle`, typed clip/mixer references, mixer buses and playback status | Production playback plus explicit Audio Clip/Mixer residency, priority, readiness, fallback, revision, diagnostics, and deterministic release |
-| VFX | `Vfx`, `VfxEmitterHandle`, typed Blackboard/range setters, events and playback status | Production playback plus VFX Effect/Volume residency; graph construction remains editor/native-owned |
-| Materials and shaders | Camera, Mesh Renderer, light, property-block, dynamic material-instance, and global parameter-collection handles | Production mutation plus typed Material, Shader, Texture, Mesh, collection, and graph residency |
+| Audio | `Audio`, `AudioSource`, `AudioListener`, `AudioReverbZone`, direct clip/mixer references, mixer buses and playback status | Production playback plus explicit Audio Clip/Mixer residency, priority, readiness, fallback, revision, diagnostics, and deterministic release |
+| VFX | `Vfx`, `VfxEmitter`, typed Blackboard/range setters, events and playback status | Production playback plus VFX Effect/Volume residency; graph construction remains editor/native-owned |
+| Materials and shaders | Camera, Mesh Renderer, light, property-block, `DynamicMaterial`, and `MaterialParameterCollectionInstance` objects | Production mutation plus typed Material, Shader, Texture, Mesh, collection, and graph residency |
 | Shader/Material/VFX graphs | Immutable native graph assets and compiled runtime consumers; managed graph construction is intentionally absent | Typed graph identities and residency status ship without mutable graph objects or speculative node APIs |
 | Runtime UI | Scene-backed controls, focus/navigation, safe-area scaling, accessibility metadata, and bounded event polling | Existing hooks remain authoritative; Texture/Material residency supplies the shared asset-readiness contract |
-| Runtime assets | Managed data has bounded `LoadAsync`; presentation assets use `AssetHandle<T>` | Typed native leases ship with priority, state, fallback, revision, structured errors, coroutine/async waiting, disposal, and hot-reload generation cleanup |
+| Runtime assets | Managed data has bounded `LoadAsync`; presentation assets use `AssetLoadOperation<T>` | Typed native leases ship with priority, state, fallback, revision, structured errors, coroutine/async waiting, disposal, and hot-reload generation cleanup |
 
 | Area | Status | Current Kéire surface | Next parity work |
 | --- | --- | --- | --- |

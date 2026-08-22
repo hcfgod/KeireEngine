@@ -8,6 +8,7 @@
 #include "Keire/ECS/Components/SpotLightComponent.h"
 #include "Keire/ECS/Entity.h"
 #include "Keire/Rendering/MaterialEcosystem.h"
+#include "Keire/Scenes/PrefabAsset.h"
 #include "Keire/Scenes/Scene.h"
 
 #include <algorithm>
@@ -1120,5 +1121,34 @@ namespace Keire::Detail
                                                                              const std::size_t slot) noexcept
     {
         return Detail::ClearManagedMaterialInstanceProperties(ManagedRuntimeScene(entity), entity, slot);
+    }
+
+    ManagedEntityHandle ManagedRuntimeSceneServices::InstantiateManagedPrefab(const AssetId prefab,
+                                                                              const ManagedEntityHandle parent,
+                                                                              const Vector3 position,
+                                                                              const Quaternion rotation,
+                                                                              const bool active) noexcept
+    {
+        try
+        {
+            const auto assets = ManagedRuntimeAssets();
+            const auto scene = ManagedRuntimeScene(parent.Entity);
+            if (!assets || !scene || !prefab)
+                return {};
+            const PrefabResolver resolver = [&assets](const AssetId id) -> Ref<const PrefabAsset>
+            { return assets->Load<PrefabAsset>(id, AssetPriority::Critical).TryGetLoaded(); };
+            if (!resolver(prefab))
+                return {};
+            auto parentEntity = parent.Entity ? scene->FindEntity(EntityId(parent.Entity)) : Entity{};
+            if (parent.Entity && (!parentEntity || parentEntity.World() != parent.World))
+                return {};
+            const auto root = scene->InstantiatePrefab(prefab, ComposePrefab(prefab, resolver), parentEntity, position,
+                                                       rotation, active);
+            return root ? ManagedEntityHandle{root.World(), root.Id().Value()} : ManagedEntityHandle{};
+        }
+        catch (...)
+        {
+            return {};
+        }
     }
 } // namespace Keire::Detail

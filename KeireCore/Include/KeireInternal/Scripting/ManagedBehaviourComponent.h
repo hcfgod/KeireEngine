@@ -34,6 +34,7 @@ namespace Keire::Detail
         void SetSerializedState(std::string state);
 
       protected:
+        void Prepare() override;
         void Awake() override;
         void OnEnable() override;
         void Start() override;

@@ -133,7 +133,7 @@ public sealed class FirstPersonCamera : Behaviour
     private Entity _motorEntity;
 
     [HotReloadState]
-    private Entity _animatorEntity;
+    private Animator? _animator;
 
     protected override void Awake()
     {
@@ -204,8 +204,8 @@ public sealed class FirstPersonCamera : Behaviour
         if (deltaTime <= 0.0f || !_motorEntity.IsValid)
             return;
 
-        CharacterControllerHandle motor = _motorEntity.CharacterController;
-        if (!motor.IsValid)
+        CharacterController? motor = _motorEntity.GetComponent<CharacterController>();
+        if (motor is null || !motor.IsValid)
             return;
 
         Vector2 move = _acceptsInput ? _moveInput : default;
@@ -224,7 +224,7 @@ public sealed class FirstPersonCamera : Behaviour
         {
             float targetYaw = RadiansToDegrees(MathF.Atan2(desiredDirection.X, desiredDirection.Z));
             _motorYaw = SmoothAngle(_motorYaw, targetYaw, ExponentialBlend(_turnSharpness, deltaTime));
-            TransformHandle motorTransform = _motorEntity.Transform;
+            Transform motorTransform = _motorEntity.Transform;
             motorTransform.Rotation = Quaternion.Euler(0.0f, _motorYaw);
         }
 
@@ -277,25 +277,27 @@ public sealed class FirstPersonCamera : Behaviour
                 _cameraPosition, desiredPosition, ExponentialBlend(_cameraFollowSharpness, deltaTime));
         }
 
-        TransformHandle cameraTransform = Entity.Transform;
+        Transform cameraTransform = Entity.Transform;
         cameraTransform.Position = _cameraPosition;
         cameraTransform.Rotation = CameraRotation();
     }
 
     private void ResolveCharacter()
     {
-        if (_motorEntity.IsValid && _motorEntity.CharacterController.IsValid)
+        if (_motorEntity is not null && _motorEntity.IsValid &&
+            _motorEntity.GetComponent<CharacterController>() is not null)
         {
-            _animatorEntity = FindAnimator(_motorEntity);
+            _animator = FindAnimator(_motorEntity);
             return;
         }
-        _motorEntity = Entity.Parent;
-        if (!_motorEntity.IsValid || !_motorEntity.CharacterController.IsValid)
+        _motorEntity = Entity.Parent!;
+        if (_motorEntity is null || !_motorEntity.IsValid ||
+            _motorEntity.GetComponent<CharacterController>() is null)
         {
             throw new InvalidOperationException(
                 $"{nameof(FirstPersonCamera)} requires its camera Entity to be parented to an enabled Character Controller.");
         }
-        _animatorEntity = FindAnimator(_motorEntity);
+        _animator = FindAnimator(_motorEntity);
     }
 
     private void DetachCameraFromMotor()
@@ -304,24 +306,24 @@ public sealed class FirstPersonCamera : Behaviour
             Entity.SetParent(default, true);
     }
 
-    private static Entity FindAnimator(Entity root)
+    private static Animator? FindAnimator(Entity root)
     {
-        if (root.HasComponent<AnimatorComponent>())
-            return root;
+        if (root.TryGetComponent(out Animator? animator))
+            return animator;
         foreach (Entity child in root.Children)
         {
-            Entity animator = FindAnimator(child);
-            if (animator.Id.IsValid)
-                return animator;
+            Animator? nested = FindAnimator(child);
+            if (nested is not null)
+                return nested;
         }
-        return default;
+        return null;
     }
 
     private void SnapCamera()
     {
         _cameraPosition = _motorEntity.Transform.Position + _cameraOffset;
         _cameraInitialized = true;
-        TransformHandle cameraTransform = Entity.Transform;
+        Transform cameraTransform = Entity.Transform;
         cameraTransform.Position = _cameraPosition;
         cameraTransform.Rotation = CameraRotation();
     }
@@ -344,27 +346,27 @@ public sealed class FirstPersonCamera : Behaviour
 
     private void BeginAirbornePresentation()
     {
-        if (!_animatorEntity.IsValid)
+        if (_animator is null || !_animator.IsValid)
             return;
         _groundedDuration = 0.0f;
         _footGroundingWeight = 0.0f;
-        Animator.SetFootGroundingWeight(_animatorEntity, 0.0f);
-        Animator.SetBool(_animatorEntity, "Grounded", false);
-        Animator.SetBool(_animatorEntity, "Falling", false);
+        _animator.SetFootGroundingWeight(0.0f);
+        _animator.SetBool("Grounded", false);
+        _animator.SetBool("Falling", false);
     }
 
     private void UpdateAnimationState(bool grounded, bool jumped)
     {
-        if (!_animatorEntity.IsValid)
+        if (_animator is null || !_animator.IsValid)
             return;
-        Animator.SetFloat(_animatorEntity, "VerticalSpeed", _verticalVelocity);
-        Animator.SetBool(_animatorEntity, "Grounded", grounded);
-        Animator.SetBool(_animatorEntity, "Falling", !grounded && !jumped && _verticalVelocity < -0.5f);
+        _animator.SetFloat("VerticalSpeed", _verticalVelocity);
+        _animator.SetBool("Grounded", grounded);
+        _animator.SetBool("Falling", !grounded && !jumped && _verticalVelocity < -0.5f);
     }
 
     private void UpdateFootGrounding(bool settledGrounded, bool jumped, float deltaTime)
     {
-        if (!_animatorEntity.IsValid)
+        if (_animator is null || !_animator.IsValid)
             return;
 
         if (!settledGrounded || jumped)
@@ -379,13 +381,13 @@ public sealed class FirstPersonCamera : Behaviour
             _footGroundingWeight +=
                 (target - _footGroundingWeight) * ExponentialBlend(_footIkSharpness, deltaTime);
         }
-        Animator.SetFootGroundingWeight(_animatorEntity, Math.Clamp(_footGroundingWeight, 0.0f, 1.0f));
+        _animator.SetFootGroundingWeight(Math.Clamp(_footGroundingWeight, 0.0f, 1.0f));
     }
 
     private void RestoreFootGrounding()
     {
-        if (_animatorEntity.IsValid)
-            Animator.SetFootGroundingWeight(_animatorEntity, 1.0f);
+        if (_animator is { IsValid: true })
+            _animator.SetFootGroundingWeight(1.0f);
         _footGroundingWeight = 1.0f;
         _groundedDuration = 0.0f;
     }

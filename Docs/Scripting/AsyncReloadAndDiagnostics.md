@@ -31,7 +31,7 @@ blocking/compute class, name, or dependencies. Managed job callbacks execute on 
 thread-safe computation and I/O, but must return to the Behaviour synchronization context before mutating entities,
 components, windows, or other owner-thread services.
 
-`JobHandle.Completion` preserves the original managed exception, publishes cancellation as a cancelled task, and runs
+`Job.Completion` preserves the original managed exception, publishes cancellation as a cancelled task, and runs
 continuations asynchronously. `Cancel` requests cooperative cancellation through `JobContext.CancellationToken`.
 Successful dependencies are omitted from later native submissions because their ordering constraint is already
 satisfied; live, failed, and cancelled dependencies retain native scheduler semantics. Reload and shutdown cancel and
@@ -41,7 +41,7 @@ Native job records are capacity-bounded and terminal records are reclaimed under
 editor sessions do not exhaust a lifetime counter.
 
 ```csharp
-JobHandle build = Jobs.Submit(
+Job build = Jobs.Submit(
     context => BuildNavigationChunk(context.CancellationToken),
     new JobDescription { Name = "Build navigation chunk", Priority = JobPriority.Low });
 
@@ -132,7 +132,7 @@ include:
 - undisposed cursor requests or other tokens;
 - custom thread-local or process-global collections.
 
-Store stable value identity such as `Entity` or `AssetReference<T>` where a relationship must be resolved again.
+Store stable object identity such as `Entity` or an `Asset` subclass where a relationship must be resolved again.
 Unsubscribe and cancel in `OnBeforeReload`; reacquire in `OnAfterReload`.
 
 ## Persistent And Reload-Only State
@@ -242,8 +242,8 @@ When a change appears not to run:
 
 | Symptom | Likely cause | Resolution |
 | --- | --- | --- |
-| Cannot convert `AudioClip` to `AssetId` | Marker type used instead of an asset reference | Declare `AssetReference<AudioClip>` and pass it or `.Id` |
-| Cannot compare `AssetReference<T>` with `null` | It is a value type | Use `.IsValid` |
+| Cannot convert `AudioClip` to `AssetId` | An advanced interop API expects an ID | Pass the direct clip to gameplay APIs, or `.Id` only to the interop API |
+| Asset field is unassigned | The Inspector reference is empty or missing | Check for `null` or assign a compatible asset |
 | Script is absent from Add Component | File is outside a source root, build failed, or type shape is invalid | Check `.keireasm`, diagnostics, filename/type match, and stable ID |
 | Saved code is not running | Candidate did not publish | Fix build, discovery, or migration diagnostics; last-good code remains active |
 | Values reset after reload | Field is neither serialized nor `[HotReloadState]` | Add the attribute matching the intended persistence |

@@ -88,7 +88,8 @@ namespace KeireEditor
         Node,
         Pin,
         Connection,
-        Block
+        Block,
+        Comment
     };
 
     struct NodeGraphContextRequest
@@ -99,6 +100,7 @@ namespace KeireEditor
         StableNodeId Connection = 0;
         Keire::Vector2 GraphPosition;
         StableNodeId Block = 0;
+        StableNodeId Comment = 0;
 
         bool operator==(const NodeGraphContextRequest&) const = default;
     };
@@ -131,8 +133,11 @@ namespace KeireEditor
         Keire::Vector2 Size{180.0F, 72.0F};
         Keire::UiColor Color{0.18F, 0.2F, 0.24F, 1.0F};
         std::string Subtitle;
+        std::string Comment;
+        bool CommentPinned = false;
         std::vector<NodeGraphPin> Pins;
         std::vector<NodeGraphBlockRow> Blocks;
+        bool Deletable = true;
 
         bool operator==(const NodeGraphNode&) const = default;
     };
@@ -150,6 +155,32 @@ namespace KeireEditor
         std::vector<Keire::Vector2> RoutingPoints;
 
         bool operator==(const NodeGraphConnection&) const = default;
+    };
+
+    struct NodeGraphComment
+    {
+        StableNodeId Id = 0;
+        std::string Title = "Comment";
+        std::string Description;
+        Keire::Vector2 Position;
+        Keire::Vector2 Size{320.0F, 180.0F};
+        Keire::UiColor Color{0.18F, 0.34F, 0.58F, 0.32F};
+        float FontSize = 18.0F;
+        bool MoveContents = true;
+        bool Collapsed = false;
+        std::optional<StableNodeId> Parent;
+        std::vector<StableNodeId> Members;
+        std::size_t SummaryInputs = 0;
+        std::size_t SummaryOutputs = 0;
+
+        bool operator==(const NodeGraphComment&) const = default;
+    };
+
+    struct NodeGraphCommentCreateRequest
+    {
+        Keire::Vector2 Position;
+        Keire::Vector2 Size{320.0F, 180.0F};
+        std::vector<StableNodeId> Members;
     };
 
     struct NodeGraphRerouteAddress
@@ -175,6 +206,8 @@ namespace KeireEditor
         bool InteractiveConnections = true;
         NodeGraphConnectionValidator ValidateConnection;
         bool EditableReroutes = false;
+        bool MultiSelection = false;
+        std::span<NodeGraphComment> Comments;
     };
 
     struct NodeGraphCanvasResult
@@ -206,6 +239,27 @@ namespace KeireEditor
         std::optional<NodeGraphRerouteRequest> AddRerouteRequested;
         std::optional<NodeGraphRerouteRequest> MoveRerouteRequested;
         std::optional<NodeGraphRerouteAddress> DeleteRerouteRequested;
+        bool SelectionChanged = false;
+        std::vector<StableNodeId> SelectedNodes;
+        std::vector<StableNodeId> MovedNodes;
+        std::vector<StableNodeId> MoveCompletedNodes;
+        std::vector<StableNodeId> DeleteNodesRequested;
+        std::vector<StableNodeId> DuplicateNodesRequested;
+        std::vector<StableNodeId> CopyNodesRequested;
+        std::vector<StableNodeId> CutNodesRequested;
+        bool PasteRequested = false;
+        std::vector<StableNodeId> ProtectedNodes;
+        std::optional<StableNodeId> ActivatedComment;
+        std::optional<StableNodeId> MovedComment;
+        std::optional<StableNodeId> MoveCompletedComment;
+        std::optional<StableNodeId> ResizedComment;
+        std::optional<StableNodeId> ResizeCompletedComment;
+        std::vector<StableNodeId> CommentMemberNodes;
+        std::vector<std::pair<StableNodeId, Keire::Vector2>> CommentMemberComments;
+        std::optional<StableNodeId> DeleteCommentRequested;
+        std::optional<StableNodeId> RenameCommentRequested;
+        std::optional<StableNodeId> ToggleCommentCollapseRequested;
+        std::optional<NodeGraphCommentCreateRequest> CreateCommentRequested;
     };
 
     /// Screen-space graph detail selected from zoom. Geometry and interaction remain available at every level while
@@ -218,6 +272,14 @@ namespace KeireEditor
         bool ConnectionLabels = false;
 
         [[nodiscard]] bool operator==(const NodeGraphCanvasDetail&) const noexcept = default;
+    };
+
+    struct NodeGraphViewport
+    {
+        Keire::Vector2 Pan;
+        float Zoom = 1.0F;
+
+        bool operator==(const NodeGraphViewport&) const = default;
     };
 
     class StableNodeGraphIdMap final
@@ -239,6 +301,11 @@ namespace KeireEditor
         EvaluateConnection(std::span<const NodeGraphNode> nodes, const NodeGraphConnectionRequest& connection,
                            const NodeGraphConnectionValidator& validator = {});
         [[nodiscard]] static NodeGraphCanvasDetail DetailForZoom(float zoom) noexcept;
+        [[nodiscard]] static std::vector<StableNodeId> MarqueeSelection(std::span<const NodeGraphNode> nodes,
+                                                                        Keire::Vector2 first, Keire::Vector2 second);
+        [[nodiscard]] static NodeGraphCommentCreateRequest CommentFromSelection(std::span<const NodeGraphNode> nodes,
+                                                                                std::span<const StableNodeId> selected,
+                                                                                Keire::Vector2 fallbackPosition);
 
         [[nodiscard]] NodeGraphCanvasResult Draw(Keire::UiFrame& ui, std::string_view id,
                                                  std::span<NodeGraphNode> nodes,
@@ -250,7 +317,10 @@ namespace KeireEditor
                                                  const NodeGraphCanvasOptions& options);
 
         void Focus(std::span<const NodeGraphNode> nodes, Keire::UiSize canvasSize);
-        void Select(std::optional<StableNodeId> node) noexcept { m_Selection = node; }
+        void Select(std::optional<StableNodeId> node);
+        void Select(std::span<const StableNodeId> nodes, std::optional<StableNodeId> primary = {});
+        void ToggleSelection(StableNodeId node);
+        void SelectAll(std::span<const NodeGraphNode> nodes);
         void SelectBlock(std::optional<NodeGraphBlockAddress> block) noexcept { m_BlockSelection = block; }
         void SelectConnection(std::optional<StableNodeId> connection) noexcept
         {
@@ -265,22 +335,34 @@ namespace KeireEditor
             m_DraggingBlock.reset();
             m_DraggingPin.reset();
             m_DraggingReroute.reset();
+            m_DraggingComment.reset();
+            m_ResizingComment.reset();
+            m_CommentMemberCommentPositions.clear();
+            m_MarqueeStart.reset();
             m_DragMoved = false;
         }
         [[nodiscard]] std::optional<StableNodeId> Selection() const noexcept { return m_Selection; }
+        [[nodiscard]] std::span<const StableNodeId> Selections() const noexcept { return m_Selections; }
         [[nodiscard]] std::optional<NodeGraphBlockAddress> BlockSelection() const noexcept { return m_BlockSelection; }
         [[nodiscard]] std::optional<StableNodeId> ConnectionSelection() const noexcept { return m_ConnectionSelection; }
+        [[nodiscard]] std::optional<StableNodeId> CommentSelection() const noexcept { return m_CommentSelection; }
         [[nodiscard]] bool ConnectionDragActive() const noexcept { return m_DraggingPin.has_value(); }
         [[nodiscard]] Keire::Vector2 Pan() const noexcept { return m_Pan; }
         [[nodiscard]] float Zoom() const noexcept { return m_Zoom; }
+        [[nodiscard]] NodeGraphViewport Viewport() const noexcept { return {m_Pan, m_Zoom}; }
+        void RestoreViewport(NodeGraphViewport viewport) noexcept;
 
       private:
         [[nodiscard]] Keire::UiPosition ToScreen(Keire::Vector2 position, Keire::UiItemRect canvas) const noexcept;
         [[nodiscard]] Keire::Vector2 ToGraph(Keire::UiPosition position, Keire::UiItemRect canvas) const noexcept;
+        [[nodiscard]] bool IsSelected(StableNodeId node) const noexcept;
+        void MakePrimary(StableNodeId node);
+        void ClearSelection() noexcept;
 
         Keire::Vector2 m_Pan;
         float m_Zoom = 1.0F;
         std::optional<StableNodeId> m_Selection;
+        std::vector<StableNodeId> m_Selections;
         std::optional<NodeGraphBlockAddress> m_BlockSelection;
         std::optional<StableNodeId> m_ConnectionSelection;
         std::optional<StableNodeId> m_Dragging;
@@ -289,10 +371,26 @@ namespace KeireEditor
         std::optional<NodeGraphPinAddress> m_DraggingPin;
         std::optional<NodeGraphRerouteAddress> m_RerouteSelection;
         std::optional<NodeGraphRerouteAddress> m_DraggingReroute;
+        std::optional<StableNodeId> m_CommentSelection;
+        std::optional<StableNodeId> m_DraggingComment;
+        std::optional<StableNodeId> m_ResizingComment;
+        Keire::Vector2 m_CommentDragPosition;
+        Keire::Vector2 m_CommentResize;
+        std::vector<std::pair<StableNodeId, Keire::Vector2>> m_CommentMemberPositions;
+        std::vector<std::pair<StableNodeId, Keire::Vector2>> m_CommentMemberCommentPositions;
         Keire::Vector2 m_RerouteDragPosition;
-        Keire::Vector2 m_DragPosition;
+        std::vector<std::pair<StableNodeId, Keire::Vector2>> m_DragPositions;
+        std::optional<Keire::Vector2> m_MarqueeStart;
+        std::vector<StableNodeId> m_MarqueeBase;
         bool m_DragMoved = false;
     };
+
+    void SynchronizeGraphSelection(StableNodeGraphCanvas& canvas,
+                                   std::span<const std::pair<StableNodeId, Keire::AssetId>> identities,
+                                   std::vector<Keire::AssetId>& selected, std::optional<Keire::AssetId> primary);
+    [[nodiscard]] std::vector<Keire::AssetId>
+    ResolveGraphSelection(std::span<const StableNodeId> selected,
+                          std::span<const std::pair<StableNodeId, Keire::AssetId>> identities);
 
     /// Shared interaction state for searchable node-creation menus. Identifiers, rather than display indexes, preserve
     /// selection as live search results are rebuilt and let different graph editors keep a small recent-node list.

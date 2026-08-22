@@ -317,7 +317,7 @@ TEST_CASE("Hierarchy snapshots omit component payload serialization")
     CHECK(hierarchy.Objects[1].Components.empty());
 }
 
-TEST_CASE("Component lifecycle callbacks are deterministic and component handles become inert after removal")
+TEST_CASE("Component lifecycle callbacks are deterministic and destruction commits at a play boundary")
 {
     auto calls = std::make_shared<std::vector<std::string>>();
     auto registry = Keire::ComponentRegistry::CreateDefault();
@@ -335,11 +335,35 @@ TEST_CASE("Component lifecycle callbacks are deterministic and component handles
     scene->LateUpdate();
     component->SetEnabled(false);
     REQUIRE(entity.RemoveComponent<LifecycleProbeComponent>());
+    CHECK(component->IsAttached());
+    scene->Update(1.0F / 60.0F);
     CHECK_FALSE(component->IsAttached());
     const std::vector<std::string> expected{
         "Awake",      "OnEnable",  "Start",    "FixedUpdate", "Update", "Animation:Footstep", "AnimatorIK:0.250000",
         "LateUpdate", "OnDisable", "OnDestroy"};
     CHECK(*calls == expected);
+}
+
+TEST_CASE("Entity destruction remains pending until the next play update boundary")
+{
+    auto calls = std::make_shared<std::vector<std::string>>();
+    auto registry = Keire::ComponentRegistry::CreateDefault();
+    registry->Register(MakeProbeRegistration(calls));
+    auto scene =
+        Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition(), registry);
+    auto entity = scene->CreateEntity("Pending destruction");
+    const auto component = entity.AddComponent<LifecycleProbeComponent>();
+    scene->BeginPlay();
+
+    REQUIRE(scene->DestroyEntity(entity.Id()));
+    CHECK(static_cast<bool>(entity));
+    CHECK(component->IsAttached());
+
+    scene->Update(1.0F / 60.0F);
+    CHECK_FALSE(static_cast<bool>(entity));
+    CHECK_FALSE(component->IsAttached());
+    CHECK(std::ranges::find(*calls, "OnDisable") != calls->end());
+    CHECK(std::ranges::find(*calls, "OnDestroy") != calls->end());
 }
 
 TEST_CASE("Play mode clones authored state and discards runtime mutations on Stop")

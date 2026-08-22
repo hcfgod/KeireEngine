@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <LangVersion>14</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <NoWarn>$(NoWarn);CS0649</NoWarn>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <KeireManagedAssembly Condition="Exists('..\..\bin\Managed\Keire.Managed.dll')">..\..\bin\Managed\Keire.Managed.dll</KeireManagedAssembly>
     <KeireManagedAssembly Condition="'$(KeireManagedAssembly)' == ''">..\..\Build\Managed\Keire.Managed.dll</KeireManagedAssembly>

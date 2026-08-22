@@ -144,6 +144,7 @@ namespace KeireRuntime
         CapsuleCastManaged(const Keire::ManagedCapsuleCastQuery& query) noexcept final;
         [[nodiscard]] std::vector<Keire::AssetId>
         OverlapSphereManaged(const Keire::ManagedSphereOverlapQuery& query) final;
+        [[nodiscard]] Keire::Ref<Keire::AssetSystem> ManagedRuntimeAssets() const noexcept final;
 
         ManagedWorldRuntime m_ManagedWorld;
         Keire::Ref<Keire::SceneRuntimeWorld> m_RuntimeWorld;

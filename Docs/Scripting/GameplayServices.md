@@ -128,7 +128,7 @@ if (!Entity.HasTag("Player"))
 
 Entity objective = SceneManager.FindWithTag("Objective");
 IReadOnlyList<Entity> enemies = SceneManager.FindAllWithTag("Enemy", maximumResults: 128);
-IReadOnlyList<Entity> lights = SceneManager.FindAllWithComponent<PointLightComponent>();
+IReadOnlyList<Entity> lights = SceneManager.FindAllWithComponent<PointLight>();
 ```
 
 `FindByName` and `FindAllByName` provide exact-name lookup. All scene queries are bounded from 1 through 4096 results,
@@ -213,7 +213,7 @@ Place a Character Controller on a player root and parent the camera to that root
 than writing the player Transform directly:
 
 ```csharp
-CharacterControllerHandle motor = Entity.CharacterController;
+CharacterController? motor = GetComponent<CharacterController>();
 if (!motor.IsValid)
     return;
 
@@ -230,7 +230,7 @@ being projected downhill along it. `Grounded`,
 `GroundNormal`, and `Velocity` report the last resolved physics state. The controller is kinematic: gameplay supplies
 gravity and jumping explicitly, as demonstrated by `FirstPersonCamera.cs` in KeireSandbox.
 
-`TransformHandle.Rotation`, `Forward`, `Right`, and `Up` are world-space. This matters for a camera parented under a
+`Transform.Rotation`, `Forward`, `Right`, and `Up` are world-space. This matters for a camera parented under a
 yawing FPS root; `LocalRotation` remains available for pitch and recoil.
 
 ## Rigid Bodies
@@ -238,7 +238,7 @@ yawing FPS root; `LocalRotation` remains available for pitch and recoil.
 `Entity.RigidBody` exposes validated runtime body state without exposing a native physics pointer:
 
 ```csharp
-RigidBodyHandle body = Entity.RigidBody;
+RigidBody? body = GetComponent<RigidBody>();
 if (body.IsValid)
 {
     body.UseGravity = true;
@@ -265,7 +265,7 @@ protected override void OnCollisionEnter(CollisionContact contact)
 
 protected override void OnTriggerEnter(CollisionContact contact)
 {
-    if (contact.Other.TryGetBehaviour<PlayerController>(out PlayerController? player) && player is not null)
+    if (contact.Other.TryGetComponent(out PlayerController? player))
         ActivateFor(player);
 }
 ```
@@ -327,7 +327,7 @@ computed paths stale at the native service boundary. Re-query after relevant nav
 
 ```csharp
 [SerializeField, StableFieldId("92968407-4ebd-4092-90fb-7bb7f660a4e2")]
-private AssetReference<PrefabAsset> _projectilePrefab;
+private Prefab? _projectilePrefab;
 
 private Entity SpawnProjectile(Vector3 position, Quaternion rotation)
 {
@@ -342,7 +342,7 @@ private Entity SpawnProjectile(Vector3 position, Quaternion rotation)
 `PrefabInstance` contains the root plus the complete instantiated entity list. Passing `default(Quaternion)` uses the
 identity rotation.
 
-`PrefabAsset` is the typed marker for authored `.keireprefab` content. `Prefab.Instantiate` accepts its stable `AssetId`
+`Prefab` is the direct asset object for authored `.keireprefab` content. `Instantiate` accepts the object
 so project code retains explicit ownership of the resulting entities.
 
 ## VFX
@@ -351,7 +351,7 @@ Declare a typed effect reference:
 
 ```csharp
 [SerializeField, StableFieldId("d34681f7-8124-4abc-a09d-f9ccba57afae")]
-private AssetReference<VfxEffect> _impact;
+private VfxEffect? _impact;
 ```
 
 Play it on an entity with a VFX Emitter:
@@ -359,7 +359,7 @@ Play it on an entity with a VFX Emitter:
 ```csharp
 if (_impact.IsValid)
 {
-    VfxEmitterHandle emitter = Vfx.Play(Entity, _impact);
+    VfxEmitter? emitter = _impact is null ? null : Vfx.Play(Entity, _impact);
     if (!emitter.IsValid)
         Debug.Warn("VFX playback was rejected.");
 }
@@ -374,7 +374,7 @@ bool alive = Vfx.IsAlive(Entity);
 bool impactQueued = Vfx.SendEvent(Entity, "Impact", 24);
 Vfx.Stop(Entity);
 
-VfxEmitterHandle handle = new(Entity);
+VfxEmitter? emitter = GetComponent<VfxEmitter>();
 handle.Restart(_impact);
 handle.SendEvent("Impact", 24);
 ```

@@ -1,23 +1,23 @@
 namespace Keire;
 
 [StableAssetTypeId("4b454952-454d-4553-4841-535345540001")]
-public sealed class Mesh;
+public sealed class Mesh : Asset;
 [StableAssetTypeId("4b454952-454d-4154-4552-49414c000001")]
-public sealed class Material;
+public sealed class Material : Asset;
 [StableAssetTypeId("4b454952-454d-5043-4f4c-4c4543540001")]
-public sealed class MaterialParameterCollection;
+public sealed class MaterialParameterCollection : Asset;
 [StableAssetTypeId("4b454952-4553-4841-4445-520000000001")]
-public sealed class Shader;
+public sealed class Shader : Asset;
 [StableAssetTypeId("4b454952-4554-4558-5455-524532440001")]
-public sealed class Texture;
+public sealed class Texture : Asset;
 [StableAssetTypeId("4b454952-4553-4752-4150-480000000001")]
-public sealed class ShaderGraph;
+public sealed class ShaderGraph : Asset;
 [StableAssetTypeId("4b454952-4553-4749-4e53-540000000001")]
-public sealed class ShaderGraphInstance;
+public sealed class ShaderGraphInstance : Asset;
 [StableAssetTypeId("4b454952-454d-4752-4150-480000000001")]
-public sealed class MaterialGraph;
+public sealed class MaterialGraph : Asset;
 [StableAssetTypeId("4b454952-454d-494e-5354-414e43450001")]
-public sealed class MaterialInstance;
+public sealed class MaterialInstance : Asset;
 
 public enum CameraProjection
 {
@@ -60,10 +60,11 @@ public enum ShadowResolution
     VeryHigh
 }
 
-public readonly record struct CameraHandle(Entity Entity)
+[StableComponentId("4b454952-4543-414d-4552-410000000001")]
+public sealed class Camera : Component
 {
+    internal Camera(Entity entity) : base(entity) { }
     private const NativeRenderingComponent Component = NativeRenderingComponent.Camera;
-    public bool IsValid => Entity.IsValid && Entity.HasComponent<CameraComponent>();
     public CameraProjection Projection
     {
         get => (CameraProjection)NativeRuntimeRendering.GetInteger(Entity, Component,
@@ -118,24 +119,25 @@ public readonly record struct CameraHandle(Entity Entity)
     }
 }
 
-public readonly record struct MeshRendererHandle(Entity Entity)
+[StableComponentId("4b454952-454d-4553-4852-454e44455201")]
+public sealed class MeshRenderer : Component
 {
+    internal MeshRenderer(Entity entity) : base(entity) { }
     private const NativeRenderingComponent Component = NativeRenderingComponent.MeshRenderer;
-    public bool IsValid => Entity.IsValid && Entity.HasComponent<MeshRendererComponent>();
-    public AssetReference<Mesh> Mesh
+    public Mesh? Mesh
     {
-        get => new(NativeRuntimeRendering.GetAsset(Entity, Component, NativeRenderingAssetProperty.Mesh));
-        set => NativeRuntimeRendering.SetAsset(Entity, Component, NativeRenderingAssetProperty.Mesh, value.Id);
+        get => Asset.FromId<Mesh>(NativeRuntimeRendering.GetAsset(Entity, Component, NativeRenderingAssetProperty.Mesh));
+        set => NativeRuntimeRendering.SetAsset(Entity, Component, NativeRenderingAssetProperty.Mesh, value?.Id ?? default);
     }
-    public IReadOnlyList<AssetReference<Material>> Materials
+    public IReadOnlyList<Material> Materials
     {
         get => NativeRuntimeRendering.GetMaterials(Entity);
         set => NativeRuntimeRendering.SetMaterials(Entity, value);
     }
-    public AssetReference<Material> Material
+    public Material? Material
     {
-        get => Materials.Count > 0 ? Materials[0] : default;
-        set => Materials = [value];
+        get => Materials.Count > 0 ? Materials[0] : null;
+        set => Materials = value is null ? [] : [value];
     }
     public Color Tint
     {
@@ -183,11 +185,11 @@ public readonly record struct MeshRendererHandle(Entity Entity)
     }
     public MaterialPropertyBlock PropertyBlock => new(Entity);
 
-    public MaterialInstanceHandle GetMaterialInstance(int materialSlot = 0)
+    public DynamicMaterial GetMaterialInstance(int materialSlot = 0)
     {
         if (materialSlot is < 0 or > 255)
             throw new ArgumentOutOfRangeException(nameof(materialSlot), "Material slots must be in the range 0..255.");
-        return new MaterialInstanceHandle(Entity, (uint)materialSlot);
+        return new DynamicMaterial(Entity, (uint)materialSlot);
     }
 }
 
@@ -204,20 +206,23 @@ public readonly record struct MaterialPropertyBlock(Entity Entity)
     public void SetVector(string name, Vector3 value) => NativeRuntimeRendering.SetMaterialProperty(Entity, name, value);
     public void SetVector(string name, Vector4 value) => NativeRuntimeRendering.SetMaterialProperty(Entity, name, value);
     public void SetColor(string name, Color value) => NativeRuntimeRendering.SetMaterialProperty(Entity, name, value);
-    public void SetTexture(string name, AssetReference<Texture> value) =>
-        NativeRuntimeRendering.SetMaterialProperty(Entity, name, value.Id);
+    public void SetTexture(string name, Texture? value) =>
+        NativeRuntimeRendering.SetMaterialProperty(Entity, name, value?.Id ?? default);
     public bool Reset(string name) => NativeRuntimeRendering.ResetMaterialProperty(Entity, name);
     public void Clear() => NativeRuntimeRendering.ClearMaterialProperties(Entity);
 }
 
-public readonly record struct MaterialInstanceHandle(Entity Entity, uint MaterialSlot)
+public sealed class DynamicMaterial
 {
-    public AssetReference<Material> SharedMaterial
+    internal DynamicMaterial(Entity entity, uint materialSlot) => (Entity, MaterialSlot) = (entity, materialSlot);
+    public Entity Entity { get; }
+    public uint MaterialSlot { get; }
+    public Material? SharedMaterial
     {
         get
         {
-            IReadOnlyList<AssetReference<Material>> materials = NativeRuntimeRendering.GetMaterials(Entity);
-            return MaterialSlot < (uint)materials.Count ? materials[(int)MaterialSlot] : default;
+            IReadOnlyList<Material> materials = NativeRuntimeRendering.GetMaterials(Entity);
+            return MaterialSlot < (uint)materials.Count ? materials[(int)MaterialSlot] : null;
         }
     }
 
@@ -236,15 +241,17 @@ public readonly record struct MaterialInstanceHandle(Entity Entity, uint Materia
         NativeRuntimeRendering.SetMaterialInstanceProperty(Entity, MaterialSlot, name, value);
     public void SetColor(string name, Color value) =>
         NativeRuntimeRendering.SetMaterialInstanceProperty(Entity, MaterialSlot, name, value);
-    public void SetTexture(string name, AssetReference<Texture> value) =>
-        NativeRuntimeRendering.SetMaterialInstanceProperty(Entity, MaterialSlot, name, value.Id);
+    public void SetTexture(string name, Texture? value) =>
+        NativeRuntimeRendering.SetMaterialInstanceProperty(Entity, MaterialSlot, name, value?.Id ?? default);
     public bool Reset(string name) =>
         NativeRuntimeRendering.ResetMaterialInstanceProperty(Entity, MaterialSlot, name);
     public void Clear() => NativeRuntimeRendering.ClearMaterialInstanceProperties(Entity, MaterialSlot);
 }
 
-public readonly record struct MaterialParameterCollectionHandle(AssetReference<MaterialParameterCollection> Asset)
+public sealed class MaterialParameterCollectionInstance
 {
+    internal MaterialParameterCollectionInstance(MaterialParameterCollection asset) => Asset = asset;
+    public MaterialParameterCollection Asset { get; }
     public bool IsReady => Asset.IsValid && NativeRuntimeRendering.MaterialParameterCollectionReady(Asset.Id);
 
     public void SetFloat(string name, float value)
@@ -258,21 +265,20 @@ public readonly record struct MaterialParameterCollectionHandle(AssetReference<M
     public void SetVector(string name, Vector3 value) => NativeRuntimeRendering.SetMaterialParameter(Asset.Id, name, value);
     public void SetVector(string name, Vector4 value) => NativeRuntimeRendering.SetMaterialParameter(Asset.Id, name, value);
     public void SetColor(string name, Color value) => NativeRuntimeRendering.SetMaterialParameter(Asset.Id, name, value);
-    public void SetTexture(string name, AssetReference<Texture> value) =>
-        NativeRuntimeRendering.SetMaterialParameter(Asset.Id, name, value.Id);
+    public void SetTexture(string name, Texture? value) =>
+        NativeRuntimeRendering.SetMaterialParameter(Asset.Id, name, value?.Id ?? default);
     public bool Reset(string name) => NativeRuntimeRendering.ResetMaterialParameter(Asset.Id, name);
     public void Clear() => NativeRuntimeRendering.ClearMaterialParameters(Asset.Id);
 }
 
 public static class GlobalMaterialParameters
 {
-    public static MaterialParameterCollectionHandle Open(
-        AssetReference<MaterialParameterCollection> collection)
+    public static MaterialParameterCollectionInstance Open(MaterialParameterCollection collection)
     {
         if (!collection.IsValid)
             throw new ArgumentException("A valid Material Parameter Collection asset is required.", nameof(collection));
         _ = NativeRuntimeRendering.MaterialParameterCollectionReady(collection.Id);
-        return new MaterialParameterCollectionHandle(collection);
+        return new MaterialParameterCollectionInstance(collection);
     }
 }
 
@@ -308,10 +314,10 @@ internal readonly record struct LightHandle(Entity Entity, NativeRenderingCompon
     internal void SetShadowResolution(ShadowResolution value) =>
         NativeRuntimeRendering.SetInteger(Entity, Component, NativeRenderingIntegerProperty.ShadowResolution,
                                           (int)value);
-    internal AssetReference<Texture> GetCookie() =>
-        new(NativeRuntimeRendering.GetAsset(Entity, Component, NativeRenderingAssetProperty.Cookie));
-    internal void SetCookie(AssetReference<Texture> value) =>
-        NativeRuntimeRendering.SetAsset(Entity, Component, NativeRenderingAssetProperty.Cookie, value.Id);
+    internal Texture? GetCookie() =>
+        Asset.FromId<Texture>(NativeRuntimeRendering.GetAsset(Entity, Component, NativeRenderingAssetProperty.Cookie));
+    internal void SetCookie(Texture? value) =>
+        NativeRuntimeRendering.SetAsset(Entity, Component, NativeRenderingAssetProperty.Cookie, value?.Id ?? default);
     internal bool GetContactShadows() =>
         NativeRuntimeRendering.GetFlag(Entity, Component, NativeRenderingFlagProperty.ContactShadows);
     internal void SetContactShadows(bool value) =>
@@ -322,10 +328,11 @@ internal readonly record struct LightHandle(Entity Entity, NativeRenderingCompon
         NativeRuntimeRendering.SetScalar(Entity, Component, NativeRenderingScalarProperty.IndirectMultiplier, value);
 }
 
-public readonly record struct DirectionalLightHandle(Entity Entity)
+[StableComponentId("4b454952-4544-4952-4c49-474854000001")]
+public sealed class DirectionalLight : Component
 {
+    internal DirectionalLight(Entity entity) : base(entity) { }
     private LightHandle Common => new(Entity, NativeRenderingComponent.DirectionalLight);
-    public bool IsValid => Entity.IsValid && Entity.HasComponent<DirectionalLightComponent>();
     public Color Color { get => Common.GetColor(); set => Common.SetColor(value); }
     public float Intensity { get => Common.GetIntensity(); set => Common.SetIntensity(value); }
     public ShadowQuality Shadows { get => Common.GetShadows(); set => Common.SetShadows(value); }
@@ -337,7 +344,7 @@ public readonly record struct DirectionalLightHandle(Entity Entity)
         get => Common.GetShadowResolution();
         set => Common.SetShadowResolution(value);
     }
-    public AssetReference<Texture> Cookie { get => Common.GetCookie(); set => Common.SetCookie(value); }
+    public Texture? Cookie { get => Common.GetCookie(); set => Common.SetCookie(value); }
     public bool ContactShadows { get => Common.GetContactShadows(); set => Common.SetContactShadows(value); }
     public float IndirectMultiplier
     {
@@ -381,10 +388,11 @@ public readonly record struct DirectionalLightHandle(Entity Entity)
     }
 }
 
-public readonly record struct PointLightHandle(Entity Entity)
+[StableComponentId("4b454952-4550-4f49-4e54-4c4947485401")]
+public sealed class PointLight : Component
 {
+    internal PointLight(Entity entity) : base(entity) { }
     private LightHandle Common => new(Entity, NativeRenderingComponent.PointLight);
-    public bool IsValid => Entity.IsValid && Entity.HasComponent<PointLightComponent>();
     public Color Color { get => Common.GetColor(); set => Common.SetColor(value); }
     public float Intensity { get => Common.GetIntensity(); set => Common.SetIntensity(value); }
     public float Range
@@ -403,7 +411,7 @@ public readonly record struct PointLightHandle(Entity Entity)
         get => Common.GetShadowResolution();
         set => Common.SetShadowResolution(value);
     }
-    public AssetReference<Texture> Cookie { get => Common.GetCookie(); set => Common.SetCookie(value); }
+    public Texture? Cookie { get => Common.GetCookie(); set => Common.SetCookie(value); }
     public bool ContactShadows { get => Common.GetContactShadows(); set => Common.SetContactShadows(value); }
     public float IndirectMultiplier
     {
@@ -412,10 +420,11 @@ public readonly record struct PointLightHandle(Entity Entity)
     }
 }
 
-public readonly record struct SpotLightHandle(Entity Entity)
+[StableComponentId("4b454952-4553-504f-544c-494748540001")]
+public sealed class SpotLight : Component
 {
+    internal SpotLight(Entity entity) : base(entity) { }
     private LightHandle Common => new(Entity, NativeRenderingComponent.SpotLight);
-    public bool IsValid => Entity.IsValid && Entity.HasComponent<SpotLightComponent>();
     public Color Color { get => Common.GetColor(); set => Common.SetColor(value); }
     public float Intensity { get => Common.GetIntensity(); set => Common.SetIntensity(value); }
     public float Range
@@ -448,7 +457,7 @@ public readonly record struct SpotLightHandle(Entity Entity)
         get => Common.GetShadowResolution();
         set => Common.SetShadowResolution(value);
     }
-    public AssetReference<Texture> Cookie { get => Common.GetCookie(); set => Common.SetCookie(value); }
+    public Texture? Cookie { get => Common.GetCookie(); set => Common.SetCookie(value); }
     public bool ContactShadows { get => Common.GetContactShadows(); set => Common.SetContactShadows(value); }
     public float IndirectMultiplier
     {

@@ -1,441 +1,111 @@
 # Managed API Index
 
-This index is a discovery map, not a replacement for the workflow guides or source declarations.
+This index covers the Kéire 0.4.0 Unity-shaped authoring surface. Native IDs and internal-call records are advanced
+interop details and are not part of normal gameplay code.
 
-## Core Types
+## Object Model
 
-| Type | Purpose | Guide |
-| --- | --- | --- |
-| `Behaviour` | Entity-attached gameplay component and lifecycle surface | [Lifecycle](BehavioursAndLifecycle.md) |
-| `Entity`, `EntityId` | Runtime scene object identity and operations | [Entities](EntitiesComponentsAndTransforms.md) |
-| `ComponentTypeId` | Stable component type identity | [Entities](EntitiesComponentsAndTransforms.md) |
-| `ComponentHandle`, `ComponentHandle<T>` | Presence, enabled-state, and removal views | [Entities](EntitiesComponentsAndTransforms.md) |
-| `TransformHandle` | Authoritative local/world transforms, presentation transforms, reset, and direction vectors | [Entities](EntitiesComponentsAndTransforms.md) |
-| `CharacterControllerHandle`, `CharacterControllerState` | Collision-resolved movement and grounded-state access | [Gameplay Services](GameplayServices.md) |
-| `RigidBodyHandle`, `RigidBodyProperties` | Runtime body state, forces, and impulses | [Gameplay Services](GameplayServices.md) |
-| `CameraHandle`, `MeshRendererHandle` | Runtime camera and renderable state | [Rendering](RenderingAndMaterials.md) |
-| `DirectionalLightHandle`, `PointLightHandle`, `SpotLightHandle` | Typed realtime and baked-light controls | [Rendering](RenderingAndMaterials.md) |
-| `MaterialPropertyBlock` | Bounded per-renderer shader property overrides | [Rendering](RenderingAndMaterials.md) |
-| `MaterialInstanceHandle` | Transient per-material-slot shader overrides | [Rendering](RenderingAndMaterials.md) |
-| `MaterialParameterCollectionHandle`, `GlobalMaterialParameters` | World-owned global shader values | [Rendering](RenderingAndMaterials.md) |
-| `SceneHandle`, `SceneLoadOperation` | Active/loaded scene identity and transactional replacement status | [Scenes](ScenesAndRenderSettings.md) |
-| `RenderEnvironmentSettings` | Atomic transient lighting, environment, exposure, and shadow state | [Scenes](ScenesAndRenderSettings.md) |
-| `AssetId` | Stable untyped asset identity | [Assets](AssetsAndScriptableObjects.md) |
-| `AssetReference<T>` | Typed serialized asset identity | [Assets](AssetsAndScriptableObjects.md) |
-| `AssetHandle<T>` | Explicit native runtime-asset residency lease and load status | [Assets](AssetsAndScriptableObjects.md) |
-| `AssetLoadState`, `AssetLoadPriority`, `AssetLoadDiagnostic`, `AssetLoadException` | Native runtime-asset loading contracts | [Assets](AssetsAndScriptableObjects.md) |
-| `ScriptableObject` | Managed data base type and transient clone API | [Assets](AssetsAndScriptableObjects.md) |
-| `Vector2`, `Vector3`, `Vector4` | Engine math values | [Gameplay Services](GameplayServices.md) |
-| `Quaternion`, `Color` | Rotation and color values | [Gameplay Services](GameplayServices.md) |
-
-`Behaviour.Enabled` and `Entity.GetComponentHandle<T>().Enabled` read and write the same native component state.
-
-## Behaviour Callbacks
-
-```text
-Awake
-OnEnable
-Start
-FixedUpdate
-Update
-LateUpdate
-OnDisable
-OnDestroy
-OnCollisionEnter / OnCollisionStay / OnCollisionExit
-OnTriggerEnter / OnTriggerStay / OnTriggerExit
-OnAnimationEvent
-OnProceduralMotionEvent
-OnAnimatorIk
-OnBeforeReload
-OnAfterReload
-```
-
-`OnAnimatorIk` runs after pose sampling and before named IK goals are solved for the frame.
-
-Callback payloads:
-
-| Type | Members |
+| Type | Purpose |
 | --- | --- |
-| `CollisionContact` | `Other`, `Point`, `Normal`, `Impulse`, `Trigger` |
-| `AnimationEvent` | `Name`, `NormalizedTime`, `Integer`, `Scalar`, `Text` |
-| `AnimationIkContext` | `LayerWeight` |
-| `ProceduralMotionEvent` | `Type`, `Foot`, `State`, `Phase`, `Intensity`, `ContactPosition`, `ContactNormal`, `Support`, `PhysicsMaterial` |
+| `EngineObject` | Base identity, `Name`, `IsValid`, equality, `Instantiate`, `Destroy`, `DontDestroyOnLoad` |
+| `Entity` | Scene object, hierarchy, active state, tags, cloning, and component lookup/mutation |
+| `Component` | Base for everything attached to an entity; mirrors the entity lookup family |
+| `Behaviour` | User script component with lifecycle, `Enabled`, coroutines, and reload support |
+| `Asset` | Base for stable native assets, `Prefab`, `SceneAsset`, and persistent ScriptableObjects |
+| `ScriptableObject` | Persistent managed data asset or transient runtime data object |
+
+## Component Lookup
+
+Available on both `Entity` and `Component`/`Behaviour`:
+
+- `GetComponent<T>()`, `GetComponent(Type)`
+- `TryGetComponent<T>(out T?)`, `TryGetComponent(Type, out Component?)`
+- `GetComponents<T>()`, `GetComponents(Type)` and allocation-free list overloads
+- `GetComponent(s)InChildren<T>(bool includeInactive = false)` plus `Type` and list overloads
+- `GetComponent(s)InParent<T>(bool includeInactive = false)` plus `Type` and list overloads
+- `AddComponent<T>()`, `AddComponent(Type)`, `Destroy(component)`
+
+## Lifecycle
+
+`Awake`, `OnEnable`, `Start`, `FixedUpdate`, `Update`, `LateUpdate`, `OnDisable`, `OnDestroy`, collision/trigger
+callbacks, animation/procedural callbacks, `OnBeforeReload`, and `OnAfterReload`.
+
+Active additions and prefab instances complete required `Awake`/`OnEnable` work before returning. Inactive entities
+defer `Awake`; disabled behaviours on active entities receive `Awake` but not `OnEnable`. `Start` runs once before the
+first enabled update. Destruction commits after the current update loop.
+
+## Native Components
+
+| Area | Components |
+| --- | --- |
+| Transform | `Transform` |
+| Rendering | `Camera`, `MeshRenderer`, `DirectionalLight`, `PointLight`, `SpotLight` |
+| Probes | `ReflectionProbe`, `LightProbeVolume` |
+| Animation | `Animator` |
+| Physics | `Collider`, `RigidBody`, `CharacterController`, `FixedJoint`, `HingeJoint`, `DistanceJoint`, `SpringJoint` |
+| Audio | `AudioSource`, `AudioListener`, `AudioReverbZone` |
+| VFX | `VfxEmitter` |
+| Scene UI | `Canvas`, `RectTransform`, `UiText`, `UiImage`, `UiButton`, `UiLayout`, `UiSlider`, `UiToggle`, `UiInputField`, `UiScrollView`, `UiAccessibility` |
+
+Programmatic overlay UI uses `RuntimeUiText`, `RuntimeUiImage`, `RuntimeUiButton`, and the other `RuntimeUi*` names.
+
+## Assets
+
+Direct `Asset` subclasses include audio clips/mixers, textures, meshes, materials and graphs, animation assets, VFX
+assets/subgraphs, physics materials, render profiles, lighting/probe data, `SceneAsset`, `Prefab`, and native text or
+binary assets. Declare these exact types in Inspector fields.
+
+`AssetLoadOperation<T>` owns optional explicit runtime residency and supports status, progress, fallback/revision,
+diagnostics, yield/await, cancellation, and disposal.
+
+## Scenes And Prefabs
+
+`Scene`, `SceneAsset`, `SceneManager`, `SceneLoadOperation`, `SceneLoadMode`, `SceneQuery`, `RenderSettings`, and
+`Prefab`. `Instantiate(Prefab, ...)` and `Prefab.Instantiate(...)` return the root `Entity`.
+
+## Materials
+
+`Material`, `DynamicMaterial`, `MaterialPropertyBlock`, `MaterialParameterCollection`, and
+`MaterialParameterCollectionInstance`. Renderer-created runtime state is never a public native handle.
+
+## Jobs And Async
+
+`Job`, `Jobs.Submit`, `Jobs.Run`, `JobStatus`, `JobPriority`, `JobClass`, `Coroutine`, `WaitForSeconds`,
+`WaitForFixedUpdate`, and `WaitForEndOfFrame`. Job dependencies accept `IReadOnlyList<Job>`.
+
+## Global Facilities
+
+- `Application`, `Time`, `Screen`, `PlayerPreferences`
+- `Input`, `Cursor`
+- `Physics`, navigation APIs
+- one-shot `Audio`
+- `SceneManager`, `RenderSettings`
+- `Assets`
+- `Debug`, profiling APIs
+
+Entity-scoped audio, animation, VFX, rendering, UI, and physics operations belong to their component instances.
 
 ## Serialization Attributes
 
-| Attribute | Target |
-| --- | --- |
-| `SerializeField` | Field, or eligible managed-data property |
-| `HotReloadState` | `Behaviour` field |
-| `SerializableType` | Nested managed-data class or struct |
-| `HideInInspector` | Field or property |
-| `Range` | Numeric field or property; renders a bounded slider |
-| `Min` / `Max` | Numeric field or property; one-sided or paired drag bounds |
-| `InspectorStep` | Numeric field or property; positive drag increment |
-| `Multiline` | String field or property; 2–32 visible lines |
-| `InspectorName` | Field or property; custom display label |
-| `Tooltip` | Field or property |
-| `InspectorGroup` | Field or property |
-| `ReadOnlyInInspector` | `Behaviour` or managed-data field or property |
-| `FormerlySerializedAs` | Field or property; multiple allowed |
-| `StableFieldId` | Serialized field or property |
-| `RequireComponent` | `Behaviour` type; multiple allowed |
-| `ExecutionOrder` | `Behaviour` type |
-| `StableComponentId` | Managed component type |
-| `StableAssetTypeId` | Managed data or asset marker type |
-| `CreateAssetMenu` | Concrete `ScriptableObject` type |
-| `Header` | `Behaviour` or managed-data field or property |
-
-See [Serialization And The Inspector](SerializationAndInspector.md) for persistence rules.
-
-`RequireComponent` is enforced transactionally during managed registration and attachment. Dependencies are added
-before the requested component, dependency cycles fail reload, and a dependency cannot be removed while a dependent
-component remains attached.
-
-## Entity API
-
-Properties:
-
-```text
-IsValid
-Name
-Active
-ActiveInHierarchy
-Layer
-Tags
-Parent
-Children
-Transform
-Animator
-AudioSource
-AudioListener
-AudioReverbZone
-Camera
-MeshRenderer
-DirectionalLight
-PointLight
-SpotLight
-CharacterController
-RigidBody
-```
-
-Methods:
-
-```text
-GetComponent / TryGetComponent / GetComponentHandle
-HasComponent / AddComponent / RemoveComponent
-GetBehaviour / TryGetBehaviour
-SetParent
-HasTag / AddTag / RemoveTag / ClearTags
-FindChild / Find
-Instantiate
-Destroy
-```
-
-## Coroutines
-
-`Behaviour` exposes `StartCoroutine`, `StopCoroutine`, and `StopAllCoroutines`. Routines may yield `null`, nested
-enumerators, `Task`, `ValueTask`, `WaitForSeconds`, `WaitForSecondsRealtime`, `WaitForFixedUpdate`, `WaitForEndOfFrame`,
-`WaitUntil`, `WaitWhile`, or a custom `CustomYieldInstruction`. `Coroutine.IsRunning` and `Coroutine.Stop()` provide a
-value-handle view without exposing scheduler ownership.
-
-## Built-In Component Markers
-
-| Area | Types |
-| --- | --- |
-| Scene/rendering | `TransformComponent`, `CameraComponent`, `MeshRendererComponent`, `AnimatorComponent` |
-| Physics | `ColliderComponent`, `RigidBodyComponent`, `CharacterControllerComponent` |
-| Audio | `AudioSourceComponent`, `AudioListenerComponent`, `AudioReverbZoneComponent` |
-| VFX | `VfxEmitterComponent` |
-| Lighting | `DirectionalLightComponent`, `PointLightComponent`, `SpotLightComponent` |
-| UI | `CanvasComponent`, `RectTransformComponent`, `UiTextComponent`, `UiImageComponent`, `UiButtonComponent`, `UiLayoutComponent`, `UiSliderComponent`, `UiToggleComponent`, `UiInputFieldComponent`, `UiScrollViewComponent`, `UiAccessibilityComponent` |
-
-These types identify native components. Their layout is intentionally not exposed to C#.
-
-## Frame And Gameplay Façades
-
-| API | Main members |
-| --- | --- |
-| `Application` | `ProductName`, `Version`, `Identifier`, `PersistentDataPath`, `IsEditor`, `Quit` |
-| `Time` | `DeltaTime`, `FixedDeltaTime`, `UnscaledDeltaTime`, `Elapsed`, `TimeScale`, `Paused` |
-| `Screen` | Resolution, display scale, safe area, focus, fullscreen mode, VSync state, `TrySetResolution` |
-| `PlayerPreferences` | Typed get/set, `HasKey`, `DeleteKey`, `DeleteAll`, atomic `Save` |
-| `Input` | Actions, device snapshots, control schemes, interactive rebinding, binding profiles, gamepad rumble |
-| `Physics` | `TryRaycast`, `Raycast`, `TryCapsuleCast`, `OverlapSphere` |
-| `Navigation` | `FindPathAsync` |
-| `Prefab` | `Instantiate` |
-| `SceneManager` | Active/loaded scene snapshots, scoped queries, `LoadSceneAsync`, `SetActiveScene`, `UnloadScene`, `Preserve` |
-| `RenderSettings` | `Current`, ambient/exposure/environment convenience properties |
-| `Cursor` | `Visible`, `Locked`, `VisibilityRequested`, `RequestCapture`, `RequestVisible`, `Hide`, `Show`, `Lock`, `Unlock` |
-| `Debug` | `Log`, `Warn`, `Error`, `LogException`, `Assert`, `DrawLine` |
-| `Log` | `Trace`, `Debug`, `Info`, `Warning`, `Error`, `Critical` |
-| `Profiler` | `Sample`, `Counter` |
-
-Result values include `RaycastHit`, `NavigationPath`, `PrefabInstance`, and `ProfileSample`.
-
-Physics motion and force values include `RigidBodyMotion` and `ForceMode`. Logging filters use `LogLevel`.
-
-`SceneLoadOperation` is a `CustomYieldInstruction` with state, progress, cancellation, failure diagnostics, and the
-stable loaded-scene handle. Packaged players and Editor Play Mode share transactional `Single` replacement, additive
-load/unload/activation, active/loaded/specific/persistent query scopes, and hierarchy-root persistence. See
-[Scenes And Render Settings](ScenesAndRenderSettings.md) for lifecycle and failure rules.
-
-## Managed Jobs
-
-```text
-Jobs.Run / Jobs.Submit
-JobDescription
-JobHandle
-JobContext
-JobPriority
-JobClass
-JobStatus
-```
-
-`JobHandle` exposes `Id`, `IsValid`, `Status`, `Completion`, and cooperative `Cancel()`. A `JobDescription` supplies the
-name, priority, compute/blocking class, and dependencies. See
-[Async, Reload, And Diagnostics](AsyncReloadAndDiagnostics.md#managed-jobs).
-
-## Audio
-
-Asset markers:
-
-```text
-AudioClip
-AudioMixer
-```
-
-State and options:
-
-```text
-AudioPlaybackState
-AudioSourceStatus
-AudioPlaybackOptions
-AudioSourceHandle
-AudioListenerHandle
-AudioReverbZoneHandle
-AudioReverbZoneShape
-```
-
-`Audio` methods:
-
-```text
-Play
-Pause
-Resume
-Seek
-Stop
-GetStatus
-```
-
-See [Audio](Audio.md).
-
-## Rendering And Materials
-
-Asset markers:
-
-```text
-Mesh
-Material
-Shader
-Texture
-MaterialParameterCollection
-```
-
-Runtime handles and values:
-
-```text
-CameraHandle
-MeshRendererHandle
-DirectionalLightHandle
-PointLightHandle
-SpotLightHandle
-MaterialPropertyBlock
-MaterialInstanceHandle
-MaterialParameterCollectionHandle
-GlobalMaterialParameters
-CameraProjection
-CameraClearMode
-GIReceiveMode
-ShadowQuality
-LightBakeMode
-ShadowResolution
-```
-
-`MeshRendererHandle.Materials` replaces the complete bounded material-slot array transactionally.
-`MeshRendererHandle.PropertyBlock` writes transient per-renderer float, vector, color, and texture overrides without
-mutating or cloning the shared material asset. `GetMaterialInstance(slot)` narrows overrides to one material slot, and
-`GlobalMaterialParameters.Open(...)` resolves a collection into world-owned frame values. See
-[Rendering And Materials](RenderingAndMaterials.md).
-
-## Animation
-
-Asset markers:
-
-```text
-AnimationClip
-AnimatorController
-```
-
-Types:
-
-```text
-AnimatorHandle
-AnimatorStateInfo
-AnimatorIkSpace
-AnimationEvent
-AnimationIkContext
-ProceduralMotionState
-ProceduralMotionQuality
-ProceduralMotionEventType
-ProceduralFootSide
-ProceduralLocomotionIntent
-ProceduralLocomotionState
-ProceduralMotionEvent
-```
-
-`Animator` operations:
-
-```text
-Play / CrossFade / Pause / Resume / Stop
-SetSpeed / GetStateInfo
-SetFloat / SetInteger / SetBool / SetTrigger / ResetTrigger
-TryGetFloat / TryGetInteger / TryGetBool
-GetFloat / GetInteger / GetBool
-SetLayerWeight / TryGetLayerWeight / GetLayerWeight
-SetTwoBoneIK / SetFabrikIK / ClearIK
-SetFootGroundingWeight
-SetProceduralLocomotion / GetProceduralState
-```
-
-See [Animation](Animation.md).
-
-## VFX
-
-```text
-VfxEffect
-VfxEmitterHandle
-Vfx.Play
-Vfx.Pause
-Vfx.Resume
-Vfx.Stop
-Vfx.IsAlive
-Vfx.SendEvent
-Vfx.SetParameter (VfxRange<T>)
-```
-
-See [Gameplay Services](GameplayServices.md#vfx).
-
-## UI
-
-Scene-facing API:
-
-```text
-UiButton
-UiSlider
-UiToggle
-UiInputField
-UiScrollView
-RuntimeUi.GetButton
-RuntimeUi.GetSlider
-RuntimeUi.GetToggle
-RuntimeUi.GetInputField
-RuntimeUi.GetScrollView
-RuntimeUi.SetText
-RuntimeUi.WasClicked
-RuntimeCanvas.SetText
-RuntimeCanvas.WasClicked
-```
-
-In-memory layout API:
-
-```text
-RuntimeCanvas
-UiElement
-UiPanel
-UiText
-UiImage
-UiButton
-UiRect
-UiThickness
-UiScaleMode
-UiAxisAlignment
-```
-
-Events:
-
-```text
-KeireEvent
-KeireEvent<T0>
-KeireEvent<T0, T1>
-KeireEvent<T0, T1, T2>
-KeireEvent<T0, T1, T2, T3>
-```
-
-See [UI And Events](UiAndEvents.md).
-
-## Managed Data
-
-`ScriptableObject`:
-
-```text
-Name
-RuntimeInstanceId
-CreateInstance<T>
-Instantiate<T>
-OnEnable
-OnDisable
-OnValidate
-```
-
-`Assets`:
-
-```text
-Load<T>
-TryLoad<T>
-LoadAsync<T>
-Unload
-```
-
-`Assets.Register` exists for runtime/host integration. Ordinary gameplay normally creates managed data through the
-Project panel or `ScriptableObject.CreateInstance`.
-
-See [Assets And ScriptableObjects](AssetsAndScriptableObjects.md).
-
-## Game-Owned Gameplay Systems
-
-Weapons, damage, ballistics, recoil, inventory, and other game rules are intentionally absent from the supported
-managed API. Define them in the project's C# assembly and compose the generic APIs indexed above. The Sandbox's
-[`WeaponGameplay.cs`](../../Samples/KeireSandbox/Assets/Scripts/Runtime/WeaponGameplay.cs) and
-[`WeaponController.cs`](../../Samples/KeireSandbox/Assets/Scripts/Runtime/WeaponController.cs) are editable project
-examples, not engine declarations. See [Game-Owned Weapon Example](../WeaponAuthoring.md).
-
-## Advanced Runtime Bridge
-
-`IRuntimeBridge` and `RuntimeBridge` are public host/test integration boundaries used by selected managed foundations.
-Normal in-engine gameplay should use `Entity`, `NativeRuntime`-backed façades, and the service APIs documented above.
-Gameplay code should not replace the engine-installed bridge.
+`SerializeField`, `NonSerialized`, `StableComponentId`, `StableFieldId`, `StableAssetTypeId`, `HotReloadState`,
+`Range`, `Min`, `Max`, `InspectorStep`, `Multiline`, `InspectorName`, `Header`, `Tooltip`, `Group`, `ReadOnly`,
+`HideInInspector`, `ExecutionOrder`, and `RequireComponent`.
+
+Use standard `[Serializable]` for supported nested values. `[SerializedField]`, `[SerializeReference]`, dictionaries,
+multidimensional/jagged arrays, and nested collection containers are not supported in 0.4.0.
 
 ## Source Files
 
-| Source | Defines |
+| File | Surface |
 | --- | --- |
-| [`Behaviour.cs`](../../KeireManaged/Behaviour.cs) | Lifecycle, callbacks, synchronization context integration |
-| [`Handles.cs`](../../KeireManaged/Handles.cs) | Entity, component, transform, asset handles |
-| [`RuntimeFoundation.cs`](../../KeireManaged/RuntimeFoundation.cs) | Application identity, time, screen, and display state |
-| [`PlayerPreferences.cs`](../../KeireManaged/PlayerPreferences.cs) | Typed persistent application preferences |
-| [`RuntimeApi.cs`](../../KeireManaged/RuntimeApi.cs) | Input, physics, navigation, animation, audio, VFX, prefab, cursor, diagnostics |
-| [`RuntimeAssets.cs`](../../KeireManaged/RuntimeAssets.cs) | Native presentation-asset residency handles and load status |
-| [`Rendering.cs`](../../KeireManaged/Rendering.cs) | Camera, renderer, light, material-slot, and shader-property handles |
-| [`RuntimeWorld.cs`](../../KeireManaged/RuntimeWorld.cs) | Multi-scene handles, transitions, query scopes, persistence, and render settings |
-| [`RuntimeUi.cs`](../../KeireManaged/RuntimeUi.cs) | UI wrappers and in-memory layout |
-| [`RuntimeUiControls.cs`](../../KeireManaged/RuntimeUiControls.cs) | Scene-backed slider, toggle, input, and scroll controls |
-| [`Coroutines.cs`](../../KeireManaged/Coroutines.cs) | Coroutine handles and built-in yield instructions |
-| [`Events.cs`](../../KeireManaged/Events.cs) | Persistent and runtime events |
-| [`ScriptableObject.cs`](../../KeireManaged/ScriptableObject.cs) | Managed data lifecycle |
-| [`ManagedAssetRuntime.cs`](../../KeireManaged/ManagedAssetRuntime.cs) | Managed data registry and load façade |
-| [`SerializationAttributes.cs`](../../KeireManaged/SerializationAttributes.cs) | Inspector and identity attributes |
-| [`Jobs.cs`](../../KeireManaged/Jobs.cs) | Managed job submission, dependencies, cancellation, and completion |
-| [`Profiler.cs`](../../KeireManaged/Profiler.cs) | Managed profile samples and counters |
-| [`MathTypes.cs`](../../KeireManaged/MathTypes.cs) | Managed vectors, quaternion, and color |
-| [`BuiltInComponents.cs`](../../KeireManaged/BuiltInComponents.cs) | Built-in component marker IDs |
+| [`Handles.cs`](../../KeireManaged/Handles.cs) | `EngineObject`, `Asset`, `Entity`, `Component`, `Transform`, lookup |
+| [`Behaviour.cs`](../../KeireManaged/Behaviour.cs) | Behaviour lifecycle and generation-local registry |
+| [`BuiltInComponents.cs`](../../KeireManaged/BuiltInComponents.cs) | Probes, collider, joints, physics material |
+| [`NativeAssets.cs`](../../KeireManaged/NativeAssets.cs) | Direct native asset types |
+| [`RuntimeApi.cs`](../../KeireManaged/RuntimeApi.cs) | Physics, animation, audio, VFX components/services |
+| [`Rendering.cs`](../../KeireManaged/Rendering.cs) | Cameras, renderers, lights, dynamic materials |
+| [`RuntimeUiControls.cs`](../../KeireManaged/RuntimeUiControls.cs) | Scene UI components |
+| [`RuntimeUi.cs`](../../KeireManaged/RuntimeUi.cs) | Programmatic `RuntimeUi*` overlays |
+| [`RuntimeWorld.cs`](../../KeireManaged/RuntimeWorld.cs) | Scenes and render settings |
+| [`Jobs.cs`](../../KeireManaged/Jobs.cs) | Managed jobs |
+| [`RuntimeAssets.cs`](../../KeireManaged/RuntimeAssets.cs) | Asset load operations |

@@ -1,5 +1,6 @@
 #include "KeireClient/Editor/InspectorPropertyEditor.h"
 
+#include "KeireClient/Editor/AssetBrowserUtilities.h"
 #include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/AuthoringWidgets.h"
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
@@ -189,7 +190,130 @@ namespace KeireEditor
                 }
             }
         }
-        return changed;
+        if (auto target = m_Ui.BeginDragTarget(); target)
+        {
+            std::vector<std::byte> payload;
+            if (m_Ui.AcceptDragPayload("KEIRE_SCENE_OBJECT", payload))
+            {
+                const auto entities = DecodeAssetPayload(payload);
+                if (entities.size() == 1 && m_Scene && m_Scene->FindEntity(Keire::EntityId(entities.front())))
+                {
+                    value = Keire::EntityId(entities.front());
+                    changed = true;
+                }
+            }
+        }
+        return Track(changed);
+    }
+
+    bool InspectorPropertyEditor::EditComponentReference(const std::string_view label,
+                                                         Keire::ComponentReferenceValue& value,
+                                                         const Keire::ComponentProperty& property)
+    {
+        struct Candidate
+        {
+            Keire::EntityId Entity;
+            Keire::ComponentTypeId Component;
+            std::string Label;
+        };
+        std::vector<Candidate> candidates;
+        const auto registry = m_Scene ? m_Scene->Components() : Keire::Ref<Keire::ComponentRegistry>{};
+        if (registry)
+        {
+            for (const auto& entity : SceneEntities())
+            {
+                for (const auto componentType : property.CompatibleComponentTypes)
+                {
+                    if (!entity.HasComponent(componentType))
+                        continue;
+                    const auto registration = registry->Find(componentType);
+                    candidates.push_back(
+                        {entity.Id(), componentType,
+                         entity.Name() + " / " + (registration ? registration->Name : componentType.ToString())});
+                }
+            }
+        }
+
+        const auto current = std::ranges::find_if(
+            candidates, [&](const Candidate& candidate)
+            { return candidate.Entity == value.Entity && candidate.Component == value.Component; });
+        const std::string preview = current != candidates.end() ? current->Label
+                                    : value.Entity              ? "Missing component"
+                                                                : "None";
+        bool changed = false;
+        if (auto combo = m_Ui.BeginCombo(label, preview); combo)
+        {
+            if (m_Ui.Selectable("None", !value.Entity))
+            {
+                value = {};
+                changed = true;
+            }
+            for (const auto& candidate : candidates)
+            {
+                if (m_Ui.Selectable(candidate.Label,
+                                    candidate.Entity == value.Entity && candidate.Component == value.Component))
+                {
+                    value = {candidate.Entity, candidate.Component};
+                    changed = true;
+                }
+            }
+        }
+
+        const auto assignDraggedEntity = [&](const Keire::EntityId entity)
+        {
+            const auto first = std::ranges::find(candidates, entity, &Candidate::Entity);
+            if (first == candidates.end())
+                return;
+            const auto matches = std::ranges::count(candidates, entity, &Candidate::Entity);
+            if (matches == 1)
+            {
+                value = {first->Entity, first->Component};
+                changed = true;
+                return;
+            }
+            m_Ui.OpenPopup(std::string(label) + "##ComponentReferenceChooser");
+        };
+
+        if (auto target = m_Ui.BeginDragTarget(); target)
+        {
+            std::vector<std::byte> payload;
+            if (m_Ui.AcceptDragPayload("KEIRE_COMPONENT", payload))
+            {
+                const auto ids = DecodeAssetPayload(payload);
+                if (ids.size() == 2)
+                {
+                    const Keire::EntityId entity(ids[0]);
+                    const Keire::ComponentTypeId component(ids[1]);
+                    if (std::ranges::any_of(candidates, [&](const Candidate& candidate)
+                                            { return candidate.Entity == entity && candidate.Component == component; }))
+                    {
+                        value = {entity, component};
+                        changed = true;
+                    }
+                }
+            }
+            payload.clear();
+            if (m_Ui.AcceptDragPayload("KEIRE_SCENE_OBJECT", payload))
+            {
+                const auto ids = DecodeAssetPayload(payload);
+                if (ids.size() == 1)
+                    assignDraggedEntity(Keire::EntityId(ids.front()));
+            }
+        }
+
+        const std::string chooser = std::string(label) + "##ComponentReferenceChooser";
+        if (auto popup = m_Ui.BeginPopup(chooser); popup)
+        {
+            for (const auto& candidate : candidates)
+            {
+                if (m_Ui.Selectable(candidate.Label))
+                {
+                    value = {candidate.Entity, candidate.Component};
+                    changed = true;
+                }
+            }
+        }
+        return Track(changed);
     }
 
     bool InspectorPropertyEditor::EditEvent(const std::string_view label, Keire::ComponentEventValue& value,

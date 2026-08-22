@@ -198,6 +198,8 @@ namespace KeireEditor
         const auto scene = ActiveScene();
         if (!scene || !scene->DestroyEntity(entity))
             throw std::invalid_argument("Cannot delete an entity outside the active scene.");
+        if (m_Selection == entity.Value())
+            m_Selection = {};
         SynchronizeSelection();
     }
 

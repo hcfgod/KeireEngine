@@ -33,13 +33,15 @@ internal static class BehaviourRegistry
 
     internal static void Register(Behaviour behaviour)
     {
+        if (behaviour.Entity is null || !behaviour.Entity.Id.IsValid)
+            return;
         var key = new Key(behaviour.Entity.World, behaviour.Entity.Id, ComponentType.Of(behaviour.GetType()));
         Instances[key] = new WeakReference<Behaviour>(behaviour);
     }
 
     internal static void Unregister(Behaviour behaviour)
     {
-        if (!behaviour.Entity.Id.IsValid)
+        if (behaviour.Entity is null || !behaviour.Entity.Id.IsValid)
             return;
         Instances.TryRemove(
             new Key(behaviour.Entity.World, behaviour.Entity.Id, ComponentType.Of(behaviour.GetType())), out _);
@@ -74,25 +76,24 @@ internal static class BehaviourRegistry
     }
 }
 
-public abstract class Behaviour
+public abstract class Behaviour : Component
 {
     private BehaviourSynchronizationContext _synchronizationContext = new();
     private readonly CoroutineScheduler _coroutines = new();
     private bool _enabled = true;
 
-    public Entity Entity { get; private set; }
-    public bool Enabled
+    public override bool Enabled
     {
         get
         {
-            if (!Entity.Id.IsValid)
+            if (Entity is null || !Entity.Id.IsValid)
                 return _enabled;
             var type = ComponentType.Of(GetType());
             return NativeRuntime.ComponentExists(Entity, type) ? NativeRuntime.GetComponentEnabled(Entity, type) : _enabled;
         }
         set
         {
-            if (Entity.Id.IsValid)
+            if (Entity is not null && Entity.Id.IsValid)
             {
                 var type = ComponentType.Of(GetType());
                 if (NativeRuntime.ComponentExists(Entity, type))
@@ -220,7 +221,7 @@ public abstract class Behaviour
         }, true);
     public void RuntimeUpdate(float deltaSeconds)
     {
-        UiButton.DispatchNativeClicks();
+        RuntimeUiButton.DispatchNativeClicks();
         InvokeWithContext(
             () =>
             {

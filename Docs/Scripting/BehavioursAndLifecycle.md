@@ -42,7 +42,7 @@ public CancellationToken LifetimeToken { get; }
 when code does not already hold the behaviour instance:
 
 ```csharp
-ComponentHandle<PauseMenu> menu = Entity.GetComponentHandle<PauseMenu>();
+PauseMenu? menu = Entity.GetComponent<PauseMenu>();
 if (menu.IsValid)
     menu.Enabled = false;
 ```
@@ -123,7 +123,7 @@ prefer explicit references and clear ownership over a large web of order numbers
 
 ```csharp
 [StableComponentId("ff29550b-903a-4509-b7b8-67fd680f34f3")]
-[RequireComponent(typeof(AudioSourceComponent))]
+[RequireComponent(typeof(AudioSource))]
 public sealed class AmbientEmitter : Behaviour
 {
 }

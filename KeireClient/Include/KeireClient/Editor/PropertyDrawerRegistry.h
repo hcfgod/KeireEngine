@@ -69,6 +69,12 @@ namespace KeireEditor
             return EditAsset(label, value, Keire::Texture2DAsset::StaticType());
         }
         [[nodiscard]] virtual bool EditEntity(std::string_view label, Keire::EntityId& value) = 0;
+        [[nodiscard]] virtual bool EditComponentReference(std::string_view label, Keire::ComponentReferenceValue& value,
+                                                          const Keire::ComponentProperty& property)
+        {
+            (void)property;
+            return EditEntity(label, value.Entity);
+        }
         [[nodiscard]] virtual bool EditEvent(std::string_view label, Keire::ComponentEventValue& value,
                                              std::size_t argumentCount) = 0;
     };

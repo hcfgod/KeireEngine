@@ -163,9 +163,19 @@ public sealed class StableComponentIdAttribute : Attribute
 }
 
 [AttributeUsage(AttributeTargets.Class, Inherited = false)]
-public sealed class StableAssetTypeIdAttribute(string id) : Attribute
+public sealed class StableAssetTypeIdAttribute : Attribute
 {
-    public Guid Id { get; } = Guid.Parse(id);
+    public StableAssetTypeIdAttribute(string id)
+    {
+        Id = Guid.Parse(id);
+        string compact = id.Replace("-", string.Empty, StringComparison.Ordinal);
+        High = Convert.ToUInt64(compact[..16], 16);
+        Low = Convert.ToUInt64(compact[16..], 16);
+    }
+
+    public Guid Id { get; }
+    public readonly ulong High;
+    public readonly ulong Low;
 }
 
 [AttributeUsage(AttributeTargets.Class, Inherited = false)]

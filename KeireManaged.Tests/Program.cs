@@ -1,22 +1,24 @@
 var tests = new (string Name, Action Run)[]
 {
     ("Prefab assets expose typed stable identity", PrefabAssetMarkerContract),
+    ("Unity-shaped object API replaces public handles and marker components", UnityShapedObjectApiContract),
+    ("Managed state v2 tags direct entity component and asset references", DirectReferenceStateContract),
     ("VFX ranges normalize and validate", VfxRangesNormalizeAndValidate),
     ("Inspector attributes validate production editing metadata", InspectorAttributeContract),
     ("VFX range setters expose every supported type", VfxRangeSettersExposeEverySupportedType),
-    ("Runtime asset handles preserve typed state diagnostics and explicit leases", RuntimeAssetHandleContract),
+    ("Runtime asset operations preserve typed diagnostics and explicit leases", RuntimeAssetHandleContract),
     ("Character Controller uses the native stable component contract", CharacterControllerStableContract),
     ("Entity exposes the production layer contract", EntityLayerContract),
     ("Behaviour lifecycle contracts are synchronized", BehaviourLifecycleContract),
     ("Managed state ignores computed math properties", ManagedStateMathContract),
     ("Coroutines schedule phases and dispose deterministically", CoroutineContract),
-    ("Transform and rigid body gameplay handles expose writable runtime state", GameplayHandleContract),
+    ("Transform and rigid body components expose writable runtime state", GameplayHandleContract),
     ("Animator exposes transient foot-grounding control", AnimatorFootGroundingContract),
     ("Managed physics shape queries validate and preserve native results", ManagedPhysicsQueryContract),
     ("Managed input devices rebinding persistence and rumble preserve native contracts", ManagedInputDeviceContract),
     ("Native UI button dispatch advances with the player clock", NativeUiButtonDispatchClockContract),
     ("Native runtime UI controls preserve values text focus and events", NativeRuntimeUiControlContract),
-    ("Managed rendering handles preserve camera lights materials and shader overrides", ManagedRenderingContract),
+    ("Managed rendering objects preserve camera lights materials and shader overrides", ManagedRenderingContract),
     ("Managed scene loads and render settings preserve native world transactions", ManagedWorldContract),
     ("Managed jobs execute delegates and publish terminal states", ManagedJobExecutionContract),
     ("Managed jobs preserve terminal dependency semantics", ManagedJobDependencyContract),
@@ -25,16 +27,77 @@ var tests = new (string Name, Action Run)[]
     ("Player preferences reject invalid and corrupt data", PlayerPreferencesValidationContract),
 };
 
+static void UnityShapedObjectApiContract()
+{
+    Type[] publicTypes = typeof(Keire.EngineObject).Assembly.GetExportedTypes();
+    string[] handles = publicTypes.Where(type => type.Name.EndsWith("Handle", StringComparison.Ordinal))
+        .Select(type => type.FullName ?? type.Name).ToArray();
+    Assert(handles.Length == 0, $"Public managed handles remain: {string.Join(", ", handles)}");
+    Assert(publicTypes.All(type => !type.Name.StartsWith("AssetReference", StringComparison.Ordinal)),
+           "AssetReference<T> must not remain in the public authoring API.");
+    Assert(publicTypes.All(type => type == typeof(Keire.Component) ||
+                                   !type.Name.EndsWith("Component", StringComparison.Ordinal)),
+           "Built-in marker types ending in Component must be replaced by concrete component objects.");
+
+    Assert(typeof(Keire.Entity).IsSealed && typeof(Keire.EngineObject).IsAssignableFrom(typeof(Keire.Entity)) &&
+               typeof(Keire.Component).IsAssignableFrom(typeof(Keire.AudioSource)) &&
+               typeof(Keire.Component).IsAssignableFrom(typeof(Keire.Behaviour)),
+           "Entity, native components, and behaviours must share the EngineObject hierarchy.");
+    Assert(typeof(Keire.Entity).GetMethods().Any(method => method.Name == nameof(Keire.Entity.GetComponent) &&
+                                                           method.IsGenericMethodDefinition) &&
+               typeof(Keire.Component).GetMethods().Any(method =>
+                   method.Name == nameof(Keire.Component.GetComponentsInChildren) && method.IsGenericMethodDefinition),
+           "Entity and Component must expose the generic Unity-shaped lookup family.");
+    Type[] nativeComponents = publicTypes.Where(type => typeof(Keire.Component).IsAssignableFrom(type) &&
+                                                        !type.IsAbstract &&
+                                                        type.IsDefined(typeof(Keire.StableComponentIdAttribute), false))
+        .ToArray();
+    Assert(nativeComponents.Length == 31,
+           $"Every one of the 31 native registry entries needs a concrete managed component; found {nativeComponents.Length}.");
+    Assert(typeof(Keire.Canvas).GetProperty(nameof(Keire.Canvas.ReferenceResolution)) is { CanRead: true, CanWrite: true } &&
+               typeof(Keire.RectTransform).GetProperty(nameof(Keire.RectTransform.AnchorMinimum)) is { CanRead: true, CanWrite: true } &&
+               typeof(Keire.UiText).GetProperty(nameof(Keire.UiText.Text)) is { CanRead: true, CanWrite: true } &&
+               typeof(Keire.UiAccessibility).GetProperty(nameof(Keire.UiAccessibility.Label)) is { CanRead: true, CanWrite: true },
+           "Scene UI component objects must expose their native authoring properties directly.");
+
+    Keire.Entity canonical = Keire.Entity.FromId(73, new Keire.EntityId(11, 12))!;
+    Assert(ReferenceEquals(canonical, Keire.Entity.FromId(73, new Keire.EntityId(11, 12))),
+           "Repeated entity lookup must preserve wrapper reference identity.");
+    Keire.Prefab prefab = Keire.Asset.FromId<Keire.Prefab>(new Keire.AssetId(21, 22))!;
+    Assert(ReferenceEquals(prefab, Keire.Asset.FromId<Keire.Prefab>(new Keire.AssetId(21, 22))),
+           "Repeated asset lookup must preserve wrapper reference identity.");
+}
+
+static void DirectReferenceStateContract()
+{
+    Keire.Entity entity = Keire.Entity.FromId(73, new Keire.EntityId(31, 32))!;
+    Keire.Prefab prefab = Keire.Asset.FromId<Keire.Prefab>(new Keire.AssetId(41, 42))!;
+    var source = new DirectReferenceStateProbe();
+    source.SetReferences(entity, new Keire.AudioSource(entity), prefab);
+
+    string state = Keire.ManagedStateSerializer.Capture(source, string.Empty, false);
+    Assert(state.Contains("\"Version\":2", StringComparison.Ordinal) ||
+               state.Contains("\"version\":2", StringComparison.Ordinal),
+           "Managed authoring state must use the v2 reference format.");
+    Assert(state.Contains("\"$ref\":\"entity\"", StringComparison.Ordinal) &&
+               state.Contains("\"$ref\":\"component\"", StringComparison.Ordinal) &&
+               state.Contains("\"$ref\":\"asset\"", StringComparison.Ordinal),
+           "Direct references must be explicitly tagged as entity, component, and asset records.");
+    Assert(state.Contains("73616e64-626f-4078-8000-00000000b002", StringComparison.Ordinal) &&
+               !state.Contains("NotSerializedByUnityRules", StringComparison.Ordinal),
+           "[SerializeField] private fields must serialize while plain private fields remain excluded.");
+}
+
 static void PrefabAssetMarkerContract()
 {
     var marker = (Keire.StableAssetTypeIdAttribute?)Attribute.GetCustomAttribute(
-        typeof(Keire.PrefabAsset), typeof(Keire.StableAssetTypeIdAttribute));
+        typeof(Keire.Prefab), typeof(Keire.StableAssetTypeIdAttribute));
     Assert(marker?.Id == Guid.Parse("4b454952-4550-5245-4641-424153535401"),
-           "PrefabAsset must expose the native prefab asset type ID for serialized references.");
+           "Prefab must expose the native prefab asset type ID for serialized references.");
 
-    var reference = new Keire.AssetReference<Keire.PrefabAsset>(new Keire.AssetId(101, 202));
+    Keire.Prefab reference = Keire.Asset.FromId<Keire.Prefab>(new Keire.AssetId(101, 202))!;
     Assert(reference.IsValid && reference.Id == new Keire.AssetId(101, 202),
-           "PrefabAsset references must preserve stable prefab identity.");
+           "Prefab objects must preserve stable prefab identity.");
 }
 
 static void InspectorAttributeContract()
@@ -169,23 +232,26 @@ static void AnimatorFootGroundingContract()
 {
     System.Reflection.MethodInfo? method = typeof(Keire.Animator).GetMethod(
         nameof(Keire.Animator.SetFootGroundingWeight),
-        [typeof(Keire.Entity), typeof(float)]);
+        [typeof(float)]);
     Assert(method is not null && method.ReturnType == typeof(void),
            "Animator must expose a model-agnostic runtime foot-grounding weight.");
 }
 
 static unsafe void ManagedPhysicsQueryContract()
 {
+    var invalidContext = new Keire.Entity(1, new Keire.EntityId(2, 3));
     AssertThrows<ArgumentException>(
-        () => Keire.Physics.TryRaycast(default, new Keire.Vector3(float.NaN, 0.0f, 0.0f),
+        () => Keire.Physics.TryRaycast(invalidContext, new Keire.Vector3(float.NaN, 0.0f, 0.0f),
                                        new Keire.Vector3(0.0f, -1.0f, 0.0f), out _),
         "Raycasts must reject non-finite origins before calling native code.");
     AssertThrows<ArgumentException>(
-        () => Keire.Physics.TryRaycast(default, default, new Keire.Vector3(0.0f, float.PositiveInfinity, 0.0f),
+        () => Keire.Physics.TryRaycast(invalidContext, default,
+                                       new Keire.Vector3(0.0f, float.PositiveInfinity, 0.0f),
                                        out _),
         "Raycasts must reject non-finite directions before calling native code.");
     AssertThrows<ArgumentOutOfRangeException>(
-        () => Keire.Physics.TryRaycast(default, default, new Keire.Vector3(0.0f, -1.0f, 0.0f), out _, float.NaN),
+        () => Keire.Physics.TryRaycast(invalidContext, default, new Keire.Vector3(0.0f, -1.0f, 0.0f), out _,
+                                       float.NaN),
         "Raycasts must reject non-finite maximum distances before calling native code.");
 
     Assert(System.Runtime.InteropServices.Marshal.SizeOf<Keire.NativeRaycastHit>() == 48 &&
@@ -295,22 +361,22 @@ static unsafe void ManagedInputDeviceContract()
 static unsafe void NativeUiButtonDispatchClockContract()
 {
     NativeUiDispatchFixture.Install();
-    var button = new Keire.UiButton(new Keire.Entity(17, new Keire.EntityId(23, 29)));
+    var button = new Keire.RuntimeUiButton(new Keire.Entity(17, new Keire.EntityId(23, 29)));
     int clicks = 0;
     Action clicked = () => ++clicks;
     button.Clicked += clicked;
     try
     {
         NativeUiDispatchFixture.QueueClick();
-        Keire.UiButton.DispatchNativeClicks();
+        Keire.RuntimeUiButton.DispatchNativeClicks();
         Assert(clicks == 1, "The first native click must be dispatched.");
 
         NativeUiDispatchFixture.QueueClick();
-        Keire.UiButton.DispatchNativeClicks();
+        Keire.RuntimeUiButton.DispatchNativeClicks();
         Assert(clicks == 1, "A button dispatch must run at most once for the same player frame clock value.");
 
         NativeUiDispatchFixture.AdvanceFrame();
-        Keire.UiButton.DispatchNativeClicks();
+        Keire.RuntimeUiButton.DispatchNativeClicks();
         Assert(clicks == 2, "Advancing the player frame clock must make the next native click dispatchable.");
     }
     finally
@@ -371,7 +437,7 @@ static unsafe void ManagedRenderingContract()
     var entity = new Keire.Entity(17, new Keire.EntityId(23, 29));
     try
     {
-        Keire.CameraHandle camera = entity.Camera;
+        var camera = new Keire.Camera(entity);
         Assert(MathF.Abs(camera.VerticalFieldOfView - 68.0f) < 0.0001f && camera.Primary,
                "Camera handles must read native lens and selection state.");
         camera.VerticalFieldOfView = 91.0f;
@@ -382,17 +448,17 @@ static unsafe void ManagedRenderingContract()
                    NativeRenderingFixture.IntegerValue == (int)Keire.CameraProjection.Orthographic,
                "Camera writes must preserve the native component, property, and value.");
 
-        Keire.MeshRendererHandle renderer = entity.MeshRenderer;
+        var renderer = new Keire.MeshRenderer(entity);
         Assert(renderer.Materials.Count == 2 && renderer.Materials[1].Id == NativeRenderingFixture.SecondMaterial,
                "Mesh Renderer material arrays must round-trip through the bounded native ABI.");
-        renderer.Materials = [new Keire.AssetReference<Keire.Material>(NativeRenderingFixture.ReplacementMaterial)];
+        renderer.Materials = [Keire.Asset.FromId<Keire.Material>(NativeRenderingFixture.ReplacementMaterial)!];
         renderer.PropertyBlock.SetFloat("Roughness", 0.37f);
         renderer.PropertyBlock.SetTexture(
-            "Albedo", new Keire.AssetReference<Keire.Texture>(NativeRenderingFixture.ReplacementTexture));
-        Keire.MaterialInstanceHandle instance = renderer.GetMaterialInstance(1);
+            "Albedo", Keire.Asset.FromId<Keire.Texture>(NativeRenderingFixture.ReplacementTexture));
+        Keire.DynamicMaterial instance = renderer.GetMaterialInstance(1);
         instance.SetColor("Emission", new Keire.Color(0.2f, 0.4f, 0.8f, 1.0f));
-        var collection = new Keire.AssetReference<Keire.MaterialParameterCollection>(new Keire.AssetId(301, 401));
-        Keire.MaterialParameterCollectionHandle globals = Keire.GlobalMaterialParameters.Open(collection);
+        var collection = Keire.Asset.FromId<Keire.MaterialParameterCollection>(new Keire.AssetId(301, 401))!;
+        Keire.MaterialParameterCollectionInstance globals = Keire.GlobalMaterialParameters.Open(collection);
         Assert(globals.IsReady, "Material Parameter Collections must expose their asynchronous readiness.");
         globals.SetFloat("Rain", 0.85f);
         Assert(NativeRenderingFixture.MaterialCount == 1 &&
@@ -406,7 +472,7 @@ static unsafe void ManagedRenderingContract()
         AssertThrows<ArgumentOutOfRangeException>(() => renderer.PropertyBlock.SetFloat("Invalid", float.NaN),
                                                   "Material property blocks must reject non-finite values early.");
 
-        Keire.SpotLightHandle spot = entity.SpotLight;
+        var spot = new Keire.SpotLight(entity);
         spot.OuterAngle = 46.0f;
         spot.CookieOffset = new Keire.Vector2(0.25f, 0.5f);
         Assert(NativeRenderingFixture.ScalarComponent == Keire.NativeRenderingComponent.SpotLight &&
@@ -431,24 +497,21 @@ static unsafe void ManagedWorldContract()
                    System.Runtime.InteropServices.Marshal.SizeOf<Keire.NativeEntityHandle>() == 24 &&
                    System.Runtime.InteropServices.Marshal.SizeOf<Keire.NativeRenderEnvironment>() == 72,
                "Managed world structs must preserve their native ABI layouts.");
-        var legacyScene = new Keire.SceneHandle(NativeWorldFixture.CurrentScene);
-        legacyScene.Deconstruct(out var legacyAsset);
-        Assert(legacyScene.IsValid && !legacyScene.HasStableIdentity && legacyAsset == NativeWorldFixture.CurrentScene,
-               "The original asset-only SceneHandle constructor and deconstruction contract must remain compatible.");
-        Assert(Keire.SceneManager.ActiveScene.Asset == NativeWorldFixture.CurrentScene &&
-                   Keire.SceneManager.ActiveScene.Id == NativeWorldFixture.CurrentHandle &&
+        Keire.Scene activeScene = Keire.SceneManager.ActiveScene!;
+        Assert(activeScene.Asset.Id == NativeWorldFixture.CurrentScene &&
+                   activeScene.Id == NativeWorldFixture.CurrentHandle &&
                    Keire.SceneManager.LoadedScenes is [{ Asset: var loaded, Id: var loadedHandle }] &&
-                   loaded == NativeWorldFixture.CurrentScene && loadedHandle == NativeWorldFixture.CurrentHandle,
+                   loaded.Id == NativeWorldFixture.CurrentScene && loadedHandle == NativeWorldFixture.CurrentHandle,
                "Scene Manager must expose the native active and loaded scene state.");
 
         Keire.SceneLoadOperation load = Keire.SceneManager.LoadSceneAsync(
-            new Keire.AssetReference<Keire.SceneAsset>(NativeWorldFixture.ReplacementScene));
+            Keire.Asset.FromId<Keire.SceneAsset>(NativeWorldFixture.ReplacementScene)!);
         Assert(load.State == Keire.SceneLoadState.Loading && MathF.Abs(load.Progress - 0.5f) < 0.0001f &&
                    load.KeepWaiting,
                "Scene load operations must expose progress and remain coroutine-compatible while loading.");
         NativeWorldFixture.CompleteLoad();
         Assert(load.Succeeded && load.IsDone && !load.KeepWaiting &&
-                    load.Scene.Asset == NativeWorldFixture.ReplacementScene &&
+                    load.Scene!.Asset.Id == NativeWorldFixture.ReplacementScene &&
                     load.Scene.Id == NativeWorldFixture.ReplacementHandle,
                "A committed native scene transition must publish a successful terminal operation.");
 
@@ -484,18 +547,18 @@ static unsafe void ManagedWorldContract()
 
         Assert(Keire.SceneManager.FindByName("PlayerSpawn") == player &&
                    Keire.SceneManager.FindAllWithTag("Enemy").Count == 2 &&
-                   Keire.SceneManager.FindAllWithComponent<Keire.CharacterControllerComponent>() is [{ } controller] &&
+                   Keire.SceneManager.FindAllWithComponent<Keire.CharacterController>() is [{ } controller] &&
                    controller == player,
                 "Scene queries must preserve stable world/entity handles across name, tag, and component indexes.");
         Assert(Keire.SceneManager.FindAllWithTag("Enemy", Keire.SceneQuery.Loaded).Count == 2 &&
                    NativeWorldFixture.LastQueryScope == Keire.SceneQueryScope.Loaded,
                "Scene queries must forward explicit loaded-scene scopes.");
-        Assert(Keire.SceneManager.FindAllByName("PlayerSpawn", Keire.SceneQuery.In(Keire.SceneManager.ActiveScene))
+        Assert(Keire.SceneManager.FindAllByName("PlayerSpawn", Keire.SceneQuery.In(activeScene))
                        .Single() == player &&
                    NativeWorldFixture.LastQueryHandle == NativeWorldFixture.CurrentHandle,
                "Specific-scene queries must preserve the opaque stable handle.");
-        Assert(Keire.SceneManager.SetActiveScene(Keire.SceneManager.ActiveScene) &&
-                   Keire.SceneManager.UnloadScene(Keire.SceneManager.ActiveScene) &&
+        Assert(Keire.SceneManager.SetActiveScene(activeScene) &&
+                   Keire.SceneManager.UnloadScene(activeScene) &&
                    Keire.SceneManager.Preserve(player),
                "Activation, unloading, and persistent-object requests must reach the native runtime.");
         AssertThrows<ArgumentOutOfRangeException>(() => Keire.SceneManager.FindAllWithTag("Enemy", 0),
@@ -563,18 +626,18 @@ static void ManagedJobDependencyContract()
            "The completed dependency fixture must succeed.");
 
     ulong[] dependencies = Keire.Jobs.CollectDependencyIds(
-        new[] { new Keire.JobHandle(activeState), new Keire.JobHandle(succeededState) }, out bool cancelled);
+        new[] { new Keire.Job(activeState), new Keire.Job(succeededState) }, out bool cancelled);
     Assert(!cancelled && dependencies.Length == 1 && dependencies[0] == 51,
            "Succeeded dependencies must be omitted because their ordering constraint is already satisfied.");
     var failedState = new Keire.ManagedJobState(_ => throw new InvalidOperationException("expected dependency failure"));
     failedState.SetId(53);
     Assert(failedState.Invoke(0, 0) != 0 && failedState.Invoke(2, 0) == 0,
            "The failed dependency fixture must publish a terminal failure.");
-    dependencies = Keire.Jobs.CollectDependencyIds(new[] { new Keire.JobHandle(failedState) }, out cancelled);
+    dependencies = Keire.Jobs.CollectDependencyIds(new[] { new Keire.Job(failedState) }, out cancelled);
     Assert(cancelled && dependencies.Length == 0,
            "A reclaimed failed dependency must still cancel dependent work without requiring a native record.");
     AssertThrows<ArgumentException>(() =>
-        Keire.Jobs.CollectDependencyIds(new[] { default(Keire.JobHandle) }, out _),
+        Keire.Jobs.CollectDependencyIds(new Keire.Job[] { null! }, out _),
                                     "Invalid dependency handles must be rejected before native submission.");
 }
 
@@ -590,8 +653,8 @@ static void BehaviourLifecycleContract()
     Assert(animatorIk is not null && animatorIk.GetParameters() is [{ ParameterType: var parameterType }] &&
            parameterType == typeof(float), "The native runtime must retain the Animator IK callback entry point.");
 
-    var dependency = new Keire.RequireComponentAttribute(typeof(Keire.CharacterControllerComponent));
-    Keire.ComponentTypeId expected = Keire.ComponentType.Of<Keire.CharacterControllerComponent>();
+    var dependency = new Keire.RequireComponentAttribute(typeof(Keire.CharacterController));
+    Keire.ComponentTypeId expected = Keire.ComponentType.Of<Keire.CharacterController>();
     Assert(dependency.High == expected.High && dependency.Low == expected.Low,
         "RequireComponent metadata must expose the dependency's stable native component ID.");
 
@@ -694,25 +757,25 @@ static void CoroutineContract()
 static void GameplayHandleContract()
 {
     System.Reflection.PropertyInfo? position =
-        typeof(Keire.TransformHandle).GetProperty(nameof(Keire.TransformHandle.Position));
+        typeof(Keire.Transform).GetProperty(nameof(Keire.Transform.Position));
     System.Reflection.PropertyInfo? rotation =
-        typeof(Keire.TransformHandle).GetProperty(nameof(Keire.TransformHandle.Rotation));
+        typeof(Keire.Transform).GetProperty(nameof(Keire.Transform.Rotation));
     Assert(position is { CanRead: true, CanWrite: true } && rotation is { CanRead: true, CanWrite: true },
            "World transform properties must remain writable for gameplay scripts.");
 
-    System.Reflection.PropertyInfo? rigidBody = typeof(Keire.Entity).GetProperty(nameof(Keire.Entity.RigidBody));
     System.Reflection.MethodInfo? addForce =
-        typeof(Keire.RigidBodyHandle).GetMethod(nameof(Keire.RigidBodyHandle.AddForce));
-    Assert(rigidBody?.PropertyType == typeof(Keire.RigidBodyHandle) && addForce is not null,
-           "Entity must expose the strongly typed rigid body gameplay API.");
+        typeof(Keire.RigidBody).GetMethod(nameof(Keire.RigidBody.AddForce));
+    Assert(addForce is not null && typeof(Keire.Component).IsAssignableFrom(typeof(Keire.RigidBody)),
+           "RigidBody must expose the strongly typed component gameplay API.");
     Assert(Enum.GetValues<Keire.ForceMode>().Length == 4,
            "Rigid body force modes must retain force, acceleration, impulse, and velocity-change semantics.");
-    Keire.TransformHandle invalidTransform = default;
+    var invalidEntity = new Keire.Entity(1, new Keire.EntityId(2, 3));
+    var invalidTransform = new Keire.Transform(invalidEntity);
     AssertThrows<ArgumentException>(() => invalidTransform.Position = new(float.NaN, 0.0f, 0.0f),
                                     "World transform setters must reject non-finite values before crossing native code.");
     AssertThrows<ArgumentException>(() => invalidTransform.Rotation = default,
                                     "World rotation setters must reject zero quaternions before crossing native code.");
-    Keire.RigidBodyHandle invalidBody = default;
+    var invalidBody = new Keire.RigidBody(invalidEntity);
     AssertThrows<ArgumentOutOfRangeException>(
         () => invalidBody.Motion = (Keire.RigidBodyMotion)byte.MaxValue,
         "Rigid body motion setters must reject undefined modes before crossing native code.");
@@ -727,7 +790,7 @@ static void EntityLayerContract()
 
 static void CharacterControllerStableContract()
 {
-    Keire.ComponentTypeId id = Keire.ComponentType.Of<Keire.CharacterControllerComponent>();
+    Keire.ComponentTypeId id = Keire.ComponentType.Of<Keire.CharacterController>();
     Assert(id.High == 0x4b45495245434841UL, "Character Controller stable ID high lane changed.");
     Assert(id.Low == 0x5241435445520001UL, "Character Controller stable ID low lane changed.");
 }
@@ -743,7 +806,7 @@ foreach ((string name, Action run) in tests)
     catch (Exception exception)
     {
         ++failed;
-        Console.Error.WriteLine($"FAIL {name}: {exception.GetBaseException().Message}");
+        Console.Error.WriteLine($"FAIL {name}: {exception}");
     }
 }
 
@@ -798,12 +861,12 @@ static void VfxRangeSettersExposeEverySupportedType()
     {
         Type rangeType = typeof(Keire.VfxRange<>).MakeGenericType(elementType);
         var handleSetter =
-            typeof(Keire.VfxEmitterHandle)
+            typeof(Keire.VfxEmitter)
                 .GetMethod("SetParameter",
                            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance,
                            binder: null, types: new[] { typeof(Keire.AssetId), rangeType }, modifiers: null);
         Assert(handleSetter?.ReturnType == typeof(bool),
-               $"VfxEmitterHandle must expose a Boolean {rangeType.Name} setter.");
+               $"VfxEmitter must expose a Boolean {rangeType.Name} setter.");
 
         var staticSetter = typeof(Keire.Vfx).GetMethod(
             "SetParameter", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static, binder: null,
@@ -817,7 +880,7 @@ static unsafe void RuntimeAssetHandleContract()
     NativeAssetFixture.Install();
     try
     {
-        var reference = new Keire.AssetReference<Keire.Material>(new Keire.AssetId(101, 201));
+        Keire.Material reference = Keire.Asset.FromId<Keire.Material>(new Keire.AssetId(101, 201))!;
         using var handle = Keire.Assets.LoadRuntime(reference, Keire.AssetLoadPriority.High);
         Assert(NativeAssetFixture.Generation == 7001 && NativeAssetFixture.Asset == reference.Id &&
                    NativeAssetFixture.Type == new Keire.AssetId(0x4b454952454d4154, 0x455249414c000001) &&
@@ -854,11 +917,11 @@ static unsafe void RuntimeAssetHandleContract()
         }
 
         AssertThrows<NotSupportedException>(
-            () => Keire.Assets.LoadRuntime(new Keire.AssetReference<object>(new Keire.AssetId(1, 2))),
+            () => Keire.Assets.LoadRuntime(Keire.Asset.FromId<UnregisteredAssetProbe>(new Keire.AssetId(1, 2))!),
             "Unregistered runtime asset marker types must be rejected before native dispatch.");
         AssertThrows<NotSupportedException>(
             () => Keire.Assets.LoadRuntime(
-                new Keire.AssetReference<ManagedRuntimeAssetProbe>(new Keire.AssetId(1, 3))),
+                Keire.Asset.FromId<ManagedRuntimeAssetProbe>(new Keire.AssetId(1, 3))!),
             "Managed data assets must use their managed loading pipeline.");
 
         handle.Dispose();
@@ -1833,6 +1896,8 @@ file sealed class DetachedManagedContractProbe : Keire.Behaviour;
 [Keire.StableAssetTypeId("d3762027-3016-4ec9-b315-67d654f46443")]
 file sealed class ManagedRuntimeAssetProbe : Keire.ScriptableObject;
 
+file sealed class UnregisteredAssetProbe : Keire.Asset;
+
 [Keire.StableComponentId("d3762027-3016-4ec9-b315-67d654f46442")]
 file sealed class ReloadLifecycleProbe : Keire.Behaviour
 {
@@ -1853,4 +1918,36 @@ file sealed class ManagedStateMathProbe : Keire.Behaviour
 
     [Keire.StableFieldId("73616e64-626f-4078-8000-00000000a003")]
     public Keire.Quaternion Rotation;
+}
+
+[Serializable]
+file sealed class DirectReferenceValue
+{
+    public Keire.Entity? Entity;
+    public List<Keire.Prefab> Prefabs = [];
+}
+
+[Keire.StableComponentId("d3762027-3016-4ec9-b315-67d654f46452")]
+file sealed class DirectReferenceStateProbe : Keire.Behaviour
+{
+    [Keire.StableFieldId("73616e64-626f-4078-8000-00000000b001")]
+    public Keire.Entity? Target;
+
+    [Keire.SerializeField]
+    [Keire.StableFieldId("73616e64-626f-4078-8000-00000000b002")]
+    private Keire.AudioSource? _audioSource;
+
+    [Keire.StableFieldId("73616e64-626f-4078-8000-00000000b003")]
+    public DirectReferenceValue References = new();
+
+    private string NotSerializedByUnityRules = "hidden";
+
+    public void SetReferences(Keire.Entity entity, Keire.AudioSource audioSource, Keire.Prefab prefab)
+    {
+        Target = entity;
+        _audioSource = audioSource;
+        References.Entity = entity;
+        References.Prefabs.Add(prefab);
+        _ = NotSerializedByUnityRules;
+    }
 }

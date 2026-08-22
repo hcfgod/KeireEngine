@@ -372,6 +372,11 @@ namespace Keire
         [[nodiscard]] virtual bool UnloadManagedScene(SceneHandle) noexcept { return false; }
         [[nodiscard]] virtual bool SetActiveManagedScene(SceneHandle) noexcept { return false; }
         [[nodiscard]] virtual bool MakeManagedEntityPersistent(ManagedEntityHandle) noexcept { return false; }
+        [[nodiscard]] virtual ManagedEntityHandle InstantiateManagedPrefab(AssetId, ManagedEntityHandle, Vector3,
+                                                                           Quaternion, bool) noexcept
+        {
+            return {};
+        }
         [[nodiscard]] virtual AssetId ActiveManagedScene() const noexcept { return {}; }
         [[nodiscard]] virtual std::vector<AssetId> LoadedManagedScenes() const { return {}; }
         [[nodiscard]] virtual ManagedSceneHandle ActiveManagedSceneHandle() const noexcept

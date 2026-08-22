@@ -58,6 +58,53 @@ namespace Keire
         bool operator==(const MaterialParameterCollectionDefinition&) const = default;
     };
 
+    inline constexpr std::size_t MaximumMaterialNumericUniforms = 256;
+
+    struct MaterialNumericUniformSnapshot
+    {
+        std::uint64_t Revision = 0;
+        std::vector<Vector4> Values;
+
+        bool operator==(const MaterialNumericUniformSnapshot&) const = default;
+    };
+
+    struct MaterialNumericUniformDirtyRange
+    {
+        std::size_t FirstUniform = 0;
+        std::size_t UniformCount = 0;
+
+        bool operator==(const MaterialNumericUniformDirtyRange&) const = default;
+    };
+
+    struct MaterialNumericUniformUpdate
+    {
+        std::uint64_t Revision = 0;
+        bool FullUpload = false;
+        std::vector<Vector4> Values;
+        std::vector<MaterialNumericUniformDirtyRange> DirtyRanges;
+
+        bool operator==(const MaterialNumericUniformUpdate&) const = default;
+    };
+
+    /// Tracks an ordered numeric uniform block without taking renderer or GPU ownership. The first update and every
+    /// extent change require a full upload; stable extents report deterministic contiguous dirty ranges.
+    class KEIRE_API MaterialNumericUniformCache final
+    {
+      public:
+        explicit MaterialNumericUniformCache(std::size_t maximumUniforms = MaximumMaterialNumericUniforms);
+
+        [[nodiscard]] MaterialNumericUniformUpdate Update(const MaterialNumericUniformSnapshot& snapshot);
+        [[nodiscard]] std::uint64_t Revision() const noexcept { return m_Revision; }
+        [[nodiscard]] std::span<const Vector4> Values() const noexcept { return m_Values; }
+        void Reset() noexcept;
+
+      private:
+        std::size_t m_MaximumUniforms = MaximumMaterialNumericUniforms;
+        std::uint64_t m_Revision = 0;
+        std::vector<Vector4> m_Values;
+        bool m_Initialized = false;
+    };
+
     class KEIRE_API MaterialFunctionAsset final : public Asset
     {
       public:
@@ -195,6 +242,8 @@ namespace Keire
 
         [[nodiscard]] MaterialParameterCollectionDefinition Definition() const;
         [[nodiscard]] std::map<AssetId, MaterialPropertyValue> Snapshot() const;
+        /// Packs values in definition order under the same lock as the returned revision.
+        [[nodiscard]] MaterialNumericUniformSnapshot NumericUniformSnapshot() const;
         [[nodiscard]] std::uint64_t Revision() const noexcept;
         void Set(AssetId parameter, MaterialPropertyValue value);
         [[nodiscard]] bool Reset(AssetId parameter);

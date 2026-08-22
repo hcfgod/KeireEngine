@@ -274,6 +274,11 @@ namespace KeireRuntime
         return m_RuntimeWorld;
     }
 
+    Keire::Ref<Keire::AssetSystem> ManagedWorldRuntimeServices::ManagedRuntimeAssets() const noexcept
+    {
+        return m_Application ? m_Application->Assets() : Keire::Ref<Keire::AssetSystem>{};
+    }
+
     bool ManagedWorldRuntimeServices::ProcessManagedSceneTransition(const bool deterministic,
                                                                     const ManagedSceneValidator validator) noexcept
     {

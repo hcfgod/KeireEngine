@@ -105,7 +105,9 @@ namespace KeireEditor
         [[nodiscard]] bool AddNode(Keire::ShaderGraphNode node);
         [[nodiscard]] bool EditNode(Keire::AssetId node, const std::function<void(Keire::ShaderGraphNode&)>& operation);
         [[nodiscard]] bool MoveNode(Keire::AssetId node, Keire::Vector2 position);
+        [[nodiscard]] bool MoveNodes(std::span<const std::pair<Keire::AssetId, Keire::Vector2>> nodes);
         [[nodiscard]] bool RemoveNode(Keire::AssetId node);
+        [[nodiscard]] bool RemoveNodes(std::span<const Keire::AssetId> nodes);
         [[nodiscard]] bool AddConnection(Keire::ShaderGraphConnection connection);
         [[nodiscard]] bool SetConnectionRouting(Keire::AssetId connection, std::vector<Keire::Vector2> routingPoints);
         [[nodiscard]] bool RemoveConnection(Keire::AssetId connection);

@@ -23,7 +23,14 @@ internal struct NativeSceneHandle
     internal ulong Low;
     internal ulong Handle;
 
-    internal readonly SceneHandle Value => new(new AssetId(High, Low), Handle);
+    internal readonly Scene? Value
+    {
+        get
+        {
+            SceneAsset? asset = Asset.FromId<SceneAsset>(new AssetId(High, Low));
+            return asset is null || Handle == 0 ? null : new Scene(asset, Handle);
+        }
+    }
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -35,7 +42,7 @@ internal struct NativeEntityHandle
 
     internal NativeEntityHandle(ulong world, ulong high, ulong low) => (World, High, Low) = (world, high, low);
 
-    internal readonly Entity Value => new(World, new EntityId(High, Low));
+    internal readonly Entity Value => Entity.FromId(World, new EntityId(High, Low))!;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -60,7 +67,7 @@ internal struct NativeRenderEnvironment
         AmbientColor = AmbientColor,
         AmbientIntensity = AmbientIntensity,
         Exposure = Exposure,
-        Environment = new AssetReference<Texture>(new AssetId(EnvironmentHigh, EnvironmentLow)),
+        Environment = Asset.FromId<Texture>(new AssetId(EnvironmentHigh, EnvironmentLow)),
         EnvironmentRotationDegrees = EnvironmentRotationDegrees,
         EnvironmentDiffuseIntensity = EnvironmentDiffuseIntensity,
         EnvironmentSpecularIntensity = EnvironmentSpecularIntensity,
@@ -76,8 +83,8 @@ internal struct NativeRenderEnvironment
         AmbientColor = settings.AmbientColor,
         AmbientIntensity = settings.AmbientIntensity,
         Exposure = settings.Exposure,
-        EnvironmentHigh = settings.Environment.Id.High,
-        EnvironmentLow = settings.Environment.Id.Low,
+        EnvironmentHigh = settings.Environment?.Id.High ?? 0,
+        EnvironmentLow = settings.Environment?.Id.Low ?? 0,
         EnvironmentRotationDegrees = settings.EnvironmentRotationDegrees,
         EnvironmentDiffuseIntensity = settings.EnvironmentDiffuseIntensity,
         EnvironmentSpecularIntensity = settings.EnvironmentSpecularIntensity,
@@ -99,6 +106,8 @@ internal static unsafe class NativeWorld
     internal static delegate* unmanaged<ulong, byte> UnloadSceneIcall;
     internal static delegate* unmanaged<ulong, byte> SetActiveSceneIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte> MakeEntityPersistentIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, Vector3, Quaternion, byte,
+        NativeEntityHandle*, byte> InstantiatePrefabIcall;
     internal static delegate* unmanaged<NativeSceneHandle*, byte> GetActiveSceneIcall;
     internal static delegate* unmanaged<NativeSceneHandle*, int, int> GetLoadedScenesIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, int> GetEntityTagCountIcall;
@@ -158,18 +167,33 @@ internal static unsafe class NativeWorld
         return CancelSceneLoadIcall(operation) != 0;
     }
 
-    internal static bool UnloadScene(SceneHandle scene)
+    internal static bool UnloadScene(Scene scene)
     {
         if (UnloadSceneIcall == null)
             throw Unbound();
         return UnloadSceneIcall(scene.Id) != 0;
     }
 
-    internal static bool SetActiveScene(SceneHandle scene)
+    internal static bool SetActiveScene(Scene scene)
     {
         if (SetActiveSceneIcall == null)
             throw Unbound();
         return SetActiveSceneIcall(scene.Id) != 0;
+    }
+
+    internal static Entity InstantiatePrefab(Prefab prefab, Vector3 position, Quaternion rotation, Entity? parent,
+                                             bool active)
+    {
+        if (InstantiatePrefabIcall == null)
+            throw Unbound();
+        NativeEntityHandle result = default;
+        if (InstantiatePrefabIcall(prefab.Id.High, prefab.Id.Low, parent?.World ?? 0, parent?.Id.High ?? 0,
+                                   parent?.Id.Low ?? 0, position, rotation, active ? (byte)1 : (byte)0, &result) == 0)
+        {
+            throw new InvalidOperationException(
+                "The prefab is unavailable or the current runtime rejected prefab instantiation.");
+        }
+        return result.Value;
     }
 
     internal static bool MakeEntityPersistent(Entity entity)
@@ -179,15 +203,15 @@ internal static unsafe class NativeWorld
         return MakeEntityPersistentIcall(entity.World, entity.Id.High, entity.Id.Low) != 0;
     }
 
-    internal static SceneHandle GetActiveScene()
+    internal static Scene? GetActiveScene()
     {
         if (GetActiveSceneIcall == null)
             throw Unbound();
         NativeSceneHandle scene = default;
-        return GetActiveSceneIcall(&scene) != 0 ? scene.Value : default;
+        return GetActiveSceneIcall(&scene) != 0 ? scene.Value : null;
     }
 
-    internal static SceneHandle[] GetLoadedScenes()
+    internal static Scene[] GetLoadedScenes()
     {
         if (GetLoadedScenesIcall == null)
             throw Unbound();
@@ -202,9 +226,10 @@ internal static unsafe class NativeWorld
             if (GetLoadedScenesIcall(destination, native.Length) != native.Length)
                 throw new InvalidOperationException("The loaded-scene list changed while it was being read.");
         }
-        var result = new SceneHandle[native.Length];
+        var result = new Scene[native.Length];
         for (int index = 0; index < native.Length; ++index)
-            result[index] = native[index].Value;
+            result[index] = native[index].Value ??
+                throw new InvalidOperationException("The native runtime returned an invalid loaded scene.");
         return result;
     }
 
@@ -262,11 +287,12 @@ internal static unsafe class NativeWorld
         if (QueryEntityNamesIcall == null)
             throw Unbound();
         using NativeString value = name;
-        int count = QueryEntityNamesIcall(value, (byte)query.Scope, query.Scene.Id, maximum, null, 0);
+        ulong scene = query.Scene?.Id ?? 0;
+        int count = QueryEntityNamesIcall(value, (byte)query.Scope, scene, maximum, null, 0);
         NativeEntityHandle[] native = AllocateEntityQuery(count, maximum);
         fixed (NativeEntityHandle* destination = native)
         {
-            if (QueryEntityNamesIcall(value, (byte)query.Scope, query.Scene.Id, maximum, destination, native.Length) !=
+            if (QueryEntityNamesIcall(value, (byte)query.Scope, scene, maximum, destination, native.Length) !=
                 native.Length)
                 throw new InvalidOperationException("The scene query changed while it was being read.");
         }
@@ -278,11 +304,12 @@ internal static unsafe class NativeWorld
         if (QueryEntityTagsIcall == null)
             throw Unbound();
         using NativeString value = tag;
-        int count = QueryEntityTagsIcall(value, (byte)query.Scope, query.Scene.Id, maximum, null, 0);
+        ulong scene = query.Scene?.Id ?? 0;
+        int count = QueryEntityTagsIcall(value, (byte)query.Scope, scene, maximum, null, 0);
         NativeEntityHandle[] native = AllocateEntityQuery(count, maximum);
         fixed (NativeEntityHandle* destination = native)
         {
-            if (QueryEntityTagsIcall(value, (byte)query.Scope, query.Scene.Id, maximum, destination, native.Length) !=
+            if (QueryEntityTagsIcall(value, (byte)query.Scope, scene, maximum, destination, native.Length) !=
                 native.Length)
                 throw new InvalidOperationException("The scene query changed while it was being read.");
         }
@@ -293,12 +320,13 @@ internal static unsafe class NativeWorld
     {
         if (QueryEntityComponentsIcall == null)
             throw Unbound();
-        int count = QueryEntityComponentsIcall(component.High, component.Low, (byte)query.Scope, query.Scene.Id,
+        ulong scene = query.Scene?.Id ?? 0;
+        int count = QueryEntityComponentsIcall(component.High, component.Low, (byte)query.Scope, scene,
                                                 maximum, null, 0);
         NativeEntityHandle[] native = AllocateEntityQuery(count, maximum);
         fixed (NativeEntityHandle* destination = native)
         {
-            if (QueryEntityComponentsIcall(component.High, component.Low, (byte)query.Scope, query.Scene.Id, maximum,
+            if (QueryEntityComponentsIcall(component.High, component.Low, (byte)query.Scope, scene, maximum,
                                            destination, native.Length) != native.Length)
                 throw new InvalidOperationException("The scene query changed while it was being read.");
         }

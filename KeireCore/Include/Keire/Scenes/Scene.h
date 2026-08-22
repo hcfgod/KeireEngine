@@ -88,6 +88,8 @@ namespace Keire
         [[nodiscard]] Entity FindEntity(EntityId id) const noexcept;
         [[nodiscard]] Entity CreateEntity(std::string name = "GameObject", const Entity& parent = {});
         [[nodiscard]] Entity DuplicateEntity(EntityId id);
+        [[nodiscard]] Entity InstantiatePrefab(AssetId prefab, SceneDefinition definition, const Entity& parent = {},
+                                               Vector3 position = {}, Quaternion rotation = {}, bool active = true);
         [[nodiscard]] bool DestroyEntity(EntityId id);
         void MoveEntity(EntityId id, EntityId parent = {}, EntityId beforeSibling = {},
                         bool preserveWorldTransform = true);

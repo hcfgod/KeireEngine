@@ -137,6 +137,7 @@ namespace Keire
                 (definition.VertexLayoutVersion < 1 || definition.VertexLayoutVersion > 3) ||
                 definition.Topology > ShaderPrimitiveTopology::PointList || definition.Culling > ShaderCullMode::Back ||
                 (definition.SpatialLightingAbiVersion != 0U && definition.SpatialLightingAbiVersion != 2U) ||
+                definition.UserResourceSlots > 16U || definition.UserReadOnlyBuffers > 8U ||
                 (definition.SpatialLightingAbiVersion == 2U &&
                  (!definition.UsesImageBasedLighting || definition.VertexLayoutVersion != 3U)) ||
                 definition.Source.empty() || definition.Source.is_absolute() ||
@@ -187,11 +188,11 @@ namespace Keire
             const auto reservedSamplers = (definition.ReceivesShadows ? 2U : 0U) +
                                           (definition.UsesImageBasedLighting ? 2U : 0U) +
                                           (definition.SpatialLightingAbiVersion == 2U ? 5U : 0U);
-            if (textureProperties + reservedSamplers > portableFragmentSamplerLimit)
-            {
+            if (textureProperties + definition.UserResourceSlots + reservedSamplers > portableFragmentSamplerLimit)
                 throw std::invalid_argument(
                     "Shader material textures and fixed lighting resources exceed the portable 16-sampler limit.");
-            }
+            if (definition.UserReadOnlyBuffers + (definition.UsesForwardPlus ? 3U : 0U) > 8U)
+                throw std::invalid_argument("Shader read-only buffers exceed the portable eight-buffer limit.");
             std::set<ShaderBinaryFormat> formats;
             for (const auto& variant : definition.Variants)
             {
@@ -485,6 +486,8 @@ namespace Keire
                     {"usesImageBasedLighting", definition.UsesImageBasedLighting},
                     {"spatialLightingAbiVersion", definition.SpatialLightingAbiVersion},
                     {"usesVertexMaterialParameters", definition.UsesVertexMaterialParameters},
+                    {"userResourceSlots", definition.UserResourceSlots},
+                    {"userReadOnlyBuffers", definition.UserReadOnlyBuffers},
                     {"properties", std::move(properties)},
                     {"dependencies", std::move(dependencies)},
                     {"variants", std::move(variants)}};
@@ -511,6 +514,8 @@ namespace Keire
             result.UsesImageBasedLighting = source.value("usesImageBasedLighting", false);
             result.SpatialLightingAbiVersion = source.value("spatialLightingAbiVersion", static_cast<std::uint8_t>(0));
             result.UsesVertexMaterialParameters = source.value("usesVertexMaterialParameters", false);
+            result.UserResourceSlots = source.value("userResourceSlots", static_cast<std::uint8_t>(0));
+            result.UserReadOnlyBuffers = source.value("userReadOnlyBuffers", static_cast<std::uint8_t>(0));
             for (const auto& property : source.at("properties"))
             {
                 ShaderPropertyDefinition decoded;
@@ -705,9 +710,11 @@ namespace Keire
             const auto minimumFragmentUniformBuffers = definition.UsesImageBasedLighting ? 4U
                                                        : definition.ReceivesShadows      ? 3U
                                                                                          : 2U;
-            const auto expectedSamplers = textureCount + (definition.ReceivesShadows ? 2U : 0U) +
+            const auto expectedSamplers = textureCount + definition.UserResourceSlots +
+                                          (definition.ReceivesShadows ? 2U : 0U) +
                                           (definition.UsesImageBasedLighting ? 2U : 0U) + (spatialLighting ? 5U : 0U);
-            const auto expectedFragmentStorageBuffers = definition.UsesForwardPlus ? 3U : 0U;
+            const auto expectedFragmentStorageBuffers =
+                (definition.UsesForwardPlus ? 3U : 0U) + definition.UserReadOnlyBuffers;
             if (!noStorageTextures(vertex) || !noStorageTextures(fragment) ||
                 vertex.value("storage_buffers", 0U) != (definition.UsesInstancing ? 1U : 0U) ||
                 fragment.value("storage_buffers", 0U) != expectedFragmentStorageBuffers ||
@@ -868,6 +875,14 @@ namespace Keire
             result.SpatialLightingAbiVersion =
                 manifest.value("spatialLightingAbiVersion", static_cast<std::uint8_t>(0));
             result.UsesVertexMaterialParameters = manifest.value("usesVertexMaterialParameters", false);
+            const auto resourceDocument = Json{{"schemaVersion", ShaderGraphResourceContractSchemaVersion},
+                                               {"resources", manifest.value("resources", Json::array())}}
+                                              .dump();
+            const auto resources = DecodeShaderGraphResources(std::as_bytes(std::span(resourceDocument)));
+            const auto resourceStatistics = AnalyzeShaderGraphResources(resources).Statistics;
+            result.UserResourceSlots =
+                static_cast<std::uint8_t>(std::max(resourceStatistics.TextureCount, resourceStatistics.SamplerCount));
+            result.UserReadOnlyBuffers = static_cast<std::uint8_t>(resourceStatistics.ReadOnlyBufferCount);
             if (result.SpatialLightingAbiVersion != 0U && result.SpatialLightingAbiVersion != 2U)
                 throw std::invalid_argument("Shader spatial-lighting ABI version is unsupported.");
             if (result.SpatialLightingAbiVersion == 2U &&

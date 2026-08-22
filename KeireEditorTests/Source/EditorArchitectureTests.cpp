@@ -685,6 +685,7 @@ TEST_CASE("scene document commands validate and target the active scene")
     CHECK(scene->FindEntity(child).Name() == "Authored light");
     document.DeleteEntity(child);
     CHECK_FALSE(document.Selection());
+    document.ActiveScene()->Update(0.0F);
     CHECK_FALSE(document.ActiveScene()->FindEntity(child));
     CHECK(scene->FindEntity(child));
     document.EndPlay();
@@ -695,7 +696,6 @@ TEST_CASE("scene document commands validate and target the active scene")
                     std::invalid_argument);
     document.Close();
 }
-
 TEST_CASE("scene document moves hierarchy selections as one validated ordered transaction")
 {
     KeireEditor::SceneDocument document;

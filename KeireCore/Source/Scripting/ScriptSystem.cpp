@@ -15,6 +15,7 @@
 #include "KeireInternal/Scripting/CoralLog.h"
 #include "KeireInternal/Scripting/ManagedBehaviourComponent.h"
 #include "KeireInternal/Scripting/ManagedBuildWorkspace.h"
+#include "KeireInternal/Scripting/ManagedBuiltinComponents.h"
 #include "KeireInternal/Scripting/ManagedGenerationSequence.h"
 #include "KeireInternal/Scripting/ManagedReflection.h"
 #include "KeireInternal/Scripting/ManagedRuntimeBindings.h"
@@ -124,7 +125,8 @@ namespace Keire
         {
           public:
             explicit RuntimeScope(Impl& runtime) noexcept
-                : m_Previous(CurrentRuntime), m_Bindings(runtime.Specification.RuntimeServices)
+                : m_Previous(CurrentRuntime), m_Bindings(runtime.Specification.RuntimeServices),
+                  m_BuiltinComponents(&Impl::ResolveRuntimeEntity)
             {
                 CurrentRuntime = &runtime;
             }
@@ -135,6 +137,7 @@ namespace Keire
           private:
             Impl* m_Previous;
             Detail::ManagedRuntimeBindingsScope m_Bindings;
+            Detail::ManagedBuiltinComponentResolverScope m_BuiltinComponents;
         };
         explicit Impl(ScriptSystemSpecification value, Ref<JobSystem> jobs)
             : Specification(std::move(value)), Owner(std::this_thread::get_id()),
@@ -950,7 +953,6 @@ namespace Keire
                 return 0;
             }
         }
-
         [[nodiscard]] static std::uint8_t
         RuntimeGetCharacterControllerState(const std::uint64_t world, const std::uint64_t high, const std::uint64_t low,
                                            std::uint8_t* grounded, Vector3* normal, Vector3* velocity) noexcept
@@ -1737,20 +1739,13 @@ namespace Keire
             }
         }
 
-        [[nodiscard]] static ComponentTypeId RuntimeComponentType(const std::uint64_t high,
-                                                                  const std::uint64_t low) noexcept
-        {
-            return ComponentTypeId(AssetId(high, low));
-        }
-
         [[nodiscard]] static std::uint8_t
         RuntimeComponentExists(const std::uint64_t world, const std::uint64_t entityHigh, const std::uint64_t entityLow,
                                const std::uint64_t typeHigh, const std::uint64_t typeLow) noexcept
         {
             const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
-            return entity && entity.HasComponent(RuntimeComponentType(typeHigh, typeLow)) ? 1 : 0;
+            return entity && entity.HasComponent(ComponentTypeId(AssetId(typeHigh, typeLow))) ? 1 : 0;
         }
-
         [[nodiscard]] static std::uint8_t RuntimeAddComponent(const std::uint64_t world, const std::uint64_t entityHigh,
                                                               const std::uint64_t entityLow,
                                                               const std::uint64_t typeHigh,
@@ -1759,7 +1754,7 @@ namespace Keire
             try
             {
                 auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
-                const auto type = RuntimeComponentType(typeHigh, typeLow);
+                const auto type = ComponentTypeId(AssetId(typeHigh, typeLow));
                 if (!entity || !type)
                     return 0;
                 return (entity.GetComponent(type) || entity.AddComponent(type)) ? 1 : 0;
@@ -1769,7 +1764,6 @@ namespace Keire
                 return 0;
             }
         }
-
         [[nodiscard]] static std::uint8_t
         RuntimeRemoveComponent(const std::uint64_t world, const std::uint64_t entityHigh, const std::uint64_t entityLow,
                                const std::uint64_t typeHigh, const std::uint64_t typeLow) noexcept
@@ -1777,14 +1771,13 @@ namespace Keire
             try
             {
                 auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
-                return entity && entity.RemoveComponent(RuntimeComponentType(typeHigh, typeLow)) ? 1 : 0;
+                return entity && entity.RemoveComponent(ComponentTypeId(AssetId(typeHigh, typeLow))) ? 1 : 0;
             }
             catch (...)
             {
                 return 0;
             }
         }
-
         [[nodiscard]] static std::uint8_t RuntimeGetComponentEnabled(const std::uint64_t world,
                                                                      const std::uint64_t entityHigh,
                                                                      const std::uint64_t entityLow,
@@ -1793,7 +1786,7 @@ namespace Keire
         {
             const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
             const auto component =
-                entity ? entity.GetComponent(RuntimeComponentType(typeHigh, typeLow)) : Ref<Component>{};
+                entity ? entity.GetComponent(ComponentTypeId(AssetId(typeHigh, typeLow))) : Ref<Component>{};
             return component && component->Enabled() ? 1 : 0;
         }
 
@@ -1806,7 +1799,7 @@ namespace Keire
             {
                 const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
                 const auto component =
-                    entity ? entity.GetComponent(RuntimeComponentType(typeHigh, typeLow)) : Ref<Component>{};
+                    entity ? entity.GetComponent(ComponentTypeId(AssetId(typeHigh, typeLow))) : Ref<Component>{};
                 if (!component)
                     return 0;
                 component->SetEnabled(enabled != 0);
@@ -3212,10 +3205,8 @@ namespace Keire
                                         m_Impl->ProjectRoot, m_Impl->Specification.RuntimeRootDirectory);
         m_Impl->InitializeRuntime();
     }
-
     ScriptSystem::~ScriptSystem() = default;
     bool ScriptSystem::IsOpen() const noexcept { return m_Impl->Open.load(std::memory_order_acquire); }
-
     ManagedIdeWorkspace ScriptSystem::GenerateIdeWorkspace(const ManagedBuildRequest& request,
                                                            const std::string_view solutionName)
     {
@@ -3585,6 +3576,14 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimeRemoveComponent));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "GetComponentEnabledIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeGetComponentEnabled));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "GetBuiltinComponentPropertyIcall",
+                                           reinterpret_cast<void*>(&Detail::GetManagedBuiltinComponentPropertyIcall));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetBuiltinComponentPropertyIcall",
+                                           reinterpret_cast<void*>(&Detail::SetManagedBuiltinComponentPropertyIcall));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "GetBuiltinComponentTextIcall",
+                                           reinterpret_cast<void*>(&Detail::GetManagedBuiltinComponentTextIcall));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetBuiltinComponentTextIcall",
+                                           reinterpret_cast<void*>(&Detail::SetManagedBuiltinComponentTextIcall));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetComponentEnabledIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeSetComponentEnabled));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "GetLocalScaleIcall",
@@ -3785,6 +3784,7 @@ namespace Keire
                     }
                 }
             }
+            Detail::PopulateManagedBehaviourReferenceCompatibility(candidateTypes, managedRuntimeTypesByName);
             if (!managedAssetMetadataType)
                 throw std::runtime_error("Managed asset discovery requires Keire.Managed metadata.");
             const Coral::ScopedString managedAssetMetadata(

@@ -145,7 +145,7 @@ namespace Keire
                                "    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>\n"
                                "    <WarningsNotAsErrors>$(WarningsNotAsErrors);CS0168;CS0169;CS0219;CS0414"
                                "</WarningsNotAsErrors>\n"
-                               "    <NoWarn>$(NoWarn);CS0649</NoWarn>\n"
+                               "    <NoWarn>$(NoWarn);CS0649;CS8601;CS8618</NoWarn>\n"
                                "    <AllowUnsafeBlocks>" +
                                std::string(assembly.Definition.AllowUnsafe ? "true" : "false") +
                                "</AllowUnsafeBlocks>\n"

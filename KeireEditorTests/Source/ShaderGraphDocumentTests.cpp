@@ -79,6 +79,60 @@ TEST_CASE("Shader Graph document preserves reusable function metadata without st
     CHECK(decodedInput->Name == "Source Color");
 }
 
+TEST_CASE("Shader Graph document batches multi-node movement and deletion into atomic undo commands")
+{
+    KeireEditor::ShaderGraphDocument document(
+        {.Persist = [](const Keire::AssetId, const std::span<const std::byte>) {}});
+    auto undoService = Keire::CreateRef<Keire::UndoService>();
+    auto undo = undoService->CreateContext({.Name = "Shader Graph batch edits"});
+    document.Create(Keire::AssetId::Generate(), Keire::CreateDefaultShaderGraph(), undo);
+    auto first = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Constant,
+                                              Keire::ShaderGraphValueType::Scalar);
+    auto second = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Constant,
+                                               Keire::ShaderGraphValueType::Scalar);
+    first.EditorPosition = {40.0F, 80.0F};
+    second.EditorPosition = {180.0F, 120.0F};
+    REQUIRE(document.AddNode(first));
+    REQUIRE(document.AddNode(second));
+
+    const std::array moves{std::pair{first.Id, Keire::Vector2{140.0F, 180.0F}},
+                           std::pair{second.Id, Keire::Vector2{280.0F, 220.0F}}};
+    REQUIRE(document.MoveNodes(moves));
+    CHECK(std::ranges::find(document.Definition().Nodes, first.Id, &Keire::ShaderGraphNode::Id)->EditorPosition ==
+          moves[0].second);
+    CHECK(std::ranges::find(document.Definition().Nodes, second.Id, &Keire::ShaderGraphNode::Id)->EditorPosition ==
+          moves[1].second);
+    REQUIRE(document.Undo());
+    CHECK(std::ranges::find(document.Definition().Nodes, first.Id, &Keire::ShaderGraphNode::Id)->EditorPosition ==
+          first.EditorPosition);
+    CHECK(std::ranges::find(document.Definition().Nodes, second.Id, &Keire::ShaderGraphNode::Id)->EditorPosition ==
+          second.EditorPosition);
+    REQUIRE(document.Redo());
+
+    REQUIRE(document.Edit("Create selection comment",
+                          [&](auto& definition)
+                          {
+                              definition.Authoring.Comments.push_back(
+                                  {Keire::AssetId::Generate(), "Values", {}, {}, {360.0F, 240.0F}, {}, 18.0F,
+                                   Keire::GraphCommentMoveMode::Group, {}, {first.Id, second.Id}, false});
+                          }));
+    const std::array selected{first.Id, second.Id};
+    REQUIRE(document.RemoveNodes(selected));
+    CHECK(std::ranges::find(document.Definition().Nodes, first.Id, &Keire::ShaderGraphNode::Id) ==
+          document.Definition().Nodes.end());
+    CHECK(document.Definition().Authoring.Comments.front().Members.empty());
+    REQUIRE(document.Undo());
+    CHECK(std::ranges::find(document.Definition().Nodes, first.Id, &Keire::ShaderGraphNode::Id) !=
+          document.Definition().Nodes.end());
+    CHECK(document.Definition().Authoring.Comments.front().Members == std::vector{first.Id, second.Id});
+
+    const std::array includesOutput{first.Id, document.Definition().Nodes.front().Id};
+    const auto before = document.Definition();
+    CHECK_THROWS_AS((void)document.RemoveNodes(includesOutput), std::invalid_argument);
+    CHECK(document.Definition() == before);
+    undoService->Close();
+}
+
 TEST_CASE("Shader Graph document reuses the stable canvas and preserves last-good preview")
 {
     std::size_t previewCount = 0;

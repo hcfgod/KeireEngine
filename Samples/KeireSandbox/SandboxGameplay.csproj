@@ -9,7 +9,7 @@
     <DebugType>portable</DebugType>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <WarningsNotAsErrors>$(WarningsNotAsErrors);CS0168;CS0169;CS0219;CS0414</WarningsNotAsErrors>
-    <NoWarn>$(NoWarn);CS0649</NoWarn>
+    <NoWarn>$(NoWarn);CS0649;CS8601;CS8618</NoWarn>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <AssemblyName>SandboxGameplay</AssemblyName>

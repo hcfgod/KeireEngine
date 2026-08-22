@@ -1,10 +1,8 @@
 #include "KeireClient/Editor/VfxEffectPanel.h"
-
 #include "KeireClient/Editor/AuthoringWidgets.h"
 #include "KeireClient/Editor/VfxEffectDocument.h"
 #include "KeireClient/Editor/VfxEffectPanelModel.h"
 #include "KeireClient/Editor/VfxNodeCatalog.h"
-
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -23,7 +21,6 @@
 #include <string>
 #include <utility>
 #include <variant>
-
 namespace KeireEditor
 {
     namespace
@@ -640,13 +637,14 @@ namespace KeireEditor
         auto& document = m_Controller.VfxEffectState();
         const auto& definition = document.Definition();
         const auto& theme = m_Controller.VfxEffectTheme();
+        if (DrawGraphMultiSelectionInspector(ui))
+            return;
         const auto system = std::ranges::find(definition.Systems, m_SelectedSystem, &Keire::VfxGraphSystem::Id);
         if (system == definition.Systems.end())
         {
             ui.TextColored(theme.MutedText, "Create or select a system to begin authoring.");
             return;
         }
-
         const auto graphViewportSize = ui.ContentAvailable();
         ui.TextColored(theme.Accent, system->Name);
         ui.SameLine();
@@ -678,9 +676,9 @@ namespace KeireEditor
             ui.SameLine();
             ui.TextColored(theme.Warning, "Convert to Graph to add executable nodes.");
         }
-
         std::vector<NodeGraphNode> nodes;
         nodes.reserve(system->Nodes.size());
+        std::vector<std::pair<StableNodeId, Keire::AssetId>> nodeIdentities;
         StableNodeGraphIdMap nodeIds;
         StableNodeGraphIdMap blockIds;
         StableNodeGraphIdMap pinIds;
@@ -699,6 +697,7 @@ namespace KeireEditor
                 .Subtitle = std::string(VfxGraphNodeKindLabel(node.Kind)) + "  |  " +
                             std::string(EnumName(node.Context, ContextTypes)),
             };
+            nodeIdentities.emplace_back(canvasNode.Id, node.Id);
             canvasNode.Pins.reserve(node.Pins.size());
             for (const auto& pin : node.Pins)
             {
@@ -710,6 +709,7 @@ namespace KeireEditor
                      .Color = PinColor(pin.Type)});
             }
             canvasNode.Blocks.reserve(node.Blocks.size());
+            canvasNode.Deletable = node.Kind != Keire::VfxGraphNodeKind::Context;
             for (const auto& block : node.Blocks)
             {
                 NodeGraphBlockRow row{
@@ -734,7 +734,10 @@ namespace KeireEditor
         }
         std::vector<NodeGraphConnection> connections;
         connections.reserve(system->Connections.size());
+        ApplyNodeGraphAnnotations(system->Authoring, nodeIdentities, nodes);
+        auto comments = BuildNodeGraphCommentModel(system->Authoring, nodeIdentities);
         StableNodeGraphIdMap connectionIds;
+        std::vector<std::pair<StableNodeId, Keire::AssetId>> connectionIdentities;
         const auto findEndpointPin = [&](const Keire::VfxGraphEndpoint endpoint) -> const Keire::VfxGraphPin*
         {
             const auto node = std::ranges::find(system->Nodes, endpoint.Node, &Keire::VfxGraphNode::Id);
@@ -763,7 +766,6 @@ namespace KeireEditor
             const auto targetPin = pinIds.Find(connection.InputPin);
             if (!source || !target || !sourceBlock || !targetBlock || !sourcePin || !targetPin)
                 continue;
-
             std::string label;
             const auto* graphPin = findEndpointPin(connection.OutputEndpoint());
             if (graphPin && graphPin->Type != Keire::VfxValueType::ParticleStream)
@@ -779,6 +781,7 @@ namespace KeireEditor
                 .TargetBlock = *targetBlock,
                 .RoutingPoints = connection.RoutingPoints,
             });
+            connectionIdentities.emplace_back(connections.back().Id, connection.Id);
         }
         if (m_SelectedNode && !nodeIds.Find(m_SelectedNode))
         {
@@ -807,19 +810,23 @@ namespace KeireEditor
         }
         if (m_SelectedConnection && !connectionIds.Find(m_SelectedConnection))
             m_SelectedConnection = {};
-        m_GraphCanvas.Select(nodeIds.Find(m_SelectedNode));
+        SynchronizeGraphSelection(m_GraphCanvas, nodeIdentities, m_SelectedNodes,
+                                  m_SelectedNode ? std::optional(m_SelectedNode) : std::nullopt);
         m_GraphCanvas.SelectBlock(selectedBlock);
         m_GraphCanvas.SelectConnection(connectionIds.Find(m_SelectedConnection));
-
         if (ui.Button("Frame All"))
             m_GraphCanvas.Focus(nodes, ui.ContentAvailable());
+        ui.SameLine();
+        if (DrawGraphArrangeMenu(ui, nodes, connections, nodeIdentities, connectionIdentities))
+            return;
+        ui.SameLine();
+        (void)DrawGraphBookmarkMenu(ui, m_GraphBookmarks, m_GraphCanvas);
         ui.SameLine();
         if (m_GraphCanvas.ConnectionDragActive())
             ui.TextColored(theme.Warning, "Release over a compatible pin  |  Escape cancels");
         else
             ui.TextColored(theme.MutedText,
                            "Right-click to add  |  drag pins to connect  |  double-click cables for routing points");
-
         const auto findGraphNode = [&](const StableNodeId canvasId) -> const Keire::VfxGraphNode*
         {
             const auto found = std::ranges::find_if(system->Nodes, [&](const Keire::VfxGraphNode& node)
@@ -869,7 +876,6 @@ namespace KeireEditor
                                      { return connectionIds.Find(connection.Id) == canvasId; });
             return found == system->Connections.end() ? nullptr : std::addressof(*found);
         };
-
         NodeGraphCanvasOptions options{
             .Editable = true,
             .ValidateConnection =
@@ -882,7 +888,6 @@ namespace KeireEditor
                     return NodeGraphConnectionValidation{NodeGraphConnectionValidationStatus::Reject,
                                                          "A connection endpoint is unavailable."};
                 }
-
                 const auto check = document.CheckConnection(system->Id, *source, *target);
                 switch (check.Status)
                 {
@@ -910,10 +915,18 @@ namespace KeireEditor
                                                      "The connection could not be validated."};
             },
             .EditableReroutes = true,
+            .MultiSelection = true,
+            .Comments = comments.Comments,
         };
         const auto result = m_GraphCanvas.Draw(ui, "VfxNodeCanvas", nodes, connections, options);
+        DrawGraphComments(ui, system->Id, nodeIdentities, nodes, comments, result);
+        m_SelectedNodes = ResolveGraphSelection(result.SelectedNodes, nodeIdentities);
+        m_SelectedNode = m_SelectedNodes.empty() ? Keire::AssetId{} : m_SelectedNodes.back();
+        if (HandleGraphClipboard(result, nodeIdentities))
+            return;
+        if (!result.DuplicateNodesRequested.empty())
+            return DuplicateGraphSelection(result.DuplicateNodesRequested, nodeIdentities);
         const auto renderedCanvasSize = ui.LastItemRect().Size();
-
         const auto setRouting = [&](const StableNodeId canvasConnection, std::vector<Keire::Vector2> routing) -> bool
         {
             const auto* connection = findGraphConnection(canvasConnection);
@@ -963,7 +976,6 @@ namespace KeireEditor
                     return;
             }
         }
-
         if (result.DeleteConnectionRequested)
         {
             if (const auto* connection = findGraphConnection(*result.DeleteConnectionRequested);
@@ -991,27 +1003,28 @@ namespace KeireEditor
                 return;
             }
         }
-        if (result.DeleteNodeRequested)
+        if (!result.DeleteNodesRequested.empty())
         {
-            if (const auto* node = findGraphNode(*result.DeleteNodeRequested); node)
+            std::vector<Keire::AssetId> selected;
+            for (const auto canvasNode : result.DeleteNodesRequested)
+                if (const auto* node = findGraphNode(canvasNode))
+                    selected.push_back(node->Id);
+            if (ApplyAction(selected.size() == 1 ? "Removed VFX graph node" : "Removed VFX graph nodes",
+                            [&document, graph = system->Id, selected]
+                            { return document.RemoveNodes(graph, selected); }))
             {
-                if (node->Kind == Keire::VfxGraphNodeKind::Context)
-                {
-                    m_Message = "Executable context nodes cannot be deleted.";
-                }
-                else if (ApplyAction("Removed VFX graph node", [&document, graph = system->Id, nodeId = node->Id]
-                                     { return document.RemoveNode(graph, nodeId); }))
-                {
-                    m_SelectedNode = {};
-                    m_SelectedBlock = {};
-                    m_SelectedConnection = {};
-                    m_GraphCanvas.Select(std::nullopt);
-                    m_GraphCanvas.SelectBlock(std::nullopt);
-                    m_GraphCanvas.SelectConnection(std::nullopt);
-                    return;
-                }
+                m_SelectedNode = {};
+                m_SelectedNodes.clear();
+                m_SelectedBlock = {};
+                m_SelectedConnection = {};
+                m_GraphCanvas.Select(std::nullopt);
+                m_GraphCanvas.SelectBlock(std::nullopt);
+                m_GraphCanvas.SelectConnection(std::nullopt);
+                return;
             }
         }
+        if (!result.ProtectedNodes.empty())
+            m_Message = "Executable VFX Context nodes are protected and were not deleted.";
         if (result.ConnectionRequested)
         {
             const auto source =
@@ -1052,7 +1065,6 @@ namespace KeireEditor
                 }
             }
         }
-
         if (result.ActivatedNode)
         {
             if (const auto* node = findGraphNode(*result.ActivatedNode); node)
@@ -1087,7 +1099,6 @@ namespace KeireEditor
             m_SelectedBlock = {};
             m_SelectedConnection = {};
         }
-
         if (result.ContextRequested)
         {
             m_ContextNode = {};
@@ -1149,9 +1160,10 @@ namespace KeireEditor
                     ui.OpenPopup("VfxGraphConnectionContext");
                 }
                 break;
+            case NodeGraphContextTargetKind::Comment:
+                break;
             }
         }
-
         if (auto popup = ui.BeginPopup("VfxGraphNodePalette"); popup)
         {
             ui.TextColored(theme.Accent, "CREATE NODE");
@@ -1169,10 +1181,11 @@ namespace KeireEditor
             if (definition.ExecutionSource != Keire::VfxExecutionSource::Graph)
                 ui.TextColored(theme.Warning, "Convert Runtime Modules to Graph before adding executable nodes.");
             ui.Separator();
+            if (ui.MenuItem("Create Empty Comment"))
+                CreateGraphComment(ui, system->Id, nodeIdentities, nodes, m_NodePalettePosition, false);
             if (ui.MenuItem("Frame All Nodes"))
                 m_GraphCanvas.Focus(nodes, renderedCanvasSize);
         }
-
         if (auto popup = ui.BeginPopup("VfxGraphNodeContext"); popup)
         {
             const auto node = std::ranges::find(system->Nodes, m_ContextNode, &Keire::VfxGraphNode::Id);
@@ -1219,6 +1232,8 @@ namespace KeireEditor
                         });
                     return;
                 }
+                if (ui.MenuItem("Create Comment from Selection"))
+                    CreateGraphComment(ui, system->Id, nodeIdentities, nodes, node->EditorPosition, true);
                 if (ui.MenuItem("Delete Node", false, node->Kind != Keire::VfxGraphNodeKind::Context))
                 {
                     (void)ApplyAction("Removed VFX graph node", [&document, graph = system->Id, nodeId = node->Id]
@@ -1232,7 +1247,6 @@ namespace KeireEditor
                     ui.TextColored(theme.MutedText, "Executable context nodes are fixed graph stages.");
             }
         }
-
         if (auto popup = ui.BeginPopup("VfxGraphBlockContext"); popup)
         {
             const auto node = std::ranges::find(system->Nodes, m_ContextNode, &Keire::VfxGraphNode::Id);
@@ -1445,19 +1459,15 @@ namespace KeireEditor
             }
         }
 
-        if (result.MoveCompletedNode)
+        if (!result.MoveCompletedNodes.empty())
         {
-            const auto canvasNode = std::ranges::find(nodes, *result.MoveCompletedNode, &NodeGraphNode::Id);
-            const auto* graphNode = findGraphNode(*result.MoveCompletedNode);
-            if (canvasNode != nodes.end() && graphNode)
-            {
-                (void)ApplyAction("Moved VFX graph node",
-                                  [&document, graph = system->Id, node = graphNode->Id, position = canvasNode->Position]
-                                  {
-                                      return document.EditNode(graph, node, [position](Keire::VfxGraphNode& candidate)
-                                                               { candidate.EditorPosition = position; });
-                                  });
-            }
+            std::vector<std::pair<Keire::AssetId, Keire::Vector2>> moves;
+            for (const auto moved : result.MoveCompletedNodes)
+                if (const auto* graphNode = findGraphNode(moved);
+                    graphNode && std::ranges::find(nodes, moved, &NodeGraphNode::Id) != nodes.end())
+                    moves.emplace_back(graphNode->Id, std::ranges::find(nodes, moved, &NodeGraphNode::Id)->Position);
+            (void)ApplyAction(moves.size() == 1 ? "Moved VFX graph node" : "Moved VFX graph nodes",
+                              [&document, graph = system->Id, moves] { return document.MoveNodes(graph, moves); });
         }
     }
 
@@ -2254,6 +2264,9 @@ namespace KeireEditor
             return;
         }
 
+        if (DrawGraphNodeComment(ui, system->Id, *selected))
+            return;
+
         ui.Separator();
         ui.TextColored(theme.Accent, "TYPED PINS");
         const bool customPins = selected->Kind == Keire::VfxGraphNodeKind::CustomHlsl;
@@ -2719,32 +2732,4 @@ namespace KeireEditor
             DrawSelectedModule(ui);
     }
 
-    void VfxEffectPanel::ResetTransientState() noexcept
-    {
-        m_SelectedModule = {};
-        m_SelectedSystem = {};
-        m_SelectedNode = {};
-        m_SelectedBlock = {};
-        m_SelectedConnection = {};
-        m_SelectedParameter = {};
-        m_ContextNode = {};
-        m_ContextBlock = {};
-        m_ContextPin = {};
-        m_ContextConnection = {};
-        m_NodePalettePosition = {};
-        m_NodePaletteSearch.clear();
-        m_GraphCanvas.CancelInteractions();
-        m_GraphCanvas.Select(std::nullopt);
-        m_GraphCanvas.SelectBlock(std::nullopt);
-        m_GraphCanvas.SelectConnection(std::nullopt);
-        m_AssetPicker.Clear();
-        m_Message.clear();
-    }
-
-    void VfxEffectPanel::StopTransientPreview() noexcept
-    {
-        m_GraphCanvas.CancelInteractions();
-        m_Controller.StopVfxEffectPreview();
-        m_WasVisible = false;
-    }
 } // namespace KeireEditor

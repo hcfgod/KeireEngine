@@ -841,13 +841,39 @@ TEST_CASE("VFX schema four rejects unknown type IDs and malformed typed fields")
 
 TEST_CASE("Default VFX effects expose a connected authoring context graph")
 {
-    const auto definition = Keire::VfxEffectAsset::DefaultDefinition();
+    auto definition = Keire::VfxEffectAsset::DefaultDefinition();
     CHECK(definition.SchemaVersion == Keire::CurrentVfxSchemaVersion);
     CHECK(definition.ExecutionSource == Keire::VfxExecutionSource::Graph);
     REQUIRE(definition.Systems.size() == 1);
     const auto& system = definition.Systems.front();
     CHECK(system.Nodes.size() == 4);
     CHECK(system.Connections.size() == 3);
+
+    definition.Systems.front().Authoring.NodeAnnotations.push_back(
+        {definition.Systems.front().Nodes.front().Id, "Spawn entry point", true, true});
+    definition.Systems.front().Authoring.Comments.push_back(
+        {Keire::AssetId::Generate(),
+         "Spawn and initialize",
+         "The authoring region survives source and cooked publication.",
+         {-80.0F, -60.0F},
+         {620.0F, 420.0F},
+         {0.18F, 0.48F, 0.3F, 0.4F},
+         20.0F,
+         Keire::GraphCommentMoveMode::Group,
+         {},
+         {definition.Systems.front().Nodes[0].Id, definition.Systems.front().Nodes[1].Id},
+         false});
+    const auto encoded = Keire::VfxEffectAsset::Encode(definition);
+    CHECK(Keire::VfxEffectAsset::Decode(encoded)->Definition() == definition);
+
+    auto schemaFour = nlohmann::json::parse(reinterpret_cast<const char*>(encoded.data()),
+                                            reinterpret_cast<const char*>(encoded.data() + encoded.size()));
+    schemaFour["schemaVersion"] = 4;
+    for (auto& encodedSystem : schemaFour["systems"])
+        encodedSystem.erase("authoring");
+    const auto migrated = Keire::VfxEffectAsset::Decode(Bytes(schemaFour.dump()));
+    CHECK(migrated->Definition().SchemaVersion == Keire::CurrentVfxSchemaVersion);
+    CHECK(migrated->Definition().Systems.front().Authoring == Keire::GraphAuthoringMetadata{});
     CHECK(std::ranges::count(system.Nodes, Keire::VfxGraphNodeKind::Context, &Keire::VfxGraphNode::Kind) == 4);
     CHECK(std::ranges::count(system.Nodes, Keire::VfxGraphNodeKind::Module, &Keire::VfxGraphNode::Kind) == 0);
     std::size_t blockCount = 0;

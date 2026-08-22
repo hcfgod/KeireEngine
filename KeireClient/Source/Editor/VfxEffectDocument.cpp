@@ -678,14 +678,50 @@ namespace KeireEditor
                     });
     }
 
-    bool VfxEffectDocument::RemoveNode(const Keire::AssetId system, const Keire::AssetId node)
+    bool VfxEffectDocument::MoveNodes(const Keire::AssetId system,
+                                      const std::span<const std::pair<Keire::AssetId, Keire::Vector2>> nodes)
     {
-        return Edit("Remove VFX graph node",
-                    [system, node](Keire::VfxEffectDefinition& definition)
+        if (nodes.empty())
+            return false;
+        return Edit(nodes.size() == 1 ? "Move VFX graph node" : "Move VFX graph nodes",
+                    [system, nodes = std::vector(nodes.begin(), nodes.end())](Keire::VfxEffectDefinition& definition)
                     {
                         auto& graph = RequireSystem(definition, system);
-                        RemoveNodeAndReconnect(graph, node,
-                                               definition.ExecutionSource == Keire::VfxExecutionSource::Graph);
+                        for (const auto& [node, position] : nodes)
+                        {
+                            RequireNode(graph, node).EditorPosition = position;
+                            Keire::UpdateGraphCommentMembership(graph.Authoring, node, position);
+                        }
+                    });
+    }
+
+    bool VfxEffectDocument::RemoveNode(const Keire::AssetId system, const Keire::AssetId node)
+    {
+        return RemoveNodes(system, std::span{&node, std::size_t{1}});
+    }
+
+    bool VfxEffectDocument::RemoveNodes(const Keire::AssetId system, const std::span<const Keire::AssetId> nodes)
+    {
+        if (nodes.empty())
+            return false;
+        return Edit(nodes.size() == 1 ? "Remove VFX graph node" : "Remove VFX graph nodes",
+                    [system, nodes = std::vector(nodes.begin(), nodes.end())](Keire::VfxEffectDefinition& definition)
+                    {
+                        auto& graph = RequireSystem(definition, system);
+                        for (const auto node : nodes)
+                        {
+                            const auto found = std::ranges::find(graph.Nodes, node, &Keire::VfxGraphNode::Id);
+                            if (found == graph.Nodes.end())
+                                throw std::invalid_argument("VFX graph node is unavailable.");
+                            if (found->Kind == Keire::VfxGraphNodeKind::Context)
+                                throw std::invalid_argument("Executable VFX Context nodes cannot be removed.");
+                        }
+                        const auto selected = [&](const Keire::AssetId candidate)
+                        { return std::ranges::find(nodes, candidate) != nodes.end(); };
+                        std::erase_if(graph.Nodes, [&](const auto& candidate) { return selected(candidate.Id); });
+                        std::erase_if(graph.Connections, [&](const auto& connection)
+                                      { return selected(connection.OutputNode) || selected(connection.InputNode); });
+                        Keire::RemoveGraphAuthoringNodeReferences(graph.Authoring, nodes);
                     });
     }
 

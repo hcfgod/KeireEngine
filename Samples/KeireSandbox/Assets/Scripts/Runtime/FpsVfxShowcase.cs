@@ -31,11 +31,12 @@ public sealed class FpsVfxShowcase : Behaviour
     [HotReloadState]
     private float _heat;
 
-    private VfxEmitterHandle _emitter;
+    private VfxEmitter _emitter = null!;
 
     protected override void Awake()
     {
-        _emitter = new VfxEmitterHandle(Entity);
+        _emitter = GetComponent<VfxEmitter>() ??
+            throw new InvalidOperationException($"{nameof(FpsVfxShowcase)} requires a VFX Emitter on the same Entity.");
         if (!_emitter.IsValid)
             throw new InvalidOperationException($"{nameof(FpsVfxShowcase)} requires a VFX Emitter on the same Entity.");
     }

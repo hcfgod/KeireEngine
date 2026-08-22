@@ -134,6 +134,23 @@ namespace Keire::Detail
             return ActiveServices && ActiveServices->MakeManagedEntityPersistent({world, AssetId(high, low)}) ? 1 : 0;
         }
 
+        [[nodiscard]] std::uint8_t InstantiatePrefab(const std::uint64_t prefabHigh, const std::uint64_t prefabLow,
+                                                     const std::uint64_t parentWorld, const std::uint64_t parentHigh,
+                                                     const std::uint64_t parentLow, const Vector3 position,
+                                                     const Quaternion rotation, const std::uint8_t active,
+                                                     NativeEntityHandle* destination) noexcept
+        {
+            if (!ActiveServices || !destination)
+                return 0;
+            const auto entity = ActiveServices->InstantiateManagedPrefab(AssetId(prefabHigh, prefabLow),
+                                                                         {parentWorld, AssetId(parentHigh, parentLow)},
+                                                                         position, rotation, active != 0);
+            destination->World = entity.World;
+            destination->High = entity.Entity.High();
+            destination->Low = entity.Entity.Low();
+            return entity.World && entity.Entity ? 1 : 0;
+        }
+
         [[nodiscard]] std::uint8_t GetActiveScene(NativeSceneHandle* destination) noexcept
         {
             if (!ActiveServices || !destination)
@@ -409,6 +426,8 @@ namespace Keire::Detail
         assembly.AddInternalCall("Keire.NativeWorld", "SetActiveSceneIcall", reinterpret_cast<void*>(&SetActiveScene));
         assembly.AddInternalCall("Keire.NativeWorld", "MakeEntityPersistentIcall",
                                  reinterpret_cast<void*>(&MakeEntityPersistent));
+        assembly.AddInternalCall("Keire.NativeWorld", "InstantiatePrefabIcall",
+                                 reinterpret_cast<void*>(&InstantiatePrefab));
         assembly.AddInternalCall("Keire.NativeWorld", "GetActiveSceneIcall", reinterpret_cast<void*>(&GetActiveScene));
         assembly.AddInternalCall("Keire.NativeWorld", "GetLoadedScenesIcall",
                                  reinterpret_cast<void*>(&GetLoadedScenes));

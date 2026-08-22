@@ -1,7 +1,5 @@
 #include "KeireInternal/Scripting/ManagedReflection.h"
 
-#include "Keire/Audio/AudioAssets.h"
-
 #if defined(_MSC_VER)
 #pragma warning(push)
 #pragma warning(disable : 4146)
@@ -81,13 +79,73 @@ namespace Keire::Detail
                 .ReadOnly = required("Keire.ReadOnlyInInspectorAttribute"),
                 .Header = required("Keire.HeaderAttribute"),
                 .Tooltip = required("Keire.TooltipAttribute"),
-                .Group = required("Keire.InspectorGroupAttribute")};
+                .Group = required("Keire.InspectorGroupAttribute"),
+                .StableComponentId = required("Keire.StableComponentIdAttribute"),
+                .StableAssetTypeId = required("Keire.StableAssetTypeIdAttribute")};
+    }
+
+    [[nodiscard]] bool ManagedTypeDerivesFrom(Coral::Type& type, const std::string_view expected)
+    {
+        auto* current = std::addressof(type);
+        while (*current)
+        {
+            const auto name = ManagedTypeName(*current);
+            if (name == expected)
+                return true;
+            if (name == "System.Object")
+                return false;
+            current = std::addressof(current->GetBaseType());
+        }
+        return false;
+    }
+
+    [[nodiscard]] ComponentTypeId ManagedComponentType(Coral::Type& type,
+                                                       const ManagedInspectorAttributeTypes& attributeTypes)
+    {
+        if (!attributeTypes.StableComponentId)
+            return {};
+        for (auto attribute : type.GetAttributes())
+        {
+            if (attribute.GetType() == *attributeTypes.StableComponentId)
+            {
+                return ComponentTypeId(AssetId(attribute.GetFieldValue<std::uint64_t>("High"),
+                                               attribute.GetFieldValue<std::uint64_t>("Low")));
+            }
+        }
+        return {};
+    }
+
+    [[nodiscard]] AssetTypeId ManagedAssetType(Coral::Type& type, const ManagedInspectorAttributeTypes& attributeTypes)
+    {
+        if (!attributeTypes.StableAssetTypeId)
+            return {};
+        for (auto attribute : type.GetAttributes())
+        {
+            if (attribute.GetType() == *attributeTypes.StableAssetTypeId)
+            {
+                return AssetTypeId(AssetId(attribute.GetFieldValue<std::uint64_t>("High"),
+                                           attribute.GetFieldValue<std::uint64_t>("Low")));
+            }
+        }
+        return {};
     }
 
     [[nodiscard]] bool ManagedTypeIsEnum(Coral::Type& type)
     {
         auto& baseType = type.GetBaseType();
         return baseType && ManagedTypeName(baseType) == "System.Enum";
+    }
+
+    [[nodiscard]] bool ManagedTypeIsInterface(Coral::Type& type)
+    {
+        const auto name = ManagedTypeName(type);
+        return name != "System.Object" && !type.GetBaseType() && type.GetManagedType() == Coral::ManagedType::Unknown;
+    }
+
+    [[nodiscard]] bool ManagedTypeHasAttribute(Coral::Type& type, const std::string_view expected)
+    {
+        return std::ranges::any_of(type.GetAttributes(), [expected](auto attribute)
+                                   { return ManagedTypeName(attribute.GetType()) == expected; });
     }
 
     [[nodiscard]] std::optional<ComponentPropertyKind> ManagedFieldKind(Coral::Type& type)
@@ -115,14 +173,14 @@ namespace Keire::Detail
             return ComponentPropertyKind::Quaternion;
         if (name == "Keire.Color")
             return ComponentPropertyKind::Color;
-        if (name == "Keire.Entity")
+        if (name == "Keire.Entity" || ManagedTypeDerivesFrom(type, "Keire.Component") || ManagedTypeIsInterface(type))
             return ComponentPropertyKind::Entity;
         if (name == "Keire.UiButton" || name == "Keire.UiSlider" || name == "Keire.UiToggle" ||
             name == "Keire.UiInputField" || name == "Keire.UiScrollView")
             return ComponentPropertyKind::Entity;
         if (name == "Keire.KeireEvent" || name.starts_with("Keire.KeireEvent`"))
             return ComponentPropertyKind::Event;
-        if (name.starts_with("Keire.AssetReference`1"))
+        if (ManagedTypeDerivesFrom(type, "Keire.Asset"))
             return ComponentPropertyKind::Asset;
         return std::nullopt;
     }
@@ -233,6 +291,35 @@ namespace Keire::Detail
                 property.DisplayName = displayName.empty() ? ManagedFieldDisplayName(name) : std::move(displayName);
                 property.Group = std::move(group);
                 property.Kind = *kind;
+                property.DeclaredManagedType = ManagedTypeName(fieldType);
+                if (*kind == ComponentPropertyKind::Entity)
+                {
+                    if (property.DeclaredManagedType == "Keire.Entity")
+                        property.ReferenceKind = ManagedReferenceKind::Entity;
+                    else if (ManagedTypeDerivesFrom(fieldType, "Keire.Behaviour"))
+                        property.ReferenceKind = ManagedReferenceKind::Behaviour;
+                    else if (ManagedTypeDerivesFrom(fieldType, "Keire.Component"))
+                        property.ReferenceKind = ManagedReferenceKind::Component;
+                    else if (ManagedTypeIsInterface(fieldType))
+                        property.ReferenceKind = ManagedReferenceKind::Behaviour;
+                }
+                else if (*kind == ComponentPropertyKind::Asset)
+                {
+                    if (ManagedTypeDerivesFrom(fieldType, "Keire.ScriptableObject"))
+                        property.ReferenceKind = ManagedReferenceKind::ScriptableObject;
+                    else if (property.DeclaredManagedType == "Keire.Prefab")
+                        property.ReferenceKind = ManagedReferenceKind::Prefab;
+                    else if (property.DeclaredManagedType == "Keire.SceneAsset")
+                        property.ReferenceKind = ManagedReferenceKind::SceneAsset;
+                    else
+                        property.ReferenceKind = ManagedReferenceKind::Asset;
+                }
+                if (property.ReferenceKind == ManagedReferenceKind::Component ||
+                    property.ReferenceKind == ManagedReferenceKind::Behaviour)
+                {
+                    if (const auto componentType = ManagedComponentType(fieldType, attributeTypes))
+                        property.CompatibleComponentTypes.push_back(componentType);
+                }
                 property.ReadOnly = readOnly;
                 property.Minimum = minimum;
                 property.Maximum = maximum;
@@ -243,16 +330,16 @@ namespace Keire::Detail
                 property.TextLines = textLines;
                 if (*kind == ComponentPropertyKind::Event)
                     property.EventArgumentCount = ManagedEventArgumentCount(ManagedTypeName(fieldType));
-                if (*kind == ComponentPropertyKind::Asset &&
-                    ManagedTypeName(fieldType).find("Keire.AudioClip") != std::string::npos)
-                {
-                    property.ExpectedAssetType = AudioClipAsset::StaticType();
-                }
+                if (*kind == ComponentPropertyKind::Asset)
+                    if (const auto assetType = ManagedAssetType(fieldType, attributeTypes))
+                        property.ExpectedAssetType = assetType;
                 result.push_back(std::move(property));
                 continue;
             }
-            if (!attributeTypes.Serializable || depth >= 4 || fieldType.IsSZArray() ||
-                !fieldType.HasAttribute(*attributeTypes.Serializable) ||
+            const bool serializable =
+                (attributeTypes.Serializable && fieldType.HasAttribute(*attributeTypes.Serializable)) ||
+                ManagedTypeHasAttribute(fieldType, "System.SerializableAttribute");
+            if (depth >= 4 || fieldType.IsSZArray() || !serializable ||
                 std::ranges::find(typeStack, fieldType.GetTypeId()) != typeStack.end())
             {
                 continue;
@@ -290,10 +377,24 @@ namespace Keire::Detail
     [[nodiscard]] std::vector<ComponentMethod> ReflectManagedMethods(const Coral::Type& concreteType)
     {
         std::vector<ComponentMethod> result;
+        std::set<std::string, std::less<>> engineMethodNames;
+        auto* current = std::addressof(const_cast<Coral::Type&>(concreteType).GetBaseType());
+        while (*current && ManagedTypeName(*current) != "Keire.Behaviour")
+            current = std::addressof(current->GetBaseType());
+        if (*current)
+        {
+            for (auto method : current->GetMethods())
+            {
+                const Coral::ScopedString scopedName(method.GetName());
+                engineMethodNames.emplace(static_cast<std::string>(scopedName));
+            }
+        }
         for (auto method : concreteType.GetMethods())
         {
             const Coral::ScopedString scopedName(method.GetName());
             const auto name = static_cast<std::string>(scopedName);
+            if (engineMethodNames.contains(name))
+                continue;
             if (ManagedTypeName(method.GetReturnType()) != "System.Void" || name.starts_with("Runtime") ||
                 name.starts_with("get_") || name.starts_with("set_") || name == "Awake" || name == "OnEnable" ||
                 name == "Start" || name == "FixedUpdate" || name == "Update" || name == "LateUpdate" ||
@@ -350,7 +451,9 @@ namespace Keire::Detail
         return member->get<double>();
     }
 
-    [[nodiscard]] ComponentPropertyValue DefaultManagedPropertyValue(const ComponentPropertyKind kind)
+    [[nodiscard]] ComponentPropertyValue
+    DefaultManagedPropertyValue(const ComponentPropertyKind kind,
+                                const ManagedReferenceKind referenceKind = ManagedReferenceKind::None)
     {
         switch (kind)
         {
@@ -375,7 +478,9 @@ namespace Keire::Detail
         case ComponentPropertyKind::Asset:
             return AssetId{};
         case ComponentPropertyKind::Entity:
-            return EntityId{};
+            return referenceKind == ManagedReferenceKind::Component || referenceKind == ManagedReferenceKind::Behaviour
+                       ? ComponentPropertyValue(ComponentReferenceValue{})
+                       : ComponentPropertyValue(EntityId{});
         case ComponentPropertyKind::Event:
             return ComponentEventValue{};
         case ComponentPropertyKind::Curve:
@@ -386,8 +491,9 @@ namespace Keire::Detail
         throw std::logic_error("Unsupported managed Inspector property kind.");
     }
 
-    [[nodiscard]] ComponentPropertyValue ReadManagedPropertyValue(const nlohmann::json& value,
-                                                                  const ComponentPropertyKind kind)
+    [[nodiscard]] ComponentPropertyValue
+    ReadManagedPropertyValue(const nlohmann::json& value, const ComponentPropertyKind kind,
+                             const ManagedReferenceKind referenceKind = ManagedReferenceKind::None)
     {
         const auto readUnsignedInteger = [](const nlohmann::json& source) -> std::optional<std::uint64_t>
         {
@@ -399,8 +505,17 @@ namespace Keire::Detail
             return signedValue < 0 ? std::nullopt
                                    : std::optional<std::uint64_t>(static_cast<std::uint64_t>(signedValue));
         };
-        const auto readReferenceId = [&readUnsignedInteger](const nlohmann::json& source)
+        std::function<AssetId(const nlohmann::json&)> readReferenceId;
+        readReferenceId = [&readUnsignedInteger, &readReferenceId](const nlohmann::json& source) -> AssetId
         {
+            if (source.is_null())
+                return {};
+            for (const auto name : {"entity", "Entity", "asset", "Asset"})
+            {
+                const auto nestedReference = source.find(name);
+                if (nestedReference != source.end() && nestedReference->is_object())
+                    return readReferenceId(*nestedReference);
+            }
             const auto* nested = JsonMember(source, "Id", "id");
             const auto& id = nested && nested->is_object() ? *nested : source;
             const auto* high = JsonMember(id, "High", "high");
@@ -412,7 +527,7 @@ namespace Keire::Detail
             return parsedHigh && parsedLow ? AssetId(*parsedHigh, *parsedLow) : AssetId{};
         };
         if (value.is_null())
-            return DefaultManagedPropertyValue(kind);
+            return DefaultManagedPropertyValue(kind, referenceKind);
         switch (kind)
         {
         case ComponentPropertyKind::Boolean:
@@ -446,6 +561,13 @@ namespace Keire::Detail
         case ComponentPropertyKind::Asset:
             return readReferenceId(value);
         case ComponentPropertyKind::Entity:
+            if (referenceKind == ManagedReferenceKind::Component || referenceKind == ManagedReferenceKind::Behaviour)
+            {
+                const auto* component = JsonMember(value, "component", "Component");
+                return ComponentReferenceValue{EntityId(readReferenceId(value)),
+                                               component ? ComponentTypeId(readReferenceId(*component))
+                                                         : ComponentTypeId{}};
+            }
             return EntityId(readReferenceId(value));
         case ComponentPropertyKind::Event:
         {
@@ -482,8 +604,9 @@ namespace Keire::Detail
     }
 
     [[nodiscard]] nlohmann::json WriteManagedPropertyValue(const ComponentPropertyValue& value,
-                                                           const ComponentPropertyKind kind)
+                                                           const ComponentProperty& property)
     {
+        const auto kind = property.Kind;
         switch (kind)
         {
         case ComponentPropertyKind::Boolean:
@@ -522,12 +645,38 @@ namespace Keire::Detail
         case ComponentPropertyKind::Asset:
         {
             const auto asset = std::get<AssetId>(value);
-            return {{"Id", {{"High", asset.High()}, {"Low", asset.Low()}}}};
+            if (!asset)
+                return nullptr;
+            return {{"$ref", "asset"},
+                    {"asset", {{"High", asset.High()}, {"Low", asset.Low()}}},
+                    {"type", property.DeclaredManagedType}};
         }
         case ComponentPropertyKind::Entity:
         {
-            const auto entity = std::get<EntityId>(value).Value();
-            return {{"Id", {{"High", entity.High()}, {"Low", entity.Low()}}}};
+            const bool componentReference = property.ReferenceKind == ManagedReferenceKind::Component ||
+                                            property.ReferenceKind == ManagedReferenceKind::Behaviour;
+            const auto entity = componentReference ? std::get<ComponentReferenceValue>(value).Entity.Value()
+                                                   : std::get<EntityId>(value).Value();
+            if (!entity)
+                return nullptr;
+            const auto entityReference =
+                nlohmann::json{{"$ref", "entity"}, {"entity", {{"High", entity.High()}, {"Low", entity.Low()}}}};
+            if (property.ReferenceKind != ManagedReferenceKind::Component &&
+                property.ReferenceKind != ManagedReferenceKind::Behaviour)
+            {
+                return entityReference;
+            }
+            const auto selected = std::get<ComponentReferenceValue>(value).Component;
+            nlohmann::json component = nullptr;
+            if (selected)
+            {
+                const auto type = selected.Value();
+                component = {{"High", type.High()}, {"Low", type.Low()}};
+            }
+            return {{"$ref", "component"},
+                    {"entity", std::move(entityReference)},
+                    {"component", std::move(component)},
+                    {"type", property.DeclaredManagedType}};
         }
         case ComponentPropertyKind::Event:
         {
@@ -661,8 +810,8 @@ namespace Keire::Detail
         for (const auto& property : properties)
         {
             const auto* value = ManagedStateValue(document, property.Key);
-            result.emplace(property.Key, value ? ReadManagedPropertyValue(*value, property.Kind)
-                                               : DefaultManagedPropertyValue(property.Kind));
+            result.emplace(property.Key, value ? ReadManagedPropertyValue(*value, property.Kind, property.ReferenceKind)
+                                               : DefaultManagedPropertyValue(property.Kind, property.ReferenceKind));
         }
         return result;
     }
@@ -682,7 +831,7 @@ namespace Keire::Detail
             if (value == values.end())
                 continue;
             EnsureManagedStateValue(document, fields, property.Key) =
-                WriteManagedPropertyValue(value->second, property.Kind);
+                WriteManagedPropertyValue(value->second, property);
         }
         return document.dump();
     }

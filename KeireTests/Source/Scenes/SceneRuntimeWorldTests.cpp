@@ -120,6 +120,7 @@ TEST_CASE("Persistent scene objects retain their hierarchy identity when their l
     const auto disposable = fixture.World->Adopt(disposableSession);
     REQUIRE(fixture.World->MakePersistent(disposableScene->FindEntity(disposableRoot)));
     REQUIRE(disposableScene->DestroyEntity(disposableRoot));
+    disposableScene->Update(0.0F);
     REQUIRE(fixture.World->Unload(disposable));
     fixture.World->Process();
     CHECK_FALSE(fixture.World->Session(disposable));

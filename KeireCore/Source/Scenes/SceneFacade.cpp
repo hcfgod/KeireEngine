@@ -127,6 +127,13 @@ namespace Keire
         return m_Impl->State->Create(std::move(name), parent.Id());
     }
     Entity Scene::DuplicateEntity(const EntityId id) { return m_Impl->State->Duplicate(id); }
+    Entity Scene::InstantiatePrefab(const AssetId prefab, SceneDefinition definition, const Entity& parent,
+                                    const Vector3 position, const Quaternion rotation, const bool active)
+    {
+        if (parent && parent.World() != m_Impl->State->Find(parent.Id()).World())
+            throw std::invalid_argument("Prefab parent belongs to another scene.");
+        return m_Impl->State->InstantiatePrefab(prefab, std::move(definition), parent.Id(), position, rotation, active);
+    }
     bool Scene::DestroyEntity(const EntityId id) { return m_Impl->State->Destroy(id); }
     void Scene::MoveEntity(const EntityId id, const EntityId parent, const EntityId beforeSibling,
                            const bool preserveWorldTransform)

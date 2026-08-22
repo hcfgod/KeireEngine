@@ -10,7 +10,7 @@ a project-first authoring workflow. The Kéire Hub manages projects and installe
 native scene, asset, rendering, scripting, profiling, and player-build workflows; and the runtime ships only the
 systems and cooked content selected by a project.
 
-Kéire is currently **version 0.3.2 and pre-1.0**. Its foundations are production-oriented, but interfaces, content
+Kéire is currently **version 0.4.0 and pre-1.0**. Its foundations are production-oriented, but interfaces, content
 formats, and release procedures may still change before the first stable release. The project documents current
 capabilities and remaining production-readiness work directly rather than presenting roadmap work as complete.
 
@@ -238,11 +238,11 @@ Markdown, and its source validation checks these values against the correspondin
 
 Managed gameplay targets .NET 10 and C# 14. A project declares source roots through `.keireasm` assets; successful
 generations publish assemblies for editor discovery and player builds. Gameplay types inherit from `Keire.Behaviour`,
-use stable component and field identities, and access runtime systems through validated handles.
-Camera, Mesh Renderer, and typed light handles expose live presentation state, while bounded material property blocks
+use stable component and field identities, and access runtime systems through canonical entity, component, and asset objects.
+Camera, Mesh Renderer, and typed light components expose live presentation state, while bounded material property blocks
 override Material/Shader Graph properties per renderer without mutating shared asset definitions.
-Native presentation assets remain behind typed references. Scripts may pass those references directly to Audio, VFX,
-rendering, and UI APIs or retain an explicit `AssetHandle<T>` residency lease for load priority, readiness,
+Native presentation assets are direct `Asset` objects. Scripts may pass those objects directly to Audio, VFX,
+rendering, and UI APIs or retain an explicit `AssetLoadOperation<T>` residency lease for load priority, readiness,
 fallback/revision state, structured diagnostics, and deterministic disposal.
 Packaged-player scripts can replace the active scene transactionally with coroutine progress, cancellation, and
 diagnostics, while atomic runtime render settings support transient environment, exposure, and shadow changes.

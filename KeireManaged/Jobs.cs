@@ -36,7 +36,7 @@ public sealed class JobDescription
     public string Name { get; init; } = "Managed job";
     public JobPriority Priority { get; init; } = JobPriority.Normal;
     public JobClass Class { get; init; } = JobClass.Compute;
-    public IReadOnlyList<JobHandle> Dependencies { get; init; } = Array.Empty<JobHandle>();
+    public IReadOnlyList<Job> Dependencies { get; init; } = Array.Empty<Job>();
 }
 
 public sealed class JobContext
@@ -47,29 +47,27 @@ public sealed class JobContext
     public bool IsCancellationRequested => CancellationToken.IsCancellationRequested;
 }
 
-public readonly struct JobHandle : IEquatable<JobHandle>
+public sealed class Job : IEquatable<Job>
 {
-    private readonly ManagedJobState? _state;
+    private readonly ManagedJobState _state;
 
-    internal JobHandle(ManagedJobState state) => _state = state;
+    internal Job(ManagedJobState state) => _state = state;
 
-    public ulong Id => _state?.Id ?? 0;
-    public bool IsValid => _state is not null;
-    public JobStatus Status => _state?.Status ?? JobStatus.Cancelled;
-    public Task Completion => _state?.Completion ?? Task.FromCanceled(new CancellationToken(true));
+    public ulong Id => _state.Id;
+    public bool IsValid => true;
+    public JobStatus Status => _state.Status;
+    public Task Completion => _state.Completion;
 
-    public void Cancel() => _state?.Cancel();
+    public void Cancel() => _state.Cancel();
 
-    public bool Equals(JobHandle other) => ReferenceEquals(_state, other._state);
-    public override bool Equals(object? value) => value is JobHandle other && Equals(other);
-    public override int GetHashCode() => _state?.GetHashCode() ?? 0;
-    public static bool operator ==(JobHandle left, JobHandle right) => left.Equals(right);
-    public static bool operator !=(JobHandle left, JobHandle right) => !left.Equals(right);
+    public bool Equals(Job? other) => other is not null && ReferenceEquals(_state, other._state);
+    public override bool Equals(object? value) => value is Job other && Equals(other);
+    public override int GetHashCode() => _state.GetHashCode();
 }
 
 public static unsafe class Jobs
 {
-    public static JobHandle Submit(Action<JobContext> callback, JobDescription? description = null)
+    public static Job Submit(Action<JobContext> callback, JobDescription? description = null)
     {
         ArgumentNullException.ThrowIfNull(callback);
         description ??= new JobDescription();
@@ -83,7 +81,7 @@ public static unsafe class Jobs
         {
             var cancelled = new ManagedJobState(callback);
             cancelled.Invoke(3, 0);
-            return new JobHandle(cancelled);
+            return new Job(cancelled);
         }
 
         var state = new ManagedJobState(callback);
@@ -98,10 +96,10 @@ public static unsafe class Jobs
             throw new InvalidOperationException("The native job scheduler rejected the managed job.");
         }
         state.SetId(id);
-        return new JobHandle(state);
+        return new Job(state);
     }
 
-    internal static ulong[] CollectDependencyIds(IReadOnlyList<JobHandle> dependencies,
+    internal static ulong[] CollectDependencyIds(IReadOnlyList<Job> dependencies,
                                                  out bool cancelledByDependency)
     {
         ulong[] result = new ulong[dependencies.Count];
@@ -109,9 +107,8 @@ public static unsafe class Jobs
         cancelledByDependency = false;
         for (int index = 0; index < dependencies.Count; ++index)
         {
-            JobHandle dependency = dependencies[index];
-            if (!dependency.IsValid)
-                throw new ArgumentException("Managed job dependencies must be valid handles.", nameof(dependencies));
+            Job dependency = dependencies[index] ??
+                throw new ArgumentException("Managed job dependencies cannot contain null.", nameof(dependencies));
             JobStatus status = dependency.Status;
             if (status == JobStatus.Succeeded)
                 continue;
@@ -127,7 +124,7 @@ public static unsafe class Jobs
         return result;
     }
 
-    public static JobHandle Run(Action callback, JobDescription? description = null)
+    public static Job Run(Action callback, JobDescription? description = null)
     {
         ArgumentNullException.ThrowIfNull(callback);
         return Submit(_ => callback(), description);

@@ -179,8 +179,11 @@ namespace KeireEditor
     void MaterialGraphPanel::ResetTransientState() noexcept
     {
         m_SelectedNode.reset();
+        m_SelectedNodes.clear();
         m_SelectedConnection.reset();
+        m_FrameNode.reset();
         m_InspectorNode.reset();
+        m_InspectorCommentNode.reset();
         m_NodeCreationPosition.reset();
         m_GraphContext.reset();
         m_Canvas.CancelInteractions();
@@ -190,6 +193,9 @@ namespace KeireEditor
         m_RawShaderPicker.Clear();
         m_TexturePicker.Clear();
         m_NodeSearch.clear();
+        m_Bookmarks.Clear();
+        m_InspectorComment.clear();
+        m_InspectorCommentPinned = false;
         m_InspectorName.clear();
         m_InspectorSymbol.clear();
         m_InspectorInclude.clear();
@@ -599,6 +605,22 @@ namespace KeireEditor
     {
         auto& document = m_Controller.MaterialGraphState();
         auto model = document.BuildCanvasModel(m_ShowTemplateParameters);
+        if (m_FrameNode)
+        {
+            const auto identity =
+                std::ranges::find(model.NodeIdentities, *m_FrameNode, &std::pair<StableNodeId, Keire::AssetId>::second);
+            const auto node = identity == model.NodeIdentities.end()
+                                  ? model.Nodes.end()
+                                  : std::ranges::find(model.Nodes, identity->first, &NodeGraphNode::Id);
+            if (node != model.Nodes.end())
+            {
+                const std::array framed{*node};
+                m_Canvas.Focus(framed, ui.ContentAvailable());
+            }
+            m_FrameNode.reset();
+        }
+        ApplyNodeGraphAnnotations(document.Definition().Authoring, model.NodeIdentities, model.Nodes);
+        auto comments = BuildNodeGraphCommentModel(document.Definition().Authoring, model.NodeIdentities);
         if (auto combo = ui.BeginCombo("Add Expression", "Search node library..."); combo)
             if (DrawExpressionCreationMenu(ui, std::nullopt))
                 return;
@@ -622,6 +644,11 @@ namespace KeireEditor
         ui.SameLine();
         if (ui.Button("Frame All"))
             m_Canvas.Focus(model.Nodes, ui.ContentAvailable());
+        ui.SameLine();
+        if (DrawArrangeMenu(ui, model.Nodes, model.Connections, model.NodeIdentities, model.ConnectionIdentities))
+            return;
+        ui.SameLine();
+        (void)DrawGraphBookmarkMenu(ui, m_Bookmarks, m_Canvas);
         ui.SameLine();
         ui.TextColored(
             m_Controller.MaterialGraphTheme().MutedText,
@@ -675,7 +702,7 @@ namespace KeireEditor
             const auto found = std::ranges::find(node.Pins, *id, &Keire::ShaderGraphPin::Id);
             return found == node.Pins.end() ? nullptr : &*found;
         };
-        m_Canvas.Select(m_SelectedNode ? findCanvas(model.NodeIdentities, *m_SelectedNode) : std::nullopt);
+        SynchronizeGraphSelection(m_Canvas, model.NodeIdentities, m_SelectedNodes, m_SelectedNode);
         m_Canvas.SelectConnection(m_SelectedConnection ? findCanvas(model.ConnectionIdentities, *m_SelectedConnection)
                                                        : std::nullopt);
         const NodeGraphCanvasOptions options{
@@ -694,8 +721,17 @@ namespace KeireEditor
                 return document.CheckConnection({*outputNode, *outputPin}, {*inputNode, *inputPin});
             },
             .EditableReroutes = true,
+            .MultiSelection = true,
+            .Comments = comments.Comments,
         };
         const auto canvas = m_Canvas.Draw(ui, "MaterialGraphCanvas", model.Nodes, model.Connections, options);
+        DrawComments(ui, document, model, comments, canvas);
+        m_SelectedNodes = ResolveGraphSelection(canvas.SelectedNodes, model.NodeIdentities);
+        m_SelectedNode = m_SelectedNodes.empty() ? std::nullopt : std::optional(m_SelectedNodes.back());
+        if (HandleClipboard(canvas, model.NodeIdentities))
+            return;
+        if (!canvas.DuplicateNodesRequested.empty())
+            return DuplicateSelection(canvas.DuplicateNodesRequested, model.NodeIdentities);
         const auto setRouting = [&](const StableNodeId canvasConnection, std::vector<Keire::Vector2> routing)
         {
             const auto connection = model.Connection(canvasConnection);
@@ -747,8 +783,6 @@ namespace KeireEditor
                 setRouting(connection->Id, std::move(routing));
             }
         }
-        if (canvas.ActivatedNode)
-            m_SelectedNode = model.Node(*canvas.ActivatedNode);
         if (canvas.ActivatedConnection)
             m_SelectedConnection = model.Connection(*canvas.ActivatedConnection);
         if (canvas.BackgroundActivated)
@@ -756,19 +790,21 @@ namespace KeireEditor
             m_SelectedNode.reset();
             m_SelectedConnection.reset();
         }
-        if (canvas.MoveCompletedNode)
+        if (!canvas.MoveCompletedNodes.empty())
         {
-            const auto node = model.Node(*canvas.MoveCompletedNode);
-            const auto canvasNode = std::ranges::find(model.Nodes, *canvas.MoveCompletedNode, &NodeGraphNode::Id);
-            if (node && canvasNode != model.Nodes.end())
-                try
-                {
-                    (void)document.MoveNode(*node, canvasNode->Position);
-                }
-                catch (const std::exception& error)
-                {
-                    Report(error.what());
-                }
+            std::vector<std::pair<Keire::AssetId, Keire::Vector2>> moves;
+            for (const auto moved : canvas.MoveCompletedNodes)
+                if (const auto node = model.Node(moved);
+                    node && std::ranges::find(model.Nodes, moved, &NodeGraphNode::Id) != model.Nodes.end())
+                    moves.emplace_back(*node, std::ranges::find(model.Nodes, moved, &NodeGraphNode::Id)->Position);
+            try
+            {
+                (void)document.MoveNodes(moves);
+            }
+            catch (const std::exception& error)
+            {
+                Report(error.what());
+            }
         }
         if (canvas.ConnectionRequested)
         {
@@ -797,24 +833,33 @@ namespace KeireEditor
                 {
                     Report(error.what());
                 }
-        if (canvas.DeleteNodeRequested)
-            if (const auto node = model.Node(*canvas.DeleteNodeRequested);
-                node && *node != document.Definition().OutputNode)
-                try
-                {
-                    (void)document.RemoveNode(*node);
-                    m_SelectedNode.reset();
-                }
-                catch (const std::exception& error)
-                {
-                    Report(error.what());
-                }
+        if (!canvas.DeleteNodesRequested.empty())
+        {
+            std::vector<Keire::AssetId> nodes;
+            for (const auto selected : canvas.DeleteNodesRequested)
+                if (const auto node = model.Node(selected))
+                    nodes.push_back(*node);
+            try
+            {
+                (void)document.RemoveNodes(nodes);
+                m_SelectedNode.reset();
+                m_SelectedNodes.clear();
+            }
+            catch (const std::exception& error)
+            {
+                Report(error.what());
+            }
+        }
+        if (!canvas.ProtectedNodes.empty())
+            Report("Material Output is protected and was not deleted.");
 
         if (canvas.ContextRequested)
         {
             m_GraphContext = canvas.ContextRequested;
             m_NodeSearch.clear();
-            if (canvas.ContextRequested->Kind == NodeGraphContextTargetKind::Background)
+            if (canvas.ContextRequested->Kind == NodeGraphContextTargetKind::Comment)
+                m_GraphContext.reset();
+            else if (canvas.ContextRequested->Kind == NodeGraphContextTargetKind::Background)
             {
                 m_NodeCreationPosition = canvas.ContextRequested->GraphPosition;
                 ui.SetNextWindowSize({380.0F, 440.0F}, true);
@@ -908,6 +953,8 @@ namespace KeireEditor
                         const bool removable = node->Id != document.Definition().OutputNode &&
                                                node->Kind != Keire::ShaderGraphNodeKind::Master;
                         ui.Separator();
+                        if (ui.MenuItem("Create Comment from Selection"))
+                            CreateComment(ui, document, model, m_GraphContext->GraphPosition, true);
                         if (ui.MenuItem("Delete Node", false, removable))
                             try
                             {
@@ -979,6 +1026,8 @@ namespace KeireEditor
                 return;
             }
             ui.Separator();
+            if (ui.MenuItem("Create Empty Comment"))
+                CreateComment(ui, document, model, *m_NodeCreationPosition, false);
             if (ui.MenuItem("Frame All Nodes"))
                 m_Canvas.Focus(model.Nodes, ui.ContentAvailable());
         }
@@ -1064,12 +1113,17 @@ namespace KeireEditor
     {
         auto& document = m_Controller.MaterialGraphState();
         const auto& theme = m_Controller.MaterialGraphTheme();
+        if (DrawMultiSelectionInspector(ui))
+            return;
         ui.TextColored(theme.Accent, "MATERIAL GRAPH INSPECTOR");
         if (!m_SelectedNode)
         {
             ui.TextColored(theme.MutedText, "Select Material Output, an expression, or a template override.");
             return;
         }
+
+        if (DrawNodeCommentInspector(ui))
+            return;
 
         const auto expressionFound =
             std::ranges::find(document.Definition().SurfaceGraph.Nodes, *m_SelectedNode, &Keire::ShaderGraphNode::Id);
@@ -1372,27 +1426,6 @@ namespace KeireEditor
             }
     }
 
-    void MaterialGraphPanel::DrawDiagnostics(Keire::UiFrame& ui)
-    {
-        const auto& theme = m_Controller.MaterialGraphTheme();
-        if (!m_Message.empty())
-            ui.TextColored(theme.Warning, m_Message);
-        const auto diagnostics = m_Controller.MaterialGraphState().Diagnostics();
-        if (diagnostics.empty())
-        {
-            ui.TextColored(theme.Success, "Material Graph diagnostics: clear.");
-            return;
-        }
-        for (const auto& diagnostic : diagnostics)
-        {
-            const auto color = diagnostic.Severity == Keire::MaterialGraphDiagnosticSeverity::Error ? theme.Error
-                               : diagnostic.Severity == Keire::MaterialGraphDiagnosticSeverity::Warning
-                                   ? theme.Warning
-                                   : theme.MutedText;
-            ui.TextColored(color, diagnostic.Code + "  " + diagnostic.Message);
-        }
-    }
-
     void MaterialGraphPanel::AddValueNode(const Keire::MaterialGraphPropertyBinding& property,
                                           const std::optional<Keire::Vector2> position)
     {
@@ -1464,9 +1497,4 @@ namespace KeireEditor
         }
     }
 
-    void MaterialGraphPanel::Report(std::string message) noexcept
-    {
-        m_Message = std::move(message);
-        m_Controller.ReportMaterialGraphError(m_Message);
-    }
 } // namespace KeireEditor

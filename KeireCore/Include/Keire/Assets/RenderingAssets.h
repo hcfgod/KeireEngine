@@ -143,6 +143,9 @@ namespace Keire
         bool UsesImageBasedLighting = false;
         std::uint8_t SpatialLightingAbiVersion = 0;
         bool UsesVertexMaterialParameters = false;
+        /// Additional graph-authored combined texture/sampler slots and fragment read-only buffers.
+        std::uint8_t UserResourceSlots = 0;
+        std::uint8_t UserReadOnlyBuffers = 0;
     };
 
     class KEIRE_API ShaderAsset final : public Asset

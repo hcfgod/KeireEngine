@@ -1,293 +1,94 @@
 # Assets And ScriptableObjects
 
-Kéire uses stable asset IDs at the managed boundary. `AssetReference<T>` adds a compile-time expected type without
-exposing native asset ownership.
-
-## Asset References
-
-Declare engine asset fields with their marker type:
+All scripting-visible native assets derive from `Asset`. Declare the asset class directly; there is no
+`AssetReference<T>` authoring wrapper in 0.4.0.
 
 ```csharp
-[SerializeField, StableFieldId("0e23b81c-1a6d-44c5-bf14-5bdfca5a3618")]
-private AssetReference<AudioClip> _sound;
-
-[SerializeField, StableFieldId("d77f598b-a745-4c0f-b076-9f2164b7cad2")]
-private AssetReference<AudioMixer> _mixer;
-
-[SerializeField, StableFieldId("9d488a47-e3ea-4b65-a027-ddd88506194e")]
-private AssetReference<AnimatorController> _controller;
-
-[SerializeField, StableFieldId("5db8bbca-0d17-45af-85ae-5d42e35d5646")]
-private AssetReference<VfxEffect> _impactEffect;
-
-[SerializeField, StableFieldId("958d1968-d2df-4886-b50b-b6165bb7ace4")]
-private AssetReference<PrefabAsset> _prefab;
+[SerializeField] private AudioClip? _sound;
+[SerializeField] private AudioMixer? _mixer;
+[SerializeField] private Material? _surface;
+[SerializeField] private AnimationClip? _reload;
+[SerializeField] private VfxEffect? _impact;
+[SerializeField] private Prefab? _projectile;
+[SerializeField] private SceneAsset? _destination;
 ```
 
-`AssetReference<T>` is a `readonly record struct`, so its default value is an invalid reference. Test it with
-`IsValid`:
+Unassigned or unresolved assets are `null`. Persistent assets have stable `AssetId` identity, and repeated resolution
+of the same type and ID returns the canonical managed wrapper for the runtime generation. `AssetId` remains available
+for diagnostics and native interoperability, but ordinary gameplay and Inspector workflows use the asset object.
+
+## Prefabs
+
+`Prefab` is a direct asset object and owns instantiation convenience methods:
 
 ```csharp
-if (_sound.IsValid)
-    Audio.Play(Entity, _sound);
+Entity first = Instantiate(_projectile!);
+Entity second = Instantiate(_projectile!, position, rotation);
+Entity child = _projectile!.Instantiate(position, rotation, parent, active: false);
 ```
 
-Use `.Id` when an API takes an untyped `AssetId`:
+Instantiation uses the real runtime scene and asset services in Editor Play Mode and packaged players. The complete
+clone graph is bound and hydrated before callbacks; active objects complete `Awake` and `OnEnable` before the call
+returns. Internal scene references remap to the clone, asset references remain shared, and any binding failure rolls
+the graph back.
+
+## Explicit Runtime Residency
+
+Presentation components accept direct assets and manage ordinary playback/render residency. Use
+`Assets.LoadRuntime(asset)` only when code needs to observe readiness, fallback, revision, or diagnostic state, or to
+retain an explicit residency lease:
 
 ```csharp
-if (_prefab.IsValid)
-    Prefab.Instantiate(_prefab.Id, spawnPosition, spawnRotation);
-```
-
-## Asset Markers Are Not Loaded Objects
-
-Types such as `AudioClip`, `AudioMixer`, `AnimationClip`, `AnimatorController`, `PrefabAsset`, and `VfxEffect` are asset
-type markers. They provide typed selection and API overloads; they are not clip or graph objects that scripts modify.
-
-This declaration is incorrect for an asset field:
-
-```csharp
-[SerializeField] private AudioClip? _clip;
-```
-
-Use:
-
-```csharp
-[SerializeField] private AssetReference<AudioClip> _clip;
-```
-
-The common compiler error
-`cannot convert from 'Keire.AudioClip' to 'Keire.AssetId'` means an asset marker object was passed where stable asset
-identity was required.
-
-## Loading Native Runtime Assets
-
-Presentation APIs normally accept `AssetReference<T>` directly and start their own load. Use `Assets.LoadRuntime` when
-game code must explicitly prewarm an engine-owned asset, observe readiness, or keep it resident across several system
-calls:
-
-```csharp
-[SerializeField, StableFieldId("65e12766-9948-4078-841e-c8bdb6710001")]
-private AssetReference<Material> _surface;
-
-private AssetHandle<Material>? _surfaceLease;
+private AssetLoadOperation<Material>? _load;
 
 protected override void OnEnable()
 {
-    if (_surface.IsValid)
-        _surfaceLease = Assets.LoadRuntime(_surface, AssetLoadPriority.High);
+    if (_surface is not null)
+        _load = Assets.LoadRuntime(_surface, AssetPriority.High);
 }
 
 protected override void OnDisable()
 {
-    _surfaceLease?.Dispose();
-    _surfaceLease = null;
+    _load?.Dispose();
+    _load = null;
 }
 ```
 
-`AssetHandle<T>` is a residency lease, not a managed wrapper around the native resource. Keep using its `Reference`
-with renderer, audio, VFX, and UI presentation APIs. The handle exposes `State`, `IsReady`, `UsingFallback`, `Revision`,
-and a structured `Diagnostic`; it can be yielded from a coroutine or awaited with `WaitUntilReadyAsync`. Call
-`RequireReady` where failure must become a deterministic `AssetLoadException`.
+`AssetLoadOperation<T>` can be yielded or awaited. It is a generation-scoped lease, not a native resource pointer.
+Disposal is idempotent, and retiring the managed generation releases outstanding operations.
 
-Dispose every lease when its owning `Behaviour` or service is disabled. Disposal is idempotent. A managed assembly
-reload also releases every lease that belongs to the retiring generation, so a missed cleanup cannot pin native assets
-across hot reload. A single generation may hold at most 4,096 native runtime handles.
+## ScriptableObject
 
-Built-in runtime markers include `AnimationClip`, `AnimatorController`, `AudioClip`, `AudioMixer`, `Mesh`, `Texture`,
-`Shader`, `Material`,
-`MaterialParameterCollection`, `ShaderGraph`, `ShaderGraphInstance`, `MaterialGraph`, `MaterialInstance`,
-`VfxEffect`, and `VfxVolume`. Their `[StableAssetTypeId]` values match the native asset types. Managed
-`ScriptableObject` types deliberately use `Assets.LoadAsync` instead; `Assets.LoadRuntime` rejects them.
-
-## Managed Data Assets
-
-Derive authorable data from `ScriptableObject`:
+Use `ScriptableObject` for managed project data:
 
 ```csharp
-using Keire;
-
-namespace MyGame;
-
-[StableAssetTypeId("abfca69a-e5c8-4462-8238-92747733f15e")]
-[CreateAssetMenu("Gameplay/Weapon Tuning", "WeaponTuning")]
+[StableAssetTypeId("e4638cc5-58e2-4955-a576-c9c4edb995ca")]
 public sealed class WeaponTuning : ScriptableObject
 {
-    [StableFieldId("c64ec4af-5a89-45d4-9878-b522470f455c")]
-    [Range(0.0, 500.0)]
     public float Damage = 25.0f;
-
-    [StableFieldId("05307831-9dd3-4bc2-a55a-d3b64350a06c")]
-    [Range(1.0, 2000.0)]
-    public float RoundsPerMinute = 600.0f;
-
-    [StableFieldId("af0a8803-7abe-4694-8b4a-b5384a734265")]
-    public AssetReference<AudioClip> FireSound;
-
-    protected override void OnValidate()
-    {
-        Damage = MathF.Max(0.0f, Damage);
-        RoundsPerMinute = MathF.Max(1.0f, RoundsPerMinute);
-    }
+    public AudioClip? FireSound;
+    public Prefab? Projectile;
 }
-```
 
-Concrete authorable types require:
-
-- a public parameterless constructor;
-- a unique `[StableAssetTypeId]`;
-- a `[StableFieldId]` on every serialized member;
-- `[CreateAssetMenu]` if designers should create the type from the Project panel.
-
-After a successful runtime assembly build, the type appears under **Create > Managed Data** at its declared menu path.
-The saved source is a `.keiredata` asset.
-
-## Managed Data Members
-
-Managed data discovery includes:
-
-- public instance fields;
-- non-public fields marked `[SerializeField]`;
-- public read/write properties;
-- properties marked `[SerializeField]` that have both a getter and setter.
-
-Static, `readonly`, indexed, compiler-generated, `[NonSerialized]`, and accessor-incomplete members are excluded.
-
-Supported shapes include:
-
-- primitives, strings, and enums;
-- `Vector2`, `Vector3`, `Vector4`, `Quaternion`, and `Color`;
-- nested `[SerializableType]` classes or structs;
-- single-dimensional, zero-based arrays;
-- `List<T>`;
-- `AssetReference<T>`.
-
-Unsupported shapes include dictionaries, cyclic inline graphs, abstract or interface inline values, multidimensional
-arrays, and inline `ScriptableObject` objects. Use `AssetReference<T>` for relationships between managed data assets.
-
-## Nested Serializable Values
-
-```csharp
-[SerializableType]
-public sealed class DamageFalloff
+public sealed class Weapon : Behaviour
 {
-    [StableFieldId("2919fa5b-c36d-4651-b3a2-3421e73a0043")]
-    public float Distance;
-
-    [StableFieldId("8c126135-70eb-4294-81bd-f3342ef52d1f")]
-    [Range(0.0, 1.0)]
-    public float Multiplier = 1.0f;
-}
-
-[StableAssetTypeId("5bab349c-18d8-4f65-afcc-aef3e0b91a2d")]
-[CreateAssetMenu("Gameplay/Damage Profile")]
-public sealed class DamageProfile : ScriptableObject
-{
-    [StableFieldId("b9c75331-a5ed-4f90-9dc3-95cf05bbde06")]
-    public List<DamageFalloff> Falloff = [];
+    [SerializeField]
+    private WeaponTuning? _tuning;
 }
 ```
 
-Stable field IDs must be unique across the complete discovered asset type, including nested members.
+Persistent ScriptableObject assets receive stable identity and canonical instances. They may reference native assets,
+prefabs, or other ScriptableObjects, but not scene entities/components. A scene behaviour may reference persistent
+managed assets and objects in its own scene.
 
-## Loading Managed Data
+`ScriptableObject.CreateInstance<T>()` creates a transient, non-persistent object. Transient instances can be cloned
+and destroyed at runtime but do not become project assets or acquire stable asset identity.
 
-Reference a managed data asset from a `Behaviour`:
+## Serialization And Dependencies
 
-```csharp
-[SerializeField, StableFieldId("d87d038f-c561-413e-85fc-dcfcba02ce59")]
-private AssetReference<WeaponTuning> _tuning;
-```
+Direct asset and ScriptableObject references are tagged in state v2 with stable identity and declared/actual type.
+They work inside supported `[Serializable]` value objects, one-dimensional arrays, and `List<T>`. Cooker dependency
+extraction reads the same tagged records, so scene-to-managed-data-to-native-asset closure is deterministic.
 
-Synchronous access is appropriate only when the object is already registered:
-
-```csharp
-if (Assets.TryLoad(_tuning, out WeaponTuning? tuning) && tuning is not null)
-    Apply(tuning);
-```
-
-`Assets.Load` requires an already loaded managed asset and throws when it is unavailable or has the wrong type:
-
-```csharp
-WeaponTuning tuning = Assets.Load(_tuning);
-```
-
-Use asynchronous loading when the asset may need admission through the application-owned pipeline:
-
-```csharp
-private async Task ApplyTuningAsync(CancellationToken cancellation)
-{
-    try
-    {
-        WeaponTuning tuning = await Assets.LoadAsync(_tuning, cancellation);
-        if (!cancellation.IsCancellationRequested)
-            Apply(tuning);
-    }
-    catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
-    {
-    }
-}
-```
-
-Within a `Behaviour`, normally pass `LifetimeToken`.
-
-For managed data, `AssetReference<T>.Value` is a convenience over `Assets.TryLoad`. It may return `null`; it does not
-synchronously force an unloaded asset through the pipeline. Built-in marker references such as
-`AssetReference<AudioClip>` should be passed to their system façade rather than dereferenced with `.Value`.
-
-## Transient Instances And Clones
-
-Create runtime-only data:
-
-```csharp
-WeaponTuning tuning = ScriptableObject.CreateInstance<WeaponTuning>();
-tuning.Name = "Runtime tuning";
-```
-
-`CreateInstance<T>` constructs the object, invokes `OnEnable`, and then `OnValidate`. If activation fails, Kéire rolls
-back the lifecycle before rethrowing.
-
-Deep-clone a supported serialized graph:
-
-```csharp
-WeaponTuning runtimeCopy = ScriptableObject.Instantiate(authoredTuning);
-```
-
-The clone receives a new `RuntimeInstanceId` and runs `OnEnable`. Supported inline arrays, lists, and values are copied;
-asset references remain references to the same stable assets.
-
-## ScriptableObject Lifecycle
-
-Override:
-
-```csharp
-protected override void OnEnable()
-{
-}
-
-protected override void OnDisable()
-{
-}
-
-protected override void OnValidate()
-{
-}
-```
-
-Lifecycle transitions are guarded against re-entry. `OnValidate` is the place to normalize data and reject invalid
-combinations. Keep it deterministic and free of scene-specific side effects.
-
-Loaded managed objects retain identity across successful asset reloads. A failed reload leaves the last-good object
-active. Script reload hydrates managed data in the candidate context before migrating `Behaviour` instances, so a
-failure can reject the entire candidate without mixing generations.
-
-## Editing And Cooking
-
-`.keiredata` edits are project-asset edits, not Play Mode scene changes. Save them through their asset document. Saving
-publishes a new development revision that active gameplay can observe.
-
-Strict cooking discovers runtime managed types, validates stable type and field IDs, validates supported member shapes,
-and closes typed dependency references. Missing or incompatible managed types fail cooking rather than producing a
-partially valid asset graph.
-
-See [Asset Pipeline](../AssetPipeline.md) for import and cooking workflows.
+The legacy reader accepts persisted 0.3.x `AssetReference<T>` records. Saving the owning scene, prefab, or data asset
+normalizes them to v2; old C# source must still be migrated to direct asset fields.

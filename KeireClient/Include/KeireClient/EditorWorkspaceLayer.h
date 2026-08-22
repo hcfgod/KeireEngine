@@ -315,6 +315,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void RedoMaterialGraphEdit() override;
     void RevealMaterialGraphAsset(Keire::AssetId asset) override;
     void ReportMaterialGraphError(std::string message) noexcept override;
+    void SetGraphClipboard(std::string_view text) override;
+    [[nodiscard]] std::string GraphClipboard() const override;
     [[nodiscard]] const Keire::UiThemeDefinition& RiggingStudioTheme() const noexcept override;
     [[nodiscard]] Keire::Ref<Keire::AssetDatabase> RiggingStudioDatabase() const noexcept override;
     [[nodiscard]] Keire::Ref<Keire::AssetSystem> RiggingStudioAssets() const noexcept override;
@@ -606,6 +608,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] bool ConsumeManagedUiEvent(Keire::AssetId entity, Keire::RuntimeUiEventType type) noexcept override;
     [[nodiscard]] bool FocusManagedUi(Keire::AssetId entity) noexcept override;
     [[nodiscard]] Keire::Ref<Keire::Scene> ManagedRuntimeScene(Keire::AssetId entity = {}) const noexcept override;
+    [[nodiscard]] Keire::Ref<Keire::AssetSystem> ManagedRuntimeAssets() const noexcept override;
     [[nodiscard]] Keire::Ref<Keire::SceneRuntimeSession>
     ManagedRuntimeSession(Keire::AssetId entity = {}) const noexcept;
     void AddConsoleMessage(std::string category, std::string message, Keire::UiColor color,

@@ -25,20 +25,20 @@ These typed fields are serializable:
 
 ```csharp
 [SerializeField, StableFieldId("5eb02211-195c-45ee-b651-082a9bd3830a")]
-private AssetReference<AnimationClip> _reloadClip;
+private AnimationClip? _reloadClip;
 
 [SerializeField, StableFieldId("d4fb6451-fbee-4483-8314-f787c8c693f0")]
-private AssetReference<AnimatorController> _controller;
+private AnimatorController? _controller;
 ```
 
 They support authoring and dependency references. Runtime `Play` selects a named state in the controller; it does not
 take an `AnimationClip` reference directly. This keeps layers, transitions, events, blend trees, and root motion
 coherent.
 
-## Animator Handle
+## Animator Component
 
 ```csharp
-AnimatorHandle animator = Entity.Animator;
+Animator? animator = GetComponent<Animator>();
 if (!animator.IsValid)
 {
     Debug.Warn($"{Entity.Name} has no Animator component.");

@@ -12,7 +12,7 @@ namespace Keire::Detail
     {
     }
 
-    void ManagedBehaviourComponent::Awake()
+    void ManagedBehaviourComponent::Prepare()
     {
         const auto callbacks = m_Callbacks.lock();
         if (!callbacks || !callbacks->Create)
@@ -22,7 +22,12 @@ namespace Keire::Detail
             return;
         if (!m_State.empty() && callbacks->RestoreState)
             callbacks->RestoreState(m_Instance, m_State);
-        if (callbacks->Invoke)
+    }
+
+    void ManagedBehaviourComponent::Awake()
+    {
+        const auto callbacks = m_Callbacks.lock();
+        if (callbacks && m_Instance && callbacks->Invoke)
             callbacks->Invoke(m_Instance, ManagedBehaviourCallback::Awake, 0.0F);
     }
 

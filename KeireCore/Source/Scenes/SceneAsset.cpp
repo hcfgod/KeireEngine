@@ -432,6 +432,10 @@ namespace Keire
                         return Json::array({current.Red, current.Green, current.Blue, current.Alpha});
                     else if constexpr (std::same_as<T, AssetId> || std::same_as<T, EntityId>)
                         return current ? Json(current.ToString()) : Json(nullptr);
+                    else if constexpr (std::same_as<T, ComponentReferenceValue>)
+                        return Json{
+                            {"entity", current.Entity ? Json(current.Entity.ToString()) : Json(nullptr)},
+                            {"component", current.Component ? Json(current.Component.ToString()) : Json(nullptr)}};
                     else if constexpr (std::same_as<T, ComponentEventValue>)
                     {
                         Json listeners = Json::array();
@@ -586,6 +590,19 @@ namespace Keire
                          {color[0].get<float>(), color[1].get<float>(), color[2].get<float>(), color[3].get<float>()}});
                 }
                 return ColorGradient(std::move(keys), static_cast<GradientInterpolation>(interpolation));
+            }
+            case 14:
+            {
+                if (!value.is_object())
+                    throw std::runtime_error("Prefab component-reference override must be an object.");
+                ComponentReferenceValue result;
+                if (const auto entity = value.find("entity"); entity != value.end() && !entity->is_null())
+                    result.Entity = EntityId::Parse(entity->get<std::string>());
+                if (const auto component = value.find("component"); component != value.end() && !component->is_null())
+                {
+                    result.Component = ComponentTypeId::Parse(component->get<std::string>());
+                }
+                return result;
             }
             default:
                 throw std::runtime_error("Prefab override value uses an unsupported type.");

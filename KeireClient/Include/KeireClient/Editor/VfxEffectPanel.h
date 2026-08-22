@@ -3,6 +3,10 @@
 #include "Keire/Core.h"
 #include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/AuthoringWidgets.h"
+#include "KeireClient/Editor/GraphClipboard.h"
+#include "KeireClient/Editor/GraphComments.h"
+#include "KeireClient/Editor/GraphLayout.h"
+#include "KeireClient/Editor/GraphNavigation.h"
 
 #include <cstddef>
 #include <functional>
@@ -50,6 +54,8 @@ namespace KeireEditor
         virtual void SetVfxEffectPreviewBackend(Keire::VfxBackend backend) = 0;
         virtual void SetVfxEffectPreviewSpeed(float speed) = 0;
         virtual void StopVfxEffectPreview() noexcept = 0;
+        virtual void SetGraphClipboard(std::string_view text) = 0;
+        [[nodiscard]] virtual std::string GraphClipboard() const = 0;
         virtual void ReportVfxEffectError(std::string message) noexcept = 0;
     };
 
@@ -75,7 +81,26 @@ namespace KeireEditor
         void DrawGraphEditor(Keire::UiFrame& ui);
         void DrawGraphSystems(Keire::UiFrame& ui);
         void DrawGraphCanvas(Keire::UiFrame& ui);
+        void DrawGraphComments(Keire::UiFrame& ui, Keire::AssetId system,
+                               std::span<const std::pair<StableNodeId, Keire::AssetId>> nodeIdentities,
+                               std::span<const NodeGraphNode> nodes, const NodeGraphCommentModel& comments,
+                               const NodeGraphCanvasResult& canvas);
+        void CreateGraphComment(Keire::UiFrame& ui, Keire::AssetId system,
+                                std::span<const std::pair<StableNodeId, Keire::AssetId>> nodeIdentities,
+                                std::span<const NodeGraphNode> nodes, Keire::Vector2 position, bool selection);
+        void DuplicateGraphSelection(std::span<const StableNodeId> selection,
+                                     std::span<const std::pair<StableNodeId, Keire::AssetId>> identities);
+        [[nodiscard]] bool HandleGraphClipboard(const NodeGraphCanvasResult& result,
+                                                std::span<const std::pair<StableNodeId, Keire::AssetId>> identities);
+        [[nodiscard]] bool
+        DrawGraphArrangeMenu(Keire::UiFrame& ui, std::span<const NodeGraphNode> nodes,
+                             std::span<const NodeGraphConnection> connections,
+                             std::span<const std::pair<StableNodeId, Keire::AssetId>> nodeIdentities,
+                             std::span<const std::pair<StableNodeId, Keire::AssetId>> connectionIdentities);
         void DrawGraphInspector(Keire::UiFrame& ui);
+        [[nodiscard]] bool DrawGraphMultiSelectionInspector(Keire::UiFrame& ui);
+        [[nodiscard]] bool DrawGraphNodeComment(Keire::UiFrame& ui, Keire::AssetId system,
+                                                const Keire::VfxGraphNode& node);
         [[nodiscard]] bool DrawGraphValueEditor(Keire::UiFrame& ui, std::string_view label, Keire::VfxValueType type,
                                                 Keire::VfxParameterValue& value);
         [[nodiscard]] bool DrawGraphPropertyEditor(Keire::UiFrame& ui, Keire::VfxGraphProperty& property);
@@ -88,10 +113,12 @@ namespace KeireEditor
         IVfxEffectPanelController& m_Controller;
         AssetPicker m_AssetPicker;
         StableNodeGraphCanvas m_GraphCanvas;
+        GraphCommentEditorState m_CommentEditor;
         Keire::UiPanelRegistration m_Registration;
         Keire::AssetId m_SelectedModule;
         Keire::AssetId m_SelectedSystem;
         Keire::AssetId m_SelectedNode;
+        std::vector<Keire::AssetId> m_SelectedNodes;
         Keire::AssetId m_SelectedBlock;
         Keire::AssetId m_SelectedConnection;
         Keire::AssetId m_SelectedParameter;
@@ -101,7 +128,11 @@ namespace KeireEditor
         Keire::AssetId m_ContextConnection;
         Keire::Vector2 m_NodePalettePosition;
         std::string m_NodePaletteSearch;
+        std::string m_InspectorComment;
         NodeMenuSelection m_NodeMenuSelection;
+        GraphBookmarkSet m_GraphBookmarks;
+        Keire::AssetId m_InspectorCommentNode;
+        bool m_InspectorCommentPinned = false;
         std::string m_Message;
         bool m_WasVisible = false;
         bool m_NodePaletteMenuOpen = false;

@@ -46,6 +46,8 @@ namespace Keire::Detail
         [[nodiscard]] Entity Find(EntityId id) const noexcept;
         [[nodiscard]] Entity Create(std::string name, EntityId parent = {});
         [[nodiscard]] Entity Duplicate(EntityId id);
+        [[nodiscard]] Entity InstantiatePrefab(AssetId prefab, SceneDefinition definition, EntityId parent,
+                                               Vector3 position, Quaternion rotation, bool active);
         [[nodiscard]] bool Destroy(EntityId id);
         [[nodiscard]] std::vector<Entity> Query(ComponentTypeId type) const;
         [[nodiscard]] std::vector<Entity> QueryName(std::string_view name) const;

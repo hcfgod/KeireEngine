@@ -16,6 +16,7 @@
 #include "Keire/ECS/Components/VfxEmitterComponent.h"
 #include "Keire/Log.h"
 #include "Keire/Scenes/ScenePresentationRuntime.h"
+#include "Keire/Vfx/VfxSubgraph.h"
 #include "Keire/Vfx/VfxSystem.h"
 #include "Keire/Vfx/VfxVolumeAsset.h"
 #include "KeireInternal/Animation/ProceduralPoseMath.h"
@@ -81,12 +82,10 @@ namespace Keire::Detail
             },
             value);
     }
-
     [[nodiscard]] inline bool VfxOverrideMatches(const VfxValueType type, const VfxParameterValue& value) noexcept
     {
         return VfxValueMatchesType(type, value) && IsFiniteVfxValue(value) && HasCanonicalVfxRangeEndpoints(value);
     }
-
     [[nodiscard]] inline std::vector<VfxParameterOverride>
     CompatibleVfxOverrides(const VfxEffectDefinition& definition, const std::span<const VfxParameterOverride> authored)
     {
@@ -1980,6 +1979,7 @@ namespace Keire
         std::map<EntityId, std::unique_ptr<AnimationRuntimeState>> Animators;
         std::map<EntityId, PhysicsRuntimeState> PhysicsBodies;
         std::map<EntityId, VfxRuntimeState> VfxEmitters;
+        std::map<AssetId, AssetHandle<VfxSubgraphAsset>> VfxSubgraphs;
         std::map<AssetId, VfxMeshShapeState> VfxMeshShapes;
         std::map<AssetId, AssetHandle<VfxVolumeAsset>> VfxVolumes;
         float PresentationWidth = 1920.0F;

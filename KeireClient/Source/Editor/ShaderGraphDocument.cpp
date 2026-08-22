@@ -535,27 +535,56 @@ namespace KeireEditor
 
     bool ShaderGraphDocument::MoveNode(const Keire::AssetId node, const Keire::Vector2 position)
     {
+        const std::array move{std::pair{node, position}};
+        return MoveNodes(move);
+    }
+
+    bool ShaderGraphDocument::MoveNodes(const std::span<const std::pair<Keire::AssetId, Keire::Vector2>> nodes)
+    {
+        if (nodes.empty())
+            return false;
         auto candidate = m_Host.Draft();
-        const auto found = std::ranges::find(candidate.Nodes, node, &Keire::ShaderGraphNode::Id);
-        if (found == candidate.Nodes.end())
-            throw std::invalid_argument("Shader Graph node is unavailable.");
-        found->EditorPosition = position;
-        return m_Host.EditMetadata("Move Shader Graph node", std::move(candidate));
+        for (const auto& [node, position] : nodes)
+        {
+            const auto found = std::ranges::find(candidate.Nodes, node, &Keire::ShaderGraphNode::Id);
+            if (found == candidate.Nodes.end())
+                throw std::invalid_argument("Shader Graph node is unavailable.");
+            found->EditorPosition = position;
+            Keire::UpdateGraphCommentMembership(candidate.Authoring, node, position);
+        }
+        return m_Host.EditMetadata(nodes.size() == 1 ? "Move Shader Graph node" : "Move Shader Graph nodes",
+                                   std::move(candidate));
     }
 
     bool ShaderGraphDocument::RemoveNode(const Keire::AssetId node)
     {
-        return Edit("Remove Shader Graph node",
-                    [node](auto& definition)
+        return RemoveNodes(std::span{&node, std::size_t{1}});
+    }
+
+    bool ShaderGraphDocument::RemoveNodes(const std::span<const Keire::AssetId> nodes)
+    {
+        if (nodes.empty())
+            return false;
+        return Edit(nodes.size() == 1 ? "Remove Shader Graph node" : "Remove Shader Graph nodes",
+                    [nodes = std::vector(nodes.begin(), nodes.end())](auto& definition)
                     {
-                        const auto found = std::ranges::find(definition.Nodes, node, &Keire::ShaderGraphNode::Id);
-                        if (found == definition.Nodes.end())
-                            throw std::invalid_argument("Shader Graph node is unavailable.");
-                        if (found->Kind == Keire::ShaderGraphNodeKind::Master)
-                            throw std::invalid_argument("Shader Output node cannot be removed.");
-                        definition.Nodes.erase(found);
-                        std::erase_if(definition.Connections, [node](const auto& connection)
-                                      { return connection.Output.Node == node || connection.Input.Node == node; });
+                        for (const auto node : nodes)
+                        {
+                            const auto found = std::ranges::find(definition.Nodes, node, &Keire::ShaderGraphNode::Id);
+                            if (found == definition.Nodes.end())
+                                throw std::invalid_argument("Shader Graph node is unavailable.");
+                            if (found->Kind == Keire::ShaderGraphNodeKind::Master)
+                                throw std::invalid_argument("Shader Output node cannot be removed.");
+                        }
+                        std::erase_if(definition.Nodes, [&](const auto& candidate)
+                                      { return std::ranges::find(nodes, candidate.Id) != nodes.end(); });
+                        std::erase_if(definition.Connections,
+                                      [&](const auto& connection)
+                                      {
+                                          return std::ranges::find(nodes, connection.Output.Node) != nodes.end() ||
+                                                 std::ranges::find(nodes, connection.Input.Node) != nodes.end();
+                                      });
+                        Keire::RemoveGraphAuthoringNodeReferences(definition.Authoring, nodes);
                     });
     }
 
@@ -649,6 +678,7 @@ namespace KeireEditor
             node.Position = source.EditorPosition;
             node.Size = {220.0F, std::max(72.0F, 42.0F + static_cast<float>(source.Pins.size()) * 20.0F)};
             node.Color = NodeColor(source.Kind);
+            node.Deletable = source.Kind != Keire::ShaderGraphNodeKind::Master;
             for (const auto& sourcePin : source.Pins)
             {
                 const auto pinId = pinIds.Assign(sourcePin.Id, PreferredCanvasId(sourcePin.Id, 0x4d415450494e0001ULL));

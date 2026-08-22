@@ -1,4 +1,5 @@
 #include "KeireClient/Editor/AuthoringWidgets.h"
+#include "KeireClient/Editor/GraphComments.h"
 
 #include <algorithm>
 #include <cmath>
@@ -6,9 +7,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
-#include <stdexcept>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -258,172 +257,6 @@ namespace
 
 namespace KeireEditor
 {
-    bool ShaderGraphPinsCanConnect(const Keire::ShaderGraphPin& first, const Keire::ShaderGraphPin& second) noexcept
-    {
-        if (first.Direction == second.Direction)
-            return false;
-        const auto& output = first.Direction == Keire::ShaderGraphPinDirection::Output ? first : second;
-        const auto& input = first.Direction == Keire::ShaderGraphPinDirection::Input ? first : second;
-        return output.Type == input.Type ||
-               ((output.Type == Keire::ShaderGraphValueType::Color &&
-                 input.Type == Keire::ShaderGraphValueType::Vector4) ||
-                (output.Type == Keire::ShaderGraphValueType::Vector4 &&
-                 input.Type == Keire::ShaderGraphValueType::Color) ||
-                ((output.Type == Keire::ShaderGraphValueType::Vector4 ||
-                  output.Type == Keire::ShaderGraphValueType::Color) &&
-                 input.Type == Keire::ShaderGraphValueType::Vector3) ||
-                (output.Type == Keire::ShaderGraphValueType::Vector3 &&
-                 (input.Type == Keire::ShaderGraphValueType::Vector4 ||
-                  input.Type == Keire::ShaderGraphValueType::Color))) ||
-               (output.Type == Keire::ShaderGraphValueType::Scalar &&
-                input.Type != Keire::ShaderGraphValueType::Texture2D &&
-                input.Type != Keire::ShaderGraphValueType::MaterialAttributes &&
-                input.Type != Keire::ShaderGraphValueType::Bsdf);
-    }
-
-    bool ShaderGraphNodesCanConnect(const Keire::ShaderGraphNode& first, const Keire::ShaderGraphNode& second) noexcept
-    {
-        return std::ranges::any_of(first.Pins,
-                                   [&](const Keire::ShaderGraphPin& firstPin)
-                                   {
-                                       return std::ranges::any_of(
-                                           second.Pins, [&](const Keire::ShaderGraphPin& secondPin)
-                                           { return ShaderGraphPinsCanConnect(firstPin, secondPin); });
-                                   });
-    }
-
-    StableNodeId StableNodeGraphIdMap::Assign(const Keire::AssetId source, StableNodeId preferred)
-    {
-        if (const auto existing = std::ranges::find(m_Assignments, source, &decltype(m_Assignments)::value_type::first);
-            existing != m_Assignments.end())
-            return existing->second;
-
-        if (preferred == 0)
-            preferred = 1;
-        while (std::ranges::find(m_Used, preferred) != m_Used.end())
-        {
-            ++preferred;
-            if (preferred == 0)
-                preferred = 1;
-        }
-        m_Assignments.emplace_back(source, preferred);
-        m_Used.push_back(preferred);
-        return preferred;
-    }
-
-    std::optional<StableNodeId> StableNodeGraphIdMap::Find(const Keire::AssetId source) const noexcept
-    {
-        const auto found = std::ranges::find(m_Assignments, source, &decltype(m_Assignments)::value_type::first);
-        if (found == m_Assignments.end())
-            return std::nullopt;
-        return found->second;
-    }
-
-    void StableNodeGraphCanvas::Validate(const std::span<const NodeGraphNode> nodes,
-                                         const std::span<const NodeGraphConnection> connections)
-    {
-        std::unordered_set<StableNodeId> nodeIds;
-        std::unordered_set<StableNodeId> blockIds;
-        std::unordered_set<StableNodeId> pinIds;
-        nodeIds.reserve(nodes.size());
-        for (const auto& node : nodes)
-        {
-            if (node.Id == 0)
-                throw std::invalid_argument("Node graph IDs must be non-zero.");
-            if (!nodeIds.emplace(node.Id).second)
-                throw std::invalid_argument("Node graph IDs must be unique.");
-            if (node.Label.empty() || !std::isfinite(node.Position.X) || !std::isfinite(node.Position.Y) ||
-                !std::isfinite(node.Size.X) || !std::isfinite(node.Size.Y) || node.Size.X < 40.0F ||
-                node.Size.Y < 24.0F)
-                throw std::invalid_argument("Node graph nodes require a label, finite position, and usable size.");
-
-            for (const auto& pin : node.Pins)
-            {
-                if (pin.Id == 0 || !pinIds.emplace(pin.Id).second)
-                    throw std::invalid_argument("Node graph pin IDs must be non-zero and unique.");
-                if (pin.Label.empty() || !std::isfinite(pin.Color.Red) || !std::isfinite(pin.Color.Green) ||
-                    !std::isfinite(pin.Color.Blue) || !std::isfinite(pin.Color.Alpha))
-                {
-                    throw std::invalid_argument("Node graph pins require a label and finite color.");
-                }
-            }
-            for (const auto& block : node.Blocks)
-            {
-                if (block.Id == 0 || !blockIds.emplace(block.Id).second || block.Label.empty() ||
-                    !std::isfinite(block.Color.Red) || !std::isfinite(block.Color.Green) ||
-                    !std::isfinite(block.Color.Blue) || !std::isfinite(block.Color.Alpha))
-                {
-                    throw std::invalid_argument("Node graph Blocks require a unique ID, label, and finite color.");
-                }
-                for (const auto& pin : block.Pins)
-                {
-                    if (pin.Id == 0 || !pinIds.emplace(pin.Id).second)
-                        throw std::invalid_argument("Node graph pin IDs must be non-zero and unique.");
-                    if (pin.Label.empty() || !std::isfinite(pin.Color.Red) || !std::isfinite(pin.Color.Green) ||
-                        !std::isfinite(pin.Color.Blue) || !std::isfinite(pin.Color.Alpha))
-                    {
-                        throw std::invalid_argument("Node graph pins require a label and finite color.");
-                    }
-                }
-            }
-        }
-
-        std::unordered_set<StableNodeId> connectionIds;
-        connectionIds.reserve(connections.size());
-        for (const auto& connection : connections)
-        {
-            if (connection.Id == 0 || !connectionIds.emplace(connection.Id).second)
-                throw std::invalid_argument("Node graph connection IDs must be non-zero and unique.");
-            if (!nodeIds.contains(connection.Source) || !nodeIds.contains(connection.Target))
-                throw std::invalid_argument("Node graph connections must reference existing nodes.");
-            if (connection.RoutingPoints.size() > 64 ||
-                std::ranges::any_of(connection.RoutingPoints, [](const Keire::Vector2 point)
-                                    { return !std::isfinite(point.X) || !std::isfinite(point.Y); }))
-                throw std::invalid_argument("Node graph connection routing points are invalid or exceed 64 entries.");
-
-            const bool legacy = connection.SourcePin == 0 && connection.TargetPin == 0;
-            if (legacy)
-            {
-                if (connection.SourceBlock != 0 || connection.TargetBlock != 0)
-                    throw std::invalid_argument("Legacy node graph connections cannot reference Blocks.");
-                continue;
-            }
-            if (connection.SourcePin == 0 || connection.TargetPin == 0)
-                throw std::invalid_argument("Pin-aware node graph connections require both endpoint pins.");
-            const NodeGraphConnectionRequest request{connection.Source,      connection.SourcePin,
-                                                     connection.Target,      connection.TargetPin,
-                                                     connection.SourceBlock, connection.TargetBlock};
-            const auto validation = EvaluateConnection(nodes, request);
-            if (!validation.CanConnect())
-                throw std::invalid_argument(validation.Diagnostic);
-        }
-    }
-
-    NodeGraphConnectionValidation
-    StableNodeGraphCanvas::EvaluateConnection(const std::span<const NodeGraphNode> nodes,
-                                              const NodeGraphConnectionRequest& connection,
-                                              const NodeGraphConnectionValidator& validator)
-    {
-        const NodeGraphPinAddress sourceAddress{connection.SourceNode, connection.SourcePin, connection.SourceBlock};
-        const NodeGraphPinAddress targetAddress{connection.TargetNode, connection.TargetPin, connection.TargetBlock};
-        if (sourceAddress.Node == 0 || sourceAddress.Pin == 0 || targetAddress.Node == 0 || targetAddress.Pin == 0)
-            return {NodeGraphConnectionValidationStatus::Reject, "A connection requires two stable pin endpoints."};
-        if (sourceAddress == targetAddress)
-            return {NodeGraphConnectionValidationStatus::Reject, "A pin cannot connect to itself."};
-
-        const auto* source = FindPin(nodes, sourceAddress);
-        const auto* target = FindPin(nodes, targetAddress);
-        if (!source || !target)
-            return {NodeGraphConnectionValidationStatus::Reject, "A connection references an unavailable pin."};
-        if (source->Direction != NodeGraphPinDirection::Output || target->Direction != NodeGraphPinDirection::Input)
-            return {NodeGraphConnectionValidationStatus::Reject, "Connections must run from an output to an input."};
-        if (source->Type != target->Type)
-            return {NodeGraphConnectionValidationStatus::Reject, "The selected pins have incompatible types."};
-        if (!validator)
-            return {};
-        return validator(connection);
-    }
-
     NodeGraphCanvasDetail StableNodeGraphCanvas::DetailForZoom(const float zoom) noexcept
     {
         const float boundedZoom = std::isfinite(zoom) ? std::clamp(zoom, 0.35F, 2.5F) : 1.0F;
@@ -503,25 +336,131 @@ namespace KeireEditor
         }
         ui.DrawRectangle(canvas, {0.18F, 0.2F, 0.24F, 1.0F}, 1.0F, 4.0F);
 
+        if (m_DraggingComment)
+        {
+            const auto comment = std::ranges::find(options.Comments, *m_DraggingComment, &NodeGraphComment::Id);
+            if (comment == options.Comments.end())
+                m_DraggingComment.reset();
+            else if (options.Editable && pointer.LeftDown)
+            {
+                const Keire::Vector2 delta{pointer.Delta.X / m_Zoom, pointer.Delta.Y / m_Zoom};
+                m_CommentDragPosition.X += delta.X;
+                m_CommentDragPosition.Y += delta.Y;
+                comment->Position = m_CommentDragPosition;
+                for (auto& [node, position] : m_CommentMemberPositions)
+                {
+                    position.X += delta.X;
+                    position.Y += delta.Y;
+                    if (const auto member = std::ranges::find(nodes, node, &NodeGraphNode::Id); member != nodes.end())
+                        member->Position = position;
+                }
+                for (auto& [nested, position] : m_CommentMemberCommentPositions)
+                {
+                    position.X += delta.X;
+                    position.Y += delta.Y;
+                    if (const auto member = std::ranges::find(options.Comments, nested, &NodeGraphComment::Id);
+                        member != options.Comments.end())
+                        member->Position = position;
+                }
+                result.MovedComment = comment->Id;
+                result.Changed = delta.X != 0.0F || delta.Y != 0.0F;
+            }
+        }
+        if (m_ResizingComment)
+        {
+            const auto comment = std::ranges::find(options.Comments, *m_ResizingComment, &NodeGraphComment::Id);
+            if (comment == options.Comments.end())
+                m_ResizingComment.reset();
+            else if (options.Editable && pointer.LeftDown)
+            {
+                m_CommentResize.X = std::max(120.0F, m_CommentResize.X + pointer.Delta.X / m_Zoom);
+                m_CommentResize.Y = std::max(64.0F, m_CommentResize.Y + pointer.Delta.Y / m_Zoom);
+                comment->Size = m_CommentResize;
+                result.ResizedComment = comment->Id;
+                result.Changed = true;
+            }
+        }
+        std::unordered_map<StableNodeId, NodeGraphComment*> collapsedOwners;
+        for (auto& comment : options.Comments)
+        {
+            comment.SummaryInputs = 0;
+            comment.SummaryOutputs = 0;
+            if (!comment.Collapsed)
+                continue;
+            bool collapsedAncestor = false;
+            auto parent = comment.Parent;
+            while (parent)
+            {
+                const auto found = std::ranges::find(options.Comments, *parent, &NodeGraphComment::Id);
+                if (found == options.Comments.end())
+                    break;
+                collapsedAncestor = collapsedAncestor || found->Collapsed;
+                parent = found->Parent;
+            }
+            if (collapsedAncestor)
+                continue;
+
+            std::vector<StableNodeId> pending(comment.Members.begin(), comment.Members.end());
+            while (!pending.empty())
+            {
+                const auto member = pending.back();
+                pending.pop_back();
+                if (const auto nested = std::ranges::find(options.Comments, member, &NodeGraphComment::Id);
+                    nested != options.Comments.end())
+                    pending.insert(pending.end(), nested->Members.begin(), nested->Members.end());
+                else
+                    collapsedOwners.emplace(member, std::addressof(comment));
+            }
+        }
+        for (const auto& connection : connections)
+        {
+            const auto source = collapsedOwners.find(connection.Source);
+            const auto target = collapsedOwners.find(connection.Target);
+            if (source != collapsedOwners.end() &&
+                (target == collapsedOwners.end() || source->second != target->second))
+                ++source->second->SummaryOutputs;
+            if (target != collapsedOwners.end() &&
+                (source == collapsedOwners.end() || source->second != target->second))
+                ++target->second->SummaryInputs;
+        }
+        const auto commentLayer = DrawNodeGraphComments(ui, options.Comments, canvas, m_Pan, m_Zoom, pointer.Position);
+        if (m_CommentSelection)
+            if (const auto selected = std::ranges::find(options.Comments, *m_CommentSelection, &NodeGraphComment::Id);
+                selected != options.Comments.end())
+            {
+                const auto minimum = ToScreen(selected->Position, canvas);
+                const float collapsedHeight =
+                    34.0F + static_cast<float>(std::max(selected->SummaryInputs, selected->SummaryOutputs)) * 20.0F;
+                const float height = (selected->Collapsed ? collapsedHeight : selected->Size.Y) * m_Zoom;
+                ui.DrawRectangle({minimum, {minimum.X + selected->Size.X * m_Zoom, minimum.Y + height}},
+                                 {0.3F, 0.78F, 1.0F, 1.0F}, 2.5F, 6.0F);
+            }
+
         if (m_Dragging)
         {
-            const auto dragged = std::ranges::find(nodes, *m_Dragging, &NodeGraphNode::Id);
-            if (dragged == nodes.end())
+            if (std::ranges::find(nodes, *m_Dragging, &NodeGraphNode::Id) == nodes.end())
             {
                 m_Dragging.reset();
+                m_DragPositions.clear();
                 m_DragMoved = false;
             }
             else
             {
                 if (options.Editable && pointer.LeftDown)
                 {
-                    m_DragPosition.X += pointer.Delta.X / m_Zoom;
-                    m_DragPosition.Y += pointer.Delta.Y / m_Zoom;
-                    result.MovedNode = dragged->Id;
                     result.Changed = pointer.Delta.X != 0.0F || pointer.Delta.Y != 0.0F;
                     m_DragMoved = m_DragMoved || result.Changed;
+                    for (auto& [node, position] : m_DragPositions)
+                    {
+                        position.X += pointer.Delta.X / m_Zoom;
+                        position.Y += pointer.Delta.Y / m_Zoom;
+                        result.MovedNodes.push_back(node);
+                    }
                 }
-                dragged->Position = m_DragPosition;
+                result.MovedNode = m_Dragging;
+                for (const auto& [node, position] : m_DragPositions)
+                    if (const auto found = std::ranges::find(nodes, node, &NodeGraphNode::Id); found != nodes.end())
+                        found->Position = position;
             }
         }
 
@@ -530,8 +469,12 @@ namespace KeireEditor
         for (const auto& node : nodes)
             nodeLookup.emplace(node.Id, std::addressof(node));
 
+        std::erase_if(m_Selections, [&](const StableNodeId node) { return !nodeLookup.contains(node); });
         if (m_Selection && !nodeLookup.contains(*m_Selection))
-            m_Selection.reset();
+            m_Selection = m_Selections.empty() ? std::nullopt : std::optional(m_Selections.back());
+        if (m_CommentSelection &&
+            std::ranges::find(options.Comments, *m_CommentSelection, &NodeGraphComment::Id) == options.Comments.end())
+            m_CommentSelection.reset();
         const auto blockAvailable = [&](const NodeGraphBlockAddress address)
         {
             const auto* node = FindNode(nodes, address.Node);
@@ -593,6 +536,8 @@ namespace KeireEditor
         drawnNodes.reserve(nodes.size());
         for (const auto& node : nodes)
         {
+            if (collapsedOwners.contains(node.Id))
+                continue;
             const auto minimum = ToScreen(node.Position, canvas);
             const auto effectiveSize = EffectiveNodeSize(node);
             const Keire::UiSize scaledSize{effectiveSize.Width * m_Zoom, effectiveSize.Height * m_Zoom};
@@ -648,11 +593,27 @@ namespace KeireEditor
 
         std::vector<DrawnConnection> drawnConnections;
         drawnConnections.reserve(connections.size());
+        std::unordered_map<StableNodeId, std::size_t> collapsedInputIndices;
+        std::unordered_map<StableNodeId, std::size_t> collapsedOutputIndices;
+        std::vector<std::pair<Keire::UiPosition, Keire::UiColor>> summaryPins;
+        const auto collapsedEndpoint = [&](NodeGraphComment& comment, const bool input)
+        {
+            auto& indices = input ? collapsedInputIndices : collapsedOutputIndices;
+            const auto index = indices[comment.Id]++;
+            return ToScreen({comment.Position.X + (input ? 0.0F : comment.Size.X),
+                             comment.Position.Y + 34.0F + (static_cast<float>(index) + 0.5F) * 20.0F},
+                            canvas);
+        };
         for (const auto& connection : connections)
         {
             const auto sourceNode = nodeLookup.find(connection.Source);
             const auto targetNode = nodeLookup.find(connection.Target);
             if (sourceNode == nodeLookup.end() || targetNode == nodeLookup.end())
+                continue;
+            const auto sourceOwner = collapsedOwners.find(connection.Source);
+            const auto targetOwner = collapsedOwners.find(connection.Target);
+            if (sourceOwner != collapsedOwners.end() && targetOwner != collapsedOwners.end() &&
+                sourceOwner->second == targetOwner->second)
                 continue;
 
             Keire::UiPosition sourcePosition;
@@ -660,24 +621,48 @@ namespace KeireEditor
             Keire::UiColor cableColor{0.42F, 0.62F, 0.9F, 1.0F};
             if (connection.SourcePin != 0)
             {
-                const auto* source = findDrawnPin({connection.Source, connection.SourcePin, connection.SourceBlock});
-                const auto* target = findDrawnPin({connection.Target, connection.TargetPin, connection.TargetBlock});
+                const NodeGraphPinAddress sourceAddress{connection.Source, connection.SourcePin,
+                                                        connection.SourceBlock};
+                const NodeGraphPinAddress targetAddress{connection.Target, connection.TargetPin,
+                                                        connection.TargetBlock};
+                const auto* source = FindPin(nodes, sourceAddress);
+                const auto* target = FindPin(nodes, targetAddress);
                 if (!source || !target)
                     continue;
-                sourcePosition = source->Position;
-                targetPosition = target->Position;
-                cableColor = source->Pin->Color;
+                cableColor = source->Color;
+                if (sourceOwner != collapsedOwners.end())
+                {
+                    sourcePosition = collapsedEndpoint(*sourceOwner->second, false);
+                    summaryPins.emplace_back(sourcePosition, source->Color);
+                }
+                else
+                    sourcePosition = findDrawnPin(sourceAddress)->Position;
+                if (targetOwner != collapsedOwners.end())
+                {
+                    targetPosition = collapsedEndpoint(*targetOwner->second, true);
+                    summaryPins.emplace_back(targetPosition, target->Color);
+                }
+                else
+                    targetPosition = findDrawnPin(targetAddress)->Position;
             }
             else
             {
                 const auto sourceSize = EffectiveNodeSize(*sourceNode->second);
                 const auto targetSize = EffectiveNodeSize(*targetNode->second);
-                sourcePosition = ToScreen({sourceNode->second->Position.X + sourceSize.Width,
-                                           sourceNode->second->Position.Y + sourceSize.Height * 0.5F},
-                                          canvas);
-                targetPosition = ToScreen(
-                    {targetNode->second->Position.X, targetNode->second->Position.Y + targetSize.Height * 0.5F},
-                    canvas);
+                sourcePosition = sourceOwner != collapsedOwners.end()
+                                     ? collapsedEndpoint(*sourceOwner->second, false)
+                                     : ToScreen({sourceNode->second->Position.X + sourceSize.Width,
+                                                 sourceNode->second->Position.Y + sourceSize.Height * 0.5F},
+                                                canvas);
+                targetPosition = targetOwner != collapsedOwners.end()
+                                     ? collapsedEndpoint(*targetOwner->second, true)
+                                     : ToScreen({targetNode->second->Position.X,
+                                                 targetNode->second->Position.Y + targetSize.Height * 0.5F},
+                                                canvas);
+                if (sourceOwner != collapsedOwners.end())
+                    summaryPins.emplace_back(sourcePosition, cableColor);
+                if (targetOwner != collapsedOwners.end())
+                    summaryPins.emplace_back(targetPosition, cableColor);
             }
             DrawnConnection drawn{std::addressof(connection), cableColor};
             drawn.Reroutes.reserve(connection.RoutingPoints.size());
@@ -778,12 +763,35 @@ namespace KeireEditor
                 }
             }
         }
+        const auto hoveredComment =
+            !hoveredReroute && !hoveredPin && !hoveredBlock && !hoveredNode && !hoveredConnection ? commentLayer.Hovered
+                                                                                                  : std::nullopt;
 
         result.HoveredPin = hoveredPin;
         result.HoveredBlock = hoveredBlock;
         result.HoveredNode = hoveredNode;
         result.HoveredConnection = hoveredConnection;
         result.HoveredReroute = hoveredReroute;
+
+        if (canvasHovered && options.Editable && options.MultiSelection &&
+            ui.Shortcut({.Key = Keire::UiKey::A, .Primary = true}))
+        {
+            SelectAll(nodes);
+            result.SelectionChanged = true;
+        }
+        if (canvasHovered && ui.Shortcut({.Key = Keire::UiKey::F, .Shift = true}))
+            Focus(nodes, size);
+        else if (canvasHovered && ui.Shortcut({Keire::UiKey::F}))
+        {
+            std::vector<NodeGraphNode> selected;
+            for (const auto& node : nodes)
+                if (IsSelected(node.Id))
+                    selected.push_back(node);
+            if (selected.empty())
+                Focus(nodes, size);
+            else
+                Focus(selected, size);
+        }
 
         if (canvasHovered && canvasItem.DoubleClicked && options.Editable && options.EditableReroutes)
         {
@@ -795,15 +803,25 @@ namespace KeireEditor
                     NodeGraphRerouteRequest{*hoveredConnection, hoveredConnectionSegment, result.PointerGraphPosition};
             }
         }
+        if (canvasHovered && canvasItem.DoubleClicked && hoveredComment && commentLayer.Header)
+        {
+            const auto comment = std::ranges::find(options.Comments, *hoveredComment, &NodeGraphComment::Id);
+            if (comment != options.Comments.end() && comment->Collapsed)
+                result.ToggleCommentCollapseRequested = hoveredComment;
+            else
+                result.RenameCommentRequested = hoveredComment;
+        }
 
         if (canvasHovered && pointer.LeftPressed)
         {
             if (hoveredReroute)
             {
-                m_Selection.reset();
+                ClearSelection();
+                m_CommentSelection.reset();
                 m_BlockSelection.reset();
                 m_ConnectionSelection = hoveredReroute->Connection;
                 m_RerouteSelection = hoveredReroute;
+                m_CommentSelection.reset();
                 result.ActivatedConnection = hoveredReroute->Connection;
                 result.ActivatedReroute = hoveredReroute;
                 if (options.Editable && options.EditableReroutes && !canvasItem.DoubleClicked)
@@ -816,11 +834,16 @@ namespace KeireEditor
             }
             else if (hoveredPin)
             {
-                m_Selection = hoveredPin->Node;
+                m_CommentSelection.reset();
+                if (options.MultiSelection && IsSelected(hoveredPin->Node))
+                    MakePrimary(hoveredPin->Node);
+                else
+                    Select(hoveredPin->Node);
                 m_BlockSelection = hoveredPin->Block
                                        ? std::optional(NodeGraphBlockAddress{hoveredPin->Node, hoveredPin->Block})
                                        : std::nullopt;
                 m_ConnectionSelection.reset();
+                m_CommentSelection.reset();
                 m_RerouteSelection.reset();
                 result.ActivatedNode = hoveredPin->Node;
                 result.ActivatedPin = hoveredPin;
@@ -829,9 +852,14 @@ namespace KeireEditor
             }
             else if (hoveredBlock)
             {
-                m_Selection = hoveredBlock->Node;
+                m_CommentSelection.reset();
+                if (options.MultiSelection && IsSelected(hoveredBlock->Node))
+                    MakePrimary(hoveredBlock->Node);
+                else
+                    Select(hoveredBlock->Node);
                 m_BlockSelection = hoveredBlock;
                 m_ConnectionSelection.reset();
+                m_CommentSelection.reset();
                 m_RerouteSelection.reset();
                 result.ActivatedNode = hoveredBlock->Node;
                 result.ActivatedBlock = hoveredBlock;
@@ -844,34 +872,95 @@ namespace KeireEditor
             }
             else if (hoveredNode)
             {
-                m_Selection = hoveredNode;
+                m_CommentSelection.reset();
+                if (options.MultiSelection && ui.ControlDown())
+                    ToggleSelection(*hoveredNode);
+                else if (options.MultiSelection && IsSelected(*hoveredNode))
+                    MakePrimary(*hoveredNode);
+                else
+                    Select(hoveredNode);
                 m_BlockSelection.reset();
                 m_ConnectionSelection.reset();
+                m_CommentSelection.reset();
                 m_RerouteSelection.reset();
-                result.ActivatedNode = hoveredNode;
-                if (options.Editable)
+                result.ActivatedNode = m_Selection;
+                result.SelectionChanged = true;
+                if (options.Editable && IsSelected(*hoveredNode))
                 {
-                    const auto found = std::ranges::find(nodes, *hoveredNode, &NodeGraphNode::Id);
                     m_Dragging = hoveredNode;
-                    m_DragPosition = found->Position;
+                    m_DragPositions.clear();
+                    for (const auto selected : m_Selections)
+                        if (const auto found = std::ranges::find(nodes, selected, &NodeGraphNode::Id);
+                            found != nodes.end())
+                            m_DragPositions.emplace_back(selected, found->Position);
                     m_DragMoved = false;
                 }
             }
             else if (hoveredConnection && options.InteractiveConnections)
             {
-                m_Selection.reset();
+                ClearSelection();
+                m_CommentSelection.reset();
                 m_BlockSelection.reset();
                 m_ConnectionSelection = hoveredConnection;
                 m_RerouteSelection.reset();
                 result.ActivatedConnection = hoveredConnection;
             }
-            else
+            else if (hoveredComment)
             {
-                m_Selection.reset();
+                ClearSelection();
                 m_BlockSelection.reset();
                 m_ConnectionSelection.reset();
                 m_RerouteSelection.reset();
-                result.BackgroundActivated = true;
+                m_CommentSelection = hoveredComment;
+                result.ActivatedComment = hoveredComment;
+                const auto comment = std::ranges::find(options.Comments, *hoveredComment, &NodeGraphComment::Id);
+                if (options.Editable && comment != options.Comments.end())
+                {
+                    if (commentLayer.ResizeHandle)
+                    {
+                        m_ResizingComment = hoveredComment;
+                        m_CommentResize = comment->Size;
+                    }
+                    else if (commentLayer.Header)
+                    {
+                        m_DraggingComment = hoveredComment;
+                        m_CommentDragPosition = comment->Position;
+                        m_CommentMemberPositions.clear();
+                        m_CommentMemberCommentPositions.clear();
+                        if (comment->MoveContents)
+                        {
+                            std::vector<StableNodeId> pending(comment->Members.begin(), comment->Members.end());
+                            while (!pending.empty())
+                            {
+                                const auto member = pending.back();
+                                pending.pop_back();
+                                if (const auto node = std::ranges::find(nodes, member, &NodeGraphNode::Id);
+                                    node != nodes.end())
+                                    m_CommentMemberPositions.emplace_back(member, node->Position);
+                                else if (const auto nested =
+                                             std::ranges::find(options.Comments, member, &NodeGraphComment::Id);
+                                         nested != options.Comments.end())
+                                {
+                                    m_CommentMemberCommentPositions.emplace_back(member, nested->Position);
+                                    pending.insert(pending.end(), nested->Members.begin(), nested->Members.end());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            else
+            {
+                m_MarqueeStart = options.MultiSelection ? std::optional(result.PointerGraphPosition) : std::nullopt;
+                m_MarqueeBase = ui.ControlDown() ? m_Selections : std::vector<StableNodeId>{};
+                if (!ui.ControlDown())
+                    ClearSelection();
+                m_BlockSelection.reset();
+                m_ConnectionSelection.reset();
+                m_RerouteSelection.reset();
+                m_CommentSelection.reset();
+                result.BackgroundActivated = !ui.ControlDown();
+                result.SelectionChanged = !ui.ControlDown();
             }
         }
 
@@ -883,7 +972,7 @@ namespace KeireEditor
             {
                 request.Kind = NodeGraphContextTargetKind::Connection;
                 request.Connection = hoveredReroute->Connection;
-                m_Selection.reset();
+                ClearSelection();
                 m_BlockSelection.reset();
                 m_ConnectionSelection = hoveredReroute->Connection;
                 m_RerouteSelection = hoveredReroute;
@@ -894,7 +983,10 @@ namespace KeireEditor
                 request.Node = hoveredPin->Node;
                 request.Pin = hoveredPin->Pin;
                 request.Block = hoveredPin->Block;
-                m_Selection = hoveredPin->Node;
+                if (!options.MultiSelection || !IsSelected(hoveredPin->Node))
+                    Select(hoveredPin->Node);
+                else
+                    MakePrimary(hoveredPin->Node);
                 m_BlockSelection = hoveredPin->Block
                                        ? std::optional(NodeGraphBlockAddress{hoveredPin->Node, hoveredPin->Block})
                                        : std::nullopt;
@@ -905,7 +997,10 @@ namespace KeireEditor
                 request.Kind = NodeGraphContextTargetKind::Block;
                 request.Node = hoveredBlock->Node;
                 request.Block = hoveredBlock->Block;
-                m_Selection = hoveredBlock->Node;
+                if (!options.MultiSelection || !IsSelected(hoveredBlock->Node))
+                    Select(hoveredBlock->Node);
+                else
+                    MakePrimary(hoveredBlock->Node);
                 m_BlockSelection = hoveredBlock;
                 m_ConnectionSelection.reset();
             }
@@ -913,7 +1008,10 @@ namespace KeireEditor
             {
                 request.Kind = NodeGraphContextTargetKind::Node;
                 request.Node = *hoveredNode;
-                m_Selection = hoveredNode;
+                if (!options.MultiSelection || !IsSelected(*hoveredNode))
+                    Select(hoveredNode);
+                else
+                    MakePrimary(*hoveredNode);
                 m_BlockSelection.reset();
                 m_ConnectionSelection.reset();
             }
@@ -921,14 +1019,38 @@ namespace KeireEditor
             {
                 request.Kind = NodeGraphContextTargetKind::Connection;
                 request.Connection = *hoveredConnection;
-                m_Selection.reset();
+                ClearSelection();
                 m_BlockSelection.reset();
                 m_ConnectionSelection = hoveredConnection;
                 m_RerouteSelection.reset();
+                m_CommentSelection.reset();
+            }
+            else if (hoveredComment)
+            {
+                request.Kind = NodeGraphContextTargetKind::Comment;
+                request.Comment = *hoveredComment;
+                ClearSelection();
+                m_BlockSelection.reset();
+                m_ConnectionSelection.reset();
+                m_RerouteSelection.reset();
+                m_CommentSelection = hoveredComment;
             }
             else
+            {
                 m_RerouteSelection.reset();
+                m_CommentSelection.reset();
+            }
             result.ContextRequested = request;
+        }
+
+        if (m_MarqueeStart && (pointer.LeftDown || pointer.LeftReleased))
+        {
+            auto selected = m_MarqueeBase;
+            for (const auto node : MarqueeSelection(nodes, *m_MarqueeStart, result.PointerGraphPosition))
+                if (std::ranges::find(selected, node) == selected.end())
+                    selected.push_back(node);
+            Select(selected);
+            result.SelectionChanged = true;
         }
 
         if (m_DraggingBlock && pointer.LeftDown)
@@ -980,6 +1102,24 @@ namespace KeireEditor
 
         if (pointer.LeftReleased)
         {
+            if (m_DraggingComment)
+            {
+                result.MoveCompletedComment = m_DraggingComment;
+                for (const auto& [node, position] : m_CommentMemberPositions)
+                {
+                    (void)position;
+                    result.CommentMemberNodes.push_back(node);
+                }
+                result.CommentMemberComments = m_CommentMemberCommentPositions;
+                m_DraggingComment.reset();
+                m_CommentMemberPositions.clear();
+                m_CommentMemberCommentPositions.clear();
+            }
+            if (m_ResizingComment)
+            {
+                result.ResizeCompletedComment = m_ResizingComment;
+                m_ResizingComment.reset();
+            }
             if (m_DraggingReroute)
             {
                 result.MoveRerouteRequested = NodeGraphRerouteRequest{m_DraggingReroute->Connection,
@@ -987,8 +1127,18 @@ namespace KeireEditor
                 m_DraggingReroute.reset();
             }
             if (m_Dragging && m_DragMoved)
+            {
                 result.MoveCompletedNode = m_Dragging;
+                for (const auto& [node, position] : m_DragPositions)
+                {
+                    (void)position;
+                    result.MoveCompletedNodes.push_back(node);
+                }
+            }
             m_Dragging.reset();
+            m_DragPositions.clear();
+            m_MarqueeStart.reset();
+            m_MarqueeBase.clear();
             m_DragMoved = false;
 
             if (m_DraggingBlock)
@@ -1014,6 +1164,24 @@ namespace KeireEditor
             }
         }
 
+        if (canvasHovered && options.Editable && m_CommentSelection && ui.Shortcut({Keire::UiKey::F2}))
+            result.RenameCommentRequested = m_CommentSelection;
+        if (canvasHovered && options.Editable && options.MultiSelection && !ui.ControlDown() &&
+            ui.Shortcut({Keire::UiKey::C}))
+            result.CreateCommentRequested = CommentFromSelection(nodes, m_Selections, result.PointerGraphPosition);
+        if (canvasHovered && options.Editable && options.MultiSelection && !m_Selections.empty() &&
+            ui.Shortcut({.Key = Keire::UiKey::D, .Primary = true}))
+            result.DuplicateNodesRequested = m_Selections;
+        if (canvasHovered && options.Editable && options.MultiSelection && !m_Selections.empty() &&
+            ui.Shortcut({.Key = Keire::UiKey::C, .Primary = true}))
+            result.CopyNodesRequested = m_Selections;
+        if (canvasHovered && options.Editable && options.MultiSelection && !m_Selections.empty() &&
+            ui.Shortcut({.Key = Keire::UiKey::X, .Primary = true}))
+            result.CutNodesRequested = m_Selections;
+        if (canvasHovered && options.Editable && options.MultiSelection &&
+            ui.Shortcut({.Key = Keire::UiKey::V, .Primary = true}))
+            result.PasteRequested = true;
+
         if (canvasHovered && options.Editable && ui.Shortcut({Keire::UiKey::Delete}))
         {
             if (m_RerouteSelection && options.EditableReroutes)
@@ -1023,7 +1191,20 @@ namespace KeireEditor
             else if (m_BlockSelection)
                 result.DeleteBlockRequested = m_BlockSelection;
             else if (m_Selection)
-                result.DeleteNodeRequested = m_Selection;
+            {
+                for (const auto node : m_Selections)
+                {
+                    const auto found = nodeLookup.find(node);
+                    if (found != nodeLookup.end() && found->second->Deletable)
+                        result.DeleteNodesRequested.push_back(node);
+                    else
+                        result.ProtectedNodes.push_back(node);
+                }
+                if (!result.DeleteNodesRequested.empty())
+                    result.DeleteNodeRequested = result.DeleteNodesRequested.front();
+            }
+            else if (m_CommentSelection)
+                result.DeleteCommentRequested = m_CommentSelection;
         }
 
         for (const auto& connection : drawnConnections)
@@ -1073,6 +1254,13 @@ namespace KeireEditor
                                                      : connection.Color);
             }
         }
+        for (const auto& [position, color] : summaryPins)
+        {
+            const float radius = std::clamp(6.0F * m_Zoom, 5.0F, 8.0F);
+            ui.DrawFilledCircle(position, radius + 2.0F, {0.008F, 0.012F, 0.02F, 0.95F});
+            ui.DrawFilledCircle(position, radius, color);
+            ui.DrawCircle(position, radius, ScaleColor(color, 1.25F, 1.0F), 1.5F);
+        }
 
         if (dragStart)
         {
@@ -1108,7 +1296,7 @@ namespace KeireEditor
             const auto rectangle = drawn->Rectangle;
             const bool hovered =
                 (hoveredNode && *hoveredNode == node.Id) || (hoveredBlock && hoveredBlock->Node == node.Id);
-            const bool selected = m_Selection && *m_Selection == node.Id;
+            const bool selected = IsSelected(node.Id);
             const Keire::UiItemRect shadow{{rectangle.Minimum.X + 4.0F, rectangle.Minimum.Y + 6.0F},
                                            {rectangle.Maximum.X + 4.0F, rectangle.Maximum.Y + 6.0F}};
             ui.DrawFilledRectangle(shadow, {0.0F, 0.0F, 0.0F, 0.42F}, 8.0F);
@@ -1130,6 +1318,8 @@ namespace KeireEditor
                                      : hovered ? Keire::UiColor{0.46F, 0.54F, 0.68F, 1.0F}
                                                : Keire::UiColor{0.22F, 0.25F, 0.32F, 1.0F};
             ui.DrawRectangle(rectangle, borderColor, selected ? 2.5F : hovered ? 1.5F : 1.0F, 8.0F);
+
+            DrawNodeGraphAnnotation(ui, node, rectangle, m_Zoom);
 
             const float labelX = rectangle.Minimum.X + std::clamp(13.0F * m_Zoom, 6.0F, 13.0F);
             const float titleY = rectangle.Minimum.Y + std::clamp(8.0F * m_Zoom, 3.0F, 8.0F);
@@ -1281,33 +1471,19 @@ namespace KeireEditor
                                previewValidation->Diagnostic, 11.0F, canvas);
         }
 
-        return result;
-    }
+        if (m_MarqueeStart && pointer.LeftDown)
+        {
+            const auto start = ToScreen(*m_MarqueeStart, canvas);
+            const Keire::UiItemRect marquee{
+                {std::min(start.X, pointer.Position.X), std::min(start.Y, pointer.Position.Y)},
+                {std::max(start.X, pointer.Position.X), std::max(start.Y, pointer.Position.Y)}};
+            ui.DrawFilledRectangle(marquee, {0.2F, 0.58F, 0.95F, 0.12F}, 2.0F);
+            ui.DrawRectangle(marquee, {0.3F, 0.72F, 1.0F, 0.9F}, 1.0F, 2.0F);
+        }
 
-    void StableNodeGraphCanvas::Focus(const std::span<const NodeGraphNode> nodes, const Keire::UiSize canvasSize)
-    {
-        if (nodes.empty())
-        {
-            m_Pan = {};
-            m_Zoom = 1.0F;
-            return;
-        }
-        Keire::Vector2 minimum{std::numeric_limits<float>::max(), std::numeric_limits<float>::max()};
-        Keire::Vector2 maximum{std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest()};
-        for (const auto& node : nodes)
-        {
-            const auto size = EffectiveNodeSize(node);
-            minimum.X = std::min(minimum.X, node.Position.X);
-            minimum.Y = std::min(minimum.Y, node.Position.Y);
-            maximum.X = std::max(maximum.X, node.Position.X + size.Width);
-            maximum.Y = std::max(maximum.Y, node.Position.Y + size.Height);
-        }
-        const float width = std::max(maximum.X - minimum.X, 1.0F);
-        const float height = std::max(maximum.Y - minimum.Y, 1.0F);
-        m_Zoom =
-            std::clamp(std::min((canvasSize.Width - 48.0F) / width, (canvasSize.Height - 48.0F) / height), 0.35F, 2.5F);
-        m_Pan = {(canvasSize.Width / m_Zoom - width) * 0.5F - minimum.X,
-                 (canvasSize.Height / m_Zoom - height) * 0.5F - minimum.Y};
+        result.SelectedNodes = m_Selections;
+
+        return result;
     }
 
     Keire::UiPosition StableNodeGraphCanvas::ToScreen(const Keire::Vector2 position,
@@ -1320,123 +1496,5 @@ namespace KeireEditor
                                                   const Keire::UiItemRect canvas) const noexcept
     {
         return {(position.X - canvas.Minimum.X) / m_Zoom - m_Pan.X, (position.Y - canvas.Minimum.Y) / m_Zoom - m_Pan.Y};
-    }
-
-    void NodeMenuSelection::Open() noexcept
-    {
-        m_Selected.clear();
-        m_FocusRequested = true;
-    }
-
-    bool NodeMenuSelection::ConsumeFocusRequest() noexcept { return std::exchange(m_FocusRequested, false); }
-
-    void NodeMenuSelection::Synchronize(const std::span<const std::string_view> visibleIds)
-    {
-        if (visibleIds.empty())
-        {
-            m_Selected.clear();
-            return;
-        }
-        if (std::ranges::find(visibleIds, m_Selected) == visibleIds.end())
-            m_Selected = visibleIds.front();
-    }
-
-    void NodeMenuSelection::MovePrevious(const std::span<const std::string_view> visibleIds) { Move(visibleIds, -1); }
-
-    void NodeMenuSelection::MoveNext(const std::span<const std::string_view> visibleIds) { Move(visibleIds, 1); }
-
-    void NodeMenuSelection::Remember(const std::string_view id)
-    {
-        if (id.empty())
-            return;
-        const auto existing = std::ranges::find(m_Recent, id);
-        if (existing != m_Recent.end())
-            m_Recent.erase(existing);
-        m_Recent.insert(m_Recent.begin(), std::string(id));
-        if (m_Recent.size() > RecentCapacity)
-            m_Recent.resize(RecentCapacity);
-    }
-
-    std::optional<std::string_view> NodeMenuSelection::Selected() const noexcept
-    {
-        return m_Selected.empty() ? std::nullopt : std::optional<std::string_view>(m_Selected);
-    }
-
-    bool NodeMenuSelection::IsSelected(const std::string_view id) const noexcept { return m_Selected == id; }
-
-    void NodeMenuSelection::Move(const std::span<const std::string_view> visibleIds, const int direction)
-    {
-        Synchronize(visibleIds);
-        if (visibleIds.empty())
-            return;
-        const auto selected = std::ranges::find(visibleIds, m_Selected);
-        const auto index =
-            selected == visibleIds.end() ? std::size_t{0} : static_cast<std::size_t>(selected - visibleIds.begin());
-        const auto count = visibleIds.size();
-        const auto next = direction < 0 ? (index + count - 1) % count : (index + 1) % count;
-        m_Selected = visibleIds[next];
-    }
-
-    bool AuthoringValueEditors::Curve(Keire::UiFrame& ui, const std::string_view label, Keire::Curve1D& value,
-                                      const float minimumTime, const float maximumTime)
-    {
-        if (!std::isfinite(minimumTime) || !std::isfinite(maximumTime) || maximumTime <= minimumTime)
-            throw std::invalid_argument("Curve editor time range must be finite and increasing.");
-        ui.Text(label);
-        std::vector<Keire::CurveKey> keys(value.Keys().begin(), value.Keys().end());
-        bool changed = false;
-        for (std::size_t index = 0; index < keys.size(); ++index)
-        {
-            auto id = ui.PushId(std::to_string(index));
-            double time = keys[index].Time;
-            double keyValue = keys[index].Value;
-            const float lower = index == 0 ? minimumTime : std::nextafter(keys[index - 1].Time, maximumTime);
-            const float upper =
-                index + 1 == keys.size() ? maximumTime : std::nextafter(keys[index + 1].Time, minimumTime);
-            if (ui.DragScalar("Time", time, 0.01, lower, upper))
-            {
-                keys[index].Time = static_cast<float>(time);
-                changed = true;
-            }
-            ui.SameLine();
-            if (ui.DragScalar("Value", keyValue, 0.01))
-            {
-                keys[index].Value = static_cast<float>(keyValue);
-                changed = true;
-            }
-        }
-        if (changed)
-            value.SetKeys(std::move(keys));
-        return changed;
-    }
-
-    bool AuthoringValueEditors::Gradient(Keire::UiFrame& ui, const std::string_view label, Keire::ColorGradient& value)
-    {
-        ui.Text(label);
-        std::vector<Keire::ColorGradientKey> keys(value.Keys().begin(), value.Keys().end());
-        bool changed = false;
-        for (std::size_t index = 0; index < keys.size(); ++index)
-        {
-            auto id = ui.PushId(std::to_string(index));
-            double time = keys[index].Time;
-            const float lower = index == 0 ? 0.0F : std::nextafter(keys[index - 1].Time, 1.0F);
-            const float upper = index + 1 == keys.size() ? 1.0F : std::nextafter(keys[index + 1].Time, 0.0F);
-            if (ui.DragScalar("Time", time, 0.01, lower, upper))
-            {
-                keys[index].Time = static_cast<float>(time);
-                changed = true;
-            }
-            ui.SameLine();
-            Keire::UiColor color{keys[index].Value.Red, keys[index].Value.Green, keys[index].Value.Blue,
-                                 keys[index].Value.Alpha};
-            if (ui.ColorEdit("Color", color))
-            {
-                keys[index].Value = {color.Red, color.Green, color.Blue, color.Alpha};
-                changed = true;
-            }
-        }
-        if (changed)
-            value.SetKeys(std::move(keys));
-        return changed;
     }
 } // namespace KeireEditor

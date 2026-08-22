@@ -9,15 +9,15 @@ expose a native `Scene` pointer, and runtime render changes never mutate the aut
 bounded snapshot of the scenes owned by the current runtime context.
 
 ```csharp
-SceneHandle active = SceneManager.ActiveScene;
+Scene active = SceneManager.ActiveScene;
 if (active.IsValid)
     Debug.Log($"Active scene: {active.Asset}");
 ```
 
-`SceneHandle` contains an asset ID for inspection and an opaque stable runtime identity. Handles returned by the
+`Scene` contains an asset ID for inspection and an opaque stable runtime identity. Objects returned by the
 runtime are never reused within that Play/runtime world. Its `IsLoaded` and `IsActive` properties query the current
 world, so a retained handle becomes stale after unload rather than addressing a later load of the same asset. The
-one-argument `SceneHandle(AssetId)` constructor remains source-compatible for asset inspection, but only handles
+direct `SceneAsset` reference remains available for asset inspection, but only loaded `Scene` objects
 returned by `SceneManager` have `HasStableIdentity` and can address a specific loaded scene.
 
 ## Load, Activate, And Unload Scenes
@@ -31,7 +31,7 @@ using Keire;
 public sealed class LevelExit : Behaviour
 {
     [SerializeField]
-    private AssetReference<SceneAsset> _destination;
+    private SceneAsset? _destination;
 
     private IEnumerator ChangeLevel()
     {
@@ -129,7 +129,7 @@ as interiors, weather, damage states, cinematics, and accessibility exposure pre
 ## Failure And Lifetime Rules
 
 - Call these APIs only from an active managed gameplay callback or continuation owned by that generation.
-- Treat every `SceneHandle` as non-owning and recheck `IsLoaded` after a safe boundary.
+- Treat every `Scene` object as non-owning and recheck `IsLoaded` after a safe boundary.
 - Use `SceneQuery.Loaded` or `SceneQuery.In(handle)` deliberately; compatibility query overloads search only the active
   scene.
 - Preserve an entity once. Preserving a child retains its complete hierarchy root; it does not detach or clone it.

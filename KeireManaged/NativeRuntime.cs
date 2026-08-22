@@ -48,6 +48,30 @@ internal struct NativeEntityId
     internal ulong Low;
 }
 
+internal enum NativeBuiltinPropertyKind : uint
+{
+    Boolean,
+    Integer,
+    Scalar,
+    Vector2,
+    Vector3,
+    Vector4,
+    Color,
+    Asset,
+    Entity
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeBuiltinProperty
+{
+    internal NativeBuiltinPropertyKind Kind;
+    internal long Integer;
+    internal double Scalar;
+    internal Vector4 Vector;
+    internal ulong High;
+    internal ulong Low;
+}
+
 internal enum AudioSourceScalarProperty : byte
 {
     Gain,
@@ -384,6 +408,14 @@ internal static unsafe class NativeRuntime
     internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, byte> RemoveComponentIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, byte> GetComponentEnabledIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, byte, byte> SetComponentEnabledIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, NativeString, NativeBuiltinProperty*, byte>
+        GetBuiltinComponentPropertyIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, NativeString, NativeBuiltinProperty*, byte>
+        SetBuiltinComponentPropertyIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, NativeString, byte*, int, int>
+        GetBuiltinComponentTextIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, NativeString, NativeString, byte>
+        SetBuiltinComponentTextIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, ulong*, ulong*, void> CloneEntityIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, void> DestroyEntityIcall;
     internal static delegate* unmanaged<ulong, Vector3, Vector3, float, uint, ulong, ulong, NativeRaycastHit*, byte>
@@ -531,20 +563,20 @@ internal static unsafe class NativeRuntime
             throw new InvalidOperationException("The entity name could not be changed.");
     }
 
-    internal static Entity GetEntityParent(Entity entity)
+    internal static Entity? GetEntityParent(Entity entity)
     {
         ulong high = 0;
         ulong low = 0;
         return GetEntityParentIcall(entity.World, entity.Id.High, entity.Id.Low, &high, &low) != 0
-            ? new Entity(entity.World, new EntityId(high, low))
-            : default;
+            ? Entity.FromId(entity.World, new EntityId(high, low))
+            : null;
     }
 
-    internal static void SetEntityParent(Entity entity, Entity parent, bool preserveWorldTransform)
+    internal static void SetEntityParent(Entity entity, Entity? parent, bool preserveWorldTransform)
     {
-        if (parent.Id.IsValid && parent.World != entity.World)
+        if (parent is not null && parent.Id.IsValid && parent.World != entity.World)
             throw new ArgumentException("An entity cannot be parented across worlds.", nameof(parent));
-        if (SetEntityParentIcall(entity.World, entity.Id.High, entity.Id.Low, parent.Id.High, parent.Id.Low,
+        if (SetEntityParentIcall(entity.World, entity.Id.High, entity.Id.Low, parent?.Id.High ?? 0, parent?.Id.Low ?? 0,
                                  preserveWorldTransform ? (byte)1 : (byte)0) == 0)
             throw new InvalidOperationException("The entity parent could not be changed.");
     }
@@ -561,7 +593,7 @@ internal static unsafe class NativeRuntime
             ulong high = 0;
             ulong low = 0;
             if (GetEntityChildIcall(entity.World, entity.Id.High, entity.Id.Low, index, &high, &low) != 0)
-                children[written++] = new Entity(entity.World, new EntityId(high, low));
+                children[written++] = Entity.FromId(entity.World, new EntityId(high, low))!;
         }
         return written == children.Length ? children : children[..written];
     }
@@ -580,6 +612,54 @@ internal static unsafe class NativeRuntime
         if (SetComponentEnabledIcall(entity.World, entity.Id.High, entity.Id.Low, type.High, type.Low,
                                      enabled ? (byte)1 : (byte)0) == 0)
             throw new InvalidOperationException("The component enabled state could not be changed.");
+    }
+    internal static NativeBuiltinProperty GetBuiltinComponentProperty(Component component, string key)
+    {
+        NativeBuiltinProperty value = default;
+        using NativeString nativeKey = key;
+        ComponentTypeId type = component.Type;
+        Entity entity = component.Entity;
+        if (GetBuiltinComponentPropertyIcall(entity.World, entity.Id.High, entity.Id.Low, type.High, type.Low,
+                                             nativeKey, &value) == 0)
+            throw new InvalidOperationException($"Component property '{key}' is unavailable.");
+        return value;
+    }
+    internal static void SetBuiltinComponentProperty(Component component, string key, NativeBuiltinProperty value)
+    {
+        using NativeString nativeKey = key;
+        ComponentTypeId type = component.Type;
+        Entity entity = component.Entity;
+        if (SetBuiltinComponentPropertyIcall(entity.World, entity.Id.High, entity.Id.Low, type.High, type.Low,
+                                             nativeKey, &value) == 0)
+            throw new InvalidOperationException($"Component property '{key}' could not be changed.");
+    }
+    internal static string GetBuiltinComponentText(Component component, string key)
+    {
+        using NativeString nativeKey = key;
+        ComponentTypeId type = component.Type;
+        Entity entity = component.Entity;
+        int length = GetBuiltinComponentTextIcall(entity.World, entity.Id.High, entity.Id.Low, type.High, type.Low,
+                                                  nativeKey, null, 0);
+        if (length <= 0)
+            return string.Empty;
+        byte[] bytes = new byte[length];
+        fixed (byte* destination = bytes)
+        {
+            _ = GetBuiltinComponentTextIcall(entity.World, entity.Id.High, entity.Id.Low, type.High, type.Low,
+                                             nativeKey, destination, bytes.Length);
+        }
+        return Encoding.UTF8.GetString(bytes);
+    }
+    internal static void SetBuiltinComponentText(Component component, string key, string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        using NativeString nativeKey = key;
+        using NativeString nativeValue = value;
+        ComponentTypeId type = component.Type;
+        Entity entity = component.Entity;
+        if (SetBuiltinComponentTextIcall(entity.World, entity.Id.High, entity.Id.Low, type.High, type.Low,
+                                         nativeKey, nativeValue) == 0)
+            throw new InvalidOperationException($"Component property '{key}' could not be changed.");
     }
     internal static Vector3 GetLocalPosition(Entity entity) =>
         GetLocalPositionIcall(entity.World, entity.Id.High, entity.Id.Low);
@@ -861,8 +941,8 @@ internal static unsafe class NativeRuntime
     {
         using NativeString bus = options.Bus;
         return PlayAudioAdvancedIcall(
-            entity.World, entity.Id.High, entity.Id.Low, clip.High, clip.Low, options.Mixer.Id.High,
-            options.Mixer.Id.Low, options.BusId.High, options.BusId.Low, bus, options.Gain, options.Pitch,
+            entity.World, entity.Id.High, entity.Id.Low, clip.High, clip.Low, options.Mixer?.Id.High ?? 0,
+            options.Mixer?.Id.Low ?? 0, options.BusId.High, options.BusId.Low, bus, options.Gain, options.Pitch,
             options.Priority, options.Loop ? (byte)1 : (byte)0, options.Spatial ? (byte)1 : (byte)0,
             options.MinimumDistance, options.MaximumDistance) != 0;
     }
@@ -1004,13 +1084,13 @@ internal static unsafe class NativeRuntime
         ConsumeUiClickIcall(entity.World, entity.Id.High, entity.Id.Low) != 0;
 
     internal static bool TryRaycast(Entity context, Vector3 origin, Vector3 direction, float maximumDistance,
-                                    uint mask, Entity ignoredEntity, out RaycastHit hit)
+                                    uint mask, Entity? ignoredEntity, out RaycastHit hit)
     {
         NativeRaycastHit nativeHit = default;
         bool didHit = RaycastIcall(context.World, origin, direction, maximumDistance, mask,
-                                   ignoredEntity.Id.High, ignoredEntity.Id.Low, &nativeHit) != 0;
+                                   ignoredEntity?.Id.High ?? 0, ignoredEntity?.Id.Low ?? 0, &nativeHit) != 0;
         hit = didHit
-            ? new RaycastHit(new Entity(context.World, new EntityId(nativeHit.EntityHigh, nativeHit.EntityLow)),
+            ? new RaycastHit(Entity.FromId(context.World, new EntityId(nativeHit.EntityHigh, nativeHit.EntityLow))!,
                              nativeHit.Point, nativeHit.Normal, nativeHit.Distance)
             : default;
         return didHit;
@@ -1018,25 +1098,25 @@ internal static unsafe class NativeRuntime
 
     internal static bool TryCapsuleCast(Entity context, Vector3 origin, Quaternion rotation, float radius,
                                         float height, Vector3 displacement, uint mask, bool includeTriggers,
-                                        Entity ignoredEntity, out RaycastHit hit)
+                                        Entity? ignoredEntity, out RaycastHit hit)
     {
         NativeRaycastHit nativeHit = default;
         bool didHit = CapsuleCastIcall(context.World, context.Id.High, context.Id.Low, origin, rotation, radius, height,
-                                       displacement, mask, includeTriggers ? (byte)1 : (byte)0, ignoredEntity.Id.High,
-                                       ignoredEntity.Id.Low, &nativeHit) != 0;
+                                       displacement, mask, includeTriggers ? (byte)1 : (byte)0,
+                                       ignoredEntity?.Id.High ?? 0, ignoredEntity?.Id.Low ?? 0, &nativeHit) != 0;
         hit = didHit
-            ? new RaycastHit(new Entity(context.World, new EntityId(nativeHit.EntityHigh, nativeHit.EntityLow)),
+            ? new RaycastHit(Entity.FromId(context.World, new EntityId(nativeHit.EntityHigh, nativeHit.EntityLow))!,
                              nativeHit.Point, nativeHit.Normal, nativeHit.Distance)
             : default;
         return didHit;
     }
 
     internal static IReadOnlyList<Entity> OverlapSphere(Entity context, Vector3 center, float radius, uint mask,
-                                                         bool includeTriggers, Entity ignoredEntity)
+                                                         bool includeTriggers, Entity? ignoredEntity)
     {
         int count = OverlapSphereIcall(context.World, context.Id.High, context.Id.Low, center, radius, mask,
-                                       includeTriggers ? (byte)1 : (byte)0, ignoredEntity.Id.High,
-                                       ignoredEntity.Id.Low, null, 0);
+                                       includeTriggers ? (byte)1 : (byte)0, ignoredEntity?.Id.High ?? 0,
+                                       ignoredEntity?.Id.Low ?? 0, null, 0);
         if (count < 0)
             throw new InvalidOperationException("The native physics world rejected the sphere overlap.");
         if (count == 0)
@@ -1045,14 +1125,15 @@ internal static unsafe class NativeRuntime
         fixed (NativeEntityId* destination = nativeEntities)
         {
             int copied = OverlapSphereIcall(context.World, context.Id.High, context.Id.Low, center, radius, mask,
-                                            includeTriggers ? (byte)1 : (byte)0, ignoredEntity.Id.High,
-                                            ignoredEntity.Id.Low, destination, nativeEntities.Length);
+                                            includeTriggers ? (byte)1 : (byte)0, ignoredEntity?.Id.High ?? 0,
+                                            ignoredEntity?.Id.Low ?? 0, destination, nativeEntities.Length);
             if (copied != count)
                 throw new InvalidOperationException("The native physics overlap changed during one managed call.");
         }
         var result = new Entity[count];
         for (int index = 0; index < count; ++index)
-            result[index] = new Entity(context.World, new EntityId(nativeEntities[index].High, nativeEntities[index].Low));
+            result[index] = Entity.FromId(context.World,
+                new EntityId(nativeEntities[index].High, nativeEntities[index].Low))!;
         return result;
     }
 }

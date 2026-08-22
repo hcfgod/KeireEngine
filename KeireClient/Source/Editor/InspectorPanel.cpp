@@ -944,6 +944,18 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                     const auto heading = (expanded ? "v  " : ">  ") + registration->Name;
                     if (ui.Selectable(heading))
                         expanded = !expanded;
+                    if (auto source = ui.BeginDragSource(); source)
+                    {
+                        const std::array ids{entity.Id().Value(), registration->Type.Value()};
+                        std::string payload;
+                        for (const auto id : ids)
+                        {
+                            payload += id.ToString();
+                            payload.push_back('\n');
+                        }
+                        ui.SetDragPayload("KEIRE_COMPONENT", std::as_bytes(std::span(payload.data(), payload.size())));
+                        ui.Text(entity.Name() + " / " + registration->Name);
+                    }
                     if (!expanded)
                         continue;
                     auto enabled = component->Enabled();

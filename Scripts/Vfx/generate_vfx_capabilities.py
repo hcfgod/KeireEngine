@@ -139,6 +139,22 @@ def render(manifest: dict[str, object]) -> str:
     lines.extend(
         [
             "",
+            "## Runtime Composition Contracts",
+            "",
+            "These engine capabilities are production contracts outside the frozen Unity node-row score:",
+            "",
+            "- Schema-1 Operator, Block, and System VFX Subgraphs expand before CPU/GPU lowering with deterministic "
+            "per-call identities, explicit dependency resolution, indirect-cycle rejection, and a default 16-level "
+            "nesting bound.",
+            "- Sprite (quad), Ribbon (strip), Mesh, and Volumetric outputs preserve authored Material assets through "
+            "CPU snapshots and GPU emitter records; the renderer resolves those materials or emits an explicit "
+            "fallback diagnostic.",
+        ]
+    )
+
+    lines.extend(
+        [
+            "",
             "## Prioritized Outstanding Matrix",
             "",
             "| Priority | Class | Unity capability | Category | Backend target |",

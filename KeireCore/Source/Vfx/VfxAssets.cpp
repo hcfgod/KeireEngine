@@ -1,5 +1,7 @@
+#include "Keire/Vfx/VfxSubgraph.h"
 #include "Keire/Vfx/VfxSystem.h"
 
+#include "KeireInternal/Authoring/GraphAuthoringSerialization.h"
 #include "KeireInternal/Vfx/VfxAssetValueCodec.h"
 #include "KeireInternal/Vfx/VfxExecutionInternal.h"
 #include "KeireInternal/Vfx/VfxExpressionInternal.h"
@@ -12,6 +14,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstring>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <queue>
@@ -957,7 +960,8 @@ namespace Keire
                       system.DataType == VfxParticleDataType::ParticleStrip ? "particle-strip" : "particle"},
                      {"particlesPerStrip", system.ParticlesPerStrip},
                      {"nodes", std::move(nodes)},
-                     {"connections", std::move(connections)}});
+                     {"connections", std::move(connections)},
+                     {"authoring", Detail::EncodeGraphAuthoringMetadata(system.Authoring)}});
             }
             return encodedSystems;
         }
@@ -1044,6 +1048,14 @@ namespace Keire
                         connection.RoutingPoints.push_back({point.at(0).get<float>(), point.at(1).get<float>()});
                     }
                     system.Connections.push_back(connection);
+                }
+                if (schemaVersion >= 5)
+                {
+                    std::vector<AssetId> nodeIds;
+                    nodeIds.reserve(system.Nodes.size());
+                    std::ranges::transform(system.Nodes, std::back_inserter(nodeIds), &VfxGraphNode::Id);
+                    system.Authoring =
+                        Detail::DecodeGraphAuthoringMetadata(encodedSystem.value("authoring", Json::object()), nodeIds);
                 }
                 systems.push_back(std::move(system));
             }
@@ -3788,6 +3800,10 @@ namespace Keire
                                             [](const Vector2 point) { return !Math::IsFinite(point); }))
                         throw std::invalid_argument("VFX graph contains an invalid connection.");
                 }
+                std::vector<AssetId> authoringNodeIds;
+                authoringNodeIds.reserve(system.Nodes.size());
+                std::ranges::transform(system.Nodes, std::back_inserter(authoringNodeIds), &VfxGraphNode::Id);
+                ValidateGraphAuthoringMetadata(system.Authoring, authoringNodeIds);
             }
             if (nodeCount > MaximumGraphNodes || connectionCount > MaximumGraphConnections)
                 throw std::invalid_argument("VFX graph exceeds its bounded complexity limits.");
@@ -3811,82 +3827,16 @@ namespace Keire
             throw std::invalid_argument("VFX effect requires enabled emission and renderer modules.");
         if (definition.ExecutionSource == VfxExecutionSource::Graph && !hasRendererPayload)
             throw std::invalid_argument("VFX graph requires renderer backing modules.");
-        if (definition.ExecutionSource == VfxExecutionSource::Graph)
+        if (definition.ExecutionSource == VfxExecutionSource::Graph && !HasVfxSubgraphCalls(definition))
             for (const auto& system : definition.Systems)
                 (void)LowerGraph(definition, system, false);
     }
-
     void ValidateVfxEffect(const VfxEffectDefinition& definition)
     {
         ValidateVfxEffectAuthoring(definition);
-        if (definition.ExecutionSource == VfxExecutionSource::Graph)
+        if (definition.ExecutionSource == VfxExecutionSource::Graph && !HasVfxSubgraphCalls(definition))
             for (const auto& system : definition.Systems)
                 (void)LowerGraph(definition, system, true);
-    }
-
-    std::vector<AssetId> VfxEffectDependencies(const VfxEffectDefinition& definition)
-    {
-        ValidateVfxEffect(definition);
-        std::vector<AssetId> result;
-        const auto appendValue = [&result](const auto& value)
-        {
-            if (const auto* asset = std::get_if<AssetId>(&value); asset && *asset)
-                result.push_back(*asset);
-        };
-        const auto appendProperties = [&result](const std::span<const VfxGraphProperty> properties)
-        {
-            for (const auto& property : properties)
-                if (const auto* asset = std::get_if<AssetId>(&property.Value); asset && *asset)
-                    result.push_back(*asset);
-        };
-        for (const auto& module : definition.Modules)
-        {
-            std::visit(
-                Overloaded{
-                    [&result](const VfxShapeModule& value)
-                    {
-                        if (value.Shape == VfxShape::Mesh && value.Mesh)
-                            result.push_back(value.Mesh);
-                        if (value.Shape == VfxShape::Volume && value.Volume)
-                            result.push_back(value.Volume);
-                    },
-                    [&result](const VfxRendererModule& value)
-                    {
-                        if (value.Type != VfxRendererType::Mesh && value.Sprite)
-                            result.push_back(value.Sprite);
-                        if (value.Type == VfxRendererType::Mesh && value.Mesh)
-                            result.push_back(value.Mesh);
-                        if (value.Material)
-                            result.push_back(value.Material);
-                    },
-                    [](const auto&) {},
-                },
-                module.Payload);
-        }
-        for (const auto& parameter : definition.Blackboard)
-            appendValue(parameter.DefaultValue);
-        for (const auto& system : definition.Systems)
-        {
-            for (const auto& node : system.Nodes)
-            {
-                if (node.Kind == VfxGraphNodeKind::Subgraph && node.Reference)
-                    result.push_back(node.Reference);
-                appendProperties(node.Properties);
-                for (const auto& pin : node.Pins)
-                    if (pin.DefaultValue)
-                        appendValue(*pin.DefaultValue);
-                for (const auto& block : node.Blocks)
-                {
-                    appendProperties(block.Properties);
-                    for (const auto& pin : block.Pins)
-                        if (pin.DefaultValue)
-                            appendValue(*pin.DefaultValue);
-                }
-            }
-        }
-        std::ranges::sort(result);
-        result.erase(std::unique(result.begin(), result.end()), result.end());
-        return result;
     }
 
     namespace
@@ -4141,7 +4091,7 @@ namespace Keire
         return result;
     }
 
-    VfxEffectDefinition MigrateVfxEffectToSchema4(const VfxEffectDefinition& definition)
+    VfxEffectDefinition MigrateVfxEffectToCurrentSchema(const VfxEffectDefinition& definition)
     {
         if (definition.SchemaVersion < 1 || definition.SchemaVersion > CurrentVfxSchemaVersion)
             throw std::invalid_argument("VFX effect migration source schema is unsupported.");
@@ -4181,7 +4131,7 @@ namespace Keire
 
     VfxEffectDefinition ConvertVfxEffectToGraph(const VfxEffectDefinition& definition)
     {
-        auto result = MigrateVfxEffectToSchema4(definition);
+        auto result = MigrateVfxEffectToCurrentSchema(definition);
         ValidateVfxEffect(result);
         if (result.ExecutionSource == VfxExecutionSource::Graph)
             return result;
@@ -4194,7 +4144,6 @@ namespace Keire
             used.insert(module.Id);
         for (const auto& parameter : result.Blackboard)
             used.insert(parameter.Id);
-
         VfxGraphSystem system;
         system.Id = AllocateDerivedId(result.EmitterId, 0x1000, used);
         system.Name = "Particle System";
@@ -4317,7 +4266,7 @@ namespace Keire
                 definition.Systems = DecodeSystems(document.at("systems"), schemaVersion);
                 definition.Blackboard = DecodeBlackboard(document.value("blackboard", Json::array()));
             }
-            return CreateRef<VfxEffectAsset>(MigrateVfxEffectToSchema4(definition));
+            return CreateRef<VfxEffectAsset>(MigrateVfxEffectToCurrentSchema(definition));
         }
         catch (const Json::exception& error)
         {
@@ -4327,7 +4276,7 @@ namespace Keire
 
     std::vector<std::byte> VfxEffectAsset::Encode(const VfxEffectDefinition& definition)
     {
-        auto published = MigrateVfxEffectToSchema4(definition);
+        auto published = MigrateVfxEffectToCurrentSchema(definition);
         ValidateVfxEffect(published);
         auto modules = Json::array();
         for (const auto& module : published.Modules)

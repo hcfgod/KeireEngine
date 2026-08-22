@@ -19,11 +19,11 @@ For an individual playback request with explicit clip and options, use `Audio.Pl
 
 ## Reference Audio Correctly
 
-`AudioClip` is an asset marker. Store an `AssetReference<AudioClip>`:
+`AudioClip` is a direct asset object. Store it directly:
 
 ```csharp
 [SerializeField, StableFieldId("33b83319-6061-4056-b28c-71cce922d51d")]
-private AssetReference<AudioClip> _openSound;
+private AudioClip? _openSound;
 ```
 
 Do not use:
@@ -32,7 +32,7 @@ Do not use:
 [SerializeField] private AudioClip? _openSound;
 ```
 
-`AssetReference<AudioClip>` is a value type. Check `IsValid`, not `null`:
+Unassigned asset fields are `null`; persistent clips also expose `IsValid`:
 
 ```csharp
 if (_openSound.IsValid)
@@ -40,7 +40,7 @@ if (_openSound.IsValid)
 ```
 
 Playback starts its ordinary asset load automatically. When a transition needs explicit prewarming or readiness
-diagnostics, retain `Assets.LoadRuntime(_openSound)` in an `AssetHandle<AudioClip>` and dispose it when that transition
+diagnostics, retain `Assets.LoadRuntime(_openSound)` in an `AssetLoadOperation<AudioClip>` and dispose it when that transition
 or owning `Behaviour` ends. The same contract applies to `AudioMixer` references; the lease never exposes decoded audio
 or a native voice.
 
@@ -56,7 +56,7 @@ if (_openSound.IsValid)
 Get the entity's handle:
 
 ```csharp
-AudioSourceHandle source = Entity.AudioSource;
+AudioSource? source = GetComponent<AudioSource>();
 if (!source.IsValid)
 {
     Debug.Warn($"{Entity.Name} needs an Audio Source.");
@@ -77,7 +77,7 @@ if (!source.Play())
     Debug.Warn("Audio Source playback was rejected.");
 ```
 
-An `AudioSourceHandle` never creates a missing component. Its property getters and setters throw
+An `AudioSource` lookup never creates a missing component. Its property getters and setters throw
 `InvalidOperationException` when the entity does not have an Audio Source, so check `IsValid` or add the component
 explicitly. `Volume` must be finite and between `0.0` and `16.0`; `Pitch` must be finite, greater than `0.01`, and at
 most `8.0`. Invalid scalar assignments throw `ArgumentOutOfRangeException` before native state is changed.
@@ -149,7 +149,7 @@ Check the return value when playback failure matters to the game.
 | Property | Default | Valid contract |
 | --- | --- | --- |
 | `Bus` | `"SFX"` | Non-empty, at most 128 UTF-8 bytes |
-| `Mixer` | Invalid reference | Optional typed `AssetReference<AudioMixer>` |
+| `Mixer` | `null` | Optional direct `AudioMixer` asset |
 | `BusId` | Invalid ID | Optional stable mixer bus identity |
 | `Gain` | `1.0` | Finite, `0.0` through `16.0` |
 | `Pitch` | `1.0` | Finite, greater than `0.01` and at most `8.0` |
@@ -168,7 +168,7 @@ Declare a mixer:
 
 ```csharp
 [SerializeField, StableFieldId("2c270719-41c4-4830-a5c9-bc0d0ca7aa94")]
-private AssetReference<AudioMixer> _gameplayMixer;
+private AudioMixer? _gameplayMixer;
 ```
 
 Route with the typed mixer and, when available, a stable bus ID:
@@ -195,14 +195,14 @@ Audio components expose typed stateful handles. Check `IsValid` before using a h
 component.
 
 ```csharp
-AudioListenerHandle listener = Entity.AudioListener;
+AudioListener? listener = GetComponent<AudioListener>();
 if (listener.IsValid)
 {
     listener.Primary = true;
     listener.VolumeDecibels = -3.0f;
 }
 
-AudioReverbZoneHandle zone = Entity.AudioReverbZone;
+AudioReverbZone? zone = GetComponent<AudioReverbZone>();
 if (zone.IsValid)
 {
     zone.Shape = AudioReverbZoneShape.Box;
@@ -213,7 +213,7 @@ if (zone.IsValid)
 }
 ```
 
-`AudioSourceHandle` additionally exposes `VolumeDecibels`, `Mixer`, `BusId`, `Priority`, `MinimumDistance`,
+`AudioSource` additionally exposes `VolumeDecibels`, `Mixer`, `BusId`, `Priority`, `MinimumDistance`,
 `MaximumDistance`, and `PlayOnAwake`. `Audio.DecibelsToLinear` and `Audio.LinearToDecibels` use the same bounded
 conversion as the native runtime and Inspector.
 
@@ -223,7 +223,7 @@ Use animation events for footsteps and similar synchronized sounds:
 
 ```csharp
 [SerializeField, StableFieldId("592be18a-428e-4a21-af36-b5d48724a82a")]
-private AssetReference<AudioClip> _footstep;
+private AudioClip? _footstep;
 
 [SerializeField, StableFieldId("bf3391e8-0099-4d9b-bb23-40aa39e342f0")]
 [Range(0.0, 1.0)]
@@ -265,8 +265,8 @@ input handler.
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| Cannot convert `AudioClip` to `AssetId` | Field uses the marker object instead of an asset reference | Use `AssetReference<AudioClip>` and pass it or `.Id` |
-| Cannot compare the clip with `null` | `AssetReference<T>` is a value type | Check `.IsValid` |
+| Cannot convert `AudioClip` to `AssetId` | An advanced interop API expects an ID | Pass the clip to normal audio APIs, or `.Id` only to the interop API |
+| Clip is `null` | The direct asset field is unassigned or missing | Assign it in the Inspector or guard the call |
 | `Play()` returns `false` | Source, voice, or runtime playback rejected the command | Validate the entity, component, clip, and runtime state |
 | `Audio.Play` throws for the clip | The reference ID is invalid | Guard with `.IsValid` |
 | Audio Source property throws | The handle is invalid or the value is outside its documented range | Check `source.IsValid` and validate the value |

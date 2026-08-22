@@ -128,6 +128,13 @@ namespace KeireEditor
             Keire::ComponentPropertyKind::Entity,
             [](IPropertyEditor& editor, const Keire::ComponentProperty& property, Keire::ComponentPropertyValue& value)
             {
+                if (property.ReferenceKind == Keire::ManagedReferenceKind::Component ||
+                    property.ReferenceKind == Keire::ManagedReferenceKind::Behaviour)
+                {
+                    return DrawValue<Keire::ComponentReferenceValue>(
+                        value, [&](Keire::ComponentReferenceValue& typed)
+                        { return editor.EditComponentReference(property.DisplayName, typed, property); });
+                }
                 return DrawValue<Keire::EntityId>(value, [&](Keire::EntityId& typed)
                                                   { return editor.EditEntity(property.DisplayName, typed); });
             });

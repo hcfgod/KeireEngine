@@ -195,7 +195,7 @@ internal static class ManagedAssetMetadata
         result.Step = step?.Step ?? (IsInteger(valueType) ? 1.0 : 0.1);
         result.TextLines = multiline?.Lines ?? 1;
 
-        if (IsAssetReference(valueType, out Type? referencedType))
+        if (IsAssetObject(valueType, out Type? referencedType))
         {
             StableAssetTypeIdAttribute? referencedId =
                 referencedType.GetCustomAttribute<StableAssetTypeIdAttribute>(false);
@@ -208,7 +208,7 @@ internal static class ManagedAssetMetadata
             {
                 result.ExpectedAssetType = referencedId?.Id.ToString("D") ??
                     throw Invalid(ownerType,
-                                  $"asset reference '{member.Member.Name}' targets a type without StableAssetTypeId");
+                                  $"asset field '{member.Member.Name}' targets a type without StableAssetTypeId");
             }
             return result;
         }
@@ -237,8 +237,8 @@ internal static class ManagedAssetMetadata
                                                     DiscoveryContext context, int depth)
     {
         RejectUnsupportedContainer(ownerType, elementType);
-        if (typeof(ScriptableObject).IsAssignableFrom(elementType))
-            throw Invalid(ownerType, "inline ScriptableObjects are unsupported; use AssetReference<T>");
+        if (typeof(Entity).IsAssignableFrom(elementType) || typeof(Component).IsAssignableFrom(elementType))
+            throw Invalid(ownerType, "persistent managed assets cannot reference scene objects");
         Guid elementId = DerivedId(parentId, "element");
         var result = new PropertyDocument
         {
@@ -250,7 +250,7 @@ internal static class ManagedAssetMetadata
             Header = string.Empty,
             Tooltip = string.Empty,
         };
-        if (IsAssetReference(elementType, out Type? referencedType))
+        if (IsAssetObject(elementType, out Type? referencedType))
         {
             StableAssetTypeIdAttribute? referencedId =
                 referencedType.GetCustomAttribute<StableAssetTypeIdAttribute>(false);
@@ -262,7 +262,7 @@ internal static class ManagedAssetMetadata
             else
             {
                 result.ExpectedAssetType = referencedId?.Id.ToString("D") ??
-                    throw Invalid(ownerType, "an AssetReference element targets a type without StableAssetTypeId");
+                    throw Invalid(ownerType, "an asset element targets a type without StableAssetTypeId");
             }
         }
         else if (elementType.IsArray)
@@ -285,8 +285,9 @@ internal static class ManagedAssetMetadata
     private static void DescribeNestedType(Type ownerType, Type valueType, DiscoveryContext context, int depth,
                                            List<PropertyDocument> destination)
     {
-        if (!valueType.IsDefined(typeof(SerializableTypeAttribute), false))
-            throw Invalid(ownerType, $"inline type '{valueType.FullName}' requires SerializableType");
+        if (!valueType.IsDefined(typeof(SerializableAttribute), false) &&
+            !valueType.IsDefined(typeof(SerializableTypeAttribute), false))
+            throw Invalid(ownerType, $"inline type '{valueType.FullName}' requires Serializable");
         if (valueType.IsAbstract || valueType.IsInterface)
             throw Invalid(ownerType, $"inline type '{valueType.FullName}' cannot be abstract or an interface");
         if (!context.ActiveTypes.Add(valueType))
@@ -327,17 +328,6 @@ internal static class ManagedAssetMetadata
                 RejectUnsupportedContainer(type, field.FieldType);
                 yield return new SerializableMember(field, field.FieldType, CanWrite: true);
             }
-            foreach (PropertyInfo property in current.GetProperties(flags).OrderBy(value => value.MetadataToken))
-            {
-                bool serialized = (property.GetMethod?.IsPublic == true && property.SetMethod?.IsPublic == true) ||
-                                  property.IsDefined(typeof(SerializeFieldAttribute), true);
-                if (!serialized || property.GetIndexParameters().Length != 0 || property.GetMethod is null ||
-                    property.SetMethod is null)
-                    continue;
-                RejectUnsupportedContainer(type, property.PropertyType);
-                yield return new SerializableMember(property, property.PropertyType,
-                                                      CanWrite: property.SetMethod is not null);
-            }
         }
     }
 
@@ -371,10 +361,10 @@ internal static class ManagedAssetMetadata
             return 12;
         if (IsList(type, out _))
             return 13;
-        if (IsAssetReference(type, out _))
+        if (IsAssetObject(type, out _))
             return 14;
-        if (typeof(ScriptableObject).IsAssignableFrom(type))
-            throw new InvalidOperationException("inline ScriptableObjects are unsupported; use AssetReference<T>");
+        if (typeof(Entity).IsAssignableFrom(type) || typeof(Component).IsAssignableFrom(type))
+            throw new InvalidOperationException("persistent managed assets cannot reference scene objects");
         return 11;
     }
 
@@ -397,11 +387,11 @@ internal static class ManagedAssetMetadata
         return false;
     }
 
-    private static bool IsAssetReference(Type type, out Type referencedType)
+    private static bool IsAssetObject(Type type, out Type referencedType)
     {
-        if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(AssetReference<>))
+        if (typeof(Asset).IsAssignableFrom(type))
         {
-            referencedType = type.GetGenericArguments()[0];
+            referencedType = type;
             return true;
         }
         referencedType = null!;

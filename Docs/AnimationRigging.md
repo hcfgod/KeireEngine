@@ -113,25 +113,25 @@ Managed gameplay code controls typed parameters and named IK goals:
 ```csharp
 using Keire;
 
-AnimatorHandle animator = Entity.Animator;
+Animator animator = GetComponent<Animator>() ??
+    throw new InvalidOperationException("An Animator component is required.");
 animator.Speed = 1.25f;
 animator.Play("Locomotion");
 animator.CrossFade("Jump", duration: 0.15f);
 
-Animator.SetFloat(Entity, "Speed", velocity.Length);
-Animator.SetTwoBoneIK(Entity, "LeftHand", "LeftUpperArm", "LeftLowerArm", "LeftHand",
+animator.SetFloat("Speed", velocity.Length);
+animator.SetTwoBoneIK("LeftHand", "LeftUpperArm", "LeftLowerArm", "LeftHand",
                       handTarget, elbowPole, 1.0f);
-Animator.SetFabrikIK(Entity, "SpineAim",
-                     new[] { "Pelvis", "Spine", "Chest", "Neck", "Head" },
+animator.SetFabrikIK("SpineAim", new[] { "Pelvis", "Spine", "Chest", "Neck", "Head" },
                      lookTarget, 0.75f, maximumIterations: 12);
 
 // Remove a persistent goal when it is no longer needed.
-Animator.ClearIK(Entity, "LeftHand");
+animator.ClearIK("LeftHand");
 ```
 
-`Play` and `CrossFade` accept a controller state name, optional layer name, and normalized start time. The handle also
+`Play` and `CrossFade` accept a controller state name, optional layer name, and normalized start time. The component also
 supports `Pause`, `Resume`, and `Stop`, and reports the current state, normalized time, speed, and playback flags.
-`AssetReference<AnimationClip>` and `AssetReference<AnimatorController>` fields are supported serialized references;
+Direct `AnimationClip` and `AnimatorController` fields are supported serialized references;
 explicit playback selects controller states so transitions, layers, masks, blend trees, events, and root motion remain
 coherent.
 

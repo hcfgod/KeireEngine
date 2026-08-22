@@ -1,5 +1,6 @@
 #include "Keire/Rendering/ShaderGraph.h"
 #include "Keire/Rendering/MaterialEcosystem.h"
+#include "KeireInternal/Authoring/GraphAuthoringSerialization.h"
 #include "KeireInternal/Rendering/ShaderGraphIdentity.h"
 #include "KeireInternal/Rendering/ShaderGraphManifest.h"
 
@@ -219,13 +220,16 @@ namespace Keire
             Json roots = Json::array();
             for (const auto& root : definition.IncludeRoots)
                 roots.push_back(root.generic_string());
-            Json result{{"schemaVersion", ShaderGraphSourceSchemaVersion},
-                        {"purpose", static_cast<std::uint8_t>(definition.Purpose)},
-                        {"output", static_cast<std::uint8_t>(definition.Output)},
-                        {"nodes", std::move(nodes)},
-                        {"connections", std::move(connections)},
-                        {"keywords", std::move(keywords)},
-                        {"includeRoots", std::move(roots)}};
+            Json result{
+                {"schemaVersion", ShaderGraphSourceSchemaVersion},
+                {"purpose", static_cast<std::uint8_t>(definition.Purpose)},
+                {"output", static_cast<std::uint8_t>(definition.Output)},
+                {"nodes", std::move(nodes)},
+                {"connections", std::move(connections)},
+                {"keywords", std::move(keywords)},
+                {"includeRoots", std::move(roots)},
+                {"resources", Json::parse(Text(EncodeShaderGraphResources(definition.Resources))).at("resources")},
+                {"authoring", Detail::EncodeGraphAuthoringMetadata(definition.Authoring)}};
             if (definition.GeneratedAssetOwner)
                 result["generatedAssetOwner"] = definition.GeneratedAssetOwner.ToString();
             return result;
@@ -351,6 +355,18 @@ namespace Keire
                 result.Keywords.push_back({encoded.at("name").get<std::string>(),
                                            encoded.value("options", std::vector<std::string>{}),
                                            encoded.value("default", std::string{}), encoded.value("exposed", true)});
+            const auto resourceText = Json{{"schemaVersion", ShaderGraphResourceContractSchemaVersion},
+                                           {"resources", source.value("resources", Json::array())}}
+                                          .dump();
+            result.Resources = DecodeShaderGraphResources(std::as_bytes(std::span(resourceText)));
+            if (sourceSchemaVersion >= 4U)
+            {
+                std::vector<AssetId> nodeIds;
+                nodeIds.reserve(result.Nodes.size());
+                std::ranges::transform(result.Nodes, std::back_inserter(nodeIds), &ShaderGraphNode::Id);
+                result.Authoring =
+                    Detail::DecodeGraphAuthoringMetadata(source.value("authoring", Json::object()), nodeIds);
+            }
             if (result.Purpose == ShaderGraphPurpose::Shader)
             {
                 const auto canonicalDefinition = CreateDefaultShaderGraph(result.Output);
@@ -1095,7 +1111,7 @@ cbuffer MaterialData : register(b1, space3)
                     source << "    float4 " << materialBindingSentinel << ";\n";
                 }
                 source << "};\n\n";
-                std::size_t textureIndex = 0;
+                std::uint32_t textureIndex = 0;
                 for (const auto& property : m_Properties)
                 {
                     if (property.Type != ShaderPropertyType::Texture2D)
@@ -1105,6 +1121,11 @@ cbuffer MaterialData : register(b1, space3)
                     source << "SamplerState " << symbol << "Sampler : register(s" << textureIndex << ", space2);\n";
                     ++textureIndex;
                 }
+                const auto resourceDeclarations =
+                    GenerateShaderGraphResourceDeclarations(m_Definition.Resources, textureIndex, textureIndex);
+                source << resourceDeclarations.Hlsl;
+                textureIndex =
+                    std::max(resourceDeclarations.NextTextureRegister, resourceDeclarations.NextSamplerRegister);
                 if (!unlit)
                 {
                     source << "Texture2DArray<float> DirectionalShadowTexture : register(t" << textureIndex
@@ -3090,29 +3111,6 @@ float4 PSMain(VertexOutput input) : SV_Target0
         }
     } // namespace
 
-    bool ShaderGraphCompilation::Succeeded() const noexcept
-    {
-        return !Variants.empty() &&
-               std::ranges::none_of(Diagnostics, [](const ShaderGraphDiagnostic& diagnostic)
-                                    { return diagnostic.Severity == ShaderGraphDiagnosticSeverity::Error; });
-    }
-
-    ShaderGraphAsset::ShaderGraphAsset(ShaderGraphDefinition definition) : m_Definition(std::move(definition)) {}
-
-    std::size_t ShaderGraphAsset::ResidentBytes() const noexcept
-    {
-        std::size_t result = sizeof(*this);
-        for (const auto& node : m_Definition.Nodes)
-            result += sizeof(node) + node.TypeId.size() + node.Name.size() + node.Symbol.size() + node.Function.size() +
-                      node.Include.native().size() * sizeof(std::filesystem::path::value_type) +
-                      node.ParameterMetadata.Description.size() + node.ParameterMetadata.Category.size() +
-                      node.Pins.size() * sizeof(ShaderGraphPin);
-        result += m_Definition.Connections.size() * sizeof(ShaderGraphConnection);
-        for (const auto& connection : m_Definition.Connections)
-            result += connection.RoutingPoints.capacity() * sizeof(Vector2);
-        return result;
-    }
-
     Ref<ShaderGraphAsset> ShaderGraphAsset::Decode(const std::span<const std::byte> bytes)
     {
         try
@@ -3451,6 +3449,16 @@ float4 PSMain(VertexOutput input) : SV_Target0
                 for (const auto& root : function.IncludeRoots)
                     if (std::ranges::find(result.IncludeRoots, root) == result.IncludeRoots.end())
                         result.IncludeRoots.push_back(root);
+                for (const auto& resource : function.Resources)
+                {
+                    const auto existing =
+                        std::ranges::find(result.Resources, resource.Symbol, &ShaderGraphResourceDefinition::Symbol);
+                    if (existing == result.Resources.end())
+                        result.Resources.push_back(resource);
+                    else if (*existing != resource)
+                        throw std::invalid_argument("Reusable graph resource contract conflicts for " +
+                                                    resource.Symbol + '.');
+                }
             }
             ValidateShaderGraph(result);
             return result;
@@ -3470,8 +3478,14 @@ float4 PSMain(VertexOutput input) : SV_Target0
             definition.IncludeRoots.size() > MaximumGraphIncludeRoots)
             throw std::invalid_argument("Shader Graph has an unsupported schema or exceeds a bounded collection.");
 
+        ValidateShaderGraphResources(definition.Resources);
         std::set<AssetId> identities;
         std::set<std::string, std::less<>> properties;
+        for (const auto& resource : definition.Resources)
+        {
+            identities.insert(resource.Id);
+            properties.insert(resource.Symbol);
+        }
         std::set<std::string, std::less<>> keywordNodeSymbols;
         std::size_t masters = 0;
         std::size_t propertyCount = 0;
@@ -3590,8 +3604,12 @@ float4 PSMain(VertexOutput input) : SV_Target0
         if (masters != 1 || propertyCount > MaximumGraphProperties)
             throw std::invalid_argument("Shader Graph requires one Shader Output node and at most 80 properties.");
         const auto maximumTextures = IsUnlitOutput(definition.Output) ? 16U : 12U;
-        if (definition.Purpose == ShaderGraphPurpose::Shader && texturePropertyCount > maximumTextures)
-            throw std::invalid_argument("Shader Graph texture parameters exceed the portable sampler budget.");
+        const auto resourceStatistics = AnalyzeShaderGraphResources(definition.Resources).Statistics;
+        if (definition.Purpose == ShaderGraphPurpose::Shader &&
+            (texturePropertyCount + resourceStatistics.TextureCount > maximumTextures ||
+             texturePropertyCount + resourceStatistics.SamplerCount > maximumTextures ||
+             resourceStatistics.ReadOnlyBufferCount > (IsUnlitOutput(definition.Output) ? 8U : 5U)))
+            throw std::invalid_argument("Shader Graph resources exceed the portable sampler or buffer budget.");
         const auto master = std::ranges::find(definition.Nodes, ShaderGraphNodeKind::Master, &ShaderGraphNode::Kind);
         if (definition.Purpose == ShaderGraphPurpose::Shader)
         {
@@ -3683,38 +3701,11 @@ float4 PSMain(VertexOutput input) : SV_Target0
         }
         if (visited != definition.Nodes.size())
             throw std::invalid_argument("Shader Graph contains a cycle.");
-    }
 
-    std::vector<std::vector<std::string>>
-    EnumerateShaderGraphKeywordVariants(const std::span<const ShaderGraphKeyword> keywords,
-                                        const std::size_t maximumVariants)
-    {
-        if (maximumVariants == 0 || maximumVariants > 1024)
-            throw std::invalid_argument("Shader Graph variant limit must be between 1 and 1,024.");
-        std::vector<std::vector<std::string>> result(1);
-        for (const auto& keyword : keywords)
-        {
-            std::vector<std::optional<std::string>> choices;
-            if (keyword.Options.empty())
-                choices = {std::nullopt, keyword.Name};
-            else
-                for (const auto& option : keyword.Options)
-                    choices.emplace_back(keyword.Name + "_" + option);
-            if (choices.empty() || result.size() > maximumVariants / choices.size())
-                throw std::invalid_argument("Shader Graph keyword permutations exceed the configured variant limit.");
-            std::vector<std::vector<std::string>> expanded;
-            expanded.reserve(result.size() * choices.size());
-            for (const auto& existing : result)
-                for (const auto& choice : choices)
-                {
-                    auto variant = existing;
-                    if (choice)
-                        variant.push_back(*choice);
-                    expanded.push_back(std::move(variant));
-                }
-            result = std::move(expanded);
-        }
-        return result;
+        std::vector<AssetId> nodeIds;
+        nodeIds.reserve(definition.Nodes.size());
+        std::ranges::transform(definition.Nodes, std::back_inserter(nodeIds), &ShaderGraphNode::Id);
+        ValidateGraphAuthoringMetadata(definition.Authoring, nodeIds);
     }
 
     ShaderGraphCompilation CompileShaderGraph(const ShaderGraphDefinition& definition,
@@ -3735,6 +3726,9 @@ float4 PSMain(VertexOutput input) : SV_Target0
                 !SafeRelativePath(options.GeneratedSource) || expanded.Nodes.size() > options.MaximumNodes ||
                 expanded.Connections.size() > options.MaximumConnections)
                 throw std::invalid_argument("Shader Graph compile options or graph bounds are invalid.");
+            if (!expanded.Resources.empty() && !options.AllowOfflineResourceDeclarations)
+                throw std::invalid_argument(
+                    "Shader Graph portable resources require a backend binding implementation before runtime import.");
             result.Statistics = AnalyzeGraph(expanded);
             const auto variants = EnumerateShaderGraphKeywordVariants(expanded.Keywords, options.MaximumVariants);
             result.Statistics.VariantCount = variants.size();
@@ -3987,6 +3981,9 @@ float4 PSMain(VertexOutput input) : SV_Target0
             const auto functionDependencies = ShaderGraphReferencedAssets(definition);
             output.AssetDependencies.insert(output.AssetDependencies.end(), functionDependencies.begin(),
                                             functionDependencies.end());
+            const auto resourceDependencies = ShaderGraphResourceDependencies(definition.Resources);
+            output.AssetDependencies.insert(output.AssetDependencies.end(), resourceDependencies.begin(),
+                                            resourceDependencies.end());
             std::ranges::sort(output.AssetDependencies);
             output.AssetDependencies.erase(
                 std::unique(output.AssetDependencies.begin(), output.AssetDependencies.end()),

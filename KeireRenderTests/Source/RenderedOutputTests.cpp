@@ -2147,36 +2147,37 @@ TEST_CASE("schema-4 Block order Blackboard overrides and Portable HLSL drive ren
     CHECK(results->Statistics.VfxPipelinesReady);
     CHECK(results->Statistics.VfxPipelineWarmupMilliseconds > 0.0F);
 }
-
-TEST_CASE("CPU textured Sprite and GPU Mesh VFX outputs survive render readback")
+TEST_CASE("CPU and GPU textured material Sprite plus GPU Mesh VFX outputs survive render readback")
 {
     RenderAssetFixture assets;
-
-    SUBCASE("CPU textured Sprite")
+    SUBCASE("CPU and GPU textured material Sprite")
     {
-        const auto results = std::make_shared<VfxGraphCaptureResults>();
-        auto specification = RenderTestSpecification();
-        specification.Assets.Mode = Keire::AssetMode::Development;
-        specification.Assets.DevelopmentCatalog = assets.Catalog;
+        for (const auto backend : {Keire::VfxBackend::Cpu, Keire::VfxBackend::Gpu})
         {
-            Keire::Application application(std::move(specification));
-            (void)application.PushLayer(std::make_unique<VfxResourceOutputCaptureLayer>(
-                Keire::VfxBackend::Cpu, RenderedResourceOutputEffect(Keire::VfxRendererType::Sprite, assets.Texture),
-                results));
-            REQUIRE(application.Run() == 0);
+            CAPTURE(backend);
+            const auto results = std::make_shared<VfxGraphCaptureResults>();
+            auto specification = RenderTestSpecification();
+            specification.Assets.Mode = Keire::AssetMode::Development;
+            specification.Assets.DevelopmentCatalog = assets.Catalog;
+            {
+                Keire::Application application(std::move(specification));
+                (void)application.PushLayer(std::make_unique<VfxResourceOutputCaptureLayer>(
+                    backend,
+                    RenderedResourceOutputEffect(Keire::VfxRendererType::Sprite, assets.Texture, assets.Material),
+                    results));
+                REQUIRE(application.Run() == 0);
+            }
+            REQUIRE(results->Frames.size() == 60);
+            float greenDominance = 0.0F;
+            for (const auto& frame : results->Frames)
+            {
+                const auto green = MeasureChannelSignal(frame, 1);
+                const auto red = MeasureChannelSignal(frame, 0);
+                greenDominance = std::max(greenDominance, green.Weight - red.Weight);
+            }
+            CHECK(greenDominance > 10.0F);
         }
-
-        REQUIRE(results->Frames.size() == 60);
-        float greenDominance = 0.0F;
-        for (const auto& frame : results->Frames)
-        {
-            const auto green = MeasureChannelSignal(frame, 1);
-            const auto red = MeasureChannelSignal(frame, 0);
-            greenDominance = std::max(greenDominance, green.Weight - red.Weight);
-        }
-        CHECK(greenDominance > 10.0F);
     }
-
     SUBCASE("GPU Mesh")
     {
         const auto results = std::make_shared<VfxGraphCaptureResults>();
@@ -2190,7 +2191,6 @@ TEST_CASE("CPU textured Sprite and GPU Mesh VFX outputs survive render readback"
                 RenderedResourceOutputEffect(Keire::VfxRendererType::Mesh, assets.Mesh, assets.Material), results));
             REQUIRE(application.Run() == 0);
         }
-
         REQUIRE(results->Frames.size() == 60);
         float greenDominance = 0.0F;
         for (const auto& frame : results->Frames)

@@ -7,7 +7,7 @@ namespace Keire;
 public sealed class PersistentEventCall
 {
     public bool Enabled = true;
-    public Entity Target;
+    public Entity? Target;
     public ComponentTypeId Component;
     public string Method = string.Empty;
 
@@ -71,7 +71,7 @@ public abstract class KeireEventBase
     {
         foreach (PersistentEventCall call in persistentCalls)
         {
-            if (!call.Enabled || !call.Target.Id.IsValid || !call.Component.IsValid ||
+            if (!call.Enabled || call.Target is null || !call.Target.Id.IsValid || !call.Component.IsValid ||
                 string.IsNullOrWhiteSpace(call.Method))
             {
                 continue;

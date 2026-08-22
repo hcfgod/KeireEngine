@@ -14,8 +14,6 @@ public enum LogLevel : byte
 
 public readonly record struct RaycastHit(Entity Entity, Vector3 Point, Vector3 Normal, float Distance);
 public readonly record struct NavigationPath(IReadOnlyList<Vector3> Points, ulong MeshRevision);
-public readonly record struct PrefabInstance(Entity Root, IReadOnlyList<Entity> Entities);
-
 public interface IRuntimeBridge
 {
     bool EntityExists(Entity entity);
@@ -23,13 +21,10 @@ public interface IRuntimeBridge
     void SetEntityName(Entity entity, string name);
     bool GetEntityActive(Entity entity);
     void SetEntityActive(Entity entity, bool active);
-    Entity GetEntityParent(Entity entity);
-    void SetEntityParent(Entity entity, Entity parent);
+    Entity? GetEntityParent(Entity entity);
+    void SetEntityParent(Entity entity, Entity? parent);
     IReadOnlyList<Entity> GetEntityChildren(Entity entity);
-    ComponentHandle GetComponent(Entity entity, ComponentTypeId type);
-    ComponentHandle AddComponent(Entity entity, ComponentTypeId type);
     bool RemoveComponent(Entity entity, ComponentTypeId type);
-    bool ComponentExists(ComponentHandle component);
     Entity CloneEntity(Entity entity);
     void DestroyEntity(Entity entity);
     Vector3 GetLocalPosition(Entity entity);
@@ -51,7 +46,6 @@ public interface IRuntimeBridge
     void SetAnimatorTrigger(Entity entity, string parameter);
     void PlayAudio(Entity entity, AssetId clip, float volume);
     void StopAudio(Entity entity);
-    PrefabInstance InstantiatePrefab(AssetId prefab, Vector3 position, Quaternion rotation);
     void DrawLine(Vector3 start, Vector3 end, Color color, float duration);
     void WriteLog(LogLevel level, string message);
 }
@@ -66,13 +60,10 @@ public static class RuntimeBridge
         public void SetEntityName(Entity entity, string name) => throw Unbound();
         public bool GetEntityActive(Entity entity) => throw Unbound();
         public void SetEntityActive(Entity entity, bool active) => throw Unbound();
-        public Entity GetEntityParent(Entity entity) => throw Unbound();
-        public void SetEntityParent(Entity entity, Entity parent) => throw Unbound();
+        public Entity? GetEntityParent(Entity entity) => throw Unbound();
+        public void SetEntityParent(Entity entity, Entity? parent) => throw Unbound();
         public IReadOnlyList<Entity> GetEntityChildren(Entity entity) => throw Unbound();
-        public ComponentHandle GetComponent(Entity entity, ComponentTypeId type) => throw Unbound();
-        public ComponentHandle AddComponent(Entity entity, ComponentTypeId type) => throw Unbound();
         public bool RemoveComponent(Entity entity, ComponentTypeId type) => throw Unbound();
-        public bool ComponentExists(ComponentHandle component) => throw Unbound();
         public Entity CloneEntity(Entity entity) => throw Unbound();
         public void DestroyEntity(Entity entity) => throw Unbound();
         public Vector3 GetLocalPosition(Entity entity) => throw Unbound();
@@ -94,7 +85,6 @@ public static class RuntimeBridge
         public void SetAnimatorTrigger(Entity entity, string parameter) => throw Unbound();
         public void PlayAudio(Entity entity, AssetId clip, float volume) => throw Unbound();
         public void StopAudio(Entity entity) => throw Unbound();
-        public PrefabInstance InstantiatePrefab(AssetId prefab, Vector3 position, Quaternion rotation) => throw Unbound();
         public void DrawLine(Vector3 start, Vector3 end, Color color, float duration) => throw Unbound();
         public void WriteLog(LogLevel level, string message) => throw Unbound();
     }
@@ -254,7 +244,7 @@ public static class Physics
 {
     public static bool TryRaycast(Entity context, Vector3 origin, Vector3 direction, out RaycastHit hit,
                                   float maximumDistance = 1000.0f, uint mask = uint.MaxValue,
-                                  Entity ignoredEntity = default)
+                                  Entity? ignoredEntity = null)
     {
         if (!IsFinite(origin))
             throw new ArgumentException("Raycast origins must be finite.", nameof(origin));
@@ -280,7 +270,7 @@ public static class Physics
 
     public static bool TryCapsuleCast(Entity context, Vector3 origin, Quaternion rotation, float radius, float height,
                                       Vector3 displacement, out RaycastHit hit, uint mask = uint.MaxValue,
-                                      bool includeTriggers = false, Entity ignoredEntity = default)
+                                      bool includeTriggers = false, Entity? ignoredEntity = null)
     {
         if (!IsFinite(origin))
             throw new ArgumentException("Capsule cast origins must be finite.", nameof(origin));
@@ -303,7 +293,7 @@ public static class Physics
 
     public static IReadOnlyList<Entity> OverlapSphere(Entity context, Vector3 center, float radius,
                                                        uint mask = uint.MaxValue, bool includeTriggers = true,
-                                                       Entity ignoredEntity = default)
+                                                       Entity? ignoredEntity = null)
     {
         if (!IsFinite(center))
             throw new ArgumentException("Sphere overlap centers must be finite.", nameof(center));
@@ -313,9 +303,9 @@ public static class Physics
         return NativeRuntime.OverlapSphere(context, center, radius, mask, includeTriggers, ignoredEntity);
     }
 
-    private static void ValidateIgnoredEntityWorld(Entity context, Entity ignoredEntity)
+    private static void ValidateIgnoredEntityWorld(Entity context, Entity? ignoredEntity)
     {
-        if (ignoredEntity.Id.IsValid && ignoredEntity.World != context.World)
+        if (ignoredEntity is not null && ignoredEntity.Id.IsValid && ignoredEntity.World != context.World)
             throw new ArgumentException("Ignored physics entities must belong to the query world.", nameof(ignoredEntity));
     }
 
@@ -337,10 +327,10 @@ public enum AnimatorIkSpace : byte
 }
 
 [StableAssetTypeId("4b454952-4541-4e49-4d43-4c4950000001")]
-public sealed class AnimationClip;
+public sealed class AnimationClip : Asset;
 
 [StableAssetTypeId("4b454952-4541-4e49-4d47-524150480001")]
-public sealed class AnimatorController;
+public sealed class AnimatorController : Asset;
 
 public readonly record struct AnimatorStateInfo(string State, float NormalizedTime, bool IsPlaying, bool IsPaused,
                                                 float Speed);
@@ -394,9 +384,10 @@ public enum ForceMode : byte
 public readonly record struct RigidBodyProperties(RigidBodyMotion Motion, float Mass, Vector3 Velocity, bool Continuous,
                                                   bool UseGravity);
 
-public readonly record struct RigidBodyHandle(Entity Entity)
+[StableComponentId("4b454952-4552-4947-4944-424f44590001")]
+public sealed class RigidBody : Component
 {
-    public bool IsValid => Entity.IsValid && Entity.HasComponent<RigidBodyComponent>();
+    internal RigidBody(Entity entity) : base(entity) { }
     private RigidBodyProperties Properties =>
         IsValid && NativeRuntime.TryGetRigidBodyProperties(Entity, out RigidBodyProperties properties) ? properties
                                                                                                        : default;
@@ -462,9 +453,10 @@ public readonly record struct RigidBodyHandle(Entity Entity)
     }
 }
 
-public readonly record struct CharacterControllerHandle(Entity Entity)
+[StableComponentId("4b454952-4543-4841-5241-435445520001")]
+public sealed class CharacterController : Component
 {
-    public bool IsValid => Entity.IsValid && Entity.HasComponent<CharacterControllerComponent>();
+    internal CharacterController(Entity entity) : base(entity) { }
     public CharacterControllerState State =>
         IsValid && NativeRuntime.TryGetCharacterControllerState(Entity, out CharacterControllerState state)
             ? state
@@ -481,9 +473,10 @@ public readonly record struct CharacterControllerHandle(Entity Entity)
     }
 }
 
-public readonly record struct AnimatorHandle(Entity Entity)
+[StableComponentId("4b454952-4541-4e49-4d41-544f52000001")]
+public sealed class Animator : Component
 {
-    public bool IsValid => Entity.HasComponent<AnimatorComponent>();
+    internal Animator(Entity entity) : base(entity) { }
     public bool IsPlaying => IsValid && NativeRuntime.GetAnimatorState(Entity).IsPlaying;
     public bool IsPaused => IsValid && NativeRuntime.GetAnimatorState(Entity).IsPaused;
     public string CurrentState => IsValid ? NativeRuntime.GetAnimatorState(Entity).State : string.Empty;
@@ -491,20 +484,48 @@ public readonly record struct AnimatorHandle(Entity Entity)
     public float Speed
     {
         get => NativeRuntime.GetAnimatorState(Entity).Speed;
-        set => Animator.SetSpeed(Entity, value);
+        set => AnimatorApi.SetSpeed(Entity, value);
     }
 
     public AnimatorStateInfo StateInfo => NativeRuntime.GetAnimatorState(Entity);
     public void Play(string state, float normalizedTime = 0.0f, string? layer = null) =>
-        Animator.Play(Entity, state, normalizedTime, layer);
+        AnimatorApi.Play(Entity, state, normalizedTime, layer);
     public void CrossFade(string state, float duration, float normalizedTime = 0.0f, string? layer = null) =>
-        Animator.CrossFade(Entity, state, duration, normalizedTime, layer);
-    public void Pause() => Animator.Pause(Entity);
-    public void Resume() => Animator.Resume(Entity);
-    public void Stop() => Animator.Stop(Entity);
+        AnimatorApi.CrossFade(Entity, state, duration, normalizedTime, layer);
+    public void Pause() => AnimatorApi.Pause(Entity);
+    public void Resume() => AnimatorApi.Resume(Entity);
+    public void Stop() => AnimatorApi.Stop(Entity);
+    public void SetFootGroundingWeight(float weight) => AnimatorApi.SetFootGroundingWeight(Entity, weight);
+    public void SetProceduralLocomotion(ProceduralLocomotionIntent intent) =>
+        AnimatorApi.SetProceduralLocomotion(Entity, intent);
+    public ProceduralLocomotionState ProceduralState => AnimatorApi.GetProceduralState(Entity);
+    public void SetFloat(string parameter, float value) => AnimatorApi.SetFloat(Entity, parameter, value);
+    public void SetInteger(string parameter, int value) => AnimatorApi.SetInteger(Entity, parameter, value);
+    public void SetBool(string parameter, bool value) => AnimatorApi.SetBool(Entity, parameter, value);
+    public void SetTrigger(string parameter) => AnimatorApi.SetTrigger(Entity, parameter);
+    public void ResetTrigger(string parameter) => AnimatorApi.ResetTrigger(Entity, parameter);
+    public void SetLayerWeight(string layer, float value) => AnimatorApi.SetLayerWeight(Entity, layer, value);
+    public float GetFloat(string parameter) => AnimatorApi.GetFloat(Entity, parameter);
+    public bool TryGetFloat(string parameter, out float value) => AnimatorApi.TryGetFloat(Entity, parameter, out value);
+    public int GetInteger(string parameter) => AnimatorApi.GetInteger(Entity, parameter);
+    public bool TryGetInteger(string parameter, out int value) =>
+        AnimatorApi.TryGetInteger(Entity, parameter, out value);
+    public bool GetBool(string parameter) => AnimatorApi.GetBool(Entity, parameter);
+    public bool TryGetBool(string parameter, out bool value) => AnimatorApi.TryGetBool(Entity, parameter, out value);
+    public float GetLayerWeight(string layer) => AnimatorApi.GetLayerWeight(Entity, layer);
+    public bool TryGetLayerWeight(string layer, out float value) =>
+        AnimatorApi.TryGetLayerWeight(Entity, layer, out value);
+    public void SetTwoBoneIK(string goal, string rootBone, string middleBone, string endBone, Vector3 target,
+                             Vector3 pole, float weight = 1.0f, AnimatorIkSpace space = AnimatorIkSpace.World) =>
+        AnimatorApi.SetTwoBoneIK(Entity, goal, rootBone, middleBone, endBone, target, pole, weight, space);
+    public void SetFabrikIK(string goal, IReadOnlyList<string> bones, Vector3 target, float weight = 1.0f,
+                            uint maximumIterations = 12, float tolerance = 0.001f,
+                            AnimatorIkSpace space = AnimatorIkSpace.World) =>
+        AnimatorApi.SetFabrikIK(Entity, goal, bones, target, weight, maximumIterations, tolerance, space);
+    public bool ClearIK(string goal) => AnimatorApi.ClearIK(Entity, goal);
 }
 
-public static class Animator
+internal static class AnimatorApi
 {
     public static void Play(Entity entity, string state, float normalizedTime = 0.0f, string? layer = null)
     {
@@ -631,10 +652,10 @@ public static class Animator
 }
 
 [StableAssetTypeId("4b454952-4541-5544-494f-434c49500001")]
-public sealed class AudioClip;
+public sealed class AudioClip : Asset;
 
 [StableAssetTypeId("4b454952-4541-5544-4d49-584552303031")]
-public sealed class AudioMixer;
+public sealed class AudioMixer : Asset;
 
 public enum AudioPlaybackState : byte
 {
@@ -666,7 +687,7 @@ public readonly record struct AudioPlaybackOptions
     }
 
     public string Bus { get; init; }
-    public AssetReference<AudioMixer> Mixer { get; init; }
+    public AudioMixer? Mixer { get; init; }
     public AssetId BusId { get; init; }
     public float Gain { get; init; }
     public float Pitch { get; init; }
@@ -677,17 +698,18 @@ public readonly record struct AudioPlaybackOptions
     public float MaximumDistance { get; init; }
 }
 
-public readonly record struct AudioSourceHandle(Entity Entity)
+[StableComponentId("4b454952-4541-5544-494f-535243000001")]
+public sealed class AudioSource : Component
 {
-    public bool IsValid => Entity.IsValid && Entity.HasComponent<AudioSourceComponent>();
-    public AssetReference<AudioClip> Clip
+    internal AudioSource(Entity entity) : base(entity) { }
+    public AudioClip? Clip
     {
-        get => new(NativeRuntime.GetAudioSourceProperties(Entity).Clip);
+        get => Asset.FromId<AudioClip>(NativeRuntime.GetAudioSourceProperties(Entity).Clip);
         set
         {
             if (!IsValid)
                 throw new InvalidOperationException("The Audio Source is unavailable.");
-            NativeRuntime.SetAudioSourceClip(Entity, value.Id);
+            NativeRuntime.SetAudioSourceClip(Entity, value?.Id ?? default);
         }
     }
     public float Volume
@@ -712,13 +734,13 @@ public readonly record struct AudioSourceHandle(Entity Entity)
             Volume = Audio.DecibelsToLinear(value);
         }
     }
-    public AssetReference<AudioMixer> Mixer
+    public AudioMixer? Mixer
     {
-        get => new(NativeRuntime.GetAudioSourceProperties(Entity).Mixer);
+        get => Asset.FromId<AudioMixer>(NativeRuntime.GetAudioSourceProperties(Entity).Mixer);
         set
         {
             NativeAudioSourceProperties properties = NativeRuntime.GetAudioSourceProperties(Entity);
-            NativeRuntime.SetAudioSourceRouting(Entity, value.Id, properties.BusId);
+            NativeRuntime.SetAudioSourceRouting(Entity, value?.Id ?? default, properties.BusId);
         }
     }
     public AssetId BusId
@@ -805,8 +827,8 @@ public readonly record struct AudioSourceHandle(Entity Entity)
     }
     public float Duration => Status.Duration;
     public bool Play() => Audio.Play(Entity);
-    public bool Play(AssetReference<AudioClip> clip) => Audio.Play(Entity, clip);
-    public bool Play(AssetReference<AudioClip> clip, AudioPlaybackOptions options) => Audio.Play(Entity, clip, options);
+    public bool Play(AudioClip clip) => Audio.Play(Entity, clip);
+    public bool Play(AudioClip clip, AudioPlaybackOptions options) => Audio.Play(Entity, clip, options);
     public bool Pause() => Audio.Pause(Entity);
     public bool Resume() => Audio.Resume(Entity);
     public bool Seek(float time) => Audio.Seek(Entity, time);
@@ -820,9 +842,10 @@ public enum AudioReverbZoneShape : byte
 }
 
 /// <summary>Runtime control surface for an Audio Listener component.</summary>
-public readonly record struct AudioListenerHandle(Entity Entity)
+[StableComponentId("4b454952-4541-5544-494f-4c4953540001")]
+public sealed class AudioListener : Component
 {
-    public bool IsValid => Entity.IsValid && Entity.HasComponent<AudioListenerComponent>();
+    internal AudioListener(Entity entity) : base(entity) { }
 
     public bool Primary
     {
@@ -856,18 +879,19 @@ public readonly record struct AudioListenerHandle(Entity Entity)
 }
 
 /// <summary>Runtime control surface for a spatial Audio Reverb Zone component.</summary>
-public readonly record struct AudioReverbZoneHandle(Entity Entity)
+[StableComponentId("4b454952-4541-5544-494f-52565a4f0001")]
+public sealed class AudioReverbZone : Component
 {
-    public bool IsValid => Entity.IsValid && Entity.HasComponent<AudioReverbZoneComponent>();
+    internal AudioReverbZone(Entity entity) : base(entity) { }
 
-    public AssetReference<AudioMixer> Mixer
+    public AudioMixer? Mixer
     {
-        get => new(NativeRuntime.GetAudioReverbZoneProperties(Entity).Mixer);
+        get => Asset.FromId<AudioMixer>(NativeRuntime.GetAudioReverbZoneProperties(Entity).Mixer);
         set
         {
             NativeAudioReverbZoneProperties properties = NativeRuntime.GetAudioReverbZoneProperties(Entity);
-            properties.MixerHigh = value.Id.High;
-            properties.MixerLow = value.Id.Low;
+            properties.MixerHigh = value?.Id.High ?? 0;
+            properties.MixerLow = value?.Id.Low ?? 0;
             NativeRuntime.SetAudioReverbZoneProperties(Entity, properties);
         }
     }
@@ -990,10 +1014,10 @@ public static class Audio
     public static bool Play(Entity entity, AssetId clip, float volume = 1.0f) =>
         Play(entity, clip, new AudioPlaybackOptions { Gain = volume });
 
-    public static bool Play(Entity entity, AssetReference<AudioClip> clip) =>
+    public static bool Play(Entity entity, AudioClip clip) =>
         Play(entity, clip.Id, new AudioPlaybackOptions());
 
-    public static bool Play(Entity entity, AssetReference<AudioClip> clip, AudioPlaybackOptions options) =>
+    public static bool Play(Entity entity, AudioClip clip, AudioPlaybackOptions options) =>
         Play(entity, clip.Id, options);
 
     public static bool Play(Entity entity, AssetId clip, AudioPlaybackOptions options)
@@ -1040,10 +1064,10 @@ public static class Audio
 
 /// <summary>Typed reference target for a cooked <c>.keirevfx</c> asset.</summary>
 [StableAssetTypeId("4b454952-4556-4658-4546-464543540001")]
-public sealed class VfxEffect;
+public sealed class VfxEffect : Asset;
 
 [StableAssetTypeId("4b454952-4556-4658-564f-4c554d450001")]
-public sealed class VfxVolume;
+public sealed class VfxVolume : Asset;
 
 /// <summary>A canonical inclusive range used by VFX Blackboard range parameters.</summary>
 /// <remarks>
@@ -1146,10 +1170,11 @@ public readonly record struct VfxRange<T>
 /// the assigned effect loads asynchronously. Native generation safety is provided internally by
 /// <c>Keire::VfxHandle</c>.
 /// </remarks>
-public readonly record struct VfxEmitterHandle(Entity Entity)
+[StableComponentId("4b454952-4556-4658-454d-495454455201")]
+public sealed class VfxEmitter : Component
 {
+    internal VfxEmitter(Entity entity) : base(entity) { }
     /// <summary>Whether the entity still exists and has a VFX Emitter component.</summary>
-    public bool IsValid => Entity.IsValid && Entity.HasComponent<VfxEmitterComponent>();
     /// <summary>Whether the runtime entity currently owns a live native effect instance.</summary>
     public bool IsAlive => IsValid && NativeRuntime.IsVfxAlive(Entity);
     /// <summary>Queues a named event for every matching system in this entity's live effect.</summary>
@@ -1169,7 +1194,7 @@ public readonly record struct VfxEmitterHandle(Entity Entity)
     /// <summary>Assigns <paramref name="effect"/> and replaces only this entity's live instance.</summary>
     public bool Restart(AssetId effect) => IsValid && NativeRuntime.PlayVfx(Entity, effect, true);
     /// <summary>Assigns <paramref name="effect"/> and replaces only this entity's live instance.</summary>
-    public bool Restart(AssetReference<VfxEffect> effect) => Restart(effect.Id);
+    public bool Restart(VfxEffect effect) => Restart(effect.Id);
     /// <summary>Sets an exposed scalar-range Blackboard parameter on the component and live effect.</summary>
     public bool SetParameter(AssetId parameter,
                              VfxRange<float> value) => IsValid && parameter.IsValid
@@ -1219,22 +1244,22 @@ public static class Vfx
     /// </summary>
     /// <remarks>
     /// The request can succeed before asynchronous asset loading creates a live native instance. Poll
-    /// <see cref="VfxEmitterHandle.IsAlive"/> when activation timing matters.
+    /// <see cref="VfxEmitter.IsAlive"/> when activation timing matters.
     /// </remarks>
-    public static VfxEmitterHandle Play(Entity entity, AssetReference<VfxEffect> effect, bool restart = false) =>
+    public static VfxEmitter? Play(Entity entity, VfxEffect effect, bool restart = false) =>
         Play(entity, effect.Id, restart);
 
     /// <summary>
     /// Assigns and requests playback of <paramref name="effect"/> on <paramref name="entity"/>.
     /// </summary>
     /// <exception cref="ArgumentException">The entity or effect ID is invalid.</exception>
-    public static VfxEmitterHandle Play(Entity entity, AssetId effect, bool restart = false)
+    public static VfxEmitter? Play(Entity entity, AssetId effect, bool restart = false)
     {
         if (!entity.IsValid)
             throw new ArgumentException("VFX playback requires a valid entity.", nameof(entity));
         if (!effect.IsValid)
             throw new ArgumentException("VFX playback requires a valid effect.", nameof(effect));
-        return NativeRuntime.PlayVfx(entity, effect, restart) ? new VfxEmitterHandle(entity) : default;
+        return NativeRuntime.PlayVfx(entity, effect, restart) ? entity.GetComponent<VfxEmitter>() : null;
     }
 
     /// <summary>Stops only the entity's runtime effect without removing its VFX Emitter component.</summary>
@@ -1255,43 +1280,53 @@ public static class Vfx
     }
     /// <summary>Sets an exposed scalar-range Blackboard parameter on an entity's component and live effect.</summary>
     public static bool SetParameter(Entity entity, AssetId parameter,
-                                    VfxRange<float> value) => new VfxEmitterHandle(entity).SetParameter(parameter,
-                                                                                                        value);
+                                    VfxRange<float> value) => entity.GetComponent<VfxEmitter>()?.SetParameter(parameter,
+                                                                                                               value) == true;
     /// <summary>Sets an exposed signed-integer-range Blackboard parameter on an entity's component and live
     /// effect.</summary>
     public static bool SetParameter(Entity entity, AssetId parameter,
-                                    VfxRange<long> value) => new VfxEmitterHandle(entity).SetParameter(parameter,
-                                                                                                       value);
+                                    VfxRange<long> value) => entity.GetComponent<VfxEmitter>()?.SetParameter(parameter,
+                                                                                                              value) == true;
     /// <summary>Sets an exposed unsigned-integer-range Blackboard parameter on an entity's component and live
     /// effect.</summary>
     public static bool SetParameter(Entity entity, AssetId parameter,
-                                    VfxRange<ulong> value) => new VfxEmitterHandle(entity).SetParameter(parameter,
-                                                                                                        value);
+                                    VfxRange<ulong> value) => entity.GetComponent<VfxEmitter>()?.SetParameter(parameter,
+                                                                                                               value) == true;
     /// <summary>Sets an exposed Vector2-range Blackboard parameter on an entity's component and live effect.</summary>
     public static bool SetParameter(Entity entity, AssetId parameter,
-                                    VfxRange<Vector2> value) => new VfxEmitterHandle(entity).SetParameter(parameter,
-                                                                                                          value);
+                                    VfxRange<Vector2> value) => entity.GetComponent<VfxEmitter>()?.SetParameter(parameter,
+                                                                                                                 value) == true;
     /// <summary>Sets an exposed Vector3-range Blackboard parameter on an entity's component and live effect.</summary>
     public static bool SetParameter(Entity entity, AssetId parameter,
-                                    VfxRange<Vector3> value) => new VfxEmitterHandle(entity).SetParameter(parameter,
-                                                                                                          value);
+                                    VfxRange<Vector3> value) => entity.GetComponent<VfxEmitter>()?.SetParameter(parameter,
+                                                                                                                 value) == true;
     /// <summary>Sets an exposed Vector4-range Blackboard parameter on an entity's component and live effect.</summary>
     public static bool SetParameter(Entity entity, AssetId parameter,
-                                    VfxRange<Vector4> value) => new VfxEmitterHandle(entity).SetParameter(parameter,
-                                                                                                          value);
+                                    VfxRange<Vector4> value) => entity.GetComponent<VfxEmitter>()?.SetParameter(parameter,
+                                                                                                                 value) == true;
     /// <summary>Sets an exposed color-range Blackboard parameter on an entity's component and live effect.</summary>
     public static bool SetParameter(Entity entity, AssetId parameter,
-                                    VfxRange<Color> value) => new VfxEmitterHandle(entity).SetParameter(parameter,
-                                                                                                        value);
+                                    VfxRange<Color> value) => entity.GetComponent<VfxEmitter>()?.SetParameter(parameter,
+                                                                                                               value) == true;
 }
 
 [StableAssetTypeId("4b454952-4550-5245-4641-424153535401")]
-public sealed class PrefabAsset;
-
-public static class Prefab
+public sealed class Prefab : Asset
 {
-    public static PrefabInstance Instantiate(AssetId prefab, Vector3 position = default, Quaternion rotation = default) =>
-        RuntimeBridge.Current.InstantiatePrefab(prefab, position, rotation == default ? Quaternion.Identity : rotation);
+    public Entity Instantiate(Vector3 position = default, Quaternion rotation = default, Entity? parent = null,
+                              bool active = true)
+    {
+        if (!IsValid)
+            throw new InvalidOperationException("A valid Prefab asset is required.");
+        if (parent is not null && !parent.IsValid)
+            throw new ArgumentException("The prefab parent must be a live entity.", nameof(parent));
+        return NativeWorld.InstantiatePrefab(this, position,
+            rotation == default ? Quaternion.Identity : rotation, parent, active);
+    }
+
+
+    public Entity Instantiate(Entity parent, bool active = true) =>
+        Instantiate(default, Quaternion.Identity, parent, active);
 }
 
 public static class Cursor

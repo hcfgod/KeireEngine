@@ -1053,6 +1053,8 @@ Keire::Ref<Keire::Scene> EditorWorkspaceLayer::ManagedRuntimeScene(const Keire::
     return session ? session->RuntimeScene() : Keire::Ref<Keire::Scene>{};
 }
 
+Keire::Ref<Keire::AssetSystem> EditorWorkspaceLayer::ManagedRuntimeAssets() const noexcept { return Owner().Assets(); }
+
 std::optional<Keire::ManagedRaycastHit>
 EditorWorkspaceLayer::RaycastManaged(const Keire::ManagedRaycastQuery& query) noexcept
 {

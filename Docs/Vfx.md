@@ -9,8 +9,8 @@ Related guides cover [Scene Authoring](SceneAuthoring.md), [Rendering](Rendering
 
 The execution and backend badges in the VFX Effect panel are authoritative:
 
-> **Schema-4 Graph assets execute their connected value graph and ordered Context Blocks. LegacyModules assets execute
-> the compatibility module stack.** Schemas 1–3 migrate in memory and are only written as schema 4 on explicit Save. A
+> **Schema-5 Graph assets execute their connected value graph and ordered Context Blocks. LegacyModules assets execute
+> the compatibility module stack.** Schemas 1–4 migrate in memory and are only written as schema 5 on explicit Save. A
 > node marked Disabled or GPU Required never degrades into a silent no-op.
 
 A **CPU + GPU** badge means the node's lowering opcode and packed pin types have implementations on both value
@@ -26,7 +26,7 @@ Every `.keirevfx` asset contains one `Keire::VfxEffectDefinition` with an explic
 
 ```mermaid
 flowchart TD
-    Asset[".keirevfx schema 4"] --> Source{"Execution Source"}
+    Asset[".keirevfx schema 5"] --> Source{"Execution Source"}
     Source -->|"LegacyModules"| Legacy["Enabled module stack<br/>compatibility schedule"]
     Source -->|"Graph"| Contexts["Spawn / Initialize / Update / Output Contexts"]
     Payloads["Validated module payload data"] --> Legacy
@@ -46,14 +46,14 @@ The graph and compatibility payload list are related, but they are not interchan
 
 - A Graph asset can contain multiple executable particle **systems** behind one root handle. Connected Event contexts
   route named spawns, and Particle Strip systems preserve strip-scoped identity and sequence-qualified Ribbon topology.
-  Operator, Block, and System Subgraph assets remain a separate disabled authoring milestone.
+  Schema-1 Operator, Block, and System Subgraphs expand before CPU/GPU lowering with deterministic instance identity.
 - **Context nodes** delimit Spawn, Initialize, Update, and Output. Their `Blocks` vectors are executable order; Blocks do
   not need decorative flow cables between one another.
 - A **Block** references validated payload data by stable ID, owns canonical typed input pins, and runs only because it
   is present and enabled in a connected Context stack. Free-floating compatibility Module nodes remain readable during
-  migration, but new schema-4 authoring should prefer Blocks.
+  migration, but new schema-5 authoring should prefer Blocks.
 - Free-floating **Operator** and **Parameter** nodes produce typed values; Block and Operator pins also provide inline
-  literals. Attribute, Constant-card, and Subgraph nodes remain disabled milestones. Executable value cables feed Block
+  literals. Attribute and Constant-card nodes remain disabled milestones. Executable value cables feed Block
   inputs and are lowered into a bounded SSA-style register program.
 - `ParticleStream` cables connect Contexts and establish the system path. Data cables never imply particle execution.
 - A **Parameter node** references a Blackboard property by stable ID. Renaming the property cannot break a binding.
@@ -61,9 +61,23 @@ The graph and compatibility payload list are related, but they are not interchan
   separate GPU-required milestone and cannot silently run through Portable HLSL semantics.
 - LegacyModules mode ignores graph scheduling and lowers enabled payloads directly for historical compatibility.
 
-## Schema-4 Core Value Release
+### Reusable VFX Subgraphs
 
-Schema 4 separates stable machine identity from presentation. `VfxNodeTypeId` values such as
+`.keirevfxsubgraph` schema 1 stores one typed `VfxSubgraphDefinition` with an Operator, Block, or System purpose.
+`CreateVfxSubgraphNode` creates Operator and System calls; `CreateVfxSubgraphBlock` creates an ordered Block call in a
+compatible Context. Operator boundary ports splice typed data cables, Block ports splice typed inputs into the selected
+Context body, and a System call adds each complete referenced system behind the same root effect handle.
+
+Native worlds opt in with `VfxWorldSpecification::SubgraphResolver`. Activation and reload resolve the entire dependency
+graph into a temporary definition, deterministically remap every internal node, pin, Block, module, parameter,
+connection, and system identity per call site, validate the result, and only then replace runtime state. Missing or
+wrong-identity assets, stale boundary signatures, purpose/context mismatches, direct or indirect cycles, and nesting
+beyond 16 levels are errors. `ExpandVfxSubgraphs` exposes the same transaction for offline compilation and tooling;
+calling the ordinary compiler on an unresolved call reports an error instead of accepting a no-op.
+
+## Schema-5 Core Value Release
+
+Schema 5 separates stable machine identity from presentation. `VfxNodeTypeId` values such as
 `keire.operator.random-range` stay ASCII and stable while the editor displays familiar labels such as **Random Range**.
 The compiler-owned `VfxNodeDescriptor` catalog is shared by validation, lowering, the right-click palette, backend
 badges, search synonyms, canonical pins, settings, and tests. Hand-authored unknown IDs are rejected during import and
@@ -129,7 +143,7 @@ claiming Unity's broader Unified/adaptive-pin surface.
 | Runtime identity | Age Over Lifetime, Frame Index, System Seed | Read-only outputs with no input pins; valid evaluation domains are compiler-owned. |
 
 All 21 nodes participate in ordinary right-click search, typed cable filtering, inline literal editing, constant
-folding where pure, dead-node elimination, block-property binding, canonical schema-4 serialization, and CPU/GPU
+folding where pure, dead-node elimination, block-property binding, canonical schema-5 serialization, and CPU/GPU
 backend diagnostics. Their packed signatures are renderer-validated before dispatch, so a corrupt or hand-authored
 program is rejected with its instruction index rather than reaching the shader interpreter.
 
@@ -318,7 +332,7 @@ outputs. A rejected cross-Context data cable leaves the document unchanged.
 
 ### Ordered Context Blocks
 
-Schema-4 Contexts own `std::vector<VfxGraphBlock> Blocks`. Vector order is execution order and survives save, reload,
+Schema-5 Contexts own `std::vector<VfxGraphBlock> Blocks`. Vector order is execution order and survives save, reload,
 undo, and compilation. `CreateVfxGraphBlock(module)` creates canonical stable pins without particle-flow pins. A Block
 input endpoint uses the owning Context node ID plus the Block ID and pin ID; this prevents ID ambiguity while keeping the
 Block visually inside its Context.
@@ -341,12 +355,12 @@ enabled renderer Block before publication.
 Use this workflow for a first effect:
 
 1. In the Project panel, open the create menu and choose **VFX Effect**.
-2. Name the asset. Kéire creates a schema-4 Graph asset with connected Spawn, Initialize, Update, and Output contexts
+2. Name the asset. Kéire creates a schema-5 Graph asset with connected Spawn, Initialize, Update, and Output contexts
    and ordered Blocks for its default payloads.
 3. Double-click the asset to open the **VFX Effect** panel.
 4. Confirm the header says **EXECUTION: GRAPH**.
 5. Expand a Context to edit and reorder its Blocks. The compatibility Runtime Modules view remains available for
-   payload editing and historical assets, but Context Block order is authoritative for schema-4 Graph execution.
+   payload editing and historical assets, but Context Block order is authoritative for schema-5 Graph execution.
 6. In **Graph**, right-click the canvas to open the ranked, context-sensitive palette. Add an Operator, Blackboard
    Parameter, compatible Context Block,
    or Custom HLSL node, then drag between compatible typed pins to connect it.
@@ -464,7 +478,7 @@ flowchart TD
 
 ## Graph Workflow
 
-The Graph tab is the executable authoring surface for schema-4 Graph assets. It shows the current schema and execution
+The Graph tab is the executable authoring surface for schema-5 Graph assets. It shows the current schema and execution
 source in the Systems pane. If the header says **EXECUTION: LEGACY RUNTIME MODULES**, graph edits remain descriptive
 until the asset is explicitly converted.
 
@@ -504,14 +518,15 @@ deleted independently of their owning system.
 
 ### Execution Source And Migration
 
-New effects are Graph assets. Schemas 1–3 are accepted and migrated in memory. Historical module-stack assets retain
-`LegacyModules` execution until explicit conversion; Save publishes canonical schema 4 without silently opting into a
+New effects are Graph assets. Schemas 1–4 are accepted and migrated in memory. Historical module-stack assets retain
+`LegacyModules` execution until explicit conversion; Save publishes canonical schema 5 without silently opting into a
 different execution model. Reachable executable nodes in a historical schema-3 Graph are migrated automatically into
 ordered Context Blocks. Their node IDs become Block IDs, data-pin and cable IDs are preserved, and the four Contexts
 become the only `ParticleStream` path. Disconnected legacy draft nodes remain readable so migration never invents
 execution for unfinished work.
 
-Schema 4 records a `VfxCompatibilityMode`. Newly created graphs use `NativeSchema4`, where unsupported authored values
+Schema 5 records a `VfxCompatibilityMode`. Newly created graphs use the source-compatible `NativeSchema4` enum value,
+where unsupported authored values
 are compile errors. Schema 1-3 migration and explicit Runtime Module conversion use `MigratedLegacyModules`, preserving
 historical execution while publishing explicit capability warnings. Duplicate Blocks are legal: the compiler assigns
 each Block its own execution identity even when several Blocks reference the same authoring payload, so bindings and
@@ -529,7 +544,7 @@ flowchart TD
     Replace --> Blocks["Create ordered Blocks from module payloads"]
     Replace --> Cables["Connect one ParticleStream path"]
     Replace --> Params["Create stable-ID Parameter nodes"]
-    Keep --> Graph["Schema-4 Graph draft"]
+    Keep --> Graph["Schema-5 Graph draft"]
     Contexts --> Graph
     Blocks --> Graph
     Cables --> Graph
@@ -561,9 +576,10 @@ without replacing the categorized Context, Operator, module, and Blackboard menu
 | Block | Runs one ordered particle operation inside a Context | Canonical payload reference and typed inputs; vector order is execution order |
 | Operator | Produces a reusable typed value | Known descriptor ID/version, canonical settings/pins, and a valid evaluation Context |
 | Blackboard Parameter | Supplies one typed value | References a Blackboard stable ID and has one typed `value` output |
-| Constant / Attribute / Subgraph | Reserved production-parity nodes | Disabled with a visible reason until the corresponding milestone is executable; use inline literals for current constants |
+| Constant / Attribute | Reserved production-parity nodes | Disabled with a visible reason until the corresponding milestone is executable; use inline literals for current constants |
+| Subgraph call | Reuses an Operator, ordered Block, or complete System | Created from a schema-1 `.keirevfxsubgraph`; resolved and expanded before lowering |
 | Portable Custom HLSL | Mutates bounded particle attributes | An ordered Context Block, optional typed value inputs, and valid Portable source |
-| Legacy Module node | Reads historical schema-3 flow graphs | Canonical flow/property pins; retained for migration, not preferred for new schema-4 work |
+| Legacy Module node | Reads historical schema-3 flow graphs | Canonical flow/property pins; retained for migration, not preferred for new schema-5 work |
 
 A Block stores the compatibility payload stable ID in `VfxGraphBlock::Reference`, but its enabled state, inline pin
 values, incoming value cables, and position in the Context stack are authoritative for Graph execution. The payload
@@ -645,7 +661,7 @@ Each pin has:
 - A compiler semantic such as `particles`, `value`, `gravityMultiplier`, or a Custom HLSL input identifier
 - An optional typed fallback for a Custom HLSL input
 
-Schema-4 graph types include Boolean, signed/unsigned Integer, Scalar, Vector2/3/4, Quaternion, Matrix, Color, Curve,
+Schema-5 graph types include Boolean, signed/unsigned Integer, Scalar, Vector2/3/4, Quaternion, Matrix, Color, Curve,
 Gradient, scalar/integer/vector/color Ranges, Texture/resource types, Mesh, generic Asset, and
 `ParticleStream`. `ParticleStream` represents execution flow; it is not a Blackboard value and has no literal default.
 
@@ -849,7 +865,7 @@ for structural compatibility while its inline inputs and value cables supply exe
 
 ### Module Multiplicity
 
-| Module type | LegacyModules count | Schema-4 Graph count |
+| Module type | LegacyModules count | Schema-5 Graph count |
 | --- | ---: | ---: |
 | Emission Rate | Bounded by the module limit | Bounded by the graph module limit |
 | Burst | 0 to 32 | 0 to 32 |
@@ -874,7 +890,7 @@ Emission Rate continuously requests particles while the emitter is emitting.
 | --- | --- |
 | **Particles per Second** | Continuous rate from `0` to `1,000,000`. Fractional particles accumulate deterministically. |
 
-For a one-shot effect driven only by bursts, remove or disable Emission Rate. Multiple scheduled schema-4 Emission Rate
+For a one-shot effect driven only by bursts, remove or disable Emission Rate. Multiple scheduled schema-5 Emission Rate
 Blocks are additive on both CPU and GPU; the shared fractional accumulator makes their total independent of Block
 grouping.
 
@@ -1365,12 +1381,12 @@ effect becomes non-looping.
 
 ## Managed C# Usage
 
-The managed API defines typed `VfxEffect` and `VfxVolume` asset markers, entity-scoped `VfxEmitterHandle`, and the
+The managed API defines direct `VfxEffect` and `VfxVolume` assets, the entity-scoped `VfxEmitter` component, and the
 static `Vfx` service in the `Keire` namespace.
 
 Playback starts ordinary asset loading. Code that must prewarm an effect or volume can retain
-`Assets.LoadRuntime(reference)` and inspect the resulting `AssetHandle<T>` readiness, fallback, revision, and structured
-diagnostic before issuing presentation calls. Disposing the handle releases only that residency lease; graph authoring
+`Assets.LoadRuntime(reference)` and inspect the resulting `AssetLoadOperation<T>` readiness, fallback, revision, and structured
+diagnostic before issuing presentation calls. Disposing the operation releases only that residency lease; graph authoring
 and mutation remain editor/native responsibilities.
 
 ### Serialized Effect And Playback
@@ -1384,55 +1400,55 @@ namespace MyGame;
 public sealed class ImpactVfx : Behaviour
 {
     [SerializeField, StableFieldId("813ae003-fd0d-4e5b-b277-c309ba07f289")]
-    private AssetReference<VfxEffect> _impact;
+    private VfxEffect? _impact;
 
-    private VfxEmitterHandle _emitter;
+    private VfxEmitter? _emitter;
 
     public void PlayImpact()
     {
-        if (!_impact.IsValid)
+        if (_impact is null)
         {
             Debug.Warn("Impact VFX is not assigned.");
             return;
         }
 
         _emitter = Vfx.Play(Entity, _impact, restart: true);
-        if (!_emitter.IsValid)
+        if (_emitter is null || !_emitter.IsValid)
             Debug.Warn("VFX playback request was rejected.");
     }
 
     public void PauseImpact()
     {
-        if (!_emitter.Pause())
+        if (_emitter is null || !_emitter.Pause())
             Debug.Warn("VFX pause was rejected.");
     }
 
     public void ResumeImpact()
     {
-        if (!_emitter.Resume())
+        if (_emitter is null || !_emitter.Resume())
             Debug.Warn("VFX resume was rejected.");
     }
 
     public void TriggerSecondaryBurst(uint count = 12)
     {
-        if (!_emitter.SendEvent("Impact", count))
+        if (_emitter is null || !_emitter.SendEvent("Impact", count))
             Debug.Warn("No live VFX system accepted the Impact event.");
     }
 
     protected override void OnDisable()
     {
-        _emitter.Stop();
+        _emitter?.Stop();
     }
 }
 ```
 
 `Vfx.Play` validates the entity and effect, then asks the runtime scene to create or configure a VFX Emitter on that
-entity. A valid returned `VfxEmitterHandle` means the request was accepted. Asset loading is asynchronous, so
-`handle.IsAlive` may remain false until the native effect instance activates.
+entity. A valid returned `VfxEmitter` means the request was accepted. Asset loading is asynchronous, so
+`emitter.IsAlive` may remain false until the native effect instance activates.
 
 ### Named Events
 
-`Vfx.SendEvent(entity, name, count)` and `VfxEmitterHandle.SendEvent(name, count)` enqueue the requested spawn count for
+`Vfx.SendEvent(entity, name, count)` and `VfxEmitter.SendEvent(name, count)` enqueue the requested spawn count for
 every Event Context whose name exactly matches inside that root effect. Event names must contain non-whitespace text and
 fit in 256 UTF-8 bytes; counts are bounded to `1..1,000,000`. Invalid arguments throw before native dispatch. A valid
 request returns `false` when the entity/effect is not live or no system has that name. Events are owner-thread scene
@@ -1458,7 +1474,7 @@ private static readonly AssetId EnergyColor =
 
 private Color _energyColor = new(0.08f, 0.72f, 1.0f, 1.0f);
 
-public bool ApplyEnergyColor(VfxEmitterHandle emitter)
+public bool ApplyEnergyColor(VfxEmitter emitter)
 {
     // _energyColor is the code-side readable value. The stable ID selects the Blackboard row.
     return emitter.SetParameter(EnergyColor, new VfxRange<Color>(_energyColor, _energyColor));
@@ -1487,7 +1503,7 @@ public bool ConfigureTrailRanges(AssetId lifetimeRangeParameter, AssetId velocit
 The supported element types and exact overloads are:
 
 ```csharp
-// VfxEmitterHandle instance overloads
+// VfxEmitter instance overloads
 public bool SetParameter(AssetId parameter, VfxRange<float> value);
 public bool SetParameter(AssetId parameter, VfxRange<long> value);
 public bool SetParameter(AssetId parameter, VfxRange<ulong> value);
@@ -1520,7 +1536,7 @@ is true:
 - Native validation rejects the candidate, including a range/finite-value contract violation.
 
 Call from normal Behaviour lifecycle callbacks on the runtime owner thread. Because asset activation is asynchronous,
-wait for `handle.IsAlive` before treating a `false` result as a permanent content error. A successful call updates the
+wait for `emitter.IsAlive` before treating a `false` result as a permanent content error. A successful call updates the
 runtime-scene component clone and that entity's live effect atomically; it does not modify the `.keirevfx` asset, the
 edit-scene component, or another emitter. This milestone does not expose managed `ResetParameter`, so retain the
 authored default in content or use native control when reset semantics are required.
@@ -1528,8 +1544,8 @@ authored default in content or use native control when reset semantics are requi
 ### Managed API Reference
 
 ```csharp
-VfxEmitterHandle handle = Vfx.Play(entity, effectReference);
-VfxEmitterHandle restarted = Vfx.Play(entity, effectReference, restart: true);
+VfxEmitter? emitter = Vfx.Play(entity, effectReference);
+VfxEmitter? restarted = Vfx.Play(entity, effectReference, restart: true);
 
 bool paused = Vfx.Pause(entity);
 bool resumed = Vfx.Resume(entity);
@@ -1537,22 +1553,22 @@ bool alive = Vfx.IsAlive(entity);
 bool stopped = Vfx.Stop(entity);
 bool eventQueued = Vfx.SendEvent(entity, "Impact", 24);
 
-bool handleAlive = handle.IsAlive;
-handle.SendEvent("Impact", 24);
-handle.Pause();
-handle.Resume();
-handle.Restart(effectReference);
-handle.Stop();
+bool emitterAlive = emitter?.IsAlive == true;
+emitter?.SendEvent("Impact", 24);
+emitter?.Pause();
+emitter?.Resume();
+emitter?.Restart(effectReference);
+emitter?.Stop();
 
 VfxRange<float> lifetime = new(1.0f, 20.0f);
-bool rangeApplied = handle.SetParameter(lifetimeRangeParameter, lifetime);
+bool rangeApplied = emitter?.SetParameter(lifetimeRangeParameter, lifetime) == true;
 bool entityRangeApplied = Vfx.SetParameter(entity, lifetimeRangeParameter, lifetime);
 ```
 
 Important behavior:
 
-- `VfxEmitterHandle.IsValid` requires a valid entity that has a VFX Emitter component.
-- The managed handle is entity-scoped. The lower-level native `Keire::VfxHandle` contains the generation used to reject
+- `VfxEmitter.IsValid` requires a valid entity that has a VFX Emitter component.
+- The managed component is entity-scoped. The lower-level native `Keire::VfxHandle` contains the generation used to reject
   stale pooled handles.
 - `Restart` requires the effect because it can replace the emitter's current Effect.
 - Pause sets Simulation Speed to zero.
@@ -2012,7 +2028,7 @@ world->SetParameter(handle, velocityRangeParameter, launchVelocity);
 an explicit aggregate; persisted/authoring values require component-wise `Minimum <= Maximum` and finite floating
 components. `SetParameter` validates the exact Blackboard type and applies the whole candidate transactionally.
 
-### Building A Schema-4 Value Graph In C++
+### Building A Schema-5 Value Graph In C++
 
 Authoring tools normally create IDs and undo records, but importers and procedural tooling can use the same public
 catalog and canonical factories:
@@ -2036,7 +2052,7 @@ if (!program.Valid)
 ```
 
 Use `FindVfxNodeDescriptor(typeId)` before procedural creation to inspect canonical pins, settings, valid Contexts,
-support tier, and backend tier. Never construct a known built-in with hand-invented pin names: schema-4 validation
+support tier, and backend tier. Never construct a known built-in with hand-invented pin names: schema-5 validation
 rejects stale signatures instead of guessing.
 
 On `Reload`, compatible overrides with the same stable ID, exact type, and Exposed status are preserved. Removed,
@@ -2272,7 +2288,7 @@ explicit tier instead of changing behavior.
 | Per-handle stop, restart, and incompatible-reload isolation | Yes | Yes; matching handle generation only |
 | Exact active particle count | Yes | Spawn-based estimate |
 | Per-particle debug samples | Yes | No |
-| Schema-4 Context/Block scheduling | Yes | Cooked paths only |
+| Schema-5 Context/Block scheduling | Yes | Cooked paths only |
 | Module-property Blackboard binding | Yes | Yes |
 | Activation/component/live parameter overrides | Yes | Yes |
 | Core packed value Operators | Yes | Yes; opcode and pin support is shown by the CPU + GPU badge |
@@ -2425,11 +2441,11 @@ Graph execution adds these publish-time requirements:
 - Block endpoints identify the owning Context, Block, and pin; Context vector order is executable order
 - At most 4,096 valid Portable Custom HLSL statements
 
-Schema versions 1, 2, 3, and 4 are readable. Schemas 1–3 migrate in memory and explicit Save publishes schema 4.
+Schema versions 1 through 5 are readable. Schemas 1–4 migrate in memory and explicit Save publishes schema 5.
 Historical compatibility assets retain `LegacyModules`; opening, previewing, or saving does not convert execution. Use
-the explicit conversion command to replace old Systems with a schema-4 executable Graph.
+the explicit conversion command to replace old Systems with a schema-5 executable Graph.
 
-Schema 4 also versions individual executable definitions. Older Shape and Renderer Blocks are upgraded in memory when
+Schema 5 also versions individual executable definitions. Older Shape and Renderer Blocks are upgraded in memory when
 new resource inputs are introduced: existing pin and cable IDs are preserved, missing canonical pins receive
 deterministic stable IDs, and explicit Save writes the current Block definition version. Unknown pins, type changes, or
 future definition versions remain hard errors instead of being discarded during repair.

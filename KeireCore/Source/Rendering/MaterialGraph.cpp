@@ -1,6 +1,7 @@
 #include "Keire/Rendering/MaterialGraph.h"
 
 #include "Keire/Rendering/ShaderGraph.h"
+#include "KeireInternal/Authoring/GraphAuthoringSerialization.h"
 
 #include <nlohmann/json.hpp>
 
@@ -9,6 +10,7 @@
 #include <cctype>
 #include <cmath>
 #include <filesystem>
+#include <iterator>
 #include <set>
 #include <stdexcept>
 #include <type_traits>
@@ -306,7 +308,8 @@ namespace Keire
                     {"properties", std::move(properties)},
                     {"nodes", std::move(nodes)},
                     {"connections", std::move(connections)},
-                    {"surfaceGraph", surfaceGraph}};
+                    {"surfaceGraph", surfaceGraph},
+                    {"authoring", Detail::EncodeGraphAuthoringMetadata(definition.Authoring)}};
         }
 
         [[nodiscard]] MaterialGraphDefinition DecodeDefinition(const Json& source)
@@ -315,7 +318,7 @@ namespace Keire
                 throw std::invalid_argument("Material Graph source must be an object.");
             MaterialGraphDefinition result;
             const auto sourceSchema = source.value("schemaVersion", 0U);
-            if (sourceSchema != 1 && sourceSchema != 2 && sourceSchema != MaterialGraphSourceSchemaVersion)
+            if (sourceSchema == 0 || sourceSchema > MaterialGraphSourceSchemaVersion)
                 throw std::invalid_argument("Material Graph source schema is unsupported.");
             result.SchemaVersion = MaterialGraphSourceSchemaVersion;
             result.Shader = DecodeShaderReference(source.at("shader"));
@@ -402,6 +405,15 @@ namespace Keire
             }
             else
                 result.SurfaceGraph = CreateStableMaterialSurfaceGraph(result.Shader);
+            if (sourceSchema >= 4)
+            {
+                std::vector<AssetId> nodeIds{result.OutputNode};
+                nodeIds.reserve(result.Nodes.size() + result.SurfaceGraph.Nodes.size() + 1U);
+                std::ranges::transform(result.Nodes, std::back_inserter(nodeIds), &MaterialGraphValueNode::Id);
+                std::ranges::transform(result.SurfaceGraph.Nodes, std::back_inserter(nodeIds), &ShaderGraphNode::Id);
+                result.Authoring =
+                    Detail::DecodeGraphAuthoringMetadata(source.value("authoring", Json::object()), nodeIds);
+            }
             ValidateMaterialGraph(result);
             return result;
         }
@@ -805,6 +817,11 @@ namespace Keire
         result += m_Definition.SurfaceGraph.Connections.size() * sizeof(ShaderGraphConnection);
         for (const auto& connection : m_Definition.SurfaceGraph.Connections)
             result += connection.RoutingPoints.capacity() * sizeof(Vector2);
+        for (const auto& annotation : m_Definition.Authoring.NodeAnnotations)
+            result += sizeof(annotation) + annotation.Text.capacity();
+        for (const auto& comment : m_Definition.Authoring.Comments)
+            result += sizeof(comment) + comment.Title.capacity() + comment.Description.capacity() +
+                      comment.Members.capacity() * sizeof(AssetId);
         return result;
     }
 
@@ -962,6 +979,13 @@ namespace Keire
                 node->OutputPin != connection.Output.Pin || node->Type != property->Type)
                 throw std::invalid_argument("Material Graph connection endpoints or value types are incompatible.");
         }
+
+        std::vector<AssetId> authoringNodeIds{definition.OutputNode};
+        authoringNodeIds.reserve(definition.Nodes.size() + definition.SurfaceGraph.Nodes.size() + 1U);
+        std::ranges::transform(definition.Nodes, std::back_inserter(authoringNodeIds), &MaterialGraphValueNode::Id);
+        std::ranges::transform(definition.SurfaceGraph.Nodes, std::back_inserter(authoringNodeIds),
+                               &ShaderGraphNode::Id);
+        ValidateGraphAuthoringMetadata(definition.Authoring, authoringNodeIds);
     }
 
     std::vector<MaterialGraphDiagnostic>

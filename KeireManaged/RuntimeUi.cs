@@ -26,9 +26,9 @@ public readonly record struct UiThickness(float Left, float Top, float Right, fl
     public UiThickness(float uniform) : this(uniform, uniform, uniform, uniform) { }
 }
 
-public abstract class UiElement
+public abstract class RuntimeUiElement
 {
-    private readonly List<UiElement> _children = [];
+    private readonly List<RuntimeUiElement> _children = [];
 
     public string Name { get; set; } = string.Empty;
     public bool Visible { get; set; } = true;
@@ -40,10 +40,10 @@ public abstract class UiElement
     public Vector2 Size { get; set; } = new(100.0f, 30.0f);
     public UiThickness Margin { get; set; }
     public UiRect LayoutRect { get; internal set; }
-    public UiElement? Parent { get; private set; }
-    public IReadOnlyList<UiElement> Children => _children;
+    public RuntimeUiElement? Parent { get; private set; }
+    public IReadOnlyList<RuntimeUiElement> Children => _children;
 
-    public void Add(UiElement child)
+    public void Add(RuntimeUiElement child)
     {
         ArgumentNullException.ThrowIfNull(child);
         if (ReferenceEquals(child, this) || IsAncestorOf(child))
@@ -53,7 +53,7 @@ public abstract class UiElement
         _children.Add(child);
     }
 
-    public bool Remove(UiElement child)
+    public bool Remove(RuntimeUiElement child)
     {
         if (!_children.Remove(child))
             return false;
@@ -61,23 +61,23 @@ public abstract class UiElement
         return true;
     }
 
-    private bool IsAncestorOf(UiElement candidate)
+    private bool IsAncestorOf(RuntimeUiElement candidate)
     {
-        for (UiElement? current = Parent; current is not null; current = current.Parent)
+        for (RuntimeUiElement? current = Parent; current is not null; current = current.Parent)
             if (ReferenceEquals(current, candidate))
                 return true;
         return false;
     }
 }
 
-public sealed class UiPanel : UiElement
+public sealed class RuntimeUiPanel : RuntimeUiElement
 {
     public Color Color { get; set; } = new(0.0f, 0.0f, 0.0f, 0.65f);
     public UiThickness Padding { get; set; }
     public bool ClipChildren { get; set; }
 }
 
-public sealed class UiText : UiElement
+public sealed class RuntimeUiText : RuntimeUiElement
 {
     public string Text { get; set; } = string.Empty;
     public float FontSize { get; set; } = 18.0f;
@@ -86,36 +86,36 @@ public sealed class UiText : UiElement
     public UiAxisAlignment VerticalAlignment { get; set; } = UiAxisAlignment.Center;
 }
 
-public sealed class UiImage : UiElement
+public sealed class RuntimeUiImage : RuntimeUiElement
 {
-    public AssetReference<ScriptableObject> Texture { get; set; }
+    public Texture? Texture { get; set; }
     public Color Tint { get; set; } = Color.White;
     public UiThickness Border { get; set; }
 }
 
-public sealed class UiButton : UiElement
+public sealed class RuntimeUiButton : RuntimeUiElement
 {
-    private static readonly Dictionary<Entity, List<WeakReference<UiButton>>> NativeBindings = [];
+    private static readonly Dictionary<Entity, List<WeakReference<RuntimeUiButton>>> NativeBindings = [];
     private static readonly List<Entity> DispatchKeys = [];
-    private static readonly List<UiButton> DispatchTargets = [];
+    private static readonly List<RuntimeUiButton> DispatchTargets = [];
     private static bool s_dispatching;
     private static double s_lastDispatchElapsed = double.NaN;
 
     private Action? _clicked;
 
-    public UiButton()
+    public RuntimeUiButton()
     {
     }
 
-    internal UiButton(Entity entity)
+    internal RuntimeUiButton(Entity entity)
     {
         Entity = entity;
         Interactable = true;
     }
 
-    public Entity Entity { get; }
-    public bool NativeBound => Entity.Id != default;
-    public bool IsValid => NativeBound && Entity.HasComponent<UiButtonComponent>();
+    public Entity Entity { get; } = null!;
+    public bool NativeBound => Entity is not null && Entity.Id != default;
+    public bool IsValid => NativeBound && Entity.HasComponent<UiButton>();
 
     public event Action? Clicked
     {
@@ -136,8 +136,8 @@ public sealed class UiButton : UiElement
         }
     }
 
-    public static UiButton? FromEntity(Entity entity) =>
-        entity.HasComponent<UiButtonComponent>() ? new UiButton(entity) : null;
+    public static RuntimeUiButton? FromEntity(Entity entity) =>
+        entity.HasComponent<UiButton>() ? new RuntimeUiButton(entity) : null;
 
     public void Invoke() => _clicked?.Invoke();
 
@@ -159,13 +159,13 @@ public sealed class UiButton : UiElement
 
             foreach (Entity entity in DispatchKeys)
             {
-                if (!NativeBindings.TryGetValue(entity, out List<WeakReference<UiButton>>? bindings))
+                if (!NativeBindings.TryGetValue(entity, out List<WeakReference<RuntimeUiButton>>? bindings))
                     continue;
 
                 DispatchTargets.Clear();
                 for (int index = bindings.Count - 1; index >= 0; --index)
                 {
-                    if (!bindings[index].TryGetTarget(out UiButton? button) || button._clicked is null)
+                    if (!bindings[index].TryGetTarget(out RuntimeUiButton? button) || button._clicked is null)
                     {
                         bindings.RemoveAt(index);
                         continue;
@@ -182,7 +182,7 @@ public sealed class UiButton : UiElement
                 if (!NativeRuntime.ConsumeUiClick(entity))
                     continue;
 
-                foreach (UiButton button in DispatchTargets)
+                foreach (RuntimeUiButton button in DispatchTargets)
                     button.Invoke();
             }
         }
@@ -194,26 +194,26 @@ public sealed class UiButton : UiElement
         }
     }
 
-    private static void RegisterNativeBinding(UiButton button)
+    private static void RegisterNativeBinding(RuntimeUiButton button)
     {
-        if (!NativeBindings.TryGetValue(button.Entity, out List<WeakReference<UiButton>>? bindings))
+        if (!NativeBindings.TryGetValue(button.Entity, out List<WeakReference<RuntimeUiButton>>? bindings))
         {
             bindings = [];
             NativeBindings.Add(button.Entity, bindings);
         }
 
-        foreach (WeakReference<UiButton> binding in bindings)
-            if (binding.TryGetTarget(out UiButton? existing) && ReferenceEquals(existing, button))
+        foreach (WeakReference<RuntimeUiButton> binding in bindings)
+            if (binding.TryGetTarget(out RuntimeUiButton? existing) && ReferenceEquals(existing, button))
                 return;
-        bindings.Add(new WeakReference<UiButton>(button));
+        bindings.Add(new WeakReference<RuntimeUiButton>(button));
     }
 
-    private static void UnregisterNativeBinding(UiButton button)
+    private static void UnregisterNativeBinding(RuntimeUiButton button)
     {
-        if (!NativeBindings.TryGetValue(button.Entity, out List<WeakReference<UiButton>>? bindings))
+        if (!NativeBindings.TryGetValue(button.Entity, out List<WeakReference<RuntimeUiButton>>? bindings))
             return;
         for (int index = bindings.Count - 1; index >= 0; --index)
-            if (!bindings[index].TryGetTarget(out UiButton? existing) || ReferenceEquals(existing, button))
+            if (!bindings[index].TryGetTarget(out RuntimeUiButton? existing) || ReferenceEquals(existing, button))
                 bindings.RemoveAt(index);
         if (bindings.Count == 0)
             NativeBindings.Remove(button.Entity);
@@ -232,13 +232,13 @@ public sealed class RuntimeCanvas
         Entity = entity;
     }
 
-    public Entity Entity { get; }
-    public bool NativeBound => Entity.Id != default;
+    public Entity? Entity { get; }
+    public bool NativeBound => Entity is not null && Entity.Id != default;
 
     public bool SetText(Entity textEntity, string text) => NativeRuntime.SetUiText(textEntity, text);
     public bool WasClicked(Entity buttonEntity) => NativeRuntime.ConsumeUiClick(buttonEntity);
 
-    public UiPanel Root { get; } = new() { Name = "Root" };
+    public RuntimeUiPanel Root { get; } = new() { Name = "Root" };
     public UiScaleMode ScaleMode { get; set; } = UiScaleMode.ScaleWithScreen;
     public Vector2 ReferenceResolution { get; set; } = new(1920.0f, 1080.0f);
     public float MatchWidthOrHeight { get; set; } = 0.5f;
@@ -260,7 +260,7 @@ public sealed class RuntimeCanvas
         LayoutElement(Root, rootRect, scale);
     }
 
-    private static void LayoutElement(UiElement element, UiRect parent, float scale)
+    private static void LayoutElement(RuntimeUiElement element, UiRect parent, float scale)
     {
         float minimumX = parent.X + (parent.Width * element.AnchorMinimum.X);
         float minimumY = parent.Y + (parent.Height * element.AnchorMinimum.Y);
@@ -279,7 +279,7 @@ public sealed class RuntimeCanvas
             y,
             MathF.Max(0.0f, width - ((element.Margin.Left + element.Margin.Right) * scale)),
             MathF.Max(0.0f, height - ((element.Margin.Top + element.Margin.Bottom) * scale)));
-        foreach (UiElement child in element.Children)
+        foreach (RuntimeUiElement child in element.Children)
             LayoutElement(child, element.LayoutRect, scale);
     }
 }
@@ -288,9 +288,9 @@ public static class RuntimeUi
 {
     public static bool SetText(Entity entity, string text) => NativeRuntime.SetUiText(entity, text);
     public static bool WasClicked(Entity entity) => NativeRuntime.ConsumeUiClick(entity);
-    public static UiButton? GetButton(Entity entity) => UiButton.FromEntity(entity);
-    public static UiSlider? GetSlider(Entity entity) => UiSlider.FromEntity(entity);
-    public static UiToggle? GetToggle(Entity entity) => UiToggle.FromEntity(entity);
-    public static UiInputField? GetInputField(Entity entity) => UiInputField.FromEntity(entity);
-    public static UiScrollView? GetScrollView(Entity entity) => UiScrollView.FromEntity(entity);
+    public static UiButton? GetButton(Entity entity) => entity.GetComponent<UiButton>();
+    public static UiSlider? GetSlider(Entity entity) => entity.GetComponent<UiSlider>();
+    public static UiToggle? GetToggle(Entity entity) => entity.GetComponent<UiToggle>();
+    public static UiInputField? GetInputField(Entity entity) => entity.GetComponent<UiInputField>();
+    public static UiScrollView? GetScrollView(Entity entity) => entity.GetComponent<UiScrollView>();
 }

@@ -92,6 +92,18 @@ TEST_CASE("Shader Graph source and cooked assets preserve stable graph identity"
     definition.Nodes.push_back(roughness);
     Connect(definition, definition.Nodes.back(), "Value", definition.Nodes.front(), "Roughness");
     definition.Connections.back().RoutingPoints = {{180.0F, 96.0F}, {320.0F, 132.0F}};
+    definition.Authoring.NodeAnnotations.push_back({roughness.Id, "Driven by the finish mask.", true, true});
+    definition.Authoring.Comments.push_back({Keire::AssetId::Generate(),
+                                             "Surface response",
+                                             "Parameters controlling the reflected light response.",
+                                             {80.0F, 40.0F},
+                                             {420.0F, 260.0F},
+                                             {0.12F, 0.42F, 0.75F, 0.4F},
+                                             20.0F,
+                                             Keire::GraphCommentMoveMode::Group,
+                                             {},
+                                             {roughness.Id},
+                                             false});
 
     const auto source = Keire::ShaderGraphAsset::EncodeSource(definition);
     const auto sourceDecoded = Keire::ShaderGraphAsset::DecodeSource(source);
@@ -160,7 +172,7 @@ TEST_CASE("Shader Graph v2 catalogs stable node identities and migrates v1 sourc
 
 TEST_CASE("Shader Graph compatibility versions are explicit and future sources fail recoverably")
 {
-    CHECK(Keire::ShaderGraphSourceSchemaVersion == 3);
+    CHECK(Keire::ShaderGraphSourceSchemaVersion == 4);
     CHECK(Keire::ShaderGraphGeneratedShaderVersion == 3);
     CHECK(Keire::ShaderGraphVertexLayoutVersion == 3);
 
@@ -174,12 +186,12 @@ TEST_CASE("Shader Graph compatibility versions are explicit and future sources f
     CHECK(manifest.at("materialGraphSourceSchemaVersion") == Keire::ShaderGraphSourceSchemaVersion);
     CHECK(manifest.at("materialGraphGeneratedShaderVersion") == Keire::ShaderGraphGeneratedShaderVersion);
     CHECK(manifest.at("vertexLayoutVersion") == Keire::ShaderGraphVertexLayoutVersion);
-    CHECK(variant.Hlsl.find("Generator version 3, source schema 3") != std::string::npos);
+    CHECK(variant.Hlsl.find("Generator version 3, source schema 4") != std::string::npos);
 
     const auto future = nlohmann::json{{"schemaVersion", Keire::ShaderGraphSourceSchemaVersion + 1U}}.dump();
     const auto futureBytes = std::as_bytes(std::span(future));
     CHECK_THROWS_WITH_AS((void)Keire::ShaderGraphAsset::DecodeSource(futureBytes),
-                         "Shader Graph schema version 4 is newer than the supported version 3.", std::invalid_argument);
+                         "Shader Graph schema version 5 is newer than the supported version 4.", std::invalid_argument);
 }
 
 TEST_CASE("Shader Graph v3 lowers multi-output nodes and parameter authoring metadata")

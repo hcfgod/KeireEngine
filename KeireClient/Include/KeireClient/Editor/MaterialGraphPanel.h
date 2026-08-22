@@ -3,6 +3,10 @@
 #include "Keire/Core.h"
 #include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/AuthoringWidgets.h"
+#include "KeireClient/Editor/GraphClipboard.h"
+#include "KeireClient/Editor/GraphComments.h"
+#include "KeireClient/Editor/GraphLayout.h"
+#include "KeireClient/Editor/GraphNavigation.h"
 #include "KeireClient/Editor/MaterialGraphDocument.h"
 
 #include <atomic>
@@ -35,6 +39,8 @@ namespace KeireEditor
         virtual void UndoMaterialGraphEdit() = 0;
         virtual void RedoMaterialGraphEdit() = 0;
         virtual void RevealMaterialGraphAsset(Keire::AssetId asset) = 0;
+        virtual void SetGraphClipboard(std::string_view text) = 0;
+        [[nodiscard]] virtual std::string GraphClipboard() const = 0;
         virtual void ReportMaterialGraphError(std::string message) noexcept = 0;
     };
 
@@ -68,7 +74,22 @@ namespace KeireEditor
         void DrawHeader(Keire::UiFrame& ui);
         void DrawPreview(Keire::UiFrame& ui);
         void DrawCanvas(Keire::UiFrame& ui);
+        void DrawComments(Keire::UiFrame& ui, MaterialGraphDocument& document, const MaterialGraphCanvasModel& model,
+                          const NodeGraphCommentModel& comments, const NodeGraphCanvasResult& canvas);
+        void CreateComment(Keire::UiFrame& ui, MaterialGraphDocument& document, const MaterialGraphCanvasModel& model,
+                           Keire::Vector2 position, bool selection);
+        void DuplicateSelection(std::span<const StableNodeId> selection,
+                                std::span<const std::pair<StableNodeId, Keire::AssetId>> identities);
+        [[nodiscard]] bool HandleClipboard(const NodeGraphCanvasResult& result,
+                                           std::span<const std::pair<StableNodeId, Keire::AssetId>> identities);
+        [[nodiscard]] bool
+        DrawArrangeMenu(Keire::UiFrame& ui, std::span<const NodeGraphNode> nodes,
+                        std::span<const NodeGraphConnection> connections,
+                        std::span<const std::pair<StableNodeId, Keire::AssetId>> nodeIdentities,
+                        std::span<const std::pair<StableNodeId, Keire::AssetId>> connectionIdentities);
         void DrawInspector(Keire::UiFrame& ui);
+        [[nodiscard]] bool DrawMultiSelectionInspector(Keire::UiFrame& ui);
+        [[nodiscard]] bool DrawNodeCommentInspector(Keire::UiFrame& ui);
         void DrawDiagnostics(Keire::UiFrame& ui);
         void EnsureJobScope();
         [[nodiscard]] bool DrawExpressionCreationMenu(Keire::UiFrame& ui, std::optional<Keire::Vector2> position,
@@ -88,13 +109,17 @@ namespace KeireEditor
 
         IMaterialGraphPanelController& m_Controller;
         StableNodeGraphCanvas m_Canvas;
+        GraphCommentEditorState m_CommentEditor;
         AssetPicker m_ShaderGraphPicker;
         AssetPicker m_RawShaderPicker;
         AssetPicker m_TexturePicker;
         Keire::UiPanelRegistration m_Registration;
         std::optional<Keire::AssetId> m_SelectedNode;
+        std::vector<Keire::AssetId> m_SelectedNodes;
         std::optional<Keire::AssetId> m_SelectedConnection;
+        std::optional<Keire::AssetId> m_FrameNode;
         std::optional<Keire::AssetId> m_InspectorNode;
+        std::optional<Keire::AssetId> m_InspectorCommentNode;
         std::optional<Keire::Vector2> m_NodeCreationPosition;
         std::optional<NodeGraphContextRequest> m_GraphContext;
         std::string m_InspectorName;
@@ -103,6 +128,7 @@ namespace KeireEditor
         std::string m_InspectorFunction;
         std::string m_InspectorDescription;
         std::string m_InspectorCategory;
+        std::string m_InspectorComment;
         double m_InspectorSortPriority = 0.0;
         double m_InspectorMinimum = 0.0;
         double m_InspectorMaximum = 1.0;
@@ -110,8 +136,10 @@ namespace KeireEditor
         bool m_InspectorHasMinimum = false;
         bool m_InspectorHasMaximum = false;
         bool m_InspectorHasStep = false;
+        bool m_InspectorCommentPinned = false;
         bool m_ShowTemplateParameters = false;
         std::string m_NodeSearch;
+        GraphBookmarkSet m_Bookmarks;
         std::string m_Message;
         Keire::Ref<Keire::UiImage> m_PreviewImage;
         std::optional<Keire::MaterialGraphDefinition> m_PreviewDefinition;

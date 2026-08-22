@@ -6,37 +6,37 @@ namespace ManagedSdkConsumer;
 public sealed class PresentationAssetResidency : Behaviour
 {
     [SerializeField, StableFieldId("79fb11a8-7488-4887-87e5-ed09984bf001")]
-    private AssetReference<AudioClip> _audio = default;
+    private AudioClip? _audio;
 
     [SerializeField, StableFieldId("79fb11a8-7488-4887-87e5-ed09984bf002")]
-    private AssetReference<Material> _material = default;
+    private Material? _material;
 
     [SerializeField, StableFieldId("79fb11a8-7488-4887-87e5-ed09984bf003")]
-    private AssetReference<MaterialGraph> _materialGraph = default;
+    private MaterialGraph? _materialGraph;
 
     [SerializeField, StableFieldId("79fb11a8-7488-4887-87e5-ed09984bf004")]
-    private AssetReference<ShaderGraph> _shaderGraph = default;
+    private ShaderGraph? _shaderGraph;
 
     [SerializeField, StableFieldId("79fb11a8-7488-4887-87e5-ed09984bf005")]
-    private AssetReference<VfxEffect> _effect = default;
+    private VfxEffect? _effect;
 
     [SerializeField, StableFieldId("79fb11a8-7488-4887-87e5-ed09984bf006")]
-    private AssetReference<ShaderGraphInstance> _shaderGraphInstance = default;
+    private ShaderGraphInstance? _shaderGraphInstance;
 
     [SerializeField, StableFieldId("79fb11a8-7488-4887-87e5-ed09984bf007")]
-    private AssetReference<MaterialInstance> _materialInstance = default;
+    private MaterialInstance? _materialInstance;
 
     [SerializeField, StableFieldId("79fb11a8-7488-4887-87e5-ed09984bf008")]
-    private AssetReference<VfxVolume> _volume = default;
+    private VfxVolume? _volume;
 
-    private AssetHandle<AudioClip>? _audioLease;
-    private AssetHandle<Material>? _materialLease;
-    private AssetHandle<MaterialGraph>? _materialGraphLease;
-    private AssetHandle<ShaderGraph>? _shaderGraphLease;
-    private AssetHandle<VfxEffect>? _effectLease;
-    private AssetHandle<ShaderGraphInstance>? _shaderGraphInstanceLease;
-    private AssetHandle<MaterialInstance>? _materialInstanceLease;
-    private AssetHandle<VfxVolume>? _volumeLease;
+    private AssetLoadOperation<AudioClip>? _audioLease;
+    private AssetLoadOperation<Material>? _materialLease;
+    private AssetLoadOperation<MaterialGraph>? _materialGraphLease;
+    private AssetLoadOperation<ShaderGraph>? _shaderGraphLease;
+    private AssetLoadOperation<VfxEffect>? _effectLease;
+    private AssetLoadOperation<ShaderGraphInstance>? _shaderGraphInstanceLease;
+    private AssetLoadOperation<MaterialInstance>? _materialInstanceLease;
+    private AssetLoadOperation<VfxVolume>? _volumeLease;
 
     protected override void OnEnable()
     {
@@ -70,6 +70,6 @@ public sealed class PresentationAssetResidency : Behaviour
         _audioLease = null;
     }
 
-    private static AssetHandle<T>? LoadWhenValid<T>(AssetReference<T> reference) where T : class =>
-        reference.IsValid ? Assets.LoadRuntime(reference, AssetLoadPriority.High) : null;
+    private static AssetLoadOperation<T>? LoadWhenValid<T>(T? asset) where T : Asset =>
+        asset is { IsValid: true } ? Assets.LoadRuntime(asset, AssetLoadPriority.High) : null;
 }

@@ -87,6 +87,10 @@ namespace Keire::Detail
         Json roots = Json::array();
         for (const auto& root : definition.IncludeRoots)
             roots.push_back(root.generic_string());
+        const auto resourceBytes = EncodeShaderGraphResources(definition.Resources);
+        const auto resourceContract =
+            Json::parse(reinterpret_cast<const char*>(resourceBytes.data()),
+                        reinterpret_cast<const char*>(resourceBytes.data()) + resourceBytes.size());
         const bool transparent =
             definition.Output == ShaderGraphOutput::Transparent || definition.Output == ShaderGraphOutput::Decal;
         const bool fullscreen = definition.Output == ShaderGraphOutput::Fullscreen;
@@ -104,6 +108,7 @@ namespace Keire::Detail
                             {"stages", {{"vertex", "VSMain"}, {"fragment", "PSMain"}}},
                             {"defines", std::move(defines)},
                             {"includeRoots", std::move(roots)},
+                            {"resources", resourceContract.at("resources")},
                             {"renderState",
                              {{"topology", "TriangleList"},
                               {"culling", fullscreen                                      ? "None"

@@ -9,7 +9,7 @@ internal static class ManagedStateSerializer
 {
     private sealed class StateDocument
     {
-        public int Version { get; set; } = 1;
+        public int Version { get; set; } = 2;
         public List<StateField> Fields { get; set; } = [];
     }
 
@@ -27,22 +27,25 @@ internal static class ManagedStateSerializer
 
     private sealed class EntityJsonConverter : JsonConverter<Entity>
     {
-        public override Entity Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        public override Entity? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
         {
             using JsonDocument document = JsonDocument.ParseValue(ref reader);
             JsonElement root = document.RootElement;
             if (root.ValueKind == JsonValueKind.Null)
-                return default;
-            JsonElement id = TryProperty(root, "Id", "id", out JsonElement nested) ? nested : root;
+                return null;
+            JsonElement id = TryProperty(root, "entity", "Entity", out JsonElement entity)
+                ? entity
+                : TryProperty(root, "Id", "id", out JsonElement nested) ? nested : root;
             ulong high = ReadUInt64(id, "High", "high");
             ulong low = ReadUInt64(id, "Low", "low");
-            return new Entity(s_restoreWorld, new EntityId(high, low));
+            return Entity.FromId(s_restoreWorld, new EntityId(high, low));
         }
 
         public override void Write(Utf8JsonWriter writer, Entity value, JsonSerializerOptions options)
         {
             writer.WriteStartObject();
-            writer.WritePropertyName("Id");
+            writer.WriteString("$ref", "entity");
+            writer.WritePropertyName("entity");
             writer.WriteStartObject();
             writer.WriteNumber("High", value.Id.High);
             writer.WriteNumber("Low", value.Id.Low);
@@ -59,76 +62,92 @@ internal static class ManagedStateSerializer
                 : 0;
     }
 
-    private sealed class UiButtonJsonConverter : JsonConverter<UiButton>
+    private sealed class ComponentJsonConverterFactory : JsonConverterFactory
     {
-        public override UiButton? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-        {
-            if (reader.TokenType == JsonTokenType.Null)
-                return null;
-            Entity entity = JsonSerializer.Deserialize<Entity>(ref reader, options);
-            return entity.Id == default ? null : new UiButton(entity);
-        }
-
-        public override void Write(Utf8JsonWriter writer, UiButton value, JsonSerializerOptions options) =>
-            JsonSerializer.Serialize(writer, value.Entity, options);
+        public override bool CanConvert(Type typeToConvert) => typeof(Component).IsAssignableFrom(typeToConvert) ||
+            typeToConvert.IsInterface && ComponentType.AssignableTypes(typeToConvert).Any();
+        public override JsonConverter CreateConverter(Type typeToConvert, JsonSerializerOptions options) =>
+            (JsonConverter)Activator.CreateInstance(typeof(ComponentJsonConverter<>).MakeGenericType(typeToConvert))!;
     }
 
-    private sealed class UiSliderJsonConverter : JsonConverter<UiSlider>
+    private sealed class ComponentJsonConverter<T> : JsonConverter<T> where T : class
     {
-        public override UiSlider? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        public override T? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
         {
             if (reader.TokenType == JsonTokenType.Null)
                 return null;
-            Entity entity = JsonSerializer.Deserialize<Entity>(ref reader, options);
-            return entity.Id == default ? null : new UiSlider(entity);
+            using JsonDocument document = JsonDocument.ParseValue(ref reader);
+            if (!document.RootElement.TryGetProperty("entity", out JsonElement entityElement))
+                return null;
+            Entity? entity = JsonSerializer.Deserialize<Entity>(entityElement, options);
+            if (entity is null)
+                return null;
+            if (document.RootElement.TryGetProperty("component", out JsonElement componentElement) &&
+                componentElement.ValueKind == JsonValueKind.Object)
+            {
+                ulong high = componentElement.TryGetProperty("High", out JsonElement oldHigh)
+                    ? oldHigh.GetUInt64()
+                    : componentElement.TryGetProperty("high", out JsonElement highValue) ? highValue.GetUInt64() : 0;
+                ulong low = componentElement.TryGetProperty("Low", out JsonElement oldLow)
+                    ? oldLow.GetUInt64()
+                    : componentElement.TryGetProperty("low", out JsonElement lowValue) ? lowValue.GetUInt64() : 0;
+                Type? concrete = ComponentType.FromId(new ComponentTypeId(high, low), typeToConvert);
+                if (concrete is not null)
+                    return entity.GetComponent(concrete) as T;
+            }
+            return entity.GetComponent(typeToConvert) as T;
         }
 
-        public override void Write(Utf8JsonWriter writer, UiSlider value, JsonSerializerOptions options) =>
-            JsonSerializer.Serialize(writer, value.Entity, options);
+        public override void Write(Utf8JsonWriter writer, T value, JsonSerializerOptions options)
+        {
+            if (value is not Component component)
+                throw new JsonException($"'{typeof(T).FullName}' does not contain a component reference.");
+            writer.WriteStartObject();
+            writer.WriteString("$ref", "component");
+            writer.WritePropertyName("entity");
+            JsonSerializer.Serialize(writer, component.Entity, options);
+            writer.WritePropertyName("component");
+            writer.WriteStartObject();
+            writer.WriteNumber("High", component.Type.High);
+            writer.WriteNumber("Low", component.Type.Low);
+            writer.WriteEndObject();
+            writer.WriteString("type", component.GetType().AssemblyQualifiedName);
+            writer.WriteEndObject();
+        }
     }
 
-    private sealed class UiToggleJsonConverter : JsonConverter<UiToggle>
+    private sealed class AssetJsonConverterFactory : JsonConverterFactory
     {
-        public override UiToggle? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-        {
-            if (reader.TokenType == JsonTokenType.Null)
-                return null;
-            Entity entity = JsonSerializer.Deserialize<Entity>(ref reader, options);
-            return entity.Id == default ? null : new UiToggle(entity);
-        }
-
-        public override void Write(Utf8JsonWriter writer, UiToggle value, JsonSerializerOptions options) =>
-            JsonSerializer.Serialize(writer, value.Entity, options);
+        public override bool CanConvert(Type typeToConvert) => typeof(Asset).IsAssignableFrom(typeToConvert);
+        public override JsonConverter CreateConverter(Type typeToConvert, JsonSerializerOptions options) =>
+            (JsonConverter)Activator.CreateInstance(typeof(AssetJsonConverter<>).MakeGenericType(typeToConvert))!;
     }
 
-    private sealed class UiInputFieldJsonConverter : JsonConverter<UiInputField>
+    private sealed class AssetJsonConverter<T> : JsonConverter<T> where T : Asset
     {
-        public override UiInputField? Read(ref Utf8JsonReader reader, Type typeToConvert,
-                                           JsonSerializerOptions options)
+        public override T? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
         {
             if (reader.TokenType == JsonTokenType.Null)
                 return null;
-            Entity entity = JsonSerializer.Deserialize<Entity>(ref reader, options);
-            return entity.Id == default ? null : new UiInputField(entity);
+            using JsonDocument document = JsonDocument.ParseValue(ref reader);
+            JsonElement root = document.RootElement;
+            JsonElement id = root.TryGetProperty("asset", out JsonElement asset) ? asset : root;
+            ulong high = id.TryGetProperty("High", out JsonElement oldHigh) ? oldHigh.GetUInt64()
+                : id.TryGetProperty("high", out JsonElement highValue) ? highValue.GetUInt64() : 0;
+            ulong low = id.TryGetProperty("Low", out JsonElement oldLow) ? oldLow.GetUInt64()
+                : id.TryGetProperty("low", out JsonElement lowValue) ? lowValue.GetUInt64() : 0;
+            return Asset.FromId(typeToConvert, new AssetId(high, low)) as T;
         }
 
-        public override void Write(Utf8JsonWriter writer, UiInputField value, JsonSerializerOptions options) =>
-            JsonSerializer.Serialize(writer, value.Entity, options);
-    }
-
-    private sealed class UiScrollViewJsonConverter : JsonConverter<UiScrollView>
-    {
-        public override UiScrollView? Read(ref Utf8JsonReader reader, Type typeToConvert,
-                                          JsonSerializerOptions options)
+        public override void Write(Utf8JsonWriter writer, T value, JsonSerializerOptions options)
         {
-            if (reader.TokenType == JsonTokenType.Null)
-                return null;
-            Entity entity = JsonSerializer.Deserialize<Entity>(ref reader, options);
-            return entity.Id == default ? null : new UiScrollView(entity);
+            writer.WriteStartObject();
+            writer.WriteString("$ref", "asset");
+            writer.WritePropertyName("asset");
+            JsonSerializer.Serialize(writer, value.Id, options);
+            writer.WriteString("type", value.GetType().AssemblyQualifiedName);
+            writer.WriteEndObject();
         }
-
-        public override void Write(Utf8JsonWriter writer, UiScrollView value, JsonSerializerOptions options) =>
-            JsonSerializer.Serialize(writer, value.Entity, options);
     }
 
     private static readonly JsonSerializerOptions Options = CreateOptions();
@@ -141,6 +160,20 @@ internal static class ManagedStateSerializer
         {
             if (typeInfo.Kind != JsonTypeInfoKind.Object)
                 return;
+            bool fieldOnly = typeInfo.Type.IsDefined(typeof(SerializableAttribute), false) ||
+                             typeInfo.Type.IsDefined(typeof(SerializableTypeAttribute), false);
+            if (fieldOnly)
+            {
+                for (int index = typeInfo.Properties.Count - 1; index >= 0; --index)
+                {
+                    ICustomAttributeProvider? provider = typeInfo.Properties[index].AttributeProvider;
+                    if (provider is PropertyInfo || provider is FieldInfo field &&
+                        (field.IsStatic || field.IsInitOnly || field.IsDefined(typeof(NonSerializedAttribute), false)))
+                    {
+                        typeInfo.Properties.RemoveAt(index);
+                    }
+                }
+            }
             var existing = typeInfo.Properties.Select(property => property.Name).ToHashSet(StringComparer.Ordinal);
             foreach (FieldInfo field in typeInfo.Type.GetFields(BindingFlags.Instance | BindingFlags.NonPublic))
             {
@@ -163,11 +196,8 @@ internal static class ManagedStateSerializer
             WriteIndented = false
         };
         options.Converters.Add(new EntityJsonConverter());
-        options.Converters.Add(new UiButtonJsonConverter());
-        options.Converters.Add(new UiSliderJsonConverter());
-        options.Converters.Add(new UiToggleJsonConverter());
-        options.Converters.Add(new UiInputFieldJsonConverter());
-        options.Converters.Add(new UiScrollViewJsonConverter());
+        options.Converters.Add(new ComponentJsonConverterFactory());
+        options.Converters.Add(new AssetJsonConverterFactory());
         return options;
     }
 
@@ -202,7 +232,7 @@ internal static class ManagedStateSerializer
         var document = Read(state);
         var warnings = new List<string>();
         ulong previousWorld = s_restoreWorld;
-        s_restoreWorld = behaviour.Entity.World;
+        s_restoreWorld = behaviour.Entity?.World ?? 0;
         try
         {
             foreach (var field in SerializableFields(behaviour.GetType(), includeReloadOnly))

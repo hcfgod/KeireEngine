@@ -1,4 +1,5 @@
 #include "KeireClient/Editor/AuthoringWidgets.h"
+#include "KeireClient/Editor/GraphComments.h"
 
 #include <doctest/doctest.h>
 
@@ -378,4 +379,98 @@ TEST_CASE("Stable node graph zoom detail prevents labels from overlapping scaled
     CHECK(full.PinLabels);
     CHECK(full.ConnectionLabels);
     CHECK(KeireEditor::StableNodeGraphCanvas::DetailForZoom(std::numeric_limits<float>::quiet_NaN()) == full);
+}
+
+TEST_CASE("Stable node graph multi-selection is ordered and marquee selection is deterministic")
+{
+    KeireEditor::StableNodeGraphCanvas canvas;
+    const auto selections = [&canvas] { return std::vector(canvas.Selections().begin(), canvas.Selections().end()); };
+    canvas.Select(11);
+    canvas.ToggleSelection(22);
+    CHECK(selections() == std::vector<KeireEditor::StableNodeId>{11, 22});
+    CHECK(canvas.Selection() == 22);
+    canvas.ToggleSelection(11);
+    CHECK(selections() == std::vector<KeireEditor::StableNodeId>{22});
+
+    const std::array ordered{KeireEditor::StableNodeId{31}, KeireEditor::StableNodeId{32},
+                             KeireEditor::StableNodeId{33}};
+    canvas.Select(ordered, 31);
+    CHECK(selections() == std::vector<KeireEditor::StableNodeId>{32, 33, 31});
+    CHECK(canvas.Selection() == 31);
+
+    const std::vector<KeireEditor::NodeGraphNode> nodes{{41, "First", {10.0F, 10.0F}, {80.0F, 60.0F}},
+                                                        {42, "Second", {180.0F, 40.0F}, {100.0F, 80.0F}},
+                                                        {43, "Outside", {420.0F, 360.0F}, {90.0F, 60.0F}}};
+    CHECK(KeireEditor::StableNodeGraphCanvas::MarqueeSelection(nodes, {0.0F, 0.0F}, {220.0F, 100.0F}) ==
+          std::vector<KeireEditor::StableNodeId>{41, 42});
+    canvas.SelectAll(nodes);
+    CHECK(selections() == std::vector<KeireEditor::StableNodeId>{41, 42, 43});
+    CHECK(canvas.Selection() == 43);
+}
+
+TEST_CASE("Graph comment presentation reserves node identities and preserves nested ownership")
+{
+    constexpr KeireEditor::StableNodeId nodeCanvas = 77;
+    const auto nodeAsset = Keire::AssetId::Generate();
+    const Keire::AssetId commentAsset(0, 0x434f4d4d454e5401ULL ^ nodeCanvas);
+    Keire::GraphAuthoringMetadata metadata;
+    metadata.Comments.push_back({commentAsset, "Collision-safe", {}, {}, {400.0F, 240.0F}});
+    const std::array identities{std::pair{nodeCanvas, nodeAsset}};
+
+    const auto model = KeireEditor::BuildNodeGraphCommentModel(metadata, identities);
+    REQUIRE(model.Comments.size() == 1);
+    CHECK(model.Comments.front().Id != nodeCanvas);
+    CHECK(model.Asset(model.Comments.front().Id) == commentAsset);
+
+    KeireEditor::NodeGraphCommentCreateRequest request;
+    request.Position = {80.0F, 90.0F};
+    request.Size = {220.0F, 120.0F};
+    request.Members = {nodeCanvas};
+    const KeireEditor::GraphCommentCanvasEdit edit{KeireEditor::GraphCommentCanvasEditKind::Create,
+                                                   KeireEditor::CreateGraphComment(request, identities)};
+    KeireEditor::ApplyGraphCommentCanvasEdit(metadata, edit);
+    REQUIRE(metadata.Comments.size() == 2);
+    CHECK(metadata.Comments.back().Parent == commentAsset);
+    CHECK(metadata.Comments.front().Members == std::vector<Keire::AssetId>{metadata.Comments.back().Id});
+    CHECK(metadata.Comments.back().Members == std::vector<Keire::AssetId>{nodeAsset});
+}
+
+TEST_CASE("Graph comments enclose selection with deterministic padding")
+{
+    const std::vector<KeireEditor::NodeGraphNode> nodes{{11, "First", {100.0F, 80.0F}, {120.0F, 90.0F}},
+                                                        {12, "Second", {300.0F, 220.0F}, {160.0F, 100.0F}}};
+    constexpr std::array selected{KeireEditor::StableNodeId{11}, KeireEditor::StableNodeId{12}};
+    const auto request = KeireEditor::StableNodeGraphCanvas::CommentFromSelection(nodes, selected, {});
+    CHECK(request.Members == std::vector<KeireEditor::StableNodeId>{11, 12});
+    CHECK((request.Position == Keire::Vector2{60.0F, 16.0F}));
+    CHECK((request.Size == Keire::Vector2{440.0F, 344.0F}));
+}
+
+TEST_CASE("Graph node annotations map stable identities and preserve pinned presentation")
+{
+    const auto nodeId = Keire::AssetId::Generate();
+    Keire::GraphAuthoringMetadata metadata;
+    metadata.NodeAnnotations.push_back({nodeId, "Keep this branch normalized", true, true});
+    metadata.NodeAnnotations.push_back({Keire::AssetId::Generate(), "Hidden", false, false});
+    const std::array identities{std::pair<KeireEditor::StableNodeId, Keire::AssetId>{42, nodeId}};
+    std::array nodes{KeireEditor::NodeGraphNode{.Id = 42}};
+
+    KeireEditor::ApplyNodeGraphAnnotations(metadata, identities, nodes);
+
+    CHECK(nodes.front().Comment == "Keep this branch normalized");
+    CHECK(nodes.front().CommentPinned);
+}
+
+TEST_CASE("Graph node annotation editing upserts and removes one stable bubble")
+{
+    const auto node = Keire::AssetId::Generate();
+    Keire::GraphAuthoringMetadata metadata;
+
+    KeireEditor::SetGraphNodeAnnotation(metadata, node, "First", false);
+    KeireEditor::SetGraphNodeAnnotation(metadata, node, "Updated", true);
+
+    REQUIRE(metadata.NodeAnnotations.size() == 1);
+    CHECK(metadata.NodeAnnotations.front() == Keire::GraphNodeAnnotation{node, "Updated", true, true});
+    KeireEditor::SetGraphNodeAnnotation(metadata, node, {}, false);
+    CHECK(metadata.NodeAnnotations.empty());
 }

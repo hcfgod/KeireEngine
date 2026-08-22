@@ -3,6 +3,7 @@
 #include "Keire/Api.h"
 #include "Keire/Assets/AssetPipeline.h"
 #include "Keire/Assets/AssetSystem.h"
+#include "Keire/Authoring/GraphAuthoring.h"
 #include "Keire/Math/Curves.h"
 #include "Keire/Math/Math.h"
 #include "Keire/Ref.h"
@@ -23,6 +24,9 @@
 
 namespace Keire
 {
+    class VfxSubgraphAsset;
+    using VfxSubgraphResolver = std::function<Ref<const VfxSubgraphAsset>(AssetId)>;
+
     /// Controls whether simulated particle positions are relative to the emitter or fixed in world coordinates.
     ///
     /// On both CPU and GPU, Local particles follow later SetTransform calls. World particles keep the world position
@@ -78,14 +82,14 @@ namespace Keire
         Gpu
     };
 
-    /// Selects the compatibility module stack or the schema-4 Context/Block graph as the authoritative program.
+    /// Selects the compatibility module stack or the Context/Block graph as the authoritative program.
     enum class VfxExecutionSource : std::uint8_t
     {
         LegacyModules,
         Graph
     };
 
-    /// Selects whether a schema-4 Graph enforces native capability errors or preserves historical module behavior with
+    /// Selects whether a Graph enforces native capability errors or preserves historical module behavior with
     /// explicit warnings. Conversion and schema 1-3 migration select MigratedLegacyModules automatically.
     enum class VfxCompatibilityMode : std::uint8_t
     {
@@ -229,7 +233,7 @@ namespace Keire
         Event
     };
 
-    inline constexpr std::uint32_t CurrentVfxSchemaVersion = 4;
+    inline constexpr std::uint32_t CurrentVfxSchemaVersion = 5;
 
     template <typename T> struct VfxRange
     {
@@ -445,7 +449,7 @@ namespace Keire
         [[nodiscard]] bool operator==(const VfxGraphPin&) const = default;
     };
 
-    /// Ordered executable element owned by a schema-4 Context node.
+    /// Ordered executable element owned by a Context node.
     struct VfxGraphBlock
     {
         AssetId Id;
@@ -556,6 +560,7 @@ namespace Keire
         std::uint32_t ParticlesPerStrip = 32;
         std::vector<VfxGraphNode> Nodes;
         std::vector<VfxGraphConnection> Connections;
+        GraphAuthoringMetadata Authoring;
 
         [[nodiscard]] bool operator==(const VfxGraphSystem&) const = default;
     };
@@ -574,7 +579,7 @@ namespace Keire
 
     /// Complete serialized definition of a .keirevfx asset.
     ///
-    /// Schemas 1-3 are migrated in memory. Explicit publication writes schema 4.
+    /// Schemas 1-4 are migrated in memory. Explicit publication writes schema 5.
     struct VfxEffectDefinition
     {
         std::uint32_t SchemaVersion = CurrentVfxSchemaVersion;
@@ -830,7 +835,7 @@ namespace Keire
         std::uint32_t Index = 0;
     };
 
-    /// Deterministic executable program lowered from the compatibility stack or a schema-4 Context/Block graph.
+    /// Deterministic executable program lowered from the compatibility stack or a Context/Block graph.
     struct VfxCompiledProgram
     {
         std::uint64_t Hash = 0;
@@ -881,12 +886,14 @@ namespace Keire
     /// Creates an executable module node with generated stable identity and canonical typed pins.
     [[nodiscard]] KEIRE_API VfxGraphNode CreateVfxGraphModuleNode(const VfxModuleDefinition& module,
                                                                   Vector2 editorPosition = {});
-    /// Creates a schema-4 Block for an ordered Context stack. The block references, but does not duplicate, the
+    /// Creates a Block for an ordered Context stack. The block references, but does not duplicate, the
     /// module payload and owns canonical data-input pins only; its vector position in the Context is execution order.
     [[nodiscard]] KEIRE_API VfxGraphBlock CreateVfxGraphBlock(const VfxModuleDefinition& module);
     /// Creates an ordered Portable Custom HLSL Block. Callers may append supported typed input pins before insertion.
     [[nodiscard]] KEIRE_API VfxGraphBlock CreateVfxGraphPortableHlslBlock(std::string source);
     /// Migrates any supported historical definition to the current schema without changing existing stable IDs.
+    [[nodiscard]] KEIRE_API VfxEffectDefinition MigrateVfxEffectToCurrentSchema(const VfxEffectDefinition& definition);
+    /// Source-compatible alias retained for callers compiled against Kéire 0.3.x.
     [[nodiscard]] KEIRE_API VfxEffectDefinition MigrateVfxEffectToSchema4(const VfxEffectDefinition& definition);
     /// Converts a legacy module stack to an executable graph without changing module stable IDs.
     [[nodiscard]] KEIRE_API VfxEffectDefinition ConvertVfxEffectToGraph(const VfxEffectDefinition& definition);
@@ -1052,6 +1059,8 @@ namespace Keire
         /// Optional CPU resource provider used by texture, mesh, and buffer expression nodes. A missing or rejected
         /// query fails the affected expression deterministically and publishes SimulationValueInvalid.
         std::function<std::optional<VfxResourceQueryResult>(const VfxResourceQuery& query)> ResourceQuery;
+        /// Resolves referenced VFX Subgraph assets during activation and reload. Missing dependencies fail explicitly.
+        VfxSubgraphResolver SubgraphResolver;
     };
 
     /// Parameters used to create one effect instance.

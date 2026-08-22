@@ -108,6 +108,7 @@ internal sealed class ManagedAssetRegistry : IDisposable
         if (!id.IsValid)
             throw new ArgumentException("Asset ID must be valid.", nameof(id));
         ArgumentNullException.ThrowIfNull(asset);
+        asset.BindAsset(id);
 
         InFlightLoad? completedLoad = null;
         lock (_gate)
@@ -150,11 +151,11 @@ internal sealed class ManagedAssetRegistry : IDisposable
         completedLoad?.Completion.TrySetResult(asset);
     }
 
-    public bool TryLoad<T>(AssetReference<T> reference, out T? value) where T : class
+    public bool TryLoad<T>(AssetId id, out T? value) where T : class
     {
         lock (_gate)
         {
-            if (!_disposed && reference.Id.IsValid && _loaded.TryGetValue(reference.Id, out ScriptableObject? asset) &&
+            if (!_disposed && id.IsValid && _loaded.TryGetValue(id, out ScriptableObject? asset) &&
                 asset is T typed)
             {
                 value = typed;
@@ -208,29 +209,29 @@ internal sealed class ManagedAssetRegistry : IDisposable
         }
     }
 
-    public ValueTask<T> LoadAsync<T>(AssetReference<T> reference, CancellationToken cancellation)
+    public ValueTask<T> LoadAsync<T>(AssetId id, CancellationToken cancellation)
         where T : ScriptableObject
     {
         cancellation.ThrowIfCancellationRequested();
-        if (!reference.Id.IsValid)
-            return ValueTask.FromException<T>(new ArgumentException("Asset ID must be valid.", nameof(reference)));
+        if (!id.IsValid)
+            return ValueTask.FromException<T>(new ArgumentException("Asset ID must be valid.", nameof(id)));
 
         Task<ScriptableObject> task;
         InFlightLoad? startedLoad = null;
         lock (_gate)
         {
             ThrowIfDisposed();
-            if (_loaded.TryGetValue(reference.Id, out ScriptableObject? loaded))
+            if (_loaded.TryGetValue(id, out ScriptableObject? loaded))
                 return loaded is T typed
                     ? ValueTask.FromResult(typed)
-                    : ValueTask.FromException<T>(TypeMismatch<T>(reference.Id, loaded));
+                    : ValueTask.FromException<T>(TypeMismatch<T>(id, loaded));
 
             if (_provider is null)
                 return ValueTask.FromException<T>(
                     new InvalidOperationException(
-                        $"Managed asset {reference.Id} is not loaded and no provider exists."));
+                        $"Managed asset {id} is not loaded and no provider exists."));
 
-            if (!_inFlight.TryGetValue(reference.Id, out InFlightLoad? inFlight))
+            if (!_inFlight.TryGetValue(id, out InFlightLoad? inFlight))
             {
                 if (_loaded.Count + _inFlight.Count >= _maximumLoadedAssets)
                     return ValueTask.FromException<T>(new InvalidOperationException(
@@ -240,15 +241,15 @@ internal sealed class ManagedAssetRegistry : IDisposable
                         $"Managed asset generation {Generation} reached its " +
                         $"{_maximumInFlightLoads}-request asynchronous load capacity."));
                 inFlight = new InFlightLoad();
-                _inFlight.Add(reference.Id, inFlight);
+                _inFlight.Add(id, inFlight);
                 startedLoad = inFlight;
             }
             task = inFlight.Completion.Task;
         }
 
         if (startedLoad is not null)
-            _ = ResolveAsync(reference.Id, startedLoad);
-        return new ValueTask<T>(AwaitTyped<T>(reference.Id, task, cancellation));
+            _ = ResolveAsync(id, startedLoad);
+        return new ValueTask<T>(AwaitTyped<T>(id, task, cancellation));
     }
 
     public bool Unload(AssetId id)
@@ -432,44 +433,46 @@ internal sealed class ManagedAssetRegistry : IDisposable
 
 public static class Assets
 {
-    public static AssetHandle<T> LoadRuntime<T>(AssetReference<T> reference,
-                                                AssetLoadPriority priority = AssetLoadPriority.Normal)
-        where T : class
+    public static AssetLoadOperation<T> LoadRuntime<T>(T asset,
+                                                       AssetLoadPriority priority = AssetLoadPriority.Normal)
+        where T : Asset
     {
-        if (!reference.Id.IsValid)
-            throw new ArgumentException("Runtime asset loading requires a valid asset reference.", nameof(reference));
+        ArgumentNullException.ThrowIfNull(asset);
+        if (!asset.Id.IsValid)
+            throw new ArgumentException("Runtime asset loading requires a persistent asset.", nameof(asset));
         if (priority is < AssetLoadPriority.Critical or > AssetLoadPriority.Background)
             throw new ArgumentOutOfRangeException(nameof(priority));
         ulong generation = NativeRuntime.ManagedAssets?.Generation ??
             throw new InvalidOperationException("No managed asset generation is installed for this application.");
-        ulong handle = NativeAssets.BeginRuntimeAssetLoad(generation, reference.Id, RuntimeAssetType<T>.Id, priority);
+        ulong handle = NativeAssets.BeginRuntimeAssetLoad(generation, asset.Id, RuntimeAssetType<T>.Id, priority);
         return handle != 0
-            ? new AssetHandle<T>(reference, handle)
+            ? new AssetLoadOperation<T>(asset, handle)
             : throw new InvalidOperationException(
-                $"Runtime asset {reference.Id} could not enter the application asset pipeline.");
+                $"Runtime asset {asset.Id} could not enter the application asset pipeline.");
     }
 
     public static void Register<T>(AssetId id, T asset) where T : ScriptableObject =>
         RequireRegistry().Register(id, asset);
 
-    public static T Load<T>(AssetReference<T> reference) where T : ScriptableObject
+    public static T Load<T>(T asset) where T : ScriptableObject
     {
-        if (TryLoad(reference, out T? value))
+        ArgumentNullException.ThrowIfNull(asset);
+        if (TryLoad(asset, out T? value))
             return value!;
-        throw new InvalidOperationException($"Managed asset {reference.Id} is not loaded as {typeof(T).FullName}.");
+        throw new InvalidOperationException($"Managed asset {asset.Id} is not loaded as {typeof(T).FullName}.");
     }
 
-    public static bool TryLoad<T>(AssetReference<T> reference, out T? value) where T : class
+    public static bool TryLoad<T>(T asset, out T? value) where T : ScriptableObject
     {
+        ArgumentNullException.ThrowIfNull(asset);
         ManagedAssetRegistry? registry = NativeRuntime.ManagedAssets;
         if (registry is not null)
-            return registry.TryLoad(reference, out value);
+            return registry.TryLoad(asset.Id, out value);
         value = null;
         return false;
     }
 
-    public static ValueTask<T> LoadAsync<T>(AssetReference<T> reference,
-                                            CancellationToken cancellation = default)
+    public static ValueTask<T> LoadAsync<T>(T asset, CancellationToken cancellation = default)
         where T : ScriptableObject
     {
         cancellation.ThrowIfCancellationRequested();
@@ -477,7 +480,7 @@ public static class Assets
         return registry is null
             ? ValueTask.FromException<T>(
                 new InvalidOperationException("No managed asset generation is installed for this application."))
-            : registry.LoadAsync(reference, cancellation);
+            : registry.LoadAsync<T>(asset.Id, cancellation);
     }
 
     public static bool Unload(AssetId id)
@@ -520,7 +523,7 @@ internal static class ManagedAssetRuntimeSelfTests
     {
         public string Label = string.Empty;
         public List<SelfTestLeaf> Leaves = [];
-        public AssetReference<SelfTestAsset> Asset;
+        public SelfTestAsset? Asset;
         public SelfTestNode? Next;
     }
 
@@ -552,7 +555,7 @@ internal static class ManagedAssetRuntimeSelfTests
 
         const ulong generation = ulong.MaxValue - 1;
         var id = new AssetId(0x6b656972652d4077, 0x8000000000001001);
-        var reference = new AssetReference<SelfTestAsset>(id);
+        var reference = (SelfTestAsset)Asset.FromId(typeof(SelfTestAsset), id)!;
         var release = new TaskCompletionSource<ScriptableObject?>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         int providerCalls = 0;

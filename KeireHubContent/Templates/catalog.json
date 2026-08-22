@@ -108,7 +108,7 @@
       "compatibleEditors": ">=0.3.0 <2.0.0",
       "projectSchema": 3,
       "platformTarget": "desktop",
-      "estimatedSizeBytes": 24822837,
+      "estimatedSizeBytes": 24823050,
       "payloadRoot": "Payloads/Sandbox",
       "payloadFiles": [
         {
@@ -548,8 +548,8 @@
         },
         {
           "path": "Assets/Scripts/Runtime/Examples/ShowcaseOrbit.cs",
-          "sizeBytes": 1441,
-          "sha256": "510bea57c66ae486355d2b049e3eb8d0cd9be13adba8bf0f818edc56423721fe"
+          "sizeBytes": 1435,
+          "sha256": "5c2ca468d77aa750171647694f0bda8c27c25145ca219928cb695258fbd40694"
         },
         {
           "path": "Assets/Scripts/Runtime/Examples/ShowcaseOrbit.cs.keiremeta",
@@ -558,8 +558,8 @@
         },
         {
           "path": "Assets/Scripts/Runtime/FirstPersonCamera.cs",
-          "sizeBytes": 15900,
-          "sha256": "d15a94ca6edc9b5f45e50116d0371ba44726a60a6ac2fa5b049a3accf9341927"
+          "sizeBytes": 15939,
+          "sha256": "2396d142102f764673197dc0adcc49cdb6c6ea73e433b3bfa1ec5fe0e0d74c5c"
         },
         {
           "path": "Assets/Scripts/Runtime/FirstPersonCamera.cs.keiremeta",
@@ -568,8 +568,8 @@
         },
         {
           "path": "Assets/Scripts/Runtime/FpsVfxShowcase.cs",
-          "sizeBytes": 3193,
-          "sha256": "47d6ebe097973593c08b2c319c4fd505a48cb808128904b6c1a884b038355a64"
+          "sizeBytes": 3316,
+          "sha256": "6b36f603d247b2b63f3e395329591b342853174777e9ca166096530eb7d61821"
         },
         {
           "path": "Assets/Scripts/Runtime/FpsVfxShowcase.cs.keiremeta",
@@ -598,8 +598,8 @@
         },
         {
           "path": "Assets/Scripts/Runtime/ThirdPersonController.cs",
-          "sizeBytes": 3344,
-          "sha256": "24c10101a0d93b9305edea6c021a953c533ca06f6a6d9c3862fdb36cf7827df2"
+          "sizeBytes": 3356,
+          "sha256": "548fd2d9a665f0f5443b068861c24fa2e064e099f37abf616fe41c495b49b041"
         },
         {
           "path": "Assets/Scripts/Runtime/ThirdPersonController.cs.keiremeta",
@@ -608,8 +608,8 @@
         },
         {
           "path": "Assets/Scripts/Runtime/UIController.cs",
-          "sizeBytes": 3828,
-          "sha256": "1ede877ceca2d4d6e838271674064ec67b076fce5278cc3c1d2190a39eae9f5c"
+          "sizeBytes": 3873,
+          "sha256": "82f73a1ef48edc3d4f028c23e13d2eb9cecfeace47919a5bc9a46701daaa9b1f"
         },
         {
           "path": "Assets/Scripts/Runtime/UIController.cs.keiremeta",

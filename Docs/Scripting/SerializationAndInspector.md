@@ -1,236 +1,127 @@
 # Serialization And The Inspector
 
-Kéire serializes authoring state by stable identity so scene, prefab, Play Mode, and script-reload workflows can survive
-ordinary code changes. Treat serialized members as a data contract: choose supported types, assign stable IDs, and
-migrate intentionally.
+Kéire 0.4.0 uses managed-state format v2 and Unity-style field eligibility. State is attached to a behaviour,
+prefab, scene, or persistent managed-data asset; the Inspector edits the same stable-field representation used by
+save/load, duplication, prefab instantiation, hot reload, undo/redo, and Play Mode Changes.
 
-## Behaviour Fields
+## Field Eligibility
 
-A `Behaviour` field participates in persistent scene or prefab state when it is:
+The following fields serialize:
 
-- a public instance field; or
-- a non-public instance field marked `[SerializeField]`.
+- public instance fields;
+- private or protected instance fields marked `[SerializeField]`.
 
-Static, `readonly`, `[NonSerialized]`, and compiler-generated fields are not captured. Private fields without
-`[SerializeField]` remain ordinary runtime state.
+The following do not serialize:
 
-Prefer private serialized fields:
+- plain non-public fields;
+- static, const, or readonly fields;
+- properties;
+- fields marked `[NonSerialized]`.
 
-```csharp
-[SerializeField, StableFieldId("8a802089-1236-4370-9c9c-133c251305f2")]
-[Header("Locomotion")]
-[InspectorName("Maximum Speed")]
-[InspectorGroup("Movement")]
-[Range(0.0, 20.0)]
-[Tooltip("Maximum horizontal speed in metres per second.")]
-private float _maximumSpeed = 6.0f;
-```
-
-This keeps the public API small while preserving an explicit authoring surface.
-
-## Persistent State Versus Reload State
-
-The two state categories solve different problems:
-
-| Declaration | Scene/prefab state | Successful reload migration |
-| --- | --- | --- |
-| Public field | Yes | Yes |
-| `[SerializeField]` private field | Yes | Yes |
-| `[HotReloadState]` private field | No | Yes |
-| Plain private field | No | No |
-
-Use `[HotReloadState]` for transient Play Mode values that should survive recompilation but must not become authored
-defaults:
+`[SerializedField]` is not an alias and is intentionally unsupported.
 
 ```csharp
-[SerializeField, StableFieldId("8306ea72-47ed-48bf-95d3-0023575806c8")]
-private float _maximumHealth = 100.0f;
+public int Lives = 3;
 
-[HotReloadState]
-private float _currentHealth;
-```
-
-A field can be both persistent and reloadable through its persistent declaration; adding `[HotReloadState]` to a
-serialized field is redundant.
-
-## Stable Field Identity
-
-`StableFieldId` is the durable identity of a serialized member:
-
-```csharp
-[SerializeField, StableFieldId("e22be096-7a90-4936-b474-b5f1a47b74af")]
-private AssetReference<AudioClip> _interactionSound;
-```
-
-Keep the ID unchanged when renaming the field. Never copy an ID to a different field or change the field's meaning
-without an explicit data migration.
-
-For legacy fields without a stable ID, `FormerlySerializedAs` provides a compatibility fallback:
-
-```csharp
 [SerializeField]
-[FormerlySerializedAs("movementSpeed")]
-[FormerlySerializedAs("_walkSpeed")]
-private float _speed = 5.0f;
+private float _speed = 6.0f;
+
+private float _runtimeAccumulator; // not serialized
+public string DisplayName => $"Player ({Lives})"; // not serialized
 ```
 
-Name-based restoration produces a migration warning. Add a stable ID so future renames no longer depend on names.
+Generated gameplay projects suppress only the nullable warnings required for Inspector-injected references and direct
+assignment from nullable lookups. The engine assembly remains nullable-strict; use `TryGetComponent` when absence is
+part of normal control flow.
 
-## Inspector Attributes
+## Supported Values
 
-| Attribute | Purpose |
-| --- | --- |
-| `[SerializeField]` | Include a non-public field, or an eligible managed-data property, in serialized authoring state |
-| `[HotReloadState]` | Migrate a non-persistent `Behaviour` field during Play Mode reload |
-| `[StableFieldId("uuid")]` | Give a serialized member durable identity |
-| `[FormerlySerializedAs("name")]` | Add a legacy name fallback |
-| `[Header("text")]` | Add a heading before a `Behaviour` or managed-data member |
-| `[InspectorName("name")]` | Replace the generated member label without changing serialized identity |
-| `[InspectorGroup("name")]` | Group related members where the Inspector supports grouped presentation |
-| `[Tooltip("text")]` | Describe a member in the Inspector |
-| `[Range(min, max)]` | Render a numeric slider with finite increasing bounds |
-| `[Min(value)]` / `[Max(value)]` | Apply one or both bounds to a numeric drag field without converting it to a slider |
-| `[InspectorStep(value)]` | Set the positive drag increment for a numeric field |
-| `[Multiline(lines)]` | Render a string field with 2–32 visible lines |
-| `[ReadOnlyInInspector]` | Show a `Behaviour` or managed-data member without allowing Inspector edits |
-| `[HideInInspector]` | Serialize a member without displaying it |
-| `[SerializableType]` | Allow a nested inline type in managed data |
-| `[StableComponentId("uuid")]` | Identify an attachable managed component |
-| `[StableAssetTypeId("uuid")]` | Identify a concrete managed data or built-in asset marker type |
-| `[CreateAssetMenu("path", "name")]` | Add a managed data type to **Create > Managed Data** |
-| `[RequireComponent(typeof(T))]` | Enforce an automatically attached, non-removable-while-required dependency |
-| `[ExecutionOrder(value)]` | Define relative managed callback order |
+- primitives, strings, enums, and Kéire math/value types;
+- `[Serializable]` classes and structs with supported fields;
+- `Entity`, concrete `Component`, `Behaviour`, `Asset`, `Prefab`, `SceneAsset`, and persistent `ScriptableObject`
+  references;
+- one-dimensional arrays and `List<T>` of supported element values;
+- `KeireEvent` values.
 
-`Range`, `Min`, `Max`, `InspectorStep`, and `Multiline` validate their constructor values. Discovery also rejects
-numeric attributes on non-numeric members and `Multiline` on non-string members. These authoring controls do not
-replace runtime validation for values loaded from another source or computed by code.
-
-Use a slider for a deliberately bounded choice and a bounded drag for values that may need precise keyboard entry:
+This milestone does not support `[SerializeReference]`, dictionaries, multidimensional arrays, jagged arrays, or a
+collection nested directly inside another collection.
 
 ```csharp
-[SerializeField, Range(0.0, 1.0)]
-private float _masterVolume = 0.8f;
-
-[SerializeField, Min(0.0), Max(500.0), InspectorStep(0.25)]
-private float _acceleration = 12.0f;
-
-[SerializeField, Multiline(6), InspectorName("Designer Notes")]
-private string _notes = string.Empty;
-```
-
-## Common Supported Values
-
-Behaviour state supports the engine value types used throughout the managed API:
-
-- Boolean, integral, floating-point, string, and enum values;
-- `Vector2`, `Vector3`, `Vector4`, `Quaternion`, and `Color`;
-- `Entity`, ID values, and asset references;
-- `UiButton` scene bindings;
-- serializable arrays, lists, and event data whose elements are supported.
-
-Managed data assets apply stricter discovery rules described in
-[Assets And ScriptableObjects](AssetsAndScriptableObjects.md). In particular, nested inline managed-data types require
-`[SerializableType]`, dictionaries are rejected, and inline `ScriptableObject` graphs must use `AssetReference<T>`.
-
-If the editor reports a serialization diagnostic, change the field shape rather than relying on implementation-specific
-`System.Text.Json` behavior.
-
-The current `Behaviour` Inspector directly edits scalar/string/enum values, engine math values, `Entity`, `UiButton`,
-`KeireEvent`, and `AssetReference<T>` fields, plus supported nested `[SerializableType]` values. Arrays and lists may
-participate in state migration without receiving the same direct component-Inspector editing surface. Display names,
-headers, groups, tooltips, sliders, drag bounds and steps, multiline strings, read-only state, and hidden state use the
-same validated metadata semantics for `Behaviour` and managed-data members.
-
-## Entity And Asset References
-
-Scene references use `Entity`:
-
-```csharp
-[SerializeField, StableFieldId("04e66bd4-3747-4340-af60-a1d77a3111a1")]
-private Entity _target;
-```
-
-Asset references use `AssetReference<T>`, not the asset marker type itself:
-
-```csharp
-[SerializeField, StableFieldId("76d371a5-ffcb-4793-9fe0-90a95f1fd8e7")]
-private AssetReference<AudioClip> _clip;
-```
-
-`AssetReference<T>` is a value type. Do not declare it nullable or compare it with `null`; use `_clip.IsValid`.
-
-`UiButton?` is different: it is a managed wrapper class for a scene-authored UI Button and can be `null`:
-
-```csharp
-[SerializeField, StableFieldId("31375b29-c8a8-4943-a7df-07f3d515caa2")]
-private UiButton? _confirmButton;
-```
-
-## Inspector Events
-
-`KeireEvent` fields expose persistent listeners:
-
-```csharp
-[SerializeField, StableFieldId("76ff62e8-d557-4e4c-8c65-0933763e4162")]
-private KeireEvent _opened = new();
-
-[SerializeField, StableFieldId("85fc4fee-a36a-48dc-91f1-b5c1529026dd")]
-private KeireEvent<float> _healthChanged = new();
-```
-
-Generic events support up to four arguments. Persistent callback methods must return `void` and accept runtime-compatible
-arguments in the same order. Code listeners added with `AddListener` are runtime-only and must be removed during
-disable/reload when the subscription should not survive.
-
-See [UI And Events](UiAndEvents.md) for a complete binding pattern.
-
-## Inspector Edits During Play Mode
-
-Inspector edits to serialized `Behaviour` fields hydrate the active Play Mode instance immediately. They remain
-isolated to the runtime scene clone unless selected and applied through **Play Mode Changes**.
-
-Managed data assets are different: `.keiredata` documents are project assets. Saving one publishes a new development
-revision even during Play Mode; it is not a scene-clone edit.
-
-## Renaming And Changing Types
-
-Safe changes:
-
-- rename a field while preserving its `StableFieldId`;
-- add a new field with a new ID and a useful default;
-- hide or regroup a field without changing its identity;
-- add a legacy alias while transitioning an old field.
-
-Changes that require migration planning:
-
-- changing a field to an incompatible type;
-- reusing an ID for another meaning;
-- deleting a field whose value must be preserved elsewhere;
-- converting an inline object to an asset reference;
-- moving a type to a different assembly while changing its stable component or asset ID.
-
-Candidate reload hydration is transactional. An incompatible migration rejects the candidate generation rather than
-partially replacing live instances.
-
-## Recommended Declaration Style
-
-```csharp
-[StableComponentId("dce1db02-69f0-4101-9a9f-437464427f56")]
-public sealed class Pickup : Behaviour
+[Serializable]
+public sealed class Wave
 {
-    [SerializeField, StableFieldId("81f7adfd-669c-4946-a143-52e0d4d06834")]
-    [Tooltip("Amount awarded when the pickup is collected.")]
-    private int _amount = 1;
+    public Prefab? Enemy;
+    public List<Entity> SpawnPoints = [];
+}
 
-    [SerializeField, StableFieldId("c47de4cb-1072-4036-ac6a-e85e51b36db1")]
-    private AssetReference<AudioClip> _collectedSound;
+[SerializeField]
+private Wave[] _waves = [];
+```
 
-    [SerializeField, StableFieldId("95055e77-ce88-4fa8-a636-577e29af2ed1")]
-    private KeireEvent _collected = new();
+## Direct References
 
-    [HotReloadState]
-    private bool _consumed;
+Declare the actual type you want to use:
+
+```csharp
+public Entity? Target;
+public Prefab? Projectile;
+public AudioSource? AudioSource;
+
+[SerializeField]
+private Gameplay? _gameplay;
+
+[SerializeField]
+private AudioClip? _impactSound;
+```
+
+Entity fields accept Hierarchy drags and an entity picker. Component or behaviour fields accept a component-header
+drag or an entity drag; a unique compatible component is selected automatically, while ambiguous matches open a
+filtered chooser. Asset, prefab, scene, and ScriptableObject fields accept filtered Project/Asset Browser drags.
+
+`None` clears a reference. A missing object retains its serialized identity and is displayed as missing rather than
+silently erased. Reference drawers work on behaviour fields and supported nested objects. Persistent ScriptableObject
+collection drawers support add/remove/reorder; behaviour arrays and lists are serialized at runtime but do not yet have
+collection authoring controls in the scene Inspector. Assignments exposed by the Inspector participate in undo/redo
+and Play Mode Changes.
+
+Scene behaviours may reference scene objects in their own scene and any project asset. Persistent ScriptableObject
+assets may reference assets, prefabs, or other ScriptableObjects, but may not capture scene entities or components.
+
+## Stable IDs
+
+`StableComponentId` identifies a behaviour type. `StableFieldId` identifies authored field meaning:
+
+```csharp
+[StableComponentId("668c2cee-3c8b-443f-a183-2f3f06141d77")]
+public sealed class Door : Behaviour
+{
+    [SerializeField]
+    [StableFieldId("3cc5bb2c-8c77-47a8-bf2d-768468e6fb07")]
+    private AudioClip? _openSound;
 }
 ```
 
-This style makes persistence, editor presentation, dependencies, and migration intent visible at the declaration site.
+Preserve the field ID when renaming a field without changing its meaning. Give a replacement meaning a new ID. The
+v1 reader recognizes historical field aliases and old entity/asset-reference records; the next save writes canonical
+v2.
+
+## Reference Records
+
+State v2 explicitly tags reference kind:
+
+- entity: stable entity identity, rebound to the destination runtime world;
+- component/behaviour: entity identity plus stable concrete component type;
+- native asset, prefab, or scene asset: stable asset identity plus declared/actual managed type;
+- persistent ScriptableObject: stable managed asset identity and type.
+
+This makes cyclic and cross-behaviour relationships available before `Awake` and lets clone/prefab transactions remap
+only references internal to the cloned graph.
+
+## Inspector Attributes
+
+Use `[Range]`, `[Min]`, `[Max]`, `[InspectorStep]`, `[Multiline]`, `[InspectorName]`, `[Header]`, `[Tooltip]`,
+`[Group]`, `[ReadOnly]`, and `[HideInInspector]` to control presentation. These attributes do not replace stable field
+identity and do not change runtime ownership.
+
+`[HotReloadState]` is separate from authored serialization. It migrates transient state across a successful reload and
+is discarded with the Play session.

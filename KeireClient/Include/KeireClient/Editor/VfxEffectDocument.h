@@ -88,7 +88,10 @@ namespace KeireEditor
         [[nodiscard]] bool AddNode(Keire::AssetId system, Keire::VfxGraphNode node);
         [[nodiscard]] bool EditNode(Keire::AssetId system, Keire::AssetId node,
                                     const std::function<void(Keire::VfxGraphNode&)>& operation);
+        [[nodiscard]] bool MoveNodes(Keire::AssetId system,
+                                     std::span<const std::pair<Keire::AssetId, Keire::Vector2>> nodes);
         [[nodiscard]] bool RemoveNode(Keire::AssetId system, Keire::AssetId node);
+        [[nodiscard]] bool RemoveNodes(Keire::AssetId system, std::span<const Keire::AssetId> nodes);
         [[nodiscard]] bool AddBlock(Keire::AssetId system, Keire::AssetId context, Keire::VfxGraphBlock block);
         [[nodiscard]] bool EditBlock(Keire::AssetId system, Keire::AssetId context, Keire::AssetId block,
                                      const std::function<void(Keire::VfxGraphBlock&)>& operation);

@@ -3,6 +3,10 @@
 #include "Keire/Core.h"
 #include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/AuthoringWidgets.h"
+#include "KeireClient/Editor/GraphClipboard.h"
+#include "KeireClient/Editor/GraphComments.h"
+#include "KeireClient/Editor/GraphLayout.h"
+#include "KeireClient/Editor/GraphNavigation.h"
 #include "KeireClient/Editor/ShaderGraphDocument.h"
 
 #include <atomic>
@@ -33,6 +37,8 @@ namespace KeireEditor
         [[nodiscard]] virtual std::optional<Keire::ShaderGraphDefinition>
         ResolveShaderGraphFunction(Keire::AssetId asset) const = 0;
         virtual void RevealShaderGraphAsset(Keire::AssetId asset) = 0;
+        virtual void SetGraphClipboard(std::string_view text) = 0;
+        [[nodiscard]] virtual std::string GraphClipboard() const = 0;
         virtual void ReportShaderGraphError(std::string message) noexcept = 0;
     };
 
@@ -72,7 +78,21 @@ namespace KeireEditor
         void DrawHeader(Keire::UiFrame& ui);
         void DrawPreview(Keire::UiFrame& ui);
         void DrawCanvas(Keire::UiFrame& ui);
+        void DrawComments(Keire::UiFrame& ui, ShaderGraphDocument& document, const ShaderGraphCanvasModel& model,
+                          const NodeGraphCommentModel& comments, const NodeGraphCanvasResult& canvas);
+        void CreateComment(Keire::UiFrame& ui, ShaderGraphDocument& document, const ShaderGraphCanvasModel& model,
+                           Keire::Vector2 position, bool selection);
+        void DuplicateSelection(std::span<const StableNodeId> selection,
+                                std::span<const std::pair<StableNodeId, Keire::AssetId>> identities);
+        [[nodiscard]] bool HandleClipboard(const NodeGraphCanvasResult& result,
+                                           std::span<const std::pair<StableNodeId, Keire::AssetId>> identities);
+        [[nodiscard]] bool
+        DrawArrangeMenu(Keire::UiFrame& ui, std::span<const NodeGraphNode> nodes,
+                        std::span<const NodeGraphConnection> connections,
+                        std::span<const std::pair<StableNodeId, Keire::AssetId>> nodeIdentities,
+                        std::span<const std::pair<StableNodeId, Keire::AssetId>> connectionIdentities);
         void DrawInspector(Keire::UiFrame& ui);
+        [[nodiscard]] bool DrawMultiSelectionInspector(Keire::UiFrame& ui);
         void DrawDiagnostics(Keire::UiFrame& ui);
         void EnsureJobScope();
         [[nodiscard]] bool DrawNodeCreationMenu(Keire::UiFrame& ui, std::optional<Keire::Vector2> graphPosition,
@@ -87,6 +107,7 @@ namespace KeireEditor
 
         IShaderGraphPanelController& m_Controller;
         StableNodeGraphCanvas m_Canvas;
+        GraphCommentEditorState m_CommentEditor;
         AssetPicker m_AssetPicker;
         AssetPicker m_NodeAssetPicker;
         Keire::UiPanelRegistration m_Registration;
@@ -94,7 +115,9 @@ namespace KeireEditor
         std::vector<Keire::ShaderPropertyDefinition> m_PreviewProperties;
         ShaderGraphPreviewSettings m_PreviewSettings;
         std::optional<Keire::AssetId> m_SelectedNode;
+        std::vector<Keire::AssetId> m_SelectedNodes;
         std::optional<Keire::AssetId> m_SelectedConnection;
+        std::optional<Keire::AssetId> m_FrameNode;
         std::optional<Keire::AssetId> m_InspectorNode;
         std::string m_InspectorName;
         std::string m_InspectorSymbol;
@@ -102,6 +125,7 @@ namespace KeireEditor
         std::string m_InspectorFunction;
         std::string m_InspectorDescription;
         std::string m_InspectorCategory;
+        std::string m_InspectorComment;
         double m_InspectorSortPriority = 0.0;
         double m_InspectorMinimum = 0.0;
         double m_InspectorMaximum = 1.0;
@@ -109,8 +133,10 @@ namespace KeireEditor
         bool m_InspectorHasMinimum = false;
         bool m_InspectorHasMaximum = false;
         bool m_InspectorHasStep = false;
+        bool m_InspectorCommentPinned = false;
         std::string m_NodeSearch;
         NodeMenuSelection m_NodeMenuSelection;
+        GraphBookmarkSet m_Bookmarks;
         std::optional<Keire::Vector2> m_NodeCreationPosition;
         std::optional<NodeGraphContextRequest> m_GraphContext;
         std::string m_Message;

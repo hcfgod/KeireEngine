@@ -381,55 +381,81 @@ namespace KeireEditor
 
     bool MaterialGraphDocument::MoveNode(const Keire::AssetId node, const Keire::Vector2 position)
     {
-        return Edit("Move Material Graph node",
-                    [node, position](auto& definition)
+        const std::array move{std::pair{node, position}};
+        return MoveNodes(move);
+    }
+
+    bool MaterialGraphDocument::MoveNodes(const std::span<const std::pair<Keire::AssetId, Keire::Vector2>> nodes)
+    {
+        if (nodes.empty())
+            return false;
+        return Edit(nodes.size() == 1 ? "Move Material Graph node" : "Move Material Graph nodes",
+                    [nodes = std::vector(nodes.begin(), nodes.end())](auto& definition)
                     {
-                        if (node == definition.OutputNode)
+                        for (const auto& [node, position] : nodes)
                         {
-                            definition.OutputPosition = position;
-                            return;
+                            if (node == definition.OutputNode)
+                            {
+                                definition.OutputPosition = position;
+                                Keire::UpdateGraphCommentMembership(definition.Authoring, node, position);
+                                continue;
+                            }
+                            const auto found =
+                                std::ranges::find(definition.Nodes, node, &Keire::MaterialGraphValueNode::Id);
+                            if (found != definition.Nodes.end())
+                            {
+                                found->EditorPosition = position;
+                                Keire::UpdateGraphCommentMembership(definition.Authoring, node, position);
+                                continue;
+                            }
+                            const auto expression =
+                                std::ranges::find(definition.SurfaceGraph.Nodes, node, &Keire::ShaderGraphNode::Id);
+                            if (expression == definition.SurfaceGraph.Nodes.end())
+                                throw std::invalid_argument("Material Graph node is unavailable.");
+                            expression->EditorPosition = position;
+                            Keire::UpdateGraphCommentMembership(definition.Authoring, node, position);
                         }
-                        const auto found =
-                            std::ranges::find(definition.Nodes, node, &Keire::MaterialGraphValueNode::Id);
-                        if (found != definition.Nodes.end())
-                        {
-                            found->EditorPosition = position;
-                            return;
-                        }
-                        const auto expression =
-                            std::ranges::find(definition.SurfaceGraph.Nodes, node, &Keire::ShaderGraphNode::Id);
-                        if (expression == definition.SurfaceGraph.Nodes.end())
-                            throw std::invalid_argument("Material Graph node is unavailable.");
-                        expression->EditorPosition = position;
                     });
     }
 
     bool MaterialGraphDocument::RemoveNode(const Keire::AssetId node)
     {
-        const auto expression = FindExpressionNode(Definition(), node);
-        if (node == Definition().OutputNode || (expression && expression->Kind == Keire::ShaderGraphNodeKind::Master))
-            throw std::invalid_argument("Material Output cannot be removed.");
-        const auto keyword = expression && expression->Kind == Keire::ShaderGraphNodeKind::Keyword
-                                 ? std::optional(expression->Symbol)
-                                 : std::nullopt;
-        return Edit("Remove Material Graph node",
-                    [node, keyword](auto& definition)
+        return RemoveNodes(std::span{&node, std::size_t{1}});
+    }
+
+    bool MaterialGraphDocument::RemoveNodes(const std::span<const Keire::AssetId> nodes)
+    {
+        if (nodes.empty())
+            return false;
+        std::vector<std::string> keywords;
+        for (const auto node : nodes)
+        {
+            const auto expression = FindExpressionNode(Definition(), node);
+            if (node == Definition().OutputNode ||
+                (expression && expression->Kind == Keire::ShaderGraphNodeKind::Master))
+                throw std::invalid_argument("Material Output cannot be removed.");
+            if (!expression && std::ranges::find(Definition().Nodes, node, &Keire::MaterialGraphValueNode::Id) ==
+                                   Definition().Nodes.end())
+                throw std::invalid_argument("Material Graph node is unavailable.");
+            if (expression && expression->Kind == Keire::ShaderGraphNodeKind::Keyword)
+                keywords.push_back(expression->Symbol);
+        }
+        return Edit(nodes.size() == 1 ? "Remove Material Graph node" : "Remove Material Graph nodes",
+                    [nodes = std::vector(nodes.begin(), nodes.end()), keywords = std::move(keywords)](auto& definition)
                     {
-                        const auto valueCount = definition.Nodes.size();
-                        const auto expressionCount = definition.SurfaceGraph.Nodes.size();
-                        std::erase_if(definition.Nodes, [node](const auto& candidate) { return candidate.Id == node; });
+                        const auto selected = [&](const Keire::AssetId candidate)
+                        { return std::ranges::find(nodes, candidate) != nodes.end(); };
+                        std::erase_if(definition.Nodes, [&](const auto& candidate) { return selected(candidate.Id); });
                         std::erase_if(definition.SurfaceGraph.Nodes,
-                                      [node](const auto& candidate) { return candidate.Id == node; });
-                        if (definition.Nodes.size() == valueCount &&
-                            definition.SurfaceGraph.Nodes.size() == expressionCount)
-                            throw std::invalid_argument("Material Graph node is unavailable.");
+                                      [&](const auto& candidate) { return selected(candidate.Id); });
                         std::erase_if(definition.Connections,
-                                      [node](const auto& connection) { return connection.Output.Node == node; });
-                        std::erase_if(definition.SurfaceGraph.Connections, [node](const auto& connection)
-                                      { return connection.Output.Node == node || connection.Input.Node == node; });
-                        if (keyword)
-                            std::erase_if(definition.SurfaceGraph.Keywords,
-                                          [&](const auto& candidate) { return candidate.Name == *keyword; });
+                                      [&](const auto& connection) { return selected(connection.Output.Node); });
+                        std::erase_if(definition.SurfaceGraph.Connections, [&](const auto& connection)
+                                      { return selected(connection.Output.Node) || selected(connection.Input.Node); });
+                        std::erase_if(definition.SurfaceGraph.Keywords, [&](const auto& candidate)
+                                      { return std::ranges::find(keywords, candidate.Name) != keywords.end(); });
+                        Keire::RemoveGraphAuthoringNodeReferences(definition.Authoring, nodes);
+                        Keire::RemoveGraphAuthoringNodeReferences(definition.SurfaceGraph.Authoring, nodes);
                     });
     }
 
@@ -554,6 +580,7 @@ namespace KeireEditor
             output.Position = Definition().OutputPosition;
             output.Size = {260.0F, std::max(96.0F, 48.0F + static_cast<float>(Definition().Properties.size()) * 24.0F)};
             output.Color = {0.42F, 0.22F, 0.12F, 1.0F};
+            output.Deletable = false;
             for (const auto& property : Definition().Properties)
             {
                 NodeGraphPin pin;
@@ -600,6 +627,7 @@ namespace KeireEditor
                            std::max(88.0F, 48.0F + static_cast<float>(node.Pins.size()) * 22.0F)};
             canvas.Color = node.Kind == Keire::ShaderGraphNodeKind::Master ? Keire::UiColor{0.48F, 0.2F, 0.08F, 1.0F}
                                                                            : Keire::UiColor{0.12F, 0.25F, 0.36F, 1.0F};
+            canvas.Deletable = node.Kind != Keire::ShaderGraphNodeKind::Master;
             for (const auto& graphPin : node.Pins)
             {
                 NodeGraphPin pin;

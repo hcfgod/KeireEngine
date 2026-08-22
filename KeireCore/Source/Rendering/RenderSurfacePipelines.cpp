@@ -862,10 +862,12 @@ namespace Keire::RenderBackend
         information.format = format;
         information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
         information.num_samplers = vertex ? 0
-                                          : textureCount + (definition.ReceivesShadows ? 2U : 0U) +
+                                          : textureCount + definition.UserResourceSlots +
+                                                (definition.ReceivesShadows ? 2U : 0U) +
                                                 (definition.UsesImageBasedLighting ? 2U : 0U) +
                                                 (definition.SpatialLightingAbiVersion == 2U ? 5U : 0U);
-        information.num_storage_buffers = !vertex && definition.UsesForwardPlus ? 3U : 0U;
+        information.num_storage_buffers =
+            !vertex ? (definition.UsesForwardPlus ? 3U : 0U) + definition.UserReadOnlyBuffers : 0U;
         if (vertex && definition.UsesInstancing)
             information.num_storage_buffers = 1U;
         information.num_uniform_buffers = vertex ? (definition.UsesVertexMaterialParameters ? 2U : 1U)

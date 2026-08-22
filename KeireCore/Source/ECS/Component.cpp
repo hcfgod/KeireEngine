@@ -41,6 +41,7 @@ namespace Keire
         WeakRef<Detail::SceneState> State;
         EntityId Owner;
         bool Enabled = true;
+        bool Prepared = false;
         bool Awakened = false;
         bool Started = false;
         bool LifecycleActive = false;
@@ -103,10 +104,20 @@ namespace Keire
         m_Impl->Owner = {};
     }
 
+    void Component::InvokePrepare()
+    {
+        if (!m_Impl->Prepared && !m_Impl->Destroyed)
+        {
+            Prepare();
+            m_Impl->Prepared = true;
+        }
+    }
+
     void Component::InvokeAwake()
     {
         if (!m_Impl->Awakened && !m_Impl->Destroyed)
         {
+            InvokePrepare();
             Awake();
             m_Impl->Awakened = true;
         }

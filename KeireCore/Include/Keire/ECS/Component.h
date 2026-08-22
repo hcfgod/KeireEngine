@@ -84,6 +84,18 @@ namespace Keire
         Gradient
     };
 
+    enum class ManagedReferenceKind : std::uint8_t
+    {
+        None,
+        Entity,
+        Component,
+        Behaviour,
+        Asset,
+        Prefab,
+        SceneAsset,
+        ScriptableObject
+    };
+
     struct ComponentEventListener
     {
         bool Enabled = true;
@@ -101,9 +113,17 @@ namespace Keire
         [[nodiscard]] bool operator==(const ComponentEventValue&) const = default;
     };
 
+    struct ComponentReferenceValue
+    {
+        EntityId Entity;
+        ComponentTypeId Component;
+
+        [[nodiscard]] bool operator==(const ComponentReferenceValue&) const = default;
+    };
+
     using ComponentPropertyValue =
         std::variant<bool, std::int64_t, double, std::string, Vector2, Vector3, Vector4, Quaternion, Color, AssetId,
-                     EntityId, ComponentEventValue, Curve1D, ColorGradient>;
+                     EntityId, ComponentEventValue, Curve1D, ColorGradient, ComponentReferenceValue>;
     using ComponentPropertyBag = std::map<std::string, ComponentPropertyValue, std::less<>>;
 
     struct ComponentProperty
@@ -122,6 +142,10 @@ namespace Keire
         std::string Header;
         bool Slider = false;
         std::uint32_t TextLines = 1;
+        ManagedReferenceKind ReferenceKind = ManagedReferenceKind::None;
+        std::string DeclaredManagedType;
+        std::vector<ComponentTypeId> CompatibleComponentTypes;
+        std::vector<std::string> CompatibleBehaviourTypes;
     };
 
     struct ComponentMethod
@@ -175,6 +199,7 @@ namespace Keire
       protected:
         explicit Component(ComponentTypeId type);
 
+        virtual void Prepare() {}
         virtual void Awake() {}
         virtual void OnEnable() {}
         virtual void Start() {}
@@ -200,6 +225,7 @@ namespace Keire
         friend class Detail::SceneState;
         void Attach(WeakRef<Detail::SceneState> state, EntityId owner);
         void Detach() noexcept;
+        void InvokePrepare();
         void InvokeAwake();
         void InvokeEnable();
         void InvokeStart();

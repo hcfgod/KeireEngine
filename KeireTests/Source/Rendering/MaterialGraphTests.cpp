@@ -73,7 +73,20 @@ namespace
 
 TEST_CASE("Material Graph source and cooked serialization are deterministic")
 {
-    const auto definition = SampleMaterialGraph();
+    auto definition = SampleMaterialGraph();
+    definition.Authoring.NodeAnnotations.push_back(
+        {definition.OutputNode, "The immutable material output.", true, false});
+    definition.Authoring.Comments.push_back({Keire::AssetId::Generate(),
+                                             "Material output",
+                                             "Reflected properties are connected here.",
+                                             {-80.0F, -60.0F},
+                                             {480.0F, 360.0F},
+                                             {0.38F, 0.2F, 0.64F, 0.35F},
+                                             18.0F,
+                                             Keire::GraphCommentMoveMode::Group,
+                                             {},
+                                             {definition.OutputNode},
+                                             false});
     const auto source = Keire::MaterialGraphAsset::EncodeSource(definition);
     CHECK(Keire::MaterialGraphAsset::EncodeSource(Keire::MaterialGraphAsset::DecodeSource(source)) == source);
     const auto cooked = Keire::MaterialGraphAsset::Encode(definition);
@@ -82,6 +95,24 @@ TEST_CASE("Material Graph source and cooked serialization are deterministic")
     auto duplicate = definition;
     duplicate.Properties.push_back(duplicate.Properties.front());
     CHECK_THROWS_AS(Keire::ValidateMaterialGraph(duplicate), std::invalid_argument);
+}
+
+TEST_CASE("Material Graph schema three migrates in memory and explicit save publishes schema four")
+{
+    const auto current = Keire::MaterialGraphAsset::EncodeSource(SampleMaterialGraph());
+    auto legacy = nlohmann::json::parse(std::string(reinterpret_cast<const char*>(current.data()), current.size()));
+    legacy["schemaVersion"] = 3;
+    legacy.erase("authoring");
+    const auto legacyText = legacy.dump();
+    const auto migrated = Keire::MaterialGraphAsset::DecodeSource(std::as_bytes(std::span(legacyText)));
+
+    CHECK(migrated.SchemaVersion == 4);
+    CHECK(migrated.Authoring == Keire::GraphAuthoringMetadata{});
+    const auto saved = Keire::MaterialGraphAsset::EncodeSource(migrated);
+    const auto savedJson =
+        nlohmann::json::parse(std::string(reinterpret_cast<const char*>(saved.data()), saved.size()));
+    CHECK(savedJson.at("schemaVersion") == 4);
+    CHECK(savedJson.contains("authoring"));
 }
 
 TEST_CASE("Material Graph bindings retain stable shader property identities across renames")
