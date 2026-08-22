@@ -4,7 +4,7 @@
     "state": "preparing",
     "version": "0.4.0",
     "activeCatalogVersion": "0.3.2",
-    "message": "Kéire 0.4.0 is a source candidate with no active sequence-15 artifacts. Windows and Linux x86-64 Hub 0.3.2 remain catalog-verified; macOS downloads remain gated."
+    "message": "Kéire 0.4.0 is a source candidate; local packages are not website releases because no signed sequence-15 catalog is active. Windows and Linux x86-64 Hub 0.3.2 remain catalog-verified; macOS downloads remain gated."
   },
   "packages": []
 }

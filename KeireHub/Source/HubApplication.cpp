@@ -158,17 +158,14 @@ namespace
                         throw std::runtime_error(status.Error().Message);
                     if (const auto status = KeireHub::RepairLegacyHubStorageRoots(m_Controller->Settings()); !status)
                         throw std::runtime_error(status.Error().Message + " " + status.Error().TechnicalDetails);
-                    if (m_Controller->Installations().Snapshot()->empty())
+                    const auto packagedEditor = KeireHub::RegisterPackagedEditorIfPresent(
+                        *m_Controller, m_Executable.parent_path().parent_path());
+                    if (!packagedEditor)
                     {
-                        const auto packagedEditor = KeireHub::RegisterPackagedEditorIfPresent(
-                            *m_Controller, m_Executable.parent_path().parent_path());
-                        if (!packagedEditor)
-                        {
-                            KEIRE_CLIENT_WARN("[Project Hub] Packaged editor registration was rejected: {}",
-                                              packagedEditor.Error().TechnicalDetails);
-                            SetError("The packaged editor could not be registered because its manifest is invalid. "
-                                     "Locate a verified editor from Installs.");
-                        }
+                        KEIRE_CLIENT_WARN("[Project Hub] Packaged editor registration was rejected: {}",
+                                          packagedEditor.Error().TechnicalDetails);
+                        SetError("The packaged editor could not be registered because its manifest is invalid. "
+                                 "Locate a verified editor from Installs.");
                     }
                     for (const auto& failure : localContent.Failures)
                         SetError(failure.Message);

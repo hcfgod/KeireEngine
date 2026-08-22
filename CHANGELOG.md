@@ -71,6 +71,8 @@ versions.
 
 ### Engine, Editor, documentation, and release validation since 0.3.2
 
+- Refresh a bundled external Editor registration whenever the Hub starts beside a newly rebuilt package, so an
+  in-place 0.4.0 Dist rebuild updates its manifest fingerprint instead of being reported as a damaged installation.
 - Added type-catalog-driven ScriptableObject creation to the Asset Browser, kept new C# scripts in the selected folder,
   and reused an already-open managed IDE workspace for subsequent script opens. Hierarchy-to-folder prefab drops now
   decode their bounded drag payload before UUID parsing, and current first-party Marketplace source metadata follows

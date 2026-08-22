@@ -1,7 +1,7 @@
 {
   "name": "Kéire Engine",
   "short_name": "Kéire",
-  "description": "Open, cross-platform game technology.",
+  "description": "Kéire 0.4.0 source candidate; catalog-verified 0.3.2 downloads remain active.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#02040b",

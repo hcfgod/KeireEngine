@@ -15,6 +15,7 @@ MODERATION = ROOT / "supabase/functions/marketplace-moderation/index.ts"
 VALIDATOR_QUEUE = ROOT / "supabase/functions/marketplace-validator-queue/index.ts"
 PUBLICATION = ROOT / "supabase/functions/marketplace-publication/index.ts"
 PUBLICATION_QUEUE = ROOT / "supabase/functions/marketplace-publication-queue/index.ts"
+WEBSITE_CONTACT = ROOT / "supabase/functions/website-contact/index.ts"
 SUPABASE_CONFIG = ROOT / "supabase/config.toml"
 MIDDLEWARE = (
     ROOT / "Services/KeireDistributionService/DocumentationSite/Source/middleware.ts"
@@ -76,6 +77,7 @@ moderation = MODERATION.read_text(encoding="utf-8")
 validator_queue = VALIDATOR_QUEUE.read_text(encoding="utf-8")
 publication = PUBLICATION.read_text(encoding="utf-8")
 publication_queue = PUBLICATION_QUEUE.read_text(encoding="utf-8")
+website_contact = WEBSITE_CONTACT.read_text(encoding="utf-8")
 staff_page = STAFF_PAGE.read_text(encoding="utf-8")
 supabase_config = SUPABASE_CONFIG.read_text(encoding="utf-8")
 middleware = MIDDLEWARE.read_text(encoding="utf-8")
@@ -85,6 +87,22 @@ routes = "\n".join(
     for path in api_root.rglob("*.ts")
 )
 
+require(
+    '"X-Client-Info": "keire-marketplace-edge/0.4.0"' in shared,
+    "Marketplace Edge requests must identify the current 0.4.0 source client.",
+)
+require(
+    '"X-Client-Info": "keire-validator-queue/0.4.0"' in validator_queue,
+    "Marketplace validator queue requests must identify the current 0.4.0 source client.",
+)
+require(
+    '"X-Client-Info": "keire-publication-queue/0.4.0"' in publication_queue,
+    "Marketplace publication queue requests must identify the current 0.4.0 source client.",
+)
+require(
+    '"X-Client-Info": "keire-website-contact/1.0"' in website_contact,
+    "The website contact function contract version must remain independent from the Kéire product release.",
+)
 require(
     'new Set(["https://keireengine.duckdns.org"])' in shared,
     "Marketplace browser requests must use an explicit origin allowlist.",

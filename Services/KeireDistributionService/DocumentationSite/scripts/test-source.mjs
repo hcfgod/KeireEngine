@@ -346,6 +346,10 @@ const mermaidCount = mermaidSources.reduce((count, source) => count + [...source
 assert(mermaidCount > 0, "Documentation source must retain Mermaid fences for native GitHub rendering.");
 
 const packageManifest = JSON.parse(await readFile(path.join(siteRoot, "package.json"), "utf8"));
+const packageLock = JSON.parse(await readFile(path.join(siteRoot, "package-lock.json"), "utf8"));
+assert(packageManifest.version === projectVersion && packageLock.version === projectVersion &&
+    packageLock.packages?.[""]?.version === projectVersion,
+    "Documentation package metadata and the root lockfile entry must match Config/Project.conf.");
 assert(packageManifest.engines?.node === ">=22.12.0", "Documentation build must declare its Node.js production baseline.");
 assert(
     packageManifest.dependencies?.astro
@@ -368,6 +372,10 @@ assert(config.includes("checkOrigin: false") && config.includes("Source/middlewa
 const middleware = await readFile(path.join(siteRoot, "Source", "middleware.ts"), "utf8");
 const healthRoute = await readFile(path.join(siteRoot, "Source", "pages", "health", "index.ts"), "utf8");
 const contactRoute = await readFile(path.join(siteRoot, "Source", "pages", "contact", "submit.ts"), "utf8");
+assert(healthRoute.includes(`version: "${projectVersion}"`) &&
+    healthRoute.includes('releaseState: "candidate"') &&
+    healthRoute.includes(`activeCatalogVersion: "${activeCatalogVersion}"`),
+    "Health metadata must distinguish the current source candidate from the active catalog.");
 for (const source of [middleware, healthRoute, contactRoute]) {
     assert(source.includes("runtimeEnvironment("), "SSR routes must read deploy-time settings from the Node process.");
     assert(!/import\.meta\.env\.(?:PUBLIC_SUPABASE|KEIRE_)/.test(source), "SSR routes contain a build-time deployment setting.");
@@ -515,6 +523,11 @@ for (const horizon of ['id: "now"', 'id: "next"', 'id: "later"']) {
 assert(roadmapPage.includes("Windows + Linux x86-64") &&
     !roadmapModel.includes("current Windows technology preview") && !roadmapModel.includes("offline signing"),
     "The roadmap contains stale platform or Marketplace publication labels.");
+assert(roadmapPage.includes(`${projectVersion} candidate`) &&
+    roadmapPage.includes(`${activeCatalogVersion} sequence 14`) &&
+    roadmapModel.includes(`Kéire ${projectVersion} source candidate`) &&
+    roadmapModel.includes(`published ${activeCatalogVersion} catalog boundary`),
+    "The roadmap must distinguish source-candidate direction from the active immutable catalog.");
 const marketplaceProgress = launchReadiness.split('id: "marketplace"', 2)[1]?.split('id: "operations"', 1)[0] ?? "";
 const operationsProgress = launchReadiness.split('id: "operations"', 2)[1] ?? "";
 assert(marketplaceProgress.includes("completed: 10") && operationsProgress.includes("completed: 11") &&
@@ -533,6 +546,15 @@ const platformFooter = await readFile(path.join(siteRoot, "Source", "components"
 assert(platformFooter.includes('href="/roadmap/"') && platformFooter.includes('href="/changelog/"') &&
     platformFooter.includes('href="/community/"') && platformFooter.includes('href="/policies/"'),
     "Roadmap, changelog, Community, and policies must remain reachable from the global footer.");
+assert(platformFooter.includes(`Kéire ${projectVersion} source candidate`) &&
+    platformFooter.includes(`${activeCatalogVersion} catalog active`) &&
+    platformFooter.includes(`${projectVersion} publication gates remain open`),
+    "The global footer must expose the candidate and active-catalog boundary.");
+const platformHome = await readFile(path.join(siteRoot, "Source", "pages", "index.astro"), "utf8");
+assert(platformHome.includes(`softwareVersion: "${projectVersion}"`) &&
+    platformHome.includes(`Kéire ${projectVersion} source candidate`) &&
+    platformHome.includes(`Get published Hub ${activeCatalogVersion}`),
+    "Home metadata and calls to action must separate source identity from published downloads.");
 const changelogIndex = await readFile(path.join(siteRoot, "Source", "pages", "changelog", "index.astro"), "utf8");
 const changelogDetail = await readFile(path.join(siteRoot, "Source", "pages", "changelog", "[version].astro"), "utf8");
 const changelogModel = await readFile(path.join(siteRoot, "Source", "lib", "changelog.ts"), "utf8");
@@ -552,6 +574,9 @@ assert(changelogFeed.includes('Content-Type": "application/rss+xml; charset=utf-
 const publisherPage = await readFile(path.join(siteRoot, "Source", "pages", "publisher", "index.astro"), "utf8");
 assert(!publisherPage.includes("offline signing") && publisherPage.includes("queued metadata signing"),
     "Publisher copy must describe the automatic metadata-only publication workflow.");
+assert(publisherPage.includes(`name="minimumEngineVersion" value="${projectVersion}"`) &&
+    publisherPage.includes(`name="managedApiVersion" value="${projectVersion}"`),
+    "Publisher release defaults must target the current source/API version without changing its wire protocol.");
 for (const contract of [
     'import { Upload } from "tus-js-client"',
     'import { sha256 } from "@noble/hashes/sha2.js"',
