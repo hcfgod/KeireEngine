@@ -3,6 +3,7 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <optional>
@@ -250,6 +251,33 @@ namespace Keire
             return activated;
         }
 
+        [[nodiscard]] bool DrawMoreButton(const std::string_view id, const bool selected, const UiSize size)
+        {
+            const std::string label = "##" + std::string(id);
+            if (selected)
+            {
+                const auto accent = ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive);
+                ImGui::PushStyleColor(ImGuiCol_Button, accent);
+            }
+            const bool activated = ImGui::Button(label.c_str(), {size.Width, size.Height});
+            if (selected)
+                ImGui::PopStyleColor();
+
+            const auto minimum = ImGui::GetItemRectMin();
+            const auto maximum = ImGui::GetItemRectMax();
+            const float height = maximum.y - minimum.y;
+            const float centerX = (minimum.x + maximum.x) * 0.5F;
+            const float centerY = (minimum.y + maximum.y) * 0.5F;
+            const float radius = std::clamp(height * 0.065F, 1.0F, 1.5F);
+            const float spacing = std::max(radius * 3.0F, 4.0F);
+            const auto color = ImGui::GetColorU32(ImGuiCol_Text);
+            auto* drawList = ImGui::GetWindowDrawList();
+            drawList->AddCircleFilled({centerX - spacing, centerY}, radius, color);
+            drawList->AddCircleFilled({centerX, centerY}, radius, color);
+            drawList->AddCircleFilled({centerX + spacing, centerY}, radius, color);
+            return activated;
+        }
+
         [[nodiscard]] bool DrawOverlayIconButton(const std::string_view id, const char* glyph,
                                                  const UiOverlayIconButtonSpecification& specification)
         {
@@ -303,6 +331,9 @@ namespace Keire
         (void)ContentRect();
         if (id.empty())
             throw std::invalid_argument("IconButton requires a stable identifier.");
+
+        if (icon == UiIcon::More)
+            return DrawMoreButton(id, selected, size);
 
         if (const auto symbol = MaterialSymbol(icon))
         {

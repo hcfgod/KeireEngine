@@ -645,7 +645,7 @@ Assert-True ($editorPackageScript.Contains('-Configuration Dist') -and $editorPa
 Assert-True ($editorPackageScript.Contains('editor=bin/$($Project.CLIENT_TARGET).exe') -and
     -not $editorPackageScript.Contains('"--entrypoint", "hub=') -and
     -not $editorPackageScript.Contains('"--entrypoint", "worker=') -and
-    -not $editorPackageScript.Contains('KeireHubContent')) "Windows editor package excludes Hub ownership"
+    $editorPackageScript.Contains('KeireHubContent\Fonts')) "Windows editor package excludes Hub ownership except shared fonts"
 $hubPackageScript = Get-Content (Join-Path $Windows "package-hub.ps1") -Raw
 Assert-True ($hubPackageScript.Contains('KEIRE_DISTRIBUTION_TRUSTED_KEYS') -and
     $hubPackageScript.Contains('[IO.Path]::PathSeparator') -and

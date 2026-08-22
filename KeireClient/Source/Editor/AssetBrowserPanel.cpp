@@ -325,6 +325,8 @@ namespace KeireEditor
                 RequestNamedCreate(NamedCreateKind::ProceduralMotionProfile, "NewProceduralMotionProfile");
             if (ui.MenuItem("C# Script"))
                 RequestNamedCreate(NamedCreateKind::Script, "NewBehaviour");
+            if (ui.MenuItem("C# ScriptableObject Class"))
+                RequestNamedCreate(NamedCreateKind::ScriptableObjectScript, "NewScriptableObject");
             if (ui.MenuItem("Managed Assembly"))
                 RequestNamedCreate(NamedCreateKind::ManagedAssembly, "Gameplay");
             if (ui.MenuItem("Audio Mixer"))
@@ -657,6 +659,8 @@ namespace KeireEditor
                                         ? editor.CreateAssetBrowserProceduralMotionProfile(CreateNameBuffer)
                                     : PendingCreateKind == NamedCreateKind::Script
                                         ? editor.CreateAssetBrowserScript(CreateNameBuffer)
+                                    : PendingCreateKind == NamedCreateKind::ScriptableObjectScript
+                                        ? editor.CreateAssetBrowserScriptableObjectScript(CreateNameBuffer)
                                     : PendingCreateKind == NamedCreateKind::ManagedAssembly
                                         ? editor.CreateAssetBrowserManagedAssembly(CreateNameBuffer)
                                     : PendingCreateKind == NamedCreateKind::ManagedData

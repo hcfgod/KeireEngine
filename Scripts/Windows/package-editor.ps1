@@ -53,6 +53,13 @@ Copy-Item -LiteralPath (Join-Path $Root "Config\SourceModules.premake.lua") -Des
 New-Item -ItemType Directory -Force (Join-Path $stage "Config\Branding") | Out-Null
 Copy-Item -LiteralPath (Join-Path $Root "Config\Branding\Keire.png") `
     -Destination (Join-Path $stage "Config\Branding")
+$fontSource = Join-Path $Root "KeireHubContent\Fonts"
+$fontDestination = Join-Path $stage "content\Fonts"
+New-Item -ItemType Directory -Force $fontDestination | Out-Null
+foreach ($fontFile in @("Inter-Variable.ttf", "MaterialSymbolsRounded-Subset.ttf", "Inter-OFL.txt",
+        "Material-Symbols-Apache-2.0.txt", "SOURCES.md")) {
+    Copy-Item -LiteralPath (Join-Path $fontSource $fontFile) -Destination $fontDestination
+}
 Copy-Item -LiteralPath (Join-Path $Root "Config\Marketplace\trusted-marketplace-key.json") `
     -Destination (Join-Path $stage "Config\Marketplace")
 Copy-Item -LiteralPath (Join-Path $Root "Config\Marketplace\trusted-marketplace-keys.json") `

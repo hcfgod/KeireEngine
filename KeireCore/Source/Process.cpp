@@ -998,12 +998,24 @@ namespace Keire::Detail
         return std::filesystem::is_regular_file(candidate) ? candidate : std::filesystem::path{};
     }
 
+    std::vector<std::string> ResolveVisualStudioExternalEditorArguments(const std::filesystem::path& source,
+                                                                        const std::filesystem::path& managedSolution,
+                                                                        const bool reuseManagedSession)
+    {
+        if (source.empty())
+            throw std::invalid_argument("Visual Studio external-editor targeting requires a source file.");
+        const auto sourceText = PathToUtf8(source);
+        if (managedSolution.empty())
+            return {sourceText};
+        if (reuseManagedSession)
+            return {"/Edit", sourceText};
+        return {PathToUtf8(managedSolution), "/Edit", sourceText};
+    }
+
     bool OpenInExternalEditor(const std::filesystem::path& path, const std::filesystem::path& preferredEditor,
                               const std::filesystem::path& workingDirectory, std::string& diagnostic,
                               const bool reuseManagedSession) noexcept
     {
-        // Visual Studio needs the solution target on both the initial and reuse paths to avoid Miscellaneous Files.
-        (void)reuseManagedSession;
         try
         {
             const auto source = std::filesystem::weakly_canonical(path);
@@ -1027,16 +1039,14 @@ namespace Keire::Detail
                     character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
                 }
                 if (editorName == "devenv" && !managedSolution.empty())
-                {
-                    arguments = extension == ".cs"
-                                    ? std::vector<std::string>{PathToUtf8(managedSolution), "/Edit", sourceText}
-                                    : std::vector<std::string>{PathToUtf8(managedSolution)};
-                }
+                    arguments = extension == ".cs" ? ResolveVisualStudioExternalEditorArguments(source, managedSolution,
+                                                                                                reuseManagedSession)
+                                                   : std::vector<std::string>{PathToUtf8(managedSolution)};
                 return LaunchDetachedProcess(std::filesystem::weakly_canonical(preferredEditor), arguments, working,
                                              diagnostic);
             }
 #if defined(_WIN32)
-            const auto target = managedSolution.empty() ? source : managedSolution;
+            const auto target = managedSolution.empty() || reuseManagedSession ? source : managedSolution;
             const auto result = reinterpret_cast<std::intptr_t>(ShellExecuteW(
                 nullptr, L"open", target.wstring().c_str(), nullptr, working.wstring().c_str(), SW_SHOWNORMAL));
             if (result <= 32)

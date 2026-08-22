@@ -448,6 +448,9 @@ function Get-WindowsRequiredEditorPackagePaths {
         "bin\Managed\Keire.Managed.dll", "bin\Managed\Dotnet\dotnet.exe", "Config\Client.json",
         "Config\Branding\Keire.png", "Config\Marketplace\trusted-marketplace-key.json",
         "Config\Marketplace\trusted-marketplace-keys.json",
+        "content\Fonts\Inter-Variable.ttf", "content\Fonts\MaterialSymbolsRounded-Subset.ttf",
+        "content\Fonts\Inter-OFL.txt", "content\Fonts\Material-Symbols-Apache-2.0.txt",
+        "content\Fonts\SOURCES.md",
         "bin\libsodium.dll", "third-party\licenses\libsodium-LICENSE.txt",
         "samples\KeireSandbox\ProjectSettings\Project.keireproject",
         "samples\KeireSandbox\Assets\Scenes\SampleScene.keirescene", "Docs\PlayerBuilds.md", "README.md",
@@ -469,7 +472,8 @@ function Assert-WindowsEditorPackageStage {
         throw "Editor package executable must use the Windows GUI subsystem: bin\$ClientTarget.exe"
     }
     foreach ($hubPath in @(
-            "bin\$HubTarget.exe", "bin\$($Namespace)HubWorker.exe", "content", "Launch-KeireHub.cmd",
+            "bin\$HubTarget.exe", "bin\$($Namespace)HubWorker.exe", "content\Content", "content\Licenses",
+            "content\Templates", "Launch-KeireHub.cmd",
             "hub-package.json", "Config\Distribution.json", "Config\Supabase.json", "Docs\ProjectHub.md")) {
         if (Test-Path -LiteralPath (Join-Path $Stage $hubPath)) {
             throw "Editor package contains Hub-only content: $hubPath"

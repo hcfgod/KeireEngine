@@ -134,6 +134,8 @@ namespace
                     (void)ui.IconButton("TestTranslateFallback", Keire::UiIcon::Translate, false, {28.0F, 24.0F});
                     ui.SameLine();
                     (void)ui.IconButton("TestCloseSymbol", Keire::UiIcon::Close, false, {28.0F, 24.0F});
+                    ui.SameLine();
+                    (void)ui.IconButton("TestCenteredMore", Keire::UiIcon::More, false, {28.0F, 24.0F});
                     const auto button = ui.LastItemRect();
                     const auto* mainMenu = ImGui::FindWindowByName("##MainMenuBar");
                     REQUIRE(mainMenu != nullptr);

@@ -66,7 +66,8 @@ Kéire already includes substantial, integrated engine and authoring foundations
   managed audio controls, replay/diagnostic foundations, and profiling.
 - Search-first Shader/VFX node menus, portable geometry and structured-value operators, bounded CPU resource
   sampling, asynchronous graph thumbnails, and stable built-in prototype meshes.
-- Managed assemblies, component discovery, serialized Inspector fields with validated sliders, bounds, drag steps,
+- Managed assemblies, one-click Behaviour and ScriptableObject class templates, component discovery, serialized
+  Inspector fields with validated sliders, bounds, drag steps,
   multiline text, custom labels, headers, and read-only presentation, lifecycle callbacks, hot reload, gameplay APIs,
   diagnostics, packaged CoreCLR publication, and scene-backed runtime UI with buttons, sliders, toggles, UTF-8 input,
   scrolling, focus/navigation, accessibility metadata, mouse/keyboard/gamepad routing, per-slot dynamic materials,

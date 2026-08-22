@@ -218,6 +218,11 @@ bool EditorWorkspaceLayer::CreateAssetBrowserProceduralMotionProfile(const std::
 
 bool EditorWorkspaceLayer::CreateAssetBrowserScript(const std::string_view name) { return CreateCSharpScript(name); }
 
+bool EditorWorkspaceLayer::CreateAssetBrowserScriptableObjectScript(const std::string_view name)
+{
+    return CreateCSharpScript(name, true);
+}
+
 bool EditorWorkspaceLayer::CreateAssetBrowserManagedAssembly(const std::string_view name)
 {
     return CreateManagedAssembly(name);
@@ -1260,7 +1265,7 @@ void EditorWorkspaceLayer::ExtendManagedAssemblySourceRoot(const Keire::AssetId 
     RefreshAssetBrowserRecords();
 }
 
-bool EditorWorkspaceLayer::CreateCSharpScript(const std::string_view name)
+bool EditorWorkspaceLayer::CreateCSharpScript(const std::string_view name, const bool scriptableObject)
 {
     if (!m_AssetDatabase || !m_AssetOperations || !Owner().GetProject())
         return false;
@@ -1287,15 +1292,14 @@ bool EditorWorkspaceLayer::CreateCSharpScript(const std::string_view name)
         if (m_AssetDatabase->Find(destination))
             throw std::runtime_error("A script with that name already exists in " + directory.generic_string() + ".");
 
-        const std::string source = "using Keire;\n\nnamespace " + placement.RootNamespace +
-                                   ";\n\n[StableComponentId(\"" + Keire::AssetId::Generate().ToString() +
-                                   "\")]\npublic sealed class " + std::string(name) +
-                                   " : Behaviour\n{\n    protected override void Start()\n    {\n    }\n\n"
-                                   "    protected override void Update()\n    {\n    }\n}\n";
+        const auto templateKind = scriptableObject ? KeireEditor::ManagedScriptTemplateKind::ScriptableObject
+                                                   : KeireEditor::ManagedScriptTemplateKind::Behaviour;
+        const auto source = KeireEditor::BuildManagedScriptSource(templateKind, placement.RootNamespace, name,
+                                                                  Keire::AssetId::Generate());
         m_AssetOperations->QueueCreateAsset(
             destination, TextBytes(source), {},
             {.FollowUp = KeireEditor::AssetOperationFollowUp::OpenExternal,
-             .UndoName = "Create C# Script",
+             .UndoName = scriptableObject ? "Create C# ScriptableObject Class" : "Create C# Script",
              .ManagedAssembly = placement.SourceRootToAdd.empty() ? Keire::AssetId{} : placement.Assembly,
              .ManagedSourceRoot = placement.SourceRootToAdd});
         m_AssetStatus = "Creating " + destination.generic_string() + " in the isolated asset worker.";
@@ -1303,7 +1307,9 @@ bool EditorWorkspaceLayer::CreateCSharpScript(const std::string_view name)
     }
     catch (const std::exception& error)
     {
-        SetAssetError(std::string("Script creation failed: ") + error.what());
+        SetAssetError(
+            std::string(scriptableObject ? "ScriptableObject class creation failed: " : "Script creation failed: ") +
+            error.what());
         return false;
     }
 }

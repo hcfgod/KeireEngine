@@ -65,7 +65,8 @@ assets use `Assets.LoadAsync<T>` instead.
 
 ## ScriptableObjects
 
-Derive authorable managed data from `ScriptableObject` and add `[CreateAssetMenu]`:
+Choose **Create > C# ScriptableObject Class** in the Project panel for a ready-to-compile template, or derive
+authorable managed data from `ScriptableObject` and add `[CreateAssetMenu]` manually:
 
 ```csharp
 using Keire;

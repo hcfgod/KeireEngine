@@ -186,6 +186,7 @@ namespace KeireEditor
         m_InspectorCommentNode.reset();
         m_NodeCreationPosition.reset();
         m_GraphContext.reset();
+        m_OpenFunctionExtractionPopup = false;
         m_Canvas.CancelInteractions();
         m_Canvas.Select(std::nullopt);
         m_Canvas.SelectConnection(std::nullopt);
@@ -1020,6 +1021,11 @@ namespace KeireEditor
                         }
                 }
             }
+        }
+        if (m_OpenFunctionExtractionPopup)
+        {
+            ui.OpenPopup("ExtractMaterialGraphFunction");
+            m_OpenFunctionExtractionPopup = false;
         }
         if (DrawFunctionExtractionPopup(ui))
             return;

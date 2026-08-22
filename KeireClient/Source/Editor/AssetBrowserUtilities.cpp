@@ -376,6 +376,24 @@ namespace KeireEditor
         return {selected->Asset, selected->Definition.RootNamespace, selectedRoot};
     }
 
+    std::string BuildManagedScriptSource(const ManagedScriptTemplateKind kind, const std::string_view rootNamespace,
+                                         const std::string_view typeName, const Keire::AssetId stableTypeId)
+    {
+        if (rootNamespace.empty() || typeName.empty() || !stableTypeId)
+            throw std::invalid_argument("Managed script templates require a namespace, type name, and stable ID.");
+        const auto prefix = "using Keire;\n\nnamespace " + std::string(rootNamespace) + ";\n\n";
+        if (kind == ManagedScriptTemplateKind::ScriptableObject)
+        {
+            return prefix + "[StableAssetTypeId(\"" + stableTypeId.ToString() + "\")]\n[CreateAssetMenu(\"" +
+                   std::string(typeName) + "\", \"" + std::string(typeName) + "\")]\npublic sealed class " +
+                   std::string(typeName) + " : ScriptableObject\n{\n}\n";
+        }
+        return prefix + "[StableComponentId(\"" + stableTypeId.ToString() + "\")]\npublic sealed class " +
+               std::string(typeName) +
+               " : Behaviour\n{\n    protected override void Start()\n    {\n    }\n\n"
+               "    protected override void Update()\n    {\n    }\n}\n";
+    }
+
     bool ExtendManagedAssemblySourceRoots(Keire::ManagedAssemblyDefinition& assembly,
                                           const std::filesystem::path& sourceRoot)
     {

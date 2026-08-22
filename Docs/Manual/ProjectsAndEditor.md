@@ -74,9 +74,11 @@ Use this loop when trying an Inspector value:
 
 ## Assets And Undo
 
-The Project panel creates Folder, Scene, Material, C# Script, Managed Assembly, graph, VFX, and other supported asset
-types. Dragging a Hierarchy entity onto a Project folder creates a prefab. Asset operations validate paths and use
-recoverable transactions where the operation supports them.
+The Project panel creates Folder, Scene, Material, C# Script, C# ScriptableObject Class, Managed Assembly, graph, VFX,
+and other supported asset types. The ScriptableObject class template includes stable type identity and
+`CreateAssetMenu`, so it appears as an authorable data-asset type after managed compilation. Dragging a Hierarchy
+entity onto a Project folder creates a prefab. Asset operations validate paths and use recoverable transactions where
+the operation supports them.
 
 Scene and graph undo contexts are document-local. Text editing retains local text undo. A Play Mode undo never mutates
 Edit Mode history. When an operation is rejected, read the Console before repeating it; rejection is intended to leave

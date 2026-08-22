@@ -16,6 +16,8 @@ namespace KeireEditor
             return "Procedural Motion Profile";
         case NamedAssetCreationKind::Script:
             return "C# script";
+        case NamedAssetCreationKind::ScriptableObjectScript:
+            return "C# ScriptableObject class";
         case NamedAssetCreationKind::ManagedAssembly:
             return "managed assembly";
         case NamedAssetCreationKind::ManagedData:

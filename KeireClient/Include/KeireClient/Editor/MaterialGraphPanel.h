@@ -161,6 +161,7 @@ namespace KeireEditor
         std::uint64_t m_PreviewGeneration = 1;
         bool m_PreviewDirty = false;
         bool m_OwnJobSystem = false;
+        bool m_OpenFunctionExtractionPopup = false;
         bool m_ShowPreview = true;
     };
 } // namespace KeireEditor

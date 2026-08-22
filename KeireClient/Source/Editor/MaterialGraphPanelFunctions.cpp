@@ -46,7 +46,7 @@ namespace KeireEditor
         if (ui.MenuItem("Extract Selection to Material Function...", false, extractable))
         {
             m_ExtractionName = "ExtractedMaterialFunction";
-            ui.OpenPopup("ExtractMaterialGraphFunction");
+            m_OpenFunctionExtractionPopup = true;
         }
     }
 

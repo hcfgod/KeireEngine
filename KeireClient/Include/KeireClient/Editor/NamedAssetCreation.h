@@ -13,6 +13,7 @@ namespace KeireEditor
         AnimationGraph,
         ProceduralMotionProfile,
         Script,
+        ScriptableObjectScript,
         ManagedAssembly,
         ManagedData,
         AudioMixer,

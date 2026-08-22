@@ -63,6 +63,37 @@ namespace
         return selected;
     }
 
+    [[nodiscard]] std::filesystem::path ResolveEditorFontRoot(const std::filesystem::path& executable)
+    {
+        const auto complete = [](const std::filesystem::path& root)
+        {
+            std::error_code error;
+            return std::filesystem::is_regular_file(root / "Inter-Variable.ttf", error) &&
+                   std::filesystem::is_regular_file(root / "MaterialSymbolsRounded-Subset.ttf", error);
+        };
+        const auto findFrom = [&](std::filesystem::path root) -> std::filesystem::path
+        {
+            std::error_code error;
+            root = std::filesystem::absolute(root, error).lexically_normal();
+            for (std::size_t depth = 0; depth < 8 && !root.empty(); ++depth)
+            {
+                for (const auto& candidate : {root / "content/Fonts", root / "KeireHubContent/Fonts"})
+                    if (complete(candidate))
+                        return candidate;
+                const auto parent = root.parent_path();
+                if (parent == root)
+                    break;
+                root = parent;
+            }
+            return {};
+        };
+
+        if (const auto packaged = findFrom(executable.parent_path()); !packaged.empty())
+            return packaged;
+        std::error_code error;
+        return findFrom(std::filesystem::current_path(error));
+    }
+
     struct CommandLine
     {
         std::filesystem::path ExecutablePath;
@@ -366,9 +397,7 @@ namespace Keire
         if (std::filesystem::is_regular_file(windowIcon))
             specification.MainWindow.Icon = std::move(windowIcon);
 
-        auto fontRoot = commandLine.ExecutablePath.parent_path().parent_path() / "content/Fonts";
-        if (!std::filesystem::is_regular_file(fontRoot / "Inter-Variable.ttf"))
-            fontRoot = std::filesystem::current_path() / "KeireHubContent/Fonts";
+        const auto fontRoot = ResolveEditorFontRoot(commandLine.ExecutablePath);
         if (std::filesystem::is_regular_file(fontRoot / "Inter-Variable.ttf") &&
             std::filesystem::is_regular_file(fontRoot / "MaterialSymbolsRounded-Subset.ttf"))
         {

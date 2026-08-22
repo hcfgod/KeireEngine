@@ -229,6 +229,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     bool CreateAssetBrowserAnimationGraph(std::string_view name) override;
     bool CreateAssetBrowserProceduralMotionProfile(std::string_view name) override;
     bool CreateAssetBrowserScript(std::string_view name) override;
+    bool CreateAssetBrowserScriptableObjectScript(std::string_view name) override;
     bool CreateAssetBrowserManagedAssembly(std::string_view name) override;
     bool CreateAssetBrowserManagedData(Keire::ManagedTypeId type, std::string_view name) override;
     bool CreateAssetBrowserAudioMixer(std::string_view name) override;
@@ -434,7 +435,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void ReportShaderGraphError(std::string message) noexcept override;
     [[nodiscard]] bool ExtractMaterialGraphSelectionToFunction(std::span<const Keire::AssetId> selection,
                                                                std::string_view name) override;
-    [[nodiscard]] bool CreateCSharpScript(std::string_view name);
+    [[nodiscard]] bool CreateCSharpScript(std::string_view name, bool scriptableObject = false);
     [[nodiscard]] bool CreateManagedAssembly(std::string_view name);
     [[nodiscard]] bool CreateAudioMixer(std::string_view name);
     [[nodiscard]] bool CreatePhysicsMaterial(std::string_view name);

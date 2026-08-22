@@ -10,6 +10,10 @@ versions.
 
 ### Fixed
 
+- Reused the active Visual Studio solution when opening additional C# files, deferred Shader/Material Function
+  extraction modals out of their context-menu ID scope, centered component ellipsis controls geometrically, and made
+  packaged and direct-launch editors resolve the shared icon fonts reliably. The Project panel can now generate a
+  ready-to-compile C# `ScriptableObject` class with stable type identity and a `CreateAssetMenu` entry.
 - Added a versioned Mesh Renderer `Always Visible` authoring flag and matching public C# property so explicitly marked
   camera-relative or heavily deforming geometry bypasses static-bounds frustum rejection without disabling the
   renderer, skinning, or ordinary visibility controls.

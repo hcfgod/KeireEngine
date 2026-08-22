@@ -91,8 +91,8 @@ try {
         $manifest.files.path -notcontains "Config/Marketplace/trusted-marketplace-keys.json" -or
         $manifest.files.path -contains "content/Content/en-US.json" -or
         $manifest.files.path -contains "content/Licenses/catalog.json" -or
-        $manifest.licenseReferences -contains "content/Fonts/Inter-OFL.txt" -or
-        (Test-Path -LiteralPath (Join-Path $stage "content"))) {
+        $manifest.licenseReferences -notcontains "content/Fonts/Inter-OFL.txt" -or
+        $manifest.licenseReferences -notcontains "content/Fonts/Material-Symbols-Apache-2.0.txt") {
         throw "The Windows editor package schema-2 fixture is incomplete."
     }
 
@@ -129,10 +129,10 @@ try {
     Assert-Throws { Assert-WindowsEditorPackageStage $stage Client Hub Core Core } `
         "Editor package Hub worker rejection"
     Remove-Item -LiteralPath (Join-Path $stage "bin\CoreHubWorker.exe") -Force
-    New-Item -ItemType Directory -Force (Join-Path $stage "content") | Out-Null
+    New-Item -ItemType Directory -Force (Join-Path $stage "content\Templates") | Out-Null
     Assert-Throws { Assert-WindowsEditorPackageStage $stage Client Hub Core Core } `
-        "Editor package Hub content rejection"
-    Remove-Item -LiteralPath (Join-Path $stage "content") -Recurse -Force
+    "Editor package Hub content rejection"
+    Remove-Item -LiteralPath (Join-Path $stage "content\Templates") -Recurse -Force
     Compress-WindowsArchive (Join-Path $stage "*") $archive
     Assert-WindowsPackageArchiveGeneratedDataFree $archive
 

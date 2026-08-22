@@ -244,6 +244,7 @@ namespace KeireEditor
         m_GraphContext.reset();
         m_NodeSearch.clear();
         m_NodeMenuOpen = false;
+        m_OpenFunctionExtractionPopup = false;
         m_Bookmarks.Clear();
         m_Canvas.CancelInteractions();
         m_Canvas.Select(std::nullopt);
@@ -1366,7 +1367,7 @@ namespace KeireEditor
                         if (ui.MenuItem("Extract Selection to Shader Function...", false, extractable))
                         {
                             m_ExtractionName = "ExtractedShaderFunction";
-                            ui.OpenPopup("ExtractShaderGraphFunction");
+                            m_OpenFunctionExtractionPopup = true;
                         }
                         if (ui.MenuItem("Delete Node", false, node->Kind != Keire::ShaderGraphNodeKind::Master))
                             try
@@ -1412,6 +1413,11 @@ namespace KeireEditor
                         }
                 }
             }
+        }
+        if (m_OpenFunctionExtractionPopup)
+        {
+            ui.OpenPopup("ExtractShaderGraphFunction");
+            m_OpenFunctionExtractionPopup = false;
         }
         if (DrawFunctionExtractionPopup(ui))
             return;

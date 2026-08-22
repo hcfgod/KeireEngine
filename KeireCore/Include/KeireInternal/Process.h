@@ -85,6 +85,9 @@ namespace Keire::Detail
     [[nodiscard]] std::filesystem::path
     ResolveManagedSolutionForExternalEditor(const std::filesystem::path& path,
                                             const std::filesystem::path& workingDirectory);
+    [[nodiscard]] std::vector<std::string>
+    ResolveVisualStudioExternalEditorArguments(const std::filesystem::path& source,
+                                               const std::filesystem::path& managedSolution, bool reuseManagedSession);
     [[nodiscard]] bool OpenInExternalEditor(const std::filesystem::path& path,
                                             const std::filesystem::path& preferredEditor,
                                             const std::filesystem::path& workingDirectory, std::string& diagnostic,

@@ -52,6 +52,12 @@ namespace KeireEditor
         std::filesystem::path SourceRootToAdd;
     };
 
+    enum class ManagedScriptTemplateKind : std::uint8_t
+    {
+        Behaviour,
+        ScriptableObject
+    };
+
     class AssetBrowserRecordViewCache final
     {
       public:
@@ -109,6 +115,8 @@ namespace KeireEditor
     [[nodiscard]] ManagedScriptPlacement
     ResolveManagedScriptPlacement(std::span<const ManagedScriptAssemblyCandidate> assemblies,
                                   const std::filesystem::path& selectedAssetFolder);
+    [[nodiscard]] std::string BuildManagedScriptSource(ManagedScriptTemplateKind kind, std::string_view rootNamespace,
+                                                       std::string_view typeName, Keire::AssetId stableTypeId);
     [[nodiscard]] bool ExtendManagedAssemblySourceRoots(Keire::ManagedAssemblyDefinition& assembly,
                                                         const std::filesystem::path& sourceRoot);
     [[nodiscard]] std::vector<std::filesystem::path>

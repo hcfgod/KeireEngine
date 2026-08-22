@@ -46,6 +46,7 @@ TEST_CASE("Asset creation labels keep Shader Graph and Material Graph workflows 
     CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::MaterialFunction) == "material function");
     CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::MaterialLayer) == "material layer");
     CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::ManagedData) == "ScriptableObject");
+    CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::ScriptableObjectScript) == "C# ScriptableObject class");
 }
 
 TEST_CASE("managed script creation stays in the selected folder and extends runtime source coverage")
@@ -73,6 +74,18 @@ TEST_CASE("managed script creation stays in the selected folder and extends runt
     CHECK(KeireEditor::ExtendManagedAssemblySourceRoots(gameplay, "Assets/Scripts"));
     CHECK(std::ranges::find(gameplay.SourceRoots, std::filesystem::path("Assets/Scripts/Gameplay")) ==
           gameplay.SourceRoots.end());
+
+    const auto stableId = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000103");
+    const auto behaviour = KeireEditor::BuildManagedScriptSource(KeireEditor::ManagedScriptTemplateKind::Behaviour,
+                                                                 "Game", "PlayerController", stableId);
+    CHECK(behaviour.find("[StableComponentId(\"" + stableId.ToString() + "\")]") != std::string::npos);
+    CHECK(behaviour.find("public sealed class PlayerController : Behaviour") != std::string::npos);
+
+    const auto scriptableObject = KeireEditor::BuildManagedScriptSource(
+        KeireEditor::ManagedScriptTemplateKind::ScriptableObject, "Game", "WeaponTuning", stableId);
+    CHECK(scriptableObject.find("[StableAssetTypeId(\"" + stableId.ToString() + "\")]") != std::string::npos);
+    CHECK(scriptableObject.find("[CreateAssetMenu(\"WeaponTuning\", \"WeaponTuning\")]") != std::string::npos);
+    CHECK(scriptableObject.find("public sealed class WeaponTuning : ScriptableObject") != std::string::npos);
 }
 
 TEST_CASE("hierarchy prefab payloads decode the encoder terminator before UUID parsing")
