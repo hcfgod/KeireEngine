@@ -1,5 +1,8 @@
 # Changelog
 
+- Prevent Hub package validation from spuriously cancelling marketplace synchronization under loaded Windows builds by
+  using a bounded, scheduler-friendly integration-test wait with actionable failure diagnostics.
+
 All notable Kéire changes are documented here. The format follows Keep a Changelog, and releases use semantic
 versions.
 

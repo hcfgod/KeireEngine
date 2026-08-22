@@ -71,12 +71,15 @@ TEST_CASE("Marketplace synchronization registers the Hub session before reading 
                                  .Platform = "windows",
                                  .Architecture = "x86_64"}));
 
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     while (integration.Snapshot()->Running && std::chrono::steady_clock::now() < deadline)
-        std::this_thread::yield();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    const auto completed = integration.Snapshot();
+    INFO("Marketplace integration message: ", completed->Message);
+    INFO("Marketplace integration failure: ", completed->Failure ? completed->Failure->TechnicalDetails : "");
+    REQUIRE_FALSE(completed->Running);
     integration.Stop();
 
-    REQUIRE_FALSE(integration.Snapshot()->Running);
     REQUIRE(requests.size() == 3U);
     CHECK(requests[0].ends_with("/marketplace/v1/sessions/"));
     CHECK(requests[1].find("/marketplace/v1/catalog/") != std::string::npos);
