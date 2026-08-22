@@ -12,7 +12,8 @@ versions.
   renderer, skinning, or ordinary visibility controls.
 - Made private Windows FFmpeg source archives ignore the caller's global `core.autocrlf` policy and apply the locked
   revision's exact upstream MSVC configure correction, so packaging cannot corrupt or misconfigure its private audio
-  dependency before compilation.
+  dependency before compilation. Cache validation now checks the actual installed DLL and import-library locations so
+  subsequent Release and package gates reuse the verified build instead of rebuilding it.
 - Repaired dangling Windows dependency junctions even when their old target no longer exists, preventing a stale
   cross-environment Coral link from hiding an otherwise valid managed runtime build.
 - Fixed multi-node Material Function extraction when generated boundary symbols collide with graph resources, made
