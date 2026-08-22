@@ -13,6 +13,8 @@ systems and cooked content selected by a project.
 Kéire is currently **version 0.4.0 and pre-1.0**. Its foundations are production-oriented, but interfaces, content
 formats, and release procedures may still change before the first stable release. The project documents current
 capabilities and remaining production-readiness work directly rather than presenting roadmap work as complete.
+Version 0.4.0 currently identifies the source tree and release candidate. No sequence-15 catalog or matching 0.4.0
+artifacts are active; the immutable 0.3.2 sequence-14 packages remain the latest catalog-verified downloads.
 
 [Website](https://keireengine.duckdns.org/) ·
 [Documentation](https://keireengine.duckdns.org/docs/) ·
@@ -226,7 +228,9 @@ Current authoring and runtime contracts include:
 | Project descriptor | 3 | Older descriptors are inspected and upgraded transactionally before mutation. |
 | Scene source | 6 | Schemas 1–5 migrate in memory; saves emit canonical schema 6. |
 | Static mesh | 5 | Earlier payloads remain readable; schema 5 preserves triangle-, line-, and point-list submeshes. |
-| VFX source | 4 | Graph and compatibility payloads are validated as related, distinct execution sources. |
+| Shader Graph source | 4 | Schemas 1–3 migrate in memory; publication emits canonical schema 4. |
+| Material Graph source | 4 | Schemas 1–3 migrate in memory; publication emits canonical schema 4. |
+| VFX source | 5 | Schemas 1–4 migrate in memory; graph and compatibility payloads remain distinct execution sources. |
 | Cooked runtime manifest | 4 | Older builds require a recook; newer unsupported schemas fail before partial startup. |
 | Asset package archive | 1 | `KEIRASPK1` archives are deterministic, bounded, inventoried, hashed, and signature-verifiable. |
 | Project package lock | 1 | Exact versions, hashes, dependency edges, sources, and signature identities publish atomically. |
@@ -314,12 +318,13 @@ documentation authorities.
 
 ## Documentation
 
-The [documentation library](Docs/README.md) contains 62 maintained guides grouped around real tasks:
+The [documentation library](Docs/README.md) contains 63 maintained guides grouped around real tasks:
 
 - [Getting Started](Docs/GettingStarted.md) and [Project Hub](Docs/ProjectHub.md)
 - [Architecture](Docs/Architecture.md), [Runtime Lifecycle](Docs/RuntimeLifecycle.md), and
   [ECS and Components](Docs/ECSAndComponents.md)
 - [Scene Authoring](Docs/SceneAuthoring.md), [Asset Browser](Docs/AssetBrowser.md),
+  [Unified Graph Authoring](Docs/GraphAuthoring.md),
   [Procedural Humanoid Motion](Docs/ProceduralMotion.md), and
   [Undo and Redo](Docs/UndoRedo.md)
 - [Asset Pipeline](Docs/AssetPipeline.md), [Asset Packages](Docs/AssetPackages.md), [Rendering](Docs/Rendering.md),

@@ -2445,7 +2445,12 @@ Schema versions 1 through 5 are readable. Schemas 1–4 migrate in memory and ex
 Historical compatibility assets retain `LegacyModules`; opening, previewing, or saving does not convert execution. Use
 the explicit conversion command to replace old Systems with a schema-5 executable Graph.
 
-Schema 5 also versions individual executable definitions. Older Shape and Renderer Blocks are upgraded in memory when
+Schema 5 also stores shared authoring metadata and references to schema-1 VFX Subgraphs. Operator, ordered Block, and
+complete System bodies expand deterministically before CPU or GPU activation; missing assets, purpose drift, recursion,
+and bounded-depth overflow reject the candidate without changing the last-good effect. The parity manifest still
+contains 30 disabled rows, including 23 P0/P1 rows, and subgraphs do not enable them implicitly.
+
+Schema 5 versions individual executable definitions. Older Shape and Renderer Blocks are upgraded in memory when
 new resource inputs are introduced: existing pin and cable IDs are preserved, missing canonical pins receive
 deterministic stable IDs, and explicit Save writes the current Block definition version. Unknown pins, type changes, or
 future definition versions remain hard errors instead of being discarded during repair.

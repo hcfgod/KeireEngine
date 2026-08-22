@@ -5,8 +5,10 @@ authoring, runtime, scripting, packaging, and release workflows implemented by t
 [Kéire documentation site](https://keireengine.duckdns.org/docs/) is generated from these exact Markdown files; GitHub
 and the website therefore present one maintained body of documentation rather than parallel copies.
 
-Kéire is currently version 0.3.2 and pre-1.0. Guides describe the checked-in implementation and identify unfinished
-release work honestly. Roadmap material is labeled as roadmap material and does not redefine the supported API.
+Kéire is currently version 0.4.0 and pre-1.0. The version identifies current source and release-candidate metadata;
+catalog sequence 15 and matching 0.4.0 artifacts are not yet active. Guides describe the checked-in implementation and
+identify unfinished release work honestly. Roadmap material is labeled as roadmap material and does not redefine the
+supported API or activate a release.
 
 ## Choose a Starting Point
 
@@ -14,7 +16,7 @@ release work honestly. Roadmap material is labeled as roadmap material and does 
 | --- | --- | --- |
 | Build or evaluate Kéire | [Getting Started](GettingStarted.md) | [Project Hub](ProjectHub.md), [Testing and Release](TestingAndRelease.md) |
 | Understand engine ownership | [Architecture](Architecture.md) | [Runtime Lifecycle](RuntimeLifecycle.md), [ECS and Components](ECSAndComponents.md) |
-| Author a project | [Project System](ProjectSystem.md) | [Scene Authoring](SceneAuthoring.md), [Asset Browser](AssetBrowser.md), [Project Settings](ProjectSettings.md) |
+| Author a project | [Project System](ProjectSystem.md) | [Scene Authoring](SceneAuthoring.md), [Asset Browser](AssetBrowser.md), [Unified Graph Authoring](GraphAuthoring.md) |
 | Write C# gameplay | [C# Scripting](Scripting/README.md) | [Scripting Getting Started](Scripting/GettingStarted.md), [Scenes and Render Settings](Scripting/ScenesAndRenderSettings.md), [Managed API Index](Scripting/ApiIndex.md) |
 | Build rendering content | [Asset Pipeline](AssetPipeline.md) | [Rendering](Rendering.md), [Shaders and Materials](ShadersAndMaterials.md), [VFX](Vfx.md) |
 | Package a game or SDK | [Desktop Player Builds](PlayerBuilds.md) | [Package Archives](PackageArchives.md), [Testing and Release](TestingAndRelease.md) |
@@ -23,7 +25,7 @@ release work honestly. Roadmap material is labeled as roadmap material and does 
 
 ## Complete Guide Library
 
-All 62 published guides are listed below in the same groups used by the documentation website.
+All 63 published guides are listed below in the same groups used by the documentation website.
 
 ### Start Here
 
@@ -58,6 +60,7 @@ All 62 published guides are listed below in the same groups used by the document
 | [Input Actions Editor](InputActionsEditor.md) | Templates, maps/actions/bindings, validation, undo, live monitor, and Listen mode. |
 | [Input Debugger](InputDebugger.md) | Live action testing, capture bypass, devices/users, and Console diagnostics. |
 | [Undo and Redo](UndoRedo.md) | Contexts, commands, transactions, merging, limits, threading, and editor routing. |
+| [Unified Graph Authoring](GraphAuthoring.md) | Shared selection, comments, annotations, clipboard remap, layout, navigation, and schema migration across Shader, Material, and VFX graphs. |
 | [Animation and Rigging](AnimationRigging.md) | Skeleton/clip/graph assets, Animator authoring, rig constraints, preview, and runtime contracts. |
 | [Procedural Humanoid Motion](ProceduralMotion.md) | Zero-clip pose generation, motion profiles, terrain contacts, gameplay intent, events, and interpolation. |
 | [Game-Owned Weapon Example](WeaponAuthoring.md) | Why combat remains in project C# and how the Sandbox composes generic engine services. |

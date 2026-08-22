@@ -21,9 +21,21 @@ export const roadmapHorizons: readonly RoadmapHorizon[] = [
     {
         id: "now",
         label: "Now",
-        timeframe: "Current source after 0.3.2",
-        statement: "Harden the published Windows and Linux preview while validating the newer source-tree workflows.",
+        timeframe: "Kéire 0.4.0 source candidate",
+        statement: "Validate the unified graph and scripting milestone while preserving the published 0.3.2 catalog boundary.",
         initiatives: [
+            {
+                title: "Unified graph and scripting authoring",
+                outcome: "Validate the source-breaking managed API and shared Shader, Material, and VFX editing contracts as one release candidate.",
+                status: "In validation",
+                capabilities: [
+                    "Multi-selection, comments, clipboard remap, arrange commands, bookmarks, and diagnostic framing",
+                    "Shader/Material schema 4 and VFX schema 5 migration",
+                    "Executable Operator, Block, and System VFX Subgraphs",
+                    "Unity-shaped managed objects, direct asset references, and managed-state v2",
+                ],
+                evidenceUrl: "/changelog/0.4.0/",
+            },
             {
                 title: "Windows and Linux release reliability",
                 outcome: "Trustworthy Hub-to-Editor installation, upgrade, project, and player-build paths on published hosts.",

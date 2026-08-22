@@ -24,6 +24,7 @@ export const docGroups = [
         "InputActionsEditor.md",
         "InputDebugger.md",
         "UndoRedo.md",
+        "GraphAuthoring.md",
         "AnimationRigging.md",
         "ProceduralMotion.md",
         "WeaponAuthoring.md",
@@ -127,6 +128,7 @@ export const docAuthorities = {
     "InputActionsEditor.md": ["KeireClient/Include/KeireClient/Editor/InputActionsDocument.h", "KeireClient/Source/Editor/InputActionsPanel.cpp"],
     "InputDebugger.md": ["KeireClient/Source/ClientApplication.cpp", "KeireCore/Include/Keire/Input/Input.h"],
     "UndoRedo.md": ["KeireCore/Include/Keire/Undo.h", "KeireCore/Source/Undo.cpp"],
+    "GraphAuthoring.md": ["KeireCore/Include/Keire/Authoring/GraphAuthoring.h", "KeireClient/Include/KeireClient/Editor/GraphClipboard.h"],
     "AnimationRigging.md": ["KeireCore/Include/Keire/Animation/RiggingSystem.h", "KeireClient/Include/KeireClient/Editor/RiggingStudioPanel.h"],
     "ProceduralMotion.md": ["KeireCore/Include/Keire/Animation/ProceduralMotion.h", "KeireCore/Source/Animation/ProceduralMotion.cpp"],
     "WeaponAuthoring.md": [

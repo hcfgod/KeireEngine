@@ -2,16 +2,35 @@
 
 Review date: 2026-08-21
 
-Revision: Kéire 0.3.2 exact-release evidence plus a fresh current-source and complete website-content audit
+Revision: Kéire 0.3.2 exact-release evidence plus the Kéire 0.4.0 source-candidate integration audit
 
 Review scope: release commit `4b966260f9f6eb5fcb988d48da89639554c63a4d`, its clean Windows and Linux Dist
-packages, signed distribution snapshot `release-0.3.2-sequence-14-4b96626`, current source at `bd5bdbb`, the canonical
-documentation library, and the feature-gated online platform. Source behavior, package validation,
+packages, signed distribution snapshot `release-0.3.2-sequence-14-4b96626`, the uncommitted 0.4.0 source candidate, the
+canonical documentation library, and the feature-gated online platform. Source behavior, package validation,
 native installation, and public-catalog evidence remain distinct; success in one lane is not silently promoted into
 another.
 
 Review target: sustained commercial and AAA-team production use. A feature existing in source is not equivalent to a
 validated workflow, and a validated preview is not equivalent to a production-proven 1.0 release.
+
+## 0.4.0 Source-Candidate Update
+
+Version 0.4.0 identifies the checked-in source and release-candidate metadata only. No sequence-15 catalog, immutable
+0.4.0 package set, signature envelope, or activated website deployment exists. The 0.3.2 sequence-14 snapshot and its
+exact hashes remain the active distribution evidence; the immutable 0.3.2 grade below is not retroactively changed.
+
+The candidate adds the source-breaking Unity-shaped managed API and managed-state v2, shared Shader/Material/VFX graph
+selection and comments, bounded canonical clipboard remap, arrange/navigation tools, Shader/Material schema 4, VFX
+schema 5, and executable Operator/Block/System VFX Subgraphs. Focused graph, Shader/Material, VFX, scripting, Debug,
+Release, and AddressSanitizer tests passed in their owning integration tasks. The final scripting run reported 696/696
+Debug tests, 697/697 Release tests, and 696/696 DebugASan tests, with managed consumer and Sandbox Release builds clean.
+
+The candidate is not feature-complete against the original 0.4.0 ambition. Named reroute declarations, persisted
+nested local-graph stacks, generic backend realization for array/cube/3D texture and user-buffer graph resources,
+23 disabled P0/P1 VFX parity rows, and scene-Inspector collection add/remove/reorder controls remain open. The complete
+Editor suite still has one stale VFX protected-Context removal expectation to reconcile, and no new D3D12/Vulkan
+reference-hardware capture, signed packages, catalog activation, or deployment evidence has been produced. These gaps
+prevent this source label from being presented as an activated release.
 
 ## What Changed In This Refresh
 
@@ -38,7 +57,7 @@ validated workflow, and a validated preview is not equivalent to a production-pr
   download worker and update handoff. The download site presents the formats independently.
 - Catalog and artifact integrity are verified, but the current Windows Hub EXE is not Authenticode-signed and the RPM
   is not GPG-signed. Those facts are disclosed on the download surface and remain production-signing gaps.
-- The canonical documentation inventory contains 62 guides. Source validation checks inventory, authorities, local
+- The canonical documentation inventory contains 63 guides. Source validation checks inventory, authorities, local
   links/fragments, schema statements, release/platform claims, and the generated site.
 - A fresh Windows Debug source audit passed 669 Core tests/49,254 assertions, 157 Editor tests/2,395 assertions, 370
   Hub tests/3,789 assertions, the full Client compile gate, managed production API checks, 10 distribution-service
@@ -48,7 +67,7 @@ validated workflow, and a validated preview is not equivalent to a production-pr
   No all-green current-source, sanitizer, or rendered-output claim is made until that gate is repaired and rerun.
 - The website audit covers the unified Astro platform plus its static migration fallback. Navigation labels, heading
   hierarchy, social metadata, Windows/Linux roadmap status, automatic Marketplace publication language, readiness
-  dates, and all 62 fallback guide/category counts now agree with their authorities.
+  dates, and all 63 fallback guide/category counts now agree with their authorities.
 
 ## Executive Assessment
 

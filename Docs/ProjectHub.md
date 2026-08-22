@@ -365,6 +365,10 @@ Windows EXE and RPM are catalog/hash verified but do not carry Authenticode or R
 were retired as an explicit release decision because they contain known major defects; ordinary future publication
 remains additive unless another documented retirement is approved.
 
+The repository and Hub-facing source metadata now identify 0.4.0 as a release candidate. Hub must continue to select
+only the signed catalog above until a sequence-15 snapshot and exact 0.4.0 artifacts exist and are activated; source
+labels alone never advance the catalog.
+
 ## Launch and activation
 
 Opening a project launches the selected editor's typed entrypoint as:

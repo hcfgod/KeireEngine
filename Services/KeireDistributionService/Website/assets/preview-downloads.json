@@ -2,8 +2,9 @@
   "schemaVersion": 2,
   "releaseStatus": {
     "state": "preparing",
-    "version": "0.3.2",
-    "message": "Windows and Linux x86-64 Hub 0.3.2 are available through catalog-verified releases. macOS downloads remain gated."
+    "version": "0.4.0",
+    "activeCatalogVersion": "0.3.2",
+    "message": "Kéire 0.4.0 is a source candidate with no active sequence-15 artifacts. Windows and Linux x86-64 Hub 0.3.2 remain catalog-verified; macOS downloads remain gated."
   },
   "packages": []
 }

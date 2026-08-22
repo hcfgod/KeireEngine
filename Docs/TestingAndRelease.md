@@ -110,7 +110,8 @@ Stable Linux editor catalog packages are produced from a clean detached release 
 baseline container (glibc 2.34 and GCC Toolset 12). Headless release validation uses Xvfb with Mesa Vulkan for the
 packaged runtime GPU smoke. Do not relabel an artifact built against a newer glibc as a general Linux release.
 
-The active 0.3.2 sequence-14 stable catalog publishes Windows and Linux x86-64. Its Linux catalog contains the Editor
+The 0.4.0 source tree is a release candidate. Sequence 15 and matching artifacts are absent, so it is not activated or
+advertised as a catalog release. The active 0.3.2 sequence-14 stable catalog publishes Windows and Linux x86-64. Its Linux catalog contains the Editor
 archive plus distinct DEB and RPM Hub records. The exact release Editor/package gate ran on the Rocky Linux 9 baseline;
 the DEB was installed on Ubuntu 22.04 and Debian, the RPM on Rocky Linux 9, Fedora 44, and openSUSE Tumbleweed, and a
 packaged Vulkan/WSLg Play Mode smoke completed. Linux ARM64, Alpine/musl, native macOS, and Metal remain unobserved and

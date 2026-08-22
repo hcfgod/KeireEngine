@@ -405,7 +405,7 @@ that do not request it retain synchronous first-use creation for source compatib
 pending/ready state and elapsed warmup time. While an explicitly requested warmup is pending, GPU VFX presentation is
 deferred without blocking the frame; simulation and unrelated rendering remain live.
 
-Schema-4 `.keirevfx` documents make execution explicit with `LegacyModules` or `Graph`. The graph compiler accepts
+Schema-5 `.keirevfx` documents make execution explicit with `LegacyModules` or `Graph`. The graph compiler accepts
 multiple particle systems with Spawn or named Event sources and canonical Initialize, Update, and Output contexts;
 stable-ID Block, Operator, and Parameter references; typed, single-driver, forward `ParticleStream` flow; and a directed
 acyclic topology. Context stacks lower every Block occurrence to its own execution ID even when payload references
@@ -417,8 +417,15 @@ owns bounded internal system slots.
 Portable Custom HLSL is a bounded backend-neutral instruction language, not arbitrary shader compilation. The compiler
 accepts up to 4,096 verified assignments to Position, Velocity, billboard Rotation, Tint, or Size using `=`, `+=`, or
 `*=`, a literal or typed expression operand, and optional trailing `* DeltaTime`. Both simulation backends consume the
-dynamic lowered instruction stream. Unrestricted Unity-style HLSL, arbitrary resources, branches, loops, subgraphs,
-decals, and froxel injection remain explicit capability tiers.
+dynamic lowered instruction stream. Unrestricted Unity-style HLSL, arbitrary resources, branches, loops, decals, and
+froxel injection remain explicit capability tiers.
+
+Schema-1 `.keirevfxsubgraph` assets provide typed Operator, ordered Block, and complete System bodies. Import publishes
+their sorted dependencies; compilation resolves immutable assets through an injected callback, validates purpose and
+boundary ports, rejects direct or indirect recursion, and expands each instance with regenerated stable identities
+inside bounded depth and size limits. Expansion completes before CPU or GPU activation and reload, so a missing asset,
+purpose drift, cycle, or invalid expanded graph rejects the candidate transactionally. Subgraph support does not enable
+disabled parity rows: the manifest retains 30 disabled entries, including 23 P0/P1 rows.
 
 CPU texture, mesh, buffer, and attribute-map expressions cross a separate renderer-neutral `ResourceQuery` callback on
 `VfxWorldSpecification`. Requests carry only a stable `AssetId`, operation kind, coordinate, integer index, and level;
@@ -427,9 +434,11 @@ ownership never enter the public graph or compiled-program ABI. A missing provid
 or invalid returned value fails the affected expression and records `SimulationValueInvalid`. These descriptors remain
 explicitly CPU-only until the renderer exposes an equivalent cross-platform resource-table contract.
 
-Schema 1-3 module documents remain readable and always decode as `LegacyModules`. Explicit Save publishes schema 4 without
-changing their execution source; the explicit deterministic conversion operation replaces previous presentation
-systems with one canonical graph while preserving emitter, payload, and Blackboard stable IDs. CPU-incompatible
+Schemas 1-4 remain readable. Historical module documents decode as `LegacyModules`, and explicit Save publishes schema
+5 without changing their execution source; the explicit deterministic conversion operation replaces previous
+presentation systems with one canonical graph while preserving emitter, payload, and Blackboard stable IDs.
+Authoring annotations, comments, and subgraph declarations migrate in memory before canonical publication. Future
+schemas fail before the live document changes. CPU-incompatible
 features produce diagnostics rather than implicit substitutions. Managed VFX calls cross `IScriptRuntimeServices`,
 validate entity/world/script generations, and enqueue component state for the scene-safe render boundary.
 
@@ -762,10 +771,11 @@ evaluates the validated built-in graph per shaded sample using the same coercion
 UV, procedural, shaping, surface, and neutral texture-semantic rules as generated shaders; unsupported custom functions
 retain a bounded node-default fallback. The shared stable canvas installs an RAII draw-list clip covering the exact
 canvas rectangle, so nodes and connection feedback cannot escape into adjacent preview or inspector regions. The graph
-schema-v3 descriptor catalog assigns stable node type IDs, canonical pin contracts, cost metadata, legal shader
-stages, graph purpose, and stable referenced-asset identities. Schema-v1/2 data is upgraded through deterministic
-derived pin IDs and an explicit Shader purpose, so migration does not dirty the same asset
-differently across machines. The compiler computes endpoint-aware reverse reachability from the single Master node
+schema-v4 descriptor catalog assigns stable node type IDs, canonical pin contracts, cost metadata, legal shader
+stages, graph purpose, stable referenced-asset identities, and shared editor-only authoring metadata. Schema-v1/2/3
+data is upgraded in memory through deterministic derived pin IDs and an explicit Shader purpose; only publication
+writes schema 4, and future schemas fail before the document or last-good preview changes. This keeps migration from
+dirtying the same asset differently across machines. The compiler computes endpoint-aware reverse reachability from the single Master node
 before lowering vertex and fragment expressions; structured Material Attributes and BSDF values remain typed through
 validation and preview, then lower into private generated-shader structs rather than entering the renderer property ABI.
 The resulting immutable statistics and advisory diagnostics expose unused work, texture samples, estimated ALU, and
@@ -777,6 +787,18 @@ custom-mesh resolution through the asset system, and persistence. Both graph edi
 region and place a bounded, collapsible square preview on the right when space permits. Material Graph composes its
 selected shader template before preview; Shader Graph expands reusable calls first. Preview evaluation failures remain
 visible diagnostics rather than being converted into an indistinguishable checkerboard result.
+
+Shader, Material, and VFX panels share ordered multi-selection, batch movement/deletion, protected anchors, comment
+regions, annotation bubbles, bounded canonical clipboard remap, arrange commands, bookmarks, and selection/graph
+framing. Documents apply each accepted multi-item operation as one undo transaction. Comments and annotations persist
+with source authoring metadata but never enter shader, material, or VFX runtime ABIs. Named reroute declarations and
+persisted nested local-graph stacks are not part of the 0.4.0 contract; cable routing remains presentation geometry.
+See [Unified Graph Authoring](GraphAuthoring.md) for the interaction and migration contract.
+
+Shader/Material schema 4 also carries renderer-neutral portable sampler, Texture2D-array/cube/3D, and bounded
+read-only structured/byte-address buffer declarations through encoding, reflection, dependency extraction, and typed
+material overrides. Generic backend GPU asset and binding realization for array/cube/3D textures and user buffers is
+deferred. Runtime import rejects those resources until the backend contract exists instead of manufacturing a fallback.
 
 Reusable Material Function, Shader Function, Material Layer, and Material Layer Blend assets wrap the same typed graph
 model behind distinct immutable asset types. Their editor document runs in purpose-aware reusable mode: it validates

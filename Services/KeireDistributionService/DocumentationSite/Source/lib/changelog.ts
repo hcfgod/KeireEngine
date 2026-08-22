@@ -108,6 +108,7 @@ const categoryDefinitions: readonly CategoryDefinition[] = [
 ];
 
 const summaries: Readonly<Record<string, string>> = {
+    "0.4.0": "A unified graph-authoring and Unity-shaped scripting milestone with schema-4 Shader/Material graphs, executable VFX subgraphs, and explicit release-candidate boundaries.",
     "0.3.2": "A cross-platform preview adding procedural humanoid locomotion, Linux Hub packages, and stronger release/runtime reliability.",
     "0.3.1": "A production-oriented preview centered on the asset ecosystem, modern authoring workflows, audio, animation, Hub reliability, and cross-platform release foundations.",
     "0.3.0": "The visual-authoring milestone that separated reusable Shader Graphs from Material Graphs and established the production Sandbox showcase.",
@@ -116,7 +117,7 @@ const summaries: Readonly<Record<string, string>> = {
 };
 
 const parsedReleases = parseChangelog(changelogSource) as ParsedChangelogRelease[];
-const currentVersion = /^PROJECT_VERSION=(.+)$/m.exec(projectConfiguration)?.[1]?.trim() ?? "0.3.2";
+const currentVersion = /^PROJECT_VERSION=(.+)$/m.exec(projectConfiguration)?.[1]?.trim() ?? "0.4.0";
 
 function flatten(release: ParsedChangelogRelease | undefined): string[] {
     return release?.groups.flatMap((group) => group.entries) ?? [];

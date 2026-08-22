@@ -30,6 +30,10 @@ pointers or stage Git changes.
 | Linux ARM64 or Alpine/musl | Build contracts retained but not validated in this audit | Not published |
 | macOS x86-64/ARM64 | Build and packaging contracts retained; native macOS and Metal evidence remains outstanding | Not published |
 
+The checked-in version is 0.4.0 and is a release candidate, not an activated download. Until a sequence-15 catalog and
+matching artifacts pass release acceptance, the immutable 0.3.2 sequence-14 records above remain the active public
+evidence. Building current source does not relabel those packages.
+
 The [Downloads page](https://keireengine.duckdns.org/downloads/) shows the current Hub release. The
 [release archive](https://keireengine.duckdns.org/downloads/archive/) preserves historical metadata without crowding
 the primary download. The Hub's Installs page consumes the independently signed distribution catalog; catalog

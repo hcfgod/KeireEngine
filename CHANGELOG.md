@@ -31,6 +31,8 @@ versions.
   source-breaking API: old C# handle, marker, `GetComponentHandle`, `GetBehaviour`, and static prefab call sites must be
   updated, while persisted 0.3.x scenes and managed data continue to load through the legacy reader.
 
+### Unified graph authoring, Shader/Material, and VFX
+
 - Unified editable Shader, Material, and VFX graph selection around an ordered multi-selection and primary item.
   Graphs now support Ctrl-toggle, additive marquee, Ctrl+A, group dragging, protected-anchor diagnostics, and atomic
   multi-node deletion with one undo operation; Audio Mixer and Animator retain their existing single-selection model.
@@ -60,6 +62,8 @@ versions.
   is consumed transactionally by CPU and GPU VFX activation/reload through an explicit dependency resolver.
 - Renamed the VFX migration entry point to `MigrateVfxEffectToCurrentSchema`; retained
   `MigrateVfxEffectToSchema4` as a source-compatible 0.3.x alias.
+
+### Engine, Editor, documentation, and release validation since 0.3.2
 
 - Audited every first-party documentation and website surface against current schemas, APIs, release artifacts,
   Marketplace publication, parity ledgers, and rendered navigation. Corrected website headings, metadata, roadmap and

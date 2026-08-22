@@ -314,14 +314,9 @@ TEST_CASE("VFX effect document authors graph systems nodes connections and black
     CHECK(document.Definition().Systems.back().Connections.size() == 3);
     CHECK(document.RemovePin(system.Id, input.Id, removablePin.Id));
 
-    CHECK(document.RemoveNode(system.Id, output.Id));
-    CHECK(document.Definition().Systems.back().Nodes.size() == 1);
-    CHECK(document.Definition().Systems.back().Connections.empty());
-    CHECK(document.Undo());
+    CHECK_THROWS_AS((void)document.RemoveNode(system.Id, output.Id), std::invalid_argument);
     CHECK(document.Definition().Systems.back().Nodes.size() == 2);
     CHECK(document.Definition().Systems.back().Connections.size() == 2);
-    CHECK(document.RemoveNode(system.Id, output.Id));
-    CHECK(document.Definition().Systems.back().Connections.empty());
 
     CHECK(document.RemoveBlackboardParameter(intensity.Id));
     CHECK(document.Definition().Blackboard.empty());
