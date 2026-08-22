@@ -9,6 +9,7 @@ namespace KeireEditor
     struct EditorSessionState final
     {
         Keire::AssetId LastScene;
+        bool MaximizeGameOnPlay = false;
 
         [[nodiscard]] bool operator==(const EditorSessionState&) const = default;
     };

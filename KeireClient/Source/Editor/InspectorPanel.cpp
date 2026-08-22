@@ -3,6 +3,7 @@
 #include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/EulerEditContinuity.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
+#include "KeireClient/Editor/InspectorComponentUtilities.h"
 #include "KeireClient/Editor/InspectorPropertyEditor.h"
 #include "KeireClient/Editor/InspectorPropertyVisibility.h"
 #include "KeireClient/Editor/ManagedDataInspectorPanel.h"
@@ -14,6 +15,7 @@
 
 #include "Keire/Audio/AudioAssets.h"
 #include "Keire/ECS/Components/AudioComponents.h"
+#include "Keire/ECS/Components/ColliderComponent.h"
 #include "Keire/ECS/Components/RuntimeUiComponents.h"
 #include "Keire/ECS/Components/VfxEmitterComponent.h"
 #include "Keire/Rendering/ShaderGraph.h"
@@ -52,6 +54,7 @@ namespace
         }
         return result;
     }
+
     [[nodiscard]] bool ContainsCaseInsensitive(const std::string_view value, const std::string_view query)
     {
         if (query.empty())
@@ -362,949 +365,1067 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
             }
             m_EntityTagEditing = tagState.Active;
             ui.Separator();
+            const auto componentOrder = entity.GetComponents();
+            const auto drawComponentHeader = [&](const Keire::Ref<Keire::Component>& component,
+                                                 const Keire::ComponentRegistration& registration, bool& expanded,
+                                                 const std::string_view title)
+            {
+                bool removed = false;
+                const auto ordinal = ComponentOrdinal(componentOrder, component);
+                const auto unique = registration.Type.ToString() + "." + std::to_string(ordinal);
+                const auto popupId = "ComponentMenu##" + unique;
+                const auto tableId = "ComponentHeader##" + unique;
+                bool openMenu = false;
+                if (auto table = ui.BeginTable(tableId, 2,
+                                               {.Sizing = Keire::UiTableSizing::Proportional,
+                                                .Borders = false,
+                                                .Resizable = false,
+                                                .RowBackground = false,
+                                                .PersistSettings = false});
+                    table)
+                {
+                    ui.TableSetupColumn("Component", Keire::UiTableColumnSizing::Stretch, 1.0F);
+                    ui.TableSetupColumn("Menu", Keire::UiTableColumnSizing::Fixed, 28.0F);
+                    ui.TableNextRow();
+                    (void)ui.TableNextColumn();
+                    if (ui.Selectable((expanded ? "v  " : ">  ") + std::string(title)))
+                        expanded = !expanded;
+                    const auto headerRect = ui.LastItemRect();
+                    if (auto source = ui.BeginDragSource(); source)
+                    {
+                        const auto payload = EncodeComponentOrderPayload({entity.Id(), registration.Type, ordinal});
+                        ui.SetDragPayload("KEIRE_COMPONENT_ORDER",
+                                          std::as_bytes(std::span(payload.data(), payload.size())));
+                        ui.Text(entity.Name() + " / " + registration.Name);
+                    }
+                    if (auto target = ui.BeginDragTarget(headerRect, "ComponentDrop##" + unique); target)
+                    {
+                        std::vector<std::byte> bytes;
+                        if (ui.AcceptDragPayload("KEIRE_COMPONENT_ORDER", bytes))
+                        {
+                            const auto payload = DecodeComponentOrderPayload(bytes);
+                            const auto source =
+                                payload ? ResolveComponentOrderPayload(componentOrder, entity.Id(), *payload)
+                                        : Keire::Ref<Keire::Component>{};
+                            if (source && source != component)
+                            {
+                                m_Controller.RecordInspectorUndo("Reorder Components");
+                                sceneDocument.MoveComponentBefore(entity.Id(), source, component);
+                            }
+                        }
+                    }
+                    if (auto context = ui.BeginItemContextMenu("ComponentContext##" + unique); context)
+                        removed = DrawComponentMenu(ui, entity, component, registration, sceneDocument, scene);
+                    (void)ui.TableNextColumn();
+                    if (ui.IconButton("ComponentMore##" + unique, Keire::UiIcon::More, false, {26.0F, 22.0F}))
+                        openMenu = true;
+                    if (ui.LastItemState().Hovered)
+                        ui.SetTooltip("Component actions", {.Delayed = true});
+                }
+                if (openMenu)
+                    ui.OpenPopup(popupId);
+                if (auto popup = ui.BeginPopup(popupId); popup)
+                    removed = DrawComponentMenu(ui, entity, component, registration, sceneDocument, scene) || removed;
+                return removed;
+            };
             const auto expansion = [&](const std::string_view type) -> bool&
             {
                 const auto key = entity.Id().ToString() + "." + std::string(type);
                 return m_ComponentExpansion.try_emplace(key, true).first->second;
             };
-            auto& transformExpanded = expansion("transform");
-            const float transformCardHeight =
-                transformExpanded ? (ui.ContentAvailable().Width < 325.0F ? 267.0F : 212.0F) : 38.0F;
-            if (auto card = ui.BeginChild("TransformCard", {0.0F, transformCardHeight}, true); card)
+            for (const auto& displayedComponent : componentOrder)
             {
-                if (ui.Selectable(transformExpanded ? "v  TRANSFORM" : ">  TRANSFORM"))
-                    transformExpanded = !transformExpanded;
-                if (transformExpanded)
+                if (!displayedComponent)
+                    continue;
+                if (displayedComponent->Type() == Keire::TransformComponent::StaticType())
                 {
-                    ui.TextColored(theme.MutedText, "Required | Local space");
-                    ui.Separator();
+                    auto& transformExpanded = expansion("transform");
                     const auto transform = entity.GetComponent<Keire::TransformComponent>();
-                    auto position = transform->LocalPosition();
-                    const auto currentOrientation = transform->LocalRotation();
-                    if (m_RotationTarget != entity.Id().Value() ||
-                        (!m_RotationEditing && !SameRotation(currentOrientation, m_RotationOrientation)))
+                    const auto transformRegistration =
+                        scene->Components()->Find(Keire::TransformComponent::StaticType());
+                    const float transformCardHeight =
+                        transformExpanded ? (ui.ContentAvailable().Width < 325.0F ? 267.0F : 212.0F) : 38.0F;
+                    if (auto card = ui.BeginChild("TransformCard", {0.0F, transformCardHeight}, true); card)
                     {
-                        const auto reference =
-                            m_RotationTarget == entity.Id().Value() ? m_RotationEuler : transform->LocalEulerAngles();
-                        m_RotationEuler = ContinuousEulerAngles(currentOrientation, reference);
-                        m_RotationOrientation = currentOrientation;
-                        m_RotationTarget = entity.Id().Value();
-                    }
-                    auto rotation = m_RotationEuler;
-                    auto scale = transform->LocalScale();
-                    const bool positionChanged = ui.DragVector3("Position", position, 0.05F);
-                    const auto positionState = ui.LastItemState();
-                    const bool rotationChanged = ui.DragVector3("Rotation", rotation, 0.25F);
-                    const auto rotationState = ui.LastItemState();
-                    const auto previousScale = scale;
-                    const bool scaleChanged = ui.DragVector3("Scale", scale, 0.01F);
-                    const auto scaleState = ui.LastItemState();
-                    if (m_UniformScale && scaleChanged)
-                    {
-                        const auto propagate = [](const float previous, const float current, const float otherPrevious)
+                        if (transformRegistration)
+                            (void)drawComponentHeader(transform, *transformRegistration, transformExpanded,
+                                                      "TRANSFORM");
+                        if (transformExpanded)
                         {
-                            if (std::abs(previous) > 0.0001F)
-                                return otherPrevious * (current / previous);
-                            return otherPrevious + (current - previous);
-                        };
-                        if (scale.X != previousScale.X)
-                        {
-                            scale.Y = propagate(previousScale.X, scale.X, previousScale.Y);
-                            scale.Z = propagate(previousScale.X, scale.X, previousScale.Z);
-                        }
-                        else if (scale.Y != previousScale.Y)
-                        {
-                            scale.X = propagate(previousScale.Y, scale.Y, previousScale.X);
-                            scale.Z = propagate(previousScale.Y, scale.Y, previousScale.Z);
-                        }
-                        else if (scale.Z != previousScale.Z)
-                        {
-                            scale.X = propagate(previousScale.Z, scale.Z, previousScale.X);
-                            scale.Y = propagate(previousScale.Z, scale.Z, previousScale.Y);
-                        }
-                    }
-                    const bool validScale = Keire::TransformComponent::IsValidLocalScale(scale);
-                    if (positionChanged)
-                    {
-                        m_Controller.RecordInspectorUndo("Change Position", "transform.position." +
-                                                                                entity.Id().ToString() + "." +
-                                                                                std::to_string(m_EditSerial));
-                        sceneDocument.SetTransform(entity.Id(), {.Position = position});
-                    }
-                    if (rotationChanged)
-                    {
-                        m_Controller.RecordInspectorUndo("Change Rotation", "transform.rotation." +
-                                                                                entity.Id().ToString() + "." +
-                                                                                std::to_string(m_EditSerial));
-                        sceneDocument.SetTransform(entity.Id(), {.EulerDegrees = rotation});
-                        m_RotationEuler = rotation;
-                        m_RotationOrientation = Keire::Math::EulerDegreesToQuaternion(rotation);
-                    }
-                    if (scaleChanged && validScale)
-                    {
-                        m_Controller.RecordInspectorUndo("Change Scale", "transform.scale." + entity.Id().ToString() +
-                                                                             "." + std::to_string(m_EditSerial));
-                        sceneDocument.SetTransform(entity.Id(), {.Scale = scale});
-                    }
-                    if (scaleState.Active && !validScale)
-                        ui.TextColored(theme.Error,
-                                       "Scale axes need magnitude 0.000001 or greater. Finish typing to apply.");
-                    m_RotationEditing = rotationState.Active;
-                    if (rotationState.DeactivatedAfterEdit)
-                    {
-                        m_RotationEditing = false;
-                        m_RotationOrientation = transform->LocalRotation();
-                    }
-                    if (positionState.DeactivatedAfterEdit || rotationState.DeactivatedAfterEdit ||
-                        scaleState.DeactivatedAfterEdit)
-                        ++m_EditSerial;
-                    ui.Spacing();
-                    (void)ui.Checkbox("Uniform scale", m_UniformScale);
-                    ui.SameLine();
-                    if (ui.Button("Reset"))
-                    {
-                        m_Controller.RecordInspectorUndo();
-                        sceneDocument.SetTransform(entity.Id(), {.Position = Keire::Vector3{},
-                                                                 .EulerDegrees = Keire::Vector3{},
-                                                                 .Scale = Keire::Vector3{1.0F, 1.0F, 1.0F}});
-                        m_RotationTarget = entity.Id().Value();
-                        m_RotationEuler = {};
-                        m_RotationOrientation = {};
-                        m_RotationEditing = false;
-                    }
-                    if (ui.LastItemState().Hovered)
-                        ui.SetTooltip("Reset local position, rotation, and scale.");
-                }
-            }
-            if (const auto light = entity.GetComponent<Keire::DirectionalLightComponent>())
-            {
-                ui.Spacing();
-                auto& lightExpanded = expansion("directional-light");
-                if (auto card = ui.BeginChild("DirectionalLightCard", {0.0F, lightExpanded ? 360.0F : 38.0F}, true);
-                    card)
-                {
-                    if (ui.Selectable(lightExpanded ? "v  DIRECTIONAL LIGHT" : ">  DIRECTIONAL LIGHT"))
-                        lightExpanded = !lightExpanded;
-                    if (lightExpanded)
-                    {
-                        auto enabled = light->Enabled();
-                        if (ui.Checkbox("Enabled", enabled))
-                        {
-                            m_Controller.RecordInspectorUndo();
-                            sceneDocument.SetComponentEnabled(entity.Id(), light->Type(), enabled);
-                        }
-                        auto color = light->LightColor();
-                        Keire::UiColor editorColor{color.Red, color.Green, color.Blue, color.Alpha};
-                        if (ui.ColorEdit("Color", editorColor))
-                        {
-                            m_Controller.RecordInspectorUndo();
-                            sceneDocument.SetComponentProperty(
-                                entity.Id(), light->Type(), "color",
-                                Keire::Color{editorColor.Red, editorColor.Green, editorColor.Blue, editorColor.Alpha});
-                        }
-                        auto intensity = light->Intensity();
-                        if (ui.SliderFloat("Intensity", intensity, 0.0F, 100.0F))
-                        {
-                            m_Controller.RecordInspectorUndo();
-                            sceneDocument.SetComponentProperty(entity.Id(), light->Type(), "intensity",
-                                                               static_cast<double>(intensity));
-                        }
-                        auto temperature = light->UseColorTemperature();
-                        if (ui.Checkbox("Use Color Temperature", temperature))
-                        {
-                            m_Controller.RecordInspectorUndo();
-                            sceneDocument.SetComponentProperty(entity.Id(), light->Type(), "useTemperature",
-                                                               temperature);
-                        }
-                        auto kelvin = light->ColorTemperatureKelvin();
-                        if (ui.SliderFloat("Temperature (K)", kelvin, 1000.0F, 20000.0F))
-                        {
-                            m_Controller.RecordInspectorUndo();
-                            sceneDocument.SetComponentProperty(entity.Id(), light->Type(), "temperature",
-                                                               static_cast<double>(kelvin));
-                        }
-                        const auto shadows = light->Shadows();
-                        const auto shadowLabel = shadows == Keire::ShadowQuality::Disabled ? "Disabled"
-                                                 : shadows == Keire::ShadowQuality::Hard   ? "Hard"
-                                                                                           : "Soft";
-                        if (auto shadowMode = ui.BeginCombo("Shadows", shadowLabel); shadowMode)
-                        {
-                            constexpr std::array modes{Keire::ShadowQuality::Disabled, Keire::ShadowQuality::Hard,
-                                                       Keire::ShadowQuality::Soft};
-                            constexpr std::array<std::string_view, 3> labels{"Disabled", "Hard", "Soft"};
-                            for (std::size_t index = 0; index < modes.size(); ++index)
+                            ui.TextColored(theme.MutedText, "Required | Local space");
+                            ui.Separator();
+                            auto position = transform->LocalPosition();
+                            const auto currentOrientation = transform->LocalRotation();
+                            if (m_RotationTarget != entity.Id().Value() ||
+                                (!m_RotationEditing && !SameRotation(currentOrientation, m_RotationOrientation)))
                             {
-                                if (ui.Selectable(labels[index], shadows == modes[index]))
+                                const auto reference = m_RotationTarget == entity.Id().Value()
+                                                           ? m_RotationEuler
+                                                           : transform->LocalEulerAngles();
+                                m_RotationEuler = ContinuousEulerAngles(currentOrientation, reference);
+                                m_RotationOrientation = currentOrientation;
+                                m_RotationTarget = entity.Id().Value();
+                            }
+                            auto rotation = m_RotationEuler;
+                            auto scale = transform->LocalScale();
+                            const bool positionChanged = ui.DragVector3("Position", position, 0.05F);
+                            const auto positionState = ui.LastItemState();
+                            const bool rotationChanged = ui.DragVector3("Rotation", rotation, 0.25F);
+                            const auto rotationState = ui.LastItemState();
+                            const auto previousScale = scale;
+                            const bool scaleChanged = ui.DragVector3("Scale", scale, 0.01F);
+                            const auto scaleState = ui.LastItemState();
+                            if (m_UniformScale && scaleChanged)
+                            {
+                                const auto propagate =
+                                    [](const float previous, const float current, const float otherPrevious)
+                                {
+                                    if (std::abs(previous) > 0.0001F)
+                                        return otherPrevious * (current / previous);
+                                    return otherPrevious + (current - previous);
+                                };
+                                if (scale.X != previousScale.X)
+                                {
+                                    scale.Y = propagate(previousScale.X, scale.X, previousScale.Y);
+                                    scale.Z = propagate(previousScale.X, scale.X, previousScale.Z);
+                                }
+                                else if (scale.Y != previousScale.Y)
+                                {
+                                    scale.X = propagate(previousScale.Y, scale.Y, previousScale.X);
+                                    scale.Z = propagate(previousScale.Y, scale.Y, previousScale.Z);
+                                }
+                                else if (scale.Z != previousScale.Z)
+                                {
+                                    scale.X = propagate(previousScale.Z, scale.Z, previousScale.X);
+                                    scale.Y = propagate(previousScale.Z, scale.Z, previousScale.Y);
+                                }
+                            }
+                            const bool validScale = Keire::TransformComponent::IsValidLocalScale(scale);
+                            if (positionChanged)
+                            {
+                                m_Controller.RecordInspectorUndo("Change Position", "transform.position." +
+                                                                                        entity.Id().ToString() + "." +
+                                                                                        std::to_string(m_EditSerial));
+                                sceneDocument.SetTransform(entity.Id(), {.Position = position});
+                            }
+                            if (rotationChanged)
+                            {
+                                m_Controller.RecordInspectorUndo("Change Rotation", "transform.rotation." +
+                                                                                        entity.Id().ToString() + "." +
+                                                                                        std::to_string(m_EditSerial));
+                                sceneDocument.SetTransform(entity.Id(), {.EulerDegrees = rotation});
+                                m_RotationEuler = rotation;
+                                m_RotationOrientation = Keire::Math::EulerDegreesToQuaternion(rotation);
+                            }
+                            if (scaleChanged && validScale)
+                            {
+                                m_Controller.RecordInspectorUndo("Change Scale", "transform.scale." +
+                                                                                     entity.Id().ToString() + "." +
+                                                                                     std::to_string(m_EditSerial));
+                                sceneDocument.SetTransform(entity.Id(), {.Scale = scale});
+                            }
+                            if (scaleState.Active && !validScale)
+                                ui.TextColored(
+                                    theme.Error,
+                                    "Scale axes need magnitude 0.000001 or greater. Finish typing to apply.");
+                            m_RotationEditing = rotationState.Active;
+                            if (rotationState.DeactivatedAfterEdit)
+                            {
+                                m_RotationEditing = false;
+                                m_RotationOrientation = transform->LocalRotation();
+                            }
+                            if (positionState.DeactivatedAfterEdit || rotationState.DeactivatedAfterEdit ||
+                                scaleState.DeactivatedAfterEdit)
+                                ++m_EditSerial;
+                            ui.Spacing();
+                            (void)ui.Checkbox("Uniform scale", m_UniformScale);
+                            ui.SameLine();
+                            if (ui.Button("Reset"))
+                            {
+                                m_Controller.RecordInspectorUndo();
+                                sceneDocument.SetTransform(entity.Id(), {.Position = Keire::Vector3{},
+                                                                         .EulerDegrees = Keire::Vector3{},
+                                                                         .Scale = Keire::Vector3{1.0F, 1.0F, 1.0F}});
+                                m_RotationTarget = entity.Id().Value();
+                                m_RotationEuler = {};
+                                m_RotationOrientation = {};
+                                m_RotationEditing = false;
+                            }
+                            if (ui.LastItemState().Hovered)
+                                ui.SetTooltip("Reset local position, rotation, and scale.");
+                        }
+                    }
+                }
+                if (displayedComponent->Type() == Keire::DirectionalLightComponent::StaticType())
+                {
+                    if (const auto light = entity.GetComponent<Keire::DirectionalLightComponent>())
+                    {
+                        ui.Spacing();
+                        auto& lightExpanded = expansion("directional-light");
+                        if (auto card =
+                                ui.BeginChild("DirectionalLightCard", {0.0F, lightExpanded ? 360.0F : 38.0F}, true);
+                            card)
+                        {
+                            const auto registration = scene->Components()->Find(light->Type());
+                            const bool removed =
+                                registration &&
+                                drawComponentHeader(light, *registration, lightExpanded, "DIRECTIONAL LIGHT");
+                            if (lightExpanded && !removed)
+                            {
+                                auto enabled = light->Enabled();
+                                if (ui.Checkbox("Enabled", enabled))
                                 {
                                     m_Controller.RecordInspectorUndo();
-                                    sceneDocument.SetComponentProperty(entity.Id(), light->Type(), "shadows",
-                                                                       static_cast<std::int64_t>(modes[index]));
+                                    sceneDocument.SetComponentEnabled(entity.Id(), light->Type(), enabled);
                                 }
-                            }
-                        }
-                        auto shadowStrength = light->ShadowStrength();
-                        if (ui.SliderFloat("Shadow Strength", shadowStrength, 0.0F, 1.0F))
-                        {
-                            m_Controller.RecordInspectorUndo();
-                            sceneDocument.SetComponentProperty(entity.Id(), light->Type(), "shadowStrength",
-                                                               static_cast<double>(shadowStrength));
-                        }
-                        auto bias = light->ShadowBias();
-                        if (ui.SliderFloat("Shadow Bias", bias, 0.0F, 1.0F))
-                        {
-                            m_Controller.RecordInspectorUndo();
-                            sceneDocument.SetComponentProperty(entity.Id(), light->Type(), "shadowBias",
-                                                               static_cast<double>(bias));
-                        }
-                        if (ui.Button("Reset Light"))
-                        {
-                            m_Controller.RecordInspectorUndo();
-                            sceneDocument.ResetComponent(entity.Id(), light->Type());
-                        }
-                        ui.SameLine();
-                        if (ui.Button("Remove Component"))
-                        {
-                            m_Controller.RecordInspectorUndo();
-                            sceneDocument.RemoveComponent(entity.Id(), Keire::DirectionalLightComponent::StaticType());
-                        }
-                        ui.TextColored(theme.MutedText, "Direct lighting | Directional shadows");
-                    }
-                }
-            }
-            if (const auto camera = entity.GetComponent<Keire::CameraComponent>())
-            {
-                ui.Spacing();
-                auto& cameraExpanded = expansion("camera");
-                if (auto card = ui.BeginChild("CameraCard", {0.0F, cameraExpanded ? 440.0F : 38.0F}, true); card)
-                {
-                    if (ui.Selectable(cameraExpanded ? "v  CAMERA" : ">  CAMERA"))
-                        cameraExpanded = !cameraExpanded;
-                    if (cameraExpanded)
-                    {
-                        ui.TextColored(theme.MutedText, "Game view | Priority-selected");
-                        ui.Separator();
-                        auto enabled = camera->Enabled();
-                        if (ui.Checkbox("Enabled##Camera", enabled))
-                        {
-                            m_Controller.RecordInspectorUndo();
-                            sceneDocument.SetComponentEnabled(entity.Id(), camera->Type(), enabled);
-                        }
-                        auto primary = camera->Primary();
-                        if (ui.Checkbox("Primary", primary))
-                        {
-                            m_Controller.RecordInspectorUndo();
-                            sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "primary", primary);
-                        }
-                        const auto projection = camera->Projection();
-                        if (auto combo = ui.BeginCombo("Projection", projection == Keire::CameraProjection::Perspective
-                                                                         ? "Perspective"
-                                                                         : "Orthographic");
-                            combo)
-                        {
-                            if (ui.Selectable("Perspective", projection == Keire::CameraProjection::Perspective))
-                            {
-                                m_Controller.RecordInspectorUndo();
-                                sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "projection",
-                                                                   std::int64_t{0});
-                            }
-                            if (ui.Selectable("Orthographic", projection == Keire::CameraProjection::Orthographic))
-                            {
-                                m_Controller.RecordInspectorUndo();
-                                sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "projection",
-                                                                   std::int64_t{1});
-                            }
-                        }
-                        const auto clearMode = camera->ClearMode();
-                        if (auto combo = ui.BeginCombo(
-                                "Background", clearMode == Keire::CameraClearMode::Skybox ? "Skybox" : "Solid Color");
-                            combo)
-                        {
-                            if (ui.Selectable("Skybox", clearMode == Keire::CameraClearMode::Skybox))
-                            {
-                                m_Controller.RecordInspectorUndo();
-                                sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "clearMode",
-                                                                   std::int64_t{0});
-                            }
-                            if (ui.Selectable("Solid Color", clearMode == Keire::CameraClearMode::SolidColor))
-                            {
-                                m_Controller.RecordInspectorUndo();
-                                sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "clearMode",
-                                                                   std::int64_t{1});
-                            }
-                        }
-                        auto priority = camera->Priority();
-                        if (ui.SliderInt("Priority", priority, -100, 100))
-                        {
-                            m_Controller.RecordInspectorUndo();
-                            sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "priority",
-                                                               static_cast<std::int64_t>(priority));
-                        }
-                        if (camera->Projection() == Keire::CameraProjection::Perspective)
-                        {
-                            auto fieldOfView = camera->VerticalFieldOfViewDegrees();
-                            if (ui.SliderFloat("Vertical FOV", fieldOfView, 1.0F, 179.0F))
-                            {
-                                m_Controller.RecordInspectorUndo();
-                                sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "fieldOfView",
-                                                                   static_cast<double>(fieldOfView));
-                            }
-                        }
-                        else
-                        {
-                            auto size = camera->OrthographicSize();
-                            if (ui.SliderFloat("Orthographic Size", size, 0.01F, 100.0F))
-                            {
-                                m_Controller.RecordInspectorUndo();
-                                sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "orthographicSize",
-                                                                   static_cast<double>(size));
-                            }
-                        }
-                        auto nearPlane = camera->NearPlane();
-                        auto farPlane = camera->FarPlane();
-                        const bool nearChanged =
-                            ui.SliderFloat("Near Plane", nearPlane, 0.01F, std::min(farPlane - 0.01F, 100.0F));
-                        const bool farChanged =
-                            ui.SliderFloat("Far Plane", farPlane, std::max(nearPlane + 0.01F, 1.0F), 10000.0F);
-                        if (nearChanged || farChanged)
-                        {
-                            m_Controller.RecordInspectorUndo();
-                            sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "nearPlane",
-                                                               static_cast<double>(nearPlane));
-                            sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "farPlane",
-                                                               static_cast<double>(farPlane));
-                        }
-                        if (camera->ClearMode() == Keire::CameraClearMode::SolidColor)
-                        {
-                            auto clear = camera->ClearColor();
-                            Keire::UiColor clearColor{clear.Red, clear.Green, clear.Blue, clear.Alpha};
-                            if (ui.ColorEdit("Clear Color", clearColor))
-                            {
-                                m_Controller.RecordInspectorUndo();
-                                sceneDocument.SetComponentProperty(
-                                    entity.Id(), camera->Type(), "clearColor",
-                                    Keire::Color{clearColor.Red, clearColor.Green, clearColor.Blue, clearColor.Alpha});
-                            }
-                        }
-                        if (ui.Button("Reset Camera"))
-                        {
-                            m_Controller.RecordInspectorUndo();
-                            sceneDocument.ResetComponent(entity.Id(), camera->Type());
-                        }
-                        ui.SameLine();
-                        if (ui.Button("Remove Camera"))
-                        {
-                            m_Controller.RecordInspectorUndo();
-                            sceneDocument.RemoveComponent(entity.Id(), Keire::CameraComponent::StaticType());
-                        }
-                    }
-                }
-            }
-            if (const auto renderer = entity.GetComponent<Keire::MeshRendererComponent>())
-            {
-                ui.Spacing();
-                auto& rendererExpanded = expansion("mesh-renderer");
-                if (auto card = ui.BeginChild("MeshRendererCard", {0.0F, rendererExpanded ? 260.0F : 38.0F}, true);
-                    card)
-                {
-                    if (ui.Selectable(rendererExpanded ? "v  MESH RENDERER" : ">  MESH RENDERER"))
-                        rendererExpanded = !rendererExpanded;
-                    if (rendererExpanded)
-                    {
-                        ui.TextColored(theme.MutedText, "Lit geometry submission");
-                        ui.Separator();
-                        auto enabled = renderer->Enabled();
-                        if (ui.Checkbox("Enabled##MeshRenderer", enabled))
-                        {
-                            m_Controller.RecordInspectorUndo();
-                            sceneDocument.SetComponentEnabled(entity.Id(), renderer->Type(), enabled);
-                        }
-                        auto visible = renderer->Visible();
-                        if (ui.Checkbox("Visible", visible))
-                        {
-                            m_Controller.RecordInspectorUndo();
-                            sceneDocument.SetComponentProperty(entity.Id(), renderer->Type(), "visible", visible);
-                        }
-                        auto tint = renderer->Tint();
-                        Keire::UiColor tintColor{tint.Red, tint.Green, tint.Blue, tint.Alpha};
-                        if (ui.ColorEdit("Tint", tintColor))
-                        {
-                            m_Controller.RecordInspectorUndo("Change Tint", "mesh.tint." + entity.Id().ToString() +
-                                                                                "." + std::to_string(m_EditSerial));
-                            sceneDocument.SetComponentProperty(
-                                entity.Id(), renderer->Type(), "tint",
-                                Keire::Color{tintColor.Red, tintColor.Green, tintColor.Blue, tintColor.Alpha});
-                        }
-                        if (ui.LastItemState().DeactivatedAfterEdit)
-                            ++m_EditSerial;
-                        if (const auto registration = scene->Components()->Find(renderer->Type()))
-                        {
-                            InspectorPropertyEditor propertyEditor(ui, records, assets, scene, *m_AssetPicker);
-                            for (const auto& property : registration->Properties)
-                            {
-                                if (property.Key != "mesh")
-                                    continue;
-                                try
+                                auto color = light->LightColor();
+                                Keire::UiColor editorColor{color.Red, color.Green, color.Blue, color.Alpha};
+                                if (ui.ColorEdit("Color", editorColor))
                                 {
-                                    const auto values = registration->Serialize(*renderer);
-                                    const auto found = values.find(property.Key);
-                                    if (found == values.end())
-                                        throw std::invalid_argument("The Mesh Renderer omitted a declared property.");
-                                    auto candidate = found->second;
-                                    if (propertyDrawers.Draw(propertyEditor, registration->Type, property, candidate))
+                                    m_Controller.RecordInspectorUndo();
+                                    sceneDocument.SetComponentProperty(entity.Id(), light->Type(), "color",
+                                                                       Keire::Color{editorColor.Red, editorColor.Green,
+                                                                                    editorColor.Blue,
+                                                                                    editorColor.Alpha});
+                                }
+                                auto intensity = light->Intensity();
+                                if (ui.SliderFloat("Intensity", intensity, 0.0F, 100.0F))
+                                {
+                                    m_Controller.RecordInspectorUndo();
+                                    sceneDocument.SetComponentProperty(entity.Id(), light->Type(), "intensity",
+                                                                       static_cast<double>(intensity));
+                                }
+                                auto temperature = light->UseColorTemperature();
+                                if (ui.Checkbox("Use Color Temperature", temperature))
+                                {
+                                    m_Controller.RecordInspectorUndo();
+                                    sceneDocument.SetComponentProperty(entity.Id(), light->Type(), "useTemperature",
+                                                                       temperature);
+                                }
+                                auto kelvin = light->ColorTemperatureKelvin();
+                                if (ui.SliderFloat("Temperature (K)", kelvin, 1000.0F, 20000.0F))
+                                {
+                                    m_Controller.RecordInspectorUndo();
+                                    sceneDocument.SetComponentProperty(entity.Id(), light->Type(), "temperature",
+                                                                       static_cast<double>(kelvin));
+                                }
+                                const auto shadows = light->Shadows();
+                                const auto shadowLabel = shadows == Keire::ShadowQuality::Disabled ? "Disabled"
+                                                         : shadows == Keire::ShadowQuality::Hard   ? "Hard"
+                                                                                                   : "Soft";
+                                if (auto shadowMode = ui.BeginCombo("Shadows", shadowLabel); shadowMode)
+                                {
+                                    constexpr std::array modes{Keire::ShadowQuality::Disabled,
+                                                               Keire::ShadowQuality::Hard, Keire::ShadowQuality::Soft};
+                                    constexpr std::array<std::string_view, 3> labels{"Disabled", "Hard", "Soft"};
+                                    for (std::size_t index = 0; index < modes.size(); ++index)
                                     {
-                                        m_Controller.RecordInspectorUndo("Change " + property.DisplayName,
-                                                                         "mesh-renderer." + property.Key + "." +
-                                                                             entity.Id().ToString());
-                                        sceneDocument.SetComponentProperty(entity.Id(), registration->Type,
-                                                                           property.Key, std::move(candidate));
-                                    }
-                                }
-                                catch (const std::exception& error)
-                                {
-                                    ui.TextColored(theme.Error, error.what());
-                                }
-                            }
-                        }
-                        InspectorPropertyEditor propertyEditor(ui, records, assets, scene, *m_AssetPicker);
-                        Keire::Ref<const Keire::MeshAsset> mesh =
-                            renderer->Mesh() ? Keire::MeshAsset::ResolveBuiltin(renderer->Mesh())
-                                             : Keire::MeshAsset::Cube();
-                        if (!mesh && assets)
-                        {
-                            mesh = assets->Load<Keire::MeshAsset>(renderer->Mesh(), Keire::AssetPriority::High)
-                                       .TryGetLoaded();
-                        }
-                        if (mesh)
-                        {
-                            ui.TextColored(theme.MutedText, "Material Slots");
-                            for (std::size_t slot = 0; slot < mesh->MaterialSlots().size(); ++slot)
-                            {
-                                auto material = renderer->Material(slot);
-                                if (!material)
-                                    material = mesh->MaterialSlots()[slot].DefaultMaterial;
-                                const auto label =
-                                    mesh->MaterialSlots()[slot].Name + "##material-slot-" + std::to_string(slot);
-                                if (propertyEditor.EditAsset(label, material, Keire::MaterialAsset::StaticType()))
-                                {
-                                    m_Controller.RecordInspectorUndo("Change Material Slot",
-                                                                     "mesh-renderer.material." + std::to_string(slot) +
-                                                                         "." + entity.Id().ToString());
-                                    sceneDocument.SetMeshRendererMaterial(entity.Id(), slot, material);
-                                    m_Controller.NotifyInspectorMaterialAssigned(material);
-                                }
-                            }
-                        }
-                        auto castShadows = renderer->CastShadows();
-                        if (ui.Checkbox("Cast Shadows", castShadows))
-                        {
-                            m_Controller.RecordInspectorUndo("Change Shadow Casting");
-                            sceneDocument.SetComponentProperty(entity.Id(), renderer->Type(), "castShadows",
-                                                               castShadows);
-                        }
-                        auto receiveShadows = renderer->ReceiveShadows();
-                        if (ui.Checkbox("Receive Shadows", receiveShadows))
-                        {
-                            m_Controller.RecordInspectorUndo("Change Shadow Receiving");
-                            sceneDocument.SetComponentProperty(entity.Id(), renderer->Type(), "receiveShadows",
-                                                               receiveShadows);
-                        }
-                        if (ui.Button("Reset Renderer"))
-                        {
-                            m_Controller.RecordInspectorUndo();
-                            sceneDocument.ResetComponent(entity.Id(), renderer->Type());
-                        }
-                        ui.SameLine();
-                        if (ui.Button("Remove Renderer"))
-                        {
-                            m_Controller.RecordInspectorUndo();
-                            sceneDocument.RemoveComponent(entity.Id(), Keire::MeshRendererComponent::StaticType());
-                        }
-                    }
-                }
-            }
-            InspectorPropertyEditor propertyEditor(ui, records, assets, scene, *m_AssetPicker);
-            for (const auto& component : entity.GetComponents())
-            {
-                if (!component || component->Type() == Keire::TransformComponent::StaticType() ||
-                    component->Type() == Keire::CameraComponent::StaticType() ||
-                    component->Type() == Keire::DirectionalLightComponent::StaticType() ||
-                    component->Type() == Keire::MeshRendererComponent::StaticType())
-                    continue;
-                const auto registration = scene->Components()->Find(component->Type());
-                if (!registration)
-                    continue;
-                auto vfxEmitter = Keire::Ref<Keire::VfxEmitterComponent>{};
-                auto vfxEffect = Keire::Ref<const Keire::VfxEffectAsset>{};
-                std::string vfxEffectDiagnostic;
-                bool vfxEffectDiagnosticWarning = false;
-                if (registration->Type == Keire::VfxEmitterComponent::StaticType())
-                {
-                    vfxEmitter = Keire::DynamicRefCast<Keire::VfxEmitterComponent>(component);
-                    if (!vfxEmitter)
-                    {
-                        vfxEffectDiagnostic = "The VFX Emitter registration returned an incompatible component.";
-                        vfxEffectDiagnosticWarning = true;
-                    }
-                    else if (!vfxEmitter->Effect())
-                    {
-                        vfxEffectDiagnostic = "Assign a VFX effect to edit exposed Blackboard parameters.";
-                    }
-                    else if (!assets)
-                    {
-                        vfxEffectDiagnostic = "The asset system is unavailable; serialized overrides are preserved.";
-                        vfxEffectDiagnosticWarning = true;
-                    }
-                    else
-                    {
-                        try
-                        {
-                            vfxEffect =
-                                assets->Load<Keire::VfxEffectAsset>(vfxEmitter->Effect(), Keire::AssetPriority::High)
-                                    .TryGetLoaded();
-                            if (!vfxEffect)
-                                vfxEffectDiagnostic = "Loading VFX Blackboard metadata...";
-                        }
-                        catch (const std::exception& error)
-                        {
-                            vfxEffectDiagnostic =
-                                std::string("VFX Blackboard metadata is unavailable: ") + error.what();
-                            vfxEffectDiagnosticWarning = true;
-                        }
-                    }
-                }
-                const auto audioSource = registration->Type == Keire::AudioSourceComponent::StaticType()
-                                             ? Keire::DynamicRefCast<Keire::AudioSourceComponent>(component)
-                                             : Keire::Ref<Keire::AudioSourceComponent>{};
-                const auto reverbZone = registration->Type == Keire::AudioReverbZoneComponent::StaticType()
-                                            ? Keire::DynamicRefCast<Keire::AudioReverbZoneComponent>(component)
-                                            : Keire::Ref<Keire::AudioReverbZoneComponent>{};
-                const auto explicitMixer = audioSource  ? audioSource->Mixer()
-                                           : reverbZone ? reverbZone->Mixer()
-                                                        : Keire::AssetId{};
-                const auto resolvedMixer = explicitMixer ? explicitMixer : m_Controller.InspectorDefaultAudioMixer();
-                auto mixerAsset = Keire::Ref<const Keire::AudioMixerAsset>{};
-                if (assets && resolvedMixer)
-                {
-                    try
-                    {
-                        mixerAsset = assets->Load<Keire::AudioMixerAsset>(resolvedMixer, Keire::AssetPriority::High)
-                                         .TryGetLoaded();
-                    }
-                    catch (...)
-                    {
-                        // The component card reports loading and validation state below without interrupting editing.
-                    }
-                }
-                ui.Spacing();
-                auto& expanded = expansion(registration->Type.ToString());
-                const auto cardId = "ComponentCard##" + registration->Type.ToString();
-                const bool rectTransform = registration->Type == Keire::RectTransformComponent::StaticType();
-                const float anchorPickerHeight = rectTransform ? 64.0F : 0.0F;
-                std::size_t groupRows = 0;
-                std::size_t headerRows = 0;
-                std::size_t additionalTextRows = 0;
-                std::string_view previousGroup;
-                for (const auto& property : registration->Properties)
-                {
-                    if (!IsInspectorPropertyVisible(registration->Type, property.Key))
-                        continue;
-                    if (!property.Group.empty() && property.Group != previousGroup)
-                    {
-                        ++groupRows;
-                        previousGroup = property.Group;
-                    }
-                    if (!property.Header.empty())
-                        ++headerRows;
-                    if (property.TextLines > 1)
-                        additionalTextRows += property.TextLines - 1;
-                }
-                const auto vfxEntries = vfxEffect ? KeireEditor::VfxEmitterInspector::VisibleEntryCount(
-                                                        vfxEffect->Definition(), vfxEmitter->ParameterOverrides())
-                                                  : std::size_t{0};
-                const float vfxInspectorHeight =
-                    vfxEmitter
-                        ? std::min(720.0F, 26.0F + static_cast<float>(std::max<std::size_t>(vfxEntries, 1U)) * 48.0F)
-                        : 0.0F;
-                const float audioSetupHeight =
-                    registration->Type == Keire::AudioSourceComponent::StaticType() ||
-                            registration->Type == Keire::AudioReverbZoneComponent::StaticType()
-                        ? 72.0F
-                        : 0.0F;
-                const float proceduralDiagnosticsHeight =
-                    registration->Type == Keire::AnimatorComponent::StaticType() ? 138.0F : 0.0F;
-                const float cardHeight =
-                    expanded ? std::max(115.0F, 80.0F + anchorPickerHeight +
-                                                    static_cast<float>(registration->Properties.size()) * 34.0F +
-                                                    static_cast<float>(groupRows + headerRows) * 22.0F +
-                                                    static_cast<float>(additionalTextRows) * 20.0F +
-                                                    vfxInspectorHeight + audioSetupHeight + proceduralDiagnosticsHeight)
-                             : 38.0F;
-                if (auto card = ui.BeginChild(cardId, {0.0F, cardHeight}, true); card)
-                {
-                    const auto heading = (expanded ? "v  " : ">  ") + registration->Name;
-                    if (ui.Selectable(heading))
-                        expanded = !expanded;
-                    if (auto source = ui.BeginDragSource(); source)
-                    {
-                        const std::array ids{entity.Id().Value(), registration->Type.Value()};
-                        std::string payload;
-                        for (const auto id : ids)
-                        {
-                            payload += id.ToString();
-                            payload.push_back('\n');
-                        }
-                        ui.SetDragPayload("KEIRE_COMPONENT", std::as_bytes(std::span(payload.data(), payload.size())));
-                        ui.Text(entity.Name() + " / " + registration->Name);
-                    }
-                    if (!expanded)
-                        continue;
-                    auto enabled = component->Enabled();
-                    if (ui.Checkbox("Enabled##" + registration->Type.ToString(), enabled))
-                    {
-                        m_Controller.RecordInspectorUndo("Change " + registration->Name);
-                        sceneDocument.SetComponentEnabled(entity.Id(), registration->Type, enabled);
-                    }
-                    if (const auto animator = Keire::DynamicRefCast<Keire::AnimatorComponent>(component);
-                        animator && animator->PoseSource() == Keire::AnimatorPoseSource::ProceduralHumanoid)
-                    {
-                        const auto& state = animator->ProceduralState();
-                        ui.TextColored(theme.Accent, "PROCEDURAL RUNTIME");
-                        ui.Text("State: " + std::string(Keire::ProceduralMotionStateName(state.State)));
-                        ui.Text("Phase: " + std::to_string(state.GaitPhase) +
-                                " | Speed: " + std::to_string(state.Speed));
-                        ui.Text(std::string("Contacts: L ") + (state.LeftFootPlanted ? "planted" : "free") + " | R " +
-                                (state.RightFootPlanted ? "planted" : "free"));
-                        ui.Text("Quality: " +
-                                std::string(state.Quality == Keire::ProceduralMotionQuality::High     ? "High"
-                                            : state.Quality == Keire::ProceduralMotionQuality::Medium ? "Medium"
-                                            : state.Quality == Keire::ProceduralMotionQuality::Low    ? "Low"
-                                                                                                      : "Auto"));
-                        if (!animator->RuntimeDiagnostic().empty())
-                            ui.TextColored(theme.Warning, animator->RuntimeDiagnostic());
-                        ui.Separator();
-                    }
-                    if (rectTransform)
-                    {
-                        const auto rect = entity.GetComponent<Keire::RectTransformComponent>();
-                        if (rect)
-                        {
-                            if (const auto preset =
-                                    DrawAnchorPresetPicker(ui, rect->AnchorMinimum(), rect->AnchorMaximum(), theme))
-                            {
-                                auto anchoredPosition = rect->AnchoredPosition();
-                                auto sizeDelta = rect->SizeDelta();
-                                const bool stretchHorizontal =
-                                    std::abs(preset->Preset.Minimum.X - preset->Preset.Maximum.X) > 0.0001F;
-                                const bool stretchVertical =
-                                    std::abs(preset->Preset.Minimum.Y - preset->Preset.Maximum.Y) > 0.0001F;
-                                m_Controller.RecordInspectorUndo(
-                                    "Change Anchor Preset", "rect-transform.anchor-preset." + entity.Id().ToString());
-                                sceneDocument.SetComponentProperty(entity.Id(), registration->Type, "anchorMinimum",
-                                                                   preset->Preset.Minimum);
-                                sceneDocument.SetComponentProperty(entity.Id(), registration->Type, "anchorMaximum",
-                                                                   preset->Preset.Maximum);
-                                if (preset->FitStretch && (stretchHorizontal || stretchVertical))
-                                {
-                                    if (stretchHorizontal)
-                                    {
-                                        anchoredPosition.X = 0.0F;
-                                        sizeDelta.X = 0.0F;
-                                    }
-                                    if (stretchVertical)
-                                    {
-                                        anchoredPosition.Y = 0.0F;
-                                        sizeDelta.Y = 0.0F;
-                                    }
-                                    sceneDocument.SetComponentProperty(entity.Id(), registration->Type,
-                                                                       "anchoredPosition", anchoredPosition);
-                                    sceneDocument.SetComponentProperty(entity.Id(), registration->Type, "sizeDelta",
-                                                                       sizeDelta);
-                                }
-                            }
-                        }
-                    }
-                    std::string activeGroup;
-                    Keire::ComponentPropertyBag values;
-                    bool serialized = false;
-                    try
-                    {
-                        values = registration->Serialize(*component);
-                        serialized = true;
-                    }
-                    catch (const std::exception& error)
-                    {
-                        ui.TextColored(theme.Error, error.what());
-                    }
-                    for (const auto& property : registration->Properties)
-                    {
-                        if (!serialized)
-                            break;
-                        if (!IsInspectorPropertyVisible(registration->Type, property.Key))
-                            continue;
-                        if (!property.Group.empty() && property.Group != activeGroup)
-                        {
-                            activeGroup = property.Group;
-                            ui.TextColored(theme.MutedText, activeGroup);
-                        }
-                        if (!property.Header.empty())
-                            ui.TextColored(theme.Accent, property.Header);
-                        const auto propertyDisabled = ui.BeginDisabled(property.ReadOnly);
-                        try
-                        {
-                            const auto found = values.find(property.Key);
-                            if (found == values.end())
-                                throw std::invalid_argument("The component omitted a declared property.");
-                            auto candidate = found->second;
-                            std::optional<std::string> audioBusFallback;
-                            bool changed = false;
-                            bool editBoundary = false;
-                            const bool localLight = registration->Type == Keire::PointLightComponent::StaticType() ||
-                                                    registration->Type == Keire::SpotLightComponent::StaticType();
-                            const bool vfxOverrides = registration->Type == Keire::VfxEmitterComponent::StaticType() &&
-                                                      property.Key == "parameterOverrides";
-                            if (audioSource && property.Key == "busId")
-                            {
-                                const auto current = audioSource->BusId();
-                                std::span<const Keire::AudioMixerBusDefinition> buses;
-                                std::string preview = !resolvedMixer ? "Select a Mixer" : "Loading mixer buses...";
-                                if (mixerAsset)
-                                {
-                                    buses = mixerAsset->Definition().Buses;
-                                    if (const auto selected =
-                                            std::ranges::find(buses, current, &Keire::AudioMixerBusDefinition::Id);
-                                        selected != buses.end())
-                                    {
-                                        preview = selected->Name;
-                                    }
-                                    else
-                                        preview = "Missing Bus";
-                                }
-                                if (auto disabled = ui.BeginDisabled(!mixerAsset); disabled)
-                                {
-                                    if (auto busCombo = ui.BeginCombo("Bus", preview); busCombo)
-                                    {
-                                        for (const auto& bus : buses)
+                                        if (ui.Selectable(labels[index], shadows == modes[index]))
                                         {
-                                            if (ui.Selectable(bus.Name, bus.Id == current))
-                                            {
-                                                candidate = bus.Id.ToString();
-                                                audioBusFallback = bus.Name;
-                                                changed = true;
-                                                editBoundary = true;
-                                            }
+                                            m_Controller.RecordInspectorUndo();
+                                            sceneDocument.SetComponentProperty(entity.Id(), light->Type(), "shadows",
+                                                                               static_cast<std::int64_t>(modes[index]));
                                         }
                                     }
                                 }
-                            }
-                            else if (reverbZone && property.Key == "snapshotId")
-                            {
-                                const auto current = reverbZone->SnapshotId();
-                                std::span<const Keire::AudioMixerSnapshotDefinition> snapshots;
-                                std::string preview = !current ? "None (wet blend only)" : "Missing Snapshot";
-                                if (mixerAsset && current)
+                                auto shadowStrength = light->ShadowStrength();
+                                if (ui.SliderFloat("Shadow Strength", shadowStrength, 0.0F, 1.0F))
                                 {
-                                    snapshots = mixerAsset->Definition().Snapshots;
-                                    if (const auto selected = std::ranges::find(
-                                            snapshots, current, &Keire::AudioMixerSnapshotDefinition::Id);
-                                        selected != snapshots.end())
+                                    m_Controller.RecordInspectorUndo();
+                                    sceneDocument.SetComponentProperty(entity.Id(), light->Type(), "shadowStrength",
+                                                                       static_cast<double>(shadowStrength));
+                                }
+                                auto bias = light->ShadowBias();
+                                if (ui.SliderFloat("Shadow Bias", bias, 0.0F, 1.0F))
+                                {
+                                    m_Controller.RecordInspectorUndo();
+                                    sceneDocument.SetComponentProperty(entity.Id(), light->Type(), "shadowBias",
+                                                                       static_cast<double>(bias));
+                                }
+                                if (ui.Button("Reset Light"))
+                                {
+                                    m_Controller.RecordInspectorUndo();
+                                    sceneDocument.ResetComponent(entity.Id(), light->Type());
+                                }
+                                ui.TextColored(theme.MutedText, "Direct lighting | Directional shadows");
+                            }
+                        }
+                    }
+                }
+                if (displayedComponent->Type() == Keire::CameraComponent::StaticType())
+                {
+                    if (const auto camera = entity.GetComponent<Keire::CameraComponent>())
+                    {
+                        ui.Spacing();
+                        auto& cameraExpanded = expansion("camera");
+                        if (auto card = ui.BeginChild("CameraCard", {0.0F, cameraExpanded ? 440.0F : 38.0F}, true);
+                            card)
+                        {
+                            const auto registration = scene->Components()->Find(camera->Type());
+                            const bool removed =
+                                registration && drawComponentHeader(camera, *registration, cameraExpanded, "CAMERA");
+                            if (cameraExpanded && !removed)
+                            {
+                                ui.TextColored(theme.MutedText, "Game view | Priority-selected");
+                                ui.Separator();
+                                auto enabled = camera->Enabled();
+                                if (ui.Checkbox("Enabled##Camera", enabled))
+                                {
+                                    m_Controller.RecordInspectorUndo();
+                                    sceneDocument.SetComponentEnabled(entity.Id(), camera->Type(), enabled);
+                                }
+                                auto primary = camera->Primary();
+                                if (ui.Checkbox("Primary", primary))
+                                {
+                                    m_Controller.RecordInspectorUndo();
+                                    sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "primary", primary);
+                                }
+                                const auto projection = camera->Projection();
+                                if (auto combo =
+                                        ui.BeginCombo("Projection", projection == Keire::CameraProjection::Perspective
+                                                                        ? "Perspective"
+                                                                        : "Orthographic");
+                                    combo)
+                                {
+                                    if (ui.Selectable("Perspective",
+                                                      projection == Keire::CameraProjection::Perspective))
                                     {
-                                        preview = selected->Name;
+                                        m_Controller.RecordInspectorUndo();
+                                        sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "projection",
+                                                                           std::int64_t{0});
+                                    }
+                                    if (ui.Selectable("Orthographic",
+                                                      projection == Keire::CameraProjection::Orthographic))
+                                    {
+                                        m_Controller.RecordInspectorUndo();
+                                        sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "projection",
+                                                                           std::int64_t{1});
                                     }
                                 }
-                                else if (mixerAsset)
-                                    snapshots = mixerAsset->Definition().Snapshots;
-                                if (auto disabled = ui.BeginDisabled(!mixerAsset); disabled)
+                                const auto clearMode = camera->ClearMode();
+                                if (auto combo = ui.BeginCombo("Background", clearMode == Keire::CameraClearMode::Skybox
+                                                                                 ? "Skybox"
+                                                                                 : "Solid Color");
+                                    combo)
                                 {
-                                    if (auto snapshotCombo = ui.BeginCombo("Snapshot", preview); snapshotCombo)
+                                    if (ui.Selectable("Skybox", clearMode == Keire::CameraClearMode::Skybox))
                                     {
-                                        if (ui.Selectable("None (wet blend only)", !current))
-                                        {
-                                            candidate = std::string{};
-                                            changed = true;
-                                            editBoundary = true;
-                                        }
-                                        for (const auto& snapshot : snapshots)
-                                        {
-                                            if (ui.Selectable(snapshot.Name, snapshot.Id == current))
-                                            {
-                                                candidate = snapshot.Id.ToString();
-                                                changed = true;
-                                                editBoundary = true;
-                                            }
-                                        }
+                                        m_Controller.RecordInspectorUndo();
+                                        sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "clearMode",
+                                                                           std::int64_t{0});
+                                    }
+                                    if (ui.Selectable("Solid Color", clearMode == Keire::CameraClearMode::SolidColor))
+                                    {
+                                        m_Controller.RecordInspectorUndo();
+                                        sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "clearMode",
+                                                                           std::int64_t{1});
                                     }
                                 }
-                            }
-                            else if (vfxOverrides)
-                            {
-                                if (!vfxEffect)
+                                auto priority = camera->Priority();
+                                if (ui.SliderInt("Priority", priority, -100, 100))
                                 {
-                                    ui.TextColored(vfxEffectDiagnosticWarning ? theme.Warning : theme.MutedText,
-                                                   vfxEffectDiagnostic);
+                                    m_Controller.RecordInspectorUndo();
+                                    sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "priority",
+                                                                       static_cast<std::int64_t>(priority));
+                                }
+                                if (camera->Projection() == Keire::CameraProjection::Perspective)
+                                {
+                                    auto fieldOfView = camera->VerticalFieldOfViewDegrees();
+                                    if (ui.SliderFloat("Vertical FOV", fieldOfView, 1.0F, 179.0F))
+                                    {
+                                        m_Controller.RecordInspectorUndo();
+                                        sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "fieldOfView",
+                                                                           static_cast<double>(fieldOfView));
+                                    }
                                 }
                                 else
                                 {
-                                    auto overrides = std::vector<Keire::VfxParameterOverride>(
-                                        vfxEmitter->ParameterOverrides().begin(),
-                                        vfxEmitter->ParameterOverrides().end());
-                                    if (KeireEditor::VfxEmitterInspector::VisibleEntryCount(vfxEffect->Definition(),
-                                                                                            overrides) == 0)
+                                    auto size = camera->OrthographicSize();
+                                    if (ui.SliderFloat("Orthographic Size", size, 0.01F, 100.0F))
                                     {
-                                        ui.TextColored(theme.MutedText,
-                                                       "This effect has no exposed Blackboard parameters.");
-                                    }
-                                    bool actionBoundary = false;
-                                    KeireEditor::VfxEmitterInspectorCallbacks callbacks;
-                                    callbacks.Status = [&ui, &theme](const Keire::AssetId,
-                                                                     const std::string_view message, const bool warning)
-                                    { ui.TextColored(warning ? theme.Warning : theme.MutedText, message); };
-                                    callbacks.Reset = [&ui, &actionBoundary](const Keire::AssetId parameter)
-                                    {
-                                        ui.SameLine();
-                                        auto id = ui.PushId("VfxBlackboardReset-" + parameter.ToString());
-                                        if (!ui.Button("Reset"))
-                                            return false;
-                                        actionBoundary = true;
-                                        return true;
-                                    };
-                                    callbacks.RemoveStale = [&ui, &actionBoundary](const Keire::AssetId parameter)
-                                    {
-                                        ui.SameLine();
-                                        auto id = ui.PushId("VfxBlackboardRemoveStale-" + parameter.ToString());
-                                        if (!ui.Button("Remove"))
-                                            return false;
-                                        actionBoundary = true;
-                                        return true;
-                                    };
-                                    InspectorPropertyEditor vfxPropertyEditor(ui, records, assets, scene,
-                                                                              *m_AssetPicker);
-                                    changed = KeireEditor::VfxEmitterInspector{}.Draw(
-                                        vfxPropertyEditor, vfxEffect->Definition(), overrides, callbacks);
-                                    editBoundary = actionBoundary || vfxPropertyEditor.EditBoundary();
-                                    if (changed)
-                                    {
-                                        candidate = KeireEditor::VfxEmitterInspector::SerializeOverrides(
-                                            *registration, values, overrides);
+                                        m_Controller.RecordInspectorUndo();
+                                        sceneDocument.SetComponentProperty(
+                                            entity.Id(), camera->Type(), "orthographicSize", static_cast<double>(size));
                                     }
                                 }
-                            }
-                            else if (localLight && property.Key == "shadows")
-                            {
-                                const auto* current = std::get_if<std::int64_t>(&candidate);
-                                if (!current || *current < 0 || *current > 2)
-                                    throw std::invalid_argument("The local-light shadow mode is invalid.");
-                                constexpr std::array<std::string_view, 3> labels{"Disabled", "Hard", "Soft"};
-                                if (auto shadowMode =
-                                        ui.BeginCombo(property.DisplayName, labels[static_cast<std::size_t>(*current)]);
-                                    shadowMode)
+                                auto nearPlane = camera->NearPlane();
+                                auto farPlane = camera->FarPlane();
+                                const bool nearChanged =
+                                    ui.SliderFloat("Near Plane", nearPlane, 0.01F, std::min(farPlane - 0.01F, 100.0F));
+                                const bool farChanged =
+                                    ui.SliderFloat("Far Plane", farPlane, std::max(nearPlane + 0.01F, 1.0F), 10000.0F);
+                                if (nearChanged || farChanged)
                                 {
-                                    for (std::int64_t index = 0; index < static_cast<std::int64_t>(labels.size());
-                                         ++index)
+                                    m_Controller.RecordInspectorUndo();
+                                    sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "nearPlane",
+                                                                       static_cast<double>(nearPlane));
+                                    sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "farPlane",
+                                                                       static_cast<double>(farPlane));
+                                }
+                                if (camera->ClearMode() == Keire::CameraClearMode::SolidColor)
+                                {
+                                    auto clear = camera->ClearColor();
+                                    Keire::UiColor clearColor{clear.Red, clear.Green, clear.Blue, clear.Alpha};
+                                    if (ui.ColorEdit("Clear Color", clearColor))
                                     {
-                                        if (ui.Selectable(labels[static_cast<std::size_t>(index)], *current == index))
+                                        m_Controller.RecordInspectorUndo();
+                                        sceneDocument.SetComponentProperty(
+                                            entity.Id(), camera->Type(), "clearColor",
+                                            Keire::Color{clearColor.Red, clearColor.Green, clearColor.Blue,
+                                                         clearColor.Alpha});
+                                    }
+                                }
+                                if (ui.Button("Reset Camera"))
+                                {
+                                    m_Controller.RecordInspectorUndo();
+                                    sceneDocument.ResetComponent(entity.Id(), camera->Type());
+                                }
+                            }
+                        }
+                    }
+                }
+                if (displayedComponent->Type() == Keire::MeshRendererComponent::StaticType())
+                {
+                    if (const auto renderer = entity.GetComponent<Keire::MeshRendererComponent>())
+                    {
+                        ui.Spacing();
+                        auto& rendererExpanded = expansion("mesh-renderer");
+                        if (auto card =
+                                ui.BeginChild("MeshRendererCard", {0.0F, rendererExpanded ? 260.0F : 38.0F}, true);
+                            card)
+                        {
+                            const auto registration = scene->Components()->Find(renderer->Type());
+                            const bool removed = registration && drawComponentHeader(renderer, *registration,
+                                                                                     rendererExpanded, "MESH RENDERER");
+                            if (rendererExpanded && !removed)
+                            {
+                                ui.TextColored(theme.MutedText, "Lit geometry submission");
+                                ui.Separator();
+                                auto enabled = renderer->Enabled();
+                                if (ui.Checkbox("Enabled##MeshRenderer", enabled))
+                                {
+                                    m_Controller.RecordInspectorUndo();
+                                    sceneDocument.SetComponentEnabled(entity.Id(), renderer->Type(), enabled);
+                                }
+                                auto visible = renderer->Visible();
+                                if (ui.Checkbox("Visible", visible))
+                                {
+                                    m_Controller.RecordInspectorUndo();
+                                    sceneDocument.SetComponentProperty(entity.Id(), renderer->Type(), "visible",
+                                                                       visible);
+                                }
+                                auto tint = renderer->Tint();
+                                Keire::UiColor tintColor{tint.Red, tint.Green, tint.Blue, tint.Alpha};
+                                if (ui.ColorEdit("Tint", tintColor))
+                                {
+                                    m_Controller.RecordInspectorUndo("Change Tint", "mesh.tint." +
+                                                                                        entity.Id().ToString() + "." +
+                                                                                        std::to_string(m_EditSerial));
+                                    sceneDocument.SetComponentProperty(
+                                        entity.Id(), renderer->Type(), "tint",
+                                        Keire::Color{tintColor.Red, tintColor.Green, tintColor.Blue, tintColor.Alpha});
+                                }
+                                if (ui.LastItemState().DeactivatedAfterEdit)
+                                    ++m_EditSerial;
+                                if (registration)
+                                {
+                                    InspectorPropertyEditor propertyEditor(ui, records, assets, scene, *m_AssetPicker);
+                                    for (const auto& property : registration->Properties)
+                                    {
+                                        if (property.Key != "mesh")
+                                            continue;
+                                        try
                                         {
-                                            candidate = index;
-                                            changed = true;
+                                            const auto values = registration->Serialize(*renderer);
+                                            const auto found = values.find(property.Key);
+                                            if (found == values.end())
+                                                throw std::invalid_argument(
+                                                    "The Mesh Renderer omitted a declared property.");
+                                            auto candidate = found->second;
+                                            if (propertyDrawers.Draw(propertyEditor, registration->Type, property,
+                                                                     candidate))
+                                            {
+                                                m_Controller.RecordInspectorUndo("Change " + property.DisplayName,
+                                                                                 "mesh-renderer." + property.Key + "." +
+                                                                                     entity.Id().ToString());
+                                                sceneDocument.SetComponentProperty(entity.Id(), registration->Type,
+                                                                                   property.Key, std::move(candidate));
+                                            }
+                                        }
+                                        catch (const std::exception& error)
+                                        {
+                                            ui.TextColored(theme.Error, error.what());
                                         }
                                     }
                                 }
-                            }
-                            else
-                                changed = propertyDrawers.Draw(propertyEditor, registration->Type, property, candidate);
-                            if (!vfxOverrides && !property.Tooltip.empty() && ui.LastItemState().Hovered)
-                                ui.SetTooltip(property.Tooltip, {.Delayed = true});
-                            if (changed)
-                            {
-                                m_Controller.RecordInspectorUndo("Change " + property.DisplayName,
-                                                                 registration->Type.ToString() + "." + property.Key +
-                                                                     "." + entity.Id().ToString() + "." +
-                                                                     std::to_string(m_EditSerial));
-                                sceneDocument.SetComponentProperty(entity.Id(), registration->Type, property.Key,
-                                                                   std::move(candidate));
-                                if (audioBusFallback)
+                                InspectorPropertyEditor propertyEditor(ui, records, assets, scene, *m_AssetPicker);
+                                Keire::Ref<const Keire::MeshAsset> mesh =
+                                    renderer->Mesh() ? Keire::MeshAsset::ResolveBuiltin(renderer->Mesh())
+                                                     : Keire::MeshAsset::Cube();
+                                if (!mesh && assets)
                                 {
-                                    sceneDocument.SetComponentProperty(entity.Id(), registration->Type, "bus",
-                                                                       std::move(*audioBusFallback));
+                                    mesh = assets->Load<Keire::MeshAsset>(renderer->Mesh(), Keire::AssetPriority::High)
+                                               .TryGetLoaded();
+                                }
+                                if (mesh)
+                                {
+                                    ui.TextColored(theme.MutedText, "Material Slots");
+                                    for (std::size_t slot = 0; slot < mesh->MaterialSlots().size(); ++slot)
+                                    {
+                                        auto material = renderer->Material(slot);
+                                        if (!material)
+                                            material = mesh->MaterialSlots()[slot].DefaultMaterial;
+                                        const auto label = mesh->MaterialSlots()[slot].Name + "##material-slot-" +
+                                                           std::to_string(slot);
+                                        if (propertyEditor.EditAsset(label, material,
+                                                                     Keire::MaterialAsset::StaticType()))
+                                        {
+                                            m_Controller.RecordInspectorUndo("Change Material Slot",
+                                                                             "mesh-renderer.material." +
+                                                                                 std::to_string(slot) + "." +
+                                                                                 entity.Id().ToString());
+                                            sceneDocument.SetMeshRendererMaterial(entity.Id(), slot, material);
+                                            m_Controller.NotifyInspectorMaterialAssigned(material);
+                                        }
+                                    }
+                                }
+                                auto castShadows = renderer->CastShadows();
+                                if (ui.Checkbox("Cast Shadows", castShadows))
+                                {
+                                    m_Controller.RecordInspectorUndo("Change Shadow Casting");
+                                    sceneDocument.SetComponentProperty(entity.Id(), renderer->Type(), "castShadows",
+                                                                       castShadows);
+                                }
+                                auto receiveShadows = renderer->ReceiveShadows();
+                                if (ui.Checkbox("Receive Shadows", receiveShadows))
+                                {
+                                    m_Controller.RecordInspectorUndo("Change Shadow Receiving");
+                                    sceneDocument.SetComponentProperty(entity.Id(), renderer->Type(), "receiveShadows",
+                                                                       receiveShadows);
+                                }
+                                if (ui.Button("Reset Renderer"))
+                                {
+                                    m_Controller.RecordInspectorUndo();
+                                    sceneDocument.ResetComponent(entity.Id(), renderer->Type());
                                 }
                             }
-                            if (changed && (editBoundary || ui.LastItemState().DeactivatedAfterEdit))
-                                ++m_EditSerial;
+                        }
+                    }
+                }
+                InspectorPropertyEditor propertyEditor(ui, records, assets, scene, *m_AssetPicker);
+                for (const auto& component : entity.GetComponents())
+                {
+                    if (component != displayedComponent)
+                        continue;
+                    if (!component || component->Type() == Keire::TransformComponent::StaticType() ||
+                        component->Type() == Keire::CameraComponent::StaticType() ||
+                        component->Type() == Keire::DirectionalLightComponent::StaticType() ||
+                        component->Type() == Keire::MeshRendererComponent::StaticType())
+                        continue;
+                    const auto registration = scene->Components()->Find(component->Type());
+                    if (!registration)
+                        continue;
+                    auto vfxEmitter = Keire::Ref<Keire::VfxEmitterComponent>{};
+                    auto vfxEffect = Keire::Ref<const Keire::VfxEffectAsset>{};
+                    std::string vfxEffectDiagnostic;
+                    bool vfxEffectDiagnosticWarning = false;
+                    if (registration->Type == Keire::VfxEmitterComponent::StaticType())
+                    {
+                        vfxEmitter = Keire::DynamicRefCast<Keire::VfxEmitterComponent>(component);
+                        if (!vfxEmitter)
+                        {
+                            vfxEffectDiagnostic = "The VFX Emitter registration returned an incompatible component.";
+                            vfxEffectDiagnosticWarning = true;
+                        }
+                        else if (!vfxEmitter->Effect())
+                        {
+                            vfxEffectDiagnostic = "Assign a VFX effect to edit exposed Blackboard parameters.";
+                        }
+                        else if (!assets)
+                        {
+                            vfxEffectDiagnostic =
+                                "The asset system is unavailable; serialized overrides are preserved.";
+                            vfxEffectDiagnosticWarning = true;
+                        }
+                        else
+                        {
+                            try
+                            {
+                                vfxEffect =
+                                    assets
+                                        ->Load<Keire::VfxEffectAsset>(vfxEmitter->Effect(), Keire::AssetPriority::High)
+                                        .TryGetLoaded();
+                                if (!vfxEffect)
+                                    vfxEffectDiagnostic = "Loading VFX Blackboard metadata...";
+                            }
+                            catch (const std::exception& error)
+                            {
+                                vfxEffectDiagnostic =
+                                    std::string("VFX Blackboard metadata is unavailable: ") + error.what();
+                                vfxEffectDiagnosticWarning = true;
+                            }
+                        }
+                    }
+                    const auto audioSource = registration->Type == Keire::AudioSourceComponent::StaticType()
+                                                 ? Keire::DynamicRefCast<Keire::AudioSourceComponent>(component)
+                                                 : Keire::Ref<Keire::AudioSourceComponent>{};
+                    const auto reverbZone = registration->Type == Keire::AudioReverbZoneComponent::StaticType()
+                                                ? Keire::DynamicRefCast<Keire::AudioReverbZoneComponent>(component)
+                                                : Keire::Ref<Keire::AudioReverbZoneComponent>{};
+                    const auto collider = registration->Type == Keire::ColliderComponent::StaticType()
+                                              ? Keire::DynamicRefCast<Keire::ColliderComponent>(component)
+                                              : Keire::Ref<Keire::ColliderComponent>{};
+                    const auto explicitMixer = audioSource  ? audioSource->Mixer()
+                                               : reverbZone ? reverbZone->Mixer()
+                                                            : Keire::AssetId{};
+                    const auto resolvedMixer =
+                        explicitMixer ? explicitMixer : m_Controller.InspectorDefaultAudioMixer();
+                    auto mixerAsset = Keire::Ref<const Keire::AudioMixerAsset>{};
+                    if (assets && resolvedMixer)
+                    {
+                        try
+                        {
+                            mixerAsset = assets->Load<Keire::AudioMixerAsset>(resolvedMixer, Keire::AssetPriority::High)
+                                             .TryGetLoaded();
+                        }
+                        catch (...)
+                        {
+                            // The component card reports loading and validation state below without interrupting
+                            // editing.
+                        }
+                    }
+                    ui.Spacing();
+                    const auto ordinal = ComponentOrdinal(componentOrder, component);
+                    const auto componentKey = registration->Type.ToString() + "." + std::to_string(ordinal);
+                    auto& expanded = expansion(componentKey);
+                    const auto cardId = "ComponentCard##" + componentKey;
+                    const bool rectTransform = registration->Type == Keire::RectTransformComponent::StaticType();
+                    const float anchorPickerHeight = rectTransform ? 64.0F : 0.0F;
+                    std::size_t groupRows = 0;
+                    std::size_t headerRows = 0;
+                    std::size_t additionalTextRows = 0;
+                    std::string_view previousGroup;
+                    for (const auto& property : registration->Properties)
+                    {
+                        if (!IsInspectorPropertyVisible(registration->Type, property.Key))
+                            continue;
+                        if (!property.Group.empty() && property.Group != previousGroup)
+                        {
+                            ++groupRows;
+                            previousGroup = property.Group;
+                        }
+                        if (!property.Header.empty())
+                            ++headerRows;
+                        if (property.TextLines > 1)
+                            additionalTextRows += property.TextLines - 1;
+                    }
+                    const auto vfxEntries = vfxEffect ? KeireEditor::VfxEmitterInspector::VisibleEntryCount(
+                                                            vfxEffect->Definition(), vfxEmitter->ParameterOverrides())
+                                                      : std::size_t{0};
+                    const float vfxInspectorHeight =
+                        vfxEmitter ? std::min(720.0F,
+                                              26.0F + static_cast<float>(std::max<std::size_t>(vfxEntries, 1U)) * 48.0F)
+                                   : 0.0F;
+                    const float audioSetupHeight =
+                        registration->Type == Keire::AudioSourceComponent::StaticType() ||
+                                registration->Type == Keire::AudioReverbZoneComponent::StaticType()
+                            ? 72.0F
+                            : 0.0F;
+                    const float proceduralDiagnosticsHeight =
+                        registration->Type == Keire::AnimatorComponent::StaticType() ? 138.0F : 0.0F;
+                    const float cardHeight =
+                        expanded
+                            ? std::max(115.0F, 80.0F + anchorPickerHeight +
+                                                   static_cast<float>(registration->Properties.size()) * 34.0F +
+                                                   static_cast<float>(groupRows + headerRows) * 22.0F +
+                                                   static_cast<float>(additionalTextRows) * 20.0F + vfxInspectorHeight +
+                                                   audioSetupHeight + proceduralDiagnosticsHeight)
+                            : 38.0F;
+                    if (auto card = ui.BeginChild(cardId, {0.0F, cardHeight}, true); card)
+                    {
+                        const bool removed =
+                            drawComponentHeader(component, *registration, expanded, registration->Name);
+                        if (!expanded || removed)
+                            continue;
+                        auto enabled = component->Enabled();
+                        if (ui.Checkbox("Enabled##" + registration->Type.ToString(), enabled))
+                        {
+                            m_Controller.RecordInspectorUndo("Change " + registration->Name);
+                            sceneDocument.SetComponentEnabled(entity.Id(), registration->Type, enabled);
+                        }
+                        if (const auto animator = Keire::DynamicRefCast<Keire::AnimatorComponent>(component);
+                            animator && animator->PoseSource() == Keire::AnimatorPoseSource::ProceduralHumanoid)
+                        {
+                            const auto& state = animator->ProceduralState();
+                            ui.TextColored(theme.Accent, "PROCEDURAL RUNTIME");
+                            ui.Text("State: " + std::string(Keire::ProceduralMotionStateName(state.State)));
+                            ui.Text("Phase: " + std::to_string(state.GaitPhase) +
+                                    " | Speed: " + std::to_string(state.Speed));
+                            ui.Text(std::string("Contacts: L ") + (state.LeftFootPlanted ? "planted" : "free") +
+                                    " | R " + (state.RightFootPlanted ? "planted" : "free"));
+                            ui.Text("Quality: " +
+                                    std::string(state.Quality == Keire::ProceduralMotionQuality::High     ? "High"
+                                                : state.Quality == Keire::ProceduralMotionQuality::Medium ? "Medium"
+                                                : state.Quality == Keire::ProceduralMotionQuality::Low    ? "Low"
+                                                                                                          : "Auto"));
+                            if (!animator->RuntimeDiagnostic().empty())
+                                ui.TextColored(theme.Warning, animator->RuntimeDiagnostic());
+                            ui.Separator();
+                        }
+                        if (rectTransform)
+                        {
+                            const auto rect = entity.GetComponent<Keire::RectTransformComponent>();
+                            if (rect)
+                            {
+                                if (const auto preset =
+                                        DrawAnchorPresetPicker(ui, rect->AnchorMinimum(), rect->AnchorMaximum(), theme))
+                                {
+                                    auto anchoredPosition = rect->AnchoredPosition();
+                                    auto sizeDelta = rect->SizeDelta();
+                                    const bool stretchHorizontal =
+                                        std::abs(preset->Preset.Minimum.X - preset->Preset.Maximum.X) > 0.0001F;
+                                    const bool stretchVertical =
+                                        std::abs(preset->Preset.Minimum.Y - preset->Preset.Maximum.Y) > 0.0001F;
+                                    m_Controller.RecordInspectorUndo("Change Anchor Preset",
+                                                                     "rect-transform.anchor-preset." +
+                                                                         entity.Id().ToString());
+                                    sceneDocument.SetComponentProperty(entity.Id(), registration->Type, "anchorMinimum",
+                                                                       preset->Preset.Minimum);
+                                    sceneDocument.SetComponentProperty(entity.Id(), registration->Type, "anchorMaximum",
+                                                                       preset->Preset.Maximum);
+                                    if (preset->FitStretch && (stretchHorizontal || stretchVertical))
+                                    {
+                                        if (stretchHorizontal)
+                                        {
+                                            anchoredPosition.X = 0.0F;
+                                            sizeDelta.X = 0.0F;
+                                        }
+                                        if (stretchVertical)
+                                        {
+                                            anchoredPosition.Y = 0.0F;
+                                            sizeDelta.Y = 0.0F;
+                                        }
+                                        sceneDocument.SetComponentProperty(entity.Id(), registration->Type,
+                                                                           "anchoredPosition", anchoredPosition);
+                                        sceneDocument.SetComponentProperty(entity.Id(), registration->Type, "sizeDelta",
+                                                                           sizeDelta);
+                                    }
+                                }
+                            }
+                        }
+                        std::string activeGroup;
+                        Keire::ComponentPropertyBag values;
+                        bool serialized = false;
+                        try
+                        {
+                            values = registration->Serialize(*component);
+                            serialized = true;
                         }
                         catch (const std::exception& error)
                         {
                             ui.TextColored(theme.Error, error.what());
                         }
-                    }
-                    if (registration->Type == Keire::AudioReverbZoneComponent::StaticType())
-                    {
-                        const auto zone = Keire::DynamicRefCast<Keire::AudioReverbZoneComponent>(component);
-                        if (!zone || !resolvedMixer)
-                            ui.TextColored(theme.Warning,
-                                           "Assign a Mixer here or configure the project's Default Mixer.");
-                        else if (!assets)
-                            ui.TextColored(theme.Warning, "Audio assets are unavailable for setup validation.");
-                        else if (mixerAsset)
+                        for (const auto& property : registration->Properties)
                         {
-                            const auto& definition = mixerAsset->Definition();
-                            const bool hasReverb = std::ranges::any_of(
-                                definition.Buses,
-                                [](const Keire::AudioMixerBusDefinition& bus)
-                                {
-                                    return std::ranges::any_of(
-                                        bus.Effects,
-                                        [](const Keire::AudioMixerEffectDefinition& effect)
-                                        {
-                                            return effect.Type == Keire::AudioGraphNodeType::AlgorithmicReverb ||
-                                                   effect.Type == Keire::AudioGraphNodeType::ConvolutionReverb;
-                                        });
-                                });
-                            const bool snapshotValid =
-                                !zone->SnapshotId() ||
-                                std::ranges::any_of(definition.Snapshots,
-                                                    [&](const Keire::AudioMixerSnapshotDefinition& snapshot)
-                                                    { return snapshot.Id == zone->SnapshotId(); });
-                            ui.TextColored(hasReverb && snapshotValid ? theme.Success : theme.Warning,
-                                           !hasReverb       ? "Mixer has no reverb effect. Use Create Reverb Return."
-                                           : !snapshotValid ? "Snapshot Stable ID is not present in this mixer."
-                                                            : "Zone setup valid: wet level follows listener overlap.");
-                            ui.TextColored(theme.MutedText,
-                                           "Snapshot is optional; Reverb Send controls wet intensity inside the zone.");
-                            if (!zone->Mixer())
-                                ui.TextColored(theme.MutedText, "Routing through the Project Settings Default Mixer.");
-                        }
-                        else
-                            ui.TextColored(theme.MutedText, "Loading mixer setup validation...");
-                    }
-                    else if (registration->Type == Keire::AudioSourceComponent::StaticType())
-                    {
-                        const auto source = Keire::DynamicRefCast<Keire::AudioSourceComponent>(component);
-                        if (source && resolvedMixer && assets)
-                        {
-                            if (mixerAsset)
+                            if (!serialized)
+                                break;
+                            if (!IsInspectorPropertyVisible(registration->Type, property.Key))
+                                continue;
+                            if (collider && !ColliderPropertyVisible(collider->Shape(), property.Key))
+                                continue;
+                            if (!property.Group.empty() && property.Group != activeGroup)
                             {
-                                const auto& buses = mixerAsset->Definition().Buses;
-                                const bool busValid =
-                                    source->BusId()
-                                        ? std::ranges::any_of(buses, [&](const Keire::AudioMixerBusDefinition& bus)
-                                                              { return bus.Id == source->BusId(); })
-                                        : std::ranges::any_of(buses, [&](const Keire::AudioMixerBusDefinition& bus)
-                                                              { return bus.Name == source->Bus(); });
-                                ui.TextColored(busValid ? theme.Success : theme.Warning,
-                                               busValid ? "Mixer route is valid and active."
-                                                        : "Selected bus is missing; audio will fall back to Master.");
-                                if (!source->Mixer())
+                                activeGroup = property.Group;
+                                ui.TextColored(theme.MutedText, activeGroup);
+                            }
+                            if (!property.Header.empty())
+                                ui.TextColored(theme.Accent, property.Header);
+                            const auto propertyDisabled = ui.BeginDisabled(property.ReadOnly);
+                            try
+                            {
+                                const auto found = values.find(property.Key);
+                                if (found == values.end())
+                                    throw std::invalid_argument("The component omitted a declared property.");
+                                auto candidate = found->second;
+                                std::optional<std::string> audioBusFallback;
+                                bool changed = false;
+                                bool editBoundary = false;
+                                const bool localLight =
+                                    registration->Type == Keire::PointLightComponent::StaticType() ||
+                                    registration->Type == Keire::SpotLightComponent::StaticType();
+                                const bool vfxOverrides =
+                                    registration->Type == Keire::VfxEmitterComponent::StaticType() &&
+                                    property.Key == "parameterOverrides";
+                                if (collider && property.Key == "shape")
+                                {
+                                    const auto* current = std::get_if<std::int64_t>(&candidate);
+                                    constexpr std::array<std::string_view, 5> labels{"Box", "Sphere", "Capsule",
+                                                                                     "Convex Mesh", "Triangle Mesh"};
+                                    if (!current || *current < 0 || static_cast<std::size_t>(*current) >= labels.size())
+                                        throw std::invalid_argument("The collider shape is invalid.");
+                                    if (auto shape = ui.BeginCombo("Shape##ColliderShape",
+                                                                   labels[static_cast<std::size_t>(*current)]);
+                                        shape)
+                                    {
+                                        for (std::int64_t index = 0; index < static_cast<std::int64_t>(labels.size());
+                                             ++index)
+                                        {
+                                            if (ui.Selectable(labels[static_cast<std::size_t>(index)],
+                                                              *current == index))
+                                            {
+                                                candidate = index;
+                                                changed = true;
+                                                editBoundary = true;
+                                            }
+                                        }
+                                    }
+                                }
+                                else if (audioSource && property.Key == "busId")
+                                {
+                                    const auto current = audioSource->BusId();
+                                    std::span<const Keire::AudioMixerBusDefinition> buses;
+                                    std::string preview = !resolvedMixer ? "Select a Mixer" : "Loading mixer buses...";
+                                    if (mixerAsset)
+                                    {
+                                        buses = mixerAsset->Definition().Buses;
+                                        if (const auto selected =
+                                                std::ranges::find(buses, current, &Keire::AudioMixerBusDefinition::Id);
+                                            selected != buses.end())
+                                        {
+                                            preview = selected->Name;
+                                        }
+                                        else
+                                            preview = "Missing Bus";
+                                    }
+                                    if (auto disabled = ui.BeginDisabled(!mixerAsset); disabled)
+                                    {
+                                        if (auto busCombo = ui.BeginCombo("Bus", preview); busCombo)
+                                        {
+                                            for (const auto& bus : buses)
+                                            {
+                                                if (ui.Selectable(bus.Name, bus.Id == current))
+                                                {
+                                                    candidate = bus.Id.ToString();
+                                                    audioBusFallback = bus.Name;
+                                                    changed = true;
+                                                    editBoundary = true;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                else if (reverbZone && property.Key == "snapshotId")
+                                {
+                                    const auto current = reverbZone->SnapshotId();
+                                    std::span<const Keire::AudioMixerSnapshotDefinition> snapshots;
+                                    std::string preview = !current ? "None (wet blend only)" : "Missing Snapshot";
+                                    if (mixerAsset && current)
+                                    {
+                                        snapshots = mixerAsset->Definition().Snapshots;
+                                        if (const auto selected = std::ranges::find(
+                                                snapshots, current, &Keire::AudioMixerSnapshotDefinition::Id);
+                                            selected != snapshots.end())
+                                        {
+                                            preview = selected->Name;
+                                        }
+                                    }
+                                    else if (mixerAsset)
+                                        snapshots = mixerAsset->Definition().Snapshots;
+                                    if (auto disabled = ui.BeginDisabled(!mixerAsset); disabled)
+                                    {
+                                        if (auto snapshotCombo = ui.BeginCombo("Snapshot", preview); snapshotCombo)
+                                        {
+                                            if (ui.Selectable("None (wet blend only)", !current))
+                                            {
+                                                candidate = std::string{};
+                                                changed = true;
+                                                editBoundary = true;
+                                            }
+                                            for (const auto& snapshot : snapshots)
+                                            {
+                                                if (ui.Selectable(snapshot.Name, snapshot.Id == current))
+                                                {
+                                                    candidate = snapshot.Id.ToString();
+                                                    changed = true;
+                                                    editBoundary = true;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                else if (vfxOverrides)
+                                {
+                                    if (!vfxEffect)
+                                    {
+                                        ui.TextColored(vfxEffectDiagnosticWarning ? theme.Warning : theme.MutedText,
+                                                       vfxEffectDiagnostic);
+                                    }
+                                    else
+                                    {
+                                        auto overrides = std::vector<Keire::VfxParameterOverride>(
+                                            vfxEmitter->ParameterOverrides().begin(),
+                                            vfxEmitter->ParameterOverrides().end());
+                                        if (KeireEditor::VfxEmitterInspector::VisibleEntryCount(vfxEffect->Definition(),
+                                                                                                overrides) == 0)
+                                        {
+                                            ui.TextColored(theme.MutedText,
+                                                           "This effect has no exposed Blackboard parameters.");
+                                        }
+                                        bool actionBoundary = false;
+                                        KeireEditor::VfxEmitterInspectorCallbacks callbacks;
+                                        callbacks.Status = [&ui, &theme](const Keire::AssetId,
+                                                                         const std::string_view message,
+                                                                         const bool warning)
+                                        { ui.TextColored(warning ? theme.Warning : theme.MutedText, message); };
+                                        callbacks.Reset = [&ui, &actionBoundary](const Keire::AssetId parameter)
+                                        {
+                                            ui.SameLine();
+                                            auto id = ui.PushId("VfxBlackboardReset-" + parameter.ToString());
+                                            if (!ui.Button("Reset"))
+                                                return false;
+                                            actionBoundary = true;
+                                            return true;
+                                        };
+                                        callbacks.RemoveStale = [&ui, &actionBoundary](const Keire::AssetId parameter)
+                                        {
+                                            ui.SameLine();
+                                            auto id = ui.PushId("VfxBlackboardRemoveStale-" + parameter.ToString());
+                                            if (!ui.Button("Remove"))
+                                                return false;
+                                            actionBoundary = true;
+                                            return true;
+                                        };
+                                        InspectorPropertyEditor vfxPropertyEditor(ui, records, assets, scene,
+                                                                                  *m_AssetPicker);
+                                        changed = KeireEditor::VfxEmitterInspector{}.Draw(
+                                            vfxPropertyEditor, vfxEffect->Definition(), overrides, callbacks);
+                                        editBoundary = actionBoundary || vfxPropertyEditor.EditBoundary();
+                                        if (changed)
+                                        {
+                                            candidate = KeireEditor::VfxEmitterInspector::SerializeOverrides(
+                                                *registration, values, overrides);
+                                        }
+                                    }
+                                }
+                                else if (localLight && property.Key == "shadows")
+                                {
+                                    const auto* current = std::get_if<std::int64_t>(&candidate);
+                                    if (!current || *current < 0 || *current > 2)
+                                        throw std::invalid_argument("The local-light shadow mode is invalid.");
+                                    constexpr std::array<std::string_view, 3> labels{"Disabled", "Hard", "Soft"};
+                                    if (auto shadowMode = ui.BeginCombo(property.DisplayName,
+                                                                        labels[static_cast<std::size_t>(*current)]);
+                                        shadowMode)
+                                    {
+                                        for (std::int64_t index = 0; index < static_cast<std::int64_t>(labels.size());
+                                             ++index)
+                                        {
+                                            if (ui.Selectable(labels[static_cast<std::size_t>(index)],
+                                                              *current == index))
+                                            {
+                                                candidate = index;
+                                                changed = true;
+                                            }
+                                        }
+                                    }
+                                }
+                                else
+                                    changed =
+                                        propertyDrawers.Draw(propertyEditor, registration->Type, property, candidate);
+                                if (!vfxOverrides && !property.Tooltip.empty() && ui.LastItemState().Hovered)
+                                    ui.SetTooltip(property.Tooltip, {.Delayed = true});
+                                if (changed)
+                                {
+                                    m_Controller.RecordInspectorUndo("Change " + property.DisplayName,
+                                                                     registration->Type.ToString() + "." +
+                                                                         property.Key + "." + entity.Id().ToString() +
+                                                                         "." + std::to_string(m_EditSerial));
+                                    sceneDocument.SetComponentProperty(entity.Id(), registration->Type, property.Key,
+                                                                       std::move(candidate));
+                                    if (audioBusFallback)
+                                    {
+                                        sceneDocument.SetComponentProperty(entity.Id(), registration->Type, "bus",
+                                                                           std::move(*audioBusFallback));
+                                    }
+                                }
+                                if (changed && (editBoundary || ui.LastItemState().DeactivatedAfterEdit))
+                                    ++m_EditSerial;
+                            }
+                            catch (const std::exception& error)
+                            {
+                                ui.TextColored(theme.Error, error.what());
+                            }
+                        }
+                        if (registration->Type == Keire::AudioReverbZoneComponent::StaticType())
+                        {
+                            const auto zone = Keire::DynamicRefCast<Keire::AudioReverbZoneComponent>(component);
+                            if (!zone || !resolvedMixer)
+                                ui.TextColored(theme.Warning,
+                                               "Assign a Mixer here or configure the project's Default Mixer.");
+                            else if (!assets)
+                                ui.TextColored(theme.Warning, "Audio assets are unavailable for setup validation.");
+                            else if (mixerAsset)
+                            {
+                                const auto& definition = mixerAsset->Definition();
+                                const bool hasReverb = std::ranges::any_of(
+                                    definition.Buses,
+                                    [](const Keire::AudioMixerBusDefinition& bus)
+                                    {
+                                        return std::ranges::any_of(
+                                            bus.Effects,
+                                            [](const Keire::AudioMixerEffectDefinition& effect)
+                                            {
+                                                return effect.Type == Keire::AudioGraphNodeType::AlgorithmicReverb ||
+                                                       effect.Type == Keire::AudioGraphNodeType::ConvolutionReverb;
+                                            });
+                                    });
+                                const bool snapshotValid =
+                                    !zone->SnapshotId() ||
+                                    std::ranges::any_of(definition.Snapshots,
+                                                        [&](const Keire::AudioMixerSnapshotDefinition& snapshot)
+                                                        { return snapshot.Id == zone->SnapshotId(); });
+                                ui.TextColored(hasReverb && snapshotValid ? theme.Success : theme.Warning,
+                                               !hasReverb ? "Mixer has no reverb effect. Use Create Reverb Return."
+                                               : !snapshotValid
+                                                   ? "Snapshot Stable ID is not present in this mixer."
+                                                   : "Zone setup valid: wet level follows listener overlap.");
+                                ui.TextColored(
+                                    theme.MutedText,
+                                    "Snapshot is optional; Reverb Send controls wet intensity inside the zone.");
+                                if (!zone->Mixer())
                                     ui.TextColored(theme.MutedText,
                                                    "Routing through the Project Settings Default Mixer.");
                             }
+                            else
+                                ui.TextColored(theme.MutedText, "Loading mixer setup validation...");
                         }
-                        else if (source && !resolvedMixer)
-                            ui.TextColored(theme.Warning,
-                                           "Assign a Mixer here or configure the project's Default Mixer.");
-                    }
-                    if (registration->Removable && ui.Button("Remove " + registration->Name))
-                    {
-                        m_Controller.RecordInspectorUndo("Remove " + registration->Name);
-                        sceneDocument.RemoveComponent(entity.Id(), registration->Type);
+                        else if (registration->Type == Keire::AudioSourceComponent::StaticType())
+                        {
+                            const auto source = Keire::DynamicRefCast<Keire::AudioSourceComponent>(component);
+                            if (source && resolvedMixer && assets)
+                            {
+                                if (mixerAsset)
+                                {
+                                    const auto& buses = mixerAsset->Definition().Buses;
+                                    const bool busValid =
+                                        source->BusId()
+                                            ? std::ranges::any_of(buses, [&](const Keire::AudioMixerBusDefinition& bus)
+                                                                  { return bus.Id == source->BusId(); })
+                                            : std::ranges::any_of(buses, [&](const Keire::AudioMixerBusDefinition& bus)
+                                                                  { return bus.Name == source->Bus(); });
+                                    ui.TextColored(busValid ? theme.Success : theme.Warning,
+                                                   busValid
+                                                       ? "Mixer route is valid and active."
+                                                       : "Selected bus is missing; audio will fall back to Master.");
+                                    if (!source->Mixer())
+                                        ui.TextColored(theme.MutedText,
+                                                       "Routing through the Project Settings Default Mixer.");
+                                }
+                            }
+                            else if (source && !resolvedMixer)
+                                ui.TextColored(theme.Warning,
+                                               "Assign a Mixer here or configure the project's Default Mixer.");
+                        }
                     }
                 }
             }

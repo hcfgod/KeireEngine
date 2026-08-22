@@ -10,6 +10,7 @@
 #include <ranges>
 #include <span>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <vector>
 
@@ -131,6 +132,26 @@ TEST_CASE("filesystem rename supports extended-length Windows destinations")
     CHECK_NOTHROW(Keire::Detail::RenamePathWithRetry(source, destination));
     CHECK_NOTHROW(Keire::Detail::RenamePathWithRetry(destination, source));
     CHECK(Keire::Detail::ReadTextFile(source, 1024) == "long-path rename");
+
+    std::error_code ignored;
+    std::filesystem::remove_all(root, ignored);
+}
+
+TEST_CASE("atomic file publication supports Windows paths whose temporary name exceeds MAX_PATH")
+{
+    const auto suffix = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    const auto root = std::filesystem::temp_directory_path() / ("KeireLongAtomic-" + suffix);
+    std::filesystem::create_directories(root);
+    REQUIRE(root.native().size() < 240);
+    const auto filenameLength = std::size_t{245} - root.native().size() - 1;
+    REQUIRE(filenameLength > 4);
+    REQUIRE(filenameLength < 255);
+    const auto destination = root / (std::string(filenameLength - 4, 'a') + ".bin");
+    REQUIRE(destination.native().size() == 245);
+    REQUIRE(destination.native().size() + std::string_view(".tmp.18446744073709551615").size() > 260);
+
+    CHECK_NOTHROW(Keire::Detail::WriteTextFileAtomically(destination, "long-path atomic publication"));
+    CHECK(Keire::Detail::ReadTextFile(destination, 1024) == "long-path atomic publication");
 
     std::error_code ignored;
     std::filesystem::remove_all(root, ignored);

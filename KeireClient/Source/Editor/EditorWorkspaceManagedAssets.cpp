@@ -22,7 +22,7 @@ bool EditorWorkspaceLayer::CreateManagedAssembly(const std::string_view name)
             (void)m_AssetOperations->PreemptBackgroundImports();
         const auto directory = m_AssetBrowserPanel ? m_AssetBrowserPanel->CurrentFolder() : std::filesystem::path{};
         const auto destination = directory / (std::string(name) + ".keireasm");
-        const auto script = directory / std::string(name) / (std::string(name) + "Root.cs");
+        const auto script = directory / (std::string(name) + "Root.cs");
         if (m_AssetDatabase->Find(destination) ||
             std::filesystem::exists(m_AssetDatabase->Specification().ProjectRoot / "Assets" / script))
             throw std::runtime_error("The assembly or its source folder already exists.");
@@ -30,7 +30,7 @@ bool EditorWorkspaceLayer::CreateManagedAssembly(const std::string_view name)
         Keire::ManagedAssemblyDefinition definition;
         definition.Name = name;
         definition.RootNamespace = name;
-        definition.SourceRoots = {std::filesystem::path("Assets") / directory / std::string(name)};
+        definition.SourceRoots = {std::filesystem::path("Assets") / directory};
         const std::string source = "using Keire;\n\nnamespace " + std::string(name) + ";\n\npublic sealed class " +
                                    std::string(name) +
                                    "Root : Behaviour\n{\n    protected override void Start() => "

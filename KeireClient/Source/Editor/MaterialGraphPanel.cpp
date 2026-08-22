@@ -900,6 +900,10 @@ namespace KeireEditor
                         m_SelectedNode = node->Id;
                         m_SelectedConnection.reset();
                     }
+                    if (DrawClipboardContextMenu(ui, model.NodeIdentities, true,
+                                                 node->Id != document.Definition().OutputNode &&
+                                                     node->Kind != Keire::ShaderGraphNodeKind::Master))
+                        return;
                     if (auto addMenu = ui.BeginMenu("Add Compatible Node"); addMenu)
                     {
                         if (DrawExpressionCreationMenu(ui, m_GraphContext->GraphPosition, pin ? nullptr : &*node, pin))
@@ -955,6 +959,7 @@ namespace KeireEditor
                         ui.Separator();
                         if (ui.MenuItem("Create Comment from Selection"))
                             CreateComment(ui, document, model, m_GraphContext->GraphPosition, true);
+                        DrawFunctionExtractionContextMenu(ui, document.Definition());
                         if (ui.MenuItem("Delete Node", false, removable))
                             try
                             {
@@ -1016,6 +1021,8 @@ namespace KeireEditor
                 }
             }
         }
+        if (DrawFunctionExtractionPopup(ui))
+            return;
         bool paletteOpen = false;
         if (auto popup = ui.BeginPopup("MaterialGraphExpressionPalette"); popup)
         {
@@ -1026,6 +1033,8 @@ namespace KeireEditor
                 return;
             }
             ui.Separator();
+            if (DrawClipboardContextMenu(ui, model.NodeIdentities, false))
+                return;
             if (ui.MenuItem("Create Empty Comment"))
                 CreateComment(ui, document, model, *m_NodeCreationPosition, false);
             if (ui.MenuItem("Frame All Nodes"))
@@ -1460,30 +1469,6 @@ namespace KeireEditor
                 if (kind == Keire::ShaderGraphNodeKind::Parameter)
                     node.ParameterMetadata.Category = "Material";
             }
-            const auto id = node.Id;
-            if (!m_Controller.MaterialGraphState().AddExpressionNode(std::move(node)))
-                return false;
-            m_SelectedNode = id;
-            return true;
-        }
-        catch (const std::exception& error)
-        {
-            Report(error.what());
-            return false;
-        }
-    }
-
-    bool MaterialGraphPanel::AddFunctionNode(const Keire::AssetId asset, const std::string_view name,
-                                             const std::optional<Keire::Vector2> position)
-    {
-        try
-        {
-            const auto function = m_Controller.ResolveMaterialGraphFunction(asset);
-            if (!function)
-                throw std::runtime_error("The reusable material graph source is unavailable.");
-            auto node = Keire::CreateShaderGraphFunctionCallNode(asset, *function);
-            node.Name = std::string(name);
-            node.EditorPosition = position.value_or(Keire::Vector2{120.0F, 120.0F});
             const auto id = node.Id;
             if (!m_Controller.MaterialGraphState().AddExpressionNode(std::move(node)))
                 return false;

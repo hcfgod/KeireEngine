@@ -53,6 +53,18 @@ MANAGED_ASSEMBLY_TYPE = "4b454952-454d-414e-4147-454441534d01"
 TEXT_ASSET_TYPE = "4b454952-4554-4558-5441-535345540001"
 
 
+def project_version(repository: pathlib.Path) -> str:
+    configuration = repository / "Config/Project.conf"
+    for line in configuration.read_text(encoding="utf-8").splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key.strip() == "PROJECT_VERSION" and value.strip():
+            return value.strip()
+    raise RuntimeError("Config/Project.conf does not define PROJECT_VERSION.")
+
+
+ENGINE_VERSION = project_version(pathlib.Path(__file__).resolve().parents[2])
+
+
 def canonical_json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
@@ -287,8 +299,8 @@ def create_manifest(payload: pathlib.Path) -> dict[str, object]:
         "channel": "stable",
         "compatibility": {
             "architectures": ["x86_64"],
-            "managedApiVersion": "0.3.1",
-            "minimumEngineVersion": "0.3.1",
+            "managedApiVersion": ENGINE_VERSION,
+            "minimumEngineVersion": ENGINE_VERSION,
             "platforms": ["linux", "windows"],
             "rendererCapabilities": [
                 "material-graph",

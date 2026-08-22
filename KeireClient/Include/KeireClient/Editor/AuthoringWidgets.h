@@ -376,6 +376,7 @@ namespace KeireEditor
         std::optional<StableNodeId> m_ResizingComment;
         Keire::Vector2 m_CommentDragPosition;
         Keire::Vector2 m_CommentResize;
+        Keire::Vector2 m_CommentResizeGrabOffset;
         std::vector<std::pair<StableNodeId, Keire::Vector2>> m_CommentMemberPositions;
         std::vector<std::pair<StableNodeId, Keire::Vector2>> m_CommentMemberCommentPositions;
         Keire::Vector2 m_RerouteDragPosition;

@@ -19,7 +19,7 @@ namespace KeireEditor
         case NamedAssetCreationKind::ManagedAssembly:
             return "managed assembly";
         case NamedAssetCreationKind::ManagedData:
-            return "managed data asset";
+            return "ScriptableObject";
         case NamedAssetCreationKind::AudioMixer:
             return "audio mixer";
         case NamedAssetCreationKind::PhysicsMaterial:

@@ -981,8 +981,29 @@ namespace Keire::Detail
                                  "'.");
     }
 
+    std::filesystem::path ResolveManagedSolutionForExternalEditor(const std::filesystem::path& path,
+                                                                  const std::filesystem::path& workingDirectory,
+                                                                  const bool reuseManagedSession)
+    {
+        if (reuseManagedSession)
+            return {};
+        auto extension = path.extension().string();
+        for (char& character : extension)
+            character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+        if (extension != ".cs" && extension != ".keireasm")
+            return {};
+
+        auto solutionName = workingDirectory.filename().string();
+        for (char& character : solutionName)
+            if (!std::isalnum(static_cast<unsigned char>(character)) && character != '_' && character != '-')
+                character = '_';
+        const auto candidate = workingDirectory / (solutionName + ".sln");
+        return std::filesystem::is_regular_file(candidate) ? candidate : std::filesystem::path{};
+    }
+
     bool OpenInExternalEditor(const std::filesystem::path& path, const std::filesystem::path& preferredEditor,
-                              const std::filesystem::path& workingDirectory, std::string& diagnostic) noexcept
+                              const std::filesystem::path& workingDirectory, std::string& diagnostic,
+                              const bool reuseManagedSession) noexcept
     {
         try
         {
@@ -998,17 +1019,7 @@ namespace Keire::Detail
             auto extension = source.extension().string();
             for (char& character : extension)
                 character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
-            std::filesystem::path managedSolution;
-            if (extension == ".cs" || extension == ".keireasm")
-            {
-                auto solutionName = working.filename().string();
-                for (char& character : solutionName)
-                    if (!std::isalnum(static_cast<unsigned char>(character)) && character != '_' && character != '-')
-                        character = '_';
-                const auto candidate = working / (solutionName + ".sln");
-                if (std::filesystem::is_regular_file(candidate))
-                    managedSolution = candidate;
-            }
+            const auto managedSolution = ResolveManagedSolutionForExternalEditor(source, working, reuseManagedSession);
             if (!preferredEditor.empty())
             {
                 auto editorName = preferredEditor.stem().string();

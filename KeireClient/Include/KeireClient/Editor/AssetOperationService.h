@@ -53,6 +53,23 @@ namespace KeireEditor
         bool RevealResult = false;
     };
 
+    enum class GraphFunctionExtractionKind : std::uint8_t
+    {
+        Shader,
+        Material
+    };
+
+    struct GraphFunctionExtractionState
+    {
+        GraphFunctionExtractionKind Kind = GraphFunctionExtractionKind::Shader;
+        Keire::AssetId SourceAsset;
+        Keire::AssetId PlaceholderAsset;
+        std::optional<Keire::ShaderGraphDefinition> ShaderBefore;
+        std::optional<Keire::ShaderGraphDefinition> ShaderAfter;
+        std::optional<Keire::MaterialGraphDefinition> MaterialBefore;
+        std::optional<Keire::MaterialGraphDefinition> MaterialAfter;
+    };
+
     struct AssetOperationContext
     {
         Keire::AssetId ReloadAsset;
@@ -65,7 +82,10 @@ namespace KeireEditor
         Keire::AssetId SourceSceneAsset;
         std::filesystem::path SceneSource;
         std::shared_ptr<AssetMutationUndoState> MutationUndo;
+        std::shared_ptr<GraphFunctionExtractionState> GraphFunctionExtraction;
         AssetMutationPhase MutationPhase = AssetMutationPhase::Initial;
+        Keire::AssetId ManagedAssembly;
+        std::filesystem::path ManagedSourceRoot;
         std::string Reason;
     };
 

@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <limits>
 #include <ranges>
+#include <sstream>
 #include <string>
 
 namespace KeireEditor
@@ -20,6 +21,18 @@ namespace KeireEditor
             return static_cast<std::int64_t>(std::clamp(
                 static_cast<long double>(value), static_cast<long double>(std::numeric_limits<std::int64_t>::min()),
                 static_cast<long double>(std::numeric_limits<std::int64_t>::max())));
+        }
+
+        [[nodiscard]] std::vector<Keire::AssetId> DecodeComponentOrderPayload(const std::span<const std::byte> bytes)
+        {
+            const std::string text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+            std::istringstream stream(text);
+            std::vector<Keire::AssetId> result;
+            std::string line;
+            while (result.size() < 2 && std::getline(stream, line))
+                if (!line.empty())
+                    result.push_back(Keire::AssetId::Parse(line));
+            return result;
         }
     } // namespace
 
@@ -280,6 +293,22 @@ namespace KeireEditor
             if (m_Ui.AcceptDragPayload("KEIRE_COMPONENT", payload))
             {
                 const auto ids = DecodeAssetPayload(payload);
+                if (ids.size() == 2)
+                {
+                    const Keire::EntityId entity(ids[0]);
+                    const Keire::ComponentTypeId component(ids[1]);
+                    if (std::ranges::any_of(candidates, [&](const Candidate& candidate)
+                                            { return candidate.Entity == entity && candidate.Component == component; }))
+                    {
+                        value = {entity, component};
+                        changed = true;
+                    }
+                }
+            }
+            payload.clear();
+            if (m_Ui.AcceptDragPayload("KEIRE_COMPONENT_ORDER", payload))
+            {
+                const auto ids = DecodeComponentOrderPayload(payload);
                 if (ids.size() == 2)
                 {
                     const Keire::EntityId entity(ids[0]);

@@ -61,7 +61,7 @@ namespace Keire
     } // namespace
 
     VfxEffectAsset::VfxEffectAsset(const VfxEffectDefinition& definition)
-        : m_Definition(MigrateVfxEffectToSchema4(definition))
+        : m_Definition(MigrateVfxEffectToCurrentSchema(definition))
     {
         ValidateVfxEffect(m_Definition);
     }

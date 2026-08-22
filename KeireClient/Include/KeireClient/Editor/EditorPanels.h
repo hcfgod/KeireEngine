@@ -273,11 +273,24 @@ namespace KeireEditor
         }
 
       private:
+        struct ComponentClipboard final
+        {
+            Keire::ComponentTypeId Type;
+            Keire::ComponentPropertyBag Values;
+            bool WholeComponent = false;
+        };
+
+        [[nodiscard]] bool DrawComponentMenu(Keire::UiFrame& ui, const Keire::Entity& entity,
+                                             const Keire::Ref<Keire::Component>& component,
+                                             const Keire::ComponentRegistration& registration,
+                                             SceneDocument& sceneDocument, const Keire::Ref<Keire::Scene>& scene);
+
         IInspectorController& m_Controller;
         std::unique_ptr<AssetInspectorPanel> m_AssetInspector;
         std::unique_ptr<AssetPicker> m_AssetPicker;
         Keire::UiPanelRegistration m_Registration;
         std::unordered_map<std::string, bool> m_ComponentExpansion;
+        std::optional<ComponentClipboard> m_ComponentClipboard;
         std::string m_ComponentSearch;
         std::uint64_t m_EditSerial = 0;
         Keire::AssetId m_LockedEntity;

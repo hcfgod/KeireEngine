@@ -73,7 +73,12 @@ namespace KeireEditor
         void SetTransform(Keire::EntityId entity, const TransformValues& values);
         [[nodiscard]] Keire::Ref<Keire::Component> AddComponent(Keire::EntityId entity, Keire::ComponentTypeId type);
         void RemoveComponent(Keire::EntityId entity, Keire::ComponentTypeId type);
+        void RemoveComponent(Keire::EntityId entity, const Keire::Ref<Keire::Component>& component);
+        void MoveComponentBefore(Keire::EntityId entity, const Keire::Ref<Keire::Component>& component,
+                                 const Keire::Ref<Keire::Component>& before = {});
         void SetComponentEnabled(Keire::EntityId entity, Keire::ComponentTypeId type, bool enabled);
+        void SetComponentValues(Keire::EntityId entity, const Keire::Ref<Keire::Component>& component,
+                                const Keire::ComponentPropertyBag& values);
         void ResetComponent(Keire::EntityId entity, Keire::ComponentTypeId type);
         void SetComponentProperty(Keire::EntityId entity, Keire::ComponentTypeId type, std::string_view property,
                                   Keire::ComponentPropertyValue value);

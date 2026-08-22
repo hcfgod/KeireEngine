@@ -11,7 +11,7 @@ namespace KeireEditor
     namespace
     {
         constexpr std::string_view Header = "KEIRE_EDITOR_SESSION";
-        constexpr std::uint32_t SchemaVersion = 1;
+        constexpr std::uint32_t SchemaVersion = 2;
     } // namespace
 
     EditorSessionState LoadEditorSessionState(const std::filesystem::path& path) noexcept
@@ -24,14 +24,22 @@ namespace KeireEditor
             std::string header;
             std::string scene;
             std::uint32_t version = 0;
-            if (!(input >> header >> version >> scene) || header != Header || version != SchemaVersion)
+            if (!(input >> header >> version >> scene) || header != Header ||
+                (version != 1 && version != SchemaVersion))
                 return {};
+            bool maximizeGameOnPlay = false;
+            if (version >= 2)
+            {
+                std::uint32_t value = 0;
+                if (!(input >> value) || value > 1)
+                    return {};
+                maximizeGameOnPlay = value != 0;
+            }
             input >> std::ws;
             if (!input.eof())
                 return {};
-            if (scene == "none")
-                return {};
-            return {.LastScene = Keire::AssetId::Parse(scene)};
+            return {.LastScene = scene == "none" ? Keire::AssetId{} : Keire::AssetId::Parse(scene),
+                    .MaximizeGameOnPlay = maximizeGameOnPlay};
         }
         catch (...)
         {
@@ -47,7 +55,8 @@ namespace KeireEditor
         {
             std::ostringstream output;
             output << Header << ' ' << SchemaVersion << '\n'
-                   << (state.LastScene ? state.LastScene.ToString() : std::string("none")) << '\n';
+                   << (state.LastScene ? state.LastScene.ToString() : std::string("none")) << '\n'
+                   << static_cast<std::uint32_t>(state.MaximizeGameOnPlay) << '\n';
             std::filesystem::create_directories(path.parent_path());
             Keire::Detail::WriteTextFileAtomically(path, output.str());
             return true;

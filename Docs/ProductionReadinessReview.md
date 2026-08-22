@@ -57,7 +57,7 @@ prevent this source label from being presented as an activated release.
   download worker and update handoff. The download site presents the formats independently.
 - Catalog and artifact integrity are verified, but the current Windows Hub EXE is not Authenticode-signed and the RPM
   is not GPG-signed. Those facts are disclosed on the download surface and remain production-signing gaps.
-- The canonical documentation inventory contains 63 guides. Source validation checks inventory, authorities, local
+- The canonical documentation inventory contains 81 guides. Source validation checks inventory, authorities, local
   links/fragments, schema statements, release/platform claims, and the generated site.
 - A fresh Windows Debug source audit passed 669 Core tests/49,254 assertions, 157 Editor tests/2,395 assertions, 370
   Hub tests/3,789 assertions, the full Client compile gate, managed production API checks, 10 distribution-service

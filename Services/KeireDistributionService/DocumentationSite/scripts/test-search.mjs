@@ -37,12 +37,12 @@ try {
         noWorker: true,
     });
     await search.init();
-    const response = await search.search("deterministic runtime");
+    const response = await search.search("VFX subgraph collapsed comment");
     if (!response || response.results.length === 0) {
         throw new Error("Pagefind returned no results for a known documentation query.");
     }
     const result = await response.results[0].data();
-    if (!result?.meta?.title || !String(result.url).startsWith("/docs/reference/")) {
+    if (!result?.meta?.title || !String(result.url).startsWith("/docs/reference/manual/")) {
         throw new Error("Pagefind returned a malformed native documentation result.");
     }
     await search.destroy();

@@ -170,6 +170,20 @@ namespace Keire
         return state && state->RemoveComponent(m_Id, type);
     }
 
+    bool Entity::RemoveComponent(const Ref<Component>& component)
+    {
+        const auto state = m_State.Lock();
+        return state && state->RemoveComponent(m_Id, component);
+    }
+
+    void Entity::MoveComponentBefore(const Ref<Component>& component, const Ref<Component>& before)
+    {
+        const auto state = m_State.Lock();
+        if (!state)
+            throw std::logic_error("Entity::MoveComponentBefore cannot mutate a stale entity.");
+        state->MoveComponentBefore(m_Id, component, before);
+    }
+
     Entity Entity::Clone()
     {
         const auto state = m_State.Lock();

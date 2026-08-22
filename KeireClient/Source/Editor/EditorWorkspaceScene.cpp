@@ -6,7 +6,6 @@
 #include "KeireClient/Editor/ConsolePanel.h"
 #include "KeireClient/Editor/DiagnosticsPanel.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
-#include "KeireClient/Editor/EditorSessionState.h"
 #include "KeireClient/Editor/ExternalAssetImportController.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/MaterialDocument.h"
@@ -274,14 +273,6 @@ void EditorWorkspaceLayer::OpenScene(const Keire::AssetId asset)
         m_SceneDocument->SetLoadOperation(scenes->Load(asset, Keire::SceneLoadMode::Single));
     m_SceneDocument->SetStatus("Opening " + record->RelativePath.generic_string() + ".");
     PersistEditorSessionScene(asset);
-}
-
-void EditorWorkspaceLayer::PersistEditorSessionScene(const Keire::AssetId asset) noexcept
-{
-    if (!asset || m_EditorSessionPath.empty())
-        return;
-    if (!KeireEditor::SaveEditorSessionState(m_EditorSessionPath, {.LastScene = asset}))
-        KEIRE_CLIENT_WARN("[Scene] Could not persist the last open scene for this project.");
 }
 
 void EditorWorkspaceLayer::RequestInitialScene(const Keire::AssetId candidate)
@@ -710,6 +701,7 @@ void EditorWorkspaceLayer::BeginPlayMode()
     m_ActiveUndoContext = m_SceneDocument->History();
     m_GameViewportInputActive = false;
     m_GameViewportCaptureSuspended = false;
+    m_Game.SetMaximized(m_MaximizeGameOnPlay);
     m_Game.RequestFocus();
 }
 
@@ -812,6 +804,7 @@ void EditorWorkspaceLayer::FinishPlayMode(const bool apply)
 {
     if (!m_SceneDocument->PlaySession())
         return;
+    m_Game.SetMaximized(false);
     try
     {
         std::optional<Keire::SceneDefinition> applied;
@@ -1284,6 +1277,11 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
                 if (ui.Selectable(aspectLabels[index], m_GameAspect == static_cast<int>(index)))
                     m_GameAspect = static_cast<int>(index);
         }
+        ui.SameLine();
+        if (ui.Checkbox("Maximize On Play", m_MaximizeGameOnPlay))
+            PersistEditorSessionPreferences();
+        ui.SameLine();
+        (void)ui.Checkbox("FPS", m_ShowPerformanceOverlay);
         const auto scene = RenderedScene(m_SceneDocument->EditingScene(), m_SceneDocument->PlaySession());
         if (!scene)
         {
@@ -1468,26 +1466,14 @@ void EditorWorkspaceLayer::DrawPerformanceOverlay(Keire::UiFrame& ui, const Keir
     const auto performanceColor =
         frameMilliseconds <= 16.7 ? m_Theme.Success : (frameMilliseconds <= 33.3 ? m_Theme.Warning : m_Theme.Error);
     const Keire::UiItemRect overlay{{viewport.Minimum.X + 12.0F, viewport.Minimum.Y + 12.0F},
-                                    {viewport.Minimum.X + 292.0F, viewport.Minimum.Y + 102.0F}};
-    ui.DrawFilledRectangle(overlay, {0.018F, 0.024F, 0.035F, 0.92F}, 7.0F);
-    ui.DrawRectangle(overlay, {performanceColor.Red, performanceColor.Green, performanceColor.Blue, 0.72F}, 1.0F, 7.0F);
-    ui.DrawOverlayText({overlay.Minimum.X + 12.0F, overlay.Minimum.Y + 9.0F}, m_Theme.MutedText,
-                       "PERFORMANCE / " + std::string(label), 11.0F, overlay);
-    ui.DrawOverlayText({overlay.Minimum.X + 12.0F, overlay.Minimum.Y + 29.0F}, performanceColor,
-                       std::to_string(framesPerSecond) + " FPS   " + decimal(frameMilliseconds) + " ms", 16.0F,
+                                    {viewport.Minimum.X + 178.0F, viewport.Minimum.Y + 56.0F}};
+    ui.DrawFilledRectangle(overlay, {0.018F, 0.024F, 0.035F, 0.88F}, 6.0F);
+    ui.DrawRectangle(overlay, {performanceColor.Red, performanceColor.Green, performanceColor.Blue, 0.72F}, 1.0F, 6.0F);
+    ui.DrawOverlayText({overlay.Minimum.X + 10.0F, overlay.Minimum.Y + 6.0F}, m_Theme.MutedText,
+                       std::string(label) + " VIEW", 10.0F, overlay);
+    ui.DrawOverlayText({overlay.Minimum.X + 10.0F, overlay.Minimum.Y + 21.0F}, performanceColor,
+                       std::to_string(framesPerSecond) + " FPS  |  " + decimal(frameMilliseconds) + " ms", 15.0F,
                        overlay);
-    ui.DrawOverlayText({overlay.Minimum.X + 12.0F, overlay.Minimum.Y + 54.0F}, m_Theme.Text,
-                       "Scripts " + decimal(frame.ScriptingMicroseconds / 1000.0) + " ms   " +
-                           std::to_string(frame.SpanCount) + " spans",
-                       11.0F, overlay);
-    if (const auto renderer = Owner().Renderer())
-    {
-        const auto statistics = renderer->Statistics();
-        ui.DrawOverlayText({overlay.Minimum.X + 12.0F, overlay.Minimum.Y + 72.0F}, m_Theme.MutedText,
-                           std::to_string(statistics.DrawCalls) + " draws   " + std::to_string(statistics.Triangles) +
-                               " triangles",
-                           11.0F, overlay);
-    }
 }
 
 Keire::Ref<Keire::Scene> EditorWorkspaceLayer::ActiveHierarchyScene() const noexcept { return ActiveScene(); }

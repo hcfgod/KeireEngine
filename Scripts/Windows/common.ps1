@@ -121,12 +121,18 @@ function Get-CMakeExecutable {
 }
 
 function Get-PythonInvocation {
-    foreach ($candidate in @(@{ Name = "python"; PrefixArguments = @() },
-            @{ Name = "py"; PrefixArguments = @("-3") })) {
+    # Prefer the Windows launcher. The Microsoft Store installs an executable
+    # alias named python.exe that Get-Command can resolve even when Python is
+    # not installed; invoking that alias only prints a Store prompt and exits.
+    foreach ($candidate in @(@{ Name = "py"; PrefixArguments = @("-3") },
+            @{ Name = "python"; PrefixArguments = @() })) {
         $command = Get-Command $candidate.Name -ErrorAction SilentlyContinue
         if (-not $command) { continue }
+        if ($candidate.Name -eq "python" -and
+            $command.Source -like "*\Microsoft\WindowsApps\python.exe") { continue }
         $prefixArguments = @($candidate.PrefixArguments)
-        & $command.Source @prefixArguments -c "import sys; raise SystemExit(0)" 2>$null | Out-Null
+        & $command.Source @prefixArguments -c "import sys; raise SystemExit(0 if sys.version_info.major == 3 else 1)" `
+            2>$null | Out-Null
         if ($LASTEXITCODE -eq 0) {
             return [PSCustomObject]@{
                 Executable = $command.Source

@@ -108,3 +108,89 @@ TEST_CASE("VFX graph duplication remaps internal pins and cables")
     CHECK(copied.OutputPin != first.Pins.front().Id);
     CHECK(copied.InputPin != second.Pins.front().Id);
 }
+
+TEST_CASE("Shader Graph extraction creates typed boundaries and rewires the parent through one function call")
+{
+    auto definition = Keire::CreateDefaultShaderGraph(Keire::ShaderGraphOutput::Unlit);
+    auto constant =
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Constant, Keire::ShaderGraphValueType::Scalar);
+    auto reroute =
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Reroute, Keire::ShaderGraphValueType::Scalar);
+    const auto outputNode = definition.Nodes.front().Id;
+    const auto constantOutput =
+        std::ranges::find(constant.Pins, Keire::ShaderGraphPinDirection::Output, &Keire::ShaderGraphPin::Direction)->Id;
+    const auto rerouteInput =
+        std::ranges::find(reroute.Pins, Keire::ShaderGraphPinDirection::Input, &Keire::ShaderGraphPin::Direction)->Id;
+    const auto rerouteOutput =
+        std::ranges::find(reroute.Pins, Keire::ShaderGraphPinDirection::Output, &Keire::ShaderGraphPin::Direction)->Id;
+    const auto opacity = std::ranges::find(definition.Nodes.front().Pins, "Opacity", &Keire::ShaderGraphPin::Name)->Id;
+    definition.Connections.push_back(
+        {Keire::AssetId::Generate(), {constant.Id, constantOutput}, {reroute.Id, rerouteInput}});
+    definition.Connections.push_back({Keire::AssetId::Generate(), {reroute.Id, rerouteOutput}, {outputNode, opacity}});
+    definition.Nodes.push_back(constant);
+    definition.Nodes.push_back(reroute);
+    const std::array selection{reroute.Id};
+    const auto functionAsset = Keire::AssetId::Generate();
+
+    const auto extracted = KeireEditor::ExtractShaderGraphSelection(definition, selection, functionAsset, "Mask");
+
+    CHECK_NOTHROW(Keire::ValidateGraphFunction(extracted.Function, Keire::ShaderGraphPurpose::ShaderFunction));
+    CHECK_NOTHROW(Keire::ValidateShaderGraph(extracted.Parent));
+    CHECK(std::ranges::find(extracted.Parent.Nodes, reroute.Id, &Keire::ShaderGraphNode::Id) ==
+          extracted.Parent.Nodes.end());
+    const auto call = std::ranges::find(extracted.Parent.Nodes, extracted.CallNode, &Keire::ShaderGraphNode::Id);
+    REQUIRE(call != extracted.Parent.Nodes.end());
+    CHECK(call->Kind == Keire::ShaderGraphNodeKind::FunctionCall);
+    CHECK(call->ReferencedAsset == functionAsset);
+    REQUIRE(extracted.Parent.Connections.size() == 2);
+    CHECK(std::ranges::any_of(extracted.Parent.Connections, [&](const Keire::ShaderGraphConnection& connection)
+                              { return connection.Input.Node == call->Id; }));
+    CHECK(std::ranges::any_of(extracted.Parent.Connections, [&](const Keire::ShaderGraphConnection& connection)
+                              { return connection.Output.Node == call->Id; }));
+}
+
+TEST_CASE("Material Graph extraction accepts expression selections and rejects value bindings")
+{
+    Keire::MaterialShaderReference shader;
+    shader.Kind = Keire::MaterialShaderSourceKind::ShaderGraph;
+    shader.Asset = Keire::AssetId::Generate();
+    Keire::ShaderInterfaceDefinition shaderInterface;
+    Keire::ShaderPropertyDefinition property;
+    property.Id = Keire::AssetId::Generate();
+    property.Name = "Roughness";
+    property.Type = Keire::ShaderPropertyType::Scalar;
+    property.DefaultValue.X = 0.5F;
+    shaderInterface.Properties.push_back(property);
+    auto definition = Keire::CreateMaterialGraph(shader, shaderInterface);
+    auto constant =
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Constant, Keire::ShaderGraphValueType::Scalar);
+    auto reroute =
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Reroute, Keire::ShaderGraphValueType::Scalar);
+    const auto constantOutput =
+        std::ranges::find(constant.Pins, Keire::ShaderGraphPinDirection::Output, &Keire::ShaderGraphPin::Direction)->Id;
+    const auto rerouteInput =
+        std::ranges::find(reroute.Pins, Keire::ShaderGraphPinDirection::Input, &Keire::ShaderGraphPin::Direction)->Id;
+    const auto rerouteOutput =
+        std::ranges::find(reroute.Pins, Keire::ShaderGraphPinDirection::Output, &Keire::ShaderGraphPin::Direction)->Id;
+    const auto output = definition.SurfaceGraph.Nodes.front().Id;
+    const auto opacity =
+        std::ranges::find(definition.SurfaceGraph.Nodes.front().Pins, "Opacity", &Keire::ShaderGraphPin::Name)->Id;
+    definition.SurfaceGraph.Nodes.push_back(constant);
+    definition.SurfaceGraph.Nodes.push_back(reroute);
+    definition.SurfaceGraph.Connections.push_back(
+        {Keire::AssetId::Generate(), {constant.Id, constantOutput}, {reroute.Id, rerouteInput}});
+    definition.SurfaceGraph.Connections.push_back(
+        {Keire::AssetId::Generate(), {reroute.Id, rerouteOutput}, {output, opacity}});
+    definition.Nodes.push_back(Keire::CreateMaterialGraphValueNode(Keire::ShaderPropertyType::Scalar, 0.25F));
+    const std::array selection{reroute.Id};
+
+    const auto extracted =
+        KeireEditor::ExtractMaterialGraphSelection(definition, selection, Keire::AssetId::Generate(), "Mask");
+
+    CHECK_NOTHROW(Keire::ValidateGraphFunction(extracted.Function, Keire::ShaderGraphPurpose::MaterialFunction));
+    CHECK_NOTHROW(Keire::ValidateMaterialGraph(extracted.Parent));
+    const std::array valueSelection{definition.Nodes.front().Id};
+    CHECK_THROWS_AS((void)KeireEditor::ExtractMaterialGraphSelection(definition, valueSelection,
+                                                                     Keire::AssetId::Generate(), "Invalid"),
+                    std::invalid_argument);
+}

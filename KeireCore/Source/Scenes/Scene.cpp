@@ -21,10 +21,8 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
-
 namespace Keire
 {
-
     namespace Detail
     {
         class SceneState::Impl final
@@ -1112,7 +1110,6 @@ namespace Keire
             commit();
             return component;
         }
-
         Ref<Component> SceneState::GetComponent(const EntityId id, const ComponentTypeId type) const noexcept
         {
             const auto* record = m_Impl->Find(id);
@@ -1122,7 +1119,6 @@ namespace Keire
                                                     [&](const auto& component) { return component->Type() == type; });
             return found == record->Components.end() ? Ref<Component>{} : *found;
         }
-
         std::vector<Ref<Component>> SceneState::GetComponents(const EntityId id, const ComponentTypeId type) const
         {
             RequireOwner("GetComponents");
@@ -1136,7 +1132,6 @@ namespace Keire
                                  [&](const auto& component) { return component->Type() == type; });
             return result;
         }
-
         bool SceneState::RemoveComponent(const EntityId id, const ComponentTypeId type)
         {
             RequireOwner("RemoveComponent");
@@ -1179,7 +1174,73 @@ namespace Keire
                 commit();
             return true;
         }
+        bool SceneState::RemoveComponent(const EntityId id, const Ref<Component>& component)
+        {
+            RequireOwner("RemoveComponent");
+            auto* record = m_Impl->Find(id);
+            if (!record || !component)
+                return false;
+            const auto found = std::ranges::find(record->Components, component);
+            if (found == record->Components.end())
+                return false;
+            const auto registration = m_Impl->ComponentsRegistry->Find(component->Type());
+            if (!registration || !registration->Removable)
+                return false;
+            const auto dependent = std::ranges::find_if(
+                record->Components,
+                [&](const auto& current)
+                {
+                    const auto currentRegistration = m_Impl->ComponentsRegistry->Find(current->Type());
+                    return current != component &&
+                           std::ranges::find(currentRegistration->RequiredComponents, component->Type()) !=
+                               currentRegistration->RequiredComponents.end();
+                });
+            if (dependent != record->Components.end())
+                throw std::logic_error("Component is required by another attached component.");
 
+            const auto commit = [this, id, component]
+            {
+                auto* target = m_Impl->Find(id);
+                if (!target)
+                    return;
+                const auto current = std::ranges::find(target->Components, component);
+                if (current == target->Components.end())
+                    return;
+                component->InvokeDestroy();
+                m_Impl->UnindexComponent(id, component);
+                target->Components.erase(current);
+                m_Impl->LifecycleComponentsDirty = true;
+                m_Impl->Dirty = true;
+            };
+            if (m_Impl->Playing || m_Impl->TraversalDepth)
+                m_Impl->Deferred.push_back(commit);
+            else
+                commit();
+            return true;
+        }
+        void SceneState::MoveComponentBefore(const EntityId id, const Ref<Component>& component,
+                                             const Ref<Component>& before)
+        {
+            RequireOwner("MoveComponentBefore");
+            auto* record = m_Impl->Find(id);
+            if (!record || !component)
+                throw std::invalid_argument("Cannot reorder a missing component.");
+            const auto source = std::ranges::find(record->Components, component);
+            const auto destination = before ? std::ranges::find(record->Components, before) : record->Components.end();
+            if (source == record->Components.end() || (before && destination == record->Components.end()))
+                throw std::invalid_argument("Components can only be reordered within their owning entity.");
+            if (source == destination)
+                return;
+
+            auto reordered = record->Components;
+            std::erase(reordered, component);
+            const auto insertion = before ? std::ranges::find(reordered, before) : reordered.end();
+            reordered.insert(insertion, component);
+            if (reordered == record->Components)
+                return;
+            record->Components.swap(reordered);
+            m_Impl->Dirty = true;
+        }
         void SceneState::SetComponentEnabled(Component& component, const bool enabled)
         {
             RequireOwner("SetComponentEnabled");
@@ -1195,7 +1256,6 @@ namespace Keire
                     component.InvokeDisable();
             }
         }
-
         void SceneState::ComponentChanged(const Component& component)
         {
             RequireOwner("ComponentChanged");
@@ -1205,7 +1265,6 @@ namespace Keire
             if (component.Type() == TransformComponent::StaticType())
                 m_Impl->MarkWorldDirty(component.Owner().Id());
         }
-
         Matrix4 SceneState::WorldMatrix(const EntityId id) const
         {
             RequireOwner("WorldMatrix");
@@ -1220,7 +1279,6 @@ namespace Keire
             record->WorldDirty = false;
             return record->CachedWorld;
         }
-
         void SceneState::BeginPlay()
         {
             RequireOwner("BeginPlay");
@@ -1242,7 +1300,6 @@ namespace Keire
                 });
             FlushDeferred();
         }
-
         void SceneState::FixedUpdate(const float deltaSeconds)
         {
             RequireOwner("FixedUpdate");
@@ -1391,7 +1448,6 @@ namespace Keire
             }
             m_Impl->Playing = false;
         }
-
         void SceneState::FlushDeferred()
         {
             RequireOwner("FlushDeferred");

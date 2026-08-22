@@ -194,8 +194,10 @@ namespace Keire
         [[nodiscard]] std::string_view Title() const noexcept;
         [[nodiscard]] bool Visible() const noexcept;
         [[nodiscard]] bool Locked() const noexcept;
+        [[nodiscard]] bool Maximized() const noexcept;
         void SetVisible(bool visible);
         void SetLocked(bool locked);
+        void SetMaximized(bool maximized);
         void RequestFocus();
 
       private:
@@ -206,6 +208,8 @@ namespace Keire
         [[nodiscard]] const std::string& SubmittedName() const;
         [[nodiscard]] bool* VisibilityAddress();
         [[nodiscard]] bool ConsumeFocusRequest();
+        [[nodiscard]] bool PrepareWindow();
+        void NotifyWindowSubmitted() noexcept;
         void NotifyVisibilityChanged(bool previous);
         std::unique_ptr<Impl> m_Impl;
     };

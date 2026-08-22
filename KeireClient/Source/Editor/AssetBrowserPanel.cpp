@@ -274,11 +274,11 @@ namespace KeireEditor
                     break;
                 case AssetBrowserOpenAction::External:
                 {
-                    editor.PrepareAssetBrowserExternalOpen(record.Id);
+                    const bool reuseManagedSession = editor.PrepareAssetBrowserExternalOpen(record.Id);
                     std::string diagnostic;
                     if (!Keire::Detail::OpenInExternalEditor(AssetRoot / record.RelativePath,
                                                              editor.AssetBrowserExternalEditor(), ProjectRoot,
-                                                             diagnostic))
+                                                             diagnostic, reuseManagedSession))
                         throw std::runtime_error(diagnostic);
                     editor.SetAssetBrowserStatus("Opened " + record.RelativePath.filename().string() +
                                                  " in an external editor.");
@@ -362,7 +362,7 @@ namespace KeireEditor
             const auto managedTypes = editor.AssetBrowserManagedAssetTypes();
             if (std::ranges::any_of(managedTypes, [](const auto& type) { return !type.MenuPath.empty(); }))
             {
-                if (auto managedData = ui.BeginMenu("Managed Data"); managedData)
+                if (auto managedData = ui.BeginMenu("ScriptableObject"); managedData)
                 {
                     for (const auto& type : managedTypes)
                         if (!type.MenuPath.empty() && ui.MenuItem(type.MenuPath))
@@ -1137,8 +1137,7 @@ namespace KeireEditor
             {
                 try
                 {
-                    const std::string value(reinterpret_cast<const char*>(payload.data()), payload.size());
-                    editor.CreateAssetBrowserPrefabFromObject(Keire::AssetId::Parse(value), folder);
+                    editor.CreateAssetBrowserPrefabFromObject(DecodeSingleAssetPayload(payload), folder);
                 }
                 catch (const std::exception& error)
                 {

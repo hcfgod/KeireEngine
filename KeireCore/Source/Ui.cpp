@@ -71,7 +71,6 @@ namespace Keire
                 if (Open && texture && Active.contains(texture) && std::ranges::find(Retired, texture) == Retired.end())
                     Retired.push_back(texture);
             }
-
             void ProcessRetired()
             {
                 std::vector<ImTextureData*> retired;
@@ -94,7 +93,6 @@ namespace Keire
                     delete texture;
                 }
             }
-
             void Close() noexcept
             {
                 std::scoped_lock lock(Mutex);
@@ -157,7 +155,6 @@ namespace Keire
     UiImage::~UiImage() = default;
     std::uint32_t UiImage::Width() const noexcept { return m_Impl->Width; }
     std::uint32_t UiImage::Height() const noexcept { return m_Impl->Height; }
-
     namespace
     {
         constexpr std::uintmax_t MaximumLayoutBytes = std::uintmax_t{1024} * 1024U;
@@ -167,14 +164,12 @@ namespace Keire
             const char* error = SDL_GetError();
             return error && *error ? std::string(error) : std::string("SDL did not provide a diagnostic");
         }
-
         [[nodiscard]] bool ValidColor(const UiColor color) noexcept
         {
             const auto valid = [](const float component)
             { return std::isfinite(component) && component >= 0.0F && component <= 1.0F; };
             return valid(color.Red) && valid(color.Green) && valid(color.Blue) && valid(color.Alpha);
         }
-
         [[nodiscard]] ImU32 ToImGuiColor(const UiColor color)
         {
             if (!ValidColor(color))
@@ -416,7 +411,6 @@ namespace Keire
             m_Impl->OpenScope(UiScope::Kind::TabItem);
         return UiTabItemScope(*this, visible);
     }
-
     UiTreeNodeScope UiFrame::BeginTreeNode(std::string_view label, const bool selected)
     {
         m_Impl->RequireActive("BeginTreeNode");
@@ -430,7 +424,6 @@ namespace Keire
             m_Impl->OpenScope(UiScope::Kind::TreeNode);
         return UiTreeNodeScope(*this, visible);
     }
-
     UiDisabledScope UiFrame::BeginDisabled(const bool disabled)
     {
         m_Impl->RequireActive("BeginDisabled");
@@ -438,7 +431,6 @@ namespace Keire
         m_Impl->OpenScope(UiScope::Kind::Disabled);
         return UiDisabledScope(*this);
     }
-
     UiIdScope UiFrame::PushId(std::string_view id)
     {
         m_Impl->RequireActive("PushId");
@@ -447,7 +439,6 @@ namespace Keire
         m_Impl->OpenScope(UiScope::Kind::Id);
         return UiIdScope(*this);
     }
-
     UiMainMenuBarScope UiFrame::BeginMainMenuBar()
     {
         m_Impl->RequireActive("BeginMainMenuBar");
@@ -456,7 +447,6 @@ namespace Keire
             m_Impl->OpenScope(UiScope::Kind::MainMenuBar);
         return UiMainMenuBarScope(*this, visible);
     }
-
     UiWindowScope UiFrame::BeginMainToolbar(const std::string_view id, const float height)
     {
         m_Impl->RequireActive("BeginMainToolbar");
@@ -471,7 +461,6 @@ namespace Keire
             m_Impl->OpenScope(UiScope::Kind::Window);
         return UiWindowScope(*this, visible);
     }
-
     UiWindowScope UiFrame::BeginMainStatusBar(const std::string_view id, const float height)
     {
         m_Impl->RequireActive("BeginMainStatusBar");
@@ -486,7 +475,6 @@ namespace Keire
             m_Impl->OpenScope(UiScope::Kind::Window);
         return UiWindowScope(*this, visible);
     }
-
     UiComboScope UiFrame::BeginCombo(std::string_view label, std::string_view preview)
     {
         m_Impl->RequireActive("BeginCombo");
@@ -644,6 +632,14 @@ namespace Keire
         if (panel.ConsumeFocusRequest())
             ImGui::SetNextWindowFocus();
         auto effectiveOptions = options;
+        const bool maximized = panel.PrepareWindow();
+        if (maximized)
+        {
+            effectiveOptions.NoResize = true;
+            effectiveOptions.NoMove = true;
+            effectiveOptions.NoCollapse = true;
+            effectiveOptions.NoSavedSettings = true;
+        }
         if (panel.Locked())
         {
             effectiveOptions.NoResize = true;
@@ -652,8 +648,10 @@ namespace Keire
         }
         bool* visible = panel.VisibilityAddress();
         const bool previous = *visible;
-        const bool submitted =
-            ImGui::Begin(panel.SubmittedName().c_str(), visible, ToImGuiWindowFlags(effectiveOptions));
+        const bool submitted = ImGui::Begin(panel.SubmittedName().c_str(), visible,
+                                            ToImGuiWindowFlags(effectiveOptions) |
+                                                (maximized ? ImGuiWindowFlags_NoDocking : ImGuiWindowFlags_None));
+        panel.NotifyWindowSubmitted();
         panel.NotifyVisibilityChanged(previous);
         m_Impl->OpenScope(UiScope::Kind::Window);
         if (submitted)
@@ -662,7 +660,7 @@ namespace Keire
             const float available = ImGui::GetContentRegionAvail().x;
             ImGui::SetCursorPosX(cursorX + std::max(available - 28.0F, 0.0F));
             const auto lockId = "PanelViewLock##" + std::string(panel.Id());
-            if (IconButton(lockId, UiIcon::Lock, panel.Locked(), {28.0F, 24.0F}))
+            if (IconButton(lockId, panel.Locked() ? UiIcon::Lock : UiIcon::Unlock, panel.Locked(), {28.0F, 24.0F}))
                 panel.SetLocked(!panel.Locked());
             if (LastItemState().Hovered)
             {

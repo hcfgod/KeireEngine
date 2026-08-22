@@ -72,7 +72,7 @@ namespace KeireEditor
         virtual void OpenAssetBrowserMaterialParameterCollection(Keire::AssetId asset) = 0;
         virtual void OpenAssetBrowserPrefab(Keire::AssetId asset) = 0;
         virtual void OpenAssetBrowserScene(Keire::AssetId asset) = 0;
-        virtual void PrepareAssetBrowserExternalOpen(Keire::AssetId asset) = 0;
+        [[nodiscard]] virtual bool PrepareAssetBrowserExternalOpen(Keire::AssetId asset) = 0;
         virtual void CopyAssetBrowserText(std::string_view value) = 0;
     };
 

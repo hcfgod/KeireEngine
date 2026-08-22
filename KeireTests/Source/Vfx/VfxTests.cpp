@@ -680,6 +680,7 @@ TEST_CASE("schema-four module layout revisions add resource pins without invalid
     const auto encoded = Keire::VfxEffectAsset::Encode(canonical);
     auto document = nlohmann::json::parse(reinterpret_cast<const char*>(encoded.data()),
                                           reinterpret_cast<const char*>(encoded.data() + encoded.size()));
+    document["schemaVersion"] = 4;
 
     for (auto& system : document.at("systems"))
     {
@@ -708,6 +709,7 @@ TEST_CASE("schema-four module layout revisions add resource pins without invalid
     REQUIRE(first);
     REQUIRE(second);
     CHECK(first->Definition() == second->Definition());
+    CHECK(first->Definition().CompatibilityMode == Keire::VfxCompatibilityMode::NativeSchema4);
 
     bool foundVolume = false;
     bool foundMaterial = false;

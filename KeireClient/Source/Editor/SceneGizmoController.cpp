@@ -669,9 +669,9 @@ namespace KeireEditor
             m_Settings.LocalSpace = !m_Settings.LocalSpace;
         if (button("SceneSnap", Keire::UiIcon::Snap, "Toggle snapping", m_Settings.Snapping))
             m_Settings.Snapping = !m_Settings.Snapping;
-        if (button("ScenePhysicsGizmos", Keire::UiIcon::Filter, "Show physics gizmos", m_Settings.ShowPhysicsGizmos))
+        if (button("ScenePhysicsGizmos", Keire::UiIcon::Physics, "Show physics gizmos", m_Settings.ShowPhysicsGizmos))
             m_Settings.ShowPhysicsGizmos = !m_Settings.ShowPhysicsGizmos;
-        if (button("SceneColliderEdit", Keire::UiIcon::Filter, "Edit collider shapes", m_Settings.EditColliders))
+        if (button("SceneColliderEdit", Keire::UiIcon::ColliderEdit, "Edit collider shapes", m_Settings.EditColliders))
             m_Settings.EditColliders = !m_Settings.EditColliders;
         if (button("SceneGizmoSettings", Keire::UiIcon::Settings, "Gizmo and snap settings", false))
             ui.OpenPopup("SceneSnapSettings");

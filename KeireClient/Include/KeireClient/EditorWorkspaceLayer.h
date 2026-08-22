@@ -261,7 +261,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void OpenAssetBrowserMaterialParameterCollection(Keire::AssetId asset) override;
     void OpenAssetBrowserPrefab(Keire::AssetId asset) override;
     void OpenAssetBrowserScene(Keire::AssetId asset) override;
-    void PrepareAssetBrowserExternalOpen(Keire::AssetId asset) override;
+    [[nodiscard]] bool PrepareAssetBrowserExternalOpen(Keire::AssetId asset) override;
     void CopyAssetBrowserText(std::string_view value) override;
     [[nodiscard]] KeireEditor::SceneDocument& InspectorSceneDocument() noexcept override;
     [[nodiscard]] KeireEditor::InputActionsDocument& InspectorInputDocument() noexcept override;
@@ -345,6 +345,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void
     ImportAssets(KeireEditor::AssetOperationPriority priority = KeireEditor::AssetOperationPriority::ExplicitAction);
     void UpdateAssetOperations();
+    void CompleteGraphFunctionExtraction(const KeireEditor::GraphFunctionExtractionState& state,
+                                         Keire::AssetId created);
     void QueueAssetMutation(std::shared_ptr<KeireEditor::AssetMutationUndoState> state,
                             KeireEditor::AssetMutationPhase phase);
     void ApplyAssetImportResult(const Keire::AssetImportResult& result, bool reloadLoadedAssets,
@@ -427,7 +429,11 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] std::optional<Keire::ShaderGraphDefinition>
     ResolveShaderGraphFunction(Keire::AssetId asset) const override;
     void RevealShaderGraphAsset(Keire::AssetId asset) override;
+    [[nodiscard]] bool ExtractShaderGraphSelectionToFunction(std::span<const Keire::AssetId> selection,
+                                                             std::string_view name) override;
     void ReportShaderGraphError(std::string message) noexcept override;
+    [[nodiscard]] bool ExtractMaterialGraphSelectionToFunction(std::span<const Keire::AssetId> selection,
+                                                               std::string_view name) override;
     [[nodiscard]] bool CreateCSharpScript(std::string_view name);
     [[nodiscard]] bool CreateManagedAssembly(std::string_view name);
     [[nodiscard]] bool CreateAudioMixer(std::string_view name);
@@ -444,6 +450,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] Keire::AssetId CreatePrefabAsset(const std::filesystem::path& destination,
                                                    const Keire::PrefabDefinition& definition);
     void GenerateManagedIdeWorkspace();
+    void ExtendManagedAssemblySourceRoot(Keire::AssetId assembly, const std::filesystem::path& sourceRoot);
     void OpenPrefabForEditing(Keire::AssetId asset);
     void SavePrefabEditingStage();
     void ClosePrefabEditingStage();
@@ -623,6 +630,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void RequestInitialScene(Keire::AssetId candidate);
     void OpenPendingStartupScene();
     void PersistEditorSessionScene(Keire::AssetId asset) noexcept;
+    void PersistEditorSessionPreferences() noexcept;
     void SaveScene();
     void SaveSceneAs();
     void CompleteSaveSceneAs();
@@ -724,6 +732,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     Keire::Ref<Keire::AssetDatabase> m_AssetDatabase;
     std::vector<Keire::AssetSourceRecord> m_AssetRecords;
     std::uint64_t m_AssetRecordRevision = 0;
+    bool m_ManagedIdeWorkspaceOpened = false;
     Keire::AssetId m_SelectedAsset;
     struct PendingAssetPackageDialog
     {
@@ -866,6 +875,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     bool m_VfxEffectPreviewPaused = false;
     bool m_VfxEffectPreviewAutoRestart = true;
     bool m_ShowPerformanceOverlay = false;
+    bool m_MaximizeGameOnPlay = false;
     bool m_ProfilerPaused = false;
     bool m_ProfilerShowAllManagedCallbacks = false;
     bool m_ProfilerShowAllHotspots = false;

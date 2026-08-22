@@ -4,7 +4,9 @@
 #include "KeireClient/Editor/VfxEffectDocument.h"
 #include "KeireClient/Editor/VfxEffectPanel.h"
 
+#include <algorithm>
 #include <exception>
+#include <stdexcept>
 
 namespace KeireEditor
 {
@@ -29,6 +31,7 @@ namespace KeireEditor
                     m_Canvas.Select(std::nullopt);
                     return true;
                 }
+                return true;
             }
             if (result.PasteRequested)
             {
@@ -37,7 +40,7 @@ namespace KeireEditor
                     "Paste Shader Graph fragment", [&](auto& definition)
                     { pasted = PasteShaderGraphFragment(definition, m_Controller.GraphClipboard()); });
                 m_SelectedNodes = pasted;
-                m_SelectedNode = pasted.back();
+                m_SelectedNode = pasted.empty() ? std::nullopt : std::optional(pasted.back());
                 m_SelectedConnection.reset();
                 return true;
             }
@@ -70,6 +73,7 @@ namespace KeireEditor
                     m_Canvas.Select(std::nullopt);
                     return true;
                 }
+                return true;
             }
             if (result.PasteRequested)
             {
@@ -78,7 +82,7 @@ namespace KeireEditor
                     "Paste Material Graph fragment", [&](auto& definition)
                     { pasted = PasteMaterialGraphFragment(definition, m_Controller.GraphClipboard()); });
                 m_SelectedNodes = pasted;
-                m_SelectedNode = pasted.back();
+                m_SelectedNode = pasted.empty() ? std::nullopt : std::optional(pasted.back());
                 m_SelectedConnection.reset();
                 return true;
             }
@@ -111,6 +115,7 @@ namespace KeireEditor
                     m_GraphCanvas.Select(std::nullopt);
                     return true;
                 }
+                return true;
             }
             if (result.PasteRequested)
             {
@@ -119,7 +124,7 @@ namespace KeireEditor
                     "Paste VFX Graph fragment", [&](auto& definition)
                     { pasted = PasteVfxGraphFragment(definition, m_SelectedSystem, m_Controller.GraphClipboard()); });
                 m_SelectedNodes = pasted;
-                m_SelectedNode = pasted.back();
+                m_SelectedNode = pasted.empty() ? Keire::AssetId{} : pasted.back();
                 m_SelectedConnection = {};
                 return true;
             }
@@ -129,6 +134,75 @@ namespace KeireEditor
             m_Message = error.what();
         }
         return false;
+    }
+
+    bool ShaderGraphPanel::DrawClipboardContextMenu(
+        Keire::UiFrame& ui, const std::span<const std::pair<StableNodeId, Keire::AssetId>> identities,
+        const bool includeCopy, const bool copyEnabled)
+    {
+        NodeGraphCanvasResult command;
+        if (includeCopy)
+        {
+            command.CopyNodesRequested.assign(m_Canvas.Selections().begin(), m_Canvas.Selections().end());
+            if (ui.MenuItem("Copy", false, copyEnabled) && HandleClipboard(command, identities))
+                return true;
+            command.CopyNodesRequested.clear();
+        }
+        command.PasteRequested = true;
+        return ui.MenuItem("Paste") && HandleClipboard(command, identities);
+    }
+
+    bool MaterialGraphPanel::DrawClipboardContextMenu(
+        Keire::UiFrame& ui, const std::span<const std::pair<StableNodeId, Keire::AssetId>> identities,
+        const bool includeCopy, const bool copyEnabled)
+    {
+        NodeGraphCanvasResult command;
+        if (includeCopy)
+        {
+            command.CopyNodesRequested.assign(m_Canvas.Selections().begin(), m_Canvas.Selections().end());
+            if (ui.MenuItem("Copy", false, copyEnabled) && HandleClipboard(command, identities))
+                return true;
+            command.CopyNodesRequested.clear();
+        }
+        command.PasteRequested = true;
+        return ui.MenuItem("Paste") && HandleClipboard(command, identities);
+    }
+
+    bool VfxEffectPanel::DrawGraphClipboardContextMenu(
+        Keire::UiFrame& ui, const std::span<const std::pair<StableNodeId, Keire::AssetId>> identities,
+        const bool includeCopy, const bool copyEnabled)
+    {
+        NodeGraphCanvasResult command;
+        if (includeCopy)
+        {
+            command.CopyNodesRequested.assign(m_GraphCanvas.Selections().begin(), m_GraphCanvas.Selections().end());
+            if (ui.MenuItem("Copy", false, copyEnabled) && HandleGraphClipboard(command, identities))
+                return true;
+            command.CopyNodesRequested.clear();
+        }
+        command.PasteRequested = true;
+        return ui.MenuItem("Paste") && HandleGraphClipboard(command, identities);
+    }
+
+    bool VfxEffectPanel::DrawGraphNodeUnlinkContextMenu(Keire::UiFrame& ui, const Keire::AssetId system,
+                                                        const Keire::AssetId node,
+                                                        const std::span<const Keire::VfxGraphConnection> connections)
+    {
+        const bool connected =
+            std::ranges::any_of(connections, [&](const Keire::VfxGraphConnection& connection)
+                                { return connection.OutputNode == node || connection.InputNode == node; });
+        if (!ui.MenuItem("Unlink All Cables", false, connected))
+            return false;
+        (void)ApplyEdit("Unlinked all VFX node cables",
+                        [system, node](Keire::VfxEffectDefinition& candidate)
+                        {
+                            auto graph = std::ranges::find(candidate.Systems, system, &Keire::VfxGraphSystem::Id);
+                            if (graph == candidate.Systems.end())
+                                throw std::invalid_argument("VFX graph system is unavailable.");
+                            std::erase_if(graph->Connections, [node](const Keire::VfxGraphConnection& connection)
+                                          { return connection.OutputNode == node || connection.InputNode == node; });
+                        });
+        return true;
     }
 
     void ShaderGraphPanel::DuplicateSelection(const std::span<const StableNodeId> selection,

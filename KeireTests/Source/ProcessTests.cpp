@@ -190,6 +190,24 @@ TEST_CASE("external editor launch rejects unavailable sources without starting a
     CHECK_FALSE(diagnostic.empty());
 }
 
+TEST_CASE("managed external editor targeting reuses an open solution session")
+{
+    const auto root = std::filesystem::absolute(std::filesystem::path("Build") /
+                                                ("ExternalEditor-" + Keire::AssetId::Generate().ToString()));
+    std::filesystem::create_directories(root);
+    const auto source = root / "NewBehaviour.cs";
+    const auto solution = root / (root.filename().string() + ".sln");
+    std::ofstream(source) << "public sealed class NewBehaviour {}\n";
+    std::ofstream(solution) << "Microsoft Visual Studio Solution File\n";
+
+    CHECK(Keire::Detail::ResolveManagedSolutionForExternalEditor(source, root, false) == solution);
+    CHECK(Keire::Detail::ResolveManagedSolutionForExternalEditor(source, root, true).empty());
+    CHECK(Keire::Detail::ResolveManagedSolutionForExternalEditor(root / "Texture.png", root, false).empty());
+
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+}
+
 TEST_CASE("Child process termination is bounded and idempotent")
 {
     const std::array arguments{std::string("--child-process-hang")};

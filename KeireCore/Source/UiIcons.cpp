@@ -63,6 +63,12 @@ namespace Keire
                 return "F";
             case UiIcon::Lock:
                 return "L";
+            case UiIcon::Unlock:
+                return "U";
+            case UiIcon::Physics:
+                return "P";
+            case UiIcon::ColliderEdit:
+                return "C";
             case UiIcon::Folder:
                 return "D";
             case UiIcon::Refresh:
@@ -128,6 +134,8 @@ namespace Keire
                 return 0xE037;
             case UiIcon::Create:
                 return 0xE145;
+            case UiIcon::Camera:
+                return 0xE04B;
             case UiIcon::Copy:
             case UiIcon::Restore:
                 return 0xE14D;
@@ -145,6 +153,12 @@ namespace Keire
                 return 0xE5D3;
             case UiIcon::Refresh:
                 return 0xE5D5;
+            case UiIcon::Scale:
+                return 0xE56B;
+            case UiIcon::AxisX:
+                return 0xE5C8;
+            case UiIcon::AxisY:
+                return 0xF1E0;
             case UiIcon::Notifications:
                 return 0xE7F5;
             case UiIcon::Learn:
@@ -165,6 +179,34 @@ namespace Keire
                 return 0xE89E;
             case UiIcon::Settings:
                 return 0xE8B8;
+            case UiIcon::Lock:
+                return 0xE897;
+            case UiIcon::Unlock:
+                return 0xE898;
+            case UiIcon::Global:
+                return 0xE894;
+            case UiIcon::Translate:
+                return 0xE89F;
+            case UiIcon::Rotate:
+                return 0xE84D;
+            case UiIcon::Local:
+                return 0xE55C;
+            case UiIcon::View:
+                return 0xEF4E;
+            case UiIcon::Snap:
+                return 0xE3EC;
+            case UiIcon::Filter:
+                return 0xE8F4;
+            case UiIcon::Physics:
+                return 0xEA50;
+            case UiIcon::ColliderEdit:
+                return 0xE3C2;
+            case UiIcon::Perspective:
+                return 0xEA81;
+            case UiIcon::Orthographic:
+                return 0xE3C6;
+            case UiIcon::AxisZ:
+                return 0xE39E;
             case UiIcon::Minimize:
                 return 0xE931;
             case UiIcon::Home:

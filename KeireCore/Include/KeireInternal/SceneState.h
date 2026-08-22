@@ -73,6 +73,8 @@ namespace Keire::Detail
         [[nodiscard]] Ref<Component> GetComponent(EntityId id, ComponentTypeId type) const noexcept;
         [[nodiscard]] std::vector<Ref<Component>> GetComponents(EntityId id, ComponentTypeId type = {}) const;
         [[nodiscard]] bool RemoveComponent(EntityId id, ComponentTypeId type);
+        [[nodiscard]] bool RemoveComponent(EntityId id, const Ref<Component>& component);
+        void MoveComponentBefore(EntityId id, const Ref<Component>& component, const Ref<Component>& before);
         void SetComponentEnabled(Component& component, bool enabled);
         void ComponentChanged(const Component& component);
         [[nodiscard]] Matrix4 WorldMatrix(EntityId id) const;

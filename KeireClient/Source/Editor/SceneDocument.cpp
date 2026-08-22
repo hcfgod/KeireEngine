@@ -392,6 +392,24 @@ namespace KeireEditor
             throw std::invalid_argument("Cannot remove that component from the active scene entity.");
     }
 
+    void SceneDocument::RemoveComponent(const Keire::EntityId entity, const Keire::Ref<Keire::Component>& component)
+    {
+        const auto scene = ActiveScene();
+        auto target = scene ? scene->FindEntity(entity) : Keire::Entity{};
+        if (!target || !target.RemoveComponent(component))
+            throw std::invalid_argument("Cannot remove that component from the active scene entity.");
+    }
+
+    void SceneDocument::MoveComponentBefore(const Keire::EntityId entity, const Keire::Ref<Keire::Component>& component,
+                                            const Keire::Ref<Keire::Component>& before)
+    {
+        const auto scene = ActiveScene();
+        auto target = scene ? scene->FindEntity(entity) : Keire::Entity{};
+        if (!target)
+            throw std::invalid_argument("Cannot reorder components outside the active scene.");
+        target.MoveComponentBefore(component, before);
+    }
+
     void SceneDocument::SetComponentEnabled(const Keire::EntityId entity, const Keire::ComponentTypeId type,
                                             const bool enabled)
     {
@@ -401,6 +419,21 @@ namespace KeireEditor
         if (!component)
             throw std::invalid_argument("Cannot edit a component outside the active scene.");
         component->SetEnabled(enabled);
+    }
+
+    void SceneDocument::SetComponentValues(const Keire::EntityId entity, const Keire::Ref<Keire::Component>& component,
+                                           const Keire::ComponentPropertyBag& values)
+    {
+        const auto scene = ActiveScene();
+        const auto target = scene ? scene->FindEntity(entity) : Keire::Entity{};
+        const auto components = target ? target.GetComponents() : std::vector<Keire::Ref<Keire::Component>>{};
+        const auto registration = component && scene ? scene->Components()->Find(component->Type()) : std::nullopt;
+        if (!target || std::ranges::find(components, component) == components.end() || !registration)
+            throw std::invalid_argument("Cannot edit a component outside the active scene.");
+        auto validation = registration->Factory();
+        registration->Deserialize(*validation, values, registration->SchemaVersion);
+        registration->Deserialize(*component, values, registration->SchemaVersion);
+        scene->MarkDirty();
     }
 
     void SceneDocument::ResetComponent(const Keire::EntityId entity, const Keire::ComponentTypeId type)

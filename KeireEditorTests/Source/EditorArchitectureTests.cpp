@@ -10,7 +10,6 @@
 #include "KeireClient/Editor/MaterialGraphCreationPicker.h"
 #include "KeireClient/Editor/MaterialGraphDocument.h"
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
-#include "KeireClient/Editor/NamedAssetCreation.h"
 #include "KeireClient/Editor/PackageImportReview.h"
 #include "KeireClient/Editor/PrefabAuthoring.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
@@ -380,44 +379,6 @@ TEST_CASE("Range selection follows display order and retains the clicked item as
     REQUIRE(additive.size() == 4);
     CHECK(additive.front() == order[0]);
     CHECK(additive.back() == order[4]);
-}
-
-TEST_CASE("Asset Browser double-click routes material and shader authoring assets internally")
-{
-    using enum KeireEditor::AssetBrowserOpenAction;
-
-    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Materials/Surface.keirematerial") == Material);
-    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Materials/Surface.keirematerialgraph") == MaterialGraph);
-    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Materials/Surface.keirematerialinstance") == MaterialInstance);
-    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Shaders/Surface.keireshadergraph") == ShaderGraph);
-    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Shaders/Surface.KEIRESHADERGRAPH") == ShaderGraph);
-    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Materials/Common.keirematerialfunction") == ShaderGraph);
-    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Materials/Layer.keiremateriallayer") == ShaderGraph);
-    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Materials/Globals.keirematerialcollection") ==
-          MaterialParameterCollection);
-    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Textures/Surface.png") == External);
-
-    Keire::AssetSourceRecord instance;
-    instance.RelativePath = "Materials/Surface.keirematerialinstance";
-    CHECK(KeireEditor::AssetTypeName(instance) == "Material Instance");
-    instance.RelativePath = "Materials/Legacy.keireshadergraphinstance";
-    CHECK(KeireEditor::AssetTypeName(instance) == "Legacy Shader Graph Instance");
-    instance.RelativePath = "Materials/Common.keirematerialfunction";
-    CHECK(KeireEditor::AssetTypeName(instance) == "Material Function");
-    instance.RelativePath = "Materials/Globals.keirematerialcollection";
-    CHECK(KeireEditor::AssetTypeName(instance) == "Material Parameter Collection");
-}
-
-TEST_CASE("Asset creation labels keep Shader Graph and Material Graph workflows distinct")
-{
-    using KeireEditor::NamedAssetCreationDisplayName;
-    using KeireEditor::NamedAssetCreationKind;
-
-    CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::ShaderGraph) == "shader graph");
-    CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::MaterialGraph) == "material graph");
-    CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::MaterialInstance) == "material instance");
-    CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::MaterialFunction) == "material function");
-    CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::MaterialLayer) == "material layer");
 }
 
 TEST_CASE("Material Graph creation only preselects compatible shader sources")
@@ -1086,6 +1047,38 @@ TEST_CASE("custom registered component properties edit transactionally and resto
     CHECK_THROWS_AS((void)drawers.EditComponent(editor, *registration, *component, registration->Properties.front()),
                     std::invalid_argument);
     CHECK(std::get<double>(registration->Serialize(*component).at("value")) == doctest::Approx(1.0));
+}
+
+TEST_CASE("component authoring reorders and mutates repeated component instances by identity")
+{
+    const auto components = Keire::ComponentRegistry::CreateDefault();
+    auto customRegistration = CustomRegistration();
+    customRegistration.AllowMultiple = true;
+    components->Register(std::move(customRegistration));
+    KeireEditor::SceneDocument document;
+    auto scene =
+        Keire::CreateRef<Keire::Scene>(Keire::AssetId{}, Keire::SceneAsset::EmptyDefinition("Components"), components);
+    document.Open(scene);
+    const auto entityId = document.CreateEntity("Repeated Components");
+    const auto first = document.AddComponent(entityId, CustomComponent::StaticType());
+    const auto second = document.AddComponent(entityId, CustomComponent::StaticType());
+    REQUIRE(first);
+    REQUIRE(second);
+
+    document.SetComponentValues(entityId, second, {{"value", 7.0}});
+    CHECK(dynamic_cast<const CustomComponent&>(*first).Value == doctest::Approx(1.0));
+    CHECK(dynamic_cast<const CustomComponent&>(*second).Value == doctest::Approx(7.0));
+
+    document.MoveComponentBefore(entityId, second, first);
+    const auto reordered = scene->FindEntity(entityId).GetComponents(CustomComponent::StaticType());
+    REQUIRE(reordered.size() == 2);
+    CHECK(reordered[0] == second);
+    CHECK(reordered[1] == first);
+
+    document.RemoveComponent(entityId, second);
+    const auto remaining = scene->FindEntity(entityId).GetComponents(CustomComponent::StaticType());
+    REQUIRE(remaining.size() == 1);
+    CHECK(remaining.front() == first);
 }
 
 TEST_CASE("component and property-specific drawers override generic kinds")

@@ -14,6 +14,7 @@ supported API or activate a release.
 
 | Goal | Start here | Continue with |
 | --- | --- | --- |
+| Learn Kéire as a project author | [Kéire 0.4.0 User Manual](Manual/README.md) | [Projects and Editor](Manual/ProjectsAndEditor.md), [C# API Quick Reference](Manual/CSharpApiQuickReference.md) |
 | Build or evaluate Kéire | [Getting Started](GettingStarted.md) | [Project Hub](ProjectHub.md), [Testing and Release](TestingAndRelease.md) |
 | Understand engine ownership | [Architecture](Architecture.md) | [Runtime Lifecycle](RuntimeLifecycle.md), [ECS and Components](ECSAndComponents.md) |
 | Author a project | [Project System](ProjectSystem.md) | [Scene Authoring](SceneAuthoring.md), [Asset Browser](AssetBrowser.md), [Unified Graph Authoring](GraphAuthoring.md) |
@@ -25,7 +26,7 @@ supported API or activate a release.
 
 ## Complete Guide Library
 
-All 63 published guides are listed below in the same groups used by the documentation website.
+All 81 published guides are listed below in the same groups used by the documentation website.
 
 ### Start Here
 
@@ -36,6 +37,29 @@ All 63 published guides are listed below in the same groups used by the document
 | [Project Hub](ProjectHub.md) | Project creation/opening, editor compatibility, installed versions, launch behavior, and smoke modes. |
 | [Project System](ProjectSystem.md) | Descriptor schema, stable identity, directory isolation, locking, templates, recent projects, and upgrades. |
 | [Project Settings](ProjectSettings.md) | Tracked rendering and authoring settings, validation, defaults, editor transactions, and persistence. |
+
+### Kéire 0.4.0 User Manual
+
+| Guide | Use it for |
+| --- | --- |
+| [Kéire 0.4.0 User Manual](Manual/README.md) | Task-oriented learning path for active project authors. |
+| [Projects and the Editor](Manual/ProjectsAndEditor.md) | Hub project creation, workspace orientation, scenes, Play Mode, assets, and undo. |
+| [Visual Workflow Maps](Manual/VisualWorkflowMaps.md) | Diagrams connecting Hub, Editor, scripts, scenes, graphs, assets, and players. |
+| [C# Scripting Fundamentals](Manual/ScriptingFundamentals.md) | Assemblies, Behaviours, lifecycle, reload, cleanup, and Inspector fields. |
+| [C# Scripting Recipes](Manual/ScriptingRecipes.md) | Complete patterns for movement, reload-safe events, scene portals, prefabs, and presentation. |
+| [Entities, Prefabs, Assets, and Scenes](Manual/WorldAndAssets.md) | Managed world handles, prefab instantiation, ScriptableObjects, asset residency, and scene loading. |
+| [Input, Physics, and Audio](Manual/InputPhysicsAndAudio.md) | Authored actions, physics queries, fixed-step responsibilities, and audio playback. |
+| [UI, Jobs, and Diagnostics](Manual/UiJobsAndDiagnostics.md) | Scene UI, event cleanup, managed jobs, cancellation, logging, and profiling. |
+| [Shader Graph](Manual/ShaderGraph.md) | Reusable shader templates, properties, preview, compilation, and functions. |
+| [Shader Graph Examples](Manual/ShaderGraphExamples.md) | Worked tinted, emissive, and world-height graph layouts. |
+| [Material Graph](Manual/MaterialGraph.md) | Surface graphs, materials, instances, runtime overrides, functions, and layers. |
+| [Material Graph Examples](Manual/MaterialGraphExamples.md) | Worked damage, wetness, instance, and global-parameter surfaces. |
+| [VFX Graph](Manual/VfxGraph.md) | Effect creation, preview, Contexts, Blocks, emitters, subgraphs, and runtime control. |
+| [VFX Graph Examples](Manual/VfxGraphExamples.md) | Worked looping, burst, event-driven, and reusable particle systems. |
+| [Graph Editing](Manual/GraphEditing.md) | Selection, navigation, comments, collapse, clipboard, duplication, routing, and reuse. |
+| [Debugging and Profiling](Manual/DebuggingAndProfiling.md) | Last-good code, graph/import failures, captures, counters, and fix validation. |
+| [Player Builds and Packages](Manual/PlayerBuildsAndPackages.md) | Build profiles, Build Support, target testing, asset packages, and publication boundaries. |
+| [C# API Quick Reference](Manual/CSharpApiQuickReference.md) | Compact map of the supported Unity-shaped managed gameplay API. |
 
 ### Engine Foundations
 

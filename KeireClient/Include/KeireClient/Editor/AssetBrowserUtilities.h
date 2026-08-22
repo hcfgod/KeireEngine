@@ -39,6 +39,19 @@ namespace KeireEditor
         std::filesystem::path Folder;
     };
 
+    struct ManagedScriptAssemblyCandidate final
+    {
+        Keire::AssetId Asset;
+        Keire::ManagedAssemblyDefinition Definition;
+    };
+
+    struct ManagedScriptPlacement final
+    {
+        Keire::AssetId Assembly;
+        std::string RootNamespace;
+        std::filesystem::path SourceRootToAdd;
+    };
+
     class AssetBrowserRecordViewCache final
     {
       public:
@@ -91,7 +104,13 @@ namespace KeireEditor
     [[nodiscard]] std::string AssetTypeName(const Keire::AssetSourceRecord& record);
     [[nodiscard]] AssetBrowserOpenAction ResolveAssetBrowserOpenAction(const std::filesystem::path& path) noexcept;
     [[nodiscard]] std::vector<Keire::AssetId> DecodeAssetPayload(std::span<const std::byte> bytes);
+    [[nodiscard]] Keire::AssetId DecodeSingleAssetPayload(std::span<const std::byte> bytes);
     [[nodiscard]] std::string EncodeAssetPayload(std::span<const Keire::AssetId> assets);
+    [[nodiscard]] ManagedScriptPlacement
+    ResolveManagedScriptPlacement(std::span<const ManagedScriptAssemblyCandidate> assemblies,
+                                  const std::filesystem::path& selectedAssetFolder);
+    [[nodiscard]] bool ExtendManagedAssemblySourceRoots(Keire::ManagedAssemblyDefinition& assembly,
+                                                        const std::filesystem::path& sourceRoot);
     [[nodiscard]] std::vector<std::filesystem::path>
     BuildFolderRangeSelection(std::span<const std::filesystem::path> order, const std::filesystem::path& anchor,
                               const std::filesystem::path& target, std::span<const std::filesystem::path> existing = {},

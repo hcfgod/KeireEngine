@@ -46,6 +46,8 @@ namespace Keire
         [[nodiscard]] std::vector<Ref<Component>> GetComponents(ComponentTypeId type = {}) const;
         [[nodiscard]] bool HasComponent(ComponentTypeId type) const noexcept;
         [[nodiscard]] bool RemoveComponent(ComponentTypeId type);
+        [[nodiscard]] bool RemoveComponent(const Ref<Component>& component);
+        void MoveComponentBefore(const Ref<Component>& component, const Ref<Component>& before = {});
         [[nodiscard]] Entity Clone();
         [[nodiscard]] bool Destroy();
 

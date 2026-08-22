@@ -4090,45 +4090,45 @@ namespace Keire
         result.Properties.push_back({"Source", std::move(source)});
         return result;
     }
-
     VfxEffectDefinition MigrateVfxEffectToCurrentSchema(const VfxEffectDefinition& definition)
     {
         if (definition.SchemaVersion < 1 || definition.SchemaVersion > CurrentVfxSchemaVersion)
             throw std::invalid_argument("VFX effect migration source schema is unsupported.");
-
         auto result = definition;
         if (result.SchemaVersion < CurrentVfxSchemaVersion)
         {
-            result.CompatibilityMode = VfxCompatibilityMode::MigratedLegacyModules;
-            if (result.SchemaVersion < 3)
-                result.ExecutionSource = VfxExecutionSource::LegacyModules;
-            for (auto& system : result.Systems)
+            if (result.SchemaVersion < 4)
             {
-                for (auto& node : system.Nodes)
+                result.CompatibilityMode = VfxCompatibilityMode::MigratedLegacyModules;
+                if (result.SchemaVersion < 3)
+                    result.ExecutionSource = VfxExecutionSource::LegacyModules;
+                for (auto& system : result.Systems)
                 {
-                    node.TypeId = MigratedNodeTypeId(result, node);
-                    node.DefinitionVersion = 1;
-                    for (auto& block : node.Blocks)
+                    for (auto& node : system.Nodes)
                     {
-                        if (const auto module =
-                                std::ranges::find(result.Modules, block.Reference, &VfxModuleDefinition::Id);
-                            module != result.Modules.end())
+                        node.TypeId = MigratedNodeTypeId(result, node);
+                        node.DefinitionVersion = 1;
+                        for (auto& block : node.Blocks)
                         {
-                            block.TypeId.Value = ModuleTypeId(module->Payload);
+                            if (const auto module =
+                                    std::ranges::find(result.Modules, block.Reference, &VfxModuleDefinition::Id);
+                                module != result.Modules.end())
+                            {
+                                block.TypeId.Value = ModuleTypeId(module->Payload);
+                            }
+                            else
+                                block.TypeId.Value = "keire.block." + TypeSlug(block.Type);
+                            block.DefinitionVersion = 1;
                         }
-                        else
-                            block.TypeId.Value = "keire.block." + TypeSlug(block.Type);
-                        block.DefinitionVersion = 1;
                     }
                 }
+                MigrateLegacyExecutableNodesToBlocks(result);
             }
-            MigrateLegacyExecutableNodesToBlocks(result);
             result.SchemaVersion = CurrentVfxSchemaVersion;
         }
         UpgradeModuleGraphLayouts(result);
         return result;
     }
-
     VfxEffectDefinition ConvertVfxEffectToGraph(const VfxEffectDefinition& definition)
     {
         auto result = MigrateVfxEffectToCurrentSchema(definition);
@@ -4245,7 +4245,7 @@ namespace Keire
                                              ? VfxExecutionSource::LegacyModules
                                              : ParseExecutionSource(document.at("executionSource").get<std::string>());
             definition.CompatibilityMode =
-                schemaVersion < CurrentVfxSchemaVersion
+                schemaVersion < 4
                     ? VfxCompatibilityMode::MigratedLegacyModules
                     : ParseCompatibilityMode(document.value("compatibilityMode", std::string("nativeSchema4")));
             definition.EmitterId = ParseId(document, "emitterId");

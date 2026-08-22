@@ -25,6 +25,7 @@ def require(condition: bool, message: str) -> None:
 
 
 definitions = module.PACKAGES
+require(module.VERSION == "0.4.0", "Official packages must follow the current project version.")
 require(
     len(definitions) == 5,
     "The official release set must contain exactly five launch products.",
@@ -61,6 +62,12 @@ with tempfile.TemporaryDirectory(prefix="keire-official-package-test-") as tempo
         require(
             manifest["entryPoints"] == list(definition.entry_points),
             f"{definition.slug} changed its reviewed entry points.",
+        )
+        require(
+            manifest["version"] == "0.4.0"
+            and manifest["compatibility"]["minimumEngineVersion"] == "0.4.0"
+            and manifest["compatibility"]["managedApiVersion"] == "0.4.0",
+            f"{definition.slug} does not identify the current first-party source release.",
         )
         require(
             all((payload / entry).is_file() for entry in manifest["entryPoints"]),

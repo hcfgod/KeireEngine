@@ -9,7 +9,8 @@ namespace KeireEditor
     namespace
     {
         constexpr float HeaderHeight = 34.0F;
-        constexpr float ResizeHandleSize = 14.0F;
+        constexpr float ResizeHandleSize = 16.0F;
+        constexpr float CollapseArrowSize = 10.0F;
 
         [[nodiscard]] Keire::UiPosition ToScreen(const Keire::Vector2 position, const Keire::UiItemRect canvas,
                                                  const Keire::Vector2 pan, const float zoom) noexcept
@@ -22,12 +23,6 @@ namespace KeireEditor
             return {color.Red, color.Green, color.Blue, alpha};
         }
 
-        [[nodiscard]] float CollapsedHeight(const NodeGraphComment& comment) noexcept
-        {
-            return std::max(HeaderHeight,
-                            HeaderHeight +
-                                static_cast<float>(std::max(comment.SummaryInputs, comment.SummaryOutputs)) * 20.0F);
-        }
     } // namespace
 
     std::optional<Keire::AssetId> NodeGraphCommentModel::Asset(const StableNodeId canvas) const noexcept
@@ -53,13 +48,13 @@ namespace KeireEditor
     {
         Select(value);
         ui.TextColored({0.3F, 0.78F, 1.0F, 1.0F}, "GRAPH COMMENT");
-        (void)ui.InputText("Title", m_Title);
-        (void)ui.InputTextMultiline("Description", m_Description, 4);
-        (void)ui.ColorEdit("Color / Alpha", m_Color);
-        (void)ui.DragScalar("Font Size", m_FontSize, 0.5, 8.0, 96.0);
-        (void)ui.Checkbox("Move Contents", m_MoveContents);
-        (void)ui.Checkbox("Collapsed", m_Collapsed);
-        if (ui.Button("Apply"))
+        bool changed = ui.InputText("Title", m_Title);
+        changed = ui.InputTextMultiline("Description", m_Description, 4) || changed;
+        changed = ui.ColorEdit("Color / Alpha", m_Color) || changed;
+        changed = ui.DragScalar("Font Size", m_FontSize, 0.5, 8.0, 96.0) || changed;
+        changed = ui.Checkbox("Move Contents", m_MoveContents) || changed;
+        changed = ui.Checkbox("Collapsed", m_Collapsed) || changed;
+        if (changed)
         {
             value.Title = m_Title.empty() ? "Comment" : m_Title;
             value.Description = m_Description;
@@ -70,7 +65,6 @@ namespace KeireEditor
             value.Collapsed = m_Collapsed;
             return GraphCommentEditorAction::Apply;
         }
-        ui.SameLine();
         return ui.Button("Delete Comment") ? GraphCommentEditorAction::Delete : GraphCommentEditorAction::None;
     }
 
@@ -313,6 +307,15 @@ namespace KeireEditor
                 moved->Position = position;
     }
 
+    float GraphCommentDisplayHeight(const NodeGraphComment& comment) noexcept
+    {
+        if (!comment.Collapsed)
+            return comment.Size.Y;
+        return std::max(HeaderHeight,
+                        HeaderHeight +
+                            static_cast<float>(std::max(comment.SummaryInputs, comment.SummaryOutputs)) * 20.0F);
+    }
+
     NodeGraphCommentLayerResult DrawNodeGraphComments(Keire::UiFrame& ui,
                                                       const std::span<const NodeGraphComment> comments,
                                                       const Keire::UiItemRect canvas, const Keire::Vector2 pan,
@@ -321,7 +324,7 @@ namespace KeireEditor
         for (const auto& comment : comments)
         {
             const auto minimum = ToScreen(comment.Position, canvas, pan, zoom);
-            const float height = (comment.Collapsed ? CollapsedHeight(comment) : comment.Size.Y) * zoom;
+            const float height = GraphCommentDisplayHeight(comment) * zoom;
             const Keire::UiItemRect rectangle{minimum, {minimum.X + comment.Size.X * zoom, minimum.Y + height}};
             const Keire::UiItemRect header{minimum,
                                            {rectangle.Maximum.X, minimum.Y + std::min(HeaderHeight * zoom, height)}};
@@ -329,18 +332,33 @@ namespace KeireEditor
                                    6.0F);
             ui.DrawFilledRectangle(header, Opaque(comment.Color, 0.9F), 6.0F);
             ui.DrawRectangle(rectangle, Opaque(comment.Color, 1.0F), 1.5F, 6.0F);
-            ui.DrawOverlayText({header.Minimum.X + 10.0F, header.Minimum.Y + 6.0F}, {0.97F, 0.98F, 1.0F, 1.0F},
-                               comment.Title, std::clamp(comment.FontSize * zoom, 10.0F, comment.FontSize), header);
+            const float arrowSize = std::clamp(CollapseArrowSize * zoom, 7.0F, CollapseArrowSize);
+            const Keire::UiPosition arrowCenter{header.Minimum.X + std::clamp(14.0F * zoom, 10.0F, 14.0F),
+                                                header.Minimum.Y + header.Size().Height * 0.5F};
+            if (comment.Collapsed)
+                ui.DrawFilledTriangle({arrowCenter.X - arrowSize * 0.35F, arrowCenter.Y - arrowSize * 0.5F},
+                                      {arrowCenter.X - arrowSize * 0.35F, arrowCenter.Y + arrowSize * 0.5F},
+                                      {arrowCenter.X + arrowSize * 0.5F, arrowCenter.Y}, {0.97F, 0.98F, 1.0F, 0.95F});
+            else
+                ui.DrawFilledTriangle({arrowCenter.X - arrowSize * 0.5F, arrowCenter.Y - arrowSize * 0.35F},
+                                      {arrowCenter.X + arrowSize * 0.5F, arrowCenter.Y - arrowSize * 0.35F},
+                                      {arrowCenter.X, arrowCenter.Y + arrowSize * 0.5F}, {0.97F, 0.98F, 1.0F, 0.95F});
+            ui.DrawOverlayText({header.Minimum.X + std::clamp(28.0F * zoom, 22.0F, 28.0F),
+                                header.Minimum.Y + std::clamp(6.0F * zoom, 2.0F, 6.0F)},
+                               {0.97F, 0.98F, 1.0F, 1.0F}, comment.Title,
+                               std::clamp(comment.FontSize * zoom, 8.0F, comment.FontSize), header);
             if (!comment.Collapsed && !comment.Description.empty() && zoom >= 0.55F)
                 ui.DrawOverlayText({rectangle.Minimum.X + 10.0F, header.Maximum.Y + 8.0F}, {0.82F, 0.86F, 0.94F, 0.9F},
                                    comment.Description, std::clamp(12.0F * zoom, 9.0F, 12.0F), rectangle);
             if (!comment.Collapsed)
             {
-                const Keire::UiItemRect handle{
-                    {rectangle.Maximum.X - ResizeHandleSize, rectangle.Maximum.Y - ResizeHandleSize},
-                    rectangle.Maximum};
+                const float handleSize = std::clamp(ResizeHandleSize * zoom, 12.0F, ResizeHandleSize);
+                const Keire::UiItemRect handle{{rectangle.Maximum.X - handleSize, rectangle.Maximum.Y - handleSize},
+                                               rectangle.Maximum};
                 ui.DrawFilledTriangle(handle.Minimum, {handle.Maximum.X, handle.Minimum.Y}, handle.Maximum,
                                       Opaque(comment.Color, 0.95F));
+                ui.DrawLine({handle.Minimum.X + 3.0F, handle.Maximum.Y - 2.0F},
+                            {handle.Maximum.X - 2.0F, handle.Minimum.Y + 3.0F}, {0.96F, 0.98F, 1.0F, 0.9F}, 1.5F);
             }
         }
 
@@ -348,14 +366,17 @@ namespace KeireEditor
         for (auto comment = comments.rbegin(); comment != comments.rend(); ++comment)
         {
             const auto minimum = ToScreen(comment->Position, canvas, pan, zoom);
-            const float height = (comment->Collapsed ? CollapsedHeight(*comment) : comment->Size.Y) * zoom;
+            const float height = GraphCommentDisplayHeight(*comment) * zoom;
             const Keire::UiItemRect rectangle{minimum, {minimum.X + comment->Size.X * zoom, minimum.Y + height}};
             if (!rectangle.Contains(pointer))
                 continue;
             result.Hovered = comment->Id;
             result.Header = pointer.Y <= minimum.Y + HeaderHeight * zoom;
-            result.ResizeHandle = !comment->Collapsed && pointer.X >= rectangle.Maximum.X - ResizeHandleSize &&
-                                  pointer.Y >= rectangle.Maximum.Y - ResizeHandleSize;
+            const float arrowHitWidth = std::clamp(28.0F * zoom, 22.0F, 28.0F);
+            result.CollapseToggle = result.Header && pointer.X <= rectangle.Minimum.X + arrowHitWidth;
+            const float handleSize = std::clamp(ResizeHandleSize * zoom, 12.0F, ResizeHandleSize);
+            result.ResizeHandle = !comment->Collapsed && pointer.X >= rectangle.Maximum.X - handleSize &&
+                                  pointer.Y >= rectangle.Maximum.Y - handleSize;
             break;
         }
         return result;

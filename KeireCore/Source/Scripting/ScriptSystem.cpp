@@ -316,7 +316,7 @@ namespace Keire
             try
             {
                 const RuntimeScope scope(*this);
-                (void)nativeRuntime->InvokeStaticMethod<bool>("ResetManagedAssets", generation);
+                (void)nativeRuntime->InvokeStaticMethod<Coral::Bool32>("ResetManagedAssets", generation);
             }
             catch (...)
             {
@@ -4136,7 +4136,7 @@ namespace Keire
                 const Impl::RuntimeScope scope(*m_Impl);
                 if (completion.Failed)
                 {
-                    (void)m_Impl->ActiveNativeRuntimeType->InvokeStaticMethod<bool>(
+                    (void)m_Impl->ActiveNativeRuntimeType->InvokeStaticMethod<Coral::Bool32>(
                         "FailManagedAssetLoad", generation, completion.Id.High(), completion.Id.Low(),
                         completion.Diagnostic);
                     continue;
@@ -4157,7 +4157,7 @@ namespace Keire
             catch (const std::exception& exception)
             {
                 const Impl::RuntimeScope scope(*m_Impl);
-                (void)m_Impl->ActiveNativeRuntimeType->InvokeStaticMethod<bool>(
+                (void)m_Impl->ActiveNativeRuntimeType->InvokeStaticMethod<Coral::Bool32>(
                     "FailManagedAssetLoad", generation, completion.Id.High(), completion.Id.Low(),
                     std::string(exception.what()));
             }

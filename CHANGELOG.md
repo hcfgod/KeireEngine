@@ -33,6 +33,12 @@ versions.
 
 ### Unified graph authoring, Shader/Material, and VFX
 
+- Polished graph comment authoring with immediate Inspector updates, stable graph-space resize handles, a header
+  collapse arrow, preserved authored bounds, and transition-safe compact rendering that no longer flickers or rebuilds
+  the canvas every frame. Zoom-aware titles, labels, pins, and cables remain legible across the supported zoom range.
+- Exposed the existing bounded graph-fragment clipboard through Ctrl+C/Ctrl+V and canvas context menus in every
+  editable Shader, Material, and VFX graph. Shader and Material selections can now be extracted directly into a
+  reusable function asset with derived boundaries, parent rewiring, asynchronous stable-ID completion, and undo.
 - Unified editable Shader, Material, and VFX graph selection around an ordered multi-selection and primary item.
   Graphs now support Ctrl-toggle, additive marquee, Ctrl+A, group dragging, protected-anchor diagnostics, and atomic
   multi-node deletion with one undo operation; Audio Mixer and Animator retain their existing single-selection model.
@@ -65,6 +71,17 @@ versions.
 
 ### Engine, Editor, documentation, and release validation since 0.3.2
 
+- Added type-catalog-driven ScriptableObject creation to the Asset Browser, kept new C# scripts in the selected folder,
+  and reused an already-open managed IDE workspace for subsequent script opens. Hierarchy-to-folder prefab drops now
+  decode their bounded drag payload before UUID parsing, and current first-party Marketplace source metadata follows
+  project version 0.4.0 without rewriting historical catalog or release records.
+- Added identity-safe component reordering and component context menus with copy/paste, value-only copy/paste, and
+  removal actions; changed Collider Shape to a labeled enum control; replaced opaque scene and Inspector toolbar
+  letters with code-native icons; kept FPS statistics inside the viewport; and added a persistent Maximize On Play
+  Game-view preference.
+- Added a 13-guide user manual covering editor orientation, scripting, world and asset workflows, graph authoring,
+  input, physics, audio, UI, jobs, diagnostics, profiling, player builds, and packages. Managed examples compile against
+  the current API, and documentation navigation/search now covers 76 canonical guides.
 - Audited every first-party documentation and website surface against current schemas, APIs, release artifacts,
   Marketplace publication, parity ledgers, and rendered navigation. Corrected website headings, metadata, roadmap and
   readiness labels, static guide counts, and stale capability claims; added cross-source drift checks and a weighted
@@ -72,6 +89,8 @@ versions.
 - Refresh the Asset Tool and player-runtime managed hosts when editor or Hub builds compile those executable
   dependencies, preventing packaged gameplay builds from using a stale managed API assembly.
 - Added strict player-build discovery for direct `Prefab` asset references.
+- Fixed managed-runtime reload and asset-load failure callbacks on Windows by using Coral's explicit 32-bit boolean
+  return ABI, preventing Debug runtime-check stack corruption during transactional script reloads.
 
 - Fixed Editor Play Mode startup with the multi-scene runtime by activating the cloned runtime scene before adopting
   its session into the runtime world.
@@ -174,6 +193,15 @@ versions.
   through an older registered distribution editor or worker.
 - Fixed clean editor builds after the VFX Kill Shape module addition by completing its panel-model visitors and adding
   the missing Kill Shape inspector controls.
+- Fixed Windows Editor and Hub packaging selecting the disabled Microsoft Store `python.exe` alias ahead of an
+  installed Python 3 launcher. Package scripts now prefer `py -3`, reject the Store alias, and verify the interpreter
+  major version before use.
+- Fixed atomic cache publication failing when a writable packaged-project path produced a temporary filename longer
+  than the legacy Windows MAX_PATH boundary. Windows file streams and durable replacement now use extended-length
+  native paths, preventing catalog-load failures that previously cascaded into missing-asset diagnostics.
+- Fixed schema-4 VFX sources being treated as legacy metadata during schema-5 in-memory migration. Canonical Context,
+  Block, and portable-HLSL identities and stored compatibility now survive migration, allowing packaged Sandbox VFX
+  assets such as Spectral Mist to validate and cook.
 - Fixed Python 3.9 compatibility in the distribution-snapshot preparer and deterministic Marketplace artifact writers
   on Rocky Linux 9, and restored explicit standard-library ownership in the decomposed procedural scene-runtime unit.
 - Added explicit Additive, Modulate, premultiplied Alpha Composite, and Alpha Holdout material modes with

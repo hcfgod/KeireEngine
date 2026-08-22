@@ -93,6 +93,13 @@ namespace KeireEditor
         [[nodiscard]] bool HandleGraphClipboard(const NodeGraphCanvasResult& result,
                                                 std::span<const std::pair<StableNodeId, Keire::AssetId>> identities);
         [[nodiscard]] bool
+        DrawGraphClipboardContextMenu(Keire::UiFrame& ui,
+                                      std::span<const std::pair<StableNodeId, Keire::AssetId>> identities,
+                                      bool includeCopy, bool copyEnabled = true);
+        [[nodiscard]] bool DrawGraphNodeUnlinkContextMenu(Keire::UiFrame& ui, Keire::AssetId system,
+                                                          Keire::AssetId node,
+                                                          std::span<const Keire::VfxGraphConnection> connections);
+        [[nodiscard]] bool
         DrawGraphArrangeMenu(Keire::UiFrame& ui, std::span<const NodeGraphNode> nodes,
                              std::span<const NodeGraphConnection> connections,
                              std::span<const std::pair<StableNodeId, Keire::AssetId>> nodeIdentities,

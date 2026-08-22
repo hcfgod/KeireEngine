@@ -840,7 +840,9 @@ void EditorWorkspaceLayer::OnAttach()
             ConfigureAssetImporters(databaseSpecification);
             m_AssetDatabase = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
             m_EditorSessionPath = project->WorkspaceDirectory() / "EditorSession.state";
-            const auto restoredScene = KeireEditor::LoadEditorSessionState(m_EditorSessionPath).LastScene;
+            const auto editorSession = KeireEditor::LoadEditorSessionState(m_EditorSessionPath);
+            const auto restoredScene = editorSession.LastScene;
+            m_MaximizeGameOnPlay = editorSession.MaximizeGameOnPlay;
             const auto startupCandidate = restoredScene ? restoredScene : project->Descriptor().StartupScene;
             m_AssetOperations = std::make_unique<KeireEditor::AssetOperationService>(
                 KeireEditor::AssetOperationService::ResolveWorkerExecutable(m_ExecutablePath), project->Root());

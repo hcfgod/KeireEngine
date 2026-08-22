@@ -89,7 +89,7 @@ function parseUnsignedConstant(source, name) {
 
 const actual = await collectMarkdown(docsRoot);
 const expected = [...allDocSources].sort((left, right) => left.localeCompare(right));
-assert(allDocSources.length === 63, `Expected 63 documentation sources, found ${allDocSources.length}.`);
+assert(allDocSources.length === 81, `Expected 81 documentation sources, found ${allDocSources.length}.`);
 assert(new Set(allDocSources).size === allDocSources.length, "Documentation inventory contains duplicate source paths.");
 assert(JSON.stringify(actual) === JSON.stringify(expected), "Documentation inventory does not exactly cover Docs/**/*.md.");
 
@@ -132,12 +132,25 @@ assert(
 assert(fallbackLanding.includes(`<span data-doc-count>${allDocSources.length} documents</span>`),
     "Fallback documentation count is stale.");
 for (const [fragment, count] of [
-    ["getting-projects", 5], ["editor-authoring", 11], ["engine-systems", 11], ["assets-builds", 4],
+    ["user-manual", 18], ["getting-projects", 5], ["editor-authoring", 11], ["engine-systems", 11], ["assets-builds", 4],
     ["vfx", 4], ["csharp", 16], ["production", 7], ["diagnostics", 5],
 ]) {
     assert(new RegExp(`<a href="#${fragment}">[^<]*<span>[^<]+</span><b>${count}</b></a>`).test(fallbackLanding),
     `Fallback documentation category count is stale: ${fragment}.`);
 }
+
+const manualSources = allDocSources.filter((sourcePath) => sourcePath.startsWith("Manual/"));
+assert(manualSources.length === 18, `Expected 18 user-manual guides, found ${manualSources.length}.`);
+for (const topic of ["ShaderGraph.md", "MaterialGraph.md", "VfxGraph.md", "GraphEditing.md",
+    "PlayerBuildsAndPackages.md", "CSharpApiQuickReference.md", "VisualWorkflowMaps.md", "ScriptingRecipes.md",
+    "ShaderGraphExamples.md", "MaterialGraphExamples.md", "VfxGraphExamples.md"]) {
+    assert(manualSources.includes(`Manual/${topic}`), `User manual is missing ${topic}.`);
+}
+await access(path.join(docsRoot, "Manual", "Examples", "Keire.ManualExamples.csproj"));
+await access(path.join(docsRoot, "Manual", "Examples", "ManualExamples.cs"));
+const manualOverview = await readMarkdown(path.join(docsRoot, "Manual", "README.md"));
+assert(manualOverview.includes("compile-checkable example project"),
+    "User manual does not link its compile-checked C# examples.");
 
 for (const sourcePath of allDocSources) {
     const sourceAbsolute = path.join(docsRoot, ...sourcePath.split("/"));
@@ -472,6 +485,11 @@ const platformStyles = await readFile(path.join(siteRoot, "Source", "styles", "p
 assert(!platformStyles.includes("var(--space-") && !platformStyles.includes("var(--radius-md") &&
     !platformStyles.includes("var(--surface-strong"),
     "Platform components must not depend on undefined design tokens.");
+assert(platformStyles.includes(".editorial-panel:nth-child(4n + 1)") &&
+    platformStyles.includes(".editorial-panel:nth-child(4n + 2)") &&
+    platformStyles.includes(".editorial-panel:nth-child(4n + 3)") &&
+    platformStyles.includes(".editorial-panel:nth-child(4n)"),
+    "Editorial card spans must repeat after the first four cards.");
 const documentationStyles = await readFile(path.join(siteRoot, "Source", "styles", "keire.css"), "utf8");
 assert(documentationStyles.includes("main .hero > .stack") && documentationStyles.includes("place-items: center") &&
     documentationStyles.includes("grid-template-columns: minmax(0, 1fr)") &&

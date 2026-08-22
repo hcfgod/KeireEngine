@@ -82,10 +82,13 @@ namespace Keire::Detail
     [[nodiscard]] bool IsProcessAlive(std::uint64_t processId) noexcept;
     [[nodiscard]] std::filesystem::path ResolveCompanionExecutable(const std::filesystem::path& executable,
                                                                    std::string_view companionTarget);
+    [[nodiscard]] std::filesystem::path
+    ResolveManagedSolutionForExternalEditor(const std::filesystem::path& path,
+                                            const std::filesystem::path& workingDirectory, bool reuseManagedSession);
     [[nodiscard]] bool OpenInExternalEditor(const std::filesystem::path& path,
                                             const std::filesystem::path& preferredEditor,
-                                            const std::filesystem::path& workingDirectory,
-                                            std::string& diagnostic) noexcept;
+                                            const std::filesystem::path& workingDirectory, std::string& diagnostic,
+                                            bool reuseManagedSession = false) noexcept;
     [[nodiscard]] bool RevealInFileManager(const std::filesystem::path& path, std::string& diagnostic) noexcept;
 } // namespace Keire::Detail
 #include <chrono>

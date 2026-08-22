@@ -487,13 +487,17 @@ void EditorWorkspaceLayer::OpenAssetBrowserPrefab(const Keire::AssetId asset) { 
 
 void EditorWorkspaceLayer::OpenAssetBrowserScene(const Keire::AssetId asset) { RequestOpenScene(asset); }
 
-void EditorWorkspaceLayer::PrepareAssetBrowserExternalOpen(const Keire::AssetId asset)
+bool EditorWorkspaceLayer::PrepareAssetBrowserExternalOpen(const Keire::AssetId asset)
 {
     if (!m_AssetDatabase)
-        return;
+        return false;
     const auto record = m_AssetDatabase->Find(asset);
-    if (record && (record->RelativePath.extension() == ".cs" || record->RelativePath.extension() == ".keireasm"))
-        GenerateManagedIdeWorkspace();
+    if (!record || (record->RelativePath.extension() != ".cs" && record->RelativePath.extension() != ".keireasm"))
+        return false;
+    const bool reuseManagedSession = m_ManagedIdeWorkspaceOpened;
+    GenerateManagedIdeWorkspace();
+    m_ManagedIdeWorkspaceOpened = true;
+    return reuseManagedSession;
 }
 
 void EditorWorkspaceLayer::CopyAssetBrowserText(const std::string_view value)
@@ -844,6 +848,11 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
                 const auto created = completion->Result.CreatedAsset;
                 if (!created)
                     throw std::runtime_error("Asset worker completed creation without a stable asset identity.");
+                if (completion->Context.ManagedAssembly)
+                    ExtendManagedAssemblySourceRoot(completion->Context.ManagedAssembly,
+                                                    completion->Context.ManagedSourceRoot);
+                if (completion->Context.GraphFunctionExtraction)
+                    CompleteGraphFunctionExtraction(*completion->Context.GraphFunctionExtraction, created);
                 m_SelectedAsset = created;
                 if (m_AssetBrowserPanel)
                 {
@@ -1234,6 +1243,23 @@ void EditorWorkspaceLayer::GenerateManagedIdeWorkspace()
     m_AssetStatus = "Generated Visual Studio workspace " + workspace.Solution.filename().string() + ".";
 }
 
+void EditorWorkspaceLayer::ExtendManagedAssemblySourceRoot(const Keire::AssetId assembly,
+                                                           const std::filesystem::path& sourceRoot)
+{
+    if (!m_AssetDatabase || !Owner().GetProject())
+        throw std::logic_error("Open a project before extending managed assembly source coverage.");
+    const auto record = m_AssetDatabase->Find(assembly);
+    if (!record || record->Type != Keire::ManagedAssemblyAsset::StaticType())
+        throw std::runtime_error("The selected managed assembly is no longer available.");
+    auto definition =
+        Keire::ManagedAssemblyAsset::Decode(ReadBytes(Owner().GetProject()->Root() / "Assets" / record->RelativePath))
+            ->Definition();
+    if (!KeireEditor::ExtendManagedAssemblySourceRoots(definition, sourceRoot))
+        return;
+    m_AssetDatabase->ReplaceAssetSource(assembly, Keire::ManagedAssemblyAsset::Encode(definition));
+    RefreshAssetBrowserRecords();
+}
+
 bool EditorWorkspaceLayer::CreateCSharpScript(const std::string_view name)
 {
     if (!m_AssetDatabase || !m_AssetOperations || !Owner().GetProject())
@@ -1245,13 +1271,7 @@ bool EditorWorkspaceLayer::CreateCSharpScript(const std::string_view name)
         if (m_AssetOperations->Busy())
             (void)m_AssetOperations->PreemptBackgroundImports();
         const auto directory = m_AssetBrowserPanel ? m_AssetBrowserPanel->CurrentFolder() : std::filesystem::path{};
-        auto destinationDirectory = directory;
-        const auto projectRelativeParent = std::filesystem::path("Assets") / directory;
-        std::string rootNamespace;
-        std::size_t matchedLength = 0;
-        std::filesystem::path fallbackRoot;
-        std::string fallbackNamespace;
-        bool fallbackIsDescendant = false;
+        std::vector<KeireEditor::ManagedScriptAssemblyCandidate> assemblies;
         const auto projectRoot = Owner().GetProject()->Root();
         for (const auto& record : m_AssetDatabase->Records())
         {
@@ -1259,51 +1279,25 @@ bool EditorWorkspaceLayer::CreateCSharpScript(const std::string_view name)
                 continue;
             const auto assembly =
                 Keire::ManagedAssemblyAsset::Decode(ReadBytes(projectRoot / "Assets" / record.RelativePath));
-            for (const auto& root : assembly->Definition().SourceRoots)
-            {
-                const auto assetsRelativeRoot = root.lexically_normal().lexically_relative("Assets");
-                if (assetsRelativeRoot.empty() || assetsRelativeRoot.is_absolute() ||
-                    assetsRelativeRoot.generic_string().starts_with(".."))
-                    continue;
-                if (SameOrChild(root, projectRelativeParent) && root.generic_string().size() >= matchedLength)
-                {
-                    rootNamespace = assembly->Definition().RootNamespace;
-                    matchedLength = root.generic_string().size();
-                }
-                const bool descendant = SameOrChild(projectRelativeParent, root);
-                const bool runtime =
-                    assembly->Definition().Classification == Keire::ManagedAssemblyClassification::Runtime;
-                if ((descendant || runtime) &&
-                    (fallbackNamespace.empty() || (descendant && !fallbackIsDescendant) ||
-                     (descendant == fallbackIsDescendant && root.generic_string() < fallbackRoot.generic_string())))
-                {
-                    fallbackRoot = assetsRelativeRoot;
-                    fallbackNamespace = assembly->Definition().RootNamespace;
-                    fallbackIsDescendant = descendant;
-                }
-            }
+            assemblies.push_back({record.Id, assembly->Definition()});
         }
-        if (rootNamespace.empty())
-        {
-            if (fallbackNamespace.empty())
-                throw std::runtime_error("Create a runtime .keireasm asset before creating a C# script.");
-            destinationDirectory = fallbackRoot;
-            rootNamespace = fallbackNamespace;
-        }
+        const auto placement = KeireEditor::ResolveManagedScriptPlacement(assemblies, directory);
 
-        const auto destination = destinationDirectory / (std::string(name) + ".cs");
+        const auto destination = directory / (std::string(name) + ".cs");
         if (m_AssetDatabase->Find(destination))
-            throw std::runtime_error("A script with that name already exists in " +
-                                     destinationDirectory.generic_string() + ".");
+            throw std::runtime_error("A script with that name already exists in " + directory.generic_string() + ".");
 
-        const std::string source = "using Keire;\n\nnamespace " + rootNamespace + ";\n\n[StableComponentId(\"" +
-                                   Keire::AssetId::Generate().ToString() + "\")]\npublic sealed class " +
-                                   std::string(name) +
+        const std::string source = "using Keire;\n\nnamespace " + placement.RootNamespace +
+                                   ";\n\n[StableComponentId(\"" + Keire::AssetId::Generate().ToString() +
+                                   "\")]\npublic sealed class " + std::string(name) +
                                    " : Behaviour\n{\n    protected override void Start()\n    {\n    }\n\n"
                                    "    protected override void Update()\n    {\n    }\n}\n";
         m_AssetOperations->QueueCreateAsset(
             destination, TextBytes(source), {},
-            {.FollowUp = KeireEditor::AssetOperationFollowUp::OpenExternal, .UndoName = "Create C# Script"});
+            {.FollowUp = KeireEditor::AssetOperationFollowUp::OpenExternal,
+             .UndoName = "Create C# Script",
+             .ManagedAssembly = placement.SourceRootToAdd.empty() ? Keire::AssetId{} : placement.Assembly,
+             .ManagedSourceRoot = placement.SourceRootToAdd});
         m_AssetStatus = "Creating " + destination.generic_string() + " in the isolated asset worker.";
         return true;
     }

@@ -1,6 +1,7 @@
 #include "Keire/UiWorkspace.h"
 
 #include "KeireInternal/FileSystem.h"
+#include "KeireInternal/UiPanelRegistry.h"
 #include "KeireInternal/WindowInternal.h"
 
 #include "Keire/PlatformDirectories.h"
@@ -44,26 +45,6 @@ namespace Keire
             const auto* first = reinterpret_cast<const char8_t*>(value);
             return std::filesystem::path(std::u8string(first, first + std::char_traits<char>::length(value)));
         }
-
-        struct PanelRecord
-        {
-            std::string Id;
-            std::string Title;
-            std::string SubmittedName;
-            bool Visible = true;
-            bool DefaultVisible = true;
-            bool FocusRequested = false;
-            bool Locked = false;
-        };
-
-        struct PanelRegistry
-        {
-            std::unordered_map<std::string, PanelRecord> Panels;
-            std::unordered_map<std::string, bool> Visibility;
-            bool VisibilityDirty = false;
-            bool Alive = true;
-            std::thread::id OwnerThread = std::this_thread::get_id();
-        };
 
         struct LayoutRecord
         {
@@ -439,174 +420,12 @@ namespace Keire
         m_Impl->Docks.push_back({std::string(panelId), region.m_Value});
     }
 
-    class UiPanelRegistration::Impl final
-    {
-      public:
-        Impl(std::weak_ptr<PanelRegistry> registry, std::string id) : Registry(std::move(registry)), Id(std::move(id))
-        {
-        }
-
-        std::weak_ptr<PanelRegistry> Registry;
-        std::string Id;
-    };
-
-    UiPanelRegistration::UiPanelRegistration() noexcept = default;
-    UiPanelRegistration::UiPanelRegistration(std::unique_ptr<Impl> implementation) noexcept
-        : m_Impl(std::move(implementation))
-    {
-    }
-    UiPanelRegistration::UiPanelRegistration(UiPanelRegistration&& other) noexcept = default;
-    UiPanelRegistration& UiPanelRegistration::operator=(UiPanelRegistration&& other) noexcept
-    {
-        if (this != &other)
-        {
-            if (m_Impl)
-            {
-                if (const auto registry = m_Impl->Registry.lock(); registry && registry->Alive)
-                    registry->Panels.erase(m_Impl->Id);
-            }
-            m_Impl = std::move(other.m_Impl);
-        }
-        return *this;
-    }
-    UiPanelRegistration::~UiPanelRegistration()
-    {
-        if (!m_Impl)
-            return;
-        if (const auto registry = m_Impl->Registry.lock(); registry && registry->Alive)
-            registry->Panels.erase(m_Impl->Id);
-    }
-
-    UiPanelRegistration::operator bool() const noexcept
-    {
-        if (!m_Impl)
-            return false;
-        const auto registry = m_Impl->Registry.lock();
-        return registry && registry->Alive && registry->Panels.contains(m_Impl->Id);
-    }
-
-    std::string_view UiPanelRegistration::Id() const noexcept { return m_Impl ? m_Impl->Id : std::string_view{}; }
-
-    std::string_view UiPanelRegistration::Title() const noexcept
-    {
-        if (!m_Impl)
-            return {};
-        if (const auto registry = m_Impl->Registry.lock();
-            registry && registry->Alive && registry->Panels.contains(m_Impl->Id))
-            return registry->Panels.at(m_Impl->Id).Title;
-        return {};
-    }
-
-    bool UiPanelRegistration::Visible() const noexcept
-    {
-        if (!m_Impl)
-            return false;
-        if (const auto registry = m_Impl->Registry.lock();
-            registry && registry->Alive && registry->Panels.contains(m_Impl->Id))
-            return registry->Panels.at(m_Impl->Id).Visible;
-        return false;
-    }
-
-    bool UiPanelRegistration::Locked() const noexcept
-    {
-        if (!m_Impl)
-            return false;
-        if (const auto registry = m_Impl->Registry.lock();
-            registry && registry->Alive && registry->Panels.contains(m_Impl->Id))
-            return registry->Panels.at(m_Impl->Id).Locked;
-        return false;
-    }
-
-    void UiPanelRegistration::SetVisible(const bool visible)
-    {
-        if (!m_Impl)
-            throw std::logic_error("The UI panel registration is empty.");
-        const auto registry = m_Impl->Registry.lock();
-        if (!registry || !registry->Alive || !registry->Panels.contains(m_Impl->Id))
-            throw std::logic_error("The UI panel registration is no longer active.");
-        if (std::this_thread::get_id() != registry->OwnerThread)
-            throw std::logic_error("UiPanelRegistration::SetVisible must run on the UI owner thread.");
-        auto& panel = registry->Panels.at(m_Impl->Id);
-        if (panel.Visible != visible)
-        {
-            panel.Visible = visible;
-            registry->Visibility[panel.Id] = visible;
-            registry->VisibilityDirty = true;
-        }
-    }
-
-    void UiPanelRegistration::SetLocked(const bool locked)
-    {
-        if (!m_Impl)
-            throw std::logic_error("The UI panel registration is empty.");
-        const auto registry = m_Impl->Registry.lock();
-        if (!registry || !registry->Alive || !registry->Panels.contains(m_Impl->Id))
-            throw std::logic_error("The UI panel registration is no longer active.");
-        if (std::this_thread::get_id() != registry->OwnerThread)
-            throw std::logic_error("UiPanelRegistration::SetLocked must run on the UI owner thread.");
-        registry->Panels.at(m_Impl->Id).Locked = locked;
-    }
-
-    void UiPanelRegistration::RequestFocus()
-    {
-        if (!m_Impl)
-            throw std::logic_error("The UI panel registration is empty.");
-        const auto registry = m_Impl->Registry.lock();
-        if (!registry || !registry->Alive || !registry->Panels.contains(m_Impl->Id))
-            throw std::logic_error("The UI panel registration is no longer active.");
-        if (std::this_thread::get_id() != registry->OwnerThread)
-            throw std::logic_error("UiPanelRegistration::RequestFocus must run on the UI owner thread.");
-        auto& panel = registry->Panels.at(m_Impl->Id);
-        panel.Visible = true;
-        panel.FocusRequested = true;
-        registry->Visibility[panel.Id] = true;
-        registry->VisibilityDirty = true;
-    }
-
-    const std::string& UiPanelRegistration::SubmittedName() const
-    {
-        const auto registry = m_Impl ? m_Impl->Registry.lock() : nullptr;
-        if (!registry || !registry->Alive || !registry->Panels.contains(m_Impl->Id))
-            throw std::logic_error("The UI panel registration is no longer active.");
-        return registry->Panels.at(m_Impl->Id).SubmittedName;
-    }
-
-    bool* UiPanelRegistration::VisibilityAddress()
-    {
-        const auto registry = m_Impl ? m_Impl->Registry.lock() : nullptr;
-        if (!registry || !registry->Alive || !registry->Panels.contains(m_Impl->Id))
-            throw std::logic_error("The UI panel registration is no longer active.");
-        return &registry->Panels.at(m_Impl->Id).Visible;
-    }
-
-    bool UiPanelRegistration::ConsumeFocusRequest()
-    {
-        const auto registry = m_Impl ? m_Impl->Registry.lock() : nullptr;
-        if (!registry || !registry->Alive || !registry->Panels.contains(m_Impl->Id))
-            return false;
-        auto& panel = registry->Panels.at(m_Impl->Id);
-        return std::exchange(panel.FocusRequested, false);
-    }
-
-    void UiPanelRegistration::NotifyVisibilityChanged(const bool previous)
-    {
-        const auto registry = m_Impl ? m_Impl->Registry.lock() : nullptr;
-        if (!registry || !registry->Alive || !registry->Panels.contains(m_Impl->Id))
-            return;
-        const auto& panel = registry->Panels.at(m_Impl->Id);
-        if (panel.Visible != previous)
-        {
-            registry->Visibility[panel.Id] = panel.Visible;
-            registry->VisibilityDirty = true;
-        }
-    }
-
     class UiWorkspace::Impl final
     {
       public:
         Impl(UiWorkspaceSpecification value, WindowSystem& windows, Window& window, const bool nativeDialogsEnabled)
             : Specification(std::move(value)), OwnerThread(std::this_thread::get_id()),
-              Panels(std::make_shared<PanelRegistry>()), Mailbox(std::make_shared<DialogMailbox>()),
+              Panels(std::make_shared<Detail::UiPanelRegistry>()), Mailbox(std::make_shared<DialogMailbox>()),
               NativeWindow(nativeDialogsEnabled ? WindowSystemInternalAccess::NativeWindow(windows, window.Id())
                                                 : nullptr)
         {
@@ -798,7 +617,7 @@ namespace Keire
         }
 
         [[nodiscard]] static std::pair<std::string, std::string> ParseLayoutDocument(const Json& document,
-                                                                                     PanelRegistry& panels)
+                                                                                     Detail::UiPanelRegistry& panels)
         {
             RequireKeys(document, {"schemaVersion", "kind", "name", "backendVersion", "docking", "panels"},
                         "layout document");
@@ -823,7 +642,7 @@ namespace Keire
             return {std::move(name), docking};
         }
 
-        void ApplyVisibility(const PanelRegistry& source)
+        void ApplyVisibility(const Detail::UiPanelRegistry& source)
         {
             for (const auto& [id, visible] : source.Visibility)
             {
@@ -936,7 +755,7 @@ namespace Keire
             {
                 try
                 {
-                    PanelRegistry parsed;
+                    Detail::UiPanelRegistry parsed;
                     auto [unused, docking] = ParseLayoutDocument(ParseDocument(session), parsed);
                     (void)unused;
                     ApplyVisibility(parsed);
@@ -981,7 +800,7 @@ namespace Keire
             }
             else
             {
-                PanelRegistry parsed;
+                Detail::UiPanelRegistry parsed;
                 auto [unused, docking] = ParseLayoutDocument(ParseDocument(LayoutPath(id)), parsed);
                 (void)unused;
                 ActiveLayoutId = id;
@@ -1176,7 +995,7 @@ namespace Keire
         void ImportLayout(const std::filesystem::path& path)
         {
             const auto document = ParseDocument(path);
-            PanelRegistry parsed;
+            Detail::UiPanelRegistry parsed;
             auto [name, docking] = ParseLayoutDocument(document, parsed);
             ValidateUniqueName(name, false);
             const UiLayoutId id(NextLayoutId++);
@@ -1225,7 +1044,7 @@ namespace Keire
         UiWorkspaceSpecification Specification;
         std::thread::id OwnerThread;
         std::filesystem::path Root;
-        std::shared_ptr<PanelRegistry> Panels;
+        std::shared_ptr<Detail::UiPanelRegistry> Panels;
         std::shared_ptr<DialogMailbox> Mailbox;
         std::vector<LayoutRecord> LayoutRecords;
         std::vector<ThemeRecord> ThemeRecords;
@@ -1296,8 +1115,9 @@ namespace Keire
                                  : specification.DefaultVisible;
         m_Impl->Panels->Visibility[specification.Id] = visible;
         const auto id = specification.Id;
-        m_Impl->Panels->Panels.emplace(id, PanelRecord{id, specification.Title, specification.Title + "###" + id,
-                                                       visible, specification.DefaultVisible});
+        m_Impl->Panels->Panels.emplace(id,
+                                       Detail::UiPanelRecord{id, specification.Title, specification.Title + "###" + id,
+                                                             visible, specification.DefaultVisible});
         return UiPanelRegistration(std::make_unique<UiPanelRegistration::Impl>(m_Impl->Panels, id));
     }
 

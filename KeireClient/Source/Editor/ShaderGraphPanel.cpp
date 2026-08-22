@@ -1315,6 +1315,9 @@ namespace KeireEditor
                         m_SelectedNode = node->Id;
                         m_SelectedConnection.reset();
                     }
+                    if (DrawClipboardContextMenu(ui, model.NodeIdentities, true,
+                                                 node->Kind != Keire::ShaderGraphNodeKind::Master))
+                        return;
                     if (auto addMenu = ui.BeginMenu("Add Compatible Node"); addMenu)
                     {
                         if (DrawNodeCreationMenu(ui, m_GraphContext->GraphPosition, pin ? nullptr : node, pin))
@@ -1359,6 +1362,12 @@ namespace KeireEditor
                         ui.Separator();
                         if (ui.MenuItem("Create Comment from Selection"))
                             CreateComment(ui, document, model, m_GraphContext->GraphPosition, true);
+                        const bool extractable = CanExtractSelection(document.Definition());
+                        if (ui.MenuItem("Extract Selection to Shader Function...", false, extractable))
+                        {
+                            m_ExtractionName = "ExtractedShaderFunction";
+                            ui.OpenPopup("ExtractShaderGraphFunction");
+                        }
                         if (ui.MenuItem("Delete Node", false, node->Kind != Keire::ShaderGraphNodeKind::Master))
                             try
                             {
@@ -1404,6 +1413,8 @@ namespace KeireEditor
                 }
             }
         }
+        if (DrawFunctionExtractionPopup(ui))
+            return;
         bool contextMenuOpen = false;
         if (auto popup = ui.BeginPopup("ShaderGraphNodePalette"); popup)
         {
@@ -1415,6 +1426,8 @@ namespace KeireEditor
                 return;
             }
             ui.Separator();
+            if (DrawClipboardContextMenu(ui, model.NodeIdentities, false))
+                return;
             if (ui.MenuItem("Create Empty Comment"))
                 CreateComment(ui, document, model, *m_NodeCreationPosition, false);
             if (ui.MenuItem("Frame All Nodes"))

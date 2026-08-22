@@ -121,6 +121,16 @@ namespace Keire::Detail
     namespace
     {
 #if defined(_WIN32)
+        [[nodiscard]] std::wstring ExtendedLengthPath(const std::filesystem::path& path)
+        {
+            auto value = std::filesystem::absolute(path).lexically_normal().native();
+            if (value.starts_with(LR"(\\?\)"))
+                return value;
+            if (value.starts_with(LR"(\\)"))
+                return LR"(\\?\UNC\)" + value.substr(2);
+            return LR"(\\?\)" + value;
+        }
+
         [[nodiscard]] bool FilesMatch(const std::filesystem::path& first, const std::filesystem::path& second)
         {
             std::error_code error;
@@ -130,8 +140,8 @@ namespace Keire::Detail
             const auto secondSize = std::filesystem::file_size(second, error);
             if (error || firstSize != secondSize)
                 return false;
-            std::ifstream left(first, std::ios::binary);
-            std::ifstream right(second, std::ios::binary);
+            std::ifstream left(std::filesystem::path(ExtendedLengthPath(first)), std::ios::binary);
+            std::ifstream right(std::filesystem::path(ExtendedLengthPath(second)), std::ios::binary);
             if (!left || !right)
                 return false;
             std::array<char, std::size_t{64} * 1024U> leftBytes{};
@@ -151,9 +161,10 @@ namespace Keire::Detail
         void FlushFileToStorage(const std::filesystem::path& path)
         {
 #if defined(_WIN32)
-            const auto handle = CreateFileW(path.wstring().c_str(), GENERIC_WRITE,
-                                            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
-                                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            const auto nativePath = ExtendedLengthPath(path);
+            const auto handle =
+                CreateFileW(nativePath.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
             if (handle == INVALID_HANDLE_VALUE)
                 throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
                                         "Cannot open temporary file for durable publication");
@@ -178,16 +189,6 @@ namespace Keire::Detail
         }
 
 #if defined(_WIN32)
-        [[nodiscard]] std::wstring ExtendedLengthPath(const std::filesystem::path& path)
-        {
-            auto value = std::filesystem::absolute(path).lexically_normal().native();
-            if (value.starts_with(LR"(\\?\)"))
-                return value;
-            if (value.starts_with(LR"(\\)"))
-                return LR"(\\?\UNC\)" + value.substr(2);
-            return LR"(\\?\)" + value;
-        }
-
         void RenameNativePath(const std::filesystem::path& source, const std::filesystem::path& destination,
                               std::error_code& error)
         {
@@ -336,8 +337,8 @@ namespace Keire::Detail
         FlushFileToStorage(temporary);
 
 #if defined(_WIN32)
-        const auto target = destination.wstring();
-        const auto source = temporary.wstring();
+        const auto target = ExtendedLengthPath(destination);
+        const auto source = ExtendedLengthPath(temporary);
         DWORD lastError = ERROR_SUCCESS;
         constexpr std::size_t maximumAttempts = 6;
         for (std::size_t attempt = 0; attempt < maximumAttempts; ++attempt)
@@ -399,7 +400,12 @@ namespace Keire::Detail
         temporary += ".tmp." + std::to_string(uniqueValue);
         try
         {
+#if defined(_WIN32)
+            std::ofstream output(std::filesystem::path(ExtendedLengthPath(temporary)),
+                                 std::ios::binary | std::ios::trunc);
+#else
             std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+#endif
             if (!output)
                 throw std::runtime_error("Cannot create temporary file: " + PathToUtf8(temporary));
             output.write(reinterpret_cast<const char*>(contents.data()), static_cast<std::streamsize>(contents.size()));

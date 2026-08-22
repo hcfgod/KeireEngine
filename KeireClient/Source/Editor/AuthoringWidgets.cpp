@@ -20,28 +20,23 @@ namespace
     constexpr float BlockInset = 8.0F;
     constexpr float ConnectionHitRadius = 7.0F;
     constexpr int ConnectionSegmentCount = 28;
-
     [[nodiscard]] Keire::UiPosition Add(const Keire::UiPosition left, const Keire::UiPosition right) noexcept
     {
         return {left.X + right.X, left.Y + right.Y};
     }
-
     [[nodiscard]] Keire::UiPosition Subtract(const Keire::UiPosition left, const Keire::UiPosition right) noexcept
     {
         return {left.X - right.X, left.Y - right.Y};
     }
-
     [[nodiscard]] Keire::UiPosition Scale(const Keire::UiPosition value, const float scale) noexcept
     {
         return {value.X * scale, value.Y * scale};
     }
-
     [[nodiscard]] Keire::UiColor ScaleColor(const Keire::UiColor color, const float scale, const float alpha) noexcept
     {
         return {std::clamp(color.Red * scale, 0.0F, 1.0F), std::clamp(color.Green * scale, 0.0F, 1.0F),
                 std::clamp(color.Blue * scale, 0.0F, 1.0F), alpha};
     }
-
     [[nodiscard]] Keire::UiPosition BezierPoint(const Keire::UiPosition start, const Keire::UiPosition first,
                                                 const Keire::UiPosition second, const Keire::UiPosition end,
                                                 const float amount) noexcept
@@ -52,14 +47,12 @@ namespace
                 inverse * inverse * inverse * start.Y + 3.0F * inverse * inverse * amount * first.Y +
                     3.0F * inverse * amount * amount * second.Y + amount * amount * amount * end.Y};
     }
-
     [[nodiscard]] float SquaredDistance(const Keire::UiPosition first, const Keire::UiPosition second) noexcept
     {
         const float x = first.X - second.X;
         const float y = first.Y - second.Y;
         return x * x + y * y;
     }
-
     [[nodiscard]] float SquaredDistanceToSegment(const Keire::UiPosition point, const Keire::UiPosition first,
                                                  const Keire::UiPosition second) noexcept
     {
@@ -72,12 +65,10 @@ namespace
             std::clamp(((point.X - first.X) * segmentX + (point.Y - first.Y) * segmentY) / lengthSquared, 0.0F, 1.0F);
         return SquaredDistance(point, {first.X + segmentX * amount, first.Y + segmentY * amount});
     }
-
     [[nodiscard]] float HeaderHeight(const KeireEditor::NodeGraphNode& node) noexcept
     {
         return node.Subtitle.empty() ? 34.0F : 48.0F;
     }
-
     [[nodiscard]] float PinAreaHeight(const std::span<const KeireEditor::NodeGraphPin> pins) noexcept
     {
         const auto inputCount = static_cast<std::size_t>(
@@ -369,15 +360,17 @@ namespace KeireEditor
         if (m_ResizingComment)
         {
             const auto comment = std::ranges::find(options.Comments, *m_ResizingComment, &NodeGraphComment::Id);
-            if (comment == options.Comments.end())
+            if (comment == options.Comments.end() || comment->Collapsed)
                 m_ResizingComment.reset();
-            else if (options.Editable && pointer.LeftDown)
+            else if (options.Editable && (pointer.LeftDown || pointer.LeftReleased))
             {
-                m_CommentResize.X = std::max(120.0F, m_CommentResize.X + pointer.Delta.X / m_Zoom);
-                m_CommentResize.Y = std::max(64.0F, m_CommentResize.Y + pointer.Delta.Y / m_Zoom);
+                m_CommentResize.X =
+                    std::max(120.0F, result.PointerGraphPosition.X - comment->Position.X + m_CommentResizeGrabOffset.X);
+                m_CommentResize.Y =
+                    std::max(64.0F, result.PointerGraphPosition.Y - comment->Position.Y + m_CommentResizeGrabOffset.Y);
                 comment->Size = m_CommentResize;
                 result.ResizedComment = comment->Id;
-                result.Changed = true;
+                result.Changed = pointer.Delta.X != 0.0F || pointer.Delta.Y != 0.0F;
             }
         }
         std::unordered_map<StableNodeId, NodeGraphComment*> collapsedOwners;
@@ -429,9 +422,7 @@ namespace KeireEditor
                 selected != options.Comments.end())
             {
                 const auto minimum = ToScreen(selected->Position, canvas);
-                const float collapsedHeight =
-                    34.0F + static_cast<float>(std::max(selected->SummaryInputs, selected->SummaryOutputs)) * 20.0F;
-                const float height = (selected->Collapsed ? collapsedHeight : selected->Size.Y) * m_Zoom;
+                const float height = GraphCommentDisplayHeight(*selected) * m_Zoom;
                 ui.DrawRectangle({minimum, {minimum.X + selected->Size.X * m_Zoom, minimum.Y + height}},
                                  {0.3F, 0.78F, 1.0F, 1.0F}, 2.5F, 6.0F);
             }
@@ -916,10 +907,17 @@ namespace KeireEditor
                 const auto comment = std::ranges::find(options.Comments, *hoveredComment, &NodeGraphComment::Id);
                 if (options.Editable && comment != options.Comments.end())
                 {
-                    if (commentLayer.ResizeHandle)
+                    if (commentLayer.CollapseToggle)
+                    {
+                        result.ToggleCommentCollapseRequested = hoveredComment;
+                    }
+                    else if (commentLayer.ResizeHandle)
                     {
                         m_ResizingComment = hoveredComment;
                         m_CommentResize = comment->Size;
+                        m_CommentResizeGrabOffset = {
+                            comment->Position.X + comment->Size.X - result.PointerGraphPosition.X,
+                            comment->Position.Y + comment->Size.Y - result.PointerGraphPosition.Y};
                     }
                     else if (commentLayer.Header)
                     {
@@ -1226,7 +1224,7 @@ namespace KeireEditor
 
             if (!connection.Connection->Label.empty() && detail.ConnectionLabels && !connection.Segments.empty())
             {
-                constexpr float labelFontSize = 11.0F;
+                const float labelFontSize = std::clamp(11.0F * m_Zoom, 8.0F, 11.0F);
                 const auto& labelSegment = connection.Segments[(connection.Segments.size() - 1) / 2];
                 const auto labelPosition = BezierPoint(labelSegment.Start, labelSegment.FirstControl,
                                                        labelSegment.SecondControl, labelSegment.End, 0.5F);
@@ -1256,7 +1254,7 @@ namespace KeireEditor
         }
         for (const auto& [position, color] : summaryPins)
         {
-            const float radius = std::clamp(6.0F * m_Zoom, 5.0F, 8.0F);
+            const float radius = std::clamp(6.0F * m_Zoom, 2.75F, 8.0F);
             ui.DrawFilledCircle(position, radius + 2.0F, {0.008F, 0.012F, 0.02F, 0.95F});
             ui.DrawFilledCircle(position, radius, color);
             ui.DrawCircle(position, radius, ScaleColor(color, 1.25F, 1.0F), 1.5F);
@@ -1323,11 +1321,12 @@ namespace KeireEditor
 
             const float labelX = rectangle.Minimum.X + std::clamp(13.0F * m_Zoom, 6.0F, 13.0F);
             const float titleY = rectangle.Minimum.Y + std::clamp(8.0F * m_Zoom, 3.0F, 8.0F);
-            const float titleFontSize = detail.NodeSubtitle ? 0.0F : 11.0F;
+            const float titleFontSize = std::clamp(13.0F * m_Zoom, 8.0F, 13.0F);
             ui.DrawOverlayText({labelX, titleY}, {0.97F, 0.98F, 1.0F, 1.0F}, node.Label, titleFontSize, rectangle);
             if (!node.Subtitle.empty() && detail.NodeSubtitle)
-                ui.DrawOverlayText({labelX, rectangle.Minimum.Y + 27.0F}, {0.68F, 0.73F, 0.82F, 1.0F}, node.Subtitle,
-                                   11.0F, rectangle);
+                ui.DrawOverlayText({labelX, rectangle.Minimum.Y + std::clamp(25.0F * m_Zoom, 15.0F, 25.0F)},
+                                   {0.68F, 0.73F, 0.82F, 1.0F}, node.Subtitle, std::clamp(10.0F * m_Zoom, 8.0F, 10.0F),
+                                   rectangle);
 
             for (const auto& block : drawnBlocks)
             {
@@ -1386,7 +1385,7 @@ namespace KeireEditor
 
             if (node.Pins.empty() && node.Blocks.empty())
             {
-                const float portRadius = std::clamp(4.5F * m_Zoom, 2.5F, 5.0F);
+                const float portRadius = std::clamp(4.5F * m_Zoom, 2.0F, 5.0F);
                 const float portY = rectangle.Minimum.Y + rectangle.Size().Height * 0.5F;
                 ui.DrawFilledCircle({rectangle.Minimum.X, portY}, portRadius, {0.32F, 0.6F, 0.9F, 1.0F});
                 ui.DrawCircle({rectangle.Minimum.X, portY}, portRadius, {0.72F, 0.85F, 1.0F, 1.0F});
@@ -1422,7 +1421,7 @@ namespace KeireEditor
                 ring = {0.92F, 0.95F, 1.0F, 1.0F};
             }
 
-            const float radius = std::clamp(5.0F * m_Zoom, 4.0F, 6.0F);
+            const float radius = std::clamp(5.0F * m_Zoom, 2.5F, 6.0F);
             if (hovered || linkOrigin)
                 ui.DrawFilledCircle(pin.Position, radius + 3.0F, {ring.Red, ring.Green, ring.Blue, 0.18F});
             ui.DrawFilledCircle(pin.Position, radius, ScaleColor(pin.Pin->Color, hovered ? 1.2F : 0.88F, 1.0F));

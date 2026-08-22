@@ -17,8 +17,7 @@
 
 void EditorWorkspaceLayer::OnDetach() noexcept
 {
-    if (m_SceneDocument && m_SceneDocument->Asset())
-        PersistEditorSessionScene(m_SceneDocument->Asset());
+    PersistEditorSessionPreferences();
     ShutdownPlayerBuild();
     m_PackageManagerPanel->Shutdown();
     if (m_AssetOperations)
@@ -124,6 +123,7 @@ void EditorWorkspaceLayer::OnDetach() noexcept
         }
     }
     m_AssetPackageOutput.clear();
+    m_ManagedIdeWorkspaceOpened = false;
     m_AssetBrowserPanel->Close();
     m_AssetDatabase.Reset();
 }

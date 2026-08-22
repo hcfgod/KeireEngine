@@ -8,6 +8,7 @@ namespace KeireEditor
     {
         std::optional<StableNodeId> Hovered;
         bool Header = false;
+        bool CollapseToggle = false;
         bool ResizeHandle = false;
     };
 
@@ -78,6 +79,8 @@ namespace KeireEditor
                            std::span<const NodeGraphNode> nodes, const NodeGraphCommentModel& comments,
                            const NodeGraphCanvasResult& canvas, GraphCommentEditorState& editor);
     void ApplyGraphCommentCanvasEdit(Keire::GraphAuthoringMetadata& metadata, const GraphCommentCanvasEdit& edit);
+
+    [[nodiscard]] float GraphCommentDisplayHeight(const NodeGraphComment& comment) noexcept;
 
     [[nodiscard]] NodeGraphCommentLayerResult DrawNodeGraphComments(Keire::UiFrame& ui,
                                                                     std::span<const NodeGraphComment> comments,

@@ -48,6 +48,11 @@ function Invoke-RepositoryBatchSearch([bool]$FixedStrings, [string[]]$Patterns) 
 
 $project = Get-ProjectConfig
 $python = Get-PythonInvocation
+$storePython = Get-Command python -ErrorAction SilentlyContinue
+$pythonLauncher = Get-Command py -ErrorAction SilentlyContinue
+if ($storePython -and $pythonLauncher -and $storePython.Source -like "*\Microsoft\WindowsApps\python.exe") {
+    Assert-Equal ([IO.Path]::GetFileName($python.Executable)) "py.exe" "Microsoft Store Python alias rejection"
+}
 if ($runFast) {
 & $python.Executable @($python.PrefixArguments) (Join-Path $PSScriptRoot "check-repository-layout.py")
 if ($LASTEXITCODE -ne 0) { throw "Repository layout checks failed." }

@@ -15,7 +15,17 @@ import uuid
 from dataclasses import dataclass
 
 
-VERSION = "0.3.1"
+def project_version(repository: pathlib.Path) -> str:
+    configuration = repository / "Config/Project.conf"
+    for line in configuration.read_text(encoding="utf-8").splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key.strip() == "PROJECT_VERSION" and value.strip():
+            return value.strip()
+    raise RuntimeError("Config/Project.conf does not define PROJECT_VERSION.")
+
+
+REPOSITORY = pathlib.Path(__file__).resolve().parents[2]
+VERSION = project_version(REPOSITORY)
 PUBLISHER_ID = "keire-engine"
 
 

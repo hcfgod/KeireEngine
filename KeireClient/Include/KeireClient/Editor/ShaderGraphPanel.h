@@ -39,6 +39,8 @@ namespace KeireEditor
         virtual void RevealShaderGraphAsset(Keire::AssetId asset) = 0;
         virtual void SetGraphClipboard(std::string_view text) = 0;
         [[nodiscard]] virtual std::string GraphClipboard() const = 0;
+        [[nodiscard]] virtual bool ExtractShaderGraphSelectionToFunction(std::span<const Keire::AssetId> selection,
+                                                                         std::string_view name) = 0;
         virtual void ReportShaderGraphError(std::string message) noexcept = 0;
     };
 
@@ -86,6 +88,9 @@ namespace KeireEditor
                                 std::span<const std::pair<StableNodeId, Keire::AssetId>> identities);
         [[nodiscard]] bool HandleClipboard(const NodeGraphCanvasResult& result,
                                            std::span<const std::pair<StableNodeId, Keire::AssetId>> identities);
+        [[nodiscard]] bool DrawClipboardContextMenu(Keire::UiFrame& ui,
+                                                    std::span<const std::pair<StableNodeId, Keire::AssetId>> identities,
+                                                    bool includeCopy, bool copyEnabled = true);
         [[nodiscard]] bool
         DrawArrangeMenu(Keire::UiFrame& ui, std::span<const NodeGraphNode> nodes,
                         std::span<const NodeGraphConnection> connections,
@@ -103,6 +108,8 @@ namespace KeireEditor
                                    std::optional<Keire::Vector2> graphPosition = std::nullopt);
         [[nodiscard]] bool AddFunctionNode(Keire::AssetId asset, std::string_view name,
                                            std::optional<Keire::Vector2> graphPosition);
+        [[nodiscard]] bool CanExtractSelection(const Keire::ShaderGraphDefinition& definition) const;
+        [[nodiscard]] bool DrawFunctionExtractionPopup(Keire::UiFrame& ui);
         void Report(std::string message) noexcept;
 
         IShaderGraphPanelController& m_Controller;
@@ -135,6 +142,7 @@ namespace KeireEditor
         bool m_InspectorHasStep = false;
         bool m_InspectorCommentPinned = false;
         std::string m_NodeSearch;
+        std::string m_ExtractionName;
         NodeMenuSelection m_NodeMenuSelection;
         GraphBookmarkSet m_Bookmarks;
         std::optional<Keire::Vector2> m_NodeCreationPosition;

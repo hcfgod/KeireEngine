@@ -318,8 +318,20 @@ documentation authorities.
 
 ## Documentation
 
-The [documentation library](Docs/README.md) contains 63 maintained guides grouped around real tasks:
+The [documentation library](Docs/README.md) contains 81 maintained guides grouped around real tasks. Project authors
+should begin with the [Kéire 0.4.0 User Manual](Docs/Manual/README.md):
 
+- [Projects and the Editor](Docs/Manual/ProjectsAndEditor.md),
+  [C# Scripting Fundamentals](Docs/Manual/ScriptingFundamentals.md), and
+  [C# Scripting Recipes](Docs/Manual/ScriptingRecipes.md)
+- [Shader Graph](Docs/Manual/ShaderGraph.md), [Material Graph](Docs/Manual/MaterialGraph.md),
+  [VFX Graph](Docs/Manual/VfxGraph.md), and [Graph Editing](Docs/Manual/GraphEditing.md)
+- [Visual Workflow Maps](Docs/Manual/VisualWorkflowMaps.md),
+  [Shader Graph Examples](Docs/Manual/ShaderGraphExamples.md),
+  [Material Graph Examples](Docs/Manual/MaterialGraphExamples.md), and
+  [VFX Graph Examples](Docs/Manual/VfxGraphExamples.md)
+- [Debugging and Profiling](Docs/Manual/DebuggingAndProfiling.md) and
+  [Player Builds and Packages](Docs/Manual/PlayerBuildsAndPackages.md)
 - [Getting Started](Docs/GettingStarted.md) and [Project Hub](Docs/ProjectHub.md)
 - [Architecture](Docs/Architecture.md), [Runtime Lifecycle](Docs/RuntimeLifecycle.md), and
   [ECS and Components](Docs/ECSAndComponents.md)

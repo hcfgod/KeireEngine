@@ -121,7 +121,7 @@ namespace Keire
         result.Properties = {
             {"shape", "Shape", "Collider", ComponentPropertyKind::Integer, false, 0.0, 4.0, 1.0},
             {"center", "Center", "Collider", ComponentPropertyKind::Vector3},
-            {"halfExtent", "Half Extent", "Collider", ComponentPropertyKind::Vector3},
+            {"halfExtent", "Half Extents", "Collider", ComponentPropertyKind::Vector3},
             {"radius", "Radius", "Collider", ComponentPropertyKind::Scalar, false, 0.001, 100'000.0, 0.05},
             {"height", "Height", "Collider", ComponentPropertyKind::Scalar, false, 0.001, 100'000.0, 0.05},
             {"collisionMesh",

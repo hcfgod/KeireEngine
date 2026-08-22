@@ -1,9 +1,24 @@
 #include "KeireClient/Editor/ShaderGraphPanel.h"
 
+#include <algorithm>
 #include <stdexcept>
 
 namespace KeireEditor
 {
+    bool ShaderGraphPanel::CanExtractSelection(const Keire::ShaderGraphDefinition& definition) const
+    {
+        return !m_SelectedNodes.empty() &&
+               std::ranges::all_of(m_SelectedNodes,
+                                   [&](const Keire::AssetId selected)
+                                   {
+                                       const auto node =
+                                           std::ranges::find(definition.Nodes, selected, &Keire::ShaderGraphNode::Id);
+                                       return node != definition.Nodes.end() &&
+                                              node->Kind != Keire::ShaderGraphNodeKind::Master &&
+                                              node->Kind != Keire::ShaderGraphNodeKind::Parameter;
+                                   });
+    }
+
     bool ShaderGraphPanel::AddFunctionNode(const Keire::AssetId asset, const std::string_view name,
                                            const std::optional<Keire::Vector2> graphPosition)
     {
@@ -27,5 +42,26 @@ namespace KeireEditor
             Report(error.what());
             return false;
         }
+    }
+
+    bool ShaderGraphPanel::DrawFunctionExtractionPopup(Keire::UiFrame& ui)
+    {
+        auto popup = ui.BeginPopupModal("ExtractShaderGraphFunction");
+        if (!popup)
+            return false;
+        ui.Text("Create a reusable Shader Function beside the current graph and replace the selection with its call.");
+        (void)ui.InputText("Function Name", m_ExtractionName);
+        bool extracted = false;
+        if (auto disabled = ui.BeginDisabled(m_ExtractionName.empty()); disabled)
+            if (ui.Button("Extract"))
+            {
+                extracted = m_Controller.ExtractShaderGraphSelectionToFunction(m_SelectedNodes, m_ExtractionName);
+                if (extracted)
+                    ui.CloseCurrentPopup();
+            }
+        ui.SameLine();
+        if (ui.Button("Cancel"))
+            ui.CloseCurrentPopup();
+        return extracted;
     }
 } // namespace KeireEditor

@@ -1200,6 +1200,9 @@ namespace KeireEditor
                     m_SelectedBlock = {};
                     m_SelectedConnection = {};
                 }
+                if (DrawGraphClipboardContextMenu(ui, nodeIdentities, true,
+                                                  node->Kind != Keire::VfxGraphNodeKind::Context))
+                    return;
                 if (node->Kind == Keire::VfxGraphNodeKind::Context)
                 {
                     if (auto addBlockMenu = ui.BeginMenu("Add Compatible Block"); addBlockMenu)
@@ -1213,25 +1216,8 @@ namespace KeireEditor
                     }
                     ui.Separator();
                 }
-                const bool connected = std::ranges::any_of(
-                    system->Connections, [&](const Keire::VfxGraphConnection& connection)
-                    { return connection.OutputNode == node->Id || connection.InputNode == node->Id; });
-                if (ui.MenuItem("Unlink All Cables", false, connected))
-                {
-                    const auto nodeId = node->Id;
-                    (void)ApplyEdit(
-                        "Unlinked all VFX node cables",
-                        [graph = system->Id, nodeId](Keire::VfxEffectDefinition& candidate)
-                        {
-                            auto graphSystem = std::ranges::find(candidate.Systems, graph, &Keire::VfxGraphSystem::Id);
-                            if (graphSystem == candidate.Systems.end())
-                                throw std::invalid_argument("VFX graph system is unavailable.");
-                            std::erase_if(
-                                graphSystem->Connections, [nodeId](const Keire::VfxGraphConnection& connection)
-                                { return connection.OutputNode == nodeId || connection.InputNode == nodeId; });
-                        });
+                if (DrawGraphNodeUnlinkContextMenu(ui, system->Id, node->Id, system->Connections))
                     return;
-                }
                 if (ui.MenuItem("Create Comment from Selection"))
                     CreateGraphComment(ui, system->Id, nodeIdentities, nodes, node->EditorPosition, true);
                 if (ui.MenuItem("Delete Node", false, node->Kind != Keire::VfxGraphNodeKind::Context))

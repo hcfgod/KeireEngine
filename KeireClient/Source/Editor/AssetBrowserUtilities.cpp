@@ -10,6 +10,7 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <tuple>
 #include <variant>
 
 namespace KeireEditor
@@ -301,6 +302,14 @@ namespace KeireEditor
         return result;
     }
 
+    Keire::AssetId DecodeSingleAssetPayload(const std::span<const std::byte> bytes)
+    {
+        const auto assets = DecodeAssetPayload(bytes);
+        if (assets.size() != 1)
+            throw std::invalid_argument("Asset drag payload must contain exactly one identity.");
+        return assets.front();
+    }
+
     std::string EncodeAssetPayload(const std::span<const Keire::AssetId> assets)
     {
         std::string result;
@@ -310,6 +319,80 @@ namespace KeireEditor
             result.push_back('\n');
         }
         return result;
+    }
+
+    ManagedScriptPlacement
+    ResolveManagedScriptPlacement(const std::span<const ManagedScriptAssemblyCandidate> assemblies,
+                                  const std::filesystem::path& selectedAssetFolder)
+    {
+        const auto normalizedFolder = selectedAssetFolder.lexically_normal();
+        if (selectedAssetFolder.is_absolute() || normalizedFolder == ".." ||
+            std::ranges::any_of(normalizedFolder, [](const auto& part) { return part == ".."; }))
+            throw std::invalid_argument("C# script creation requires a project-relative asset folder.");
+
+        const auto selectedRoot = (std::filesystem::path("Assets") / normalizedFolder).lexically_normal();
+        const ManagedScriptAssemblyCandidate* covering = nullptr;
+        std::size_t coveringLength = 0;
+        const ManagedScriptAssemblyCandidate* descendant = nullptr;
+        std::filesystem::path descendantRoot;
+        const ManagedScriptAssemblyCandidate* runtime = nullptr;
+        for (const auto& candidate : assemblies)
+        {
+            if (!candidate.Asset)
+                throw std::invalid_argument("Managed script placement requires valid assembly identities.");
+            Keire::ManagedAssemblyAsset::Validate(candidate.Definition);
+            if (candidate.Definition.Classification == Keire::ManagedAssemblyClassification::Runtime &&
+                (!runtime || std::tie(candidate.Definition.Name, candidate.Asset) <
+                                 std::tie(runtime->Definition.Name, runtime->Asset)))
+                runtime = &candidate;
+            for (const auto& root : candidate.Definition.SourceRoots)
+            {
+                const auto normalizedRoot = root.lexically_normal();
+                if (SameOrChild(normalizedRoot, selectedRoot))
+                {
+                    const auto length = normalizedRoot.generic_string().size();
+                    if (!covering || length > coveringLength ||
+                        (length == coveringLength && candidate.Asset < covering->Asset))
+                    {
+                        covering = &candidate;
+                        coveringLength = length;
+                    }
+                }
+                else if (SameOrChild(selectedRoot, normalizedRoot) &&
+                         (!descendant || normalizedRoot.generic_string() < descendantRoot.generic_string() ||
+                          (normalizedRoot == descendantRoot && candidate.Asset < descendant->Asset)))
+                {
+                    descendant = &candidate;
+                    descendantRoot = normalizedRoot;
+                }
+            }
+        }
+
+        if (covering)
+            return {covering->Asset, covering->Definition.RootNamespace, {}};
+        const auto* selected = descendant ? descendant : runtime;
+        if (!selected)
+            throw std::runtime_error("Create a runtime .keireasm asset before creating a C# script.");
+        return {selected->Asset, selected->Definition.RootNamespace, selectedRoot};
+    }
+
+    bool ExtendManagedAssemblySourceRoots(Keire::ManagedAssemblyDefinition& assembly,
+                                          const std::filesystem::path& sourceRoot)
+    {
+        const auto normalizedRoot = sourceRoot.lexically_normal();
+        if (sourceRoot.empty() || sourceRoot.is_absolute() || normalizedRoot == "." ||
+            std::ranges::any_of(normalizedRoot, [](const auto& part) { return part == ".."; }))
+            throw std::invalid_argument("Managed assembly source coverage requires a project-relative folder.");
+        if (std::ranges::any_of(assembly.SourceRoots,
+                                [&](const auto& existing) { return SameOrChild(existing, normalizedRoot); }))
+            return false;
+
+        std::erase_if(assembly.SourceRoots,
+                      [&](const auto& existing) { return SameOrChild(normalizedRoot, existing); });
+        assembly.SourceRoots.push_back(normalizedRoot);
+        std::ranges::sort(assembly.SourceRoots);
+        Keire::ManagedAssemblyAsset::Validate(assembly);
+        return true;
     }
 
     std::vector<std::filesystem::path> BuildFolderRangeSelection(const std::span<const std::filesystem::path> order,

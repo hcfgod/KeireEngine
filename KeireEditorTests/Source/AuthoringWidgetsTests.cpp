@@ -446,6 +446,21 @@ TEST_CASE("Graph comments enclose selection with deterministic padding")
     CHECK((request.Size == Keire::Vector2{440.0F, 344.0F}));
 }
 
+TEST_CASE("Collapsed graph comment display bounds are stable and do not overwrite authored size")
+{
+    KeireEditor::NodeGraphComment comment;
+    comment.Size = {480.0F, 260.0F};
+    CHECK(KeireEditor::GraphCommentDisplayHeight(comment) == doctest::Approx(260.0F));
+    comment.Collapsed = true;
+    CHECK(KeireEditor::GraphCommentDisplayHeight(comment) == doctest::Approx(34.0F));
+    comment.SummaryInputs = 2;
+    comment.SummaryOutputs = 4;
+    CHECK(KeireEditor::GraphCommentDisplayHeight(comment) == doctest::Approx(114.0F));
+    CHECK((comment.Size == Keire::Vector2{480.0F, 260.0F}));
+    comment.Collapsed = false;
+    CHECK(KeireEditor::GraphCommentDisplayHeight(comment) == doctest::Approx(260.0F));
+}
+
 TEST_CASE("Graph node annotations map stable identities and preserve pinned presentation")
 {
     const auto nodeId = Keire::AssetId::Generate();
