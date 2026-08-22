@@ -81,6 +81,16 @@ assert.equal(ordered.length, 3);
 assert.equal(ordered[0].version.raw, "2.0.0");
 assert.equal(ordered[1].version.raw, "2.0.0-beta.1");
 
+context.fixtureCandidates = validate(catalog([packageRecord("0.3.2"), packageRecord("0.4.0")]));
+context.fixtureReleaseStatus = { version: "0.4.0" };
+const currentCandidates = vm.runInContext(
+    "currentReleaseCandidates(fixtureCandidates, fixtureReleaseStatus)", context);
+assert.deepEqual(Array.from(currentCandidates, (candidate) => candidate.version.raw), ["0.4.0"]);
+context.fixtureCandidates = validate(catalog([packageRecord("0.3.2")]));
+assert.equal(vm.runInContext(
+    "currentReleaseCandidates(fixtureCandidates, fixtureReleaseStatus).length", context), 0);
+assert.equal(vm.runInContext("currentReleaseCandidates(fixtureCandidates, null).length", context), 0);
+
 const compact = packageRecord("2.1.0", {
     manifest: { sizeBytes: 1024, sha256: "c".repeat(64) },
 });
@@ -168,7 +178,15 @@ const linuxRpm = {
     url: "/preview-downloads/keire-hub-linux-x86_64-0.1.0-preview-cccccccc.rpm",
     sha256: "c".repeat(64),
 };
-const multiFormatPreview = { ...preview, packages: [preview.packages[0], linuxDeb, linuxRpm] };
+const multiFormatPreview = {
+    ...preview,
+    releaseStatus: {
+        state: "preparing",
+        version: "0.1.0",
+        message: "Kéire Hub 0.1.0 development previews are available for focused validation.",
+    },
+    packages: [preview.packages[0], linuxDeb, linuxRpm],
+};
 const multiFormatCandidates = validatePreview(multiFormatPreview);
 assert.equal(multiFormatCandidates.length, 3);
 assert.deepEqual(

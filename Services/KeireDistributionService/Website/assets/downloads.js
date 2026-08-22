@@ -233,6 +233,13 @@ function validatePreviewReleaseStatus(metadata) {
         typeof status.message === "string" && status.message.length >= 20 && status.message.length <= 240 ? status : null;
 }
 
+function currentReleaseCandidates(candidates, releaseStatus) {
+    if (!releaseStatus) {
+        return [];
+    }
+    return candidates.filter((candidate) => candidate.version.raw === releaseStatus.version);
+}
+
 function bytes(value) {
     const units = ["B", "KB", "MB", "GB"];
     let amount = value;
@@ -439,12 +446,14 @@ async function loadDownloads() {
         }
         const matching = results.filter((result) => result.status === "fulfilled" && result.value.platform === hostPlatform);
         for (const result of matching) {
-            const latestVersion = result.value.candidates[0]?.version.raw;
-            for (const candidate of result.value.candidates.filter((value) => value.version.raw === latestVersion)) {
+            const eligibleCandidates = currentReleaseCandidates(result.value.candidates, previewReleaseStatus);
+            const latestVersion = eligibleCandidates[0]?.version.raw;
+            for (const candidate of eligibleCandidates.filter((value) => value.version.raw === latestVersion)) {
                 renderVariant(variants, hostPlatform, result.value.architecture, candidate);
             }
         }
-        const platformPreviews = previews.filter((candidate) => candidate.packageRecord.platform === hostPlatform);
+        const platformPreviews = currentReleaseCandidates(
+            previews.filter((candidate) => candidate.packageRecord.platform === hostPlatform), previewReleaseStatus);
         const latestPreviewVersion = platformPreviews[0]?.version.raw;
         const currentPreviews = platformPreviews.filter((candidate) => candidate.version.raw === latestPreviewVersion);
         if (variants.children.length === 0 && currentPreviews.length > 0) {

@@ -108,7 +108,7 @@ const categoryDefinitions: readonly CategoryDefinition[] = [
 ];
 
 const summaries: Readonly<Record<string, string>> = {
-    "0.4.0": "A unified graph-authoring and Unity-shaped scripting milestone with schema-4 Shader/Material graphs, executable VFX subgraphs, and explicit release-candidate boundaries.",
+    "0.4.0": "A unified graph-authoring and Unity-shaped scripting milestone with schema-4 Shader/Material graphs, executable VFX subgraphs, and explicit catalog-publication boundaries.",
     "0.3.2": "A cross-platform preview adding procedural humanoid locomotion, Linux Hub packages, and stronger release/runtime reliability.",
     "0.3.1": "A production-oriented preview centered on the asset ecosystem, modern authoring workflows, audio, animation, Hub reliability, and cross-platform release foundations.",
     "0.3.0": "The visual-authoring milestone that separated reusable Shader Graphs from Material Graphs and established the production Sandbox showcase.",
@@ -180,12 +180,12 @@ function buildReleaseNote(release: ParsedChangelogRelease): ReleaseNote {
     const currentEvidence = {
         validation: [
             "The canonical release record, website source contracts, generated routes, local links, structured metadata, RSS output, documentation search, and production CSP are validated during every site build.",
-            "The public Windows package remains independently catalog-verified; exact native suite counts and rendered-output evidence are maintained in the production-readiness review.",
+            "Every public Windows or Linux package remains independently catalog-verified; exact native suite counts and rendered-output evidence are maintained in the production-readiness review.",
             "Marketplace artifacts retain quarantine, validator, moderation, signature, immutable publication, entitlement, and download evidence as separate trust decisions.",
         ],
         limitations: [
             `Kéire ${currentVersion} remains a pre-1.0 technology preview rather than a completed AAA production claim.`,
-            "Windows and Linux packages are published for x86-64; macOS remains source-compatible but unadvertised pending Metal, signing, and notarization validation.",
+            `Windows and Linux x86-64 delivery is supported, but ${currentVersion} packages become downloadable only after signed catalog activation; macOS remains gated pending Metal, signing, and notarization validation.`,
             `Marketplace, publisher, community, and paid-checkout capabilities remain subject to their explicit feature flags and launch gates; paid checkout is disabled for ${currentVersion}.`,
         ],
     } as const;

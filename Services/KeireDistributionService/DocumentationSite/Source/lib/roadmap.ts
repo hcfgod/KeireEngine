@@ -21,12 +21,12 @@ export const roadmapHorizons: readonly RoadmapHorizon[] = [
     {
         id: "now",
         label: "Now",
-        timeframe: "Kéire 0.4.0 source candidate",
-        statement: "Validate the unified graph and scripting milestone while preserving the published 0.3.2 catalog boundary.",
+        timeframe: "Kéire 0.4.0 current release",
+        statement: "Complete release evidence and signed catalog activation for the unified graph and scripting milestone.",
         initiatives: [
             {
                 title: "Unified graph and scripting authoring",
-                outcome: "Validate the source-breaking managed API and shared Shader, Material, and VFX editing contracts as one release candidate.",
+                outcome: "Validate the source-breaking managed API and shared Shader, Material, and VFX editing contracts as one current release boundary.",
                 status: "In validation",
                 capabilities: [
                     "Multi-selection, comments, clipboard remap, arrange commands, bookmarks, and diagnostic framing",
@@ -46,7 +46,7 @@ export const roadmapHorizons: readonly RoadmapHorizon[] = [
                     "Direct3D 12 and Vulkan validation",
                     "Actionable launch, installation, and recovery diagnostics",
                 ],
-                evidenceUrl: "/changelog/0.3.2/",
+                evidenceUrl: "/changelog/0.4.0/",
             },
             {
                 title: "Marketplace and package workflows",

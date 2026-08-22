@@ -307,22 +307,26 @@ for (const sourcePath of ["GettingStarted.md", "TestingAndRelease.md", "ProjectH
 }
 const downloadsPage = await readFile(path.join(siteRoot, "Source", "pages", "downloads", "index.astro"), "utf8");
 for (const contract of [
-    "Catalog-verified Windows and Linux x86-64 releases are available",
-    "The catalog and artifact hash are verified",
-    "Use the DEB on Ubuntu or Debian and the RPM on Rocky Linux, Fedora, or openSUSE",
+    `Kéire ${projectVersion} is the current release`,
+    "Package links are populated exclusively from the active, signed distribution catalog",
+    "Every link shown here has an active catalog record and verified artifact hash",
+    `Use the DEB on Ubuntu or Debian and the RPM on Rocky Linux, Fedora, or openSUSE once its ${projectVersion} catalog record is active`,
 ]) {
     assert(downloadsPage.includes(contract), `Downloads page is missing current platform contract: ${contract}`);
 }
 const previewDownloadMetadata = JSON.parse(await readFile(path.join(repositoryRoot, "Services",
     "KeireDistributionService", "Website", "assets", "preview-downloads.json"), "utf8"));
 const activeCatalogVersion = "0.3.2";
-assert(previewDownloadMetadata?.releaseStatus?.version === projectVersion &&
-    previewDownloadMetadata.releaseStatus.state === "preparing" &&
-    previewDownloadMetadata.releaseStatus.activeCatalogVersion === activeCatalogVersion &&
-    previewDownloadMetadata.releaseStatus.message.includes(`Kéire ${projectVersion} is a source candidate`) &&
-    previewDownloadMetadata.releaseStatus.message.includes(`Hub ${activeCatalogVersion} remain catalog-verified`) &&
-    previewDownloadMetadata.releaseStatus.message.includes("macOS downloads remain gated"),
-"Download fallback metadata must describe the current Windows/Linux releases and gated macOS platform.");
+const releaseStatus = previewDownloadMetadata?.releaseStatus;
+assert(releaseStatus?.version === projectVersion && ["preparing", "active"].includes(releaseStatus.state),
+    "Download fallback metadata must identify the current release and its publication state.");
+if (releaseStatus.state === "active") {
+    assert(releaseStatus.activeCatalogVersion === projectVersion && previewDownloadMetadata.packages?.length > 0,
+        "An active download fallback must contain current-version catalog packages.");
+} else {
+    assert(previewDownloadMetadata.packages?.length === 0 && /catalog|activation/i.test(releaseStatus.message),
+        "A preparing download fallback must not invent packages and must explain catalog activation.");
+}
 for (const [displayPath, source] of [
     ["README.md", rootReadme],
     ["Docs/README.md", documentationOverview],
@@ -373,9 +377,11 @@ const middleware = await readFile(path.join(siteRoot, "Source", "middleware.ts")
 const healthRoute = await readFile(path.join(siteRoot, "Source", "pages", "health", "index.ts"), "utf8");
 const contactRoute = await readFile(path.join(siteRoot, "Source", "pages", "contact", "submit.ts"), "utf8");
 assert(healthRoute.includes(`version: "${projectVersion}"`) &&
-    healthRoute.includes('releaseState: "candidate"') &&
+    healthRoute.includes('releaseState: "current"') &&
+    healthRoute.includes(`targetCatalogVersion: "${projectVersion}"`) &&
+    healthRoute.includes('catalogState: "activation_required"') &&
     healthRoute.includes(`activeCatalogVersion: "${activeCatalogVersion}"`),
-    "Health metadata must distinguish the current source candidate from the active catalog.");
+    "Health metadata must identify the current release target and the separately verified active catalog.");
 for (const source of [middleware, healthRoute, contactRoute]) {
     assert(source.includes("runtimeEnvironment("), "SSR routes must read deploy-time settings from the Node process.");
     assert(!/import\.meta\.env\.(?:PUBLIC_SUPABASE|KEIRE_)/.test(source), "SSR routes contain a build-time deployment setting.");
@@ -523,11 +529,11 @@ for (const horizon of ['id: "now"', 'id: "next"', 'id: "later"']) {
 assert(roadmapPage.includes("Windows + Linux x86-64") &&
     !roadmapModel.includes("current Windows technology preview") && !roadmapModel.includes("offline signing"),
     "The roadmap contains stale platform or Marketplace publication labels.");
-assert(roadmapPage.includes(`${projectVersion} candidate`) &&
-    roadmapPage.includes(`${activeCatalogVersion} sequence 14`) &&
-    roadmapModel.includes(`Kéire ${projectVersion} source candidate`) &&
-    roadmapModel.includes(`published ${activeCatalogVersion} catalog boundary`),
-    "The roadmap must distinguish source-candidate direction from the active immutable catalog.");
+assert(roadmapPage.includes(`${projectVersion} current`) &&
+    roadmapPage.includes("Signed catalog activation required") &&
+    roadmapModel.includes(`Kéire ${projectVersion} current release`) &&
+    roadmapModel.includes("signed catalog activation"),
+    "The roadmap must identify the current release without bypassing signed catalog activation.");
 const marketplaceProgress = launchReadiness.split('id: "marketplace"', 2)[1]?.split('id: "operations"', 1)[0] ?? "";
 const operationsProgress = launchReadiness.split('id: "operations"', 2)[1] ?? "";
 assert(marketplaceProgress.includes("completed: 10") && operationsProgress.includes("completed: 11") &&
@@ -546,15 +552,15 @@ const platformFooter = await readFile(path.join(siteRoot, "Source", "components"
 assert(platformFooter.includes('href="/roadmap/"') && platformFooter.includes('href="/changelog/"') &&
     platformFooter.includes('href="/community/"') && platformFooter.includes('href="/policies/"'),
     "Roadmap, changelog, Community, and policies must remain reachable from the global footer.");
-assert(platformFooter.includes(`Kéire ${projectVersion} source candidate`) &&
-    platformFooter.includes(`${activeCatalogVersion} catalog active`) &&
-    platformFooter.includes(`${projectVersion} publication gates remain open`),
-    "The global footer must expose the candidate and active-catalog boundary.");
+assert(platformFooter.includes(`Kéire ${projectVersion}`) &&
+    platformFooter.includes("current pre-1.0 release") &&
+    platformFooter.includes("signed catalog activation controls package availability"),
+    "The global footer must identify the current release and catalog-controlled availability.");
 const platformHome = await readFile(path.join(siteRoot, "Source", "pages", "index.astro"), "utf8");
 assert(platformHome.includes(`softwareVersion: "${projectVersion}"`) &&
-    platformHome.includes(`Kéire ${projectVersion} source candidate`) &&
-    platformHome.includes(`Get published Hub ${activeCatalogVersion}`),
-    "Home metadata and calls to action must separate source identity from published downloads.");
+    platformHome.includes(`Kéire ${projectVersion} current release`) &&
+    platformHome.includes(`Check Hub ${projectVersion} availability`),
+    "Home metadata and calls to action must identify the current release.");
 const changelogIndex = await readFile(path.join(siteRoot, "Source", "pages", "changelog", "index.astro"), "utf8");
 const changelogDetail = await readFile(path.join(siteRoot, "Source", "pages", "changelog", "[version].astro"), "utf8");
 const changelogModel = await readFile(path.join(siteRoot, "Source", "lib", "changelog.ts"), "utf8");
