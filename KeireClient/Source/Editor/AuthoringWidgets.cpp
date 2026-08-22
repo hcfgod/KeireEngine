@@ -271,7 +271,7 @@ namespace KeireEditor
         if (canvasHovered && options.Editable && pointer.LeftPressed && !canvasItem.DoubleClicked)
         {
             immediateCommentCollapse =
-                ToggleGraphCommentCollapseAtPointer(options.Comments, canvas, m_Pan, m_Zoom, pointer.Position);
+                FindGraphCommentCollapseToggleAtPointer(options.Comments, canvas, m_Pan, m_Zoom, pointer.Position);
             if (immediateCommentCollapse)
             {
                 result.ToggleCommentCollapseRequested = immediateCommentCollapse;
@@ -325,29 +325,32 @@ namespace KeireEditor
             const auto comment = std::ranges::find(options.Comments, *m_DraggingComment, &NodeGraphComment::Id);
             if (comment == options.Comments.end())
                 m_DraggingComment.reset();
-            else if (options.Editable && pointer.LeftDown)
+            else if (options.Editable)
             {
-                const Keire::Vector2 delta{pointer.Delta.X / m_Zoom, pointer.Delta.Y / m_Zoom};
-                m_CommentDragPosition.X += delta.X;
-                m_CommentDragPosition.Y += delta.Y;
-                comment->Position = m_CommentDragPosition;
-                for (auto& [node, position] : m_CommentMemberPositions)
+                const auto drag =
+                    ApplyGraphCommentDragFrame(*comment, m_CommentDragPosition, {pointer.Delta.X, pointer.Delta.Y},
+                                               m_Zoom, pointer.LeftDown, pointer.LeftReleased);
+                if (drag.Active)
                 {
-                    position.X += delta.X;
-                    position.Y += delta.Y;
-                    if (const auto member = std::ranges::find(nodes, node, &NodeGraphNode::Id); member != nodes.end())
-                        member->Position = position;
+                    for (auto& [node, position] : m_CommentMemberPositions)
+                    {
+                        position.X += drag.Delta.X;
+                        position.Y += drag.Delta.Y;
+                        if (const auto member = std::ranges::find(nodes, node, &NodeGraphNode::Id);
+                            member != nodes.end())
+                            member->Position = position;
+                    }
+                    for (auto& [nested, position] : m_CommentMemberCommentPositions)
+                    {
+                        position.X += drag.Delta.X;
+                        position.Y += drag.Delta.Y;
+                        if (const auto member = std::ranges::find(options.Comments, nested, &NodeGraphComment::Id);
+                            member != options.Comments.end())
+                            member->Position = position;
+                    }
+                    result.MovedComment = comment->Id;
+                    result.Changed = drag.Delta.X != 0.0F || drag.Delta.Y != 0.0F;
                 }
-                for (auto& [nested, position] : m_CommentMemberCommentPositions)
-                {
-                    position.X += delta.X;
-                    position.Y += delta.Y;
-                    if (const auto member = std::ranges::find(options.Comments, nested, &NodeGraphComment::Id);
-                        member != options.Comments.end())
-                        member->Position = position;
-                }
-                result.MovedComment = comment->Id;
-                result.Changed = delta.X != 0.0F || delta.Y != 0.0F;
             }
         }
         if (m_ResizingComment)
@@ -620,14 +623,24 @@ namespace KeireEditor
                     summaryPins.emplace_back(sourcePosition, source->Color);
                 }
                 else
-                    sourcePosition = findDrawnPin(sourceAddress)->Position;
+                {
+                    const auto* drawnSource = findDrawnPin(sourceAddress);
+                    if (!drawnSource)
+                        continue;
+                    sourcePosition = drawnSource->Position;
+                }
                 if (targetOwner != collapsedOwners.end())
                 {
                     targetPosition = collapsedEndpoint(*targetOwner->second, true);
                     summaryPins.emplace_back(targetPosition, target->Color);
                 }
                 else
-                    targetPosition = findDrawnPin(targetAddress)->Position;
+                {
+                    const auto* drawnTarget = findDrawnPin(targetAddress);
+                    if (!drawnTarget)
+                        continue;
+                    targetPosition = drawnTarget->Position;
+                }
             }
             else
             {
@@ -1288,6 +1301,8 @@ namespace KeireEditor
         {
             const auto& node = *iterator;
             const auto drawn = std::ranges::find(drawnNodes, node.Id, &DrawnNode::Id);
+            if (drawn == drawnNodes.end())
+                continue;
             const auto rectangle = drawn->Rectangle;
             const bool hovered =
                 (hoveredNode && *hoveredNode == node.Id) || (hoveredBlock && hoveredBlock->Node == node.Id);
@@ -1426,7 +1441,10 @@ namespace KeireEditor
 
             if (detail.PinLabels)
             {
-                auto labelRectangle = std::ranges::find(drawnNodes, pin.Address.Node, &DrawnNode::Id)->Rectangle;
+                const auto drawnNode = std::ranges::find(drawnNodes, pin.Address.Node, &DrawnNode::Id);
+                if (drawnNode == drawnNodes.end())
+                    continue;
+                auto labelRectangle = drawnNode->Rectangle;
                 if (pin.Address.Block)
                 {
                     const auto block = std::ranges::find(

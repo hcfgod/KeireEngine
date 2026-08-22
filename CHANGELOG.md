@@ -17,10 +17,12 @@ versions.
 - Repaired dangling Windows dependency junctions even when their old target no longer exists, preventing a stale
   cross-environment Coral link from hiding an otherwise valid managed runtime build.
 - Fixed multi-node Material Function extraction when generated boundary symbols collide with graph resources, made
-  comment collapse update in the click frame, kept repeated C# asset opens targeted at the generated solution, moved
-  advanced performance data into the viewport overlay, and replaced editor toolbar and panel-lock letters with the
-  packaged scene-control icon set. Runtime game UI is now composited only into Game view while Scene view retains its
-  editor workspace overlays.
+  comment collapse update in the click frame without transiently rebuilding the canvas, preserved the final graph
+  comment position through mouse release, and kept the VFX canvas visible while its multi-selection summary remains in
+  the Inspector. Repeated C# asset opens stay targeted at the generated solution, advanced performance data moved into
+  the viewport overlay, and editor toolbar and panel-lock letters use the packaged scene-control icon set. Build-scene
+  reordering now opens valid drag source and target scopes instead of asserting during workspace startup. Runtime game
+  UI is now composited only into Game view while Scene view retains its editor workspace overlays.
 
 ## 0.4.0 - 2026-08-21
 

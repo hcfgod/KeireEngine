@@ -6,6 +6,7 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
+#include <array>
 #include <atomic>
 #include <filesystem>
 #include <fstream>
@@ -266,6 +267,11 @@ namespace
                 {
                     (void)ui.Button("Disabled");
                 }
+
+                const std::array<std::byte, 1> dragPayload{};
+                CHECK_THROWS_AS(ui.SetDragPayload("KEIRE_TEST", dragPayload), std::logic_error);
+                std::vector<std::byte> acceptedPayload;
+                CHECK_THROWS_AS((void)ui.AcceptDragPayload("KEIRE_TEST", acceptedPayload), std::logic_error);
 
                 (void)ui.Button("Overlay layout anchor", {120.0F, 40.0F});
                 const auto anchor = ui.LastItemRect();

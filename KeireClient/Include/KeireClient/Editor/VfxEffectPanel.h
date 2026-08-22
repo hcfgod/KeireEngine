@@ -81,13 +81,15 @@ namespace KeireEditor
         void DrawGraphEditor(Keire::UiFrame& ui);
         void DrawGraphSystems(Keire::UiFrame& ui);
         void DrawGraphCanvas(Keire::UiFrame& ui);
-        void DrawGraphComments(Keire::UiFrame& ui, Keire::AssetId system,
-                               std::span<const std::pair<StableNodeId, Keire::AssetId>> nodeIdentities,
-                               std::span<const NodeGraphNode> nodes, const NodeGraphCommentModel& comments,
-                               const NodeGraphCanvasResult& canvas);
-        void CreateGraphComment(Keire::UiFrame& ui, Keire::AssetId system,
-                                std::span<const std::pair<StableNodeId, Keire::AssetId>> nodeIdentities,
-                                std::span<const NodeGraphNode> nodes, Keire::Vector2 position, bool selection);
+        [[nodiscard]] bool DrawGraphComments(Keire::UiFrame& ui, Keire::AssetId system,
+                                             std::span<const std::pair<StableNodeId, Keire::AssetId>> nodeIdentities,
+                                             std::span<const NodeGraphNode> nodes,
+                                             const NodeGraphCommentModel& comments,
+                                             const NodeGraphCanvasResult& canvas);
+        [[nodiscard]] bool CreateGraphComment(Keire::UiFrame& ui, Keire::AssetId system,
+                                              std::span<const std::pair<StableNodeId, Keire::AssetId>> nodeIdentities,
+                                              std::span<const NodeGraphNode> nodes, Keire::Vector2 position,
+                                              bool selection);
         void DuplicateGraphSelection(std::span<const StableNodeId> selection,
                                      std::span<const std::pair<StableNodeId, Keire::AssetId>> identities);
         [[nodiscard]] bool HandleGraphClipboard(const NodeGraphCanvasResult& result,

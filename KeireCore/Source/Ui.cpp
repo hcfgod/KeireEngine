@@ -271,6 +271,14 @@ namespace Keire
                 throw std::logic_error(std::string("UiFrame::") + operation + " called outside Layer::OnUi.");
         }
 
+        void RequireScope(const UiScope::Kind kind, const char* operation, const char* requiredScope) const
+        {
+            RequireActive(operation);
+            if (Scopes.empty() || Scopes.back() != kind)
+                throw std::logic_error(std::string("UiFrame::") + operation + " requires an active " + requiredScope +
+                                       " scope.");
+        }
+
         void OpenScope(const UiScope::Kind kind) { Scopes.push_back(kind); }
 
         void CloseScope(const UiScope::Kind kind, const std::uint64_t generation) noexcept
@@ -700,7 +708,7 @@ namespace Keire
 
     void UiFrame::SetDragPayload(const std::string_view type, const std::span<const std::byte> bytes)
     {
-        m_Impl->RequireActive("SetDragPayload");
+        m_Impl->RequireScope(UiScope::Kind::DragSource, "SetDragPayload", "drag source");
         if (type.empty() || type.size() > 32)
             throw std::invalid_argument("UI drag payload types must contain between 1 and 32 bytes.");
         const std::string safeType(type);
@@ -709,7 +717,7 @@ namespace Keire
 
     bool UiFrame::AcceptDragPayload(const std::string_view type, std::vector<std::byte>& bytes)
     {
-        m_Impl->RequireActive("AcceptDragPayload");
+        m_Impl->RequireScope(UiScope::Kind::DragTarget, "AcceptDragPayload", "drag target");
         if (type.empty() || type.size() > 32)
             throw std::invalid_argument("UI drag payload types must contain between 1 and 32 bytes.");
         const std::string safeType(type);

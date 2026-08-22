@@ -1,17 +1,81 @@
+#include "Keire/Core.h"
 #include "KeireClient/Editor/AuthoringWidgets.h"
 #include "KeireClient/Editor/GraphComments.h"
 
+#include <SDL3/SDL.h>
 #include <doctest/doctest.h>
 
 #include <algorithm>
 #include <array>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <ranges>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
+
+namespace
+{
+    class CollapsedGraphUiLayer final : public Keire::Layer
+    {
+      public:
+        explicit CollapsedGraphUiLayer(bool& drawn) : Layer("CollapsedGraphUiLayer"), m_Drawn(drawn) {}
+
+      protected:
+        void OnUi(Keire::UiFrame& ui) override
+        {
+            ui.SetNextWindowSize({640.0F, 420.0F});
+            if (auto window = ui.BeginWindow("Collapsed graph regression"); window)
+            {
+                KeireEditor::NodeGraphCanvasOptions options;
+                options.Comments = m_Comments;
+                (void)m_Canvas.Draw(ui, "CollapsedGraph", m_Nodes, m_Connections, options);
+                m_Drawn = true;
+            }
+            Owner().RequestExit();
+        }
+
+      private:
+        bool& m_Drawn;
+        KeireEditor::StableNodeGraphCanvas m_Canvas;
+        std::array<KeireEditor::NodeGraphNode, 2> m_Nodes{
+            KeireEditor::NodeGraphNode{1, "Hidden producer", {80.0F, 100.0F}, {160.0F, 100.0F}},
+            KeireEditor::NodeGraphNode{2, "Visible consumer", {380.0F, 100.0F}, {160.0F, 100.0F}}};
+        std::array<KeireEditor::NodeGraphConnection, 1> m_Connections{
+            KeireEditor::NodeGraphConnection{3, 1, 2, "Boundary cable"}};
+        std::array<KeireEditor::NodeGraphComment, 1> m_Comments{KeireEditor::NodeGraphComment{
+            .Id = 4,
+            .Title = "Collapsed region",
+            .Position = {40.0F, 50.0F},
+            .Size = {240.0F, 200.0F},
+            .Collapsed = true,
+            .Members = {1},
+        }};
+    };
+
+    class CollapsedGraphUiApplication final : public Keire::Application
+    {
+      public:
+        explicit CollapsedGraphUiApplication(bool& drawn) : Application(Specification())
+        {
+            (void)PushLayer(std::make_unique<CollapsedGraphUiLayer>(drawn));
+        }
+
+      private:
+        static Keire::ApplicationSpecification Specification()
+        {
+            Keire::ApplicationSpecification specification;
+            specification.MainWindow.Title = "collapsed-graph-regression";
+            specification.MainWindow.Visible = false;
+            specification.TargetFrameRate = 0;
+            specification.Ui.Mode = Keire::UiMode::Headless;
+            specification.Ui.LayoutPath.clear();
+            return specification;
+        }
+    };
+} // namespace
 
 TEST_CASE("Node menu selection focuses on open and follows live search results")
 {
@@ -459,6 +523,59 @@ TEST_CASE("Collapsed graph comment display bounds are stable and do not overwrit
     CHECK((comment.Size == Keire::Vector2{480.0F, 260.0F}));
     comment.Collapsed = false;
     CHECK(KeireEditor::GraphCommentDisplayHeight(comment) == doctest::Approx(260.0F));
+}
+
+TEST_CASE("Collapsed graph comments omit member nodes without invalidating canvas rendering")
+{
+    REQUIRE(SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, "dummy", SDL_HINT_OVERRIDE));
+    bool drawn = false;
+    CollapsedGraphUiApplication application(drawn);
+
+    CHECK(application.Run() == 0);
+    CHECK(drawn);
+}
+
+TEST_CASE("Graph comment drag retains its presentation through the release frame")
+{
+    KeireEditor::NodeGraphComment comment;
+    comment.Position = {40.0F, 30.0F};
+    Keire::Vector2 retainedPosition{180.0F, 120.0F};
+
+    const auto release = KeireEditor::ApplyGraphCommentDragFrame(comment, retainedPosition, {}, 1.0F, false, true);
+    CHECK(release.Active);
+    CHECK((comment.Position == Keire::Vector2{180.0F, 120.0F}));
+
+    const auto drag =
+        KeireEditor::ApplyGraphCommentDragFrame(comment, retainedPosition, {20.0F, -10.0F}, 2.0F, true, false);
+    CHECK(drag.Active);
+    CHECK((drag.Delta == Keire::Vector2{10.0F, -5.0F}));
+    CHECK((comment.Position == Keire::Vector2{190.0F, 115.0F}));
+
+    const auto idle =
+        KeireEditor::ApplyGraphCommentDragFrame(comment, retainedPosition, {100.0F, 100.0F}, 1.0F, false, false);
+    CHECK_FALSE(idle.Active);
+    CHECK((comment.Position == Keire::Vector2{190.0F, 115.0F}));
+}
+
+TEST_CASE("Graph comment collapse arrow hit testing does not mutate presentation state")
+{
+    KeireEditor::NodeGraphComment comment;
+    comment.Id = 91;
+    comment.Position = {100.0F, 80.0F};
+    comment.Size = {320.0F, 220.0F};
+    std::array comments{comment};
+    const Keire::UiItemRect canvas{{20.0F, 30.0F}, {820.0F, 630.0F}};
+
+    const auto target =
+        KeireEditor::FindGraphCommentCollapseToggleAtPointer(comments, canvas, {}, 1.0F, {125.0F, 115.0F});
+    CHECK(target == comment.Id);
+    CHECK_FALSE(comments.front().Collapsed);
+
+    comments.front().Collapsed = true;
+    const auto expandedTarget =
+        KeireEditor::FindGraphCommentCollapseToggleAtPointer(comments, canvas, {}, 1.0F, {125.0F, 115.0F});
+    CHECK(expandedTarget == comment.Id);
+    CHECK(comments.front().Collapsed);
 }
 
 TEST_CASE("Graph node annotations map stable identities and preserve pinned presentation")

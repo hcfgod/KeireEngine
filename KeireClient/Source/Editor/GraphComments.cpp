@@ -316,10 +316,27 @@ namespace KeireEditor
                             static_cast<float>(std::max(comment.SummaryInputs, comment.SummaryOutputs)) * 20.0F);
     }
 
-    std::optional<StableNodeId> ToggleGraphCommentCollapseAtPointer(const std::span<NodeGraphComment> comments,
-                                                                    const Keire::UiItemRect canvas,
-                                                                    const Keire::Vector2 pan, const float zoom,
-                                                                    const Keire::UiPosition pointer)
+    NodeGraphCommentDragFrameResult ApplyGraphCommentDragFrame(NodeGraphComment& comment,
+                                                               Keire::Vector2& retainedPosition,
+                                                               const Keire::Vector2 pointerDelta, const float zoom,
+                                                               const bool pointerDown,
+                                                               const bool pointerReleased) noexcept
+    {
+        if (!pointerDown && !pointerReleased)
+            return {};
+
+        const float inverseZoom = zoom > 0.0F ? 1.0F / zoom : 1.0F;
+        const Keire::Vector2 delta{pointerDelta.X * inverseZoom, pointerDelta.Y * inverseZoom};
+        retainedPosition.X += delta.X;
+        retainedPosition.Y += delta.Y;
+        comment.Position = retainedPosition;
+        return {true, delta};
+    }
+
+    std::optional<StableNodeId>
+    FindGraphCommentCollapseToggleAtPointer(const std::span<const NodeGraphComment> comments,
+                                            const Keire::UiItemRect canvas, const Keire::Vector2 pan, const float zoom,
+                                            const Keire::UiPosition pointer)
     {
         for (auto comment = comments.rbegin(); comment != comments.rend(); ++comment)
         {
@@ -334,7 +351,6 @@ namespace KeireEditor
             if (pointer.Y > minimum.Y + headerHeight || pointer.X > minimum.X + arrowHitWidth)
                 return std::nullopt;
 
-            comment->Collapsed = !comment->Collapsed;
             return comment->Id;
         }
         return std::nullopt;

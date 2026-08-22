@@ -637,8 +637,6 @@ namespace KeireEditor
         auto& document = m_Controller.VfxEffectState();
         const auto& definition = document.Definition();
         const auto& theme = m_Controller.VfxEffectTheme();
-        if (DrawGraphMultiSelectionInspector(ui))
-            return;
         const auto system = std::ranges::find(definition.Systems, m_SelectedSystem, &Keire::VfxGraphSystem::Id);
         if (system == definition.Systems.end())
         {
@@ -919,7 +917,8 @@ namespace KeireEditor
             .Comments = comments.Comments,
         };
         const auto result = m_GraphCanvas.Draw(ui, "VfxNodeCanvas", nodes, connections, options);
-        DrawGraphComments(ui, system->Id, nodeIdentities, nodes, comments, result);
+        if (DrawGraphComments(ui, system->Id, nodeIdentities, nodes, comments, result))
+            return;
         m_SelectedNodes = ResolveGraphSelection(result.SelectedNodes, nodeIdentities);
         m_SelectedNode = m_SelectedNodes.empty() ? Keire::AssetId{} : m_SelectedNodes.back();
         if (HandleGraphClipboard(result, nodeIdentities))
@@ -1182,7 +1181,10 @@ namespace KeireEditor
                 ui.TextColored(theme.Warning, "Convert Runtime Modules to Graph before adding executable nodes.");
             ui.Separator();
             if (ui.MenuItem("Create Empty Comment"))
-                CreateGraphComment(ui, system->Id, nodeIdentities, nodes, m_NodePalettePosition, false);
+            {
+                (void)CreateGraphComment(ui, system->Id, nodeIdentities, nodes, m_NodePalettePosition, false);
+                return;
+            }
             if (ui.MenuItem("Frame All Nodes"))
                 m_GraphCanvas.Focus(nodes, renderedCanvasSize);
         }
@@ -1219,7 +1221,10 @@ namespace KeireEditor
                 if (DrawGraphNodeUnlinkContextMenu(ui, system->Id, node->Id, system->Connections))
                     return;
                 if (ui.MenuItem("Create Comment from Selection"))
-                    CreateGraphComment(ui, system->Id, nodeIdentities, nodes, node->EditorPosition, true);
+                {
+                    (void)CreateGraphComment(ui, system->Id, nodeIdentities, nodes, node->EditorPosition, true);
+                    return;
+                }
                 if (ui.MenuItem("Delete Node", false, node->Kind != Keire::VfxGraphNodeKind::Context))
                 {
                     (void)ApplyAction("Removed VFX graph node", [&document, graph = system->Id, nodeId = node->Id]
@@ -1795,6 +1800,8 @@ namespace KeireEditor
             ui.TextColored(theme.MutedText, "No graph system selected.");
             return;
         }
+        if (DrawGraphMultiSelectionInspector(ui))
+            return;
 
         auto rename = system->Name;
         if (ui.InputText("System Name", rename))

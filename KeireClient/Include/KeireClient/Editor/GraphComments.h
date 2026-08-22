@@ -12,6 +12,12 @@ namespace KeireEditor
         bool ResizeHandle = false;
     };
 
+    struct NodeGraphCommentDragFrameResult
+    {
+        bool Active = false;
+        Keire::Vector2 Delta;
+    };
+
     struct NodeGraphCommentModel
     {
         std::vector<NodeGraphComment> Comments;
@@ -82,10 +88,13 @@ namespace KeireEditor
 
     [[nodiscard]] float GraphCommentDisplayHeight(const NodeGraphComment& comment) noexcept;
 
-    [[nodiscard]] std::optional<StableNodeId> ToggleGraphCommentCollapseAtPointer(std::span<NodeGraphComment> comments,
-                                                                                  Keire::UiItemRect canvas,
-                                                                                  Keire::Vector2 pan, float zoom,
-                                                                                  Keire::UiPosition pointer);
+    [[nodiscard]] NodeGraphCommentDragFrameResult
+    ApplyGraphCommentDragFrame(NodeGraphComment& comment, Keire::Vector2& retainedPosition, Keire::Vector2 pointerDelta,
+                               float zoom, bool pointerDown, bool pointerReleased) noexcept;
+
+    [[nodiscard]] std::optional<StableNodeId>
+    FindGraphCommentCollapseToggleAtPointer(std::span<const NodeGraphComment> comments, Keire::UiItemRect canvas,
+                                            Keire::Vector2 pan, float zoom, Keire::UiPosition pointer);
 
     [[nodiscard]] NodeGraphCommentLayerResult DrawNodeGraphComments(Keire::UiFrame& ui,
                                                                     std::span<const NodeGraphComment> comments,

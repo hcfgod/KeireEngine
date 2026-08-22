@@ -213,20 +213,28 @@ void EditorWorkspaceLayer::DrawBuildSettings(Keire::UiFrame& ui)
             displayLabel.append("  ").append(sceneLabel);
             if (ui.Selectable(displayLabel, m_SelectedPlayerBuildScene == entry.Scene))
                 m_SelectedPlayerBuildScene = entry.Scene;
-            const auto payloadText = entry.Scene.ToString();
-            ui.SetDragPayload("KEIRE_BUILD_SCENE", std::as_bytes(std::span(payloadText.data(), payloadText.size())));
-            std::vector<std::byte> payload;
-            if (ui.AcceptDragPayload("KEIRE_BUILD_SCENE", payload))
+            if (auto source = ui.BeginDragSource(); source)
             {
-                try
+                const auto payloadText = entry.Scene.ToString();
+                ui.SetDragPayload("KEIRE_BUILD_SCENE",
+                                  std::as_bytes(std::span(payloadText.data(), payloadText.size())));
+                ui.Text(sceneLabel);
+            }
+            if (auto target = ui.BeginDragTarget(); target)
+            {
+                std::vector<std::byte> payload;
+                if (ui.AcceptDragPayload("KEIRE_BUILD_SCENE", payload))
                 {
-                    const std::string dragged(reinterpret_cast<const char*>(payload.data()), payload.size());
-                    const auto source = Keire::AssetId::Parse(dragged);
-                    if (source != entry.Scene)
-                        requestedSceneReorder = std::pair{source, entry.Scene};
-                }
-                catch (...)
-                {
+                    try
+                    {
+                        const std::string dragged(reinterpret_cast<const char*>(payload.data()), payload.size());
+                        const auto sourceScene = Keire::AssetId::Parse(dragged);
+                        if (sourceScene != entry.Scene)
+                            requestedSceneReorder = std::pair{sourceScene, entry.Scene};
+                    }
+                    catch (...)
+                    {
+                    }
                 }
             }
         }

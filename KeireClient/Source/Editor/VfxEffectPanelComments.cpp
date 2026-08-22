@@ -7,7 +7,7 @@
 
 namespace KeireEditor
 {
-    void
+    bool
     VfxEffectPanel::CreateGraphComment(Keire::UiFrame& ui, const Keire::AssetId system,
                                        const std::span<const std::pair<StableNodeId, Keire::AssetId>> nodeIdentities,
                                        const std::span<const NodeGraphNode> nodes, const Keire::Vector2 position,
@@ -16,16 +16,16 @@ namespace KeireEditor
         const auto& document = m_Controller.VfxEffectState();
         const auto graph = std::ranges::find(document.Definition().Systems, system, &Keire::VfxGraphSystem::Id);
         if (graph == document.Definition().Systems.end())
-            return;
+            return false;
         NodeGraphCanvasResult canvas;
         canvas.CreateCommentRequested =
             selection ? StableNodeGraphCanvas::CommentFromSelection(nodes, m_GraphCanvas.Selections(), position)
                       : NodeGraphCommentCreateRequest{.Position = position};
         const auto comments = BuildNodeGraphCommentModel(graph->Authoring, nodeIdentities);
-        DrawGraphComments(ui, system, nodeIdentities, nodes, comments, canvas);
+        return DrawGraphComments(ui, system, nodeIdentities, nodes, comments, canvas);
     }
 
-    void
+    bool
     VfxEffectPanel::DrawGraphComments(Keire::UiFrame& ui, const Keire::AssetId system,
                                       const std::span<const std::pair<StableNodeId, Keire::AssetId>> nodeIdentities,
                                       const std::span<const NodeGraphNode> nodes, const NodeGraphCommentModel& comments,
@@ -34,16 +34,17 @@ namespace KeireEditor
         auto& document = m_Controller.VfxEffectState();
         const auto graph = std::ranges::find(document.Definition().Systems, system, &Keire::VfxGraphSystem::Id);
         if (graph == document.Definition().Systems.end())
-            return;
+            return false;
         const auto edit = DrawGraphCommentEditor(ui, "VfxGraphCommentEditor", graph->Authoring, nodeIdentities, nodes,
                                                  comments, canvas, m_CommentEditor);
         if (!edit)
-            return;
+            return false;
 
         const auto name = edit->Kind == GraphCommentCanvasEditKind::Create   ? "Created VFX graph comment"
                           : edit->Kind == GraphCommentCanvasEditKind::Delete ? "Deleted VFX graph comment"
                                                                              : "Edited VFX graph comment";
-        if (ApplyEdit(name,
+        const auto applied =
+            ApplyEdit(name,
                       [system, edit = *edit](Keire::VfxEffectDefinition& definition)
                       {
                           auto target = std::ranges::find(definition.Systems, system, &Keire::VfxGraphSystem::Id);
@@ -54,8 +55,9 @@ namespace KeireEditor
                               if (auto node = std::ranges::find(target->Nodes, id, &Keire::VfxGraphNode::Id);
                                   node != target->Nodes.end())
                                   node->EditorPosition = position;
-                      }) &&
-            edit->Kind == GraphCommentCanvasEditKind::Delete)
+                      });
+        if (applied && edit->Kind == GraphCommentCanvasEditKind::Delete)
             m_CommentEditor.Clear();
+        return applied;
     }
 } // namespace KeireEditor
