@@ -11,6 +11,7 @@ extern "C"
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -149,6 +150,11 @@ namespace Keire::Detail
                         const float value = ReadChannel<float>(Row(frame, 0, y), x);
                         set(pixel, value, value, value, 1.0F);
                     }
+                    else if (frame.format == AV_PIX_FMT_GRAYF16)
+                    {
+                        const float value = HalfToFloat(ReadChannel<std::uint16_t>(Row(frame, 0, y), x));
+                        set(pixel, value, value, value, 1.0F);
+                    }
                     else
                     {
                         throw std::runtime_error("The OpenEXR decoder returned an unsupported float pixel format: " +
@@ -176,7 +182,13 @@ namespace Keire::Detail
                       "Could not allocate the OpenEXR decode packet");
             std::memcpy(packet->data, source.data(), source.size());
             RequireAv(avcodec_send_packet(decoder.get(), packet.get()), "Could not submit the OpenEXR image");
-            RequireAv(avcodec_receive_frame(decoder.get(), frame.get()), "Could not decode the OpenEXR image");
+            auto receiveStatus = avcodec_receive_frame(decoder.get(), frame.get());
+            if (receiveStatus == AVERROR(EAGAIN))
+            {
+                RequireAv(avcodec_send_packet(decoder.get(), nullptr), "Could not flush the OpenEXR decoder");
+                receiveStatus = avcodec_receive_frame(decoder.get(), frame.get());
+            }
+            RequireAv(receiveStatus, "Could not decode the OpenEXR image");
             return Convert(*frame);
         }
     } // namespace

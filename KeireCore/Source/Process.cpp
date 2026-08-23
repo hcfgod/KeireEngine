@@ -1235,16 +1235,14 @@ namespace Keire::Detail
     }
 
     std::vector<std::string> ResolveVisualStudioExternalEditorArguments(const std::filesystem::path& source,
-                                                                        const std::filesystem::path& managedSolution,
-                                                                        const bool reuseManagedSession)
+                                                                        const std::filesystem::path& managedSolution)
     {
         if (source.empty())
             throw std::invalid_argument("Visual Studio external-editor targeting requires a source file.");
         const auto sourceText = PathToUtf8(source);
         if (managedSolution.empty())
             return {sourceText};
-        (void)reuseManagedSession;
-        return {PathToUtf8(managedSolution), "/Edit", sourceText};
+        return {PathToUtf8(managedSolution), "/Command", "File.OpenFile \"" + sourceText + "\""};
     }
 
     bool OpenInExternalEditor(const std::filesystem::path& path, const std::filesystem::path& preferredEditor,
@@ -1284,9 +1282,8 @@ namespace Keire::Detail
                     character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
                 }
                 if (editorName == "devenv" && !managedSolution.empty())
-                    arguments = extension == ".cs"
-                                    ? ResolveVisualStudioExternalEditorArguments(source, managedSolution, false)
-                                    : std::vector<std::string>{PathToUtf8(managedSolution)};
+                    arguments = extension == ".cs" ? ResolveVisualStudioExternalEditorArguments(source, managedSolution)
+                                                   : std::vector<std::string>{PathToUtf8(managedSolution)};
                 return LaunchDetachedProcess(std::filesystem::weakly_canonical(preferredEditor), arguments, working,
                                              diagnostic);
             }
@@ -1300,9 +1297,9 @@ namespace Keire::Detail
                 for (char& character : editorName)
                     character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
                 if (!visualStudio.empty() && editorName == "devenv")
-                    return LaunchDetachedProcess(
-                        visualStudio, ResolveVisualStudioExternalEditorArguments(source, managedSolution, false),
-                        working, diagnostic);
+                    return LaunchDetachedProcess(visualStudio,
+                                                 ResolveVisualStudioExternalEditorArguments(source, managedSolution),
+                                                 working, diagnostic);
             }
             const auto target = managedSolution.empty() ? source : managedSolution;
             const auto result = reinterpret_cast<std::intptr_t>(ShellExecuteW(

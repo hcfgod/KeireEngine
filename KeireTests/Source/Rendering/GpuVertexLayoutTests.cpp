@@ -130,6 +130,22 @@ TEST_CASE("GPU skinning output slots stay bounded by frames in flight")
     CHECK(SkinningOutputSlot(10, 0) == 0);
 }
 
+TEST_CASE("GPU skinning instances isolate writable outputs by render surface")
+{
+    using Keire::AssetId;
+    using Keire::EntityId;
+    using Keire::RenderBackend::GpuSkinInstanceKey;
+    using Keire::RenderBackend::GpuSkinInstanceKeyHash;
+
+    const auto scene = AssetId::Parse("711ace00-0000-4000-8000-000000000021");
+    const auto entity = EntityId::Parse("711ace00-0000-4000-8000-000000000022");
+    const GpuSkinInstanceKey sceneView{scene, entity, 17};
+    const GpuSkinInstanceKey gameView{scene, entity, 18};
+
+    CHECK(sceneView != gameView);
+    CHECK(GpuSkinInstanceKeyHash{}(sceneView) != GpuSkinInstanceKeyHash{}(gameView));
+}
+
 TEST_CASE("GPU VFX sequencing distinguishes document snapshots from simulation steps")
 {
     Keire::RenderBackend::GpuVfxWorldResources resources;

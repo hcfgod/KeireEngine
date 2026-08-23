@@ -40,21 +40,24 @@ project(ProjectConfig.CLIENT_TARGET)
 
     if _ACTION ~= "ninja" then
         local postBuildPathPrefix = _ACTION == "gmake" and "KeireClient/" or ""
+        local commandRepositoryRoot = _ACTION == "gmake" and "." or ".."
 
         filter { "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
             postbuildcommands
             {
-                '{COPYFILE} "' .. postBuildPathPrefix .. DependencyManifest.SodiumDebugRuntime .. '" "' ..
-                    postBuildPathPrefix .. '%{cfg.targetdir}/' ..
-                    path.getname(DependencyManifest.SodiumDebugRuntime) .. '"'
+                CopyFileIfChangedCommand(postBuildPathPrefix .. DependencyManifest.SodiumDebugRuntime,
+                                         postBuildPathPrefix .. "%{cfg.targetdir}/" ..
+                                             path.getname(DependencyManifest.SodiumDebugRuntime),
+                                         commandRepositoryRoot)
             }
 
         filter { "configurations:Release or Dist" }
             postbuildcommands
             {
-                '{COPYFILE} "' .. postBuildPathPrefix .. DependencyManifest.SodiumReleaseRuntime .. '" "' ..
-                    postBuildPathPrefix .. '%{cfg.targetdir}/' ..
-                    path.getname(DependencyManifest.SodiumReleaseRuntime) .. '"'
+                CopyFileIfChangedCommand(postBuildPathPrefix .. DependencyManifest.SodiumReleaseRuntime,
+                                         postBuildPathPrefix .. "%{cfg.targetdir}/" ..
+                                             path.getname(DependencyManifest.SodiumReleaseRuntime),
+                                         commandRepositoryRoot)
             }
     end
 

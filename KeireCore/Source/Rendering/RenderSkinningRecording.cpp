@@ -61,7 +61,8 @@ namespace Keire::RenderBackend
         return SkinningPipeline != nullptr;
     }
 
-    void RenderSharedState::PrepareSkinning(SDL_GPUCommandBuffer* commands, SceneRenderPacket& packet)
+    void RenderSharedState::PrepareSkinning(SDL_GPUCommandBuffer* commands, SceneRenderPacket& packet,
+                                            const std::uint64_t surface)
     {
         struct alignas(16) GpuSkinInfluence
         {
@@ -304,7 +305,7 @@ namespace Keire::RenderBackend
                 UploadBuffer(commands, std::as_bytes(std::span(palette)), SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ);
             FrameTransientBuffers.push_back(paletteBuffer);
 
-            const GpuSkinInstanceKey instanceKey{packet.Scene, item.Entity};
+            const GpuSkinInstanceKey instanceKey{packet.Scene, item.Entity, surface};
             auto [instanceIterator, instanceInserted] = cache.Resources.Instances.try_emplace(instanceKey);
             auto& instance = instanceIterator->second;
             if (instanceInserted)

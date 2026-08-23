@@ -16,7 +16,25 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "common.ps1")
 
+function Enter-KeireBuildLock {
+    param([Parameter(Mandatory = $true)][string]$RepositoryRoot)
+
+    . (Join-Path $PSScriptRoot "generated-content-cache.ps1")
+    return Enter-GeneratedContentLock -Name "native-build" -RepositoryRoot $RepositoryRoot `
+        -Timeout ([TimeSpan]::FromHours(2)) `
+        -WaitMessage "==> Another build is using this checkout; waiting for it to finish"
+}
+
+function Exit-KeireBuildLock {
+    param([Parameter(Mandatory = $true)][Threading.Mutex]$Mutex)
+
+    . (Join-Path $PSScriptRoot "generated-content-cache.ps1")
+    Exit-GeneratedContentLock -Mutex $Mutex
+}
+
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
+$BuildLock = Enter-KeireBuildLock -RepositoryRoot $Root
+try {
 $Project = Get-ProjectConfig
 $WorkspaceName = $Project.PROJECT_IDENTIFIER
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
@@ -111,6 +129,11 @@ if ($Target -in @($Project.HUB_TARGET, $Project.CLIENT_TARGET)) {
     if (-not (Test-Path -LiteralPath $sodiumRuntime -PathType Leaf)) {
         throw "The pinned marketplace signature verifier runtime is missing: $sodiumRuntime"
     }
-    Copy-Item -LiteralPath $sodiumRuntime -Destination $targetDirectory -Force
+    & (Join-Path $PSScriptRoot "copy-file-if-changed.ps1") -Source $sodiumRuntime `
+        -Destination (Join-Path $targetDirectory "libsodium.dll")
     Write-Host "==> Staged pinned marketplace signature verifier for $Target"
+}
+}
+finally {
+    Exit-KeireBuildLock -Mutex $BuildLock
 }

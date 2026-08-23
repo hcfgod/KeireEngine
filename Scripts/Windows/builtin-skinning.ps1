@@ -5,14 +5,29 @@ $Compiler = Join-Path $Root "Build/Tools/ShaderCompiler/KeireShaderCompiler.exe"
 $Source = Join-Path $Root "KeireCore/Shaders/BuiltinSkinning.hlsl"
 $GeneratedDirectory = Join-Path $Root "Build/Generated/Keire"
 $Header = Join-Path $GeneratedDirectory "BuiltinSkinningShaders.h"
+$Stamp = Join-Path $GeneratedDirectory "BuiltinSkinningShaders.stamp"
+$CacheHelper = Join-Path $PSScriptRoot "generated-content-cache.ps1"
+. $CacheHelper
 
 if (-not (Test-Path -LiteralPath $Compiler)) {
     throw "KeireShaderCompiler is required before generating the built-in skinning shader."
 }
 
-$Temporary = Join-Path ([IO.Path]::GetTempPath()) ("KeireBuiltinSkinning-" + [Guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Force -Path $Temporary | Out-Null
+$Fingerprint = Get-GeneratedContentFingerprint -Schema "builtin-skinning-v1" `
+    -Inputs @($PSCommandPath, $CacheHelper, $Compiler, $Source)
+if (Test-GeneratedContentCurrent -Output $Header -Stamp $Stamp -Fingerprint $Fingerprint) {
+    return
+}
+
+$CacheLock = Enter-GeneratedContentLock -Name "builtin-skinning" -RepositoryRoot $Root
+$Temporary = $null
 try {
+    if (Test-GeneratedContentCurrent -Output $Header -Stamp $Stamp -Fingerprint $Fingerprint) {
+        return
+    }
+
+    $Temporary = Join-Path ([IO.Path]::GetTempPath()) ("KeireBuiltinSkinning-" + [Guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Force -Path $Temporary | Out-Null
     $temporarySource = Join-Path $Temporary "BuiltinSkinning.hlsl"
     Copy-Item -LiteralPath $Source -Destination $temporarySource
     $variants = @(
@@ -52,9 +67,15 @@ try {
     $content = $builder.ToString()
     $existing = if (Test-Path -LiteralPath $Header) { [IO.File]::ReadAllText($Header) } else { "" }
     if ($existing -ne $content) {
-        [IO.File]::WriteAllText($Header, $content, [Text.Encoding]::ASCII)
+        $temporaryHeader = Join-Path $Temporary "BuiltinSkinningShaders.h"
+        [IO.File]::WriteAllText($temporaryHeader, $content, [Text.Encoding]::ASCII)
+        Move-Item -LiteralPath $temporaryHeader -Destination $Header -Force
     }
+    Write-GeneratedContentStamp -Stamp $Stamp -Fingerprint $Fingerprint
 }
 finally {
-    Remove-Item -LiteralPath $Temporary -Recurse -Force -ErrorAction SilentlyContinue
+    if ($Temporary) {
+        Remove-Item -LiteralPath $Temporary -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Exit-GeneratedContentLock -Mutex $CacheLock
 }

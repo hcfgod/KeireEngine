@@ -201,6 +201,13 @@ namespace
                 ui.DrawTriangle({120.0F, 50.0F}, {130.0F, 30.0F}, {140.0F, 50.0F}, {0.0F, 1.0F, 1.0F, 1.0F});
                 ui.DrawFilledTriangle({145.0F, 50.0F}, {155.0F, 30.0F}, {165.0F, 50.0F}, {1.0F, 0.5F, 0.0F, 1.0F});
                 ui.DrawOverlayText({170.0F, 30.0F}, {1.0F, 1.0F, 1.0F, 1.0F}, "overlay");
+                const std::array<std::byte, 4> imagePixels{std::byte{0x33}, std::byte{0x66}, std::byte{0x99},
+                                                           std::byte{0xFF}};
+                const auto image = ui.CreateImage(1, 1, imagePixels);
+                ui.DrawImage(image, {{170.0F, 52.0F}, {186.0F, 68.0F}});
+                CHECK_THROWS_AS(ui.DrawImage(Keire::Ref<Keire::UiImage>{}, {{170.0F, 52.0F}, {186.0F, 68.0F}}),
+                                std::invalid_argument);
+                CHECK_THROWS_AS(ui.DrawImage(image, {{170.0F, 52.0F}, {170.0F, 68.0F}}), std::invalid_argument);
                 {
                     const auto content = ui.ContentRect();
                     const Keire::UiItemRect clipRectangle{{content.Minimum.X + 4.0F, content.Minimum.Y + 4.0F},

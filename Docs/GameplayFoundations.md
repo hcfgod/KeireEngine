@@ -46,9 +46,10 @@ The Project panel creates managed assembly definitions with a transactional star
 scripts only beneath declared source roots. Script and assembly sources open in a configured external editor or the
 operating-system default application.
 Before a C# source opens, the editor regenerates a project-root Visual Studio solution and one SDK-style project per
-`.keireasm`. Visual Studio receives the solution plus `/Edit <script>`, matching Unity's solution-context workflow
-instead of opening an isolated source file. The generated projects are authoring artifacts; managed builds continue to
-regenerate and compile from the canonical assembly definitions.
+`.keireasm`. The first Windows open loads that solution normally and then runs Visual Studio's `File.OpenFile` command
+for the requested script. Later opens target the running Visual Studio instance that has that exact solution loaded,
+instead of opening an isolated source file or relying on the most-recent IDE window. The generated projects are
+authoring artifacts; managed builds continue to regenerate and compile from the canonical assembly definitions.
 
 `ScriptSystem::StartBuild` generates SDK-style `net8.0` gameplay projects under a staging directory, references the
 staged `Keire.Managed.dll`, runs the verified .NET 10 SDK on a cancellable worker, parses source/line/column diagnostics, and

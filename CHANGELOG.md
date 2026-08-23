@@ -10,6 +10,23 @@ versions.
 
 ### Fixed
 
+- Isolated GPU-skinned output buffers per render surface so simultaneous Scene, Game, and preview views cannot
+  overwrite one another's animated deformation.
+- Reduced dense-material render chunks to keep D3D12 sampler tables stable across large modular environments.
+- Created FFmpeg's out-of-tree configure log directory before configuration so a clean Windows Debug dependency cache
+  can be rebuilt instead of leaving the editor without codec headers after an early configure failure.
+- Restored OpenEXR texture imports by building the private FFmpeg runtime with its required pinned zlib dependency,
+  rejecting cached builds that omit the decoder, flushing delayed still-image frames, and accepting half-float
+  grayscale texture planes.
+- Loaded generated gameplay solutions as real Visual Studio solutions before opening the requested C# source, avoiding
+  the editor-only `/Edit` layout that displayed the `.sln` itself under Miscellaneous Files.
+- Unified folders, ordinary assets, and generated Material/Shader graph hierarchies under compact Asset Browser cards
+  and rows with full-item hover/selection, measured labels, type metadata, child-count disclosures, nested connector
+  rails, and an in-place generated-content tray that does not introduce card-level scrolling.
+- Cached built-in rendering, skinning, and VFX shader headers by their generator, compiler, and source content, and
+  serialized cache misses across processes so ordinary builds no longer recompile every shader backend; platform
+  build launchers now also serialize writes to a checkout's shared build tree so concurrent agents cannot race outputs,
+  while unchanged runtime DLL staging no longer rewrites files held by a running editor.
 - Stopped ordinary Windows project generation from rebuilding both private FFmpeg configurations by validating the
   MSVC import library in FFmpeg's actual `bin` install directory instead of the unused `lib` directory, and made
   managed-host staging skip unchanged bundled .NET runtime files on Windows, Linux, and macOS.

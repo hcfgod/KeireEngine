@@ -612,6 +612,7 @@ namespace Keire
                                                std::span<const std::byte> rgbaPixels);
         void Image(const Ref<UiImage>& image, UiSize size = {});
         void Image(const Ref<RenderSurface>& surface, UiSize size = {});
+        void DrawImage(const Ref<UiImage>& image, UiItemRect rectangle);
         void DrawImage(const Ref<RenderSurface>& surface, UiItemRect rectangle);
         [[nodiscard]] bool ImageButton(std::string_view id, const Ref<UiImage>& image, UiSize size = {});
         void DrawLine(UiPosition start, UiPosition end, UiColor color, float thickness = 1.0F);

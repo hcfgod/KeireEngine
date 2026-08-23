@@ -56,6 +56,7 @@ if ($storePython -and $pythonLauncher -and $storePython.Source -like "*\Microsof
 if ($runFast) {
 & $python.Executable @($python.PrefixArguments) (Join-Path $PSScriptRoot "check-repository-layout.py")
 if ($LASTEXITCODE -ne 0) { throw "Repository layout checks failed." }
+& (Join-Path $PSScriptRoot "test-generated-content-cache-windows.ps1")
 & $python.Executable @($python.PrefixArguments) (Join-Path $PSScriptRoot "..\Packaging\sync-sandbox-template.py") --check
 if ($LASTEXITCODE -ne 0) { throw "Sandbox template synchronization checks failed." }
 & (Join-Path $PSScriptRoot "test-clean-windows.ps1")
@@ -359,6 +360,8 @@ $testsPremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireTests\premake5
 $assetToolPremake = Get-Content (Join-Path (Get-RepositoryRoot) "AssetTool\premake5.lua") -Raw
 $assetToolSource = Get-Content (Join-Path (Get-RepositoryRoot) "AssetTool\Source\Main.cpp") -Raw
 $assetWorkerPremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireAssetWorker\premake5.lua") -Raw
+$ffmpegTextureBackend = Get-Content `
+    (Join-Path (Get-RepositoryRoot) "KeireAssetWorker\Source\FfmpegTextureImportBackend.cpp") -Raw
 Assert-True ($corePremake.Contains('touch-ninja-stamp.ps1') -and
              $assetWorkerPremake.Contains('touch-ninja-stamp.ps1') -and
              (Test-Path (Join-Path (Get-RepositoryRoot) 'Scripts\Windows\touch-ninja-stamp.ps1'))) `
@@ -374,10 +377,24 @@ Assert-True $windowsFfmpegBuild.Contains('git -c core.autocrlf=false -C $VendorS
 Assert-True ($windowsFfmpegBuild.Contains('f101fce22d64db10f500242e23e43a251fe14414') -and
              $windowsFfmpegBuild.Contains('$ConfigureText.LastIndexOf($BrokenMsvcProbe')) `
     "Windows FFmpeg builds apply the validated upstream MSVC configure correction exactly once"
+Assert-True ($windowsFfmpegBuild.Contains('$FfbuildDirectory = Join-Path $Output "ffbuild"') -and
+             $windowsFfmpegBuild.Contains('-Path $FfbuildDirectory, $ZlibIncludeDirectory, $ZlibLinkDirectory')) `
+    "Windows FFmpeg builds create the out-of-tree configure log directory before configuration"
 Assert-True ($windowsFfmpegBuild.Contains('bin\avformat-63.dll') -and
              $windowsFfmpegBuild.Contains('bin\avformat.lib') -and
              -not $windowsFfmpegBuild.Contains('lib\avformat.lib')) `
     "Windows FFmpeg cache validation checks the installed runtime and import-library locations"
+Assert-True ($windowsFfmpegBuild.Contains('--enable-zlib') -and
+             $windowsFfmpegBuild.Contains('--enable-decoder=exr') -and
+             $windowsFfmpegBuild.Contains('#define CONFIG_EXR_DECODER 1') -and
+             $unixFfmpegBuild.Contains('--enable-zlib') -and
+             $unixFfmpegBuild.Contains('--enable-decoder=exr') -and
+             $unixFfmpegBuild.Contains('#define CONFIG_EXR_DECODER 1')) `
+    "Private FFmpeg builds require zlib-backed OpenEXR decoding"
+Assert-True ($ffmpegTextureBackend.Contains('receiveStatus == AVERROR(EAGAIN)') -and
+             $ffmpegTextureBackend.Contains('avcodec_send_packet(decoder.get(), nullptr)') -and
+             $ffmpegTextureBackend.Contains('frame.format == AV_PIX_FMT_GRAYF16')) `
+    "OpenEXR decoding flushes delayed still frames and accepts half-float grayscale textures"
 $windowsBuild = Get-Content (Join-Path $Windows "build.ps1") -Raw
 $windowsManagedBuild = Get-Content (Join-Path $Windows "build-managed.ps1") -Raw
 $windowsManagedHostStage = Get-Content (Join-Path $Windows "stage-managed-host.ps1") -Raw

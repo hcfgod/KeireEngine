@@ -22,7 +22,10 @@
 
 namespace
 {
-    constexpr std::size_t MaximumSceneBatchesPerCommandBuffer = 32U;
+    // Dense project shaders can bind sixteen or more samplers per draw. Keep the command-buffer-local D3D12
+    // descriptor working set below SDL's rollover threshold instead of waiting for a failed binding or corrupted
+    // texture table before continuing the surface.
+    constexpr std::size_t MaximumSceneBatchesPerCommandBuffer = 12U;
 
     using Keire::RenderBackend::GeometryDetail::IsFrustumVisible;
     using Keire::RenderBackend::GeometryDetail::ProjectedHeight;
@@ -664,7 +667,7 @@ namespace Keire::RenderBackend
         if (request != Requests.end())
         {
             auto started = std::chrono::steady_clock::now();
-            PrepareSkinning(commands, request->Packet);
+            PrepareSkinning(commands, request->Packet, surface.Id);
             Statistics.SkinningPreparationMilliseconds +=
                 std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
             started = std::chrono::steady_clock::now();

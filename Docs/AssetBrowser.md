@@ -30,12 +30,15 @@ mesh or texture import cannot leave a cached cube or checkerboard preview from a
 
 The Asset Browser is a focused editor panel backed by `AssetDatabase`. It presents a persistent folder tree,
 breadcrumbs, search, List and Grid modes, adjustable thumbnail size, multi-selection, double-click open, drag payloads,
-rename, stable-identity duplicate, and recoverable Move to Trash operations.
-Extracted Shader and Material Functions carry a persistent source-parent identity in their `.keiremeta`. List mode
-indents those sources beneath the graph that produced them. Grid mode keeps their compact rows inside the parent tile
-under an explicit **Show sub-assets** disclosure instead of presenting them as peer thumbnails. Search temporarily
-expands matching groups. Moving a child away from its parent folder or removing the
-parent leaves the child visible as an ordinary standalone asset instead of hiding it.
+rename, stable-identity duplicate, and recoverable Move to Trash operations. Folders, ordinary assets, and grouped
+sources share the same compact card and row chrome, including full-item hover and selection states plus a muted type
+line.
+Extracted Shader and Material Functions carry a persistent source-parent identity in their `.keiremeta`. A parent uses
+the same collapsed footprint as its peers and overlays a disclosure plus generated-child count on its preview. List
+mode indents generated sources with hierarchy rails; Grid mode grows the parent in place and presents children as
+compact rows in an inset tray instead of flat peer thumbnails. Search temporarily expands matching groups. Moving a
+child away from its parent folder or removing the parent leaves the child visible as an ordinary standalone asset
+instead of hiding it.
 Names that do not fit their List or Grid cell are shortened with a measured `...` suffix. Hover either the shortened
 label or its thumbnail to see the complete filename, type, project-relative path, size, stable ID, importer, and any
 import failure diagnostic.
@@ -107,8 +110,9 @@ not rewrite the loaded `.sln` or `.csproj`, so Visual Studio does not prompt to 
 Visual Studio automation sessions, match the loaded solution's canonical path to the current project, and open the
 source through that exact instance. An unrelated most-recent Visual Studio window is never selected. While Visual
 Studio is still starting, or if the original instance has closed, Kéire invokes the solution-associated Visual Studio
-executable with both the exact project solution and requested source instead of sending the file to another project. This
-applies to an explicit `devenv.exe` preference and to the Windows system-default path. Build Settings also exposes
+executable with the exact project solution and a `File.OpenFile` command for the requested source instead of using
+Visual Studio's editor-only `/Edit` mode or sending the file to another project. This applies to an explicit
+`devenv.exe` preference and to the Windows system-default path. Build Settings also exposes
 **Regenerate C# Project**. Generated root `.sln` and `.csproj` files are ignored by newly created projects.
 
 Managed builds keep strict warnings-as-errors behavior for correctness and analyzer diagnostics, but common unused local

@@ -2,18 +2,34 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cache_helper="$ROOT/Scripts/Unix/generated-content-cache.sh"
+source "$cache_helper"
 compiler="$ROOT/Build/Tools/ShaderCompiler/KeireShaderCompiler"
 source_file="$ROOT/KeireCore/Shaders/BuiltinVfx.hlsl"
 generated_directory="$ROOT/Build/Generated/Keire"
 header="$generated_directory/BuiltinVfxShaders.h"
+stamp="$generated_directory/BuiltinVfxShaders.stamp"
+lock="$ROOT/Build/Generated/.locks/builtin-vfx.lock"
 
 [[ -x "$compiler" ]] || {
   printf 'KeireShaderCompiler is required before generating the built-in VFX shaders.\n' >&2
   exit 1
 }
 
-temporary="$(mktemp -d)"
-trap 'rm -rf "$temporary"' EXIT
+fingerprint="$(generated_content_fingerprint builtin-vfx-v1 "${BASH_SOURCE[0]}" "$cache_helper" \
+  "$compiler" "$source_file")"
+generated_content_is_current "$header" "$stamp" "$fingerprint" && exit 0
+
+mkdir -p "$generated_directory"
+generated_content_acquire_lock "$lock"
+temporary=""
+cleanup() {
+  [[ -z "$temporary" ]] || rm -rf "$temporary"
+  generated_content_release_lock "$lock"
+}
+trap cleanup EXIT
+generated_content_is_current "$header" "$stamp" "$fingerprint" && exit 0
+temporary="$(mktemp -d "$generated_directory/.builtin-vfx.XXXXXX")"
 
 stages=(
   "compute CSInitialize Initialize"
@@ -78,5 +94,6 @@ temporary_header="$temporary/BuiltinVfxShaders.h"
 } > "$temporary_header"
 
 if [[ ! -f "$header" ]] || ! cmp -s "$temporary_header" "$header"; then
-  cp "$temporary_header" "$header"
+  mv "$temporary_header" "$header"
 fi
+generated_content_write_stamp "$stamp" "$fingerprint"

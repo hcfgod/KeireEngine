@@ -27,6 +27,17 @@ function GeneratorRootPath(path)
     return path
 end
 
+function CopyFileIfChangedCommand(source, destination, repositoryRoot)
+    repositoryRoot = repositoryRoot or ".."
+    if os.host() == "windows" then
+        return 'powershell -NoProfile -ExecutionPolicy Bypass -File "' .. repositoryRoot ..
+                   '/Scripts/Windows/copy-file-if-changed.ps1" -Source "' .. source .. '" -Destination "' ..
+                   destination .. '"'
+    end
+    return 'bash "' .. repositoryRoot .. '/Scripts/Unix/copy-file-if-changed.sh" "' .. source .. '" "' ..
+               destination .. '"'
+end
+
 local function DependencyLink(path)
     local resolved = GeneratorRootPath(path)
     if (_ACTION == "ninja" or _ACTION == "gmake") and SelectedToolset ~= "msc" then
@@ -105,7 +116,7 @@ function LinkKeireCore()
         filter "system:windows"
             postbuildcommands
             {
-                '{COPYFILE} "' .. netHostRuntime .. '" "' .. runtimeDirectory .. '/nethost.dll"'
+                CopyFileIfChangedCommand(netHostRuntime, runtimeDirectory .. "/nethost.dll", commandRepositoryRoot)
             }
 
         filter {}

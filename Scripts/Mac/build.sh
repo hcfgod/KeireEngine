@@ -2,6 +2,11 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/Scripts/Unix/common.sh"
+source "$ROOT/Scripts/Unix/generated-content-cache.sh"
+build_lock="$ROOT/Build/.locks/native-build.lock"
+generated_content_acquire_lock "$build_lock" 7200 \
+  '==> Another build is using this checkout; waiting for it to finish'
+trap 'generated_content_release_lock "$build_lock"' EXIT
 GENERATOR=xcode4; CONFIGURATION=Debug; ARCHITECTURE="$(native_architecture)"; TOOLSET=default; TARGET=KeireClient; CI=0; UPDATE=0; FORCE=0; INSTALL_OPTIONAL=0
 parse_build_arguments "$@"
 load_project_config "$ROOT"
@@ -54,6 +59,6 @@ if [[ "$TARGET" == "$HUB_TARGET" || "$TARGET" == "$CLIENT_TARGET" ]]; then
         printf 'The pinned marketplace signature verifier runtime is missing: %s\n' "$sodium_runtime" >&2
         exit 1
     }
-    cp -f "$sodium_runtime" "$target_directory/libsodium.dylib"
+    generated_content_copy_file_if_changed "$sodium_runtime" "$target_directory/libsodium.dylib"
     printf '==> Staged pinned marketplace signature verifier for %s\n' "$TARGET"
 fi

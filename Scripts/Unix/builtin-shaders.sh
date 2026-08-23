@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cache_helper="$ROOT/Scripts/Unix/generated-content-cache.sh"
+source "$cache_helper"
 compiler="$ROOT/Build/Tools/ShaderCompiler/KeireShaderCompiler"
 source_files=("$ROOT/KeireCore/Shaders/BuiltinUnlit.hlsl" "$ROOT/KeireCore/Shaders/BuiltinSky.hlsl" \
   "$ROOT/KeireCore/Shaders/BuiltinGrid.hlsl" \
@@ -9,18 +11,24 @@ source_files=("$ROOT/KeireCore/Shaders/BuiltinUnlit.hlsl" "$ROOT/KeireCore/Shade
   "$ROOT/KeireCore/Shaders/BuiltinRuntimeUi.hlsl")
 prefixes=(BuiltinUnlit BuiltinSky BuiltinGrid BuiltinShadow BuiltinToneMap BuiltinRuntimeUi)
 generated="$ROOT/Build/Generated/Keire/BuiltinUnlitShaders.h"
-temporary="$ROOT/Build/Generated/Keire/BuiltinShaderTemporary"
+stamp="$ROOT/Build/Generated/Keire/BuiltinRenderingShaders.stamp"
+lock="$ROOT/Build/Generated/.locks/builtin-rendering.lock"
 
 [[ -x "$compiler" ]] || { printf 'KeireShaderCompiler is required before generating built-in rendering shaders.\n' >&2; exit 1; }
-if [[ -f "$generated" && "$generated" -nt "$compiler" ]]; then
-  current=true
-  for source_file in "${source_files[@]}"; do
-    [[ "$generated" -nt "$source_file" ]] || current=false
-  done
-  $current && exit 0
-fi
+fingerprint="$(generated_content_fingerprint builtin-rendering-v1 "${BASH_SOURCE[0]}" "$cache_helper" \
+  "$compiler" "${source_files[@]}")"
+generated_content_is_current "$generated" "$stamp" "$fingerprint" && exit 0
 
-mkdir -p "$temporary" "$(dirname "$generated")"
+mkdir -p "$(dirname "$generated")"
+generated_content_acquire_lock "$lock"
+temporary=""
+cleanup() {
+  [[ -z "$temporary" ]] || rm -rf "$temporary"
+  generated_content_release_lock "$lock"
+}
+trap cleanup EXIT
+generated_content_is_current "$generated" "$stamp" "$fingerprint" && exit 0
+temporary="$(mktemp -d "$(dirname "$generated")/.builtin-rendering.XXXXXX")"
 names=(VertexDxil FragmentDxil VertexSpirV FragmentSpirV VertexMsl FragmentMsl)
 stages=(vertex fragment vertex fragment vertex fragment)
 entries=(VSMain PSMain VSMain PSMain VSMain PSMain)
@@ -46,6 +54,8 @@ done
     done
   done
   printf '} // namespace Keire::Detail\n'
-} > "$generated.tmp"
-mv "$generated.tmp" "$generated"
-rm -rf "$temporary"
+} > "$temporary/BuiltinUnlitShaders.h"
+if [[ ! -f "$generated" ]] || ! cmp -s "$temporary/BuiltinUnlitShaders.h" "$generated"; then
+  mv "$temporary/BuiltinUnlitShaders.h" "$generated"
+fi
+generated_content_write_stamp "$stamp" "$fingerprint"

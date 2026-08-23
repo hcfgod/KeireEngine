@@ -346,6 +346,7 @@ namespace Keire::RenderBackend
     {
         AssetId Scene;
         EntityId Entity;
+        std::uint64_t Surface = 0;
 
         [[nodiscard]] bool operator==(const GpuSkinInstanceKey&) const noexcept = default;
     };
@@ -356,6 +357,7 @@ namespace Keire::RenderBackend
         {
             auto result = std::hash<AssetId>{}(value.Scene);
             result ^= std::hash<EntityId>{}(value.Entity) + 0x9e3779b9U + (result << 6U) + (result >> 2U);
+            result ^= std::hash<std::uint64_t>{}(value.Surface) + 0x9e3779b9U + (result << 6U) + (result >> 2U);
             return result;
         }
     };
@@ -1196,7 +1198,7 @@ namespace Keire::RenderBackend
         void StartGpuVfxPipelineWarmup();
         void CompileGpuVfxPipelines();
         void ReleaseGpuVfxPipelines() noexcept;
-        void PrepareSkinning(SDL_GPUCommandBuffer* commands, SceneRenderPacket& packet);
+        void PrepareSkinning(SDL_GPUCommandBuffer* commands, SceneRenderPacket& packet, std::uint64_t surface);
         [[nodiscard]] bool EnsureGpuVfxPipelines(bool requireStripPipelines);
         void PrepareGpuVfx(SDL_GPUCommandBuffer* commands, const VfxRenderSnapshot& snapshot,
                            const RenderSurfaceState& surface);

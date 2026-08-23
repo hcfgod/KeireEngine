@@ -56,6 +56,7 @@ namespace KeireEditor
     {
         const Keire::AssetSourceRecord* Record = nullptr;
         std::size_t Depth = 0;
+        std::size_t DirectChildCount = 0;
         bool HasChildren = false;
     };
 

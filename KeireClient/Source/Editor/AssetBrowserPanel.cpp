@@ -1031,111 +1031,305 @@ namespace KeireEditor
             }
         }
 
+        [[nodiscard]] Keire::Ref<Keire::UiImage> AssetImage(const Keire::AssetSourceRecord& record) const
+        {
+            if (const auto found = Images.find(record.Id); found != Images.end())
+                return found->second;
+            if (record.Type == Keire::ShaderGraphAsset::StaticType())
+                return ShaderGraphFallbackImage;
+            if (record.Type == Keire::MaterialGraphAsset::StaticType())
+                return MaterialGraphFallbackImage;
+            if (record.Type == Keire::MaterialInstanceAsset::StaticType() ||
+                record.Type == Keire::ShaderGraphInstanceAsset::StaticType())
+                return MaterialInstanceFallbackImage;
+            if (record.Type == Keire::VfxEffectAsset::StaticType())
+                return VfxFallbackImage;
+            if (record.Type == Keire::AudioMixerAsset::StaticType())
+                return AudioMixerFallbackImage;
+            if (record.Type == Keire::AnimationSourceAsset::StaticType() ||
+                record.Type == Keire::AnimationClipAsset::StaticType())
+                return AnimationFallbackImage;
+            return AssetFallbackImage;
+        }
+
+        void ToggleAssetChildren(const Keire::AssetId asset)
+        {
+            if (ExpandedParents.contains(asset))
+                ExpandedParents.erase(asset);
+            else
+                ExpandedParents.insert(asset);
+        }
+
+        [[nodiscard]] static Keire::UiColor WithAlpha(Keire::UiColor color, const float alpha) noexcept
+        {
+            color.Alpha = alpha;
+            return color;
+        }
+
+        [[nodiscard]] float GridCardHeight(Keire::UiFrame& ui) const
+        {
+            const float lineHeight = std::max(ui.MeasureText("Ag").Height, 12.0F);
+            return ThumbnailSize + lineHeight * 2.0F + 26.0F;
+        }
+
+        [[nodiscard]] static Keire::UiItemRect GridThumbnailArea(const Keire::UiItemRect card,
+                                                                 const float thumbnailSize) noexcept
+        {
+            const float left = card.Minimum.X + (card.Size().Width - thumbnailSize) * 0.5F;
+            return {{left, card.Minimum.Y + 8.0F}, {left + thumbnailSize, card.Minimum.Y + 8.0F + thumbnailSize}};
+        }
+
+        [[nodiscard]] static Keire::UiItemRect GridDisclosureArea(const Keire::UiItemRect card,
+                                                                  const float thumbnailSize) noexcept
+        {
+            const auto thumbnail = GridThumbnailArea(card, thumbnailSize);
+            return {{thumbnail.Maximum.X - 22.0F, thumbnail.Minimum.Y + 2.0F},
+                    {thumbnail.Maximum.X - 2.0F, thumbnail.Minimum.Y + 22.0F}};
+        }
+
+        [[nodiscard]] static Keire::UiItemRect ListDisclosureArea(const Keire::UiItemRect row) noexcept
+        {
+            return {{row.Minimum.X + 4.0F, row.Minimum.Y + 10.0F}, {row.Minimum.X + 24.0F, row.Minimum.Y + 30.0F}};
+        }
+
+        static void DrawItemChrome(Keire::UiFrame& ui, const Keire::UiItemRect area, const bool selected,
+                                   const bool hovered, const Keire::UiThemeDefinition& theme, const float rounding)
+        {
+            ui.DrawFilledRectangle(area, theme.Panel, rounding);
+            if (selected)
+                ui.DrawFilledRectangle(area, theme.Selection, rounding);
+            ui.DrawRectangle(area, selected ? theme.Accent : (hovered ? theme.AccentHovered : theme.Border),
+                             selected ? 2.0F : 1.0F, rounding);
+        }
+
+        static void DrawCountBadge(Keire::UiFrame& ui, const Keire::UiItemRect area, const std::size_t count,
+                                   const Keire::UiThemeDefinition& theme)
+        {
+            const auto label = std::to_string(count);
+            const auto text = ui.MeasureText(label, 11.0F);
+            const float width = std::max(text.Width + 10.0F, 20.0F);
+            const Keire::UiItemRect badge{{area.Maximum.X - width, area.Minimum.Y}, area.Maximum};
+            ui.DrawFilledRectangle(badge, theme.RaisedPanel, 8.0F);
+            ui.DrawRectangle(badge, theme.Border, 1.0F, 8.0F);
+            ui.DrawOverlayText({badge.Minimum.X + (badge.Size().Width - text.Width) * 0.5F, badge.Minimum.Y + 2.0F},
+                               theme.Text, label, 11.0F, badge);
+        }
+
+        void DrawGridItemVisual(Keire::UiFrame& ui, const Keire::UiItemRect area,
+                                const Keire::Ref<Keire::UiImage>& image, const std::string_view name,
+                                const std::string_view type, const bool selected, const bool hovered,
+                                const bool hasChildren, const std::size_t childCount, const bool expanded,
+                                const bool failed, const Keire::UiThemeDefinition& theme) const
+        {
+            DrawItemChrome(ui, area, selected, hovered, theme, 4.0F);
+            const auto thumbnail = GridThumbnailArea(area, ThumbnailSize);
+            ui.DrawImage(image, thumbnail);
+            ui.DrawRectangle(thumbnail, selected ? theme.Accent : theme.Border, selected ? 2.0F : 1.0F, 3.0F);
+            if (failed)
+                ui.DrawFilledCircle({thumbnail.Minimum.X + 7.0F, thumbnail.Minimum.Y + 7.0F}, 4.0F, theme.Error);
+
+            const float textWidth = std::max(area.Size().Width - 16.0F, 1.0F);
+            const auto visibleName = ElideAssetDisplayName(name, textWidth, [&ui](const std::string_view value)
+                                                           { return ui.MeasureText(value, 13.0F).Width; });
+            const auto visibleType = ElideAssetDisplayName(type, textWidth, [&ui](const std::string_view value)
+                                                           { return ui.MeasureText(value, 11.0F).Width; });
+            const auto nameSize = ui.MeasureText(visibleName, 13.0F);
+            const auto typeSize = ui.MeasureText(visibleType, 11.0F);
+            const float nameY = thumbnail.Maximum.Y + 6.0F;
+            ui.DrawOverlayText({area.Minimum.X + (area.Size().Width - nameSize.Width) * 0.5F, nameY}, theme.Text,
+                               visibleName, 13.0F, area);
+            ui.DrawOverlayText({area.Minimum.X + (area.Size().Width - typeSize.Width) * 0.5F, nameY + 16.0F},
+                               theme.MutedText, visibleType, 11.0F, area);
+
+            if (!hasChildren)
+                return;
+            const auto disclosure = GridDisclosureArea(area, ThumbnailSize);
+            ui.DrawFilledRectangle(disclosure, WithAlpha(theme.Panel, 0.92F), 4.0F);
+            ui.DrawRectangle(disclosure, theme.Border, 1.0F, 4.0F);
+            ui.DrawOverlayIcon(expanded ? Keire::UiIcon::ExpandMore : Keire::UiIcon::ChevronRight,
+                               {disclosure.Minimum.X, disclosure.Minimum.Y}, theme.Text);
+            DrawCountBadge(ui,
+                           {{thumbnail.Maximum.X - 36.0F, thumbnail.Maximum.Y - 18.0F},
+                            {thumbnail.Maximum.X - 2.0F, thumbnail.Maximum.Y - 2.0F}},
+                           childCount, theme);
+        }
+
+        static void DrawListItemVisual(Keire::UiFrame& ui, const Keire::UiItemRect area,
+                                       const Keire::Ref<Keire::UiImage>& image, const std::string_view name,
+                                       const std::string_view type, const bool selected, const bool hovered,
+                                       const bool hasChildren, const std::size_t childCount, const bool expanded,
+                                       const bool failed, const Keire::UiThemeDefinition& theme)
+        {
+            DrawItemChrome(ui, area, selected, hovered, theme, 3.0F);
+            if (hasChildren)
+            {
+                const auto disclosure = ListDisclosureArea(area);
+                ui.DrawOverlayIcon(expanded ? Keire::UiIcon::ExpandMore : Keire::UiIcon::ChevronRight,
+                                   {disclosure.Minimum.X, disclosure.Minimum.Y}, theme.MutedText);
+            }
+
+            const Keire::UiItemRect thumbnail{{area.Minimum.X + 28.0F, area.Minimum.Y + 6.0F},
+                                              {area.Minimum.X + 58.0F, area.Minimum.Y + 36.0F}};
+            ui.DrawImage(image, thumbnail);
+            ui.DrawRectangle(thumbnail, selected ? theme.Accent : theme.Border, selected ? 2.0F : 1.0F, 3.0F);
+            if (failed)
+                ui.DrawFilledCircle({thumbnail.Minimum.X + 5.0F, thumbnail.Minimum.Y + 5.0F}, 3.5F, theme.Error);
+
+            float trailingWidth = 8.0F;
+            if (hasChildren)
+            {
+                const auto count = std::to_string(childCount);
+                trailingWidth = std::max(ui.MeasureText(count, 11.0F).Width + 24.0F, 38.0F);
+                DrawCountBadge(ui,
+                               {{area.Maximum.X - trailingWidth, area.Minimum.Y + 12.0F},
+                                {area.Maximum.X - 8.0F, area.Minimum.Y + 30.0F}},
+                               childCount, theme);
+            }
+            const float textWidth = std::max(area.Maximum.X - trailingWidth - (thumbnail.Maximum.X + 8.0F), 1.0F);
+            const auto visibleName = ElideAssetDisplayName(name, textWidth, [&ui](const std::string_view value)
+                                                           { return ui.MeasureText(value, 13.0F).Width; });
+            const auto visibleType = ElideAssetDisplayName(type, textWidth, [&ui](const std::string_view value)
+                                                           { return ui.MeasureText(value, 11.0F).Width; });
+            ui.DrawOverlayText({thumbnail.Maximum.X + 8.0F, area.Minimum.Y + 5.0F}, theme.Text, visibleName, 13.0F,
+                               area);
+            ui.DrawOverlayText({thumbnail.Maximum.X + 8.0F, area.Minimum.Y + 22.0F}, theme.MutedText, visibleType,
+                               11.0F, area);
+        }
+
         void DrawAsset(Keire::UiFrame& ui, const Keire::AssetSourceRecord& record, IAssetBrowserController& editor,
-                       const bool grid, const std::size_t depth, const bool hasChildren)
+                       const bool grid, const std::size_t depth, const std::size_t directChildCount,
+                       const bool hasChildren, const bool forceExpanded = false, const float rowHeight = 42.0F)
         {
             auto id = ui.PushId(record.Id.ToString());
-            auto image = Images.contains(record.Id) ? Images.at(record.Id) : AssetFallbackImage;
-            if (!Images.contains(record.Id))
-            {
-                if (record.Type == Keire::ShaderGraphAsset::StaticType())
-                    image = ShaderGraphFallbackImage;
-                else if (record.Type == Keire::MaterialGraphAsset::StaticType())
-                    image = MaterialGraphFallbackImage;
-                else if (record.Type == Keire::MaterialInstanceAsset::StaticType() ||
-                         record.Type == Keire::ShaderGraphInstanceAsset::StaticType())
-                    image = MaterialInstanceFallbackImage;
-                else if (record.Type == Keire::VfxEffectAsset::StaticType())
-                    image = VfxFallbackImage;
-                else if (record.Type == Keire::AudioMixerAsset::StaticType())
-                    image = AudioMixerFallbackImage;
-                else if (record.Type == Keire::AnimationSourceAsset::StaticType() ||
-                         record.Type == Keire::AnimationClipAsset::StaticType())
-                    image = AnimationFallbackImage;
-            }
+            const auto image = AssetImage(record);
             const bool selected = std::ranges::find(Selection, record.Id) != Selection.end();
             const auto fullName = DisplayName(record.RelativePath);
+            const bool expanded = forceExpanded || ExpandedParents.contains(record.Id);
+            const bool failed =
+                editor.AssetBrowserDatabase()->ImportStatus(record.Id).State == Keire::AssetImportState::Failed;
             bool open = false;
-            const bool expanded = ExpandedParents.contains(record.Id);
             if (grid)
             {
-                if (ui.ImageButton("Thumbnail", image, {ThumbnailSize, ThumbnailSize}))
-                    SelectFromClick(record.Id, ui, editor);
-                open = ui.LastItemState().DoubleClicked;
-                DrawAssetTooltip(ui, record, editor);
-                DrawAssetDragSource(ui, record);
-                DrawAssetContext(ui, record, editor, "ThumbnailContext");
-                const auto visibleName =
-                    ElideAssetDisplayName(fullName, std::max(ui.ContentAvailable().Width - 8.0F, 1.0F),
-                                          [&ui](const std::string_view text) { return ui.MeasureText(text).Width; });
-                if (ui.Selectable(visibleName, selected))
-                    SelectFromClick(record.Id, ui, editor);
-                open |= ui.LastItemState().DoubleClicked;
-                DrawAssetDragSource(ui, record);
-                DrawAssetContext(ui, record, editor, "LabelContext");
-                DrawAssetTooltip(ui, record, editor);
-                if (hasChildren)
+                const auto size = Keire::UiSize{std::max(ui.ContentAvailable().Width, 1.0F), GridCardHeight(ui)};
+                const bool activated = ui.InvisibleButton("AssetCard", size);
+                const auto state = ui.LastItemState();
+                const auto area = ui.LastItemRect();
+                const auto disclosure = GridDisclosureArea(area, ThumbnailSize);
+                const bool disclosureHovered = hasChildren && disclosure.Contains(ui.PointerState().Position);
+                if (activated)
                 {
-                    const auto disclosure = expanded ? "Hide sub-assets" : "Show sub-assets";
-                    if (ui.Selectable(disclosure, false))
-                    {
-                        if (expanded)
-                            ExpandedParents.erase(record.Id);
-                        else
-                            ExpandedParents.insert(record.Id);
-                    }
-                    ui.SetTooltip(expanded ? "Collapse generated assets under this source."
-                                           : "Expand generated assets under this source.",
-                                  {.Delayed = true});
+                    if (disclosureHovered)
+                        ToggleAssetChildren(record.Id);
+                    else
+                        SelectFromClick(record.Id, ui, editor);
                 }
+                open = state.DoubleClicked && !disclosureHovered;
+                if (state.Hovered && disclosureHovered)
+                    ui.SetTooltip(expanded ? "Collapse generated assets" : "Show generated assets", {.Delayed = true});
+                else
+                    DrawAssetTooltip(ui, record, editor);
+                if (!disclosureHovered)
+                    DrawAssetDragSource(ui, record);
+                DrawAssetContext(ui, record, editor, "AssetCardContext");
+                DrawGridItemVisual(ui, area, image, fullName, AssetTypeName(record), selected, state.Hovered,
+                                   hasChildren, directChildCount, expanded, failed, editor.AssetBrowserTheme());
             }
             else
             {
                 auto cursor = ui.CursorPosition();
-                cursor.X += static_cast<float>(depth) * 24.0F;
+                cursor.X += static_cast<float>(depth) * 20.0F;
                 ui.SetCursorPosition(cursor);
-                if (hasChildren)
+                const auto size = Keire::UiSize{std::max(ui.ContentAvailable().Width, 1.0F), rowHeight};
+                const bool activated = ui.InvisibleButton("AssetRow", size);
+                const auto state = ui.LastItemState();
+                const auto area = ui.LastItemRect();
+                const auto disclosure = ListDisclosureArea(area);
+                const bool disclosureHovered = hasChildren && disclosure.Contains(ui.PointerState().Position);
+                if (activated)
                 {
-                    if (ui.IconButton("AssetChildren",
-                                      expanded ? Keire::UiIcon::ExpandMore : Keire::UiIcon::ChevronRight, false,
-                                      {22.0F, 22.0F}))
-                    {
-                        if (expanded)
-                            ExpandedParents.erase(record.Id);
-                        else
-                            ExpandedParents.insert(record.Id);
-                    }
-                    ui.SameLine();
+                    if (disclosureHovered)
+                        ToggleAssetChildren(record.Id);
+                    else
+                        SelectFromClick(record.Id, ui, editor);
                 }
-                else if (depth > 0)
+                open = state.DoubleClicked && !disclosureHovered;
+                if (state.Hovered && disclosureHovered)
+                    ui.SetTooltip(expanded ? "Collapse generated assets" : "Show generated assets", {.Delayed = true});
+                else
+                    DrawAssetTooltip(ui, record, editor);
+                if (!disclosureHovered)
+                    DrawAssetDragSource(ui, record);
+                DrawAssetContext(ui, record, editor, "AssetRowContext");
+                DrawListItemVisual(ui, area, image, fullName, AssetTypeName(record), selected, state.Hovered,
+                                   hasChildren, directChildCount, expanded, failed, editor.AssetBrowserTheme());
+                if (depth > 0)
                 {
-                    cursor = ui.CursorPosition();
-                    cursor.X += 22.0F;
-                    ui.SetCursorPosition(cursor);
+                    const float railX = area.Minimum.X - 10.0F;
+                    const auto rail = WithAlpha(editor.AssetBrowserTheme().Accent, 0.38F);
+                    ui.DrawLine({railX, area.Minimum.Y - 4.0F}, {railX, area.Maximum.Y + 4.0F}, rail);
+                    ui.DrawLine({railX, area.Minimum.Y + area.Size().Height * 0.5F},
+                                {area.Minimum.X - 3.0F, area.Minimum.Y + area.Size().Height * 0.5F}, rail);
                 }
-                if (ui.ImageButton("Thumbnail", image, {32.0F, 32.0F}))
-                    SelectFromClick(record.Id, ui, editor);
-                open = ui.LastItemState().DoubleClicked;
-                DrawAssetTooltip(ui, record, editor);
-                DrawAssetDragSource(ui, record);
-                DrawAssetContext(ui, record, editor, "ThumbnailContext");
-                ui.SameLine();
-                const auto visibleName =
-                    ElideAssetDisplayName(fullName, std::max(ui.ContentAvailable().Width - 8.0F, 1.0F),
-                                          [&ui](const std::string_view text) { return ui.MeasureText(text).Width; });
-                if (ui.Selectable(visibleName, selected))
-                    SelectFromClick(record.Id, ui, editor);
-                open |= ui.LastItemState().DoubleClicked;
-                DrawAssetDragSource(ui, record);
-                DrawAssetContext(ui, record, editor, "LabelContext");
-                DrawAssetTooltip(ui, record, editor);
             }
-            if (editor.AssetBrowserDatabase()->ImportStatus(record.Id).State == Keire::AssetImportState::Failed)
-                ui.TextColored(editor.AssetBrowserTheme().Error, "Import error");
             if (open)
                 Open(record, editor);
             if (RevealAsset == record.Id)
                 RevealAsset = {};
+        }
+
+        void DrawGridAssetGroup(Keire::UiFrame& ui, const std::span<const AssetBrowserHierarchyEntry> entries,
+                                IAssetBrowserController& editor, const bool forceExpanded)
+        {
+            if (entries.empty() || !entries.front().Record)
+                return;
+
+            const auto& parent = entries.front();
+            DrawAsset(ui, *parent.Record, editor, true, 0, parent.DirectChildCount, parent.HasChildren, forceExpanded);
+            if (entries.size() == 1)
+                return;
+
+            const auto& theme = editor.AssetBrowserTheme();
+            const float width = std::max(ui.ContentAvailable().Width, 1.0F);
+            auto trayId = ui.PushId("GeneratedAssetsTray-" + parent.Record->Id.ToString());
+            (void)ui.InvisibleButton("GeneratedAssetsHeader", {width, 24.0F});
+            const auto header = ui.LastItemRect();
+            ui.DrawFilledRectangle(header, theme.RaisedPanel, 3.0F);
+            ui.DrawRectangle(header, theme.Border, 1.0F, 3.0F);
+            ui.DrawFilledRectangle({{header.Minimum.X, header.Minimum.Y}, {header.Minimum.X + 3.0F, header.Maximum.Y}},
+                                   theme.Accent, 3.0F);
+            ui.DrawOverlayText({header.Minimum.X + 9.0F, header.Minimum.Y + 4.0F}, theme.MutedText, "Generated assets",
+                               11.0F, header);
+            const auto headerCount = std::to_string(entries.size() - 1);
+            const auto headerCountSize = ui.MeasureText(headerCount, 11.0F);
+            ui.DrawOverlayText({header.Maximum.X - headerCountSize.Width - 9.0F, header.Minimum.Y + 4.0F},
+                               theme.MutedText, headerCount, 11.0F, header);
+
+            for (std::size_t index = 1; index < entries.size(); ++index)
+            {
+                const auto& child = entries[index];
+                if (!child.Record)
+                    continue;
+                auto childId = ui.PushId("GeneratedAsset-" + child.Record->Id.ToString());
+                auto cursor = ui.CursorPosition();
+                cursor.X += 14.0F + static_cast<float>(child.Depth - 1) * 14.0F;
+                ui.SetCursorPosition(cursor);
+                const auto rowStart = ui.CursorScreenPosition();
+                DrawAsset(ui, *child.Record, editor, false, 0, child.DirectChildCount, child.HasChildren, forceExpanded,
+                          44.0F);
+
+                const auto rail = WithAlpha(theme.Accent, 0.38F);
+                const float railTop = rowStart.Y - 4.0F;
+                const float railBottom = rowStart.Y + 48.0F;
+                for (std::size_t level = 0; level < child.Depth; ++level)
+                {
+                    const float railX = header.Minimum.X + 7.0F + static_cast<float>(level) * 14.0F;
+                    ui.DrawLine({railX, railTop}, {railX, railBottom}, rail);
+                    if (level + 1 == child.Depth)
+                    {
+                        ui.DrawLine({railX, rowStart.Y + 22.0F}, {rowStart.X - 3.0F, rowStart.Y + 22.0F}, rail);
+                    }
+                }
+            }
         }
 
         void AcceptFolderPayloads(Keire::UiFrame& ui, const std::filesystem::path& folder,
@@ -1220,66 +1414,26 @@ namespace KeireEditor
                                                        : std::to_string(payloadFolders.size()) + " folders");
                 }
             };
-            bool open = false;
+            const auto size = grid ? Keire::UiSize{std::max(ui.ContentAvailable().Width, 1.0F), GridCardHeight(ui)}
+                                   : Keire::UiSize{std::max(ui.ContentAvailable().Width, 1.0F), 42.0F};
+            const bool activated = ui.InvisibleButton(grid ? "FolderCard" : "FolderRow", size);
+            const auto state = ui.LastItemState();
+            const auto area = ui.LastItemRect();
+            if (activated)
+                SelectFolderFromClick(folder, ui, editor);
+            const bool open = state.DoubleClicked;
+            if (state.Hovered)
+                ui.SetTooltip((std::filesystem::path("Assets") / folder).generic_string(), {.Delayed = true});
+            drawDragSource();
+            DrawFolderContext(ui, folder, editor, grid ? "FolderCardContext" : "FolderRowContext");
             if (grid)
-            {
-                if (ui.ImageButton("Folder", FolderImage, {ThumbnailSize, ThumbnailSize}))
-                    SelectFolderFromClick(folder, ui, editor);
-                open = ui.LastItemState().DoubleClicked;
-                auto area = ui.LastItemRect();
-                if (selected)
-                    ui.DrawRectangle(area, editor.AssetBrowserTheme().Accent, 2.0F, 4.0F);
-                drawDragSource();
-                DrawFolderContext(ui, folder, editor, "FolderImageContext");
-                if (ui.Selectable(folder.filename().string(), selected))
-                    SelectFolderFromClick(folder, ui, editor);
-                open |= ui.LastItemState().DoubleClicked;
-                const auto labelArea = ui.LastItemRect();
-                area.Minimum.X = std::min(area.Minimum.X, labelArea.Minimum.X);
-                area.Minimum.Y = std::min(area.Minimum.Y, labelArea.Minimum.Y);
-                area.Maximum.X = std::max(area.Maximum.X, labelArea.Maximum.X);
-                area.Maximum.Y = std::max(area.Maximum.Y, labelArea.Maximum.Y);
-                area.Minimum.X -= 4.0F;
-                area.Minimum.Y -= 4.0F;
-                area.Maximum.X =
-                    std::max(area.Maximum.X + 4.0F, area.Minimum.X + std::max(ui.ContentAvailable().Width, 1.0F));
-                area.Maximum.Y += 4.0F;
-                drawDragSource();
-                DrawFolderContext(ui, folder, editor, "FolderLabelContext");
-                ExternalDropTargets.push_back({area, folder});
-                AcceptFolderDrop(ui, area, folder, editor);
-                ui.SetTooltip((std::filesystem::path("Assets") / folder).generic_string(), {.Delayed = true});
-            }
+                DrawGridItemVisual(ui, area, FolderImage, folder.filename().string(), "Folder", selected, state.Hovered,
+                                   false, 0, false, false, editor.AssetBrowserTheme());
             else
-            {
-                if (ui.ImageButton("Folder", FolderImage, {32.0F, 32.0F}))
-                    SelectFolderFromClick(folder, ui, editor);
-                open = ui.LastItemState().DoubleClicked;
-                auto area = ui.LastItemRect();
-                if (selected)
-                    ui.DrawRectangle(area, editor.AssetBrowserTheme().Accent, 2.0F, 4.0F);
-                drawDragSource();
-                DrawFolderContext(ui, folder, editor, "FolderImageContext");
-                ui.SameLine();
-                if (ui.Selectable(folder.filename().string(), selected))
-                    SelectFolderFromClick(folder, ui, editor);
-                open |= ui.LastItemState().DoubleClicked;
-                const auto labelArea = ui.LastItemRect();
-                area.Minimum.X = std::min(area.Minimum.X, labelArea.Minimum.X);
-                area.Minimum.Y = std::min(area.Minimum.Y, labelArea.Minimum.Y);
-                area.Maximum.X = std::max(area.Maximum.X, labelArea.Maximum.X);
-                area.Maximum.Y = std::max(area.Maximum.Y, labelArea.Maximum.Y);
-                area.Minimum.X -= 4.0F;
-                area.Minimum.Y -= 4.0F;
-                area.Maximum.X =
-                    std::max(area.Maximum.X + 4.0F, area.Minimum.X + std::max(ui.ContentAvailable().Width, 1.0F));
-                area.Maximum.Y += 4.0F;
-                drawDragSource();
-                DrawFolderContext(ui, folder, editor, "FolderLabelContext");
-                ExternalDropTargets.push_back({area, folder});
-                AcceptFolderDrop(ui, area, folder, editor);
-                ui.SetTooltip((std::filesystem::path("Assets") / folder).generic_string(), {.Delayed = true});
-            }
+                DrawListItemVisual(ui, area, FolderImage, folder.filename().string(), "Folder", selected, state.Hovered,
+                                   false, 0, false, false, editor.AssetBrowserTheme());
+            ExternalDropTargets.push_back({area, folder});
+            AcceptFolderDrop(ui, area, folder, editor);
             if (open)
                 CurrentFolder = folder;
         }
@@ -1443,7 +1597,8 @@ namespace KeireEditor
                     if (Search.empty() || folder.filename().string().find(Search) != std::string::npos)
                         DrawFolder(ui, folder, editor, false);
                 for (const auto& entry : hierarchy)
-                    DrawAsset(ui, *entry.Record, editor, false, entry.Depth, entry.HasChildren);
+                    DrawAsset(ui, *entry.Record, editor, false, entry.Depth, entry.DirectChildCount, entry.HasChildren,
+                              !Search.empty());
                 const auto remaining = ui.ContentAvailable();
                 (void)ui.InvisibleButton("AssetCurrentFolderDrop",
                                          {std::max(remaining.Width, 1.0F), std::max(remaining.Height, 24.0F)});
@@ -1458,7 +1613,7 @@ namespace KeireEditor
             const float availableWidth = std::max(ui.ContentAvailable().Width, 0.0F);
             if (availableWidth > 1.0F)
             {
-                const float cellWidth = std::max(ThumbnailSize + 28.0F, 1.0F);
+                const float cellWidth = std::max(ThumbnailSize + 40.0F, 136.0F);
                 const auto calculatedColumns = static_cast<std::size_t>(std::floor(availableWidth / cellWidth));
                 const auto columns = std::clamp<std::size_t>(calculatedColumns, 1, 32);
                 const Keire::UiTableOptions gridOptions{.Sizing = Keire::UiTableSizing::Equal,
@@ -1484,23 +1639,18 @@ namespace KeireEditor
                         nextCell();
                         DrawFolder(ui, folder, editor, true);
                     }
-                    bool drawingChildren = false;
-                    for (const auto& entry : hierarchy)
+                    for (std::size_t index = 0; index < hierarchy.size();)
                     {
-                        if (entry.Depth == 0)
-                        {
-                            nextCell();
-                            drawingChildren = false;
-                            DrawAsset(ui, *entry.Record, editor, true, 0, entry.HasChildren);
-                            continue;
-                        }
-                        if (!drawingChildren)
-                        {
-                            ui.Separator();
-                            ui.TextColored(editor.AssetBrowserTheme().MutedText, "SUB-ASSETS");
-                            drawingChildren = true;
-                        }
-                        DrawAsset(ui, *entry.Record, editor, false, entry.Depth - 1, entry.HasChildren);
+                        const auto begin = index;
+                        ++index;
+                        while (index < hierarchy.size() && hierarchy[index].Depth > 0)
+                            ++index;
+                        nextCell();
+                        const auto group = std::span(hierarchy).subspan(begin, index - begin);
+                        if (group.front().HasChildren)
+                            DrawGridAssetGroup(ui, group, editor, !Search.empty());
+                        else
+                            DrawAsset(ui, *group.front().Record, editor, true, 0, 0, false);
                     }
                 }
             }

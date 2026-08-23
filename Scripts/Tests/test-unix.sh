@@ -31,6 +31,7 @@ if [[ $run_fast -eq 1 ]]; then
 assert_false grep -R -E -q 'declare[[:space:]]+-A|local[[:space:]]+-A' \
   "$ROOT/Scripts/Unix" "$ROOT/Scripts/Linux" "$ROOT/Scripts/Mac"
 python3 "$ROOT/Scripts/Tests/check-repository-layout.py"
+bash "$ROOT/Scripts/Tests/test-generated-content-cache-unix.sh"
 python3 "$ROOT/Scripts/Packaging/sync-sandbox-template.py" --check
 bash "$ROOT/Scripts/Tests/test-clean-unix.sh"
 bash "$ROOT/Scripts/Tests/test-editor-package-unix.sh"
@@ -556,6 +557,14 @@ assert_false grep -F -q '"system:linux or macosx"' "$ROOT/KeireAssetWorker/prema
 assert_true grep -F -q -- '--install-name-dir=@rpath' "$ROOT/Scripts/Unix/ffmpeg.sh"
 assert_true grep -F -q 'git -C "$VENDOR_SOURCE" archive --format=tar "$COMMIT"' \
   "$ROOT/Scripts/Unix/ffmpeg.sh"
+assert_true grep -F -q -- '--enable-zlib' "$ROOT/Scripts/Unix/ffmpeg.sh"
+assert_true grep -F -q -- '--enable-decoder=exr' "$ROOT/Scripts/Unix/ffmpeg.sh"
+assert_true grep -F -q '#define CONFIG_EXR_DECODER 1' "$ROOT/Scripts/Unix/ffmpeg.sh"
+assert_true grep -F -q 'ffmpeg.sh" Debug "$base/Release"' "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -F -q 'receiveStatus == AVERROR(EAGAIN)' \
+  "$ROOT/KeireAssetWorker/Source/FfmpegTextureImportBackend.cpp"
+assert_true grep -F -q 'frame.format == AV_PIX_FMT_GRAYF16' \
+  "$ROOT/KeireAssetWorker/Source/FfmpegTextureImportBackend.cpp"
 assert_true grep -F -q 'bin\avformat.lib' "$ROOT/Scripts/Windows/ffmpeg.ps1"
 assert_false grep -F -q 'lib\avformat.lib' "$ROOT/Scripts/Windows/ffmpeg.ps1"
 assert_true test -z "$(find "$ROOT/KeireCore/Source" "$ROOT/KeireClient/Source" "$ROOT/KeireHub/Source" "$ROOT/KeireTests/Source" "$ROOT/AssetTool/Source" "$ROOT/KeireRuntime/Source" -type f -name '*.h' -print -quit)"

@@ -219,7 +219,12 @@ Xcode generation is also supported, but command-line validation should still use
 
 Build/test automatically regenerate after source files are added/removed, Premake/config inputs change, generator or
 architecture changes, or generated outputs disappear. The generation fingerprint prevents the stale-project linker
-failure that otherwise follows a new translation unit. Ordinary C++ content edits only rebuild affected targets:
+failure that otherwise follows a new translation unit. Built-in rendering, skinning, and VFX shaders use
+content-fingerprinted headers; unchanged inputs return immediately, and concurrent builds serialize a cache miss so
+only one process invokes the shader compiler. Platform build launchers also serialize writes to a checkout's shared
+`Build` tree, so a second build waits instead of corrupting or replacing the first build's outputs. Ordinary C++
+content edits only rebuild affected targets, and unchanged staged runtime libraries are left untouched so a running
+editor does not block an otherwise no-op build:
 
 Keep new headers in the owning project’s `Include/` tree and new implementation files in `Source/`. Directory names
 are case-sensitive repository contracts even on Windows: use `Docs`, `Include`, and `Source`, never `docs` or `src`

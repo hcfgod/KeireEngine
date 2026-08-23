@@ -1101,6 +1101,17 @@ namespace Keire
             ImGui::Dummy({size.Width, size.Height});
     }
 
+    void UiFrame::DrawImage(const Ref<UiImage>& image, const UiItemRect rectangle)
+    {
+        m_Impl->RequireActive("DrawImage(UiImage)");
+        if (!image || !image->m_Impl->Texture || rectangle.Maximum.X <= rectangle.Minimum.X ||
+            rectangle.Maximum.Y <= rectangle.Minimum.Y)
+            throw std::invalid_argument("UiFrame::DrawImage requires a valid UI image and rectangle.");
+        ImGui::GetWindowDrawList()->AddImage(image->m_Impl->Texture->GetTexRef(),
+                                             {rectangle.Minimum.X, rectangle.Minimum.Y},
+                                             {rectangle.Maximum.X, rectangle.Maximum.Y});
+    }
+
     void UiFrame::DrawImage(const Ref<RenderSurface>& surface, const UiItemRect rectangle)
     {
         m_Impl->RequireActive("DrawImage(RenderSurface)");

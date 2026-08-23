@@ -282,7 +282,7 @@ TEST_CASE("asset browser record views cache a sorted 50000-asset project slice")
 
 TEST_CASE("asset browser source hierarchy collapses persistent child assets")
 {
-    std::array<Keire::AssetSourceRecord, 4> records;
+    std::array<Keire::AssetSourceRecord, 5> records;
     for (auto& record : records)
         record.Id = Keire::AssetId::Generate();
     records[0].RelativePath = "Graphs/Main.keirematerialgraph";
@@ -291,21 +291,46 @@ TEST_CASE("asset browser source hierarchy collapses persistent child assets")
     records[2].RelativePath = "Graphs/Layer.keiremateriallayer";
     records[2].ParentSource = records[0].Id;
     records[3].RelativePath = "Graphs/Standalone.keirematerialfunction";
-    const std::array<const Keire::AssetSourceRecord*, 4> pointers{&records[1], &records[0], &records[2], &records[3]};
+    records[4].RelativePath = "Graphs/Nested.keirematerialfunction";
+    records[4].ParentSource = records[1].Id;
+    const std::array<const Keire::AssetSourceRecord*, 5> pointers{&records[1], &records[0], &records[2], &records[3],
+                                                                  &records[4]};
 
     const auto collapsed = KeireEditor::BuildAssetBrowserHierarchy(pointers, {});
     REQUIRE(collapsed.size() == 2);
     CHECK(collapsed[0].Record == &records[0]);
     CHECK(collapsed[0].HasChildren);
+    CHECK(collapsed[0].DirectChildCount == 2);
     CHECK(collapsed[1].Record == &records[3]);
+    CHECK(collapsed[1].DirectChildCount == 0);
 
     const std::array expanded{records[0].Id};
     const auto visible = KeireEditor::BuildAssetBrowserHierarchy(pointers, expanded);
     REQUIRE(visible.size() == 4);
     CHECK(visible[0].Record == &records[0]);
+    CHECK(visible[0].DirectChildCount == 2);
     CHECK(visible[1].Depth == 1);
+    CHECK(visible[1].HasChildren);
+    CHECK(visible[1].DirectChildCount == 1);
     CHECK(visible[2].Depth == 1);
     CHECK(visible[3].Record == &records[3]);
+
+    const std::array nestedExpanded{records[0].Id, records[1].Id};
+    const auto nestedVisible = KeireEditor::BuildAssetBrowserHierarchy(pointers, nestedExpanded);
+    REQUIRE(nestedVisible.size() == 5);
+    CHECK(nestedVisible[2].Record == &records[4]);
+    CHECK(nestedVisible[2].Depth == 2);
+    CHECK(nestedVisible[3].Record == &records[2]);
+    CHECK(nestedVisible[4].Record == &records[3]);
+
+    const auto searchVisible = KeireEditor::BuildAssetBrowserHierarchy(pointers, {}, true);
+    REQUIRE(searchVisible.size() == 5);
+    CHECK(searchVisible[0].Record == &records[0]);
+    CHECK(searchVisible[1].Record == &records[1]);
+    CHECK(searchVisible[2].Record == &records[4]);
+    CHECK(searchVisible[2].Depth == 2);
+    CHECK(searchVisible[3].Record == &records[2]);
+    CHECK(searchVisible[4].Record == &records[3]);
 }
 
 TEST_CASE("asset browser utilities preserve preferences and deterministic folder routing")

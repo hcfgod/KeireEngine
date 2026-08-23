@@ -15,7 +15,18 @@ $VendorSource = Join-Path $Root "Vendor\ffmpeg"
 $Output = Join-Path $Root "Build\Dependencies\ffmpeg\$Configuration"
 $Install = Join-Path $Output "install"
 $Stamp = Join-Path $Output "keire-ffmpeg.stamp"
-$Expected = "$($Lock.FFMPEG_COMMIT)|$Configuration|shared-lgpl-avformat-avcodec-swresample-avutil-v2"
+$ZlibBuild = Join-Path $Root "Build\Dependencies\windows-x86_64-msc\Release"
+$ZlibSourceInclude = Join-Path $Root "Vendor\assimp\contrib\zlib"
+$ZlibGeneratedInclude = Join-Path $ZlibBuild "Assimp\contrib\zlib"
+$ZlibLibrary = Join-Path $ZlibBuild "install\lib\zlibstatic.lib"
+$ZlibStamp = Join-Path $ZlibBuild "keire-dependency.stamp"
+if (-not (Test-Path -LiteralPath (Join-Path $ZlibSourceInclude "zlib.h")) -or
+    -not (Test-Path -LiteralPath (Join-Path $ZlibGeneratedInclude "zconf.h")) -or
+    -not (Test-Path -LiteralPath $ZlibLibrary) -or -not (Test-Path -LiteralPath $ZlibStamp)) {
+    throw "The Release native dependency build is missing the zlib files required by private FFmpeg."
+}
+$ZlibKey = (Get-Content -LiteralPath $ZlibStamp -Raw).Trim()
+$Expected = "$($Lock.FFMPEG_COMMIT)|$Configuration|$ZlibKey|shared-lgpl-avformat-avcodec-swresample-avutil-zlib-exr-v6"
 
 if (-not (Test-Path -LiteralPath (Join-Path $VendorSource "configure"))) {
     throw "Vendor/ffmpeg is unavailable. Initialize the locked FFmpeg submodule first."
@@ -27,6 +38,8 @@ if ($LASTEXITCODE -ne 0 -or $Actual -ne $Lock.FFMPEG_COMMIT) {
 if (-not $Force -and (Test-Path -LiteralPath (Join-Path $Install "include\libavformat\avformat.h")) -and
     (Test-Path -LiteralPath (Join-Path $Install "bin\avformat-63.dll")) -and
     (Test-Path -LiteralPath (Join-Path $Install "bin\avformat.lib")) -and
+    (Test-Path -LiteralPath (Join-Path $Output "config_components.h")) -and
+    (Select-String -LiteralPath (Join-Path $Output "config_components.h") -SimpleMatch "#define CONFIG_EXR_DECODER 1" -Quiet) -and
     (Test-Path -LiteralPath $Stamp) -and ((Get-Content -LiteralPath $Stamp -Raw).Trim() -eq $Expected)) {
     Write-Host "==> Private FFmpeg $Configuration build is current"
     return
@@ -34,9 +47,12 @@ if (-not $Force -and (Test-Path -LiteralPath (Join-Path $Install "include\libavf
 if ($Configuration -eq "Release" -and -not $Force) {
     $DebugInstall = Join-Path $Root "Build\Dependencies\ffmpeg\Debug\install"
     $DebugStamp = Join-Path $Root "Build\Dependencies\ffmpeg\Debug\keire-ffmpeg.stamp"
-    $DebugExpected = "$($Lock.FFMPEG_COMMIT)|Debug|shared-lgpl-avformat-avcodec-swresample-avutil-v2"
+    $DebugComponents = Join-Path $Root "Build\Dependencies\ffmpeg\Debug\config_components.h"
+    $DebugExpected = "$($Lock.FFMPEG_COMMIT)|Debug|$ZlibKey|shared-lgpl-avformat-avcodec-swresample-avutil-zlib-exr-v6"
     if ((Test-Path -LiteralPath (Join-Path $DebugInstall "bin\avformat-63.dll")) -and
         (Test-Path -LiteralPath (Join-Path $DebugInstall "bin\avformat.lib")) -and
+        (Test-Path -LiteralPath $DebugComponents) -and
+        (Select-String -LiteralPath $DebugComponents -SimpleMatch "#define CONFIG_EXR_DECODER 1" -Quiet) -and
         (Test-Path -LiteralPath $DebugStamp) -and
         ((Get-Content -LiteralPath $DebugStamp -Raw).Trim() -eq $DebugExpected)) {
         New-Item -ItemType Directory -Force -Path $Output | Out-Null
@@ -114,6 +130,28 @@ function Convert-ToBashPath([string]$Path) {
 $SourceBash = Convert-ToBashPath $Source
 $OutputBash = Convert-ToBashPath $Output
 $InstallBash = Convert-ToBashPath $Install
+$FfbuildDirectory = Join-Path $Output "ffbuild"
+$ZlibIncludeDirectory = Join-Path $Output "zlib-include"
+$ZlibLinkDirectory = Join-Path $Output "zlib-lib"
+# FFmpeg opens ffbuild/config.log before its configure script materializes the rest of the out-of-tree directory
+# layout. Create that log parent explicitly so a clean cache cannot fail before configuration begins.
+New-Item -ItemType Directory -Force -Path $FfbuildDirectory, $ZlibIncludeDirectory, $ZlibLinkDirectory | Out-Null
+Copy-Item -LiteralPath (Join-Path $ZlibSourceInclude "zlib.h"), (Join-Path $ZlibGeneratedInclude "zconf.h") `
+    -Destination $ZlibIncludeDirectory
+# FFmpeg's private config.h defines the generic HAVE_UNISTD_H macro because its compatibility headers provide one.
+# The native MSVC zlib build does not use that compatibility layer, so keep zconf.h from inferring a Unix API here.
+$ZconfPath = Join-Path $ZlibIncludeDirectory "zconf.h"
+$ZconfText = [IO.File]::ReadAllText($ZconfPath)
+$ZconfUnistdProbe = "#ifdef HAVE_UNISTD_H    /* may be set to #if 1 by ./configure */"
+if ($ZconfText.IndexOf($ZconfUnistdProbe, [StringComparison]::Ordinal) -lt 0) {
+    throw "The pinned zlib configuration no longer contains the expected unistd compatibility probe."
+}
+[IO.File]::WriteAllText($ZconfPath,
+    $ZconfText.Replace($ZconfUnistdProbe, "#if defined(HAVE_UNISTD_H) && !defined(_WIN32)"),
+    [Text.UTF8Encoding]::new($false))
+Copy-Item -LiteralPath $ZlibLibrary -Destination (Join-Path $ZlibLinkDirectory "zlib.lib")
+$ZlibIncludeDirectoryBash = Convert-ToBashPath $ZlibIncludeDirectory
+$ZlibLinkDirectoryBash = Convert-ToBashPath $ZlibLinkDirectory
 $DebugOptions = "--disable-debug"
 $Jobs = [Math]::Max(1, [Environment]::ProcessorCount)
 $Configure = @(
@@ -138,13 +176,18 @@ $Configure = @(
     "--enable-avcodec",
     "--enable-swresample",
     "--enable-avutil",
+    "--enable-zlib",
+    "--enable-decoder=exr",
     "--enable-encoder=flac",
-    "--enable-muxer=flac"
+    "--enable-muxer=flac",
+    "--extra-cflags=`"-MD -I$ZlibIncludeDirectoryBash`"",
+    "--extra-ldflags=`"-libpath:$ZlibLinkDirectoryBash`""
 ) -join " "
 
 Write-Host "==> Building private LGPL FFmpeg $Configuration libraries"
 $Command = "export PATH=/usr/bin:`$PATH; set -euo pipefail; cd '$OutputBash'; " +
     "'$SourceBash/configure' $Configure $DebugOptions; " +
+    "cd '$SourceBash'; find . -type d -exec mkdir -p '$OutputBash'/{} \;; cd '$OutputBash'; " +
     "make -j$Jobs; make install"
 & $Bash -c $Command
 if ($LASTEXITCODE -ne 0) { throw "Private FFmpeg $Configuration source build failed." }

@@ -192,7 +192,8 @@ namespace KeireEditor
                 return;
             const auto found = children.find(record.Id);
             const bool hasChildren = found != children.end() && !found->second.empty();
-            result.push_back({&record, depth, hasChildren});
+            const auto directChildCount = hasChildren ? found->second.size() : 0;
+            result.push_back({&record, depth, directChildCount, hasChildren});
             if (!hasChildren || (!expandAll && !expanded.contains(record.Id)))
                 return;
             for (const auto* child : found->second)
