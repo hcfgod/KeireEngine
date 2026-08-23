@@ -19,8 +19,10 @@
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
-#include <OleAuto.h>
 #include <Windows.h>
+
+#include <OleAuto.h>
+#include <objbase.h>
 #include <shellapi.h>
 
 #if defined(_MSC_VER)

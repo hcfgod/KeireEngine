@@ -441,7 +441,7 @@ namespace Keire::Detail
                 bool equal = true;
                 while (offset < contents.size())
                 {
-                    const auto count = std::min(buffer.size(), contents.size() - offset);
+                    const auto count = (std::min)(buffer.size(), contents.size() - offset);
                     stream.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(count));
                     if (stream.gcount() != static_cast<std::streamsize>(count) ||
                         !std::equal(buffer.begin(), buffer.begin() + static_cast<std::ptrdiff_t>(count),
