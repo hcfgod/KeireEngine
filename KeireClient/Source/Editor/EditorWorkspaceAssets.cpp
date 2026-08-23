@@ -150,6 +150,13 @@ std::vector<Keire::ManagedAssetTypeDescriptor> EditorWorkspaceLayer::AssetBrowse
                                                       : std::vector<Keire::ManagedAssetTypeDescriptor>{};
 }
 
+std::vector<Keire::ManagedAssetTypeDiagnostic> EditorWorkspaceLayer::AssetBrowserManagedAssetTypeDiagnostics() const
+{
+    const auto scripts = Owner().Scripts();
+    return scripts && scripts->RuntimeHostAvailable() ? scripts->ManagedAssetTypeDiagnostics()
+                                                      : std::vector<Keire::ManagedAssetTypeDiagnostic>{};
+}
+
 std::filesystem::path EditorWorkspaceLayer::AssetBrowserExternalEditor() const
 {
     if (!m_ProjectSettingsDocument)

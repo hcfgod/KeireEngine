@@ -511,8 +511,9 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                   "public ReusedNestedTuning Primary = new(); "
                   "[StableFieldId(\"73616e64-626f-4078-8000-000000000197\")] "
                   "public ReusedNestedTuning Secondary = new(); } "
+                  "[CreateAssetMenu(\"Gameplay/Implicit Tuning\", \"ImplicitTuning\")] "
                   "[StableAssetTypeId(\"73616e64-626f-4078-8000-000000000193\")] "
-                  "public sealed class InvalidTuning : ScriptableObject { public float MissingStableId = 1.0f; } "
+                  "public sealed class ImplicitFieldTuning : ScriptableObject { public float Value = 1.0f; } "
                   "[StableAssetTypeId(\"73616e64-626f-4078-8000-000000000198\")] "
                   "public sealed class DuplicateFieldTuning : ScriptableObject { "
                   "[StableFieldId(\"73616e64-626f-4078-8000-000000000199\")] public float First = 1.0f; "
@@ -589,11 +590,17 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     REQUIRE(playerTuning->Properties[4].Children.size() == 1);
     CHECK(playerTuning->Properties[3].Children[0].StableFieldId ==
           playerTuning->Properties[4].Children[0].StableFieldId);
+    const auto implicitTuning = std::ranges::find(managedAssetTypes, std::string("Game.ImplicitFieldTuning"),
+                                                  &Keire::ManagedAssetTypeDescriptor::FullName);
+    REQUIRE(implicitTuning != managedAssetTypes.end());
+    CHECK(implicitTuning->MenuPath == "Gameplay/Implicit Tuning");
+    REQUIRE(implicitTuning->Properties.size() == 1);
+    CHECK(implicitTuning->Properties[0].StableFieldId);
     const auto assetDiagnostics = scripts->ManagedAssetTypeDiagnostics();
     CHECK_FALSE(std::ranges::any_of(assetDiagnostics, [](const Keire::ManagedAssetTypeDiagnostic& diagnostic)
                                     { return diagnostic.TypeName.starts_with("Keire."); }));
-    CHECK(std::ranges::any_of(assetDiagnostics, [](const Keire::ManagedAssetTypeDiagnostic& diagnostic)
-                              { return diagnostic.TypeName == "Game.InvalidTuning"; }));
+    CHECK_FALSE(std::ranges::any_of(assetDiagnostics, [](const Keire::ManagedAssetTypeDiagnostic& diagnostic)
+                                    { return diagnostic.TypeName == "Game.ImplicitFieldTuning"; }));
     CHECK(std::ranges::any_of(assetDiagnostics, [](const Keire::ManagedAssetTypeDiagnostic& diagnostic)
                               { return diagnostic.TypeName == "Game.DuplicateFieldTuning"; }));
     const auto componentType = Keire::ComponentTypeId::Parse("73616e64-626f-4078-8000-000000000099");

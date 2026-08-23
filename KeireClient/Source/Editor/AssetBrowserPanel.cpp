@@ -17,6 +17,7 @@
 #include <cmath>
 #include <optional>
 #include <ranges>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -315,6 +316,71 @@ namespace KeireEditor
             }
         }
 
+        void DrawManagedDataCreateItems(Keire::UiFrame& ui,
+                                        const std::span<const Keire::ManagedAssetTypeDescriptor> types,
+                                        const std::string_view prefix = {})
+        {
+            const auto leafLabel = [](const Keire::ManagedAssetTypeDescriptor* type)
+            {
+                const auto path = std::string_view(type->MenuPath);
+                const auto separator = path.find_last_of('/');
+                return separator == std::string_view::npos ? path : path.substr(separator + 1);
+            };
+            std::vector<const Keire::ManagedAssetTypeDescriptor*> leaves;
+            std::set<std::string, std::less<>> childMenus;
+            for (const auto& type : types)
+            {
+                if (type.MenuPath.empty() || !type.MenuPath.starts_with(prefix))
+                    continue;
+                const auto remainder = std::string_view(type.MenuPath).substr(prefix.size());
+                const auto separator = remainder.find('/');
+                if (separator == std::string_view::npos)
+                    leaves.push_back(&type);
+                else
+                    childMenus.emplace(remainder.substr(0, separator));
+            }
+            std::ranges::sort(leaves, {}, leafLabel);
+            for (const auto* type : leaves)
+            {
+                const auto label = std::string_view(type->MenuPath).substr(prefix.size());
+                if (ui.MenuItem(std::string(label) + "###ManagedData." + type->StableTypeId.ToString()))
+                    RequestManagedDataCreate(*type);
+            }
+            for (const auto& child : childMenus)
+            {
+                const auto childPrefix = std::string(prefix) + child + '/';
+                if (auto menu = ui.BeginMenu(child + "###ManagedDataMenu." + childPrefix); menu)
+                    DrawManagedDataCreateItems(ui, types, childPrefix);
+            }
+        }
+
+        void DrawManagedDataDiagnostics(Keire::UiFrame& ui, IAssetBrowserController& editor,
+                                        const bool hasAuthorableTypes)
+        {
+            const auto diagnostics = editor.AssetBrowserManagedAssetTypeDiagnostics();
+            if (hasAuthorableTypes && diagnostics.empty())
+                return;
+            const auto label = hasAuthorableTypes ? "ScriptableObject Errors###ManagedDataErrors"
+                                                  : "ScriptableObject Asset###ManagedDataUnavailable";
+            if (auto menu = ui.BeginMenu(label); menu)
+            {
+                if (!hasAuthorableTypes)
+                    (void)ui.MenuItem("No compiled CreateAssetMenu types", false, false);
+                if (diagnostics.empty())
+                {
+                    (void)ui.MenuItem("Build scripts to populate this menu", false, false);
+                    return;
+                }
+                if (!hasAuthorableTypes)
+                    ui.Separator();
+                for (const auto& diagnostic : diagnostics)
+                {
+                    (void)ui.MenuItem("Invalid: " + diagnostic.TypeName, false, false);
+                    ui.SetTooltip(diagnostic.Message, {.Delayed = true});
+                }
+            }
+        }
+
         void DrawCreateItems(Keire::UiFrame& ui, IAssetBrowserController& editor)
         {
             if (ui.MenuItem("Folder"))
@@ -366,15 +432,10 @@ namespace KeireEditor
             if (ui.MenuItem("Material Instance"))
                 RequestNamedCreate(NamedCreateKind::MaterialInstance, "NewMaterialInstance");
             const auto managedTypes = editor.AssetBrowserManagedAssetTypes();
-            if (std::ranges::any_of(managedTypes, [](const auto& type) { return !type.MenuPath.empty(); }))
-            {
-                if (auto managedData = ui.BeginMenu("ScriptableObject"); managedData)
-                {
-                    for (const auto& type : managedTypes)
-                        if (!type.MenuPath.empty() && ui.MenuItem(type.MenuPath))
-                            RequestManagedDataCreate(type);
-                }
-            }
+            const bool hasAuthorableManagedTypes =
+                std::ranges::any_of(managedTypes, [](const auto& type) { return !type.MenuPath.empty(); });
+            DrawManagedDataCreateItems(ui, managedTypes);
+            DrawManagedDataDiagnostics(ui, editor, hasAuthorableManagedTypes);
             if (ui.MenuItem("Prefab from Selection"))
                 RequestNamedCreate(NamedCreateKind::Prefab, "NewPrefab");
             if (ui.MenuItem("Unlit Shader"))

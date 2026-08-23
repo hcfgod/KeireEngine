@@ -59,6 +59,7 @@ public sealed class ScenePortal : Behaviour
     }
 }
 
+[StableAssetTypeId("c469739a-e7ac-4d9a-8e32-148fbb01baf2")]
 [CreateAssetMenu("Gameplay/Movement Tuning", "MovementTuning")]
 public sealed class MovementTuning : ScriptableObject
 {

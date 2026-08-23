@@ -600,7 +600,9 @@ retaining an obsolete load context after hot reload.
 
 Managed field discovery projects primitives, enums, direct engine-object references, and bounded nested
 `[Serializable]` members into ordinary `ComponentProperty` descriptors. Stable field IDs remain the serialized
-identity while dotted property paths address nested Inspector leaves. Validated display labels, headers, groups,
+identity while dotted property paths address nested Inspector leaves. Managed-data fields without an explicit ID
+derive one deterministically from the managed asset type and property path; an explicit ID remains the rename-stable
+production contract. Validated display labels, headers, groups,
 tooltips, slider intent, one-sided bounds, drag steps, multiline height, and read-only state flow through the same
 descriptor path used by native components and managed data assets. Canonical state JSON stores entity IDs without runtime-world
 identity. Tagged state-v2 references record entity identity, concrete component type, or stable asset identity;

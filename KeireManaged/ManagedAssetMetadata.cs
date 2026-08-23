@@ -1,6 +1,5 @@
 using System.Collections;
 using System.Reflection;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -134,26 +133,25 @@ internal static class ManagedAssetMetadata
         var context = new DiscoveryContext();
         context.ActiveTypes.Add(type);
         foreach (SerializableMember member in SerializableMembers(type, stopAtScriptableObject: true))
-            result.Properties.Add(DescribeMember(type, member, context, 0));
+            result.Properties.Add(DescribeMember(type, member, context, 0, stableType.Id));
         return result;
     }
 
     private static PropertyDocument DescribeMember(Type ownerType, SerializableMember member,
-                                                   DiscoveryContext context, int depth)
+                                                   DiscoveryContext context, int depth, Guid parentId)
     {
         if (depth > MaximumDepth)
             throw Invalid(ownerType, $"member '{member.Member.Name}' exceeds the supported nesting depth");
-        StableFieldIdAttribute stable = member.Member.GetCustomAttribute<StableFieldIdAttribute>(true) ??
-            throw Invalid(ownerType, $"serialized member '{member.Member.Name}' requires StableFieldId");
+        Guid stableId = ManagedStableIdentity.Field(member.Member, parentId);
         string stableOwner = $"{member.Member.Module.ModuleVersionId:D}:{member.Member.MetadataToken}";
-        if (context.StableFieldOwners.TryGetValue(stable.Id, out string? existingOwner) && existingOwner != stableOwner)
-            throw Invalid(ownerType, $"stable field ID '{stable.Id:D}' is duplicated");
-        context.StableFieldOwners[stable.Id] = stableOwner;
+        if (context.StableFieldOwners.TryGetValue(stableId, out string? existingOwner) && existingOwner != stableOwner)
+            throw Invalid(ownerType, $"stable field ID '{stableId:D}' is duplicated");
+        context.StableFieldOwners[stableId] = stableOwner;
 
         Type valueType = member.ValueType;
         var result = new PropertyDocument
         {
-            StableFieldId = stable.Id.ToString("D"),
+            StableFieldId = stableId.ToString("D"),
             Name = member.Member.Name,
             DisplayName = member.Member.GetCustomAttribute<InspectorNameAttribute>(true)?.Name ??
                           SplitName(member.Member.Name.TrimStart('_')),
@@ -217,17 +215,17 @@ internal static class ManagedAssetMetadata
         {
             if (!valueType.IsSZArray)
                 throw Invalid(ownerType, $"member '{member.Member.Name}' uses a non-SZ array");
-            result.Children.Add(DescribeElement(ownerType, stable.Id, valueType.GetElementType()!, context, depth + 1));
+            result.Children.Add(DescribeElement(ownerType, stableId, valueType.GetElementType()!, context, depth + 1));
             return result;
         }
         if (IsList(valueType, out Type? elementType))
         {
-            result.Children.Add(DescribeElement(ownerType, stable.Id, elementType, context, depth + 1));
+            result.Children.Add(DescribeElement(ownerType, stableId, elementType, context, depth + 1));
             return result;
         }
         if (result.Kind == 11)
         {
-            DescribeNestedType(ownerType, valueType, context, depth + 1, result.Children);
+            DescribeNestedType(ownerType, valueType, context, depth + 1, stableId, result.Children);
             return result;
         }
         return result;
@@ -239,7 +237,7 @@ internal static class ManagedAssetMetadata
         RejectUnsupportedContainer(ownerType, elementType);
         if (typeof(Entity).IsAssignableFrom(elementType) || typeof(Component).IsAssignableFrom(elementType))
             throw Invalid(ownerType, "persistent managed assets cannot reference scene objects");
-        Guid elementId = DerivedId(parentId, "element");
+        Guid elementId = ManagedStableIdentity.Derive(parentId, "element");
         var result = new PropertyDocument
         {
             StableFieldId = elementId.ToString("D"),
@@ -277,13 +275,13 @@ internal static class ManagedAssetMetadata
         }
         else if (result.Kind == 11)
         {
-            DescribeNestedType(ownerType, elementType, context, depth + 1, result.Children);
+            DescribeNestedType(ownerType, elementType, context, depth + 1, elementId, result.Children);
         }
         return result;
     }
 
     private static void DescribeNestedType(Type ownerType, Type valueType, DiscoveryContext context, int depth,
-                                           List<PropertyDocument> destination)
+                                           Guid parentId, List<PropertyDocument> destination)
     {
         if (!valueType.IsDefined(typeof(SerializableAttribute), false) &&
             !valueType.IsDefined(typeof(SerializableTypeAttribute), false))
@@ -295,7 +293,7 @@ internal static class ManagedAssetMetadata
         try
         {
             foreach (SerializableMember child in SerializableMembers(valueType, stopAtScriptableObject: false))
-                destination.Add(DescribeMember(ownerType, child, context, depth));
+                destination.Add(DescribeMember(ownerType, child, context, depth, parentId));
         }
         finally
         {
@@ -416,14 +414,6 @@ internal static class ManagedAssetMetadata
         {
             return exception.Types.Where(type => type is not null).Cast<Type>().ToArray();
         }
-    }
-
-    private static Guid DerivedId(Guid parent, string suffix)
-    {
-        byte[] value = SHA256.HashData(Encoding.UTF8.GetBytes($"{parent:D}/{suffix}"));
-        value[6] = (byte)((value[6] & 0x0F) | 0x50);
-        value[8] = (byte)((value[8] & 0x3F) | 0x80);
-        return new Guid(value.AsSpan(0, 16));
     }
 
     private static string SplitName(string name)

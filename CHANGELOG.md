@@ -10,6 +10,9 @@ versions.
 
 ### Fixed
 
+- Made the Unity-style ScriptableObject workflow discover public and `[SerializeField]` fields without requiring
+  hand-authored field IDs, create typed `.keiredata` assets from nested `[CreateAssetMenu]` paths, and keep actionable
+  managed-type diagnostics visible in the Project panel when the Create menu cannot be populated.
 - Input Actions now keeps map, scheme, action, binding, and control-path text as in-progress drafts until editing
   finishes, rejects empty, duplicate, or otherwise invalid commits without changing the last valid document, and
   contains validation failures instead of terminating the editor.

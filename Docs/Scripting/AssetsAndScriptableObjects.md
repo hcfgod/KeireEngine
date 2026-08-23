@@ -63,6 +63,7 @@ Use `ScriptableObject` for managed project data:
 
 ```csharp
 [StableAssetTypeId("e4638cc5-58e2-4955-a576-c9c4edb995ca")]
+[CreateAssetMenu("Gameplay/Weapon Tuning", "WeaponTuning")]
 public sealed class WeaponTuning : ScriptableObject
 {
     public float Damage = 25.0f;
@@ -76,6 +77,15 @@ public sealed class Weapon : Behaviour
     private WeaponTuning? _tuning;
 }
 ```
+
+After the managed build succeeds, right-click a folder in the Project panel and choose
+**Create > Gameplay > Weapon Tuning**. Kéire creates a typed `.keiredata` asset in that folder, selects it, and exposes
+its public fields (and private fields marked `[SerializeField]`) in the Inspector. The slash-separated
+`CreateAssetMenu` name controls the nested Create-menu path, while its second argument supplies the default filename.
+
+ScriptableObject fields receive deterministic implicit field IDs so a newly generated class is authorable without
+extra attributes. Add an explicit `[StableFieldId]` before shipping data whose field may be renamed; the explicit ID
+preserves that field's serialized meaning across a source rename.
 
 Persistent ScriptableObject assets receive stable identity and canonical instances. They may reference native assets,
 prefabs, or other ScriptableObjects, but not scene entities/components. A scene behaviour may reference persistent

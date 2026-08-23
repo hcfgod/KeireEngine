@@ -473,7 +473,7 @@ namespace KeireEditor
         {
             return prefix + "[StableAssetTypeId(\"" + stableTypeId.ToString() + "\")]\n[CreateAssetMenu(\"" +
                    std::string(typeName) + "\", \"" + std::string(typeName) + "\")]\npublic sealed class " +
-                   std::string(typeName) + " : ScriptableObject\n{\n}\n";
+                   std::string(typeName) + " : ScriptableObject\n{\n    public int Value = 0;\n}\n";
         }
         return prefix + "[StableComponentId(\"" + stableTypeId.ToString() + "\")]\npublic sealed class " +
                std::string(typeName) +

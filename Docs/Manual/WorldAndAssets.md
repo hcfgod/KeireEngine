@@ -73,6 +73,7 @@ using Keire;
 
 namespace MyGame;
 
+[StableAssetTypeId("c469739a-e7ac-4d9a-8e32-148fbb01baf2")]
 [CreateAssetMenu("Gameplay/Movement Tuning", "MovementTuning")]
 public sealed class MovementTuning : ScriptableObject
 {
@@ -84,7 +85,11 @@ public sealed class MovementTuning : ScriptableObject
 }
 ```
 
-Create the asset through the Project panel menu supplied by `CreateAssetMenu`, then assign it to a serialized field.
+After scripts compile, right-click the destination folder and choose
+**Create > Gameplay > Movement Tuning**. The Editor creates and selects a typed `.keiredata` asset; edit its public or
+`[SerializeField]` fields in the Inspector, then assign it to a compatible serialized field. Public fields work
+immediately with deterministic implicit identity. Use explicit `[StableFieldId]` values, as above, when authored data
+must survive a later source-field rename.
 `ScriptableObject.CreateInstance<T>()` creates transient data and `ScriptableObject.Instantiate(source)` clones an
 existing object. Persistent project data should be authored and referenced as an asset; destroying persistent assets
 at runtime is rejected.

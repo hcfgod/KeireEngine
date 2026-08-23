@@ -103,7 +103,8 @@ public sealed class Door : Behaviour
 
 Preserve the field ID when renaming a field without changing its meaning. Give a replacement meaning a new ID. The
 v1 reader recognizes historical field aliases and old entity/asset-reference records; the next save writes canonical
-v2.
+v2. ScriptableObject fields without this attribute receive a deterministic ID derived from the asset type and field
+path for Unity-style initial authoring. Add an explicit ID before renaming a field in persistent production data.
 
 ## Reference Records
 

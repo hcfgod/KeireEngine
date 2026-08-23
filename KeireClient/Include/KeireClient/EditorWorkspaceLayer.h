@@ -212,6 +212,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] Keire::AssetId AssetBrowserSceneAsset() const noexcept override;
     [[nodiscard]] bool AssetBrowserSceneDirty() const noexcept override;
     [[nodiscard]] std::vector<Keire::ManagedAssetTypeDescriptor> AssetBrowserManagedAssetTypes() const override;
+    [[nodiscard]] std::vector<Keire::ManagedAssetTypeDiagnostic>
+    AssetBrowserManagedAssetTypeDiagnostics() const override;
     [[nodiscard]] std::filesystem::path AssetBrowserExternalEditor() const override;
     void ConfigureAssetBrowserExternalEditor() override;
     [[nodiscard]] static bool FileIsNewerThan(const std::filesystem::path& path,

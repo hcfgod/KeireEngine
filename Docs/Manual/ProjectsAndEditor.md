@@ -76,9 +76,11 @@ Use this loop when trying an Inspector value:
 
 The Project panel creates Folder, Scene, Material, C# Script, C# ScriptableObject Class, Managed Assembly, graph, VFX,
 and other supported asset types. The ScriptableObject class template includes stable type identity and
-`CreateAssetMenu`, so it appears as an authorable data-asset type after managed compilation. Dragging a Hierarchy
-entity onto a Project folder creates a prefab. Asset operations validate paths and use recoverable transactions where
-the operation supports them.
+`CreateAssetMenu`, so its slash-separated menu path appears under **Create** after managed compilation. Choosing that
+entry creates a typed `.keiredata` asset in the current folder and selects it for Inspector editing. If compilation or
+type discovery fails, the Create menu keeps a ScriptableObject diagnostic entry visible instead of silently hiding the
+workflow. Dragging a Hierarchy entity onto a Project folder creates a prefab. Asset operations validate paths and use
+recoverable transactions where the operation supports them.
 
 Scene and graph undo contexts are document-local. Text editing retains local text undo. A Play Mode undo never mutates
 Edit Mode history. When an operation is rejected, read the Console before repeating it; rejection is intended to leave

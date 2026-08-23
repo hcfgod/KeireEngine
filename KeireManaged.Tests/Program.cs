@@ -5,6 +5,7 @@ var tests = new (string Name, Action Run)[]
     ("Managed state v2 tags direct entity component and asset references", DirectReferenceStateContract),
     ("VFX ranges normalize and validate", VfxRangesNormalizeAndValidate),
     ("Inspector attributes validate production editing metadata", InspectorAttributeContract),
+    ("ScriptableObject authoring discovers and hydrates Unity-style public fields", ScriptableObjectAuthoringContract),
     ("VFX range setters expose every supported type", VfxRangeSettersExposeEverySupportedType),
     ("Runtime asset operations preserve typed diagnostics and explicit leases", RuntimeAssetHandleContract),
     ("Character Controller uses the native stable component contract", CharacterControllerStableContract),
@@ -123,6 +124,38 @@ static void InspectorAttributeContract()
                                               "Inspector multiline fields must remain bounded.");
     AssertThrows<ArgumentException>(() => _ = new Keire.InspectorNameAttribute(" "),
                                     "Inspector labels must contain visible text.");
+}
+
+static void ScriptableObjectAuthoringContract()
+{
+    string exported = Keire.ManagedAssetMetadata.Export();
+    using System.Text.Json.JsonDocument document = System.Text.Json.JsonDocument.Parse(exported);
+    string fullName = typeof(ScriptableObjectAuthoringProbe).FullName!;
+    System.Text.Json.JsonElement descriptor = document.RootElement.GetProperty("types").EnumerateArray()
+        .Single(type => type.GetProperty("fullName").GetString() == fullName);
+    Assert(descriptor.GetProperty("menuPath").GetString() == "Gameplay/Authoring Probe",
+           "CreateAssetMenu must publish the ScriptableObject into the editor Create menu.");
+
+    System.Text.Json.JsonElement property = descriptor.GetProperty("properties").EnumerateArray().Single();
+    string stableFieldId = property.GetProperty("stableFieldId").GetString()!;
+    Assert(Guid.TryParse(stableFieldId, out Guid parsedFieldId) && parsedFieldId != Guid.Empty,
+           "Public ScriptableObject fields must receive deterministic implicit stable IDs.");
+    using System.Text.Json.JsonDocument second = System.Text.Json.JsonDocument.Parse(Keire.ManagedAssetMetadata.Export());
+    string repeatedFieldId = second.RootElement.GetProperty("types").EnumerateArray()
+        .Single(type => type.GetProperty("fullName").GetString() == fullName)
+        .GetProperty("properties").EnumerateArray().Single().GetProperty("stableFieldId").GetString()!;
+    Assert(stableFieldId == repeatedFieldId,
+           "Implicit ScriptableObject field IDs must remain deterministic across discovery passes.");
+
+    var target = Keire.ScriptableObject.CreateInstance<ScriptableObjectAuthoringProbe>();
+    string hydration = System.Text.Json.JsonSerializer.Serialize(new
+    {
+        schemaVersion = 1,
+        managedTypeId = "73616e64-626f-4078-8000-00000000c001",
+        fields = new[] { new { stableId = stableFieldId, name = "Value", value = 42 } },
+    });
+    target.RuntimeHydrateManagedData(hydration);
+    Assert(target.Value == 42, "Implicit stable field IDs must hydrate the persistent ScriptableObject instance.");
 }
 
 static unsafe void RuntimeFoundationContract()
@@ -1908,6 +1941,13 @@ file sealed class DetachedManagedContractProbe : Keire.Behaviour;
 
 [Keire.StableAssetTypeId("d3762027-3016-4ec9-b315-67d654f46443")]
 file sealed class ManagedRuntimeAssetProbe : Keire.ScriptableObject;
+
+[Keire.StableAssetTypeId("73616e64-626f-4078-8000-00000000c001")]
+[Keire.CreateAssetMenu("Gameplay/Authoring Probe", "AuthoringProbe")]
+file sealed class ScriptableObjectAuthoringProbe : Keire.ScriptableObject
+{
+    public int Value = 0;
+}
 
 file sealed class UnregisteredAssetProbe : Keire.Asset;
 

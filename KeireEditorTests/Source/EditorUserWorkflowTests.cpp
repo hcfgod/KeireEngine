@@ -86,6 +86,7 @@ TEST_CASE("managed script creation stays in the selected folder and extends runt
     CHECK(scriptableObject.find("[StableAssetTypeId(\"" + stableId.ToString() + "\")]") != std::string::npos);
     CHECK(scriptableObject.find("[CreateAssetMenu(\"WeaponTuning\", \"WeaponTuning\")]") != std::string::npos);
     CHECK(scriptableObject.find("public sealed class WeaponTuning : ScriptableObject") != std::string::npos);
+    CHECK(scriptableObject.find("public int Value = 0;") != std::string::npos);
 }
 
 TEST_CASE("hierarchy prefab payloads decode the encoder terminator before UUID parsing")

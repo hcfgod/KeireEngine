@@ -42,10 +42,8 @@ internal static class ManagedDataHydrator
         JsonElement[] sourceFields = fields.EnumerateArray().ToArray();
         foreach (SerializableMember member in SerializableMembers(type))
         {
-            StableFieldIdAttribute stable = member.Member.GetCustomAttribute<StableFieldIdAttribute>(true) ??
-                throw new InvalidOperationException(
-                    $"Managed data member '{type.FullName}.{member.Member.Name}' does not declare StableFieldId.");
-            JsonElement? source = FindField(sourceFields, member.Member, stable.Id);
+            Guid stableId = ManagedStableIdentity.Field(member.Member, stableType.Id);
+            JsonElement? source = FindField(sourceFields, member.Member, stableId);
             if (source is null)
                 continue;
             try
