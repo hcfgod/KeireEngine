@@ -174,8 +174,17 @@ namespace KeireEditor
 
         const std::unordered_set<Keire::AssetId> expanded(expandedParents.begin(), expandedParents.end());
         std::unordered_set<Keire::AssetId> visited;
+        std::unordered_set<Keire::AssetId> grouped;
         std::vector<AssetBrowserHierarchyEntry> result;
         result.reserve(records.size());
+        const auto markGrouped = [&](const auto& self, const Keire::AssetSourceRecord& record) -> void
+        {
+            if (!grouped.emplace(record.Id).second)
+                return;
+            if (const auto found = children.find(record.Id); found != children.end())
+                for (const auto* child : found->second)
+                    self(self, *child);
+        };
         const auto append = [&](const auto& self, const Keire::AssetSourceRecord& record,
                                 const std::size_t depth) -> void
         {
@@ -193,9 +202,12 @@ namespace KeireEditor
         for (const auto* record : records)
             if (record &&
                 (!record->ParentSource || record->ParentSource == record->Id || !byId.contains(record->ParentSource)))
+            {
+                markGrouped(markGrouped, *record);
                 append(append, *record, 0);
+            }
         for (const auto* record : records)
-            if (record && !visited.contains(record->Id))
+            if (record && !grouped.contains(record->Id))
                 append(append, *record, 0);
         return result;
     }
