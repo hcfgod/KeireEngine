@@ -2,6 +2,7 @@
 
 #include "Keire/Core.h"
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -110,6 +111,10 @@ namespace KeireEditor
     [[nodiscard]] std::vector<AssetBrowserHierarchyEntry>
     BuildAssetBrowserHierarchy(std::span<const Keire::AssetSourceRecord* const> records,
                                std::span<const Keire::AssetId> expandedParents, bool expandAll = false);
+    [[nodiscard]] std::array<Keire::UiPosition, 3> AssetBrowserDisclosureTriangle(Keire::UiItemRect area,
+                                                                                  bool expanded) noexcept;
+    [[nodiscard]] Keire::UiItemRect AssetBrowserGridNameArea(Keire::UiItemRect card, float thumbnailSize,
+                                                             float countBadgeWidth, bool hasChildren) noexcept;
     [[nodiscard]] std::filesystem::path UniqueAssetBrowserFolder(const std::filesystem::path& assetRoot,
                                                                  std::filesystem::path desired);
     [[nodiscard]] std::filesystem::path UniqueAssetBrowserPath(const Keire::AssetSourceRecord& source,

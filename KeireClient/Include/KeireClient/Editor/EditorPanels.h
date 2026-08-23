@@ -332,10 +332,26 @@ namespace KeireEditor
         [[nodiscard]] Keire::UiPanelRegistration& Registration() noexcept { return m_Registration; }
 
       private:
+        struct TextDraft final
+        {
+            Keire::AssetId Target;
+            std::string Value;
+            bool Editing = false;
+        };
+
+        [[nodiscard]] static bool DrawTextDraft(Keire::UiFrame& ui, std::string_view label, Keire::AssetId target,
+                                                std::string_view current, TextDraft& draft);
+
         IInputActionsController& m_Controller;
         Keire::UiPanelRegistration m_Registration;
         Keire::Ref<Keire::InputActionContext> m_RebindContext;
         Keire::Ref<Keire::InteractiveRebindOperation> m_Rebind;
+        TextDraft m_SchemeNameDraft;
+        TextDraft m_BindingGroupDraft;
+        TextDraft m_MapNameDraft;
+        TextDraft m_ActionNameDraft;
+        TextDraft m_BindingNameDraft;
+        TextDraft m_ControlPathDraft;
         std::string m_Search;
         std::string m_Message;
         bool m_LiveMonitor = false;

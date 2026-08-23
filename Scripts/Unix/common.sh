@@ -99,6 +99,7 @@ project_generation_fingerprint() {
         done
         for source_root in \
           Scripts/Unix/common.sh Scripts/Windows/common.ps1 \
+          Scripts/patch-ninja-depfiles.py Scripts/patch-ninja-compiler-cache.py \
           Scripts/Linux/bootstrap.sh Scripts/Linux/generate.sh Scripts/Mac/bootstrap.sh Scripts/Mac/generate.sh \
           Scripts/Windows/bootstrap.ps1 Scripts/Windows/generate.ps1 \
           Scripts/Unix/dependencies.sh Scripts/Windows/dependencies.ps1 \
@@ -810,6 +811,27 @@ build_parallel_jobs() {
     printf '%s\n' "$detected"
 }
 
+resolve_compiler_cache() {
+    local generator="$1" requested="${2:-auto}"
+    case "$requested" in auto|off|sccache) ;; *)
+        printf "Unsupported compiler cache '%s'. Use auto, off, or sccache.\n" "$requested" >&2
+        return 1
+    esac
+    if [[ "$generator" != ninja && "$generator" != compilecommands ]] || [[ "$requested" == off ]]; then
+        printf '%s\n' off
+        return 0
+    fi
+    if command -v sccache >/dev/null 2>&1; then
+        printf '%s\n' sccache
+        return 0
+    fi
+    [[ "$requested" != sccache ]] || {
+        printf '%s\n' 'sccache was requested but is not available in PATH.' >&2
+        return 1
+    }
+    printf '%s\n' off
+}
+
 activate_linux_toolchain() {
     local root="$1" toolset="$2" environment
     [[ "$toolset" == gcc ]] || return 0
@@ -827,6 +849,8 @@ parse_build_arguments() {
             --configuration) CONFIGURATION="$(normalize_configuration "$2")"; shift 2 ;;
             --architecture) ARCHITECTURE="$(normalize_architecture "$2")"; shift 2 ;;
             --toolset) TOOLSET="$2"; shift 2 ;;
+            --compiler-cache) COMPILER_CACHE="$2"; shift 2 ;;
+            --profile-build) PROFILE_BUILD=1; shift ;;
             --target) TARGET="$2"; shift 2 ;;
             --ci) CI=1; shift ;;
             --update) UPDATE=1; shift ;;
@@ -840,10 +864,11 @@ parse_build_arguments() {
 
 managed_host_staging_targets() {
     local target="$1" client_target="$2" hub_target="$3" project_namespace="$4"
+    local editor_dev_target="${project_namespace}EditorDev"
     {
-        if [[ "$target" == "$client_target" || "$target" == "$hub_target" ]]; then
+        if [[ "$target" == "$client_target" || "$target" == "$hub_target" || "$target" == "$editor_dev_target" ]]; then
             printf '%s\n' "${project_namespace}AssetTool" "${project_namespace}Runtime" "$client_target"
         fi
-        printf '%s\n' "$target"
+        [[ "$target" == "$editor_dev_target" ]] || printf '%s\n' "$target"
     } | awk '!seen[$0]++'
 }

@@ -39,6 +39,31 @@ class NinjaDepfileTests(unittest.TestCase):
             command = project.read_text(encoding="utf-8")
             self.assertEqual(command.count("-MD -MF $out.d"), 1)
 
+    def test_repairs_msvc_pch_paths_relative_to_project_locations(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "build.ninja").write_text(
+                "subninja project.ninja\n", encoding="utf-8"
+            )
+            project = root / "project.ninja"
+            project.write_text(
+                "rule cxx_msc\n"
+                "  command = cl $cxxflags /c $in /Fo$out\n"
+                "  deps = msvc\n"
+                "cxxflags = /YuExamplePch.h /Fp../../Build/Intermediates/Example.pch\n",
+                encoding="utf-8",
+            )
+            for _ in range(2):
+                subprocess.run(
+                    [sys.executable, str(SCRIPT), str(root)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+            generated = project.read_text(encoding="utf-8")
+            self.assertIn("/FpBuild/Intermediates/Example.pch", generated)
+            self.assertNotIn("/Fp../", generated)
+
     def test_rejects_unrecognized_gcc_style_rule(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

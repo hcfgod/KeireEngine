@@ -5,6 +5,8 @@ param(
     [string]$Architecture = "",
     [ValidateSet("default", "msc", "gcc", "clang")]
     [string]$Toolset = "default",
+    [ValidateSet("auto", "off", "sccache")]
+    [string]$CompilerCache = "auto",
     [switch]$CI,
     [switch]$Update,
     [switch]$Force
@@ -17,12 +19,15 @@ $Root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $PremakeExe = Join-Path $Root "Tools\Windows\premake5.exe"
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
 $Toolset = Resolve-WindowsToolset $Generator $Toolset
+$CompilerCache = Resolve-CompilerCache $Generator $CompilerCache
 
 Assert-SupportedBuildCombination $Generator "Debug" $Architecture $Toolset
 & (Join-Path $PSScriptRoot "bootstrap.ps1") -Generators @($Generator) -Architecture $Architecture `
     -Toolset $Toolset -Update:$Update
+# -Force means "replace generated project files" at this layer. Third-party caches remain content/stamp driven;
+# rebuilding those is an explicit bootstrap operation so a project refresh cannot start an hour-long codec build.
 & (Join-Path $PSScriptRoot "dependencies.ps1") -Generator $Generator -Architecture $Architecture `
-    -Toolset $Toolset -Force:$Force
+    -Toolset $Toolset
 
 $premakeArchitecture = Get-PremakeArchitecture $Architecture
 # Premake beta8 cannot reliably parse a Unicode absolute --file path on
@@ -65,6 +70,9 @@ if ($Generator -in @("ninja", "compilecommands")) {
     $pythonPrefix = @($python.PrefixArguments)
     & $python.Executable @pythonPrefix (Join-Path $Root "Scripts\patch-ninja-depfiles.py") $Root
     if ($LASTEXITCODE -ne 0) { throw "Ninja dependency-file rule repair failed." }
+    & $python.Executable @pythonPrefix (Join-Path $Root "Scripts\patch-ninja-compiler-cache.py") $Root `
+        --cache $CompilerCache
+    if ($LASTEXITCODE -ne 0) { throw "Ninja compiler-cache configuration failed." }
 }
 if ($Generator -eq "compilecommands") {
     $ruleToolset = $Toolset
@@ -82,10 +90,10 @@ $stampDirectory = Join-Path $Root "Build\Generated"
 New-Item -ItemType Directory -Force -Path $stampDirectory | Out-Null
 $generationFingerprint = Get-ProjectGenerationFingerprint $Root
 Set-Content -Path (Join-Path $stampDirectory "$Generator.stamp") `
-    -Value "$Generator|$Architecture|$Toolset|$([bool]$CI)|$generationFingerprint" -Encoding ASCII
+    -Value "$Generator|$Architecture|$Toolset|$CompilerCache|$([bool]$CI)|$generationFingerprint" -Encoding ASCII
 if ($Generator -eq "compilecommands") {
     # Compile database generation produces the shared build.ninja too. Record its actual identity so a later Ninja
     # build with a different toolset cannot accept a stale stamp left by an earlier generation.
     Set-Content -Path (Join-Path $stampDirectory "ninja.stamp") `
-        -Value "ninja|$Architecture|$Toolset|$([bool]$CI)|$generationFingerprint" -Encoding ASCII
+        -Value "ninja|$Architecture|$Toolset|$CompilerCache|$([bool]$CI)|$generationFingerprint" -Encoding ASCII
 }

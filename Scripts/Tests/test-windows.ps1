@@ -87,7 +87,9 @@ if ($LASTEXITCODE -ne 0) { throw "Marketplace Edge trust-boundary checks failed.
 & $python.Executable @($python.PrefixArguments) (Join-Path $PSScriptRoot "test-marketplace-upload-sample.py")
 if ($LASTEXITCODE -ne 0) { throw "Marketplace package-fixture checks failed." }
 & $python.Executable @($python.PrefixArguments) (Join-Path $PSScriptRoot "test-patch-ninja-depfiles.py")
-if ($LASTEXITCODE -ne 0) { throw "Ninja dependency-file rule checks failed." }
+if ($LASTEXITCODE -ne 0) { throw "Ninja dependency-file and PCH-path checks failed." }
+& $python.Executable @($python.PrefixArguments) (Join-Path $PSScriptRoot "test-ninja-compiler-cache.py")
+if ($LASTEXITCODE -ne 0) { throw "Ninja compiler-cache checks failed." }
 & (Join-Path $PSScriptRoot "test-installer-windows.ps1")
 & (Join-Path $PSScriptRoot "test-hub-installer-windows.ps1")
 & (Join-Path $PSScriptRoot "test-distribution-service-package-windows.ps1")
@@ -95,6 +97,9 @@ if ($LASTEXITCODE -ne 0) { throw "Ninja dependency-file rule checks failed." }
 $generateScript = Get-Content (Join-Path $Windows "generate.ps1") -Raw
 Assert-True ($generateScript.Contains('--file=premake5.lua')) "Unicode-safe relative Premake script path"
 Assert-True ($generateScript.Contains('Get-ProjectGenerationFingerprint')) "Source-inventory project regeneration"
+Assert-True ($generateScript.Contains('"dependencies.ps1"') -and
+             -not $generateScript.Contains('-Toolset $Toolset -Force:$Force')) `
+    "Forced project generation preserves third-party dependency caches"
 Assert-True ($generateScript.Contains('$Generator -eq "compilecommands"') -and
              $generateScript.Contains('(Join-Path $stampDirectory "ninja.stamp")') -and
              $generateScript.Contains('"ninja|$Architecture|$Toolset|$([bool]$CI)|$generationFingerprint"')) `
@@ -391,6 +396,13 @@ Assert-True ($windowsFfmpegBuild.Contains('--enable-zlib') -and
              $unixFfmpegBuild.Contains('--enable-decoder=exr') -and
              $unixFfmpegBuild.Contains('#define CONFIG_EXR_DECODER 1')) `
     "Private FFmpeg builds require zlib-backed OpenEXR decoding"
+Assert-True ($windowsFfmpegBuild.Contains('$AlternateConfiguration = if ($Configuration -eq "Debug")') -and
+             $windowsFfmpegBuild.Contains('Copy-Item -LiteralPath $AlternateComponents') -and
+             $windowsFfmpegBuild.Contains('Reused the identical private FFmpeg')) `
+    "Identical Windows FFmpeg configurations compile once and publish to both roots"
+Assert-True ($dependencyScript.Contains('$forceFfmpegSourceBuild = $Force') -and
+             $dependencyScript.Contains('$forceFfmpegSourceBuild = $false')) `
+    "Forced Windows dependency repair compiles the shared FFmpeg source only once"
 Assert-True ($ffmpegTextureBackend.Contains('receiveStatus == AVERROR(EAGAIN)') -and
              $ffmpegTextureBackend.Contains('avcodec_send_packet(decoder.get(), nullptr)') -and
              $ffmpegTextureBackend.Contains('frame.format == AV_PIX_FMT_GRAYF16')) `
@@ -404,7 +416,9 @@ Assert-True ($windowsManagedHostStage.Contains('function Copy-FileIfChanged') -a
              -not $windowsManagedHostStage.Contains('Copy-Item -Path (Join-Path $coreRuntime.FullName "*")')) `
     "Windows managed-host staging skips unchanged bundled runtime files"
 Assert-True ($corePremake.Contains('links { DearImGuiProject, ZstdProject }') -and -not $corePremake.Contains('imgui.cpp') -and -not $premakePolicy.Contains('AddDearImGuiSources')) "Private dependency project ownership"
-Assert-True ($corePremake.Contains('VendorIncludeDirs.entt') -and $corePremake.Contains('VendorIncludeDirs.glm') -and $corePremake.Contains('dependson { EnTTProject, GLMProject }')) "Private ECS and math build wiring"
+Assert-True ($corePremake.Contains('VendorIncludeDirs.entt') -and $corePremake.Contains('VendorIncludeDirs.glm') -and
+             -not $corePremake.Contains('dependson { EnTTProject, GLMProject }')) `
+    "Private ECS and math headers do not add no-op build dependencies"
 Assert-True ($hubPremake.Contains('links { HubRuntimeTarget }') -and
              -not $hubPremake.Contains('dependson { ProjectConfig.CLIENT_TARGET }')) `
     "Standalone Hub links its private runtime without depending on an editor build"
@@ -460,13 +474,42 @@ Assert-True ($premakePolicy.Contains('externalanglebrackets "On"') -and
 Assert-True ($managedPremake.Contains('Scripts/Windows/build-managed.ps1') -and
              $managedPremake.Contains('Scripts/Unix/build-managed.sh') -and
              (Test-Path (Join-Path (Get-RepositoryRoot) 'Scripts\Premake\ManagedBuildAnchor.cpp'))) "Managed runtime API wrapper integration"
-Assert-Equal ([regex]::Matches($windowsBuild, '(?m)^\s+Invoke-ManagedBuild\s*$').Count) 3 "Managed runtime API build launcher coverage"
-Assert-True ($windowsBuild.Contains('"build-managed.ps1"') -and
+Assert-True (-not $windowsBuild.Contains('Invoke-ManagedBuild') -and
+             -not $windowsBuild.Contains('"build-managed.ps1"') -and
              $windowsManagedBuild.Contains('"Keire.Managed.dll"') -and
-             $windowsManagedBuild.Contains('LastWriteTimeUtc')) "Managed runtime API freshness and output validation"
-Assert-True ($windowsBuild.Contains('"build-info.ps1"') -and
-             $windowsBuild.Contains('"Build metadata generation"')) `
-    "Every Windows build refreshes generated product identity before compilation"
+             $windowsManagedBuild.Contains('LastWriteTimeUtc')) `
+    "Generated target dependencies own managed runtime freshness without launcher duplication"
+$preparedContent = Get-Content (Join-Path $Windows "prepare-generated-content.ps1") -Raw
+Assert-True ($corePremake.Contains('prepare-generated-content.ps1') -and
+             -not $windowsBuild.Contains('"build-info.ps1"') -and
+             $preparedContent.Contains('"build-info.ps1"') -and
+             $preparedContent.Contains('"builtin-vfx.ps1"')) `
+    "One Core prebuild process owns generated identity and built-in content"
+Assert-True ($corePremake.Contains('pchheader "KeireInternal/KeireCorePch.h"') -and
+             $corePremake.Contains('buildoptions { "/FIKeireInternal/KeireCorePch.h" }') -and
+             $clientPremake.Contains('pchheader "KeireClient/ClientPch.h"') -and
+             $clientPremake.Contains('buildoptions { "/FIKeireClient/ClientPch.h" }') -and
+             -not $clientPremake.Contains('dependson { AssetWorkerTarget, AssetToolTarget, RuntimeTarget }')) `
+    "Private PCHs and the fast editor compile graph"
+Assert-True ($corePremake.Contains('CoreGeneratedContentTarget') -and
+             $corePremake.Contains('removebuildoptions { "/MP" }') -and
+             -not $corePremake.Contains('buildoptions { "/MP1" }') -and
+             $premakePolicy.Contains('CoreArchiveTargets') -and
+             $premakePolicy.Contains('linkgroups "On"')) `
+    "Parallel Core archives retain stable PCH tracking and cyclic-link closure"
+foreach ($coreArchive in @("Assets", "Build", "World", "Rendering", "Scenes", "Scripting", "Ui", "Vfx")) {
+    Assert-True (Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Source\Pch\KeireCore${coreArchive}Pch.cpp")) `
+        "Core $coreArchive archive owns a distinct PCH source"
+}
+$editorDevPremake = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Premake\EditorDev.lua") -Raw
+Assert-True ($editorDevPremake.Contains('ProjectConfig.PROJECT_NAMESPACE .. "EditorDev"') -and
+             $editorDevPremake.Contains('dependson { ProjectConfig.CLIENT_TARGET, AssetToolTarget, RuntimeTarget }') -and
+             $windowsRun.Contains('$editorDevTarget')) "Complete editor development aggregate"
+Assert-True ($windowsBuild.Contains('Resolve-CompilerCache') -and
+             $windowsBuild.Contains('ProfileBuild') -and
+             $windowsBuild.Contains('/p:PreferredToolArchitecture=x64') -and
+             (Test-Path (Join-Path (Get-RepositoryRoot) 'Scripts\patch-ninja-compiler-cache.py'))) `
+    "Optional compiler cache, build profiling, and native x64 MSVC host tools"
 Assert-True ($windowsRun.Contains('[Diagnostics.ProcessStartInfo]::new()') -and
              $windowsRun.Contains('$invalid.StandardError.ReadToEnd()') -and
              $windowsRun.Contains('$invalid.WaitForExit()') -and
@@ -690,6 +733,19 @@ $publicLogHeader = Get-Content (Join-Path (Get-RepositoryRoot) "KeireCore\Includ
 Assert-True (-not $publicLogHeader.Contains("spdlog/") -and -not $publicLogHeader.Contains("fmt::") -and $publicLogHeader.Contains("KEIRE_COMPILED_LOG_LEVEL")) "Public logging boundary is engine-owned"
 $commonPremake = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Premake\Common.lua") -Raw
 Assert-True ($commonPremake.Contains('_DISABLE_STRING_ANNOTATION') -and $commonPremake.Contains('_DISABLE_VECTOR_ANNOTATION')) "MSVC sanitizer dependency ABI alignment"
+$windowsPackage = Get-Content (Join-Path $Windows "package.ps1") -Raw
+$windowsArchiveMergerPath = Join-Path $Windows "merge-static-libraries.ps1"
+$windowsArchiveMerger = Get-Content $windowsArchiveMergerPath -Raw
+Assert-True ($windowsPackage.Contains('merge-static-libraries.ps1') -and
+             $windowsPackage.Contains('$coreArchiveTargets') -and
+             $windowsArchiveMerger.Contains('Get-Command lib.exe') -and
+             $windowsArchiveMerger.Contains('Move-Item -LiteralPath $temporary')) `
+    "SDK packaging recombines internal Core archives into one public library"
+$missingArchiveOutput = Join-Path ([IO.Path]::GetTempPath()) ("keire-missing-archive-" + [guid]::NewGuid().ToString("N") + ".lib")
+Assert-Throws {
+    & $windowsArchiveMergerPath -Output $missingArchiveOutput `
+        -InputLibraries (Join-Path ([IO.Path]::GetTempPath()) "keire-missing-input.lib")
+} "Static-library merger rejects missing inputs before invoking the librarian"
 
 $packageStage = Join-Path ([IO.Path]::GetTempPath()) ("template-package-test-" + [guid]::NewGuid().ToString("N"))
 try {

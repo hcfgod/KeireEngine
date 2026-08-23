@@ -20,6 +20,8 @@ CONFIGURATION="Debug"
 CONFIGURATION_SET=0
 ARCHITECTURE="$(native_architecture)"
 TOOLSET="default"
+COMPILER_CACHE="auto"
+PROFILE_BUILD=0
 TARGET="$CLIENT_TARGET"
 TARGET_SET=0
 DEPENDENCY="spdlog"
@@ -46,6 +48,8 @@ while [[ $# -gt 0 ]]; do
         --configuration) CONFIGURATION="$(normalize_configuration "$2")"; CONFIGURATION_SET=1; shift 2 ;;
         --architecture) ARCHITECTURE="$(normalize_architecture "$2")"; shift 2 ;;
         --toolset) TOOLSET="$2"; shift 2 ;;
+        --compiler-cache) COMPILER_CACHE="$2"; shift 2 ;;
+        --profile-build) PROFILE_BUILD=1; shift ;;
         --target) TARGET="$2"; TARGET_SET=1; shift 2 ;;
         --dependency) DEPENDENCY="$2"; shift 2 ;;
         --tag) TAG="$2"; shift 2 ;;
@@ -84,10 +88,11 @@ run_command() {
     local resolved_toolset
     resolved_toolset="$(resolve_unix_toolset "$PLATFORM_NAME" "$TOOLSET")"
     validate_unix_combination "$PLATFORM_NAME" "$GENERATOR" "$resolved_toolset"
-    local common=(--generator "$GENERATOR" --architecture "$ARCHITECTURE" --toolset "$resolved_toolset")
+    local common=(--generator "$GENERATOR" --architecture "$ARCHITECTURE" --toolset "$resolved_toolset" --compiler-cache "$COMPILER_CACHE")
     [[ $CI -eq 1 ]] && common+=(--ci)
     [[ $UPDATE -eq 1 ]] && common+=(--update)
     [[ $FORCE -eq 1 ]] && common+=(--force)
+    [[ $PROFILE_BUILD -eq 1 ]] && common+=(--profile-build)
     case "$1" in
         bootstrap)
             [[ $INSTALL_OPTIONAL -eq 1 ]] && common+=(--install-optional)
@@ -148,6 +153,8 @@ Common options:
   --generator <ninja|gmake|xcode4|compilecommands>
   --configuration <Debug|Release|Dist|DebugASan|DebugUBSan|DebugTSan|Coverage>
   --architecture <x86_64|ARM64> --toolset <default|gcc|clang>
+  --compiler-cache <auto|off|sccache> (Ninja builds; auto uses sccache when installed)
+  --profile-build (build command only; writes timing data under Build/Reports)
   --smoke-ui (run command only; requires a graphics-capable environment)
   --smoke-project (run the sample project editor and exit after several frames)
   --smoke-window (run the client with SDL's dummy video backend and exit after startup)

@@ -560,13 +560,25 @@ namespace KeireEditor
             if (meter->Clipping)
                 ui.TextColored(theme.Error, "Output is clipping. Lower this channel or an upstream bus.");
         }
-        std::string name = bus.Name;
+        auto& name = m_NameBuffers.try_emplace(bus.Id, bus.Name).first->second;
         if (auto disabled = ui.BeginDisabled(bus.Id == definition.MasterBus); disabled)
         {
-            if (ui.InputText("Name", name))
-                (void)ApplyEdit("Rename Audio Mixer bus",
-                                [id = bus.Id, name = std::move(name)](Keire::AudioMixerDefinition& candidate) mutable
-                                { RequireBus(candidate, id).Name = std::move(name); });
+            (void)ui.InputText("Name", name);
+            const auto nameState = ui.LastItemState();
+            if (nameState.DeactivatedAfterEdit)
+            {
+                const auto committedName = name;
+                if (!ApplyEdit("Rename Audio Mixer bus",
+                               [id = bus.Id, committedName](Keire::AudioMixerDefinition& candidate)
+                               { RequireBus(candidate, id).Name = committedName; }))
+                {
+                    name = bus.Name;
+                }
+            }
+            else if (!nameState.Active && !nameState.Edited && name != bus.Name)
+            {
+                name = bus.Name;
+            }
         }
         if (bus.Id != definition.MasterBus)
         {
@@ -611,7 +623,7 @@ namespace KeireEditor
                                              effect.Id.ToString());
                 tree)
             {
-                auto& nameBuffer = m_EffectNameBuffers.try_emplace(effect.Id, effect.Name).first->second;
+                auto& nameBuffer = m_NameBuffers.try_emplace(effect.Id, effect.Name).first->second;
                 (void)ui.InputText("Name", nameBuffer);
                 const auto nameState = ui.LastItemState();
                 if (nameState.DeactivatedAfterEdit)
@@ -907,11 +919,23 @@ namespace KeireEditor
                 return;
             }
             const auto& snapshot = *current;
-            std::string name = snapshot.Name;
-            if (ui.InputText("Name", name))
-                (void)ApplyEdit("Rename Audio Mixer snapshot",
-                                [id = snapshot.Id, name = std::move(name)](Keire::AudioMixerDefinition& mixer) mutable
-                                { RequireSnapshot(mixer, id).Name = std::move(name); });
+            auto& name = m_NameBuffers.try_emplace(snapshot.Id, snapshot.Name).first->second;
+            (void)ui.InputText("Name", name);
+            const auto nameState = ui.LastItemState();
+            if (nameState.DeactivatedAfterEdit)
+            {
+                const auto committedName = name;
+                if (!ApplyEdit("Rename Audio Mixer snapshot",
+                               [id = snapshot.Id, committedName](Keire::AudioMixerDefinition& mixer)
+                               { RequireSnapshot(mixer, id).Name = committedName; }))
+                {
+                    name = snapshot.Name;
+                }
+            }
+            else if (!nameState.Active && !nameState.Edited && name != snapshot.Name)
+            {
+                name = snapshot.Name;
+            }
             ui.TextColored(theme.MutedText, "Stable ID: " + snapshot.Id.ToString());
             ui.Separator();
 
@@ -1207,11 +1231,23 @@ namespace KeireEditor
                 return;
             }
             const auto& ducking = *found;
-            std::string name = ducking.Name;
-            if (ui.InputText("Name", name))
-                (void)ApplyEdit("Rename Audio Mixer ducking",
-                                [id = ducking.Id, name = std::move(name)](Keire::AudioMixerDefinition& mixer) mutable
-                                { RequireDucking(mixer, id).Name = std::move(name); });
+            auto& name = m_NameBuffers.try_emplace(ducking.Id, ducking.Name).first->second;
+            (void)ui.InputText("Name", name);
+            const auto nameState = ui.LastItemState();
+            if (nameState.DeactivatedAfterEdit)
+            {
+                const auto committedName = name;
+                if (!ApplyEdit("Rename Audio Mixer ducking",
+                               [id = ducking.Id, committedName](Keire::AudioMixerDefinition& mixer)
+                               { RequireDucking(mixer, id).Name = committedName; }))
+                {
+                    name = ducking.Name;
+                }
+            }
+            else if (!nameState.Active && !nameState.Edited && name != ducking.Name)
+            {
+                name = ducking.Name;
+            }
             const auto sidechain = FindBus(definition, ducking.SidechainBus);
             if (auto combo = ui.BeginCombo("Sidechain", sidechain ? sidechain->Name : "Missing Bus"); combo)
             {
@@ -1266,7 +1302,7 @@ namespace KeireEditor
     {
         m_SelectedSnapshot = {};
         m_SelectedDucking = {};
-        m_EffectNameBuffers.clear();
+        m_NameBuffers.clear();
         m_Message.clear();
     }
 

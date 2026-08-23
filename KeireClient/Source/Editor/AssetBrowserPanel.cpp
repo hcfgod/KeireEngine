@@ -1083,8 +1083,8 @@ namespace KeireEditor
                                                                   const float thumbnailSize) noexcept
         {
             const auto thumbnail = GridThumbnailArea(card, thumbnailSize);
-            return {{thumbnail.Maximum.X - 22.0F, thumbnail.Minimum.Y + 2.0F},
-                    {thumbnail.Maximum.X - 2.0F, thumbnail.Minimum.Y + 22.0F}};
+            return {{card.Minimum.X + 8.0F, thumbnail.Maximum.Y + 3.0F},
+                    {card.Minimum.X + 26.0F, thumbnail.Maximum.Y + 21.0F}};
         }
 
         [[nodiscard]] static Keire::UiItemRect ListDisclosureArea(const Keire::UiItemRect row) noexcept
@@ -1102,17 +1102,29 @@ namespace KeireEditor
                              selected ? 2.0F : 1.0F, rounding);
         }
 
+        [[nodiscard]] static float CountBadgeWidth(Keire::UiFrame& ui, const std::size_t count)
+        {
+            return std::max(ui.MeasureText(std::to_string(count), 11.0F).Width + 10.0F, 20.0F);
+        }
+
         static void DrawCountBadge(Keire::UiFrame& ui, const Keire::UiItemRect area, const std::size_t count,
                                    const Keire::UiThemeDefinition& theme)
         {
             const auto label = std::to_string(count);
             const auto text = ui.MeasureText(label, 11.0F);
-            const float width = std::max(text.Width + 10.0F, 20.0F);
+            const float width = CountBadgeWidth(ui, count);
             const Keire::UiItemRect badge{{area.Maximum.X - width, area.Minimum.Y}, area.Maximum};
             ui.DrawFilledRectangle(badge, theme.RaisedPanel, 8.0F);
             ui.DrawRectangle(badge, theme.Border, 1.0F, 8.0F);
             ui.DrawOverlayText({badge.Minimum.X + (badge.Size().Width - text.Width) * 0.5F, badge.Minimum.Y + 2.0F},
                                theme.Text, label, 11.0F, badge);
+        }
+
+        static void DrawDisclosureTriangle(Keire::UiFrame& ui, const Keire::UiItemRect area, const bool expanded,
+                                           const Keire::UiColor color)
+        {
+            const auto triangle = AssetBrowserDisclosureTriangle(area, expanded);
+            ui.DrawFilledTriangle(triangle[0], triangle[1], triangle[2], color);
         }
 
         void DrawGridItemVisual(Keire::UiFrame& ui, const Keire::UiItemRect area,
@@ -1128,29 +1140,29 @@ namespace KeireEditor
             if (failed)
                 ui.DrawFilledCircle({thumbnail.Minimum.X + 7.0F, thumbnail.Minimum.Y + 7.0F}, 4.0F, theme.Error);
 
-            const float textWidth = std::max(area.Size().Width - 16.0F, 1.0F);
-            const auto visibleName = ElideAssetDisplayName(name, textWidth, [&ui](const std::string_view value)
+            const float badgeWidth = hasChildren ? CountBadgeWidth(ui, childCount) : 0.0F;
+            const auto nameArea = AssetBrowserGridNameArea(area, ThumbnailSize, badgeWidth, hasChildren);
+            const float nameWidth = std::max(nameArea.Size().Width, 1.0F);
+            const float typeWidth = std::max(area.Size().Width - 16.0F, 1.0F);
+            const auto visibleName = ElideAssetDisplayName(name, nameWidth, [&ui](const std::string_view value)
                                                            { return ui.MeasureText(value, 13.0F).Width; });
-            const auto visibleType = ElideAssetDisplayName(type, textWidth, [&ui](const std::string_view value)
+            const auto visibleType = ElideAssetDisplayName(type, typeWidth, [&ui](const std::string_view value)
                                                            { return ui.MeasureText(value, 11.0F).Width; });
             const auto nameSize = ui.MeasureText(visibleName, 13.0F);
             const auto typeSize = ui.MeasureText(visibleType, 11.0F);
             const float nameY = thumbnail.Maximum.Y + 6.0F;
-            ui.DrawOverlayText({area.Minimum.X + (area.Size().Width - nameSize.Width) * 0.5F, nameY}, theme.Text,
-                               visibleName, 13.0F, area);
+            ui.DrawOverlayText({nameArea.Minimum.X + (nameArea.Size().Width - nameSize.Width) * 0.5F, nameY},
+                               theme.Text, visibleName, 13.0F, nameArea);
             ui.DrawOverlayText({area.Minimum.X + (area.Size().Width - typeSize.Width) * 0.5F, nameY + 16.0F},
                                theme.MutedText, visibleType, 11.0F, area);
 
             if (!hasChildren)
                 return;
             const auto disclosure = GridDisclosureArea(area, ThumbnailSize);
-            ui.DrawFilledRectangle(disclosure, WithAlpha(theme.Panel, 0.92F), 4.0F);
-            ui.DrawRectangle(disclosure, theme.Border, 1.0F, 4.0F);
-            ui.DrawOverlayIcon(expanded ? Keire::UiIcon::ExpandMore : Keire::UiIcon::ChevronRight,
-                               {disclosure.Minimum.X, disclosure.Minimum.Y}, theme.Text);
+            DrawDisclosureTriangle(ui, disclosure, expanded, theme.Text);
             DrawCountBadge(ui,
-                           {{thumbnail.Maximum.X - 36.0F, thumbnail.Maximum.Y - 18.0F},
-                            {thumbnail.Maximum.X - 2.0F, thumbnail.Maximum.Y - 2.0F}},
+                           {{area.Maximum.X - 8.0F - badgeWidth, thumbnail.Maximum.Y + 3.0F},
+                            {area.Maximum.X - 8.0F, thumbnail.Maximum.Y + 21.0F}},
                            childCount, theme);
         }
 
@@ -1164,8 +1176,7 @@ namespace KeireEditor
             if (hasChildren)
             {
                 const auto disclosure = ListDisclosureArea(area);
-                ui.DrawOverlayIcon(expanded ? Keire::UiIcon::ExpandMore : Keire::UiIcon::ChevronRight,
-                                   {disclosure.Minimum.X, disclosure.Minimum.Y}, theme.MutedText);
+                DrawDisclosureTriangle(ui, disclosure, expanded, theme.Text);
             }
 
             const Keire::UiItemRect thumbnail{{area.Minimum.X + 28.0F, area.Minimum.Y + 6.0F},

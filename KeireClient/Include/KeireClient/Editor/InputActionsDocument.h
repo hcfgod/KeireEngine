@@ -4,6 +4,7 @@
 
 #include <filesystem>
 #include <functional>
+#include <string>
 #include <string_view>
 
 namespace KeireEditor
@@ -23,6 +24,8 @@ namespace KeireEditor
                   Keire::Ref<Keire::UndoContext> undo = {}, std::filesystem::path source = {});
         void Save();
         void ReplaceDefinition(Keire::InputActionAssetDefinition definition, bool dirty = true);
+        [[nodiscard]] bool TryReplaceDefinition(Keire::InputActionAssetDefinition definition, std::string& diagnostic,
+                                                bool dirty = true);
         void SelectMap(Keire::AssetId map) noexcept;
         void SelectScheme(Keire::AssetId scheme) noexcept;
         void SelectAction(Keire::AssetId action) noexcept;

@@ -34,10 +34,18 @@ rm -rf "$stage" "$symbol_stage"
 mkdir -p "$stage/bin" "$stage/lib" "$stage/include" "$stage/Config" "$stage/samples" "$stage/content" "$stage/Docs/Diagnostics" "$stage/third-party/licenses" "$stage/third-party/SDL3" "$stage/examples/consumer" "$stage/examples/managed-consumer" "$stage/examples/source-module" "$stage/lib/cmake/$PROJECT_IDENTIFIER"
 client_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$CLIENT_TARGET/$CLIENT_TARGET"
 hub_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$HUB_TARGET/$HUB_TARGET"
-core_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$CORE_TARGET/lib$CORE_TARGET.a"
+core_archive_targets=("$CORE_TARGET")
+for suffix in Assets Build World Rendering Scenes Scripting Ui Vfx; do core_archive_targets+=("$CORE_TARGET$suffix"); done
+core_archive_sources=()
+for core_archive_target in "${core_archive_targets[@]}"; do
+  core_archive_sources+=("$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$core_archive_target/lib$core_archive_target.a")
+done
+core_source="$stage/lib/lib$CORE_TARGET.a"
 imgui_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/DearImGui/lib$imgui_library.a"
 zstd_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/Zstd/lib$zstd_library.a"
-cp "$client_source" "$hub_source" "$stage/bin/"; cp "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$asset_tool/$asset_tool" "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$asset_worker/$asset_worker" "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$runtime/$runtime" "$stage/bin/"; cp "$core_source" "$imgui_source" "$zstd_source" "$stage/lib/"
+cp "$client_source" "$hub_source" "$stage/bin/"; cp "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$asset_tool/$asset_tool" "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$asset_worker/$asset_worker" "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$runtime/$runtime" "$stage/bin/"
+bash "$ROOT/Scripts/Unix/merge-static-libraries.sh" "$core_source" "${core_archive_sources[@]}"
+cp "$imgui_source" "$zstd_source" "$stage/lib/"
 find "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$asset_worker" -maxdepth 1 \
   \( -type f -o -type l \) \
   \( -name 'libav*.so*' -o -name 'libav*.dylib' -o -name 'libswresample*.so*' -o -name 'libswresample*.dylib' \) \

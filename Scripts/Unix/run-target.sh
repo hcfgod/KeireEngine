@@ -4,7 +4,7 @@ PLATFORM="$1"; MODE="$2"; shift 2
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/Scripts/Unix/common.sh"
 GENERATOR=ninja; [[ "$PLATFORM" == Mac ]] && GENERATOR=xcode4
-CONFIGURATION=Debug; ARCHITECTURE="$(native_architecture)"; TOOLSET=default; TARGET=KeireClient; CI=0; UPDATE=0; FORCE=0; INSTALL_OPTIONAL=0
+CONFIGURATION=Debug; ARCHITECTURE="$(native_architecture)"; TOOLSET=default; COMPILER_CACHE=auto; PROFILE_BUILD=0; TARGET=KeireClient; CI=0; UPDATE=0; FORCE=0; INSTALL_OPTIONAL=0
 parse_build_arguments "$@"; load_project_config "$ROOT"; TOOLSET="$(resolve_unix_toolset "$PLATFORM" "$TOOLSET")"
 if [[ "$MODE" == test ]]; then
     TARGET="$TESTS_TARGET"
@@ -13,7 +13,12 @@ elif [[ "${KEIRE_EDITOR:-0}" == 1 || "${KEIRE_SMOKE_PROJECT:-0}" == 1 || -n "${K
 else
     TARGET="$HUB_TARGET"
 fi
-args=(--generator "$GENERATOR" --configuration "$CONFIGURATION" --architecture "$ARCHITECTURE" --toolset "$TOOLSET" --target "$TARGET")
+args=(--generator "$GENERATOR" --configuration "$CONFIGURATION" --architecture "$ARCHITECTURE" \
+  --toolset "$TOOLSET" --compiler-cache "$COMPILER_CACHE" --target "$TARGET")
+if [[ "$TARGET" == "$CLIENT_TARGET" ]]; then
+    args=(--generator "$GENERATOR" --configuration "$CONFIGURATION" --architecture "$ARCHITECTURE" \
+      --toolset "$TOOLSET" --compiler-cache "$COMPILER_CACHE" --target "${PROJECT_NAMESPACE}EditorDev")
+fi
 [[ $CI -eq 1 ]] && args+=(--ci); [[ $UPDATE -eq 1 ]] && args+=(--update); [[ $FORCE -eq 1 ]] && args+=(--force)
 bash "$ROOT/Scripts/$PLATFORM/build.sh" "${args[@]}"
 [[ "$PLATFORM" == Linux ]] && activate_linux_toolchain "$ROOT" "$TOOLSET"
@@ -53,7 +58,8 @@ if [[ "$MODE" == test && "$CONFIGURATION" =~ ^Debug ]]; then
 fi
 if [[ "$MODE" == test ]]; then
     editor_tests_target="${PROJECT_NAMESPACE}EditorTests"
-    editor_args=(--generator "$GENERATOR" --configuration "$CONFIGURATION" --architecture "$ARCHITECTURE" --toolset "$TOOLSET" --target "$editor_tests_target")
+    editor_args=(--generator "$GENERATOR" --configuration "$CONFIGURATION" --architecture "$ARCHITECTURE" \
+      --toolset "$TOOLSET" --compiler-cache "$COMPILER_CACHE" --target "$editor_tests_target")
     [[ $CI -eq 1 ]] && editor_args+=(--ci)
     [[ $UPDATE -eq 1 ]] && editor_args+=(--update)
     [[ $FORCE -eq 1 ]] && editor_args+=(--force)

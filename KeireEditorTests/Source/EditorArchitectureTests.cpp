@@ -333,6 +333,39 @@ TEST_CASE("asset browser source hierarchy collapses persistent child assets")
     CHECK(searchVisible[4].Record == &records[3]);
 }
 
+TEST_CASE("asset browser disclosure triangles visibly communicate collapsed and expanded hierarchy state")
+{
+    const Keire::UiItemRect area{{10.0F, 20.0F}, {30.0F, 40.0F}};
+    const auto collapsed = KeireEditor::AssetBrowserDisclosureTriangle(area, false);
+    CHECK(collapsed[2].X > collapsed[0].X);
+    CHECK(collapsed[2].X > collapsed[1].X);
+    CHECK(collapsed[0].Y < collapsed[1].Y);
+
+    const auto expanded = KeireEditor::AssetBrowserDisclosureTriangle(area, true);
+    CHECK(expanded[2].Y > expanded[0].Y);
+    CHECK(expanded[2].Y > expanded[1].Y);
+    CHECK(expanded[0].X < expanded[1].X);
+}
+
+TEST_CASE("asset browser grid names reserve space for hierarchy controls")
+{
+    const Keire::UiItemRect card{{0.0F, 0.0F}, {136.0F, 110.0F}};
+
+    const auto ordinary = KeireEditor::AssetBrowserGridNameArea(card, 48.0F, 0.0F, false);
+    CHECK(ordinary.Minimum.X == doctest::Approx(8.0F));
+    CHECK(ordinary.Maximum.X == doctest::Approx(128.0F));
+
+    const auto grouped = KeireEditor::AssetBrowserGridNameArea(card, 48.0F, 20.0F, true);
+    CHECK(grouped.Minimum.X == doctest::Approx(30.0F));
+    CHECK(grouped.Maximum.X == doctest::Approx(104.0F));
+    CHECK(grouped.Minimum.X > 26.0F);
+    CHECK(grouped.Maximum.X < 108.0F);
+
+    const Keire::UiItemRect narrowCard{{0.0F, 0.0F}, {42.0F, 90.0F}};
+    const auto narrow = KeireEditor::AssetBrowserGridNameArea(narrowCard, 48.0F, 20.0F, true);
+    CHECK(narrow.Maximum.X == narrow.Minimum.X);
+}
+
 TEST_CASE("asset browser utilities preserve preferences and deterministic folder routing")
 {
     const auto measureCharacters = [](const std::string_view text) { return static_cast<float>(text.size()); };
@@ -981,6 +1014,45 @@ TEST_CASE("input actions document owns authoring state and dirty lifecycle")
     undoService->Close();
     std::error_code error;
     std::filesystem::remove_all(root, error);
+}
+
+TEST_CASE("input actions document rejects invalid text drafts without losing the last valid definition")
+{
+    KeireEditor::InputActionsDocument document;
+    document.Open(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000066"),
+                  Keire::InputActionAsset::DefaultDefinition());
+    REQUIRE_FALSE(document.Definition().ActionMaps.empty());
+    REQUIRE_FALSE(document.Definition().ActionMaps.front().Actions.empty());
+    REQUIRE_FALSE(document.Definition().ActionMaps.front().Bindings.empty());
+
+    const auto originalActionName = document.Definition().ActionMaps.front().Actions.front().Name;
+    auto invalidName = document.Definition();
+    invalidName.ActionMaps.front().Actions.front().Name.clear();
+    std::string diagnostic;
+    CHECK_FALSE(document.TryReplaceDefinition(std::move(invalidName), diagnostic));
+    CHECK_FALSE(diagnostic.empty());
+    CHECK(document.Definition().ActionMaps.front().Actions.front().Name == originalActionName);
+    CHECK_FALSE(document.Dirty());
+
+    const auto binding = std::ranges::find_if(document.Definition().ActionMaps.front().Bindings,
+                                              [](const auto& candidate) { return candidate.Composite.empty(); });
+    REQUIRE(binding != document.Definition().ActionMaps.front().Bindings.end());
+    const auto bindingIndex =
+        static_cast<std::size_t>(std::distance(document.Definition().ActionMaps.front().Bindings.begin(), binding));
+    const auto originalPath = binding->Path;
+    auto invalidPath = document.Definition();
+    invalidPath.ActionMaps.front().Bindings[bindingIndex].Path.clear();
+    CHECK_FALSE(document.TryReplaceDefinition(std::move(invalidPath), diagnostic));
+    CHECK_FALSE(diagnostic.empty());
+    CHECK(document.Definition().ActionMaps.front().Bindings[bindingIndex].Path == originalPath);
+    CHECK_FALSE(document.Dirty());
+
+    auto renamed = document.Definition();
+    renamed.ActionMaps.front().Actions.front().Name = "Confirmed Action";
+    CHECK(document.TryReplaceDefinition(std::move(renamed), diagnostic));
+    CHECK(diagnostic.empty());
+    CHECK(document.Definition().ActionMaps.front().Actions.front().Name == "Confirmed Action");
+    CHECK(document.Dirty());
 }
 
 TEST_CASE("scene document owns asynchronous operations and replacement lifecycle")

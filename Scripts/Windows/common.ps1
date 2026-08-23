@@ -82,7 +82,8 @@ function Get-ProjectGenerationFingerprint {
         "Scripts\Unix\coral.sh", "Scripts\Windows\coral.ps1",
         "Scripts\Unix\ffmpeg.sh", "Scripts\Windows\ffmpeg.ps1",
         "Scripts\Unix\vendor.sh", "Scripts\Linux\vendor.sh", "Scripts\Mac\vendor.sh",
-        "Scripts\Windows\vendor.ps1"
+        "Scripts\Windows\vendor.ps1", "Scripts\patch-ninja-depfiles.py",
+        "Scripts\patch-ninja-compiler-cache.py"
     ) | ForEach-Object { Join-Path $Root $_ }
     $generationInfrastructureInputs += Get-ChildItem -LiteralPath (Join-Path $Root "Scripts\Dependencies") `
         -Recurse -File | ForEach-Object FullName
@@ -762,6 +763,22 @@ function Get-NinjaExecutable {
     throw "Ninja was not found. Run bootstrap for the Ninja generator."
 }
 
+function Resolve-CompilerCache {
+    param(
+        [Parameter(Mandatory = $true)][string]$Generator,
+        [ValidateSet("auto", "off", "sccache")][string]$CompilerCache = "auto"
+    )
+
+    if ($Generator -notin @("ninja", "compilecommands") -or $CompilerCache -eq "off") {
+        return "off"
+    }
+    $available = Get-Command sccache -ErrorAction SilentlyContinue
+    if ($CompilerCache -eq "sccache" -and -not $available) {
+        throw "sccache was requested but is not available in PATH."
+    }
+    return $(if ($available) { "sccache" } else { "off" })
+}
+
 function Add-LLVMToPath {
     $bin = "C:\Program Files\LLVM\bin"
     if (-not (Test-Path (Join-Path $bin "clang.exe"))) { throw "LLVM was not found under $bin." }
@@ -802,11 +819,14 @@ function Get-ManagedHostStagingTargets {
     )
 
     $targets = [System.Collections.Generic.List[string]]::new()
-    if ($Target -in @($Project.CLIENT_TARGET, $Project.HUB_TARGET)) {
+    $editorDevTarget = "$($Project.PROJECT_NAMESPACE)EditorDev"
+    if ($Target -in @($Project.CLIENT_TARGET, $Project.HUB_TARGET, $editorDevTarget)) {
         $targets.Add("$($Project.PROJECT_NAMESPACE)AssetTool")
         $targets.Add("$($Project.PROJECT_NAMESPACE)Runtime")
         $targets.Add($Project.CLIENT_TARGET)
     }
-    $targets.Add($Target)
+    if ($Target -ne $editorDevTarget) {
+        $targets.Add($Target)
+    }
     return @($targets | Select-Object -Unique)
 }

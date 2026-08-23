@@ -6,6 +6,17 @@ project(HubRuntimeTarget)
 
     ApplyCommonProjectSettings()
 
+    pchheader "KeireHubRuntime/HubRuntimePch.h"
+    pchsource "Source/HubRuntimePch.cpp"
+
+    filter { "system:windows", "toolset:msc" }
+        buildoptions { "/FIKeireHubRuntime/HubRuntimePch.h" }
+
+    filter { "system:linux or macosx" }
+        buildoptions { "-include KeireHubRuntime/HubRuntimePch.h" }
+
+    filter {}
+
     files
     {
         "Include/**.h",
@@ -28,6 +39,9 @@ project(HubRuntimeTarget)
 
     filter "system:macosx"
         files { "Source/**.mm" }
+
+    filter { "files:**.mm" }
+        enablepch "Off"
 
     filter { "system:macosx", "files:**NativeHttpTransportMac.mm" }
         buildoptions { "-fobjc-arc" }

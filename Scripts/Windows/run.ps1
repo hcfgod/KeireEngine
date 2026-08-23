@@ -26,9 +26,10 @@ $Toolset = Resolve-WindowsToolset $Generator $Toolset
 $outputArchitecture = Get-ArchitectureOutputName $Architecture
 $ClientExe = Join-Path $Root "Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CLIENT_TARGET)\$($Project.CLIENT_TARGET).exe"
 $HubExe = Join-Path $Root "Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.HUB_TARGET)\$($Project.HUB_TARGET).exe"
+$editorDevTarget = "$($Project.PROJECT_NAMESPACE)EditorDev"
 
 & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration `
-    -Architecture $Architecture -Toolset $Toolset -Target $Project.CLIENT_TARGET -CI:$CI -Update:$Update -Generate:$Generate
+    -Architecture $Architecture -Toolset $Toolset -Target $editorDevTarget -CI:$CI -Update:$Update -Generate:$Generate
 if (-not (Test-Path $ClientExe)) { throw "KeireClient executable was not found: $ClientExe" }
 if (-not $Editor -and -not $SmokeWindow -and -not $SmokeProject -and -not $ProjectPath) {
     & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration `

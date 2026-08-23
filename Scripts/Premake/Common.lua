@@ -5,6 +5,18 @@ ZstdProject = "Zstd"
 ZstdLibrary = ProjectConfig.PROJECT_NAMESPACE .. "Zstd"
 EnTTProject = "EnTT"
 GLMProject = "GLM"
+CoreArchiveTargets =
+{
+    ProjectConfig.CORE_TARGET,
+    ProjectConfig.CORE_TARGET .. "Assets",
+    ProjectConfig.CORE_TARGET .. "Build",
+    ProjectConfig.CORE_TARGET .. "World",
+    ProjectConfig.CORE_TARGET .. "Rendering",
+    ProjectConfig.CORE_TARGET .. "Scenes",
+    ProjectConfig.CORE_TARGET .. "Scripting",
+    ProjectConfig.CORE_TARGET .. "Ui",
+    ProjectConfig.CORE_TARGET .. "Vfx"
+}
 
 VendorIncludeDirs = {
     spdlog = "../Vendor/spdlog/include",
@@ -59,12 +71,16 @@ local function DependencyLinks(paths)
 end
 
 function LinkKeireCore()
-    links
-    {
-        ProjectConfig.CORE_TARGET,
-        DearImGuiProject,
-        ZstdProject
-    }
+    links(CoreArchiveTargets)
+    links { DearImGuiProject, ZstdProject }
+
+    -- Core is split into domain archives so an isolated edit does not rewrite a monolithic library. GNU-family
+    -- linkers need archive grouping because subsystem references intentionally cross those internal boundaries.
+    filter { "system:linux or macosx", "toolset:gcc or clang" }
+        linkgroups "On"
+
+    filter { "system:windows", "toolset:gcc" }
+        linkgroups "On"
 
     filter { "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
         links

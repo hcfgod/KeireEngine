@@ -45,6 +45,9 @@ Assert-StagingState (($clientTargets -join ",") -eq "KeireAssetTool,KeireRuntime
 $hubTargets = @(Get-ManagedHostStagingTargets -Project $stagingProject -Target "KeireHub")
 Assert-StagingState (($hubTargets -join ",") -eq "KeireAssetTool,KeireRuntime,KeireClient,KeireHub") `
     "Hub builds do not refresh the editor dependency managed hosts."
+$editorDevTargets = @(Get-ManagedHostStagingTargets -Project $stagingProject -Target "KeireEditorDev")
+Assert-StagingState (($editorDevTargets -join ",") -eq "KeireAssetTool,KeireRuntime,KeireClient") `
+    "The complete editor aggregate does not stage every managed executable host."
 $toolTargets = @(Get-ManagedHostStagingTargets -Project $stagingProject -Target "KeireAssetTool")
 Assert-StagingState (($toolTargets -join ",") -eq "KeireAssetTool") `
     "Direct managed-host target staging changed unexpectedly."

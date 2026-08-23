@@ -6,17 +6,30 @@ source "$ROOT/Scripts/Unix/generated-content-cache.sh"
 build_lock="$ROOT/Build/.locks/native-build.lock"
 generated_content_acquire_lock "$build_lock" 7200 \
   '==> Another build is using this checkout; waiting for it to finish'
-trap 'generated_content_release_lock "$build_lock"' EXIT
-GENERATOR=xcode4; CONFIGURATION=Debug; ARCHITECTURE="$(native_architecture)"; TOOLSET=default; TARGET=KeireClient; CI=0; UPDATE=0; FORCE=0; INSTALL_OPTIONAL=0
+GENERATOR=xcode4; CONFIGURATION=Debug; ARCHITECTURE="$(native_architecture)"; TOOLSET=default; COMPILER_CACHE=auto; PROFILE_BUILD=0; TARGET=KeireClient; CI=0; UPDATE=0; FORCE=0; INSTALL_OPTIONAL=0
+build_started="$SECONDS"
+build_succeeded=0
 parse_build_arguments "$@"
 load_project_config "$ROOT"
 TOOLSET="$(resolve_unix_toolset Mac "$TOOLSET")"
+COMPILER_CACHE="$(resolve_compiler_cache "$GENERATOR" "$COMPILER_CACHE")"
+write_build_profile() {
+    [[ "$PROFILE_BUILD" == 1 ]] || return 0
+    local directory="$ROOT/Build/Reports/BuildProfiles"
+    mkdir -p "$directory"
+    printf '{\n  "schemaVersion": 1,\n  "generator": "%s",\n  "configuration": "%s",\n  "architecture": "%s",\n  "toolset": "%s",\n  "compilerCache": "%s",\n  "target": "%s",\n  "succeeded": %s,\n  "elapsedSeconds": %s\n}\n' \
+      "$GENERATOR" "$CONFIGURATION" "$ARCHITECTURE" "$TOOLSET" "$COMPILER_CACHE" "$TARGET" \
+      "$([[ "$build_succeeded" == 1 ]] && printf true || printf false)" "$((SECONDS - build_started))" \
+      > "$directory/latest-$GENERATOR-$TARGET-$CONFIGURATION.json"
+    printf '==> Build profile: %s\n' "$directory/latest-$GENERATOR-$TARGET-$CONFIGURATION.json"
+}
+trap 'status=$?; generated_content_release_lock "$build_lock"; write_build_profile; exit "$status"' EXIT
 [[ "$TARGET" == KeireClient ]] && TARGET="$CLIENT_TARGET"
 [[ "$TARGET" == KeireHub ]] && TARGET="$HUB_TARGET"
 [[ "$TARGET" == KeireTests ]] && TARGET="$TESTS_TARGET"
 validate_unix_combination Mac "$GENERATOR" "$TOOLSET"
 if [[ "$CONFIGURATION" == Coverage && ( "$GENERATOR" != ninja || "$TOOLSET" != clang ) ]]; then printf 'Coverage requires Ninja and Clang.\n' >&2; exit 1; fi
-expected="$GENERATOR|$ARCHITECTURE|$TOOLSET|$CI|$(project_generation_fingerprint "$ROOT")"; stamp="$ROOT/Build/Generated/$GENERATOR.stamp"
+expected="$GENERATOR|$ARCHITECTURE|$TOOLSET|$COMPILER_CACHE|$CI|$(project_generation_fingerprint "$ROOT")"; stamp="$ROOT/Build/Generated/$GENERATOR.stamp"
 
 case "$GENERATOR" in
     xcode4) generated="$PROJECT_IDENTIFIER.xcworkspace" ;;
@@ -25,40 +38,42 @@ case "$GENERATOR" in
     *) printf "Unsupported build generator '%s'.\n" "$GENERATOR" >&2; exit 1 ;;
 esac
 if [[ $FORCE -eq 1 || $UPDATE -eq 1 || ! -e "$ROOT/$generated" || ! -f "$stamp" || "$(tr -d '\r\n' < "$stamp")" != "$expected" ]]; then
-    args=(--generator "$GENERATOR" --architecture "$ARCHITECTURE" --toolset "$TOOLSET"); [[ $CI -eq 1 ]] && args+=(--ci)
+    args=(--generator "$GENERATOR" --architecture "$ARCHITECTURE" --toolset "$TOOLSET" --compiler-cache "$COMPILER_CACHE"); [[ $CI -eq 1 ]] && args+=(--ci)
     [[ $UPDATE -eq 1 ]] && args+=(--update)
-    [[ $FORCE -eq 1 ]] && args+=(--force)
     bash "$ROOT/Scripts/Mac/generate.sh" "${args[@]}"
 fi
-
-bash "$ROOT/Scripts/Unix/build-info.sh"
-bash "$ROOT/Scripts/Unix/build-managed.sh"
 
 case "$GENERATOR" in
     xcode4)
         printf '==> Building %s %s for %s with Xcode\n' "$TARGET" "$CONFIGURATION" "$ARCHITECTURE"
+        xcode_profile=(); [[ "$PROFILE_BUILD" == 1 ]] && xcode_profile=(-showBuildTimingSummary)
         if [[ -d "$ROOT/$PROJECT_IDENTIFIER.xcworkspace" ]]; then
-            xcodebuild -workspace "$ROOT/$PROJECT_IDENTIFIER.xcworkspace" -scheme "$TARGET" -configuration "$CONFIGURATION"
+            xcodebuild -workspace "$ROOT/$PROJECT_IDENTIFIER.xcworkspace" -scheme "$TARGET" -configuration "$CONFIGURATION" "${xcode_profile[@]}"
         else
-            xcodebuild -project "$ROOT/$PROJECT_IDENTIFIER.xcodeproj" -scheme "$TARGET" -configuration "$CONFIGURATION"
+            xcodebuild -project "$ROOT/$PROJECT_IDENTIFIER.xcodeproj" -scheme "$TARGET" -configuration "$CONFIGURATION" "${xcode_profile[@]}"
         fi
         ;;
-    ninja) printf '==> Building %s %s for %s with Ninja\n' "$TARGET" "$CONFIGURATION" "$ARCHITECTURE"; ninja -C "$ROOT" -f build.ninja "${TARGET}_${CONFIGURATION}" ;;
+    ninja) printf '==> Building %s %s for %s with Ninja\n' "$TARGET" "$CONFIGURATION" "$ARCHITECTURE"; ninja_profile=(); [[ "$PROFILE_BUILD" == 1 ]] && ninja_profile=(-d stats); ninja -C "$ROOT" -f build.ninja "${ninja_profile[@]}" "${TARGET}_${CONFIGURATION}" ;;
     gmake) printf '==> Building %s %s for %s with GNU Make\n' "$TARGET" "$CONFIGURATION" "$ARCHITECTURE"; gmake -C "$ROOT" "config=$(printf '%s' "$CONFIGURATION" | tr '[:upper:]' '[:lower:]')" "$TARGET" ;;
 esac
-while IFS= read -r managed_host_target; do
-    bash "$ROOT/Scripts/Unix/stage-managed-host.sh" "$ROOT" "$CONFIGURATION" macosx "$ARCHITECTURE" "$managed_host_target"
-done < <(managed_host_staging_targets "$TARGET" "$CLIENT_TARGET" "$HUB_TARGET" "$PROJECT_NAMESPACE")
-if [[ "$TARGET" == "$HUB_TARGET" || "$TARGET" == "$CLIENT_TARGET" ]]; then
+if [[ "$GENERATOR" == ninja ]]; then
+    while IFS= read -r managed_host_target; do
+        bash "$ROOT/Scripts/Unix/stage-managed-host.sh" "$ROOT" "$CONFIGURATION" macosx "$ARCHITECTURE" "$managed_host_target"
+    done < <(managed_host_staging_targets "$TARGET" "$CLIENT_TARGET" "$HUB_TARGET" "$PROJECT_NAMESPACE")
+fi
+runtime_staging_target="$TARGET"
+[[ "$TARGET" == "${PROJECT_NAMESPACE}EditorDev" ]] && runtime_staging_target="$CLIENT_TARGET"
+if [[ "$GENERATOR" == ninja && ( "$runtime_staging_target" == "$HUB_TARGET" || "$runtime_staging_target" == "$CLIENT_TARGET" ) ]]; then
     output_architecture="$(architecture_output_name "$ARCHITECTURE")"
     dependency_configuration=Debug
     [[ "$CONFIGURATION" == Release || "$CONFIGURATION" == Dist ]] && dependency_configuration=Release
     sodium_runtime="$ROOT/Build/Dependencies/macosx-$output_architecture-$TOOLSET/$dependency_configuration/install/lib/libsodium.dylib"
-    target_directory="$ROOT/Build/Bin/$CONFIGURATION-macosx-$output_architecture/$TARGET"
+    target_directory="$ROOT/Build/Bin/$CONFIGURATION-macosx-$output_architecture/$runtime_staging_target"
     [[ -f "$sodium_runtime" ]] || {
         printf 'The pinned marketplace signature verifier runtime is missing: %s\n' "$sodium_runtime" >&2
         exit 1
     }
     generated_content_copy_file_if_changed "$sodium_runtime" "$target_directory/libsodium.dylib"
-    printf '==> Staged pinned marketplace signature verifier for %s\n' "$TARGET"
+    printf '==> Staged pinned marketplace signature verifier for %s\n' "$runtime_staging_target"
 fi
+build_succeeded=1

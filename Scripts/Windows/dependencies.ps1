@@ -221,8 +221,12 @@ foreach ($configuration in @("Debug", "Release")) {
     [IO.File]::WriteAllText($stamp, "$key|$configuration`n", [Text.UTF8Encoding]::new($false))
 }
 
+$forceFfmpegSourceBuild = $Force
 foreach ($configuration in @("Debug", "Release")) {
-    & (Join-Path $PSScriptRoot "ffmpeg.ps1") -Configuration $configuration -Force:$Force
+    & (Join-Path $PSScriptRoot "ffmpeg.ps1") -Configuration $configuration -Force:$forceFfmpegSourceBuild
+    # Debug and Release intentionally publish the same optimized FFmpeg binary. Once the first configuration has
+    # honored a forced rebuild, allow the second root to reuse that freshly validated result.
+    $forceFfmpegSourceBuild = $false
 }
 
 & (Join-Path $PSScriptRoot "shader-compiler.ps1") -Generator $Generator -Architecture $Architecture -Toolset $Toolset -Force:$Force

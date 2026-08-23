@@ -39,6 +39,26 @@ namespace KeireEditor
                 ui.Text(hint);
         }
     } // namespace
+
+    bool InputActionsPanel::DrawTextDraft(Keire::UiFrame& ui, const std::string_view label, const Keire::AssetId target,
+                                          const std::string_view current, TextDraft& draft)
+    {
+        if (draft.Target != target || (!draft.Editing && draft.Value != current))
+        {
+            draft.Target = target;
+            draft.Value = current;
+            draft.Editing = false;
+        }
+
+        (void)ui.InputText(label, draft.Value);
+        const auto state = ui.LastItemState();
+        const bool commit = state.DeactivatedAfterEdit;
+        draft.Editing = state.Active;
+        if (!state.Active && !commit && !state.Edited && draft.Value != current)
+            draft.Value = current;
+        return commit;
+    }
+
     void InputActionsPanel::Draw(Keire::UiFrame& ui)
     {
         auto panel = ui.BeginPanel(m_Registration);
@@ -63,7 +83,41 @@ namespace KeireEditor
         auto selectedScheme = document.SelectedScheme();
         auto selectedAction = document.SelectedAction();
         auto selectedBinding = document.SelectedBinding();
-        const auto originalBytes = Keire::InputActionAsset::Encode(inputDocument);
+
+        const auto applyValidatedEdit =
+            [&]<typename Operation>(const std::string_view undoName, const Operation& operation)
+        {
+            try
+            {
+                auto candidate = inputDocument;
+                std::invoke(operation, candidate);
+                const auto candidateBytes = Keire::InputActionAsset::Encode(candidate);
+                if (candidateBytes == Keire::InputActionAsset::Encode(inputDocument))
+                    return true;
+            }
+            catch (const std::exception& error)
+            {
+                m_Message = error.what();
+                m_Controller.ReportInputActionsError(m_Message);
+                return false;
+            }
+
+            m_Controller.RecordInputActionsUndo(undoName);
+            std::invoke(operation, inputDocument);
+            return true;
+        };
+
+        const auto commitDocument = [&]
+        {
+            document.SetSelection(selectedMap, selectedScheme, selectedAction, selectedBinding);
+            std::string diagnostic;
+            (void)document.TryReplaceDefinition(std::move(inputDocument), diagnostic);
+            if (!diagnostic.empty())
+            {
+                m_Message = std::move(diagnostic);
+                m_Controller.ReportInputActionsError(m_Message);
+            }
+        };
 
         const auto record = database ? database->Find(document.Asset()) : std::nullopt;
         ui.TextColored(theme.Accent, "INPUT ACTIONS");
@@ -529,24 +583,52 @@ namespace KeireEditor
                 if (scheme == inputDocument.ControlSchemes.end())
                 {
                     ui.TextColored(theme.MutedText, "Select an action map, action, binding, or control scheme.");
+                    commitDocument();
                     return;
                 }
-                auto name = scheme->Name;
-                if (ui.InputText("Scheme Name", name))
+                if (DrawTextDraft(ui, "Scheme Name", scheme->Id, scheme->Name, m_SchemeNameDraft))
                 {
-                    m_Controller.RecordInputActionsUndo("Rename Control Scheme");
-                    scheme->Name = std::move(name);
+                    const auto schemeId = scheme->Id;
+                    const auto name = m_SchemeNameDraft.Value;
+                    if (!applyValidatedEdit("Rename Control Scheme",
+                                            [schemeId, &name](auto& candidate)
+                                            {
+                                                const auto edited =
+                                                    std::ranges::find(candidate.ControlSchemes, schemeId,
+                                                                      &Keire::InputControlSchemeDefinition::Id);
+                                                if (edited != candidate.ControlSchemes.end())
+                                                    edited->Name = name;
+                                            }))
+                    {
+                        m_SchemeNameDraft.Value = scheme->Name;
+                    }
                 }
-                auto group = scheme->BindingGroup;
-                if (ui.InputText("Binding Group", group))
+                if (m_SchemeNameDraft.Editing && m_SchemeNameDraft.Value.empty())
+                    ui.TextColored(theme.Error, "Scheme name cannot be empty. Finish typing to apply.");
+                if (DrawTextDraft(ui, "Binding Group", scheme->Id, scheme->BindingGroup, m_BindingGroupDraft))
                 {
-                    m_Controller.RecordInputActionsUndo("Change Binding Group");
-                    const auto previous = scheme->BindingGroup;
-                    scheme->BindingGroup = std::move(group);
-                    for (auto& actionMap : inputDocument.ActionMaps)
-                        for (auto& binding : actionMap.Bindings)
-                            std::ranges::replace(binding.Groups, previous, scheme->BindingGroup);
+                    const auto schemeId = scheme->Id;
+                    const auto group = m_BindingGroupDraft.Value;
+                    if (!applyValidatedEdit("Change Binding Group",
+                                            [schemeId, &group](auto& candidate)
+                                            {
+                                                const auto edited =
+                                                    std::ranges::find(candidate.ControlSchemes, schemeId,
+                                                                      &Keire::InputControlSchemeDefinition::Id);
+                                                if (edited == candidate.ControlSchemes.end())
+                                                    return;
+                                                const auto previous = edited->BindingGroup;
+                                                edited->BindingGroup = group;
+                                                for (auto& actionMap : candidate.ActionMaps)
+                                                    for (auto& binding : actionMap.Bindings)
+                                                        std::ranges::replace(binding.Groups, previous, group);
+                                            }))
+                    {
+                        m_BindingGroupDraft.Value = scheme->BindingGroup;
+                    }
                 }
+                if (m_BindingGroupDraft.Editing && m_BindingGroupDraft.Value.empty())
+                    ui.TextColored(theme.Error, "Binding group cannot be empty. Finish typing to apply.");
                 ui.Separator();
                 ui.TextColored(theme.Accent, "DEVICES");
                 for (const std::string_view family : {"Keyboard", "Mouse", "Gamepad"})
@@ -593,16 +675,29 @@ namespace KeireEditor
                     if (!inputDocument.ActionMaps.empty())
                         selectedMap = inputDocument.ActionMaps.front().Id;
                 }
+                commitDocument();
                 return;
             }
             if (!selectedAction)
             {
-                auto name = map->Name;
-                if (ui.InputText("Map Name", name))
+                if (DrawTextDraft(ui, "Map Name", map->Id, map->Name, m_MapNameDraft))
                 {
-                    m_Controller.RecordInputActionsUndo();
-                    map->Name = std::move(name);
+                    const auto mapId = map->Id;
+                    const auto name = m_MapNameDraft.Value;
+                    if (!applyValidatedEdit("Rename Action Map",
+                                            [mapId, &name](auto& candidate)
+                                            {
+                                                const auto edited = std::ranges::find(
+                                                    candidate.ActionMaps, mapId, &Keire::InputActionMapDefinition::Id);
+                                                if (edited != candidate.ActionMaps.end())
+                                                    edited->Name = name;
+                                            }))
+                    {
+                        m_MapNameDraft.Value = map->Name;
+                    }
                 }
+                if (m_MapNameDraft.Editing && m_MapNameDraft.Value.empty())
+                    ui.TextColored(theme.Error, "Map name cannot be empty. Finish typing to apply.");
                 bool alwaysReceive = map->CapturePolicy == Keire::InputCapturePolicy::AlwaysReceive;
                 if (ui.Checkbox("Always Receive", alwaysReceive))
                 {
@@ -616,12 +711,31 @@ namespace KeireEditor
                 auto action = std::ranges::find(map->Actions, selectedAction, &Keire::InputActionDefinition::Id);
                 if (action != map->Actions.end())
                 {
-                    auto name = action->Name;
-                    if (ui.InputText("Action Name", name))
+                    if (DrawTextDraft(ui, "Action Name", action->Id, action->Name, m_ActionNameDraft))
                     {
-                        m_Controller.RecordInputActionsUndo();
-                        action->Name = std::move(name);
+                        const auto mapId = map->Id;
+                        const auto actionId = action->Id;
+                        const auto name = m_ActionNameDraft.Value;
+                        if (!applyValidatedEdit("Rename Input Action",
+                                                [mapId, actionId, &name](auto& candidate)
+                                                {
+                                                    const auto editedMap =
+                                                        std::ranges::find(candidate.ActionMaps, mapId,
+                                                                          &Keire::InputActionMapDefinition::Id);
+                                                    if (editedMap == candidate.ActionMaps.end())
+                                                        return;
+                                                    const auto editedAction =
+                                                        std::ranges::find(editedMap->Actions, actionId,
+                                                                          &Keire::InputActionDefinition::Id);
+                                                    if (editedAction != editedMap->Actions.end())
+                                                        editedAction->Name = name;
+                                                }))
+                        {
+                            m_ActionNameDraft.Value = action->Name;
+                        }
                     }
+                    if (m_ActionNameDraft.Editing && m_ActionNameDraft.Value.empty())
+                        ui.TextColored(theme.Error, "Action name cannot be empty. Finish typing to apply.");
                     const auto actionTypeName = [](const Keire::InputActionType type)
                     {
                         switch (type)
@@ -712,11 +826,28 @@ namespace KeireEditor
                         std::ranges::find(map->Bindings, selectedBinding, &Keire::InputBindingDefinition::Id);
                     if (binding != map->Bindings.end())
                     {
-                        auto name = binding->Name;
-                        if (ui.InputText("Binding Name", name))
+                        if (DrawTextDraft(ui, "Binding Name", binding->Id, binding->Name, m_BindingNameDraft))
                         {
-                            m_Controller.RecordInputActionsUndo();
-                            binding->Name = std::move(name);
+                            const auto mapId = map->Id;
+                            const auto bindingId = binding->Id;
+                            const auto name = m_BindingNameDraft.Value;
+                            if (!applyValidatedEdit("Rename Input Binding",
+                                                    [mapId, bindingId, &name](auto& candidate)
+                                                    {
+                                                        const auto editedMap =
+                                                            std::ranges::find(candidate.ActionMaps, mapId,
+                                                                              &Keire::InputActionMapDefinition::Id);
+                                                        if (editedMap == candidate.ActionMaps.end())
+                                                            return;
+                                                        const auto editedBinding =
+                                                            std::ranges::find(editedMap->Bindings, bindingId,
+                                                                              &Keire::InputBindingDefinition::Id);
+                                                        if (editedBinding != editedMap->Bindings.end())
+                                                            editedBinding->Name = name;
+                                                    }))
+                            {
+                                m_BindingNameDraft.Value = binding->Name;
+                            }
                         }
                         if (!binding->Composite.empty())
                         {
@@ -748,12 +879,31 @@ namespace KeireEditor
                                     }
                                 }
                             }
-                            auto path = binding->Path;
-                            if (ui.InputText("Control Path", path))
+                            if (DrawTextDraft(ui, "Control Path", binding->Id, binding->Path, m_ControlPathDraft))
                             {
-                                m_Controller.RecordInputActionsUndo("Change Control Path");
-                                binding->Path = std::move(path);
+                                const auto mapId = map->Id;
+                                const auto bindingId = binding->Id;
+                                const auto path = m_ControlPathDraft.Value;
+                                if (!applyValidatedEdit("Change Control Path",
+                                                        [mapId, bindingId, &path](auto& candidate)
+                                                        {
+                                                            const auto editedMap =
+                                                                std::ranges::find(candidate.ActionMaps, mapId,
+                                                                                  &Keire::InputActionMapDefinition::Id);
+                                                            if (editedMap == candidate.ActionMaps.end())
+                                                                return;
+                                                            const auto editedBinding =
+                                                                std::ranges::find(editedMap->Bindings, bindingId,
+                                                                                  &Keire::InputBindingDefinition::Id);
+                                                            if (editedBinding != editedMap->Bindings.end())
+                                                                editedBinding->Path = path;
+                                                        }))
+                                {
+                                    m_ControlPathDraft.Value = binding->Path;
+                                }
                             }
+                            if (m_ControlPathDraft.Editing && m_ControlPathDraft.Value.empty())
+                                ui.TextColored(theme.Error, "Control path cannot be empty. Finish typing to apply.");
                         }
                         ui.Separator();
                         ui.TextColored(theme.Accent, "BINDING GROUPS");
@@ -890,14 +1040,18 @@ namespace KeireEditor
             }
         }
 
-        document.SetSelection(selectedMap, selectedScheme, selectedAction, selectedBinding);
-        if (Keire::InputActionAsset::Encode(inputDocument) != originalBytes)
-            document.ReplaceDefinition(std::move(inputDocument));
+        commitDocument();
     }
 
     void InputActionsPanel::ResetTransientState() noexcept
     {
         m_Rebind.Reset();
         m_RebindContext.Reset();
+        m_SchemeNameDraft = {};
+        m_BindingGroupDraft = {};
+        m_MapNameDraft = {};
+        m_ActionNameDraft = {};
+        m_BindingNameDraft = {};
+        m_ControlPathDraft = {};
     }
 } // namespace KeireEditor

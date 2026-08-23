@@ -7,10 +7,13 @@ param(
     [string]$Architecture = "",
     [ValidateSet("default", "msc", "gcc", "clang")]
     [string]$Toolset = "default",
+    [ValidateSet("auto", "off", "sccache")]
+    [string]$CompilerCache = "auto",
     [string]$Target = "",
     [switch]$CI,
     [switch]$Update,
-    [switch]$Generate
+    [switch]$Generate,
+    [switch]$ProfileBuild
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,14 +36,18 @@ function Exit-KeireBuildLock {
 }
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
+$BuildTimer = [Diagnostics.Stopwatch]::StartNew()
+$BuildSucceeded = $false
+$BuildProfileBinaryLog = $null
 $BuildLock = Enter-KeireBuildLock -RepositoryRoot $Root
 try {
 $Project = Get-ProjectConfig
 $WorkspaceName = $Project.PROJECT_IDENTIFIER
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
 $Toolset = Resolve-WindowsToolset $Generator $Toolset
+$CompilerCache = Resolve-CompilerCache $Generator $CompilerCache
 $Target = if ($Target) { $Target } else { $Project.CLIENT_TARGET }
-$expectedStamp = "$Generator|$Architecture|$Toolset|$([bool]$CI)|$(Get-ProjectGenerationFingerprint $Root)"
+$expectedStamp = "$Generator|$Architecture|$Toolset|$CompilerCache|$([bool]$CI)|$(Get-ProjectGenerationFingerprint $Root)"
 $stamp = Join-Path $Root "Build\Generated\$Generator.stamp"
 
 Assert-SupportedBuildCombination $Generator $Configuration $Architecture $Toolset
@@ -50,7 +57,7 @@ function Invoke-GenerationIfNeeded {
     $stampMatches = (Test-Path $stamp) -and ((Get-Content $stamp -Raw).Trim() -eq $expectedStamp)
     if ($Generate -or $Update -or -not (Test-Path (Join-Path $Root $ExpectedFile)) -or -not $stampMatches) {
         & (Join-Path $PSScriptRoot "generate.ps1") -Generator $Generator -Architecture $Architecture `
-            -Toolset $Toolset -CI:$CI -Update:$Update -Force:$Generate
+            -Toolset $Toolset -CompilerCache $CompilerCache -CI:$CI -Update:$Update
     }
 }
 
@@ -62,41 +69,49 @@ function Get-NinjaExecutable {
     throw "Ninja was not found. Run bootstrap for the Ninja generator."
 }
 
-function Invoke-ManagedBuild {
-    Write-Host "==> Building managed runtime API"
-    & (Join-Path $PSScriptRoot "build-managed.ps1")
-    if ($LASTEXITCODE -ne 0) { throw "Managed runtime API build failed with exit code $LASTEXITCODE." }
-}
-
-Invoke-CheckedWindowsCommand { & (Join-Path $PSScriptRoot "build-info.ps1") } "Build metadata generation"
-
 switch ($Generator) {
     { $_ -like "vs*" } {
         $majorVersion = Get-VisualStudioMajorVersion $Generator
         $solutionName = if ($Generator -eq "vs2026") { "$WorkspaceName.slnx" } else { "$WorkspaceName.sln" }
         Invoke-GenerationIfNeeded $solutionName
-        Invoke-ManagedBuild
         $environment = Get-VSBuildEnvironment $majorVersion
         $platform = Get-MSBuildPlatform $Architecture
         Write-Host "==> Building $Target $Configuration for $Architecture with $Generator"
-        & $environment.MSBuild (Join-Path $Root $solutionName) "/m" "/t:$Target" `
-            "/p:Configuration=$Configuration" "/p:Platform=$platform" `
-            "/p:VCTargetsPath=$($environment.VCTargetsPath)"
+        $msbuildArguments = @(
+            (Join-Path $Root $solutionName), "/m", "/t:$Target", "/p:Configuration=$Configuration",
+            "/p:Platform=$platform", "/p:VCTargetsPath=$($environment.VCTargetsPath)"
+        )
+        $hostArchitecture = if ($env:PROCESSOR_ARCHITEW6432) {
+            $env:PROCESSOR_ARCHITEW6432
+        } else {
+            $env:PROCESSOR_ARCHITECTURE
+        }
+        if ($hostArchitecture -eq "AMD64") {
+            $msbuildArguments += "/p:PreferredToolArchitecture=x64"
+        }
+        if ($ProfileBuild) {
+            $profileDirectory = Join-Path $Root "Build\Reports\BuildProfiles"
+            New-Item -ItemType Directory -Force -Path $profileDirectory | Out-Null
+            $BuildProfileBinaryLog = Join-Path $profileDirectory "latest-$Generator-$Target-$Configuration.binlog"
+            $msbuildArguments += "/bl:$BuildProfileBinaryLog"
+        }
+        & $environment.MSBuild @msbuildArguments
         if ($LASTEXITCODE -ne 0) { throw "MSBuild failed with exit code $LASTEXITCODE." }
         break
     }
     "ninja" {
         Invoke-GenerationIfNeeded "build.ninja"
-        Invoke-ManagedBuild
         Enter-WindowsToolEnvironment $Generator $Toolset $Architecture | Out-Null
         Write-Host "==> Building $Target $Configuration for $Architecture with Ninja"
-        & (Get-NinjaExecutable) -C $Root -f build.ninja "$($Target)_$Configuration"
+        $ninjaArguments = @("-C", $Root, "-f", "build.ninja")
+        if ($ProfileBuild) { $ninjaArguments += @("-d", "stats") }
+        $ninjaArguments += "$($Target)_$Configuration"
+        & (Get-NinjaExecutable) @ninjaArguments
         if ($LASTEXITCODE -ne 0) { throw "Ninja failed with exit code $LASTEXITCODE." }
         break
     }
     "gmake" {
         Invoke-GenerationIfNeeded "Makefile"
-        Invoke-ManagedBuild
         Enter-WindowsToolEnvironment $Generator $Toolset $Architecture | Out-Null
         $make = Get-Command mingw32-make, make -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $make) {
@@ -115,25 +130,54 @@ switch ($Generator) {
     }
 }
 
-foreach ($managedHostTarget in @(Get-ManagedHostStagingTargets -Project $Project -Target $Target)) {
-    & (Join-Path $PSScriptRoot "stage-managed-host.ps1") -Root $Root -Configuration $Configuration `
-        -Architecture $Architecture -Target $managedHostTarget -IfPresent
+if ($Generator -eq "ninja") {
+    foreach ($managedHostTarget in @(Get-ManagedHostStagingTargets -Project $Project -Target $Target)) {
+        & (Join-Path $PSScriptRoot "stage-managed-host.ps1") -Root $Root -Configuration $Configuration `
+            -Architecture $Architecture -Target $managedHostTarget -IfPresent
+    }
 }
 
-if ($Target -in @($Project.HUB_TARGET, $Project.CLIENT_TARGET)) {
+$runtimeStagingTarget = if ($Target -eq "$($Project.PROJECT_NAMESPACE)EditorDev") {
+    $Project.CLIENT_TARGET
+}
+else {
+    $Target
+}
+if ($Generator -eq "ninja" -and $runtimeStagingTarget -in @($Project.HUB_TARGET, $Project.CLIENT_TARGET)) {
     $outputArchitecture = Get-ArchitectureOutputName $Architecture
     $dependencyConfiguration = if ($Configuration -in @("Release", "Dist")) { "Release" } else { "Debug" }
     $sodiumRuntime = Join-Path $Root `
         "Build\Dependencies\windows-$outputArchitecture-$Toolset\$dependencyConfiguration\install\bin\libsodium.dll"
-    $targetDirectory = Join-Path $Root "Build\Bin\$Configuration-windows-$outputArchitecture\$Target"
+    $targetDirectory = Join-Path $Root "Build\Bin\$Configuration-windows-$outputArchitecture\$runtimeStagingTarget"
     if (-not (Test-Path -LiteralPath $sodiumRuntime -PathType Leaf)) {
         throw "The pinned marketplace signature verifier runtime is missing: $sodiumRuntime"
     }
     & (Join-Path $PSScriptRoot "copy-file-if-changed.ps1") -Source $sodiumRuntime `
         -Destination (Join-Path $targetDirectory "libsodium.dll")
-    Write-Host "==> Staged pinned marketplace signature verifier for $Target"
+    Write-Host "==> Staged pinned marketplace signature verifier for $runtimeStagingTarget"
 }
+$BuildSucceeded = $true
 }
 finally {
     Exit-KeireBuildLock -Mutex $BuildLock
+    $BuildTimer.Stop()
+    if ($ProfileBuild) {
+        $profileDirectory = Join-Path $Root "Build\Reports\BuildProfiles"
+        New-Item -ItemType Directory -Force -Path $profileDirectory | Out-Null
+        $profilePath = Join-Path $profileDirectory "latest-$Generator-$Target-$Configuration.json"
+        [ordered]@{
+            SchemaVersion = 1
+            TimestampUtc = [DateTime]::UtcNow.ToString("o")
+            Generator = $Generator
+            Configuration = $Configuration
+            Architecture = $Architecture
+            Toolset = $Toolset
+            CompilerCache = $CompilerCache
+            Target = $Target
+            Succeeded = $BuildSucceeded
+            ElapsedMilliseconds = [Math]::Round($BuildTimer.Elapsed.TotalMilliseconds, 3)
+            BinaryLog = $(if ($BuildProfileBinaryLog) { $BuildProfileBinaryLog } else { $null })
+        } | ConvertTo-Json | Set-Content -LiteralPath $profilePath -Encoding UTF8
+        Write-Host "==> Build profile: $profilePath"
+    }
 }

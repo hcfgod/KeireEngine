@@ -59,7 +59,7 @@ namespace KeireEditor
         Keire::UiPanelRegistration m_Registration;
         Keire::AssetId m_SelectedSnapshot;
         Keire::AssetId m_SelectedDucking;
-        std::unordered_map<Keire::AssetId, std::string> m_EffectNameBuffers;
+        std::unordered_map<Keire::AssetId, std::string> m_NameBuffers;
         std::string m_Message;
         bool m_WasVisible = false;
     };

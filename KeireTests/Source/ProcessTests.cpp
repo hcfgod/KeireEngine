@@ -190,21 +190,23 @@ TEST_CASE("external editor launch rejects unavailable sources without starting a
     CHECK_FALSE(diagnostic.empty());
 }
 
-TEST_CASE("managed external editor targeting reuses an open solution session")
+TEST_CASE("managed external editor targeting reuses one solution for scripts and assembly definitions")
 {
     const auto root = std::filesystem::absolute(std::filesystem::path("Build") /
                                                 ("ExternalEditor-" + Keire::AssetId::Generate().ToString()));
     std::filesystem::create_directories(root);
     const auto source = root / "NewBehaviour.cs";
+    const auto assembly = root / "Gameplay.keireasm";
     const auto solution = root / (root.filename().string() + ".sln");
     std::ofstream(source) << "public sealed class NewBehaviour {}\n";
+    std::ofstream(assembly) << "{\"name\":\"Gameplay\"}\n";
     std::ofstream(solution) << "Microsoft Visual Studio Solution File\n";
 
     CHECK(Keire::Detail::ResolveManagedSolutionForExternalEditor(source, root) == solution);
+    CHECK(Keire::Detail::ResolveManagedSolutionForExternalEditor(assembly, root) == solution);
     CHECK(Keire::Detail::ResolveManagedSolutionForExternalEditor(root / "Texture.png", root).empty());
     CHECK((Keire::Detail::ResolveVisualStudioExternalEditorArguments(source, solution) ==
-           std::vector<std::string>{Keire::Detail::PathToUtf8(solution), "/Command",
-                                    "File.OpenFile \"" + Keire::Detail::PathToUtf8(source) + "\""}));
+           std::vector<std::string>{Keire::Detail::PathToUtf8(solution)}));
     CHECK((Keire::Detail::ResolveVisualStudioExternalEditorArguments(source, {}) ==
            std::vector<std::string>{Keire::Detail::PathToUtf8(source)}));
 

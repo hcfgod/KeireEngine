@@ -10,6 +10,21 @@ versions.
 
 ### Fixed
 
+- Input Actions now keeps map, scheme, action, binding, and control-path text as in-progress drafts until editing
+  finishes, rejects empty, duplicate, or otherwise invalid commits without changing the last valid document, and
+  contains validation failures instead of terminating the editor.
+- Removed duplicated build metadata, managed compilation, runtime staging, header-only project traversal, and FFmpeg
+  copies from ordinary builds, and stopped forced project regeneration from force-rebuilding third-party caches; added
+  private Core/Client/Hub Runtime PCHs, a fast editor-only target plus complete
+  `KeireEditorDev` aggregate, optional Ninja `sccache`, opt-in build timing reports, and direct x64 MSVC host-tool
+  selection that avoids repeating large archive operations. Split source-build KeireCore into parallel private
+  subsystem archives while preserving one recombined SDK library, and disabled nested MSVC compiler parallelism
+  without the `/MP1` PCH-tracking invalidation that caused perpetual rebuilds. Asset hierarchy disclosures are
+  now visible geometry-drawn triangles in List and Grid footers, with Grid count badges reserving a non-overlapping
+  name lane. Visual Studio opens the exact solution first, then routes C# and managed-assembly files through its
+  matching DTE instance without the failing combined command-line invocation.
+- Reused the identical optimized private FFmpeg output between Debug and Release dependency roots so a fresh or
+  partially repaired workstation performs one codec compilation instead of two.
 - Isolated GPU-skinned output buffers per render surface so simultaneous Scene, Game, and preview views cannot
   overwrite one another's animated deformation.
 - Reduced dense-material render chunks to keep D3D12 sampler tables stable across large modular environments.

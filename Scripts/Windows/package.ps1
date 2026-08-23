@@ -43,7 +43,15 @@ Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$runtimeNa
 Copy-Item "$Root\Build\Tools\ShaderCompiler\KeireShaderCompiler.exe" "$stage\bin\"
 Get-ChildItem "$Root\Build\Tools\ShaderCompiler" -Filter *.dll -File | Copy-Item -Destination "$stage\bin\"
 Copy-Item "$Root\Build\Dependencies\ffmpeg\Release\install\share\licenses\ffmpeg" "$stage\third-party\licenses\" -Recurse
-Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CORE_TARGET)\$($Project.CORE_TARGET).lib" "$stage\lib\"
+$coreArchiveTargets = @($Project.CORE_TARGET) + @(
+    @("Assets", "Build", "World", "Rendering", "Scenes", "Scripting", "Ui", "Vfx") |
+        ForEach-Object { "$($Project.CORE_TARGET)$_" }
+)
+$coreArchiveInputs = $coreArchiveTargets | ForEach-Object {
+    Join-Path $Root "Build\Bin\$Configuration-windows-$outputArchitecture\$_\$_.lib"
+}
+& (Join-Path $PSScriptRoot "merge-static-libraries.ps1") `
+    -Output (Join-Path $stage "lib\$($Project.CORE_TARGET).lib") -InputLibraries $coreArchiveInputs
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\DearImGui\$imguiLibraryName.lib" "$stage\lib\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\Zstd\$zstdLibraryName.lib" "$stage\lib\"
 $dependencyInstall = Join-Path $Root "Build\Dependencies\windows-$outputArchitecture-$Toolset\Release\install"
@@ -206,12 +214,14 @@ if ($Configuration -eq "Release") {
     New-Item -ItemType Directory -Force "$symbolStage\KeireClient", "$symbolStage\KeireHub", "$symbolStage\KeireCore", "$symbolStage\DearImGui", "$symbolStage\Zstd" | Out-Null
     $clientPdb = "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CLIENT_TARGET)\$($Project.CLIENT_TARGET).pdb"
     $hubPdb = "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.HUB_TARGET)\$($Project.HUB_TARGET).pdb"
-    $corePdb = "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CORE_TARGET)\$($Project.CORE_TARGET).pdb"
     $imguiPdb = "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\DearImGui\$imguiLibraryName.pdb"
     $zstdPdb = "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\Zstd\$zstdLibraryName.pdb"
     if (Test-Path $clientPdb) { Copy-Item $clientPdb "$symbolStage\KeireClient\" }
     if (Test-Path $hubPdb) { Copy-Item $hubPdb "$symbolStage\KeireHub\" }
-    if (Test-Path $corePdb) { Copy-Item $corePdb "$symbolStage\KeireCore\" }
+    foreach ($coreArchiveTarget in $coreArchiveTargets) {
+        $corePdb = "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$coreArchiveTarget\$coreArchiveTarget.pdb"
+        if (Test-Path $corePdb) { Copy-Item $corePdb "$symbolStage\KeireCore\" }
+    }
     if (Test-Path $imguiPdb) { Copy-Item $imguiPdb "$symbolStage\DearImGui\" }
     if (Test-Path $zstdPdb) { Copy-Item $zstdPdb "$symbolStage\Zstd\" }
 }

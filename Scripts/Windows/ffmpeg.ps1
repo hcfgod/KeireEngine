@@ -44,21 +44,30 @@ if (-not $Force -and (Test-Path -LiteralPath (Join-Path $Install "include\libavf
     Write-Host "==> Private FFmpeg $Configuration build is current"
     return
 }
-if ($Configuration -eq "Release" -and -not $Force) {
-    $DebugInstall = Join-Path $Root "Build\Dependencies\ffmpeg\Debug\install"
-    $DebugStamp = Join-Path $Root "Build\Dependencies\ffmpeg\Debug\keire-ffmpeg.stamp"
-    $DebugComponents = Join-Path $Root "Build\Dependencies\ffmpeg\Debug\config_components.h"
-    $DebugExpected = "$($Lock.FFMPEG_COMMIT)|Debug|$ZlibKey|shared-lgpl-avformat-avcodec-swresample-avutil-zlib-exr-v6"
-    if ((Test-Path -LiteralPath (Join-Path $DebugInstall "bin\avformat-63.dll")) -and
-        (Test-Path -LiteralPath (Join-Path $DebugInstall "bin\avformat.lib")) -and
-        (Test-Path -LiteralPath $DebugComponents) -and
-        (Select-String -LiteralPath $DebugComponents -SimpleMatch "#define CONFIG_EXR_DECODER 1" -Quiet) -and
-        (Test-Path -LiteralPath $DebugStamp) -and
-        ((Get-Content -LiteralPath $DebugStamp -Raw).Trim() -eq $DebugExpected)) {
+if (-not $Force) {
+    # Both configurations deliberately use the same optimized /MD FFmpeg build. Keep separate install roots for the
+    # generated project contract, but compile the large codec dependency only once on a fresh workstation.
+    $AlternateConfiguration = if ($Configuration -eq "Debug") { "Release" } else { "Debug" }
+    $AlternateOutput = Join-Path $Root "Build\Dependencies\ffmpeg\$AlternateConfiguration"
+    $AlternateInstall = Join-Path $AlternateOutput "install"
+    $AlternateStamp = Join-Path $AlternateOutput "keire-ffmpeg.stamp"
+    $AlternateComponents = Join-Path $AlternateOutput "config_components.h"
+    $AlternateExpected = "$($Lock.FFMPEG_COMMIT)|$AlternateConfiguration|$ZlibKey|shared-lgpl-avformat-avcodec-swresample-avutil-zlib-exr-v6"
+    if ((Test-Path -LiteralPath (Join-Path $AlternateInstall "include\libavformat\avformat.h")) -and
+        (Test-Path -LiteralPath (Join-Path $AlternateInstall "bin\avformat-63.dll")) -and
+        (Test-Path -LiteralPath (Join-Path $AlternateInstall "bin\avformat.lib")) -and
+        (Test-Path -LiteralPath $AlternateComponents) -and
+        (Select-String -LiteralPath $AlternateComponents -SimpleMatch "#define CONFIG_EXR_DECODER 1" -Quiet) -and
+        (Test-Path -LiteralPath $AlternateStamp) -and
+        ((Get-Content -LiteralPath $AlternateStamp -Raw).Trim() -eq $AlternateExpected)) {
         New-Item -ItemType Directory -Force -Path $Output | Out-Null
-        Copy-Item -LiteralPath $DebugInstall -Destination $Output -Recurse -Force
+        if (Test-Path -LiteralPath $Install) {
+            Remove-Item -LiteralPath $Install -Recurse -Force
+        }
+        Copy-Item -LiteralPath $AlternateInstall -Destination $Output -Recurse -Force
+        Copy-Item -LiteralPath $AlternateComponents -Destination (Join-Path $Output "config_components.h") -Force
         [IO.File]::WriteAllText($Stamp, "$Expected`n", [Text.UTF8Encoding]::new($false))
-        Write-Host "==> Reused the optimized private FFmpeg source build for Release"
+        Write-Host "==> Reused the identical private FFmpeg $AlternateConfiguration build for $Configuration"
         return
     }
 }

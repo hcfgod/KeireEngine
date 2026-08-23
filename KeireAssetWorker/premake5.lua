@@ -25,10 +25,9 @@ project(AssetWorkerTarget)
     local workerPrelinkStamp = commandRepositoryRoot .. "/Build/Intermediates/" .. OutputDir .. "/" ..
                                    AssetWorkerTarget .. "/" .. AssetWorkerTarget .. ".prelinkevents"
     local function CopyWindowsRuntime(source)
-        local windowsSource = source:gsub("/", "\\")
-        local windowsRuntimeDirectory = workerRuntimeDirectory:gsub("/", "\\")
-        local command = "mkdir " .. windowsRuntimeDirectory .. " >nul 2>&1 & copy /Y " .. windowsSource ..
-                            "\\*.dll " .. windowsRuntimeDirectory .. "\\"
+        local command = "powershell -NoProfile -ExecutionPolicy Bypass -File " .. commandRepositoryRoot ..
+                            "/Scripts/Windows/copy-files-if-changed.ps1 -SourceDirectory " .. source ..
+                            " -DestinationDirectory " .. workerRuntimeDirectory .. " -Filter *.dll"
         if _ACTION == "ninja" then
             command = command .. " && powershell -NoProfile -ExecutionPolicy Bypass -File " .. commandRepositoryRoot ..
                           "/Scripts/Windows/touch-ninja-stamp.ps1 -Path " .. workerPrelinkStamp .. " && exit /b 0"
@@ -36,7 +35,8 @@ project(AssetWorkerTarget)
         return command
     end
     local function CopyUnixRuntime(source)
-        return "mkdir -p " .. workerRuntimeDirectory .. " && cp -R " .. source .. "/. " .. workerRuntimeDirectory .. "/"
+        return "bash " .. commandRepositoryRoot .. "/Scripts/Unix/copy-files-if-changed.sh " .. source .. " " ..
+                   workerRuntimeDirectory .. " '*'"
     end
     if os.isdir(ffmpegDebug .. "/include") then
         filter { "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }

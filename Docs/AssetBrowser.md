@@ -34,8 +34,9 @@ rename, stable-identity duplicate, and recoverable Move to Trash operations. Fol
 sources share the same compact card and row chrome, including full-item hover and selection states plus a muted type
 line.
 Extracted Shader and Material Functions carry a persistent source-parent identity in their `.keiremeta`. A parent uses
-the same collapsed footprint as its peers and overlays a disclosure plus generated-child count on its preview. List
-mode indents generated sources with hierarchy rails; Grid mode grows the parent in place and presents children as
+the same collapsed footprint as its peers and places a geometry-drawn directional disclosure beside its label, with
+the generated-child count in the card footer so neither control covers the preview. List mode uses the same visible
+triangle in a reserved leading gutter and indents generated sources with hierarchy rails; Grid mode grows the parent in place and presents children as
 compact rows in an inset tray instead of flat peer thumbnails. Search temporarily expands matching groups. Moving a
 child away from its parent folder or removing the parent leaves the child visible as an ordinary standalone asset
 instead of hiding it.

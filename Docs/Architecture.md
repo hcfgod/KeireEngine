@@ -277,6 +277,12 @@ grouped under `Dependencies`; its reviewed definition lives in `Scripts/Premake/
 metadata lives below ignored `Build/Projects/DearImGui`. First-party targets retain local `premake5.lua` files, and
 the root file defines workspace identity, dependency grouping, and project load order.
 
+KeireCore's source-build implementation is partitioned into private Foundation, Assets, Build, World, Rendering,
+Scenes, Scripting, UI, and VFX archives. They share the same public headers, compile contract, generated-content
+dependency, and final-binary link closure, but keep ordinary edits from recreating one monolithic archive. GNU-family
+links group the archives to preserve cross-subsystem cyclic resolution. Packaging transactionally recombines them into
+one platform KeireCore archive, so the supported SDK boundary and consumer link name do not expose the partitioning.
+
 First-run discovery and import preparation are bounded Hub worker-thread operations. The worker re-inspects every
 discovered project descriptor and editor manifest, then publishes immutable prepared project/editor records. The owner
 thread only preflights and commits those records through the runtime's batched stores. Both store plans are validated

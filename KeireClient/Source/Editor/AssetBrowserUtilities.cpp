@@ -213,6 +213,34 @@ namespace KeireEditor
         return result;
     }
 
+    std::array<Keire::UiPosition, 3> AssetBrowserDisclosureTriangle(const Keire::UiItemRect area,
+                                                                    const bool expanded) noexcept
+    {
+        const auto center =
+            Keire::UiPosition{area.Minimum.X + area.Size().Width * 0.5F, area.Minimum.Y + area.Size().Height * 0.5F};
+        constexpr float halfWidth = 4.5F;
+        constexpr float halfHeight = 3.5F;
+        if (expanded)
+        {
+            return {{{center.X - halfWidth, center.Y - halfHeight},
+                     {center.X + halfWidth, center.Y - halfHeight},
+                     {center.X, center.Y + halfHeight}}};
+        }
+        return {{{center.X - halfHeight, center.Y - halfWidth},
+                 {center.X - halfHeight, center.Y + halfWidth},
+                 {center.X + halfHeight, center.Y}}};
+    }
+
+    Keire::UiItemRect AssetBrowserGridNameArea(const Keire::UiItemRect card, const float thumbnailSize,
+                                               const float countBadgeWidth, const bool hasChildren) noexcept
+    {
+        const float thumbnailBottom = card.Minimum.Y + 8.0F + std::max(thumbnailSize, 0.0F);
+        const float left = card.Minimum.X + (hasChildren ? 30.0F : 8.0F);
+        const float right =
+            hasChildren ? card.Maximum.X - 12.0F - std::max(countBadgeWidth, 0.0F) : card.Maximum.X - 8.0F;
+        return {{left, thumbnailBottom + 3.0F}, {std::max(left, right), thumbnailBottom + 21.0F}};
+    }
+
     std::filesystem::path UniqueAssetBrowserFolder(const std::filesystem::path& assetRoot,
                                                    std::filesystem::path desired)
     {

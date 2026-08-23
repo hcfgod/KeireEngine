@@ -97,6 +97,7 @@ assert_true grep -Fq '@distribution_api path /v1 /v1/* /v2 /v2/* /health/live /h
   "$ROOT/Services/KeireDistributionService/Deployment/Caddyfile.example"
 python3 "$ROOT/Scripts/Tests/test-supabase-config.py"
 python3 "$ROOT/Scripts/Tests/test-patch-ninja-depfiles.py"
+python3 "$ROOT/Scripts/Tests/test-ninja-compiler-cache.py"
 bash "$ROOT/Scripts/Tests/test-installer-unix.sh"
 bash "$ROOT/Scripts/Tests/test-hub-installer-unix.sh"
 bash "$ROOT/Scripts/Tests/test-macos-packaging-unix.sh"
@@ -412,8 +413,11 @@ done < <(find "$ROOT/AssetTool" "$ROOT/KeireAssetWorker" "$ROOT/KeireClient" "$R
   "$ROOT/KeireHubWorker" "$ROOT/KeireRuntime" "$ROOT/KeireTests" -type f \( -name '*.cpp' -o -name '*.h' \))
 assert_true grep -q 'libsodium.*configure' "$ROOT/Scripts/Unix/dependencies.sh"
 assert_true grep -q 'LIBSODIUM_COMMIT' "$ROOT/Scripts/Unix/dependencies.sh"
-assert_true grep -F -q 'cp -f "$sodium_runtime" "$target_directory/libsodium.so"' "$ROOT/Scripts/Linux/build.sh"
-assert_true grep -F -q 'cp -f "$sodium_runtime" "$target_directory/libsodium.dylib"' "$ROOT/Scripts/Mac/build.sh"
+assert_true grep -F -q 'generated_content_copy_file_if_changed "$sodium_runtime" "$target_directory/libsodium.so"' "$ROOT/Scripts/Linux/build.sh"
+assert_true grep -F -q 'generated_content_copy_file_if_changed "$sodium_runtime" "$target_directory/libsodium.dylib"' "$ROOT/Scripts/Mac/build.sh"
+assert_true grep -F -q '"$ROOT/Scripts/Unix/dependencies.sh" Linux "$ARCHITECTURE" "$TOOLSET" 0' "$ROOT/Scripts/Linux/generate.sh"
+assert_true grep -F -q '"$ROOT/Scripts/Unix/dependencies.sh" Mac "$ARCHITECTURE" "$TOOLSET" 0' "$ROOT/Scripts/Mac/generate.sh"
+assert_false grep -q 'force_dependencies=' "$ROOT/Scripts/Linux/generate.sh" "$ROOT/Scripts/Mac/generate.sh"
 assert_true grep -F -q '"$TARGET" == "$CLIENT_TARGET"' "$ROOT/Scripts/Linux/build.sh"
 assert_true grep -F -q '"$TARGET" == "$CLIENT_TARGET"' "$ROOT/Scripts/Mac/build.sh"
 assert_true grep -q 'DependencyManifest.SodiumDebugRuntime' "$ROOT/KeireHub/premake5.lua"
@@ -470,6 +474,21 @@ assert_true grep -q '../../Build/Projects/GLM' "$ROOT/Scripts/Premake/HeaderDepe
 assert_true grep -q 'links { DearImGuiProject, ZstdProject }' "$ROOT/KeireCore/premake5.lua"
 assert_true grep -q 'VendorIncludeDirs.entt' "$ROOT/KeireCore/premake5.lua"
 assert_true grep -q 'VendorIncludeDirs.glm' "$ROOT/KeireCore/premake5.lua"
+assert_false grep -F -q 'dependson { EnTTProject, GLMProject }' "$ROOT/KeireCore/premake5.lua"
+assert_true grep -F -q 'pchheader "KeireInternal/KeireCorePch.h"' "$ROOT/KeireCore/premake5.lua"
+assert_true grep -F -q 'buildoptions { "-include KeireInternal/KeireCorePch.h" }' "$ROOT/KeireCore/premake5.lua"
+assert_true grep -F -q 'removebuildoptions { "/MP" }' "$ROOT/KeireCore/premake5.lua"
+assert_false grep -F -q 'buildoptions { "/MP1" }' "$ROOT/KeireCore/premake5.lua"
+assert_true grep -F -q 'CoreArchiveTargets' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'linkgroups "On"' "$ROOT/Scripts/Premake/Common.lua"
+for core_archive in Assets Build World Rendering Scenes Scripting Ui Vfx; do
+  assert_true test -f "$ROOT/KeireCore/Source/Pch/KeireCore${core_archive}Pch.cpp"
+done
+assert_true grep -F -q 'pchheader "KeireClient/ClientPch.h"' "$ROOT/KeireClient/premake5.lua"
+assert_true grep -F -q 'buildoptions { "-include KeireClient/ClientPch.h" }' "$ROOT/KeireClient/premake5.lua"
+assert_false grep -F -q 'dependson { AssetWorkerTarget, AssetToolTarget, RuntimeTarget }' "$ROOT/KeireClient/premake5.lua"
+assert_true grep -F -q 'dependson { ProjectConfig.CLIENT_TARGET, AssetToolTarget, RuntimeTarget }' \
+  "$ROOT/Scripts/Premake/EditorDev.lua"
 assert_true grep -q 'Source/ECS/Components/CameraComponent.cpp' "$ROOT/KeireCore/premake5.lua"
 assert_true grep -q 'Source/ECS/Components/MeshRendererComponent.cpp' "$ROOT/KeireCore/premake5.lua"
 assert_true grep -q 'builtin-shaders.sh' "$ROOT/KeireCore/premake5.lua"
@@ -521,6 +540,9 @@ assert_equal "$(managed_host_staging_targets KeireClient KeireClient KeireHub Ke
 assert_equal "$(managed_host_staging_targets KeireHub KeireClient KeireHub Keire | tr '\n' ',')" \
   'KeireAssetTool,KeireRuntime,KeireClient,KeireHub,' \
   'Hub builds refresh managed hosts for the editor dependency chain'
+assert_equal "$(managed_host_staging_targets KeireEditorDev KeireClient KeireHub Keire | tr '\n' ',')" \
+  'KeireAssetTool,KeireRuntime,KeireClient,' \
+  'Complete editor aggregates refresh managed hosts without staging their proxy target'
 assert_true grep -q 'dependson { KeireManagedProject }' "$ROOT/Scripts/Premake/Managed.lua"
 assert_true grep -q 'links { KeireManagedProject }' "$ROOT/Scripts/Premake/Managed.lua"
 assert_true grep -q 'kind "StaticLib"' "$ROOT/Scripts/Premake/Managed.lua"
@@ -539,10 +561,12 @@ assert_true grep -q 'linkbuildoutputs "Off"' "$ROOT/Scripts/Premake/Managed.lua"
 assert_true grep -q 'Scripts/Unix/build-managed.sh' "$ROOT/Scripts/Premake/Managed.lua"
 assert_true grep -F -q -- '-newer "$assembly"' "$ROOT/Scripts/Unix/build-managed.sh"
 assert_true test -f "$ROOT/Scripts/Premake/ManagedBuildAnchor.cpp"
-assert_true grep -q 'Scripts/Unix/build-managed.sh' "$ROOT/Scripts/Linux/build.sh"
-assert_true grep -q 'Scripts/Unix/build-managed.sh' "$ROOT/Scripts/Mac/build.sh"
-assert_true grep -q 'Scripts/Unix/build-info.sh' "$ROOT/Scripts/Linux/build.sh"
-assert_true grep -q 'Scripts/Unix/build-info.sh' "$ROOT/Scripts/Mac/build.sh"
+assert_false grep -q 'Scripts/Unix/build-managed.sh' "$ROOT/Scripts/Linux/build.sh"
+assert_false grep -q 'Scripts/Unix/build-managed.sh' "$ROOT/Scripts/Mac/build.sh"
+assert_false grep -q 'Scripts/Unix/build-info.sh' "$ROOT/Scripts/Linux/build.sh"
+assert_false grep -q 'Scripts/Unix/build-info.sh' "$ROOT/Scripts/Mac/build.sh"
+assert_true grep -q 'resolve_compiler_cache' "$ROOT/Scripts/Linux/build.sh"
+assert_true grep -q 'PROFILE_BUILD' "$ROOT/Scripts/Linux/build.sh"
 assert_true grep -q 'KeireManaged KeireManaged.Tests SourceModules Scripts/Premake' "$ROOT/Scripts/Unix/common.sh"
 assert_true grep -F -q -- "-name '*.csproj'" "$ROOT/Scripts/Unix/common.sh"
 assert_true grep -F -q 'dependson { AssetWorkerTarget }' "$ROOT/AssetTool/premake5.lua"
@@ -567,6 +591,10 @@ assert_true grep -F -q 'frame.format == AV_PIX_FMT_GRAYF16' \
   "$ROOT/KeireAssetWorker/Source/FfmpegTextureImportBackend.cpp"
 assert_true grep -F -q 'bin\avformat.lib' "$ROOT/Scripts/Windows/ffmpeg.ps1"
 assert_false grep -F -q 'lib\avformat.lib' "$ROOT/Scripts/Windows/ffmpeg.ps1"
+assert_true grep -F -q '$AlternateConfiguration = if ($Configuration -eq "Debug")' \
+  "$ROOT/Scripts/Windows/ffmpeg.ps1"
+assert_true grep -F -q 'Reused the identical private FFmpeg' "$ROOT/Scripts/Windows/ffmpeg.ps1"
+assert_true grep -F -q '$forceFfmpegSourceBuild = $false' "$ROOT/Scripts/Windows/dependencies.ps1"
 assert_true test -z "$(find "$ROOT/KeireCore/Source" "$ROOT/KeireClient/Source" "$ROOT/KeireHub/Source" "$ROOT/KeireTests/Source" "$ROOT/AssetTool/Source" "$ROOT/KeireRuntime/Source" -type f -name '*.h' -print -quit)"
 assert_true test -f "$ROOT/KeireCore/Include/Keire/Assets/Asset.h"
 assert_true test -f "$ROOT/KeireCore/Source/Assets/AssetSystem.cpp"
@@ -713,6 +741,14 @@ for exported_function in AssertionFailure GetName GetBuildInfo GetVersionString 
 done
 assert_false grep -R -E -q 'KEIRE_API[^;{}]*(GetApplicationCommandLineDescription|CreateApplication)[[:space:]]*\(' "$ROOT/KeireCore/Include/Keire"
 assert_true grep -q 'dear-imgui-LICENSE.txt' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -F -q 'merge-static-libraries.sh' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -F -q 'core_archive_targets=("$CORE_TARGET")' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -F -q 'ar_command="${AR:-ar}"' "$ROOT/Scripts/Unix/merge-static-libraries.sh"
+missing_archive_directory="$(mktemp -d)"
+missing_archive_output="$missing_archive_directory/merged.a"
+assert_false bash "$ROOT/Scripts/Unix/merge-static-libraries.sh" "$missing_archive_output" \
+  "$missing_archive_output.missing"
+rm -rf "$missing_archive_directory"
 assert_true grep -q 'IMGUI_COMMIT' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q 'lib\$imgui_library.a' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q 'zstandard-LICENSE.txt' "$ROOT/Scripts/Unix/package.sh"

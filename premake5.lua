@@ -162,6 +162,7 @@ include(ProjectConfig.HUB_DIRECTORY .. "/premake5.lua")
 include "AssetTool/premake5.lua"
 include "KeireAssetWorker/premake5.lua"
 include "KeireRuntime/premake5.lua"
+include "Scripts/Premake/EditorDev.lua"
 include(ProjectConfig.TESTS_DIRECTORY .. "/premake5.lua")
 include "KeireEditorTests/premake5.lua"
 include "KeireRenderTests/premake5.lua"

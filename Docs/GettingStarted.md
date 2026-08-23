@@ -226,6 +226,16 @@ only one process invokes the shader compiler. Platform build launchers also seri
 content edits only rebuild affected targets, and unchanged staged runtime libraries are left untouched so a running
 editor does not block an otherwise no-op build:
 
+`KeireCore`, `KeireClient`, and `KeireHubRuntime` use project-private precompiled headers for stable standard-library
+and JSON parsing dependencies. Building `KeireClient` directly is the fast edit/compile target and no longer traverses
+the Asset Worker, Asset Tool, or player Runtime. The `KeireEditorDev` aggregate adds those executable tools and is what
+the `run` workflow builds before launching the editor.
+
+Source builds divide KeireCore into private subsystem archives that MSBuild can schedule in parallel. A change only
+recreates the archive that owns the modified translation unit instead of re-archiving the entire Core object set. This
+is an implementation detail: applications still use `LinkKeireCore()`, and SDK packages recombine the private archives
+into the single public KeireCore library expected by existing CMake consumers.
+
 Keep new headers in the owning project’s `Include/` tree and new implementation files in `Source/`. Directory names
 are case-sensitive repository contracts even on Windows: use `Docs`, `Include`, and `Source`, never `docs` or `src`
 for first-party source trees. `python Scripts/Tests/check-repository-layout.py` checks the complete layout quickly.
@@ -233,12 +243,20 @@ for first-party source trees. `python Scripts/Tests/check-repository-layout.py` 
 ```powershell
 ./Scripts/project.ps1 build -Generator ninja -Configuration Debug -Toolset msc
 ./Scripts/project.ps1 test -Generator ninja -Configuration Debug -Toolset msc
+./Scripts/project.ps1 build -Generator ninja -CompilerCache auto -ProfileBuild
 ```
 
 ```sh
 bash Scripts/project.sh build --generator ninja --configuration Debug --toolset clang
 bash Scripts/project.sh test --generator ninja --configuration Debug --toolset clang
+bash Scripts/project.sh build --generator ninja --compiler-cache auto --profile-build
 ```
+
+Ninja compiler caching defaults to `auto`: it uses `sccache` when that executable is already available in `PATH` and
+otherwise builds normally. Use `off` for an uncached comparison or `sccache` to require the tool. Profiling writes the
+latest timing JSON beneath `Build/Reports/BuildProfiles`; Visual Studio generators also write an MSBuild binary log.
+On x64 Windows, the launcher selects MSVC's x64 host tools up front so large static-library archives do not first fail
+inside the 32-bit librarian and repeat the archive operation.
 
 Run the bounded rendered UI smoke when changing the editor or UI renderer:
 
@@ -322,7 +340,10 @@ bash Scripts/project.sh doctor --generator ninja --toolset clang
 
 The doctor reports concrete tool resolution, compiler selection, architecture, and dependency state. If generation
 reports a stamp mismatch, regenerate with the intended generator, architecture, and toolset; use `-Force` or `--force`
-only when deliberately replacing the previous generated configuration.
+only when deliberately replacing the previous generated configuration. Forced generation does not invalidate the
+native dependency or FFmpeg caches. Use an explicit forced `bootstrap` only when those pinned third-party outputs
+must be rebuilt. The private FFmpeg configurations use identical optimized runtime flags, so dependency setup compiles
+that source once and publishes the validated result into both configuration roots.
 
 ## Common Problems
 

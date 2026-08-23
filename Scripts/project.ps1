@@ -8,6 +8,8 @@ param(
     [string]$Architecture = "",
     [ValidateSet("default", "msc", "gcc", "clang")]
     [string]$Toolset = "default",
+    [ValidateSet("auto", "off", "sccache")]
+    [string]$CompilerCache = "auto",
     [string]$Target = "",
     [ValidateSet("spdlog", "doctest", "SDL", "json", "imgui", "zstd", "entt", "glm", "SDL_shadercross", "assimp", "stb")]
     [string]$Dependency = "spdlog",
@@ -24,6 +26,7 @@ param(
     [switch]$Editor,
     [string]$ProjectPath = "",
     [switch]$Force,
+    [switch]$ProfileBuild,
     [switch]$AllowDirty
 )
 
@@ -74,14 +77,14 @@ function Invoke-ProjectCommand {
         "generate" {
             Invoke-CheckedCommand {
                 & (Join-Path $WindowsScripts "generate.ps1") -Generator $Generator -Architecture $Architecture `
-                    -Toolset $Toolset -CI:$CI -Update:$Update -Force:$Force
+                    -Toolset $Toolset -CompilerCache $CompilerCache -CI:$CI -Update:$Update -Force:$Force
             } "Project generation"
         }
         "build" {
             Invoke-CheckedCommand {
                 & (Join-Path $WindowsScripts "build.ps1") -Generator $Generator -Configuration $Configuration `
                     -Architecture $Architecture -Toolset $Toolset -Target $Target -CI:$CI -Update:$Update `
-                    -Generate:$Force
+                    -Generate:$Force -CompilerCache $CompilerCache -ProfileBuild:$ProfileBuild
             } "Build"
         }
         "test" {
@@ -177,6 +180,8 @@ Common options:
   -Generator <vs2026|vs2022|vs2019|ninja|gmake|compilecommands>
   -Configuration <Debug|Release|Dist|DebugASan|DebugUBSan|DebugTSan|Coverage>
   -Architecture <x86_64|ARM64>  -Toolset <default|msc|gcc|clang>
+  -CompilerCache <auto|off|sccache> (Ninja builds; auto uses sccache when installed)
+  -ProfileBuild (build command only; writes timing data and an MSBuild binary log under Build\Reports)
   -SmokeUi (run command only; requires a graphics-capable environment)
   -SmokeProject (run the sample project editor and exit after several frames)
   -Editor -ProjectPath <path> (open the editor directly instead of the project hub)

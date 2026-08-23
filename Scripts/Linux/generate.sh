@@ -3,18 +3,20 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/Scripts/Unix/common.sh"
 export PATH="$ROOT/Tools/Linux:$PATH"
-GENERATOR=ninja; CONFIGURATION=Debug; ARCHITECTURE="$(native_architecture)"; TOOLSET=default; TARGET=KeireClient; CI=0; UPDATE=0; FORCE=0; INSTALL_OPTIONAL=0
+GENERATOR=ninja; CONFIGURATION=Debug; ARCHITECTURE="$(native_architecture)"; TOOLSET=default; COMPILER_CACHE=auto; TARGET=KeireClient; CI=0; UPDATE=0; FORCE=0; INSTALL_OPTIONAL=0
 parse_build_arguments "$@"
 load_project_config "$ROOT"
 TOOLSET="$(resolve_unix_toolset Linux "$TOOLSET")"
+COMPILER_CACHE="$(resolve_compiler_cache "$GENERATOR" "$COMPILER_CACHE")"
 validate_unix_combination Linux "$GENERATOR" "$TOOLSET"
 
 bootstrap=(--generator "$GENERATOR" --architecture "$ARCHITECTURE" --toolset "$TOOLSET")
 [[ $UPDATE -eq 1 ]] && bootstrap+=(--update)
 bash "$ROOT/Scripts/Linux/bootstrap.sh" "${bootstrap[@]}"
 activate_linux_toolchain "$ROOT" "$TOOLSET"
-force_dependencies=0; [[ $FORCE -eq 1 ]] && force_dependencies=1
-bash "$ROOT/Scripts/Unix/dependencies.sh" Linux "$ARCHITECTURE" "$TOOLSET" "$force_dependencies"
+# Forced project generation must not invalidate native/codec caches. Use a forced bootstrap only when deliberately
+# replacing pinned third-party outputs.
+bash "$ROOT/Scripts/Unix/dependencies.sh" Linux "$ARCHITECTURE" "$TOOLSET" 0
 
 args=("--file=premake5.lua" "--arch=$(premake_architecture "$ARCHITECTURE")" "--toolset=$TOOLSET")
 [[ $CI -eq 1 ]] && args+=(--ci)
@@ -27,10 +29,11 @@ else
 fi
 if [[ "$GENERATOR" == ninja || "$GENERATOR" == compilecommands ]]; then
     python3 "$ROOT/Scripts/patch-ninja-depfiles.py" "$ROOT"
+    python3 "$ROOT/Scripts/patch-ninja-compiler-cache.py" "$ROOT" --cache "$COMPILER_CACHE"
 fi
 if [[ "$GENERATOR" == compilecommands ]]; then
     rule_toolset="$TOOLSET"
     ninja -C "$ROOT" -f build.ninja -t compdb "cxx_$rule_toolset" > "$ROOT/Build/Generated/compile_commands.all.json"
     python3 "$ROOT/Scripts/Unix/filter-compdb.py" "$ROOT/Build/Generated/compile_commands.all.json" "$ROOT/compile_commands.json"
 fi
-printf '%s|%s|%s|%s|%s\n' "$GENERATOR" "$ARCHITECTURE" "$TOOLSET" "$CI" "$(project_generation_fingerprint "$ROOT")" > "$ROOT/Build/Generated/$GENERATOR.stamp"
+printf '%s|%s|%s|%s|%s|%s\n' "$GENERATOR" "$ARCHITECTURE" "$TOOLSET" "$COMPILER_CACHE" "$CI" "$(project_generation_fingerprint "$ROOT")" > "$ROOT/Build/Generated/$GENERATOR.stamp"

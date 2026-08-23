@@ -35,6 +35,29 @@ namespace KeireEditor
         m_Dirty = dirty;
     }
 
+    bool InputActionsDocument::TryReplaceDefinition(Keire::InputActionAssetDefinition definition,
+                                                    std::string& diagnostic, const bool dirty)
+    {
+        try
+        {
+            const auto candidateBytes = Keire::InputActionAsset::Encode(definition);
+            if (candidateBytes == Keire::InputActionAsset::Encode(m_Definition))
+            {
+                diagnostic.clear();
+                return false;
+            }
+            m_Definition = std::move(definition);
+            m_Dirty = dirty;
+            diagnostic.clear();
+            return true;
+        }
+        catch (const std::exception& error)
+        {
+            diagnostic = error.what();
+            return false;
+        }
+    }
+
     void InputActionsDocument::SelectMap(const Keire::AssetId map) noexcept
     {
         m_Map = map;

@@ -338,6 +338,42 @@ namespace Keire::Detail
             return opened;
         }
 
+        [[nodiscard]] bool WaitForMatchingVisualStudioInstance(const std::filesystem::path& source,
+                                                               const std::filesystem::path& solution,
+                                                               const std::chrono::milliseconds timeout,
+                                                               bool& matchingInstance, std::string& diagnostic)
+        {
+            const auto deadline = std::chrono::steady_clock::now() + timeout;
+            matchingInstance = false;
+            do
+            {
+                bool currentMatch = false;
+                std::string currentDiagnostic;
+                if (OpenInMatchingVisualStudioInstance(source, solution, currentMatch, currentDiagnostic))
+                    return true;
+                matchingInstance = matchingInstance || currentMatch;
+                if (!currentDiagnostic.empty())
+                    diagnostic = std::move(currentDiagnostic);
+                if (std::chrono::steady_clock::now() >= deadline)
+                    break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            } while (true);
+            return false;
+        }
+
+        void OpenInVisualStudioWhenSolutionReady(std::filesystem::path source, std::filesystem::path solution)
+        {
+            std::thread(
+                [source = std::move(source), solution = std::move(solution)]
+                {
+                    bool matchingInstance = false;
+                    std::string ignoredDiagnostic;
+                    (void)WaitForMatchingVisualStudioInstance(source, solution, std::chrono::seconds(60),
+                                                              matchingInstance, ignoredDiagnostic);
+                })
+                .detach();
+        }
+
         class UniqueHandle final
         {
           public:
@@ -1242,7 +1278,7 @@ namespace Keire::Detail
         const auto sourceText = PathToUtf8(source);
         if (managedSolution.empty())
             return {sourceText};
-        return {PathToUtf8(managedSolution), "/Command", "File.OpenFile \"" + sourceText + "\""};
+        return {PathToUtf8(managedSolution)};
     }
 
     bool OpenInExternalEditor(const std::filesystem::path& path, const std::filesystem::path& preferredEditor,
@@ -1260,18 +1296,20 @@ namespace Keire::Detail
             }
             const auto sourceText = PathToUtf8(source);
             std::vector<std::string> arguments{sourceText};
-            auto extension = source.extension().string();
-            for (char& character : extension)
-                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
             const auto managedSolution = ResolveManagedSolutionForExternalEditor(source, working);
 #if defined(_WIN32)
-            if (reuseManagedSession && extension == ".cs" && !managedSolution.empty())
+            const bool managedVisualStudioDocument = !managedSolution.empty();
+            if (managedVisualStudioDocument)
             {
                 bool matchingInstance = false;
-                if (OpenInMatchingVisualStudioInstance(source, managedSolution, matchingInstance, diagnostic))
+                const auto wait = reuseManagedSession ? std::chrono::milliseconds(1500) : std::chrono::milliseconds(0);
+                if (WaitForMatchingVisualStudioInstance(source, managedSolution, wait, matchingInstance, diagnostic))
                     return true;
                 if (matchingInstance)
-                    return false;
+                {
+                    OpenInVisualStudioWhenSolutionReady(source, managedSolution);
+                    return true;
+                }
             }
 #endif
             if (!preferredEditor.empty())
@@ -1281,14 +1319,22 @@ namespace Keire::Detail
                 {
                     character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
                 }
+#if defined(_WIN32)
                 if (editorName == "devenv" && !managedSolution.empty())
-                    arguments = extension == ".cs" ? ResolveVisualStudioExternalEditorArguments(source, managedSolution)
-                                                   : std::vector<std::string>{PathToUtf8(managedSolution)};
+                {
+                    arguments = {PathToUtf8(managedSolution)};
+                    if (!LaunchDetachedProcess(std::filesystem::weakly_canonical(preferredEditor), arguments, working,
+                                               diagnostic))
+                        return false;
+                    OpenInVisualStudioWhenSolutionReady(source, managedSolution);
+                    return true;
+                }
+#endif
                 return LaunchDetachedProcess(std::filesystem::weakly_canonical(preferredEditor), arguments, working,
                                              diagnostic);
             }
 #if defined(_WIN32)
-            if (extension == ".cs" && !managedSolution.empty())
+            if (managedVisualStudioDocument)
             {
                 auto visualStudio = ResolveVisualStudioExecutable();
                 if (visualStudio.empty())
@@ -1297,9 +1343,13 @@ namespace Keire::Detail
                 for (char& character : editorName)
                     character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
                 if (!visualStudio.empty() && editorName == "devenv")
-                    return LaunchDetachedProcess(visualStudio,
-                                                 ResolveVisualStudioExternalEditorArguments(source, managedSolution),
-                                                 working, diagnostic);
+                {
+                    const auto solutionArguments = ResolveVisualStudioExternalEditorArguments(source, managedSolution);
+                    if (!LaunchDetachedProcess(visualStudio, solutionArguments, working, diagnostic))
+                        return false;
+                    OpenInVisualStudioWhenSolutionReady(source, managedSolution);
+                    return true;
+                }
             }
             const auto target = managedSolution.empty() ? source : managedSolution;
             const auto result = reinterpret_cast<std::intptr_t>(ShellExecuteW(
@@ -1311,6 +1361,8 @@ namespace Keire::Detail
                                  : "Windows could not open the generated Visual Studio solution.";
                 return false;
             }
+            if (managedVisualStudioDocument)
+                OpenInVisualStudioWhenSolutionReady(source, managedSolution);
             return true;
 #elif defined(__APPLE__)
             const std::filesystem::path executable = "/usr/bin/open";

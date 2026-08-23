@@ -4,6 +4,17 @@ project(ProjectConfig.CLIENT_TARGET)
 
     ApplyCommonProjectSettings()
 
+    pchheader "KeireClient/ClientPch.h"
+    pchsource "Source/ClientPch.cpp"
+
+    filter { "system:windows", "toolset:msc" }
+        buildoptions { "/FIKeireClient/ClientPch.h" }
+
+    filter { "system:linux or macosx" }
+        buildoptions { "-include KeireClient/ClientPch.h" }
+
+    filter {}
+
     files
     {
         "Include/**.h",
@@ -32,7 +43,6 @@ project(ProjectConfig.CLIENT_TARGET)
     LinkKeireSourceModules()
     LinkKeireCore()
 
-    dependson { AssetWorkerTarget, AssetToolTarget, RuntimeTarget }
     AddKeireManagedRuntimeDependency()
     AddKeireManagedHostStaging()
 

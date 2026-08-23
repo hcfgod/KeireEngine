@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Repair Premake Ninja compiler rules that declare, but do not emit, depfiles."""
+"""Repair known Premake Ninja compiler-rule and PCH-path defects."""
 
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
+
+
+MSVC_PCH_PATH = re.compile(r"/Fp(?:\.\./)+Build/")
 
 
 def patch_rule_block(block: list[str], source: Path) -> int:
@@ -49,6 +53,11 @@ def patch_project(path: Path) -> int:
             patched += patch_rule_block(block, path)
             lines[rule_start:index] = block
         rule_start = index
+    for index, line in enumerate(lines):
+        repaired = MSVC_PCH_PATH.sub("/FpBuild/", line)
+        if repaired != line:
+            lines[index] = repaired
+            patched += 1
     if patched:
         with path.open("w", encoding="utf-8", newline="") as stream:
             stream.write("".join(lines))
@@ -79,7 +88,7 @@ def main() -> int:
     projects = project_files(root)
     patched = sum(patch_project(project) for project in projects)
     print(
-        f"Validated Ninja depfile emission in {len(projects)} subprojects; patched {patched} compiler rules."
+        f"Validated Ninja dependency and PCH paths in {len(projects)} subprojects; patched {patched} entries."
     )
     return 0
 
