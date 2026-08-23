@@ -548,6 +548,35 @@ TEST_CASE("Scene assets and mutable scenes preserve validated hierarchy ordering
     CHECK_FALSE(root);
 }
 
+TEST_CASE("legacy mesh renderer migration preserves every material slot")
+{
+    const auto baseMaterial = Keire::AssetId::Parse("10000000-0000-4000-8000-000000000001");
+    const auto detailMaterial = Keire::AssetId::Parse("10000000-0000-4000-8000-000000000002");
+    auto definition = Keire::SceneAsset::EmptyDefinition("Multi Material Migration");
+    definition.Objects.push_back({.Id = Keire::AssetId::Parse("20000000-0000-4000-8000-000000000001"),
+                                  .Name = "Multi Material Mesh",
+                                  .Components = {{Keire::MeshRendererComponent::StaticType(), 3, true,
+                                                  "{\"mesh\":\"4b454952-4543-5542-454d-455348000001\",\"material\":\"" +
+                                                      baseMaterial.ToString() + "\",\"material.1\":\"" +
+                                                      detailMaterial.ToString() + "\",\"visible\":true}"}}});
+
+    const auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), std::move(definition));
+    const auto entity = scene->FindEntity(Keire::EntityId::Parse("20000000-0000-4000-8000-000000000001"));
+    const auto renderer = entity.GetComponent<Keire::MeshRendererComponent>();
+    REQUIRE(renderer);
+    REQUIRE(renderer->Materials().size() == 2);
+    CHECK(renderer->Material(0) == baseMaterial);
+    CHECK(renderer->Material(1) == detailMaterial);
+
+    const auto objects = scene->Objects();
+    REQUIRE(objects.size() == 1);
+    const auto serialized = std::ranges::find(objects.front().Components, Keire::MeshRendererComponent::StaticType(),
+                                              &Keire::SceneComponentDefinition::Type);
+    REQUIRE(serialized != objects.front().Components.end());
+    CHECK(serialized->SchemaVersion == 4);
+    CHECK(serialized->Data.find("\"material.1\":\"" + detailMaterial.ToString() + "\"") != std::string::npos);
+}
+
 TEST_CASE("Scene import discovers deterministic authored and managed asset dependencies")
 {
     const auto graph = Keire::AssetId::Parse("10000000-0000-4000-8000-000000000001");
@@ -566,6 +595,9 @@ TEST_CASE("Scene import discovers deterministic authored and managed asset depen
     const auto prefab = Keire::AssetId::Parse("10000000-0000-4000-8000-00000000000e");
     const auto ignoredEntity = Keire::AssetId::Parse("10000000-0000-4000-8000-00000000000f");
     const auto projectedManagedAsset = Keire::AssetId::Parse("10000000-0000-4000-8000-000000000010");
+    const auto mesh = Keire::AssetId::Parse("10000000-0000-4000-8000-000000000011");
+    const auto baseMaterial = Keire::AssetId::Parse("10000000-0000-4000-8000-000000000012");
+    const auto detailMaterial = Keire::AssetId::Parse("10000000-0000-4000-8000-000000000013");
 
     const std::string managedState =
         "{\"Version\":1,\"Fields\":["
@@ -590,6 +622,9 @@ TEST_CASE("Scene import discovers deterministic authored and managed asset depen
     object.Id = Keire::AssetId::Parse("30000000-0000-4000-8000-000000000001");
     object.Name = "Authoring";
     object.Components = {
+        {Keire::MeshRendererComponent::StaticType(), 3, true,
+         "{\"mesh\":" + JsonString(mesh.ToString()) + ",\"material\":" + JsonString(baseMaterial.ToString()) +
+             ",\"material.1\":" + JsonString(detailMaterial.ToString()) + "}"},
         {Keire::AnimatorComponent::StaticType(), 1, true,
          "{\"graph\":" + JsonString(graph.ToString()) + ",\"skeleton\":" + JsonString(skeleton.ToString()) +
              ",\"skinnedMesh\":" + JsonString(skinnedMesh.ToString()) + ",\"avatarMasks\":[" +
@@ -638,6 +673,7 @@ TEST_CASE("Scene import discovers deterministic authored and managed asset depen
     auto expected = std::vector{graph,           skeleton,      skinnedMesh, avatarMask, collisionMesh,
                                 physicsMaterial, clip,          mixer,       effect,     managedDirect,
                                 managedArray,    overrideAsset, addedEffect, prefab,     projectedManagedAsset};
+    expected.insert(expected.end(), {mesh, baseMaterial, detailMaterial});
     std::ranges::sort(expected);
     CHECK(first.AssetDependencies == expected);
     CHECK(second.AssetDependencies == expected);

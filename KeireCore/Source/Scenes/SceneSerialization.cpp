@@ -1,10 +1,13 @@
 #include "KeireInternal/Scenes/SceneSerialization.h"
 
 #include "Keire/Animation/ProceduralMotion.h"
+#include "Keire/ECS/Components/MeshRendererComponent.h"
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <type_traits>
@@ -278,6 +281,25 @@ namespace Keire::Detail
         }
     } // namespace
 
+    bool IsMeshMaterialSlotKey(const std::string_view key) noexcept
+    {
+        constexpr std::string_view prefix = "material.";
+        if (!key.starts_with(prefix) || key.size() == prefix.size())
+            return false;
+
+        std::size_t slot = 0;
+        for (const char character : key.substr(prefix.size()))
+        {
+            if (character < '0' || character > '9')
+                return false;
+            const auto digit = static_cast<std::size_t>(character - '0');
+            if (slot > (std::numeric_limits<std::size_t>::max() - digit) / 10U)
+                return false;
+            slot = slot * 10U + digit;
+        }
+        return slot > 0U && slot < 256U;
+    }
+
     std::string EncodeComponentPropertyBag(const ComponentPropertyBag& bag)
     {
         Json object = Json::object();
@@ -297,6 +319,17 @@ namespace Keire::Detail
         {
             if (const auto found = object.find(property.Key); found != object.end())
                 result.emplace(property.Key, DecodeProperty(*found, property));
+        }
+        if (registration.Type == MeshRendererComponent::StaticType())
+        {
+            const auto material = std::ranges::find(registration.Properties, "material", &ComponentProperty::Key);
+            if (material == registration.Properties.end())
+                throw std::logic_error("Mesh Renderer registration is missing its material property.");
+            for (const auto& [key, value] : object.items())
+            {
+                if (IsMeshMaterialSlotKey(key))
+                    result.emplace(key, DecodeProperty(value, *material));
+            }
         }
         if (const auto found = object.find("managedState"); found != object.end())
         {

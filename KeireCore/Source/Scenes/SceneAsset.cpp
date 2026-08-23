@@ -1,5 +1,7 @@
 #include "Keire/Scenes/SceneAsset.h"
 
+#include "KeireInternal/Scenes/SceneSerialization.h"
+
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/ECS/Components/AnimatorComponent.h"
 #include "Keire/ECS/Components/AudioComponents.h"
@@ -190,12 +192,13 @@ namespace Keire
             const auto data = Json::parse(component.Data);
             if (component.Type == MeshRendererComponent::StaticType())
             {
-                for (const auto key : {"mesh", "material"})
+                for (const auto& [key, value] : data.items())
                 {
-                    const auto* value = FindMember(data, key);
-                    if (!value || value->is_null())
+                    if (key != "mesh" && key != "material" && !Detail::IsMeshMaterialSlotKey(key))
                         continue;
-                    const auto dependency = AssetId::Parse(value->get<std::string>());
+                    if (value.is_null())
+                        continue;
+                    const auto dependency = AssetId::Parse(value.get<std::string>());
                     if (!MeshAsset::IsBuiltin(dependency))
                         InsertDependency(dependencies, dependency);
                 }

@@ -3236,12 +3236,12 @@ namespace Keire
             const auto referenceDirectory = m_Impl->ProjectRoot / "Library/ScriptAssemblies/References";
             const auto reference = referenceDirectory / ideManagedApi.filename();
             const auto contents = Detail::ReadTextFile(ideManagedApi, std::size_t{64} << 20U);
-            Detail::WriteFileAtomically(reference, std::as_bytes(std::span(contents)));
+            (void)Detail::WriteFileAtomicallyIfChanged(reference, std::as_bytes(std::span(contents)));
             ideManagedApi = reference;
             if (!ideManagedApiProject.empty())
             {
                 const auto designTimeProject = referenceDirectory / "Keire.Managed.VisualStudio.csproj";
-                Detail::WriteTextFileAtomically(
+                (void)Detail::WriteTextFileAtomicallyIfChanged(
                     designTimeProject, GenerateManagedApiDesignTimeProject(ideManagedApiProject, designTimeProject));
                 ideManagedApiProject = designTimeProject;
             }
@@ -3249,13 +3249,13 @@ namespace Keire
         for (const auto& assembly : request.Assemblies)
         {
             const auto project = m_Impl->ProjectRoot / (assembly.Definition.Name + ".csproj");
-            Detail::WriteTextFileAtomically(project,
-                                            GenerateProject(assembly, names, m_Impl->ProjectRoot, m_Impl->ProjectRoot,
-                                                            ideManagedApi, ideManagedApiProject, "net8.0", "12.0"));
+            (void)Detail::WriteTextFileAtomicallyIfChanged(
+                project, GenerateProject(assembly, names, m_Impl->ProjectRoot, m_Impl->ProjectRoot, ideManagedApi,
+                                         ideManagedApiProject, "net8.0", "12.0"));
             result.Projects.push_back(project);
         }
-        Detail::WriteTextFileAtomically(result.Solution,
-                                        GenerateSolution(request, names, m_Impl->ProjectRoot, ideManagedApiProject));
+        (void)Detail::WriteTextFileAtomicallyIfChanged(
+            result.Solution, GenerateSolution(request, names, m_Impl->ProjectRoot, ideManagedApiProject));
         return result;
     }
 

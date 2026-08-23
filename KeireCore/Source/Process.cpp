@@ -19,10 +19,13 @@
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
+#include <OleAuto.h>
 #include <Windows.h>
 #include <shellapi.h>
 
 #if defined(_MSC_VER)
+#pragma comment(lib, "Ole32.lib")
+#pragma comment(lib, "OleAut32.lib")
 #pragma comment(lib, "Shell32.lib")
 #endif
 #else
@@ -100,6 +103,206 @@ namespace Keire::Detail
             result.append(slashes * 2, L'\\');
             result.push_back(L'\"');
             return result;
+        }
+
+        template <typename Type> class ComReference final
+        {
+          public:
+            ComReference() = default;
+            explicit ComReference(Type* value) noexcept : m_Value(value) {}
+            ~ComReference()
+            {
+                if (m_Value)
+                    m_Value->Release();
+            }
+            ComReference(const ComReference&) = delete;
+            ComReference& operator=(const ComReference&) = delete;
+            ComReference(ComReference&& other) noexcept : m_Value(std::exchange(other.m_Value, nullptr)) {}
+            ComReference& operator=(ComReference&& other) noexcept
+            {
+                if (this == &other)
+                    return *this;
+                if (m_Value)
+                    m_Value->Release();
+                m_Value = std::exchange(other.m_Value, nullptr);
+                return *this;
+            }
+            [[nodiscard]] Type* Get() const noexcept { return m_Value; }
+            [[nodiscard]] Type** Receive() noexcept { return &m_Value; }
+            [[nodiscard]] explicit operator bool() const noexcept { return m_Value != nullptr; }
+
+          private:
+            Type* m_Value = nullptr;
+        };
+
+        [[nodiscard]] DISPID ResolveDispatchMember(IDispatch& dispatch, wchar_t* name)
+        {
+            DISPID member = DISPID_UNKNOWN;
+            if (FAILED(dispatch.GetIDsOfNames(IID_NULL, &name, 1, LOCALE_USER_DEFAULT, &member)))
+                return DISPID_UNKNOWN;
+            return member;
+        }
+
+        [[nodiscard]] ComReference<IDispatch> ReadDispatchProperty(IDispatch& dispatch, wchar_t* name)
+        {
+            const auto member = ResolveDispatchMember(dispatch, name);
+            if (member == DISPID_UNKNOWN)
+                return {};
+            DISPPARAMS parameters{};
+            VARIANT result;
+            VariantInit(&result);
+            const auto status = dispatch.Invoke(member, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET,
+                                                &parameters, &result, nullptr, nullptr);
+            if (FAILED(status) || result.vt != VT_DISPATCH || !result.pdispVal)
+            {
+                VariantClear(&result);
+                return {};
+            }
+            auto* value = result.pdispVal;
+            result.vt = VT_EMPTY;
+            return ComReference<IDispatch>(value);
+        }
+
+        [[nodiscard]] std::wstring ReadStringProperty(IDispatch& dispatch, wchar_t* name)
+        {
+            const auto member = ResolveDispatchMember(dispatch, name);
+            if (member == DISPID_UNKNOWN)
+                return {};
+            DISPPARAMS parameters{};
+            VARIANT result;
+            VariantInit(&result);
+            const auto status = dispatch.Invoke(member, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET,
+                                                &parameters, &result, nullptr, nullptr);
+            if (FAILED(status) || result.vt != VT_BSTR || !result.bstrVal)
+            {
+                VariantClear(&result);
+                return {};
+            }
+            std::wstring value(result.bstrVal, SysStringLen(result.bstrVal));
+            VariantClear(&result);
+            return value;
+        }
+
+        [[nodiscard]] bool SameWindowsPath(const std::filesystem::path& left, const std::filesystem::path& right)
+        {
+            std::error_code leftError;
+            std::error_code rightError;
+            const auto normalizedLeft = std::filesystem::weakly_canonical(left, leftError).wstring();
+            const auto normalizedRight = std::filesystem::weakly_canonical(right, rightError).wstring();
+            if (leftError || rightError)
+                return false;
+            return CompareStringOrdinal(normalizedLeft.c_str(), static_cast<int>(normalizedLeft.size()),
+                                        normalizedRight.c_str(), static_cast<int>(normalizedRight.size()),
+                                        TRUE) == CSTR_EQUAL;
+        }
+
+        [[nodiscard]] bool InvokeVisualStudioOpenFile(IDispatch& dte, const std::filesystem::path& source,
+                                                      std::string& diagnostic)
+        {
+            auto itemOperations = ReadDispatchProperty(dte, const_cast<wchar_t*>(L"ItemOperations"));
+            if (!itemOperations)
+            {
+                diagnostic = "The matching Visual Studio instance did not expose ItemOperations.";
+                return false;
+            }
+            const auto member = ResolveDispatchMember(*itemOperations.Get(), const_cast<wchar_t*>(L"OpenFile"));
+            if (member == DISPID_UNKNOWN)
+            {
+                diagnostic = "The matching Visual Studio instance did not expose OpenFile.";
+                return false;
+            }
+            VARIANTARG argument;
+            VariantInit(&argument);
+            argument.vt = VT_BSTR;
+            argument.bstrVal = SysAllocString(source.wstring().c_str());
+            if (!argument.bstrVal)
+            {
+                diagnostic = "Visual Studio source-path allocation failed.";
+                return false;
+            }
+            DISPPARAMS parameters{&argument, nullptr, 1, 0};
+            VARIANT result;
+            VariantInit(&result);
+            EXCEPINFO exception{};
+            UINT argumentError = 0;
+            const auto status = itemOperations.Get()->Invoke(member, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
+                                                             &parameters, &result, &exception, &argumentError);
+            VariantClear(&argument);
+            VariantClear(&result);
+            SysFreeString(exception.bstrSource);
+            SysFreeString(exception.bstrDescription);
+            SysFreeString(exception.bstrHelpFile);
+            if (FAILED(status))
+            {
+                diagnostic = "Visual Studio could not open the source in the matching solution instance.";
+                return false;
+            }
+            return true;
+        }
+
+        [[nodiscard]] bool OpenInMatchingVisualStudioInstance(const std::filesystem::path& source,
+                                                              const std::filesystem::path& solution,
+                                                              bool& matchingInstance, std::string& diagnostic)
+        {
+            matchingInstance = false;
+            const auto initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+            const bool uninitialize = initialized == S_OK || initialized == S_FALSE;
+            if (FAILED(initialized) && initialized != RPC_E_CHANGED_MODE)
+                return false;
+
+            ComReference<IRunningObjectTable> table;
+            ComReference<IEnumMoniker> enumeration;
+            ComReference<IBindCtx> bindContext;
+            if (FAILED(GetRunningObjectTable(0, table.Receive())) || !table ||
+                FAILED(table.Get()->EnumRunning(enumeration.Receive())) || !enumeration ||
+                FAILED(CreateBindCtx(0, bindContext.Receive())) || !bindContext)
+            {
+                bindContext = {};
+                enumeration = {};
+                table = {};
+                if (uninitialize)
+                    CoUninitialize();
+                return false;
+            }
+
+            bool opened = false;
+            for (;;)
+            {
+                ComReference<IMoniker> moniker;
+                ULONG fetched = 0;
+                if (enumeration.Get()->Next(1, moniker.Receive(), &fetched) != S_OK || fetched != 1)
+                    break;
+                LPOLESTR displayName = nullptr;
+                if (FAILED(moniker.Get()->GetDisplayName(bindContext.Get(), nullptr, &displayName)) || !displayName)
+                    continue;
+                const std::wstring_view name(displayName);
+                const bool visualStudio = name.starts_with(L"!VisualStudio.DTE.");
+                CoTaskMemFree(displayName);
+                if (!visualStudio)
+                    continue;
+
+                ComReference<IUnknown> object;
+                ComReference<IDispatch> dte;
+                if (FAILED(table.Get()->GetObject(moniker.Get(), object.Receive())) || !object ||
+                    FAILED(object.Get()->QueryInterface(IID_IDispatch, reinterpret_cast<void**>(dte.Receive()))) ||
+                    !dte)
+                    continue;
+                auto loadedSolution = ReadDispatchProperty(*dte.Get(), const_cast<wchar_t*>(L"Solution"));
+                if (!loadedSolution)
+                    continue;
+                const auto fullName = ReadStringProperty(*loadedSolution.Get(), const_cast<wchar_t*>(L"FullName"));
+                if (fullName.empty() || !SameWindowsPath(fullName, solution))
+                    continue;
+                matchingInstance = true;
+                opened = InvokeVisualStudioOpenFile(*dte.Get(), source, diagnostic);
+                break;
+            }
+            bindContext = {};
+            enumeration = {};
+            table = {};
+            if (uninitialize)
+                CoUninitialize();
+            return opened;
         }
 
         class UniqueHandle final
@@ -1031,6 +1234,16 @@ namespace Keire::Detail
             for (char& character : extension)
                 character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
             const auto managedSolution = ResolveManagedSolutionForExternalEditor(source, working);
+#if defined(_WIN32)
+            if (reuseManagedSession && extension == ".cs" && !managedSolution.empty())
+            {
+                bool matchingInstance = false;
+                if (OpenInMatchingVisualStudioInstance(source, managedSolution, matchingInstance, diagnostic))
+                    return true;
+                if (matchingInstance)
+                    return false;
+            }
+#endif
             if (!preferredEditor.empty())
             {
                 auto editorName = preferredEditor.stem().string();
@@ -1039,14 +1252,14 @@ namespace Keire::Detail
                     character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
                 }
                 if (editorName == "devenv" && !managedSolution.empty())
-                    arguments = extension == ".cs" ? ResolveVisualStudioExternalEditorArguments(source, managedSolution,
-                                                                                                reuseManagedSession)
-                                                   : std::vector<std::string>{PathToUtf8(managedSolution)};
+                    arguments = extension == ".cs"
+                                    ? ResolveVisualStudioExternalEditorArguments(source, managedSolution, false)
+                                    : std::vector<std::string>{PathToUtf8(managedSolution)};
                 return LaunchDetachedProcess(std::filesystem::weakly_canonical(preferredEditor), arguments, working,
                                              diagnostic);
             }
 #if defined(_WIN32)
-            const auto target = managedSolution.empty() || reuseManagedSession ? source : managedSolution;
+            const auto target = managedSolution.empty() ? source : managedSolution;
             const auto result = reinterpret_cast<std::intptr_t>(ShellExecuteW(
                 nullptr, L"open", target.wstring().c_str(), nullptr, working.wstring().c_str(), SW_SHOWNORMAL));
             if (result <= 32)

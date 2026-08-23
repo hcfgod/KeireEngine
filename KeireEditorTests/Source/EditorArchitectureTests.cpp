@@ -280,6 +280,34 @@ TEST_CASE("asset browser record views cache a sorted 50000-asset project slice")
     CHECK(cache.Records().empty());
 }
 
+TEST_CASE("asset browser source hierarchy collapses persistent child assets")
+{
+    std::array<Keire::AssetSourceRecord, 4> records;
+    for (auto& record : records)
+        record.Id = Keire::AssetId::Generate();
+    records[0].RelativePath = "Graphs/Main.keirematerialgraph";
+    records[1].RelativePath = "Graphs/Function.keirematerialfunction";
+    records[1].ParentSource = records[0].Id;
+    records[2].RelativePath = "Graphs/Layer.keiremateriallayer";
+    records[2].ParentSource = records[0].Id;
+    records[3].RelativePath = "Graphs/Standalone.keirematerialfunction";
+    const std::array<const Keire::AssetSourceRecord*, 4> pointers{&records[1], &records[0], &records[2], &records[3]};
+
+    const auto collapsed = KeireEditor::BuildAssetBrowserHierarchy(pointers, {});
+    REQUIRE(collapsed.size() == 2);
+    CHECK(collapsed[0].Record == &records[0]);
+    CHECK(collapsed[0].HasChildren);
+    CHECK(collapsed[1].Record == &records[3]);
+
+    const std::array expanded{records[0].Id};
+    const auto visible = KeireEditor::BuildAssetBrowserHierarchy(pointers, expanded);
+    REQUIRE(visible.size() == 4);
+    CHECK(visible[0].Record == &records[0]);
+    CHECK(visible[1].Depth == 1);
+    CHECK(visible[2].Depth == 1);
+    CHECK(visible[3].Record == &records[3]);
+}
+
 TEST_CASE("asset browser utilities preserve preferences and deterministic folder routing")
 {
     const auto measureCharacters = [](const std::string_view text) { return static_cast<float>(text.size()); };

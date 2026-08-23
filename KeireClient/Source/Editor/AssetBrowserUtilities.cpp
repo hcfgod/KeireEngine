@@ -11,6 +11,8 @@
 #include <sstream>
 #include <stdexcept>
 #include <tuple>
+#include <unordered_map>
+#include <unordered_set>
 #include <variant>
 
 namespace KeireEditor
@@ -151,6 +153,50 @@ namespace KeireEditor
         for (const auto& folder : folders)
             if (folder.parent_path() == parent)
                 result.push_back(folder);
+        return result;
+    }
+
+    std::vector<AssetBrowserHierarchyEntry>
+    BuildAssetBrowserHierarchy(const std::span<const Keire::AssetSourceRecord* const> records,
+                               const std::span<const Keire::AssetId> expandedParents, const bool expandAll)
+    {
+        std::unordered_map<Keire::AssetId, const Keire::AssetSourceRecord*> byId;
+        byId.reserve(records.size());
+        for (const auto* record : records)
+            if (record)
+                byId.emplace(record->Id, record);
+
+        std::unordered_map<Keire::AssetId, std::vector<const Keire::AssetSourceRecord*>> children;
+        for (const auto* record : records)
+            if (record && record->ParentSource && record->ParentSource != record->Id &&
+                byId.contains(record->ParentSource))
+                children[record->ParentSource].push_back(record);
+
+        const std::unordered_set<Keire::AssetId> expanded(expandedParents.begin(), expandedParents.end());
+        std::unordered_set<Keire::AssetId> visited;
+        std::vector<AssetBrowserHierarchyEntry> result;
+        result.reserve(records.size());
+        const auto append = [&](const auto& self, const Keire::AssetSourceRecord& record,
+                                const std::size_t depth) -> void
+        {
+            if (!visited.emplace(record.Id).second)
+                return;
+            const auto found = children.find(record.Id);
+            const bool hasChildren = found != children.end() && !found->second.empty();
+            result.push_back({&record, depth, hasChildren});
+            if (!hasChildren || (!expandAll && !expanded.contains(record.Id)))
+                return;
+            for (const auto* child : found->second)
+                self(self, *child, depth + 1);
+        };
+
+        for (const auto* record : records)
+            if (record &&
+                (!record->ParentSource || record->ParentSource == record->Id || !byId.contains(record->ParentSource)))
+                append(append, *record, 0);
+        for (const auto* record : records)
+            if (record && !visited.contains(record->Id))
+                append(append, *record, 0);
         return result;
     }
 

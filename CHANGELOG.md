@@ -10,6 +10,13 @@ versions.
 
 ### Fixed
 
+- Kept Shader/Material Function extraction selections stable while their naming modal opens on the following frame,
+  retried targeted asset imports from a fresh source scan when the worker receives a stale published index, and routed
+  subsequent Windows C# opens through `devenv.exe /Edit` so they reuse the running Visual Studio instance.
+- Preserved every Mesh Renderer material slot while migrating and resaving older scenes, included those slot assets in
+  scene dependency collection, and restored the Profiler entry under the editor's Window menu.
+- Added a mesh-import option for projects that author all materials externally, retaining stable material slots while
+  suppressing unused embedded-material extraction and its external author-path diagnostics.
 - Reused the active Visual Studio solution when opening additional C# files, deferred Shader/Material Function
   extraction modals out of their context-menu ID scope, centered component ellipsis controls geometrically, and made
   packaged and direct-launch editors resolve the shared icon fonts reliably. The Project panel can now generate a

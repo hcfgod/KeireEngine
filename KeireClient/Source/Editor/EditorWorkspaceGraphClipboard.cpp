@@ -45,6 +45,7 @@ bool EditorWorkspaceLayer::ExtractShaderGraphSelectionToFunction(const std::span
                                             {.FollowUp = KeireEditor::AssetOperationFollowUp::Reveal,
                                              .UndoName = "Extract Shader Function",
                                              .GraphFunctionExtraction = std::move(state),
+                                             .ParentSource = m_ShaderGraphDocument->Asset(),
                                              .Reason = "shader-function-extraction"});
         m_ShaderGraphPanel->SetMessage("Creating " + destination.generic_string() +
                                        " and preparing parent rewiring...");
@@ -89,6 +90,7 @@ bool EditorWorkspaceLayer::ExtractMaterialGraphSelectionToFunction(const std::sp
                                             {.FollowUp = KeireEditor::AssetOperationFollowUp::Reveal,
                                              .UndoName = "Extract Material Function",
                                              .GraphFunctionExtraction = std::move(state),
+                                             .ParentSource = m_MaterialGraphDocument->Asset(),
                                              .Reason = "material-function-extraction"});
         m_MaterialGraphPanel->SetMessage("Creating " + destination.generic_string() +
                                          " and preparing parent rewiring...");

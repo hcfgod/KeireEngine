@@ -236,12 +236,21 @@ namespace
             case Keire::Detail::AssetWorkerOperationKind::ImportAssets:
                 if (request.ImportAssets.empty())
                     throw std::invalid_argument("Targeted asset import requires at least one asset identity.");
-                result.Import =
-                    loadedSourceIndex
-                        ? Keire::Detail::AssetDatabaseWorkerAccess::ImportAssetsFromSourceIndex(
-                              *database, request.ImportAssets, Keire::AssetImportPolicy::KeepLastGood, {}, progress)
-                        : database->ImportAssets(request.ImportAssets, Keire::AssetImportPolicy::KeepLastGood, {},
-                                                 progress);
+                if (loadedSourceIndex)
+                {
+                    bool rescanned = false;
+                    result.Import = Keire::Detail::AssetDatabaseWorkerAccess::ImportAssetsFromSourceIndexOrRescan(
+                        database, CreateDatabaseSpecification(request.ProjectRoot), request.ImportAssets,
+                        Keire::AssetImportPolicy::KeepLastGood, rescanned, {}, progress);
+                    if (rescanned)
+                        std::cout << "Asset worker targeted identities were absent from the published source index; "
+                                     "rescanning before retry.\n";
+                }
+                else
+                {
+                    result.Import = database->ImportAssets(request.ImportAssets, Keire::AssetImportPolicy::KeepLastGood,
+                                                           {}, progress);
+                }
                 break;
             case Keire::Detail::AssetWorkerOperationKind::ExternalImport:
             {
@@ -276,13 +285,17 @@ namespace
                         publishedAuxiliary.push_back(destination);
                     }
                     const auto importer = database->FindImporterForPath(request.CreateRelativePath);
+                    if (request.CreateParentSource && (!request.CreateAuxiliarySources.empty() || !importer))
+                        throw std::runtime_error(
+                            "Parented asset creation requires a directly registered source importer.");
                     if (request.CreateAuxiliarySources.empty() && importer)
                     {
                         const auto source =
                             Keire::Detail::ReadTextFile(request.CreatePayloadPath, std::size_t{64} * 1024U * 1024U);
-                        result.CreatedAsset = database->CreateAsset(
-                            request.CreateRelativePath, *importer,
-                            std::as_bytes(std::span(source.data(), source.size())), request.CreateSettings);
+                        result.CreatedAsset =
+                            database->CreateAsset(request.CreateRelativePath, *importer,
+                                                  std::as_bytes(std::span(source.data(), source.size())),
+                                                  request.CreateSettings, request.CreateParentSource);
                         const std::array targets{result.CreatedAsset};
                         result.Import = Keire::Detail::AssetDatabaseWorkerAccess::ImportAssetsFromSourceIndex(
                             *database, targets, Keire::AssetImportPolicy::FailFast, {}, progress);

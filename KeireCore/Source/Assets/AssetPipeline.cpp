@@ -100,6 +100,32 @@ namespace Keire
         return database.ImportAssetsUnlocked(assets, policy, cancellation, std::move(progress), false);
     }
 
+    AssetImportResult Detail::AssetDatabaseWorkerAccess::ImportAssetsFromSourceIndexOrRescan(
+        Ref<AssetDatabase>& database, AssetDatabaseSpecification fallbackSpecification,
+        const std::span<const AssetId> assets, const AssetImportPolicy policy, bool& rescanned,
+        const std::stop_token cancellation, AssetOperationProgressCallback progress)
+    {
+        rescanned = false;
+        const auto records = database->Records();
+        const bool missingTarget =
+            std::ranges::any_of(assets,
+                                [&](const AssetId asset)
+                                {
+                                    return std::ranges::none_of(records,
+                                                                [asset](const AssetSourceRecord& record)
+                                                                {
+                                                                    return record.Id == asset ||
+                                                                           std::ranges::find(record.SubAssets, asset) !=
+                                                                               record.SubAssets.end();
+                                                                });
+                                });
+        if (!missingTarget)
+            return ImportAssetsFromSourceIndex(*database, assets, policy, cancellation, progress);
+        database = CreateRef<AssetDatabase>(std::move(fallbackSpecification));
+        rescanned = true;
+        return database->ImportAssets(assets, policy, cancellation, std::move(progress));
+    }
+
     std::size_t AssetDatabase::Refresh()
     {
         std::scoped_lock operation(*m_Impl->OperationMutex);

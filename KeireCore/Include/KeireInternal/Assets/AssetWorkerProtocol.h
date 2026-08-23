@@ -67,6 +67,7 @@ namespace Keire::Detail
         std::filesystem::path CreatePayloadPath;
         AssetImportSettings CreateSettings;
         std::vector<AssetWorkerAuxiliarySource> CreateAuxiliarySources;
+        AssetId CreateParentSource;
         AssetId ExtractModel;
         std::filesystem::path ExtractDirectory;
         AssetWorkerMutation Mutation;

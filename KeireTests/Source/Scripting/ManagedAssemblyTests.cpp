@@ -164,6 +164,14 @@ TEST_CASE("Managed IDE workspace mirrors assembly source roots and references")
     CHECK(projectText.find("Library/ScriptAssemblies/References/Keire.Managed.dll") != std::string::npos);
     CHECK(std::filesystem::is_regular_file(root / "Library/ScriptAssemblies/References/Keire.Managed.dll"));
     CHECK(projectText.find(root.generic_string()) == std::string::npos);
+
+    const auto preservedTime = std::filesystem::file_time_type::clock::now() - std::chrono::hours(1);
+    std::filesystem::last_write_time(workspace.Solution, preservedTime);
+    std::filesystem::last_write_time(workspace.Projects.front(), preservedTime);
+    const auto regenerated = scripts->GenerateIdeWorkspace(request, "My Game");
+    CHECK(regenerated.Solution == workspace.Solution);
+    CHECK(std::filesystem::last_write_time(workspace.Solution) == preservedTime);
+    CHECK(std::filesystem::last_write_time(workspace.Projects.front()) == preservedTime);
 }
 
 TEST_CASE("Managed IDE workspace references the engine API project in source checkouts")

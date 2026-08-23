@@ -242,6 +242,7 @@ namespace KeireEditor
         m_InspectorNode.reset();
         m_NodeCreationPosition.reset();
         m_GraphContext.reset();
+        m_FunctionExtractionSelection.clear();
         m_NodeSearch.clear();
         m_NodeMenuOpen = false;
         m_OpenFunctionExtractionPopup = false;
@@ -1044,6 +1045,7 @@ namespace KeireEditor
     }
     void ShaderGraphPanel::DrawCanvas(Keire::UiFrame& ui)
     {
+        const bool openFunctionExtractionPopup = std::exchange(m_OpenFunctionExtractionPopup, false);
         auto& document = m_Controller.ShaderGraphState();
         auto model = document.BuildCanvasModel();
         if (m_FrameNode)
@@ -1367,6 +1369,7 @@ namespace KeireEditor
                         if (ui.MenuItem("Extract Selection to Shader Function...", false, extractable))
                         {
                             m_ExtractionName = "ExtractedShaderFunction";
+                            m_FunctionExtractionSelection = m_SelectedNodes;
                             m_OpenFunctionExtractionPopup = true;
                         }
                         if (ui.MenuItem("Delete Node", false, node->Kind != Keire::ShaderGraphNodeKind::Master))
@@ -1414,11 +1417,8 @@ namespace KeireEditor
                 }
             }
         }
-        if (m_OpenFunctionExtractionPopup)
-        {
+        if (openFunctionExtractionPopup)
             ui.OpenPopup("ExtractShaderGraphFunction");
-            m_OpenFunctionExtractionPopup = false;
-        }
         if (DrawFunctionExtractionPopup(ui))
             return;
         bool contextMenuOpen = false;

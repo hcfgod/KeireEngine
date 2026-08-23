@@ -427,6 +427,44 @@ namespace Keire::Detail
         WriteFileAtomically(path, std::as_bytes(std::span(contents.data(), contents.size())));
     }
 
+    bool WriteFileAtomicallyIfChanged(const std::filesystem::path& path, const std::span<const std::byte> contents)
+    {
+        std::error_code error;
+        if (std::filesystem::is_regular_file(path, error) && !error &&
+            std::filesystem::file_size(path, error) == contents.size() && !error)
+        {
+            std::ifstream stream(path, std::ios::binary);
+            if (stream)
+            {
+                std::array<std::byte, 64U * 1024U> buffer{};
+                std::size_t offset = 0;
+                bool equal = true;
+                while (offset < contents.size())
+                {
+                    const auto count = std::min(buffer.size(), contents.size() - offset);
+                    stream.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(count));
+                    if (stream.gcount() != static_cast<std::streamsize>(count) ||
+                        !std::equal(buffer.begin(), buffer.begin() + static_cast<std::ptrdiff_t>(count),
+                                    contents.begin() + static_cast<std::ptrdiff_t>(offset)))
+                    {
+                        equal = false;
+                        break;
+                    }
+                    offset += count;
+                }
+                if (equal)
+                    return false;
+            }
+        }
+        WriteFileAtomically(path, contents);
+        return true;
+    }
+
+    bool WriteTextFileAtomicallyIfChanged(const std::filesystem::path& path, const std::string_view contents)
+    {
+        return WriteFileAtomicallyIfChanged(path, std::as_bytes(std::span(contents.data(), contents.size())));
+    }
+
     std::filesystem::path CanonicalExistingPath(const std::filesystem::path& path)
     {
         if (path.empty())

@@ -15,16 +15,16 @@ namespace Keire
     AssetId AssetDatabase::CreateAsset(const std::filesystem::path& relativePath,
                                        const AssetImporterRegistration& importer,
                                        const std::span<const std::byte> sourceBytes,
-                                       const AssetImportSettings& requestedSettings)
+                                       const AssetImportSettings& requestedSettings, const AssetId parentSource)
     {
         std::scoped_lock operation(*m_Impl->OperationMutex);
-        return CreateAssetUnlocked(relativePath, importer, sourceBytes, requestedSettings);
+        return CreateAssetUnlocked(relativePath, importer, sourceBytes, requestedSettings, parentSource);
     }
 
     AssetId AssetDatabase::CreateAssetUnlocked(const std::filesystem::path& relativePath,
                                                const AssetImporterRegistration& importer,
                                                const std::span<const std::byte> sourceBytes,
-                                               const AssetImportSettings& requestedSettings)
+                                               const AssetImportSettings& requestedSettings, const AssetId parentSource)
     {
         const auto registered = m_Impl->Importers.find(importer.Name);
         if (registered == m_Impl->Importers.end() || registered->second.Version != importer.Version ||
@@ -39,18 +39,28 @@ namespace Keire
             throw std::invalid_argument("Asset creation path does not use an importer-supported extension.");
         if (sourceBytes.size() > m_Impl->Specification.MaximumSourceBytes)
             throw std::invalid_argument("Asset creation source exceeds the configured maximum size.");
+        const auto relativeDestination = std::filesystem::relative(destination, m_Impl->SourceRoot).lexically_normal();
+        if (parentSource)
+        {
+            const auto parent = Find(parentSource);
+            if (!parent)
+                throw std::invalid_argument("Asset creation parent must be a live source asset.");
+            if (parent->RelativePath.parent_path() != relativeDestination.parent_path())
+                throw std::invalid_argument("Asset creation parent must be in the same source folder.");
+        }
         const auto settings = m_Impl->NormalizeSettings(registered->second, requestedSettings);
         const auto id = AssetId::Generate();
         AssetSourceRecord validationRecord;
         validationRecord.Id = id;
         validationRecord.Type = importer.Type;
-        validationRecord.RelativePath = std::filesystem::relative(destination, m_Impl->SourceRoot).lexically_normal();
+        validationRecord.RelativePath = relativeDestination;
         validationRecord.Importer = importer.Name;
         validationRecord.ImporterVersion = importer.Version;
         validationRecord.ImportSettings = settings;
+        validationRecord.ParentSource = parentSource;
         const auto validationMetadata = Detail::PathWithSuffix(metadata, ".validate.tmp");
         validationRecord.MetadataPath = validationMetadata;
-        WriteMetadata(validationMetadata, id, importer.Type, importer.Name, importer.Version, settings);
+        WriteMetadata(validationMetadata, id, importer.Type, importer.Name, importer.Version, settings, parentSource);
         AssetImportOutput validated;
         try
         {
@@ -68,7 +78,7 @@ namespace Keire
         try
         {
             Detail::WriteFileAtomically(destination, sourceBytes);
-            WriteMetadata(metadata, id, importer.Type, importer.Name, importer.Version, settings);
+            WriteMetadata(metadata, id, importer.Type, importer.Name, importer.Version, settings, parentSource);
             UpdateMetadataImportOutput(metadata, validated.PrimaryType.value_or(importer.Type), validated.SubAssets);
         }
         catch (...)
@@ -242,7 +252,7 @@ namespace Keire
         if (materialImporter == m_Impl->Importers.end())
             throw std::logic_error("Material extraction requires the Kéire material importer.");
         const auto source = MaterialAsset::EncodeSource(definition);
-        return CreateAssetUnlocked(relativePath, materialImporter->second, source, {});
+        return CreateAssetUnlocked(relativePath, materialImporter->second, source, {}, {});
     }
 
     std::vector<AssetId> AssetDatabase::ExtractMaterials(const AssetId model,
@@ -288,7 +298,7 @@ namespace Keire
                     destination = relativeDirectory / (name + " " + std::to_string(copy) + ".keirematerial");
                 const auto definition = MaterialAsset::Decode(generated->Bytes)->Definition();
                 const auto source = MaterialAsset::EncodeSource(definition);
-                result.push_back(CreateAssetUnlocked(destination, materialImporter->second, source, {}));
+                result.push_back(CreateAssetUnlocked(destination, materialImporter->second, source, {}, {}));
                 createdPaths.push_back(destination);
             }
         }
@@ -382,7 +392,10 @@ namespace Keire
         const auto newId = AssetId::Generate();
         try
         {
-            WriteMetadata(metadata, newId, record->Type, record->Importer, record->ImporterVersion);
+            const auto duplicateParent =
+                record->RelativePath.parent_path() == destination.parent_path() ? record->ParentSource : AssetId{};
+            WriteMetadata(metadata, newId, record->Type, record->Importer, record->ImporterVersion,
+                          record->ImportSettings, duplicateParent);
         }
         catch (...)
         {

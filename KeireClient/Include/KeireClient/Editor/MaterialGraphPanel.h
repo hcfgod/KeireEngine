@@ -147,6 +147,7 @@ namespace KeireEditor
         bool m_ShowTemplateParameters = false;
         std::string m_NodeSearch;
         std::string m_ExtractionName;
+        std::vector<Keire::AssetId> m_FunctionExtractionSelection;
         GraphBookmarkSet m_Bookmarks;
         std::string m_Message;
         Keire::Ref<Keire::UiImage> m_PreviewImage;

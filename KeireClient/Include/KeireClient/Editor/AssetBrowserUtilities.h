@@ -52,6 +52,13 @@ namespace KeireEditor
         std::filesystem::path SourceRootToAdd;
     };
 
+    struct AssetBrowserHierarchyEntry final
+    {
+        const Keire::AssetSourceRecord* Record = nullptr;
+        std::size_t Depth = 0;
+        bool HasChildren = false;
+    };
+
     enum class ManagedScriptTemplateKind : std::uint8_t
     {
         Behaviour,
@@ -99,6 +106,9 @@ namespace KeireEditor
                                      const AssetBrowserPreferences& preferences) noexcept;
     [[nodiscard]] std::vector<std::filesystem::path>
     DirectChildAssetFolders(std::span<const std::filesystem::path> folders, const std::filesystem::path& parent);
+    [[nodiscard]] std::vector<AssetBrowserHierarchyEntry>
+    BuildAssetBrowserHierarchy(std::span<const Keire::AssetSourceRecord* const> records,
+                               std::span<const Keire::AssetId> expandedParents, bool expandAll = false);
     [[nodiscard]] std::filesystem::path UniqueAssetBrowserFolder(const std::filesystem::path& assetRoot,
                                                                  std::filesystem::path desired);
     [[nodiscard]] std::filesystem::path UniqueAssetBrowserPath(const Keire::AssetSourceRecord& source,

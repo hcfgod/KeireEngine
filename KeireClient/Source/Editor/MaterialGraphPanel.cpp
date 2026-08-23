@@ -186,6 +186,7 @@ namespace KeireEditor
         m_InspectorCommentNode.reset();
         m_NodeCreationPosition.reset();
         m_GraphContext.reset();
+        m_FunctionExtractionSelection.clear();
         m_OpenFunctionExtractionPopup = false;
         m_Canvas.CancelInteractions();
         m_Canvas.Select(std::nullopt);
@@ -604,6 +605,7 @@ namespace KeireEditor
 
     void MaterialGraphPanel::DrawCanvas(Keire::UiFrame& ui)
     {
+        const bool openFunctionExtractionPopup = std::exchange(m_OpenFunctionExtractionPopup, false);
         auto& document = m_Controller.MaterialGraphState();
         auto model = document.BuildCanvasModel(m_ShowTemplateParameters);
         if (m_FrameNode)
@@ -1022,11 +1024,8 @@ namespace KeireEditor
                 }
             }
         }
-        if (m_OpenFunctionExtractionPopup)
-        {
+        if (openFunctionExtractionPopup)
             ui.OpenPopup("ExtractMaterialGraphFunction");
-            m_OpenFunctionExtractionPopup = false;
-        }
         if (DrawFunctionExtractionPopup(ui))
             return;
         bool paletteOpen = false;

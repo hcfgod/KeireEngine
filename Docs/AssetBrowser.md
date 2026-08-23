@@ -96,9 +96,11 @@ engine API used by the managed build. Source checkouts include `Keire.Managed.cs
 through a generated .NET 8 design-time facade so Visual Studio 2022 has complete engine semantic information and source
 navigation. The generated root gameplay projects also target .NET 8/C# 12 for Visual Studio 2022 design-time
 compatibility, while Kéire's separate internal compilation projects remain on .NET 10/C# 14. Packaged editors use a
-stable project-local `Keire.Managed.dll` reference. When the configured editor is `devenv.exe`, the solution opens with
-the requested script through Visual Studio's `/Edit` workflow. Build Settings also exposes **Regenerate C# Project**.
-Generated root `.sln` and `.csproj` files are ignored by newly created projects.
+stable project-local `Keire.Managed.dll` reference. The first C# open loads the generated solution; later C# opens use
+Visual Studio's `/Edit` workflow so the requested source is sent to the running IDE instead of launching another
+solution window. This applies to an explicit `devenv.exe` preference and to the Windows system-default path. Build
+Settings also exposes **Regenerate C# Project**. Generated root `.sln` and `.csproj` files are ignored by newly created
+projects.
 
 Managed builds keep strict warnings-as-errors behavior for correctness and analyzer diagnostics, but common unused local
 and field diagnostics (`CS0168`, `CS0169`, `CS0219`, and `CS0414`) remain non-blocking warnings. They are reported in the

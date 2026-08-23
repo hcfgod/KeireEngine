@@ -155,6 +155,7 @@ namespace Keire
         std::uint32_t ImporterVersion = 1;
         std::string SourceDigest;
         std::string MetadataDigest;
+        AssetId ParentSource;
         std::vector<AssetId> Dependencies;
         std::vector<AssetId> SubAssets;
         std::vector<AssetSourceDependency> SourceDependencies;
@@ -344,7 +345,7 @@ namespace Keire
         [[nodiscard]] AssetId CreateAsset(const std::filesystem::path& relativePath,
                                           const AssetImporterRegistration& importer,
                                           std::span<const std::byte> sourceBytes,
-                                          const AssetImportSettings& settings = {});
+                                          const AssetImportSettings& settings = {}, AssetId parentSource = {});
         void ReplaceAssetSource(AssetId id, std::span<const std::byte> sourceBytes);
         void SetImportSettings(AssetId id, const AssetImportSettings& settings);
         void RequestReimport(AssetId id);
@@ -390,7 +391,7 @@ namespace Keire
         [[nodiscard]] AssetId CreateAssetUnlocked(const std::filesystem::path& relativePath,
                                                   const AssetImporterRegistration& importer,
                                                   std::span<const std::byte> sourceBytes,
-                                                  const AssetImportSettings& settings);
+                                                  const AssetImportSettings& settings, AssetId parentSource);
         void MoveAssetUnlocked(AssetId id, const std::filesystem::path& destination);
         void ApplyExternalImportReceipt(ExternalAssetImportReceiptId receipt, bool applied);
         class Impl;

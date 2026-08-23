@@ -297,7 +297,7 @@ namespace Keire
 
         [[maybe_unused]] void WriteMetadata(const std::filesystem::path& path, const AssetId id, const AssetTypeId type,
                                             const std::string_view importer, const std::uint32_t importerVersion,
-                                            const AssetImportSettings& settings = {})
+                                            const AssetImportSettings& settings = {}, const AssetId parentSource = {})
         {
             Json metadata{{"schemaVersion", 1},
                           {"id", id.ToString()},
@@ -306,6 +306,8 @@ namespace Keire
                           {"importerVersion", importerVersion},
                           {"dependencies", Json::array()},
                           {"subAssets", Json::array()}};
+            if (parentSource)
+                metadata["parentSource"] = parentSource.ToString();
             if (!settings.empty())
                 metadata["importSettings"] = EncodeImportSettings(settings);
             std::filesystem::create_directories(path.parent_path());
@@ -422,6 +424,8 @@ namespace Keire
             record.Type = AssetTypeId::Parse(metadata.at("type").get<std::string>());
             record.Importer = metadata.at("importer").get<std::string>();
             record.ImporterVersion = metadata.at("importerVersion").get<std::uint32_t>();
+            if (const auto parent = metadata.value("parentSource", std::string{}); !parent.empty())
+                record.ParentSource = AssetId::Parse(parent);
             if (!record.Id || !record.Type || record.Importer.empty() || record.ImporterVersion == 0)
                 throw std::runtime_error("Asset metadata contains an invalid identity or importer.");
             if (metadata.contains("dependencies"))

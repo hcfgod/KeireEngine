@@ -256,6 +256,7 @@ TEST_CASE("Asset worker protocol and published source index round trip without r
     request.CreateRelativePath = "Scenes/Created.keirescene";
     request.CreatePayloadPath = operation / "source.keirescene";
     request.CreateSettings = {{"quality", std::int64_t{2}}};
+    request.CreateParentSource = id;
     Keire::ExternalAssetImportItem externalItem;
     externalItem.SourcePath = project.Root / "Source/Character.fbx";
     externalItem.RelativeDestination = "Models/Character.fbx";
@@ -294,6 +295,7 @@ TEST_CASE("Asset worker protocol and published source index round trip without r
     CHECK(restored.CreateRelativePath == request.CreateRelativePath);
     CHECK(restored.CreatePayloadPath == request.CreatePayloadPath);
     CHECK(restored.CreateSettings == request.CreateSettings);
+    CHECK(restored.CreateParentSource == request.CreateParentSource);
     REQUIRE(restored.ExternalItems.size() == 1);
     CHECK(restored.ExternalItems.front().SourcePath == externalItem.SourcePath);
     CHECK(restored.ExternalItems.front().RelativeDestination == externalItem.RelativeDestination);
@@ -327,6 +329,39 @@ TEST_CASE("Asset worker protocol and published source index round trip without r
     CHECK(restoredResult.LightingCacheHit);
 }
 
+TEST_CASE("Indexed targeted import rescans when a requested source is newer than the published index")
+{
+    TemporaryAssetProject project;
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.SourceIndexFallback";
+    importer.Type = Keire::TextAsset::StaticType();
+    importer.Extensions = {".fallback"};
+    importer.Import = [](const std::span<const std::byte> bytes)
+    { return std::vector<std::byte>(bytes.begin(), bytes.end()); };
+    const Keire::AssetDatabaseSpecification specification{.ProjectRoot = project.Root, .Importers = {importer}};
+
+    project.Write("Existing.fallback", "existing");
+    auto initial = Keire::CreateRef<Keire::AssetDatabase>(specification);
+    REQUIRE(initial->ImportAll().Imported == 1);
+    const auto sourceIndex = project.Root / "Library/AssetCache/Runtime/source-index.json";
+    Keire::Detail::AssetDatabaseWorkerAccess::PublishSourceIndex(*initial, sourceIndex);
+
+    project.Write("Added.fallback", "added after source-index publication");
+    auto current = Keire::CreateRef<Keire::AssetDatabase>(specification);
+    const auto added = current->Find("Added.fallback");
+    REQUIRE(added);
+    auto indexed = Keire::Detail::AssetDatabaseWorkerAccess::CreateFromSourceIndex(specification, sourceIndex);
+    CHECK_FALSE(indexed->Find(added->Id));
+
+    bool rescanned = false;
+    const std::array targets{added->Id};
+    const auto imported = Keire::Detail::AssetDatabaseWorkerAccess::ImportAssetsFromSourceIndexOrRescan(
+        indexed, specification, targets, Keire::AssetImportPolicy::FailFast, rescanned);
+    CHECK(rescanned);
+    CHECK(imported.Imported == 1);
+    CHECK(indexed->Find(added->Id));
+}
+
 TEST_CASE("Single asset creation and rename avoid unrelated project rescans")
 {
     TemporaryAssetProject project;
@@ -349,6 +384,42 @@ TEST_CASE("Single asset creation and rename avoid unrelated project rescans")
     REQUIRE(database->Find(created));
     CHECK(database->Find(created)->RelativePath == std::filesystem::path("Renamed.fast"));
     CHECK_THROWS((void)database->Refresh());
+}
+
+TEST_CASE("asset source parent relationships persist and remain folder-confined")
+{
+    TemporaryAssetProject project;
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.ParentedSource";
+    importer.Type = Keire::AssetTypeId::Parse("f1000000-0000-4000-8000-000000000099");
+    importer.Extensions = {".parented"};
+    importer.Import = [](const std::span<const std::byte> bytes)
+    { return std::vector<std::byte>(bytes.begin(), bytes.end()); };
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
+    const std::string source = "graph";
+    const auto bytes = std::as_bytes(std::span(source.data(), source.size()));
+    const auto parent = database->CreateAsset("Graphs/Main.parented", importer, bytes);
+    const auto child = database->CreateAsset("Graphs/Function.parented", importer, bytes, {}, parent);
+    REQUIRE(database->Find(child));
+    CHECK(database->Find(child)->ParentSource == parent);
+    CHECK_THROWS_AS((void)database->CreateAsset("Other/Invalid.parented", importer, bytes, {}, parent),
+                    std::invalid_argument);
+    CHECK_FALSE(database->Find("Other/Invalid.parented"));
+
+    const auto siblingCopy = database->Duplicate(child, "Graphs/Function Copy.parented");
+    REQUIRE(database->Find(siblingCopy));
+    CHECK(database->Find(siblingCopy)->ParentSource == parent);
+    const auto detachedCopy = database->Duplicate(child, "Other/Function Copy.parented");
+    REQUIRE(database->Find(detachedCopy));
+    CHECK_FALSE(database->Find(detachedCopy)->ParentSource);
+
+    const auto sourceIndex = project.Root / "Library/AssetOperations/parented-source-index.json";
+    Keire::Detail::AssetDatabaseWorkerAccess::PublishSourceIndex(*database, sourceIndex);
+    auto indexed = Keire::Detail::AssetDatabaseWorkerAccess::CreateFromSourceIndex(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}}, sourceIndex);
+    REQUIRE(indexed->Find(child));
+    CHECK(indexed->Find(child)->ParentSource == parent);
 }
 
 TEST_CASE("Asset database ignores files used for atomic writes and editor backups")

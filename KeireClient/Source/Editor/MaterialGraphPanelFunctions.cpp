@@ -46,6 +46,7 @@ namespace KeireEditor
         if (ui.MenuItem("Extract Selection to Material Function...", false, extractable))
         {
             m_ExtractionName = "ExtractedMaterialFunction";
+            m_FunctionExtractionSelection = m_SelectedNodes;
             m_OpenFunctionExtractionPopup = true;
         }
     }
@@ -62,13 +63,20 @@ namespace KeireEditor
         if (auto disabled = ui.BeginDisabled(m_ExtractionName.empty()); disabled)
             if (ui.Button("Extract"))
             {
-                extracted = m_Controller.ExtractMaterialGraphSelectionToFunction(m_SelectedNodes, m_ExtractionName);
+                extracted = m_Controller.ExtractMaterialGraphSelectionToFunction(m_FunctionExtractionSelection,
+                                                                                 m_ExtractionName);
                 if (extracted)
+                {
+                    m_FunctionExtractionSelection.clear();
                     ui.CloseCurrentPopup();
+                }
             }
         ui.SameLine();
         if (ui.Button("Cancel"))
+        {
+            m_FunctionExtractionSelection.clear();
             ui.CloseCurrentPopup();
+        }
         return extracted;
     }
 } // namespace KeireEditor

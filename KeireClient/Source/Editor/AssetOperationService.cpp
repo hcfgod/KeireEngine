@@ -156,6 +156,7 @@ namespace KeireEditor
         operation.Request.Kind = Keire::Detail::AssetWorkerOperationKind::CreateAsset;
         operation.Request.CreateRelativePath = std::move(relativePath);
         operation.Request.CreateSettings = std::move(settings);
+        operation.Request.CreateParentSource = context.ParentSource;
         operation.Payload = std::move(source);
         for (const auto& auxiliary : auxiliarySources)
         {

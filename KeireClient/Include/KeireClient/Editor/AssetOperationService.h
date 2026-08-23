@@ -86,6 +86,7 @@ namespace KeireEditor
         AssetMutationPhase MutationPhase = AssetMutationPhase::Initial;
         Keire::AssetId ManagedAssembly;
         std::filesystem::path ManagedSourceRoot;
+        Keire::AssetId ParentSource;
         std::string Reason;
     };
 

@@ -716,13 +716,19 @@ TEST_CASE("Sandbox pyramid triangle winding agrees with its authored outward nor
 TEST_CASE("model importer exposes explicit animation source routing")
 {
     const auto importer = Keire::CreateMeshAssetImporter();
-    CHECK(importer.Version == 15);
+    CHECK(importer.Version == 16);
     const auto content =
         std::ranges::find(importer.ImportOptions, std::string("contentType"), &Keire::AssetImportOptionDescriptor::Key);
     REQUIRE(content != importer.ImportOptions.end());
     CHECK(content->Kind == Keire::AssetImportOptionKind::Choice);
     CHECK(std::get<std::string>(content->DefaultValue) == "model");
     CHECK(content->Choices == std::vector<std::string>{"model", "animation"});
+    const auto materials = std::ranges::find(importer.ImportOptions, std::string("materialImport"),
+                                             &Keire::AssetImportOptionDescriptor::Key);
+    REQUIRE(materials != importer.ImportOptions.end());
+    CHECK(materials->Group == "Materials");
+    CHECK(std::get<std::string>(materials->DefaultValue) == "embedded");
+    CHECK(materials->Choices == std::vector<std::string>{"embedded", "none"});
     const auto compression = std::ranges::find(importer.ImportOptions, std::string("animationCompression"),
                                                &Keire::AssetImportOptionDescriptor::Key);
     REQUIRE(compression != importer.ImportOptions.end());
@@ -864,6 +870,44 @@ TEST_CASE("glTF import publishes faithful material and embedded texture subasset
     std::ranges::sort(firstIds);
     std::ranges::sort(repeatedIds);
     CHECK(firstIds == repeatedIds);
+}
+
+TEST_CASE("model import can retain material slots without publishing source materials")
+{
+    TemporaryDirectory directory("GltfMaterialSlotOnlyImportTests");
+    const auto sourcePath = directory.Path / "material-slots.gltf";
+    const std::string gltf = R"({
+        "asset":{"version":"2.0"},
+        "buffers":[{"uri":"data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAABAAIAAAA=","byteLength":104}],
+        "bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":36},{"buffer":0,"byteOffset":36,"byteLength":36},{"buffer":0,"byteOffset":72,"byteLength":24},{"buffer":0,"byteOffset":96,"byteLength":6}],
+        "accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]},{"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"},{"bufferView":2,"componentType":5126,"count":3,"type":"VEC2"},{"bufferView":3,"componentType":5123,"count":3,"type":"SCALAR"}],
+        "materials":[{"name":"AuthoredOverride","pbrMetallicRoughness":{"baseColorFactor":[0.2,0.4,0.6,1.0]}}],
+        "meshes":[{"primitives":[{"attributes":{"POSITION":0,"NORMAL":1,"TEXCOORD_0":2},"indices":3,"material":0}]}],
+        "nodes":[{"mesh":0}],"scenes":[{"nodes":[0]}],"scene":0
+    })";
+    {
+        std::ofstream source(sourcePath);
+        source << gltf;
+    }
+
+    Keire::AssetImportContext context;
+    context.Asset = Keire::AssetId::Parse("bbbbbbbb-cccc-4ddd-8eee-ffffffffffff");
+    context.ProjectRoot = directory.Path;
+    context.SourceRoot = directory.Path;
+    context.SourcePath = sourcePath;
+    context.RelativePath = sourcePath.filename();
+    context.ImportSettings["materialImport"] = std::string("none");
+
+    const auto output = Keire::CreateMeshAssetImporter().ContextualImport(context, std::as_bytes(std::span(gltf)));
+    const auto mesh = Keire::MeshAsset::Decode(output.Bytes);
+    const auto authoredSlot =
+        std::ranges::find(mesh->MaterialSlots(), std::string("AuthoredOverride"), &Keire::MeshMaterialSlot::Name);
+    REQUIRE(authoredSlot != mesh->MaterialSlots().end());
+    CHECK_FALSE(authoredSlot->DefaultMaterial);
+    CHECK(std::ranges::none_of(mesh->MaterialSlots(), [](const Keire::MeshMaterialSlot& slot)
+                               { return static_cast<bool>(slot.DefaultMaterial); }));
+    CHECK(std::ranges::none_of(output.SubAssets, [](const Keire::AssetGeneratedSubAsset& subAsset)
+                               { return subAsset.Type == Keire::MaterialAsset::StaticType(); }));
 }
 
 TEST_CASE("static model import groups conventional mesh names into deterministic LOD ranges")

@@ -181,3 +181,22 @@ TEST_CASE("atomic file publication replaces complete text and binary contents")
     std::error_code ignored;
     std::filesystem::remove_all(directory, ignored);
 }
+
+TEST_CASE("conditional atomic file publication preserves unchanged files")
+{
+    const auto directory =
+        std::filesystem::temp_directory_path() /
+        ("KeireConditionalPublication-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    const auto path = directory / "workspace.sln";
+    REQUIRE(Keire::Detail::WriteTextFileAtomicallyIfChanged(path, "solution"));
+    const auto preservedTime = std::filesystem::file_time_type::clock::now() - std::chrono::hours(1);
+    std::filesystem::last_write_time(path, preservedTime);
+
+    CHECK_FALSE(Keire::Detail::WriteTextFileAtomicallyIfChanged(path, "solution"));
+    CHECK(std::filesystem::last_write_time(path) == preservedTime);
+    CHECK(Keire::Detail::WriteTextFileAtomicallyIfChanged(path, "updated solution"));
+    CHECK(Keire::Detail::ReadTextFile(path, 1024) == "updated solution");
+
+    std::error_code ignored;
+    std::filesystem::remove_all(directory, ignored);
+}

@@ -1131,7 +1131,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.Mesh";
-        result.Version = 15;
+        result.Version = 16;
         result.Type = MeshAsset::StaticType();
         result.CompatibleTypes = {AnimationSourceAsset::StaticType()};
         result.Extensions = {".obj", ".fbx", ".gltf", ".glb", ".keiremesh"};
@@ -1251,218 +1251,228 @@ namespace Keire
                         }
             }
 
-            const auto shader = FindImportedMaterialShader(context);
-            if (!shader)
+            const bool importMaterials = stringSetting("materialImport", "embedded") != "none";
+            if (importMaterials)
             {
-                output.Diagnostics.push_back(
-                    {AssetDiagnosticSeverity::Warning, context.RelativePath, 0, 0,
-                     "Model materials were not published because no project material shader was found."});
-            }
-            else if (!context.ResolveSubAssetId)
-            {
-                throw std::logic_error("Mesh importing requires a generated-subasset identity resolver.");
-            }
-            else
-            {
-                const auto declared = [&shader](const std::string_view property)
-                { return shader->Properties.contains(std::string(property)); };
-                std::unordered_map<std::string, AssetId> publishedTextures;
-                const auto publishTexture = [&](const unsigned int materialIndex, const aiTextureType type,
-                                                const std::string_view property, const TextureSemantic semantic,
-                                                const TextureColorSpace colorSpace) -> AssetId
+                const auto shader = FindImportedMaterialShader(context);
+                if (!shader)
                 {
-                    const auto* material = scene->mMaterials[materialIndex];
-                    const auto count = material->GetTextureCount(type);
-                    if (count == 0)
-                        return {};
-                    if (count > 1)
-                        output.Diagnostics.push_back({AssetDiagnosticSeverity::Warning, context.RelativePath, 0, 0,
-                                                      "Material '" + materialNames[materialIndex] + "' has " +
-                                                          std::to_string(count) + " textures for " +
-                                                          std::string(property) + "; only the first is supported."});
-                    aiString path;
-                    if (material->GetTexture(type, 0, &path) != aiReturn_SUCCESS)
-                        return {};
-                    const auto* embedded = scene->GetEmbeddedTexture(path.C_Str());
-                    if (!embedded)
-                    {
-                        output.Diagnostics.push_back(
-                            {AssetDiagnosticSeverity::Warning, context.RelativePath, 0, 0,
-                             "Material '" + materialNames[materialIndex] + "' references external texture '" +
-                                 path.C_Str() + "'; import it as a project texture and assign it after extraction."});
-                        return {};
-                    }
-                    const auto textureIterator =
-                        std::find(scene->mTextures, scene->mTextures + scene->mNumTextures, embedded);
-                    if (textureIterator == scene->mTextures + scene->mNumTextures)
-                        throw std::logic_error("Assimp returned an embedded texture outside the imported scene.");
-                    const auto textureIndex = static_cast<std::size_t>(textureIterator - scene->mTextures);
-                    const auto key = "texture/" + std::to_string(textureIndex) + "/" +
-                                     std::to_string(static_cast<unsigned int>(semantic));
-                    if (const auto existing = publishedTextures.find(key); existing != publishedTextures.end())
-                        return existing->second;
-
-                    TextureImportSettings settings;
-                    settings.Semantic = semantic;
-                    settings.ColorSpace = colorSpace;
-                    std::vector<TextureMipLevel> mips;
-                    if (embedded->mHeight == 0)
-                    {
-                        const auto textureBytes = std::span(reinterpret_cast<const std::byte*>(embedded->pcData),
-                                                            static_cast<std::size_t>(embedded->mWidth));
-                        mips = ImportTexture(textureBytes, settings);
-                    }
-                    else
-                    {
-                        if (embedded->mWidth == 0 || embedded->mHeight == 0 ||
-                            embedded->mWidth > MaximumTextureDimension || embedded->mHeight > MaximumTextureDimension)
-                            throw std::invalid_argument("Embedded model texture dimensions are invalid.");
-                        TextureMipLevel base;
-                        base.Width = embedded->mWidth;
-                        base.Height = embedded->mHeight;
-                        base.Pixels.resize(static_cast<std::size_t>(base.Width) * base.Height * 4U);
-                        for (std::size_t pixel = 0; pixel < static_cast<std::size_t>(base.Width) * base.Height; ++pixel)
-                        {
-                            base.Pixels[pixel * 4U] = std::byte(embedded->pcData[pixel].r);
-                            base.Pixels[pixel * 4U + 1U] = std::byte(embedded->pcData[pixel].g);
-                            base.Pixels[pixel * 4U + 2U] = std::byte(embedded->pcData[pixel].b);
-                            base.Pixels[pixel * 4U + 3U] = std::byte(embedded->pcData[pixel].a);
-                        }
-                        mips.push_back(std::move(base));
-                        while (mips.back().Width > 1 || mips.back().Height > 1)
-                            mips.push_back(Downsample(mips.back(), semantic == TextureSemantic::Normal));
-                    }
-                    const auto id = context.ResolveSubAssetId(key);
-                    output.SubAssets.push_back({id, Texture2DAsset::StaticType(), key,
-                                                materialNames[materialIndex] + " " + std::string(property),
-                                                Texture2DAsset::Encode(settings, mips)});
-                    publishedTextures.emplace(key, id);
-                    return id;
-                };
-
-                std::unordered_map<std::string, std::size_t> materialNameOccurrences;
-                std::vector<bool> materialUsed(scene->mNumMaterials);
-                for (unsigned int meshIndex = 0; meshIndex < scene->mNumMeshes; ++meshIndex)
-                    if (scene->mMeshes[meshIndex] && scene->mMeshes[meshIndex]->mMaterialIndex < materialUsed.size())
-                        materialUsed[scene->mMeshes[meshIndex]->mMaterialIndex] = true;
-                for (unsigned int materialIndex = 0; materialIndex < scene->mNumMaterials; ++materialIndex)
+                    output.Diagnostics.push_back(
+                        {AssetDiagnosticSeverity::Warning, context.RelativePath, 0, 0,
+                         "Model materials were not published because no project material shader was found."});
+                }
+                else if (!context.ResolveSubAssetId)
                 {
-                    if (!materialUsed[materialIndex])
-                        continue;
-                    const auto* sourceMaterial = scene->mMaterials[materialIndex];
-                    const auto occurrence = materialNameOccurrences[materialNames[materialIndex]]++;
-                    const auto key = "material/" + materialNames[materialIndex] + "/" + std::to_string(occurrence);
-                    MaterialAssetDefinition definition;
-                    definition.SchemaVersion = 2;
-                    definition.Shader = shader->Id;
-
-                    aiColor4D baseColor{1.0F, 1.0F, 1.0F, 1.0F};
-                    if (sourceMaterial->Get(AI_MATKEY_BASE_COLOR, baseColor) != aiReturn_SUCCESS)
-                        (void)sourceMaterial->Get(AI_MATKEY_COLOR_DIFFUSE, baseColor);
-                    if (declared("Tint"))
-                        definition.Properties.emplace("Tint",
-                                                      Color{baseColor.r, baseColor.g, baseColor.b, baseColor.a});
-                    float scalar = 1.0F;
-                    if (declared("MetallicFactor") &&
-                        sourceMaterial->Get(AI_MATKEY_METALLIC_FACTOR, scalar) == aiReturn_SUCCESS)
-                        definition.Properties.emplace("MetallicFactor", std::clamp(scalar, 0.0F, 1.0F));
-                    scalar = 1.0F;
-                    if (declared("RoughnessFactor") &&
-                        sourceMaterial->Get(AI_MATKEY_ROUGHNESS_FACTOR, scalar) == aiReturn_SUCCESS)
-                        definition.Properties.emplace("RoughnessFactor", std::clamp(scalar, 0.0F, 1.0F));
-                    scalar = 1.0F;
-                    if (declared("NormalScale") &&
-                        sourceMaterial->Get(AI_MATKEY_GLTF_TEXTURE_SCALE(aiTextureType_NORMALS, 0), scalar) ==
-                            aiReturn_SUCCESS)
-                        definition.Properties.emplace("NormalScale", std::max(scalar, 0.0F));
-                    scalar = 1.0F;
-                    if (declared("OcclusionStrength") &&
-                        sourceMaterial->Get(AI_MATKEY_GLTF_TEXTURE_STRENGTH(aiTextureType_AMBIENT_OCCLUSION, 0),
-                                            scalar) == aiReturn_SUCCESS)
-                        definition.Properties.emplace("OcclusionStrength", std::clamp(scalar, 0.0F, 1.0F));
-                    aiColor3D emissive{};
-                    if (declared("EmissiveFactor") &&
-                        sourceMaterial->Get(AI_MATKEY_COLOR_EMISSIVE, emissive) == aiReturn_SUCCESS)
-                        definition.Properties.emplace("EmissiveFactor",
-                                                      Color{emissive.r, emissive.g, emissive.b, 1.0F});
-
-                    const auto addTexture = [&](const aiTextureType type, const std::string_view property,
-                                                const TextureSemantic semantic,
-                                                const TextureColorSpace colorSpace) -> AssetId
+                    throw std::logic_error("Mesh importing requires a generated-subasset identity resolver.");
+                }
+                else
+                {
+                    const auto declared = [&shader](const std::string_view property)
+                    { return shader->Properties.contains(std::string(property)); };
+                    std::unordered_map<std::string, AssetId> publishedTextures;
+                    const auto publishTexture = [&](const unsigned int materialIndex, const aiTextureType type,
+                                                    const std::string_view property, const TextureSemantic semantic,
+                                                    const TextureColorSpace colorSpace) -> AssetId
                     {
-                        if (const auto texture = publishTexture(materialIndex, type, property, semantic, colorSpace))
+                        const auto* material = scene->mMaterials[materialIndex];
+                        const auto count = material->GetTextureCount(type);
+                        if (count == 0)
+                            return {};
+                        if (count > 1)
+                            output.Diagnostics.push_back(
+                                {AssetDiagnosticSeverity::Warning, context.RelativePath, 0, 0,
+                                 "Material '" + materialNames[materialIndex] + "' has " + std::to_string(count) +
+                                     " textures for " + std::string(property) + "; only the first is supported."});
+                        aiString path;
+                        if (material->GetTexture(type, 0, &path) != aiReturn_SUCCESS)
+                            return {};
+                        const auto* embedded = scene->GetEmbeddedTexture(path.C_Str());
+                        if (!embedded)
                         {
-                            if (declared(property))
-                                definition.Properties.insert_or_assign(std::string(property), texture);
-                            else
-                                output.Diagnostics.push_back(
-                                    {AssetDiagnosticSeverity::Warning, context.RelativePath, 0, 0,
-                                     "Material '" + materialNames[materialIndex] + "' has " + std::string(property) +
-                                         ", but the project material shader does not declare that property."});
-                            return texture;
+                            output.Diagnostics.push_back(
+                                {AssetDiagnosticSeverity::Warning, context.RelativePath, 0, 0,
+                                 "Material '" + materialNames[materialIndex] + "' references external texture '" +
+                                     path.C_Str() +
+                                     "'; import it as a project texture and assign it after extraction."});
+                            return {};
                         }
-                        return {};
+                        const auto textureIterator =
+                            std::find(scene->mTextures, scene->mTextures + scene->mNumTextures, embedded);
+                        if (textureIterator == scene->mTextures + scene->mNumTextures)
+                            throw std::logic_error("Assimp returned an embedded texture outside the imported scene.");
+                        const auto textureIndex = static_cast<std::size_t>(textureIterator - scene->mTextures);
+                        const auto key = "texture/" + std::to_string(textureIndex) + "/" +
+                                         std::to_string(static_cast<unsigned int>(semantic));
+                        if (const auto existing = publishedTextures.find(key); existing != publishedTextures.end())
+                            return existing->second;
+
+                        TextureImportSettings settings;
+                        settings.Semantic = semantic;
+                        settings.ColorSpace = colorSpace;
+                        std::vector<TextureMipLevel> mips;
+                        if (embedded->mHeight == 0)
+                        {
+                            const auto textureBytes = std::span(reinterpret_cast<const std::byte*>(embedded->pcData),
+                                                                static_cast<std::size_t>(embedded->mWidth));
+                            mips = ImportTexture(textureBytes, settings);
+                        }
+                        else
+                        {
+                            if (embedded->mWidth == 0 || embedded->mHeight == 0 ||
+                                embedded->mWidth > MaximumTextureDimension ||
+                                embedded->mHeight > MaximumTextureDimension)
+                                throw std::invalid_argument("Embedded model texture dimensions are invalid.");
+                            TextureMipLevel base;
+                            base.Width = embedded->mWidth;
+                            base.Height = embedded->mHeight;
+                            base.Pixels.resize(static_cast<std::size_t>(base.Width) * base.Height * 4U);
+                            for (std::size_t pixel = 0; pixel < static_cast<std::size_t>(base.Width) * base.Height;
+                                 ++pixel)
+                            {
+                                base.Pixels[pixel * 4U] = std::byte(embedded->pcData[pixel].r);
+                                base.Pixels[pixel * 4U + 1U] = std::byte(embedded->pcData[pixel].g);
+                                base.Pixels[pixel * 4U + 2U] = std::byte(embedded->pcData[pixel].b);
+                                base.Pixels[pixel * 4U + 3U] = std::byte(embedded->pcData[pixel].a);
+                            }
+                            mips.push_back(std::move(base));
+                            while (mips.back().Width > 1 || mips.back().Height > 1)
+                                mips.push_back(Downsample(mips.back(), semantic == TextureSemantic::Normal));
+                        }
+                        const auto id = context.ResolveSubAssetId(key);
+                        output.SubAssets.push_back({id, Texture2DAsset::StaticType(), key,
+                                                    materialNames[materialIndex] + " " + std::string(property),
+                                                    Texture2DAsset::Encode(settings, mips)});
+                        publishedTextures.emplace(key, id);
+                        return id;
                     };
-                    const auto baseColorTexture = addTexture(aiTextureType_BASE_COLOR, "MainTexture",
-                                                             TextureSemantic::Color, TextureColorSpace::Srgb);
-                    if (!baseColorTexture)
-                        addTexture(aiTextureType_DIFFUSE, "MainTexture", TextureSemantic::Color,
+
+                    std::unordered_map<std::string, std::size_t> materialNameOccurrences;
+                    std::vector<bool> materialUsed(scene->mNumMaterials);
+                    for (unsigned int meshIndex = 0; meshIndex < scene->mNumMeshes; ++meshIndex)
+                        if (scene->mMeshes[meshIndex] &&
+                            scene->mMeshes[meshIndex]->mMaterialIndex < materialUsed.size())
+                            materialUsed[scene->mMeshes[meshIndex]->mMaterialIndex] = true;
+                    for (unsigned int materialIndex = 0; materialIndex < scene->mNumMaterials; ++materialIndex)
+                    {
+                        if (!materialUsed[materialIndex])
+                            continue;
+                        const auto* sourceMaterial = scene->mMaterials[materialIndex];
+                        const auto occurrence = materialNameOccurrences[materialNames[materialIndex]]++;
+                        const auto key = "material/" + materialNames[materialIndex] + "/" + std::to_string(occurrence);
+                        MaterialAssetDefinition definition;
+                        definition.SchemaVersion = 2;
+                        definition.Shader = shader->Id;
+
+                        aiColor4D baseColor{1.0F, 1.0F, 1.0F, 1.0F};
+                        if (sourceMaterial->Get(AI_MATKEY_BASE_COLOR, baseColor) != aiReturn_SUCCESS)
+                            (void)sourceMaterial->Get(AI_MATKEY_COLOR_DIFFUSE, baseColor);
+                        if (declared("Tint"))
+                            definition.Properties.emplace("Tint",
+                                                          Color{baseColor.r, baseColor.g, baseColor.b, baseColor.a});
+                        float scalar = 1.0F;
+                        if (declared("MetallicFactor") &&
+                            sourceMaterial->Get(AI_MATKEY_METALLIC_FACTOR, scalar) == aiReturn_SUCCESS)
+                            definition.Properties.emplace("MetallicFactor", std::clamp(scalar, 0.0F, 1.0F));
+                        scalar = 1.0F;
+                        if (declared("RoughnessFactor") &&
+                            sourceMaterial->Get(AI_MATKEY_ROUGHNESS_FACTOR, scalar) == aiReturn_SUCCESS)
+                            definition.Properties.emplace("RoughnessFactor", std::clamp(scalar, 0.0F, 1.0F));
+                        scalar = 1.0F;
+                        if (declared("NormalScale") &&
+                            sourceMaterial->Get(AI_MATKEY_GLTF_TEXTURE_SCALE(aiTextureType_NORMALS, 0), scalar) ==
+                                aiReturn_SUCCESS)
+                            definition.Properties.emplace("NormalScale", std::max(scalar, 0.0F));
+                        scalar = 1.0F;
+                        if (declared("OcclusionStrength") &&
+                            sourceMaterial->Get(AI_MATKEY_GLTF_TEXTURE_STRENGTH(aiTextureType_AMBIENT_OCCLUSION, 0),
+                                                scalar) == aiReturn_SUCCESS)
+                            definition.Properties.emplace("OcclusionStrength", std::clamp(scalar, 0.0F, 1.0F));
+                        aiColor3D emissive{};
+                        if (declared("EmissiveFactor") &&
+                            sourceMaterial->Get(AI_MATKEY_COLOR_EMISSIVE, emissive) == aiReturn_SUCCESS)
+                            definition.Properties.emplace("EmissiveFactor",
+                                                          Color{emissive.r, emissive.g, emissive.b, 1.0F});
+
+                        const auto addTexture = [&](const aiTextureType type, const std::string_view property,
+                                                    const TextureSemantic semantic,
+                                                    const TextureColorSpace colorSpace) -> AssetId
+                        {
+                            if (const auto texture =
+                                    publishTexture(materialIndex, type, property, semantic, colorSpace))
+                            {
+                                if (declared(property))
+                                    definition.Properties.insert_or_assign(std::string(property), texture);
+                                else
+                                    output.Diagnostics.push_back(
+                                        {AssetDiagnosticSeverity::Warning, context.RelativePath, 0, 0,
+                                         "Material '" + materialNames[materialIndex] + "' has " +
+                                             std::string(property) +
+                                             ", but the project material shader does not declare that property."});
+                                return texture;
+                            }
+                            return {};
+                        };
+                        const auto baseColorTexture = addTexture(aiTextureType_BASE_COLOR, "MainTexture",
+                                                                 TextureSemantic::Color, TextureColorSpace::Srgb);
+                        if (!baseColorTexture)
+                            addTexture(aiTextureType_DIFFUSE, "MainTexture", TextureSemantic::Color,
+                                       TextureColorSpace::Srgb);
+                        addTexture(aiTextureType_NORMALS, "NormalTexture", TextureSemantic::Normal,
+                                   TextureColorSpace::Linear);
+                        addTexture(aiTextureType_GLTF_METALLIC_ROUGHNESS, "MetallicRoughnessTexture",
+                                   TextureSemantic::Data, TextureColorSpace::Linear);
+                        addTexture(aiTextureType_AMBIENT_OCCLUSION, "OcclusionTexture", TextureSemantic::Data,
+                                   TextureColorSpace::Linear);
+                        addTexture(aiTextureType_EMISSIVE, "EmissiveTexture", TextureSemantic::Color,
                                    TextureColorSpace::Srgb);
-                    addTexture(aiTextureType_NORMALS, "NormalTexture", TextureSemantic::Normal,
-                               TextureColorSpace::Linear);
-                    addTexture(aiTextureType_GLTF_METALLIC_ROUGHNESS, "MetallicRoughnessTexture", TextureSemantic::Data,
-                               TextureColorSpace::Linear);
-                    addTexture(aiTextureType_AMBIENT_OCCLUSION, "OcclusionTexture", TextureSemantic::Data,
-                               TextureColorSpace::Linear);
-                    addTexture(aiTextureType_EMISSIVE, "EmissiveTexture", TextureSemantic::Color,
-                               TextureColorSpace::Srgb);
-                    addTexture(aiTextureType_METALNESS, "MetallicTexture", TextureSemantic::Data,
-                               TextureColorSpace::Linear);
-                    addTexture(aiTextureType_DIFFUSE_ROUGHNESS, "RoughnessTexture", TextureSemantic::Data,
-                               TextureColorSpace::Linear);
+                        addTexture(aiTextureType_METALNESS, "MetallicTexture", TextureSemantic::Data,
+                                   TextureColorSpace::Linear);
+                        addTexture(aiTextureType_DIFFUSE_ROUGHNESS, "RoughnessTexture", TextureSemantic::Data,
+                                   TextureColorSpace::Linear);
 
-                    aiString alphaMode;
-                    const bool explicitAlphaMode =
-                        sourceMaterial->Get(AI_MATKEY_GLTF_ALPHAMODE, alphaMode) == aiReturn_SUCCESS;
-                    if (explicitAlphaMode)
-                    {
-                        const auto mode = Lowercase(alphaMode.C_Str());
-                        if (mode == "mask")
-                            definition.Surface.AlphaMode = MaterialAlphaMode::Mask;
-                        else if (mode == "blend")
+                        aiString alphaMode;
+                        const bool explicitAlphaMode =
+                            sourceMaterial->Get(AI_MATKEY_GLTF_ALPHAMODE, alphaMode) == aiReturn_SUCCESS;
+                        if (explicitAlphaMode)
+                        {
+                            const auto mode = Lowercase(alphaMode.C_Str());
+                            if (mode == "mask")
+                                definition.Surface.AlphaMode = MaterialAlphaMode::Mask;
+                            else if (mode == "blend")
+                                definition.Surface.AlphaMode = MaterialAlphaMode::Blend;
+                        }
+                        scalar = 0.5F;
+                        if (sourceMaterial->Get(AI_MATKEY_GLTF_ALPHACUTOFF, scalar) == aiReturn_SUCCESS)
+                            definition.Surface.AlphaCutoff = std::clamp(scalar, 0.0F, 1.0F);
+                        int twoSided = 0;
+                        if (sourceMaterial->Get(AI_MATKEY_TWOSIDED, twoSided) == aiReturn_SUCCESS)
+                            definition.Surface.DoubleSided = twoSided != 0;
+                        scalar = 1.0F;
+                        if (!explicitAlphaMode && sourceMaterial->Get(AI_MATKEY_OPACITY, scalar) == aiReturn_SUCCESS &&
+                            scalar < 1.0F)
+                        {
                             definition.Surface.AlphaMode = MaterialAlphaMode::Blend;
-                    }
-                    scalar = 0.5F;
-                    if (sourceMaterial->Get(AI_MATKEY_GLTF_ALPHACUTOFF, scalar) == aiReturn_SUCCESS)
-                        definition.Surface.AlphaCutoff = std::clamp(scalar, 0.0F, 1.0F);
-                    int twoSided = 0;
-                    if (sourceMaterial->Get(AI_MATKEY_TWOSIDED, twoSided) == aiReturn_SUCCESS)
-                        definition.Surface.DoubleSided = twoSided != 0;
-                    scalar = 1.0F;
-                    if (!explicitAlphaMode && sourceMaterial->Get(AI_MATKEY_OPACITY, scalar) == aiReturn_SUCCESS &&
-                        scalar < 1.0F)
-                    {
-                        definition.Surface.AlphaMode = MaterialAlphaMode::Blend;
-                        if (auto tint = definition.Properties.find("Tint"); tint != definition.Properties.end())
-                            if (auto* color = std::get_if<Color>(&tint->second))
-                                color->Alpha = std::min(color->Alpha, std::clamp(scalar, 0.0F, 1.0F));
-                    }
+                            if (auto tint = definition.Properties.find("Tint"); tint != definition.Properties.end())
+                                if (auto* color = std::get_if<Color>(&tint->second))
+                                    color->Alpha = std::min(color->Alpha, std::clamp(scalar, 0.0F, 1.0F));
+                        }
 
-                    std::vector<AssetId> dependencies{shader->Id};
-                    for (const auto& [name, value] : definition.Properties)
-                    {
-                        (void)name;
-                        if (const auto* texture = std::get_if<AssetId>(&value); texture && *texture)
-                            dependencies.push_back(*texture);
+                        std::vector<AssetId> dependencies{shader->Id};
+                        for (const auto& [name, value] : definition.Properties)
+                        {
+                            (void)name;
+                            if (const auto* texture = std::get_if<AssetId>(&value); texture && *texture)
+                                dependencies.push_back(*texture);
+                        }
+                        std::ranges::sort(dependencies);
+                        dependencies.erase(std::unique(dependencies.begin(), dependencies.end()), dependencies.end());
+                        const auto materialId = context.ResolveSubAssetId(key);
+                        output.SubAssets.push_back({materialId, MaterialAsset::StaticType(), key,
+                                                    materialNames[materialIndex], MaterialAsset::Encode(definition),
+                                                    dependencies});
+                        output.AssetDependencies.push_back(materialId);
+                        materialSlots[materialIndex].DefaultMaterial = materialId;
                     }
-                    std::ranges::sort(dependencies);
-                    dependencies.erase(std::unique(dependencies.begin(), dependencies.end()), dependencies.end());
-                    const auto materialId = context.ResolveSubAssetId(key);
-                    output.SubAssets.push_back({materialId, MaterialAsset::StaticType(), key,
-                                                materialNames[materialIndex], MaterialAsset::Encode(definition),
-                                                dependencies});
-                    output.AssetDependencies.push_back(materialId);
-                    materialSlots[materialIndex].DefaultMaterial = materialId;
                 }
             }
             AssetId skeletonId;
@@ -2030,6 +2040,15 @@ namespace Keire
                                  {},
                                  1.0,
                                  {"model", "animation"}},
+                                {"materialImport",
+                                 "Materials",
+                                 "Materials",
+                                 AssetImportOptionKind::Choice,
+                                 std::string("embedded"),
+                                 {},
+                                 {},
+                                 1.0,
+                                 {"embedded", "none"}},
                                 {"rigSource",
                                  "Rig Source",
                                  "Rig",

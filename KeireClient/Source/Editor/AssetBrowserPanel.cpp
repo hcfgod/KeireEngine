@@ -18,6 +18,7 @@
 #include <optional>
 #include <ranges>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace KeireEditor
@@ -108,6 +109,7 @@ namespace KeireEditor
             AudioMixerFallbackImage.Reset();
             AnimationFallbackImage.Reset();
             Selection.clear();
+            ExpandedParents.clear();
             FolderSelection.clear();
             VisibleSelectionOrder.clear();
             VisibleFolderOrder.clear();
@@ -228,6 +230,8 @@ namespace KeireEditor
                     editor.AssetBrowserDatabase() ? editor.AssetBrowserDatabase()->Find(asset) : std::nullopt)
             {
                 CurrentFolder = record->RelativePath.parent_path();
+                if (record->ParentSource)
+                    ExpandedParents.insert(record->ParentSource);
                 Select(asset, false, editor);
                 RevealAsset = asset;
             }
@@ -1028,7 +1032,7 @@ namespace KeireEditor
         }
 
         void DrawAsset(Keire::UiFrame& ui, const Keire::AssetSourceRecord& record, IAssetBrowserController& editor,
-                       const bool grid)
+                       const bool grid, const std::size_t depth, const bool hasChildren)
         {
             auto id = ui.PushId(record.Id.ToString());
             auto image = Images.contains(record.Id) ? Images.at(record.Id) : AssetFallbackImage;
@@ -1052,6 +1056,7 @@ namespace KeireEditor
             const bool selected = std::ranges::find(Selection, record.Id) != Selection.end();
             const auto fullName = DisplayName(record.RelativePath);
             bool open = false;
+            const bool expanded = ExpandedParents.contains(record.Id);
             if (grid)
             {
                 if (ui.ImageButton("Thumbnail", image, {ThumbnailSize, ThumbnailSize}))
@@ -1060,8 +1065,22 @@ namespace KeireEditor
                 DrawAssetTooltip(ui, record, editor);
                 DrawAssetDragSource(ui, record);
                 DrawAssetContext(ui, record, editor, "ThumbnailContext");
+                if (hasChildren)
+                {
+                    if (ui.IconButton("AssetChildren",
+                                      expanded ? Keire::UiIcon::ExpandMore : Keire::UiIcon::ChevronRight, false,
+                                      {22.0F, 22.0F}))
+                    {
+                        if (expanded)
+                            ExpandedParents.erase(record.Id);
+                        else
+                            ExpandedParents.insert(record.Id);
+                    }
+                    ui.SameLine();
+                }
                 const auto visibleName =
-                    ElideAssetDisplayName(fullName, std::max(ui.ContentAvailable().Width - 8.0F, 1.0F),
+                    ElideAssetDisplayName((depth == 0 ? std::string{} : std::string("- ")) + fullName,
+                                          std::max(ui.ContentAvailable().Width - 8.0F, 1.0F),
                                           [&ui](const std::string_view text) { return ui.MeasureText(text).Width; });
                 if (ui.Selectable(visibleName, selected))
                     SelectFromClick(record.Id, ui, editor);
@@ -1072,6 +1091,28 @@ namespace KeireEditor
             }
             else
             {
+                auto cursor = ui.CursorPosition();
+                cursor.X += static_cast<float>(depth) * 24.0F;
+                ui.SetCursorPosition(cursor);
+                if (hasChildren)
+                {
+                    if (ui.IconButton("AssetChildren",
+                                      expanded ? Keire::UiIcon::ExpandMore : Keire::UiIcon::ChevronRight, false,
+                                      {22.0F, 22.0F}))
+                    {
+                        if (expanded)
+                            ExpandedParents.erase(record.Id);
+                        else
+                            ExpandedParents.insert(record.Id);
+                    }
+                    ui.SameLine();
+                }
+                else if (depth > 0)
+                {
+                    cursor = ui.CursorPosition();
+                    cursor.X += 22.0F;
+                    ui.SetCursorPosition(cursor);
+                }
                 if (ui.ImageButton("Thumbnail", image, {32.0F, 32.0F}))
                     SelectFromClick(record.Id, ui, editor);
                 open = ui.LastItemState().DoubleClicked;
@@ -1385,9 +1426,15 @@ namespace KeireEditor
             (void)VisibleRecords.Refresh(editor.AssetBrowserRecords(), editor.AssetBrowserRecordRevision(),
                                          CurrentFolder, Search);
             const auto assets = VisibleRecords.Records();
+            std::vector<Keire::AssetId> expandedParents(ExpandedParents.begin(), ExpandedParents.end());
+            const auto hierarchy = BuildAssetBrowserHierarchy(assets, expandedParents, !Search.empty());
+            std::vector<const Keire::AssetSourceRecord*> displayedAssets;
+            displayedAssets.reserve(hierarchy.size());
+            for (const auto& entry : hierarchy)
+                displayedAssets.push_back(entry.Record);
             VisibleSelectionOrder.clear();
-            VisibleSelectionOrder.reserve(assets.size());
-            for (const auto* record : assets)
+            VisibleSelectionOrder.reserve(displayedAssets.size());
+            for (const auto* record : displayedAssets)
                 VisibleSelectionOrder.push_back(record->Id);
 
             if (Mode == ViewMode::List)
@@ -1395,15 +1442,15 @@ namespace KeireEditor
                 for (const auto& folder : folders)
                     if (Search.empty() || folder.filename().string().find(Search) != std::string::npos)
                         DrawFolder(ui, folder, editor, false);
-                for (const auto* record : assets)
-                    DrawAsset(ui, *record, editor, false);
+                for (const auto& entry : hierarchy)
+                    DrawAsset(ui, *entry.Record, editor, false, entry.Depth, entry.HasChildren);
                 const auto remaining = ui.ContentAvailable();
                 (void)ui.InvisibleButton("AssetCurrentFolderDrop",
                                          {std::max(remaining.Width, 1.0F), std::max(remaining.Height, 24.0F)});
                 if (auto context = ui.BeginItemContextMenu("AssetBlankDropContext"); context)
                     DrawBlankContextItems(ui, editor);
                 AcceptFolderDrop(ui, contentDropArea, CurrentFolder, editor);
-                DrawKeyboardCommands(ui, assets, editor);
+                DrawKeyboardCommands(ui, displayedAssets, editor);
                 DrawBlankContext(ui, editor);
                 return;
             }
@@ -1437,10 +1484,10 @@ namespace KeireEditor
                         nextCell();
                         DrawFolder(ui, folder, editor, true);
                     }
-                    for (const auto* record : assets)
+                    for (const auto& entry : hierarchy)
                     {
                         nextCell();
-                        DrawAsset(ui, *record, editor, true);
+                        DrawAsset(ui, *entry.Record, editor, true, entry.Depth, entry.HasChildren);
                     }
                 }
             }
@@ -1450,7 +1497,7 @@ namespace KeireEditor
             if (auto context = ui.BeginItemContextMenu("AssetBlankDropContext"); context)
                 DrawBlankContextItems(ui, editor);
             AcceptFolderDrop(ui, contentDropArea, CurrentFolder, editor);
-            DrawKeyboardCommands(ui, assets, editor);
+            DrawKeyboardCommands(ui, displayedAssets, editor);
             DrawBlankContext(ui, editor);
         }
 
@@ -1720,6 +1767,7 @@ namespace KeireEditor
         Keire::Ref<Keire::UndoContext> Undo;
         std::vector<Keire::AssetId> Selection;
         std::vector<Keire::AssetId> VisibleSelectionOrder;
+        std::unordered_set<Keire::AssetId> ExpandedParents;
         std::vector<std::filesystem::path> FolderSelection;
         std::vector<std::filesystem::path> VisibleFolderOrder;
         std::vector<Keire::AssetId> PendingDeleteAssets;

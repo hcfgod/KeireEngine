@@ -143,6 +143,7 @@ namespace KeireEditor
         bool m_InspectorCommentPinned = false;
         std::string m_NodeSearch;
         std::string m_ExtractionName;
+        std::vector<Keire::AssetId> m_FunctionExtractionSelection;
         NodeMenuSelection m_NodeMenuSelection;
         GraphBookmarkSet m_Bookmarks;
         std::optional<Keire::Vector2> m_NodeCreationPosition;

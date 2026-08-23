@@ -127,6 +127,7 @@ namespace Keire::Detail
                     {"importerVersion", record.ImporterVersion},
                     {"sourceDigest", record.SourceDigest},
                     {"metadataDigest", record.MetadataDigest},
+                    {"parentSource", record.ParentSource ? record.ParentSource.ToString() : std::string{}},
                     {"dependencies", std::move(dependencies)},
                     {"subAssets", std::move(subAssets)},
                     {"sourceDependencies", std::move(sourceDependencies)},
@@ -145,6 +146,8 @@ namespace Keire::Detail
             record.ImporterVersion = value.at("importerVersion").get<std::uint32_t>();
             record.SourceDigest = value.at("sourceDigest").get<std::string>();
             record.MetadataDigest = value.at("metadataDigest").get<std::string>();
+            if (const auto parent = value.value("parentSource", std::string{}); !parent.empty())
+                record.ParentSource = AssetId::Parse(parent);
             for (const auto& dependency : value.value("dependencies", Json::array()))
                 record.Dependencies.push_back(AssetId::Parse(dependency.get<std::string>()));
             for (const auto& subAsset : value.value("subAssets", Json::array()))
@@ -266,6 +269,8 @@ namespace Keire::Detail
                          {"createPayloadPath", PathToUtf8(request.CreatePayloadPath)},
                          {"createSettings", EncodeSettings(request.CreateSettings)},
                          {"createAuxiliarySources", std::move(auxiliarySources)},
+                         {"createParentSource",
+                          request.CreateParentSource ? request.CreateParentSource.ToString() : std::string{}},
                          {"extractModel", request.ExtractModel ? request.ExtractModel.ToString() : std::string{}},
                          {"extractDirectory", PathToUtf8(request.ExtractDirectory)},
                          {"mutation",
@@ -307,6 +312,8 @@ namespace Keire::Detail
         request.CreateRelativePath = PathFromUtf8(value.value("createRelativePath", std::string{}));
         request.CreatePayloadPath = PathFromUtf8(value.value("createPayloadPath", std::string{}));
         request.CreateSettings = DecodeSettings(value.value("createSettings", Json::object()));
+        if (const auto parent = value.value("createParentSource", std::string{}); !parent.empty())
+            request.CreateParentSource = AssetId::Parse(parent);
         if (const auto model = value.value("extractModel", std::string{}); !model.empty())
             request.ExtractModel = AssetId::Parse(model);
         request.ExtractDirectory = PathFromUtf8(value.value("extractDirectory", std::string{}));

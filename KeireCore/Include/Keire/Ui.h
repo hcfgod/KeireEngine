@@ -241,7 +241,9 @@ namespace Keire
         Bug,
         Link,
         Copy,
-        Description
+        Description,
+        ChevronRight,
+        ExpandMore
     };
 
     struct UiOverlayIconButtonSpecification

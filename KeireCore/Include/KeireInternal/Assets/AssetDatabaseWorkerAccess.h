@@ -14,5 +14,9 @@ namespace Keire::Detail
         [[nodiscard]] static AssetImportResult
         ImportAssetsFromSourceIndex(AssetDatabase& database, std::span<const AssetId> assets, AssetImportPolicy policy,
                                     std::stop_token cancellation = {}, AssetOperationProgressCallback progress = {});
+        [[nodiscard]] static AssetImportResult ImportAssetsFromSourceIndexOrRescan(
+            Ref<AssetDatabase>& database, AssetDatabaseSpecification fallbackSpecification,
+            std::span<const AssetId> assets, AssetImportPolicy policy, bool& rescanned,
+            std::stop_token cancellation = {}, AssetOperationProgressCallback progress = {});
     };
 } // namespace Keire::Detail

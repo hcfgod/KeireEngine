@@ -339,6 +339,7 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
             DrawPanelMenuItem(ui, m_LightingPanel->Registration());
             DrawPanelMenuItem(ui, m_PrefabOverrides);
             DrawPanelMenuItem(ui, m_BuildSettings);
+            DrawPanelMenuItem(ui, m_Profiler);
             if (ui.MenuItem("Advanced Performance Overlay", m_ShowAdvancedPerformanceOverlay))
             {
                 m_ShowAdvancedPerformanceOverlay = !m_ShowAdvancedPerformanceOverlay;

@@ -9,6 +9,8 @@
 
 namespace Keire::Detail
 {
+    [[nodiscard]] bool IsMeshMaterialSlotKey(std::string_view key) noexcept;
+
     [[nodiscard]] std::string EncodeComponentPropertyBag(const ComponentPropertyBag& bag);
 
     [[nodiscard]] ComponentPropertyBag DecodeComponentPropertyBag(std::string_view data,

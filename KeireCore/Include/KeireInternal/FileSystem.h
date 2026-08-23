@@ -37,6 +37,9 @@ namespace Keire::Detail
     void PublishFileAtomically(const std::filesystem::path& temporary, const std::filesystem::path& destination);
     void WriteFileAtomically(const std::filesystem::path& path, std::span<const std::byte> contents);
     void WriteTextFileAtomically(const std::filesystem::path& path, std::string_view contents);
+    [[nodiscard]] bool WriteFileAtomicallyIfChanged(const std::filesystem::path& path,
+                                                    std::span<const std::byte> contents);
+    [[nodiscard]] bool WriteTextFileAtomicallyIfChanged(const std::filesystem::path& path, std::string_view contents);
     using RenamePathOperation =
         std::function<void(const std::filesystem::path&, const std::filesystem::path&, std::error_code&)>;
     using RenamePathDelay = std::function<void(std::size_t attempt, std::chrono::milliseconds delay)>;

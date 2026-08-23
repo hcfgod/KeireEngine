@@ -121,6 +121,10 @@ namespace Keire
                 return "@";
             case UiIcon::Copy:
                 return "=";
+            case UiIcon::ChevronRight:
+                return ">";
+            case UiIcon::ExpandMore:
+                return "v";
             }
             return "?";
         }
@@ -154,6 +158,10 @@ namespace Keire
                 return 0xE5D3;
             case UiIcon::Refresh:
                 return 0xE5D5;
+            case UiIcon::ChevronRight:
+                return 0xE5CC;
+            case UiIcon::ExpandMore:
+                return 0xE5CF;
             case UiIcon::Scale:
                 return 0xE56B;
             case UiIcon::AxisX:
