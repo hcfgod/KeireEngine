@@ -30,6 +30,10 @@ mesh or texture import cannot leave a cached cube or checkerboard preview from a
 The Asset Browser is a focused editor panel backed by `AssetDatabase`. It presents a persistent folder tree,
 breadcrumbs, search, List and Grid modes, adjustable thumbnail size, multi-selection, double-click open, drag payloads,
 rename, stable-identity duplicate, and recoverable Move to Trash operations.
+Extracted Shader and Material Functions carry a persistent source-parent identity in their `.keiremeta`. List and Grid
+views show those sources beneath the graph that produced them, with an icon control on the parent to expand or collapse
+the group. Search temporarily expands matching groups. Moving a child away from its parent folder or removing the
+parent leaves the child visible as an ordinary standalone asset instead of hiding it.
 Names that do not fit their List or Grid cell are shortened with a measured `...` suffix. Hover either the shortened
 label or its thumbnail to see the complete filename, type, project-relative path, size, stable ID, importer, and any
 import failure diagnostic.
@@ -96,11 +100,14 @@ engine API used by the managed build. Source checkouts include `Keire.Managed.cs
 through a generated .NET 8 design-time facade so Visual Studio 2022 has complete engine semantic information and source
 navigation. The generated root gameplay projects also target .NET 8/C# 12 for Visual Studio 2022 design-time
 compatibility, while Kéire's separate internal compilation projects remain on .NET 10/C# 14. Packaged editors use a
-stable project-local `Keire.Managed.dll` reference. The first C# open loads the generated solution; later C# opens use
-Visual Studio's `/Edit` workflow so the requested source is sent to the running IDE instead of launching another
-solution window. This applies to an explicit `devenv.exe` preference and to the Windows system-default path. Build
-Settings also exposes **Regenerate C# Project**. Generated root `.sln` and `.csproj` files are ignored by newly created
-projects.
+stable project-local `Keire.Managed.dll` reference. Workspace publication compares generated contents before replacing
+a `.sln`, `.csproj`, design-time facade, or API reference, so simply opening another script does not make Visual Studio
+prompt to reload an unchanged solution. The first C# open loads the generated solution; later Windows opens enumerate
+Visual Studio automation sessions, match the loaded solution's canonical path to the current project, and open the
+source through that exact instance. An unrelated most-recent Visual Studio window is never selected. If the original
+instance has closed, Kéire opens the project solution again instead of sending the file to another project. This
+applies to an explicit `devenv.exe` preference and to the Windows system-default path. Build Settings also exposes
+**Regenerate C# Project**. Generated root `.sln` and `.csproj` files are ignored by newly created projects.
 
 Managed builds keep strict warnings-as-errors behavior for correctness and analyzer diagnostics, but common unused local
 and field diagnostics (`CS0168`, `CS0169`, `CS0219`, and `CS0414`) remain non-blocking warnings. They are reported in the

@@ -10,6 +10,9 @@ versions.
 
 ### Fixed
 
+- Regenerated Visual Studio workspaces only when their generated contents change, routed later C# opens to the exact
+  running Visual Studio instance whose loaded solution matches the current project, and grouped extracted
+  Shader/Material Function sources as collapsible children of their parent graph in the Asset Browser.
 - Kept Shader/Material Function extraction selections stable while their naming modal opens on the following frame,
   retried targeted asset imports from a fresh source scan when the worker receives a stale published index, and routed
   subsequent Windows C# opens through `devenv.exe /Edit` so they reuse the running Visual Studio instance.
