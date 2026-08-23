@@ -884,9 +884,12 @@ protect decode inputs. Core owns Binary/Text lifecycle types only. No GPU, audio
 crosses this boundary.
 
 `AssetDatabase` owns source-side identity through adjacent `.keiremeta` files, a content-addressed import cache, and
-confined rollback-capable file operations. `AssetCooker` sorts stable IDs, writes deterministic sharded packs and a
-versioned build profile into staging, then atomically publishes the directory. The editor and `KeireAssetTool` call the
-same public APIs. Detailed contracts live in [Asset Runtime](AssetRuntime.md) and [Asset Pipeline](AssetPipeline.md).
+confined rollback-capable file operations. Every indexed source and metadata path is re-resolved through the canonical
+source root before reads or mutations, so replacing an indexed parent with a symbolic link or reparse point cannot
+redirect later work outside the project. Importer-side project discovery follows the same rule before enumeration and
+again before every dependency read. `AssetCooker` sorts stable IDs, writes deterministic sharded packs and a versioned
+build profile into staging, then atomically publishes the directory. The editor and `KeireAssetTool` call the same
+public APIs. Detailed contracts live in [Asset Runtime](AssetRuntime.md) and [Asset Pipeline](AssetPipeline.md).
 
 Standalone player builds add a second transaction above cooking. Public value types own player identity and persistent
 profile policy; internal Build Support code owns immutable native-template discovery, archive verification, branding,
@@ -986,7 +989,9 @@ and Assets. Full contracts live in [Input System](InputSystem.md).
 Managed gameplay observes bounded device snapshots and the active player control scheme through callback-local runtime
 services. Rebind operations retain native action contexts until completion or cancellation, expose immutable polling
 snapshots, and are cancelled before Play Mode or player teardown. Rumble accepts normalized motor strengths for paired
-gamepads only and degrades to a rejected operation when the platform SDL build has no joystick backend.
+gamepads only. Production Windows, Linux, and macOS dependencies enable native joystick, HIDAPI, virtual-joystick,
+and haptic backends; unsupported future ports or custom SDL builds degrade rumble to a rejected operation without
+affecting keyboard or mouse input.
 
 `.keireinput` is the first registered typed source importer. It validates bounded versioned JSON and emits deterministic
 canonical bytes into the normal content-addressed cache and cooker. The dockable editor exposes every schema-owned

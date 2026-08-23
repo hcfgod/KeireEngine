@@ -10,9 +10,20 @@ versions.
 
 ### Fixed
 
+- Made Player Support publication operation-staged, content-addressed, and catalog-locked; runtime closure staging now
+  rejects links and reparse points, preserves primary failures during cleanup, requires the complete per-variant
+  runtime license inventory, and carries the architecture-matched app-local MSVC runtime on Windows.
+- Confined indexed asset source and metadata reads, moves, duplication, trash, scanning, import upgrades, and model
+  shader discovery to their canonical project roots even when a parent is replaced by a symbolic link or Windows
+  reparse point, while preserving supported missing project roots and `.` source/cache directory configurations.
+- Enabled the production SDL joystick, HIDAPI, virtual-joystick, and haptic backends on Windows, Linux, and macOS;
+  added deterministic virtual-gamepad rumble coverage and complete static-link/package consumer dependencies while
+  retaining a safe unsupported-platform fallback.
 - Made the Unity-style ScriptableObject workflow discover public and `[SerializeField]` fields without requiring
   hand-authored field IDs, create typed `.keiredata` assets from nested `[CreateAssetMenu]` paths, and keep actionable
-  managed-type diagnostics visible in the Project panel when the Create menu cannot be populated.
+  managed-type diagnostics visible in the Project panel when the Create menu cannot be populated. Behaviour Inspector
+  pickers and drag/drop now distinguish the shared managed-data file format from the declared ScriptableObject type,
+  accepting exact and derived typed assets instead of rejecting every authored instance.
 - Input Actions now keeps map, scheme, action, binding, and control-path text as in-progress drafts until editing
   finishes, rejects empty, duplicate, or otherwise invalid commits without changing the last valid document, and
   contains validation failures instead of terminating the editor.

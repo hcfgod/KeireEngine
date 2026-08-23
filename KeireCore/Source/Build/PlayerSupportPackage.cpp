@@ -60,6 +60,51 @@ namespace Keire::Detail
             return value;
         }
 
+        [[nodiscard]] std::string LogicalPathKey(const std::filesystem::path& path, const PlayerPlatform platform)
+        {
+            return platform == PlayerPlatform::Windows ? CaseFoldedPath(path) : PathToUtf8(path.lexically_normal());
+        }
+
+        [[nodiscard]] bool HasExecutableMode(const std::filesystem::file_status status) noexcept
+        {
+#if defined(_WIN32)
+            (void)status;
+            return false;
+#else
+            constexpr auto executable = std::filesystem::perms::owner_exec | std::filesystem::perms::group_exec |
+                                        std::filesystem::perms::others_exec;
+            return status.permissions() != std::filesystem::perms::unknown &&
+                   (status.permissions() & executable) != std::filesystem::perms::none;
+#endif
+        }
+
+        [[nodiscard]] bool IsCreateDump(const std::filesystem::path& path, const PlayerPlatform platform)
+        {
+            const auto filename =
+                platform == PlayerPlatform::Windows ? CaseFoldedPath(path.filename()) : PathToUtf8(path.filename());
+            return filename == (platform == PlayerPlatform::Windows ? "createdump.exe" : "createdump");
+        }
+
+        [[nodiscard]] bool HasExpectedExecutableMode(const std::filesystem::file_status status,
+                                                     const std::uint32_t mode) noexcept
+        {
+#if defined(_WIN32)
+            (void)status;
+            (void)mode;
+            return true;
+#else
+            constexpr auto mask = std::filesystem::perms::owner_all | std::filesystem::perms::group_all |
+                                  std::filesystem::perms::others_all;
+            const auto expected = mode == 0755U
+                                      ? std::filesystem::perms::owner_all | std::filesystem::perms::group_read |
+                                            std::filesystem::perms::group_exec | std::filesystem::perms::others_read |
+                                            std::filesystem::perms::others_exec
+                                      : std::filesystem::perms::owner_read | std::filesystem::perms::owner_write |
+                                            std::filesystem::perms::group_read | std::filesystem::perms::others_read;
+            return status.permissions() != std::filesystem::perms::unknown && (status.permissions() & mask) == expected;
+#endif
+        }
+
         [[nodiscard]] std::filesystem::path NativeIoPath(const std::filesystem::path& path)
         {
 #if defined(_WIN32)
@@ -287,7 +332,8 @@ namespace Keire::Detail
             for (const auto& file : manifest.Files)
             {
                 if (!IsConfinedRelativePath(file.Path) || file.Size > MaximumFileBytes ||
-                    total > MaximumPackageBytes - file.Size || !paths.emplace(CaseFoldedPath(file.Path)).second)
+                    total > MaximumPackageBytes - file.Size ||
+                    !paths.emplace(LogicalPathKey(file.Path, manifest.Platform)).second)
                     throw std::runtime_error("Player support package file catalog is unsafe.");
                 total += file.Size;
                 (void)ParseDigest(file.Sha256);
@@ -304,8 +350,23 @@ namespace Keire::Detail
                 throw std::runtime_error("Player support package source-module catalog is incompatible.");
         }
 
-        void WriteRegistry(const std::filesystem::path& versionRoot)
+        [[nodiscard]] std::string ReadAnchoredText(const AnchoredFileSystem& fileSystem,
+                                                   const std::filesystem::path& relative,
+                                                   const std::size_t maximumBytes)
         {
+            const auto bytes = fileSystem.Read(relative, maximumBytes);
+            return {reinterpret_cast<const char*>(bytes.data()), bytes.size()};
+        }
+
+        [[nodiscard]] PlayerSupportManifest LoadAnchoredManifest(const AnchoredFileSystem& fileSystem,
+                                                                 const std::filesystem::path& relative)
+        {
+            return DecodePlayerSupportManifest(ReadAnchoredText(fileSystem, relative, MaximumManifestBytes));
+        }
+
+        void WriteRegistry(const AnchoredFileSystem& fileSystem, const std::filesystem::path& versionRelative)
+        {
+            const auto versionRoot = fileSystem.Root() / versionRelative;
             Json entries = Json::array();
             std::error_code error;
             if (std::filesystem::is_directory(versionRoot, error) && !error)
@@ -315,11 +376,17 @@ namespace Keire::Detail
                     if (error)
                         throw std::filesystem::filesystem_error("Could not enumerate Build Support.", versionRoot,
                                                                 error);
-                    if (!entry.is_directory() || entry.path().filename().string().starts_with('.'))
+                    const auto status = entry.symlink_status(error);
+                    if (error || !std::filesystem::is_directory(status) || std::filesystem::is_symlink(status) ||
+                        entry.path().filename().string().starts_with('.'))
                         continue;
                     try
                     {
-                        const auto manifest = LoadPlayerSupportManifest(entry.path() / "manifest.json");
+                        const auto relative = entry.path().lexically_relative(fileSystem.Root()).lexically_normal();
+                        (void)fileSystem.Exists(relative);
+                        if (!fileSystem.IsRegularFile(relative / "manifest.json"))
+                            throw std::runtime_error("Build Support manifest is not a regular file.");
+                        const auto manifest = LoadAnchoredManifest(fileSystem, relative / "manifest.json");
                         entries.push_back({{"id", manifest.Id},
                                            {"platform", ToString(manifest.Platform)},
                                            {"architecture", ToString(manifest.Architecture)}});
@@ -329,8 +396,9 @@ namespace Keire::Detail
                     }
                 }
             }
-            WriteTextFileAtomically(versionRoot / "registry.json",
-                                    Json{{"schemaVersion", 1}, {"installed", std::move(entries)}}.dump(2) + '\n');
+            const auto contents = Json{{"schemaVersion", 1}, {"installed", std::move(entries)}}.dump(2) + '\n';
+            fileSystem.WriteFileAtomically(versionRelative / "registry.json",
+                                           std::as_bytes(std::span(contents.data(), contents.size())));
         }
 
         [[nodiscard]] std::uint64_t InstalledBytes(const PlayerSupportManifest& manifest)
@@ -347,23 +415,97 @@ namespace Keire::Detail
                                      : std::filesystem::absolute(requested).lexically_normal();
         }
 
-        [[nodiscard]] bool IsSafeRemovalComponent(const std::string_view value) noexcept
+        [[nodiscard]] bool IsSafeRemovalComponent(const std::string_view value,
+                                                  const bool allowInternal = false) noexcept
         {
-            return !value.empty() && value != "." && value != ".." && value.size() <= 128 &&
-                   std::ranges::none_of(
-                       value, [](const unsigned char character)
-                       { return character < 0x20U || character == 0x7fU || character == '/' || character == '\\'; });
+            if (value.empty() || value == "." || value == ".." || value.size() > 128 || value.back() == '.' ||
+                value.back() == ' ' || (!allowInternal && value.front() == '.'))
+            {
+                return false;
+            }
+            if (std::ranges::any_of(value,
+                                    [](const unsigned char character)
+                                    {
+                                        return character < 0x20U || character == 0x7fU || character == '/' ||
+                                               character == '\\' || character == '<' || character == '>' ||
+                                               character == ':' || character == '"' || character == '|' ||
+                                               character == '?' || character == '*';
+                                    }))
+            {
+                return false;
+            }
+            const auto path = PathFromUtf8(value);
+            if (path.is_absolute() || path.has_root_name() || path.has_root_directory() || path.filename() != path)
+                return false;
+            auto stem = std::string(value.substr(0, value.find('.')));
+            std::ranges::transform(stem, stem.begin(), [](const unsigned char character)
+                                   { return static_cast<char>(std::toupper(character)); });
+            static constexpr std::array reservedNames{"CON",  "PRN",  "AUX",  "NUL",  "CLOCK$", "COM1", "COM2", "COM3",
+                                                      "COM4", "COM5", "COM6", "COM7", "COM8",   "COM9", "LPT1", "LPT2",
+                                                      "LPT3", "LPT4", "LPT5", "LPT6", "LPT7",   "LPT8", "LPT9"};
+            return std::ranges::find(reservedNames, stem) == reservedNames.end();
         }
 
-        void ValidateInstalledFiles(const std::filesystem::path& installation, const PlayerSupportManifest& manifest)
+        void RequireUnredirectedRoot(const std::filesystem::path& root)
         {
+            const auto parent = root.parent_path();
+            if (parent.empty() || root.filename().empty())
+                throw std::invalid_argument("Build Support storage requires a named directory root.");
+            (void)ResolveConfinedPath(parent, root.filename());
+        }
+
+        void RemoveAnchoredTree(const AnchoredFileSystem& fileSystem, const std::filesystem::path& relative)
+        {
+            if (!fileSystem.Exists(relative))
+                return;
+            std::vector<std::filesystem::path> entries;
+            const auto nativeRoot = NativeIoPath(fileSystem.Root());
+            const auto nativeTree = nativeRoot / relative;
+            for (std::filesystem::recursive_directory_iterator iterator(nativeTree), end; iterator != end; ++iterator)
+            {
+                const auto entry = iterator->path().lexically_relative(nativeRoot).lexically_normal();
+                (void)fileSystem.Exists(entry);
+                entries.push_back(entry);
+            }
+            std::ranges::sort(entries, [](const auto& left, const auto& right)
+                              { return std::ranges::distance(left) > std::ranges::distance(right); });
+            for (const auto& entry : entries)
+                fileSystem.Remove(entry);
+            fileSystem.Remove(relative);
+        }
+
+        void TryRemoveAnchoredTree(const AnchoredFileSystem& fileSystem, const std::filesystem::path& relative) noexcept
+        {
+            try
+            {
+                RemoveAnchoredTree(fileSystem, relative);
+            }
+            catch (...)
+            {
+            }
+        }
+
+        void ValidateTreeHasNoRedirects(const AnchoredFileSystem& fileSystem)
+        {
+            const auto nativeRoot = NativeIoPath(fileSystem.Root());
+            for (std::filesystem::recursive_directory_iterator iterator(nativeRoot), end; iterator != end; ++iterator)
+            {
+                const auto relative = iterator->path().lexically_relative(nativeRoot).lexically_normal();
+                (void)fileSystem.Exists(relative);
+            }
+        }
+
+        void ValidateInstalledFiles(const AnchoredFileSystem& fileSystem, const PlayerSupportManifest& manifest)
+        {
+            ValidateTreeHasNoRedirects(fileSystem);
             for (const auto& file : manifest.Files)
             {
-                const auto path = installation / file.Path;
-                const auto nativePath = NativeIoPath(path);
-                if (!std::filesystem::is_regular_file(nativePath) ||
-                    std::filesystem::file_size(nativePath) != file.Size ||
-                    DigestToString(Sha256File(nativePath, MaximumFileBytes)) != file.Sha256)
+                AnchoredFileMetadata metadata;
+                const auto digest = DigestToString(Sha256File(fileSystem, file.Path, MaximumFileBytes, metadata));
+                const auto status =
+                    std::filesystem::file_status(std::filesystem::file_type::regular, metadata.Permissions);
+                if (metadata.Size != file.Size || digest != file.Sha256 ||
+                    !HasExpectedExecutableMode(status, file.Mode))
                 {
                     throw std::runtime_error("Installed Build Support contains a missing or corrupt file: " +
                                              PathToUtf8(file.Path));
@@ -376,11 +518,15 @@ namespace Keire::Detail
             std::error_code error;
             if (!std::filesystem::is_directory(storageRoot, error) || error)
                 return;
+            RequireUnredirectedRoot(storageRoot);
+            const AnchoredFileSystem fileSystem(storageRoot);
             for (const auto& version : std::filesystem::directory_iterator(storageRoot))
             {
                 const auto versionStatus = version.symlink_status();
                 if (!std::filesystem::is_directory(versionStatus) || std::filesystem::is_symlink(versionStatus))
                     continue;
+                const auto versionRelative = version.path().lexically_relative(storageRoot).lexically_normal();
+                (void)fileSystem.Exists(versionRelative);
                 std::vector<std::filesystem::path> journals;
                 for (const auto& entry : std::filesystem::directory_iterator(version.path()))
                 {
@@ -397,14 +543,16 @@ namespace Keire::Detail
                 std::ranges::sort(journals);
                 for (const auto& journal : journals)
                 {
-                    const auto document = Json::parse(ReadTextFile(journal, MaximumRemovalJournalBytes));
+                    const auto journalRelative = journal.lexically_relative(storageRoot).lexically_normal();
+                    const auto document =
+                        Json::parse(ReadAnchoredText(fileSystem, journalRelative, MaximumRemovalJournalBytes));
                     if (!document.is_object() || document.value("schemaVersion", 0U) != 1U)
                         throw std::runtime_error("Build Support removal journal schema is invalid.");
                     const auto engineVersion = document.at("engineVersion").get<std::string>();
                     const auto packId = document.at("packId").get<std::string>();
                     const auto tombstoneName = document.at("tombstone").get<std::string>();
                     if (!IsSafeRemovalComponent(engineVersion) || !IsSafeRemovalComponent(packId) ||
-                        !IsSafeRemovalComponent(tombstoneName) || !tombstoneName.starts_with(".remove-") ||
+                        !IsSafeRemovalComponent(tombstoneName, true) || !tombstoneName.starts_with(".remove-") ||
                         version.path().filename() != PathFromUtf8(engineVersion))
                     {
                         throw std::runtime_error("Build Support removal journal identity is invalid.");
@@ -424,19 +572,13 @@ namespace Keire::Detail
                     {
                         throw std::runtime_error("Build Support removal tombstone is not a directory.");
                     }
-
-                    WriteRegistry(version.path());
                     if (tombstoneExists)
-                    {
-                        std::filesystem::remove_all(tombstone, error);
-                        if (error)
-                            throw std::filesystem::filesystem_error(
-                                "Could not finish interrupted Build Support removal.", tombstone, error);
-                    }
-                    std::filesystem::remove(journal, error);
-                    if (error)
-                        throw std::filesystem::filesystem_error("Could not clear Build Support removal journal.",
-                                                                journal, error);
+                        (void)fileSystem.Exists(versionRelative / PathFromUtf8(tombstoneName));
+
+                    WriteRegistry(fileSystem, versionRelative);
+                    if (tombstoneExists)
+                        RemoveAnchoredTree(fileSystem, versionRelative / PathFromUtf8(tombstoneName));
+                    fileSystem.Remove(journalRelative);
                 }
             }
         }
@@ -475,7 +617,8 @@ namespace Keire::Detail
         manifest.Files.clear();
         std::set<std::string> executablePaths;
         for (const auto& variant : manifest.Variants)
-            executablePaths.emplace(CaseFoldedPath((variant.Root / variant.Executable).lexically_normal()));
+            executablePaths.emplace(
+                LogicalPathKey((variant.Root / variant.Executable).lexically_normal(), manifest.Platform));
         std::uint64_t total = 0;
         for (std::filesystem::recursive_directory_iterator iterator(root), end; iterator != end; ++iterator)
         {
@@ -487,7 +630,8 @@ namespace Keire::Detail
             if (!std::filesystem::is_regular_file(status))
                 throw std::runtime_error("Player support payloads may contain only regular files.");
             const auto relative = iterator->path().lexically_relative(root).lexically_normal();
-            if (!IsConfinedRelativePath(relative) || CaseFoldedPath(relative) == "manifest.json")
+            if (!IsConfinedRelativePath(relative) ||
+                LogicalPathKey(relative, manifest.Platform) == LogicalPathKey("manifest.json", manifest.Platform))
                 throw std::runtime_error("Player support payload contains an unsafe or reserved path.");
             const auto size = iterator->file_size();
             if (size > MaximumFileBytes || total > MaximumPackageBytes - size || manifest.Files.size() >= MaximumFiles)
@@ -496,7 +640,11 @@ namespace Keire::Detail
             manifest.Files.push_back({.Path = relative,
                                       .Size = size,
                                       .Sha256 = DigestToString(Sha256File(iterator->path(), MaximumFileBytes)),
-                                      .Mode = executablePaths.contains(CaseFoldedPath(relative)) ? 0755U : 0644U});
+                                      .Mode = executablePaths.contains(LogicalPathKey(relative, manifest.Platform)) ||
+                                                      IsCreateDump(relative, manifest.Platform) ||
+                                                      HasExecutableMode(status)
+                                                  ? 0755U
+                                                  : 0644U});
         }
         std::ranges::sort(manifest.Files, {}, [](const auto& file) { return PathToUtf8(file.Path); });
         ValidatePackageManifest(manifest, manifest.ModuleFingerprint);
@@ -567,88 +715,92 @@ namespace Keire::Detail
         ValidatePackageManifest(manifest, expectedModuleFingerprint);
         ThrowIfCancelled(callbacks);
 
-        const auto versionRoot = ResolveStorageRoot(storageRoot) / manifest.EngineVersion;
-        const auto destination = versionRoot / PathFromUtf8(manifest.Id);
-        const auto staging = versionRoot / (".install-" + AssetId::Generate().ToString());
-        const auto backup = versionRoot / (".repair-" + AssetId::Generate().ToString());
-        std::filesystem::create_directories(staging);
+        const auto root = ResolveStorageRoot(storageRoot);
+        std::filesystem::create_directories(root);
+        RequireUnredirectedRoot(root);
+        const AnchoredFileSystem fileSystem(root);
+        const auto version = PathFromUtf8(manifest.EngineVersion);
+        const auto destination = version / PathFromUtf8(manifest.Id);
+        const auto staging = version / (".install-" + AssetId::Generate().ToString());
+        const auto backup = version / (".repair-" + AssetId::Generate().ToString());
+        fileSystem.CreateDirectories(staging);
         std::uint64_t completed = 0;
         const auto total = InstalledBytes(manifest);
         try
         {
-            std::vector<std::byte> buffer(BufferBytes);
             for (const auto& file : manifest.Files)
             {
                 ThrowIfCancelled(callbacks);
                 const auto target = staging / file.Path;
-                std::filesystem::create_directories(NativeIoPath(target.parent_path()));
-                const auto nativeTarget = NativeIoPath(target);
-                std::ofstream output(nativeTarget, std::ios::binary | std::ios::trunc);
-                if (!output)
-                    throw std::runtime_error("Could not create a Build Support payload file.");
-                std::uint64_t remaining = file.Size;
-                while (remaining != 0)
-                {
-                    ThrowIfCancelled(callbacks);
-                    const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(remaining, buffer.size()));
-                    reader.Read(std::span(buffer).first(count));
-                    output.write(reinterpret_cast<const char*>(buffer.data()), static_cast<std::streamsize>(count));
-                    if (!output)
-                        throw std::runtime_error("Could not write a Build Support payload file.");
-                    remaining -= count;
-                    completed += count;
-                    Report(callbacks,
-                           0.05F +
-                               (total == 0 ? 0.0F : 0.85F * static_cast<float>(completed) / static_cast<float>(total)),
-                           "Extracting Build Support");
-                }
-                output.close();
-                if (DigestToString(Sha256File(nativeTarget, MaximumFileBytes)) != file.Sha256)
-                    throw std::runtime_error("Build Support payload hash verification failed.");
-#if !defined(_WIN32)
-                std::filesystem::permissions(
-                    target,
+                const auto permissions =
                     file.Mode == 0755U ? std::filesystem::perms::owner_all | std::filesystem::perms::group_read |
                                              std::filesystem::perms::group_exec | std::filesystem::perms::others_read |
                                              std::filesystem::perms::others_exec
                                        : std::filesystem::perms::owner_read | std::filesystem::perms::owner_write |
-                                             std::filesystem::perms::group_read | std::filesystem::perms::others_read,
-                    std::filesystem::perm_options::replace);
-#endif
+                                             std::filesystem::perms::group_read | std::filesystem::perms::others_read;
+                fileSystem.WriteFileAtomically(
+                    target, file.Size,
+                    [&](const std::span<std::byte> chunk)
+                    {
+                        ThrowIfCancelled(callbacks);
+                        reader.Read(chunk);
+                        completed += chunk.size();
+                        Report(callbacks,
+                               0.05F + (total == 0 ? 0.0F
+                                                   : 0.85F * static_cast<float>(completed) / static_cast<float>(total)),
+                               "Extracting Build Support");
+                    },
+                    permissions, false);
+                AnchoredFileMetadata metadata;
+                if (DigestToString(Sha256File(fileSystem, target, MaximumFileBytes, metadata)) != file.Sha256 ||
+                    metadata.Size != file.Size)
+                    throw std::runtime_error("Build Support payload hash verification failed.");
             }
             reader.RequireEnd();
-            WriteTextFileAtomically(staging / "manifest.json", EncodePlayerSupportManifest(manifest));
+            const auto encodedManifest = EncodePlayerSupportManifest(manifest);
+            fileSystem.WriteFileAtomically(staging / "manifest.json",
+                                           std::as_bytes(std::span(encodedManifest.data(), encodedManifest.size())),
+                                           false);
             ThrowIfCancelled(callbacks);
             Report(callbacks, 0.93F, "Publishing Build Support");
-            const bool replacing = std::filesystem::exists(destination);
+            const bool replacing = fileSystem.Exists(destination);
             if (replacing)
-                RenamePathWithRetry(destination, backup);
+                fileSystem.Rename(destination, backup);
             try
             {
-                RenamePathWithRetry(staging, destination);
-                WriteRegistry(versionRoot);
+                fileSystem.Rename(staging, destination);
+                WriteRegistry(fileSystem, version);
             }
             catch (...)
             {
-                std::error_code ignored;
-                std::filesystem::remove_all(destination, ignored);
-                if (replacing && std::filesystem::exists(backup))
-                    RenamePathWithRetry(backup, destination);
-                throw;
+                const auto original = std::current_exception();
+                TryRemoveAnchoredTree(fileSystem, destination);
+                try
+                {
+                    if (replacing && fileSystem.Exists(backup) && !fileSystem.Exists(destination))
+                        fileSystem.Rename(backup, destination);
+                }
+                catch (...)
+                {
+                }
+                std::rethrow_exception(original);
             }
             if (replacing)
-            {
-                std::error_code ignored;
-                std::filesystem::remove_all(backup, ignored);
-            }
+                TryRemoveAnchoredTree(fileSystem, backup);
         }
         catch (...)
         {
-            std::error_code ignored;
-            std::filesystem::remove_all(staging, ignored);
-            if (std::filesystem::exists(backup) && !std::filesystem::exists(destination))
-                (void)TryRenamePathWithRetry(backup, destination, ignored);
-            throw;
+            const auto original = std::current_exception();
+            TryRemoveAnchoredTree(fileSystem, staging);
+            try
+            {
+                if (fileSystem.Exists(backup) && !fileSystem.Exists(destination))
+                    fileSystem.Rename(backup, destination);
+            }
+            catch (...)
+            {
+            }
+            std::rethrow_exception(original);
         }
         Report(callbacks, 1.0F, "Build Support installed");
         return {.Manifest = std::move(manifest),
@@ -660,9 +812,13 @@ namespace Keire::Detail
     {
         try
         {
-            const auto manifest = LoadPlayerSupportManifest(installation / "manifest.json");
+            RequireUnredirectedRoot(installation);
+            const AnchoredFileSystem fileSystem(installation);
+            if (!fileSystem.IsRegularFile("manifest.json"))
+                throw std::runtime_error("Installed Build Support manifest is not a regular file.");
+            const auto manifest = LoadAnchoredManifest(fileSystem, "manifest.json");
             ValidatePackageManifest(manifest, {});
-            ValidateInstalledFiles(installation, manifest);
+            ValidateInstalledFiles(fileSystem, manifest);
             diagnostic.clear();
             return true;
         }
@@ -686,11 +842,15 @@ namespace Keire::Detail
     {
         try
         {
-            const auto manifest = LoadPlayerSupportManifest(installation / "manifest.json");
+            RequireUnredirectedRoot(installation);
+            const AnchoredFileSystem fileSystem(installation);
+            if (!fileSystem.IsRegularFile("manifest.json"))
+                throw std::runtime_error("Installed Build Support manifest is not a regular file.");
+            const auto manifest = LoadAnchoredManifest(fileSystem, "manifest.json");
             ValidatePackageManifestStructure(manifest);
             if (expectedEngineVersion.empty() || manifest.EngineVersion != expectedEngineVersion)
                 throw std::runtime_error("Installed Build Support is stored under the wrong editor version.");
-            ValidateInstalledFiles(installation, manifest);
+            ValidateInstalledFiles(fileSystem, manifest);
             diagnostic.clear();
             return true;
         }
@@ -716,17 +876,28 @@ namespace Keire::Detail
         std::error_code error;
         if (!std::filesystem::is_directory(root, error) || error)
             return result;
+        RequireUnredirectedRoot(root);
+        const AnchoredFileSystem fileSystem(root);
         for (const auto& version : std::filesystem::directory_iterator(root, error))
         {
-            if (error || !version.is_directory())
+            const auto versionStatus = version.symlink_status(error);
+            if (error || !std::filesystem::is_directory(versionStatus) || std::filesystem::is_symlink(versionStatus))
                 continue;
+            const auto versionRelative = version.path().lexically_relative(root).lexically_normal();
+            (void)fileSystem.Exists(versionRelative);
             for (const auto& entry : std::filesystem::directory_iterator(version.path(), error))
             {
-                if (error || !entry.is_directory() || entry.path().filename().string().starts_with('.'))
+                const auto entryStatus = entry.symlink_status(error);
+                if (error || !std::filesystem::is_directory(entryStatus) || std::filesystem::is_symlink(entryStatus) ||
+                    entry.path().filename().string().starts_with('.'))
                     continue;
                 try
                 {
-                    auto manifest = LoadPlayerSupportManifest(entry.path() / "manifest.json");
+                    const auto relative = entry.path().lexically_relative(root).lexically_normal();
+                    (void)fileSystem.Exists(relative);
+                    if (!fileSystem.IsRegularFile(relative / "manifest.json"))
+                        throw std::runtime_error("Build Support manifest is not a regular file.");
+                    auto manifest = LoadAnchoredManifest(fileSystem, relative / "manifest.json");
                     const auto bytes = InstalledBytes(manifest);
                     result.push_back({.Manifest = std::move(manifest), .ArchiveSize = bytes});
                 }
@@ -747,47 +918,50 @@ namespace Keire::Detail
             throw std::invalid_argument("Build Support removal requires safe engine-version and pack identifiers.");
         const auto root = ResolveStorageRoot(storageRoot);
         RecoverInterruptedRemovals(root);
-        const auto versionRoot = root / PathFromUtf8(engineVersion);
-        const auto installation = versionRoot / PathFromUtf8(packId);
+        RequireUnredirectedRoot(root);
+        const AnchoredFileSystem fileSystem(root);
+        const auto version = PathFromUtf8(engineVersion);
+        const auto installation = version / PathFromUtf8(packId);
+        const auto versionRoot = root / version;
+        (void)fileSystem.Exists(version);
+        (void)fileSystem.Exists(installation);
         const auto versionStatus = std::filesystem::symlink_status(versionRoot);
-        const auto installationStatus = std::filesystem::symlink_status(installation);
+        const auto installationStatus = std::filesystem::symlink_status(root / installation);
         if (!std::filesystem::is_directory(versionStatus) || std::filesystem::is_symlink(versionStatus) ||
             !std::filesystem::is_directory(installationStatus) || std::filesystem::is_symlink(installationStatus))
         {
             throw std::runtime_error("The requested Build Support module is not installed.");
         }
         const auto operationId = ".remove-" + AssetId::Generate().ToString();
-        const auto removed = versionRoot / operationId;
-        const auto journal = versionRoot / (operationId + ".json");
-        WriteTextFileAtomically(journal, Json{{"schemaVersion", 1},
-                                              {"engineVersion", std::string(engineVersion)},
-                                              {"packId", std::string(packId)},
-                                              {"tombstone", operationId}}
-                                                 .dump(2) +
-                                             '\n');
-        RenamePathWithRetry(installation, removed);
+        const auto removed = version / operationId;
+        const auto journal = version / (operationId + ".json");
+        const auto journalContents = Json{{"schemaVersion", 1},
+                                          {"engineVersion", std::string(engineVersion)},
+                                          {"packId", std::string(packId)},
+                                          {"tombstone", operationId}}
+                                         .dump(2) +
+                                     '\n';
+        fileSystem.WriteFileAtomically(journal,
+                                       std::as_bytes(std::span(journalContents.data(), journalContents.size())), false);
+        fileSystem.Rename(installation, removed);
         try
         {
-            WriteRegistry(versionRoot);
+            WriteRegistry(fileSystem, version);
         }
         catch (...)
         {
             const auto original = std::current_exception();
-            std::error_code rollbackError;
-            (void)TryRenamePathWithRetry(removed, installation, rollbackError);
-            if (!rollbackError)
+            try
             {
-                std::error_code ignored;
-                std::filesystem::remove(journal, ignored);
+                fileSystem.Rename(removed, installation);
+                fileSystem.Remove(journal);
+            }
+            catch (...)
+            {
             }
             std::rethrow_exception(original);
         }
-        std::error_code error;
-        std::filesystem::remove_all(removed, error);
-        if (error)
-            throw std::filesystem::filesystem_error("Could not remove Build Support payload.", removed, error);
-        std::filesystem::remove(journal, error);
-        if (error)
-            throw std::filesystem::filesystem_error("Could not clear Build Support removal journal.", journal, error);
+        RemoveAnchoredTree(fileSystem, removed);
+        fileSystem.Remove(journal);
     }
 } // namespace Keire::Detail

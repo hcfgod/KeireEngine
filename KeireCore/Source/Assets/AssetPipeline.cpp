@@ -29,6 +29,7 @@ namespace Keire
         if (initialization == Initialization::Full)
         {
             (void)Refresh();
+            m_Impl->CompleteExternalImportRecovery(*this);
             m_Impl->StartChangeMonitor();
         }
     }
@@ -42,6 +43,7 @@ namespace Keire
         auto database =
             CreateRef<AssetDatabase>(std::move(specification), AssetDatabase::Initialization::PublishedSourceIndex);
         (void)ReloadSourceIndex(*database, path);
+        database->m_Impl->CompleteExternalImportRecovery(*database);
         return database;
     }
 
@@ -63,7 +65,7 @@ namespace Keire
         {
             record.RelativePath = record.RelativePath.lexically_normal();
             const auto source = ConfinedPath(database.m_Impl->SourceRoot, record.RelativePath);
-            const auto expectedMetadata = Detail::PathWithSuffix(source, ".keiremeta").lexically_normal();
+            const auto expectedMetadata = ConfinedMetadataPath(database.m_Impl->SourceRoot, record.RelativePath);
             if (!record.Id || !record.Type || record.RelativePath.empty() || record.RelativePath.is_absolute() ||
                 !identities.insert(record.Id).second ||
                 !relativePaths.insert(record.RelativePath.generic_string()).second ||
@@ -182,8 +184,9 @@ namespace Keire
         for (const auto& previous : owners)
         {
             const auto source = ConfinedPath(m_Impl->SourceRoot, previous.RelativePath);
-            auto refreshed = ReadMetadata(m_Impl->SourceRoot, source, m_Impl->Specification.MaximumSourceBytes, true,
-                                          m_Impl->InferImporter(source));
+            auto refreshed =
+                ReadMetadata(*m_Impl->SourceFiles, previous.RelativePath, m_Impl->Specification.MaximumSourceBytes,
+                             true, m_Impl->InferImporter(source));
             if (refreshed.Id != previous.Id)
                 throw std::runtime_error("Targeted source refresh changed the stable asset identity.");
             if (refreshed.Importer == previous.Importer && refreshed.ImporterVersion == previous.ImporterVersion)
@@ -192,8 +195,9 @@ namespace Keire
                 refreshed.SourceDependencies = previous.SourceDependencies;
                 refreshed.Metadata = previous.Metadata;
             }
-            m_Impl->PublishRecord(std::move(refreshed),
-                                  m_Impl->ReadSignature(source, Detail::PathWithSuffix(source, ".keiremeta")));
+            m_Impl->PublishRecord(
+                std::move(refreshed),
+                m_Impl->ReadSignature(source, ConfinedMetadataPath(m_Impl->SourceRoot, previous.RelativePath)));
         }
     }
 
@@ -385,8 +389,7 @@ namespace Keire
         }
         ReportOperationProgress(progress, AssetOperationPhase::Importing, 0, records.size());
         m_Impl->ResetCookInputs();
-        const auto objectRoot = m_Impl->CacheRoot / "Objects";
-        std::filesystem::create_directories(objectRoot);
+        m_Impl->CacheFiles->CreateDirectories("Objects");
         AssetImportResult result;
         bool failed = false;
         std::size_t completed = 0;
@@ -398,6 +401,8 @@ namespace Keire
             status.Id = record.Id;
             try
             {
+                (void)ConfinedPath(m_Impl->SourceRoot, record.RelativePath);
+                record.MetadataPath = ConfinedMetadataPath(m_Impl->SourceRoot, record.RelativePath);
                 auto validated = m_Impl->TakeValidatedImport(record);
                 auto restored = validated ? std::optional<AssetImportOutput>{} : m_Impl->RestoreCachedImport(record);
                 const bool restoredFromCache = restored.has_value();
@@ -405,9 +410,12 @@ namespace Keire
                                 : restored ? std::move(*restored)
                                            : m_Impl->Import(record);
                 const auto effectiveType = imported.PrimaryType.value_or(record.Type);
-                UpdateMetadataImportOutput(record.MetadataPath, effectiveType, imported.SubAssets);
+                UpdateMetadataImportOutput(*m_Impl->SourceFiles,
+                                           record.MetadataPath.lexically_relative(m_Impl->SourceRoot), effectiveType,
+                                           imported.SubAssets);
                 record.Type = effectiveType;
-                const auto metadataBytes = ReadSource(record.MetadataPath, 16ULL * 1024ULL * 1024U);
+                const auto metadataBytes = m_Impl->SourceFiles->Read(
+                    record.MetadataPath.lexically_relative(m_Impl->SourceRoot), 16ULL * 1024ULL * 1024U);
                 record.MetadataDigest = Detail::DigestToString(Detail::Sha256(metadataBytes));
                 status.Diagnostics = imported.Diagnostics;
                 for (const auto& diagnostic : status.Diagnostics)
@@ -441,7 +449,8 @@ namespace Keire
                 }
                 else
                 {
-                    Detail::WriteFileAtomically(object, imported.Bytes);
+                    m_Impl->CacheFiles->WriteFileAtomically(object.lexically_relative(m_Impl->CacheRoot),
+                                                            imported.Bytes);
                     ++result.Imported;
                     status.State = AssetImportState::Imported;
                 }
@@ -486,11 +495,18 @@ namespace Keire
         for (const auto& [previous, version] : metadataUpgrades)
         {
             const auto record = Find(previous.Id);
-            if (!record || !UpgradeMetadataImporterVersion(record->MetadataPath, record->Importer, version))
+            if (!record)
+                continue;
+            const auto source = ConfinedPath(m_Impl->SourceRoot, record->RelativePath);
+            const auto metadata = ConfinedMetadataPath(m_Impl->SourceRoot, record->RelativePath);
+            if (!UpgradeMetadataImporterVersion(*m_Impl->SourceFiles, metadata.lexically_relative(m_Impl->SourceRoot),
+                                                record->Importer, version))
                 continue;
             auto upgraded = *record;
+            upgraded.MetadataPath = metadata;
             upgraded.ImporterVersion = version;
-            const auto metadataBytes = ReadSource(upgraded.MetadataPath, 1024ULL * 1024U);
+            const auto metadataBytes = m_Impl->SourceFiles->Read(
+                upgraded.MetadataPath.lexically_relative(m_Impl->SourceRoot), 1024ULL * 1024U);
             upgraded.MetadataDigest = Detail::DigestToString(Detail::Sha256(metadataBytes));
             auto imported = m_Impl->TakeCookInput(previous);
             if (!imported)
@@ -498,11 +514,10 @@ namespace Keire
                     "A successfully imported asset lost its prepared output during metadata upgrade.");
             const auto object = m_Impl->ObjectPath(upgraded, m_Impl->ImportDigest(upgraded, *imported));
             if (!std::filesystem::exists(object))
-                Detail::WriteFileAtomically(object, imported->Bytes);
+                m_Impl->CacheFiles->WriteFileAtomically(object.lexically_relative(m_Impl->CacheRoot), imported->Bytes);
             m_Impl->StoreCachedImport(upgraded, *imported);
             m_Impl->StoreCookInput(upgraded, std::move(*imported));
-            m_Impl->PublishRecord(std::move(upgraded), m_Impl->ReadSignature(m_Impl->SourceRoot / record->RelativePath,
-                                                                             record->MetadataPath));
+            m_Impl->PublishRecord(std::move(upgraded), m_Impl->ReadSignature(source, metadata));
         }
         try
         {

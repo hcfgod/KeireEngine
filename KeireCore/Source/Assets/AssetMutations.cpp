@@ -7,9 +7,8 @@ namespace Keire
     void AssetDatabase::CreateFolder(const std::filesystem::path& relativePath)
     {
         std::scoped_lock operation(*m_Impl->OperationMutex);
-        const auto destination = ConfinedPath(m_Impl->SourceRoot, relativePath);
-        if (!std::filesystem::create_directories(destination) && !std::filesystem::is_directory(destination))
-            throw std::runtime_error("Could not create asset folder: " + Detail::PathToUtf8(destination));
+        (void)ConfinedPath(m_Impl->SourceRoot, relativePath);
+        m_Impl->SourceFiles->CreateDirectories(relativePath);
     }
 
     AssetId AssetDatabase::CreateAsset(const std::filesystem::path& relativePath,
@@ -31,8 +30,9 @@ namespace Keire
             registered->second.Type != importer.Type)
             throw std::invalid_argument("Asset creation requires an importer registered with this database.");
         const auto destination = ConfinedPath(m_Impl->SourceRoot, relativePath);
-        const auto metadata = Detail::PathWithSuffix(destination, ".keiremeta");
-        if (std::filesystem::exists(destination) || std::filesystem::exists(metadata))
+        const auto metadata = ConfinedMetadataPath(m_Impl->SourceRoot, relativePath);
+        const auto metadataRelative = Detail::PathWithSuffix(relativePath, ".keiremeta");
+        if (m_Impl->SourceFiles->Exists(relativePath) || m_Impl->SourceFiles->Exists(metadataRelative))
             throw std::runtime_error("Asset creation destination already exists.");
         const auto extension = LowerExtension(destination);
         if (std::ranges::find(importer.Extensions, extension) == importer.Extensions.end())
@@ -60,7 +60,8 @@ namespace Keire
         validationRecord.ParentSource = parentSource;
         const auto validationMetadata = Detail::PathWithSuffix(metadata, ".validate.tmp");
         validationRecord.MetadataPath = validationMetadata;
-        WriteMetadata(validationMetadata, id, importer.Type, importer.Name, importer.Version, settings, parentSource);
+        WriteMetadata(*m_Impl->SourceFiles, validationMetadata.lexically_relative(m_Impl->SourceRoot), id,
+                      importer.Type, importer.Name, importer.Version, settings, parentSource);
         AssetImportOutput validated;
         try
         {
@@ -68,38 +69,53 @@ namespace Keire
         }
         catch (...)
         {
-            std::error_code ignored;
-            std::filesystem::remove(validationMetadata, ignored);
+            try
+            {
+                m_Impl->SourceFiles->Remove(validationMetadata.lexically_relative(m_Impl->SourceRoot));
+            }
+            catch (...)
+            {
+            }
             throw;
         }
-        std::error_code ignored;
-        std::filesystem::remove(validationMetadata, ignored);
-        std::filesystem::create_directories(destination.parent_path());
+        m_Impl->SourceFiles->Remove(validationMetadata.lexically_relative(m_Impl->SourceRoot));
         try
         {
-            Detail::WriteFileAtomically(destination, sourceBytes);
-            WriteMetadata(metadata, id, importer.Type, importer.Name, importer.Version, settings, parentSource);
-            UpdateMetadataImportOutput(metadata, validated.PrimaryType.value_or(importer.Type), validated.SubAssets);
+            m_Impl->SourceFiles->WriteFileAtomically(relativeDestination, sourceBytes);
+            WriteMetadata(*m_Impl->SourceFiles, metadata.lexically_relative(m_Impl->SourceRoot), id, importer.Type,
+                          importer.Name, importer.Version, settings, parentSource);
+            UpdateMetadataImportOutput(*m_Impl->SourceFiles, metadata.lexically_relative(m_Impl->SourceRoot),
+                                       validated.PrimaryType.value_or(importer.Type), validated.SubAssets);
         }
         catch (...)
         {
-            std::error_code cleanupError;
-            std::filesystem::remove(destination, cleanupError);
-            std::filesystem::remove(metadata, cleanupError);
+            try
+            {
+                m_Impl->SourceFiles->Remove(relativeDestination);
+                m_Impl->SourceFiles->Remove(metadataRelative);
+            }
+            catch (...)
+            {
+            }
             throw;
         }
         AssetSourceRecord record;
         try
         {
-            record = ReadMetadata(m_Impl->SourceRoot, destination, m_Impl->Specification.MaximumSourceBytes, true,
-                                  &registered->second);
+            record = ReadMetadata(*m_Impl->SourceFiles, relativeDestination, m_Impl->Specification.MaximumSourceBytes,
+                                  true, &registered->second);
             m_Impl->PublishRecord(record, m_Impl->ReadSignature(destination, metadata));
         }
         catch (...)
         {
-            std::error_code cleanupError;
-            std::filesystem::remove(destination, cleanupError);
-            std::filesystem::remove(metadata, cleanupError);
+            try
+            {
+                m_Impl->SourceFiles->Remove(relativeDestination);
+                m_Impl->SourceFiles->Remove(metadataRelative);
+            }
+            catch (...)
+            {
+            }
             throw;
         }
         m_Impl->StoreValidatedImport(record, std::move(validated));
@@ -120,18 +136,21 @@ namespace Keire
             throw std::runtime_error("Asset source replacement requires the source asset's registered importer.");
 
         const auto destination = ConfinedPath(m_Impl->SourceRoot, existing->RelativePath);
-        const auto metadata = Detail::PathWithSuffix(destination, ".keiremeta");
-        const auto originalSource = ReadSource(destination, m_Impl->Specification.MaximumSourceBytes);
-        const auto originalMetadata = ReadSource(metadata, 16ULL * 1024ULL * 1024U);
+        const auto metadata = ConfinedMetadataPath(m_Impl->SourceRoot, existing->RelativePath);
+        const auto originalSource =
+            m_Impl->SourceFiles->Read(existing->RelativePath, m_Impl->Specification.MaximumSourceBytes);
+        const auto metadataRelative = Detail::PathWithSuffix(existing->RelativePath, ".keiremeta");
+        const auto originalMetadata = m_Impl->SourceFiles->Read(metadataRelative, 16ULL * 1024ULL * 1024U);
         auto originalImport = m_Impl->Import(*existing);
         auto validated = m_Impl->ImportSource(*existing, sourceBytes);
 
         try
         {
-            Detail::WriteFileAtomically(destination, sourceBytes);
-            UpdateMetadataImportOutput(metadata, validated.PrimaryType.value_or(existing->Type), validated.SubAssets);
-            auto replacement = ReadMetadata(m_Impl->SourceRoot, destination, m_Impl->Specification.MaximumSourceBytes,
-                                            true, &importer->second);
+            m_Impl->SourceFiles->WriteFileAtomically(existing->RelativePath, sourceBytes);
+            UpdateMetadataImportOutput(*m_Impl->SourceFiles, metadata.lexically_relative(m_Impl->SourceRoot),
+                                       validated.PrimaryType.value_or(existing->Type), validated.SubAssets);
+            auto replacement = ReadMetadata(*m_Impl->SourceFiles, existing->RelativePath,
+                                            m_Impl->Specification.MaximumSourceBytes, true, &importer->second);
             if (replacement.Id != id)
                 throw std::runtime_error("Asset source replacement changed the stable asset identity.");
             m_Impl->PublishRecord(replacement, m_Impl->ReadSignature(destination, metadata));
@@ -142,10 +161,10 @@ namespace Keire
             const auto failure = std::current_exception();
             try
             {
-                Detail::WriteFileAtomically(destination, originalSource);
-                Detail::WriteFileAtomically(metadata, originalMetadata);
-                auto restored = ReadMetadata(m_Impl->SourceRoot, destination, m_Impl->Specification.MaximumSourceBytes,
-                                             true, &importer->second);
+                m_Impl->SourceFiles->WriteFileAtomically(existing->RelativePath, originalSource);
+                m_Impl->SourceFiles->WriteFileAtomically(metadataRelative, originalMetadata);
+                auto restored = ReadMetadata(*m_Impl->SourceFiles, existing->RelativePath,
+                                             m_Impl->Specification.MaximumSourceBytes, true, &importer->second);
                 m_Impl->PublishRecord(restored, m_Impl->ReadSignature(destination, metadata));
                 m_Impl->StoreValidatedImport(restored, std::move(originalImport));
             }
@@ -173,13 +192,15 @@ namespace Keire
         if (settings == existing->ImportSettings)
             return;
         const auto source = ConfinedPath(m_Impl->SourceRoot, existing->RelativePath);
-        const auto metadata = Detail::PathWithSuffix(source, ".keiremeta");
-        const auto originalMetadata = ReadSource(metadata, 16ULL * 1024ULL * 1024U);
+        const auto metadata = ConfinedMetadataPath(m_Impl->SourceRoot, existing->RelativePath);
+        const auto metadataRelative = Detail::PathWithSuffix(existing->RelativePath, ".keiremeta");
+        const auto originalMetadata = m_Impl->SourceFiles->Read(metadataRelative, 16ULL * 1024ULL * 1024U);
         try
         {
-            UpdateMetadataImportSettings(metadata, settings);
-            auto replacement = ReadMetadata(m_Impl->SourceRoot, source, m_Impl->Specification.MaximumSourceBytes, true,
-                                            &importer->second);
+            UpdateMetadataImportSettings(*m_Impl->SourceFiles, metadata.lexically_relative(m_Impl->SourceRoot),
+                                         settings);
+            auto replacement = ReadMetadata(*m_Impl->SourceFiles, existing->RelativePath,
+                                            m_Impl->Specification.MaximumSourceBytes, true, &importer->second);
             if (replacement.Id != id)
                 throw std::runtime_error("Import settings changed the stable asset identity.");
             m_Impl->PublishRecord(replacement, m_Impl->ReadSignature(source, metadata));
@@ -189,7 +210,7 @@ namespace Keire
             const auto failure = std::current_exception();
             try
             {
-                Detail::WriteFileAtomically(metadata, originalMetadata);
+                m_Impl->SourceFiles->WriteFileAtomically(metadataRelative, originalMetadata);
                 m_Impl->PublishRecord(*existing, m_Impl->ReadSignature(source, metadata));
             }
             catch (...)
@@ -210,13 +231,14 @@ namespace Keire
             throw std::runtime_error("Reimport requires the source asset's registered importer.");
 
         const auto source = ConfinedPath(m_Impl->SourceRoot, existing->RelativePath);
-        const auto metadata = Detail::PathWithSuffix(source, ".keiremeta");
-        const auto originalMetadata = ReadSource(metadata, 16ULL * 1024ULL * 1024U);
+        const auto metadata = ConfinedMetadataPath(m_Impl->SourceRoot, existing->RelativePath);
+        const auto metadataRelative = Detail::PathWithSuffix(existing->RelativePath, ".keiremeta");
+        const auto originalMetadata = m_Impl->SourceFiles->Read(metadataRelative, 16ULL * 1024ULL * 1024U);
         try
         {
-            IncrementMetadataImportRevision(metadata);
-            auto replacement = ReadMetadata(m_Impl->SourceRoot, source, m_Impl->Specification.MaximumSourceBytes, true,
-                                            &importer->second);
+            IncrementMetadataImportRevision(*m_Impl->SourceFiles, metadata.lexically_relative(m_Impl->SourceRoot));
+            auto replacement = ReadMetadata(*m_Impl->SourceFiles, existing->RelativePath,
+                                            m_Impl->Specification.MaximumSourceBytes, true, &importer->second);
             if (replacement.Id != id)
                 throw std::runtime_error("Reimport invalidation changed the stable asset identity.");
             m_Impl->PublishRecord(replacement, m_Impl->ReadSignature(source, metadata));
@@ -226,7 +248,7 @@ namespace Keire
             const auto failure = std::current_exception();
             try
             {
-                Detail::WriteFileAtomically(metadata, originalMetadata);
+                m_Impl->SourceFiles->WriteFileAtomically(metadataRelative, originalMetadata);
                 m_Impl->PublishRecord(*existing, m_Impl->ReadSignature(source, metadata));
             }
             catch (...)
@@ -271,6 +293,12 @@ namespace Keire
         std::vector<AssetId> result;
         std::vector<std::filesystem::path> createdPaths;
         std::unordered_set<AssetId> extracted;
+        const auto destinationExists = [this](const std::filesystem::path& relative)
+        {
+            const auto destination = ConfinedPath(m_Impl->SourceRoot, relative);
+            return m_Impl->SourceFiles->Exists(relative) ||
+                   m_Impl->SourceFiles->Exists(Detail::PathWithSuffix(relative, ".keiremeta"));
+        };
         try
         {
             for (const auto& slot : mesh->MaterialSlots())
@@ -291,10 +319,7 @@ namespace Keire
                 if (name.empty() || name == "." || name == "..")
                     name = "Material";
                 auto destination = relativeDirectory / (name + ".keirematerial");
-                for (std::size_t copy = 2;
-                     std::filesystem::exists(m_Impl->SourceRoot / destination) ||
-                     std::filesystem::exists(Detail::PathWithSuffix(m_Impl->SourceRoot / destination, ".keiremeta"));
-                     ++copy)
+                for (std::size_t copy = 2; destinationExists(destination); ++copy)
                     destination = relativeDirectory / (name + " " + std::to_string(copy) + ".keirematerial");
                 const auto definition = MaterialAsset::Decode(generated->Bytes)->Definition();
                 const auto source = MaterialAsset::EncodeSource(definition);
@@ -306,9 +331,15 @@ namespace Keire
         {
             for (const auto& path : createdPaths)
             {
-                std::error_code ignored;
-                std::filesystem::remove(m_Impl->SourceRoot / path, ignored);
-                std::filesystem::remove(Detail::PathWithSuffix(m_Impl->SourceRoot / path, ".keiremeta"), ignored);
+                try
+                {
+                    (void)ConfinedPath(m_Impl->SourceRoot, path);
+                    m_Impl->SourceFiles->Remove(path);
+                    m_Impl->SourceFiles->Remove(Detail::PathWithSuffix(path, ".keiremeta"));
+                }
+                catch (...)
+                {
+                }
             }
             (void)RefreshUnlocked();
             throw;
@@ -341,24 +372,24 @@ namespace Keire
         const auto record = Find(id);
         if (!record)
             throw std::invalid_argument("Cannot move an unknown asset ID.");
-        const auto source = m_Impl->SourceRoot / record->RelativePath;
+        const auto source = ConfinedPath(m_Impl->SourceRoot, record->RelativePath);
         const auto destination = ConfinedPath(m_Impl->SourceRoot, relativeDestination);
         if (source == destination)
             return;
-        const auto sourceMetadata = record->MetadataPath;
-        const auto destinationMetadata = Detail::PathWithSuffix(destination, ".keiremeta");
-        if (std::filesystem::exists(destination) || std::filesystem::exists(destinationMetadata))
+        const auto sourceMetadata = ConfinedMetadataPath(m_Impl->SourceRoot, record->RelativePath);
+        const auto destinationMetadata = ConfinedMetadataPath(m_Impl->SourceRoot, relativeDestination);
+        if (m_Impl->SourceFiles->Exists(relativeDestination) ||
+            m_Impl->SourceFiles->Exists(Detail::PathWithSuffix(relativeDestination, ".keiremeta")))
             throw std::runtime_error("Asset move destination already exists.");
-        std::filesystem::create_directories(destination.parent_path());
-        Detail::RenamePathWithRetry(source, destination);
+        m_Impl->SourceFiles->Rename(record->RelativePath, relativeDestination);
         try
         {
-            Detail::RenamePathWithRetry(sourceMetadata, destinationMetadata);
+            m_Impl->SourceFiles->Rename(Detail::PathWithSuffix(record->RelativePath, ".keiremeta"),
+                                        Detail::PathWithSuffix(relativeDestination, ".keiremeta"));
         }
         catch (...)
         {
-            std::error_code ignored;
-            (void)Detail::TryRenamePathWithRetry(destination, source, ignored);
+            m_Impl->SourceFiles->Rename(relativeDestination, record->RelativePath);
             throw;
         }
         try
@@ -370,9 +401,9 @@ namespace Keire
         }
         catch (...)
         {
-            std::error_code ignored;
-            (void)Detail::TryRenamePathWithRetry(destinationMetadata, sourceMetadata, ignored);
-            (void)Detail::TryRenamePathWithRetry(destination, source, ignored);
+            m_Impl->SourceFiles->Rename(Detail::PathWithSuffix(relativeDestination, ".keiremeta"),
+                                        Detail::PathWithSuffix(record->RelativePath, ".keiremeta"));
+            m_Impl->SourceFiles->Rename(relativeDestination, record->RelativePath);
             throw;
         }
     }
@@ -383,24 +414,30 @@ namespace Keire
         const auto record = Find(id);
         if (!record)
             throw std::invalid_argument("Cannot duplicate an unknown asset ID.");
+        const auto source = ConfinedPath(m_Impl->SourceRoot, record->RelativePath);
         const auto target = ConfinedPath(m_Impl->SourceRoot, destination);
-        const auto metadata = Detail::PathWithSuffix(target, ".keiremeta");
-        if (std::filesystem::exists(target) || std::filesystem::exists(metadata))
+        const auto metadata = ConfinedMetadataPath(m_Impl->SourceRoot, destination);
+        if (m_Impl->SourceFiles->Exists(destination) ||
+            m_Impl->SourceFiles->Exists(Detail::PathWithSuffix(destination, ".keiremeta")))
             throw std::runtime_error("Asset duplicate destination already exists.");
-        std::filesystem::create_directories(target.parent_path());
-        std::filesystem::copy_file(m_Impl->SourceRoot / record->RelativePath, target);
+        m_Impl->SourceFiles->Copy(record->RelativePath, destination);
         const auto newId = AssetId::Generate();
         try
         {
             const auto duplicateParent =
                 record->RelativePath.parent_path() == destination.parent_path() ? record->ParentSource : AssetId{};
-            WriteMetadata(metadata, newId, record->Type, record->Importer, record->ImporterVersion,
-                          record->ImportSettings, duplicateParent);
+            WriteMetadata(*m_Impl->SourceFiles, metadata.lexically_relative(m_Impl->SourceRoot), newId, record->Type,
+                          record->Importer, record->ImporterVersion, record->ImportSettings, duplicateParent);
         }
         catch (...)
         {
-            std::error_code ignored;
-            std::filesystem::remove(target, ignored);
+            try
+            {
+                m_Impl->SourceFiles->Remove(destination);
+            }
+            catch (...)
+            {
+            }
             throw;
         }
         (void)RefreshUnlocked();
@@ -419,7 +456,7 @@ namespace Keire
             throw std::invalid_argument("Asset folder move requires a regular source directory.");
         if (IsSameOrWithin(source, destination))
             throw std::invalid_argument("An asset folder cannot be moved into itself.");
-        if (std::filesystem::exists(destination))
+        if (m_Impl->SourceFiles->Exists(relativeDestination))
             throw std::runtime_error("Asset folder move destination already exists.");
         const auto sourceRelative = std::filesystem::relative(source, m_Impl->SourceRoot).lexically_normal();
         const auto destinationRelative = std::filesystem::relative(destination, m_Impl->SourceRoot).lexically_normal();
@@ -427,8 +464,7 @@ namespace Keire
         for (const auto& record : Records())
             if (IsSameOrWithin(sourceRelative, record.RelativePath))
                 affected.push_back(record);
-        std::filesystem::create_directories(destination.parent_path());
-        Detail::RenamePathWithRetry(source, destination);
+        m_Impl->SourceFiles->Rename(sourceRelative, destinationRelative);
         try
         {
             for (const auto& record : affected)
@@ -436,8 +472,8 @@ namespace Keire
                 auto moved = record;
                 moved.RelativePath =
                     (destinationRelative / record.RelativePath.lexically_relative(sourceRelative)).lexically_normal();
-                const auto movedSource = m_Impl->SourceRoot / moved.RelativePath;
-                const auto movedMetadata = Detail::PathWithSuffix(movedSource, ".keiremeta");
+                const auto movedSource = ConfinedPath(m_Impl->SourceRoot, moved.RelativePath);
+                const auto movedMetadata = ConfinedMetadataPath(m_Impl->SourceRoot, moved.RelativePath);
                 moved.MetadataPath = movedMetadata;
                 m_Impl->PublishRecord(std::move(moved), m_Impl->ReadSignature(movedSource, movedMetadata));
             }
@@ -445,13 +481,16 @@ namespace Keire
         catch (...)
         {
             const auto failure = std::current_exception();
-            std::error_code ignored;
-            (void)Detail::TryRenamePathWithRetry(destination, source, ignored);
+            m_Impl->SourceFiles->Rename(destinationRelative, sourceRelative);
             try
             {
                 for (const auto& record : affected)
+                {
+                    const auto restoredSource = ConfinedPath(m_Impl->SourceRoot, record.RelativePath);
                     m_Impl->PublishRecord(
-                        record, m_Impl->ReadSignature(m_Impl->SourceRoot / record.RelativePath, record.MetadataPath));
+                        record, m_Impl->ReadSignature(restoredSource,
+                                                      ConfinedMetadataPath(m_Impl->SourceRoot, record.RelativePath)));
+                }
             }
             catch (...)
             {
@@ -470,20 +509,24 @@ namespace Keire
             throw std::invalid_argument("Asset folder duplication requires a regular source directory.");
         if (IsSameOrWithin(source, destination))
             throw std::invalid_argument("An asset folder cannot be duplicated into itself.");
-        if (std::filesystem::exists(destination))
+        if (m_Impl->SourceFiles->Exists(relativeDestination))
             throw std::runtime_error("Asset folder duplicate destination already exists.");
         try
         {
-            std::filesystem::create_directories(destination.parent_path());
-            std::filesystem::copy(source, destination, std::filesystem::copy_options::recursive);
             std::error_code error;
-            for (std::filesystem::recursive_directory_iterator iterator(destination, error), end;
-                 !error && iterator != end; iterator.increment(error))
+            m_Impl->SourceFiles->CreateDirectories(relativeDestination);
+            for (std::filesystem::recursive_directory_iterator iterator(source, error), end; !error && iterator != end;
+                 iterator.increment(error))
             {
                 if (iterator->is_symlink())
                     throw std::runtime_error("Asset folders containing symbolic links cannot be duplicated.");
-                if (iterator->is_regular_file() && iterator->path().extension() == ".keiremeta")
-                    std::filesystem::remove(iterator->path());
+                const auto relative = iterator->path().lexically_relative(source);
+                const auto sourceEntry = relativeSource / relative;
+                const auto destinationEntry = relativeDestination / relative;
+                if (iterator->is_directory())
+                    m_Impl->SourceFiles->CreateDirectories(destinationEntry);
+                else if (iterator->is_regular_file() && iterator->path().extension() != ".keiremeta")
+                    m_Impl->SourceFiles->Copy(sourceEntry, destinationEntry);
             }
             if (error)
                 throw std::runtime_error("Could not enumerate the duplicated asset folder.");
@@ -491,8 +534,14 @@ namespace Keire
         }
         catch (...)
         {
-            std::error_code ignored;
-            std::filesystem::remove_all(destination, ignored);
+            try
+            {
+                const auto projectRelative = destination.lexically_relative(m_Impl->Specification.ProjectRoot);
+                m_Impl->RemoveProjectTree(projectRelative);
+            }
+            catch (...)
+            {
+            }
             throw;
         }
         std::vector<AssetId> result;
@@ -509,25 +558,44 @@ namespace Keire
         const auto record = Find(id);
         if (!record)
             throw std::invalid_argument("Cannot trash an unknown asset ID.");
+        const auto source = ConfinedPath(m_Impl->SourceRoot, record->RelativePath);
+        const auto sourceMetadata = ConfinedMetadataPath(m_Impl->SourceRoot, record->RelativePath);
         const auto transaction = AssetId::Generate();
-        const auto root = m_Impl->Specification.ProjectRoot / "Library" / "Trash" / transaction.ToString();
-        std::filesystem::create_directories(root);
-        const auto source = m_Impl->SourceRoot / record->RelativePath;
+        const auto rootRelative = std::filesystem::path("Library/Trash") / transaction.ToString();
+        const auto root = m_Impl->Specification.ProjectRoot / rootRelative;
+        m_Impl->ProjectFiles->CreateDirectories(rootRelative);
         const auto destination = root / source.filename();
-        const auto destinationMetadata = root / record->MetadataPath.filename();
-        Detail::RenamePathWithRetry(source, destination);
+        const auto destinationMetadata = root / sourceMetadata.filename();
+        m_Impl->SourceFiles->RenameTo(record->RelativePath, *m_Impl->ProjectFiles,
+                                      rootRelative / record->RelativePath.filename());
         try
         {
-            Detail::RenamePathWithRetry(record->MetadataPath, destinationMetadata);
+            m_Impl->SourceFiles->RenameTo(
+                Detail::PathWithSuffix(record->RelativePath, ".keiremeta"), *m_Impl->ProjectFiles,
+                rootRelative / Detail::PathWithSuffix(record->RelativePath.filename(), ".keiremeta"));
             const std::array assets{id};
-            WriteTrashManifest(root, transaction, record->RelativePath, assets, false);
+            WriteTrashManifest(*m_Impl->ProjectFiles, rootRelative, transaction, record->RelativePath, assets, false);
         }
         catch (...)
         {
-            std::error_code ignored;
-            (void)Detail::TryRenamePathWithRetry(destinationMetadata, record->MetadataPath, ignored);
-            (void)Detail::TryRenamePathWithRetry(destination, source, ignored);
-            std::filesystem::remove_all(root, ignored);
+            try
+            {
+                m_Impl->ProjectFiles->RenameTo(
+                    rootRelative / Detail::PathWithSuffix(record->RelativePath.filename(), ".keiremeta"),
+                    *m_Impl->SourceFiles, Detail::PathWithSuffix(record->RelativePath, ".keiremeta"));
+            }
+            catch (...)
+            {
+            }
+            m_Impl->ProjectFiles->RenameTo(rootRelative / record->RelativePath.filename(), *m_Impl->SourceFiles,
+                                           record->RelativePath);
+            try
+            {
+                m_Impl->RemoveProjectTree(rootRelative);
+            }
+            catch (...)
+            {
+            }
             throw;
         }
         const std::array assets{id};
@@ -547,19 +615,25 @@ namespace Keire
             if (IsSameOrWithin(normalized, record.RelativePath))
                 assets.push_back(record.Id);
         const auto transaction = AssetId::Generate();
-        const auto root = m_Impl->Specification.ProjectRoot / "Library" / "Trash" / transaction.ToString();
-        std::filesystem::create_directories(root);
+        const auto rootRelative = std::filesystem::path("Library/Trash") / transaction.ToString();
+        const auto root = m_Impl->Specification.ProjectRoot / rootRelative;
+        m_Impl->ProjectFiles->CreateDirectories(rootRelative);
         const auto destination = root / source.filename();
-        Detail::RenamePathWithRetry(source, destination);
+        m_Impl->SourceFiles->RenameTo(normalized, *m_Impl->ProjectFiles, rootRelative / normalized.filename());
         try
         {
-            WriteTrashManifest(root, transaction, normalized, assets, true);
+            WriteTrashManifest(*m_Impl->ProjectFiles, rootRelative, transaction, normalized, assets, true);
         }
         catch (...)
         {
-            std::error_code ignored;
-            (void)Detail::TryRenamePathWithRetry(destination, source, ignored);
-            std::filesystem::remove_all(root, ignored);
+            m_Impl->ProjectFiles->RenameTo(rootRelative / normalized.filename(), *m_Impl->SourceFiles, normalized);
+            try
+            {
+                m_Impl->RemoveProjectTree(rootRelative);
+            }
+            catch (...)
+            {
+            }
             throw;
         }
         m_Impl->RemoveRecords(assets);
@@ -576,7 +650,8 @@ namespace Keire
         {
             if (!iterator->is_directory())
                 continue;
-            const auto parsed = ReadTrashManifest(iterator->path());
+            const auto relativeRoot = iterator->path().lexically_relative(m_Impl->Specification.ProjectRoot);
+            const auto parsed = ReadTrashManifest(*m_Impl->ProjectFiles, relativeRoot);
             result.push_back(
                 {AssetTrashId(parsed.Id), parsed.OriginalPath, iterator->path(), parsed.Assets, parsed.Folder});
         }
@@ -591,46 +666,44 @@ namespace Keire
         std::scoped_lock operation(*m_Impl->OperationMutex);
         if (!id)
             throw std::invalid_argument("Cannot restore an empty asset trash identity.");
-        const auto root = m_Impl->Specification.ProjectRoot / "Library" / "Trash" / id.ToString();
-        const auto record = ReadTrashManifest(root);
+        const auto rootRelative = std::filesystem::path("Library/Trash") / id.ToString();
+        const auto root = m_Impl->Specification.ProjectRoot / rootRelative;
+        const auto record = ReadTrashManifest(*m_Impl->ProjectFiles, rootRelative);
         if (record.Id.ToString() != id.ToString())
             throw std::runtime_error("Asset trash identity does not match its manifest.");
         const auto destination = ConfinedPath(m_Impl->SourceRoot, record.OriginalPath);
         const auto source = root / record.OriginalPath.filename();
-        if (std::filesystem::exists(destination))
+        if (m_Impl->SourceFiles->Exists(record.OriginalPath))
         {
-            std::error_code error;
-            std::filesystem::remove_all(root, error);
-            if (error)
-                throw std::runtime_error("Could not discard a superseded asset trash entry: " + error.message());
+            m_Impl->RemoveProjectTree(rootRelative);
             return;
         }
-        std::filesystem::create_directories(destination.parent_path());
         std::filesystem::path sourceMetadata;
         std::filesystem::path destinationMetadata;
         if (record.Folder)
-            Detail::RenamePathWithRetry(source, destination);
+            m_Impl->ProjectFiles->RenameTo(rootRelative / record.OriginalPath.filename(), *m_Impl->SourceFiles,
+                                           record.OriginalPath);
         else
         {
             sourceMetadata = Detail::PathWithSuffix(root / record.OriginalPath.filename(), ".keiremeta");
-            destinationMetadata = Detail::PathWithSuffix(destination, ".keiremeta");
-            if (std::filesystem::exists(destinationMetadata))
+            destinationMetadata = ConfinedMetadataPath(m_Impl->SourceRoot, record.OriginalPath);
+            if (m_Impl->SourceFiles->Exists(Detail::PathWithSuffix(record.OriginalPath, ".keiremeta")))
             {
-                std::error_code error;
-                std::filesystem::remove_all(root, error);
-                if (error)
-                    throw std::runtime_error("Could not discard a superseded asset trash entry: " + error.message());
+                m_Impl->RemoveProjectTree(rootRelative);
                 return;
             }
-            Detail::RenamePathWithRetry(source, destination);
+            m_Impl->ProjectFiles->RenameTo(rootRelative / record.OriginalPath.filename(), *m_Impl->SourceFiles,
+                                           record.OriginalPath);
             try
             {
-                Detail::RenamePathWithRetry(sourceMetadata, destinationMetadata);
+                m_Impl->ProjectFiles->RenameTo(
+                    rootRelative / Detail::PathWithSuffix(record.OriginalPath.filename(), ".keiremeta"),
+                    *m_Impl->SourceFiles, Detail::PathWithSuffix(record.OriginalPath, ".keiremeta"));
             }
             catch (...)
             {
-                std::error_code ignored;
-                (void)Detail::TryRenamePathWithRetry(destination, source, ignored);
+                m_Impl->SourceFiles->RenameTo(record.OriginalPath, *m_Impl->ProjectFiles,
+                                              rootRelative / record.OriginalPath.filename());
                 throw;
             }
         }
@@ -640,14 +713,15 @@ namespace Keire
         }
         catch (...)
         {
-            std::error_code ignored;
             if (!record.Folder)
-                (void)Detail::TryRenamePathWithRetry(destinationMetadata, sourceMetadata, ignored);
-            (void)Detail::TryRenamePathWithRetry(destination, source, ignored);
+                m_Impl->SourceFiles->RenameTo(
+                    Detail::PathWithSuffix(record.OriginalPath, ".keiremeta"), *m_Impl->ProjectFiles,
+                    rootRelative / Detail::PathWithSuffix(record.OriginalPath.filename(), ".keiremeta"));
+            m_Impl->SourceFiles->RenameTo(record.OriginalPath, *m_Impl->ProjectFiles,
+                                          rootRelative / record.OriginalPath.filename());
             throw;
         }
-        std::error_code ignored;
-        std::filesystem::remove_all(root, ignored);
+        m_Impl->RemoveProjectTree(rootRelative);
     }
 
     void AssetDatabase::PermanentlyDeleteTrash(const AssetTrashId id)
@@ -659,11 +733,9 @@ namespace Keire
         const auto root = (trashRoot / id.ToString()).lexically_normal();
         if (root.parent_path() != trashRoot)
             throw std::logic_error("Asset trash deletion escaped the configured trash directory.");
-        (void)ReadTrashManifest(root);
-        std::error_code error;
-        std::filesystem::remove_all(root, error);
-        if (error)
-            throw std::runtime_error("Could not permanently remove the asset trash entry: " + error.message());
+        const auto relativeRoot = root.lexically_relative(m_Impl->Specification.ProjectRoot);
+        (void)ReadTrashManifest(*m_Impl->ProjectFiles, relativeRoot);
+        m_Impl->RemoveProjectTree(relativeRoot);
     }
 
     std::filesystem::path AssetDatabase::MoveToTrash(const AssetId id) { return TrashAsset(id).TrashPath; }

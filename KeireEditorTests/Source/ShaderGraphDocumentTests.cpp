@@ -86,10 +86,10 @@ TEST_CASE("Shader Graph document batches multi-node movement and deletion into a
     auto undoService = Keire::CreateRef<Keire::UndoService>();
     auto undo = undoService->CreateContext({.Name = "Shader Graph batch edits"});
     document.Create(Keire::AssetId::Generate(), Keire::CreateDefaultShaderGraph(), undo);
-    auto first = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Constant,
-                                              Keire::ShaderGraphValueType::Scalar);
-    auto second = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Constant,
-                                               Keire::ShaderGraphValueType::Scalar);
+    auto first =
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Constant, Keire::ShaderGraphValueType::Scalar);
+    auto second =
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Constant, Keire::ShaderGraphValueType::Scalar);
     first.EditorPosition = {40.0F, 80.0F};
     second.EditorPosition = {180.0F, 120.0F};
     REQUIRE(document.AddNode(first));
@@ -112,9 +112,17 @@ TEST_CASE("Shader Graph document batches multi-node movement and deletion into a
     REQUIRE(document.Edit("Create selection comment",
                           [&](auto& definition)
                           {
-                              definition.Authoring.Comments.push_back(
-                                  {Keire::AssetId::Generate(), "Values", {}, {}, {360.0F, 240.0F}, {}, 18.0F,
-                                   Keire::GraphCommentMoveMode::Group, {}, {first.Id, second.Id}, false});
+                              definition.Authoring.Comments.push_back({Keire::AssetId::Generate(),
+                                                                       "Values",
+                                                                       {},
+                                                                       {},
+                                                                       {360.0F, 240.0F},
+                                                                       {},
+                                                                       18.0F,
+                                                                       Keire::GraphCommentMoveMode::Group,
+                                                                       {},
+                                                                       {first.Id, second.Id},
+                                                                       false});
                           }));
     const std::array selected{first.Id, second.Id};
     REQUIRE(document.RemoveNodes(selected));

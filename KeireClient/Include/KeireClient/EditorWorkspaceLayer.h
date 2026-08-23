@@ -8,6 +8,7 @@
 #include "KeireClient/Editor/AudioMixerPanel.h"
 #include "KeireClient/Editor/EditorPanels.h"
 #include "KeireClient/Editor/LightingPanel.h"
+#include "KeireClient/Editor/ManagedDataTypeCache.h"
 #include "KeireClient/Editor/MaterialGraphPanel.h"
 #include "KeireClient/Editor/RiggingStudioPanel.h"
 #include "KeireClient/Editor/ShaderGraphPanel.h"
@@ -279,6 +280,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] Keire::AssetId InspectorSelectedAsset() const noexcept override;
     [[nodiscard]] std::string_view InspectorAssetStatus() const noexcept override;
     [[nodiscard]] std::vector<Keire::ManagedAssetTypeDescriptor> InspectorManagedAssetTypes() const override;
+    [[nodiscard]] std::optional<Keire::ManagedTypeId>
+    InspectorManagedDataType(Keire::AssetId asset) const noexcept override;
     [[nodiscard]] Keire::Ref<Keire::UndoContext> InspectorManagedDataHistory() const noexcept override;
     [[nodiscard]] bool InspectorPlayModeActive() const noexcept override;
     void SetInspectorSelectedAsset(Keire::AssetId asset) noexcept override;
@@ -735,6 +738,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::string m_VfxEffectPreviewDiagnostic;
     Keire::Ref<Keire::AssetDatabase> m_AssetDatabase;
     std::vector<Keire::AssetSourceRecord> m_AssetRecords;
+    KeireEditor::ManagedDataTypeCache m_ManagedDataTypeCache;
     std::uint64_t m_AssetRecordRevision = 0;
     bool m_ManagedIdeWorkspaceOpened = false;
     Keire::AssetId m_SelectedAsset;

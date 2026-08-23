@@ -15,8 +15,11 @@ namespace KeireEditor
         std::string_view Label;
         std::string_view EmptyLabel = "None";
         std::optional<Keire::AssetTypeId> ExpectedType;
+        std::optional<Keire::ManagedTypeId> ExpectedManagedType;
+        std::span<const Keire::ManagedAssetTypeDescriptor> ManagedTypes;
         std::function<bool(const Keire::AssetSourceRecord&)> Filter;
         std::function<std::optional<Keire::AssetTypeId>(Keire::AssetId)> ResolveType;
+        std::function<std::optional<Keire::ManagedTypeId>(Keire::AssetId)> ResolveManagedType;
         std::function<void(Keire::AssetId)> Reveal;
         bool AllowNone = true;
     };

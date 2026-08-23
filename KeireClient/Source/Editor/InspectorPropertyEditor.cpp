@@ -11,6 +11,7 @@
 #include <ranges>
 #include <sstream>
 #include <string>
+#include <utility>
 
 namespace KeireEditor
 {
@@ -36,11 +37,13 @@ namespace KeireEditor
         }
     } // namespace
 
-    InspectorPropertyEditor::InspectorPropertyEditor(Keire::UiFrame& ui,
-                                                     const std::span<const Keire::AssetSourceRecord> assets,
-                                                     const Keire::Ref<Keire::AssetSystem>& assetSystem,
-                                                     const Keire::Ref<Keire::Scene>& scene, AssetPicker& assetPicker)
-        : m_Ui(ui), m_Assets(assets), m_AssetSystem(assetSystem), m_Scene(scene), m_AssetPicker(assetPicker)
+    InspectorPropertyEditor::InspectorPropertyEditor(
+        Keire::UiFrame& ui, const std::span<const Keire::AssetSourceRecord> assets,
+        const Keire::Ref<Keire::AssetSystem>& assetSystem, const Keire::Ref<Keire::Scene>& scene,
+        AssetPicker& assetPicker, const std::span<const Keire::ManagedAssetTypeDescriptor> managedAssetTypes,
+        std::function<std::optional<Keire::ManagedTypeId>(Keire::AssetId)> resolveManagedType)
+        : m_Ui(ui), m_Assets(assets), m_AssetSystem(assetSystem), m_Scene(scene), m_AssetPicker(assetPicker),
+          m_ManagedAssetTypes(managedAssetTypes), m_ResolveManagedType(std::move(resolveManagedType))
     {
     }
 
@@ -152,11 +155,25 @@ namespace KeireEditor
     }
 
     bool InspectorPropertyEditor::EditAsset(const std::string_view label, Keire::AssetId& value,
-                                            const std::optional<Keire::AssetTypeId> expectedType)
+                                            const std::optional<Keire::AssetTypeId> expectedType,
+                                            const std::string_view expectedManagedType)
     {
         AssetPickerOptions options;
         options.Label = label;
         options.ExpectedType = expectedType;
+        if (!expectedManagedType.empty())
+        {
+            const auto descriptor = std::ranges::find(m_ManagedAssetTypes, expectedManagedType,
+                                                      &Keire::ManagedAssetTypeDescriptor::FullName);
+            if (descriptor == m_ManagedAssetTypes.end())
+                options.Filter = [](const Keire::AssetSourceRecord&) { return false; };
+            else
+            {
+                options.ExpectedManagedType = descriptor->StableTypeId;
+                options.ManagedTypes = m_ManagedAssetTypes;
+                options.ResolveManagedType = m_ResolveManagedType;
+            }
+        }
         if (m_AssetSystem)
             options.ResolveType = [assets = m_AssetSystem](const Keire::AssetId id) { return assets->TryGetType(id); };
         const bool changed = m_AssetPicker.Draw(m_Ui, m_Assets, value, options);

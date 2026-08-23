@@ -5,6 +5,7 @@
 #include "Keire/Core.h"
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -17,9 +18,11 @@ namespace KeireEditor
     class InspectorPropertyEditor final : public IPropertyEditor
     {
       public:
-        InspectorPropertyEditor(Keire::UiFrame& ui, std::span<const Keire::AssetSourceRecord> assets,
-                                const Keire::Ref<Keire::AssetSystem>& assetSystem,
-                                const Keire::Ref<Keire::Scene>& scene, AssetPicker& assetPicker);
+        InspectorPropertyEditor(
+            Keire::UiFrame& ui, std::span<const Keire::AssetSourceRecord> assets,
+            const Keire::Ref<Keire::AssetSystem>& assetSystem, const Keire::Ref<Keire::Scene>& scene,
+            AssetPicker& assetPicker, std::span<const Keire::ManagedAssetTypeDescriptor> managedAssetTypes = {},
+            std::function<std::optional<Keire::ManagedTypeId>(Keire::AssetId)> resolveManagedType = {});
 
         [[nodiscard]] bool EditBoundary() const noexcept;
         bool EditBoolean(std::string_view label, bool& value) override;
@@ -40,8 +43,8 @@ namespace KeireEditor
         bool EditColor(std::string_view label, Keire::Color& value) override;
         bool EditCurve(std::string_view label, Keire::Curve1D& value) override;
         bool EditGradient(std::string_view label, Keire::ColorGradient& value) override;
-        bool EditAsset(std::string_view label, Keire::AssetId& value,
-                       std::optional<Keire::AssetTypeId> expectedType) override;
+        bool EditAsset(std::string_view label, Keire::AssetId& value, std::optional<Keire::AssetTypeId> expectedType,
+                       std::string_view expectedManagedType = {}) override;
         bool EditTextureAsset(std::string_view label, Keire::AssetId& value,
                               Keire::ShaderTextureSemantic semantic) override;
         bool EditEntity(std::string_view label, Keire::EntityId& value) override;
@@ -58,6 +61,8 @@ namespace KeireEditor
         Keire::Ref<Keire::AssetSystem> m_AssetSystem;
         Keire::Ref<Keire::Scene> m_Scene;
         AssetPicker& m_AssetPicker;
+        std::span<const Keire::ManagedAssetTypeDescriptor> m_ManagedAssetTypes;
+        std::function<std::optional<Keire::ManagedTypeId>(Keire::AssetId)> m_ResolveManagedType;
         std::optional<std::vector<Keire::Entity>> m_EntityCache;
         bool m_EditBoundary = false;
     };

@@ -6,11 +6,13 @@ project(ProjectConfig.PROJECT_NAMESPACE .. "RenderTests")
 
     files
     {
+        "Include/**.h",
         "Source/**.cpp"
     }
 
     includedirs
     {
+        "Include",
         "../" .. ProjectConfig.CORE_DIRECTORY .. "/Include"
     }
 

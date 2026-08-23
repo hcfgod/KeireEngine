@@ -5,14 +5,159 @@
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <cstring>
+#include <exception>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
+
+#if defined(_WIN32)
+#include <Windows.h>
+#include <winioctl.h>
+#endif
+
+namespace
+{
+    class TestDirectoryLink final
+    {
+      public:
+        static std::unique_ptr<TestDirectoryLink> Create(const std::filesystem::path& target,
+                                                         const std::filesystem::path& link)
+        {
+#if defined(_WIN32)
+            std::filesystem::create_directory(link);
+            const auto handle =
+                CreateFileW(link.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                            nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+            if (handle == INVALID_HANDLE_VALUE)
+                throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
+                                        "Cannot open junction directory");
+            const auto substitute = std::wstring(L"\\??\\") + std::filesystem::absolute(target).native();
+            const auto print = std::filesystem::absolute(target).native();
+            constexpr std::size_t maximumPathCharacters = 32U * 1024U;
+            struct MountPointBuffer final
+            {
+                DWORD Tag = IO_REPARSE_TAG_MOUNT_POINT;
+                WORD DataLength = 0;
+                WORD Reserved = 0;
+                WORD SubstituteOffset = 0;
+                WORD SubstituteLength = 0;
+                WORD PrintOffset = 0;
+                WORD PrintLength = 0;
+                std::array<wchar_t, maximumPathCharacters> Path{};
+            } buffer;
+            buffer.SubstituteLength = static_cast<WORD>(substitute.size() * sizeof(wchar_t));
+            buffer.PrintOffset = static_cast<WORD>(buffer.SubstituteLength + sizeof(wchar_t));
+            buffer.PrintLength = static_cast<WORD>(print.size() * sizeof(wchar_t));
+            buffer.DataLength = static_cast<WORD>(8U + buffer.PrintOffset + buffer.PrintLength + sizeof(wchar_t));
+            std::memcpy(buffer.Path.data(), substitute.data(), buffer.SubstituteLength);
+            std::memcpy(reinterpret_cast<std::byte*>(buffer.Path.data()) + buffer.PrintOffset, print.data(),
+                        buffer.PrintLength);
+            DWORD returned = 0;
+            const auto changed =
+                DeviceIoControl(handle, FSCTL_SET_REPARSE_POINT, &buffer, static_cast<DWORD>(buffer.DataLength + 8U),
+                                nullptr, 0, &returned, nullptr);
+            const auto error = changed ? ERROR_SUCCESS : GetLastError();
+            if (!changed)
+            {
+                CloseHandle(handle);
+                std::filesystem::remove(link);
+                throw std::system_error(static_cast<int>(error), std::system_category(), "Cannot create test junction");
+            }
+            return std::unique_ptr<TestDirectoryLink>(new TestDirectoryLink(link, handle));
+#else
+            std::filesystem::create_directory_symlink(target, link);
+            return std::unique_ptr<TestDirectoryLink>(new TestDirectoryLink(link));
+#endif
+        }
+
+        ~TestDirectoryLink() { RemoveNoThrow(); }
+
+        TestDirectoryLink(const TestDirectoryLink&) = delete;
+        TestDirectoryLink& operator=(const TestDirectoryLink&) = delete;
+
+        void Remove()
+        {
+            if (!m_Active)
+                throw std::logic_error("Test directory link was already removed.");
+#if defined(_WIN32)
+            FILE_ATTRIBUTE_TAG_INFO attributes{};
+            if (!GetFileInformationByHandleEx(m_Handle, FileAttributeTagInfo, &attributes, sizeof(attributes)))
+                ThrowAndClose(GetLastError(), "Cannot query test junction reparse tag");
+            if ((attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0 ||
+                attributes.ReparseTag != IO_REPARSE_TAG_MOUNT_POINT)
+                ThrowAndClose(ERROR_REPARSE_TAG_MISMATCH, "Retained test handle is not a mount-point junction");
+            struct ReparseHeader final
+            {
+                DWORD Tag = IO_REPARSE_TAG_MOUNT_POINT;
+                WORD DataLength = 0;
+                WORD Reserved = 0;
+            } header;
+            DWORD returned = 0;
+            if (!DeviceIoControl(m_Handle, FSCTL_DELETE_REPARSE_POINT, &header, sizeof(header), nullptr, 0, &returned,
+                                 nullptr))
+                ThrowAndClose(GetLastError(), "Cannot delete test junction reparse point");
+            CloseHandle(m_Handle);
+            m_Handle = INVALID_HANDLE_VALUE;
+            if (!RemoveDirectoryW(m_Link.c_str()))
+                throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
+                                        "Cannot remove test junction directory");
+#else
+            std::filesystem::remove(m_Link);
+#endif
+            m_Active = false;
+        }
+
+      private:
+#if defined(_WIN32)
+        TestDirectoryLink(std::filesystem::path link, const HANDLE handle) : m_Link(std::move(link)), m_Handle(handle)
+        {
+        }
+
+        [[noreturn]] void ThrowAndClose(const DWORD error, const char* message)
+        {
+            CloseHandle(m_Handle);
+            m_Handle = INVALID_HANDLE_VALUE;
+            m_Active = false;
+            throw std::system_error(static_cast<int>(error), std::system_category(), message);
+        }
+#else
+        explicit TestDirectoryLink(std::filesystem::path link) : m_Link(std::move(link)) {}
+#endif
+
+        void RemoveNoThrow() noexcept
+        {
+            if (!m_Active)
+                return;
+            try
+            {
+                Remove();
+            }
+            catch (...)
+            {
+#if defined(_WIN32)
+                if (m_Handle != INVALID_HANDLE_VALUE)
+                    CloseHandle(m_Handle);
+                m_Handle = INVALID_HANDLE_VALUE;
+#endif
+                m_Active = false;
+            }
+        }
+
+        std::filesystem::path m_Link;
+#if defined(_WIN32)
+        HANDLE m_Handle = INVALID_HANDLE_VALUE;
+#endif
+        bool m_Active = true;
+    };
+} // namespace
 
 TEST_CASE("filesystem UTF-8 conversion preserves non-ASCII project paths")
 {
@@ -199,4 +344,218 @@ TEST_CASE("conditional atomic file publication preserves unchanged files")
 
     std::error_code ignored;
     std::filesystem::remove_all(directory, ignored);
+}
+
+TEST_CASE("anchored filesystem operations cannot be redirected by a parent-directory swap")
+{
+    const auto suffix = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    const auto root = std::filesystem::temp_directory_path() / ("KeireAnchoredSwap-" + suffix);
+    const auto outside = std::filesystem::temp_directory_path() / ("KeireAnchoredOutside-" + suffix);
+    std::filesystem::create_directories(root / "parent");
+    std::filesystem::create_directories(outside);
+    Keire::Detail::WriteTextFileAtomically(root / "parent/value.txt", "inside");
+    Keire::Detail::WriteTextFileAtomically(root / "parent/from.txt", "inside rename");
+    Keire::Detail::WriteTextFileAtomically(outside / "value.txt", "outside");
+    Keire::Detail::WriteTextFileAtomically(outside / "from.txt", "outside rename");
+
+    Keire::Detail::AnchoredFileSystem files(root);
+    bool swapped = false;
+    std::unique_ptr<TestDirectoryLink> activeLink;
+    Keire::Detail::SetAnchoredFileSystemOperationHookForTesting(
+        [&](const std::string_view operation, const std::filesystem::path&)
+        {
+            if (swapped || operation == "exists" || operation == "signature")
+                return;
+            swapped = true;
+            std::filesystem::rename(root / "parent", root / "retained");
+            try
+            {
+                activeLink = TestDirectoryLink::Create(outside, root / "parent");
+            }
+            catch (...)
+            {
+                std::filesystem::rename(root / "retained", root / "parent");
+                swapped = false;
+                throw;
+            }
+        });
+
+    try
+    {
+        const auto bytes = files.Read("parent/value.txt", 1024);
+        CHECK(std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size()) == "inside");
+        CHECK(Keire::Detail::ReadTextFile(outside / "value.txt", 1024) == "outside");
+    }
+    catch (const std::system_error& error)
+    {
+        Keire::Detail::SetAnchoredFileSystemOperationHookForTesting({});
+        WARN_MESSAGE(false, "Skipping anchored swap test because directory links are unavailable: ", error.what());
+        if (swapped)
+        {
+            activeLink->Remove();
+            activeLink.reset();
+            std::filesystem::rename(root / "retained", root / "parent");
+        }
+        std::error_code ignored;
+        std::filesystem::remove_all(root, ignored);
+        std::filesystem::remove_all(outside, ignored);
+        return;
+    }
+    Keire::Detail::SetAnchoredFileSystemOperationHookForTesting({});
+    activeLink->Remove();
+    activeLink.reset();
+    std::filesystem::rename(root / "retained", root / "parent");
+
+    const auto verifySwap = [&](const std::function<void()>& operation)
+    {
+        swapped = false;
+        Keire::Detail::SetAnchoredFileSystemOperationHookForTesting(
+            [&](const std::string_view, const std::filesystem::path&)
+            {
+                if (swapped)
+                    return;
+                swapped = true;
+                std::filesystem::rename(root / "parent", root / "retained");
+                try
+                {
+                    activeLink = TestDirectoryLink::Create(outside, root / "parent");
+                }
+                catch (...)
+                {
+                    std::filesystem::rename(root / "retained", root / "parent");
+                    swapped = false;
+                    throw;
+                }
+            });
+        bool completed = false;
+        std::exception_ptr unexpected;
+        try
+        {
+            operation();
+            completed = true;
+        }
+        catch (const std::system_error&)
+        {
+            // Failing closed is valid when a platform refuses a mutation after the visible namespace changes.
+        }
+        catch (...)
+        {
+            unexpected = std::current_exception();
+        }
+        Keire::Detail::SetAnchoredFileSystemOperationHookForTesting({});
+        if (swapped)
+        {
+            activeLink->Remove();
+            activeLink.reset();
+            std::filesystem::rename(root / "retained", root / "parent");
+        }
+        if (unexpected)
+            std::rethrow_exception(unexpected);
+        return completed;
+    };
+
+    const std::string replacement = "replacement";
+    const bool writeCompleted =
+        verifySwap([&] { files.WriteFileAtomically("parent/value.txt", std::as_bytes(std::span(replacement))); });
+    CHECK(Keire::Detail::ReadTextFile(root / "parent/value.txt", 1024) == (writeCompleted ? replacement : "inside"));
+    CHECK(Keire::Detail::ReadTextFile(outside / "value.txt", 1024) == "outside");
+
+    const bool removeCompleted = verifySwap([&] { files.Remove("parent/value.txt"); });
+    CHECK(std::filesystem::exists(root / "parent/value.txt") != removeCompleted);
+    CHECK(std::filesystem::exists(outside / "value.txt"));
+
+    const bool renameCompleted = verifySwap([&] { files.Rename("parent/from.txt", "parent/to.txt"); });
+    CHECK(std::filesystem::exists(root / "parent/to.txt") == renameCompleted);
+    CHECK(std::filesystem::exists(root / "parent/from.txt") != renameCompleted);
+    CHECK(std::filesystem::exists(outside / "from.txt"));
+
+    files.CreateDirectories("delete/child");
+    files.WriteFileAtomically("delete/child/value.txt", std::as_bytes(std::span(replacement)));
+    files.Remove("delete/child/value.txt");
+    files.Remove("delete/child");
+    files.Remove("delete");
+    CHECK_FALSE(files.Exists("delete"));
+    CHECK_FALSE(std::filesystem::exists(root / "delete"));
+
+#if defined(_WIN32)
+    std::filesystem::rename(root / "parent", root / "retained");
+    activeLink = TestDirectoryLink::Create(outside, root / "parent");
+    CHECK_THROWS(files.CreateDirectories("parent/new/deep"));
+    activeLink->Remove();
+    activeLink.reset();
+    std::filesystem::rename(root / "retained", root / "parent");
+    CHECK_FALSE(std::filesystem::exists(root / "parent/new"));
+    CHECK_FALSE(std::filesystem::exists(outside / "new"));
+#else
+    const bool createCompleted = verifySwap([&] { files.CreateDirectories("parent/new/deep"); });
+    CHECK(std::filesystem::is_directory(root / "parent/new/deep") == createCompleted);
+    CHECK_FALSE(std::filesystem::exists(outside / "new"));
+#endif
+
+    std::error_code ignored;
+    std::filesystem::remove_all(root, ignored);
+    std::filesystem::remove_all(outside, ignored);
+}
+
+TEST_CASE("anchored no-replace mutations reject destinations created during the operation")
+{
+    const auto suffix = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    const auto root = std::filesystem::temp_directory_path() / ("KeireAnchoredNoReplace-" + suffix);
+    std::filesystem::create_directories(root);
+    Keire::Detail::WriteTextFileAtomically(root / "rename-source.txt", "rename source");
+    Keire::Detail::WriteTextFileAtomically(root / "copy-source.txt", "copy source");
+    Keire::Detail::AnchoredFileSystem files(root);
+
+    Keire::Detail::SetAnchoredFileSystemOperationHookForTesting(
+        [&](const std::string_view operation, const std::filesystem::path&)
+        {
+            if (operation == "rename" && !std::filesystem::exists(root / "rename-destination.txt"))
+                Keire::Detail::WriteTextFileAtomically(root / "rename-destination.txt", "raced rename");
+        });
+    try
+    {
+        files.Rename("rename-source.txt", "rename-destination.txt", false);
+        FAIL("The raced rename destination was overwritten.");
+    }
+    catch (const std::system_error& error)
+    {
+        CHECK(error.code().default_error_condition() == std::errc::file_exists);
+    }
+    Keire::Detail::SetAnchoredFileSystemOperationHookForTesting({});
+    CHECK(Keire::Detail::ReadTextFile(root / "rename-source.txt", 1024) == "rename source");
+    CHECK(Keire::Detail::ReadTextFile(root / "rename-destination.txt", 1024) == "raced rename");
+
+    Keire::Detail::SetAnchoredFileSystemOperationHookForTesting(
+        [&](const std::string_view operation, const std::filesystem::path&)
+        {
+            if (operation == "write" && !std::filesystem::exists(root / "copy-destination.txt"))
+                Keire::Detail::WriteTextFileAtomically(root / "copy-destination.txt", "raced copy");
+        });
+    try
+    {
+        files.Copy("copy-source.txt", "copy-destination.txt", false);
+        FAIL("The raced copy destination was overwritten.");
+    }
+    catch (const std::system_error& error)
+    {
+        CHECK(error.code().default_error_condition() == std::errc::file_exists);
+    }
+    Keire::Detail::SetAnchoredFileSystemOperationHookForTesting({});
+    CHECK(Keire::Detail::ReadTextFile(root / "copy-source.txt", 1024) == "copy source");
+    CHECK(Keire::Detail::ReadTextFile(root / "copy-destination.txt", 1024) == "raced copy");
+    bool retainedTemporary = false;
+    for (const auto& entry : std::filesystem::directory_iterator(root))
+    {
+        if (entry.path().filename().string().starts_with("copy-destination.txt.tmp."))
+            retainedTemporary = true;
+    }
+    CHECK_FALSE(retainedTemporary);
+
+    files.Rename("rename-source.txt", "rename-success.txt", false);
+    files.Copy("copy-source.txt", "copy-success.txt", false);
+    CHECK(Keire::Detail::ReadTextFile(root / "rename-success.txt", 1024) == "rename source");
+    CHECK(Keire::Detail::ReadTextFile(root / "copy-success.txt", 1024) == "copy source");
+
+    std::error_code ignored;
+    std::filesystem::remove_all(root, ignored);
 }

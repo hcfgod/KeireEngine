@@ -87,3 +87,55 @@ TEST_CASE("Asset picker resolves material authoring sources but hides Shader Gra
           Keire::MeshAsset::TorusId());
     CHECK_FALSE(KeireEditor::AssetPicker::ResolveCompatibleAsset({}, Keire::AssetId::Generate(), meshOptions));
 }
+
+TEST_CASE("Asset picker accepts only compatible managed data types for ScriptableObject fields")
+{
+    const auto baseType = Keire::ManagedTypeId(Keire::AssetId::Generate());
+    const auto derivedType = Keire::ManagedTypeId(Keire::AssetId::Generate());
+    const auto unrelatedType = Keire::ManagedTypeId(Keire::AssetId::Generate());
+    std::array<Keire::ManagedAssetTypeDescriptor, 3> types;
+    types[0].StableTypeId = baseType;
+    types[0].FullName = "Tests.BaseData";
+    types[1].StableTypeId = derivedType;
+    types[1].FullName = "Tests.DerivedData";
+    types[1].BaseTypeId = baseType;
+    types[2].StableTypeId = unrelatedType;
+    types[2].FullName = "Tests.UnrelatedData";
+
+    std::array<Keire::AssetSourceRecord, 3> records;
+    for (auto& record : records)
+    {
+        record.Id = Keire::AssetId::Generate();
+        record.Type = Keire::ManagedDataAsset::StaticType();
+    }
+    records[0].RelativePath = "Data/Base.keiredata";
+    records[1].RelativePath = "Data/Derived.keiredata";
+    records[2].RelativePath = "Data/Unrelated.keiredata";
+
+    KeireEditor::AssetPickerOptions options;
+    options.Label = "Data";
+    options.ExpectedType = Keire::ManagedDataAsset::StaticType();
+    options.ExpectedManagedType = baseType;
+    options.ManagedTypes = types;
+    options.ResolveManagedType = [&, base = records[0].Id, derived = records[1].Id, unrelated = records[2].Id](
+                                     const Keire::AssetId asset) -> std::optional<Keire::ManagedTypeId>
+    {
+        if (asset == base)
+            return baseType;
+        if (asset == derived)
+            return derivedType;
+        if (asset == unrelated)
+            return unrelatedType;
+        return std::nullopt;
+    };
+
+    CHECK(KeireEditor::AssetPicker::Accepts(records[0], options));
+    CHECK(KeireEditor::AssetPicker::Accepts(records[1], options));
+    CHECK_FALSE(KeireEditor::AssetPicker::Accepts(records[2], options));
+    CHECK(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, records[0].Id, options) == records[0].Id);
+    CHECK(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, records[1].Id, options) == records[1].Id);
+    CHECK_FALSE(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, records[2].Id, options));
+
+    options.ResolveManagedType = {};
+    CHECK_FALSE(KeireEditor::AssetPicker::Accepts(records[0], options));
+}

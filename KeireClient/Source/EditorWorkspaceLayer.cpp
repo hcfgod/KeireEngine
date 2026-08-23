@@ -184,8 +184,10 @@ namespace
             return true;
         }
         bool EditAsset(const std::string_view label, Keire::AssetId& value,
-                       const std::optional<Keire::AssetTypeId> expectedType) override
+                       const std::optional<Keire::AssetTypeId> expectedType,
+                       const std::string_view expectedManagedType = {}) override
         {
+            (void)expectedManagedType;
             const auto selected = std::ranges::find(m_Assets, value, &Keire::AssetSourceRecord::Id);
             const auto preview = selected == m_Assets.end() ? (value ? "Missing asset" : "None")
                                                             : selected->RelativePath.filename().string();

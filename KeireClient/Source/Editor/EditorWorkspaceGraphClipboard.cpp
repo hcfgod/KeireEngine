@@ -7,6 +7,7 @@
 #include "KeireClient/Editor/ShaderGraphDocument.h"
 #include "KeireClient/Editor/ShaderGraphPanel.h"
 
+#include <algorithm>
 #include <stdexcept>
 
 void EditorWorkspaceLayer::SetGraphClipboard(const std::string_view text) { Owner().Windows()->SetClipboardText(text); }

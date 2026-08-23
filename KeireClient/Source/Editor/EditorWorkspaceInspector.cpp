@@ -106,6 +106,12 @@ std::vector<Keire::ManagedAssetTypeDescriptor> EditorWorkspaceLayer::InspectorMa
                                                       : std::vector<Keire::ManagedAssetTypeDescriptor>{};
 }
 
+std::optional<Keire::ManagedTypeId>
+EditorWorkspaceLayer::InspectorManagedDataType(const Keire::AssetId asset) const noexcept
+{
+    return m_ManagedDataTypeCache.Type(asset);
+}
+
 Keire::Ref<Keire::UndoContext> EditorWorkspaceLayer::InspectorManagedDataHistory() const noexcept
 {
     return m_ManagedDataUndoContext;

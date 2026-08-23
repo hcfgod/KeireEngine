@@ -102,7 +102,7 @@ Assert-True ($generateScript.Contains('"dependencies.ps1"') -and
     "Forced project generation preserves third-party dependency caches"
 Assert-True ($generateScript.Contains('$Generator -eq "compilecommands"') -and
              $generateScript.Contains('(Join-Path $stampDirectory "ninja.stamp")') -and
-             $generateScript.Contains('"ninja|$Architecture|$Toolset|$([bool]$CI)|$generationFingerprint"')) `
+             $generateScript.Contains('"ninja|$Architecture|$Toolset|$CompilerCache|$([bool]$CI)|$generationFingerprint"')) `
     "Compile database generation records the shared Ninja artifact identity"
 $windowsCommonSource = Get-Content (Join-Path $Windows "common.ps1") -Raw
 Assert-True ($windowsCommonSource.Contains('$generationInfrastructureInputs') -and
@@ -311,6 +311,19 @@ Assert-True ($dependencyScript.Contains('[string]::IsNullOrWhiteSpace($LinkTarge
     "Dependency bootstrap repairs dangling junctions without normalizing an empty target"
 Assert-True ($dependencyScript.Contains('"Debug", "Release"') -and $dependencyScript.Contains('SDL_DUMMYVIDEO=ON') -and $dependencyScript.Contains('SDL_OFFSCREEN=ON')) "SDL variants and headless drivers"
 Assert-True ($dependencyScript.Contains('SDL_GPU=ON') -and $dependencyScript.Contains('SDL_RENDER=OFF')) "SDL GPU renderer policy"
+Assert-True ($dependencyScript.Contains('SDL_JOYSTICK=ON') -and
+             $dependencyScript.Contains('SDL_HAPTIC=ON') -and
+             $dependencyScript.Contains('SDL_HIDAPI=ON') -and
+             $dependencyScript.Contains('SDL_HIDAPI_JOYSTICK=ON') -and
+             $dependencyScript.Contains('SDL_HIDAPI_LIBUSB=OFF') -and
+             $dependencyScript.Contains('SDL_VIRTUAL_JOYSTICK=ON') -and
+             -not $dependencyScript.Contains('SDL_JOYSTICK=OFF') -and
+             -not $dependencyScript.Contains('SDL_HAPTIC=OFF')) "SDL desktop gamepad capability profile"
+Assert-True ($dependencyScript.Contains('Assert-SdlInputBackends') -and
+             $dependencyScript.Contains('SDL_JOYSTICK_RAWINPUT') -and
+             $dependencyScript.Contains('SDL_HAPTIC_DINPUT') -and
+             $dependencyScript.Contains('"hid", "mincore", "dinput8"')) `
+    "Windows SDL gamepad backend and static-link validation"
 Assert-True ($dependencyScript.Contains('shader-compiler.ps1')) "Host shader compiler bootstrap"
 Assert-True ($dependencyScript.Contains('$Lock.LIBSODIUM_COMMIT') -and
              $dependencyScript.Contains('ReleaseDLL') -and
@@ -547,7 +560,11 @@ finally {
     Remove-Item $managedFixture -Recurse -Force -ErrorAction SilentlyContinue
 }
 Assert-True ($corePremake.Contains('Source/ECS/Components/CameraComponent.cpp') -and $corePremake.Contains('Source/ECS/Components/MeshRendererComponent.cpp')) "Explicit built-in component translation units"
-Assert-True ($corePremake.Contains('builtin-shaders.ps1') -and (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinUnlit.hlsl'))) "First-party built-in shader generation"
+$generatedContentScript = Get-Content (Join-Path $Windows 'prepare-generated-content.ps1') -Raw
+Assert-True ($corePremake.Contains('prepare-generated-content.ps1') -and
+             $generatedContentScript.Contains('builtin-shaders.ps1') -and
+             (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinUnlit.hlsl'))) `
+    "First-party built-in shader generation"
 $renderSource = (Get-ChildItem (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Rendering') -File |
     Where-Object { $_.Name -like 'Render*.cpp' -or $_.Name -like 'Render*.h' } |
     Get-Content -Raw) -join "`n"
@@ -693,6 +710,12 @@ foreach ($exportedFunction in @("AssertionFailure", "GetName", "GetBuildInfo", "
 }
 Assert-True (-not ($publicHeaders -match 'KEIRE_API[^;{}]*\b(?:GetApplicationCommandLineDescription|CreateApplication)\s*\(')) "Managed-client reverse API ownership"
 $packageScript = Get-Content (Join-Path $Windows "package.ps1") -Raw
+Assert-True ($packageScript.Contains('$sdlMsvcLibraries') -and
+             $packageScript.Contains('$sdlGnuLibraries') -and
+             $packageScript.Contains('"hid.lib", "mincore.lib"') -and
+             $packageScript.Contains('"dinput8.lib"') -and
+             $packageScript.Contains('"-lhid", "-lmincore", "-ldinput8"')) `
+    "Extracted Windows SDK consumers link the enabled SDL gamepad backends"
 Assert-True ($packageScript.Contains('dear-imgui-LICENSE.txt') -and $packageScript.Contains('$Lock.IMGUI_COMMIT') -and $packageScript.Contains('$imguiLibraryName.lib')) "Dear ImGui package metadata and archive"
 Assert-True ($packageScript.Contains('zstandard-LICENSE.txt') -and $packageScript.Contains('$Lock.ZSTD_COMMIT') -and $packageScript.Contains('$zstdLibraryName.lib')) "Zstandard package metadata and archive"
 Assert-True ($packageScript.Contains('entt-LICENSE.txt') -and $packageScript.Contains('$Lock.ENTT_COMMIT') -and $packageScript.Contains('glm-COPYING.txt') -and $packageScript.Contains('$Lock.GLM_COMMIT')) "ECS and math package metadata and attribution"
@@ -968,5 +991,6 @@ if ($runFast) {
     )
     Assert-Equal $searchExitCode 1 "Stale repository identity batch scan"
 }
+& (Join-Path $PSScriptRoot 'test-player-support-runtime-windows.ps1')
 Write-Host ("Windows $Suite script regression tests passed in {0:N2}s." -f $started.Elapsed.TotalSeconds)
 $global:LASTEXITCODE = 0

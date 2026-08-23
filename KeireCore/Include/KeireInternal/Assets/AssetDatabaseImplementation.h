@@ -37,9 +37,9 @@ namespace Keire
     {
         struct AssetFileSignature final
         {
-            std::filesystem::file_time_type Modified;
+            std::uint64_t Modified = 0;
             std::uintmax_t Size = 0;
-            std::filesystem::file_time_type MetadataModified;
+            std::uint64_t MetadataModified = 0;
             std::uintmax_t MetadataSize = 0;
 
             [[nodiscard]] bool operator==(const AssetFileSignature&) const noexcept = default;
@@ -54,11 +54,13 @@ namespace Keire
         [[maybe_unused, nodiscard]] std::filesystem::path ConfinedPath(const std::filesystem::path& root,
                                                                        const std::filesystem::path& relative)
         {
-            const auto normalized = relative.lexically_normal();
-            if (relative.empty() || relative.is_absolute() || normalized.empty() ||
-                normalized.native().starts_with(std::filesystem::path("..").native()))
-                throw std::invalid_argument("Asset path must be a confined project-relative path.");
-            return (root / normalized).lexically_normal();
+            return Detail::ResolveConfinedPath(root, relative);
+        }
+
+        [[maybe_unused, nodiscard]] std::filesystem::path
+        ConfinedMetadataPath(const std::filesystem::path& root, const std::filesystem::path& relativeSource)
+        {
+            return ConfinedPath(root, Detail::PathWithSuffix(relativeSource, ".keiremeta"));
         }
 
         [[maybe_unused, nodiscard]] std::vector<std::byte> ReadSource(const std::filesystem::path& path,
@@ -212,7 +214,8 @@ namespace Keire
             bool Folder = false;
         };
 
-        [[maybe_unused]] void WriteTrashManifest(const std::filesystem::path& root, const AssetId id,
+        [[maybe_unused]] void WriteTrashManifest(const Detail::AnchoredFileSystem& files,
+                                                 const std::filesystem::path& relativeRoot, const AssetId id,
                                                  const std::filesystem::path& originalPath,
                                                  const std::span<const AssetId> assets, const bool folder)
         {
@@ -224,29 +227,18 @@ namespace Keire
                                 {"originalPath", Detail::PathToUtf8(originalPath)},
                                 {"folder", folder},
                                 {"assets", std::move(assetIds)}};
-            const auto destination = root / "trash.json";
-            const auto temporary = Detail::PathWithSuffix(destination, ".tmp");
-            std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
-            if (!stream)
-                throw std::runtime_error("Could not create asset trash manifest.");
-            stream << manifest.dump(2) << '\n';
-            stream.close();
-            if (!stream)
-                throw std::runtime_error("Could not write asset trash manifest.");
-            Detail::AtomicReplace(temporary, destination);
+            const auto serialized = manifest.dump(2) + '\n';
+            files.WriteFileAtomically(relativeRoot / "trash.json",
+                                      std::as_bytes(std::span(serialized.data(), serialized.size())));
         }
 
-        [[maybe_unused, nodiscard]] ParsedTrashRecord ReadTrashManifest(const std::filesystem::path& root)
+        [[maybe_unused, nodiscard]] ParsedTrashRecord ReadTrashManifest(const Detail::AnchoredFileSystem& files,
+                                                                        const std::filesystem::path& relativeRoot)
         {
-            const auto path = root / "trash.json";
-            std::error_code error;
-            if (!std::filesystem::is_regular_file(path, error) ||
-                std::filesystem::file_size(path, error) > 1024ULL * 1024U)
-                throw std::runtime_error("Asset trash manifest is missing or exceeds the 1 MiB limit.");
-            std::ifstream stream(path, std::ios::binary);
-            Json manifest;
-            stream >> manifest;
-            if (!stream || !manifest.is_object() || manifest.value("schemaVersion", 0) != 1)
+            const auto bytes = files.Read(relativeRoot / "trash.json", 1024ULL * 1024U);
+            const auto manifest = Json::parse(reinterpret_cast<const char*>(bytes.data()),
+                                              reinterpret_cast<const char*>(bytes.data() + bytes.size()));
+            if (!manifest.is_object() || manifest.value("schemaVersion", 0) != 1)
                 throw std::runtime_error("Asset trash manifest has an unsupported schema.");
             ParsedTrashRecord result;
             result.Id = AssetId::Parse(manifest.at("id").get<std::string>());
@@ -295,8 +287,25 @@ namespace Keire
             return result;
         }
 
-        [[maybe_unused]] void WriteMetadata(const std::filesystem::path& path, const AssetId id, const AssetTypeId type,
-                                            const std::string_view importer, const std::uint32_t importerVersion,
+        [[maybe_unused, nodiscard]] Json ReadJsonFile(const Detail::AnchoredFileSystem& files,
+                                                      const std::filesystem::path& relative, const std::size_t maximum)
+        {
+            const auto bytes = files.Read(relative, maximum);
+            return Json::parse(reinterpret_cast<const char*>(bytes.data()),
+                               reinterpret_cast<const char*>(bytes.data() + bytes.size()));
+        }
+
+        [[maybe_unused]] void WriteJsonAtomically(const Detail::AnchoredFileSystem& files,
+                                                  const std::filesystem::path& relative, const Json& value)
+        {
+            const auto serialized = value.dump(2) + '\n';
+            files.WriteFileAtomically(relative, std::as_bytes(std::span(serialized.data(), serialized.size())));
+        }
+
+        [[maybe_unused]] void WriteMetadata(const Detail::AnchoredFileSystem& files,
+                                            const std::filesystem::path& relative, const AssetId id,
+                                            const AssetTypeId type, const std::string_view importer,
+                                            const std::uint32_t importerVersion,
                                             const AssetImportSettings& settings = {}, const AssetId parentSource = {})
         {
             Json metadata{{"schemaVersion", 1},
@@ -310,53 +319,47 @@ namespace Keire
                 metadata["parentSource"] = parentSource.ToString();
             if (!settings.empty())
                 metadata["importSettings"] = EncodeImportSettings(settings);
-            std::filesystem::create_directories(path.parent_path());
-            const auto temporary = Detail::PathWithSuffix(path, ".tmp");
-            std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
-            if (!stream)
-                throw std::runtime_error("Could not create asset metadata: " + Detail::PathToUtf8(path));
-            stream << metadata.dump(2) << '\n';
-            stream.close();
-            if (!stream)
-                throw std::runtime_error("Could not write asset metadata: " + Detail::PathToUtf8(path));
-            Detail::AtomicReplace(temporary, path);
+            WriteJsonAtomically(files, relative, metadata);
         }
 
-        [[maybe_unused, nodiscard]] bool UpgradeMetadataImporterVersion(const std::filesystem::path& path,
+        [[maybe_unused, nodiscard]] bool UpgradeMetadataImporterVersion(const Detail::AnchoredFileSystem& files,
+                                                                        const std::filesystem::path& relative,
                                                                         const std::string_view importer,
                                                                         const std::uint32_t importerVersion)
         {
-            auto metadata = ReadJsonFile(path, 1024ULL * 1024U);
+            auto metadata = ReadJsonFile(files, relative, 1024ULL * 1024U);
             if (!metadata.is_object() || metadata.value("schemaVersion", 0) != 1 ||
                 metadata.value("importer", std::string{}) != importer)
                 throw std::runtime_error("Asset metadata cannot be upgraded by a different importer: " +
-                                         Detail::PathToUtf8(path));
+                                         Detail::PathToUtf8(files.Root() / relative));
             const auto currentVersion = metadata.value("importerVersion", 0U);
             if (currentVersion >= importerVersion)
                 return false;
             metadata["importerVersion"] = importerVersion;
-            WriteJsonAtomically(path, metadata);
+            WriteJsonAtomically(files, relative, metadata);
             return true;
         }
 
-        [[maybe_unused]] void UpdateMetadataSubAssets(const std::filesystem::path& path,
+        [[maybe_unused]] void UpdateMetadataSubAssets(const Detail::AnchoredFileSystem& files,
+                                                      const std::filesystem::path& relative,
                                                       const std::span<const AssetGeneratedSubAsset> generated)
         {
-            auto metadata = ReadJsonFile(path, 1024ULL * 1024U);
+            auto metadata = ReadJsonFile(files, relative, 1024ULL * 1024U);
             Json subAssets = Json::array();
             for (const auto& subAsset : generated)
                 subAssets.push_back(subAsset.Id.ToString());
             if (!metadata.contains("subAssets") || metadata["subAssets"] != subAssets)
             {
                 metadata["subAssets"] = std::move(subAssets);
-                WriteJsonAtomically(path, metadata);
+                WriteJsonAtomically(files, relative, metadata);
             }
         }
 
-        [[maybe_unused]] void UpdateMetadataImportOutput(const std::filesystem::path& path, const AssetTypeId type,
+        [[maybe_unused]] void UpdateMetadataImportOutput(const Detail::AnchoredFileSystem& files,
+                                                         const std::filesystem::path& relative, const AssetTypeId type,
                                                          const std::span<const AssetGeneratedSubAsset> generated)
         {
-            auto metadata = ReadJsonFile(path, 1024ULL * 1024U);
+            auto metadata = ReadJsonFile(files, relative, 1024ULL * 1024U);
             Json subAssets = Json::array();
             for (const auto& subAsset : generated)
                 subAssets.push_back(subAsset.Id.ToString());
@@ -366,58 +369,56 @@ namespace Keire
             {
                 metadata["type"] = encodedType;
                 metadata["subAssets"] = std::move(subAssets);
-                WriteJsonAtomically(path, metadata);
+                WriteJsonAtomically(files, relative, metadata);
             }
         }
 
-        [[maybe_unused]] void UpdateMetadataImportSettings(const std::filesystem::path& path,
+        [[maybe_unused]] void UpdateMetadataImportSettings(const Detail::AnchoredFileSystem& files,
+                                                           const std::filesystem::path& relative,
                                                            const AssetImportSettings& settings)
         {
-            auto metadata = ReadJsonFile(path, 1024ULL * 1024U);
+            auto metadata = ReadJsonFile(files, relative, 1024ULL * 1024U);
             const auto encoded = EncodeImportSettings(settings);
             if (!metadata.contains("importSettings") || metadata["importSettings"] != encoded)
             {
                 metadata["importSettings"] = encoded;
-                WriteJsonAtomically(path, metadata);
+                WriteJsonAtomically(files, relative, metadata);
             }
         }
 
-        [[maybe_unused]] void IncrementMetadataImportRevision(const std::filesystem::path& path)
+        [[maybe_unused]] void IncrementMetadataImportRevision(const Detail::AnchoredFileSystem& files,
+                                                              const std::filesystem::path& relative)
         {
-            auto metadata = ReadJsonFile(path, 1024ULL * 1024U);
+            auto metadata = ReadJsonFile(files, relative, 1024ULL * 1024U);
             const auto current = metadata.value("importRevision", std::uint64_t{0});
             metadata["importRevision"] =
                 current == std::numeric_limits<std::uint64_t>::max() ? std::uint64_t{1} : current + 1;
-            WriteJsonAtomically(path, metadata);
+            WriteJsonAtomically(files, relative, metadata);
         }
 
-        [[maybe_unused, nodiscard]] AssetSourceRecord ReadMetadata(const std::filesystem::path& sourceRoot,
-                                                                   const std::filesystem::path& source,
+        [[maybe_unused, nodiscard]] AssetSourceRecord ReadMetadata(const Detail::AnchoredFileSystem& files,
+                                                                   const std::filesystem::path& relativeSource,
                                                                    const std::size_t maximumSourceBytes,
                                                                    const bool digestSource,
                                                                    const AssetImporterRegistration* inferredImporter)
         {
             AssetSourceRecord record;
-            record.RelativePath = std::filesystem::relative(source, sourceRoot).lexically_normal();
-            record.MetadataPath = Detail::PathWithSuffix(source, ".keiremeta");
-            if (!std::filesystem::exists(record.MetadataPath))
+            record.RelativePath = relativeSource.lexically_normal();
+            const auto confinedSource = files.Root() / record.RelativePath;
+            const auto metadataRelative = Detail::PathWithSuffix(record.RelativePath, ".keiremeta");
+            record.MetadataPath = files.Root() / metadataRelative;
+            if (!files.IsRegularFile(metadataRelative))
             {
-                const auto type = inferredImporter ? inferredImporter->Type : InferType(source);
-                WriteMetadata(record.MetadataPath, AssetId::Generate(), type,
+                const auto type = inferredImporter ? inferredImporter->Type : InferType(confinedSource);
+                WriteMetadata(files, metadataRelative, AssetId::Generate(), type,
                               inferredImporter ? inferredImporter->Name : ImporterName(type),
                               inferredImporter ? inferredImporter->Version : 1U);
             }
-            if (std::filesystem::is_symlink(source) || std::filesystem::is_symlink(record.MetadataPath))
-                throw std::runtime_error("Asset sources and metadata may not be symbolic links.");
-            if (std::filesystem::file_size(record.MetadataPath) > 1024ULL * 1024U)
-                throw std::runtime_error("Asset metadata exceeds the 1 MiB safety limit.");
-
-            std::ifstream stream(record.MetadataPath, std::ios::binary);
-            if (!stream)
-                throw std::runtime_error("Could not open asset metadata: " + Detail::PathToUtf8(record.MetadataPath));
-            Json metadata;
-            stream >> metadata;
-            if (!stream || !metadata.is_object() || metadata.value("schemaVersion", 0) != 1)
+            const auto metadataBytes = files.Read(metadataRelative, 1024ULL * 1024U);
+            const auto metadata =
+                Json::parse(reinterpret_cast<const char*>(metadataBytes.data()),
+                            reinterpret_cast<const char*>(metadataBytes.data() + metadataBytes.size()));
+            if (!metadata.is_object() || metadata.value("schemaVersion", 0) != 1)
                 throw std::runtime_error("Asset metadata has an unsupported schema: " +
                                          Detail::PathToUtf8(record.MetadataPath));
             record.Id = AssetId::Parse(metadata.at("id").get<std::string>());
@@ -442,9 +443,8 @@ namespace Keire
                 record.ImportSettings = DecodeImportSettings(metadata["importSettings"]);
             if (digestSource)
             {
-                const auto bytes = ReadSource(source, maximumSourceBytes);
+                const auto bytes = files.Read(record.RelativePath, maximumSourceBytes);
                 record.SourceDigest = Detail::DigestToString(Detail::Sha256(bytes));
-                const auto metadataBytes = ReadSource(record.MetadataPath, 1024ULL * 1024U);
                 record.MetadataDigest = Detail::DigestToString(Detail::Sha256(metadataBytes));
             }
             return record;
@@ -738,8 +738,16 @@ namespace Keire
                 Specification.ChangeMonitorInterval.count() <= 0)
                 throw std::invalid_argument("Asset database limits must be non-zero and non-negative.");
             Specification.ProjectRoot = std::filesystem::absolute(Specification.ProjectRoot).lexically_normal();
+            std::filesystem::create_directories(Specification.ProjectRoot);
+            ProjectFiles = std::make_unique<Detail::AnchoredFileSystem>(Specification.ProjectRoot);
+            if (Specification.SourceDirectory.lexically_normal() != std::filesystem::path("."))
+                ProjectFiles->CreateDirectories(Specification.SourceDirectory);
+            if (Specification.CacheDirectory.lexically_normal() != std::filesystem::path("."))
+                ProjectFiles->CreateDirectories(Specification.CacheDirectory);
             SourceRoot = ConfinedPath(Specification.ProjectRoot, Specification.SourceDirectory);
             CacheRoot = ConfinedPath(Specification.ProjectRoot, Specification.CacheDirectory);
+            SourceFiles = std::make_unique<Detail::AnchoredFileSystem>(SourceRoot);
+            CacheFiles = std::make_unique<Detail::AnchoredFileSystem>(CacheRoot);
             OperationMutex = std::make_unique<Detail::InterprocessMutex>(Specification.ProjectRoot /
                                                                          "Library/AssetOperations/project.lock");
             for (auto& importer : Specification.Importers)
@@ -758,65 +766,12 @@ namespace Keire
                 if (!Importers.emplace(importer.Name, importer).second)
                     throw std::invalid_argument("Asset importer name is duplicated.");
             }
-            std::filesystem::create_directories(SourceRoot);
-            std::filesystem::create_directories(CacheRoot);
             RecoverDirectoryPublication(CacheRoot / "Runtime");
             RecoverInterruptedExternalImports();
         }
 
-        void RecoverInterruptedExternalImports()
-        {
-            const auto transactions = Specification.ProjectRoot / "Library/AssetImport";
-            std::error_code error;
-            if (!std::filesystem::is_directory(transactions, error))
-                return;
-            for (std::filesystem::directory_iterator iterator(transactions, error), end; !error && iterator != end;
-                 iterator.increment(error))
-            {
-                if (!iterator->is_directory(error))
-                    continue;
-                const auto journalPath = iterator->path() / "journal.json";
-                if (!std::filesystem::is_regular_file(journalPath, error))
-                    continue;
-                const auto journal = ReadJsonFile(journalPath, 16ULL * 1024ULL * 1024U);
-                if (journal.value("schemaVersion", 0) != 1 || !journal.contains("state"))
-                    throw std::runtime_error("External asset import journal is invalid: " +
-                                             Detail::PathToUtf8(journalPath));
-                const auto state = journal.at("state").get<std::string>();
-                if (state == "committed")
-                    continue;
-                if (state == "publishing")
-                {
-                    if (!journal.contains("entries") || !journal["entries"].is_array())
-                        throw std::runtime_error("Publishing asset journal has no recovery entries.");
-                    for (std::size_t index = journal["entries"].size(); index > 0; --index)
-                    {
-                        const auto& entry = journal["entries"][index - 1];
-                        const auto destination =
-                            ConfinedPath(SourceRoot, Detail::PathFromUtf8(entry.at("destination").get<std::string>()));
-                        const auto metadata = Detail::PathWithSuffix(destination, ".keiremeta");
-                        if (entry.value("replaced", false))
-                        {
-                            const auto prefix = std::to_string(index - 1);
-                            WriteFileAtomically(destination,
-                                                ReadSource(iterator->path() / "before" / (prefix + ".source"),
-                                                           Specification.MaximumSourceBytes));
-                            WriteFileAtomically(metadata,
-                                                ReadSource(iterator->path() / "before" / (prefix + ".metadata"),
-                                                           16ULL * 1024ULL * 1024U));
-                        }
-                        else
-                        {
-                            RemovePathNoThrow(destination);
-                            RemovePathNoThrow(metadata);
-                        }
-                    }
-                }
-                RemovePathNoThrow(iterator->path());
-            }
-            if (error)
-                throw std::runtime_error("Could not recover external asset import transactions: " + error.message());
-        }
+        void RecoverInterruptedExternalImports();
+        void CompleteExternalImportRecovery(AssetDatabase& database);
 
         [[nodiscard]] const AssetImporterRegistration* InferImporter(const std::filesystem::path& path) const
         {
@@ -825,7 +780,6 @@ namespace Keire
                 return nullptr;
             return &Importers.at(found->second);
         }
-
         [[nodiscard]] const AssetImporterRegistration* FindImporter(const AssetSourceRecord& record) const
         {
             const auto found = Importers.find(record.Importer);
@@ -837,26 +791,27 @@ namespace Keire
                 std::ranges::find(importer.CompatibleTypes, record.Type) != importer.CompatibleTypes.end();
             return importer.Version >= record.ImporterVersion && compatible ? &importer : nullptr;
         }
-
-        [[nodiscard]] AssetImportContext CreateImportContext(const AssetSourceRecord& record) const
+        [[nodiscard]] AssetImportContext
+        CreateImportContext(const AssetSourceRecord& record,
+                            const std::filesystem::path& contextSourceRoot = std::filesystem::path{}) const
         {
+            const auto& importSourceRoot = contextSourceRoot.empty() ? SourceRoot : contextSourceRoot;
+            const auto source = ConfinedPath(importSourceRoot, record.RelativePath);
             AssetImportContext context;
             context.Asset = record.Id;
             context.ProjectRoot = Specification.ProjectRoot;
             context.SourceRoot = SourceRoot;
-            context.SourcePath = SourceRoot / record.RelativePath;
-            context.MetadataPath = record.MetadataPath;
+            context.SourcePath = source;
+            const auto metadataRelative = record.MetadataPath.empty()
+                                              ? Detail::PathWithSuffix(record.RelativePath, ".keiremeta")
+                                              : record.MetadataPath.lexically_relative(importSourceRoot);
+            context.MetadataPath = ConfinedPath(importSourceRoot, metadataRelative);
             context.RelativePath = record.RelativePath;
             context.MaximumDependencyBytes =
                 std::min(Specification.MaximumSourceBytes, std::size_t{64ULL * 1024ULL * 1024U});
-            context.ReadProjectFile = [root = Specification.ProjectRoot,
-                                       maximum = context.MaximumDependencyBytes](const std::filesystem::path& relative)
-            {
-                const auto path = ConfinedPath(root, relative);
-                if (std::filesystem::is_symlink(path))
-                    throw std::runtime_error("Asset dependencies may not be symbolic links.");
-                return ReadSource(path, maximum);
-            };
+            context.ReadProjectFile =
+                [this, maximum = context.MaximumDependencyBytes](const std::filesystem::path& relative)
+            { return ProjectFiles->Read(relative, maximum); };
             context.ImportSettings = record.ImportSettings;
             context.ResolveSubAssetId = [parent = record.Id](const std::string_view key)
             { return DeriveSubAssetId(parent, key); };
@@ -875,7 +830,6 @@ namespace Keire
             };
             return context;
         }
-
         [[nodiscard]] AssetImportSettings NormalizeSettings(const AssetImporterRegistration& importer,
                                                             const AssetImportSettings& requested) const
         {
@@ -970,9 +924,9 @@ namespace Keire
                     throw std::runtime_error("Contextual importer returned an invalid diagnostic.");
             }
         }
-
-        [[nodiscard]] AssetImportOutput ImportSource(const AssetSourceRecord& record,
-                                                     const std::span<const std::byte> source) const
+        [[nodiscard]] AssetImportOutput
+        ImportSource(const AssetSourceRecord& record, const std::span<const std::byte> source,
+                     const std::filesystem::path& contextSourceRoot = std::filesystem::path{}) const
         {
             AssetImportOutput result;
             const auto* importer = FindImporter(record);
@@ -980,7 +934,7 @@ namespace Keire
             {
                 if (importer->ContextualImport)
                 {
-                    auto context = CreateImportContext(record);
+                    auto context = CreateImportContext(record, contextSourceRoot);
                     const auto readProjectFile = context.ReadProjectFile;
                     std::vector<AssetSourceDependency> observedDependencies;
                     context.ReadProjectFile =
@@ -1021,10 +975,9 @@ namespace Keire
             ValidateImportOutput(importer, result);
             return result;
         }
-
         [[nodiscard]] AssetImportOutput Import(const AssetSourceRecord& record) const
         {
-            const auto source = ReadSource(SourceRoot / record.RelativePath, Specification.MaximumSourceBytes);
+            const auto source = SourceFiles->Read(record.RelativePath, Specification.MaximumSourceBytes);
             return ImportSource(record, source);
         }
 
@@ -1067,11 +1020,10 @@ namespace Keire
             {
                 for (auto& dependency : dependencies)
                 {
-                    const auto path = ConfinedPath(Specification.ProjectRoot, dependency.RelativePath);
-                    if (std::filesystem::is_symlink(path))
-                        return false;
-                    dependency.Digest = Detail::DigestToString(Detail::Sha256File(
-                        path, std::min(Specification.MaximumSourceBytes, std::size_t{64U} * 1024U * 1024U)));
+                    const auto bytes =
+                        ProjectFiles->Read(dependency.RelativePath, std::min(Specification.MaximumSourceBytes,
+                                                                             std::size_t{64U} * 1024U * 1024U));
+                    dependency.Digest = Detail::DigestToString(Detail::Sha256(bytes));
                 }
                 return true;
             }
@@ -1094,7 +1046,8 @@ namespace Keire
                                     Detail::PathToUtf8(record.RelativePath));
                     return;
                 }
-                Detail::WriteFileAtomically(ImportOutputPath(object, record.Id), std::as_bytes(std::span(encoded)));
+                CacheFiles->WriteFileAtomically(ImportOutputPath(object, record.Id).lexically_relative(CacheRoot),
+                                                std::as_bytes(std::span(encoded)));
             }
             catch (const std::exception& error)
             {
@@ -1112,29 +1065,32 @@ namespace Keire
             priorOutput.SourceDependencies = sourceDependencies;
             priorOutput.AssetDependencies = record.Dependencies;
             const auto object = ObjectPath(record, ImportDigest(record, priorOutput));
-            if (!std::filesystem::is_regular_file(object))
+            const auto objectRelative = object.lexically_relative(CacheRoot);
+            if (!CacheFiles->IsRegularFile(objectRelative))
                 return std::nullopt;
             const auto* importer = FindImporter(record);
             if (importer && importer->RestoreCachedOutput && record.SourceDependencies.empty() &&
                 record.SubAssets.empty())
             {
-                auto restored = importer->RestoreCachedOutput(ReadSource(object, Specification.MaximumSourceBytes));
+                auto restored =
+                    importer->RestoreCachedOutput(CacheFiles->Read(objectRelative, Specification.MaximumSourceBytes));
                 ValidateImportOutput(importer, restored);
                 if (!restored.SourceDependencies.empty())
                     throw std::logic_error("A dependency-free cached importer restored source dependencies.");
                 return restored;
             }
             const auto outputPath = ImportOutputPath(object, record.Id);
-            if (std::filesystem::is_regular_file(outputPath))
+            const auto outputRelative = outputPath.lexically_relative(CacheRoot);
+            if (CacheFiles->IsRegularFile(outputRelative))
             {
                 try
                 {
                     constexpr std::size_t maximumCacheDocumentBytes = std::size_t{512U} * 1024U * 1024U;
-                    const auto encoded = ReadSource(outputPath, maximumCacheDocumentBytes);
+                    const auto encoded = CacheFiles->Read(outputRelative, maximumCacheDocumentBytes);
                     auto restored = Detail::DecodeCachedImportOutput(
                         Json::from_cbor(reinterpret_cast<const std::uint8_t*>(encoded.data()),
                                         reinterpret_cast<const std::uint8_t*>(encoded.data() + encoded.size())),
-                        ReadSource(object, Specification.MaximumSourceBytes));
+                        CacheFiles->Read(objectRelative, Specification.MaximumSourceBytes));
                     if (!RefreshSourceDependencies(restored.SourceDependencies) ||
                         ObjectPath(record, ImportDigest(record, restored)) != object)
                     {
@@ -1245,7 +1201,8 @@ namespace Keire
             std::unordered_set<std::string> paths;
             for (const auto& source : sources)
             {
-                auto record = ReadMetadata(SourceRoot, source, Specification.MaximumSourceBytes, digestSources,
+                const auto relative = source.lexically_relative(SourceRoot).lexically_normal();
+                auto record = ReadMetadata(*SourceFiles, relative, Specification.MaximumSourceBytes, digestSources,
                                            InferImporter(source));
                 if (!identities.insert(record.Id).second)
                     throw std::runtime_error("Duplicate asset identity detected: " + record.Id.ToString());
@@ -1261,11 +1218,11 @@ namespace Keire
 #endif
                 if (!paths.insert(comparable).second)
                     throw std::runtime_error("Case-colliding asset paths are not portable: " + comparable);
-                result.Signatures.emplace(record.Id,
-                                          FileSignature{std::filesystem::last_write_time(source),
-                                                        std::filesystem::file_size(source),
-                                                        std::filesystem::last_write_time(record.MetadataPath),
-                                                        std::filesystem::file_size(record.MetadataPath)});
+                const auto sourceSignature = SourceFiles->Signature(record.RelativePath);
+                const auto metadataSignature =
+                    SourceFiles->Signature(Detail::PathWithSuffix(record.RelativePath, ".keiremeta"));
+                result.Signatures.emplace(record.Id, FileSignature{sourceSignature.Modified, sourceSignature.Size,
+                                                                   metadataSignature.Modified, metadataSignature.Size});
                 result.Records.push_back(std::move(record));
             }
             std::ranges::sort(result.Records, [](const auto& left, const auto& right) { return left.Id < right.Id; });
@@ -1275,8 +1232,9 @@ namespace Keire
         [[nodiscard]] FileSignature ReadSignature(const std::filesystem::path& source,
                                                   const std::filesystem::path& metadata) const
         {
-            return {std::filesystem::last_write_time(source), std::filesystem::file_size(source),
-                    std::filesystem::last_write_time(metadata), std::filesystem::file_size(metadata)};
+            const auto sourceSignature = SourceFiles->Signature(source.lexically_relative(SourceRoot));
+            const auto metadataSignature = SourceFiles->Signature(metadata.lexically_relative(SourceRoot));
+            return {sourceSignature.Modified, sourceSignature.Size, metadataSignature.Modified, metadataSignature.Size};
         }
 
         struct MonitoredScan final
@@ -1338,6 +1296,29 @@ namespace Keire
                 ChangeMonitorRequested = true;
             }
             ChangeMonitorCondition.notify_one();
+        }
+
+        void RemoveProjectTree(const std::filesystem::path& relative)
+        {
+            const auto root = ConfinedPath(Specification.ProjectRoot, relative);
+            std::vector<std::filesystem::path> entries;
+            std::error_code error;
+            for (std::filesystem::recursive_directory_iterator
+                     iterator(root, std::filesystem::directory_options::skip_permission_denied, error),
+                 end;
+                 !error && iterator != end; iterator.increment(error))
+            {
+                entries.push_back(iterator->path().lexically_relative(Specification.ProjectRoot));
+            }
+            if (error && error != std::errc::no_such_file_or_directory)
+                throw std::runtime_error("Could not enumerate project tree for removal: " + error.message());
+            std::ranges::sort(
+                entries, [](const auto& left, const auto& right)
+                { return std::distance(left.begin(), left.end()) > std::distance(right.begin(), right.end()); });
+            for (const auto& entry : entries)
+                ProjectFiles->Remove(entry);
+            if (ProjectFiles->Exists(relative))
+                ProjectFiles->Remove(relative);
         }
 
         [[nodiscard]] std::optional<MonitoredScan> TakeChangeMonitorScan()
@@ -1432,6 +1413,9 @@ namespace Keire
         AssetDatabaseSpecification Specification;
         std::filesystem::path SourceRoot;
         std::filesystem::path CacheRoot;
+        std::unique_ptr<Detail::AnchoredFileSystem> ProjectFiles;
+        std::unique_ptr<Detail::AnchoredFileSystem> SourceFiles;
+        std::unique_ptr<Detail::AnchoredFileSystem> CacheFiles;
         std::vector<AssetSourceRecord> Records;
         std::unordered_map<AssetId, std::size_t> IdIndex;
         std::unordered_map<std::string, std::size_t> PathIndex;
@@ -1442,6 +1426,7 @@ namespace Keire
         std::unordered_map<AssetId, AssetImportStatus> ImportStatuses;
         std::unordered_map<AssetId, PreparedImport> ValidatedImports;
         std::unordered_map<AssetId, PreparedImport> CookInputs;
+        std::vector<std::filesystem::path> PendingExternalImportRecovery;
         std::unique_ptr<Detail::InterprocessMutex> OperationMutex;
         mutable std::mutex Mutex;
         std::atomic<std::uint64_t> SourceRevision{1};

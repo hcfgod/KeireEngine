@@ -234,6 +234,9 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
     const auto& theme = m_Controller.InspectorTheme();
     const auto records = m_Controller.InspectorAssetRecords();
     const auto assets = m_Controller.InspectorAssetSystem();
+    const auto managedAssetTypes = m_Controller.InspectorManagedAssetTypes();
+    const auto resolveManagedType = [this](const Keire::AssetId asset)
+    { return m_Controller.InspectorManagedDataType(asset); };
     const auto database = m_Controller.InspectorAssetDatabase();
     const auto scene = sceneDocument.ActiveScene();
     const auto selectedAsset = m_Controller.InspectorSelectedAsset();
@@ -842,7 +845,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                     ++m_EditSerial;
                                 if (registration)
                                 {
-                                    InspectorPropertyEditor propertyEditor(ui, records, assets, scene, *m_AssetPicker);
+                                    InspectorPropertyEditor propertyEditor(ui, records, assets, scene, *m_AssetPicker,
+                                                                           managedAssetTypes, resolveManagedType);
                                     for (const auto& property : registration->Properties)
                                     {
                                         if (property.Key != "mesh")
@@ -871,7 +875,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                         }
                                     }
                                 }
-                                InspectorPropertyEditor propertyEditor(ui, records, assets, scene, *m_AssetPicker);
+                                InspectorPropertyEditor propertyEditor(ui, records, assets, scene, *m_AssetPicker,
+                                                                       managedAssetTypes, resolveManagedType);
                                 Keire::Ref<const Keire::MeshAsset> mesh =
                                     renderer->Mesh() ? Keire::MeshAsset::ResolveBuiltin(renderer->Mesh())
                                                      : Keire::MeshAsset::Cube();
@@ -925,7 +930,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                         }
                     }
                 }
-                InspectorPropertyEditor propertyEditor(ui, records, assets, scene, *m_AssetPicker);
+                InspectorPropertyEditor propertyEditor(ui, records, assets, scene, *m_AssetPicker, managedAssetTypes,
+                                                       resolveManagedType);
                 for (const auto& component : entity.GetComponents())
                 {
                     if (component != displayedComponent)

@@ -74,6 +74,31 @@ namespace
     {
         if (options.ExpectedType && type != *options.ExpectedType)
             return false;
+        if (options.ExpectedManagedType)
+        {
+            if (!options.ResolveManagedType)
+                return false;
+            const auto actual = options.ResolveManagedType(id);
+            if (!actual)
+                return false;
+            auto current = *actual;
+            bool compatible = false;
+            for (std::size_t depth = 0; current && depth <= options.ManagedTypes.size(); ++depth)
+            {
+                if (current == *options.ExpectedManagedType)
+                {
+                    compatible = true;
+                    break;
+                }
+                const auto descriptor =
+                    std::ranges::find(options.ManagedTypes, current, &Keire::ManagedAssetTypeDescriptor::StableTypeId);
+                if (descriptor == options.ManagedTypes.end() || !descriptor->BaseTypeId)
+                    break;
+                current = *descriptor->BaseTypeId;
+            }
+            if (!compatible)
+                return false;
+        }
         if (!options.Filter)
             return true;
         if (id == source.Id)
@@ -137,8 +162,7 @@ namespace KeireEditor
 {
     bool AssetPicker::Accepts(const Keire::AssetSourceRecord& record, const AssetPickerOptions& options)
     {
-        return (!options.ExpectedType || record.Type == *options.ExpectedType) &&
-               (!options.Filter || options.Filter(record));
+        return AcceptsCandidate(record, record.Id, record.Type, options);
     }
 
     bool AssetPicker::AcceptsEnvironmentTexture(const Keire::AssetSourceRecord& record)

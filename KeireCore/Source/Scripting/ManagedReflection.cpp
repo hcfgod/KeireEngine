@@ -1,5 +1,7 @@
 #include "KeireInternal/Scripting/ManagedReflection.h"
 
+#include "Keire/Scripting/ManagedDataAsset.h"
+
 #if defined(_MSC_VER)
 #pragma warning(push)
 #pragma warning(disable : 4146)
@@ -331,8 +333,12 @@ namespace Keire::Detail
                 if (*kind == ComponentPropertyKind::Event)
                     property.EventArgumentCount = ManagedEventArgumentCount(ManagedTypeName(fieldType));
                 if (*kind == ComponentPropertyKind::Asset)
-                    if (const auto assetType = ManagedAssetType(fieldType, attributeTypes))
+                {
+                    if (property.ReferenceKind == ManagedReferenceKind::ScriptableObject)
+                        property.ExpectedAssetType = ManagedDataAsset::StaticType();
+                    else if (const auto assetType = ManagedAssetType(fieldType, attributeTypes))
                         property.ExpectedAssetType = assetType;
+                }
                 result.push_back(std::move(property));
                 continue;
             }

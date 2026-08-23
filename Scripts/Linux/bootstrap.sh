@@ -516,6 +516,7 @@ perl -Mopen=:std -e 1 || { printf 'Perl open module is unavailable.\n' >&2; exit
 install_dotnet_sdk
 install_logical_packages curl-dev
 install_logical_packages sdl-video
+install_logical_packages sdl-input
 ensure_command zenity native-dialog
 ensure_host_clang_toolchain
 if ! pkg-config --exists x11 && ! pkg-config --exists wayland-client; then

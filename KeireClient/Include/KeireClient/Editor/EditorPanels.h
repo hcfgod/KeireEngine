@@ -104,6 +104,8 @@ namespace KeireEditor
         [[nodiscard]] virtual Keire::AssetId InspectorSelectedAsset() const noexcept = 0;
         [[nodiscard]] virtual std::string_view InspectorAssetStatus() const noexcept = 0;
         [[nodiscard]] virtual std::vector<Keire::ManagedAssetTypeDescriptor> InspectorManagedAssetTypes() const = 0;
+        [[nodiscard]] virtual std::optional<Keire::ManagedTypeId>
+        InspectorManagedDataType(Keire::AssetId asset) const noexcept = 0;
         [[nodiscard]] virtual Keire::Ref<Keire::UndoContext> InspectorManagedDataHistory() const noexcept = 0;
         [[nodiscard]] virtual bool InspectorPlayModeActive() const noexcept = 0;
         virtual void SetInspectorSelectedAsset(Keire::AssetId asset) noexcept = 0;

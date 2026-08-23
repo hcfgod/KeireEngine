@@ -1,5 +1,7 @@
 #include "KeireClient/Editor/AssetBrowserPanel.h"
 
+#include "KeireClient/Editor/AssetBrowserPresentation.h"
+
 #include "KeireClient/Editor/AssetBrowserFolderCache.h"
 #include "KeireClient/Editor/AssetBrowserUtilities.h"
 #include "KeireClient/Editor/ExternalAssetImportController.h"
@@ -713,60 +715,10 @@ namespace KeireEditor
                             bool created = false;
                             try
                             {
-                                created =
-                                    PendingCreateKind == NamedCreateKind::Scene
-                                        ? editor.CreateAssetBrowserScene(CreateNameBuffer)
-                                    : PendingCreateKind == NamedCreateKind::Material
-                                        ? editor.CreateAssetBrowserMaterial(CreateNameBuffer)
-                                    : PendingCreateKind == NamedCreateKind::AnimationGraph
-                                        ? editor.CreateAssetBrowserAnimationGraph(CreateNameBuffer)
-                                    : PendingCreateKind == NamedCreateKind::ProceduralMotionProfile
-                                        ? editor.CreateAssetBrowserProceduralMotionProfile(CreateNameBuffer)
-                                    : PendingCreateKind == NamedCreateKind::Script
-                                        ? editor.CreateAssetBrowserScript(CreateNameBuffer)
-                                    : PendingCreateKind == NamedCreateKind::ScriptableObjectScript
-                                        ? editor.CreateAssetBrowserScriptableObjectScript(CreateNameBuffer)
-                                    : PendingCreateKind == NamedCreateKind::ManagedAssembly
-                                        ? editor.CreateAssetBrowserManagedAssembly(CreateNameBuffer)
-                                    : PendingCreateKind == NamedCreateKind::ManagedData
-                                        ? editor.CreateAssetBrowserManagedData(PendingManagedType, CreateNameBuffer)
-                                    : PendingCreateKind == NamedCreateKind::AudioMixer
-                                        ? editor.CreateAssetBrowserAudioMixer(CreateNameBuffer)
-                                    : PendingCreateKind == NamedCreateKind::PhysicsMaterial
-                                        ? editor.CreateAssetBrowserPhysicsMaterial(CreateNameBuffer)
-                                    : PendingCreateKind == NamedCreateKind::VfxEffect
-                                        ? editor.CreateAssetBrowserVfxEffect(CreateNameBuffer)
-                                    : PendingCreateKind == NamedCreateKind::MaterialGraph
-                                        ? editor.CreateAssetBrowserMaterialGraph(CreateNameBuffer,
-                                                                                 MaterialGraphCreation.Shader())
-                                    : PendingCreateKind == NamedCreateKind::ShaderGraph
-                                        ? editor.CreateAssetBrowserShaderGraph(CreateNameBuffer,
-                                                                               PendingShaderGraphTemplate)
-                                    : PendingCreateKind == NamedCreateKind::MaterialFunction
-                                        ? editor.CreateAssetBrowserReusableGraph(
-                                              CreateNameBuffer, Keire::ShaderGraphPurpose::MaterialFunction)
-                                    : PendingCreateKind == NamedCreateKind::ShaderFunction
-                                        ? editor.CreateAssetBrowserReusableGraph(
-                                              CreateNameBuffer, Keire::ShaderGraphPurpose::ShaderFunction)
-                                    : PendingCreateKind == NamedCreateKind::MaterialLayer
-                                        ? editor.CreateAssetBrowserReusableGraph(
-                                              CreateNameBuffer, Keire::ShaderGraphPurpose::MaterialLayer)
-                                    : PendingCreateKind == NamedCreateKind::MaterialLayerBlend
-                                        ? editor.CreateAssetBrowserReusableGraph(
-                                              CreateNameBuffer, Keire::ShaderGraphPurpose::MaterialLayerBlend)
-                                    : PendingCreateKind == NamedCreateKind::MaterialParameterCollection
-                                        ? editor.CreateAssetBrowserMaterialParameterCollection(CreateNameBuffer)
-                                    : PendingCreateKind == NamedCreateKind::MaterialInstance
-                                        ? editor.CreateAssetBrowserMaterialInstance(CreateNameBuffer)
-                                    : PendingCreateKind == NamedCreateKind::Prefab
-                                        ? editor.CreateAssetBrowserPrefab(CreateNameBuffer)
-                                    : PendingCreateKind == NamedCreateKind::PrefabVariant
-                                        ? editor.CreateAssetBrowserPrefabVariant(PendingVariantBase, CreateNameBuffer)
-                                    : PendingCreateKind == NamedCreateKind::Shader
-                                        ? editor.CreateAssetBrowserShader(CreateNameBuffer)
-                                    : PendingInputActions
-                                        ? editor.CreateAssetBrowserInputActions(*PendingInputActions, CreateNameBuffer)
-                                        : false;
+                                created = Detail::CreateNamedAsset(editor, PendingCreateKind, CreateNameBuffer,
+                                                                   PendingManagedType, PendingInputActions,
+                                                                   PendingVariantBase, MaterialGraphCreation.Shader(),
+                                                                   PendingShaderGraphTemplate);
                             }
                             catch (...)
                             {
@@ -955,26 +907,6 @@ namespace KeireEditor
             }
         }
 
-        void CopyText(IAssetBrowserController& editor, const std::string_view value)
-        {
-            try
-            {
-                editor.CopyAssetBrowserText(value);
-                editor.SetAssetBrowserStatus("Copied to clipboard.");
-            }
-            catch (const std::exception& error)
-            {
-                editor.ReportAssetBrowserError(std::string("Clipboard operation failed: ") + error.what());
-            }
-        }
-
-        void RevealPath(IAssetBrowserController& editor, const std::filesystem::path& path)
-        {
-            std::string diagnostic;
-            if (!Keire::Detail::RevealInFileManager(path, diagnostic))
-                editor.ReportAssetBrowserError("Reveal failed: " + diagnostic);
-        }
-
         void DrawAssetContext(Keire::UiFrame& ui, const Keire::AssetSourceRecord& record,
                               IAssetBrowserController& editor, const std::string_view id)
         {
@@ -1013,11 +945,12 @@ namespace KeireEditor
                     ui.MenuItem("Extract Materials"))
                     editor.ExtractAssetBrowserMaterials(record.Id);
                 if (ui.MenuItem("Reveal in File Explorer"))
-                    RevealPath(editor, AssetRoot / record.RelativePath);
+                    Detail::RevealAssetBrowserPath(editor, AssetRoot / record.RelativePath);
                 if (ui.MenuItem("Copy Relative Path"))
-                    CopyText(editor, (std::filesystem::path("Assets") / record.RelativePath).generic_string());
+                    Detail::CopyAssetBrowserText(
+                        editor, (std::filesystem::path("Assets") / record.RelativePath).generic_string());
                 if (ui.MenuItem("Copy Asset ID"))
-                    CopyText(editor, record.Id.ToString());
+                    Detail::CopyAssetBrowserText(editor, record.Id.ToString());
             }
         }
 
@@ -1053,30 +986,10 @@ namespace KeireEditor
                 if (ui.MenuItem("Reimport Recursively"))
                     editor.ImportAssetBrowserAssets();
                 if (ui.MenuItem("Reveal in File Explorer"))
-                    RevealPath(editor, AssetRoot / folder);
+                    Detail::RevealAssetBrowserPath(editor, AssetRoot / folder);
                 if (ui.MenuItem("Copy Relative Path"))
-                    CopyText(editor, (std::filesystem::path("Assets") / folder).generic_string());
+                    Detail::CopyAssetBrowserText(editor, (std::filesystem::path("Assets") / folder).generic_string());
             }
-        }
-
-        void DrawAssetTooltip(Keire::UiFrame& ui, const Keire::AssetSourceRecord& record,
-                              IAssetBrowserController& editor)
-        {
-            if (!ui.LastItemState().Hovered)
-                return;
-            std::error_code error;
-            const auto bytes = std::filesystem::file_size(AssetRoot / record.RelativePath, error);
-            const auto status = editor.AssetBrowserDatabase()->ImportStatus(record.Id);
-            std::ostringstream text;
-            text << record.RelativePath.filename().string() << '\n'
-                 << AssetTypeName(record) << '\n'
-                 << "Assets/" << record.RelativePath.generic_string() << '\n';
-            if (!error)
-                text << bytes << " bytes\n";
-            text << "ID: " << record.Id.ToString() << '\n' << "Importer: " << record.Importer;
-            if (status.State == Keire::AssetImportState::Failed && !status.Diagnostics.empty())
-                text << "\nImport failed: " << status.Diagnostics.front().Message;
-            ui.SetTooltip(text.str(), {.Delayed = true});
         }
 
         void DrawAssetDragSource(Keire::UiFrame& ui, const Keire::AssetSourceRecord& record)
@@ -1092,27 +1005,6 @@ namespace KeireEditor
             }
         }
 
-        [[nodiscard]] Keire::Ref<Keire::UiImage> AssetImage(const Keire::AssetSourceRecord& record) const
-        {
-            if (const auto found = Images.find(record.Id); found != Images.end())
-                return found->second;
-            if (record.Type == Keire::ShaderGraphAsset::StaticType())
-                return ShaderGraphFallbackImage;
-            if (record.Type == Keire::MaterialGraphAsset::StaticType())
-                return MaterialGraphFallbackImage;
-            if (record.Type == Keire::MaterialInstanceAsset::StaticType() ||
-                record.Type == Keire::ShaderGraphInstanceAsset::StaticType())
-                return MaterialInstanceFallbackImage;
-            if (record.Type == Keire::VfxEffectAsset::StaticType())
-                return VfxFallbackImage;
-            if (record.Type == Keire::AudioMixerAsset::StaticType())
-                return AudioMixerFallbackImage;
-            if (record.Type == Keire::AnimationSourceAsset::StaticType() ||
-                record.Type == Keire::AnimationClipAsset::StaticType())
-                return AnimationFallbackImage;
-            return AssetFallbackImage;
-        }
-
         void ToggleAssetChildren(const Keire::AssetId asset)
         {
             if (ExpandedParents.contains(asset))
@@ -1121,159 +1013,14 @@ namespace KeireEditor
                 ExpandedParents.insert(asset);
         }
 
-        [[nodiscard]] static Keire::UiColor WithAlpha(Keire::UiColor color, const float alpha) noexcept
-        {
-            color.Alpha = alpha;
-            return color;
-        }
-
-        [[nodiscard]] float GridCardHeight(Keire::UiFrame& ui) const
-        {
-            const float lineHeight = std::max(ui.MeasureText("Ag").Height, 12.0F);
-            return ThumbnailSize + lineHeight * 2.0F + 26.0F;
-        }
-
-        [[nodiscard]] static Keire::UiItemRect GridThumbnailArea(const Keire::UiItemRect card,
-                                                                 const float thumbnailSize) noexcept
-        {
-            const float left = card.Minimum.X + (card.Size().Width - thumbnailSize) * 0.5F;
-            return {{left, card.Minimum.Y + 8.0F}, {left + thumbnailSize, card.Minimum.Y + 8.0F + thumbnailSize}};
-        }
-
-        [[nodiscard]] static Keire::UiItemRect GridDisclosureArea(const Keire::UiItemRect card,
-                                                                  const float thumbnailSize) noexcept
-        {
-            const auto thumbnail = GridThumbnailArea(card, thumbnailSize);
-            return {{card.Minimum.X + 8.0F, thumbnail.Maximum.Y + 3.0F},
-                    {card.Minimum.X + 26.0F, thumbnail.Maximum.Y + 21.0F}};
-        }
-
-        [[nodiscard]] static Keire::UiItemRect ListDisclosureArea(const Keire::UiItemRect row) noexcept
-        {
-            return {{row.Minimum.X + 4.0F, row.Minimum.Y + 10.0F}, {row.Minimum.X + 24.0F, row.Minimum.Y + 30.0F}};
-        }
-
-        static void DrawItemChrome(Keire::UiFrame& ui, const Keire::UiItemRect area, const bool selected,
-                                   const bool hovered, const Keire::UiThemeDefinition& theme, const float rounding)
-        {
-            ui.DrawFilledRectangle(area, theme.Panel, rounding);
-            if (selected)
-                ui.DrawFilledRectangle(area, theme.Selection, rounding);
-            ui.DrawRectangle(area, selected ? theme.Accent : (hovered ? theme.AccentHovered : theme.Border),
-                             selected ? 2.0F : 1.0F, rounding);
-        }
-
-        [[nodiscard]] static float CountBadgeWidth(Keire::UiFrame& ui, const std::size_t count)
-        {
-            return std::max(ui.MeasureText(std::to_string(count), 11.0F).Width + 10.0F, 20.0F);
-        }
-
-        static void DrawCountBadge(Keire::UiFrame& ui, const Keire::UiItemRect area, const std::size_t count,
-                                   const Keire::UiThemeDefinition& theme)
-        {
-            const auto label = std::to_string(count);
-            const auto text = ui.MeasureText(label, 11.0F);
-            const float width = CountBadgeWidth(ui, count);
-            const Keire::UiItemRect badge{{area.Maximum.X - width, area.Minimum.Y}, area.Maximum};
-            ui.DrawFilledRectangle(badge, theme.RaisedPanel, 8.0F);
-            ui.DrawRectangle(badge, theme.Border, 1.0F, 8.0F);
-            ui.DrawOverlayText({badge.Minimum.X + (badge.Size().Width - text.Width) * 0.5F, badge.Minimum.Y + 2.0F},
-                               theme.Text, label, 11.0F, badge);
-        }
-
-        static void DrawDisclosureTriangle(Keire::UiFrame& ui, const Keire::UiItemRect area, const bool expanded,
-                                           const Keire::UiColor color)
-        {
-            const auto triangle = AssetBrowserDisclosureTriangle(area, expanded);
-            ui.DrawFilledTriangle(triangle[0], triangle[1], triangle[2], color);
-        }
-
-        void DrawGridItemVisual(Keire::UiFrame& ui, const Keire::UiItemRect area,
-                                const Keire::Ref<Keire::UiImage>& image, const std::string_view name,
-                                const std::string_view type, const bool selected, const bool hovered,
-                                const bool hasChildren, const std::size_t childCount, const bool expanded,
-                                const bool failed, const Keire::UiThemeDefinition& theme) const
-        {
-            DrawItemChrome(ui, area, selected, hovered, theme, 4.0F);
-            const auto thumbnail = GridThumbnailArea(area, ThumbnailSize);
-            ui.DrawImage(image, thumbnail);
-            ui.DrawRectangle(thumbnail, selected ? theme.Accent : theme.Border, selected ? 2.0F : 1.0F, 3.0F);
-            if (failed)
-                ui.DrawFilledCircle({thumbnail.Minimum.X + 7.0F, thumbnail.Minimum.Y + 7.0F}, 4.0F, theme.Error);
-
-            const float badgeWidth = hasChildren ? CountBadgeWidth(ui, childCount) : 0.0F;
-            const auto nameArea = AssetBrowserGridNameArea(area, ThumbnailSize, badgeWidth, hasChildren);
-            const float nameWidth = std::max(nameArea.Size().Width, 1.0F);
-            const float typeWidth = std::max(area.Size().Width - 16.0F, 1.0F);
-            const auto visibleName = ElideAssetDisplayName(name, nameWidth, [&ui](const std::string_view value)
-                                                           { return ui.MeasureText(value, 13.0F).Width; });
-            const auto visibleType = ElideAssetDisplayName(type, typeWidth, [&ui](const std::string_view value)
-                                                           { return ui.MeasureText(value, 11.0F).Width; });
-            const auto nameSize = ui.MeasureText(visibleName, 13.0F);
-            const auto typeSize = ui.MeasureText(visibleType, 11.0F);
-            const float nameY = thumbnail.Maximum.Y + 6.0F;
-            ui.DrawOverlayText({nameArea.Minimum.X + (nameArea.Size().Width - nameSize.Width) * 0.5F, nameY},
-                               theme.Text, visibleName, 13.0F, nameArea);
-            ui.DrawOverlayText({area.Minimum.X + (area.Size().Width - typeSize.Width) * 0.5F, nameY + 16.0F},
-                               theme.MutedText, visibleType, 11.0F, area);
-
-            if (!hasChildren)
-                return;
-            const auto disclosure = GridDisclosureArea(area, ThumbnailSize);
-            DrawDisclosureTriangle(ui, disclosure, expanded, theme.Text);
-            DrawCountBadge(ui,
-                           {{area.Maximum.X - 8.0F - badgeWidth, thumbnail.Maximum.Y + 3.0F},
-                            {area.Maximum.X - 8.0F, thumbnail.Maximum.Y + 21.0F}},
-                           childCount, theme);
-        }
-
-        static void DrawListItemVisual(Keire::UiFrame& ui, const Keire::UiItemRect area,
-                                       const Keire::Ref<Keire::UiImage>& image, const std::string_view name,
-                                       const std::string_view type, const bool selected, const bool hovered,
-                                       const bool hasChildren, const std::size_t childCount, const bool expanded,
-                                       const bool failed, const Keire::UiThemeDefinition& theme)
-        {
-            DrawItemChrome(ui, area, selected, hovered, theme, 3.0F);
-            if (hasChildren)
-            {
-                const auto disclosure = ListDisclosureArea(area);
-                DrawDisclosureTriangle(ui, disclosure, expanded, theme.Text);
-            }
-
-            const Keire::UiItemRect thumbnail{{area.Minimum.X + 28.0F, area.Minimum.Y + 6.0F},
-                                              {area.Minimum.X + 58.0F, area.Minimum.Y + 36.0F}};
-            ui.DrawImage(image, thumbnail);
-            ui.DrawRectangle(thumbnail, selected ? theme.Accent : theme.Border, selected ? 2.0F : 1.0F, 3.0F);
-            if (failed)
-                ui.DrawFilledCircle({thumbnail.Minimum.X + 5.0F, thumbnail.Minimum.Y + 5.0F}, 3.5F, theme.Error);
-
-            float trailingWidth = 8.0F;
-            if (hasChildren)
-            {
-                const auto count = std::to_string(childCount);
-                trailingWidth = std::max(ui.MeasureText(count, 11.0F).Width + 24.0F, 38.0F);
-                DrawCountBadge(ui,
-                               {{area.Maximum.X - trailingWidth, area.Minimum.Y + 12.0F},
-                                {area.Maximum.X - 8.0F, area.Minimum.Y + 30.0F}},
-                               childCount, theme);
-            }
-            const float textWidth = std::max(area.Maximum.X - trailingWidth - (thumbnail.Maximum.X + 8.0F), 1.0F);
-            const auto visibleName = ElideAssetDisplayName(name, textWidth, [&ui](const std::string_view value)
-                                                           { return ui.MeasureText(value, 13.0F).Width; });
-            const auto visibleType = ElideAssetDisplayName(type, textWidth, [&ui](const std::string_view value)
-                                                           { return ui.MeasureText(value, 11.0F).Width; });
-            ui.DrawOverlayText({thumbnail.Maximum.X + 8.0F, area.Minimum.Y + 5.0F}, theme.Text, visibleName, 13.0F,
-                               area);
-            ui.DrawOverlayText({thumbnail.Maximum.X + 8.0F, area.Minimum.Y + 22.0F}, theme.MutedText, visibleType,
-                               11.0F, area);
-        }
-
         void DrawAsset(Keire::UiFrame& ui, const Keire::AssetSourceRecord& record, IAssetBrowserController& editor,
                        const bool grid, const std::size_t depth, const std::size_t directChildCount,
                        const bool hasChildren, const bool forceExpanded = false, const float rowHeight = 42.0F)
         {
             auto id = ui.PushId(record.Id.ToString());
-            const auto image = AssetImage(record);
+            const auto image = Detail::ResolveAssetBrowserImage(
+                record, Images, AssetFallbackImage, ShaderGraphFallbackImage, MaterialGraphFallbackImage,
+                MaterialInstanceFallbackImage, VfxFallbackImage, AudioMixerFallbackImage, AnimationFallbackImage);
             const bool selected = std::ranges::find(Selection, record.Id) != Selection.end();
             const auto fullName = DisplayName(record.RelativePath);
             const bool expanded = forceExpanded || ExpandedParents.contains(record.Id);
@@ -1282,11 +1029,12 @@ namespace KeireEditor
             bool open = false;
             if (grid)
             {
-                const auto size = Keire::UiSize{std::max(ui.ContentAvailable().Width, 1.0F), GridCardHeight(ui)};
+                const auto size = Keire::UiSize{std::max(ui.ContentAvailable().Width, 1.0F),
+                                                Detail::AssetBrowserGridCardHeight(ui, ThumbnailSize)};
                 const bool activated = ui.InvisibleButton("AssetCard", size);
                 const auto state = ui.LastItemState();
                 const auto area = ui.LastItemRect();
-                const auto disclosure = GridDisclosureArea(area, ThumbnailSize);
+                const auto disclosure = Detail::AssetBrowserGridDisclosureArea(area, ThumbnailSize);
                 const bool disclosureHovered = hasChildren && disclosure.Contains(ui.PointerState().Position);
                 if (activated)
                 {
@@ -1299,12 +1047,13 @@ namespace KeireEditor
                 if (state.Hovered && disclosureHovered)
                     ui.SetTooltip(expanded ? "Collapse generated assets" : "Show generated assets", {.Delayed = true});
                 else
-                    DrawAssetTooltip(ui, record, editor);
+                    Detail::DrawAssetBrowserTooltip(ui, record, AssetRoot, *editor.AssetBrowserDatabase());
                 if (!disclosureHovered)
                     DrawAssetDragSource(ui, record);
                 DrawAssetContext(ui, record, editor, "AssetCardContext");
-                DrawGridItemVisual(ui, area, image, fullName, AssetTypeName(record), selected, state.Hovered,
-                                   hasChildren, directChildCount, expanded, failed, editor.AssetBrowserTheme());
+                Detail::DrawAssetBrowserGridItemVisual(ui, area, image, fullName, AssetTypeName(record), selected,
+                                                       state.Hovered, hasChildren, directChildCount, expanded, failed,
+                                                       editor.AssetBrowserTheme(), ThumbnailSize);
             }
             else
             {
@@ -1315,7 +1064,7 @@ namespace KeireEditor
                 const bool activated = ui.InvisibleButton("AssetRow", size);
                 const auto state = ui.LastItemState();
                 const auto area = ui.LastItemRect();
-                const auto disclosure = ListDisclosureArea(area);
+                const auto disclosure = Detail::AssetBrowserListDisclosureArea(area);
                 const bool disclosureHovered = hasChildren && disclosure.Contains(ui.PointerState().Position);
                 if (activated)
                 {
@@ -1328,16 +1077,17 @@ namespace KeireEditor
                 if (state.Hovered && disclosureHovered)
                     ui.SetTooltip(expanded ? "Collapse generated assets" : "Show generated assets", {.Delayed = true});
                 else
-                    DrawAssetTooltip(ui, record, editor);
+                    Detail::DrawAssetBrowserTooltip(ui, record, AssetRoot, *editor.AssetBrowserDatabase());
                 if (!disclosureHovered)
                     DrawAssetDragSource(ui, record);
                 DrawAssetContext(ui, record, editor, "AssetRowContext");
-                DrawListItemVisual(ui, area, image, fullName, AssetTypeName(record), selected, state.Hovered,
-                                   hasChildren, directChildCount, expanded, failed, editor.AssetBrowserTheme());
+                Detail::DrawAssetBrowserListItemVisual(ui, area, image, fullName, AssetTypeName(record), selected,
+                                                       state.Hovered, hasChildren, directChildCount, expanded, failed,
+                                                       editor.AssetBrowserTheme());
                 if (depth > 0)
                 {
                     const float railX = area.Minimum.X - 10.0F;
-                    const auto rail = WithAlpha(editor.AssetBrowserTheme().Accent, 0.38F);
+                    const auto rail = Detail::AssetBrowserColorWithAlpha(editor.AssetBrowserTheme().Accent, 0.38F);
                     ui.DrawLine({railX, area.Minimum.Y - 4.0F}, {railX, area.Maximum.Y + 4.0F}, rail);
                     ui.DrawLine({railX, area.Minimum.Y + area.Size().Height * 0.5F},
                                 {area.Minimum.X - 3.0F, area.Minimum.Y + area.Size().Height * 0.5F}, rail);
@@ -1389,7 +1139,7 @@ namespace KeireEditor
                 DrawAsset(ui, *child.Record, editor, false, 0, child.DirectChildCount, child.HasChildren, forceExpanded,
                           44.0F);
 
-                const auto rail = WithAlpha(theme.Accent, 0.38F);
+                const auto rail = Detail::AssetBrowserColorWithAlpha(theme.Accent, 0.38F);
                 const float railTop = rowStart.Y - 4.0F;
                 const float railBottom = rowStart.Y + 48.0F;
                 for (std::size_t level = 0; level < child.Depth; ++level)
@@ -1404,70 +1154,17 @@ namespace KeireEditor
             }
         }
 
-        void AcceptFolderPayloads(Keire::UiFrame& ui, const std::filesystem::path& folder,
-                                  IAssetBrowserController& editor)
-        {
-            std::vector<std::byte> payload;
-            if (ui.AcceptDragPayload("KEIRE_ASSETS", payload))
-            {
-                try
-                {
-                    MoveAssets(DecodeAssetPayload(payload), folder, editor);
-                }
-                catch (const std::exception& error)
-                {
-                    editor.ReportAssetBrowserError(std::string("Asset move failed: ") + error.what());
-                }
-            }
-            payload.clear();
-            if (ui.AcceptDragPayload("KEIRE_FOLDERS", payload))
-            {
-                try
-                {
-                    const auto sources = DecodeFolderPayload(payload);
-                    for (const auto& source : sources)
-                    {
-                        const auto destination = folder / source.filename();
-                        editor.MutateAssetBrowser({.Kind = Keire::Detail::AssetWorkerMutationKind::MoveFolder,
-                                                   .Source = source,
-                                                   .Destination = destination},
-                                                  {.Kind = Keire::Detail::AssetWorkerMutationKind::MoveFolder,
-                                                   .Source = destination,
-                                                   .Destination = source},
-                                                  "Move Folder");
-                    }
-                    editor.SetAssetBrowserStatus("Queued " + std::to_string(sources.size()) + " folder move(s).");
-                }
-                catch (const std::exception& error)
-                {
-                    editor.ReportAssetBrowserError(std::string("Folder move failed: ") + error.what());
-                }
-            }
-            payload.clear();
-            if (ui.AcceptDragPayload("KEIRE_SCENE_OBJECT", payload))
-            {
-                try
-                {
-                    editor.CreateAssetBrowserPrefabFromObject(DecodeSingleAssetPayload(payload), folder);
-                }
-                catch (const std::exception& error)
-                {
-                    editor.ReportAssetBrowserError(std::string("Prefab creation failed: ") + error.what());
-                }
-            }
-        }
-
         void AcceptFolderDrop(Keire::UiFrame& ui, const std::filesystem::path& folder, IAssetBrowserController& editor)
         {
             if (auto target = ui.BeginDragTarget(); target)
-                AcceptFolderPayloads(ui, folder, editor);
+                Detail::AcceptAssetBrowserFolderPayloads(ui, folder, editor);
         }
 
         void AcceptFolderDrop(Keire::UiFrame& ui, const Keire::UiItemRect area, const std::filesystem::path& folder,
                               IAssetBrowserController& editor)
         {
             if (auto target = ui.BeginDragTarget(area, "FolderCardDrop"); target)
-                AcceptFolderPayloads(ui, folder, editor);
+                Detail::AcceptAssetBrowserFolderPayloads(ui, folder, editor);
         }
 
         void DrawFolder(Keire::UiFrame& ui, const std::filesystem::path& folder, IAssetBrowserController& editor,
@@ -1486,7 +1183,8 @@ namespace KeireEditor
                                                        : std::to_string(payloadFolders.size()) + " folders");
                 }
             };
-            const auto size = grid ? Keire::UiSize{std::max(ui.ContentAvailable().Width, 1.0F), GridCardHeight(ui)}
+            const auto size = grid ? Keire::UiSize{std::max(ui.ContentAvailable().Width, 1.0F),
+                                                   Detail::AssetBrowserGridCardHeight(ui, ThumbnailSize)}
                                    : Keire::UiSize{std::max(ui.ContentAvailable().Width, 1.0F), 42.0F};
             const bool activated = ui.InvisibleButton(grid ? "FolderCard" : "FolderRow", size);
             const auto state = ui.LastItemState();
@@ -1499,11 +1197,13 @@ namespace KeireEditor
             drawDragSource();
             DrawFolderContext(ui, folder, editor, grid ? "FolderCardContext" : "FolderRowContext");
             if (grid)
-                DrawGridItemVisual(ui, area, FolderImage, folder.filename().string(), "Folder", selected, state.Hovered,
-                                   false, 0, false, false, editor.AssetBrowserTheme());
+                Detail::DrawAssetBrowserGridItemVisual(ui, area, FolderImage, folder.filename().string(), "Folder",
+                                                       selected, state.Hovered, false, 0, false, false,
+                                                       editor.AssetBrowserTheme(), ThumbnailSize);
             else
-                DrawListItemVisual(ui, area, FolderImage, folder.filename().string(), "Folder", selected, state.Hovered,
-                                   false, 0, false, false, editor.AssetBrowserTheme());
+                Detail::DrawAssetBrowserListItemVisual(ui, area, FolderImage, folder.filename().string(), "Folder",
+                                                       selected, state.Hovered, false, 0, false, false,
+                                                       editor.AssetBrowserTheme());
             ExternalDropTargets.push_back({area, folder});
             AcceptFolderDrop(ui, area, folder, editor);
             if (open)
@@ -1628,7 +1328,7 @@ namespace KeireEditor
             if (ui.MenuItem("Refresh and Reimport"))
                 editor.ImportAssetBrowserAssets();
             if (ui.MenuItem("Reveal in File Explorer"))
-                RevealPath(editor, AssetRoot / CurrentFolder);
+                Detail::RevealAssetBrowserPath(editor, AssetRoot / CurrentFolder);
             if (ui.MenuItem("Open Trash"))
                 OpenTrashPopup = true;
         }

@@ -11,6 +11,7 @@
 #include "KeireInternal/Assets/AssetDatabaseWorkerAccess.h"
 #include "KeireInternal/Assets/AssetInternal.h"
 #include "KeireInternal/Assets/AssetWorkerProtocol.h"
+#include "KeireInternal/Assets/ImportedMaterialShader.h"
 #include "KeireInternal/FileSystem.h"
 
 #include <nlohmann/json.hpp>
@@ -386,6 +387,223 @@ TEST_CASE("Single asset creation and rename avoid unrelated project rescans")
     CHECK_THROWS((void)database->Refresh());
 }
 
+TEST_CASE("Asset mutations reject paths through symbolic links without changing external files")
+{
+    TemporaryAssetProject project;
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.SymlinkConfinement";
+    importer.Type = Keire::AssetTypeId::Parse("f1000000-0000-4000-8000-000000000012");
+    importer.Extensions = {".confined"};
+    importer.Import = [](const std::span<const std::byte> bytes)
+    { return std::vector<std::byte>(bytes.begin(), bytes.end()); };
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
+
+    const auto outside = project.Root.parent_path() / ("AssetTests-Outside-" + Keire::AssetId::Generate().ToString());
+    std::filesystem::create_directories(outside);
+    struct OutsideCleanup final
+    {
+        ~OutsideCleanup()
+        {
+            std::error_code ignored;
+            std::filesystem::remove_all(Path, ignored);
+        }
+
+        std::filesystem::path Path;
+    } cleanup{outside};
+
+    std::error_code linkError;
+    std::filesystem::create_directory_symlink(outside, project.Root / "Assets/Escape", linkError);
+    if (linkError)
+    {
+        MESSAGE("Symbolic-link creation is unavailable in this environment: " << linkError.message());
+        if (KeireTests::RunningInCi())
+            FAIL_CHECK("CI must provide symbolic-link capability for asset-mutation confinement tests.");
+        return;
+    }
+
+    CHECK_THROWS_AS(database->CreateFolder("Escape/Created"), std::invalid_argument);
+    const std::string source = "must remain confined";
+    CHECK_THROWS_AS((void)database->CreateAsset("Escape/Created.confined", importer,
+                                                std::as_bytes(std::span(source.data(), source.size()))),
+                    std::invalid_argument);
+    CHECK_FALSE(std::filesystem::exists(outside / "Created"));
+    CHECK_FALSE(std::filesystem::exists(outside / "Created.confined"));
+    CHECK_FALSE(std::filesystem::exists(outside / "Created.confined.keiremeta"));
+    CHECK(database->Records().empty());
+}
+
+TEST_CASE("Indexed asset operations reject a source parent replaced by a symbolic link")
+{
+    TemporaryAssetProject project;
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.IndexedSymlinkConfinement";
+    importer.Type = Keire::AssetTypeId::Parse("f1000000-0000-4000-8000-000000000013");
+    importer.Extensions = {".confined"};
+    importer.Import = [](const std::span<const std::byte> bytes)
+    { return std::vector<std::byte>(bytes.begin(), bytes.end()); };
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
+
+    database->CreateFolder("Indexed");
+    const std::string source = "indexed project source";
+    const auto asset = database->CreateAsset("Indexed/Existing.confined", importer,
+                                             std::as_bytes(std::span(source.data(), source.size())));
+    REQUIRE(database->Find(asset));
+
+    const auto indexed = project.Root / "Assets/Indexed";
+    const auto parked = project.Root / "Assets/Indexed.original";
+    const auto outside = project.Root.parent_path() / ("AssetTests-IndexedOutside-" + asset.ToString());
+    std::filesystem::create_directories(outside);
+    std::filesystem::copy_file(indexed / "Existing.confined", outside / "Existing.confined");
+    std::filesystem::copy_file(indexed / "Existing.confined.keiremeta", outside / "Existing.confined.keiremeta");
+    Keire::Detail::RenamePathWithRetry(indexed, parked);
+
+    std::error_code linkError;
+    std::filesystem::create_directory_symlink(outside, indexed, linkError);
+    if (linkError)
+    {
+        Keire::Detail::RenamePathWithRetry(parked, indexed);
+        std::filesystem::remove_all(outside);
+        MESSAGE("Symbolic-link creation is unavailable in this environment: " << linkError.message());
+        if (KeireTests::RunningInCi())
+            FAIL_CHECK("CI must provide symbolic-link capability for indexed asset confinement tests.");
+        return;
+    }
+
+    struct LinkSwapCleanup final
+    {
+        ~LinkSwapCleanup()
+        {
+            std::error_code ignored;
+            std::filesystem::remove(Link, ignored);
+            (void)Keire::Detail::TryRenamePathWithRetry(Original, Link, ignored);
+            std::filesystem::remove_all(Outside, ignored);
+        }
+
+        std::filesystem::path Link;
+        std::filesystem::path Original;
+        std::filesystem::path Outside;
+    } cleanup{indexed, parked, outside};
+
+    const auto externalSource = ReadAll(outside / "Existing.confined");
+    const auto externalMetadata = ReadAll(outside / "Existing.confined.keiremeta");
+    const std::array assets{asset};
+    CHECK_THROWS_AS((void)Keire::Detail::AssetDatabaseWorkerAccess::ImportAssetsFromSourceIndex(
+                        *database, assets, Keire::AssetImportPolicy::FailFast),
+                    std::invalid_argument);
+    CHECK_THROWS_AS((void)database->Duplicate(asset, "Duplicate.confined"), std::invalid_argument);
+    CHECK_THROWS_AS(database->MoveAsset(asset, "Moved.confined"), std::invalid_argument);
+    CHECK_THROWS_AS((void)database->TrashAsset(asset), std::invalid_argument);
+
+    CHECK(ReadAll(outside / "Existing.confined") == externalSource);
+    CHECK(ReadAll(outside / "Existing.confined.keiremeta") == externalMetadata);
+    CHECK_FALSE(std::filesystem::exists(project.Root / "Assets/Duplicate.confined"));
+    CHECK_FALSE(std::filesystem::exists(project.Root / "Assets/Moved.confined"));
+}
+
+TEST_CASE("Mesh shader discovery rejects a linked shader directory before dependency reads")
+{
+    TemporaryAssetProject project;
+    const auto outside =
+        project.Root.parent_path() / ("AssetTests-ShaderOutside-" + Keire::AssetId::Generate().ToString());
+    std::filesystem::create_directories(outside);
+    {
+        std::ofstream manifest(outside / "DefaultUnlit.keireshader");
+        manifest << R"({"properties":[{"name":"MainTexture"}]})";
+        REQUIRE(manifest);
+        std::ofstream metadata(outside / "DefaultUnlit.keireshader.keiremeta");
+        metadata << R"({"id":"11111111-1111-4111-8111-111111111111"})";
+        REQUIRE(metadata);
+    }
+
+    const auto linkedShaders = project.Root / "Assets/Shaders";
+    std::error_code linkError;
+    std::filesystem::create_directory_symlink(outside, linkedShaders, linkError);
+    if (linkError)
+    {
+        std::filesystem::remove_all(outside);
+        MESSAGE("Symbolic-link creation is unavailable in this environment: " << linkError.message());
+        if (KeireTests::RunningInCi())
+            FAIL_CHECK("CI must provide symbolic-link capability for shader-discovery confinement tests.");
+        return;
+    }
+
+    struct ShaderLinkCleanup final
+    {
+        ~ShaderLinkCleanup()
+        {
+            std::error_code ignored;
+            std::filesystem::remove(Link, ignored);
+            std::filesystem::remove_all(Outside, ignored);
+        }
+
+        std::filesystem::path Link;
+        std::filesystem::path Outside;
+    } cleanup{linkedShaders, outside};
+
+    const std::string source = "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+    std::size_t dependencyReads = 0;
+    Keire::AssetImportContext context;
+    context.Asset = Keire::AssetId::Generate();
+    context.ProjectRoot = project.Root;
+    context.SourceRoot = project.Root / "Assets";
+    context.SourcePath = context.SourceRoot / "Triangle.obj";
+    context.RelativePath = "Triangle.obj";
+    context.ReadProjectFile = [&dependencyReads](const std::filesystem::path&)
+    {
+        ++dependencyReads;
+        return std::vector<std::byte>{};
+    };
+
+    const auto importer = Keire::CreateMeshAssetImporter();
+    REQUIRE(importer.ContextualImport);
+    CHECK_THROWS_AS(importer.ContextualImport(context, std::as_bytes(std::span(source.data(), source.size()))),
+                    std::invalid_argument);
+    CHECK(dependencyReads == 0);
+}
+
+TEST_CASE("Confined asset roots support equality and missing project creation")
+{
+    const auto root = std::filesystem::absolute(std::filesystem::path("Build") /
+                                                ("AssetTests-MissingRoot-" + Keire::AssetId::Generate().ToString()));
+    std::error_code ignored;
+    std::filesystem::remove_all(root, ignored);
+    struct RootCleanup final
+    {
+        ~RootCleanup()
+        {
+            std::error_code cleanupError;
+            std::filesystem::remove_all(Path, cleanupError);
+        }
+
+        std::filesystem::path Path;
+    } cleanup{root};
+
+    {
+        auto database = Keire::CreateRef<Keire::AssetDatabase>(Keire::AssetDatabaseSpecification{.ProjectRoot = root});
+        CHECK(std::filesystem::is_directory(root / "Assets"));
+        CHECK(std::filesystem::is_directory(root / "Library/AssetCache"));
+    }
+
+    const auto canonicalRoot = Keire::Detail::CanonicalExistingPath(root);
+    CHECK(Keire::Detail::ResolveConfinedPath(root, ".") == canonicalRoot);
+
+    {
+        auto database = Keire::CreateRef<Keire::AssetDatabase>(
+            Keire::AssetDatabaseSpecification{.ProjectRoot = root, .CacheDirectory = "."});
+        CHECK(database->Specification().CacheDirectory == std::filesystem::path("."));
+    }
+
+    {
+        const auto sourceEqualsRoot = root / "SourceEqualsRoot";
+        auto database = Keire::CreateRef<Keire::AssetDatabase>(Keire::AssetDatabaseSpecification{
+            .ProjectRoot = sourceEqualsRoot, .SourceDirectory = ".", .CacheDirectory = "Cache"});
+        CHECK(database->Specification().SourceDirectory == std::filesystem::path("."));
+        CHECK(std::filesystem::is_directory(sourceEqualsRoot / "Cache"));
+    }
+}
+
 TEST_CASE("asset source parent relationships persist and remain folder-confined")
 {
     TemporaryAssetProject project;
@@ -675,6 +893,177 @@ TEST_CASE("External asset imports persist normalized options and preserve identi
     CHECK(folderImport.Entries.front().RelativeDestination == std::filesystem::path("Folder/Supported.opt"));
     CHECK(std::filesystem::is_regular_file(project.Root / "Assets/Folder/Supported.opt"));
     CHECK_FALSE(std::filesystem::exists(project.Root / "Assets/Folder/Unsupported.unknown"));
+}
+
+TEST_CASE("External mesh staging discovers project shaders and selects them deterministically")
+{
+    TemporaryAssetProject project;
+    const auto alpha = Keire::AssetId::Parse("11111111-1111-4111-8111-111111111111");
+    const auto zeta = Keire::AssetId::Parse("22222222-2222-4222-8222-222222222222");
+    const auto defaultUnlit = Keire::AssetId::Parse("33333333-3333-4333-8333-333333333333");
+    const auto writeShader = [&project](const std::string_view name, const Keire::AssetId id)
+    {
+        project.Write(std::filesystem::path("Shaders") / (std::string(name) + ".keireshader"),
+                      R"({"properties":[{"name":"Tint"}]})");
+        project.Write(std::filesystem::path("Shaders") / (std::string(name) + ".keireshader.keiremeta"),
+                      "{\"id\":\"" + id.ToString() + "\"}");
+    };
+    writeShader("Zeta", zeta);
+    writeShader("Alpha", alpha);
+
+    Keire::AssetImportContext context;
+    context.Asset = Keire::AssetId::Generate();
+    context.ProjectRoot = project.Root;
+    context.SourceRoot = project.Root / "Assets";
+    context.SourcePath = project.Root / "Library/AssetImport/staging/Models/Triangle.obj";
+    context.RelativePath = "Models/Triangle.obj";
+    std::vector<std::filesystem::path> reads;
+    context.ReadProjectFile = [&project, &reads](const std::filesystem::path& relative)
+    {
+        reads.push_back(relative.lexically_normal());
+        const auto characters = ReadAll(project.Root / relative);
+        std::vector<std::byte> bytes(characters.size());
+        std::ranges::transform(characters, bytes.begin(),
+                               [](const char character) { return std::byte(static_cast<unsigned char>(character)); });
+        return bytes;
+    };
+
+    const auto alphabetical = Keire::Detail::FindImportedMaterialShader(context);
+    REQUIRE(alphabetical);
+    CHECK(alphabetical->Id == alpha);
+    CHECK(std::ranges::all_of(reads, [](const std::filesystem::path& path)
+                              { return path.native().starts_with(std::filesystem::path("Assets").native()); }));
+
+    writeShader("DefaultUnlit", defaultUnlit);
+    const auto preferred = Keire::Detail::FindImportedMaterialShader(context);
+    REQUIRE(preferred);
+    CHECK(preferred->Id == defaultUnlit);
+
+    TemporaryAssetProject externalProject;
+    Keire::AssetImporterRegistration shaderImporter;
+    shaderImporter.Name = "Test.ImportedShader";
+    shaderImporter.Type = Keire::ShaderAsset::StaticType();
+    shaderImporter.Extensions = {".keireshader"};
+    shaderImporter.Import = [](const std::span<const std::byte>)
+    {
+        Keire::ShaderAssetDefinition definition;
+        definition.Source = "Assets/Shaders/DefaultUnlit.hlsl";
+        Keire::ShaderPropertyDefinition tint;
+        tint.Name = "Tint";
+        tint.Type = Keire::ShaderPropertyType::Color;
+        definition.Properties.push_back(std::move(tint));
+        for (const auto format :
+             {Keire::ShaderBinaryFormat::Dxil, Keire::ShaderBinaryFormat::SpirV, Keire::ShaderBinaryFormat::Msl})
+            definition.Variants.push_back({format, {std::byte{1}}, {std::byte{2}}});
+        return Keire::ShaderAsset::Encode(definition);
+    };
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(Keire::AssetDatabaseSpecification{
+        .ProjectRoot = externalProject.Root, .Importers = {shaderImporter, Keire::CreateMeshAssetImporter()}});
+    const std::string manifest = R"({"properties":[{"name":"Tint"}]})";
+    const auto projectShader = database->CreateAsset("Shaders/DefaultUnlit.keireshader", shaderImporter,
+                                                     std::as_bytes(std::span(manifest.data(), manifest.size())));
+    const auto incoming = externalProject.Root / "Triangle.obj";
+    {
+        std::ofstream source(incoming, std::ios::binary | std::ios::trunc);
+        source << "o Triangle\n"
+                  "v 0 0 0\n"
+                  "v 1 0 0\n"
+                  "v 0 1 0\n"
+                  "f 1 2 3\n";
+        REQUIRE(source.good());
+    }
+    Keire::ExternalAssetImportItem item{incoming, "Models/Triangle.obj"};
+    const auto imported = database->ImportExternal(std::span(&item, 1));
+    const auto catalog = Keire::Detail::LoadCatalog(imported.Import.CatalogPath);
+    const auto material =
+        std::ranges::find(catalog.Entries, Keire::MaterialAsset::StaticType(), &Keire::Detail::CatalogEntry::Type);
+    REQUIRE(material != catalog.Entries.end());
+    CHECK(std::ranges::find(material->Dependencies, projectShader) != material->Dependencies.end());
+}
+
+TEST_CASE("External import rollback republishes the last-good catalog and survives deferred recovery")
+{
+    TemporaryAssetProject project;
+    std::atomic_bool failRollbackCook = false;
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.ExternalRecovery";
+    importer.Type = Keire::AssetTypeId::Parse("f1000000-0000-4000-8000-000000000019");
+    importer.Extensions = {".recover"};
+    importer.Import = [](const std::span<const std::byte> bytes)
+    { return std::vector<std::byte>(bytes.begin(), bytes.end()); };
+    importer.Cook = [&failRollbackCook](const std::span<const std::byte> bytes, Keire::AssetTargetPlatform)
+    {
+        if (failRollbackCook.load())
+            throw std::runtime_error("intentional rollback cook failure");
+        return std::vector<std::byte>(bytes.begin(), bytes.end());
+    };
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
+    const std::string baseline = "baseline";
+    (void)database->CreateAsset("Baseline.recover", importer,
+                                std::as_bytes(std::span(baseline.data(), baseline.size())));
+    const auto initial = database->ImportAll();
+    const auto initialCatalog = ReadAll(initial.CatalogPath);
+    const auto incoming = project.Root / "Incoming.recover";
+    {
+        std::ofstream source(incoming, std::ios::binary | std::ios::trunc);
+        source << "incoming";
+        REQUIRE(source.good());
+    }
+    Keire::ExternalAssetImportItem item{incoming, "Imported/Incoming.recover"};
+
+    bool injected = false;
+    CHECK_THROWS_WITH_AS(
+        (void)database->ImportExternal(std::span(&item, 1), {},
+                                       [&injected](const Keire::AssetOperationProgress& progress)
+                                       {
+                                           if (progress.Phase == Keire::AssetOperationPhase::Completed && !injected)
+                                           {
+                                               injected = true;
+                                               throw std::runtime_error("intentional post-cook failure");
+                                           }
+                                       }),
+        "intentional post-cook failure", std::runtime_error);
+    CHECK_FALSE(database->Find("Imported/Incoming.recover"));
+    CHECK_FALSE(std::filesystem::exists(project.Root / "Assets/Imported/Incoming.recover"));
+    CHECK(ReadAll(initial.CatalogPath) == initialCatalog);
+    CHECK_NOTHROW(Keire::AssetCooker::Validate(initial.CatalogPath));
+
+    injected = false;
+    CHECK_THROWS_WITH_AS(
+        (void)database->ImportExternal(std::span(&item, 1), {},
+                                       [&injected, &failRollbackCook](const Keire::AssetOperationProgress& progress)
+                                       {
+                                           if (progress.Phase == Keire::AssetOperationPhase::Completed && !injected)
+                                           {
+                                               injected = true;
+                                               failRollbackCook = true;
+                                               throw std::runtime_error("intentional recoverable post-cook failure");
+                                           }
+                                       }),
+        "intentional recoverable post-cook failure", std::runtime_error);
+    CHECK_FALSE(database->Find("Imported/Incoming.recover"));
+    CHECK_FALSE(std::filesystem::exists(project.Root / "Assets/Imported/Incoming.recover"));
+    const auto transactionRoot = project.Root / "Library/AssetImport";
+    std::filesystem::path pending;
+    for (const auto& entry : std::filesystem::directory_iterator(transactionRoot))
+        if (std::filesystem::is_regular_file(entry.path() / "journal.json"))
+        {
+            pending = entry.path();
+            break;
+        }
+    REQUIRE_FALSE(pending.empty());
+    const auto journal = ReadAll(pending / "journal.json");
+    CHECK(std::string(journal.begin(), journal.end()).find("publishing") != std::string::npos);
+
+    failRollbackCook = false;
+    database.Reset();
+    database = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
+    CHECK_FALSE(database->Find("Imported/Incoming.recover"));
+    CHECK(ReadAll(initial.CatalogPath) == initialCatalog);
+    CHECK_NOTHROW(Keire::AssetCooker::Validate(initial.CatalogPath));
+    CHECK(std::filesystem::directory_iterator(transactionRoot) == std::filesystem::directory_iterator{});
 }
 
 TEST_CASE("created assets consume their validated import during immediate targeted publication")

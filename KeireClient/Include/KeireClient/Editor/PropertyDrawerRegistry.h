@@ -61,7 +61,8 @@ namespace KeireEditor
             return false;
         }
         [[nodiscard]] virtual bool EditAsset(std::string_view label, Keire::AssetId& value,
-                                             std::optional<Keire::AssetTypeId> expectedType) = 0;
+                                             std::optional<Keire::AssetTypeId> expectedType,
+                                             std::string_view expectedManagedType = {}) = 0;
         [[nodiscard]] virtual bool EditTextureAsset(std::string_view label, Keire::AssetId& value,
                                                     Keire::ShaderTextureSemantic semantic)
         {

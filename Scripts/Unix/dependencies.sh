@@ -71,7 +71,8 @@ compiler="$($CXX --version | head -n 1)"
 bridge="$ROOT/Scripts/Dependencies/CMakeLists.txt"
 if command -v sha256sum >/dev/null 2>&1; then bridge_hash="$(sha256sum "$bridge" | awk '{print $1}')"; else bridge_hash="$(shasum -a 256 "$bridge" | awk '{print $1}')"; fi
 options=(-DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
-  -DSDL_AUDIO=OFF -DSDL_CAMERA=OFF -DSDL_JOYSTICK=OFF -DSDL_HAPTIC=OFF -DSDL_SENSOR=OFF
+  -DSDL_AUDIO=OFF -DSDL_CAMERA=OFF -DSDL_JOYSTICK=ON -DSDL_HAPTIC=ON -DSDL_HIDAPI=ON
+  -DSDL_HIDAPI_JOYSTICK=ON -DSDL_HIDAPI_LIBUSB=OFF -DSDL_VIRTUAL_JOYSTICK=ON -DSDL_SENSOR=OFF
   -DSDL_RENDER=OFF -DSDL_GPU=ON -DSDL_DUMMYVIDEO=ON -DSDL_OFFSCREEN=ON -DSDL_INSTALL=ON
   -DSDL_INSTALL_DOCS=OFF -DSDL_INSTALL_CMAKEDIR_ROOT=cmake -DSDL_DEPS_SHARED=ON
   -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_LIBDIR=lib
@@ -101,6 +102,46 @@ fi
 key="$sdl_commit|$assimp_commit|$jolt_commit|$recast_commit|$miniaudio_commit|$libsodium_commit|$architecture|$toolset|$compiler|$bridge_hash|${options[*]}"
 base="$ROOT/Build/Dependencies/$system-$output_arch-$toolset"
 
+validate_sdl_input_backends() {
+  local build="${1:?build directory is required}"
+  local configuration="${2:?configuration is required}"
+  local configuration_name config macro
+  configuration_name="$(printf '%s' "$configuration" | tr '[:upper:]' '[:lower:]')"
+  config="$build/SDL/include-config-$configuration_name/build_config/SDL_build_config.h"
+  [[ -f "$config" ]] || { printf 'SDL %s input-backend configuration is missing: %s\n' "$configuration" "$config" >&2; return 1; }
+  for macro in SDL_JOYSTICK_HIDAPI SDL_JOYSTICK_VIRTUAL; do
+    grep -Fq "#define $macro 1" "$config" || {
+      printf 'SDL %s input-backend configuration is missing %s.\n' "$configuration" "$macro" >&2
+      return 1
+    }
+  done
+  for macro in SDL_JOYSTICK_DISABLED SDL_HAPTIC_DISABLED SDL_HIDAPI_DISABLED SDL_LIBUSB_DYNAMIC; do
+    if grep -Eq "^#define[[:space:]]+$macro([[:space:]]|$)" "$config"; then
+      printf 'SDL %s input-backend configuration unexpectedly defines %s.\n' "$configuration" "$macro" >&2
+      return 1
+    fi
+  done
+  if [[ "$platform" == Linux ]]; then
+    for macro in SDL_JOYSTICK_LINUX SDL_HAPTIC_LINUX; do
+      grep -Fq "#define $macro 1" "$config" || {
+        printf 'SDL %s Linux input-backend configuration is missing %s.\n' "$configuration" "$macro" >&2
+        return 1
+      }
+    done
+    grep -Eq '^#define[[:space:]]+SDL_UDEV_DYNAMIC[[:space:]]+"[^"[:space:]]+"' "$config" || {
+      printf 'SDL %s Linux input-backend configuration is missing dynamic libudev support.\n' "$configuration" >&2
+      return 1
+    }
+  else
+    for macro in SDL_JOYSTICK_IOKIT SDL_JOYSTICK_MFI SDL_HAPTIC_IOKIT; do
+      grep -Fq "#define $macro 1" "$config" || {
+        printf 'SDL %s macOS input-backend configuration is missing %s.\n' "$configuration" "$macro" >&2
+        return 1
+      }
+    done
+  fi
+}
+
 for configuration in Debug Release; do
   build="$base/$configuration"; install="$build/install"; library="$install/lib/libSDL3.a"; assimp_library="$install/lib/libassimp.a"; zlib_library="$install/lib/libzlibstatic.a"; jolt_library="$install/lib/libJolt.a"; miniaudio_library="$install/lib/libminiaudio.a"; stamp="$build/keire-dependency.stamp"
   sodium_runtime="$install/lib/libsodium.so"; [[ "$platform" == Mac ]] && sodium_runtime="$install/lib/libsodium.dylib"
@@ -115,6 +156,7 @@ for configuration in Debug Release; do
         -f "$crowd_library" && -f "$tile_cache_library" && -f "$miniaudio_library" &&
         -f "$sodium_runtime" && -f "$sodium_license" &&
         -f "$stamp" && "$(tr -d '\r\n' < "$stamp")" == "$key|$configuration" ]]; then
+    validate_sdl_input_backends "$build" "$configuration"
     printf '==> Native %s dependency cache is current\n' "$configuration"
     continue
   fi
@@ -123,6 +165,7 @@ for configuration in Debug Release; do
   mkdir -p "$build"
   cmake -S "$ROOT/Scripts/Dependencies" -B "$build" -G Ninja -DKEIRE_SDL_SOURCE="$ROOT/Vendor/SDL" -DKEIRE_ASSIMP_SOURCE="$ROOT/Vendor/assimp" -DKEIRE_JOLT_SOURCE="$jolt_source" -DKEIRE_RECAST_SOURCE="$recast_source" -DKEIRE_MINIAUDIO_SOURCE="$miniaudio_source" -DCMAKE_BUILD_TYPE="$configuration" -DCMAKE_INSTALL_PREFIX="$install" "${options[@]}"
   cmake --build "$build" --target install --parallel "$(build_parallel_jobs)"
+  validate_sdl_input_backends "$build" "$configuration"
   sodium_build="$build/libsodium"
   mkdir -p "$sodium_build"
   sodium_cflags="-O2"
@@ -191,7 +234,7 @@ sodium_extension=so
 [[ "$platform" == Mac ]] && sodium_extension=dylib
 platform_links='{ "dl", "m", "pthread" }'
 if [[ "$platform" == Mac ]]; then
-  platform_links='{ "Cocoa.framework", "CoreVideo.framework", "IOKit.framework", "CoreFoundation.framework", "CoreAudio.framework", "AudioToolbox.framework", "ForceFeedback.framework", "Carbon.framework", "Metal.framework", "QuartzCore.framework", "UniformTypeIdentifiers.framework" }'
+  platform_links='{ "Cocoa.framework", "CoreVideo.framework", "IOKit.framework", "CoreFoundation.framework", "CoreAudio.framework", "AudioToolbox.framework", "ForceFeedback.framework", "GameController.framework", "CoreHaptics.framework", "Carbon.framework", "Metal.framework", "QuartzCore.framework", "UniformTypeIdentifiers.framework" }'
 fi
 cat > "$ROOT/Build/Generated/Dependencies.lua" <<EOF
 DependencyManifest = {

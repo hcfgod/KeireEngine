@@ -14,7 +14,9 @@ update observe that snapshot. UI capture from the last completed UI frame suppre
 Input mutation, pairing, map enablement, subscriptions, rebinding, and override persistence are owner-thread operations.
 Keyboard and mouse are stable logical devices 1 and 2. Gamepad handles use RAII, reconnect by a stable hardware key,
 cancel actions on disconnect, and restore surviving user ownership deterministically. Gamepad support may be absent in
-a platform/test SDL build without disabling keyboard and mouse.
+an unsupported platform or custom SDL build without disabling keyboard and mouse. Kéire's production Windows, Linux,
+and macOS dependency profiles enable native joystick backends, HIDAPI gamepads, and normalized rumble. Their virtual
+joystick backend keeps gamepad discovery and rumble tests independent of attached hardware.
 
 ## Users And Actions
 
@@ -59,6 +61,11 @@ unknown stale binding IDs are ignored.
 duration from zero through 60 seconds. A zero-strength request stops the effect. Keyboard, mouse, disconnected, and
 unsupported gamepad requests return `false`; invalid strengths or durations are rejected before SDL dispatch. The
 managed runtime additionally restricts rumble to devices paired to the active player.
+
+Linux uses native evdev plus HIDAPI's hidraw backend through dynamically loaded libudev. Distribution rules normally
+grant local desktop users access to supported controllers; an unusually configured controller may require an
+administrator-provided udev rule for its `/dev/input` or `/dev/hidraw` node. Kéire does not install broad device-access
+rules or elevate the player, and inaccessible hardware is ignored without affecting keyboard or mouse input.
 
 `WindowSystem::SetCursorMode` supports `Normal`, `Hidden`, `Confined`, and `RelativeLocked`. Focus loss temporarily
 releases confinement or relative mode while preserving the requested mode for focus restoration. The public boundary

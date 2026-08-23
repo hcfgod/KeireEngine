@@ -4,27 +4,800 @@
 #include <array>
 #include <cctype>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <functional>
 #include <iterator>
+#include <limits>
 #include <mutex>
 #include <ranges>
 #include <stdexcept>
 #include <system_error>
 #include <thread>
+#include <utility>
 
 #if defined(_WIN32)
 #include <Windows.h>
+#include <winternl.h>
 #else
 #include <cerrno>
 #include <fcntl.h>
+#if defined(__APPLE__)
+#include <stdio.h>
+#elif defined(__linux__)
+#include <sys/syscall.h>
+#endif
 #include <sys/file.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
 namespace Keire::Detail
 {
+    namespace
+    {
+        std::mutex s_AnchoredHookMutex;
+        AnchoredFileSystemOperationHook s_AnchoredHook;
+
+        [[nodiscard]] std::vector<std::filesystem::path> ConfinedComponents(const std::filesystem::path& relative)
+        {
+            const auto normalized = relative.lexically_normal();
+            if (relative.empty() || relative.is_absolute() || relative.has_root_name() ||
+                relative.has_root_directory() || normalized.empty() || normalized == "..")
+                throw std::invalid_argument("Path must be a confined relative path: " + PathToUtf8(relative));
+            std::vector<std::filesystem::path> result;
+            for (const auto& component : normalized)
+            {
+                if (component.empty() || component == ".")
+                    continue;
+                if (component == "..")
+                    throw std::invalid_argument("Path must be a confined relative path: " + PathToUtf8(relative));
+                result.push_back(component);
+            }
+            if (result.empty())
+                throw std::invalid_argument("Path must name an entry below the anchored root.");
+            return result;
+        }
+
+        void InvokeAnchoredHook(const std::string_view operation, const std::filesystem::path& relative)
+        {
+            AnchoredFileSystemOperationHook hook;
+            {
+                std::scoped_lock lock(s_AnchoredHookMutex);
+                hook = s_AnchoredHook;
+            }
+            if (hook)
+                hook(operation, relative);
+        }
+    } // namespace
+
+    void SetAnchoredFileSystemOperationHookForTesting(AnchoredFileSystemOperationHook hook)
+    {
+        std::scoped_lock lock(s_AnchoredHookMutex);
+        s_AnchoredHook = std::move(hook);
+    }
+
+    class AnchoredFileSystem::Impl final
+    {
+      public:
+        explicit Impl(const std::filesystem::path& root) : m_Root(CanonicalExistingPath(root))
+        {
+#if defined(_WIN32)
+            m_RootHandle = CreateFileW(m_Root.c_str(), FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES,
+                                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                                       FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+            if (m_RootHandle == INVALID_HANDLE_VALUE)
+                ThrowWindows("Cannot anchor filesystem root");
+            try
+            {
+                RejectReparsePoint(m_RootHandle);
+            }
+            catch (...)
+            {
+                CloseHandle(m_RootHandle);
+                m_RootHandle = INVALID_HANDLE_VALUE;
+                throw;
+            }
+#else
+            m_RootDescriptor = open(m_Root.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+            if (m_RootDescriptor < 0)
+                throw std::system_error(errno, std::generic_category(), "Cannot anchor filesystem root");
+#endif
+        }
+
+        ~Impl()
+        {
+#if defined(_WIN32)
+            if (m_RootHandle != INVALID_HANDLE_VALUE)
+                CloseHandle(m_RootHandle);
+#else
+            if (m_RootDescriptor >= 0)
+                close(m_RootDescriptor);
+#endif
+        }
+
+        [[nodiscard]] const std::filesystem::path& Root() const noexcept { return m_Root; }
+
+#if defined(_WIN32)
+        class Handle final
+        {
+          public:
+            explicit Handle(HANDLE value = INVALID_HANDLE_VALUE) noexcept : m_Value(value) {}
+            ~Handle()
+            {
+                if (m_Value != INVALID_HANDLE_VALUE)
+                    CloseHandle(m_Value);
+            }
+            Handle(const Handle&) = delete;
+            Handle& operator=(const Handle&) = delete;
+            Handle(Handle&& other) noexcept : m_Value(std::exchange(other.m_Value, INVALID_HANDLE_VALUE)) {}
+            Handle& operator=(Handle&& other) noexcept
+            {
+                if (this != &other)
+                {
+                    if (m_Value != INVALID_HANDLE_VALUE)
+                        CloseHandle(m_Value);
+                    m_Value = std::exchange(other.m_Value, INVALID_HANDLE_VALUE);
+                }
+                return *this;
+            }
+            [[nodiscard]] HANDLE Get() const noexcept { return m_Value; }
+
+          private:
+            HANDLE m_Value;
+        };
+
+        using NtCreateFileFunction = NTSTATUS(NTAPI*)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, PIO_STATUS_BLOCK,
+                                                      PLARGE_INTEGER, ULONG, ULONG, ULONG, ULONG, PVOID, ULONG);
+        using NtSetInformationFileFunction = NTSTATUS(NTAPI*)(HANDLE, PIO_STATUS_BLOCK, PVOID, ULONG,
+                                                              FILE_INFORMATION_CLASS);
+        static constexpr ULONG NtFileDirectory = 0x00000001UL;
+        static constexpr ULONG NtFileSynchronousIoNonAlert = 0x00000020UL;
+        static constexpr ULONG NtFileNonDirectory = 0x00000040UL;
+        static constexpr ULONG NtFileOpenReparsePoint = 0x00200000UL;
+        static constexpr ULONG NtOpenExisting = 1UL;
+        static constexpr ULONG NtCreateNew = 2UL;
+        static constexpr ULONG NtOpenOrCreate = 3UL;
+
+        [[noreturn]] static void ThrowWindows(const std::string_view message, const DWORD error = GetLastError())
+        {
+            throw std::system_error(static_cast<int>(error), std::system_category(), std::string(message));
+        }
+
+        [[nodiscard]] static NtCreateFileFunction NtCreate()
+        {
+            static const auto function =
+                reinterpret_cast<NtCreateFileFunction>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtCreateFile"));
+            if (!function)
+                throw std::runtime_error("NtCreateFile is unavailable; anchored filesystem operations are unsafe.");
+            return function;
+        }
+
+        [[nodiscard]] static NtSetInformationFileFunction NtSetInformation()
+        {
+            static const auto function = reinterpret_cast<NtSetInformationFileFunction>(
+                GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtSetInformationFile"));
+            if (!function)
+                throw std::runtime_error(
+                    "NtSetInformationFile is unavailable; anchored filesystem operations are unsafe.");
+            return function;
+        }
+
+        [[nodiscard]] static DWORD DosError(const NTSTATUS status)
+        {
+            using ConvertFunction = ULONG(WINAPI*)(NTSTATUS);
+            static const auto convert = reinterpret_cast<ConvertFunction>(
+                GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlNtStatusToDosError"));
+            return convert ? convert(status) : ERROR_GEN_FAILURE;
+        }
+
+        static void RejectReparsePoint(const HANDLE handle)
+        {
+            FILE_ATTRIBUTE_TAG_INFO attributes{};
+            if (!GetFileInformationByHandleEx(handle, FileAttributeTagInfo, &attributes, sizeof(attributes)))
+                ThrowWindows("Cannot inspect anchored filesystem entry");
+            if ((attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+                throw std::invalid_argument("Anchored filesystem paths may not traverse reparse points.");
+        }
+
+        [[nodiscard]] static Handle OpenRelative(const HANDLE parent, const std::filesystem::path& component,
+                                                 const ACCESS_MASK access, const ULONG disposition, const ULONG options,
+                                                 const ULONG attributes = FILE_ATTRIBUTE_NORMAL,
+                                                 const bool retryTransient = false)
+        {
+            const auto name = component.native();
+            if (name.empty() || name.find_first_of(L"\\/") != std::wstring::npos)
+                throw std::invalid_argument("Anchored filesystem components must contain one filename.");
+            UNICODE_STRING unicode{};
+            if (name.size() > (std::numeric_limits<USHORT>::max)() / sizeof(wchar_t))
+                throw std::invalid_argument("Anchored filesystem component is too long.");
+            unicode.Buffer = const_cast<PWSTR>(name.data());
+            unicode.Length = static_cast<USHORT>(name.size() * sizeof(wchar_t));
+            unicode.MaximumLength = unicode.Length;
+            OBJECT_ATTRIBUTES object{};
+            InitializeObjectAttributes(&object, &unicode, OBJ_CASE_INSENSITIVE, parent, nullptr);
+            constexpr std::array delays{std::chrono::milliseconds(10), std::chrono::milliseconds(20),
+                                        std::chrono::milliseconds(40), std::chrono::milliseconds(80),
+                                        std::chrono::milliseconds(160)};
+            const auto failure = "Cannot open anchored filesystem entry '" + PathToUtf8(component) +
+                                 "' (access=" + std::to_string(access) +
+                                 ", disposition=" + std::to_string(disposition) + ')';
+            HANDLE value = INVALID_HANDLE_VALUE;
+            DWORD error = ERROR_SUCCESS;
+            for (const auto delay : delays)
+            {
+                IO_STATUS_BLOCK statusBlock{};
+                value = INVALID_HANDLE_VALUE;
+                const auto status =
+                    NtCreate()(&value, access, &object, &statusBlock, nullptr, attributes,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, disposition,
+                               options | NtFileSynchronousIoNonAlert | NtFileOpenReparsePoint, nullptr, 0);
+                if (status >= 0)
+                    break;
+                error = DosError(status);
+                if (!retryTransient ||
+                    (error != ERROR_ACCESS_DENIED && error != ERROR_SHARING_VIOLATION && error != ERROR_LOCK_VIOLATION))
+                    ThrowWindows(failure, error);
+                std::this_thread::sleep_for(delay);
+            }
+            if (value == INVALID_HANDLE_VALUE)
+                ThrowWindows(failure, error);
+            Handle result(value);
+            RejectReparsePoint(value);
+            return result;
+        }
+
+        [[nodiscard]] Handle DuplicateRoot() const
+        {
+            HANDLE duplicate = INVALID_HANDLE_VALUE;
+            if (!DuplicateHandle(GetCurrentProcess(), m_RootHandle, GetCurrentProcess(), &duplicate, 0, FALSE,
+                                 DUPLICATE_SAME_ACCESS))
+                ThrowWindows("Cannot duplicate anchored filesystem root handle");
+            return Handle(duplicate);
+        }
+
+        static void RenameRelative(const HANDLE file, const HANDLE destinationParent,
+                                   const std::filesystem::path& destinationName, const bool replaceExisting,
+                                   const std::string_view failureMessage)
+        {
+            const auto target = destinationName.native();
+            const auto bytes = offsetof(FILE_RENAME_INFO, FileName) + target.size() * sizeof(wchar_t);
+            std::vector<std::byte> storage(bytes);
+            auto* rename = reinterpret_cast<FILE_RENAME_INFO*>(storage.data());
+            rename->ReplaceIfExists = replaceExisting ? TRUE : FALSE;
+            rename->RootDirectory = destinationParent;
+            rename->FileNameLength = static_cast<DWORD>(target.size() * sizeof(wchar_t));
+            std::memcpy(rename->FileName, target.data(), rename->FileNameLength);
+            constexpr auto renameInformation = static_cast<FILE_INFORMATION_CLASS>(10);
+            constexpr std::array delays{std::chrono::milliseconds(10), std::chrono::milliseconds(20),
+                                        std::chrono::milliseconds(40), std::chrono::milliseconds(80),
+                                        std::chrono::milliseconds(160)};
+            DWORD error = ERROR_SUCCESS;
+            for (const auto delay : delays)
+            {
+                IO_STATUS_BLOCK statusBlock{};
+                const auto status = NtSetInformation()(file, &statusBlock, rename, static_cast<ULONG>(storage.size()),
+                                                       renameInformation);
+                if (status >= 0)
+                    return;
+                error = DosError(status);
+                if (error != ERROR_ACCESS_DENIED && error != ERROR_SHARING_VIOLATION && error != ERROR_LOCK_VIOLATION)
+                    ThrowWindows(failureMessage, error);
+                std::this_thread::sleep_for(delay);
+            }
+            ThrowWindows(failureMessage, error);
+        }
+
+        [[nodiscard]] Handle OpenParent(const std::vector<std::filesystem::path>& components,
+                                        const bool createDirectories) const
+        {
+            auto current = DuplicateRoot();
+            std::filesystem::path traversed;
+            for (std::size_t index = 0; index + 1 < components.size(); ++index)
+            {
+                const auto disposition = createDirectories ? NtOpenOrCreate : NtOpenExisting;
+                traversed /= components[index];
+                try
+                {
+                    current = OpenRelative(current.Get(), components[index],
+                                           FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+                                           disposition, NtFileDirectory, FILE_ATTRIBUTE_DIRECTORY, true);
+                }
+                catch (const std::system_error& error)
+                {
+                    throw std::system_error(error.code(), "Cannot traverse anchored filesystem parent '" +
+                                                              PathToUtf8(traversed) + "'");
+                }
+            }
+            return current;
+        }
+#else
+        class Descriptor final
+        {
+          public:
+            explicit Descriptor(const int value = -1) noexcept : m_Value(value) {}
+            ~Descriptor()
+            {
+                if (m_Value >= 0)
+                    close(m_Value);
+            }
+            Descriptor(const Descriptor&) = delete;
+            Descriptor& operator=(const Descriptor&) = delete;
+            Descriptor(Descriptor&& other) noexcept : m_Value(std::exchange(other.m_Value, -1)) {}
+            Descriptor& operator=(Descriptor&& other) noexcept
+            {
+                if (this != &other)
+                {
+                    if (m_Value >= 0)
+                        close(m_Value);
+                    m_Value = std::exchange(other.m_Value, -1);
+                }
+                return *this;
+            }
+            [[nodiscard]] int Get() const noexcept { return m_Value; }
+
+          private:
+            int m_Value;
+        };
+
+        static void RenameRelative(const int sourceParent, const std::filesystem::path& sourceName,
+                                   const int destinationParent, const std::filesystem::path& destinationName,
+                                   const bool replaceExisting, const std::string_view failureMessage)
+        {
+            int result = -1;
+            if (replaceExisting)
+                result = renameat(sourceParent, sourceName.c_str(), destinationParent, destinationName.c_str());
+#if defined(__APPLE__)
+            else
+                result = renameatx_np(sourceParent, sourceName.c_str(), destinationParent, destinationName.c_str(),
+                                      RENAME_EXCL);
+#elif defined(__linux__)
+            else
+                result = static_cast<int>(syscall(SYS_renameat2, sourceParent, sourceName.c_str(), destinationParent,
+                                                  destinationName.c_str(), 1U));
+#else
+#error "Kéire anchored no-replace rename requires an atomic platform implementation."
+#endif
+            if (result != 0)
+                throw std::system_error(errno, std::generic_category(), std::string(failureMessage));
+        }
+
+        [[nodiscard]] Descriptor OpenParent(const std::vector<std::filesystem::path>& components,
+                                            const bool createDirectories) const
+        {
+            Descriptor current(dup(m_RootDescriptor));
+            if (current.Get() < 0)
+                throw std::system_error(errno, std::generic_category(), "Cannot duplicate anchored root descriptor");
+            for (std::size_t index = 0; index + 1 < components.size(); ++index)
+            {
+                if (createDirectories && mkdirat(current.Get(), components[index].c_str(), 0755) != 0 &&
+                    errno != EEXIST)
+                    throw std::system_error(errno, std::generic_category(), "Cannot create anchored directory");
+                const auto next =
+                    openat(current.Get(), components[index].c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+                if (next < 0)
+                    throw std::system_error(errno, std::generic_category(), "Cannot open anchored directory");
+                current = Descriptor(next);
+            }
+            return current;
+        }
+#endif
+
+        std::filesystem::path m_Root;
+#if defined(_WIN32)
+        HANDLE m_RootHandle = INVALID_HANDLE_VALUE;
+#else
+        int m_RootDescriptor = -1;
+#endif
+    };
+
+    AnchoredFileSystem::AnchoredFileSystem(const std::filesystem::path& root) : m_Impl(std::make_unique<Impl>(root)) {}
+    AnchoredFileSystem::~AnchoredFileSystem() = default;
+    AnchoredFileSystem::AnchoredFileSystem(AnchoredFileSystem&&) noexcept = default;
+    AnchoredFileSystem& AnchoredFileSystem::operator=(AnchoredFileSystem&&) noexcept = default;
+
+    const std::filesystem::path& AnchoredFileSystem::Root() const noexcept { return m_Impl->Root(); }
+
+    std::vector<std::byte> AnchoredFileSystem::Read(const std::filesystem::path& relative,
+                                                    const std::size_t maximumBytes) const
+    {
+        std::vector<std::byte> result;
+        (void)ReadChunks(relative, maximumBytes, [&](const std::span<const std::byte> chunk)
+                         { result.insert(result.end(), chunk.begin(), chunk.end()); });
+        return result;
+    }
+
+    AnchoredFileMetadata AnchoredFileSystem::ReadChunks(const std::filesystem::path& relative,
+                                                        const std::uintmax_t maximumBytes,
+                                                        const AnchoredFileChunkVisitor& visitor) const
+    {
+        if (!visitor)
+            throw std::invalid_argument("Anchored streaming reads require a chunk visitor.");
+        const auto components = ConfinedComponents(relative);
+        auto parent = m_Impl->OpenParent(components, false);
+        InvokeAnchoredHook("read", relative);
+#if defined(_WIN32)
+        auto file =
+            Impl::OpenRelative(parent.Get(), components.back(), FILE_READ_DATA | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+                               Impl::NtOpenExisting, Impl::NtFileNonDirectory);
+        LARGE_INTEGER size{};
+        if (!GetFileSizeEx(file.Get(), &size))
+            Impl::ThrowWindows("Cannot inspect anchored file");
+        if (size.QuadPart < 0 || static_cast<std::uint64_t>(size.QuadPart) > maximumBytes ||
+            static_cast<std::uint64_t>(size.QuadPart) > (std::numeric_limits<std::size_t>::max)())
+            throw std::runtime_error("Anchored file exceeds the configured maximum size: " + PathToUtf8(relative));
+        std::vector<std::byte> buffer(256ULL * 1024U);
+        std::uint64_t remaining = static_cast<std::uint64_t>(size.QuadPart);
+        while (remaining != 0)
+        {
+            const auto count = static_cast<DWORD>((std::min)(remaining, buffer.size()));
+            DWORD read = 0;
+            if (!ReadFile(file.Get(), buffer.data(), count, &read, nullptr) || read != count)
+                Impl::ThrowWindows("Cannot read anchored file");
+            visitor(std::span(buffer).first(read));
+            remaining -= read;
+        }
+        return {.Size = static_cast<std::uintmax_t>(size.QuadPart), .Permissions = std::filesystem::perms::unknown};
+#else
+        Impl::Descriptor file(openat(parent.Get(), components.back().c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC));
+        if (file.Get() < 0)
+            throw std::system_error(errno, std::generic_category(), "Cannot open anchored file");
+        struct stat status{};
+        if (fstat(file.Get(), &status) != 0 || !S_ISREG(status.st_mode))
+            throw std::runtime_error("Anchored path is not a regular file: " + PathToUtf8(relative));
+        if (status.st_size < 0 || static_cast<std::uint64_t>(status.st_size) > maximumBytes ||
+            static_cast<std::uint64_t>(status.st_size) > (std::numeric_limits<std::size_t>::max)())
+            throw std::runtime_error("Anchored file exceeds the configured maximum size: " + PathToUtf8(relative));
+        std::vector<std::byte> buffer(256ULL * 1024U);
+        std::uint64_t remaining = static_cast<std::uint64_t>(status.st_size);
+        while (remaining != 0)
+        {
+            const auto count = read(file.Get(), buffer.data(), (std::min)(remaining, buffer.size()));
+            if (count < 0)
+            {
+                if (errno == EINTR)
+                    continue;
+                throw std::system_error(errno, std::generic_category(), "Cannot read anchored file");
+            }
+            if (count == 0)
+                throw std::runtime_error("Anchored file changed size while being read: " + PathToUtf8(relative));
+            visitor(std::span(buffer).first(static_cast<std::size_t>(count)));
+            remaining -= static_cast<std::size_t>(count);
+        }
+        return {.Size = static_cast<std::uintmax_t>(status.st_size),
+                .Permissions = static_cast<std::filesystem::perms>(status.st_mode & 07777)};
+#endif
+    }
+
+    AnchoredFileSignature AnchoredFileSystem::Signature(const std::filesystem::path& relative) const
+    {
+        const auto components = ConfinedComponents(relative);
+        auto parent = m_Impl->OpenParent(components, false);
+        InvokeAnchoredHook("signature", relative);
+#if defined(_WIN32)
+        auto file = Impl::OpenRelative(parent.Get(), components.back(), FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+                                       Impl::NtOpenExisting, Impl::NtFileNonDirectory);
+        FILE_BASIC_INFO basic{};
+        FILE_STANDARD_INFO standard{};
+        if (!GetFileInformationByHandleEx(file.Get(), FileBasicInfo, &basic, sizeof(basic)) ||
+            !GetFileInformationByHandleEx(file.Get(), FileStandardInfo, &standard, sizeof(standard)))
+            Impl::ThrowWindows("Cannot inspect anchored file signature");
+        return {static_cast<std::uint64_t>(basic.LastWriteTime.QuadPart),
+                static_cast<std::uintmax_t>(standard.EndOfFile.QuadPart)};
+#else
+        Impl::Descriptor file(openat(parent.Get(), components.back().c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC));
+        struct stat status{};
+        if (file.Get() < 0 || fstat(file.Get(), &status) != 0 || !S_ISREG(status.st_mode))
+            throw std::system_error(errno, std::generic_category(), "Cannot inspect anchored file signature");
+#if defined(__APPLE__)
+        const auto seconds = status.st_mtimespec.tv_sec;
+        const auto nanoseconds = status.st_mtimespec.tv_nsec;
+#else
+        const auto seconds = status.st_mtim.tv_sec;
+        const auto nanoseconds = status.st_mtim.tv_nsec;
+#endif
+        return {(static_cast<std::uint64_t>(seconds) * 1'000'000'000ULL) + static_cast<std::uint64_t>(nanoseconds),
+                static_cast<std::uintmax_t>(status.st_size)};
+#endif
+    }
+
+    bool AnchoredFileSystem::IsRegularFile(const std::filesystem::path& relative) const
+    {
+        const auto components = ConfinedComponents(relative);
+        try
+        {
+            auto parent = m_Impl->OpenParent(components, false);
+            InvokeAnchoredHook("is-regular-file", relative);
+#if defined(_WIN32)
+            auto entry = Impl::OpenRelative(parent.Get(), components.back(), FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+                                            Impl::NtOpenExisting, 0);
+            FILE_ATTRIBUTE_TAG_INFO attributes{};
+            if (!GetFileInformationByHandleEx(entry.Get(), FileAttributeTagInfo, &attributes, sizeof(attributes)))
+                Impl::ThrowWindows("Cannot inspect anchored filesystem entry");
+            return (attributes.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
+#else
+            struct stat status{};
+            if (fstatat(parent.Get(), components.back().c_str(), &status, AT_SYMLINK_NOFOLLOW) != 0)
+                throw std::system_error(errno, std::generic_category(), "Cannot inspect anchored filesystem entry");
+            if (S_ISLNK(status.st_mode))
+                throw std::invalid_argument("Anchored filesystem paths may not be symbolic links.");
+            return S_ISREG(status.st_mode);
+#endif
+        }
+        catch (const std::system_error& error)
+        {
+            if (error.code() == std::errc::no_such_file_or_directory)
+                return false;
+#if defined(_WIN32)
+            if (error.code().category() == std::system_category() &&
+                (error.code().value() == ERROR_FILE_NOT_FOUND || error.code().value() == ERROR_PATH_NOT_FOUND))
+                return false;
+#endif
+            throw;
+        }
+    }
+
+    bool AnchoredFileSystem::Exists(const std::filesystem::path& relative) const
+    {
+        const auto components = ConfinedComponents(relative);
+        try
+        {
+            auto parent = m_Impl->OpenParent(components, false);
+            InvokeAnchoredHook("exists", relative);
+#if defined(_WIN32)
+            (void)Impl::OpenRelative(parent.Get(), components.back(), FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+                                     Impl::NtOpenExisting, 0);
+#else
+            struct stat status{};
+            if (fstatat(parent.Get(), components.back().c_str(), &status, AT_SYMLINK_NOFOLLOW) != 0)
+                throw std::system_error(errno, std::generic_category(), "Cannot inspect anchored entry");
+            if (S_ISLNK(status.st_mode))
+                throw std::invalid_argument("Anchored filesystem paths may not be symbolic links.");
+#endif
+            return true;
+        }
+        catch (const std::system_error& error)
+        {
+            if (error.code() == std::errc::no_such_file_or_directory)
+                return false;
+#if defined(_WIN32)
+            if (error.code().category() == std::system_category() &&
+                (error.code().value() == ERROR_FILE_NOT_FOUND || error.code().value() == ERROR_PATH_NOT_FOUND))
+                return false;
+#endif
+            throw;
+        }
+    }
+
+    void AnchoredFileSystem::CreateDirectories(const std::filesystem::path& relative) const
+    {
+        const auto components = ConfinedComponents(relative);
+#if defined(_WIN32)
+        auto current = m_Impl->DuplicateRoot();
+        for (std::size_t index = 0; index < components.size(); ++index)
+        {
+            if (index + 1 == components.size())
+                InvokeAnchoredHook("create-directories", relative);
+            current = Impl::OpenRelative(current.Get(), components[index],
+                                         FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+                                         Impl::NtOpenOrCreate, Impl::NtFileDirectory, FILE_ATTRIBUTE_DIRECTORY);
+        }
+#else
+        Impl::Descriptor current(dup(m_Impl->m_RootDescriptor));
+        if (current.Get() < 0)
+            throw std::system_error(errno, std::generic_category(), "Cannot duplicate anchored root descriptor");
+        for (std::size_t index = 0; index < components.size(); ++index)
+        {
+            if (index + 1 == components.size())
+                InvokeAnchoredHook("create-directories", relative);
+            if (mkdirat(current.Get(), components[index].c_str(), 0755) != 0 && errno != EEXIST)
+                throw std::system_error(errno, std::generic_category(), "Cannot create anchored directory");
+            const auto next =
+                openat(current.Get(), components[index].c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+            if (next < 0)
+                throw std::system_error(errno, std::generic_category(), "Cannot open anchored directory");
+            current = Impl::Descriptor(next);
+        }
+#endif
+    }
+
+    void AnchoredFileSystem::WriteFileAtomically(const std::filesystem::path& relative,
+                                                 const std::span<const std::byte> contents,
+                                                 const bool replaceExisting) const
+    {
+        std::size_t offset = 0;
+        WriteFileAtomically(
+            relative, contents.size(),
+            [&](const std::span<std::byte> destination)
+            {
+                std::ranges::copy(contents.subspan(offset, destination.size()), destination.begin());
+                offset += destination.size();
+            },
+            std::filesystem::perms::owner_read | std::filesystem::perms::owner_write |
+                std::filesystem::perms::group_read | std::filesystem::perms::others_read,
+            replaceExisting);
+    }
+
+    void AnchoredFileSystem::WriteFileAtomically(const std::filesystem::path& relative, const std::uint64_t size,
+                                                 const AnchoredFileChunkReader& reader,
+                                                 const std::filesystem::perms permissions,
+                                                 const bool replaceExisting) const
+    {
+        if (!reader)
+            throw std::invalid_argument("Anchored streaming writes require a chunk reader.");
+#if defined(_WIN32)
+        (void)permissions;
+#endif
+        const auto components = ConfinedComponents(relative);
+        auto parent = m_Impl->OpenParent(components, true);
+        InvokeAnchoredHook("write", relative);
+        const auto unique = static_cast<std::uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count()) ^
+                            static_cast<std::uint64_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
+        const auto temporary = PathWithSuffix(components.back(), ".tmp." + std::to_string(unique));
+#if defined(_WIN32)
+        auto file =
+            Impl::OpenRelative(parent.Get(), temporary,
+                               FILE_WRITE_DATA | FILE_WRITE_ATTRIBUTES | FILE_READ_ATTRIBUTES | DELETE | SYNCHRONIZE,
+                               Impl::NtCreateNew, Impl::NtFileNonDirectory, FILE_ATTRIBUTE_NORMAL, true);
+        try
+        {
+            std::vector<std::byte> buffer(256ULL * 1024U);
+            std::uint64_t remaining = size;
+            while (remaining != 0)
+            {
+                const auto count = static_cast<std::size_t>((std::min)(remaining, buffer.size()));
+                const auto chunk = std::span(buffer).first(count);
+                reader(chunk);
+                DWORD written = 0;
+                if (!WriteFile(file.Get(), chunk.data(), static_cast<DWORD>(chunk.size()), &written, nullptr) ||
+                    written != chunk.size())
+                    Impl::ThrowWindows("Cannot write anchored temporary file");
+                remaining -= written;
+            }
+            if (!FlushFileBuffers(file.Get()))
+                Impl::ThrowWindows("Cannot flush anchored temporary file");
+            const auto failure = "Cannot publish anchored file '" + PathToUtf8(relative) + "'";
+            Impl::RenameRelative(file.Get(), parent.Get(), components.back(), replaceExisting, failure);
+        }
+        catch (...)
+        {
+            FILE_DISPOSITION_INFO disposition{TRUE};
+            (void)SetFileInformationByHandle(file.Get(), FileDispositionInfo, &disposition, sizeof(disposition));
+            throw;
+        }
+#else
+        Impl::Descriptor file(
+            openat(parent.Get(), temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600));
+        if (file.Get() < 0)
+            throw std::system_error(errno, std::generic_category(), "Cannot create anchored temporary file");
+        try
+        {
+            std::vector<std::byte> buffer(256ULL * 1024U);
+            std::uint64_t remaining = size;
+            while (remaining != 0)
+            {
+                const auto count = static_cast<std::size_t>((std::min)(remaining, buffer.size()));
+                const auto chunk = std::span(buffer).first(count);
+                reader(chunk);
+                std::size_t offset = 0;
+                while (offset < chunk.size())
+                {
+                    const auto written = write(file.Get(), chunk.data() + offset, chunk.size() - offset);
+                    if (written < 0)
+                    {
+                        if (errno == EINTR)
+                            continue;
+                        throw std::system_error(errno, std::generic_category(), "Cannot write anchored temporary file");
+                    }
+                    offset += static_cast<std::size_t>(written);
+                }
+                remaining -= chunk.size();
+            }
+            if (fchmod(file.Get(), static_cast<mode_t>(permissions) & 0777) != 0 || fsync(file.Get()) != 0)
+                throw std::system_error(errno, std::generic_category(), "Cannot flush anchored temporary file");
+            Impl::RenameRelative(parent.Get(), temporary, parent.Get(), components.back(), replaceExisting,
+                                 "Cannot publish anchored file");
+            (void)fsync(parent.Get());
+        }
+        catch (...)
+        {
+            (void)unlinkat(parent.Get(), temporary.c_str(), 0);
+            throw;
+        }
+#endif
+    }
+
+    void AnchoredFileSystem::Remove(const std::filesystem::path& relative) const
+    {
+        const auto components = ConfinedComponents(relative);
+        auto parent = m_Impl->OpenParent(components, false);
+        InvokeAnchoredHook("remove", relative);
+#if defined(_WIN32)
+        auto entry = Impl::OpenRelative(parent.Get(), components.back(), DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+                                        Impl::NtOpenExisting, 0, FILE_ATTRIBUTE_NORMAL, true);
+        FILE_DISPOSITION_INFO disposition{TRUE};
+        if (!SetFileInformationByHandle(entry.Get(), FileDispositionInfo, &disposition, sizeof(disposition)))
+            Impl::ThrowWindows("Cannot remove anchored filesystem entry");
+        entry = Impl::Handle{};
+        constexpr std::array delays{std::chrono::milliseconds(10), std::chrono::milliseconds(20),
+                                    std::chrono::milliseconds(40), std::chrono::milliseconds(80),
+                                    std::chrono::milliseconds(160)};
+        for (const auto delay : delays)
+        {
+            try
+            {
+                (void)Impl::OpenRelative(parent.Get(), components.back(), FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+                                         Impl::NtOpenExisting, 0);
+            }
+            catch (const std::system_error& error)
+            {
+                if (error.code().category() == std::system_category() &&
+                    (error.code().value() == ERROR_FILE_NOT_FOUND || error.code().value() == ERROR_PATH_NOT_FOUND))
+                    return;
+                if (error.code().category() != std::system_category() ||
+                    (error.code().value() != ERROR_ACCESS_DENIED && error.code().value() != ERROR_SHARING_VIOLATION &&
+                     error.code().value() != ERROR_LOCK_VIOLATION))
+                    throw;
+            }
+            std::this_thread::sleep_for(delay);
+        }
+        throw std::runtime_error("Anchored filesystem entry remained pending deletion: " + PathToUtf8(relative));
+#else
+        struct stat status{};
+        if (fstatat(parent.Get(), components.back().c_str(), &status, AT_SYMLINK_NOFOLLOW) != 0)
+            throw std::system_error(errno, std::generic_category(), "Cannot inspect anchored filesystem entry");
+        if (S_ISLNK(status.st_mode))
+            throw std::invalid_argument("Anchored filesystem paths may not be symbolic links.");
+        if (unlinkat(parent.Get(), components.back().c_str(), S_ISDIR(status.st_mode) ? AT_REMOVEDIR : 0) != 0)
+            throw std::system_error(errno, std::generic_category(), "Cannot remove anchored filesystem entry");
+#endif
+    }
+
+    void AnchoredFileSystem::Rename(const std::filesystem::path& source, const std::filesystem::path& destination,
+                                    const bool replaceExisting) const
+    {
+        RenameTo(source, *this, destination, replaceExisting);
+    }
+
+    void AnchoredFileSystem::RenameTo(const std::filesystem::path& source,
+                                      const AnchoredFileSystem& destinationFileSystem,
+                                      const std::filesystem::path& destination, const bool replaceExisting) const
+    {
+        const auto sourceComponents = ConfinedComponents(source);
+        const auto destinationComponents = ConfinedComponents(destination);
+        auto sourceParent = m_Impl->OpenParent(sourceComponents, false);
+        auto destinationParent = destinationFileSystem.m_Impl->OpenParent(destinationComponents, true);
+        InvokeAnchoredHook("rename", source);
+#if defined(_WIN32)
+        auto entry =
+            Impl::OpenRelative(sourceParent.Get(), sourceComponents.back(), DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+                               Impl::NtOpenExisting, 0, FILE_ATTRIBUTE_NORMAL, true);
+        const auto failure =
+            "Cannot rename anchored filesystem entry '" + PathToUtf8(source) + "' to '" + PathToUtf8(destination) + "'";
+        Impl::RenameRelative(entry.Get(), destinationParent.Get(), destinationComponents.back(), replaceExisting,
+                             failure);
+#else
+        struct stat status{};
+        if (fstatat(sourceParent.Get(), sourceComponents.back().c_str(), &status, AT_SYMLINK_NOFOLLOW) != 0)
+            throw std::system_error(errno, std::generic_category(), "Cannot inspect anchored rename source");
+        if (S_ISLNK(status.st_mode))
+            throw std::invalid_argument("Anchored filesystem paths may not be symbolic links.");
+        Impl::RenameRelative(sourceParent.Get(), sourceComponents.back(), destinationParent.Get(),
+                             destinationComponents.back(), replaceExisting, "Cannot rename anchored filesystem entry");
+        (void)fsync(sourceParent.Get());
+        if (destinationParent.Get() != sourceParent.Get())
+            (void)fsync(destinationParent.Get());
+#endif
+    }
+
+    void AnchoredFileSystem::Copy(const std::filesystem::path& source, const std::filesystem::path& destination,
+                                  const bool replaceExisting) const
+    {
+        WriteFileAtomically(destination, Read(source, (std::numeric_limits<std::size_t>::max)()), replaceExisting);
+    }
+
     class InterprocessMutex::Impl final
     {
       public:
@@ -474,5 +1247,51 @@ namespace Keire::Detail
         if (error)
             throw std::invalid_argument("Path does not exist or cannot be resolved: " + PathToUtf8(path));
         return result.lexically_normal();
+    }
+
+    std::filesystem::path ResolveConfinedPath(const std::filesystem::path& root, const std::filesystem::path& relative)
+    {
+        const auto normalized = relative.lexically_normal();
+        if (relative.empty() || relative.is_absolute() || relative.has_root_name() || relative.has_root_directory() ||
+            normalized.empty() || normalized == ".." || *normalized.begin() == "..")
+        {
+            throw std::invalid_argument("Path must be a confined relative path: " + PathToUtf8(relative));
+        }
+
+        const auto canonicalRoot = CanonicalExistingPath(root);
+        auto candidate = canonicalRoot;
+        for (const auto& component : normalized)
+        {
+            candidate /= component;
+            std::error_code error;
+            const auto status = std::filesystem::symlink_status(candidate, error);
+            if (error)
+            {
+                if (error == std::errc::no_such_file_or_directory)
+                    continue;
+                throw std::invalid_argument("Confined path cannot be inspected: " + PathToUtf8(candidate));
+            }
+            if (std::filesystem::is_symlink(status))
+                throw std::invalid_argument("Confined paths may not traverse symbolic links.");
+#if defined(_WIN32)
+            if (status.type() != std::filesystem::file_type::not_found)
+            {
+                const auto attributes = GetFileAttributesW(ExtendedLengthPath(candidate).c_str());
+                if (attributes == INVALID_FILE_ATTRIBUTES)
+                    throw std::invalid_argument("Confined path cannot be inspected: " + PathToUtf8(candidate));
+                if ((attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+                    throw std::invalid_argument("Confined paths may not traverse reparse points.");
+            }
+#endif
+        }
+
+        std::error_code error;
+        const auto resolved = std::filesystem::weakly_canonical(candidate, error);
+        if (error)
+            throw std::invalid_argument("Confined path cannot be resolved: " + PathToUtf8(candidate));
+        const auto mismatch = std::ranges::mismatch(canonicalRoot, resolved);
+        if (mismatch.in1 != canonicalRoot.end())
+            throw std::invalid_argument("Path escapes its configured root.");
+        return resolved.lexically_normal();
     }
 } // namespace Keire::Detail

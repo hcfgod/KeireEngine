@@ -213,6 +213,15 @@ namespace Keire::Detail
         return builder.Finish();
     }
 
+    Sha256Digest Sha256File(const AnchoredFileSystem& fileSystem, const std::filesystem::path& relative,
+                            const std::uintmax_t maximumBytes, AnchoredFileMetadata& metadata)
+    {
+        Sha256Builder builder;
+        metadata = fileSystem.ReadChunks(relative, maximumBytes,
+                                         [&](const std::span<const std::byte> chunk) { builder.Update(chunk); });
+        return builder.Finish();
+    }
+
     std::string DigestToString(const Sha256Digest& digest)
     {
         constexpr char Hex[] = "0123456789abcdef";

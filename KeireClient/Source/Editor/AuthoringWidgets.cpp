@@ -1,4 +1,6 @@
 #include "KeireClient/Editor/AuthoringWidgets.h"
+
+#include "KeireClient/Editor/AuthoringGeometry.h"
 #include "KeireClient/Editor/GraphComments.h"
 
 #include <algorithm>
@@ -13,6 +15,11 @@
 
 namespace
 {
+    using KeireEditor::Detail::Add;
+    using KeireEditor::Detail::Scale;
+    using KeireEditor::Detail::ScaleColor;
+    using KeireEditor::Detail::Subtract;
+
     constexpr float PinRowHeight = 22.0F;
     constexpr float PinBottomPadding = 8.0F;
     constexpr float BlockHeaderHeight = 28.0F;
@@ -20,23 +27,6 @@ namespace
     constexpr float BlockInset = 8.0F;
     constexpr float ConnectionHitRadius = 7.0F;
     constexpr int ConnectionSegmentCount = 28;
-    [[nodiscard]] Keire::UiPosition Add(const Keire::UiPosition left, const Keire::UiPosition right) noexcept
-    {
-        return {left.X + right.X, left.Y + right.Y};
-    }
-    [[nodiscard]] Keire::UiPosition Subtract(const Keire::UiPosition left, const Keire::UiPosition right) noexcept
-    {
-        return {left.X - right.X, left.Y - right.Y};
-    }
-    [[nodiscard]] Keire::UiPosition Scale(const Keire::UiPosition value, const float scale) noexcept
-    {
-        return {value.X * scale, value.Y * scale};
-    }
-    [[nodiscard]] Keire::UiColor ScaleColor(const Keire::UiColor color, const float scale, const float alpha) noexcept
-    {
-        return {std::clamp(color.Red * scale, 0.0F, 1.0F), std::clamp(color.Green * scale, 0.0F, 1.0F),
-                std::clamp(color.Blue * scale, 0.0F, 1.0F), alpha};
-    }
     [[nodiscard]] Keire::UiPosition BezierPoint(const Keire::UiPosition start, const Keire::UiPosition first,
                                                 const Keire::UiPosition second, const Keire::UiPosition end,
                                                 const float amount) noexcept
@@ -1502,15 +1492,4 @@ namespace KeireEditor
         return result;
     }
 
-    Keire::UiPosition StableNodeGraphCanvas::ToScreen(const Keire::Vector2 position,
-                                                      const Keire::UiItemRect canvas) const noexcept
-    {
-        return {canvas.Minimum.X + (position.X + m_Pan.X) * m_Zoom, canvas.Minimum.Y + (position.Y + m_Pan.Y) * m_Zoom};
-    }
-
-    Keire::Vector2 StableNodeGraphCanvas::ToGraph(const Keire::UiPosition position,
-                                                  const Keire::UiItemRect canvas) const noexcept
-    {
-        return {(position.X - canvas.Minimum.X) / m_Zoom - m_Pan.X, (position.Y - canvas.Minimum.Y) / m_Zoom - m_Pan.Y};
-    }
 } // namespace KeireEditor

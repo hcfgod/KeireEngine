@@ -769,6 +769,10 @@ package_name() {
         dnf:sdl-video) printf 'libX11-devel libXext-devel libXrandr-devel libXcursor-devel libXfixes-devel libXi-devel libXScrnSaver-devel libXtst-devel wayland-devel libxkbcommon-devel libdrm-devel mesa-libgbm-devel' ;;
         pacman:sdl-video) printf 'libx11 libxext libxrandr libxcursor libxfixes libxi libxss libxtst wayland libxkbcommon libdrm mesa' ;;
         zypper:sdl-video) printf 'libX11-devel libXext-devel libXrandr-devel libXcursor-devel libXfixes-devel libXi-devel libXss-devel libXtst-devel wayland-devel libxkbcommon-devel libdrm-devel libgbm-devel' ;;
+        apt-get:sdl-input) printf 'libudev-dev' ;;
+        dnf:sdl-input) printf 'systemd-devel' ;;
+        pacman:sdl-input) printf 'systemd' ;;
+        zypper:sdl-input) printf 'libudev-devel' ;;
         *:native-dialog) printf 'zenity' ;;
         *:llvm) printf 'llvm' ;;
         *:*) printf '%s' "$logical" ;;

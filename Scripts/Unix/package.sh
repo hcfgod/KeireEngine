@@ -198,16 +198,20 @@ if [[ "$PLATFORM" == Mac ]]; then
 fi
 cxx=g++; [[ "$TOOLSET" == clang ]] && cxx=clang++
 gameplay_libraries=("$validation_root/sdk/lib/libJolt.a" "$validation_root/sdk/lib/libRecast.a" "$validation_root/sdk/lib/libDetour.a" "$validation_root/sdk/lib/libDetourCrowd.a" "$validation_root/sdk/lib/libDetourTileCache.a" "$validation_root/sdk/lib/libminiaudio.a" "$validation_root/sdk/lib/libCoral.Native.a" "$validation_root/sdk/lib/libnethost.a")
+macos_sdl_frameworks=(-framework Cocoa -framework CoreVideo -framework IOKit -framework CoreFoundation
+  -framework CoreAudio -framework AudioToolbox -framework ForceFeedback -framework GameController
+  -framework CoreHaptics -framework Carbon -framework Metal -framework QuartzCore
+  -framework UniformTypeIdentifiers)
 consumer_compile=("$cxx" -std=c++20 -Wall -Wextra -Werror -DKEIRE_STATIC "-I$validation_root/sdk/include" "$validation_root/sdk/examples/consumer/Source/Main.cpp" "$validation_root/sdk/lib/lib$CORE_TARGET.a" "$validation_root/sdk/lib/lib$imgui_library.a" "$validation_root/sdk/lib/lib$zstd_library.a" "$validation_root/sdk/lib/libassimp.a" "$validation_root/sdk/lib/libzlibstatic.a" "${gameplay_libraries[@]}" "$validation_root/sdk/third-party/SDL3/lib/libSDL3.a" -o "$validation_root/consumer")
 [[ "$CONFIGURATION" == Dist ]] && consumer_compile+=(-flto)
 [[ "$PLATFORM" == Linux ]] && consumer_compile+=(-pthread -ldl -lm)
-[[ "$PLATFORM" == Mac ]] && consumer_compile+=("-mmacosx-version-min=$macos_deployment_target" -framework Cocoa -framework CoreVideo -framework IOKit -framework CoreFoundation -framework CoreAudio -framework AudioToolbox -framework ForceFeedback -framework Carbon -framework Metal -framework QuartzCore -framework UniformTypeIdentifiers)
+[[ "$PLATFORM" == Mac ]] && consumer_compile+=("-mmacosx-version-min=$macos_deployment_target" "${macos_sdl_frameworks[@]}")
 "${consumer_compile[@]}"
 (cd "$validation_root" && ./consumer "$validation_root/sdk/examples/consumer/Client.json")
 managed_compile=("$cxx" -std=c++20 -Wall -Wextra -Werror -DKEIRE_STATIC "-I$validation_root/sdk/include" "$validation_root/sdk/examples/managed-consumer/Source/ClientApplication.cpp" "$validation_root/sdk/lib/lib$CORE_TARGET.a" "$validation_root/sdk/lib/lib$imgui_library.a" "$validation_root/sdk/lib/lib$zstd_library.a" "$validation_root/sdk/lib/libassimp.a" "$validation_root/sdk/lib/libzlibstatic.a" "${gameplay_libraries[@]}" "$validation_root/sdk/third-party/SDL3/lib/libSDL3.a" -o "$validation_root/managed-consumer")
 [[ "$CONFIGURATION" == Dist ]] && managed_compile+=(-flto)
 [[ "$PLATFORM" == Linux ]] && managed_compile+=(-pthread -ldl -lm)
-[[ "$PLATFORM" == Mac ]] && managed_compile+=("-mmacosx-version-min=$macos_deployment_target" -framework Cocoa -framework CoreVideo -framework IOKit -framework CoreFoundation -framework CoreAudio -framework AudioToolbox -framework ForceFeedback -framework Carbon -framework Metal -framework QuartzCore -framework UniformTypeIdentifiers)
+[[ "$PLATFORM" == Mac ]] && managed_compile+=("-mmacosx-version-min=$macos_deployment_target" "${macos_sdl_frameworks[@]}")
 "${managed_compile[@]}"
 managed_help="$("$validation_root/managed-consumer" --help)"
 [[ "$managed_help" == *--managed-smoke* ]] || { printf 'Managed SDK consumer help validation failed.\n' >&2; exit 1; }

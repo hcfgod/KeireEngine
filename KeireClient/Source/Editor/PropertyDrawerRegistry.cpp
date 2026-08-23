@@ -121,8 +121,14 @@ namespace KeireEditor
             [](IPropertyEditor& editor, const Keire::ComponentProperty& property, Keire::ComponentPropertyValue& value)
             {
                 return DrawValue<Keire::AssetId>(
-                    value, [&](Keire::AssetId& typed)
-                    { return editor.EditAsset(property.DisplayName, typed, property.ExpectedAssetType); });
+                    value,
+                    [&](Keire::AssetId& typed)
+                    {
+                        return editor.EditAsset(property.DisplayName, typed, property.ExpectedAssetType,
+                                                property.ReferenceKind == Keire::ManagedReferenceKind::ScriptableObject
+                                                    ? std::string_view(property.DeclaredManagedType)
+                                                    : std::string_view{});
+                    });
             });
         Register(
             Keire::ComponentPropertyKind::Entity,

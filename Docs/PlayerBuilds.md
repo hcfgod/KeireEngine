@@ -61,7 +61,9 @@ launcher builds.
 Windows players contain `<Product>.exe`, `PlayerBuild.json`, `Content/`, `Managed/`, native dependencies, a generated
 ICO, and optional `Symbols/`. On Windows hosts, the selected or generated icon is also written into the executable's PE
 resources so Explorer, shortcuts, and the running window use it; the native runtime template already carries the Kéire
-fallback for foreign-host assembly. Packaged Windows executables use the GUI subsystem and therefore do not allocate a
+fallback for foreign-host assembly. Build Support carries the five architecture-matched MSVC runtime DLLs imported by
+the native template; it does not redistribute Windows 10+ Universal CRT system DLLs. Packaged Windows executables use
+the GUI subsystem and therefore do not allocate a
 console when launched normally. Linux players contain `<Product>`, the descriptor and runtime directories, a desktop
 entry, hicolor PNG icons, and optional symbols. macOS players use `<Product>.app/Contents/{MacOS,Resources}` with
 `Info.plist`, `PlayerIcon.icns`, content, the managed runtime, and optional external symbols.
@@ -74,6 +76,11 @@ always takes precedence. The player presents the game surface directly to the na
 Game UI draw commands with its dedicated SDL_GPU pipeline. Dear ImGui is neither initialized nor framed by the player;
 it remains an editor-only presentation backend. Managed gameplay uses the same scene-runtime presentation services as
 Play Mode for audio, VFX playback and events, authored UI interaction, and cursor control.
+
+Desktop player templates inherit Kéire's production SDL input profile: Windows, Linux, and macOS builds include their
+native joystick backend, HIDAPI gamepad support, and normalized motor rumble. Linux discovery remains subject to the
+host distribution's `/dev/input` and `/dev/hidraw` access policy; player packages never install permissive udev rules or
+request elevated device access.
 
 ## Build Support
 
@@ -116,8 +123,11 @@ bash Scripts/Unix/player-support.sh arm64
 
 The Unix script emits Linux modules on Linux and macOS modules on macOS. Each invocation builds Development, Release,
 and Dist templates, creates and verifies the archive, and writes a catalog entry containing the archive size and
-SHA-256. Passing an output directory, signing-key ID, and channel additionally publishes the verified archive as a
-signed generic `.keirepackage` component for editor-install dependency resolution. Publishing the six
+SHA-256. Archives use content-addressed filenames, and catalog updates are serialized and published last so parallel
+architecture jobs cannot lose entries or make an existing catalog reference replaced bytes. Every variant contains a
+mandatory `Licenses/` inventory for Kéire and its redistributed runtime dependencies; missing notices fail packaging.
+Passing an output directory, signing-key ID, and channel additionally publishes the verified archive as a signed
+generic `.keirepackage` component for editor-install dependency resolution. Publishing the six
 Windows/Linux/macOS × x86_64/ARM64 modules remains an explicit release operation.
 
 `KeireAssetTool` is a managed-host consumer. Repository launchers and generated IDE projects build the managed API and

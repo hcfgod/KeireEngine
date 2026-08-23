@@ -8,7 +8,9 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <map>
 #include <optional>
 #include <ranges>
 #include <stdexcept>
@@ -44,9 +46,274 @@ namespace Keire::Detail
 
         [[nodiscard]] bool IsSafeComponent(const std::string_view value)
         {
-            if (value.empty() || value == "." || value == ".." || value.size() > 128)
+            if (value.empty() || value == "." || value == ".." || value.size() > 128 || value.front() == '.' ||
+                value.back() == '.' || value.back() == ' ')
                 return false;
-            return value.find_first_of("/\\") == std::string_view::npos && value.find('\0') == std::string_view::npos;
+            if (std::ranges::any_of(value,
+                                    [](const unsigned char character)
+                                    {
+                                        return character < 0x20U || character == 0x7fU || character == '/' ||
+                                               character == '\\' || character == '<' || character == '>' ||
+                                               character == ':' || character == '"' || character == '|' ||
+                                               character == '?' || character == '*';
+                                    }))
+            {
+                return false;
+            }
+
+            const auto path = PathFromUtf8(value);
+            if (path.is_absolute() || path.has_root_name() || path.has_root_directory() || path.filename() != path)
+                return false;
+
+            auto stem = std::string(value.substr(0, value.find('.')));
+            std::ranges::transform(stem, stem.begin(), [](const unsigned char character)
+                                   { return static_cast<char>(std::toupper(character)); });
+            static constexpr std::array reservedNames{"CON",  "PRN",  "AUX",  "NUL",  "CLOCK$", "COM1", "COM2", "COM3",
+                                                      "COM4", "COM5", "COM6", "COM7", "COM8",   "COM9", "LPT1", "LPT2",
+                                                      "LPT3", "LPT4", "LPT5", "LPT6", "LPT7",   "LPT8", "LPT9"};
+            return std::ranges::find(reservedNames, stem) == reservedNames.end();
+        }
+
+        [[nodiscard]] std::string CaseFoldedPath(const std::filesystem::path& path)
+        {
+            auto result = PathToUtf8(path.lexically_normal());
+            std::ranges::transform(result, result.begin(), [](const unsigned char character)
+                                   { return static_cast<char>(std::tolower(character)); });
+            return result;
+        }
+
+        [[nodiscard]] std::string LogicalPathKey(const std::filesystem::path& path, const PlayerPlatform platform)
+        {
+            return platform == PlayerPlatform::Windows ? CaseFoldedPath(path) : PathToUtf8(path.lexically_normal());
+        }
+
+        [[nodiscard]] bool HasProhibitedRuntimeComponent(const std::filesystem::path& path)
+        {
+            static const std::unordered_set<std::string> prohibited{"artifacts",     "build",     "cache", "caches",
+                                                                    "logs",          "metadata",  "packs", "sdk",
+                                                                    "sdk-manifests", "templates", "temp",  "tools"};
+            return std::ranges::any_of(path, [](const auto& component)
+                                       { return prohibited.contains(CaseFoldedPath(component)); });
+        }
+
+        [[nodiscard]] std::optional<std::pair<std::string, std::string>> FfmpegAbi(const std::filesystem::path& path)
+        {
+            const auto filename = CaseFoldedPath(path.filename());
+            constexpr std::array families{"avcodec", "avformat", "avutil", "swresample", "swscale"};
+            for (const std::string_view family : families)
+            {
+                const auto position = filename.find(family);
+                if (position == std::string::npos)
+                    continue;
+                auto index = position + family.size();
+                while (index < filename.size() &&
+                       (filename[index] == '-' || filename[index] == '.' || filename[index] == '_'))
+                    ++index;
+                if (filename.substr(index).starts_with("so."))
+                    index += 3;
+                const auto first = index;
+                while (index < filename.size() && std::isdigit(static_cast<unsigned char>(filename[index])) != 0)
+                    ++index;
+                if (index != first)
+                    return std::pair{std::string(family), filename.substr(first, index - first)};
+            }
+            return std::nullopt;
+        }
+
+        [[nodiscard]] bool IsWithin(const std::filesystem::path& path, const std::filesystem::path& root,
+                                    const PlayerPlatform platform)
+        {
+            const auto pathKey = LogicalPathKey(path, platform);
+            const auto rootKey = LogicalPathKey(root, platform);
+            return pathKey == rootKey || pathKey.starts_with(rootKey + "/");
+        }
+
+        [[nodiscard]] std::optional<std::string> FirstRelativeComponent(const std::filesystem::path& path,
+                                                                        const std::filesystem::path& root,
+                                                                        const PlayerPlatform platform)
+        {
+            if (!IsWithin(path, root, platform))
+                return std::nullopt;
+            const auto pathKey = LogicalPathKey(path, platform);
+            const auto rootKey = LogicalPathKey(root, platform);
+            if (pathKey.size() <= rootKey.size())
+                return std::nullopt;
+            const auto relative = std::string_view(pathKey).substr(rootKey.size() + 1);
+            return std::string(relative.substr(0, relative.find('/')));
+        }
+
+        [[nodiscard]] std::filesystem::path ManagedRoot(const PlayerSupportManifest& manifest,
+                                                        const PlayerSupportVariant& variant)
+        {
+            if (manifest.Platform == PlayerPlatform::MacOS)
+                return variant.Root / variant.Bundle / "Contents/Resources/Managed";
+            return variant.Root / "Managed";
+        }
+
+        [[nodiscard]] std::string_view NethostName(const PlayerPlatform platform)
+        {
+            switch (platform)
+            {
+            case PlayerPlatform::Windows:
+                return "nethost.dll";
+            case PlayerPlatform::Linux:
+                return "libnethost.so";
+            case PlayerPlatform::MacOS:
+                return "libnethost.dylib";
+            }
+            throw std::invalid_argument("Player support manifest platform is invalid.");
+        }
+
+        [[nodiscard]] std::string_view HostFxrName(const PlayerPlatform platform)
+        {
+            return platform == PlayerPlatform::Windows ? "hostfxr.dll"
+                   : platform == PlayerPlatform::Linux ? "libhostfxr.so"
+                                                       : "libhostfxr.dylib";
+        }
+
+        [[nodiscard]] std::string_view CoreClrName(const PlayerPlatform platform)
+        {
+            return platform == PlayerPlatform::Windows ? "coreclr.dll"
+                   : platform == PlayerPlatform::Linux ? "libcoreclr.so"
+                                                       : "libcoreclr.dylib";
+        }
+
+        [[nodiscard]] std::string_view HostPolicyName(const PlayerPlatform platform)
+        {
+            return platform == PlayerPlatform::Windows ? "hostpolicy.dll"
+                   : platform == PlayerPlatform::Linux ? "libhostpolicy.so"
+                                                       : "libhostpolicy.dylib";
+        }
+
+        [[nodiscard]] std::string_view CreateDumpName(const PlayerPlatform platform)
+        {
+            return platform == PlayerPlatform::Windows ? "createdump.exe" : "createdump";
+        }
+
+        void RequireFile(const std::unordered_set<std::string>& files, const std::filesystem::path& path,
+                         const PlayerPlatform platform)
+        {
+            if (!files.contains(LogicalPathKey(path, platform)))
+                throw std::invalid_argument("Player support manifest runtime closure is missing a required file: " +
+                                            PathToUtf8(path));
+        }
+
+        void ValidateRuntimeClosure(const PlayerSupportManifest& manifest)
+        {
+            if (manifest.Files.empty())
+                return;
+
+            static constexpr std::array RequiredManagedFiles{"Coral.Managed.dll", "Coral.Managed.deps.json",
+                                                             "Coral.Managed.runtimeconfig.json", "Keire.Managed.dll"};
+            static constexpr std::array RequiredWindowsRuntimeFiles{
+                "MSVCP140.dll", "MSVCP140_ATOMIC_WAIT.dll", "MSVCP140_1.dll", "VCRUNTIME140.dll", "VCRUNTIME140_1.dll"};
+            static constexpr std::array RequiredLicenseFiles{"Keire-LICENSE.txt",
+                                                             "Keire-THIRD_PARTY_NOTICES.md",
+                                                             "Coral-LICENSE.txt",
+                                                             "dotnet-LICENSE.txt",
+                                                             "dotnet-ThirdPartyNotices.txt",
+                                                             "SDL-LICENSE.txt",
+                                                             "assimp-LICENSE.txt",
+                                                             "assimp-zlib-LICENSE.txt",
+                                                             "stb-LICENSE.txt",
+                                                             "Jolt-LICENSE.txt",
+                                                             "Recast-LICENSE.txt",
+                                                             "miniaudio-LICENSE.txt",
+                                                             "spdlog-LICENSE.txt",
+                                                             "fmt-LICENSE.rst",
+                                                             "nlohmann-json-LICENSE.MIT.txt",
+                                                             "dear-imgui-LICENSE.txt",
+                                                             "zstandard-LICENSE.txt",
+                                                             "entt-LICENSE.txt",
+                                                             "glm-COPYING.txt"};
+
+            std::unordered_set<std::string> logicalFiles;
+            for (const auto& file : manifest.Files)
+                logicalFiles.emplace(LogicalPathKey(file.Path, manifest.Platform));
+
+            std::unordered_set<std::string> allowedExecutables;
+            std::map<std::string, std::unordered_set<std::string>> ffmpegGenerations;
+            for (const auto& variant : manifest.Variants)
+            {
+                const auto executable = (variant.Root / variant.Executable).lexically_normal();
+                const auto managed = ManagedRoot(manifest, variant).lexically_normal();
+                std::filesystem::path nativeRoot = variant.Root;
+                if (manifest.Platform == PlayerPlatform::MacOS)
+                {
+                    const auto requiredExecutable =
+                        (variant.Bundle / "Contents/MacOS" / variant.Executable.filename()).lexically_normal();
+                    if (variant.Bundle.empty() || variant.Executable != requiredExecutable)
+                        throw std::invalid_argument("Player support macOS variant layout is invalid.");
+                    nativeRoot /= variant.Bundle / "Contents/MacOS";
+                }
+                else if (!variant.Bundle.empty() || variant.Executable.has_parent_path())
+                    throw std::invalid_argument("Player support native variant layout is invalid.");
+
+                RequireFile(logicalFiles, executable, manifest.Platform);
+                RequireFile(logicalFiles, nativeRoot / NethostName(manifest.Platform), manifest.Platform);
+                if (manifest.Platform == PlayerPlatform::Windows)
+                {
+                    for (const auto filename : RequiredWindowsRuntimeFiles)
+                        RequireFile(logicalFiles, nativeRoot / filename, manifest.Platform);
+                }
+                for (const auto filename : RequiredManagedFiles)
+                    RequireFile(logicalFiles, managed / filename, manifest.Platform);
+                for (const auto filename : RequiredLicenseFiles)
+                    RequireFile(logicalFiles, variant.Root / "Licenses" / filename, manifest.Platform);
+
+                const auto hostRoot = managed / "Dotnet/host/fxr";
+                const auto runtimeRoot = managed / "Dotnet/shared/Microsoft.NETCore.App";
+                std::unordered_set<std::string> hostGenerations;
+                std::unordered_set<std::string> runtimeGenerations;
+                for (const auto& file : manifest.Files)
+                {
+                    if (const auto generation = FirstRelativeComponent(file.Path, hostRoot, manifest.Platform))
+                        hostGenerations.emplace(*generation);
+                    if (const auto generation = FirstRelativeComponent(file.Path, runtimeRoot, manifest.Platform))
+                        runtimeGenerations.emplace(*generation);
+                    if (IsWithin(file.Path, variant.Root, manifest.Platform))
+                    {
+                        if (const auto abi = FfmpegAbi(file.Path))
+                            ffmpegGenerations[LogicalPathKey(variant.Root, manifest.Platform) + "/" + abi->first]
+                                .emplace(abi->second);
+                    }
+                }
+                if (hostGenerations.size() != 1 || runtimeGenerations.size() != 1)
+                    throw std::invalid_argument(
+                        "Player support manifest must contain exactly one .NET ABI generation.");
+                RequireFile(logicalFiles, hostRoot / *hostGenerations.begin() / HostFxrName(manifest.Platform),
+                            manifest.Platform);
+                const auto runtimeDirectory = runtimeRoot / *runtimeGenerations.begin();
+                RequireFile(logicalFiles, runtimeDirectory / CoreClrName(manifest.Platform), manifest.Platform);
+                RequireFile(logicalFiles, runtimeDirectory / HostPolicyName(manifest.Platform), manifest.Platform);
+                RequireFile(logicalFiles, runtimeDirectory / "System.Private.CoreLib.dll", manifest.Platform);
+
+                allowedExecutables.emplace(LogicalPathKey(executable, manifest.Platform));
+                const auto createDump = runtimeDirectory / CreateDumpName(manifest.Platform);
+                if (logicalFiles.contains(LogicalPathKey(createDump, manifest.Platform)))
+                    allowedExecutables.emplace(LogicalPathKey(createDump, manifest.Platform));
+            }
+
+            for (const auto& file : manifest.Files)
+            {
+                if (std::ranges::none_of(manifest.Variants, [&](const auto& variant)
+                                         { return IsWithin(file.Path, variant.Root, manifest.Platform); }) ||
+                    HasProhibitedRuntimeComponent(file.Path))
+                    throw std::invalid_argument("Player support manifest contains non-runtime payload data.");
+
+                const auto pathKey = LogicalPathKey(file.Path, manifest.Platform);
+                const auto filename = CaseFoldedPath(file.Path.filename());
+                if ((filename == "createdump" || filename == "createdump.exe") && !allowedExecutables.contains(pathKey))
+                    throw std::invalid_argument("Player support manifest contains a misplaced createdump executable.");
+                if (file.Mode == 0755U && !allowedExecutables.contains(pathKey))
+                    throw std::invalid_argument("Player support manifest contains an unexpected executable file.");
+                if (allowedExecutables.contains(pathKey) && file.Mode != 0755U)
+                    throw std::invalid_argument("Player support manifest executable mode is invalid.");
+                if (CaseFoldedPath(file.Path.extension()) == ".exe" && !allowedExecutables.contains(pathKey))
+                    throw std::invalid_argument("Player support manifest contains an unexpected executable.");
+            }
+            if (std::ranges::any_of(ffmpegGenerations, [](const auto& entry) { return entry.second.size() > 1; }))
+                throw std::invalid_argument("Player support manifest runtime closure is incomplete or ambiguous.");
         }
 
         [[nodiscard]] const PlayerSupportVariant& FindVariant(const PlayerSupportManifest& manifest,
@@ -274,9 +541,7 @@ namespace Keire::Detail
         }
         for (const auto& file : manifest.Files)
         {
-            auto key = PathToUtf8(file.Path.lexically_normal());
-            std::ranges::transform(key, key.begin(), [](const unsigned char character)
-                                   { return static_cast<char>(std::tolower(character)); });
+            const auto key = LogicalPathKey(file.Path, manifest.Platform);
             const bool validDigest =
                 file.Sha256.size() == 64 && std::ranges::all_of(file.Sha256, [](const unsigned char character)
                                                                 { return std::isxdigit(character) != 0; });
@@ -290,11 +555,15 @@ namespace Keire::Detail
                 slot.Offset > 16ULL * 1024ULL * 1024ULL * 1024ULL ||
                 slot.Size > 16ULL * 1024ULL * 1024ULL * 1024ULL - slot.Offset)
                 throw std::invalid_argument("Player support branding slots are invalid.");
-            const auto file = std::ranges::find(manifest.Files, slot.Path, &PlayerSupportFile::Path);
+            const auto slotKey = LogicalPathKey(slot.Path, manifest.Platform);
+            const auto file =
+                std::ranges::find_if(manifest.Files, [&](const auto& candidate)
+                                     { return LogicalPathKey(candidate.Path, manifest.Platform) == slotKey; });
             if (!manifest.Files.empty() &&
                 (file == manifest.Files.end() || slot.Offset > file->Size || slot.Size > file->Size - slot.Offset))
                 throw std::invalid_argument("Player support branding slot exceeds its file.");
         }
+        ValidateRuntimeClosure(manifest);
     }
 
     ResolvedPlayerSupport ResolvePlayerSupport(const std::filesystem::path& executable, const PlayerPlatform platform,

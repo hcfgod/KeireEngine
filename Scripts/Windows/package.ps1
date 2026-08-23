@@ -252,13 +252,22 @@ try {
         (Join-Path $sdkRoot "lib\Coral.Native.lib"),
         (Join-Path $sdkRoot "lib\nethost.lib")
     )
+    $sdlMsvcLibraries = @(
+        "kernel32.lib", "user32.lib", "gdi32.lib", "winmm.lib", "imm32.lib", "setupapi.lib", "version.lib",
+        "ole32.lib", "oleaut32.lib", "shell32.lib", "advapi32.lib", "uuid.lib", "hid.lib", "mincore.lib",
+        "dinput8.lib"
+    )
+    $sdlGnuLibraries = @(
+        "-lkernel32", "-luser32", "-lgdi32", "-lwinmm", "-limm32", "-lsetupapi", "-lversion", "-lole32",
+        "-loleaut32", "-lshell32", "-ladvapi32", "-luuid", "-lhid", "-lmincore", "-ldinput8"
+    )
     if ($Toolset -eq "msc") {
         $consumerLinkOptions = if ($Configuration -eq "Dist") { @("/link", "/LTCG") } else { @() }
         & cl /nologo /std:c++20 /EHsc /MD /W4 /WX /utf-8 /permissive- /Zc:__cplusplus /DKEIRE_STATIC "/I$(Join-Path $sdkRoot 'include')" $consumerSource `
             (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") (Join-Path $sdkRoot "lib\$zstdLibraryName.lib") (Join-Path $sdkRoot "lib\assimp.lib") (Join-Path $sdkRoot "lib\zlibstatic.lib") `
             @gameplayLibraries `
             (Join-Path $sdkRoot "third-party\SDL3\lib\SDL3-static.lib") `
-            user32.lib gdi32.lib winmm.lib imm32.lib setupapi.lib version.lib ole32.lib oleaut32.lib shell32.lib advapi32.lib `
+            @sdlMsvcLibraries `
             "/Fo:$consumerObject" "/Fe:$consumerExe" @consumerLinkOptions
     }
     else {
@@ -267,7 +276,7 @@ try {
             (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") (Join-Path $sdkRoot "lib\$zstdLibraryName.lib") (Join-Path $sdkRoot "lib\assimp.lib") (Join-Path $sdkRoot "lib\zlibstatic.lib") `
             @gameplayLibraries `
             (Join-Path $sdkRoot "third-party\SDL3\lib\SDL3-static.lib") `
-            -luser32 -lgdi32 -lwinmm -limm32 -lsetupapi -lversion -lole32 -loleaut32 -lshell32 -ladvapi32 -o $consumerExe
+            @sdlGnuLibraries -o $consumerExe
     }
     if ($LASTEXITCODE -ne 0) { throw "Extracted SDK consumer compilation failed with exit code $LASTEXITCODE." }
     Push-Location $validationRoot
@@ -282,7 +291,7 @@ try {
             (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") (Join-Path $sdkRoot "lib\$zstdLibraryName.lib") (Join-Path $sdkRoot "lib\assimp.lib") (Join-Path $sdkRoot "lib\zlibstatic.lib") `
             @gameplayLibraries `
             (Join-Path $sdkRoot "third-party\SDL3\lib\SDL3-static.lib") `
-            user32.lib gdi32.lib winmm.lib imm32.lib setupapi.lib version.lib ole32.lib oleaut32.lib shell32.lib advapi32.lib `
+            @sdlMsvcLibraries `
             "/Fo:$managedObject" "/Fe:$managedExe" @consumerLinkOptions
     }
     else {
@@ -290,7 +299,7 @@ try {
             (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") (Join-Path $sdkRoot "lib\$zstdLibraryName.lib") (Join-Path $sdkRoot "lib\assimp.lib") (Join-Path $sdkRoot "lib\zlibstatic.lib") `
             @gameplayLibraries `
             (Join-Path $sdkRoot "third-party\SDL3\lib\SDL3-static.lib") `
-            -luser32 -lgdi32 -lwinmm -limm32 -lsetupapi -lversion -lole32 -loleaut32 -lshell32 -ladvapi32 -o $managedExe
+            @sdlGnuLibraries -o $managedExe
     }
     if ($LASTEXITCODE -ne 0) { throw "Managed SDK consumer compilation failed with exit code $LASTEXITCODE." }
     $managedHelp = (& $managedExe --help) -join "`n"

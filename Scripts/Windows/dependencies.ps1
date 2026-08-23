@@ -83,8 +83,9 @@ elseif ($Toolset -eq "gcc") { (& g++ --version | Select-Object -First 1) }
 else { "MSVC $env:VCToolsVersion WindowsSDK $env:WindowsSDKVersion" }
 $options = @(
     "-DSDL_SHARED=OFF", "-DSDL_STATIC=ON", "-DSDL_TEST_LIBRARY=OFF", "-DSDL_TESTS=OFF",
-    "-DSDL_EXAMPLES=OFF", "-DSDL_AUDIO=OFF", "-DSDL_CAMERA=OFF", "-DSDL_JOYSTICK=OFF",
-    "-DSDL_HAPTIC=OFF", "-DSDL_SENSOR=OFF", "-DSDL_RENDER=OFF", "-DSDL_GPU=ON",
+    "-DSDL_EXAMPLES=OFF", "-DSDL_AUDIO=OFF", "-DSDL_CAMERA=OFF", "-DSDL_JOYSTICK=ON",
+    "-DSDL_HAPTIC=ON", "-DSDL_HIDAPI=ON", "-DSDL_HIDAPI_JOYSTICK=ON", "-DSDL_HIDAPI_LIBUSB=OFF",
+    "-DSDL_VIRTUAL_JOYSTICK=ON", "-DSDL_SENSOR=OFF", "-DSDL_RENDER=OFF", "-DSDL_GPU=ON",
     "-DSDL_DUMMYVIDEO=ON", "-DSDL_OFFSCREEN=ON", "-DSDL_INSTALL=ON", "-DSDL_INSTALL_DOCS=OFF",
     "-DSDL_INSTALL_CMAKEDIR_ROOT=cmake", "-DSDL_DEPS_SHARED=ON",
     "-DCMAKE_POSITION_INDEPENDENT_CODE=ON", "-DCMAKE_INSTALL_LIBDIR=lib",
@@ -109,6 +110,28 @@ $options = @(
     "-DMINIAUDIO_BUILD_TOOLS=OFF", "-DMINIAUDIO_NO_EXTRA_NODES=ON", "-DMINIAUDIO_NO_LIBVORBIS=ON",
     "-DMINIAUDIO_NO_LIBOPUS=ON", "-DMINIAUDIO_INSTALL=ON"
 )
+
+function Assert-SdlInputBackends {
+    param([string]$Build, [string]$Configuration)
+
+    $configurationName = $Configuration.ToLowerInvariant()
+    $config = Join-Path $Build "SDL\include-config-$configurationName\build_config\SDL_build_config.h"
+    if (-not (Test-Path -LiteralPath $config -PathType Leaf)) {
+        throw "SDL $Configuration input-backend configuration is missing: $config"
+    }
+    $source = Get-Content -LiteralPath $config -Raw
+    foreach ($macro in @("SDL_JOYSTICK_HIDAPI", "SDL_JOYSTICK_VIRTUAL", "SDL_JOYSTICK_RAWINPUT", "SDL_HAPTIC_DINPUT")) {
+        if (-not $source.Contains("#define $macro 1")) {
+            throw "SDL $Configuration input-backend configuration is missing $macro."
+        }
+    }
+    foreach ($macro in @("SDL_JOYSTICK_DISABLED", "SDL_HAPTIC_DISABLED", "SDL_HIDAPI_DISABLED", "SDL_LIBUSB_DYNAMIC")) {
+        if ($source.Contains("#define $macro ")) {
+            throw "SDL $Configuration input-backend configuration unexpectedly defines $macro."
+        }
+    }
+}
+
 $key = @($Lock.SDL_COMMIT, $Lock.ASSIMP_COMMIT, $Lock.JOLT_COMMIT, $Lock.RECAST_COMMIT,
     $Lock.MINIAUDIO_COMMIT, $Lock.LIBSODIUM_COMMIT, $Architecture, $Toolset, $compiler, $bridgeHash,
     ($options -join ";")) -join "|"
@@ -185,7 +208,11 @@ foreach ($configuration in @("Debug", "Release")) {
         (Test-Path $miniaudioLibrary) -and (Test-Path $sodiumRuntime) -and (Test-Path $sodiumLicense) -and
         (Test-Path $zlibLibrary) -and (Test-Path $stamp) -and
         ((Get-Content $stamp -Raw).Trim() -eq "$key|$configuration")
-    if ($valid) { Write-Host "==> Native $configuration dependency cache is current"; continue }
+    if ($valid) {
+        Assert-SdlInputBackends $build $configuration
+        Write-Host "==> Native $configuration dependency cache is current"
+        continue
+    }
 
     if (Test-Path -LiteralPath $build) {
         $resolvedBuild = [IO.Path]::GetFullPath($build)
@@ -206,6 +233,7 @@ foreach ($configuration in @("Debug", "Release")) {
     if ($LASTEXITCODE -ne 0) { throw "Native $configuration dependency configuration failed." }
     & cmake --build $build --target install --parallel
     if ($LASTEXITCODE -ne 0) { throw "Native $configuration dependency build failed." }
+    Assert-SdlInputBackends $build $configuration
     Install-SodiumRuntime $install
     if (-not (Test-Path -LiteralPath $library) -or -not (Test-Path -LiteralPath $assimpLibrary) -or
         -not (Test-Path -LiteralPath $joltLibrary) -or -not (Test-Path -LiteralPath $recastLibrary) -or
@@ -329,7 +357,7 @@ DependencyManifest = {
     SodiumDebugRuntime = "$debugInstall/bin/libsodium.dll",
     SodiumReleaseRuntime = "$releaseInstall/bin/libsodium.dll",
     SodiumLicense = "$releaseInstall/share/licenses/libsodium/LICENSE",
-    SDL3PlatformLinks = { "kernel32", "user32", "gdi32", "winmm", "imm32", "setupapi", "version", "ole32", "oleaut32", "shell32", "advapi32", "uuid" }
+    SDL3PlatformLinks = { "kernel32", "user32", "gdi32", "winmm", "imm32", "setupapi", "version", "ole32", "oleaut32", "shell32", "advapi32", "uuid", "hid", "mincore", "dinput8" }
 }
 "@
 [IO.File]::WriteAllText((Join-Path $generated "Dependencies.lua"), $manifest, [Text.UTF8Encoding]::new($false))

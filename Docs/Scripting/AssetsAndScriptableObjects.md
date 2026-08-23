@@ -82,6 +82,8 @@ After the managed build succeeds, right-click a folder in the Project panel and 
 **Create > Gameplay > Weapon Tuning**. Kéire creates a typed `.keiredata` asset in that folder, selects it, and exposes
 its public fields (and private fields marked `[SerializeField]`) in the Inspector. The slash-separated
 `CreateAssetMenu` name controls the nested Create-menu path, while its second argument supplies the default filename.
+An asset can then be selected or dragged onto a compatible `WeaponTuning` field on a Behaviour. The picker accepts the
+declared ScriptableObject type and its derived types while excluding unrelated managed-data assets.
 
 ScriptableObject fields receive deterministic implicit field IDs so a newly generated class is authorable without
 extra attributes. Add an explicit `[StableFieldId]` before shipping data whose field may be renamed; the explicit ID

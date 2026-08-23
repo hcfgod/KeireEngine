@@ -15,6 +15,9 @@
 
 namespace Keire::Detail
 {
+    class AnchoredFileSystem;
+    struct AnchoredFileMetadata;
+
     using Sha256Digest = std::array<std::byte, 32>;
 
     struct CatalogPage
@@ -66,6 +69,8 @@ namespace Keire::Detail
     [[nodiscard]] Sha256Digest Sha256(std::span<const std::byte> bytes) noexcept;
     [[nodiscard]] Sha256Digest Sha256File(const std::filesystem::path& path,
                                           std::uintmax_t maximumBytes = 16ULL * 1024ULL * 1024ULL * 1024ULL);
+    [[nodiscard]] Sha256Digest Sha256File(const AnchoredFileSystem& fileSystem, const std::filesystem::path& relative,
+                                          std::uintmax_t maximumBytes, AnchoredFileMetadata& metadata);
     [[nodiscard]] std::string DigestToString(const Sha256Digest& digest);
     [[nodiscard]] Sha256Digest ParseDigest(std::string_view value);
     [[nodiscard]] CatalogData LoadCatalog(const std::filesystem::path& path);

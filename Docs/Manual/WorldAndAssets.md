@@ -89,7 +89,8 @@ After scripts compile, right-click the destination folder and choose
 **Create > Gameplay > Movement Tuning**. The Editor creates and selects a typed `.keiredata` asset; edit its public or
 `[SerializeField]` fields in the Inspector, then assign it to a compatible serialized field. Public fields work
 immediately with deterministic implicit identity. Use explicit `[StableFieldId]` values, as above, when authored data
-must survive a later source-field rename.
+must survive a later source-field rename. Behaviour fields accept the declared ScriptableObject type and its derived
+types through either the picker or Project-panel drag/drop.
 `ScriptableObject.CreateInstance<T>()` creates transient data and `ScriptableObject.Instantiate(source)` clones an
 existing object. Persistent project data should be authored and referenced as an asset; destroying persistent assets
 at runtime is rejected.

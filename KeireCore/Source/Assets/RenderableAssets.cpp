@@ -3,7 +3,9 @@
 #include "Keire/Assets/RenderingAssets.h"
 
 #include "KeireInternal/Assets/BuiltinMeshes.h"
+#include "KeireInternal/Assets/ImportedMaterialShader.h"
 #include "KeireInternal/Assets/TextureImportBackend.h"
+#include "KeireInternal/Assets/TextureImportSettingsInternal.h"
 
 #include <assimp/GltfMaterial.h>
 #include <assimp/Importer.hpp>
@@ -12,7 +14,6 @@
 #include <assimp/matrix3x3.h>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
-#include <nlohmann/json.hpp>
 #include <stb_image.h>
 
 #include <algorithm>
@@ -37,7 +38,6 @@ namespace Keire
 {
     namespace
     {
-        using Json = nlohmann::json;
         constexpr std::array<char, 8> MeshMagic{'K', 'E', 'I', 'R', 'E', 'M', 'S', 'H'};
         constexpr std::array<char, 8> TextureMagic{'K', 'E', 'I', 'R', 'E', 'T', 'E', 'X'};
         constexpr std::uint32_t MeshVersion = 5;
@@ -47,7 +47,6 @@ namespace Keire
         constexpr std::size_t MaximumMeshSubmeshes = std::size_t{1024} * 1024U;
         constexpr std::size_t MaximumMeshMaterialSlots = std::size_t{16} * 1024U;
         constexpr std::size_t MaximumMeshLods = 16U;
-        constexpr std::size_t MaximumTextureDimension = std::size_t{16} * 1024U;
         constexpr std::size_t MaximumTextureBytes = std::size_t{1024} * 1024U * 1024U;
 
         enum class ImportedAnimationMotion : std::uint8_t
@@ -395,204 +394,10 @@ namespace Keire
             }
         }
 
-        [[nodiscard]] TextureImportSettings NormalizeTextureSettings(TextureImportSettings settings)
-        {
-            const auto validSemantic =
-                settings.Semantic == TextureSemantic::Color || settings.Semantic == TextureSemantic::Data ||
-                settings.Semantic == TextureSemantic::Normal || settings.Semantic == TextureSemantic::Environment;
-            const auto validColorSpace =
-                settings.ColorSpace == TextureColorSpace::Linear || settings.ColorSpace == TextureColorSpace::Srgb;
-            const auto validMipPolicy =
-                settings.Mips == TextureMipPolicy::None || settings.Mips == TextureMipPolicy::Generate;
-            const bool validEnvironmentLayout = settings.EnvironmentLayout >= TextureEnvironmentLayout::Auto &&
-                                                settings.EnvironmentLayout <= TextureEnvironmentLayout::VerticalStrip;
-            const auto validFilter = [](const TextureFilter filter)
-            { return filter == TextureFilter::Nearest || filter == TextureFilter::Linear; };
-            const auto validAddress = [](const TextureAddressMode mode)
-            {
-                return mode == TextureAddressMode::Repeat || mode == TextureAddressMode::Clamp ||
-                       mode == TextureAddressMode::Mirror;
-            };
-            if (!validSemantic || !validColorSpace || !validMipPolicy || !validEnvironmentLayout ||
-                !validFilter(settings.Sampler.Minimum) || !validFilter(settings.Sampler.Magnification) ||
-                !validFilter(settings.Sampler.Mip) || !validAddress(settings.Sampler.AddressU) ||
-                !validAddress(settings.Sampler.AddressV) || !validAddress(settings.Sampler.AddressW))
-                throw std::invalid_argument("Texture import settings contain an invalid enum value.");
-            if (settings.MaximumSize == 0 || settings.MaximumSize > MaximumTextureDimension ||
-                settings.Sampler.Anisotropy == 0 || settings.Sampler.Anisotropy > 16)
-                throw std::invalid_argument("Texture import settings contain invalid size or anisotropy limits.");
-            if (settings.Semantic != TextureSemantic::Color)
-                settings.ColorSpace = TextureColorSpace::Linear;
-            if (settings.HighDynamicRange && settings.Semantic != TextureSemantic::Environment)
-                throw std::invalid_argument("HDR RGBE storage is reserved for environment textures.");
-            return settings;
-        }
-
-        [[nodiscard]] TextureImportSettings ApplyTextureImportSettings(TextureImportSettings settings,
-                                                                       const AssetImportSettings& values)
-        {
-            const auto choice = [&](const std::string_view key, const std::string& fallback)
-            {
-                const auto found = values.find(key);
-                return found == values.end() ? fallback : std::get<std::string>(found->second);
-            };
-            const auto semantic = choice("semantic", "color");
-            settings.Semantic = semantic == "normal"        ? TextureSemantic::Normal
-                                : semantic == "data"        ? TextureSemantic::Data
-                                : semantic == "environment" ? TextureSemantic::Environment
-                                                            : TextureSemantic::Color;
-            settings.ColorSpace =
-                choice("colorSpace", "srgb") == "linear" ? TextureColorSpace::Linear : TextureColorSpace::Srgb;
-            settings.Mips = choice("mips", "generate") == "none" ? TextureMipPolicy::None : TextureMipPolicy::Generate;
-            const auto layout = choice("environmentLayout", "auto");
-            settings.EnvironmentLayout = layout == "equirectangular"   ? TextureEnvironmentLayout::Equirectangular
-                                         : layout == "horizontalCross" ? TextureEnvironmentLayout::HorizontalCross
-                                         : layout == "verticalCross"   ? TextureEnvironmentLayout::VerticalCross
-                                         : layout == "horizontalStrip" ? TextureEnvironmentLayout::HorizontalStrip
-                                         : layout == "verticalStrip"   ? TextureEnvironmentLayout::VerticalStrip
-                                                                       : TextureEnvironmentLayout::Auto;
-            if (const auto found = values.find("maximumSize"); found != values.end())
-                settings.MaximumSize = static_cast<std::uint32_t>(std::get<std::int64_t>(found->second));
-            if (const auto found = values.find("flipGreen"); found != values.end())
-                settings.FlipGreen = std::get<bool>(found->second);
-            const auto filter = [&](const std::string_view key, const TextureFilter fallback)
-            {
-                return choice(key, fallback == TextureFilter::Nearest ? "nearest" : "linear") == "nearest"
-                           ? TextureFilter::Nearest
-                           : TextureFilter::Linear;
-            };
-            settings.Sampler.Minimum = filter("minFilter", settings.Sampler.Minimum);
-            settings.Sampler.Magnification = filter("magFilter", settings.Sampler.Magnification);
-            settings.Sampler.Mip = filter("mipFilter", settings.Sampler.Mip);
-            const auto address = [&](const std::string_view key, const TextureAddressMode fallback)
-            {
-                const auto fallbackText = fallback == TextureAddressMode::Clamp    ? "clamp"
-                                          : fallback == TextureAddressMode::Mirror ? "mirror"
-                                                                                   : "repeat";
-                const auto value = choice(key, fallbackText);
-                return value == "clamp"    ? TextureAddressMode::Clamp
-                       : value == "mirror" ? TextureAddressMode::Mirror
-                                           : TextureAddressMode::Repeat;
-            };
-            settings.Sampler.AddressU = address("addressU", settings.Sampler.AddressU);
-            settings.Sampler.AddressV = address("addressV", settings.Sampler.AddressV);
-            settings.Sampler.AddressW = address("addressW", settings.Sampler.AddressW);
-            if (const auto found = values.find("anisotropy"); found != values.end())
-                settings.Sampler.Anisotropy = static_cast<std::uint8_t>(std::get<std::int64_t>(found->second));
-            return NormalizeTextureSettings(settings);
-        }
-
-        [[nodiscard]] TextureImportSettings ReadTextureSettings(const std::filesystem::path& metadataPath,
-                                                                TextureImportSettings settings)
-        {
-            if (metadataPath.empty() || !std::filesystem::is_regular_file(metadataPath))
-                return NormalizeTextureSettings(settings);
-            std::ifstream stream(metadataPath, std::ios::binary);
-            Json metadata;
-            stream >> metadata;
-            if (!stream || !metadata.is_object())
-                throw std::invalid_argument("Texture metadata is not valid JSON.");
-            const auto found = metadata.find("textureImportSettings");
-            if (found == metadata.end())
-                return NormalizeTextureSettings(settings);
-            if (!found->is_object())
-                throw std::invalid_argument("textureImportSettings must be an object.");
-            const auto& values = *found;
-            if (values.contains("semantic"))
-            {
-                const auto semantic = values.at("semantic").get<std::string>();
-                if (semantic == "color")
-                    settings.Semantic = TextureSemantic::Color;
-                else if (semantic == "data")
-                    settings.Semantic = TextureSemantic::Data;
-                else if (semantic == "normal")
-                    settings.Semantic = TextureSemantic::Normal;
-                else if (semantic == "environment")
-                    settings.Semantic = TextureSemantic::Environment;
-                else
-                    throw std::invalid_argument("Texture semantic must be color, data, normal, or environment.");
-            }
-            if (values.contains("colorSpace"))
-            {
-                const auto colorSpace = values.at("colorSpace").get<std::string>();
-                if (colorSpace == "linear")
-                    settings.ColorSpace = TextureColorSpace::Linear;
-                else if (colorSpace == "srgb")
-                    settings.ColorSpace = TextureColorSpace::Srgb;
-                else
-                    throw std::invalid_argument("Texture colorSpace must be linear or srgb.");
-            }
-            if (values.contains("mips"))
-            {
-                const auto mips = values.at("mips").get<std::string>();
-                if (mips == "none")
-                    settings.Mips = TextureMipPolicy::None;
-                else if (mips == "generate")
-                    settings.Mips = TextureMipPolicy::Generate;
-                else
-                    throw std::invalid_argument("Texture mips must be none or generate.");
-            }
-            if (values.contains("environmentLayout"))
-            {
-                const auto layout = values.at("environmentLayout").get<std::string>();
-                settings.EnvironmentLayout = layout == "equirectangular"   ? TextureEnvironmentLayout::Equirectangular
-                                             : layout == "horizontalCross" ? TextureEnvironmentLayout::HorizontalCross
-                                             : layout == "verticalCross"   ? TextureEnvironmentLayout::VerticalCross
-                                             : layout == "horizontalStrip" ? TextureEnvironmentLayout::HorizontalStrip
-                                             : layout == "verticalStrip"   ? TextureEnvironmentLayout::VerticalStrip
-                                                                           : TextureEnvironmentLayout::Auto;
-            }
-            settings.MaximumSize = values.value("maximumSize", settings.MaximumSize);
-            settings.FlipGreen = values.value("flipGreen", settings.FlipGreen);
-            if (const auto sampler = values.find("sampler"); sampler != values.end())
-            {
-                if (!sampler->is_object())
-                    throw std::invalid_argument("Texture sampler settings must be an object.");
-                const auto filter = [](const std::string& value)
-                {
-                    if (value == "nearest")
-                        return TextureFilter::Nearest;
-                    if (value == "linear")
-                        return TextureFilter::Linear;
-                    throw std::invalid_argument("Texture filter must be nearest or linear.");
-                };
-                const auto address = [](const std::string& value)
-                {
-                    if (value == "repeat")
-                        return TextureAddressMode::Repeat;
-                    if (value == "clamp")
-                        return TextureAddressMode::Clamp;
-                    if (value == "mirror")
-                        return TextureAddressMode::Mirror;
-                    throw std::invalid_argument("Texture address mode must be repeat, clamp, or mirror.");
-                };
-                if (sampler->contains("min"))
-                    settings.Sampler.Minimum = filter(sampler->at("min").get<std::string>());
-                if (sampler->contains("mag"))
-                    settings.Sampler.Magnification = filter(sampler->at("mag").get<std::string>());
-                if (sampler->contains("mip"))
-                    settings.Sampler.Mip = filter(sampler->at("mip").get<std::string>());
-                if (sampler->contains("addressU"))
-                    settings.Sampler.AddressU = address(sampler->at("addressU").get<std::string>());
-                if (sampler->contains("addressV"))
-                    settings.Sampler.AddressV = address(sampler->at("addressV").get<std::string>());
-                if (sampler->contains("addressW"))
-                    settings.Sampler.AddressW = address(sampler->at("addressW").get<std::string>());
-                if (sampler->contains("anisotropy"))
-                {
-                    const auto anisotropy = sampler->at("anisotropy").get<unsigned int>();
-                    if (anisotropy > std::numeric_limits<std::uint8_t>::max())
-                        throw std::invalid_argument("Texture anisotropy exceeds its encoded range.");
-                    settings.Sampler.Anisotropy = static_cast<std::uint8_t>(anisotropy);
-                }
-            }
-            return NormalizeTextureSettings(settings);
-        }
-
         void ValidateMip(const TextureMipLevel& mip)
         {
-            if (mip.Width == 0 || mip.Height == 0 || mip.Width > MaximumTextureDimension ||
-                mip.Height > MaximumTextureDimension ||
+            if (mip.Width == 0 || mip.Height == 0 || mip.Width > Detail::MaximumTextureDimension ||
+                mip.Height > Detail::MaximumTextureDimension ||
                 static_cast<std::uint64_t>(mip.Width) * mip.Height * 4U != mip.Pixels.size())
                 throw std::invalid_argument("Texture mip dimensions do not match its RGBA8 payload.");
         }
@@ -725,8 +530,8 @@ namespace Keire
         [[nodiscard]] std::vector<TextureMipLevel> ImportFloatTexture(Detail::DecodedFloatTexture decoded,
                                                                       const TextureImportSettings& settings)
         {
-            if (decoded.Width == 0 || decoded.Height == 0 || decoded.Width > MaximumTextureDimension ||
-                decoded.Height > MaximumTextureDimension ||
+            if (decoded.Width == 0 || decoded.Height == 0 || decoded.Width > Detail::MaximumTextureDimension ||
+                decoded.Height > Detail::MaximumTextureDimension ||
                 decoded.Pixels.size() != static_cast<std::size_t>(decoded.Width) * decoded.Height * 4U)
                 throw std::invalid_argument("OpenEXR decoder returned invalid RGBA dimensions or storage.");
 
@@ -813,8 +618,8 @@ namespace Keire
                     stbi_loadf_from_memory(reinterpret_cast<const stbi_uc*>(bytes.data()),
                                            static_cast<int>(bytes.size()), &width, &height, &channels, 4),
                     stbi_image_free);
-                if (!pixels || width <= 0 || height <= 0 || width > static_cast<int>(MaximumTextureDimension) ||
-                    height > static_cast<int>(MaximumTextureDimension))
+                if (!pixels || width <= 0 || height <= 0 || width > static_cast<int>(Detail::MaximumTextureDimension) ||
+                    height > static_cast<int>(Detail::MaximumTextureDimension))
                     throw std::invalid_argument(std::string("HDR texture decode failed: ") + stbi_failure_reason());
                 TextureMipLevel base;
                 base.Width = static_cast<std::uint32_t>(width);
@@ -855,8 +660,8 @@ namespace Keire
                 stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(bytes.data()), static_cast<int>(bytes.size()),
                                       &width, &height, &channels, 4),
                 stbi_image_free);
-            if (!pixels || width <= 0 || height <= 0 || width > static_cast<int>(MaximumTextureDimension) ||
-                height > static_cast<int>(MaximumTextureDimension))
+            if (!pixels || width <= 0 || height <= 0 || width > static_cast<int>(Detail::MaximumTextureDimension) ||
+                height > static_cast<int>(Detail::MaximumTextureDimension))
                 throw std::invalid_argument(std::string("Texture decode failed: ") + stbi_failure_reason());
             TextureMipLevel base;
             base.Width = static_cast<std::uint32_t>(width);
@@ -879,48 +684,6 @@ namespace Keire
             return result;
         }
 
-        struct ImportedMaterialShader final
-        {
-            AssetId Id;
-            std::unordered_set<std::string> Properties;
-        };
-
-        [[nodiscard]] std::optional<ImportedMaterialShader>
-        FindImportedMaterialShader(const AssetImportContext& context)
-        {
-            std::vector<std::filesystem::path> candidates;
-            const auto standard = context.SourceRoot / "Shaders/DefaultUnlit.keireshader";
-            if (std::filesystem::is_regular_file(standard))
-                candidates.push_back(standard);
-            std::error_code error;
-            const auto shaderRoot = context.SourceRoot / "Shaders";
-            for (std::filesystem::directory_iterator iterator(shaderRoot, error), end; !error && iterator != end;
-                 iterator.increment(error))
-                if (iterator->is_regular_file(error) && iterator->path().extension() == ".keireshader" &&
-                    iterator->path() != standard)
-                    candidates.push_back(iterator->path());
-            for (const auto& source : candidates)
-            {
-                const auto metadataPath = std::filesystem::path(source.string() + ".keiremeta");
-                if (!std::filesystem::is_regular_file(metadataPath))
-                    continue;
-                try
-                {
-                    const auto metadata = Json::parse(std::ifstream(metadataPath));
-                    const auto manifest = Json::parse(std::ifstream(source));
-                    ImportedMaterialShader result;
-                    result.Id = AssetId::Parse(metadata.at("id").get<std::string>());
-                    for (const auto& property : manifest.at("properties"))
-                        result.Properties.insert(property.at("name").get<std::string>());
-                    if (result.Id)
-                        return result;
-                }
-                catch (const std::exception&)
-                {
-                }
-            }
-            return std::nullopt;
-        }
     } // namespace
 
     MeshAsset::MeshAsset(const BuiltinMesh mesh) : m_Mesh(mesh)
@@ -1110,7 +873,7 @@ namespace Keire
     }
 
     Texture2DAsset::Texture2DAsset(TextureImportSettings settings, std::vector<TextureMipLevel> mips)
-        : m_Settings(NormalizeTextureSettings(settings)), m_Mips(std::move(mips))
+        : m_Settings(Detail::NormalizeTextureSettings(settings)), m_Mips(std::move(mips))
     {
         if (m_Mips.empty())
             throw std::invalid_argument("A texture requires at least one mip.");
@@ -1133,7 +896,7 @@ namespace Keire
     std::vector<std::byte> Texture2DAsset::Encode(const TextureImportSettings& requested,
                                                   const std::span<const TextureMipLevel> mips)
     {
-        const auto settings = NormalizeTextureSettings(requested);
+        const auto settings = Detail::NormalizeTextureSettings(requested);
         Texture2DAsset validation(settings, {mips.begin(), mips.end()});
         std::vector<std::byte> result;
         result.reserve(TextureMagic.size());
@@ -1338,7 +1101,7 @@ namespace Keire
             const bool importMaterials = stringSetting("materialImport", "embedded") != "none";
             if (importMaterials)
             {
-                const auto shader = FindImportedMaterialShader(context);
+                const auto shader = Detail::FindImportedMaterialShader(context);
                 if (!shader)
                 {
                     output.Diagnostics.push_back(
@@ -1403,8 +1166,8 @@ namespace Keire
                         else
                         {
                             if (embedded->mWidth == 0 || embedded->mHeight == 0 ||
-                                embedded->mWidth > MaximumTextureDimension ||
-                                embedded->mHeight > MaximumTextureDimension)
+                                embedded->mWidth > Detail::MaximumTextureDimension ||
+                                embedded->mHeight > Detail::MaximumTextureDimension)
                                 throw std::invalid_argument("Embedded model texture dimensions are invalid.");
                             TextureMipLevel base;
                             base.Width = embedded->mWidth;
@@ -2193,7 +1956,7 @@ namespace Keire
     AssetImporterRegistration Detail::CreateTexture2DAssetImporter(TextureImportSettings settings,
                                                                    TextureDecodeBackend backend)
     {
-        settings = NormalizeTextureSettings(settings);
+        settings = Detail::NormalizeTextureSettings(settings);
         AssetImporterRegistration result;
         result.Name = "Keire.Texture2D";
         result.Version = 5;
@@ -2218,9 +1981,9 @@ namespace Keire
         result.ContextualImport = [settings, backend](const AssetImportContext& context,
                                                       const std::span<const std::byte> bytes) -> AssetImportOutput
         {
-            auto effective = ReadTextureSettings(context.MetadataPath, settings);
+            auto effective = Detail::ReadTextureSettings(context.MetadataPath, settings);
             if (!context.ImportSettings.empty())
-                effective = ApplyTextureImportSettings(effective, context.ImportSettings);
+                effective = Detail::ApplyTextureImportSettings(effective, context.ImportSettings);
             const auto extension = Lowercase(context.SourcePath.extension().string());
             std::optional<DecodedFloatTexture> decoded;
             if (extension == ".exr")
@@ -2294,7 +2057,8 @@ namespace Keire
             choice("environmentLayout", "Environment Layout", "Environment", "auto",
                    {"auto", "equirectangular", "horizontalCross", "verticalCross", "horizontalStrip", "verticalStrip"}),
             {"maximumSize", "Maximum Size", "Texture", AssetImportOptionKind::Integer,
-             std::int64_t{MaximumTextureDimension}, 1.0, static_cast<double>(MaximumTextureDimension), 1.0},
+             std::int64_t{Detail::MaximumTextureDimension}, 1.0, static_cast<double>(Detail::MaximumTextureDimension),
+             1.0},
             {"flipGreen", "Flip Green Channel", "Texture", AssetImportOptionKind::Boolean, false},
             choice("minFilter", "Min Filter", "Sampler", "linear", {"linear", "nearest"}),
             choice("magFilter", "Mag Filter", "Sampler", "linear", {"linear", "nearest"}),
@@ -2305,7 +2069,7 @@ namespace Keire
             {"anisotropy", "Anisotropy", "Sampler", AssetImportOptionKind::Integer, std::int64_t{1}, 1.0, 16.0, 1.0}};
         result.NormalizeImportSettings = [settings](const AssetImportSettings& values)
         {
-            const auto normalized = ApplyTextureImportSettings(settings, values);
+            const auto normalized = Detail::ApplyTextureImportSettings(settings, values);
             auto normalizedSettings = values;
             if (normalized.Semantic != TextureSemantic::Color)
                 normalizedSettings["colorSpace"] = std::string("linear");

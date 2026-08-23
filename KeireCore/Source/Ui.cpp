@@ -1,10 +1,10 @@
 #include "Keire/Ui.h"
 
-#include "KeireInternal/FileSystem.h"
 #include "KeireInternal/RenderInternal.h"
 #include "KeireInternal/UiFontInternal.h"
 #include "KeireInternal/UiInputInternal.h"
 #include "KeireInternal/UiInternal.h"
+#include "KeireInternal/UiLayoutInternal.h"
 #include "KeireInternal/UiThemeInternal.h"
 #include "KeireInternal/WindowInternal.h"
 
@@ -24,8 +24,6 @@
 #include <cmath>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
-#include <iterator>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -157,8 +155,6 @@ namespace Keire
     std::uint32_t UiImage::Height() const noexcept { return m_Impl->Height; }
     namespace
     {
-        constexpr std::uintmax_t MaximumLayoutBytes = std::uintmax_t{1024} * 1024U;
-
         [[nodiscard]] std::string LastSdlError()
         {
             const char* error = SDL_GetError();
@@ -197,51 +193,6 @@ namespace Keire
             if (options.NoSavedSettings)
                 flags |= ImGuiWindowFlags_NoSavedSettings;
             return flags;
-        }
-        void LoadLayout(const std::filesystem::path& path)
-        {
-            if (path.empty() || !std::filesystem::exists(path))
-                return;
-
-            const auto size = std::filesystem::file_size(path);
-            if (size > MaximumLayoutBytes)
-            {
-                throw UiError("LoadLayout", "layout file exceeds the 1 MiB safety limit: " + path.string());
-            }
-
-            std::ifstream input(path, std::ios::binary);
-            if (!input)
-            {
-                throw UiError("LoadLayout", "cannot open " + path.string());
-            }
-            const std::string contents{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
-            if (!input.good() && !input.eof())
-            {
-                throw UiError("LoadLayout", "cannot read " + path.string());
-            }
-            ImGui::LoadIniSettingsFromMemory(contents.data(), contents.size());
-        }
-
-        void SaveLayout(const std::filesystem::path& path)
-        {
-            if (path.empty())
-                return;
-
-            std::size_t size = 0;
-            const char* contents = ImGui::SaveIniSettingsToMemory(&size);
-            if (size > MaximumLayoutBytes)
-            {
-                throw UiError("SaveLayout", "layout data exceeds the 1 MiB safety limit: " + path.string());
-            }
-
-            try
-            {
-                Detail::WriteTextFileAtomically(path, std::string_view(contents, size));
-            }
-            catch (const std::exception& exception)
-            {
-                throw UiError("SaveLayout", exception.what());
-            }
         }
     } // namespace
 
@@ -1371,7 +1322,7 @@ namespace Keire
                     Workspace = std::unique_ptr<UiWorkspace>(new UiWorkspace(Specification.Workspace, windows, window,
                                                                              Specification.Mode == UiMode::Rendered));
                 else
-                    LoadLayout(Specification.LayoutPath);
+                    Detail::LoadUiLayout(Specification.LayoutPath);
                 if (Specification.Mode == UiMode::Rendered)
                     InitializeRenderer(windows, renderer);
                 InitializationComplete = true;
@@ -1574,7 +1525,7 @@ namespace Keire
                 try
                 {
                     if (InitializationComplete && !Specification.Workspace.Enabled)
-                        SaveLayout(Specification.LayoutPath);
+                        Detail::SaveUiLayout(Specification.LayoutPath);
                 }
                 catch (const std::exception& error)
                 {

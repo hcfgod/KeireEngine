@@ -453,6 +453,7 @@ namespace
     {
         Keire::InputDeviceId Device;
         bool RumbleAccepted = false;
+        bool StopAccepted = false;
         bool KeyboardRejected = false;
     };
 
@@ -497,6 +498,11 @@ namespace
         static bool SDLCALL RecordRumble(void* context, const Uint16 low, const Uint16 high)
         {
             auto& probe = *static_cast<VirtualGamepad*>(context);
+            if (probe.RumbleCalls == 0)
+            {
+                probe.FirstLowFrequency = low;
+                probe.FirstHighFrequency = high;
+            }
             ++probe.RumbleCalls;
             probe.LowFrequency = low;
             probe.HighFrequency = high;
@@ -507,6 +513,8 @@ namespace
         bool Initialized = false;
         std::string Diagnostic;
         std::uint32_t RumbleCalls = 0;
+        std::uint16_t FirstLowFrequency = 0;
+        std::uint16_t FirstHighFrequency = 0;
         std::uint16_t LowFrequency = 0;
         std::uint16_t HighFrequency = 0;
     };
@@ -548,6 +556,8 @@ namespace
             m_Result->Device = gamepad->Id;
             m_Result->RumbleAccepted =
                 input->SetGamepadRumble(gamepad->Id, 0.25F, 0.75F, Keire::TimeStep::FromSeconds(0.125));
+            m_Result->StopAccepted =
+                input->SetGamepadRumble(gamepad->Id, 0.0F, 0.0F, Keire::TimeStep::FromSeconds(0.0));
             Owner().RequestExit();
         }
 
@@ -693,8 +703,8 @@ TEST_CASE("Input gamepad rumble validates requests and reaches the owned native 
 {
     UseDummyVideoDriver();
     VirtualGamepad gamepad;
-    if (gamepad.Device == 0)
-        MESSAGE("Virtual gamepad unavailable: " << gamepad.Diagnostic);
+    REQUIRE_MESSAGE(gamepad.Initialized, gamepad.Diagnostic);
+    REQUIRE_MESSAGE(gamepad.Device != 0, gamepad.Diagnostic);
     InputProject project;
     Keire::ApplicationSpecification specification;
     specification.MainWindow.Title = "Gamepad rumble test";
@@ -711,20 +721,14 @@ TEST_CASE("Input gamepad rumble validates requests and reaches the owned native 
     GamepadRumbleApplication application(std::move(specification), result);
     CHECK(application.Run() == 0);
     CHECK(result->KeyboardRejected);
-    if (gamepad.Device != 0)
-    {
-        CHECK(result->Device);
-        CHECK(result->RumbleAccepted);
-        CHECK(gamepad.RumbleCalls == 1);
-        CHECK(gamepad.LowFrequency == 16384);
-        CHECK(gamepad.HighFrequency == 49151);
-    }
-    else
-    {
-        CHECK_FALSE(result->Device);
-        CHECK_FALSE(result->RumbleAccepted);
-        CHECK(gamepad.RumbleCalls == 0);
-    }
+    CHECK(result->Device);
+    CHECK(result->RumbleAccepted);
+    CHECK(result->StopAccepted);
+    CHECK(gamepad.RumbleCalls == 2);
+    CHECK(gamepad.FirstLowFrequency == 16384);
+    CHECK(gamepad.FirstHighFrequency == 49151);
+    CHECK(gamepad.LowFrequency == 0);
+    CHECK(gamepad.HighFrequency == 0);
 }
 
 TEST_CASE("Application rejects enabled input without assets")

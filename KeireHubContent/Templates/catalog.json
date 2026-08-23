@@ -454,7 +454,7 @@
         {
           "path": "Assets/Meshes/Idle.fbx.keiremeta",
           "sizeBytes": 535,
-          "sha256": "9990a3f12daadc926e3d030c60b3c8c8befcbefdf32ca371eb299e6a3fdb33b0"
+          "sha256": "1806c3a79128172d086523de537294054d29cbe6adb3804018a4a6aa0fc956ad"
         },
         {
           "path": "Assets/Meshes/T-Pose.fbx",
@@ -464,7 +464,7 @@
         {
           "path": "Assets/Meshes/T-Pose.fbx.keiremeta",
           "sizeBytes": 619,
-          "sha256": "ce7f8f39249aaf6603ed0dea01d9ae7fb03970f6f2b81b648016ad34d3ccec55"
+          "sha256": "3805daffbeb14f10f9b6ab7f214fbfe2a931e2efcbb1a3dc265fe51ee0987699"
         },
         {
           "path": "Assets/Meshes/TexturedPyramid.obj",
@@ -474,7 +474,7 @@
         {
           "path": "Assets/Meshes/TexturedPyramid.obj.keiremeta",
           "sizeBytes": 263,
-          "sha256": "aa29dbd5813a7663466c8beee45517ae1a832b8bc4f73ce0ce542c00b038f51f"
+          "sha256": "cedbbe1ea2304bc2da899bea44b2d89ac4665b995a9f8e1fa16446ef755938b4"
         },
         {
           "path": "Assets/NewAnimatorController.keireanimgraph",
@@ -664,7 +664,7 @@
         {
           "path": "Assets/Textures/97d0277d-60f6-48bf-8314-347f79180b7b.png.keiremeta",
           "sizeBytes": 552,
-          "sha256": "f43a26d0be523adc897577554436fa91a1374eef449fc6725c39916dd8849f3e"
+          "sha256": "bdb8fc0ad6f623aa980320871b1a0075f0633ae01534cf1c141f14aac5a8ad43"
         },
         {
           "path": "Assets/Textures/SlateInlay.png",
@@ -674,7 +674,7 @@
         {
           "path": "Assets/Textures/SlateInlay.png.keiremeta",
           "sizeBytes": 553,
-          "sha256": "3ebd354908ba58623aa8ec082948af091a88aa53c7c6c02d3d5fcf1cf2e943a6"
+          "sha256": "b31dc719cba20cf328e9c1ffb377e7f7b7f084f473062b8380a32ee3e7a10a3a"
         },
         {
           "path": "Assets/Textures/texture_diffuse.png",
@@ -684,7 +684,7 @@
         {
           "path": "Assets/Textures/texture_diffuse.png.keiremeta",
           "sizeBytes": 552,
-          "sha256": "ba6222f5de61a502a350be08c5291bf7a31d00f813e519ae1c9bcfd6896cf4fc"
+          "sha256": "e1b151aced95b1b75d224a50f6e1559d516ed90968bdc6f138a2db91d436a9d0"
         },
         {
           "path": "Assets/Textures/texture_metallic.png",
@@ -694,7 +694,7 @@
         {
           "path": "Assets/Textures/texture_metallic.png.keiremeta",
           "sizeBytes": 553,
-          "sha256": "8639215a252b4b2070b0c1454dd36d0ea6a8b1bde0e95beee930db857eb9fc6f"
+          "sha256": "f02c523f384f67a500bc505ca9751df3fd5cc95795df1f49a4ebb87c1ea8d349"
         },
         {
           "path": "Assets/Textures/texture_normal.png",
@@ -704,7 +704,7 @@
         {
           "path": "Assets/Textures/texture_normal.png.keiremeta",
           "sizeBytes": 555,
-          "sha256": "3d76b988326542f96a550f1524393ce7fa424e50b881842a06435bc59da0381c"
+          "sha256": "4ef4588fe84fe9efc171acbc39e7eb74cbbc05665309da5a632eb02c77ee5527"
         },
         {
           "path": "Assets/Textures/texture_roughness.png",
@@ -714,7 +714,7 @@
         {
           "path": "Assets/Textures/texture_roughness.png.keiremeta",
           "sizeBytes": 553,
-          "sha256": "c0e38b305f66a0cc59619b8b991cdb93cdba8d29a1c78b78f6bcec6804d07549"
+          "sha256": "cc69367b9547e685583003319b131f257a2d26918b11087d0dcc1aa8782e9413"
         },
         {
           "path": "Assets/Vfx/ArcaneNova.keirevfx",
@@ -764,7 +764,7 @@
         {
           "path": "Assets/Vfx/Meshes/ArcaneSigil.gltf.keiremeta",
           "sizeBytes": 263,
-          "sha256": "99f576adf5fa672e87c8a14ed3c80260204f5c629440aaac1de29c08964f5a47"
+          "sha256": "59075fbeb7842701fe11db1cab9867513503c5020d0b3ddbb91b986d191efb1f"
         },
         {
           "path": "Assets/Vfx/Meshes/EmberShard.gltf",
@@ -774,7 +774,7 @@
         {
           "path": "Assets/Vfx/Meshes/EmberShard.gltf.keiremeta",
           "sizeBytes": 263,
-          "sha256": "92a1b29c70fd843276868f85cf483630accd23945fb2db52678bdfd70ae10fd6"
+          "sha256": "ae9d0272f8f172eac4b8e357740552de1c54e64842ba052658e6b6e0b3fbf001"
         },
         {
           "path": "Assets/Vfx/PlasmaLance.keirematerial",
@@ -814,7 +814,7 @@
         {
           "path": "Assets/Vfx/Textures/PlasmaCore.png.keiremeta",
           "sizeBytes": 550,
-          "sha256": "dff5db82c494fefd609a43341ab3ccf4a3e9584e7f768748531b657dd02887f5"
+          "sha256": "ba06f68a786c568272a92d52c6dcdbdc2d0c90fd0321b6e38ee153e6d847989e"
         },
         {
           "path": "Assets/Vfx/VfxEffect.keirevfx",

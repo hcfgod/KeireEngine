@@ -437,6 +437,7 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                   "public string AnimationEventText = string.Empty; "
                   "[SerializeField] public bool ProceduralMotionEventObserved = false; "
                   "[SerializeField] public byte ProceduralMotionEventState = 0; "
+                  "[SerializeField] public PlayerTuning? Tuning = null; "
                   "protected override void Awake() { Speed += ReloadBonus; } "
                   "protected override void FixedUpdate() { ConsumedSpeed = Speed; "
                   "if (DisableThroughProperty) { DisableThroughProperty = false; Enabled = false; } "
@@ -635,6 +636,13 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     CHECK(eventTextProperty->ReadOnly);
     CHECK(eventTextProperty->Header == "Diagnostics");
     CHECK(eventTextProperty->TextLines == 6);
+    const auto tuningProperty =
+        std::ranges::find(registration->Properties, std::string("Tuning"), &Keire::ComponentProperty::Key);
+    REQUIRE(tuningProperty != registration->Properties.end());
+    CHECK(tuningProperty->ReferenceKind == Keire::ManagedReferenceKind::ScriptableObject);
+    CHECK(tuningProperty->DeclaredManagedType == "Game.PlayerTuning");
+    REQUIRE(tuningProperty->ExpectedAssetType);
+    CHECK(*tuningProperty->ExpectedAssetType == Keire::ManagedDataAsset::StaticType());
 
     const std::string duplicateState =
         R"({"Version":1,"Fields":[{"StableId":"","Name":"Speed","Type":"System.Single","Aliases":[],"Value":3.0},)"
