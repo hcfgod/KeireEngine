@@ -500,7 +500,8 @@ bool EditorWorkspaceLayer::PrepareAssetBrowserExternalOpen(const Keire::AssetId 
     if (!record || (record->RelativePath.extension() != ".cs" && record->RelativePath.extension() != ".keireasm"))
         return false;
     const bool reuseManagedSession = m_ManagedIdeWorkspaceOpened;
-    GenerateManagedIdeWorkspace();
+    if (!reuseManagedSession)
+        GenerateManagedIdeWorkspace();
     m_ManagedIdeWorkspaceOpened = true;
     return reuseManagedSession;
 }

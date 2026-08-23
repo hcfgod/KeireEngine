@@ -213,6 +213,7 @@ namespace KeireEditor
     struct NodeGraphCanvasResult
     {
         std::optional<StableNodeId> ActivatedNode;
+        std::optional<StableNodeId> DoubleClickedNode;
         std::optional<StableNodeId> MovedNode;
         bool BackgroundActivated = false;
         bool Changed = false;

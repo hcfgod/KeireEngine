@@ -811,6 +811,8 @@ namespace KeireEditor
                     result.RenameCommentRequested = hoveredComment;
             }
         }
+        if (canvasHovered && canvasItem.DoubleClicked && hoveredNode && !hoveredPin && !hoveredBlock && !hoveredComment)
+            result.DoubleClickedNode = hoveredNode;
 
         if (canvasHovered && pointer.LeftPressed)
         {

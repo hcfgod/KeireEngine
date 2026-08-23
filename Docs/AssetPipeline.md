@@ -201,11 +201,12 @@ meshes, rejects animation and skinning, and intentionally ignores source materia
 indices, per-submesh primitive topology, and verified bounds. `KeireAssetTool convert-mesh --input <model> [--output
 <asset.keiremesh>]` emits the same format for inspection or source-control workflows.
 
-PNG, JPEG, TGA, and BMP sources decode privately through stb_image into RGBA8 `Texture2DAsset` data. Normalized import
-settings select color/data/normal semantics, linear or sRGB interpretation, maximum dimensions, mip policy, filtering,
-addressing, anisotropy, and optional green-channel flipping. Normal-map mips average unpacked vectors and renormalize
-them; other textures use a deterministic box filter. Neither Assimp nor stb headers are part of the supported SDK
-boundary.
+PNG, JPEG, TGA, BMP, and Radiance HDR sources decode privately through stb_image. OpenEXR decodes to float RGBA through
+the asset worker's private FFmpeg backend, then uses the same normalized color/data/normal/environment semantic path.
+Color, data, and normal sources publish RGBA8 `Texture2DAsset` data; HDR environments publish RGBE storage. Import
+settings select linear or sRGB interpretation, maximum dimensions, mip policy, filtering, addressing, anisotropy, and
+optional green-channel flipping. Normal-map mips average unpacked vectors and renormalize them; other textures use a
+deterministic box filter. Assimp, stb, and FFmpeg headers remain outside the supported SDK boundary.
 
 Material texture slots are declared by the referenced shader's `Texture2D` properties. `MaterialAssetDefinition`
 provides `SetTexture`, `Texture`, and `RemoveTexture` for code and tools, while `MaterialAsset::EncodeSource` and

@@ -1,4 +1,5 @@
 #include "Keire/Core.h"
+#include "KeireInternal/Assets/TextureImportBackend.h"
 #include "KeireInternal/EditorCameraController.h"
 #include "KeireInternal/RenderInternal.h"
 #include "KeireTests/TestSupport.h"
@@ -1022,6 +1023,42 @@ TEST_CASE("texture importer emits validated RGBA8 mip chains")
     CHECK(encodedEnvironment->Settings().Semantic == Keire::TextureSemantic::Environment);
     CHECK(encodedEnvironment->Settings().EnvironmentLayout == Keire::TextureEnvironmentLayout::HorizontalCross);
     CHECK(encodedEnvironment->Settings().HighDynamicRange);
+}
+
+TEST_CASE("OpenEXR texture import supports color normal and HDR environment semantics")
+{
+    const std::array source{std::byte{0x76}, std::byte{0x2f}, std::byte{0x31}, std::byte{0x01}, std::byte{0}};
+    const Keire::Detail::TextureDecodeBackend decode = [](std::span<const std::byte>)
+    {
+        return Keire::Detail::DecodedFloatTexture{
+            .Width = 2, .Height = 1, .Pixels = {2.0F, 0.25F, 0.5F, 1.0F, 0.0F, 0.75F, 1.0F, 0.5F}};
+    };
+
+    Keire::TextureImportSettings colorSettings;
+    colorSettings.ColorSpace = Keire::TextureColorSpace::Linear;
+    colorSettings.Mips = Keire::TextureMipPolicy::None;
+    const auto colorImporter = Keire::Detail::CreateTexture2DAssetImporter(colorSettings, decode);
+    const auto color = Keire::Texture2DAsset::Decode(colorImporter.Import(source));
+    REQUIRE(color->Mips().size() == 1);
+    CHECK(color->Mips().front().Pixels[0] == std::byte{255});
+    CHECK(color->Mips().front().Pixels[1] == std::byte{64});
+    CHECK(color->Mips().front().Pixels[7] == std::byte{128});
+
+    auto normalSettings = colorSettings;
+    normalSettings.Semantic = Keire::TextureSemantic::Normal;
+    normalSettings.FlipGreen = true;
+    const auto normalImporter = Keire::Detail::CreateTexture2DAssetImporter(normalSettings, decode);
+    const auto normal = Keire::Texture2DAsset::Decode(normalImporter.Import(source));
+    CHECK(normal->Settings().Semantic == Keire::TextureSemantic::Normal);
+    CHECK(normal->Mips().front().Pixels[1] == std::byte{191});
+
+    auto environmentSettings = colorSettings;
+    environmentSettings.Semantic = Keire::TextureSemantic::Environment;
+    environmentSettings.HighDynamicRange = true;
+    const auto environmentImporter = Keire::Detail::CreateTexture2DAssetImporter(environmentSettings, decode);
+    const auto environment = Keire::Texture2DAsset::Decode(environmentImporter.Import(source));
+    CHECK(environment->Settings().HighDynamicRange);
+    CHECK(environment->Mips().front().Pixels[3] != std::byte{255});
 }
 
 TEST_CASE("pinned shader compiler resolves from the executable while the project is the working directory")

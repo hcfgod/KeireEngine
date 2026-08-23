@@ -22,6 +22,8 @@
 
 namespace
 {
+    constexpr std::size_t MaximumSceneBatchesPerCommandBuffer = 32U;
+
     using Keire::RenderBackend::GeometryDetail::IsFrustumVisible;
     using Keire::RenderBackend::GeometryDetail::ProjectedHeight;
 
@@ -249,7 +251,8 @@ namespace Keire::RenderBackend
     void RenderSharedState::DrawScene(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass,
                                       RenderSurfaceState& surface, const SceneRenderPacket& packet,
                                       const ShadowFrameData& shadows, const SceneDrawPhase phase,
-                                      const PreparedSceneDrawList& prepared)
+                                      const PreparedSceneDrawList& prepared, const std::size_t firstBatch,
+                                      const std::size_t batchCount)
     {
         const auto samples = ToSdlSampleCount(surface.ActualSamples);
         auto& pipelines = PipelinesFor(samples);
@@ -406,7 +409,7 @@ namespace Keire::RenderBackend
             return result;
         };
 
-        if (phase == SceneDrawPhase::Opaque && packet.Environment.SkyVisible && pipelines.Sky)
+        if (firstBatch == 0U && phase == SceneDrawPhase::Opaque && packet.Environment.SkyVisible && pipelines.Sky)
         {
             if (!environment.Empty())
             {
@@ -425,7 +428,7 @@ namespace Keire::RenderBackend
             }
         }
 
-        if (phase == SceneDrawPhase::Opaque && packet.DrawGrid)
+        if (firstBatch == 0U && phase == SceneDrawPhase::Opaque && packet.DrawGrid)
         {
             const GridUniforms grid{Math::Inverse(camera.Projection),
                                     Math::Inverse(camera.View),
@@ -473,7 +476,8 @@ namespace Keire::RenderBackend
                                                            std::max(light.ShadowBias * 0.01F, 0.0001F)};
         }
 
-        for (const auto& batch : prepared.Batches)
+        const auto batches = std::span(prepared.Batches).subspan(firstBatch, batchCount);
+        for (const auto& batch : batches)
         {
             const auto drawIndex = static_cast<std::size_t>(batch.First);
             const auto& draw = prepared.Draws[drawIndex];
@@ -649,7 +653,8 @@ namespace Keire::RenderBackend
         }
     }
 
-    void RenderSharedState::RecordSurface(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface)
+    void RenderSharedState::RecordSurface(SDL_GPUCommandBuffer*& commands, RenderSurfaceState& surface,
+                                          std::vector<SDL_GPUCommandBuffer*>& frameCommands)
     {
         if (!surface.Resources.SampledColor || !surface.Resources.HdrColor)
             return;
@@ -673,6 +678,13 @@ namespace Keire::RenderBackend
         }
         ShadowFrameData shadows;
         shadows.LocalLayers.fill(-1.0F);
+        const auto acquireContinuation = [&]
+        {
+            commands = SDL_AcquireGPUCommandBuffer(Device);
+            if (!commands)
+                throw std::runtime_error("SDL_AcquireGPUCommandBuffer(surface continuation) failed: " + LastSdlError());
+            frameCommands.push_back(commands);
+        };
         CallbackFrameGraphExecutionContext execution(
             [&](const CompiledFrameGraph::Transition&) { ++Statistics.FrameGraphTransitions; },
             [&](const FrameGraphPass frameGraphPass)
@@ -901,36 +913,53 @@ namespace Keire::RenderBackend
                 if (frameGraphPass == SceneFrameGraph.Opaque)
                 {
                     const auto started = std::chrono::steady_clock::now();
-                    SDL_GPUColorTargetInfo color{};
-                    color.texture = surface.Resources.MultisampleHdrColor ? surface.Resources.MultisampleHdrColor
-                                                                          : surface.Resources.HdrColor;
-                    color.clear_color = {surface.FrameClearColor.Red, surface.FrameClearColor.Green,
-                                         surface.FrameClearColor.Blue, surface.FrameClearColor.Alpha};
-                    color.load_op = SDL_GPU_LOADOP_CLEAR;
-                    color.store_op = surface.Resources.MultisampleHdrColor ? SDL_GPU_STOREOP_RESOLVE_AND_STORE
-                                                                           : SDL_GPU_STOREOP_STORE;
-                    color.resolve_texture =
-                        surface.Resources.MultisampleHdrColor ? surface.Resources.HdrColor : nullptr;
-                    SDL_GPUDepthStencilTargetInfo depth{};
-                    SDL_GPUDepthStencilTargetInfo* depthPointer = nullptr;
-                    if (surface.Resources.Depth)
+                    const auto batchTotal =
+                        request != Requests.end() ? preparedDraws.Opaque.Batches.size() : std::size_t{};
+                    const auto chunkTotal =
+                        std::max<std::size_t>(1U, (batchTotal + MaximumSceneBatchesPerCommandBuffer - 1U) /
+                                                      MaximumSceneBatchesPerCommandBuffer);
+                    for (std::size_t chunk = 0; chunk < chunkTotal; ++chunk)
                     {
-                        depth.texture = surface.Resources.Depth;
-                        depth.clear_depth = 1.0F;
-                        depth.load_op = SDL_GPU_LOADOP_CLEAR;
-                        depth.store_op = SDL_GPU_STOREOP_STORE;
-                        depth.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
-                        depth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
-                        depthPointer = &depth;
+                        if (chunk != 0U)
+                            acquireContinuation();
+                        const auto finalChunk = chunk + 1U == chunkTotal;
+                        SDL_GPUColorTargetInfo color{};
+                        color.texture = surface.Resources.MultisampleHdrColor ? surface.Resources.MultisampleHdrColor
+                                                                              : surface.Resources.HdrColor;
+                        color.clear_color = {surface.FrameClearColor.Red, surface.FrameClearColor.Green,
+                                             surface.FrameClearColor.Blue, surface.FrameClearColor.Alpha};
+                        color.load_op = chunk == 0U ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
+                        color.store_op = surface.Resources.MultisampleHdrColor && finalChunk
+                                             ? SDL_GPU_STOREOP_RESOLVE_AND_STORE
+                                             : SDL_GPU_STOREOP_STORE;
+                        color.resolve_texture =
+                            surface.Resources.MultisampleHdrColor && finalChunk ? surface.Resources.HdrColor : nullptr;
+                        SDL_GPUDepthStencilTargetInfo depth{};
+                        SDL_GPUDepthStencilTargetInfo* depthPointer = nullptr;
+                        if (surface.Resources.Depth)
+                        {
+                            depth.texture = surface.Resources.Depth;
+                            depth.clear_depth = 1.0F;
+                            depth.load_op = chunk == 0U ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
+                            depth.store_op = SDL_GPU_STOREOP_STORE;
+                            depth.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+                            depth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+                            depthPointer = &depth;
+                        }
+                        SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(commands, &color, 1, depthPointer);
+                        if (!pass)
+                            throw std::runtime_error("SDL_BeginGPURenderPass(HDR scene) failed: " + LastSdlError());
+                        if (request != Requests.end())
+                        {
+                            const auto firstBatch = chunk * MaximumSceneBatchesPerCommandBuffer;
+                            const auto batchCount =
+                                std::min(MaximumSceneBatchesPerCommandBuffer, batchTotal - firstBatch);
+                            DrawScene(commands, pass, surface, request->Packet, shadows, SceneDrawPhase::Opaque,
+                                      preparedDraws.Opaque, firstBatch, batchCount);
+                        }
+                        SDL_EndGPURenderPass(pass);
+                        ++Statistics.Passes;
                     }
-                    SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(commands, &color, 1, depthPointer);
-                    if (!pass)
-                        throw std::runtime_error("SDL_BeginGPURenderPass(HDR scene) failed: " + LastSdlError());
-                    if (request != Requests.end())
-                        DrawScene(commands, pass, surface, request->Packet, shadows, SceneDrawPhase::Opaque,
-                                  preparedDraws.Opaque);
-                    SDL_EndGPURenderPass(pass);
-                    ++Statistics.Passes;
                     Statistics.ScenePassMilliseconds +=
                         std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
                     return;
@@ -947,36 +976,50 @@ namespace Keire::RenderBackend
                 if (frameGraphPass == SceneFrameGraph.Transparency)
                 {
                     const auto started = std::chrono::steady_clock::now();
-                    SDL_GPUColorTargetInfo color{};
-                    color.texture = surface.Resources.MultisampleHdrColor ? surface.Resources.MultisampleHdrColor
-                                                                          : surface.Resources.HdrColor;
-                    color.load_op = SDL_GPU_LOADOP_LOAD;
-                    color.store_op =
-                        surface.Resources.MultisampleHdrColor ? SDL_GPU_STOREOP_RESOLVE : SDL_GPU_STOREOP_STORE;
-                    color.resolve_texture =
-                        surface.Resources.MultisampleHdrColor ? surface.Resources.HdrColor : nullptr;
-                    SDL_GPUDepthStencilTargetInfo depth{};
-                    SDL_GPUDepthStencilTargetInfo* depthPointer = nullptr;
-                    if (surface.Resources.Depth)
+                    const auto batchTotal =
+                        request != Requests.end() ? preparedDraws.Transparent.Batches.size() : std::size_t{};
+                    const auto chunkTotal =
+                        std::max<std::size_t>(1U, (batchTotal + MaximumSceneBatchesPerCommandBuffer - 1U) /
+                                                      MaximumSceneBatchesPerCommandBuffer);
+                    for (std::size_t chunk = 0; chunk < chunkTotal; ++chunk)
                     {
-                        depth.texture = surface.Resources.Depth;
-                        depth.load_op = SDL_GPU_LOADOP_LOAD;
-                        depth.store_op = SDL_GPU_STOREOP_DONT_CARE;
-                        depth.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
-                        depth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
-                        depthPointer = &depth;
+                        acquireContinuation();
+                        const auto finalChunk = chunk + 1U == chunkTotal;
+                        SDL_GPUColorTargetInfo color{};
+                        color.texture = surface.Resources.MultisampleHdrColor ? surface.Resources.MultisampleHdrColor
+                                                                              : surface.Resources.HdrColor;
+                        color.load_op = SDL_GPU_LOADOP_LOAD;
+                        color.store_op = surface.Resources.MultisampleHdrColor && finalChunk ? SDL_GPU_STOREOP_RESOLVE
+                                                                                             : SDL_GPU_STOREOP_STORE;
+                        color.resolve_texture =
+                            surface.Resources.MultisampleHdrColor && finalChunk ? surface.Resources.HdrColor : nullptr;
+                        SDL_GPUDepthStencilTargetInfo depth{};
+                        SDL_GPUDepthStencilTargetInfo* depthPointer = nullptr;
+                        if (surface.Resources.Depth)
+                        {
+                            depth.texture = surface.Resources.Depth;
+                            depth.load_op = SDL_GPU_LOADOP_LOAD;
+                            depth.store_op = finalChunk ? SDL_GPU_STOREOP_DONT_CARE : SDL_GPU_STOREOP_STORE;
+                            depth.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+                            depth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+                            depthPointer = &depth;
+                        }
+                        auto* pass = SDL_BeginGPURenderPass(commands, &color, 1, depthPointer);
+                        if (!pass)
+                            throw std::runtime_error("SDL_BeginGPURenderPass(transparency) failed: " + LastSdlError());
+                        if (request != Requests.end())
+                        {
+                            const auto firstBatch = chunk * MaximumSceneBatchesPerCommandBuffer;
+                            const auto batchCount =
+                                std::min(MaximumSceneBatchesPerCommandBuffer, batchTotal - firstBatch);
+                            DrawScene(commands, pass, surface, request->Packet, shadows, SceneDrawPhase::Transparent,
+                                      preparedDraws.Transparent, firstBatch, batchCount);
+                            if (finalChunk)
+                                DrawVfx(commands, pass, surface, request->Packet, shadows);
+                        }
+                        SDL_EndGPURenderPass(pass);
+                        ++Statistics.Passes;
                     }
-                    auto* pass = SDL_BeginGPURenderPass(commands, &color, 1, depthPointer);
-                    if (!pass)
-                        throw std::runtime_error("SDL_BeginGPURenderPass(transparency) failed: " + LastSdlError());
-                    if (request != Requests.end())
-                    {
-                        DrawScene(commands, pass, surface, request->Packet, shadows, SceneDrawPhase::Transparent,
-                                  preparedDraws.Transparent);
-                        DrawVfx(commands, pass, surface, request->Packet, shadows);
-                    }
-                    SDL_EndGPURenderPass(pass);
-                    ++Statistics.Passes;
                     Statistics.ScenePassMilliseconds +=
                         std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
                     return;

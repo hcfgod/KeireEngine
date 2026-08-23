@@ -205,7 +205,7 @@ TEST_CASE("managed external editor targeting reuses an open solution session")
     CHECK((Keire::Detail::ResolveVisualStudioExternalEditorArguments(source, solution, false) ==
            std::vector<std::string>{Keire::Detail::PathToUtf8(solution), "/Edit", Keire::Detail::PathToUtf8(source)}));
     CHECK((Keire::Detail::ResolveVisualStudioExternalEditorArguments(source, solution, true) ==
-           std::vector<std::string>{"/Edit", Keire::Detail::PathToUtf8(source)}));
+           std::vector<std::string>{Keire::Detail::PathToUtf8(solution), "/Edit", Keire::Detail::PathToUtf8(source)}));
 
     std::error_code error;
     std::filesystem::remove_all(root, error);

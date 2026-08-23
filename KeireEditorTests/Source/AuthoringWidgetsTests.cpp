@@ -197,7 +197,7 @@ TEST_CASE("Stable node graph presentation metadata remains optional")
     CHECK(contextualNode != legacyNode);
     CHECK_NOTHROW(KeireEditor::StableNodeGraphCanvas::Validate(std::span{&contextualNode, std::size_t{1}}, {}));
 
-    const KeireEditor::NodeGraphCanvasResult legacyResult{std::nullopt, std::nullopt, true, true};
+    const KeireEditor::NodeGraphCanvasResult legacyResult{std::nullopt, std::nullopt, std::nullopt, true, true};
     CHECK(legacyResult.BackgroundActivated);
     CHECK(legacyResult.Changed);
     CHECK_FALSE(legacyResult.MoveCompletedNode.has_value());

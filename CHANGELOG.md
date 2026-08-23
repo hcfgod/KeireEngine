@@ -10,6 +10,13 @@ versions.
 
 ### Fixed
 
+- Prevented D3D12 scene crashes when material-heavy editor views exhaust SDL's command-buffer-local sampler heap by
+  isolating render surfaces and continuing large opaque/transparent passes through ordered color/depth-preserving
+  command buffers.
+- Kept expanded extracted graph assets visually nested inside their parent Grid tile, restored readable Scene viewport
+  overlay tooltips, opened Material Function call nodes on double-click, stopped repeated script opens from rewriting
+  the active IDE workspace, and made Visual Studio fallbacks target the exact project solution and source file. Texture
+  import now accepts OpenEXR for color, data, normal, and HDR environment semantics through the private worker decoder.
 - Regenerated Visual Studio workspaces only when their generated contents change, routed later C# opens to the exact
   running Visual Studio instance whose loaded solution matches the current project, and grouped extracted
   Shader/Material Function sources as collapsible children of their parent graph in the Asset Browser.

@@ -35,6 +35,7 @@ namespace KeireEditor
         ResolveMaterialGraphTemplate(const Keire::MaterialShaderReference& shader) const = 0;
         [[nodiscard]] virtual Keire::Ref<const Keire::Texture2DAsset>
         ResolveMaterialGraphTexture(Keire::AssetId asset) const = 0;
+        virtual void OpenMaterialGraphFunction(Keire::AssetId asset) = 0;
         virtual void SaveMaterialGraphDocument() = 0;
         virtual void UndoMaterialGraphEdit() = 0;
         virtual void RedoMaterialGraphEdit() = 0;

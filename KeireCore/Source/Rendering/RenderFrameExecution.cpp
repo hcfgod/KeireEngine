@@ -5,6 +5,7 @@
 #include <limits>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 namespace Keire::RenderBackend
 {
@@ -54,18 +55,24 @@ namespace Keire::RenderBackend
 
         if (GpuSubmissionSerial == std::numeric_limits<std::uint64_t>::max())
             throw std::overflow_error("GPU submission serial exhausted.");
-        SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(Device);
-        if (!commands)
-            throw std::runtime_error("SDL_AcquireGPUCommandBuffer failed: " + LastSdlError());
+        SDL_GPUCommandBuffer* commands = nullptr;
+        std::vector<SDL_GPUCommandBuffer*> surfaceCommands;
+        surfaceCommands.reserve(Requests.size());
         ActiveGpuSubmissionSerial = GpuSubmissionSerial + 1U;
         FrameExecutionActive = true;
-        bool frameUploadsSubmitted = false;
+        bool gpuWorkSubmitted = false;
 
         try
         {
             const auto recordingStarted = std::chrono::steady_clock::now();
             for (const auto& request : Requests)
-                RecordSurface(commands, *request.Surface);
+            {
+                auto* surfaceCommandBuffer = SDL_AcquireGPUCommandBuffer(Device);
+                if (!surfaceCommandBuffer)
+                    throw std::runtime_error("SDL_AcquireGPUCommandBuffer(surface) failed: " + LastSdlError());
+                surfaceCommands.push_back(surfaceCommandBuffer);
+                RecordSurface(surfaceCommandBuffer, *request.Surface, surfaceCommands);
+            }
             Statistics.CommandRecordingMilliseconds =
                 std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - recordingStarted).count();
             const auto attributedRecordingMilliseconds =
@@ -95,20 +102,36 @@ namespace Keire::RenderBackend
                 }
                 else
                 {
-                    frameUploadsSubmitted = true;
+                    gpuWorkSubmitted = true;
                     ++Statistics.FrameUploadSubmissions;
                 }
             }
             Statistics.FrameUploadMilliseconds =
                 std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - uploadStarted).count();
 
+            const auto submissionStarted = std::chrono::steady_clock::now();
+            // SDL's D3D12 backend owns bounded descriptor heaps per command buffer. Keeping independent editor
+            // surfaces in one command buffer allows the Scene, Game, and preview views to exhaust a shared heap.
+            // Submitting each offscreen surface separately preserves queue order while resetting that backend-local
+            // allocation. The final swapchain fence still retires every earlier submission on the same GPU queue.
+            for (auto& surfaceCommandBuffer : surfaceCommands)
+            {
+                auto* submitted = std::exchange(surfaceCommandBuffer, nullptr);
+                if (!SDL_SubmitGPUCommandBuffer(submitted))
+                    throw std::runtime_error("SDL_SubmitGPUCommandBuffer(surface) failed: " + LastSdlError());
+                gpuWorkSubmitted = true;
+            }
+
+            commands = SDL_AcquireGPUCommandBuffer(Device);
+            if (!commands)
+                throw std::runtime_error("SDL_AcquireGPUCommandBuffer(swapchain) failed: " + LastSdlError());
             RecordSwapchain(commands, drawData);
 
-            const auto submissionStarted = std::chrono::steady_clock::now();
             SDL_GPUFence* fence = SDL_SubmitGPUCommandBufferAndAcquireFence(commands);
             commands = nullptr;
             if (!fence)
                 throw std::runtime_error("SDL_SubmitGPUCommandBufferAndAcquireFence failed: " + LastSdlError());
+            gpuWorkSubmitted = true;
             Statistics.GpuSubmissionMilliseconds =
                 std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - submissionStarted).count();
             InFlight.push_back({fence, std::move(PendingRetired), std::move(PendingRetiredMeshes),
@@ -149,7 +172,12 @@ namespace Keire::RenderBackend
                 (void)SDL_CancelGPUCommandBuffer(FrameUploadCommands);
                 FrameUploadCommands = nullptr;
             }
-            if (frameUploadsSubmitted && Device)
+            for (auto*& surfaceCommandBuffer : surfaceCommands)
+            {
+                if (surfaceCommandBuffer)
+                    (void)SDL_CancelGPUCommandBuffer(std::exchange(surfaceCommandBuffer, nullptr));
+            }
+            if (gpuWorkSubmitted && Device)
                 (void)SDL_WaitForGPUIdle(Device);
             for (auto* transfer : FrameUploadTransfers)
                 SDL_ReleaseGPUTransferBuffer(Device, transfer);

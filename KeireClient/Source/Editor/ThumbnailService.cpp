@@ -1257,6 +1257,7 @@ namespace KeireEditor
         RegisterProvider(".tga", 4, MakeTexturePreview);
         RegisterProvider(".bmp", 4, MakeTexturePreview);
         RegisterProvider(".hdr", 1, MakeTexturePreview);
+        RegisterProvider(".exr", 1, MakeTexturePreview);
         RegisterProvider(".keiremesh", 5, MakeMeshPreview);
         RegisterProvider(".obj", 5, MakeMeshPreview);
         RegisterProvider(".fbx", 5, MakeMeshPreview);

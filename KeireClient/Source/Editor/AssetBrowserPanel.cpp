@@ -1065,22 +1065,8 @@ namespace KeireEditor
                 DrawAssetTooltip(ui, record, editor);
                 DrawAssetDragSource(ui, record);
                 DrawAssetContext(ui, record, editor, "ThumbnailContext");
-                if (hasChildren)
-                {
-                    if (ui.IconButton("AssetChildren",
-                                      expanded ? Keire::UiIcon::ExpandMore : Keire::UiIcon::ChevronRight, false,
-                                      {22.0F, 22.0F}))
-                    {
-                        if (expanded)
-                            ExpandedParents.erase(record.Id);
-                        else
-                            ExpandedParents.insert(record.Id);
-                    }
-                    ui.SameLine();
-                }
                 const auto visibleName =
-                    ElideAssetDisplayName((depth == 0 ? std::string{} : std::string("- ")) + fullName,
-                                          std::max(ui.ContentAvailable().Width - 8.0F, 1.0F),
+                    ElideAssetDisplayName(fullName, std::max(ui.ContentAvailable().Width - 8.0F, 1.0F),
                                           [&ui](const std::string_view text) { return ui.MeasureText(text).Width; });
                 if (ui.Selectable(visibleName, selected))
                     SelectFromClick(record.Id, ui, editor);
@@ -1088,6 +1074,20 @@ namespace KeireEditor
                 DrawAssetDragSource(ui, record);
                 DrawAssetContext(ui, record, editor, "LabelContext");
                 DrawAssetTooltip(ui, record, editor);
+                if (hasChildren)
+                {
+                    const auto disclosure = expanded ? "Hide sub-assets" : "Show sub-assets";
+                    if (ui.Selectable(disclosure, false))
+                    {
+                        if (expanded)
+                            ExpandedParents.erase(record.Id);
+                        else
+                            ExpandedParents.insert(record.Id);
+                    }
+                    ui.SetTooltip(expanded ? "Collapse generated assets under this source."
+                                           : "Expand generated assets under this source.",
+                                  {.Delayed = true});
+                }
             }
             else
             {
@@ -1484,10 +1484,23 @@ namespace KeireEditor
                         nextCell();
                         DrawFolder(ui, folder, editor, true);
                     }
+                    bool drawingChildren = false;
                     for (const auto& entry : hierarchy)
                     {
-                        nextCell();
-                        DrawAsset(ui, *entry.Record, editor, true, entry.Depth, entry.HasChildren);
+                        if (entry.Depth == 0)
+                        {
+                            nextCell();
+                            drawingChildren = false;
+                            DrawAsset(ui, *entry.Record, editor, true, 0, entry.HasChildren);
+                            continue;
+                        }
+                        if (!drawingChildren)
+                        {
+                            ui.Separator();
+                            ui.TextColored(editor.AssetBrowserTheme().MutedText, "SUB-ASSETS");
+                            drawingChildren = true;
+                        }
+                        DrawAsset(ui, *entry.Record, editor, false, entry.Depth - 1, entry.HasChildren);
                     }
                 }
             }

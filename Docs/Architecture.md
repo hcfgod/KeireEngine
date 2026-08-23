@@ -295,7 +295,10 @@ on the frame command buffer; the fallback upload queue is reserved for resource 
 ordered recording path. The renderer applies the configured frames-in-flight policy to SDL's 1–3 frame presentation
 queue while retaining the full configured bound for fences and transient-resource retirement. Higher applied queue depths
 favor throughput at the cost of additional presentation latency. Profiling attributes command recording to skinning, VFX,
-draw preparation, frame-graph passes, and residual orchestration overhead.
+draw preparation, frame-graph passes, and residual orchestration overhead. Each offscreen surface owns an ordered
+command-buffer sequence. Material-heavy opaque and transparent passes continue in bounded batches that store and reload
+their color/depth attachments between submissions, preventing backend-local descriptor heaps from becoming an
+unbounded per-frame resource while preserving the final fence as the retirement boundary for the full sequence.
 
 The public `RenderSystem.cpp` PImpl facade delegates to separately compiled private backend units for device/frame
 lifecycle, resource caches, surface/pipeline management, and scene recording. Frame execution, skinning, sampled-depth

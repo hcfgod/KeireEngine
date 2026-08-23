@@ -47,7 +47,9 @@ Names must match reflected compatible properties. Reset one value with `Reset(na
 
 Use Material Functions for typed expressions and Material Layers for surface contributions. Functions and layers are
 explicit assets with validated boundaries. Material Parameter Collections provide global values shared across
-materials; managed code opens a live collection through `GlobalMaterialParameters.Open(collection)`.
+materials; managed code opens a live collection through `GlobalMaterialParameters.Open(collection)`. Double-click a
+Function Call node in a Material Graph to open its referenced reusable asset. Its body is an expression-level shader
+graph, so Kéire intentionally edits it in the shared Shader Graph panel while identifying its Material Function purpose.
 
 Kéire does not equate comments or collapsed regions with reusable subgraphs. Collapse is visual only. Reuse requires a
 Function, Layer, or—within VFX—the dedicated VFX Subgraph asset.

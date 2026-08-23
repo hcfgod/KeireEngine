@@ -322,12 +322,6 @@ namespace Keire
                 const ImVec2 textPosition{bounds.Min.x + (bounds.GetWidth() - textSize.x) * 0.5F,
                                           bounds.Min.y + (bounds.GetHeight() - textSize.y) * 0.5F};
                 window->DrawList->AddText(textPosition, ImGui::GetColorU32(ImGuiCol_Text), glyph);
-
-                if (!specification.Tooltip.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
-                {
-                    ImGui::SetTooltip("%.*s", static_cast<int>(specification.Tooltip.size()),
-                                      specification.Tooltip.data());
-                }
             }
             ImGui::EndDisabled();
             return activated;
@@ -362,16 +356,27 @@ namespace Keire
         if (id.empty() || specification.Size.Width <= 0.0F || specification.Size.Height <= 0.0F)
             throw std::invalid_argument("OverlayIconButton requires an identifier and positive size.");
 
+        bool activated = false;
         if (const auto symbol = MaterialSymbol(icon))
         {
             auto font = PushFont(UiFontRole::Icons);
             if (font)
             {
                 const auto glyph = EncodePrivateUseGlyph(*symbol);
-                return DrawOverlayIconButton(id, glyph.data(), specification);
+                activated = DrawOverlayIconButton(id, glyph.data(), specification);
+            }
+            else
+            {
+                activated = DrawOverlayIconButton(id, FallbackLabel(icon), specification);
             }
         }
-        return DrawOverlayIconButton(id, FallbackLabel(icon), specification);
+        else
+        {
+            activated = DrawOverlayIconButton(id, FallbackLabel(icon), specification);
+        }
+        if (!specification.Tooltip.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+            ImGui::SetTooltip("%.*s", static_cast<int>(specification.Tooltip.size()), specification.Tooltip.data());
+        return activated;
     }
 
     void UiFrame::DrawOverlayIcon(const UiIcon icon, const UiPosition position, const UiColor color)

@@ -10,12 +10,14 @@
 
 #include "KeireInternal/Assets/AssetDatabaseWorkerAccess.h"
 #include "KeireInternal/Assets/AssetWorkerProtocol.h"
+#include "KeireInternal/Assets/TextureImportBackend.h"
 #include "KeireInternal/Audio/AudioImportBackend.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
 
 #include "KeireProjectModules/SourceModulePack.h"
 #include <KeireAssetWorkerInternal/FfmpegAudioImportBackend.h>
+#include <KeireAssetWorkerInternal/FfmpegTextureImportBackend.h>
 
 #include <algorithm>
 #include <array>
@@ -94,10 +96,10 @@ namespace
         for (auto& importer : specification.Importers)
         {
             if (importer.Name == "Keire.AudioClip")
-            {
                 importer = Keire::Detail::CreateAudioClipAssetImporter(Keire::Detail::CreateFfmpegAudioImportBackend());
-                break;
-            }
+            else if (importer.Name == "Keire.Texture2D")
+                importer =
+                    Keire::Detail::CreateTexture2DAssetImporter({}, Keire::Detail::CreateFfmpegTextureImportBackend());
         }
         return specification;
     }

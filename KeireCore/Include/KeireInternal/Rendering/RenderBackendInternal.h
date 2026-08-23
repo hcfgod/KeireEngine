@@ -1207,14 +1207,15 @@ namespace Keire::RenderBackend
                                                                    const SceneRenderPacket& packet);
         void DrawScene(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass, RenderSurfaceState& surface,
                        const SceneRenderPacket& packet, const ShadowFrameData& shadows, SceneDrawPhase phase,
-                       const PreparedSceneDrawList& prepared);
+                       const PreparedSceneDrawList& prepared, std::size_t firstBatch, std::size_t batchCount);
         void DrawVfx(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass, RenderSurfaceState& surface,
                      const SceneRenderPacket& packet, const ShadowFrameData& shadows);
         [[nodiscard]] ShadowFrameData RecordShadows(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                                     const SceneRenderPacket& packet);
         void RecordSampledDepth(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                 const SceneRenderPacket& packet);
-        void RecordSurface(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface);
+        void RecordSurface(SDL_GPUCommandBuffer*& commands, RenderSurfaceState& surface,
+                           std::vector<SDL_GPUCommandBuffer*>& frameCommands);
         void RecordSwapchain(SDL_GPUCommandBuffer*& commands, ImDrawData* drawData);
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateRuntimeUiPipeline();
         void EndFrame(ImDrawData* drawData);

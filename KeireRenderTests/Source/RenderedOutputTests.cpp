@@ -188,6 +188,18 @@ namespace
         bool HasStatistics = false;
     };
 
+    struct MultiSurfaceResults final
+    {
+        std::array<std::vector<std::uint8_t>, 3> Frames;
+        Keire::RenderStatistics Statistics;
+        bool HasStatistics = false;
+    };
+
+    struct DescriptorRolloverResults final
+    {
+        std::vector<std::uint8_t> Frame;
+    };
+
     struct VfxChannelSignal final
     {
         float Weight = 0.0F;
@@ -820,6 +832,167 @@ namespace
         Keire::Ref<Keire::DirectionalLightComponent> m_Light;
         Keire::RenderEnvironmentSettings m_Environment;
         std::size_t m_NextCapture = 0;
+        bool m_Submitted = false;
+    };
+
+    class MultiSurfaceCaptureLayer final : public Keire::Layer
+    {
+      public:
+        MultiSurfaceCaptureLayer(const Keire::AssetId mesh, const Keire::AssetId material,
+                                 std::shared_ptr<MultiSurfaceResults> results)
+            : Layer("Multi-surface rendered output capture"), m_Mesh(mesh), m_Material(material),
+              m_Results(std::move(results))
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            m_Scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Parse("711ace00-0000-4000-8000-000000000011"),
+                                                     Keire::SceneAsset::EmptyDefinition("Multi-surface tests"),
+                                                     Keire::ComponentRegistry::CreateDefault());
+            auto object = m_Scene->CreateEntity("Rendered cube");
+            const auto renderer = object.AddComponent<Keire::MeshRendererComponent>();
+            renderer->SetMesh(m_Mesh);
+            renderer->SetMaterials({&m_Material, 1});
+
+            for (std::size_t index = 0; index < m_Views.size(); ++index)
+            {
+                Keire::RenderSurfaceSpecification surface;
+                surface.Name = "Multi-surface test " + std::to_string(index);
+                surface.Width = SurfaceSize;
+                surface.Height = SurfaceSize;
+                surface.ClearColor = {0.0F, 0.0F, 0.0F, 1.0F};
+                surface.Depth = true;
+                m_Views[index] = Owner().Renderer()->CreateView(surface);
+                Keire::RenderCamera camera;
+                camera.View = Keire::Math::LookAt({0.0F, 0.0F, 2.5F}, {0.0F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F});
+                camera.Projection = Keire::Math::Perspective(55.0F, 1.0F, 0.1F, 100.0F);
+                camera.ClearColor = surface.ClearColor;
+                m_Views[index]->SetCamera(camera);
+            }
+        }
+
+        void OnDetach() noexcept override
+        {
+            if (Owner().Renderer())
+            {
+                m_Results->Statistics = Owner().Renderer()->Statistics();
+                m_Results->HasStatistics = true;
+            }
+            if (m_Scene)
+                m_Scene->Close();
+            for (auto& view : m_Views)
+                view.Reset();
+            m_Scene.Reset();
+        }
+
+        void OnUpdate(const Keire::Time&) override
+        {
+            if (m_Submitted)
+            {
+                for (std::size_t index = 0; index < m_Views.size(); ++index)
+                {
+                    m_Results->Frames[index] = Keire::RenderSystemInternalAccess::ReadbackRGBA8(
+                        *Owner().Renderer(), *m_Views[index]->Surface());
+                }
+                Owner().RequestExit();
+                return;
+            }
+
+            Keire::RenderEnvironmentSettings environment;
+            environment.AmbientColor = {1.0F, 1.0F, 1.0F, 1.0F};
+            environment.AmbientIntensity = 1.0F;
+            for (const auto& view : m_Views)
+                Owner().Renderer()->Submit({m_Scene, view, false, environment});
+            m_Submitted = true;
+        }
+
+      private:
+        Keire::AssetId m_Mesh;
+        Keire::AssetId m_Material;
+        std::shared_ptr<MultiSurfaceResults> m_Results;
+        Keire::Ref<Keire::Scene> m_Scene;
+        std::array<Keire::Ref<Keire::RenderView>, 3> m_Views;
+        bool m_Submitted = false;
+    };
+
+    class DescriptorRolloverCaptureLayer final : public Keire::Layer
+    {
+      public:
+        DescriptorRolloverCaptureLayer(const Keire::AssetId mesh, const Keire::AssetId material,
+                                       const std::array<Keire::AssetId, 2> textures,
+                                       std::shared_ptr<DescriptorRolloverResults> results)
+            : Layer("Descriptor rollover rendered output capture"), m_Mesh(mesh), m_Material(material),
+              m_Textures(textures), m_Results(std::move(results))
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            m_Scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Parse("711ace00-0000-4000-8000-000000000012"),
+                                                     Keire::SceneAsset::EmptyDefinition("Descriptor rollover tests"),
+                                                     Keire::ComponentRegistry::CreateDefault());
+            constexpr std::size_t rendererCount = 160U;
+            for (std::size_t index = 0; index < rendererCount; ++index)
+            {
+                auto object = m_Scene->CreateEntity("Rendered triangle " + std::to_string(index));
+                const auto renderer = object.AddComponent<Keire::MeshRendererComponent>();
+                renderer->SetMesh(m_Mesh);
+                renderer->SetMaterial(m_Material);
+                renderer->SetMaterialProperty("MainTexture", m_Textures[index % m_Textures.size()]);
+                renderer->SetCastShadows(false);
+            }
+
+            Keire::RenderSurfaceSpecification surface;
+            surface.Name = "Descriptor rollover test";
+            surface.Width = SurfaceSize;
+            surface.Height = SurfaceSize;
+            surface.ClearColor = {0.0F, 0.0F, 0.0F, 1.0F};
+            surface.SampleCount = Keire::RenderSampleCount::Four;
+            surface.Depth = true;
+            m_View = Owner().Renderer()->CreateView(surface);
+            Keire::RenderCamera camera;
+            camera.View = Keire::Math::LookAt({0.0F, 0.0F, 2.5F}, {0.0F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F});
+            camera.Projection = Keire::Math::Perspective(55.0F, 1.0F, 0.1F, 100.0F);
+            camera.ClearColor = surface.ClearColor;
+            m_View->SetCamera(camera);
+        }
+
+        void OnDetach() noexcept override
+        {
+            if (m_Scene)
+                m_Scene->Close();
+            m_View.Reset();
+            m_Scene.Reset();
+        }
+
+        void OnUpdate(const Keire::Time&) override
+        {
+            if (m_Submitted)
+            {
+                m_Results->Frame =
+                    Keire::RenderSystemInternalAccess::ReadbackRGBA8(*Owner().Renderer(), *m_View->Surface());
+                Owner().RequestExit();
+                return;
+            }
+
+            Keire::RenderEnvironmentSettings environment;
+            environment.AmbientColor = {1.0F, 1.0F, 1.0F, 1.0F};
+            environment.AmbientIntensity = 1.0F;
+            environment.SkyVisible = false;
+            Owner().Renderer()->Submit({m_Scene, m_View, false, environment});
+            m_Submitted = true;
+        }
+
+      private:
+        Keire::AssetId m_Mesh;
+        Keire::AssetId m_Material;
+        std::array<Keire::AssetId, 2> m_Textures;
+        std::shared_ptr<DescriptorRolloverResults> m_Results;
+        Keire::Ref<Keire::Scene> m_Scene;
+        Keire::Ref<Keire::RenderView> m_View;
         bool m_Submitted = false;
     };
 
@@ -2320,6 +2493,45 @@ TEST_CASE("submitted scene data remains valid when the scene closes before end f
     Keire::Application application(RenderTestSpecification());
     (void)application.PushLayer(std::make_unique<CloseAfterSubmitLayer>());
     CHECK(application.Run() == 0);
+}
+
+TEST_CASE("independent render surfaces submit in queue order and survive final-fence retirement")
+{
+    RenderAssetFixture assets;
+    const auto results = std::make_shared<MultiSurfaceResults>();
+    auto specification = RenderTestSpecification();
+    specification.Assets.Mode = Keire::AssetMode::Development;
+    specification.Assets.DevelopmentCatalog = assets.Catalog;
+    {
+        Keire::Application application(std::move(specification));
+        (void)application.PushLayer(std::make_unique<MultiSurfaceCaptureLayer>(assets.Mesh, assets.Material, results));
+        REQUIRE(application.Run() == 0);
+    }
+
+    for (const auto& frame : results->Frames)
+    {
+        REQUIRE(frame.size() == static_cast<std::size_t>(SurfaceSize * SurfaceSize * 4));
+        CHECK(MeasureCenter(frame).Luminance() > MinimumBehaviorDelta);
+    }
+    REQUIRE(results->HasStatistics);
+}
+
+TEST_CASE("large material scenes roll descriptor pressure across ordered command buffers")
+{
+    RenderAssetFixture assets;
+    const auto results = std::make_shared<DescriptorRolloverResults>();
+    auto specification = RenderTestSpecification();
+    specification.Assets.Mode = Keire::AssetMode::Development;
+    specification.Assets.DevelopmentCatalog = assets.Catalog;
+    {
+        Keire::Application application(std::move(specification));
+        (void)application.PushLayer(std::make_unique<DescriptorRolloverCaptureLayer>(
+            assets.Mesh, assets.Material, std::array{assets.Texture, assets.RedEmissive}, results));
+        REQUIRE(application.Run() == 0);
+    }
+
+    REQUIRE(results->Frame.size() == static_cast<std::size_t>(SurfaceSize * SurfaceSize * 4));
+    CHECK(MeasureCenter(results->Frame).Luminance() > MinimumBehaviorDelta);
 }
 
 TEST_CASE("renderer replaces the deterministic error mesh with an asset-backed indexed mesh")

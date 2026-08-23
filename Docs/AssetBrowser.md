@@ -16,8 +16,9 @@ A single unambiguous asset imports directly. Texture files, batches, directories
 Include toggle, destination, conflict policy, and importer-specific settings while retaining the directory hierarchy.
 Texture settings include semantic, color space, environment layout, mip policy, maximum size,
 normal green-channel flip, filters, address modes, and anisotropy. Radiance HDR files default to linear equirectangular
-environments; LDR environment images can use equirectangular, horizontal/vertical cross, or horizontal/vertical strip
-layouts. Conflicts default to a unique name; Replace is explicit and preserves a
+environments. OpenEXR sources default to linear color but can be imported as color/diffuse, data, normal, or HDR
+environment textures; LDR environment images can use equirectangular, horizontal/vertical cross, or
+horizontal/vertical strip layouts. Conflicts default to a unique name; Replace is explicit and preserves a
 compatible asset's stable ID. Imported files are copied into `Assets`; external links and source `.keiremeta` identities
 are never adopted. Each dialog item can be excluded, in-progress validation can be cancelled, and the completed batch
 is one Project undo operation, including recoverable replacement of an existing source and metadata pair.
@@ -30,9 +31,10 @@ mesh or texture import cannot leave a cached cube or checkerboard preview from a
 The Asset Browser is a focused editor panel backed by `AssetDatabase`. It presents a persistent folder tree,
 breadcrumbs, search, List and Grid modes, adjustable thumbnail size, multi-selection, double-click open, drag payloads,
 rename, stable-identity duplicate, and recoverable Move to Trash operations.
-Extracted Shader and Material Functions carry a persistent source-parent identity in their `.keiremeta`. List and Grid
-views show those sources beneath the graph that produced them, with an icon control on the parent to expand or collapse
-the group. Search temporarily expands matching groups. Moving a child away from its parent folder or removing the
+Extracted Shader and Material Functions carry a persistent source-parent identity in their `.keiremeta`. List mode
+indents those sources beneath the graph that produced them. Grid mode keeps their compact rows inside the parent tile
+under an explicit **Show sub-assets** disclosure instead of presenting them as peer thumbnails. Search temporarily
+expands matching groups. Moving a child away from its parent folder or removing the
 parent leaves the child visible as an ordinary standalone asset instead of hiding it.
 Names that do not fit their List or Grid cell are shortened with a measured `...` suffix. Hover either the shortened
 label or its thumbnail to see the complete filename, type, project-relative path, size, stable ID, importer, and any
@@ -100,12 +102,12 @@ engine API used by the managed build. Source checkouts include `Keire.Managed.cs
 through a generated .NET 8 design-time facade so Visual Studio 2022 has complete engine semantic information and source
 navigation. The generated root gameplay projects also target .NET 8/C# 12 for Visual Studio 2022 design-time
 compatibility, while Kéire's separate internal compilation projects remain on .NET 10/C# 14. Packaged editors use a
-stable project-local `Keire.Managed.dll` reference. Workspace publication compares generated contents before replacing
-a `.sln`, `.csproj`, design-time facade, or API reference, so simply opening another script does not make Visual Studio
-prompt to reload an unchanged solution. The first C# open loads the generated solution; later Windows opens enumerate
+stable project-local `Keire.Managed.dll` reference. The first C# open publishes the IDE workspace; later script opens do
+not rewrite the loaded `.sln` or `.csproj`, so Visual Studio does not prompt to reload it. Later Windows opens enumerate
 Visual Studio automation sessions, match the loaded solution's canonical path to the current project, and open the
-source through that exact instance. An unrelated most-recent Visual Studio window is never selected. If the original
-instance has closed, Kéire opens the project solution again instead of sending the file to another project. This
+source through that exact instance. An unrelated most-recent Visual Studio window is never selected. While Visual
+Studio is still starting, or if the original instance has closed, Kéire invokes the solution-associated Visual Studio
+executable with both the exact project solution and requested source instead of sending the file to another project. This
 applies to an explicit `devenv.exe` preference and to the Windows system-default path. Build Settings also exposes
 **Regenerate C# Project**. Generated root `.sln` and `.csproj` files are ignored by newly created projects.
 

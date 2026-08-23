@@ -932,6 +932,10 @@ TEST_CASE("Texture importer exposes UI-independent production import options")
     const auto baseColor = importer.SuggestImportSettings("cartoon_monster_diffuse.png", defaults);
     CHECK(std::get<std::string>(baseColor.at("semantic")) == "color");
     CHECK(std::get<std::string>(baseColor.at("colorSpace")) == "srgb");
+    CHECK(std::ranges::find(importer.Extensions, ".exr") != importer.Extensions.end());
+    const auto exrBaseColor = importer.SuggestImportSettings("cartoon_monster_diffuse.exr", defaults);
+    CHECK(std::get<std::string>(exrBaseColor.at("semantic")) == "color");
+    CHECK(std::get<std::string>(exrBaseColor.at("colorSpace")) == "linear");
 }
 
 TEST_CASE("External asset publication rolls back when the new catalog is invalid")

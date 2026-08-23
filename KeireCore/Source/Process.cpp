@@ -198,6 +198,37 @@ namespace Keire::Detail
                                         TRUE) == CSTR_EQUAL;
         }
 
+        [[nodiscard]] std::filesystem::path ResolveAssociatedExecutable(const std::filesystem::path& document,
+                                                                        const std::filesystem::path& working)
+        {
+            std::array<wchar_t, 32768> executable{};
+            const auto result =
+                FindExecutableW(document.wstring().c_str(), working.wstring().c_str(), executable.data());
+            if (reinterpret_cast<std::intptr_t>(result) <= 32 || executable.front() == L'\0')
+                return {};
+            return executable.data();
+        }
+
+        [[nodiscard]] std::filesystem::path ResolveVisualStudioExecutable()
+        {
+            constexpr auto key = L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\devenv.exe";
+            const std::array roots{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+            for (const auto root : roots)
+            {
+                std::array<wchar_t, 32768> executable{};
+                DWORD bytes = static_cast<DWORD>(executable.size() * sizeof(wchar_t));
+                if (RegGetValueW(root, key, nullptr, RRF_RT_REG_SZ, nullptr, executable.data(), &bytes) ==
+                        ERROR_SUCCESS &&
+                    executable.front() != L'\0')
+                {
+                    const std::filesystem::path result = executable.data();
+                    if (std::filesystem::is_regular_file(result))
+                        return result;
+                }
+            }
+            return {};
+        }
+
         [[nodiscard]] bool InvokeVisualStudioOpenFile(IDispatch& dte, const std::filesystem::path& source,
                                                       std::string& diagnostic)
         {
@@ -1212,8 +1243,7 @@ namespace Keire::Detail
         const auto sourceText = PathToUtf8(source);
         if (managedSolution.empty())
             return {sourceText};
-        if (reuseManagedSession)
-            return {"/Edit", sourceText};
+        (void)reuseManagedSession;
         return {PathToUtf8(managedSolution), "/Edit", sourceText};
     }
 
@@ -1261,6 +1291,19 @@ namespace Keire::Detail
                                              diagnostic);
             }
 #if defined(_WIN32)
+            if (extension == ".cs" && !managedSolution.empty())
+            {
+                auto visualStudio = ResolveVisualStudioExecutable();
+                if (visualStudio.empty())
+                    visualStudio = ResolveAssociatedExecutable(managedSolution, working);
+                auto editorName = visualStudio.stem().string();
+                for (char& character : editorName)
+                    character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+                if (!visualStudio.empty() && editorName == "devenv")
+                    return LaunchDetachedProcess(
+                        visualStudio, ResolveVisualStudioExternalEditorArguments(source, managedSolution, false),
+                        working, diagnostic);
+            }
             const auto target = managedSolution.empty() ? source : managedSolution;
             const auto result = reinterpret_cast<std::intptr_t>(ShellExecuteW(
                 nullptr, L"open", target.wstring().c_str(), nullptr, working.wstring().c_str(), SW_SHOWNORMAL));

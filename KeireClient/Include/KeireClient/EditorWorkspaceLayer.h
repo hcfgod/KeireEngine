@@ -311,6 +311,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     ResolveMaterialGraphTemplate(const Keire::MaterialShaderReference& shader) const override;
     [[nodiscard]] Keire::Ref<const Keire::Texture2DAsset>
     ResolveMaterialGraphTexture(Keire::AssetId asset) const override;
+    void OpenMaterialGraphFunction(Keire::AssetId asset) override;
     void SaveMaterialGraphDocument() override;
     void UndoMaterialGraphEdit() override;
     void RedoMaterialGraphEdit() override;

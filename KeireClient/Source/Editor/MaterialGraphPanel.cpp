@@ -731,6 +731,19 @@ namespace KeireEditor
         DrawComments(ui, document, model, comments, canvas);
         m_SelectedNodes = ResolveGraphSelection(canvas.SelectedNodes, model.NodeIdentities);
         m_SelectedNode = m_SelectedNodes.empty() ? std::nullopt : std::optional(m_SelectedNodes.back());
+        if (canvas.DoubleClickedNode)
+        {
+            const auto nodeId = model.Node(*canvas.DoubleClickedNode);
+            const auto node = nodeId ? std::ranges::find(document.Definition().SurfaceGraph.Nodes, *nodeId,
+                                                         &Keire::ShaderGraphNode::Id)
+                                     : document.Definition().SurfaceGraph.Nodes.end();
+            if (node != document.Definition().SurfaceGraph.Nodes.end() &&
+                node->Kind == Keire::ShaderGraphNodeKind::FunctionCall && node->ReferencedAsset)
+            {
+                m_Controller.OpenMaterialGraphFunction(node->ReferencedAsset);
+                return;
+            }
+        }
         if (HandleClipboard(canvas, model.NodeIdentities))
             return;
         if (!canvas.DuplicateNodesRequested.empty())

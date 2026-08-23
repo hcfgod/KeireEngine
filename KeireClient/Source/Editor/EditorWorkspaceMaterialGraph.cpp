@@ -39,6 +39,8 @@ EditorWorkspaceLayer::ResolveMaterialGraphFunction(const Keire::AssetId asset) c
     return ResolveReusableGraph(asset);
 }
 
+void EditorWorkspaceLayer::OpenMaterialGraphFunction(const Keire::AssetId asset) { OpenShaderGraph(asset); }
+
 void EditorWorkspaceLayer::SaveMaterialGraphDocument() { SaveMaterialGraph(); }
 
 void EditorWorkspaceLayer::UndoMaterialGraphEdit() { (void)m_MaterialGraphDocument->Undo(); }
