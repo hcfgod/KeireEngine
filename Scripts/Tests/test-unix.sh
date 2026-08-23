@@ -512,6 +512,8 @@ assert_true grep -q 'AddKeireManagedHostStaging()' "$ROOT/AssetTool/premake5.lua
 assert_true grep -q 'specification.RuntimeHostDirectory = managedHost' "$ROOT/AssetTool/Source/Main.cpp"
 assert_true grep -q 'specification.RuntimeRootDirectory = managedHost / "Dotnet"' "$ROOT/AssetTool/Source/Main.cpp"
 assert_true grep -q 'Scripts/Unix/stage-managed-host.sh' "$ROOT/Scripts/Premake/Managed.lua"
+assert_true grep -F -q 'copy_tree_if_changed "$core_runtime_directory" "$bundled_runtime"' \
+  "$ROOT/Scripts/Unix/stage-managed-host.sh"
 assert_equal "$(managed_host_staging_targets KeireClient KeireClient KeireHub Keire | tr '\n' ',')" \
   'KeireAssetTool,KeireRuntime,KeireClient,' \
   'Editor builds refresh managed hosts for their executable dependencies'

@@ -380,7 +380,12 @@ Assert-True ($windowsFfmpegBuild.Contains('bin\avformat-63.dll') -and
     "Windows FFmpeg cache validation checks the installed runtime and import-library locations"
 $windowsBuild = Get-Content (Join-Path $Windows "build.ps1") -Raw
 $windowsManagedBuild = Get-Content (Join-Path $Windows "build-managed.ps1") -Raw
+$windowsManagedHostStage = Get-Content (Join-Path $Windows "stage-managed-host.ps1") -Raw
 $windowsRun = Get-Content (Join-Path $Windows "run.ps1") -Raw
+Assert-True ($windowsManagedHostStage.Contains('function Copy-FileIfChanged') -and
+             $windowsManagedHostStage.Contains('function Copy-TreeIfChanged') -and
+             -not $windowsManagedHostStage.Contains('Copy-Item -Path (Join-Path $coreRuntime.FullName "*")')) `
+    "Windows managed-host staging skips unchanged bundled runtime files"
 Assert-True ($corePremake.Contains('links { DearImGuiProject, ZstdProject }') -and -not $corePremake.Contains('imgui.cpp') -and -not $premakePolicy.Contains('AddDearImGuiSources')) "Private dependency project ownership"
 Assert-True ($corePremake.Contains('VendorIncludeDirs.entt') -and $corePremake.Contains('VendorIncludeDirs.glm') -and $corePremake.Contains('dependson { EnTTProject, GLMProject }')) "Private ECS and math build wiring"
 Assert-True ($hubPremake.Contains('links { HubRuntimeTarget }') -and

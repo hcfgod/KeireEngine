@@ -11,7 +11,8 @@ versions.
 ### Fixed
 
 - Stopped ordinary Windows project generation from rebuilding both private FFmpeg configurations by validating the
-  MSVC import library in FFmpeg's actual `bin` install directory instead of the unused `lib` directory.
+  MSVC import library in FFmpeg's actual `bin` install directory instead of the unused `lib` directory, and made
+  managed-host staging skip unchanged bundled .NET runtime files on Windows, Linux, and macOS.
 - Prevented D3D12 scene crashes when material-heavy editor views exhaust SDL's command-buffer-local sampler heap by
   isolating render surfaces and continuing large opaque/transparent passes through ordered color/depth-preserving
   command buffers.

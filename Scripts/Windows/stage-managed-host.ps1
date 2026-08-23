@@ -29,6 +29,36 @@ $managedAssembly = Join-Path $resolvedRoot "Build\Managed\Keire.Managed.dll"
 $dotnetRoot = Join-Path $resolvedRoot "Build\Dependencies\dotnet-sdk"
 $coralFiles = @("Coral.Managed.dll", "Coral.Managed.deps.json", "Coral.Managed.runtimeconfig.json")
 
+function Copy-FileIfChanged {
+    param(
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$Destination
+    )
+
+    $sourceFile = Get-Item -LiteralPath $Source
+    $destinationFile = Get-Item -LiteralPath $Destination -ErrorAction SilentlyContinue
+    if ($destinationFile -and -not $destinationFile.PSIsContainer -and
+        $destinationFile.Length -eq $sourceFile.Length -and
+        $destinationFile.LastWriteTimeUtc -eq $sourceFile.LastWriteTimeUtc) {
+        return
+    }
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Destination) | Out-Null
+    Copy-Item -LiteralPath $Source -Destination $Destination -Force
+}
+
+function Copy-TreeIfChanged {
+    param(
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$Destination
+    )
+
+    $sourceRoot = (Resolve-Path -LiteralPath $Source).Path
+    foreach ($sourceFile in Get-ChildItem -LiteralPath $sourceRoot -File -Recurse) {
+        $relativePath = $sourceFile.FullName.Substring($sourceRoot.Length).TrimStart("\", "/")
+        Copy-FileIfChanged -Source $sourceFile.FullName -Destination (Join-Path $Destination $relativePath)
+    }
+}
+
 foreach ($file in $coralFiles) {
     if (-not (Test-Path -LiteralPath (Join-Path $coralDirectory $file))) {
         throw "The patched Coral runtime output is missing: $file"
@@ -55,16 +85,16 @@ $bundledHost = Join-Path $bundledRoot "host\fxr\$($hostFxr.Name)"
 $bundledRuntime = Join-Path $bundledRoot "shared\Microsoft.NETCore.App\$($coreRuntime.Name)"
 New-Item -ItemType Directory -Force -Path $managedDirectory, $bundledHost, $bundledRuntime | Out-Null
 foreach ($file in $coralFiles) {
-    Copy-Item -LiteralPath (Join-Path $coralDirectory $file) -Destination $managedDirectory -Force
+    Copy-FileIfChanged -Source (Join-Path $coralDirectory $file) -Destination (Join-Path $managedDirectory $file)
 }
-Copy-Item -LiteralPath $managedAssembly -Destination $managedDirectory -Force
-Copy-Item -LiteralPath $netHost -Destination $targetDirectory -Force
-Copy-Item -Path (Join-Path $hostFxr.FullName "*") -Destination $bundledHost -Recurse -Force
-Copy-Item -Path (Join-Path $coreRuntime.FullName "*") -Destination $bundledRuntime -Recurse -Force
+Copy-FileIfChanged -Source $managedAssembly -Destination (Join-Path $managedDirectory "Keire.Managed.dll")
+Copy-FileIfChanged -Source $netHost -Destination (Join-Path $targetDirectory "nethost.dll")
+Copy-TreeIfChanged -Source $hostFxr.FullName -Destination $bundledHost
+Copy-TreeIfChanged -Source $coreRuntime.FullName -Destination $bundledRuntime
 foreach ($notice in @("LICENSE.txt", "ThirdPartyNotices.txt")) {
     $noticePath = Join-Path $dotnetRoot $notice
     if (Test-Path -LiteralPath $noticePath) {
-        Copy-Item -LiteralPath $noticePath -Destination $bundledRoot -Force
+        Copy-FileIfChanged -Source $noticePath -Destination (Join-Path $bundledRoot $notice)
     }
 }
 
