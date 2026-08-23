@@ -26,7 +26,7 @@ if ($LASTEXITCODE -ne 0 -or $Actual -ne $Lock.FFMPEG_COMMIT) {
 }
 if (-not $Force -and (Test-Path -LiteralPath (Join-Path $Install "include\libavformat\avformat.h")) -and
     (Test-Path -LiteralPath (Join-Path $Install "bin\avformat-63.dll")) -and
-    (Test-Path -LiteralPath (Join-Path $Install "lib\avformat.lib")) -and
+    (Test-Path -LiteralPath (Join-Path $Install "bin\avformat.lib")) -and
     (Test-Path -LiteralPath $Stamp) -and ((Get-Content -LiteralPath $Stamp -Raw).Trim() -eq $Expected)) {
     Write-Host "==> Private FFmpeg $Configuration build is current"
     return
@@ -36,7 +36,7 @@ if ($Configuration -eq "Release" -and -not $Force) {
     $DebugStamp = Join-Path $Root "Build\Dependencies\ffmpeg\Debug\keire-ffmpeg.stamp"
     $DebugExpected = "$($Lock.FFMPEG_COMMIT)|Debug|shared-lgpl-avformat-avcodec-swresample-avutil-v2"
     if ((Test-Path -LiteralPath (Join-Path $DebugInstall "bin\avformat-63.dll")) -and
-        (Test-Path -LiteralPath (Join-Path $DebugInstall "lib\avformat.lib")) -and
+        (Test-Path -LiteralPath (Join-Path $DebugInstall "bin\avformat.lib")) -and
         (Test-Path -LiteralPath $DebugStamp) -and
         ((Get-Content -LiteralPath $DebugStamp -Raw).Trim() -eq $DebugExpected)) {
         New-Item -ItemType Directory -Force -Path $Output | Out-Null

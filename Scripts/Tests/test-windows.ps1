@@ -375,7 +375,8 @@ Assert-True ($windowsFfmpegBuild.Contains('f101fce22d64db10f500242e23e43a251fe14
              $windowsFfmpegBuild.Contains('$ConfigureText.LastIndexOf($BrokenMsvcProbe')) `
     "Windows FFmpeg builds apply the validated upstream MSVC configure correction exactly once"
 Assert-True ($windowsFfmpegBuild.Contains('bin\avformat-63.dll') -and
-             $windowsFfmpegBuild.Contains('lib\avformat.lib')) `
+             $windowsFfmpegBuild.Contains('bin\avformat.lib') -and
+             -not $windowsFfmpegBuild.Contains('lib\avformat.lib')) `
     "Windows FFmpeg cache validation checks the installed runtime and import-library locations"
 $windowsBuild = Get-Content (Join-Path $Windows "build.ps1") -Raw
 $windowsManagedBuild = Get-Content (Join-Path $Windows "build-managed.ps1") -Raw

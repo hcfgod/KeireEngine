@@ -554,6 +554,8 @@ assert_false grep -F -q '"system:linux or macosx"' "$ROOT/KeireAssetWorker/prema
 assert_true grep -F -q -- '--install-name-dir=@rpath' "$ROOT/Scripts/Unix/ffmpeg.sh"
 assert_true grep -F -q 'git -C "$VENDOR_SOURCE" archive --format=tar "$COMMIT"' \
   "$ROOT/Scripts/Unix/ffmpeg.sh"
+assert_true grep -F -q 'bin\avformat.lib' "$ROOT/Scripts/Windows/ffmpeg.ps1"
+assert_false grep -F -q 'lib\avformat.lib' "$ROOT/Scripts/Windows/ffmpeg.ps1"
 assert_true test -z "$(find "$ROOT/KeireCore/Source" "$ROOT/KeireClient/Source" "$ROOT/KeireHub/Source" "$ROOT/KeireTests/Source" "$ROOT/AssetTool/Source" "$ROOT/KeireRuntime/Source" -type f -name '*.h' -print -quit)"
 assert_true test -f "$ROOT/KeireCore/Include/Keire/Assets/Asset.h"
 assert_true test -f "$ROOT/KeireCore/Source/Assets/AssetSystem.cpp"
