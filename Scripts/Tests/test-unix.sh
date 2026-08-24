@@ -534,7 +534,10 @@ assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" CMAKE_VERSION)" 3.
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" CMAKE_LINUX_X86_64_SHA256)" \
   0dc2e9a6860f06bf10bd8fadc03e35d9eeb4df46e33763a7e480e987758f385c 'CMake x86_64 archive lock'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" NASM_VERSION)" 3.02 'NASM source lock'
-assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" PATCHELF_VERSION)" 0.18.0 'patchelf source lock'
+assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" PATCHELF_VERSION)" 0.19.0 'patchelf source lock'
+assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" PATCHELF_SOURCE_SHA256)" \
+  4782e58d7dd5deae3f8d215f86f94fda0e3d072b583f5ad443846f3381fb472a 'patchelf source hash lock'
+assert_true grep -F -q 'version_at_least "$actual" "$PATCHELF_VERSION"' "$ROOT/Scripts/Linux/bootstrap.sh"
 assert_true grep -q 'Vendor/imgui' "$ROOT/Scripts/Unix/vendor.sh"
 assert_true grep -q 'Scripts/Premake/DearImGui.lua' "$ROOT/Scripts/Unix/vendor.sh"
 assert_true grep -q 'imgui|zstd|entt|glm|SDL_shadercross|assimp|stb)' "$ROOT/Scripts/Unix/vendor-update.sh"

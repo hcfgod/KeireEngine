@@ -22,6 +22,8 @@ versions.
 
 ### Fixed
 
+- Required patchelf 0.19 or newer on Linux so RPATH updates preserve relocated ELF initializer addresses instead of
+  producing shader-compiler binaries that can crash in the dynamic loader on Rocky Linux 9.
 - Removed repeated per-submesh material dependency walks within a rendered frame, and moved CPU VFX billboard/ribbon
   uploads into each surface command buffer so steady-state effects no longer add a blocking upload submission.
 - Made managed `Vector2`, `Vector3`, `Vector4`, `Quaternion`, and `Color` interpolation deterministic and

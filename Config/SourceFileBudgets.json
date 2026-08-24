@@ -41,7 +41,7 @@
     "KeireCore/Source/Vfx/VfxAssets.cpp": 4331,
     "KeireCore/Source/Vfx/VfxExpressions.cpp": 2000,
     "KeireCore/Source/Vfx/VfxSystem.cpp": 2489,
-    "KeireRenderTests/Source/RenderedOutputTests.cpp": 2568,
+    "KeireRenderTests/Source/RenderedOutputTests.cpp": 2542,
     "KeireRuntime/Source/RuntimeApplication.cpp": 1574
   }
 }

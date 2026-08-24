@@ -372,9 +372,10 @@ install_nasm() {
 
 install_patchelf() {
     local actual="" archive source built
+    # patchelf 0.18 can leave DT_INIT stale when an RPATH edit relocates an lld-produced .init section.
     if have patchelf; then
         actual="$(patchelf --version | extract_version)"
-        if version_at_least "$actual" 0.14; then
+        if version_at_least "$actual" "$PATCHELF_VERSION"; then
             step "patchelf $actual already available"
             return
         fi
@@ -383,13 +384,13 @@ install_patchelf() {
     step "Installing or updating patchelf"
     if install_logical_packages patchelf >/dev/null 2>&1 && have patchelf; then
         actual="$(patchelf --version | extract_version)"
-        if version_at_least "$actual" 0.14; then
+        if version_at_least "$actual" "$PATCHELF_VERSION"; then
             step "patchelf $actual is ready"
             return
         fi
     fi
 
-    step "The distro repositories did not provide patchelf 0.14 or newer; building the pinned source"
+    step "The distro repositories did not provide patchelf $PATCHELF_VERSION or newer; building the pinned source"
     install_logical_packages build
     TEMPORARY="$(mktemp -d)"
     archive="$TEMPORARY/patchelf-source.tar.gz"

@@ -61,50 +61,6 @@ namespace
         CaptureKind::ExposureLow,        CaptureKind::ExposureHigh, CaptureKind::NormalIdentity,
         CaptureKind::NormalTransformed};
 
-    [[nodiscard]] PixelStatistics MeasureSkyCorner(const std::vector<std::uint8_t>& pixels)
-    {
-        REQUIRE(pixels.size() == static_cast<std::size_t>(SurfaceSize * SurfaceSize * 4));
-        PixelStatistics result;
-        constexpr std::uint32_t extent = 12;
-        for (std::uint32_t y = 0; y < extent; ++y)
-        {
-            for (std::uint32_t x = 0; x < extent; ++x)
-            {
-                const auto offset = (static_cast<std::size_t>(y) * static_cast<std::size_t>(SurfaceSize) + x) * 4U;
-                result.Red += static_cast<float>(pixels[offset]) / 255.0F;
-                result.Green += static_cast<float>(pixels[offset + 1]) / 255.0F;
-                result.Blue += static_cast<float>(pixels[offset + 2]) / 255.0F;
-                result.Alpha += static_cast<float>(pixels[offset + 3]) / 255.0F;
-            }
-        }
-        constexpr float count = static_cast<float>(extent * extent);
-        result.Red /= count;
-        result.Green /= count;
-        result.Blue /= count;
-        result.Alpha /= count;
-        return result;
-    }
-
-    [[nodiscard]] float GreenDominance(const std::vector<std::uint8_t>& pixels, const bool left)
-    {
-        REQUIRE(pixels.size() == static_cast<std::size_t>(SurfaceSize * SurfaceSize * 4));
-        const auto minimumX = left ? 0U : SurfaceSize / 2U;
-        const auto maximumX = left ? SurfaceSize / 2U : SurfaceSize;
-        float result = 0.0F;
-        for (std::uint32_t y = 0; y < SurfaceSize; ++y)
-        {
-            for (std::uint32_t x = minimumX; x < maximumX; ++x)
-            {
-                const auto offset = (static_cast<std::size_t>(y) * static_cast<std::size_t>(SurfaceSize) + x) * 4U;
-                const auto red = static_cast<float>(pixels[offset]) / 255.0F;
-                const auto green = static_cast<float>(pixels[offset + 1]) / 255.0F;
-                const auto blue = static_cast<float>(pixels[offset + 2]) / 255.0F;
-                result += std::max(green - std::max(red, blue), 0.0F);
-            }
-        }
-        return result / (static_cast<float>(SurfaceSize) * static_cast<float>(SurfaceSize) / 2.0F);
-    }
-
     struct CaptureResults final
     {
         std::vector<std::vector<std::uint8_t>> Frames;
