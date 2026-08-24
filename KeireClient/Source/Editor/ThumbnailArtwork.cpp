@@ -248,7 +248,7 @@ namespace KeireEditor::Detail
                  {111, 126, 153});
         DrawLine(result, width, height, centers[1].first, centers[1].second, centers[2].first, centers[2].second,
                  {111, 126, 153});
-        for (const auto [x, y] : centers)
+        for (const auto& [x, y] : centers)
         {
             FillRectangle(result, width, height, x - 9, y - 7, x + 10, y + 8, {20, 26, 37});
             FillRectangle(result, width, height, x - 7, y - 5, x + 8, y + 6, accent);

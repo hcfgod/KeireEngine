@@ -96,7 +96,7 @@ set -euo pipefail
 current="$(tr -d '\r\n' < "$3/current")"
 [[ -n "$current" && -d "$3/snapshots/$current" ]]
 EOF
-chmod +x -- "$fixture/rclone" "$fixture/publisher"
+chmod +x "$fixture/rclone" "$fixture/publisher"
 export KEIRE_TEST_RCLONE_ROOT="$remote_storage"
 
 backup_script="$root/Services/KeireDistributionService/scripts/backup-distribution-rclone.sh"

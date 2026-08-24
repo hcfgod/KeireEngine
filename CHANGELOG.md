@@ -17,6 +17,14 @@ versions.
 
 ### Fixed
 
+- Aligned Hub templates, closed-project maintenance workflows, and packaged editor compatibility with project schema 4
+  while retaining rename and duplicate support for upgradeable schema-3 projects.
+- Staged Unix FFmpeg runtime link names alongside their versioned payloads so isolated asset workers can start without
+  relying on a system FFmpeg installation.
+- Corrected shared editor file-read diagnostics so non-input assets no longer report as input-action assets.
+- Made first-time macOS bootstrap interactive when Homebrew needs authorization, installed the checksum-pinned .NET 10
+  SDK plus the NASM, pkg-config, ripgrep, and PyYAML prerequisites required by dependency builds and validation, and added an
+  early compile-and-run gate for the production libc++ `std::stop_token` and `std::jthread` support required by Kéire.
 - Centered the shared editor icon-button glyphs across toolbars, panel controls, and viewport overlays. Asset Browser
   text, extensionless, C#, managed-assembly, data, rigging, animation, physics, and reusable-graph sources now use
   distinct semantic thumbnails instead of empty boxes or a generic error mark, and the Input Actions editor now has a

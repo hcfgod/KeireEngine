@@ -1,5 +1,7 @@
 #include <KeireHubTests/TestSupport.h>
 
+#include "Keire/Project/Project.h"
+#include "KeireHubRuntime/ProjectWorkflowManager.h"
 #include "KeireHubRuntime/TemplateManager.h"
 
 #include <doctest/doctest.h>
@@ -14,6 +16,8 @@ using namespace KeireHub;
 
 namespace
 {
+    static_assert(CurrentProjectSchemaVersion == Keire::CurrentProjectSchemaVersion);
+
     constexpr auto FixedId = "11111111-1111-4111-8111-111111111111";
     constexpr auto OtherId = "22222222-2222-4222-8222-222222222222";
     constexpr auto FixedTimestamp = "2026-08-06T12:34:56Z";
@@ -49,7 +53,7 @@ namespace
                 .Destination = destination,
                 .EditorVersion = Version("0.1.0"),
                 .EditorMinimumProjectSchema = 1,
-                .EditorMaximumProjectSchema = 3,
+                .EditorMaximumProjectSchema = CurrentProjectSchemaVersion,
                 .PlatformTarget = "desktop",
                 .HostPlatform = "windows",
                 .HostArchitecture = "x86_64"};
@@ -74,7 +78,7 @@ namespace
             "id":"test.template","version":"1.0.0","displayName":"Test Template",
             "description":"A deterministic test template.","category":"core","tags":[],
             "thumbnail":"thumbnail.svg","screenshots":[],"compatibleEditors":"^1.0.0",
-            "projectSchema":3,"platformTarget":"desktop","estimatedSizeBytes":65536,
+            "projectSchema":4,"platformTarget":"desktop","estimatedSizeBytes":65536,
             "payloadRoot":"Payload","payloadFiles":[{"path":")") +
                               std::string(payloadPath) + R"(","sizeBytes":)" + std::to_string(size) + R"(,"sha256":")" +
                               std::string(sha256) +
@@ -147,6 +151,8 @@ TEST_CASE("Template manager loads the three manifest-driven built-in templates")
           manager.Snapshot()->end());
     CHECK(std::ranges::find(*manager.Snapshot(), "keire.sandbox", &HubTemplateManifest::Id) !=
           manager.Snapshot()->end());
+    CHECK(std::ranges::all_of(*manager.Snapshot(), [](const HubTemplateManifest& manifest)
+                              { return manifest.ProjectSchema == CurrentProjectSchemaVersion; }));
 }
 
 TEST_CASE("Project creation is byte-reproducible with deterministic identity and time providers")
@@ -169,7 +175,7 @@ TEST_CASE("Project creation is byte-reproducible with deterministic identity and
     CHECK(descriptor.at("startupScene") == "10000000-0000-4000-8000-000000000001");
 }
 
-TEST_CASE("Created projects receive schema-three identity and template provenance")
+TEST_CASE("Created projects receive current-schema identity and template provenance")
 {
     KeireHubTests::TemporaryDirectory temporary;
     TemplateManager manager(BuiltInTemplates(), Services());
@@ -189,7 +195,7 @@ TEST_CASE("Created projects receive schema-three identity and template provenanc
     CHECK(result.Value().ProjectId == FixedId);
     const auto descriptor = nlohmann::json::parse(
         KeireHubTests::ReadText(request.Destination / "ProjectSettings" / "Project.keireproject"));
-    CHECK(descriptor.at("schemaVersion") == 4);
+    CHECK(descriptor.at("schemaVersion") == CurrentProjectSchemaVersion);
     CHECK(descriptor.at("defaultInputMap").is_null());
     CHECK(descriptor.at("id") == FixedId);
     CHECK(descriptor.at("name") == "Test Project");
@@ -198,6 +204,47 @@ TEST_CASE("Created projects receive schema-three identity and template provenanc
     CHECK(descriptor.at("lastSavedWithEngineVersion") == "0.1.0");
     CHECK(descriptor.at("template").at("id") == "keire.empty");
     CHECK(descriptor.at("template").at("version") == "1.0.0");
+}
+
+TEST_CASE("Created current-schema projects support immediate Hub rename and duplicate workflows")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    TemplateManager manager(BuiltInTemplates(), Services());
+    REQUIRE(manager.Load());
+    const auto created = manager.CreateProject(Request(temporary.Path() / "Created", "keire.empty"));
+    REQUIRE(created);
+
+    HubProjectCatalog catalog(temporary.Path() / "projects.json");
+    REQUIRE(catalog.Upsert({.Id = created.Value().ProjectId,
+                            .Root = created.Value().Root,
+                            .Name = "Test Project",
+                            .AddedUnixSeconds = 1,
+                            .LastOpenedUnixSeconds = 1}));
+    bool locked = false;
+    ProjectWorkflowManager workflows(
+        catalog,
+        {.GenerateProjectId = [] { return HubResult<std::string>::Success(std::string(OtherId)); },
+         .CurrentUtcTimestamp = [] { return HubResult<std::string>::Success(std::string(FixedTimestamp)); },
+         .CurrentUnixSeconds = [] { return 2ULL; },
+         .IsProjectLocked = [&locked](const std::filesystem::path&) { return HubResult<bool>::Success(locked); }});
+
+    REQUIRE(workflows.RenameDisplayName(created.Value().ProjectId, "Renamed Project"));
+    const auto duplicate = workflows.Duplicate({.SourceProjectId = created.Value().ProjectId,
+                                                .Destination = temporary.Path() / "Duplicate",
+                                                .DisplayName = "Duplicated Project"});
+    REQUIRE(duplicate);
+
+    const auto sourceDescriptor =
+        nlohmann::json::parse(KeireHubTests::ReadText(created.Value().Root / "ProjectSettings/Project.keireproject"));
+    const auto duplicateDescriptor =
+        nlohmann::json::parse(KeireHubTests::ReadText(duplicate.Value().Root / "ProjectSettings/Project.keireproject"));
+    CHECK(sourceDescriptor.at("schemaVersion") == CurrentProjectSchemaVersion);
+    CHECK(sourceDescriptor.at("name") == "Renamed Project");
+    CHECK(sourceDescriptor.at("defaultInputMap").is_null());
+    CHECK(duplicateDescriptor.at("schemaVersion") == CurrentProjectSchemaVersion);
+    CHECK(duplicateDescriptor.at("id") == OtherId);
+    CHECK(duplicateDescriptor.at("name") == "Duplicated Project");
+    CHECK(duplicateDescriptor.at("defaultInputMap").is_null());
 }
 
 TEST_CASE("Sandbox creation copies packaged clean content and never mutates its source")
@@ -268,12 +315,12 @@ TEST_CASE("Preflight rejects incompatible editor versions schemas platforms and 
     CHECK(version.Error().Code == HubErrorCode::TemplateIncompatible);
 
     request.EditorVersion = Version("0.1.0");
-    request.EditorMaximumProjectSchema = 2;
+    request.EditorMaximumProjectSchema = CurrentProjectSchemaVersion - 1;
     auto schema = manager.Preflight(request);
     REQUIRE_FALSE(schema);
     CHECK(schema.Error().Code == HubErrorCode::TemplateIncompatible);
 
-    request.EditorMaximumProjectSchema = 3;
+    request.EditorMaximumProjectSchema = CurrentProjectSchemaVersion;
     request.PlatformTarget = "mobile";
     auto platform = manager.Preflight(request);
     REQUIRE_FALSE(platform);

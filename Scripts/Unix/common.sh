@@ -16,12 +16,13 @@ workspace_lock_mtime() {
 }
 
 workspace_lock_owner_value() {
-    local lock="${1:?lock is required}" key="${2:?key is required}" line
-    [[ -f "$lock/owner" ]] || return 0
+    local lock="${1:?lock is required}" key="${2:?key is required}" line owner_contents
+    owner_contents="$(cat "$lock/owner" 2>/dev/null || true)"
     while IFS= read -r line || [[ -n "$line" ]]; do
         line="${line%$'\r'}"
         [[ "$line" == "$key="* ]] && { printf '%s\n' "${line#*=}"; return 0; }
-    done < "$lock/owner"
+    done <<< "$owner_contents"
+    return 0
 }
 
 workspace_lock_remove_stale() {
@@ -176,6 +177,131 @@ tool_version_from_temporary_directory() {
     rm -rf "$temporary_directory"
     printf '%s\n' "$output"
     return "$status"
+}
+
+probe_cxx20_thread_library() {
+    local compiler="${1:?C++ compiler is required}"
+    local temporary_directory source executable compiler_output runtime_output status
+    temporary_directory="$(mktemp -d)" || return 1
+    source="$temporary_directory/keire-cxx20-thread-probe.cpp"
+    executable="$temporary_directory/keire-cxx20-thread-probe"
+    compiler_output="$temporary_directory/compiler-output.txt"
+    runtime_output="$temporary_directory/runtime-output.txt"
+    printf '%s\n' \
+      '#include <atomic>' \
+      '#include <stop_token>' \
+      '#include <thread>' \
+      'int main()' \
+      '{' \
+      '    std::atomic<bool> observed = false;' \
+      '    std::jthread worker([&observed](std::stop_token token) { observed.store(token.stop_possible()); });' \
+      '    worker.request_stop();' \
+      '    worker.join();' \
+      '    return observed.load() ? 0 : 1;' \
+      '}' > "$source"
+
+    if "$compiler" -std=c++20 -pthread "$source" -o "$executable" >"$compiler_output" 2>&1; then
+        :
+    else
+        status=$?
+        printf '%s\n' \
+          'The selected macOS C++ toolchain cannot compile the C++20 library features required by Kéire: std::stop_token and std::jthread.' \
+          'Install a newer full Xcode or Command Line Tools release whose production libc++ provides both features, select it with xcode-select, then rerun bootstrap.' \
+          'After installing full Xcode, select it with: sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer' \
+          'Do not enable _LIBCPP_ENABLE_EXPERIMENTAL: Kéire requires the supported production libc++ ABI.' >&2
+        [[ ! -s "$compiler_output" ]] || { printf '%s\n' 'Compiler diagnostic:' >&2; cat "$compiler_output" >&2; }
+        rm -rf "$temporary_directory"
+        return "$status"
+    fi
+    if "$executable" >"$runtime_output" 2>&1; then
+        :
+    else
+        status=$?
+        printf '%s\n' \
+          'The selected macOS C++ toolchain compiled but could not run the Kéire C++20 std::stop_token/std::jthread probe.' \
+          'Install and select a native full Xcode or Command Line Tools release, then rerun bootstrap.' >&2
+        [[ ! -s "$runtime_output" ]] || { printf '%s\n' 'Probe diagnostic:' >&2; cat "$runtime_output" >&2; }
+        rm -rf "$temporary_directory"
+        return "$status"
+    fi
+    rm -rf "$temporary_directory"
+}
+
+run_homebrew_installer() {
+    local ci="${1:?CI mode is required}"
+    local installer="${2:?Homebrew installer path is required}"
+    [[ "$ci" == 0 || "$ci" == 1 ]] || {
+        printf 'Homebrew installer CI mode must be 0 or 1.\n' >&2
+        return 2
+    }
+    [[ -f "$installer" && ! -L "$installer" ]] || {
+        printf 'Homebrew installer is not a regular local file: %s.\n' "$installer" >&2
+        return 1
+    }
+    if [[ "$ci" == 1 ]]; then
+        NONINTERACTIVE=1 /bin/bash "$installer"
+        return
+    fi
+    [[ -t 0 ]] || {
+        printf '%s\n' \
+            'Homebrew is missing and local bootstrap cannot request authorization without an interactive terminal.' \
+            'Rerun from a terminal, or pass --ci only for an intentionally unattended environment.' >&2
+        return 1
+    }
+    (
+        unset NONINTERACTIVE
+        /bin/bash "$installer"
+    )
+}
+
+dotnet_sdk_listing_matches_installation() {
+    local listing="${1-}"
+    local version="${2:?SDK version is required}"
+    local install_root="${3:?SDK installation root is required}"
+    local expected_sdk line reported_version reported_sdk resolved_reported_sdk
+    [[ -d "$install_root" && ! -L "$install_root" && -d "$install_root/sdk" && ! -L "$install_root/sdk" ]] || return 1
+    expected_sdk="$(cd -P "$install_root/sdk" && pwd -P)" || return 1
+    while IFS= read -r line; do
+        [[ "$line" =~ ^([^[:space:]]+)[[:space:]]+\[([^][]+)\][[:space:]]*$ ]] || continue
+        reported_version="${BASH_REMATCH[1]}"
+        reported_sdk="${BASH_REMATCH[2]}"
+        [[ "$reported_version" == "$version" && -d "$reported_sdk" ]] || continue
+        resolved_reported_sdk="$(cd -P "$reported_sdk" && pwd -P)" || continue
+        [[ "$resolved_reported_sdk" == "$expected_sdk" ]] && return 0
+    done <<< "$listing"
+    return 1
+}
+
+pinned_dotnet_sdk_root() {
+    local executable="${1:?dotnet executable is required}"
+    local version="${2:?SDK version is required}"
+    local listing line reported_version reported_sdk install_root="" direct_executable direct_listing selected_version
+    [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+    listing="$(DOTNET_CLI_TELEMETRY_OPTOUT=1 "$executable" --list-sdks)" || return 1
+    while IFS= read -r line; do
+        [[ "$line" =~ ^([^[:space:]]+)[[:space:]]+\[([^][]+)\][[:space:]]*$ ]] || continue
+        reported_version="${BASH_REMATCH[1]}"
+        reported_sdk="${BASH_REMATCH[2]}"
+        [[ "$reported_version" == "$version" && -d "$reported_sdk" ]] || continue
+        install_root="$(cd -P "$reported_sdk/.." && pwd -P)" || continue
+        dotnet_sdk_listing_matches_installation "$listing" "$version" "$install_root" || {
+            install_root=""
+            continue
+        }
+        break
+    done <<< "$listing"
+    [[ -n "$install_root" ]] || return 1
+
+    direct_executable="$install_root/dotnet"
+    [[ -x "$direct_executable" && ! -L "$direct_executable" ]] || return 1
+    direct_listing="$(DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_ROOT="$install_root" \
+        "$direct_executable" --list-sdks)" || return 1
+    dotnet_sdk_listing_matches_installation "$direct_listing" "$version" "$install_root" || return 1
+    selected_version="$(DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_ROOT="$install_root" \
+        "$direct_executable" --version)" || return 1
+    selected_version="${selected_version//$'\r'/}"
+    [[ "$selected_version" == "$version" ]] || return 1
+    printf '%s\n' "$install_root"
 }
 
 dotnet_sdk_root() {
@@ -939,6 +1065,89 @@ version_at_least() {
     return 0
 }
 
+atomic_symlink_lock_token_pid() {
+    local token="${1-}"
+    local pid
+    case "$token" in
+        keire-owner:*) pid="${token#keire-owner:}"; pid="${pid%%:*}" ;;
+        *) return 1 ;;
+    esac
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+    printf '%s\n' "$pid"
+}
+
+atomic_symlink_lock_read_legacy_pid() {
+    local lock="${1:?lock path is required}"
+    # Keep the path as a file operand so a concurrent release remains a contained command failure.
+    # shellcheck disable=SC2002
+    cat "$lock/pid" 2>/dev/null | tr -dc '0-9' || true
+}
+
+atomic_symlink_lock_recover_stale() {
+    local lock="${1:?lock path is required}"
+    local observed_kind="" observed_owner="" observed_token="" owner="" quarantine=""
+    local moved_kind="" moved_owner="" moved_token=""
+    if [[ -L "$lock" ]]; then
+        observed_kind=symlink
+        observed_token="$(readlink "$lock" 2>/dev/null || true)"
+        owner="$(atomic_symlink_lock_token_pid "$observed_token" 2>/dev/null || true)"
+    elif [[ -d "$lock" ]]; then
+        observed_kind=legacy
+        observed_owner="$(atomic_symlink_lock_read_legacy_pid "$lock")"
+        owner="$observed_owner"
+    else
+        return 1
+    fi
+    [[ -z "$owner" ]] || ! kill -0 "$owner" 2>/dev/null || return 1
+
+    quarantine="$lock.stale.$$.$RANDOM"
+    mv "$lock" "$quarantine" 2>/dev/null || return 1
+    if [[ -L "$quarantine" ]]; then
+        moved_kind=symlink
+        moved_token="$(readlink "$quarantine" 2>/dev/null || true)"
+    elif [[ -d "$quarantine" ]]; then
+        moved_kind=legacy
+        moved_owner="$(atomic_symlink_lock_read_legacy_pid "$quarantine")"
+    else
+        moved_kind=unsafe
+    fi
+    if [[ "$moved_kind" != "$observed_kind" ||
+          ( "$moved_kind" == symlink && "$moved_token" != "$observed_token" ) ||
+          ( "$moved_kind" == legacy && "$moved_owner" != "$observed_owner" ) ]]; then
+        if [[ ! -e "$lock" && ! -L "$lock" ]]; then
+            mv "$quarantine" "$lock" 2>/dev/null || true
+        fi
+        return 1
+    fi
+    if [[ "$moved_kind" == symlink ]]; then
+        rm -f "$quarantine"
+    else
+        rm -f "$quarantine/pid"
+        rmdir "$quarantine" 2>/dev/null || return 1
+    fi
+}
+
+atomic_symlink_lock_acquire() {
+    local lock="${1:?lock path is required}"
+    local token="keire-owner:$$:$RANDOM:$RANDOM"
+    if [[ -e "$lock" || -L "$lock" ]]; then
+        atomic_symlink_lock_recover_stale "$lock" || return 1
+    fi
+    ln -s "$token" "$lock" 2>/dev/null || return 1
+    [[ -L "$lock" && "$(readlink "$lock" 2>/dev/null || true)" == "$token" ]] || return 1
+    printf '%s\n' "$token"
+}
+
+atomic_symlink_lock_release() {
+    local lock="${1:?lock path is required}"
+    local token="${2:?lock ownership token is required}"
+    local current
+    [[ -L "$lock" ]] || return 1
+    current="$(readlink "$lock" 2>/dev/null || true)"
+    [[ "$current" == "$token" ]] || return 1
+    rm -f "$lock"
+}
+
 extract_version() {
     awk '
         match($0, /[0-9]+([.][0-9]+)*/) && !found {
@@ -1116,4 +1325,110 @@ managed_host_staging_targets() {
         fi
         [[ "$target" == "$editor_dev_target" ]] || printf '%s\n' "$target"
     } | awk '!seen[$0]++'
+}
+
+validate_unix_asset_worker_ninja_commands() {
+    local root="${1:?repository root is required}"
+    local project_namespace="${2:?project namespace is required}"
+    local ninja_file="$root/${project_namespace}AssetWorker/${project_namespace}AssetWorker.ninja"
+    local line arguments source_argument destination_argument count=0
+    [[ -f "$ninja_file" ]] || {
+        printf 'Generated Asset Worker Ninja file is missing: %s\n' "$ninja_file" >&2
+        return 1
+    }
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ "$line" == *"copy-files-if-changed.sh "* ]] || continue
+        count=$((count + 1))
+        [[ "$line" == *" && touch "* ]] || {
+            printf 'Generated Asset Worker runtime-copy command is malformed: %s\n' "$line" >&2
+            return 1
+        }
+        arguments="${line#*copy-files-if-changed.sh }"
+        arguments="${arguments%% && touch *}"
+        source_argument="${arguments%% *}"
+        destination_argument="${arguments#* }"
+        [[ -n "$source_argument" && -n "$destination_argument" && "$destination_argument" != "$arguments" &&
+           "$source_argument" != *[[:space:]]* && "$destination_argument" != *[[:space:]]* &&
+           "$destination_argument" == */"${project_namespace}AssetWorker" ]] || {
+            printf 'Generated Asset Worker runtime-copy command must contain exactly two path arguments: %s\n' \
+                "$line" >&2
+            return 1
+        }
+    done < "$ninja_file"
+    [[ $count -gt 0 ]] || {
+        printf 'Generated Asset Worker Ninja file has no runtime-copy commands: %s\n' "$ninja_file" >&2
+        return 1
+    }
+}
+
+stage_unix_asset_worker_runtime() {
+    local root="${1:?repository root is required}" configuration="${2:?configuration is required}"
+    local platform="${3:?platform is required}" architecture="${4:?architecture is required}"
+    local project_namespace="${5:?project namespace is required}"
+    local target="${6:?build target is required}"
+    local dependency_configuration=Debug output_architecture source_directory destination_directory worker
+    local family candidate name pattern index
+    local runtime_names=(sentinel)
+    case "$target" in
+        "${project_namespace}AssetWorker"|"${project_namespace}AssetTool"|"${project_namespace}EditorTests"| \
+        "${project_namespace}EditorDev") ;;
+        *) return 0 ;;
+    esac
+    [[ "$configuration" == Release || "$configuration" == Dist ]] && dependency_configuration=Release
+    output_architecture="$(architecture_output_name "$architecture")"
+    source_directory="$root/Build/Dependencies/ffmpeg/$dependency_configuration/install/lib"
+    destination_directory="$root/Build/Bin/$configuration-$platform-$output_architecture/${project_namespace}AssetWorker"
+    worker="$destination_directory/${project_namespace}AssetWorker"
+    [[ -x "$worker" ]] || return 0
+    [[ -d "$source_directory" ]] || {
+        printf 'The pinned FFmpeg runtime directory is missing: %s\n' "$source_directory" >&2
+        return 1
+    }
+    case "$platform" in
+        linux) pattern=so ;;
+        macosx) pattern=dylib ;;
+        *) printf 'Unsupported Unix runtime platform: %s\n' "$platform" >&2; return 2 ;;
+    esac
+    for family in avformat avcodec swresample avutil; do
+        name=""
+        if [[ "$pattern" == so ]]; then
+            for candidate in "$source_directory/lib$family.so."*; do
+                [[ -e "$candidate" || -L "$candidate" ]] || continue
+                [[ "$(basename "$candidate")" =~ ^lib${family}\.so\.[0-9]+$ ]] || continue
+                name="$(basename "$candidate")"
+                break
+            done
+        else
+            for candidate in "$source_directory/lib$family."*.dylib; do
+                [[ -e "$candidate" || -L "$candidate" ]] || continue
+                [[ "$(basename "$candidate")" =~ ^lib${family}\.[0-9]+\.dylib$ ]] || continue
+                name="$(basename "$candidate")"
+                break
+            done
+        fi
+        [[ -n "$name" ]] || {
+            printf 'The pinned FFmpeg runtime is missing the %s SONAME link for %s.\n' "$family" "$platform" >&2
+            return 1
+        }
+        runtime_names+=("$name")
+    done
+    bash "$root/Scripts/Unix/copy-files-if-changed.sh" "$source_directory" "$destination_directory"
+    for candidate in "$destination_directory"/libavformat* "$destination_directory"/libavcodec* \
+      "$destination_directory"/libswresample* "$destination_directory"/libavutil*; do
+        [[ -e "$candidate" || -L "$candidate" ]] || continue
+        name="$(basename "$candidate")"
+        if [[ "$pattern" == so ]]; then
+            [[ "$name" =~ ^lib(avformat|avcodec|swresample|avutil)\.so(\.[0-9]+)*$ ]] || continue
+        else
+            [[ "$name" =~ ^lib(avformat|avcodec|swresample|avutil)(\.[0-9]+)*\.dylib$ ]] || continue
+        fi
+        [[ -e "$source_directory/$name" || -L "$source_directory/$name" ]] || rm -f "$candidate"
+    done
+    for ((index = 1; index < ${#runtime_names[@]}; ++index)); do
+        candidate="$destination_directory/${runtime_names[index]}"
+        [[ -f "$candidate" && ! -L "$candidate" ]] || {
+            printf 'The staged FFmpeg runtime is missing a regular SONAME file: %s\n' "$candidate" >&2
+            return 1
+        }
+    done
 }

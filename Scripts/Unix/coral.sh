@@ -16,6 +16,7 @@ force="${3:-0}"
 coral_url="$(config_value "$ROOT/Config/Dependencies.lock" CORAL_URL)"
 coral_commit="$(config_value "$ROOT/Config/Dependencies.lock" CORAL_COMMIT)"
 macos_deployment_target="$(config_value "$ROOT/Config/Dependencies.lock" MACOS_DEPLOYMENT_TARGET)"
+dotnet_sdk_version="$(config_value "$ROOT/Config/Dependencies.lock" DOTNET_SDK_VERSION)"
 patch_root="$ROOT/Patches/Coral"
 patches=()
 while IFS= read -r patch; do
@@ -73,23 +74,31 @@ else
   printf '==> Coral patch cache is current\n'
 fi
 
-command -v dotnet >/dev/null 2>&1 || {
-  printf 'Coral requires the .NET 10 SDK. A .NET 10 runtime alone cannot compile Coral.Managed.\n' >&2
+dotnet_path="$(command -v dotnet)" || {
+  printf 'Coral requires the pinned .NET SDK %s.\n' "$dotnet_sdk_version" >&2
   exit 1
 }
-dotnet_root="$(dotnet_sdk_root dotnet 10)" || exit 1
+dotnet_root="$(pinned_dotnet_sdk_root "$dotnet_path" "$dotnet_sdk_version")" || {
+  printf 'Coral requires the pinned .NET SDK %s from one canonical installation.\n' \
+    "$dotnet_sdk_version" >&2
+  exit 1
+}
+dotnet_executable="$dotnet_root/dotnet"
 
 if [[ "$build" == 1 ]]; then
   native_build="$patched/Build/$configuration"
   if [[ "$force" == 1 && -e "$native_build" ]]; then
     case "$native_build" in "$patched"/Build/*) rm -rf "$native_build" ;; *) exit 1 ;; esac
   fi
-  cmake_options=(-DCMAKE_BUILD_TYPE="$configuration" -DCORAL_TESTING=OFF -DCORAL_EXAMPLE=OFF)
+  cmake_options=(-DCMAKE_BUILD_TYPE="$configuration" -DCORAL_TESTING=OFF -DCORAL_EXAMPLE=OFF
+    "-DDOTNET_EXE=$dotnet_executable")
   if [[ "$(uname -s)" == Darwin ]]; then
     cmake_options+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=$macos_deployment_target")
   fi
-  cmake -S "$patched/cmake" -B "$native_build" -G Ninja "${cmake_options[@]}"
-  cmake --build "$native_build" --target Coral.Native --parallel "$(build_parallel_jobs)"
+  DOTNET_ROOT="$dotnet_root" PATH="$dotnet_root:$PATH" \
+    cmake -S "$patched/cmake" -B "$native_build" -G Ninja "${cmake_options[@]}"
+  DOTNET_ROOT="$dotnet_root" PATH="$dotnet_root:$PATH" \
+    cmake --build "$native_build" --target Coral.Native --parallel "$(build_parallel_jobs)"
   [[ -f "$native_build/Coral.Managed.dll" ]] || {
     printf 'Patched Coral build did not produce Coral.Managed.dll.\n' >&2
     exit 1

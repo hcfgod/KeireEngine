@@ -19,6 +19,7 @@ grep -Fq 'validate_macos_macho_minimum "$stage" "$macos_deployment_target"' \
 grep -Fq 'xvfb-run -a "$stage/bin/$runtime"' "$ROOT/Scripts/Unix/package.sh"
 grep -Fq '<key>LSMinimumSystemVersion</key>' "$ROOT/Scripts/Unix/package-editor.sh"
 grep -q 'write-package-manifest.py' "$ROOT/Scripts/Unix/package-editor.sh"
+grep -Fq -- '--project-schema-maximum 4' "$ROOT/Scripts/Unix/package-editor.sh"
 grep -Fq 'exec \"\$script_dir/bin/$CLIENT_TARGET\"' "$ROOT/Scripts/Unix/package-editor.sh"
 if grep -Fq -- '--entrypoint "hub=' "$ROOT/Scripts/Unix/package-editor.sh"; then
   printf 'The standalone Unix editor package must not publish a Hub entrypoint.\n' >&2
@@ -73,7 +74,7 @@ assert manifest["schemaVersion"] == 2
 assert manifest["entrypoints"]["editor"] == "bin/Client"
 assert manifest["entrypoints"]["worker"] == "bin/CoreHubWorker"
 assert "hub" not in manifest["entrypoints"]
-assert manifest["projectSchema"]["maximum"] == 3
+assert manifest["projectSchema"]["maximum"] == 4
 assert len(manifest["packagedTemplates"]) == 3
 assert manifest["bundledToolchains"][0]["id"] == "dotnet-sdk"
 assert manifest["files"]

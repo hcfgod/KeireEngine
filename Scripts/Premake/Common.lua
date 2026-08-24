@@ -280,6 +280,12 @@ function ApplyCommonProjectSettings(repositoryRoot)
     filter { "toolset:gcc or clang" }
         buildoptions { "-Wpedantic", "-Wconversion", "-Wshadow" }
 
+    -- Premake's Ninja backend does not translate systemversion into Clang's macOS deployment-target option. Keep
+    -- first-party objects and final links aligned with the dependency lock instead of inheriting the host SDK default.
+    filter { "system:macosx", "toolset:gcc or clang" }
+        buildoptions { "-mmacosx-version-min=" .. DependencyManifest.MacOSDeploymentTarget }
+        linkoptions { "-mmacosx-version-min=" .. DependencyManifest.MacOSDeploymentTarget }
+
     -- Partial C++20 aggregate initialization intentionally value-initializes fields that retain their defaults.
     filter { "toolset:gcc or clang" }
         buildoptions { "-Wno-missing-field-initializers" }

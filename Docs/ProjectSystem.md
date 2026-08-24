@@ -20,7 +20,7 @@ MyGame/
   .gitignore
 ```
 
-The current descriptor uses schema version 3. It stores a stable project UUID, display name, creation timestamp,
+The current descriptor uses schema version 4. It stores a stable project UUID, display name, creation timestamp,
 creating/last-saved/minimum engine versions, optional template provenance, startup scene and default input asset IDs,
 and a sorted source-module requirement catalog. Asset and scene references use stable IDs, so files may move inside
 `Assets/` without breaking project settings. Schemas 1 and 2 remain inspectable as upgrade candidates; the Hub or
@@ -33,10 +33,10 @@ have `BuildScenes.keiresettings`. Player builds use the ordered build-scene file
 and the first enabled scene is the runtime startup scene. The last successfully opened Editor scene is a per-user,
 ignored record at `Library/UserSettings/Workspace/EditorSession.state`; it never changes shared project settings.
 
-Project upgrades are explicit dry-run plans followed by a journaled transaction. The built-in v1 → v2 and v2 → v3
-steps are composed in order, snapshot every affected file, validate staged metadata before publication, retain a
-recoverable active transaction after interruption, and keep timestamped backups. This allows older projects to remain
-discoverable and upgradeable without silently rewriting them during inspection.
+Project upgrades are explicit dry-run plans followed by a journaled transaction. The built-in v1 → v2, v2 → v3,
+and v3 → v4 steps are composed in order, snapshot every affected file, validate staged metadata before publication,
+retain a recoverable active transaction after interruption, and keep timestamped backups. This allows older projects to
+remain discoverable and upgradeable without silently rewriting them during inspection.
 
 ## Creation And Opening
 

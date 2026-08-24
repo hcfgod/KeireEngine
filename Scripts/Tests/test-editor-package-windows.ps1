@@ -30,6 +30,9 @@ foreach ($contract in @("-Configuration Dist", "-StageOnly", "Build\Dependencies
         "editor-package.json", '$Project.CLIENT_TARGET', '(Join-Path $stage "third-party")')) {
     if (-not $packager.Contains($contract)) { throw "The Windows editor packager is missing '$contract'." }
 }
+if (-not $packager.Contains('"--project-schema-maximum", "4"')) {
+    throw "The Windows editor package must advertise project schema 4 support."
+}
 if ($packager.Contains('(Join-Path $stage "third-party\licenses") | Out-Null')) {
     throw "The Windows editor packager must not pre-create the copied license directory."
 }
@@ -46,8 +49,8 @@ try {
         New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
         New-Item -ItemType File -Force $file | Out-Null
     }
-    foreach ($fileName in @("avcodec-62.dll", "avformat-62.dll", "avutil-60.dll", "swresample-6.dll")) {
-        New-Item -ItemType File -Force (Join-Path $stage "bin\$fileName") | Out-Null
+    foreach ($runtime in (Get-WindowsFfmpegRuntimeContract).Files) {
+        New-Item -ItemType File -Force (Join-Path $stage "bin\$($runtime.FileName)") | Out-Null
     }
     Write-TestPeExecutable (Join-Path $stage "bin\Client.exe") 2
     [IO.File]::WriteAllText((Join-Path $stage "Launch-KeireEditor.cmd"),
@@ -78,7 +81,7 @@ try {
     $entrypointNames = @($manifest.entrypoints.PSObject.Properties.Name)
     if ($manifest.schemaVersion -ne 2 -or $manifest.entrypoints.editor -ne "bin/Client.exe" -or
         $entrypointNames -contains "hub" -or $entrypointNames -contains "worker" -or
-        $manifest.projectSchema.maximum -ne 3 -or $manifest.packagedTemplates.Count -ne 0 -or
+        $manifest.projectSchema.maximum -ne 4 -or $manifest.packagedTemplates.Count -ne 0 -or
         $manifest.bundledToolchains[0].id -ne "dotnet-sdk" -or $manifest.files.Count -lt 1 -or
         $manifest.installedSizeBytes -le 0 -or $manifest.manifestFingerprint -notmatch '^[0-9a-f]{64}$' -or
         $manifest.launcher -ne "Launch-KeireEditor.cmd" -or $manifest.bundledDotnetSdk -ne "10.0.100" -or
@@ -97,6 +100,11 @@ try {
     }
 
     Assert-WindowsEditorPackageStage $stage Client Hub Core Core
+    $unexpectedFfmpegRuntime = Join-Path $stage "bin\avfilter-12.dll"
+    New-Item -ItemType File -Force $unexpectedFfmpegRuntime | Out-Null
+    Assert-Throws { Assert-WindowsEditorPackageStage $stage Client Hub Core Core } `
+        "Editor package unexpected FFmpeg component rejection"
+    Remove-Item -LiteralPath $unexpectedFfmpegRuntime -Force
     [IO.File]::WriteAllText((Join-Path $stage "Launch-KeireEditor.cmd"),
         "@echo off`r`nstart `"`" `"%~dp0bin\Hub.exe`"`r`n", [Text.ASCIIEncoding]::new())
     Assert-Throws { Assert-WindowsEditorPackageStage $stage Client Hub Core Core } `

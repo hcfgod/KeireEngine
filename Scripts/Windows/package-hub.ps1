@@ -183,7 +183,7 @@ $manifestArguments = @(
     "--platform", "Windows", "--architecture", $outputArchitecture,
     "--configuration", "Dist", "--launcher", "Launch-KeireHub.cmd",
     "--module-definition", "Config/SourceModules.premake.lua", "--project-schema-minimum", "1",
-    "--project-schema-maximum", "3", "--entrypoint", "hub=bin/$($Project.HUB_TARGET).exe",
+    "--project-schema-maximum", "4", "--entrypoint", "hub=bin/$($Project.HUB_TARGET).exe",
     "--entrypoint", "worker=bin/$hubWorkerTarget.exe",
     "--template-catalog", "content/Templates/catalog.json", "--release-notes", "CHANGELOG.md"
 )

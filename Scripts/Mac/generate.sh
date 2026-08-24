@@ -2,6 +2,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/Scripts/Unix/common.sh"
+export PATH="$ROOT/Tools/Mac:$PATH"
 GENERATOR=xcode4; CONFIGURATION=Debug; ARCHITECTURE="$(native_architecture)"; TOOLSET=default; COMPILER_CACHE=auto; TARGET=KeireClient; CI=0; UPDATE=0; FORCE=0; INSTALL_OPTIONAL=0
 parse_build_arguments "$@"
 load_project_config "$ROOT"
@@ -11,6 +12,7 @@ validate_unix_combination Mac "$GENERATOR" "$TOOLSET"
 
 bootstrap=(--generator "$GENERATOR" --architecture "$ARCHITECTURE" --toolset "$TOOLSET")
 [[ $UPDATE -eq 1 ]] && bootstrap+=(--update)
+[[ $CI -eq 1 ]] && bootstrap+=(--ci)
 bash "$ROOT/Scripts/Mac/bootstrap.sh" "${bootstrap[@]}"
 # Forced project generation must not invalidate native/codec caches. Use a forced bootstrap only when deliberately
 # replacing pinned third-party outputs.
@@ -31,6 +33,7 @@ fi
 if [[ "$GENERATOR" == ninja || "$GENERATOR" == compilecommands ]]; then
     python3 "$ROOT/Scripts/patch-ninja-depfiles.py" "$ROOT"
     python3 "$ROOT/Scripts/patch-ninja-compiler-cache.py" "$ROOT" --cache "$COMPILER_CACHE"
+    validate_unix_asset_worker_ninja_commands "$ROOT" "$PROJECT_NAMESPACE"
 fi
 if [[ "$GENERATOR" == compilecommands ]]; then
     ninja -C "$ROOT" -f build.ninja -t compdb cxx_clang > "$ROOT/Build/Generated/compile_commands.all.json"

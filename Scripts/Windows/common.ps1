@@ -1,5 +1,12 @@
 $ErrorActionPreference = "Stop"
 
+function Get-WindowsFfmpegRuntimeContract {
+    if (-not (Get-Command Get-KeireFfmpegRuntimeContract -CommandType Function -ErrorAction SilentlyContinue)) {
+        . (Join-Path $PSScriptRoot "ffmpeg-runtime-contract.ps1")
+    }
+    return Get-KeireFfmpegRuntimeContract
+}
+
 function Get-KeireWorkspaceLockSetting {
     param([string]$Name, [int]$Default, [int]$Minimum)
 
@@ -508,7 +515,39 @@ function Get-WindowsRequiredPackagePaths {
         "examples\source-module\Source\ClientApplication.cpp", "examples\source-module\Source\GameplayModule.cpp", "examples\source-module\Include\GameplayModule.h", "examples\source-module\CMakeLists.txt", "examples\source-module\README.md",
         "Config\SourceModules.premake.lua", "Docs\PlayerBuilds.md", "Docs\Diagnostics\KEIRE-AUDIO-0001.md", "Docs\Diagnostics\KEIRE-REPLAY-0001.md", "Docs\Diagnostics\KEIRE-REPLAY-0002.md",
         "README.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json"
+    ) + @((Get-WindowsFfmpegRuntimeContract).Files | ForEach-Object { "bin\$($_.FileName)" })
+}
+
+function Assert-WindowsFfmpegRuntimeClosure {
+    param(
+        [Parameter(Mandatory = $true)][string]$Directory,
+        [Parameter(Mandatory = $true)][string]$Context
     )
+
+    if (-not (Test-Path -LiteralPath $Directory -PathType Container)) {
+        throw "$Context directory is missing: $Directory"
+    }
+    $contract = Get-WindowsFfmpegRuntimeContract
+    $expectedNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($runtime in $contract.Files) {
+        [void]$expectedNames.Add($runtime.FileName)
+        if (-not (Test-Path -LiteralPath (Join-Path $Directory $runtime.FileName) -PathType Leaf)) {
+            throw "$Context is missing the pinned FFmpeg runtime '$($runtime.FileName)'."
+        }
+    }
+    $seenPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($pattern in $contract.NamespacePatterns) {
+        foreach ($candidate in @(Get-ChildItem -LiteralPath $Directory -Filter $pattern -Force -ErrorAction Stop)) {
+            if (-not $seenPaths.Add($candidate.FullName)) {
+                continue
+            }
+            if ($candidate.PSIsContainer -or
+                (($candidate.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) -or
+                -not $expectedNames.Contains($candidate.Name)) {
+                throw "$Context contains an unsafe or unexpected FFmpeg runtime component: $($candidate.Name)"
+            }
+        }
+    }
 }
 
 function Get-WindowsExecutableSubsystem {
@@ -577,6 +616,7 @@ function Assert-WindowsPackageStage {
     foreach ($path in $required) {
         if (-not (Test-Path (Join-Path $Stage $path) -PathType Leaf)) { throw "Package is missing required content: $path" }
     }
+    Assert-WindowsFfmpegRuntimeClosure -Directory (Join-Path $Stage "bin") -Context "Package"
     if (Test-Path (Join-Path $Stage "include\KeireInternal")) {
         throw "Package contains private KeireInternal headers."
     }
@@ -647,6 +687,7 @@ function Assert-WindowsEditorPackageStage {
             throw "Editor package is missing required content: $path"
         }
     }
+    Assert-WindowsFfmpegRuntimeClosure -Directory (Join-Path $Stage "bin") -Context "Editor package"
     $editorExecutable = Join-Path $Stage "bin\$ClientTarget.exe"
     if ((Get-WindowsExecutableSubsystem $editorExecutable) -ne 2) {
         throw "Editor package executable must use the Windows GUI subsystem: bin\$ClientTarget.exe"
@@ -687,12 +728,6 @@ function Assert-WindowsEditorPackageStage {
         Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
     if (-not $dotnetSdk -or $manifest.bundledDotnetSdk -ne $dotnetSdk.Name) {
         throw "Editor package does not contain its declared .NET 10 SDK."
-    }
-    foreach ($pattern in @("avcodec-*.dll", "avformat-*.dll", "avutil-*.dll", "swresample-*.dll")) {
-        if (-not (Get-ChildItem -LiteralPath (Join-Path $Stage "bin") -Filter $pattern -File |
-            Select-Object -First 1)) {
-            throw "Editor package is missing an FFmpeg runtime matching '$pattern'."
-        }
     }
     foreach ($developmentDirectory in @("include", "lib", "examples")) {
         if (Test-Path -LiteralPath (Join-Path $Stage $developmentDirectory)) {

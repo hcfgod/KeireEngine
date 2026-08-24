@@ -243,6 +243,57 @@ Assert-True ($windowsCommon.Contains('Get-ChildItem -LiteralPath (Join-Path $Roo
              $windowsCommon.Contains('-Filter "*.lua"')) "Premake policy content project regeneration"
 $bootstrapScript = Get-Content (Join-Path $Windows "bootstrap.ps1") -Raw
 Assert-True ($bootstrapScript.Contains('GetTempPath') -and $bootstrapScript.Contains('$PremakeExe --version')) "Unicode-safe Premake version validation"
+$macBootstrapScript = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Mac\bootstrap.sh") -Raw
+$macGenerateScript = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Mac\generate.sh") -Raw
+$unixCommonScript = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Unix\common.sh") -Raw
+Assert-True ($unixCommonScript.Contains('stage_unix_asset_worker_runtime()') -and
+             $unixCommonScript.Contains('copy-files-if-changed.sh" "$source_directory" "$destination_directory"')) `
+    "Unix builds restore the isolated asset worker FFmpeg runtime closure"
+Assert-True ($macBootstrapScript.Contains('run_homebrew_installer "$CI" "$script"') -and
+             -not $macBootstrapScript.Contains('NONINTERACTIVE=1 /bin/bash "$script"') -and
+             $macBootstrapScript.Contains('brew_install pkg-config pkgconf') -and
+             $macBootstrapScript.Contains('check_version pkg-config "$(pkg-config --version)" 0.29.2') -and
+             $macBootstrapScript.Contains('brew_install rg ripgrep') -and
+             $macBootstrapScript.Contains('brew_install python3 python') -and
+             $macBootstrapScript.Contains('Refusing to use a symbolic PyYAML installation') -and
+             $macBootstrapScript.Contains('install_dotnet_sdk()') -and
+             $macBootstrapScript.Contains('install_pyyaml()') -and
+             $macBootstrapScript.Contains('PYYAML_SOURCE_SHA256') -and
+             $macBootstrapScript.Contains('python_packages_link="$ROOT/Tools/Mac/python-packages"') -and
+             $macBootstrapScript.Contains('DOTNET_MACOS_X86_64_SHA512') -and
+             $macBootstrapScript.Contains('DOTNET_MACOS_ARM64_SHA512') -and
+             $macBootstrapScript.Contains('shasum -a 512 "$archive"') -and
+             ([regex]::Matches(
+                 $macBootstrapScript,
+                 [regex]::Escape('dotnet_sdk_listing_matches_installation "$listing" "$DOTNET_SDK_VERSION"')).Count -eq 2) -and
+             $macBootstrapScript.Contains('[[ ! -L "$cache_root" ]]') -and
+             ([regex]::Matches(
+                 $macBootstrapScript,
+                 [regex]::Escape('[[ ! -e "$dotnet_link" || -L "$dotnet_link" ]]')).Count -eq 2) -and
+             $macBootstrapScript.Contains('ln -sfn "$install_root/dotnet" "$dotnet_link"') -and
+             $macBootstrapScript.Contains('brew_install nasm nasm') -and
+             $macBootstrapScript.Contains('check_version NASM "$(nasm -v | extract_version)" 2.14') -and
+             $unixCommonScript.Contains('run_homebrew_installer()') -and
+             $unixCommonScript.Contains('dotnet_sdk_listing_matches_installation()') -and
+             $unixCommonScript.Contains('resolved_reported_sdk="$(cd -P "$reported_sdk" && pwd -P)"') -and
+             $unixCommonScript.Contains('[[ -t 0 ]]') -and
+             $unixCommonScript.Contains('NONINTERACTIVE=1 /bin/bash "$installer"')) `
+    "macOS bootstrap handles authorization and provides pinned SDK, Python, pkg-config, and NASM inputs"
+$linuxBootstrapScript = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Linux\bootstrap.sh") -Raw
+Assert-True $linuxBootstrapScript.Contains('ensure_command rg ripgrep') `
+    "Linux bootstrap provides ripgrep for repository identity validation"
+Assert-True $macGenerateScript.Contains('[[ $CI -eq 1 ]] && bootstrap+=(--ci)') `
+    "macOS generation forwards CI mode to nested bootstrap"
+Assert-True ($macBootstrapScript.Contains('export PATH="$ROOT/Tools/Mac:$PATH"') -and
+             $macGenerateScript.Contains('export PATH="$ROOT/Tools/Mac:$PATH"')) `
+    "macOS bootstrap and generation expose the pinned .NET SDK launcher"
+Assert-True ($macBootstrapScript.Contains('probe_cxx20_thread_library clang++') -and
+             $unixCommonScript.Contains('probe_cxx20_thread_library()') -and
+             $unixCommonScript.Contains('"$compiler" -std=c++20 -pthread') -and
+             $unixCommonScript.Contains('std::stop_token and std::jthread') -and
+             $unixCommonScript.Contains('sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer') -and
+             $unixCommonScript.Contains('Do not enable _LIBCPP_ENABLE_EXPERIMENTAL')) `
+    "macOS bootstrap rejects standard libraries without production C++20 stoppable threads"
 $dependencyScript = Get-Content (Join-Path $Windows "dependencies.ps1") -Raw
 Assert-True ($dependencyScript.Contains('$Toolset -eq "msc"') -and
              $dependencyScript.Contains('AssimpZlibDebugLibrary = "$debugInstall/lib/$zlibDebugName"') -and
@@ -461,6 +512,15 @@ Assert-True ($dependencyScript.Contains('$Lock.LIBSODIUM_COMMIT') -and
              $dependencyScript.Contains('libsodium.dll')) "Pinned private catalog verifier bootstrap"
 $coralRoot = Join-Path (Get-RepositoryRoot) "Patches\Coral"
 $coralScript = Get-Content (Join-Path $Windows "coral.ps1") -Raw
+$unixCoralScript = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Unix\coral.sh") -Raw
+$unixCommonScript = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Unix\common.sh") -Raw
+Assert-True ($unixCoralScript.Contains('pinned_dotnet_sdk_root "$dotnet_path" "$dotnet_sdk_version"') -and
+             $unixCoralScript.Contains('"-DDOTNET_EXE=$dotnet_executable"') -and
+             ([regex]::Matches(
+                 $unixCoralScript,
+                 [regex]::Escape('DOTNET_ROOT="$dotnet_root" PATH="$dotnet_root:$PATH"')).Count -eq 2) -and
+             $unixCommonScript.Contains('selected_version="$(DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_ROOT="$install_root"')) `
+    "Unix Coral overrides stale CMake .NET discovery with the exact pinned SDK"
 Assert-True ($coralScript.Contains('git -C $TemporarySource config core.autocrlf false')) `
     "Coral source cache uses deterministic LF checkouts"
 Assert-True ($coralScript.Contains('Get-Command dotnet -CommandType Application') -and
@@ -512,15 +572,19 @@ $assetWorkerPremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireAssetWor
 $ffmpegTextureBackend = Get-Content `
     (Join-Path (Get-RepositoryRoot) "KeireAssetWorker\Source\FfmpegTextureImportBackend.cpp") -Raw
 Assert-True ($corePremake.Contains('touch-ninja-stamp.ps1') -and
-             $assetWorkerPremake.Contains('touch-ninja-stamp.ps1') -and
+             -not $assetWorkerPremake.Contains('CopyWindowsRuntime') -and
+             -not $assetWorkerPremake.Contains('copy-files-if-changed.ps1') -and
+             -not $assetWorkerPremake.Contains('touch-ninja-stamp.ps1') -and
              (Test-Path (Join-Path (Get-RepositoryRoot) 'Scripts\Windows\touch-ninja-stamp.ps1'))) `
-    "Ninja prebuild and prelink rules publish their declared Windows outputs"
+    "Ninja prebuild rules publish declared outputs without wildcard Windows FFmpeg staging"
 $managedPremake = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Premake\Managed.lua") -Raw
 $unixFfmpegBuild = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Unix\ffmpeg.sh") -Raw
 $canonicalFfmpegArchive = 'git -C "$VENDOR_SOURCE" archive --format=tar "$COMMIT"'
 Assert-True $unixFfmpegBuild.Contains($canonicalFfmpegArchive) `
     "Unix FFmpeg builds use canonical Git bytes instead of Windows-translated shell files"
 $windowsFfmpegBuild = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Windows\ffmpeg.ps1") -Raw
+$windowsFfmpegContractBuild = Get-Content `
+    (Join-Path (Get-RepositoryRoot) "Scripts\Windows\ffmpeg-runtime-contract.ps1") -Raw
 Assert-True $windowsFfmpegBuild.Contains('git -c core.autocrlf=false -C $VendorSource archive --format=tar') `
     "Windows FFmpeg builds disable caller line-ending conversion for canonical source archives"
 Assert-True ($windowsFfmpegBuild.Contains('f101fce22d64db10f500242e23e43a251fe14414') -and
@@ -529,11 +593,13 @@ Assert-True ($windowsFfmpegBuild.Contains('f101fce22d64db10f500242e23e43a251fe14
 Assert-True ($windowsFfmpegBuild.Contains('$FfbuildDirectory = Join-Path $CacheOutput "ffbuild"') -and
              $windowsFfmpegBuild.Contains('-Path $FfbuildDirectory, $ZlibIncludeDirectory, $ZlibLinkDirectory')) `
     "Windows FFmpeg builds create the out-of-tree configure log directory before configuration"
-Assert-True ($windowsFfmpegBuild.Contains('@("avformat", "avformat-63.dll")') -and
-             $windowsFfmpegBuild.Contains('@("avcodec", "avcodec-63.dll")') -and
-             $windowsFfmpegBuild.Contains('@("swresample", "swresample-7.dll")') -and
-             $windowsFfmpegBuild.Contains('@("avutil", "avutil-61.dll")') -and
-             $windowsFfmpegBuild.Contains('"bin\$($component[0]).lib"') -and
+Assert-True ($windowsFfmpegBuild.Contains('foreach ($component in $RuntimeContract.Files)') -and
+             $windowsFfmpegBuild.Contains('"bin\$($component.Component).lib"') -and
+             $windowsFfmpegBuild.Contains('"bin\$($component.FileName)"') -and
+             $windowsFfmpegContractBuild.Contains('FileName = "avformat-63.dll"') -and
+             $windowsFfmpegContractBuild.Contains('FileName = "avcodec-63.dll"') -and
+             $windowsFfmpegContractBuild.Contains('FileName = "swresample-7.dll"') -and
+             $windowsFfmpegContractBuild.Contains('FileName = "avutil-61.dll"') -and
              -not $windowsFfmpegBuild.Contains('lib\avformat.lib')) `
     "Windows FFmpeg cache validation requires every installed runtime and import library"
 Assert-True ($windowsFfmpegBuild.Contains('$Toolset -eq "gcc"') -and
@@ -582,6 +648,29 @@ $windowsBuild = Get-Content (Join-Path $Windows "build.ps1") -Raw
 $windowsManagedBuild = Get-Content (Join-Path $Windows "build-managed.ps1") -Raw
 $windowsManagedHostStage = Get-Content (Join-Path $Windows "stage-managed-host.ps1") -Raw
 $windowsRun = Get-Content (Join-Path $Windows "run.ps1") -Raw
+$windowsFfmpeg = Get-Content (Join-Path $Windows "ffmpeg.ps1") -Raw
+$windowsFfmpegContract = Get-Content (Join-Path $Windows "ffmpeg-runtime-contract.ps1") -Raw
+$windowsFfmpegStage = Get-Content (Join-Path $Windows "stage-ffmpeg-runtime.ps1") -Raw
+$windowsPackage = Get-Content (Join-Path $Windows "package.ps1") -Raw
+Assert-True ($windowsBuild.Contains('$assetWorkerConsumers') -and
+             $windowsBuild.Contains('"$($Project.PROJECT_NAMESPACE)EditorTests"') -and
+             $windowsBuild.Contains('stage-ffmpeg-runtime.ps1') -and
+             $windowsFfmpeg.Contains('Get-KeireFfmpegRuntimeContract') -and
+             $windowsFfmpegContract.Contains('FileName = "avcodec-63.dll"') -and
+             $windowsFfmpegContract.Contains('FileName = "avformat-63.dll"') -and
+             $windowsFfmpegContract.Contains('FileName = "avutil-61.dll"') -and
+             $windowsFfmpegContract.Contains('FileName = "swresample-7.dll"') -and
+             $windowsFfmpegContract.Contains('"avfilter-*.dll"') -and
+             $windowsFfmpegContract.Contains('"swscale-*.dll"') -and
+             $windowsFfmpegStage.Contains('Assert-KeireContainedWindowsPath') -and
+             $windowsFfmpegStage.Contains('Assert-KeireWindowsPeArchitecture') -and
+             $windowsFfmpegStage.Contains('Remove-Item -LiteralPath $candidate -Force') -and
+             $windowsPackage.Contains('foreach ($runtime in (Get-WindowsFfmpegRuntimeContract).Files)') -and
+             -not $windowsPackage.Contains('-Filter "av*.dll"') -and
+             -not $windowsPackage.Contains('-Filter "swresample-*.dll"') -and
+             -not $windowsBuild.Contains('-DestinationDirectory $assetWorkerDirectory -Filter "*.dll"')) `
+    "all generators restore the exact pinned asset-worker FFmpeg runtime contract"
+& (Join-Path $PSScriptRoot "test-windows-ffmpeg-runtime.ps1")
 Assert-True ($windowsManagedHostStage.Contains('function Copy-FileIfChanged') -and
              $windowsManagedHostStage.Contains('function Copy-TreeIfChanged') -and
              -not $windowsManagedHostStage.Contains('Copy-Item -Path (Join-Path $coreRuntime.FullName "*")')) `
@@ -953,6 +1042,11 @@ try {
     New-Item -ItemType Directory -Force (Split-Path $publicBuildHeader) | Out-Null
     New-Item -ItemType File -Force $publicBuildHeader | Out-Null
     Assert-WindowsPackageStage $packageStage Client Hub Core Core
+    $unexpectedPackageRuntime = Join-Path $packageStage "bin\avdevice-63.dll"
+    New-Item -ItemType File -Force $unexpectedPackageRuntime | Out-Null
+    Assert-Throws { Assert-WindowsPackageStage $packageStage Client Hub Core Core } `
+        "Unexpected FFmpeg SDK package component validation"
+    Remove-Item -LiteralPath $unexpectedPackageRuntime -Force
     Assert-WindowsPackageGeneratedDataFree $packageStage
     foreach ($generatedPath in @(
         "samples\KeireSandbox\Build\generated.vcxproj",

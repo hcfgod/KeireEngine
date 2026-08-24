@@ -192,7 +192,7 @@ manifest_arguments=(
   --package-prefix "$ARTIFACT_PREFIX" --project "$PROJECT_IDENTIFIER" --version "$PROJECT_VERSION"
   --channel Stable --commit "$commit" --dirty "$dirty" --development-artifact "$development_artifact"
   --platform "$platform_name" --architecture "$output_arch" --configuration Dist --launcher launch-hub.sh
-  --module-definition Config/SourceModules.premake.lua --project-schema-minimum 1 --project-schema-maximum 3
+  --module-definition Config/SourceModules.premake.lua --project-schema-minimum 1 --project-schema-maximum 4
   --entrypoint "hub=bin/$HUB_TARGET" --entrypoint "worker=bin/$hub_worker"
   --template-catalog content/Templates/catalog.json --release-notes CHANGELOG.md
 )

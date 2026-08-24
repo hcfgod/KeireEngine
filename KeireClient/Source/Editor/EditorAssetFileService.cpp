@@ -28,15 +28,21 @@ namespace KeireEditor
             }
         }
 
-        [[nodiscard]] std::vector<std::byte> ReadBytes(const std::filesystem::path& path)
+        [[nodiscard]] std::vector<std::byte> ReadBytes(const std::filesystem::path& path,
+                                                       const std::string_view assetKind)
         {
             std::ifstream input(path, std::ios::binary);
             if (!input)
-                throw std::runtime_error("Cannot open input action asset: " + path.string());
+                throw std::runtime_error("Cannot open " + std::string(assetKind) + ": " + path.string());
             const std::vector<char> characters{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
             std::vector<std::byte> bytes(characters.size());
             std::ranges::transform(characters, bytes.begin(), [](const char value) { return std::byte(value); });
             return bytes;
+        }
+
+        std::vector<std::byte> ReadSceneBytes(const std::filesystem::path& path)
+        {
+            return ReadBytes(path, "scene asset");
         }
 
         [[nodiscard]] std::string FormatAssetDiagnostic(const Keire::AssetImportDiagnostic& diagnostic)

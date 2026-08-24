@@ -657,7 +657,7 @@ namespace KeireHub
                 WorkflowError(HubErrorCode::ProjectValidationFailed,
                               "The registered folder belongs to a different project.", request.SourceProjectId));
         }
-        if (source.SchemaVersion != SupportedProjectSchema)
+        if (!IsProjectWorkflowSchemaSupported(source.SchemaVersion))
         {
             return HubResult<ProjectDuplicatePlan>::Failure(
                 WorkflowError(HubErrorCode::UnsupportedSchema,
@@ -786,6 +786,7 @@ namespace KeireHub
                               request.SourceProjectId, error.message()));
         }
 
+        const auto sourceProjectSchemaVersion = source.SchemaVersion;
         return HubResult<ProjectDuplicatePlan>::Success(
             {.Request = request,
              .SourceRoot = std::move(source.Root),
@@ -794,7 +795,8 @@ namespace KeireHub
              .NewProjectId = std::move(newId).Value(),
              .CreatedAt = std::move(timestamp).Value(),
              .AddedUnixSeconds = addedUnixSeconds,
-             .PreferredEditorInstallationId = std::move(recent.PreferredEditorInstallationId)});
+             .PreferredEditorInstallationId = std::move(recent.PreferredEditorInstallationId),
+             .SourceProjectSchemaVersion = sourceProjectSchemaVersion});
     }
 
     HubResult<ProjectDuplicateStagedResult>
@@ -854,7 +856,7 @@ namespace KeireHub
             auto verified = ReadProject(plan.Staging);
             if (!verified || !SameProjectId(verified.Value().Id, plan.NewProjectId) ||
                 verified.Value().Name != plan.Request.DisplayName ||
-                verified.Value().SchemaVersion != SupportedProjectSchema)
+                verified.Value().SchemaVersion != plan.SourceProjectSchemaVersion)
             {
                 return HubResult<ProjectDuplicateStagedResult>::Failure(WorkflowError(
                     HubErrorCode::ProjectValidationFailed, "The staged duplicate failed final identity validation.",
@@ -950,7 +952,7 @@ namespace KeireHub
         auto verified = ReadProject(plan.Staging);
         if (!verified || !SameProjectId(verified.Value().Id, plan.NewProjectId) ||
             verified.Value().Name != plan.Request.DisplayName ||
-            verified.Value().SchemaVersion != SupportedProjectSchema)
+            verified.Value().SchemaVersion != plan.SourceProjectSchemaVersion)
         {
             return HubResult<ProjectDuplicateResult>::Failure(WorkflowError(
                 HubErrorCode::ProjectValidationFailed, "The staged duplicate failed final identity validation.",
@@ -1078,7 +1080,7 @@ namespace KeireHub
                                                     "The registered folder belongs to a different project.",
                                                     projectId));
         }
-        if (document.SchemaVersion != SupportedProjectSchema)
+        if (!IsProjectWorkflowSchemaSupported(document.SchemaVersion))
         {
             return HubStatus::Failure(WorkflowError(
                 HubErrorCode::UnsupportedSchema,

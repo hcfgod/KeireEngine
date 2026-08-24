@@ -46,16 +46,24 @@ fi
 case "$GENERATOR" in
     xcode4)
         printf '==> Building %s %s for %s with Xcode\n' "$TARGET" "$CONFIGURATION" "$ARCHITECTURE"
-        xcode_profile=(); [[ "$PROFILE_BUILD" == 1 ]] && xcode_profile=(-showBuildTimingSummary)
+        xcode_arguments=(-scheme "$TARGET" -configuration "$CONFIGURATION")
+        [[ "$PROFILE_BUILD" == 1 ]] && xcode_arguments+=(-showBuildTimingSummary)
         if [[ -d "$ROOT/$PROJECT_IDENTIFIER.xcworkspace" ]]; then
-            xcodebuild -workspace "$ROOT/$PROJECT_IDENTIFIER.xcworkspace" -scheme "$TARGET" -configuration "$CONFIGURATION" "${xcode_profile[@]}"
+            xcodebuild -workspace "$ROOT/$PROJECT_IDENTIFIER.xcworkspace" "${xcode_arguments[@]}"
         else
-            xcodebuild -project "$ROOT/$PROJECT_IDENTIFIER.xcodeproj" -scheme "$TARGET" -configuration "$CONFIGURATION" "${xcode_profile[@]}"
+            xcodebuild -project "$ROOT/$PROJECT_IDENTIFIER.xcodeproj" "${xcode_arguments[@]}"
         fi
         ;;
-    ninja) printf '==> Building %s %s for %s with Ninja\n' "$TARGET" "$CONFIGURATION" "$ARCHITECTURE"; ninja_profile=(); [[ "$PROFILE_BUILD" == 1 ]] && ninja_profile=(-d stats); ninja -C "$ROOT" -f build.ninja "${ninja_profile[@]}" "${TARGET}_${CONFIGURATION}" ;;
+    ninja)
+        printf '==> Building %s %s for %s with Ninja\n' "$TARGET" "$CONFIGURATION" "$ARCHITECTURE"
+        ninja_arguments=(-C "$ROOT" -f build.ninja)
+        [[ "$PROFILE_BUILD" == 1 ]] && ninja_arguments+=(-d stats)
+        ninja_arguments+=("${TARGET}_${CONFIGURATION}")
+        ninja "${ninja_arguments[@]}"
+        ;;
     gmake) printf '==> Building %s %s for %s with GNU Make\n' "$TARGET" "$CONFIGURATION" "$ARCHITECTURE"; gmake -C "$ROOT" "config=$(printf '%s' "$CONFIGURATION" | tr '[:upper:]' '[:lower:]')" "$TARGET" ;;
 esac
+stage_unix_asset_worker_runtime "$ROOT" "$CONFIGURATION" macosx "$ARCHITECTURE" "$PROJECT_NAMESPACE" "$TARGET"
 if [[ "$GENERATOR" == ninja ]]; then
     while IFS= read -r managed_host_target; do
         bash "$ROOT/Scripts/Unix/stage-managed-host.sh" "$ROOT" "$CONFIGURATION" macosx "$ARCHITECTURE" "$managed_host_target"
@@ -73,7 +81,7 @@ if [[ "$GENERATOR" == ninja && ( "$runtime_staging_target" == "$HUB_TARGET" || "
         printf 'The pinned marketplace signature verifier runtime is missing: %s\n' "$sodium_runtime" >&2
         exit 1
     }
-    generated_content_copy_file_if_changed "$sodium_runtime" "$target_directory/libsodium.dylib"
+    generated_content_copy_file_if_changed "$sodium_runtime" "$target_directory/libsodium.dylib" "$ROOT"
     printf '==> Staged pinned marketplace signature verifier for %s\n' "$runtime_staging_target"
 fi
 build_succeeded=1

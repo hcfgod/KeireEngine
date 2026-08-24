@@ -679,7 +679,7 @@ def create_parser() -> argparse.ArgumentParser:
     write.add_argument("--bundled-dotnet-sdk")
     write.add_argument("--module-definition", required=True)
     write.add_argument("--project-schema-minimum", type=int, default=1)
-    write.add_argument("--project-schema-maximum", type=int, default=3)
+    write.add_argument("--project-schema-maximum", type=int, default=4)
     write.add_argument("--entrypoint", action="append", default=[])
     write.add_argument("--template", action="append", default=[])
     write.add_argument("--template-catalog")

@@ -155,9 +155,9 @@ namespace KeireEditor
                 return m_Controller.MaterialGraphState().Edit("Straighten Material Graph cables",
                                                               [cables](auto& definition)
                                                               {
-                                                                  const auto clear = [&](auto& connections)
+                                                                  const auto clear = [&](auto& graphConnections)
                                                                   {
-                                                                      for (auto& cable : connections)
+                                                                      for (auto& cable : graphConnections)
                                                                           if (std::ranges::find(cables, cable.Id) !=
                                                                               cables.end())
                                                                               cable.RoutingPoints.clear();

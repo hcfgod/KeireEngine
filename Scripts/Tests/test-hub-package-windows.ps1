@@ -30,6 +30,9 @@ foreach ($contract in @("Standalone Hub build", "Build\Distributions", "Assert-W
         "hub-package.json", "libsodium.dll", "libsodium-LICENSE.txt")) {
     if (-not $packager.Contains($contract)) { throw "The Windows Hub packager is missing '$contract'." }
 }
+if (-not $packager.Contains('"--project-schema-maximum", "4"')) {
+    throw "The Windows Hub package must advertise project schema 4 support."
+}
 if ($packager.Contains('package-editor.ps1') -or $packager.Contains('package.ps1')) {
     throw "The standalone Windows Hub package must not stage through the editor or SDK package."
 }
@@ -100,6 +103,7 @@ try {
     if ($manifest.schemaVersion -ne 2 -or $manifest.artifact -ne "hub" -or
         $manifest.entrypoints.hub -ne "bin/Hub.exe" -or
         $manifest.entrypoints.worker -ne "bin/CoreHubWorker.exe" -or
+        $manifest.projectSchema.minimum -ne 1 -or $manifest.projectSchema.maximum -ne 4 -or
         $manifest.packagedTemplates.Count -ne 3 -or
         $manifest.files.path -notcontains "content/Content/en-US.json" -or
         $manifest.files.path -notcontains "content/Licenses/catalog.json" -or

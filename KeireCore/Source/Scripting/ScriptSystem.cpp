@@ -52,23 +52,20 @@
 #include <utility>
 namespace Keire
 {
-    namespace
-    {
-        using Detail::ApplyManagedState;
-        using Detail::GenerateManagedApiDesignTimeProject;
-        using Detail::GenerateManagedBuildAggregator;
-        using Detail::GenerateProject;
-        using Detail::GenerateSolution;
-        using Detail::ManagedApiSourceFingerprint;
-        using Detail::ManagedInspectorAttributeTypes, Detail::ResolveManagedInspectorAttributeTypes;
-        using Detail::ManagedTypeName;
-        using Detail::ParseDiagnostics;
-        using Detail::ParseManagedAssetMetadata;
-        using Detail::PathText;
-        using Detail::ProjectManagedState;
-        using Detail::ReflectManagedMethods, Detail::ReflectManagedProperties;
-        using Detail::WriteText;
-    } // namespace
+    using Detail::ApplyManagedState;
+    using Detail::GenerateManagedApiDesignTimeProject;
+    using Detail::GenerateManagedBuildAggregator;
+    using Detail::GenerateProject;
+    using Detail::GenerateSolution;
+    using Detail::ManagedApiSourceFingerprint;
+    using Detail::ManagedInspectorAttributeTypes, Detail::ResolveManagedInspectorAttributeTypes;
+    using Detail::ManagedTypeName;
+    using Detail::ParseDiagnostics;
+    using Detail::ParseManagedAssetMetadata;
+    using Detail::PathText;
+    using Detail::ProjectManagedState;
+    using Detail::ReflectManagedMethods, Detail::ReflectManagedProperties, Detail::WriteText;
+
     class ScriptSystem::Impl final
     {
       public:

@@ -2,6 +2,16 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/Scripts/Unix/common.sh"
+if [[ "$(uname -s)" == Darwin ]]; then
+  if [[ -d /opt/homebrew/bin ]]; then
+    export PATH="/opt/homebrew/bin:$PATH"
+  elif [[ -d /usr/local/bin ]]; then
+    export PATH="/usr/local/bin:$PATH"
+  fi
+  if [[ -d "$ROOT/Tools/Mac/python-packages" ]]; then
+    export PYTHONPATH="$ROOT/Tools/Mac/python-packages${PYTHONPATH:+:$PYTHONPATH}"
+  fi
+fi
 suite=all
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -28,6 +38,94 @@ sha256_file() {
 
 load_project_config "$ROOT"
 if [[ $run_fast -eq 1 ]]; then
+cxx20_probe_fixture="$(mktemp -d)"
+cxx20_probe_compiler="$cxx20_probe_fixture/clang++"
+cxx20_probe_arguments="$cxx20_probe_fixture/arguments"
+printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' \
+  'printf '\''%s\n'\'' "$@" > "$KEIRE_CXX20_PROBE_ARGUMENTS"' \
+  '[[ "${KEIRE_CXX20_PROBE_COMPILE_STATUS:-0}" -eq 0 ]] || {' \
+  '  printf '\''fixture compiler rejection\n'\'' >&2' \
+  '  exit "$KEIRE_CXX20_PROBE_COMPILE_STATUS"' \
+  '}' \
+  'output=""' \
+  'while [[ $# -gt 0 ]]; do' \
+  '  if [[ "$1" == -o ]]; then output="${2:?missing compiler output}"; shift 2; else shift; fi' \
+  'done' \
+  '[[ -n "$output" ]]' \
+  'printf '\''%s\n'\'' '\''#!/usr/bin/env bash'\'' '\''exit "${KEIRE_CXX20_PROBE_RUNTIME_STATUS:-0}"'\'' > "$output"' \
+  'chmod +x "$output"' > "$cxx20_probe_compiler"
+chmod +x "$cxx20_probe_compiler"
+export KEIRE_CXX20_PROBE_ARGUMENTS="$cxx20_probe_arguments"
+probe_cxx20_thread_library "$cxx20_probe_compiler"
+assert_true grep -Fx -q -- '-std=c++20' "$cxx20_probe_arguments"
+assert_true grep -Fx -q -- '-pthread' "$cxx20_probe_arguments"
+assert_false grep -F -q '_LIBCPP_ENABLE_EXPERIMENTAL' "$cxx20_probe_arguments"
+set +e
+KEIRE_CXX20_PROBE_COMPILE_STATUS=42 probe_cxx20_thread_library "$cxx20_probe_compiler" \
+  >"$cxx20_probe_fixture/compile-diagnostic" 2>&1
+cxx20_compile_status=$?
+KEIRE_CXX20_PROBE_RUNTIME_STATUS=23 probe_cxx20_thread_library "$cxx20_probe_compiler" \
+  >"$cxx20_probe_fixture/runtime-diagnostic" 2>&1
+cxx20_runtime_status=$?
+set -e
+assert_equal "$cxx20_compile_status" 42 'C++20 thread-library compile probe status'
+assert_true grep -F -q 'std::stop_token and std::jthread' "$cxx20_probe_fixture/compile-diagnostic"
+assert_true grep -F -q 'sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer' \
+  "$cxx20_probe_fixture/compile-diagnostic"
+assert_true grep -F -q 'Do not enable _LIBCPP_ENABLE_EXPERIMENTAL' \
+  "$cxx20_probe_fixture/compile-diagnostic"
+assert_true grep -F -q 'fixture compiler rejection' "$cxx20_probe_fixture/compile-diagnostic"
+assert_equal "$cxx20_runtime_status" 23 'C++20 thread-library runtime probe status'
+assert_true grep -F -q 'compiled but could not run' "$cxx20_probe_fixture/runtime-diagnostic"
+unset KEIRE_CXX20_PROBE_ARGUMENTS
+rm -rf "$cxx20_probe_fixture"
+homebrew_installer_fixture="$(mktemp -d)"
+homebrew_installer_script="$homebrew_installer_fixture/install.sh"
+homebrew_installer_output="$homebrew_installer_fixture/output"
+printf '%s\n' '#!/usr/bin/env bash' \
+  'printf "%s\n" "${NONINTERACTIVE:-unset}" > "$KEIRE_HOMEBREW_TEST_OUTPUT"' \
+  > "$homebrew_installer_script"
+export KEIRE_HOMEBREW_TEST_OUTPUT="$homebrew_installer_output"
+run_homebrew_installer 1 "$homebrew_installer_script"
+assert_equal "$(cat "$homebrew_installer_output")" 1 'CI Homebrew installer environment'
+rm -f "$homebrew_installer_output"
+set +e
+NONINTERACTIVE=1 run_homebrew_installer 0 "$homebrew_installer_script" </dev/null \
+  > "$homebrew_installer_fixture/diagnostic" 2>&1
+homebrew_noninteractive_status=$?
+set -e
+assert_equal "$homebrew_noninteractive_status" 1 'local non-terminal Homebrew installer rejection status'
+assert_false test -e "$homebrew_installer_output"
+assert_true grep -F -q 'cannot request authorization without an interactive terminal' \
+  "$homebrew_installer_fixture/diagnostic"
+unset KEIRE_HOMEBREW_TEST_OUTPUT
+rm -rf "$homebrew_installer_fixture"
+dotnet_listing_fixture="$(mktemp -d)"
+mkdir -p "$dotnet_listing_fixture/installation/sdk" "$dotnet_listing_fixture/unrelated/sdk"
+ln -s "$dotnet_listing_fixture/installation" "$dotnet_listing_fixture/path-alias"
+printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' \
+  'case "${1:-}" in' \
+  "  --list-sdks) printf '%s\\n' '10.0.302 [$dotnet_listing_fixture/path-alias/sdk]' ;;" \
+  "  --version) printf '%s\\n' \"\${KEIRE_DOTNET_FIXTURE_SELECTED:-10.0.302}\" ;;" \
+  '  *) exit 2 ;;' 'esac' > "$dotnet_listing_fixture/installation/dotnet"
+chmod +x "$dotnet_listing_fixture/installation/dotnet"
+dotnet_listing="10.0.302 [$dotnet_listing_fixture/path-alias/sdk]"
+assert_true dotnet_sdk_listing_matches_installation "$dotnet_listing" 10.0.302 \
+  "$dotnet_listing_fixture/installation"
+assert_false dotnet_sdk_listing_matches_installation "" 10.0.302 "$dotnet_listing_fixture/installation"
+assert_false dotnet_sdk_listing_matches_installation "$dotnet_listing" 10.0.303 \
+  "$dotnet_listing_fixture/installation"
+assert_false dotnet_sdk_listing_matches_installation \
+  "10.0.302 [$dotnet_listing_fixture/unrelated/sdk]" 10.0.302 "$dotnet_listing_fixture/installation"
+assert_false dotnet_sdk_listing_matches_installation \
+  "10.0.302-preview [$dotnet_listing_fixture/path-alias/sdk]" 10.0.302 \
+  "$dotnet_listing_fixture/installation"
+assert_equal "$(pinned_dotnet_sdk_root "$dotnet_listing_fixture/installation/dotnet" 10.0.302)" \
+  "$(cd -P "$dotnet_listing_fixture/installation" && pwd -P)" 'pinned dotnet SDK provenance'
+export KEIRE_DOTNET_FIXTURE_SELECTED=10.0.400
+assert_false pinned_dotnet_sdk_root "$dotnet_listing_fixture/installation/dotnet" 10.0.302
+unset KEIRE_DOTNET_FIXTURE_SELECTED
+rm -rf "$dotnet_listing_fixture"
 ffmpeg_argument_fixture="$(mktemp -d)"
 touch "$ffmpeg_argument_fixture/sentinel"
 ffmpeg_test_platform=Linux
@@ -109,6 +207,16 @@ assert_true test -f "$binary_output_external/sentinel"
 rm -f "$binary_output_fixture/Build/Bin/Debug-linux-x86_64"
 rm -rf "$binary_output_fixture" "$binary_output_external"
 workspace_lock_fixture="$(mktemp -d)"
+workspace_owner_race="$workspace_lock_fixture/owner-race"
+workspace_owner_race_bin="$workspace_lock_fixture/owner-race-bin"
+mkdir -p "$workspace_owner_race" "$workspace_owner_race_bin"
+printf '%s\n' token=vanishing > "$workspace_owner_race/owner"
+printf '%s\n' '#!/usr/bin/env bash' 'rm -f "${1:?owner file is required}"' 'exit 1' \
+  > "$workspace_owner_race_bin/cat"
+chmod +x "$workspace_owner_race_bin/cat"
+workspace_owner_race_value="$(PATH="$workspace_owner_race_bin:$PATH" \
+  workspace_lock_owner_value "$workspace_owner_race" token)"
+assert_equal "$workspace_owner_race_value" '' 'concurrently removed workspace owner metadata'
 export KEIRE_WORKSPACE_LOCK_TIMEOUT_SECONDS=1
 export KEIRE_WORKSPACE_LOCK_STALE_SECONDS=10
 export KEIRE_WORKSPACE_LOCK_HEARTBEAT_SECONDS=1
@@ -265,7 +373,8 @@ assert_equal "$(wc -l < "$managed_fixture/invocations" | tr -d ' ')" 4 \
 rm -rf "$managed_fixture"
 trap - EXIT
 launcher_fixture="$(mktemp -d)"
-mkdir -p "$launcher_fixture/Scripts/Unix" "$launcher_fixture/Scripts/Linux"
+mkdir -p "$launcher_fixture/Scripts/Unix" "$launcher_fixture/Scripts/Linux" \
+  "$launcher_fixture/Scripts/Mac"
 cp "$ROOT/Scripts/project.sh" "$launcher_fixture/Scripts/project.sh"
 cat > "$launcher_fixture/Scripts/Unix/common.sh" <<'EOF'
 native_architecture() { printf '%s' x86_64; }
@@ -279,6 +388,7 @@ workspace_lock_release() { :; }
 EOF
 printf '%s\n' '#!/usr/bin/env bash' 'exit 23' > "$launcher_fixture/Scripts/Linux/test.sh"
 chmod +x "$launcher_fixture/Scripts/Linux/test.sh"
+cp "$launcher_fixture/Scripts/Linux/test.sh" "$launcher_fixture/Scripts/Mac/test.sh"
 set +e
 bash "$launcher_fixture/Scripts/project.sh" test --generator ninja --configuration Debug --architecture x86_64 --toolset clang
 launcher_exit=$?
@@ -411,6 +521,15 @@ assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" STB_COMMIT)" 2c980
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" FFMPEG_COMMIT)" 89153eb701d372f54a5d7d29de5067abc09e11d3 'FFmpeg lock'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" LIBSODIUM_COMMIT)" 77e1ce5d6dee871c49ef211222ba18ef0c486bda 'libsodium lock'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" DOTNET_SDK_VERSION)" 10.0.302 '.NET SDK lock'
+assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" PYYAML_VERSION)" 6.0.3 'PyYAML lock'
+assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" PYYAML_SOURCE_SHA256)" \
+  d76623373421df22fb4cf8817020cbb7ef15c725b9d5e45f17e189bfc384190f 'PyYAML source lock'
+assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" DOTNET_MACOS_X86_64_SHA512)" \
+  48d5861dc0d6c9c782c6d163d6b334ecac2ebd65a1ae59e9ce5b93dd080a31d7ecfc4e4d47e0e35b201ce63661218d641e154022266294a3a8b84593a019cfbc \
+  '.NET macOS x86_64 SDK archive lock'
+assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" DOTNET_MACOS_ARM64_SHA512)" \
+  b2286dec9177e8b5543ff2fe95c84db358b87ec2a36a0d34a29033d70279940fd1134af56c4299648f8950db2d6ce35237698cf2818d9abc670c2c1664c92ac0 \
+  '.NET macOS ARM64 SDK archive lock'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" CMAKE_VERSION)" 3.31.12 'CMake version lock'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" CMAKE_LINUX_X86_64_SHA256)" \
   0dc2e9a6860f06bf10bd8fadc03e35d9eeb4df46e33763a7e480e987758f385c 'CMake x86_64 archive lock'
@@ -477,6 +596,57 @@ assert_true grep -F -q 'version_at_least "$clang_version" 16' "$ROOT/Scripts/Lin
 assert_true grep -F -q 'brew list --versions bison' "$ROOT/Scripts/Mac/bootstrap.sh"
 assert_true grep -F -q 'check_version Bison "$("$bison_executable" --version | extract_version)" 3.0' \
   "$ROOT/Scripts/Mac/bootstrap.sh"
+assert_true grep -F -q 'brew_install pkg-config pkgconf' "$ROOT/Scripts/Mac/bootstrap.sh"
+assert_true grep -F -q 'check_version pkg-config "$(pkg-config --version)" 0.29.2' \
+  "$ROOT/Scripts/Mac/bootstrap.sh"
+assert_true grep -F -q 'brew_install rg ripgrep' "$ROOT/Scripts/Mac/bootstrap.sh"
+assert_true grep -F -q 'brew_install python3 python' "$ROOT/Scripts/Mac/bootstrap.sh"
+assert_true grep -F -q '[[ ! -L "$install_root" ]]' "$ROOT/Scripts/Mac/bootstrap.sh"
+assert_true grep -F -q 'ensure_command rg ripgrep' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'install_dotnet_sdk()' "$ROOT/Scripts/Mac/bootstrap.sh"
+assert_true grep -F -q 'install_pyyaml()' "$ROOT/Scripts/Mac/bootstrap.sh"
+assert_true grep -F -q 'publish_cached_directory()' "$ROOT/Scripts/Mac/bootstrap.sh"
+assert_equal "$(grep -F -c 'publish_cached_directory "$candidate" "$install_root"' \
+  "$ROOT/Scripts/Mac/bootstrap.sh")" 2 'atomic macOS cache publication call sites'
+assert_true grep -F -q 'PUBLICATION_BACKUP="$parent/.$name.backup.$$.$RANDOM"' \
+  "$ROOT/Scripts/Mac/bootstrap.sh"
+assert_true grep -F -q 'shasum -a 256 "$archive"' "$ROOT/Scripts/Mac/bootstrap.sh"
+assert_true grep -F -q 'python_packages_link="$ROOT/Tools/Mac/python-packages"' \
+  "$ROOT/Scripts/Mac/bootstrap.sh"
+assert_true grep -F -q 'DOTNET_MACOS_X86_64_SHA512' "$ROOT/Scripts/Mac/bootstrap.sh"
+assert_true grep -F -q 'DOTNET_MACOS_ARM64_SHA512' "$ROOT/Scripts/Mac/bootstrap.sh"
+assert_true grep -F -q 'shasum -a 512 "$archive"' "$ROOT/Scripts/Mac/bootstrap.sh"
+assert_equal "$(grep -F -c \
+  'dotnet_sdk_listing_matches_installation "$listing" "$DOTNET_SDK_VERSION"' \
+  "$ROOT/Scripts/Mac/bootstrap.sh")" 2 '.NET exact version and canonical path validation'
+assert_true grep -F -q 'resolved_reported_sdk="$(cd -P "$reported_sdk" && pwd -P)"' \
+  "$ROOT/Scripts/Unix/common.sh"
+assert_true grep -F -q '[[ ! -L "$cache_root" ]]' "$ROOT/Scripts/Mac/bootstrap.sh"
+assert_equal "$(grep -F -c '[[ ! -e "$dotnet_link" || -L "$dotnet_link" ]]' \
+  "$ROOT/Scripts/Mac/bootstrap.sh")" 2 '.NET launcher replacement guards'
+assert_true grep -F -q 'ln -sfn "$install_root/dotnet" "$dotnet_link"' "$ROOT/Scripts/Mac/bootstrap.sh"
+assert_true grep -F -q 'install_dotnet_sdk' "$ROOT/Scripts/Mac/bootstrap.sh"
+assert_true grep -F -q 'brew_install nasm nasm' "$ROOT/Scripts/Mac/bootstrap.sh"
+assert_true grep -F -q 'check_version NASM "$(nasm -v | extract_version)" 2.14' \
+  "$ROOT/Scripts/Mac/bootstrap.sh"
+assert_true grep -F -q 'run_homebrew_installer "$CI" "$script"' "$ROOT/Scripts/Mac/bootstrap.sh"
+assert_false grep -F -q 'NONINTERACTIVE=1 /bin/bash "$script"' "$ROOT/Scripts/Mac/bootstrap.sh"
+assert_true grep -F -q 'run_homebrew_installer()' "$ROOT/Scripts/Unix/common.sh"
+assert_true grep -F -q '[[ -t 0 ]]' "$ROOT/Scripts/Unix/common.sh"
+assert_true grep -F -q 'NONINTERACTIVE=1 /bin/bash "$installer"' "$ROOT/Scripts/Unix/common.sh"
+assert_true grep -F -q 'probe_cxx20_thread_library clang++' "$ROOT/Scripts/Mac/bootstrap.sh"
+assert_true grep -F -q 'probe_cxx20_thread_library()' "$ROOT/Scripts/Unix/common.sh"
+assert_true grep -F -q '"$compiler" -std=c++20 -pthread' "$ROOT/Scripts/Unix/common.sh"
+assert_true grep -F -q 'Do not enable _LIBCPP_ENABLE_EXPERIMENTAL' "$ROOT/Scripts/Unix/common.sh"
+assert_true grep -F -q '[[ $CI -eq 1 ]] && bootstrap+=(--ci)' "$ROOT/Scripts/Mac/generate.sh"
+assert_true grep -F -q 'export PATH="$ROOT/Tools/Mac:$PATH"' \
+  "$ROOT/Scripts/Mac/bootstrap.sh" "$ROOT/Scripts/Mac/generate.sh"
+assert_true grep -F -q 'xcode_arguments=(-scheme "$TARGET" -configuration "$CONFIGURATION")' \
+  "$ROOT/Scripts/Mac/build.sh"
+assert_true grep -F -q 'ninja_arguments=(-C "$ROOT" -f build.ninja)' "$ROOT/Scripts/Mac/build.sh"
+assert_true grep -F -q 'ninja_arguments+=("${TARGET}_${CONFIGURATION}")' "$ROOT/Scripts/Mac/build.sh"
+assert_false grep -E -q '(xcode|ninja)_profile=\(\)' "$ROOT/Scripts/Mac/build.sh"
+assert_true bash -n "$ROOT/Scripts/Mac/build.sh"
 assert_true grep -F -q 'gcc-environment.sh' "$ROOT/Scripts/Linux/bootstrap.sh"
 assert_true grep -F -q 'activate_linux_toolchain' "$ROOT/Scripts/Linux/build.sh" \
   "$ROOT/Scripts/Linux/generate.sh" "$ROOT/Scripts/Unix/run-target.sh" "$ROOT/Scripts/Unix/package.sh" \
@@ -485,9 +655,23 @@ assert_true grep -F -q 'activate_linux_toolchain' "$ROOT/Scripts/Linux/build.sh"
   "$ROOT/Scripts/Unix/coverage.sh"
 assert_true grep -F -q 'install_logical_packages curl-dev' "$ROOT/Scripts/Linux/bootstrap.sh"
 assert_true grep -F -q 'DOTNET_LINUX_X86_64_SHA512' "$ROOT/Scripts/Linux/bootstrap.sh"
+assert_true grep -F -q 'pattern="${3:-*}"' "$ROOT/Scripts/Unix/copy-files-if-changed.sh"
+assert_true grep -F -q '                   workerRuntimeDirectory' "$ROOT/KeireAssetWorker/premake5.lua"
+assert_false grep -F -q 'workerRuntimeDirectory .. " '\''*'\''"' "$ROOT/KeireAssetWorker/premake5.lua"
+assert_true grep -F -q 'validate_unix_asset_worker_ninja_commands "$ROOT" "$PROJECT_NAMESPACE"' \
+  "$ROOT/Scripts/Linux/generate.sh" "$ROOT/Scripts/Mac/generate.sh"
 assert_true grep -F -q '$(build_parallel_jobs)' "$ROOT/Scripts/Linux/bootstrap.sh" \
   "$ROOT/Scripts/Linux/build.sh" "$ROOT/Scripts/Unix/dependencies.sh" "$ROOT/Scripts/Unix/coral.sh" \
   "$ROOT/Scripts/Unix/ffmpeg.sh" "$ROOT/Scripts/Unix/shader-compiler.sh"
+assert_true grep -F -q 'stage_unix_asset_worker_runtime "$ROOT" "$CONFIGURATION" linux' \
+  "$ROOT/Scripts/Linux/build.sh"
+assert_true grep -F -q 'stage_unix_asset_worker_runtime "$ROOT" "$CONFIGURATION" macosx' \
+  "$ROOT/Scripts/Mac/build.sh"
+assert_true grep -F -q 'pinned_dotnet_sdk_root "$dotnet_path" "$dotnet_sdk_version"' \
+  "$ROOT/Scripts/Unix/coral.sh"
+assert_true grep -F -q '"-DDOTNET_EXE=$dotnet_executable"' "$ROOT/Scripts/Unix/coral.sh"
+assert_equal "$(grep -F -c 'DOTNET_ROOT="$dotnet_root" PATH="$dotnet_root:$PATH"' \
+  "$ROOT/Scripts/Unix/coral.sh")" 2 'Coral pinned .NET configure and build environment'
 assert_true grep -F -q 'ubuntu-22.04 ubuntu-24.04 ubuntu-26.04 debian-12 fedora arch tumbleweed rocky-9' \
   "$ROOT/Scripts/Tests/test-linux-distros.sh"
 assert_true test -f "$ROOT/Scripts/setup-linux.sh"
@@ -548,8 +732,8 @@ done < <(find "$ROOT/AssetTool" "$ROOT/KeireAssetWorker" "$ROOT/KeireClient" "$R
   "$ROOT/KeireHubWorker" "$ROOT/KeireRuntime" "$ROOT/KeireTests" -type f \( -name '*.cpp' -o -name '*.h' \))
 assert_true grep -q 'libsodium.*configure' "$ROOT/Scripts/Unix/dependencies.sh"
 assert_true grep -q 'LIBSODIUM_COMMIT' "$ROOT/Scripts/Unix/dependencies.sh"
-assert_true grep -F -q 'generated_content_copy_file_if_changed "$sodium_runtime" "$target_directory/libsodium.so"' "$ROOT/Scripts/Linux/build.sh"
-assert_true grep -F -q 'generated_content_copy_file_if_changed "$sodium_runtime" "$target_directory/libsodium.dylib"' "$ROOT/Scripts/Mac/build.sh"
+assert_true grep -F -q 'generated_content_copy_file_if_changed "$sodium_runtime" "$target_directory/libsodium.so" "$ROOT"' "$ROOT/Scripts/Linux/build.sh"
+assert_true grep -F -q 'generated_content_copy_file_if_changed "$sodium_runtime" "$target_directory/libsodium.dylib" "$ROOT"' "$ROOT/Scripts/Mac/build.sh"
 assert_true grep -F -q '"$ROOT/Scripts/Unix/dependencies.sh" Linux "$ARCHITECTURE" "$TOOLSET" 0' "$ROOT/Scripts/Linux/generate.sh"
 assert_true grep -F -q '"$ROOT/Scripts/Unix/dependencies.sh" Mac "$ARCHITECTURE" "$TOOLSET" 0' "$ROOT/Scripts/Mac/generate.sh"
 assert_false grep -q 'force_dependencies=' "$ROOT/Scripts/Linux/generate.sh" "$ROOT/Scripts/Mac/generate.sh"
@@ -594,7 +778,7 @@ assert_true grep -F -q 'invalidate_incompatible_binary_outputs()' "$ROOT/Scripts
 assert_true grep -F -q 'rm -rf -- "$resolved_path"' "$ROOT/Scripts/Unix/common.sh"
 assert_true grep -F -q 'project_generation_premake_inputs "$root" | LC_ALL=C sort' \
   "$ROOT/Scripts/Unix/common.sh"
-assert_true grep -F -q -- '-prune -o -type f -name '\''premake5.lua'\'' -print' \
+assert_true grep -F -q -- '\) -prune \) -o -type f -name '\''premake5.lua'\'' -print' \
   "$ROOT/Scripts/Unix/common.sh"
 assert_true grep -q 'KeireHubRuntime KeireHubTests KeireHubWorker' "$ROOT/Scripts/Unix/common.sh"
 assert_true grep -q 'find "$root/Scripts/Premake" -type f -name '\''\*.lua'\''' "$ROOT/Scripts/Unix/common.sh"
@@ -646,7 +830,7 @@ assert_true grep -q 'Source/ECS/Components/CameraComponent.cpp' "$ROOT/KeireCore
 assert_true grep -q 'Source/ECS/Components/MeshRendererComponent.cpp' "$ROOT/KeireCore/premake5.lua"
 assert_true grep -q 'builtin-shaders.sh' "$ROOT/KeireCore/premake5.lua"
 assert_true grep -q 'touch-ninja-stamp.ps1' "$ROOT/KeireCore/premake5.lua"
-assert_true grep -q 'touch-ninja-stamp.ps1' "$ROOT/KeireAssetWorker/premake5.lua"
+assert_false grep -q 'touch-ninja-stamp.ps1' "$ROOT/KeireAssetWorker/premake5.lua"
 assert_true test -f "$ROOT/Scripts/Windows/touch-ninja-stamp.ps1"
 assert_true test -f "$ROOT/KeireCore/Shaders/BuiltinUnlit.hlsl"
 assert_true grep -R -q 'BuiltinUnlitShaders.h' "$ROOT/KeireCore/Source/Rendering"
@@ -760,11 +944,11 @@ assert_true grep -F -q 'receiveStatus == AVERROR(EAGAIN)' \
   "$ROOT/KeireAssetWorker/Source/FfmpegTextureImportBackend.cpp"
 assert_true grep -F -q 'frame.format == AV_PIX_FMT_GRAYF16' \
   "$ROOT/KeireAssetWorker/Source/FfmpegTextureImportBackend.cpp"
-assert_true grep -F -q '@("avformat", "avformat-63.dll")' "$ROOT/Scripts/Windows/ffmpeg.ps1"
-assert_true grep -F -q '@("avcodec", "avcodec-63.dll")' "$ROOT/Scripts/Windows/ffmpeg.ps1"
-assert_true grep -F -q '@("swresample", "swresample-7.dll")' "$ROOT/Scripts/Windows/ffmpeg.ps1"
-assert_true grep -F -q '@("avutil", "avutil-61.dll")' "$ROOT/Scripts/Windows/ffmpeg.ps1"
-assert_true grep -F -q '"bin\$($component[0]).lib"' "$ROOT/Scripts/Windows/ffmpeg.ps1"
+assert_true grep -F -q 'FileName = "avformat-63.dll"' "$ROOT/Scripts/Windows/ffmpeg-runtime-contract.ps1"
+assert_true grep -F -q 'FileName = "avcodec-63.dll"' "$ROOT/Scripts/Windows/ffmpeg-runtime-contract.ps1"
+assert_true grep -F -q 'FileName = "swresample-7.dll"' "$ROOT/Scripts/Windows/ffmpeg-runtime-contract.ps1"
+assert_true grep -F -q 'FileName = "avutil-61.dll"' "$ROOT/Scripts/Windows/ffmpeg-runtime-contract.ps1"
+assert_true grep -F -q '"bin\$($component.Component).lib"' "$ROOT/Scripts/Windows/ffmpeg.ps1"
 assert_false grep -F -q 'lib\avformat.lib' "$ROOT/Scripts/Windows/ffmpeg.ps1"
 assert_true grep -F -q '$Toolset -eq "gcc"' "$ROOT/Scripts/Windows/ffmpeg.ps1"
 assert_true grep -F -q 'do not support the gcc toolset' "$ROOT/Scripts/Windows/ffmpeg.ps1"
@@ -1181,6 +1365,7 @@ printf 'Unix script integration fixtures completed in %ss.\n' "$((SECONDS - inte
 fi
 
 if [[ $run_fast -eq 1 ]]; then
+  command -v rg >/dev/null 2>&1 || fail 'ripgrep is required for repository identity validation'
   search_globs=(--glob '!.git/**' --glob '!.vs/**' --glob '!Vendor/**' --glob '!Tools/**' --glob '!Build/**' --glob '!Logs/**' --glob '!Artifacts/**' --glob '!Scripts/Tests/**')
   ! rg -n "${search_globs[@]}" '\b(CORE|CLIENT)_(API|ASSERT|ASSERTIONS_ENABLED|TRACE|DEBUG|INFO|WARN|ERROR|CRITICAL)\b' "$ROOT" || fail 'Deprecated public macros remain'
   ! rg -n -F "${search_globs[@]}" -e '#include "KeireCore/' -e 'Scripts/KeireTests' -e 'Scripts\KeireTests' -e 'Scripts/Windows/Tests' -e 'Scripts/Unix/Tests' -e 'KeireCore.log' -e 'KeireClient.log' "$ROOT" || fail 'Stale repository identity remains'

@@ -33,6 +33,7 @@ fi
 if [[ "$GENERATOR" == ninja || "$GENERATOR" == compilecommands ]]; then
     python3 "$ROOT/Scripts/patch-ninja-depfiles.py" "$ROOT"
     python3 "$ROOT/Scripts/patch-ninja-compiler-cache.py" "$ROOT" --cache "$COMPILER_CACHE"
+    validate_unix_asset_worker_ninja_commands "$ROOT" "$PROJECT_NAMESPACE"
 fi
 if [[ "$GENERATOR" == compilecommands ]]; then
     rule_toolset="$TOOLSET"

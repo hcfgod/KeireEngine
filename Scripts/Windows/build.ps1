@@ -137,6 +137,20 @@ if ($Generator -eq "ninja") {
     }
 }
 
+$assetWorkerTarget = "$($Project.PROJECT_NAMESPACE)AssetWorker"
+$assetWorkerConsumers = @(
+    $assetWorkerTarget,
+    "$($Project.PROJECT_NAMESPACE)AssetTool",
+    "$($Project.PROJECT_NAMESPACE)EditorTests",
+    "$($Project.PROJECT_NAMESPACE)EditorDev"
+)
+if ($Target -in $assetWorkerConsumers) {
+    $dependencyLock = Get-DependencyLock
+    & (Join-Path $PSScriptRoot "stage-ffmpeg-runtime.ps1") -Root $Root -Configuration $Configuration `
+        -Architecture $Architecture -Toolset $Toolset -ProjectNamespace $Project.PROJECT_NAMESPACE `
+        -FfmpegCommit $dependencyLock.FFMPEG_COMMIT
+}
+
 $runtimeStagingTarget = if ($Target -eq "$($Project.PROJECT_NAMESPACE)EditorDev") {
     $Project.CLIENT_TARGET
 }

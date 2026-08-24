@@ -1091,12 +1091,6 @@ namespace KeireEditor
         ui.TextColored(
             m_Controller.ShaderGraphTheme().MutedText,
             "Right-click canvas or items for actions  |  drag pins to connect  |  double-click cable routes");
-        const auto findCanvasNode = [&](const Keire::AssetId id) -> std::optional<StableNodeId>
-        {
-            const auto found = std::ranges::find_if(model.NodeIdentities,
-                                                    [id](const auto& identity) { return identity.second == id; });
-            return found == model.NodeIdentities.end() ? std::nullopt : std::optional<StableNodeId>(found->first);
-        };
         const auto findCanvasConnection = [&](const Keire::AssetId id) -> std::optional<StableNodeId>
         {
             const auto found = std::ranges::find_if(model.ConnectionIdentities,

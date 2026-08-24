@@ -29,4 +29,12 @@ with tempfile.TemporaryDirectory() as temporary:
     subprocess.run([sys.executable, str(script), str(fixture), "--cache", "sccache"], check=True)
     assert project.read_text(encoding="utf-8") == result
 
+    windows_project = fixture / "Windows.ninja"
+    with windows_project.open("w", encoding="utf-8", newline="") as output:
+        output.write("rule cxx_msc\r\n  command = cl $cxxflags -c $in\r\n")
+    subprocess.run([sys.executable, str(script), str(fixture), "--cache", "sccache"], check=True)
+    with windows_project.open("r", encoding="utf-8", newline="") as input_file:
+        windows_result = input_file.read()
+    assert windows_result == "rule cxx_msc\n  command = sccache cl $cxxflags -c $in\n"
+
 print("Ninja compiler-cache tests passed")

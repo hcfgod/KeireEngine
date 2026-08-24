@@ -10,6 +10,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "common.ps1")
+. (Join-Path $PSScriptRoot "ffmpeg-runtime-contract.ps1")
 
 $Root = Get-RepositoryRoot
 $Lock = Get-DependencyLock
@@ -38,7 +39,8 @@ if (-not (Test-Path -LiteralPath (Join-Path $ZlibSourceInclude "zlib.h")) -or
     throw "The Release native dependency build is missing the zlib files required by private FFmpeg."
 }
 $ZlibKey = (Get-Content -LiteralPath $ZlibStamp -Raw).Trim()
-$Expected = "$($Lock.FFMPEG_COMMIT)|$Configuration|$ZlibKey|shared-lgpl-avformat-avcodec-swresample-avutil-zlib-exr-v6"
+$RuntimeContract = Get-KeireFfmpegRuntimeContract
+$Expected = "$($Lock.FFMPEG_COMMIT)|$Configuration|$ZlibKey|$($RuntimeContract.StampFlavor)"
 
 function Test-FfmpegOutput([string]$Path, [string]$ExpectedStamp) {
     $candidateInstall = Join-Path $Path "install"
@@ -52,18 +54,30 @@ function Test-FfmpegOutput([string]$Path, [string]$ExpectedStamp) {
         return $false
     }
 
-    $componentArtifacts = @(
-        @("avformat", "avformat-63.dll"),
-        @("avcodec", "avcodec-63.dll"),
-        @("swresample", "swresample-7.dll"),
-        @("avutil", "avutil-61.dll")
-    )
-    foreach ($component in $componentArtifacts) {
-        $importLibrary = Join-Path $candidateInstall "bin\$($component[0]).lib"
-        $runtimeLibrary = Join-Path $candidateInstall "bin\$($component[1])"
+    foreach ($component in $RuntimeContract.Files) {
+        $importLibrary = Join-Path $candidateInstall "bin\$($component.Component).lib"
+        $runtimeLibrary = Join-Path $candidateInstall "bin\$($component.FileName)"
         if (-not (Test-Path -LiteralPath $importLibrary -PathType Leaf) -or
             -not (Test-Path -LiteralPath $runtimeLibrary -PathType Leaf)) {
             return $false
+        }
+    }
+
+    $expectedRuntimeNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($component in $RuntimeContract.Files) {
+        [void]$expectedRuntimeNames.Add($component.FileName)
+    }
+    $seenRuntimePaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($pattern in $RuntimeContract.NamespacePatterns) {
+        foreach ($candidate in @(
+                Get-ChildItem -LiteralPath (Join-Path $candidateInstall "bin") -Filter $pattern -Force `
+                    -ErrorAction SilentlyContinue)) {
+            if (-not $seenRuntimePaths.Add($candidate.FullName)) {
+                continue
+            }
+            if ($candidate.PSIsContainer -or -not $expectedRuntimeNames.Contains($candidate.Name)) {
+                return $false
+            }
         }
     }
     return $true
@@ -161,7 +175,8 @@ if (-not $Force) {
     $AlternateConfiguration = if ($Configuration -eq "Debug") { "Release" } else { "Debug" }
     $AlternateOutput = Join-Path $CacheBase $AlternateConfiguration
     $AlternateComponents = Join-Path $AlternateOutput "config_components.h"
-    $AlternateExpected = "$($Lock.FFMPEG_COMMIT)|$AlternateConfiguration|$ZlibKey|shared-lgpl-avformat-avcodec-swresample-avutil-zlib-exr-v6"
+    $AlternateExpected =
+        "$($Lock.FFMPEG_COMMIT)|$AlternateConfiguration|$ZlibKey|$($RuntimeContract.StampFlavor)"
     Assert-FfmpegOutputPath -Path $AlternateOutput -AllowedBase $CacheBase
     if (Test-FfmpegOutput $AlternateOutput $AlternateExpected) {
         Remove-FfmpegOutput $CacheOutput $CacheBase

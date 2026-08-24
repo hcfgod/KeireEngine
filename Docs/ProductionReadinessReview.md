@@ -177,7 +177,7 @@ Windows, DEB, and RPM records and states the native-signing limitations explicit
   a complete Unity parity claim.
 - The Unreal-inspired Material Ecosystem matrix contains 145 rows: 98 Complete, 8 Partial, and 39 Planned. The ledger
   distinguishes current source capability from immutable 0.3.2 package evidence; Planned rows remain unsupported.
-- Current content authorities are project schema 3, scene schema 6, mesh schema 5, VFX schema 4, material source
+- Current content authorities are project schema 4, scene schema 6, mesh schema 5, VFX schema 4, material source
   schema 3, Animator component schema 7, procedural motion profile schema 1, and cooked runtime-manifest schema 4.
 
 ### Documentation and web platform

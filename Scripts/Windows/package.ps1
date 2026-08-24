@@ -34,9 +34,12 @@ New-Item -ItemType Directory -Force "$stage\bin", "$stage\lib", "$stage\include"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CLIENT_TARGET)\$($Project.CLIENT_TARGET).exe" "$stage\bin\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.HUB_TARGET)\$($Project.HUB_TARGET).exe" "$stage\bin\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$assetToolName\$assetToolName.exe" "$stage\bin\"
-Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$assetWorkerName\$assetWorkerName.exe" "$stage\bin\"
-Get-ChildItem "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$assetWorkerName" -Filter "av*.dll" -File | Copy-Item -Destination "$stage\bin\"
-Get-ChildItem "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$assetWorkerName" -Filter "swresample-*.dll" -File | Copy-Item -Destination "$stage\bin\"
+$assetWorkerDirectory = "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$assetWorkerName"
+Copy-Item (Join-Path $assetWorkerDirectory "$assetWorkerName.exe") "$stage\bin\"
+Assert-WindowsFfmpegRuntimeClosure -Directory $assetWorkerDirectory -Context "Asset worker runtime"
+foreach ($runtime in (Get-WindowsFfmpegRuntimeContract).Files) {
+    Copy-Item -LiteralPath (Join-Path $assetWorkerDirectory $runtime.FileName) -Destination "$stage\bin\"
+}
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$runtimeName\$runtimeName.exe" "$stage\bin\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$runtimeName\Managed" "$stage\bin\" -Recurse
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$runtimeName\nethost.dll" "$stage\bin\"

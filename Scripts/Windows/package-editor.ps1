@@ -115,7 +115,7 @@ $manifestArguments = @(
     "--configuration", "Dist", "--launcher", "Launch-KeireEditor.cmd",
     "--build-manifest", "build-manifest.json", "--bundled-dotnet-sdk", $dotnetSdk.Name,
     "--module-definition", "Config/SourceModules.premake.lua", "--project-schema-minimum", "1",
-    "--project-schema-maximum", "3", "--entrypoint", "editor=bin/$($Project.CLIENT_TARGET).exe",
+    "--project-schema-maximum", "4", "--entrypoint", "editor=bin/$($Project.CLIENT_TARGET).exe",
     "--entrypoint", "assetTool=bin/$($Project.PROJECT_NAMESPACE)AssetTool.exe",
     "--entrypoint", "assetWorker=bin/$($Project.PROJECT_NAMESPACE)AssetWorker.exe",
     "--entrypoint", "runtime=bin/$($Project.PROJECT_NAMESPACE)Runtime.exe",

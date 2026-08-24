@@ -5,6 +5,7 @@
 #include "KeireClient/Editor/AssetOperationService.h"
 #include "KeireClient/Editor/ConsolePanel.h"
 #include "KeireClient/Editor/DiagnosticsPanel.h"
+#include "KeireClient/Editor/EditorAssetFileService.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
 #include "KeireClient/Editor/ExternalAssetImportController.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
@@ -35,9 +36,7 @@
 #include <cstdio>
 #include <exception>
 #include <filesystem>
-#include <fstream>
 #include <functional>
-#include <iterator>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -50,16 +49,7 @@
 #include <vector>
 namespace
 {
-    [[nodiscard]] std::vector<std::byte> ReadBytes(const std::filesystem::path& path)
-    {
-        std::ifstream input(path, std::ios::binary);
-        if (!input)
-            throw std::runtime_error("Cannot open scene asset: " + path.string());
-        const std::vector<char> characters{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
-        std::vector<std::byte> bytes(characters.size());
-        std::ranges::transform(characters, bytes.begin(), [](const char value) { return std::byte(value); });
-        return bytes;
-    }
+    using KeireEditor::Detail::ReadBytes, KeireEditor::Detail::ReadSceneBytes;
 
     [[nodiscard]] Keire::Ref<Keire::Scene> RenderedScene(const Keire::Ref<Keire::Scene>& editing,
                                                          const Keire::Ref<Keire::SceneRuntimeSession>& play)
@@ -248,7 +238,7 @@ void EditorWorkspaceLayer::OpenScene(const Keire::AssetId asset)
         throw std::invalid_argument("Only .keirescene assets can be opened as scenes.");
     const auto source = m_AssetDatabase->Specification().ProjectRoot /
                         m_AssetDatabase->Specification().SourceDirectory / record->RelativePath;
-    const auto definition = Keire::SceneAsset::Decode(ReadBytes(source))->Definition();
+    const auto definition = Keire::SceneAsset::Decode(ReadSceneBytes(source))->Definition();
     auto scene = Keire::CreateRef<Keire::Scene>(asset, definition, Owner().Scenes()->Components());
     scene->MarkSaved();
     Keire::Ref<Keire::UndoContext> context;
@@ -726,8 +716,8 @@ bool EditorWorkspaceLayer::ProjectRequiresManagedRuntime() const noexcept
             continue;
         try
         {
-            const auto assembly =
-                Keire::ManagedAssemblyAsset::Decode(ReadBytes(project->Root() / "Assets" / record.RelativePath));
+            const auto assembly = Keire::ManagedAssemblyAsset::Decode(
+                ReadBytes(project->Root() / "Assets" / record.RelativePath, "managed assembly asset"));
             if (assembly->Definition().Classification != Keire::ManagedAssemblyClassification::Tests)
                 return true;
         }
@@ -1125,15 +1115,15 @@ void EditorWorkspaceLayer::InstantiateDroppedPrefab(const Keire::AssetId asset)
     if (!scene || !m_AssetDatabase || !Owner().GetProject())
         throw std::runtime_error("Open a scene before dropping a prefab.");
     const auto projectRoot = Owner().GetProject()->Root();
-    const auto composed = Keire::ComposePrefab(asset,
-                                               [&](const Keire::AssetId prefab)
-                                               {
-                                                   const auto record = m_AssetDatabase->Find(prefab);
-                                                   if (!record || record->Type != Keire::PrefabAsset::StaticType())
-                                                       return Keire::Ref<Keire::PrefabAsset>{};
-                                                   return Keire::PrefabAsset::Decode(
-                                                       ReadBytes(projectRoot / "Assets" / record->RelativePath));
-                                               });
+    const auto composed = Keire::ComposePrefab(
+        asset,
+        [&](const Keire::AssetId prefab)
+        {
+            const auto record = m_AssetDatabase->Find(prefab);
+            if (!record || record->Type != Keire::PrefabAsset::StaticType())
+                return Keire::Ref<Keire::PrefabAsset>{};
+            return Keire::PrefabAsset::Decode(ReadBytes(projectRoot / "Assets" / record->RelativePath, "prefab asset"));
+        });
     RecordSceneUndo("Instantiate Prefab");
     auto replacement = scene->Snapshot();
     const auto instance = KeireEditor::InstantiatePrefab(replacement, asset, composed);
@@ -1214,7 +1204,7 @@ void EditorWorkspaceLayer::AssignDroppedMaterial(const Keire::EntityId entity, c
     {
         const auto source = m_AssetDatabase->Specification().ProjectRoot /
                             m_AssetDatabase->Specification().SourceDirectory / record->RelativePath;
-        const auto material = Keire::MaterialAsset::DecodeSource(ReadBytes(source));
+        const auto material = Keire::MaterialAsset::DecodeSource(ReadBytes(source, "material asset"));
         if (const auto tint = material.Properties.find("Tint"); tint != material.Properties.end())
             if (const auto* color = std::get_if<Keire::Color>(&tint->second))
                 materialTint = *color;
@@ -1223,7 +1213,7 @@ void EditorWorkspaceLayer::AssignDroppedMaterial(const Keire::EntityId entity, c
     {
         const auto source = m_AssetDatabase->Specification().ProjectRoot /
                             m_AssetDatabase->Specification().SourceDirectory / record->RelativePath;
-        const auto graph = Keire::MaterialGraphAsset::DecodeSource(ReadBytes(source));
+        const auto graph = Keire::MaterialGraphAsset::DecodeSource(ReadBytes(source, "material graph asset"));
         const auto tint =
             std::ranges::find(graph.Properties, std::string_view("Tint"), &Keire::MaterialGraphPropertyBinding::Name);
         if (tint != graph.Properties.end())

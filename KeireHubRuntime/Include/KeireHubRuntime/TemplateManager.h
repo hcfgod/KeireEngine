@@ -3,6 +3,7 @@
 #include "KeireHubRuntime/CatalogModels.h"
 #include "KeireHubRuntime/HubError.h"
 #include "KeireHubRuntime/PackageResolver.h"
+#include "KeireHubRuntime/ProjectSchema.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -32,7 +33,7 @@ namespace KeireHub
         std::filesystem::path Destination;
         SemanticVersion EditorVersion;
         std::uint32_t EditorMinimumProjectSchema = 1;
-        std::uint32_t EditorMaximumProjectSchema = 3;
+        std::uint32_t EditorMaximumProjectSchema = CurrentProjectSchemaVersion;
         std::string PlatformTarget = "desktop";
         std::string HostPlatform;
         std::string HostArchitecture;

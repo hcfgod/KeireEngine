@@ -101,6 +101,7 @@ def _expected_manifest(files: dict[Path, Path]) -> dict[str, object]:
     return {
         "version": "1.2.0",
         "compatibleEditors": ">=0.3.0 <2.0.0",
+        "projectSchema": 4,
         "description": (
             "The complete Kéire production Sandbox with twelve paired Shader Graph and Material Graph examples, "
             "a curated VFX gallery, reusable gameplay scripts, rendering, physics, UI, audio, meshes, and textures."
@@ -118,6 +119,7 @@ def _expected_manifest(files: dict[Path, Path]) -> dict[str, object]:
         "defaultProjectConfiguration": {
             "startupScene": "85be2f8e-31eb-5971-bca9-e5dd6b3f4029",
             "defaultInput": "97b38693-6dc3-4f06-a228-44ba5786e8d1",
+            "defaultInputMap": "a6b6db76-6436-4aa4-b96a-a72a0f987101",
         },
         "starterContent": [
             "Assets/Scenes/SandboxShowcase.keirescene",

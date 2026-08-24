@@ -458,7 +458,8 @@ namespace KeireHub
             if (candidate.Id != request.TemplateId ||
                 (request.TemplateVersion && candidate.Version != *request.TemplateVersion))
                 continue;
-            if (candidate.ProjectSchema != 3 || candidate.ProjectSchema < request.EditorMinimumProjectSchema ||
+            if (candidate.ProjectSchema != CurrentProjectSchemaVersion ||
+                candidate.ProjectSchema < request.EditorMinimumProjectSchema ||
                 candidate.ProjectSchema > request.EditorMaximumProjectSchema ||
                 !candidate.CompatibleEditors.Matches(request.EditorVersion) ||
                 candidate.PlatformTarget != request.PlatformTarget)
@@ -620,7 +621,7 @@ namespace KeireHub
         }
 
         const auto editorVersion = request.EditorVersion.ToString();
-        Detail::Json descriptor{{"schemaVersion", 4},
+        Detail::Json descriptor{{"schemaVersion", CurrentProjectSchemaVersion},
                                 {"id", projectId.Value()},
                                 {"name", request.ProjectName},
                                 {"createdWithEngineVersion", editorVersion},

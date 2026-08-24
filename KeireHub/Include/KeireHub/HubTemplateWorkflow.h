@@ -28,7 +28,7 @@ namespace KeireHub
         std::string HostPlatform;
         std::string HostArchitecture;
         std::uint32_t MinimumProjectSchema = 1;
-        std::uint32_t MaximumProjectSchema = 3;
+        std::uint32_t MaximumProjectSchema = CurrentProjectSchemaVersion;
     };
 
     enum class HubTemplateCreationState

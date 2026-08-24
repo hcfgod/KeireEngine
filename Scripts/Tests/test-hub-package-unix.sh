@@ -14,6 +14,7 @@ grep -Fq 'validate_macos_macho_minimum "$stage" "$macos_deployment_target"' \
   "$ROOT/Scripts/Unix/package-hub.sh"
 grep -Fq '<key>LSMinimumSystemVersion</key>' "$ROOT/Scripts/Unix/package-hub.sh"
 grep -q 'write-package-manifest.py' "$ROOT/Scripts/Unix/package-hub.sh"
+grep -Fq -- '--project-schema-maximum 4' "$ROOT/Scripts/Unix/package-hub.sh"
 grep -q 'write-distribution-config.py' "$ROOT/Scripts/Unix/package-hub.sh"
 grep -q 'validate-supabase-config.py' "$ROOT/Scripts/Unix/package-hub.sh"
 grep -q 'libsodium' "$ROOT/Scripts/Unix/package-hub.sh"
@@ -81,6 +82,7 @@ assert manifest["schemaVersion"] == 2
 assert manifest["artifact"] == "hub"
 assert manifest["entrypoints"]["hub"] == "bin/Hub"
 assert manifest["entrypoints"]["worker"] == "bin/CoreHubWorker"
+assert manifest["projectSchema"] == {"minimum": 1, "maximum": 4}
 assert len(manifest["packagedTemplates"]) == 3
 assert "content/Content/en-US.json" in {entry["path"] for entry in manifest["files"]}
 assert "content/Licenses/catalog.json" in {entry["path"] for entry in manifest["files"]}

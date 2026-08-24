@@ -175,7 +175,7 @@ starter content, package requirements, and license references from the manifest.
 each healthy installed editor before the creation dialog offers a template/editor pair. Remote template download and
 update controls remain absent until template packages are connected to the persistent package-task pipeline.
 
-Creation stages only declared payload files, writes schema-3 project metadata, validates the staged project
+Creation stages only declared payload files, writes schema-4 project metadata, validates the staged project
 out-of-process with the selected editor's Asset Tool, and publishes atomically. Failures remove staging and leave an
 existing destination untouched. The creation dialog explicitly chooses whether to open the result in the selected
 editor. Validation observes Hub shutdown, terminates its child process promptly, and removes staging instead of making

@@ -73,6 +73,14 @@ namespace
     }
 } // namespace
 
+TEST_CASE("Project workflow schema support retains upgradeable schema three and accepts current schema four")
+{
+    CHECK_FALSE(IsProjectWorkflowSchemaSupported(MinimumProjectWorkflowSchemaVersion - 1));
+    CHECK(IsProjectWorkflowSchemaSupported(MinimumProjectWorkflowSchemaVersion));
+    CHECK(IsProjectWorkflowSchemaSupported(CurrentProjectSchemaVersion));
+    CHECK_FALSE(IsProjectWorkflowSchemaSupported(CurrentProjectSchemaVersion + 1));
+}
+
 TEST_CASE("Project workflow duplicates a clean staged project with a new identity")
 {
     KeireHubTests::TemporaryDirectory temporary;

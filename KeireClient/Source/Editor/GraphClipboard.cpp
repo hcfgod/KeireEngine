@@ -25,11 +25,6 @@ namespace KeireEditor
             return result;
         }
 
-        [[nodiscard]] std::string Text(const std::span<const std::byte> bytes)
-        {
-            return {reinterpret_cast<const char*>(bytes.data()), bytes.size()};
-        }
-
         [[nodiscard]] std::vector<Keire::AssetId> DecodeSelection(const Json& document)
         {
             const auto& encoded = document.at("selection");

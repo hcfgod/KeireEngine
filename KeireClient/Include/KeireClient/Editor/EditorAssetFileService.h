@@ -14,7 +14,9 @@ namespace KeireEditor
     namespace Detail
     {
         void RequireCompiledVfxSystems(const Keire::VfxEffectDefinition& definition, Keire::VfxBackend backend);
-        [[nodiscard]] std::vector<std::byte> ReadBytes(const std::filesystem::path& path);
+        [[nodiscard]] std::vector<std::byte> ReadBytes(const std::filesystem::path& path,
+                                                       std::string_view assetKind = "asset");
+        [[nodiscard]] std::vector<std::byte> ReadSceneBytes(const std::filesystem::path& path);
         [[nodiscard]] std::string FormatAssetDiagnostic(const Keire::AssetImportDiagnostic& diagnostic);
         void WriteBytesAtomically(const std::filesystem::path& path, std::span<const std::byte> bytes);
         [[nodiscard]] bool IsCSharpIdentifier(std::string_view value);

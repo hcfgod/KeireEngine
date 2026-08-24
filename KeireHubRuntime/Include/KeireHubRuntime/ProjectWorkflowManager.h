@@ -1,6 +1,7 @@
 #pragma once
 
 #include "KeireHubRuntime/HubProjectCatalog.h"
+#include "KeireHubRuntime/ProjectSchema.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -55,6 +56,7 @@ namespace KeireHub
         std::string CreatedAt;
         std::uint64_t AddedUnixSeconds = 0;
         std::optional<std::string> PreferredEditorInstallationId;
+        std::uint32_t SourceProjectSchemaVersion = 0;
     };
 
     enum class ProjectDuplicateStageState
@@ -75,8 +77,6 @@ namespace KeireHub
     class ProjectWorkflowManager final
     {
       public:
-        static constexpr std::uint32_t SupportedProjectSchema = 3;
-
         explicit ProjectWorkflowManager(HubProjectCatalog& catalog, ProjectWorkflowServices services = {});
 
         [[nodiscard]] HubResult<ProjectDuplicateResult> Duplicate(const ProjectDuplicateRequest& request);

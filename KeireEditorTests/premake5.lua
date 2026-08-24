@@ -19,6 +19,7 @@ project(ProjectConfig.PROJECT_NAMESPACE .. "EditorTests")
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/AuthoringValueEditors.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/AudioMixerDocument.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/ConsolePanel.cpp",
+        "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/EditorAssetFileService.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/EditorCommandRouter.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/EditorSessionState.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/EditorWindowPlacement.cpp",

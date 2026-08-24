@@ -22,21 +22,9 @@ project(AssetWorkerTarget)
     local commandRepositoryRoot = (_ACTION == "ninja" or _ACTION == "gmake") and "." or ".."
     local workerRuntimeDirectory =
         commandRepositoryRoot .. "/Build/Bin/" .. OutputDir .. "/" .. AssetWorkerTarget
-    local workerPrelinkStamp = commandRepositoryRoot .. "/Build/Intermediates/" .. IntermediateOutputDir .. "/" ..
-                                   AssetWorkerTarget .. "/" .. AssetWorkerTarget .. ".prelinkevents"
-    local function CopyWindowsRuntime(source)
-        local command = "powershell -NoProfile -ExecutionPolicy Bypass -File " .. commandRepositoryRoot ..
-                            "/Scripts/Windows/copy-files-if-changed.ps1 -SourceDirectory " .. source ..
-                            " -DestinationDirectory " .. workerRuntimeDirectory .. " -Filter *.dll"
-        if _ACTION == "ninja" then
-            command = command .. " && powershell -NoProfile -ExecutionPolicy Bypass -File " .. commandRepositoryRoot ..
-                          "/Scripts/Windows/touch-ninja-stamp.ps1 -Path " .. workerPrelinkStamp .. " && exit /b 0"
-        end
-        return command
-    end
     local function CopyUnixRuntime(source)
         return "bash " .. commandRepositoryRoot .. "/Scripts/Unix/copy-files-if-changed.sh " .. source .. " " ..
-                   workerRuntimeDirectory .. " '*'"
+                   workerRuntimeDirectory
     end
     if os.isdir(ffmpegDebug .. "/include") then
         filter { "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
@@ -47,10 +35,6 @@ project(AssetWorkerTarget)
 
         filter { "system:windows", "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
             libdirs { GeneratorRootPath(ffmpegDebug .. "/bin") }
-            prelinkcommands
-            {
-                CopyWindowsRuntime(commandRepositoryRoot .. "/Build/Dependencies/ffmpeg/Debug/install/bin")
-            }
 
         filter { "system:linux", "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
             linkoptions { "-Wl,-rpath,'$$ORIGIN'" }
@@ -78,10 +62,6 @@ project(AssetWorkerTarget)
 
         filter { "system:windows", "configurations:Release or Dist" }
             libdirs { GeneratorRootPath(ffmpegRelease .. "/bin") }
-            prelinkcommands
-            {
-                CopyWindowsRuntime(commandRepositoryRoot .. "/Build/Dependencies/ffmpeg/Release/install/bin")
-            }
 
         filter { "system:linux", "configurations:Release or Dist" }
             linkoptions { "-Wl,-rpath,'$$ORIGIN'" }

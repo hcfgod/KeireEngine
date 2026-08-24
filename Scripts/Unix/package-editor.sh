@@ -142,7 +142,7 @@ manifest_arguments=(
   --development-artifact "$development_artifact" --platform "$platform_name"
   --architecture "$(architecture_output_name "$ARCHITECTURE")" --configuration Dist
   --launcher launch-editor.sh --build-manifest build-manifest.json --bundled-dotnet-sdk "$dotnet_sdk"
-  --module-definition Config/SourceModules.premake.lua --project-schema-minimum 1 --project-schema-maximum 3
+  --module-definition Config/SourceModules.premake.lua --project-schema-minimum 1 --project-schema-maximum 4
   --entrypoint "editor=bin/$CLIENT_TARGET" --entrypoint "worker=bin/$hub_worker"
   --entrypoint "assetTool=bin/${PROJECT_NAMESPACE}AssetTool"
   --entrypoint "assetWorker=bin/${PROJECT_NAMESPACE}AssetWorker"

@@ -46,6 +46,7 @@ case "$GENERATOR" in
     gmake) printf '==> Building %s %s for %s with GNU Make\n' "$TARGET" "$CONFIGURATION" "$ARCHITECTURE"; make -j "$(build_parallel_jobs)" -C "$ROOT" "config=$(printf '%s' "$CONFIGURATION" | tr '[:upper:]' '[:lower:]')" "$TARGET" ;;
     *) printf "Unsupported build generator '%s'.\n" "$GENERATOR" >&2; exit 1 ;;
 esac
+stage_unix_asset_worker_runtime "$ROOT" "$CONFIGURATION" linux "$ARCHITECTURE" "$PROJECT_NAMESPACE" "$TARGET"
 if [[ "$GENERATOR" == ninja ]]; then
     while IFS= read -r managed_host_target; do
         bash "$ROOT/Scripts/Unix/stage-managed-host.sh" "$ROOT" "$CONFIGURATION" linux "$ARCHITECTURE" "$managed_host_target"
@@ -63,7 +64,7 @@ if [[ "$GENERATOR" == ninja && ( "$runtime_staging_target" == "$HUB_TARGET" || "
         printf 'The pinned marketplace signature verifier runtime is missing: %s\n' "$sodium_runtime" >&2
         exit 1
     }
-    generated_content_copy_file_if_changed "$sodium_runtime" "$target_directory/libsodium.so"
+    generated_content_copy_file_if_changed "$sodium_runtime" "$target_directory/libsodium.so" "$ROOT"
     printf '==> Staged pinned marketplace signature verifier for %s\n' "$runtime_staging_target"
 fi
 build_succeeded=1

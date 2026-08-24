@@ -2,6 +2,8 @@
 
 #include <doctest/doctest.h>
 
+#include <stdexcept>
+
 TEST_CASE("TimeStep exposes type-safe duration arithmetic")
 {
     const auto first = Keire::TimeStep::FromMilliseconds(250.0);

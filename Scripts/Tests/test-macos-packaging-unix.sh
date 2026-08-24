@@ -44,6 +44,10 @@ assert actual == {key: "true" for key in expected}
 PY
 
 assert_true grep -Fq 'systemversion(DependencyManifest.MacOSDeploymentTarget)' "$ROOT/premake5.lua"
+assert_true grep -Fq 'buildoptions { "-mmacosx-version-min=" .. DependencyManifest.MacOSDeploymentTarget }' \
+  "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -Fq 'linkoptions { "-mmacosx-version-min=" .. DependencyManifest.MacOSDeploymentTarget }' \
+  "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -Fq 'MacOSDeploymentTarget = "$macos_deployment_target"' \
   "$ROOT/Scripts/Unix/dependencies.sh"
 assert_true grep -Fq 'MacOSDeploymentTarget = "$($Lock.MACOS_DEPLOYMENT_TARGET)"' \
@@ -76,8 +80,10 @@ EOF
 cat > "$fixture/tools/vtool" <<'EOF'
 #!/usr/bin/env bash
 version=12.0
-[[ "$2" == *older* ]] && version=11.0
-[[ "$2" == *newer* ]] && version=13.0
+case "$2" in
+  */older) version=11.0 ;;
+  */newer) version=13.0 ;;
+esac
 printf 'Load command 0\n      cmd LC_BUILD_VERSION\n    minos %s\n' "$version"
 EOF
 chmod +x "$fixture/tools/file" "$fixture/tools/vtool"

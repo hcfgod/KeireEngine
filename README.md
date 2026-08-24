@@ -144,6 +144,13 @@ bash Scripts/project.sh test --generator ninja --configuration Debug --toolset c
 bash Scripts/project.sh run --generator ninja --configuration Debug --toolset clang
 ```
 
+The macOS bootstrap first compiles and runs a C++20 standard-library probe for `std::stop_token` and `std::jthread`,
+then installs the checksum-pinned .NET 10 SDK in the project tool cache and supplies the required Homebrew NASM and
+pkg-config tools plus ripgrep and a checksum-pinned pure-Python PyYAML module for repository validation. If the probe fails,
+install and select a newer full Xcode or Command Line Tools release; enabling
+libc++'s experimental feature macro is unsupported because Kéire requires its production ABI. A first local Homebrew
+installation may request administrator authorization.
+
 The launchers regenerate project files when required and start the Hub by default. Run `Scripts/project.bat` on
 Windows or `bash Scripts/project.sh` on Unix without a command to use the interactive menu.
 

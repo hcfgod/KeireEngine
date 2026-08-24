@@ -33,7 +33,8 @@ def patch_file(path: Path, cache: str) -> int:
             patched += 1
     updated = "".join(lines)
     if updated != original:
-        path.write_text(updated, encoding="utf-8", newline="")
+        with path.open("w", encoding="utf-8", newline="") as output:
+            output.write(updated)
     return patched
 
 

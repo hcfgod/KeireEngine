@@ -505,6 +505,7 @@ install_cmake
 install_ninja
 ensure_command pkg-config pkg-config
 ensure_command python3 python
+ensure_command rg ripgrep
 ensure_command bison bison
 ensure_command flex flex
 [[ "$ARCHITECTURE" == x86_64 ]] && install_nasm

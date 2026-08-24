@@ -1,5 +1,6 @@
 #include "KeireClient/Editor/AssetBrowserFolderCache.h"
 #include "KeireClient/Editor/AssetBrowserUtilities.h"
+#include "KeireClient/Editor/EditorAssetFileService.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
 #include "KeireClient/Editor/EditorPanels.h"
 #include "KeireClient/Editor/EditorRendererCapabilities.h"
@@ -2451,4 +2452,15 @@ TEST_CASE("Scene document views become inert after the underlying scene closes")
     CHECK_FALSE(document.EditingScene());
     CHECK_FALSE(document.Dirty());
     CHECK_NOTHROW(document.SynchronizeSelection());
+}
+
+TEST_CASE("Shared editor asset reads report generic and explicit asset kinds")
+{
+    const auto missing = std::filesystem::temp_directory_path() / "Keire-Missing-Editor-Asset.bin";
+    std::error_code error;
+    std::filesystem::remove(missing, error);
+    CHECK_THROWS_WITH_AS((void)KeireEditor::Detail::ReadBytes(missing), doctest::Contains("Cannot open asset:"),
+                         std::runtime_error);
+    CHECK_THROWS_WITH_AS((void)KeireEditor::Detail::ReadBytes(missing, "prefab asset"),
+                         doctest::Contains("Cannot open prefab asset:"), std::runtime_error);
 }
