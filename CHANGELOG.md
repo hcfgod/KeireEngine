@@ -17,6 +17,9 @@ versions.
 
 ### Fixed
 
+- Made managed `Vector2`, `Vector3`, `Vector4`, `Quaternion`, and `Color` interpolation deterministic and
+  component-only, preventing record-generated `ToString()` from recursively formatting self-typed computed properties
+  and overflowing the stack in logs.
 - Aligned Hub templates, closed-project maintenance workflows, and packaged editor compatibility with project schema 4
   while retaining rename and duplicate support for upgradeable schema-3 projects.
 - Staged Unix FFmpeg runtime link names alongside their versioned payloads so isolated asset workers can start without

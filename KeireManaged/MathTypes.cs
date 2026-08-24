@@ -1,5 +1,9 @@
+using System.Globalization;
+
 namespace Keire;
 
+// Record-generated formatting includes computed properties, so self-typed values such as Normalized would recurse.
+// Keep every managed math value's text representation explicit and component-only.
 public readonly record struct Vector2(float X, float Y)
 {
     public static Vector2 Zero => default;
@@ -14,6 +18,9 @@ public readonly record struct Vector2(float X, float Y)
     public static Vector2 operator *(Vector2 value, float scale) => new(value.X * scale, value.Y * scale);
     public static Vector2 operator *(float scale, Vector2 value) => value * scale;
     public static Vector2 operator /(Vector2 value, float scale) => new(value.X / scale, value.Y / scale);
+
+    public override string ToString() =>
+        string.Create(CultureInfo.InvariantCulture, $"Vector2 {{ X = {X}, Y = {Y} }}");
 }
 
 public readonly record struct Vector3(float X, float Y, float Z)
@@ -51,9 +58,16 @@ public readonly record struct Vector3(float X, float Y, float Z)
     public static Vector3 operator *(float scale, Vector3 value) => value * scale;
     public static Vector3 operator /(Vector3 value, float scale) =>
         new(value.X / scale, value.Y / scale, value.Z / scale);
+
+    public override string ToString() =>
+        string.Create(CultureInfo.InvariantCulture, $"Vector3 {{ X = {X}, Y = {Y}, Z = {Z} }}");
 }
 
-public readonly record struct Vector4(float X, float Y, float Z, float W);
+public readonly record struct Vector4(float X, float Y, float Z, float W)
+{
+    public override string ToString() =>
+        string.Create(CultureInfo.InvariantCulture, $"Vector4 {{ X = {X}, Y = {Y}, Z = {Z}, W = {W} }}");
+}
 
 public readonly record struct Quaternion(float X, float Y, float Z, float W)
 {
@@ -100,10 +114,17 @@ public readonly record struct Quaternion(float X, float Y, float Z, float W)
         Vector3 twiceCross = 2.0f * Vector3.Cross(vector, point);
         return point + (rotation.W * twiceCross) + Vector3.Cross(vector, twiceCross);
     }
+
+    public override string ToString() =>
+        string.Create(CultureInfo.InvariantCulture, $"Quaternion {{ X = {X}, Y = {Y}, Z = {Z}, W = {W} }}");
 }
 
 public readonly record struct Color(float Red, float Green, float Blue, float Alpha = 1.0f)
 {
     public static Color White => new(1.0f, 1.0f, 1.0f, 1.0f);
     public static Color RedColor => new(1.0f, 0.0f, 0.0f, 1.0f);
+
+    public override string ToString() => string.Create(
+        CultureInfo.InvariantCulture,
+        $"Color {{ Red = {Red}, Green = {Green}, Blue = {Blue}, Alpha = {Alpha} }}");
 }

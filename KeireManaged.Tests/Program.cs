@@ -12,6 +12,7 @@ var tests = new (string Name, Action Run)[]
     ("Entity exposes the production layer contract", EntityLayerContract),
     ("Behaviour lifecycle contracts are synchronized", BehaviourLifecycleContract),
     ("Managed state ignores computed math properties", ManagedStateMathContract),
+    ("Managed math values format without recursive computed properties", ManagedMathFormattingContract),
     ("Coroutines schedule phases and dispose deterministically", CoroutineContract),
     ("Transform and rigid body components expose writable runtime state", GameplayHandleContract),
     ("Animator exposes transient foot-grounding control", AnimatorFootGroundingContract),
@@ -28,6 +29,42 @@ var tests = new (string Name, Action Run)[]
     ("Player preferences persist typed values atomically", PlayerPreferencesPersistenceContract),
     ("Player preferences reject invalid and corrupt data", PlayerPreferencesValidationContract),
 };
+
+static void ManagedMathFormattingContract()
+{
+    System.Globalization.CultureInfo previousCulture = System.Globalization.CultureInfo.CurrentCulture;
+    NativeLogFixture.Install();
+    try
+    {
+        System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.GetCultureInfo("fr-FR");
+
+        Assert($"Position: {new Keire.Vector2(1.25f, -2.5f)}" ==
+                   "Position: Vector2 { X = 1.25, Y = -2.5 }",
+               "Vector2 interpolation must format only its stored components without recursing through Normalized.");
+        Assert(new Keire.Vector3(1.25f, -2.5f, 3.75f).ToString() ==
+                   "Vector3 { X = 1.25, Y = -2.5, Z = 3.75 }",
+               "Vector3 formatting must omit its self-typed Normalized property.");
+        Assert(new Keire.Vector4(1.25f, -2.5f, 3.75f, -4.5f).ToString() ==
+                   "Vector4 { X = 1.25, Y = -2.5, Z = 3.75, W = -4.5 }",
+               "Vector4 formatting must remain component-only and culture-invariant.");
+        Assert(new Keire.Quaternion(0.25f, -0.5f, 0.75f, 1.0f).ToString() ==
+                   "Quaternion { X = 0.25, Y = -0.5, Z = 0.75, W = 1 }",
+               "Quaternion formatting must omit its self-typed Normalized property.");
+        Assert(new Keire.Color(0.1f, 0.2f, 0.3f, 0.4f).ToString() ==
+                   "Color { Red = 0.1, Green = 0.2, Blue = 0.3, Alpha = 0.4 }",
+               "Color formatting must remain component-only and culture-invariant.");
+
+        Keire.Log.Info($"Position: {new Keire.Vector2(1.25f, -2.5f)}");
+        Keire.Debug.Log(new Keire.Vector2(1.25f, -2.5f));
+        Assert(NativeLogFixture.WriteCount == 2,
+               "Interpolated and object-based Vector2 logging must both reach the native log without recursion.");
+    }
+    finally
+    {
+        NativeLogFixture.Uninstall();
+        System.Globalization.CultureInfo.CurrentCulture = previousCulture;
+    }
+}
 
 static void UnityShapedObjectApiContract()
 {
