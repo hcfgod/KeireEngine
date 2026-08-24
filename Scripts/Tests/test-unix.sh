@@ -28,6 +28,42 @@ sha256_file() {
 
 load_project_config "$ROOT"
 if [[ $run_fast -eq 1 ]]; then
+workspace_lock_fixture="$(mktemp -d)"
+export KEIRE_WORKSPACE_LOCK_TIMEOUT_SECONDS=1
+export KEIRE_WORKSPACE_LOCK_STALE_SECONDS=10
+export KEIRE_WORKSPACE_LOCK_HEARTBEAT_SECONDS=1
+workspace_lock_acquire "$workspace_lock_fixture" first
+assert_equal "$KEIRE_WORKSPACE_LOCK_OWNED" 1 'initial Unix workspace lock acquisition'
+assert_equal "$(workspace_lock_owner_value "$KEIRE_WORKSPACE_LOCK_PATH" platform)" unix \
+  'Unix workspace lock protocol metadata'
+(
+  workspace_lock_acquire "$workspace_lock_fixture" nested
+  assert_equal "$KEIRE_WORKSPACE_LOCK_OWNED" 0 'inherited Unix workspace lock reentry'
+  workspace_lock_release
+)
+set +e
+(
+  unset KEIRE_WORKSPACE_LOCK_TOKEN
+  workspace_lock_acquire "$workspace_lock_fixture" contender
+) >/dev/null 2>&1
+workspace_lock_contender_status=$?
+set -e
+assert_equal "$workspace_lock_contender_status" 1 'concurrent Unix workspace lock timeout'
+workspace_lock_release
+workspace_lock_stale="$workspace_lock_fixture/Tools/.locks/project-command.lock"
+mkdir "$workspace_lock_stale"
+printf '%s\n' token=expired platform=windows pid=123 host=fixture command=test started=expired > \
+  "$workspace_lock_stale/owner"
+: > "$workspace_lock_stale/heartbeat"
+python3 -c 'import os, sys, time; os.utime(sys.argv[1], (time.time() - 20, time.time() - 20))' \
+  "$workspace_lock_stale/heartbeat"
+workspace_lock_acquire "$workspace_lock_fixture" recovery
+assert_equal "$KEIRE_WORKSPACE_LOCK_OWNED" 1 'expired cross-platform workspace lock recovery'
+workspace_lock_release
+assert_false test -e "$workspace_lock_stale"
+rm -rf "$workspace_lock_fixture"
+unset KEIRE_WORKSPACE_LOCK_TIMEOUT_SECONDS KEIRE_WORKSPACE_LOCK_STALE_SECONDS \
+  KEIRE_WORKSPACE_LOCK_HEARTBEAT_SECONDS
 assert_false grep -R -E -q 'declare[[:space:]]+-A|local[[:space:]]+-A' \
   "$ROOT/Scripts/Unix" "$ROOT/Scripts/Linux" "$ROOT/Scripts/Mac"
 python3 "$ROOT/Scripts/Tests/check-repository-layout.py"
@@ -158,6 +194,8 @@ load_project_config() { PROJECT_IDENTIFIER=ExitFixture; CLIENT_TARGET=Client; }
 resolve_unix_toolset() { printf '%s' "$2"; }
 validate_unix_combination() { :; }
 normalize_configuration() { printf '%s' "$1"; }
+workspace_lock_acquire() { :; }
+workspace_lock_release() { :; }
 EOF
 printf '%s\n' '#!/usr/bin/env bash' 'exit 23' > "$launcher_fixture/Scripts/Linux/test.sh"
 chmod +x "$launcher_fixture/Scripts/Linux/test.sh"

@@ -1,5 +1,157 @@
 #!/usr/bin/env bash
 
+workspace_lock_setting() {
+    local name="${1:?setting name is required}" default="${2:?default is required}" minimum="${3:?minimum is required}"
+    local value="${!name:-$default}"
+    [[ "$value" =~ ^[0-9]+$ && "$value" -ge "$minimum" ]] || {
+        printf '%s must be an integer greater than or equal to %s.\n' "$name" "$minimum" >&2
+        return 1
+    }
+    printf '%s\n' "$value"
+}
+
+workspace_lock_mtime() {
+    local path="${1:?path is required}"
+    stat -c %Y "$path" 2>/dev/null || stat -f %m "$path"
+}
+
+workspace_lock_owner_value() {
+    local lock="${1:?lock is required}" key="${2:?key is required}" line
+    [[ -f "$lock/owner" ]] || return 0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%$'\r'}"
+        [[ "$line" == "$key="* ]] && { printf '%s\n' "${line#*=}"; return 0; }
+    done < "$lock/owner"
+}
+
+workspace_lock_remove_stale() {
+    local lock="${1:?lock is required}" quarantine="${2:?quarantine is required}"
+    mv "$lock" "$quarantine" || return 1
+    rm -f "$quarantine/owner" "$quarantine/heartbeat"
+    if ! rmdir "$quarantine"; then
+        printf "The stale workspace lock contains unexpected files. Inspect and remove '%s' manually.\n" "$quarantine" >&2
+        return 2
+    fi
+}
+
+workspace_lock_acquire() {
+    local root="${1:?repository root is required}" command_name="${2:?command name is required}"
+    local timeout_seconds stale_seconds heartbeat_seconds lock_parent lock inherited_token existing_token
+    local token deadline reported_wait=0 owner_host owner_platform owner_pid owner_command owner_started
+    local heartbeat lease first_write second_write now quarantine safe_command safe_host owner_temporary
+    timeout_seconds="$(workspace_lock_setting KEIRE_WORKSPACE_LOCK_TIMEOUT_SECONDS 7200 1)" || return 1
+    stale_seconds="$(workspace_lock_setting KEIRE_WORKSPACE_LOCK_STALE_SECONDS 300 10)" || return 1
+    heartbeat_seconds="$(workspace_lock_setting KEIRE_WORKSPACE_LOCK_HEARTBEAT_SECONDS 5 1)" || return 1
+    ((heartbeat_seconds * 3 < stale_seconds)) || {
+        printf '%s\n' 'KEIRE_WORKSPACE_LOCK_STALE_SECONDS must be more than three heartbeat intervals.' >&2
+        return 1
+    }
+
+    lock_parent="$root/Tools/.locks"
+    lock="$lock_parent/project-command.lock"
+    mkdir -p "$lock_parent"
+    inherited_token="${KEIRE_WORKSPACE_LOCK_TOKEN:-}"
+    if [[ -d "$lock" ]]; then
+        existing_token="$(workspace_lock_owner_value "$lock" token)"
+        if [[ -n "$inherited_token" && "$existing_token" == "$inherited_token" ]]; then
+            KEIRE_WORKSPACE_LOCK_OWNED=0
+            KEIRE_WORKSPACE_LOCK_PATH="$lock"
+            return 0
+        fi
+    fi
+
+    token="unix-$$-$RANDOM-$RANDOM"
+    deadline=$(($(date +%s) + timeout_seconds))
+    while ! mkdir "$lock" 2>/dev/null; do
+        [[ -d "$lock" ]] || {
+            printf "Workspace lock path is not a directory: '%s'. Remove it manually after confirming no project command is running.\n" "$lock" >&2
+            return 1
+        }
+        if [[ $reported_wait -eq 0 ]]; then
+            owner_host="$(workspace_lock_owner_value "$lock" host)"
+            owner_platform="$(workspace_lock_owner_value "$lock" platform)"
+            owner_pid="$(workspace_lock_owner_value "$lock" pid)"
+            owner_command="$(workspace_lock_owner_value "$lock" command)"
+            owner_started="$(workspace_lock_owner_value "$lock" started)"
+            printf '==> Waiting for another Kéire project command (host=%s, platform=%s, pid=%s, command=%s, started=%s).\n' \
+                "$owner_host" "$owner_platform" "$owner_pid" "$owner_command" "$owner_started"
+            printf '    Shared workspace lock: %s\n' "$lock"
+            reported_wait=1
+        fi
+        heartbeat="$lock/heartbeat"
+        [[ -f "$heartbeat" ]] && lease="$heartbeat" || lease="$lock"
+        first_write="$(workspace_lock_mtime "$lease")" || return 1
+        now="$(date +%s)"
+        if ((now - first_write >= stale_seconds)); then
+            sleep 0.25
+            if [[ -e "$lease" ]]; then
+                second_write="$(workspace_lock_mtime "$lease")" || return 1
+                now="$(date +%s)"
+                if [[ "$second_write" == "$first_write" && $((now - second_write)) -ge $stale_seconds ]]; then
+                    quarantine="$lock.stale.$token"
+                    if workspace_lock_remove_stale "$lock" "$quarantine"; then
+                        printf '%s\n' '==> Recovered expired Kéire workspace lock.'
+                        continue
+                    elif [[ $? -eq 2 ]]; then
+                        return 1
+                    fi
+                fi
+            fi
+        fi
+        if (($(date +%s) >= deadline)); then
+            printf "Timed out after %s seconds waiting for '%s'. Confirm the reported owner is no longer running before removing the lock.\n" \
+                "$timeout_seconds" "$lock" >&2
+            return 1
+        fi
+        sleep 0.25
+    done
+
+    safe_command="$(printf '%s' "$command_name" | tr '\r\n=' '___')"
+    safe_host="$(hostname 2>/dev/null | tr '\r\n=' '___')"
+    owner_temporary="$lock/owner.tmp.$token"
+    if ! printf 'token=%s\nplatform=unix\npid=%s\nhost=%s\ncommand=%s\nstarted=%s\n' \
+        "$token" "$$" "$safe_host" "$safe_command" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$owner_temporary" || \
+       ! mv "$owner_temporary" "$lock/owner" || ! : > "$lock/heartbeat"; then
+        rm -f "$owner_temporary" "$lock/owner" "$lock/heartbeat"
+        rmdir "$lock" 2>/dev/null || true
+        return 1
+    fi
+    KEIRE_WORKSPACE_LOCK_PREVIOUS_TOKEN="$inherited_token"
+    KEIRE_WORKSPACE_LOCK_TOKEN="$token"
+    export KEIRE_WORKSPACE_LOCK_TOKEN
+    KEIRE_WORKSPACE_LOCK_PATH="$lock"
+    KEIRE_WORKSPACE_LOCK_OWNED=1
+    (
+        while true; do
+            sleep "$heartbeat_seconds"
+            [[ -f "$lock/owner" ]] || break
+            IFS= read -r existing_token < "$lock/owner" || break
+            [[ "$existing_token" == "token=$token" ]] || break
+            touch "$lock/heartbeat" || break
+        done
+    ) &
+    KEIRE_WORKSPACE_LOCK_HEARTBEAT_PID=$!
+}
+
+workspace_lock_release() {
+    [[ "${KEIRE_WORKSPACE_LOCK_OWNED:-0}" -eq 1 ]] || return 0
+    kill "${KEIRE_WORKSPACE_LOCK_HEARTBEAT_PID:-0}" 2>/dev/null || true
+    wait "${KEIRE_WORKSPACE_LOCK_HEARTBEAT_PID:-0}" 2>/dev/null || true
+    local existing_token=""
+    existing_token="$(workspace_lock_owner_value "$KEIRE_WORKSPACE_LOCK_PATH" token)"
+    if [[ "$existing_token" == "$KEIRE_WORKSPACE_LOCK_TOKEN" ]]; then
+        rm -f "$KEIRE_WORKSPACE_LOCK_PATH/heartbeat" "$KEIRE_WORKSPACE_LOCK_PATH/owner"
+        rmdir "$KEIRE_WORKSPACE_LOCK_PATH" 2>/dev/null || true
+    fi
+    if [[ -n "${KEIRE_WORKSPACE_LOCK_PREVIOUS_TOKEN:-}" ]]; then
+        KEIRE_WORKSPACE_LOCK_TOKEN="$KEIRE_WORKSPACE_LOCK_PREVIOUS_TOKEN"
+        export KEIRE_WORKSPACE_LOCK_TOKEN
+    else
+        unset KEIRE_WORKSPACE_LOCK_TOKEN
+    fi
+    KEIRE_WORKSPACE_LOCK_OWNED=0
+}
+
 config_value() {
     local file="$1" key="$2" line prefix
     prefix="$key="

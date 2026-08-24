@@ -1,5 +1,184 @@
 $ErrorActionPreference = "Stop"
 
+function Get-KeireWorkspaceLockSetting {
+    param([string]$Name, [int]$Default, [int]$Minimum)
+
+    $text = [Environment]::GetEnvironmentVariable($Name)
+    if ([string]::IsNullOrWhiteSpace($text)) { return $Default }
+    $value = 0
+    if (-not [int]::TryParse($text, [ref]$value) -or $value -lt $Minimum) {
+        throw "$Name must be an integer greater than or equal to $Minimum."
+    }
+    return $value
+}
+
+function Get-KeireWorkspaceLockOwner {
+    param([Parameter(Mandatory = $true)][string]$LockPath)
+
+    $values = @{}
+    $ownerPath = Join-Path $LockPath "owner"
+    if (-not (Test-Path -LiteralPath $ownerPath -PathType Leaf)) { return $values }
+    foreach ($line in Get-Content -LiteralPath $ownerPath -Encoding UTF8 -ErrorAction SilentlyContinue) {
+        if ($line -match '^([a-z]+)=(.*)$') { $values[$Matches[1]] = $Matches[2] }
+    }
+    return $values
+}
+
+function Remove-KeireStaleWorkspaceLock {
+    param(
+        [Parameter(Mandatory = $true)][string]$LockPath,
+        [Parameter(Mandatory = $true)][string]$QuarantinePath
+    )
+
+    try {
+        Move-Item -LiteralPath $LockPath -Destination $QuarantinePath -ErrorAction Stop
+    }
+    catch {
+        return $false
+    }
+    foreach ($name in @("owner", "heartbeat")) {
+        Remove-Item -LiteralPath (Join-Path $QuarantinePath $name) -Force -ErrorAction SilentlyContinue
+    }
+    try {
+        Remove-Item -LiteralPath $QuarantinePath -Force -ErrorAction Stop
+    }
+    catch {
+        throw "The stale workspace lock contains unexpected files. Inspect and remove '$QuarantinePath' manually."
+    }
+    return $true
+}
+
+function Enter-KeireWorkspaceLock {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepositoryRoot,
+        [Parameter(Mandatory = $true)][string]$CommandName
+    )
+
+    $timeoutSeconds = Get-KeireWorkspaceLockSetting "KEIRE_WORKSPACE_LOCK_TIMEOUT_SECONDS" 7200 1
+    $staleSeconds = Get-KeireWorkspaceLockSetting "KEIRE_WORKSPACE_LOCK_STALE_SECONDS" 300 10
+    $heartbeatSeconds = Get-KeireWorkspaceLockSetting "KEIRE_WORKSPACE_LOCK_HEARTBEAT_SECONDS" 5 1
+    if ($heartbeatSeconds * 3 -ge $staleSeconds) {
+        throw "KEIRE_WORKSPACE_LOCK_STALE_SECONDS must be more than three heartbeat intervals."
+    }
+
+    $lockParent = Join-Path $RepositoryRoot "Tools\.locks"
+    $lockPath = Join-Path $lockParent "project-command.lock"
+    New-Item -ItemType Directory -Force -Path $lockParent | Out-Null
+
+    $inheritedToken = [Environment]::GetEnvironmentVariable("KEIRE_WORKSPACE_LOCK_TOKEN")
+    if (Test-Path -LiteralPath $lockPath -PathType Container) {
+        $existingOwner = Get-KeireWorkspaceLockOwner -LockPath $lockPath
+        if ($inheritedToken -and $existingOwner.token -eq $inheritedToken) {
+            return [pscustomobject]@{ Acquired = $false; Path = $lockPath; Token = $inheritedToken; Job = $null; PreviousToken = $inheritedToken }
+        }
+    }
+
+    $token = [Guid]::NewGuid().ToString("N")
+    $deadline = [DateTime]::UtcNow.AddSeconds($timeoutSeconds)
+    $reportedWait = $false
+    while ($true) {
+        try {
+            New-Item -ItemType Directory -Path $lockPath -ErrorAction Stop | Out-Null
+            break
+        }
+        catch [System.IO.IOException] {}
+        catch [System.UnauthorizedAccessException] {}
+
+        if (-not (Test-Path -LiteralPath $lockPath -PathType Container)) {
+            throw "Workspace lock path is not a directory: '$lockPath'. Remove it manually after confirming no project command is running."
+        }
+
+        $owner = Get-KeireWorkspaceLockOwner -LockPath $lockPath
+        if (-not $reportedWait) {
+            $summary = "host=$($owner.host), platform=$($owner.platform), pid=$($owner.pid), command=$($owner.command), started=$($owner.started)"
+            Write-Host "==> Waiting for another Kéire project command ($summary)."
+            Write-Host "    Shared workspace lock: $lockPath"
+            $reportedWait = $true
+        }
+
+        $heartbeatPath = Join-Path $lockPath "heartbeat"
+        $leasePath = if (Test-Path -LiteralPath $heartbeatPath -PathType Leaf) { $heartbeatPath } else { $lockPath }
+        $firstWrite = (Get-Item -LiteralPath $leasePath -Force).LastWriteTimeUtc
+        if (([DateTime]::UtcNow - $firstWrite).TotalSeconds -ge $staleSeconds) {
+            Start-Sleep -Milliseconds 250
+            if (Test-Path -LiteralPath $leasePath) {
+                $secondWrite = (Get-Item -LiteralPath $leasePath -Force).LastWriteTimeUtc
+                if ($secondWrite -eq $firstWrite -and ([DateTime]::UtcNow - $secondWrite).TotalSeconds -ge $staleSeconds) {
+                    $quarantinePath = "$lockPath.stale.$token"
+                    if (Remove-KeireStaleWorkspaceLock -LockPath $lockPath -QuarantinePath $quarantinePath) {
+                        Write-Host "==> Recovered expired Kéire workspace lock."
+                        continue
+                    }
+                }
+            }
+        }
+
+        if ([DateTime]::UtcNow -ge $deadline) {
+            throw "Timed out after $timeoutSeconds seconds waiting for '$lockPath'. Confirm the reported owner is no longer running before removing the lock."
+        }
+        Start-Sleep -Milliseconds 250
+    }
+
+    $safeCommand = ($CommandName -replace '[\r\n=]', '_')
+    $safeHost = ([Environment]::MachineName -replace '[\r\n=]', '_')
+    $ownerPath = Join-Path $lockPath "owner"
+    $ownerTemporary = Join-Path $lockPath "owner.tmp.$token"
+    $heartbeatPath = Join-Path $lockPath "heartbeat"
+    $heartbeatJob = $null
+    $previousToken = $inheritedToken
+    try {
+        $ownerText = "token=$token`nplatform=windows`npid=$PID`nhost=$safeHost`ncommand=$safeCommand`nstarted=$([DateTime]::UtcNow.ToString('o'))`n"
+        [IO.File]::WriteAllText($ownerTemporary, $ownerText, [Text.UTF8Encoding]::new($false))
+        Move-Item -LiteralPath $ownerTemporary -Destination $ownerPath
+        [IO.File]::WriteAllText($heartbeatPath, "", [Text.UTF8Encoding]::new($false))
+        [Environment]::SetEnvironmentVariable("KEIRE_WORKSPACE_LOCK_TOKEN", $token)
+
+        $heartbeatJob = Start-Job -ScriptBlock {
+            param($LockPath, $Token, $IntervalSeconds)
+            $ownerPath = Join-Path $LockPath "owner"
+            $heartbeatPath = Join-Path $LockPath "heartbeat"
+            while ($true) {
+                Start-Sleep -Seconds $IntervalSeconds
+                if (-not (Test-Path -LiteralPath $ownerPath -PathType Leaf)) { break }
+                $firstLine = Get-Content -LiteralPath $ownerPath -Encoding UTF8 -TotalCount 1 -ErrorAction SilentlyContinue
+                if ($firstLine -ne "token=$Token") { break }
+                try { [IO.File]::SetLastWriteTimeUtc($heartbeatPath, [DateTime]::UtcNow) } catch { break }
+            }
+        } -ArgumentList $lockPath, $token, $heartbeatSeconds
+    }
+    catch {
+        if ($heartbeatJob) {
+            Stop-Job -Job $heartbeatJob -ErrorAction SilentlyContinue
+            Remove-Job -Job $heartbeatJob -Force -ErrorAction SilentlyContinue
+        }
+        [Environment]::SetEnvironmentVariable("KEIRE_WORKSPACE_LOCK_TOKEN", $previousToken)
+        foreach ($path in @($ownerTemporary, $heartbeatPath, $ownerPath)) {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        }
+        Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+        throw
+    }
+
+    return [pscustomobject]@{ Acquired = $true; Path = $lockPath; Token = $token; Job = $heartbeatJob; PreviousToken = $previousToken }
+}
+
+function Exit-KeireWorkspaceLock {
+    param([Parameter(Mandatory = $true)]$Lock)
+
+    if (-not $Lock.Acquired) { return }
+    if ($Lock.Job) {
+        Stop-Job -Job $Lock.Job -ErrorAction SilentlyContinue
+        Remove-Job -Job $Lock.Job -Force -ErrorAction SilentlyContinue
+    }
+    $owner = Get-KeireWorkspaceLockOwner -LockPath $Lock.Path
+    if ($owner.token -eq $Lock.Token) {
+        Remove-Item -LiteralPath (Join-Path $Lock.Path "heartbeat") -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath (Join-Path $Lock.Path "owner") -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $Lock.Path -Force -ErrorAction SilentlyContinue
+    }
+    [Environment]::SetEnvironmentVariable("KEIRE_WORKSPACE_LOCK_TOKEN", $Lock.PreviousToken)
+}
+
 function Read-KeyValueFile {
     param([string]$Path)
     $values = @{}

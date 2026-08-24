@@ -54,6 +54,55 @@ if ($storePython -and $pythonLauncher -and $storePython.Source -like "*\Microsof
     Assert-Equal ([IO.Path]::GetFileName($python.Executable)) "py.exe" "Microsoft Store Python alias rejection"
 }
 if ($runFast) {
+$workspaceLockFixture = Join-Path ([IO.Path]::GetTempPath()) ("keire-workspace-lock-" + [guid]::NewGuid().ToString("N"))
+$savedWorkspaceLockToken = $env:KEIRE_WORKSPACE_LOCK_TOKEN
+$savedWorkspaceLockTimeout = $env:KEIRE_WORKSPACE_LOCK_TIMEOUT_SECONDS
+$savedWorkspaceLockStale = $env:KEIRE_WORKSPACE_LOCK_STALE_SECONDS
+$savedWorkspaceLockHeartbeat = $env:KEIRE_WORKSPACE_LOCK_HEARTBEAT_SECONDS
+$workspaceLock = $null
+try {
+    New-Item -ItemType Directory -Force $workspaceLockFixture | Out-Null
+    $env:KEIRE_WORKSPACE_LOCK_TIMEOUT_SECONDS = "1"
+    $env:KEIRE_WORKSPACE_LOCK_STALE_SECONDS = "10"
+    $env:KEIRE_WORKSPACE_LOCK_HEARTBEAT_SECONDS = "1"
+    $workspaceLock = Enter-KeireWorkspaceLock -RepositoryRoot $workspaceLockFixture -CommandName "first"
+    Assert-True $workspaceLock.Acquired "Initial Windows workspace lock acquisition"
+    $owner = Get-KeireWorkspaceLockOwner -LockPath $workspaceLock.Path
+    Assert-Equal $owner.platform "windows" "Windows workspace lock protocol metadata"
+    $nestedLock = Enter-KeireWorkspaceLock -RepositoryRoot $workspaceLockFixture -CommandName "nested"
+    Assert-True (-not $nestedLock.Acquired) "Inherited Windows workspace lock reentry"
+    Exit-KeireWorkspaceLock -Lock $nestedLock
+
+    $activeToken = $env:KEIRE_WORKSPACE_LOCK_TOKEN
+    $env:KEIRE_WORKSPACE_LOCK_TOKEN = $null
+    Assert-Throws {
+        Enter-KeireWorkspaceLock -RepositoryRoot $workspaceLockFixture -CommandName "contender"
+    } "Concurrent Windows workspace lock timeout"
+    $env:KEIRE_WORKSPACE_LOCK_TOKEN = $activeToken
+    Exit-KeireWorkspaceLock -Lock $workspaceLock
+    $workspaceLock = $null
+
+    $stalePath = Join-Path $workspaceLockFixture "Tools\.locks\project-command.lock"
+    New-Item -ItemType Directory -Force $stalePath | Out-Null
+    [IO.File]::WriteAllText((Join-Path $stalePath "owner"),
+        "token=expired`nplatform=unix`npid=123`nhost=fixture`ncommand=test`nstarted=expired`n",
+        [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText((Join-Path $stalePath "heartbeat"), "", [Text.UTF8Encoding]::new($false))
+    [IO.File]::SetLastWriteTimeUtc((Join-Path $stalePath "heartbeat"), [DateTime]::UtcNow.AddSeconds(-20))
+    $workspaceLock = Enter-KeireWorkspaceLock -RepositoryRoot $workspaceLockFixture -CommandName "recovery"
+    Assert-True $workspaceLock.Acquired "Expired cross-platform workspace lock recovery"
+    Exit-KeireWorkspaceLock -Lock $workspaceLock
+    $workspaceLock = $null
+    Assert-True (-not (Test-Path -LiteralPath $stalePath)) "Windows workspace lock release"
+}
+finally {
+    if ($workspaceLock) { Exit-KeireWorkspaceLock -Lock $workspaceLock }
+    $env:KEIRE_WORKSPACE_LOCK_TOKEN = $savedWorkspaceLockToken
+    $env:KEIRE_WORKSPACE_LOCK_TIMEOUT_SECONDS = $savedWorkspaceLockTimeout
+    $env:KEIRE_WORKSPACE_LOCK_STALE_SECONDS = $savedWorkspaceLockStale
+    $env:KEIRE_WORKSPACE_LOCK_HEARTBEAT_SECONDS = $savedWorkspaceLockHeartbeat
+    Remove-Item $workspaceLockFixture -Recurse -Force -ErrorAction SilentlyContinue
+}
 & $python.Executable @($python.PrefixArguments) (Join-Path $PSScriptRoot "check-repository-layout.py")
 if ($LASTEXITCODE -ne 0) { throw "Repository layout checks failed." }
 & (Join-Path $PSScriptRoot "test-generated-content-cache-windows.ps1")
@@ -190,6 +239,9 @@ function Get-ProjectConfig {
     return [pscustomobject]@{ CLIENT_TARGET = "Client"; PROJECT_IDENTIFIER = "ExitFixture" }
 }
 function Normalize-Architecture([string]$Architecture) { return "x86_64" }
+function Get-RepositoryRoot { return (Resolve-Path (Join-Path $PSScriptRoot "..\..")) }
+function Enter-KeireWorkspaceLock { return [pscustomobject]@{ Acquired = $false } }
+function Exit-KeireWorkspaceLock {}
 '@ | Set-Content (Join-Path $launcherFixture "Scripts\Windows\common.ps1") -Encoding UTF8
     'exit 23' | Set-Content (Join-Path $launcherFixture "Scripts\Windows\test.ps1") -Encoding ASCII
     $launcher = Start-Process -FilePath (Get-Command powershell.exe).Source -ArgumentList @(

@@ -93,6 +93,10 @@ run_command() {
     [[ $UPDATE -eq 1 ]] && common+=(--update)
     [[ $FORCE -eq 1 ]] && common+=(--force)
     [[ $PROFILE_BUILD -eq 1 ]] && common+=(--profile-build)
+    if [[ "$1" != help ]]; then
+        workspace_lock_acquire "$ROOT" "$1"
+        trap 'workspace_lock_release' EXIT
+    fi
     case "$1" in
         bootstrap)
             [[ $INSTALL_OPTIONAL -eq 1 ]] && common+=(--install-optional)
@@ -139,6 +143,12 @@ run_command() {
         help) show_help ;;
         *) printf "Unknown command '%s'.\n" "$1" >&2; return 1 ;;
     esac
+    local command_status=$?
+    if [[ "$1" != help ]]; then
+        workspace_lock_release
+        trap - EXIT
+    fi
+    return "$command_status"
 }
 
 show_help() {

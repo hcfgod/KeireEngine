@@ -67,7 +67,12 @@ function Invoke-CheckedCommand {
 
 function Invoke-ProjectCommand {
     param([string]$SelectedCommand)
-    switch ($SelectedCommand) {
+    $workspaceLock = $null
+    if ($SelectedCommand -ne "help") {
+        $workspaceLock = Enter-KeireWorkspaceLock -RepositoryRoot (Get-RepositoryRoot) -CommandName $SelectedCommand
+    }
+    try {
+        switch ($SelectedCommand) {
         "bootstrap" {
             Invoke-CheckedCommand {
                 & (Join-Path $WindowsScripts "bootstrap.ps1") -Generators @($Generator) -Architecture $Architecture `
@@ -165,6 +170,10 @@ function Invoke-ProjectCommand {
             } "Vendor update"
         }
         "help" { Show-Help }
+        }
+    }
+    finally {
+        if ($workspaceLock) { Exit-KeireWorkspaceLock -Lock $workspaceLock }
     }
 }
 
