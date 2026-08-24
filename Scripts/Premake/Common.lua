@@ -208,6 +208,12 @@ function ApplyCommonProjectSettings(repositoryRoot)
     objdir (repositoryRoot .. "/Build/Intermediates/" .. OutputDir .. "/%{prj.name}")
     debugdir (repositoryRoot)
 
+    -- Premake's Ninja backend prefixes a nested project's location twice when it resolves that project's PCH
+    -- input. Keep the forced include below each PCH-owning project, but compile it as a normal header on Unix
+    -- Ninja builds so the generated graph never refers to paths such as KeireCore/KeireCore/Include/....
+    filter { "action:ninja", "system:linux or macosx" }
+        enablepch "Off"
+
     filter "options:ci"
         fatalwarnings "All"
 

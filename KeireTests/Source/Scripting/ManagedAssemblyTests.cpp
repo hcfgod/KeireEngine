@@ -544,10 +544,13 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     buildRequest.Assemblies = {{TestAsset(100), support}, {TestAsset(101), definition}};
     const auto build = scripts->StartBuild(std::move(buildRequest));
     REQUIRE(scripts->WaitForBuild(build, std::chrono::seconds(60)));
-    REQUIRE(scripts->BuildStatus().State == Keire::ManagedBuildState::Succeeded);
-    const auto assembly = scripts->BuildStatus().ActiveAssemblyDirectory / "ReloadGameplay.dll";
+    const auto buildStatus = scripts->BuildStatus();
+    const auto diagnostic = buildStatus.Diagnostics.empty() ? std::string{} : buildStatus.Diagnostics.front().Message;
+    INFO(diagnostic);
+    REQUIRE(buildStatus.State == Keire::ManagedBuildState::Succeeded);
+    const auto assembly = buildStatus.ActiveAssemblyDirectory / "ReloadGameplay.dll";
     REQUIRE(std::filesystem::is_regular_file(assembly));
-    REQUIRE(std::filesystem::is_regular_file(scripts->BuildStatus().ActiveAssemblyDirectory / "ReloadSupport.dll"));
+    REQUIRE(std::filesystem::is_regular_file(buildStatus.ActiveAssemblyDirectory / "ReloadSupport.dll"));
 
     Keire::ManagedReloadRequest request;
     request.Assemblies = {assembly};

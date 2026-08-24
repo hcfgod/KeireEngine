@@ -498,6 +498,8 @@ assert_true grep -F -q 'removebuildoptions { "/MP" }' "$ROOT/KeireCore/premake5.
 assert_false grep -F -q 'buildoptions { "/MP1" }' "$ROOT/KeireCore/premake5.lua"
 assert_true grep -F -q 'CoreArchiveTargets' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'linkgroups "On"' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'filter { "action:ninja", "system:linux or macosx" }' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'enablepch "Off"' "$ROOT/Scripts/Premake/Common.lua"
 for core_archive in Assets Build World Rendering Scenes Scripting Ui Vfx; do
   assert_true test -f "$ROOT/KeireCore/Source/Pch/KeireCore${core_archive}Pch.cpp"
 done

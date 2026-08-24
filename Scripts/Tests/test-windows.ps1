@@ -508,7 +508,9 @@ Assert-True ($corePremake.Contains('CoreGeneratedContentTarget') -and
              $corePremake.Contains('removebuildoptions { "/MP" }') -and
              -not $corePremake.Contains('buildoptions { "/MP1" }') -and
              $premakePolicy.Contains('CoreArchiveTargets') -and
-             $premakePolicy.Contains('linkgroups "On"')) `
+             $premakePolicy.Contains('linkgroups "On"') -and
+             $premakePolicy.Contains('filter { "action:ninja", "system:linux or macosx" }') -and
+             $premakePolicy.Contains('enablepch "Off"')) `
     "Parallel Core archives retain stable PCH tracking and cyclic-link closure"
 foreach ($coreArchive in @("Assets", "Build", "World", "Rendering", "Scenes", "Scripting", "Ui", "Vfx")) {
     Assert-True (Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Source\Pch\KeireCore${coreArchive}Pch.cpp")) `
