@@ -160,6 +160,13 @@ cp -a "$distribution/." "$install_root/"
 # current Fedora and openSUSE. EventPipe diagnostics remain in the runtime; omit only this optional native provider so
 # one Rocky-built RPM remains installable across the supported RPM-family matrix.
 find "$install_root/bin/Managed/Dotnet" -type f -name 'libcoreclrtraceptprovider.so' -delete
+# A checkout on DrvFS reports every file as executable and writable. Native Linux installers must not preserve those
+# synthetic modes into /opt: normalize the payload, then restore only the binaries and shared libraries that are
+# executable in a native Linux stage.
+find "$install_root" -type d -exec chmod 0755 {} +
+find "$install_root" -type f -exec chmod 0644 {} +
+find "$install_root" -type f \( -name '*.so' -o -name '*.so.*' -o -name createdump \) -exec chmod 0755 {} +
+chmod 0755 "$install_root/bin/$HUB_TARGET" "$install_root/bin/$hub_worker" "$install_root/launch-hub.sh"
 cat > "$linux_root/usr/bin/$ARTIFACT_PREFIX-hub" <<EOF
 #!/usr/bin/env sh
 set -eu
@@ -252,6 +259,13 @@ validate_linux_installer_tree() {
     grep -Fqx 'MimeType=x-scheme-handler/keirehub;' \
       "$extracted/usr/share/applications/$ARTIFACT_PREFIX-hub.desktop" || {
       printf 'Linux Hub desktop entry does not register the keirehub URL scheme.\n' >&2
+      return 1
+    }
+    local unsafe_payload_file
+    unsafe_payload_file="$(find "$extracted/$install_relative" -type f -perm /022 -print -quit)"
+    [[ -z "$unsafe_payload_file" ]] || {
+      printf 'Linux Hub installer contains a group- or world-writable payload file: %s\n' \
+        "$unsafe_payload_file" >&2
       return 1
     }
 }

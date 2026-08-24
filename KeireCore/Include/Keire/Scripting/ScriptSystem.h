@@ -980,8 +980,9 @@ namespace Keire
         void InstallManagedComponents(const Ref<ComponentRegistry>& registry);
         void SetAssetSystem(Ref<AssetSystem> assets);
         void PumpManagedAssets();
-        // The caller retains ownership. The service must outlive every script callback and must be cleared before the
-        // owning layer or application begins detachment.
+        // The caller retains ownership. The service must outlive every script callback. Passing nullptr drains managed
+        // jobs and asset-generation callbacks before clearing the service and is the terminal detach for that active
+        // generation.
         void SetRuntimeServices(IScriptRuntimeServices* services);
         void Close();
 

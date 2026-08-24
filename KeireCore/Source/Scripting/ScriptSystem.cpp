@@ -318,6 +318,10 @@ namespace Keire
             catch (...)
             {
             }
+            ReleaseManagedAssetGenerationServices(generation);
+        }
+        void ReleaseManagedAssetGenerationServices(const std::uint64_t generation) noexcept
+        {
             if (Specification.RuntimeServices)
             {
                 Specification.RuntimeServices->ReleaseManagedRuntimeAssets(generation);
@@ -4516,6 +4520,16 @@ namespace Keire
     void ScriptSystem::SetRuntimeServices(IScriptRuntimeServices* services)
     {
         m_Impl->RequireOwner();
+        if (!services && m_Impl->Specification.RuntimeServices)
+        {
+            // Runtime layers unbind their native world immediately after this call. Finish managed asset lifecycle
+            // callbacks while those services are still valid, then invalidate the generation entry points.
+            m_Impl->DrainManagedJobs(false);
+            m_Impl->ResetManagedAssetGeneration(m_Impl->CandidateNativeRuntimeType, m_Impl->Reload.Generation + 1);
+            m_Impl->ResetManagedAssetGeneration(m_Impl->ActiveNativeRuntimeType, m_Impl->Reload.Generation);
+            m_Impl->CandidateNativeRuntimeType = nullptr;
+            m_Impl->ActiveNativeRuntimeType = nullptr;
+        }
         m_Impl->Specification.RuntimeServices = services;
     }
 

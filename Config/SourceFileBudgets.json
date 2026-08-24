@@ -36,12 +36,12 @@
     "KeireCore/Source/Assets/RenderableAssets.cpp": 2147,
     "KeireCore/Source/Input/InputSystem.cpp": 1964,
     "KeireCore/Source/Rendering/ShaderGraph.cpp": 4196,
-    "KeireCore/Source/Scripting/ScriptSystem.cpp": 4538,
+    "KeireCore/Source/Scripting/ScriptSystem.cpp": 4552,
     "KeireCore/Source/Ui.cpp": 1590,
     "KeireCore/Source/Vfx/VfxAssets.cpp": 4331,
     "KeireCore/Source/Vfx/VfxExpressions.cpp": 2000,
     "KeireCore/Source/Vfx/VfxSystem.cpp": 2489,
     "KeireRenderTests/Source/RenderedOutputTests.cpp": 2542,
-    "KeireRuntime/Source/RuntimeApplication.cpp": 1574
+    "KeireRuntime/Source/RuntimeApplication.cpp": 1578
   }
 }

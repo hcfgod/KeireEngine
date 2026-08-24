@@ -518,8 +518,6 @@ namespace
             m_View = Owner().Renderer()->CreateView(surface);
             Keire::RenderSystemInternalAccess::SetPresentationSurface(*Owner().Renderer(), m_View->Surface());
             m_EventSink = Keire::WindowSystemInternalAccess::AddEventSink(*Owner().Windows(), this, HandleNativeEvent);
-            if (const auto scripts = Owner().Scripts())
-                scripts->SetRuntimeServices(this);
             if (const auto input = Owner().Input())
             {
                 m_InputUser = input->CreateUser("Player");
@@ -531,21 +529,12 @@ namespace
                 if (m_DefaultInput)
                 {
                     m_InputContext = input->CreateActionContext(m_DefaultInput, m_InputUser);
-                    if (m_DefaultInputMap)
-                    {
-                        if (!m_InputContext->EnableMap(m_DefaultInputMap))
-                            throw std::runtime_error("The configured default input map is not present in its asset.");
-                    }
-                    else if (!m_InputContext->EnableMap("Player"))
-                    {
-                        const auto definition = m_InputContext->Definition();
-                        if (definition.ActionMaps.empty() ||
-                            !m_InputContext->EnableMap(definition.ActionMaps.front().Id))
-                            throw std::runtime_error("The default input action asset does not contain an action map.");
-                    }
+                    m_InputMapEnabled = TryEnableDefaultInputMap();
                 }
             }
             BindManagedInput(m_InputContext, m_InputUser);
+            if (const auto scripts = Owner().Scripts())
+                scripts->SetRuntimeServices(this);
         }
 
         void OnDetach() noexcept override
@@ -598,6 +587,8 @@ namespace
 
         void OnUpdate(const Keire::Time& time) override
         {
+            if (!m_InputMapEnabled)
+                m_InputMapEnabled = TryEnableDefaultInputMap();
             [[maybe_unused]] const bool transitioned = ProcessManagedSceneTransition(
                 m_CommandLine.ReplayAction != RuntimeReplayAction::None &&
                     m_CommandLine.ReplayProfile == Keire::ReplayProfile::StrictVerified,
@@ -1176,6 +1167,18 @@ namespace
             return session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{};
         }
 
+        [[nodiscard]] bool TryEnableDefaultInputMap()
+        {
+            if (!m_InputContext)
+                return true;
+            if (m_DefaultInputMap)
+                return m_InputContext->EnableMap(m_DefaultInputMap);
+            if (m_InputContext->EnableMap("Player"))
+                return true;
+            const auto definition = m_InputContext->Definition();
+            return !definition.ActionMaps.empty() && m_InputContext->EnableMap(definition.ActionMaps.front().Id);
+        }
+
         void ApplyManagedCursorMode(const bool restore = false) noexcept
         {
             try
@@ -1214,6 +1217,7 @@ namespace
         KeireRuntime::RuntimeUiPointerState m_UiPointer;
         Keire::InputUserId m_InputUser;
         Keire::Ref<Keire::InputActionContext> m_InputContext;
+        bool m_InputMapEnabled = false;
         bool m_ManagedCursorVisible = true;
         bool m_ManagedCursorLocked = false;
     };
