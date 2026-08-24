@@ -8,8 +8,20 @@ versions.
 
 ## Unreleased
 
+### Added
+
+- Added Unity-style managed Input Action Asset contexts with explicit asset/map/action enable lifecycles, typed reads,
+  transition callbacks, deterministic generated C# wrappers, and `Keyboard`, `Mouse`, and `Gamepad` direct polling.
+  Project Settings now selects the default action asset and stable map used on the next Play and in packaged players;
+  fixed-tick replay schema 2 preserves sparse raw-control state while continuing to read schema 1 recordings.
+
 ### Fixed
 
+- Centered the shared editor icon-button glyphs across toolbars, panel controls, and viewport overlays. Asset Browser
+  text, extensionless, C#, managed-assembly, data, rigging, animation, physics, and reusable-graph sources now use
+  distinct semantic thumbnails instead of empty boxes or a generic error mark, and the Input Actions editor now has a
+  responsive three-pane workspace, searchable action and binding hierarchy, clearer document status, and a compact
+  icon command bar.
 - Made Player Support publication operation-staged, content-addressed, and catalog-locked; runtime closure staging now
   rejects links and reparse points, preserves primary failures during cleanup, requires the complete per-variant
   runtime license inventory, and carries the architecture-matched app-local MSVC runtime on Windows.
@@ -37,6 +49,13 @@ versions.
   now visible geometry-drawn triangles in List and Grid footers, with Grid count badges reserving a non-overlapping
   name lane. Visual Studio opens the exact solution first, then routes C# and managed-assembly files through its
   matching DTE instance without the failing combined command-line invocation.
+- Isolated private FFmpeg intermediates by host platform, architecture, and toolset while retaining the stable active
+  dependency publication paths, so switching between Windows, Linux/WSL, and macOS restores a validated cache instead
+  of recompiling the codec stack.
+- Isolated native object intermediates by compiler toolset and made Ninja reconstruct static archives from their exact
+  input list, preventing stale Clang/GCC objects and removed source modules from surviving a regenerated build graph.
+- Pruned generated artifacts, dependency caches, and tool output before Unix Premake-input discovery, keeping nested
+  first-party project detection deterministic without recursively scanning large non-source trees on WSL mounts.
 - Reused the identical optimized private FFmpeg output between Debug and Release dependency roots so a fresh or
   partially repaired workstation performs one codec compilation instead of two.
 - Isolated GPU-skinned output buffers per render surface so simultaneous Scene, Game, and preview views cannot

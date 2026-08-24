@@ -75,7 +75,7 @@ end
 
 project(KeireManagedProject)
     location "../../Build/Projects/KeireManaged"
-    objdir ("../../Build/Intermediates/" .. OutputDir .. "/" .. KeireManagedProject)
+    objdir ("../../Build/Intermediates/" .. IntermediateOutputDir .. "/" .. KeireManagedProject)
 
     if _ACTION == "ninja" then
         kind "StaticLib"

@@ -2,6 +2,9 @@
 param(
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Release",
+    [string]$Architecture = "",
+    [ValidateSet("default", "msc", "gcc", "clang")]
+    [string]$Toolset = "default",
     [switch]$Force
 )
 
@@ -10,12 +13,21 @@ $ErrorActionPreference = "Stop"
 
 $Root = Get-RepositoryRoot
 $Lock = Get-DependencyLock
-Enter-WindowsToolEnvironment "vs2022" "msc" "x86_64" | Out-Null
+$Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
+$Toolset = Resolve-WindowsToolset "vs2022" $Toolset
+if ($Toolset -eq "gcc") {
+    throw "Private FFmpeg builds on Windows do not support the gcc toolset because GNU import libraries are not published."
+}
+$OutputArchitecture = Get-ArchitectureOutputName $Architecture
+$FfmpegArchitecture = if ($Architecture -eq "ARM64") { "aarch64" } else { "x86_64" }
+Enter-WindowsToolEnvironment "vs2022" "msc" $Architecture | Out-Null
 $VendorSource = Join-Path $Root "Vendor\ffmpeg"
 $Output = Join-Path $Root "Build\Dependencies\ffmpeg\$Configuration"
-$Install = Join-Path $Output "install"
-$Stamp = Join-Path $Output "keire-ffmpeg.stamp"
-$ZlibBuild = Join-Path $Root "Build\Dependencies\windows-x86_64-msc\Release"
+$CacheBase = Join-Path $Root "Build\Dependencies\ffmpeg-cache\windows-$OutputArchitecture-msc-producer-$Toolset"
+$CacheOutput = Join-Path $CacheBase $Configuration
+$Install = Join-Path $CacheOutput "install"
+$Stamp = Join-Path $CacheOutput "keire-ffmpeg.stamp"
+$ZlibBuild = Join-Path $Root "Build\Dependencies\windows-$OutputArchitecture-$Toolset\Release"
 $ZlibSourceInclude = Join-Path $Root "Vendor\assimp\contrib\zlib"
 $ZlibGeneratedInclude = Join-Path $ZlibBuild "Assimp\contrib\zlib"
 $ZlibLibrary = Join-Path $ZlibBuild "install\lib\zlibstatic.lib"
@@ -28,6 +40,95 @@ if (-not (Test-Path -LiteralPath (Join-Path $ZlibSourceInclude "zlib.h")) -or
 $ZlibKey = (Get-Content -LiteralPath $ZlibStamp -Raw).Trim()
 $Expected = "$($Lock.FFMPEG_COMMIT)|$Configuration|$ZlibKey|shared-lgpl-avformat-avcodec-swresample-avutil-zlib-exr-v6"
 
+function Test-FfmpegOutput([string]$Path, [string]$ExpectedStamp) {
+    $candidateInstall = Join-Path $Path "install"
+    $candidateStamp = Join-Path $Path "keire-ffmpeg.stamp"
+    $candidateComponents = Join-Path $Path "config_components.h"
+    if (-not (Test-Path -LiteralPath (Join-Path $candidateInstall "include\libavformat\avformat.h")) -or
+        -not (Test-Path -LiteralPath $candidateComponents) -or
+        -not (Select-String -LiteralPath $candidateComponents -SimpleMatch "#define CONFIG_EXR_DECODER 1" -Quiet) -or
+        -not (Test-Path -LiteralPath $candidateStamp) -or
+        (Get-Content -LiteralPath $candidateStamp -Raw).Trim() -ne $ExpectedStamp) {
+        return $false
+    }
+
+    $componentArtifacts = @(
+        @("avformat", "avformat-63.dll"),
+        @("avcodec", "avcodec-63.dll"),
+        @("swresample", "swresample-7.dll"),
+        @("avutil", "avutil-61.dll")
+    )
+    foreach ($component in $componentArtifacts) {
+        $importLibrary = Join-Path $candidateInstall "bin\$($component[0]).lib"
+        $runtimeLibrary = Join-Path $candidateInstall "bin\$($component[1])"
+        if (-not (Test-Path -LiteralPath $importLibrary -PathType Leaf) -or
+            -not (Test-Path -LiteralPath $runtimeLibrary -PathType Leaf)) {
+            return $false
+        }
+    }
+    return $true
+}
+
+function Remove-FfmpegOutput([string]$Path, [string]$AllowedBase) {
+    Assert-FfmpegOutputPath -Path $Path -AllowedBase $AllowedBase
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return
+    }
+    Remove-Item -LiteralPath $Path -Recurse -Force
+}
+
+function Assert-FfmpegOutputPath([string]$Path, [string]$AllowedBase) {
+    $pathSeparators = [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $resolvedPath = [IO.Path]::GetFullPath($Path).TrimEnd($pathSeparators)
+    $resolvedBase = [IO.Path]::GetFullPath($AllowedBase).TrimEnd($pathSeparators)
+    $resolvedRoot = [IO.Path]::GetFullPath($Root).TrimEnd($pathSeparators)
+    $separator = [IO.Path]::DirectorySeparatorChar
+    if (-not $resolvedBase.StartsWith("$resolvedRoot$separator", [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to use an FFmpeg output base outside the repository: $AllowedBase."
+    }
+    if (-not $resolvedPath.StartsWith("$resolvedBase$separator", [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to replace an FFmpeg build outside $AllowedBase."
+    }
+
+    $relativePath = $resolvedPath.Substring($resolvedRoot.Length).TrimStart($pathSeparators)
+    $currentPath = $resolvedRoot
+    foreach ($component in @($relativePath -split '[\\/]' | Where-Object { $_ })) {
+        $currentPath = Join-Path $currentPath $component
+        if (Test-Path -LiteralPath $currentPath) {
+            $item = Get-Item -LiteralPath $currentPath -Force
+            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "Refusing to use reparse-point FFmpeg output path '$currentPath'."
+            }
+        }
+    }
+}
+
+function Set-RelocatableFfmpegManifests([string]$InstallRoot) {
+    $manifestRoot = Join-Path $InstallRoot "lib\pkgconfig"
+    foreach ($manifest in @(Get-ChildItem -LiteralPath $manifestRoot -Filter "*.pc" -File -ErrorAction SilentlyContinue)) {
+        $text = [IO.File]::ReadAllText($manifest.FullName)
+        $text = [Text.RegularExpressions.Regex]::Replace($text, '(?m)^prefix=.*$', 'prefix=${pcfiledir}/../..')
+        $text = [Text.RegularExpressions.Regex]::Replace($text, '(?m)^exec_prefix=.*$', 'exec_prefix=${prefix}')
+        $text = [Text.RegularExpressions.Regex]::Replace($text, '(?m)^libdir=.*$', 'libdir=${prefix}/lib')
+        $text = [Text.RegularExpressions.Regex]::Replace($text, '(?m)^includedir=.*$', 'includedir=${prefix}/include')
+        [IO.File]::WriteAllText($manifest.FullName, $text, [Text.UTF8Encoding]::new($false))
+    }
+}
+
+function Publish-FfmpegOutput([string]$Source, [string]$Destination) {
+    Assert-FfmpegOutputPath -Path $Source -AllowedBase $CacheBase
+    Assert-FfmpegOutputPath -Path $Destination -AllowedBase (Join-Path $Root "Build\Dependencies\ffmpeg")
+    Set-RelocatableFfmpegManifests (Join-Path $Source "install")
+    Remove-FfmpegOutput $Destination (Join-Path $Root "Build\Dependencies\ffmpeg")
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+    Copy-Item -LiteralPath (Join-Path $Source "install") -Destination $Destination -Recurse
+    Copy-Item -LiteralPath (Join-Path $Source "config_components.h"),
+        (Join-Path $Source "keire-ffmpeg.stamp") -Destination $Destination
+}
+
+Assert-FfmpegOutputPath -Path $CacheOutput -AllowedBase $CacheBase
+Assert-FfmpegOutputPath -Path $Output -AllowedBase (Join-Path $Root "Build\Dependencies\ffmpeg")
+
 if (-not (Test-Path -LiteralPath (Join-Path $VendorSource "configure"))) {
     throw "Vendor/ffmpeg is unavailable. Initialize the locked FFmpeg submodule first."
 }
@@ -35,38 +136,40 @@ $Actual = ([string](& git -C $VendorSource rev-parse HEAD)).Trim()
 if ($LASTEXITCODE -ne 0 -or $Actual -ne $Lock.FFMPEG_COMMIT) {
     throw "Vendor/ffmpeg is not at the locked commit $($Lock.FFMPEG_COMMIT)."
 }
-if (-not $Force -and (Test-Path -LiteralPath (Join-Path $Install "include\libavformat\avformat.h")) -and
-    (Test-Path -LiteralPath (Join-Path $Install "bin\avformat-63.dll")) -and
-    (Test-Path -LiteralPath (Join-Path $Install "bin\avformat.lib")) -and
-    (Test-Path -LiteralPath (Join-Path $Output "config_components.h")) -and
-    (Select-String -LiteralPath (Join-Path $Output "config_components.h") -SimpleMatch "#define CONFIG_EXR_DECODER 1" -Quiet) -and
-    (Test-Path -LiteralPath $Stamp) -and ((Get-Content -LiteralPath $Stamp -Raw).Trim() -eq $Expected)) {
-    Write-Host "==> Private FFmpeg $Configuration build is current"
+if (-not $Force -and (Test-FfmpegOutput $CacheOutput $Expected)) {
+    if (-not (Test-FfmpegOutput $Output $Expected)) {
+        Publish-FfmpegOutput $CacheOutput $Output
+        Write-Host "==> Restored private FFmpeg $Configuration from the windows-$OutputArchitecture-msc-producer-$Toolset cache"
+    }
+    else {
+        Write-Host "==> Private FFmpeg $Configuration build is current"
+    }
+    return
+}
+if (-not $Force -and (Test-FfmpegOutput $Output $Expected)) {
+    Remove-FfmpegOutput $CacheOutput $CacheBase
+    New-Item -ItemType Directory -Force -Path $CacheOutput | Out-Null
+    Copy-Item -LiteralPath (Join-Path $Output "install") -Destination $CacheOutput -Recurse
+    Copy-Item -LiteralPath (Join-Path $Output "config_components.h"),
+        (Join-Path $Output "keire-ffmpeg.stamp") -Destination $CacheOutput
+    Write-Host "==> Adopted private FFmpeg $Configuration into the windows-$OutputArchitecture-msc-producer-$Toolset cache"
     return
 }
 if (-not $Force) {
     # Both configurations deliberately use the same optimized /MD FFmpeg build. Keep separate install roots for the
     # generated project contract, but compile the large codec dependency only once on a fresh workstation.
     $AlternateConfiguration = if ($Configuration -eq "Debug") { "Release" } else { "Debug" }
-    $AlternateOutput = Join-Path $Root "Build\Dependencies\ffmpeg\$AlternateConfiguration"
-    $AlternateInstall = Join-Path $AlternateOutput "install"
-    $AlternateStamp = Join-Path $AlternateOutput "keire-ffmpeg.stamp"
+    $AlternateOutput = Join-Path $CacheBase $AlternateConfiguration
     $AlternateComponents = Join-Path $AlternateOutput "config_components.h"
     $AlternateExpected = "$($Lock.FFMPEG_COMMIT)|$AlternateConfiguration|$ZlibKey|shared-lgpl-avformat-avcodec-swresample-avutil-zlib-exr-v6"
-    if ((Test-Path -LiteralPath (Join-Path $AlternateInstall "include\libavformat\avformat.h")) -and
-        (Test-Path -LiteralPath (Join-Path $AlternateInstall "bin\avformat-63.dll")) -and
-        (Test-Path -LiteralPath (Join-Path $AlternateInstall "bin\avformat.lib")) -and
-        (Test-Path -LiteralPath $AlternateComponents) -and
-        (Select-String -LiteralPath $AlternateComponents -SimpleMatch "#define CONFIG_EXR_DECODER 1" -Quiet) -and
-        (Test-Path -LiteralPath $AlternateStamp) -and
-        ((Get-Content -LiteralPath $AlternateStamp -Raw).Trim() -eq $AlternateExpected)) {
-        New-Item -ItemType Directory -Force -Path $Output | Out-Null
-        if (Test-Path -LiteralPath $Install) {
-            Remove-Item -LiteralPath $Install -Recurse -Force
-        }
-        Copy-Item -LiteralPath $AlternateInstall -Destination $Output -Recurse -Force
-        Copy-Item -LiteralPath $AlternateComponents -Destination (Join-Path $Output "config_components.h") -Force
+    Assert-FfmpegOutputPath -Path $AlternateOutput -AllowedBase $CacheBase
+    if (Test-FfmpegOutput $AlternateOutput $AlternateExpected) {
+        Remove-FfmpegOutput $CacheOutput $CacheBase
+        New-Item -ItemType Directory -Force -Path $CacheOutput | Out-Null
+        Copy-Item -LiteralPath (Join-Path $AlternateOutput "install") -Destination $CacheOutput -Recurse
+        Copy-Item -LiteralPath $AlternateComponents -Destination (Join-Path $CacheOutput "config_components.h")
         [IO.File]::WriteAllText($Stamp, "$Expected`n", [Text.UTF8Encoding]::new($false))
+        Publish-FfmpegOutput $CacheOutput $Output
         Write-Host "==> Reused the identical private FFmpeg $AlternateConfiguration build for $Configuration"
         return
     }
@@ -80,18 +183,10 @@ if (-not (Test-Path -LiteralPath "C:\msys64\usr\bin\make.exe")) {
     throw "GNU Make is required to source-build private FFmpeg. Run bootstrap prerequisites."
 }
 
-if (Test-Path -LiteralPath $Output) {
-    $ResolvedOutput = [IO.Path]::GetFullPath($Output)
-    $AllowedRoot = [IO.Path]::GetFullPath((Join-Path $Root "Build\Dependencies\ffmpeg")) +
-        [IO.Path]::DirectorySeparatorChar
-    if (-not $ResolvedOutput.StartsWith($AllowedRoot, [StringComparison]::OrdinalIgnoreCase)) {
-        throw "Refusing to replace an FFmpeg build outside Build/Dependencies/ffmpeg."
-    }
-    Remove-Item -LiteralPath $Output -Recurse -Force
-}
-New-Item -ItemType Directory -Force -Path $Output | Out-Null
-$Source = Join-Path $Output "source"
-$SourceArchive = Join-Path $Output "ffmpeg-source.tar"
+Remove-FfmpegOutput $CacheOutput $CacheBase
+New-Item -ItemType Directory -Force -Path $CacheOutput | Out-Null
+$Source = Join-Path $CacheOutput "source"
+$SourceArchive = Join-Path $CacheOutput "ffmpeg-source.tar"
 New-Item -ItemType Directory -Force -Path $Source | Out-Null
 # Git's locked object bytes are authoritative. A Windows checkout may translate FFmpeg's Makefiles and shell files to
 # CRLF, which changes continuation semantics under MSYS Make even though the C/C++ sources remain valid.
@@ -137,11 +232,11 @@ function Convert-ToBashPath([string]$Path) {
 }
 
 $SourceBash = Convert-ToBashPath $Source
-$OutputBash = Convert-ToBashPath $Output
+$OutputBash = Convert-ToBashPath $CacheOutput
 $InstallBash = Convert-ToBashPath $Install
-$FfbuildDirectory = Join-Path $Output "ffbuild"
-$ZlibIncludeDirectory = Join-Path $Output "zlib-include"
-$ZlibLinkDirectory = Join-Path $Output "zlib-lib"
+$FfbuildDirectory = Join-Path $CacheOutput "ffbuild"
+$ZlibIncludeDirectory = Join-Path $CacheOutput "zlib-include"
+$ZlibLinkDirectory = Join-Path $CacheOutput "zlib-lib"
 # FFmpeg opens ffbuild/config.log before its configure script materializes the rest of the out-of-tree directory
 # layout. Create that log parent explicitly so a clean cache cannot fail before configuration begins.
 New-Item -ItemType Directory -Force -Path $FfbuildDirectory, $ZlibIncludeDirectory, $ZlibLinkDirectory | Out-Null
@@ -166,7 +261,7 @@ $Jobs = [Math]::Max(1, [Environment]::ProcessorCount)
 $Configure = @(
     "--prefix='$InstallBash'",
     "--toolchain=msvc",
-    "--arch=x86_64",
+    "--arch=$FfmpegArchitecture",
     "--target-os=win64",
     "--enable-shared",
     "--disable-static",
@@ -209,3 +304,4 @@ Copy-Item -LiteralPath (Join-Path $Source "COPYING.LGPLv3") -Destination $Licens
     "Source: Vendor/ffmpeg`nCommit: $($Lock.FFMPEG_COMMIT)`nConfiguration: $Configuration`n",
     [Text.UTF8Encoding]::new($false))
 [IO.File]::WriteAllText($Stamp, "$Expected`n", [Text.UTF8Encoding]::new($false))
+Publish-FfmpegOutput $CacheOutput $Output

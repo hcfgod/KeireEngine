@@ -298,7 +298,7 @@ TEST_CASE("Projects create isolated starter assets and hold exclusive editor loc
     const auto created = Keire::Project::Create({directory.Path, "Game", Keire::ProjectTemplate::Starter});
     REQUIRE(created);
     CHECK(created->Descriptor().Name == "Game");
-    CHECK(created->Descriptor().SchemaVersion == 3);
+    CHECK(created->Descriptor().SchemaVersion == Keire::CurrentProjectSchemaVersion);
     CHECK_FALSE(created->Descriptor().CreatedAt.empty());
     CHECK(created->Descriptor().LastSavedWithEngineVersion == created->Descriptor().CreatedWithEngineVersion);
     REQUIRE(created->Descriptor().Template);
@@ -414,7 +414,7 @@ TEST_CASE("Project registry preserves UTF-8 paths across save and reload")
     const auto persisted = KeireTests::ReadFile(registryPath);
     CHECK(persisted.find(R"("schemaVersion": 2)") != std::string::npos);
     CHECK(persisted.find(R"("cachedMetadata")") != std::string::npos);
-    CHECK(persisted.find(R"("projectSchemaVersion": 3)") != std::string::npos);
+    CHECK(persisted.find(R"("projectSchemaVersion": 4)") != std::string::npos);
     CHECK(persisted.find(R"("added":)") != std::string::npos);
 }
 
@@ -483,9 +483,9 @@ TEST_CASE("Version-neutral project inspection preserves common metadata from new
 
     const auto marker = root / "ProjectSettings/Project.keireproject";
     auto source = KeireTests::ReadFile(marker);
-    const auto schema = source.find(R"("schemaVersion": 3)");
+    const auto schema = source.find(R"("schemaVersion": 4)");
     REQUIRE(schema != std::string::npos);
-    source.replace(schema, std::string_view(R"("schemaVersion": 3)").size(), R"("schemaVersion": 99)");
+    source.replace(schema, std::string_view(R"("schemaVersion": 4)").size(), R"("schemaVersion": 99)");
     {
         std::ofstream output(marker, std::ios::binary | std::ios::trunc);
         REQUIRE(output);

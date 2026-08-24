@@ -849,7 +849,8 @@
       ],
       "defaultProjectConfiguration": {
         "startupScene": "85be2f8e-31eb-5971-bca9-e5dd6b3f4029",
-        "defaultInput": "97b38693-6dc3-4f06-a228-44ba5786e8d1"
+        "defaultInput": "97b38693-6dc3-4f06-a228-44ba5786e8d1",
+        "defaultInputMap": "a6b6db76-6436-4aa4-b96a-a72a0f987101"
       },
       "starterContent": [
         "Assets/Scenes/SandboxShowcase.keirescene",

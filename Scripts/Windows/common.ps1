@@ -794,6 +794,78 @@ function Get-ArchitectureOutputName {
     return "x86_64"
 }
 
+function Remove-GeneratedBinaryDirectory {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    $pathSeparators = [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $resolvedRoot = [IO.Path]::GetFullPath($Root).TrimEnd($pathSeparators)
+    $resolvedBase = [IO.Path]::GetFullPath((Join-Path $resolvedRoot "Build\Bin")).TrimEnd($pathSeparators)
+    $resolvedPath = [IO.Path]::GetFullPath($Path).TrimEnd($pathSeparators)
+    $separator = [IO.Path]::DirectorySeparatorChar
+    if (-not $resolvedBase.StartsWith("$resolvedRoot$separator", [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to use a generated binary root outside the repository: $resolvedBase."
+    }
+    if (-not $resolvedPath.StartsWith("$resolvedBase$separator", [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to remove generated binaries outside $resolvedBase`: $resolvedPath."
+    }
+
+    $relativePath = $resolvedPath.Substring($resolvedRoot.Length).TrimStart($pathSeparators)
+    $currentPath = $resolvedRoot
+    foreach ($component in @($relativePath -split '[\\/]' | Where-Object { $_ })) {
+        $currentPath = Join-Path $currentPath $component
+        $item = Get-Item -LiteralPath $currentPath -Force -ErrorAction SilentlyContinue
+        if ($item -and (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+            throw "Refusing to remove a reparse-point generated binary path: $currentPath."
+        }
+    }
+
+    $target = Get-Item -LiteralPath $resolvedPath -Force -ErrorAction SilentlyContinue
+    if (-not $target) { return }
+    if (-not $target.PSIsContainer) {
+        throw "Generated binary output is not a directory: $resolvedPath."
+    }
+    Remove-Item -LiteralPath $resolvedPath -Recurse -Force
+}
+
+function Remove-IncompatibleBuildBinaries {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$Architecture,
+        [Parameter(Mandatory = $true)][ValidateSet("msc", "gcc", "clang")][string]$Toolset,
+        [Parameter(Mandatory = $true)][string]$IdentityStamp
+    )
+
+    $normalizedArchitecture = Normalize-Architecture $Architecture
+    $preserveOutputs = $false
+    if (Test-Path -LiteralPath $IdentityStamp -PathType Leaf) {
+        $parts = (Get-Content -LiteralPath $IdentityStamp -Raw).Trim() -split '\|'
+        if ($parts.Count -eq 6 -and -not [string]::IsNullOrWhiteSpace($parts[0]) -and
+            -not [string]::IsNullOrWhiteSpace($parts[5])) {
+            try {
+                $priorArchitecture = Normalize-Architecture $parts[1]
+                $preserveOutputs = $priorArchitecture -eq $normalizedArchitecture -and $parts[2] -eq $Toolset
+            }
+            catch {
+                $preserveOutputs = $false
+            }
+        }
+    }
+    if ($preserveOutputs) { return }
+
+    $outputArchitecture = Get-ArchitectureOutputName $normalizedArchitecture
+    $targets = @("Debug", "Release", "Dist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage") |
+        ForEach-Object { Join-Path $Root "Build\Bin\$_-windows-$outputArchitecture" } |
+        Where-Object { Get-Item -LiteralPath $_ -Force -ErrorAction SilentlyContinue }
+    if ($targets.Count -eq 0) { return }
+    Write-Host "==> Removing binaries with unknown or incompatible toolset provenance for windows-$outputArchitecture"
+    foreach ($target in $targets) {
+        Remove-GeneratedBinaryDirectory -Root $Root -Path $target
+    }
+}
+
 function Get-VisualStudioMajorVersion {
     param([string]$Generator)
     switch ($Generator) {

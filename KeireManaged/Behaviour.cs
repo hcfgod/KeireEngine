@@ -216,6 +216,7 @@ public abstract class Behaviour : Component
     public void RuntimeFixedUpdate(float deltaSeconds) => InvokeWithContext(
         () =>
         {
+            InputActionRuntime.DispatchEvents();
             _coroutines.Pump(CoroutinePhase.FixedUpdate, deltaSeconds, deltaSeconds);
             FixedUpdate();
         }, true);
@@ -225,6 +226,7 @@ public abstract class Behaviour : Component
         InvokeWithContext(
             () =>
             {
+                InputActionRuntime.DispatchEvents();
                 _coroutines.Pump(CoroutinePhase.Update, deltaSeconds, NativeRuntime.UnscaledDeltaTime);
                 Update();
             }, true);

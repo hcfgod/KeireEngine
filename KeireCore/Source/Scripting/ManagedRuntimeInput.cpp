@@ -20,6 +20,7 @@ namespace Keire::Detail
     namespace
     {
         inline constexpr std::size_t MaximumManagedInputDevices = 32;
+        inline constexpr std::size_t MaximumManagedInputContexts = 256;
         inline constexpr std::size_t MaximumManagedRebindOperations = 16;
 
         struct NativeInputDevice
@@ -42,6 +43,34 @@ namespace Keire::Detail
             std::uint8_t Reserved[3]{};
         };
         static_assert(sizeof(NativeInputRebindSnapshot) == 32);
+
+        struct NativeInputActionSnapshot
+        {
+            std::uint64_t Frame = 0;
+            float X = 0.0F;
+            float Y = 0.0F;
+            std::uint8_t Phase = 0;
+            std::uint8_t ValueType = 0;
+            std::uint8_t Enabled = 0;
+            std::uint8_t Started = 0;
+            std::uint8_t Performed = 0;
+            std::uint8_t Canceled = 0;
+            std::uint8_t Reserved[2]{};
+        };
+        static_assert(sizeof(NativeInputActionSnapshot) == 24);
+
+        struct NativeInputControlSnapshot
+        {
+            std::uint64_t Frame = 0;
+            float X = 0.0F;
+            float Y = 0.0F;
+            std::uint32_t Device = 0;
+            std::uint8_t ValueType = 0;
+            std::uint8_t Pressed = 0;
+            std::uint8_t Released = 0;
+            std::uint8_t Reserved = 0;
+        };
+        static_assert(sizeof(NativeInputControlSnapshot) == 24);
 
         thread_local IScriptRuntimeServices* ActiveServices = nullptr;
 
@@ -254,7 +283,267 @@ namespace Keire::Detail
                 return 0;
             }
         }
+
+        [[nodiscard]] std::uint64_t CreateInputContext(const std::uint64_t generation, const std::uint64_t assetHigh,
+                                                       const std::uint64_t assetLow) noexcept
+        {
+            return ActiveServices ? ActiveServices->CreateManagedInputContext(generation, AssetId(assetHigh, assetLow))
+                                  : 0;
+        }
+
+        [[nodiscard]] std::uint8_t ReleaseInputContext(const std::uint64_t handle) noexcept
+        {
+            return ActiveServices && ActiveServices->ReleaseManagedInputContext(handle) ? 1 : 0;
+        }
+
+        [[nodiscard]] std::uint8_t OperateInputContext(const std::uint64_t handle, const std::uint8_t operation,
+                                                       const std::uint64_t targetHigh,
+                                                       const std::uint64_t targetLow) noexcept
+        {
+            return ActiveServices &&
+                           operation <= static_cast<std::uint8_t>(ManagedInputContextOperation::DisableAction) &&
+                           ActiveServices->OperateManagedInputContext(
+                               handle, static_cast<ManagedInputContextOperation>(operation),
+                               AssetId(targetHigh, targetLow))
+                       ? 1
+                       : 0;
+        }
+
+        [[nodiscard]] std::uint64_t BeginInputContextRebind(const std::uint64_t handle, const std::uint64_t bindingHigh,
+                                                            const std::uint64_t bindingLow, const float threshold,
+                                                            const double timeoutSeconds,
+                                                            const std::uint8_t allowedDeviceMask) noexcept
+        {
+            return ActiveServices
+                       ? ActiveServices->BeginManagedInputContextRebind(handle, AssetId(bindingHigh, bindingLow),
+                                                                        {threshold, timeoutSeconds, allowedDeviceMask})
+                       : 0;
+        }
+
+        [[nodiscard]] std::uint8_t FindInputMap(const std::uint64_t handle, const Coral::String name,
+                                                std::uint64_t* high, std::uint64_t* low) noexcept
+        {
+            if (!ActiveServices || !high || !low)
+                return 0;
+            const auto id = ActiveServices->FindManagedInputMap(handle, static_cast<std::string>(name));
+            *high = id.High();
+            *low = id.Low();
+            return id ? 1 : 0;
+        }
+
+        [[nodiscard]] std::uint8_t FindInputAction(const std::uint64_t handle, const std::uint64_t mapHigh,
+                                                   const std::uint64_t mapLow, const Coral::String name,
+                                                   std::uint64_t* high, std::uint64_t* low) noexcept
+        {
+            if (!ActiveServices || !high || !low)
+                return 0;
+            const auto id = ActiveServices->FindManagedInputAction(handle, AssetId(mapHigh, mapLow),
+                                                                   static_cast<std::string>(name));
+            *high = id.High();
+            *low = id.Low();
+            return id ? 1 : 0;
+        }
+
+        [[nodiscard]] std::uint8_t GetInputActionSnapshot(const std::uint64_t handle, const std::uint64_t actionHigh,
+                                                          const std::uint64_t actionLow,
+                                                          NativeInputActionSnapshot* destination) noexcept
+        {
+            if (!ActiveServices || !destination)
+                return 0;
+            const auto snapshot = ActiveServices->ManagedInputAction(handle, AssetId(actionHigh, actionLow));
+            if (!snapshot)
+                return 0;
+            *destination = {snapshot->Frame,
+                            snapshot->Value.X,
+                            snapshot->Value.Y,
+                            static_cast<std::uint8_t>(snapshot->Phase),
+                            static_cast<std::uint8_t>(snapshot->Value.Type),
+                            snapshot->Enabled ? std::uint8_t{1} : std::uint8_t{0},
+                            snapshot->Started ? std::uint8_t{1} : std::uint8_t{0},
+                            snapshot->Performed ? std::uint8_t{1} : std::uint8_t{0},
+                            snapshot->Canceled ? std::uint8_t{1} : std::uint8_t{0},
+                            {}};
+            return 1;
+        }
+
+        [[nodiscard]] std::uint32_t GetCurrentInputDevice(const std::uint8_t type) noexcept
+        {
+            if (!ActiveServices || type > static_cast<std::uint8_t>(InputDeviceType::Gamepad))
+                return 0;
+            const auto device = ActiveServices->CurrentManagedInputDevice(static_cast<InputDeviceType>(type));
+            return device ? device->Value() : 0;
+        }
+
+        [[nodiscard]] std::uint8_t GetInputControlSnapshot(const std::uint32_t device, const Coral::String path,
+                                                           NativeInputControlSnapshot* destination) noexcept
+        {
+            if (!ActiveServices || !destination || device == 0)
+                return 0;
+            const auto snapshot =
+                ActiveServices->ManagedInputControl(InputDeviceId(device), static_cast<std::string>(path));
+            if (!snapshot)
+                return 0;
+            *destination = {snapshot->Frame,
+                            snapshot->Value.X,
+                            snapshot->Value.Y,
+                            snapshot->Device.Value(),
+                            static_cast<std::uint8_t>(snapshot->Value.Type),
+                            snapshot->Pressed ? std::uint8_t{1} : std::uint8_t{0},
+                            snapshot->Released ? std::uint8_t{1} : std::uint8_t{0},
+                            0};
+            return 1;
+        }
     } // namespace
+
+    class ManagedInputContextStore::Impl final
+    {
+      public:
+        struct Entry final
+        {
+            std::uint64_t Generation = 0;
+            Ref<InputSystem> Input;
+            Ref<InputActionContext> Context;
+        };
+
+        std::uint64_t NextContext = 1;
+        std::map<std::uint64_t, Entry> Contexts;
+    };
+
+    ManagedInputContextStore::ManagedInputContextStore() : m_Impl(std::make_unique<Impl>()) {}
+    ManagedInputContextStore::~ManagedInputContextStore() { ReleaseAll(); }
+
+    std::uint64_t ManagedInputContextStore::Create(const std::uint64_t generation, const Ref<InputSystem>& input,
+                                                   const InputUserId user, const AssetId asset) noexcept
+    {
+        try
+        {
+            if (!input || !user || !asset || m_Impl->Contexts.size() >= MaximumManagedInputContexts)
+                return 0;
+            const auto handle = m_Impl->NextContext++;
+            m_Impl->Contexts.emplace(handle, Impl::Entry{generation, input, input->CreateActionContext(asset, user)});
+            return handle;
+        }
+        catch (...)
+        {
+            return 0;
+        }
+    }
+
+    bool ManagedInputContextStore::Release(const std::uint64_t handle) noexcept
+    {
+        return m_Impl->Contexts.erase(handle) > 0;
+    }
+
+    void ManagedInputContextStore::ReleaseGeneration(const std::uint64_t generation) noexcept
+    {
+        std::erase_if(m_Impl->Contexts,
+                      [generation](const auto& entry) { return entry.second.Generation == generation; });
+    }
+
+    void ManagedInputContextStore::ReleaseAll() noexcept { m_Impl->Contexts.clear(); }
+
+    bool ManagedInputContextStore::Operate(const std::uint64_t handle, const ManagedInputContextOperation operation,
+                                           const AssetId target) noexcept
+    {
+        try
+        {
+            const auto found = m_Impl->Contexts.find(handle);
+            if (found == m_Impl->Contexts.end())
+                return false;
+            auto& context = *found->second.Context;
+            switch (operation)
+            {
+            case ManagedInputContextOperation::EnableAll:
+                for (const auto& map : context.Definition().ActionMaps)
+                    (void)context.EnableMap(map.Id);
+                return true;
+            case ManagedInputContextOperation::DisableAll:
+                context.DisableAll();
+                return true;
+            case ManagedInputContextOperation::EnableMap:
+                return context.EnableMap(target);
+            case ManagedInputContextOperation::DisableMap:
+                return context.DisableMap(target);
+            case ManagedInputContextOperation::EnableAction:
+                return context.EnableAction(target);
+            case ManagedInputContextOperation::DisableAction:
+                return context.DisableAction(target);
+            }
+        }
+        catch (...)
+        {
+        }
+        return false;
+    }
+
+    AssetId ManagedInputContextStore::FindMap(const std::uint64_t handle, const std::string_view name) const noexcept
+    {
+        try
+        {
+            const auto found = m_Impl->Contexts.find(handle);
+            if (found == m_Impl->Contexts.end())
+                return {};
+            const auto definition = found->second.Context->Definition();
+            const auto map = std::ranges::find(definition.ActionMaps, name, &InputActionMapDefinition::Name);
+            return map == definition.ActionMaps.end() ? AssetId{} : map->Id;
+        }
+        catch (...)
+        {
+            return {};
+        }
+    }
+
+    AssetId ManagedInputContextStore::FindAction(const std::uint64_t handle, const AssetId mapId,
+                                                 const std::string_view name) const noexcept
+    {
+        try
+        {
+            const auto found = m_Impl->Contexts.find(handle);
+            if (found == m_Impl->Contexts.end())
+                return {};
+            const auto definition = found->second.Context->Definition();
+            const auto map = std::ranges::find(definition.ActionMaps, mapId, &InputActionMapDefinition::Id);
+            if (map == definition.ActionMaps.end())
+                return {};
+            const auto action = std::ranges::find(map->Actions, name, &InputActionDefinition::Name);
+            return action == map->Actions.end() ? AssetId{} : action->Id;
+        }
+        catch (...)
+        {
+            return {};
+        }
+    }
+
+    std::optional<ManagedInputActionSnapshot> ManagedInputContextStore::Action(const std::uint64_t handle,
+                                                                               const AssetId action) const noexcept
+    {
+        try
+        {
+            const auto found = m_Impl->Contexts.find(handle);
+            if (found == m_Impl->Contexts.end())
+                return std::nullopt;
+            const auto native = found->second.Context->FindAction(action);
+            if (!native)
+                return std::nullopt;
+            return ManagedInputActionSnapshot{native.Phase(),
+                                              native.Value(),
+                                              found->second.Input->Frame(),
+                                              found->second.Context->ActionEnabled(action),
+                                              native.WasStartedThisFrame(),
+                                              native.WasPerformedThisFrame(),
+                                              native.WasCanceledThisFrame()};
+        }
+        catch (...)
+        {
+            return std::nullopt;
+        }
+    }
+
+    Ref<InputActionContext> ManagedInputContextStore::Context(const std::uint64_t handle) const noexcept
+    {
+        const auto found = m_Impl->Contexts.find(handle);
+        return found == m_Impl->Contexts.end() ? Ref<InputActionContext>{} : found->second.Context;
+    }
 
     class ManagedInputOperationStore::Impl final
     {
@@ -395,5 +684,21 @@ namespace Keire::Detail
         assembly.AddInternalCall("Keire.NativeInput", "LoadBindingsIcall", reinterpret_cast<void*>(&LoadInputBindings));
         assembly.AddInternalCall("Keire.NativeInput", "ClearBindingsIcall",
                                  reinterpret_cast<void*>(&ClearInputBindings));
+        assembly.AddInternalCall("Keire.NativeInput", "CreateContextIcall",
+                                 reinterpret_cast<void*>(&CreateInputContext));
+        assembly.AddInternalCall("Keire.NativeInput", "ReleaseContextIcall",
+                                 reinterpret_cast<void*>(&ReleaseInputContext));
+        assembly.AddInternalCall("Keire.NativeInput", "OperateContextIcall",
+                                 reinterpret_cast<void*>(&OperateInputContext));
+        assembly.AddInternalCall("Keire.NativeInput", "BeginContextRebindIcall",
+                                 reinterpret_cast<void*>(&BeginInputContextRebind));
+        assembly.AddInternalCall("Keire.NativeInput", "FindMapIcall", reinterpret_cast<void*>(&FindInputMap));
+        assembly.AddInternalCall("Keire.NativeInput", "FindActionIcall", reinterpret_cast<void*>(&FindInputAction));
+        assembly.AddInternalCall("Keire.NativeInput", "GetActionSnapshotIcall",
+                                 reinterpret_cast<void*>(&GetInputActionSnapshot));
+        assembly.AddInternalCall("Keire.NativeInput", "GetCurrentDeviceIcall",
+                                 reinterpret_cast<void*>(&GetCurrentInputDevice));
+        assembly.AddInternalCall("Keire.NativeInput", "GetControlSnapshotIcall",
+                                 reinterpret_cast<void*>(&GetInputControlSnapshot));
     }
 } // namespace Keire::Detail

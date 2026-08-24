@@ -24,6 +24,34 @@ internal unsafe struct NativeInputRebindSnapshot
     private fixed byte _reserved[3];
 }
 
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct NativeInputActionSnapshot
+{
+    internal ulong Frame;
+    internal float X;
+    internal float Y;
+    internal byte Phase;
+    internal byte ValueType;
+    internal byte EnabledValue;
+    internal byte StartedValue;
+    internal byte PerformedValue;
+    internal byte CanceledValue;
+    private fixed byte _reserved[2];
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeInputControlSnapshot
+{
+    internal ulong Frame;
+    internal float X;
+    internal float Y;
+    internal uint Device;
+    internal byte ValueType;
+    internal byte PressedValue;
+    internal byte ReleasedValue;
+    internal byte Reserved;
+}
+
 internal static unsafe class NativeInput
 {
 #pragma warning disable CS0649
@@ -42,6 +70,15 @@ internal static unsafe class NativeInput
     internal static delegate* unmanaged<NativeString, byte> SaveBindingsIcall;
     internal static delegate* unmanaged<NativeString, int> LoadBindingsIcall;
     internal static delegate* unmanaged<byte> ClearBindingsIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong> CreateContextIcall;
+    internal static delegate* unmanaged<ulong, byte> ReleaseContextIcall;
+    internal static delegate* unmanaged<ulong, byte, ulong, ulong, byte> OperateContextIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, float, double, byte, ulong> BeginContextRebindIcall;
+    internal static delegate* unmanaged<ulong, NativeString, ulong*, ulong*, byte> FindMapIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, ulong*, ulong*, byte> FindActionIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, NativeInputActionSnapshot*, byte> GetActionSnapshotIcall;
+    internal static delegate* unmanaged<byte, uint> GetCurrentDeviceIcall;
+    internal static delegate* unmanaged<uint, NativeString, NativeInputControlSnapshot*, byte> GetControlSnapshotIcall;
 #pragma warning restore CS0649
 
     internal static IReadOnlyList<InputDevice> Devices
@@ -143,6 +180,96 @@ internal static unsafe class NativeInput
     {
         RequireBound();
         return ClearBindingsIcall() != 0;
+    }
+
+    internal static ulong CreateContext(AssetId asset)
+    {
+        RequireBound();
+        if (CreateContextIcall == null)
+            throw new InvalidOperationException("Kéire managed input actions are not attached.");
+        ulong generation = NativeRuntime.ManagedAssets?.Generation ??
+            throw new InvalidOperationException("No managed input generation is installed for this application.");
+        ulong handle = CreateContextIcall(generation, asset.High, asset.Low);
+        return handle != 0 ? handle : throw new InvalidOperationException(
+            $"Input action asset {asset} could not create a runtime context.");
+    }
+
+    internal static void ReleaseContext(ulong context)
+    {
+        if (context != 0 && ReleaseContextIcall != null)
+            _ = ReleaseContextIcall(context);
+    }
+
+    internal static bool OperateContext(ulong context, InputContextOperation operation, AssetId target = default)
+    {
+        RequireBound();
+        if (OperateContextIcall == null)
+            throw new InvalidOperationException("Kéire managed input actions are not attached.");
+        return OperateContextIcall(context, (byte)operation, target.High, target.Low) != 0;
+    }
+
+    internal static ulong BeginRebind(ulong context, AssetId binding, InputRebindOptions options)
+    {
+        RequireBound();
+        if (BeginContextRebindIcall == null)
+            throw new InvalidOperationException("Kéire managed input action rebinding is not attached.");
+        return BeginContextRebindIcall(context, binding.High, binding.Low, options.MagnitudeThreshold,
+                                       options.TimeoutSeconds, (byte)options.AllowedDevices);
+    }
+
+    internal static AssetId FindMap(ulong context, string name)
+    {
+        RequireBound();
+        if (FindMapIcall == null)
+            throw new InvalidOperationException("Kéire managed input actions are not attached.");
+        using NativeString native = name;
+        ulong high = 0;
+        ulong low = 0;
+        return FindMapIcall(context, native, &high, &low) != 0 ? new AssetId(high, low) : default;
+    }
+
+    internal static AssetId FindAction(ulong context, AssetId map, string name)
+    {
+        RequireBound();
+        if (FindActionIcall == null)
+            throw new InvalidOperationException("Kéire managed input actions are not attached.");
+        using NativeString native = name;
+        ulong high = 0;
+        ulong low = 0;
+        return FindActionIcall(context, map.High, map.Low, native, &high, &low) != 0
+            ? new AssetId(high, low)
+            : default;
+    }
+
+    internal static NativeInputActionSnapshot ActionSnapshot(ulong context, AssetId action)
+    {
+        RequireBound();
+        if (GetActionSnapshotIcall == null)
+            throw new InvalidOperationException("Kéire managed input actions are not attached.");
+        NativeInputActionSnapshot snapshot = default;
+        if (GetActionSnapshotIcall(context, action.High, action.Low, &snapshot) == 0)
+            throw new InvalidOperationException("The input action or its context is no longer available.");
+        return snapshot;
+    }
+
+    internal static uint CurrentDevice(InputDeviceType type)
+    {
+        RequireBound();
+        if (GetCurrentDeviceIcall == null)
+            throw new InvalidOperationException("Kéire direct input polling is not attached.");
+        return GetCurrentDeviceIcall((byte)type);
+    }
+
+    internal static bool TryControlSnapshot(uint device, string path, out NativeInputControlSnapshot snapshot)
+    {
+        RequireBound();
+        if (GetControlSnapshotIcall == null)
+            throw new InvalidOperationException("Kéire direct input polling is not attached.");
+        using NativeString native = path;
+        NativeInputControlSnapshot nativeSnapshot = default;
+        bool found = GetControlSnapshotIcall(device, native, &nativeSnapshot) != 0;
+        snapshot = nativeSnapshot;
+        return found;
     }
 
     private static string ReadDeviceName(uint device)

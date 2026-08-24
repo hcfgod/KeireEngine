@@ -532,6 +532,8 @@ namespace
             {"buildScenes", std::move(encodedBuildScenes)},
             {"defaultInput",
              descriptor.DefaultInput ? nlohmann::json(descriptor.DefaultInput.ToString()) : nlohmann::json(nullptr)},
+            {"defaultInputMap", descriptor.DefaultInputMap ? nlohmann::json(descriptor.DefaultInputMap.ToString())
+                                                           : nlohmann::json(nullptr)},
             {"defaultMixer",
              authoring.DefaultMixer ? nlohmann::json(authoring.DefaultMixer.ToString()) : nlohmann::json(nullptr)},
             {"buildIdentity",

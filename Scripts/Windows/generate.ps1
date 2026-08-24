@@ -34,6 +34,9 @@ $premakeArchitecture = Get-PremakeArchitecture $Architecture
 # Windows. Generation already runs from $Root, so keep the script path local.
 $arguments = @("--file=premake5.lua", "--arch=$premakeArchitecture", "--toolset=$Toolset")
 if ($CI) { $arguments += "--ci" }
+$stampDirectory = Join-Path $Root "Build\Generated"
+$identityGenerator = if ($Generator -eq "compilecommands") { "ninja" } else { $Generator }
+$identityStamp = Join-Path $stampDirectory "$identityGenerator.stamp"
 Write-Host "==> Generating $Generator files for $Architecture with toolset $Toolset"
 $premakeRoot = $Root.Path
 $premakeJunction = $null
@@ -86,8 +89,9 @@ if ($Generator -eq "compilecommands") {
     $debugCommands | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $Root "compile_commands.json") -Encoding UTF8
 }
 
-$stampDirectory = Join-Path $Root "Build\Generated"
 New-Item -ItemType Directory -Force -Path $stampDirectory | Out-Null
+Remove-IncompatibleBuildBinaries -Root $Root -Architecture $Architecture -Toolset $Toolset `
+    -IdentityStamp $identityStamp
 $generationFingerprint = Get-ProjectGenerationFingerprint $Root
 Set-Content -Path (Join-Path $stampDirectory "$Generator.stamp") `
     -Value "$Generator|$Architecture|$Toolset|$CompilerCache|$([bool]$CI)|$generationFingerprint" -Encoding ASCII

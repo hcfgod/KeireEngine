@@ -54,6 +54,74 @@ if ($storePython -and $pythonLauncher -and $storePython.Source -like "*\Microsof
     Assert-Equal ([IO.Path]::GetFileName($python.Executable)) "py.exe" "Microsoft Store Python alias rejection"
 }
 if ($runFast) {
+$powerShellExecutable = (Get-Process -Id $PID).Path
+$savedErrorActionPreference = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+$ffmpegToolsetError = & $powerShellExecutable -NoProfile -ExecutionPolicy Bypass -File `
+    (Join-Path $Windows "ffmpeg.ps1") -Configuration Debug -Architecture x86_64 -Toolset gcc 2>&1
+$ffmpegToolsetStatus = $LASTEXITCODE
+$ErrorActionPreference = $savedErrorActionPreference
+Assert-True ($ffmpegToolsetStatus -ne 0) "Non-MSVC Windows FFmpeg producer rejection status"
+Assert-True (($ffmpegToolsetError | Out-String).Contains("do not support the gcc toolset")) `
+    "GNU Windows FFmpeg consumer rejection diagnostic"
+$binaryOutputFixture = Join-Path ([IO.Path]::GetTempPath()) ("keire-binary-output-" + [guid]::NewGuid().ToString("N"))
+$binaryOutputExternal = Join-Path ([IO.Path]::GetTempPath()) `
+    ("keire-binary-output-external-" + [guid]::NewGuid().ToString("N"))
+$binaryOutputJunction = Join-Path $binaryOutputFixture "Build\Bin\Debug-windows-x86_64"
+try {
+    New-Item -ItemType Directory -Force -Path `
+        $binaryOutputJunction, `
+        (Join-Path $binaryOutputFixture "Build\Bin\Release-windows-x86_64"), `
+        (Join-Path $binaryOutputFixture "Build\Bin\Debug-windows-AARCH64"), `
+        $binaryOutputExternal | Out-Null
+    New-Item -ItemType File -Force -Path `
+        (Join-Path $binaryOutputJunction "sentinel"), `
+        (Join-Path $binaryOutputFixture "Build\Bin\Release-windows-x86_64\sentinel"), `
+        (Join-Path $binaryOutputFixture "Build\Bin\Debug-windows-AARCH64\sentinel"), `
+        (Join-Path $binaryOutputExternal "sentinel") | Out-Null
+    $binaryIdentityStamp = Join-Path $binaryOutputFixture "generation.stamp"
+    Set-Content -LiteralPath $binaryIdentityStamp -Encoding ASCII -Value "ninja|x86_64|msc|off|False|fingerprint"
+    Remove-IncompatibleBuildBinaries -Root $binaryOutputFixture -Architecture x86_64 -Toolset msc `
+        -IdentityStamp $binaryIdentityStamp
+    Assert-True (Test-Path -LiteralPath (Join-Path $binaryOutputJunction "sentinel") -PathType Leaf) `
+        "Same-toolset Windows binary preservation"
+    Set-Content -LiteralPath $binaryIdentityStamp -Encoding ASCII -Value "ninja|x86_64|clang|off|False|fingerprint"
+    Remove-IncompatibleBuildBinaries -Root $binaryOutputFixture -Architecture x86_64 -Toolset msc `
+        -IdentityStamp $binaryIdentityStamp
+    Assert-True (-not (Test-Path -LiteralPath $binaryOutputJunction)) `
+        "Changed-toolset Windows binary invalidation"
+    Assert-True (-not (Test-Path -LiteralPath `
+        (Join-Path $binaryOutputFixture "Build\Bin\Release-windows-x86_64"))) `
+        "All-configuration Windows binary invalidation"
+    Assert-True (Test-Path -LiteralPath `
+        (Join-Path $binaryOutputFixture "Build\Bin\Debug-windows-AARCH64\sentinel") -PathType Leaf) `
+        "Other-architecture Windows binary preservation"
+    Assert-True (Test-Path -LiteralPath (Join-Path $binaryOutputExternal "sentinel") -PathType Leaf) `
+        "Outside Windows binary sentinel preservation"
+
+    New-Item -ItemType Directory -Force -Path $binaryOutputJunction | Out-Null
+    Remove-Item -LiteralPath $binaryIdentityStamp -Force
+    Remove-IncompatibleBuildBinaries -Root $binaryOutputFixture -Architecture x86_64 -Toolset msc `
+        -IdentityStamp $binaryIdentityStamp
+    Assert-True (-not (Test-Path -LiteralPath $binaryOutputJunction)) `
+        "Unknown-provenance Windows binary invalidation"
+
+    New-Item -ItemType Junction -Path $binaryOutputJunction -Target $binaryOutputExternal | Out-Null
+    Set-Content -LiteralPath $binaryIdentityStamp -Encoding ASCII -Value "ninja|x86_64|clang|off|False|fingerprint"
+    Assert-Throws {
+        Remove-IncompatibleBuildBinaries -Root $binaryOutputFixture -Architecture x86_64 -Toolset msc `
+            -IdentityStamp $binaryIdentityStamp
+    } "Reparse-point Windows binary output rejection"
+    Assert-True (Test-Path -LiteralPath (Join-Path $binaryOutputExternal "sentinel") -PathType Leaf) `
+        "Reparse target sentinel preservation"
+}
+finally {
+    $junction = Get-Item -LiteralPath $binaryOutputJunction -Force -ErrorAction SilentlyContinue
+    if ($junction -and (($junction.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        [IO.Directory]::Delete($binaryOutputJunction)
+    }
+    Remove-Item -LiteralPath $binaryOutputFixture, $binaryOutputExternal -Recurse -Force -ErrorAction SilentlyContinue
+}
 $workspaceLockFixture = Join-Path ([IO.Path]::GetTempPath()) ("keire-workspace-lock-" + [guid]::NewGuid().ToString("N"))
 $savedWorkspaceLockToken = $env:KEIRE_WORKSPACE_LOCK_TOKEN
 $savedWorkspaceLockTimeout = $env:KEIRE_WORKSPACE_LOCK_TIMEOUT_SECONDS
@@ -153,10 +221,21 @@ Assert-True ($generateScript.Contains('$Generator -eq "compilecommands"') -and
              $generateScript.Contains('(Join-Path $stampDirectory "ninja.stamp")') -and
              $generateScript.Contains('"ninja|$Architecture|$Toolset|$CompilerCache|$([bool]$CI)|$generationFingerprint"')) `
     "Compile database generation records the shared Ninja artifact identity"
+Assert-True ($generateScript.Contains('$identityGenerator = if ($Generator -eq "compilecommands") { "ninja" }') -and
+             $generateScript.Contains('Remove-IncompatibleBuildBinaries') -and
+             $generateScript.Contains('-IdentityStamp $identityStamp')) `
+    "Windows generation invalidates stable outputs with incompatible toolset provenance"
 $windowsCommonSource = Get-Content (Join-Path $Windows "common.ps1") -Raw
 Assert-True ($windowsCommonSource.Contains('$generationInfrastructureInputs') -and
              $windowsCommonSource.Contains('Scripts\Unix\dependencies.sh') -and
              $windowsCommonSource.Contains('Scripts\Dependencies')) "Dependency-infrastructure project regeneration"
+Assert-True ($windowsCommonSource.Contains('$_.Name -notin @(".git", "Build", "Vendor", "Tools")') -and
+             $windowsCommonSource.Contains('Get-ChildItem -LiteralPath $_.FullName -Recurse -Filter "premake5.lua"')) `
+    "Windows Premake inventory skips non-source roots before recursive discovery"
+Assert-True ($windowsCommonSource.Contains('function Remove-IncompatibleBuildBinaries') -and
+             $windowsCommonSource.Contains('[IO.FileAttributes]::ReparsePoint') -and
+             $windowsCommonSource.Contains('Build\Bin\$_-windows-$outputArchitecture')) `
+    "Windows toolset-output invalidation is contained and rejects reparse points"
 $windowsCommon = Get-Content (Join-Path $Windows "common.ps1") -Raw
 Assert-True ($windowsCommon.Contains('"KeireHubRuntime"') -and $windowsCommon.Contains('"KeireHubTests"') -and
              $windowsCommon.Contains('"KeireHubWorker"')) "Hub target source-inventory project regeneration"
@@ -447,13 +526,29 @@ Assert-True $windowsFfmpegBuild.Contains('git -c core.autocrlf=false -C $VendorS
 Assert-True ($windowsFfmpegBuild.Contains('f101fce22d64db10f500242e23e43a251fe14414') -and
              $windowsFfmpegBuild.Contains('$ConfigureText.LastIndexOf($BrokenMsvcProbe')) `
     "Windows FFmpeg builds apply the validated upstream MSVC configure correction exactly once"
-Assert-True ($windowsFfmpegBuild.Contains('$FfbuildDirectory = Join-Path $Output "ffbuild"') -and
+Assert-True ($windowsFfmpegBuild.Contains('$FfbuildDirectory = Join-Path $CacheOutput "ffbuild"') -and
              $windowsFfmpegBuild.Contains('-Path $FfbuildDirectory, $ZlibIncludeDirectory, $ZlibLinkDirectory')) `
     "Windows FFmpeg builds create the out-of-tree configure log directory before configuration"
-Assert-True ($windowsFfmpegBuild.Contains('bin\avformat-63.dll') -and
-             $windowsFfmpegBuild.Contains('bin\avformat.lib') -and
+Assert-True ($windowsFfmpegBuild.Contains('@("avformat", "avformat-63.dll")') -and
+             $windowsFfmpegBuild.Contains('@("avcodec", "avcodec-63.dll")') -and
+             $windowsFfmpegBuild.Contains('@("swresample", "swresample-7.dll")') -and
+             $windowsFfmpegBuild.Contains('@("avutil", "avutil-61.dll")') -and
+             $windowsFfmpegBuild.Contains('"bin\$($component[0]).lib"') -and
              -not $windowsFfmpegBuild.Contains('lib\avformat.lib')) `
-    "Windows FFmpeg cache validation checks the installed runtime and import-library locations"
+    "Windows FFmpeg cache validation requires every installed runtime and import library"
+Assert-True ($windowsFfmpegBuild.Contains('$Toolset -eq "gcc"') -and
+             $windowsFfmpegBuild.Contains('do not support the gcc toolset') -and
+             $windowsFfmpegBuild.Contains('Enter-WindowsToolEnvironment "vs2022" "msc" $Architecture') -and
+             $windowsFfmpegBuild.Contains('--toolchain=msvc') -and
+             $windowsFfmpegBuild.Contains('--extra-cflags=`"-MD')) `
+    "Windows FFmpeg uses an explicit MSVC producer and rejects unsupported GNU import-library consumers"
+Assert-True ($windowsFfmpegBuild.Contains('if (Test-FfmpegOutput $AlternateOutput $AlternateExpected)')) `
+    "Windows FFmpeg alternate-configuration reuse applies the complete cache validator"
+Assert-True ($unixFfmpegBuild.Contains('valid_ffmpeg_component_artifacts()') -and
+             $unixFfmpegBuild.Contains('for component in avformat avcodec swresample avutil') -and
+             $unixFfmpegBuild.Contains('lib$component.dylib') -and
+             $unixFfmpegBuild.Contains('lib$component.so')) `
+    "Unix FFmpeg cache validation requires every shared runtime and linker artifact"
 Assert-True ($windowsFfmpegBuild.Contains('--enable-zlib') -and
              $windowsFfmpegBuild.Contains('--enable-decoder=exr') -and
              $windowsFfmpegBuild.Contains('#define CONFIG_EXR_DECODER 1') -and
@@ -465,8 +560,19 @@ Assert-True ($windowsFfmpegBuild.Contains('$AlternateConfiguration = if ($Config
              $windowsFfmpegBuild.Contains('Copy-Item -LiteralPath $AlternateComponents') -and
              $windowsFfmpegBuild.Contains('Reused the identical private FFmpeg')) `
     "Identical Windows FFmpeg configurations compile once and publish to both roots"
+Assert-True ($windowsFfmpegBuild.Contains('ffmpeg-cache\windows-$OutputArchitecture-msc-producer-$Toolset') -and
+             $windowsFfmpegBuild.Contains('function Publish-FfmpegOutput') -and
+             $windowsFfmpegBuild.Contains('prefix=${pcfiledir}/../..') -and
+             $windowsFfmpegBuild.Contains('Adopted private FFmpeg') -and
+             $unixFfmpegBuild.Contains('ffmpeg-cache/$SYSTEM-$OUTPUT_ARCHITECTURE-$TOOLSET') -and
+             $unixFfmpegBuild.Contains('publish_ffmpeg_output()') -and
+             $unixFfmpegBuild.Contains('prefix=${pcfiledir}/../..') -and
+             $unixFfmpegBuild.Contains('Adopted private FFmpeg')) `
+    "FFmpeg intermediates are host-specific while active-host publication remains compatible"
 Assert-True ($dependencyScript.Contains('$forceFfmpegSourceBuild = $Force') -and
-             $dependencyScript.Contains('$forceFfmpegSourceBuild = $false')) `
+             $dependencyScript.Contains('$forceFfmpegSourceBuild = $false') -and
+             $dependencyScript.Contains('-Architecture $Architecture') -and
+             $dependencyScript.Contains('-Toolset $Toolset')) `
     "Forced Windows dependency repair compiles the shared FFmpeg source only once"
 Assert-True ($ffmpegTextureBackend.Contains('receiveStatus == AVERROR(EAGAIN)') -and
              $ffmpegTextureBackend.Contains('avcodec_send_packet(decoder.get(), nullptr)') -and
@@ -561,9 +667,12 @@ Assert-True ($corePremake.Contains('CoreGeneratedContentTarget') -and
              -not $corePremake.Contains('buildoptions { "/MP1" }') -and
              $premakePolicy.Contains('CoreArchiveTargets') -and
              $premakePolicy.Contains('linkgroups "On"') -and
+             $premakePolicy.Contains('premake.override(ninjaCpp, "linkrule"') -and
+             $premakePolicy.Contains('return "rm -f $out && " .. command') -and
+             $premakePolicy.Contains('del /F /Q \"$out\" & if exist \"$out\" exit /B 1') -and
              $premakePolicy.Contains('filter { "action:ninja", "system:linux or macosx" }') -and
              $premakePolicy.Contains('enablepch "Off"')) `
-    "Parallel Core archives retain stable PCH tracking and cyclic-link closure"
+    "Parallel Core archives retain stable membership, PCH tracking, and cyclic-link closure"
 foreach ($coreArchive in @("Assets", "Build", "World", "Rendering", "Scenes", "Scripting", "Ui", "Vfx")) {
     Assert-True (Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Source\Pch\KeireCore${coreArchive}Pch.cpp")) `
         "Core $coreArchive archive owns a distinct PCH source"

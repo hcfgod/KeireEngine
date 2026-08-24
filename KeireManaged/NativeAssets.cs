@@ -78,7 +78,7 @@ public sealed class BinaryAsset : Asset;
 public sealed class TextAsset : Asset;
 
 [StableAssetTypeId("4b454952-4549-4e50-5554-414354494f01")]
-public sealed class InputActionAsset : Asset;
+public sealed partial class InputActionAsset : Asset;
 
 [StableAssetTypeId("4b454952-4553-4b45-4c45-544f4e000001")]
 public sealed class Skeleton : Asset;

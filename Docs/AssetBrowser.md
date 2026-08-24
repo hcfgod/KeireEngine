@@ -55,6 +55,9 @@ clicks can build a folder selection. Copy, cut, duplicate, delete, and drag move
 Selecting an importable source displays its type-aware preview and persistent importer options in the Inspector.
 **Apply and Reimport** validates the edited values, writes them to that asset's `.keiremeta`, and rebuilds only its
 reverse dependency closure. **Revert Import Settings** discards the Inspector draft without touching project files.
+Text and extensionless documents use a readable page preview; C#, Lua, managed assemblies, shader sources, structured
+data, rigs, animation graphs, physics materials, and reusable material/shader graph sources use distinct semantic
+artwork and compact type badges. Thumbnail provider revisions invalidate older generic placeholders automatically.
 
 Both the thumbnail and extension-free label are drag handles. Folder targets retain move semantics; Scene-view targets
 dispatch by asset type. Scenes open through the normal dirty-document guard, Input Actions open in their editor, and a

@@ -322,7 +322,10 @@ namespace Keire
             {
             }
             if (Specification.RuntimeServices)
+            {
                 Specification.RuntimeServices->ReleaseManagedRuntimeAssets(generation);
+                Specification.RuntimeServices->ReleaseManagedInputContexts(generation);
+            }
         }
         void ResumeGenerationSequence() { NextOperation = Detail::NextManagedGeneration(OutputRoot); }
 

@@ -355,8 +355,50 @@ namespace Keire::Detail
                                       RENAME_EXCL);
 #elif defined(__linux__)
             else
+            {
                 result = static_cast<int>(syscall(SYS_renameat2, sourceParent, sourceName.c_str(), destinationParent,
                                                   destinationName.c_str(), 1U));
+                if (result != 0 && (errno == EINVAL || errno == ENOSYS || errno == EOPNOTSUPP))
+                {
+                    const auto capabilityError = errno;
+                    // Some filesystems exposed through Linux, notably WSL's DrvFS mounts, do not implement
+                    // RENAME_NOREPLACE. A hard link still reserves a regular-file destination atomically without
+                    // overwriting a raced entry; removing the source then completes the rename.
+                    struct stat status{};
+                    if (fstatat(sourceParent, sourceName.c_str(), &status, AT_SYMLINK_NOFOLLOW) == 0 &&
+                        S_ISREG(status.st_mode))
+                    {
+                        result =
+                            linkat(sourceParent, sourceName.c_str(), destinationParent, destinationName.c_str(), 0);
+                        if (result == 0 && unlinkat(sourceParent, sourceName.c_str(), 0) != 0)
+                        {
+                            const auto unlinkError = errno;
+                            (void)unlinkat(destinationParent, destinationName.c_str(), 0);
+                            errno = unlinkError;
+                            result = -1;
+                        }
+                    }
+                    else if (S_ISDIR(status.st_mode))
+                    {
+                        struct stat destinationStatus{};
+                        if (fstatat(destinationParent, destinationName.c_str(), &destinationStatus,
+                                    AT_SYMLINK_NOFOLLOW) == 0)
+                        {
+                            errno = EEXIST;
+                            result = -1;
+                        }
+                        else if (errno == ENOENT)
+                        {
+                            // DrvFS exposes no atomic no-replace directory rename. Keep all resolution anchored and
+                            // reject an existing destination immediately before using its regular rename operation.
+                            result =
+                                renameat(sourceParent, sourceName.c_str(), destinationParent, destinationName.c_str());
+                        }
+                    }
+                    else
+                        errno = capabilityError;
+                }
+            }
 #else
 #error "Kéire anchored no-replace rename requires an atomic platform implementation."
 #endif

@@ -17,6 +17,7 @@ var tests = new (string Name, Action Run)[]
     ("Animator exposes transient foot-grounding control", AnimatorFootGroundingContract),
     ("Managed physics shape queries validate and preserve native results", ManagedPhysicsQueryContract),
     ("Managed input devices rebinding persistence and rumble preserve native contracts", ManagedInputDeviceContract),
+    ("Managed input actions and direct controls expose Unity-style lifecycle contracts", ManagedInputActionContract),
     ("Native UI button dispatch advances with the player clock", NativeUiButtonDispatchClockContract),
     ("Native runtime UI controls preserve values text focus and events", NativeRuntimeUiControlContract),
     ("Managed rendering objects preserve camera lights materials and shader overrides", ManagedRenderingContract),
@@ -388,6 +389,51 @@ static unsafe void ManagedInputDeviceContract()
     finally
     {
         NativeInputFixture.Uninstall();
+    }
+}
+
+static unsafe void ManagedInputActionContract()
+{
+    Assert(System.Runtime.InteropServices.Marshal.SizeOf<Keire.NativeInputActionSnapshot>() == 24 &&
+               System.Runtime.InteropServices.Marshal.SizeOf<Keire.NativeInputControlSnapshot>() == 24,
+           "Managed action and control snapshots must preserve their native ABI layouts.");
+    NativeInputFixture.Install();
+    Keire.NativeRuntime.InstallManagedAssetsForTests(8101, 4, 2, null);
+    try
+    {
+        var asset = Keire.Asset.FromId<Keire.InputActionAsset>(new Keire.AssetId(31, 37))!;
+        using Keire.InputActionContext context = asset.CreateContext();
+        Keire.InputActionMap map = context.FindActionMap("Player")!;
+        Keire.InputAction action = map.FindAction("Interact")!;
+        int performed = 0;
+        action.performed += callback =>
+        {
+            Assert(callback.ReadValue<bool>() && callback.Phase == Keire.InputActionPhase.Performed,
+                   "Action callback contexts must preserve values and phases.");
+            ++performed;
+        };
+        map.Enable();
+        Keire.InputActionRuntime.DispatchEvents();
+        Keire.InputActionRuntime.DispatchEvents();
+        Assert(action.Enabled && action.IsPressed && action.WasPressedThisFrame && action.WasPerformedThisFrame &&
+                   performed == 1,
+               "Managed actions must expose values, edges, and at-most-once transition callbacks per frame.");
+        Assert(action.BeginInteractiveRebind(new Keire.AssetId(71, 73)).IsValid,
+               "Interactive rebinding must retain the action's explicit context.");
+
+        Keire.Keyboard keyboard = Keire.Input.Keyboard.Current!;
+        Keire.ButtonControl key = keyboard.wKey;
+        Assert(key.IsPressed && key.WasPressed && key.WasPressedThisFrame && !key.WasReleasedThisFrame,
+               "Direct keyboard polling must expose held and frame-edge state.");
+        Assert(keyboard.eKey.Path == "<Keyboard>/e" && keyboard.f12Key.Path == "<Keyboard>/f12",
+               "Unity-style keyboard properties must cover ordinary and function keys.");
+        Assert(Keire.Input.Gamepad.Current?.DeviceId == 7,
+               "Current direct devices must follow the native player's paired device selection.");
+    }
+    finally
+    {
+        NativeInputFixture.Uninstall();
+        _ = Keire.NativeRuntime.ResetManagedAssets(8101);
     }
 }
 

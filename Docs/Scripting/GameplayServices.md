@@ -63,34 +63,42 @@ service restores the previous window mode and size if a later step fails.
 
 ## Input
 
-Managed scripts poll named actions from the active Input Action asset:
+Managed scripts can own an Input Action Asset context with the same enable/disable shape used by Unity:
 
 ```csharp
-Vector2 move = Input.Axis2D("Move");
-float throttle = Input.Axis("Throttle");
+[SerializeField] private InputActionAsset _input = null!;
+private InputAction? _move;
 
-if (Input.Pressed("Jump"))
-    Jump();
-if (Input.Held("Fire"))
-    ContinueFiring();
-if (Input.Released("Aim"))
-    StopAiming();
+protected override void OnEnable()
+{
+    _move = _input.FindAction("Player/Move");
+    _input.Enable();
+}
+
+protected override void OnDisable() => _input.Disable();
+
+protected override void Update()
+{
+    Vector2 move = _move?.ReadValue<Vector2>() ?? Vector2.Zero;
+}
 ```
 
-| Method | Meaning |
-| --- | --- |
-| `Axis2D(action)` | Current two-dimensional action value |
-| `Axis(action)` | X component of `Axis2D` |
-| `Held(action)` | Action is currently held |
-| `Pressed(action)` | Action became pressed in the current snapshot |
-| `Released(action)` | Action became released in the current snapshot |
-| `Button(action)` | Alias for `Held` |
+Actions expose `ReadValue<bool>()`, `ReadValue<float>()`, `ReadValue<Vector2>()`, `IsPressed`, frame-edge properties,
+and `started`, `performed`, and `canceled` callbacks. Use `CreateContext()` and dispose the returned context when a
+component or local player needs enable state independent from the asset's shared context. All fixed ticks and variable
+updates in one outer frame observe the same immutable snapshot. Configure the project startup asset/map, bindings,
+generated wrapper, and UI-capture policy in the [Input Actions Editor](../InputActionsEditor.md).
 
-All fixed ticks and the variable update in one outer frame observe the same immutable action snapshot. Use edge methods
-for one-shot commands and `Held` for continuous behavior.
+Direct controls are available when an action abstraction is unnecessary:
 
-Action names are strings and must match authoring exactly. Configure actions, maps, bindings, and UI-capture policy in
-the [Input Actions Editor](../InputActionsEditor.md).
+```csharp
+if (Input.Keyboard.Current?.spaceKey.WasPressedThisFrame == true)
+    Jump();
+Vector2 pointerDelta = Input.Mouse.Current?.delta.ReadValue() ?? Vector2.Zero;
+```
+
+The string-based `Input.Axis2D`, `Input.Axis`, `Input.Held`, `Input.Pressed`, `Input.Released`, and `Input.Button`
+methods remain compatible but are obsolete.
 
 Device and control-scheme metadata can drive prompts without exposing SDL handles:
 

@@ -64,6 +64,9 @@ namespace
         bool CaptureOverrideActive = false;
         std::size_t ReloadedOverrides = 0;
         int PerformedCallbacks = 0;
+        bool RawKeyHeld = false;
+        bool RawKeyPressed = false;
+        Keire::InputDeviceId CurrentKeyboard;
     };
 
     class InputProbeLayer final : public Keire::Layer
@@ -127,6 +130,12 @@ namespace
             if (!m_Result->SawMove && m_Move.Value().AsAxis2D().Y > 0.9F)
             {
                 m_Result->SawMove = m_Move.WasPerformedThisFrame();
+                const auto raw = Owner().Input()->ReadControl(Keire::InputDeviceId(1), "<Keyboard>/w");
+                REQUIRE(raw);
+                m_Result->RawKeyHeld = raw->IsPressed();
+                m_Result->RawKeyPressed = raw->Pressed;
+                m_Result->CurrentKeyboard =
+                    Owner().Input()->CurrentDevice(Keire::InputDeviceType::Keyboard).value_or(Keire::InputDeviceId{});
                 PushKey(false);
                 return;
             }
@@ -649,6 +658,9 @@ TEST_CASE("Application input processes one immutable action snapshot per outer f
     CHECK(result->Rebound);
     CHECK(result->ReloadedOverrides == 1);
     CHECK(result->CaptureOverrideActive);
+    CHECK(result->RawKeyHeld);
+    CHECK(result->RawKeyPressed);
+    CHECK(result->CurrentKeyboard == Keire::InputDeviceId(1));
 }
 
 TEST_CASE("Input preserves mouse button taps that begin and end within one action snapshot")

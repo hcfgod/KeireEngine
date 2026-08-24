@@ -189,7 +189,8 @@ TEST_CASE("Created projects receive schema-three identity and template provenanc
     CHECK(result.Value().ProjectId == FixedId);
     const auto descriptor = nlohmann::json::parse(
         KeireHubTests::ReadText(request.Destination / "ProjectSettings" / "Project.keireproject"));
-    CHECK(descriptor.at("schemaVersion") == 3);
+    CHECK(descriptor.at("schemaVersion") == 4);
+    CHECK(descriptor.at("defaultInputMap").is_null());
     CHECK(descriptor.at("id") == FixedId);
     CHECK(descriptor.at("name") == "Test Project");
     CHECK(descriptor.at("createdAt") == FixedTimestamp);
@@ -234,6 +235,7 @@ TEST_CASE("Sandbox creation copies packaged clean content and never mutates its 
         nlohmann::json::parse(KeireHubTests::ReadText(first.Value().Root / "ProjectSettings/Project.keireproject"));
     CHECK(descriptor.at("startupScene") == "85be2f8e-31eb-5971-bca9-e5dd6b3f4029");
     CHECK(descriptor.at("defaultInput") == "97b38693-6dc3-4f06-a228-44ba5786e8d1");
+    CHECK(descriptor.at("defaultInputMap") == "a6b6db76-6436-4aa4-b96a-a72a0f987101");
     CHECK(descriptor.at("createdWithEngineVersion") == "0.3.0");
     CHECK(descriptor.at("minimumEngineVersion") == "0.3.0");
     CHECK(descriptor.at("template").at("version") == "1.2.0");

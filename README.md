@@ -226,7 +226,7 @@ Current authoring and runtime contracts include:
 
 | Contract | Current schema | Compatibility policy |
 | --- | ---: | --- |
-| Project descriptor | 3 | Older descriptors are inspected and upgraded transactionally before mutation. |
+| Project descriptor | 4 | Older descriptors are inspected and upgraded transactionally before mutation. |
 | Scene source | 6 | Schemas 1–5 migrate in memory; saves emit canonical schema 6. |
 | Static mesh | 5 | Earlier payloads remain readable; schema 5 preserves triangle-, line-, and point-list submeshes. |
 | Shader Graph source | 4 | Schemas 1–3 migrate in memory; publication emits canonical schema 4. |
@@ -251,6 +251,9 @@ rendering, and UI APIs or retain an explicit `AssetLoadOperation<T>` residency l
 fallback/revision state, structured diagnostics, and deterministic disposal.
 Packaged-player scripts can replace the active scene transactionally with coroutine progress, cancellation, and
 diagnostics, while atomic runtime render settings support transient environment, exposure, and shadow changes.
+Input action assets expose Unity-style managed contexts, map/action enable and disable lifecycles, transition callbacks,
+and typed values. Project Settings selects the asset and stable map enabled at the next Play, while `Keyboard`, `Mouse`,
+and `Gamepad` controls provide frame-snapshot direct polling when an action abstraction is unnecessary.
 
 Start with [C# Scripting](Docs/Scripting/README.md), then use the
 [Managed API Index](Docs/Scripting/ApiIndex.md) as the compact API map and the

@@ -648,6 +648,7 @@ void EditorWorkspaceLayer::BeginPlayMode()
     m_ManagedMaterialParameters.Close();
     m_ManagedInputOperations.CancelAll();
     m_GameplayInputContext.Reset();
+    m_GameplayInputMap = {};
     if (const auto input = Owner().Input(); input && m_EditorInputUser)
     {
         const auto project = Owner().GetProject();
@@ -657,14 +658,21 @@ void EditorWorkspaceLayer::BeginPlayMode()
             {
                 m_GameplayInputContext =
                     input->CreateActionContext(project->Descriptor().DefaultInput, m_EditorInputUser);
-                if (!m_GameplayInputContext || !m_GameplayInputContext->EnableMap("Player"))
-                    throw std::runtime_error("The default input action asset does not contain a Player action map.");
-                m_ManagedInputCaptureOverride.emplace(m_GameplayInputContext->OverrideUiCapture("Player"));
+                if (!m_GameplayInputContext)
+                    throw std::runtime_error("The default input action asset could not create an input context.");
+                const auto definition = m_GameplayInputContext->Definition();
+                m_GameplayInputMap = project->Descriptor().DefaultInputMap;
+                if (!m_GameplayInputMap && !definition.ActionMaps.empty())
+                    m_GameplayInputMap = definition.ActionMaps.front().Id;
+                if (!m_GameplayInputMap || !m_GameplayInputContext->EnableMap(m_GameplayInputMap))
+                    throw std::runtime_error("The default input action asset does not contain the configured map.");
+                m_ManagedInputCaptureOverride.emplace(m_GameplayInputContext->OverrideUiCapture(m_GameplayInputMap));
             }
             catch (const std::exception& error)
             {
                 m_ManagedInputCaptureOverride.reset();
                 m_GameplayInputContext.Reset();
+                m_GameplayInputMap = {};
                 ReportError("Play Mode Input", error.what());
                 return;
             }
@@ -817,7 +825,9 @@ void EditorWorkspaceLayer::FinishPlayMode(const bool apply)
         m_SceneDocument->EndPlay();
         m_ManagedInputCaptureOverride.reset();
         m_ManagedInputOperations.CancelAll();
+        m_ManagedInputContexts.ReleaseAll();
         m_GameplayInputContext.Reset();
+        m_GameplayInputMap = {};
         m_ManagedCursorLocked = false;
         m_ManagedCursorVisible = true;
         m_ManagedRenderEnvironmentOverride.reset();

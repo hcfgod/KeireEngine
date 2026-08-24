@@ -551,16 +551,23 @@ Keire::Vector2 EditorWorkspaceLayer::ReadManagedInput(const std::string_view act
     {
         if (!m_GameplayInputContext || !m_SceneDocument->PlaySession() || !m_GameViewportInputActive)
             return {};
-        if (!m_GameplayInputContext->EnableMap("Player"))
+        if (!m_GameplayInputMap || !m_GameplayInputContext->EnableMap(m_GameplayInputMap))
             return {};
         if (!m_ManagedInputCaptureOverride)
-            m_ManagedInputCaptureOverride.emplace(m_GameplayInputContext->OverrideUiCapture("Player"));
+            m_ManagedInputCaptureOverride.emplace(m_GameplayInputContext->OverrideUiCapture(m_GameplayInputMap));
         if (action == "Look" && m_SuppressManagedLookFrames > 0)
         {
             --m_SuppressManagedLookFrames;
             return {};
         }
-        const auto handle = m_GameplayInputContext->FindAction("Player", action);
+        const auto definition = m_GameplayInputContext->Definition();
+        const auto map =
+            std::ranges::find(definition.ActionMaps, m_GameplayInputMap, &Keire::InputActionMapDefinition::Id);
+        if (map == definition.ActionMaps.end())
+            return {};
+        const auto found = std::ranges::find(map->Actions, action, &Keire::InputActionDefinition::Name);
+        const auto handle =
+            found != map->Actions.end() ? m_GameplayInputContext->FindAction(found->Id) : Keire::InputActionHandle{};
         if (!handle)
             return {};
         const auto value = handle.Value().AsAxis2D();
@@ -578,11 +585,18 @@ Keire::ManagedInputState EditorWorkspaceLayer::ReadManagedInputState(const std::
     {
         if (!m_GameplayInputContext || !m_SceneDocument->PlaySession() || !m_GameViewportInputActive)
             return Keire::ManagedInputState::None;
-        if (!m_GameplayInputContext->EnableMap("Player"))
+        if (!m_GameplayInputMap || !m_GameplayInputContext->EnableMap(m_GameplayInputMap))
             return Keire::ManagedInputState::None;
         if (!m_ManagedInputCaptureOverride)
-            m_ManagedInputCaptureOverride.emplace(m_GameplayInputContext->OverrideUiCapture("Player"));
-        const auto handle = m_GameplayInputContext->FindAction("Player", action);
+            m_ManagedInputCaptureOverride.emplace(m_GameplayInputContext->OverrideUiCapture(m_GameplayInputMap));
+        const auto definition = m_GameplayInputContext->Definition();
+        const auto map =
+            std::ranges::find(definition.ActionMaps, m_GameplayInputMap, &Keire::InputActionMapDefinition::Id);
+        if (map == definition.ActionMaps.end())
+            return Keire::ManagedInputState::None;
+        const auto found = std::ranges::find(map->Actions, action, &Keire::InputActionDefinition::Name);
+        const auto handle =
+            found != map->Actions.end() ? m_GameplayInputContext->FindAction(found->Id) : Keire::InputActionHandle{};
         if (!handle)
             return Keire::ManagedInputState::None;
         auto state = Keire::ManagedInputState::None;
@@ -734,6 +748,77 @@ bool EditorWorkspaceLayer::ClearManagedInputBindings() noexcept
     {
         return false;
     }
+}
+
+std::uint64_t EditorWorkspaceLayer::CreateManagedInputContext(const std::uint64_t generation,
+                                                              const Keire::AssetId asset) noexcept
+{
+    if (!m_SceneDocument->PlaySession())
+        return 0;
+    return m_ManagedInputContexts.Create(generation, Owner().Input(), m_EditorInputUser, asset);
+}
+
+bool EditorWorkspaceLayer::ReleaseManagedInputContext(const std::uint64_t handle) noexcept
+{
+    return m_ManagedInputContexts.Release(handle);
+}
+
+void EditorWorkspaceLayer::ReleaseManagedInputContexts(const std::uint64_t generation) noexcept
+{
+    m_ManagedInputContexts.ReleaseGeneration(generation);
+}
+
+bool EditorWorkspaceLayer::OperateManagedInputContext(const std::uint64_t handle,
+                                                      const Keire::ManagedInputContextOperation operation,
+                                                      const Keire::AssetId target) noexcept
+{
+    return m_ManagedInputContexts.Operate(handle, operation, target);
+}
+
+std::uint64_t
+EditorWorkspaceLayer::BeginManagedInputContextRebind(const std::uint64_t handle, const Keire::AssetId binding,
+                                                     const Keire::ManagedInputRebindOptions options) noexcept
+{
+    const auto context = m_ManagedInputContexts.Context(handle);
+    return context && m_SceneDocument->PlaySession()
+               ? m_ManagedInputOperations.Begin(Owner().Input(), context, binding, options)
+               : 0;
+}
+
+Keire::AssetId EditorWorkspaceLayer::FindManagedInputMap(const std::uint64_t handle,
+                                                         const std::string_view name) noexcept
+{
+    return m_ManagedInputContexts.FindMap(handle, name);
+}
+
+Keire::AssetId EditorWorkspaceLayer::FindManagedInputAction(const std::uint64_t handle, const Keire::AssetId map,
+                                                            const std::string_view name) noexcept
+{
+    return m_ManagedInputContexts.FindAction(handle, map, name);
+}
+
+std::optional<Keire::ManagedInputActionSnapshot>
+EditorWorkspaceLayer::ManagedInputAction(const std::uint64_t handle, const Keire::AssetId action) noexcept
+{
+    if (!m_SceneDocument->PlaySession() || !m_GameViewportInputActive)
+        return std::nullopt;
+    return m_ManagedInputContexts.Action(handle, action);
+}
+
+std::optional<Keire::InputDeviceId>
+EditorWorkspaceLayer::CurrentManagedInputDevice(const Keire::InputDeviceType type) noexcept
+{
+    const auto input = Owner().Input();
+    return input && m_SceneDocument->PlaySession() && m_GameViewportInputActive ? input->CurrentDevice(type)
+                                                                                : std::nullopt;
+}
+
+std::optional<Keire::InputControlSnapshot>
+EditorWorkspaceLayer::ManagedInputControl(const Keire::InputDeviceId device, const std::string_view path) noexcept
+{
+    const auto input = Owner().Input();
+    return input && m_SceneDocument->PlaySession() && m_GameViewportInputActive ? input->ReadControl(device, path)
+                                                                                : std::nullopt;
 }
 
 bool EditorWorkspaceLayer::PlayManagedAudio(const Keire::ManagedAudioPlayback& playback) noexcept

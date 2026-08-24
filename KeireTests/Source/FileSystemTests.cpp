@@ -500,10 +500,11 @@ TEST_CASE("anchored filesystem operations cannot be redirected by a parent-direc
 TEST_CASE("anchored no-replace mutations reject destinations created during the operation")
 {
     const auto suffix = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
-    const auto root = std::filesystem::temp_directory_path() / ("KeireAnchoredNoReplace-" + suffix);
+    const auto root = std::filesystem::absolute(std::filesystem::path("Build") / ("KeireAnchoredNoReplace-" + suffix));
     std::filesystem::create_directories(root);
     Keire::Detail::WriteTextFileAtomically(root / "rename-source.txt", "rename source");
     Keire::Detail::WriteTextFileAtomically(root / "copy-source.txt", "copy source");
+    std::filesystem::create_directories(root / "rename-source-directory");
     Keire::Detail::AnchoredFileSystem files(root);
 
     Keire::Detail::SetAnchoredFileSystemOperationHookForTesting(
@@ -524,6 +525,25 @@ TEST_CASE("anchored no-replace mutations reject destinations created during the 
     Keire::Detail::SetAnchoredFileSystemOperationHookForTesting({});
     CHECK(Keire::Detail::ReadTextFile(root / "rename-source.txt", 1024) == "rename source");
     CHECK(Keire::Detail::ReadTextFile(root / "rename-destination.txt", 1024) == "raced rename");
+
+    Keire::Detail::SetAnchoredFileSystemOperationHookForTesting(
+        [&](const std::string_view operation, const std::filesystem::path&)
+        {
+            if (operation == "rename" && !std::filesystem::exists(root / "rename-destination-directory"))
+                std::filesystem::create_directories(root / "rename-destination-directory");
+        });
+    try
+    {
+        files.Rename("rename-source-directory", "rename-destination-directory", false);
+        FAIL("The raced rename directory destination was overwritten.");
+    }
+    catch (const std::system_error& error)
+    {
+        CHECK(error.code().default_error_condition() == std::errc::file_exists);
+    }
+    Keire::Detail::SetAnchoredFileSystemOperationHookForTesting({});
+    CHECK(std::filesystem::is_directory(root / "rename-source-directory"));
+    CHECK(std::filesystem::is_directory(root / "rename-destination-directory"));
 
     Keire::Detail::SetAnchoredFileSystemOperationHookForTesting(
         [&](const std::string_view operation, const std::filesystem::path&)
@@ -552,8 +572,11 @@ TEST_CASE("anchored no-replace mutations reject destinations created during the 
     CHECK_FALSE(retainedTemporary);
 
     files.Rename("rename-source.txt", "rename-success.txt", false);
+    std::filesystem::remove(root / "rename-destination-directory");
+    files.Rename("rename-source-directory", "rename-success-directory", false);
     files.Copy("copy-source.txt", "copy-success.txt", false);
     CHECK(Keire::Detail::ReadTextFile(root / "rename-success.txt", 1024) == "rename source");
+    CHECK(std::filesystem::is_directory(root / "rename-success-directory"));
     CHECK(Keire::Detail::ReadTextFile(root / "copy-success.txt", 1024) == "copy source");
 
     std::error_code ignored;

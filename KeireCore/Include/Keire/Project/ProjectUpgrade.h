@@ -75,6 +75,7 @@ namespace Keire
 
         [[nodiscard]] static ProjectUpgradeStep CreateVersion1To2Step();
         [[nodiscard]] static ProjectUpgradeStep CreateVersion2To3Step();
+        [[nodiscard]] static ProjectUpgradeStep CreateVersion3To4Step();
 
       private:
         class Impl;

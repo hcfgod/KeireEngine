@@ -6,8 +6,9 @@ menu. KeireClient uses only `UiFrame`; no Dear ImGui include or symbol crosses t
 
 The panel uses a master-detail workflow:
 
-- The toolbar identifies the source asset and provides Save, Revert, bounded Undo/Redo, Validate, search, and live
-  monitor controls. `Ctrl+S`, `Ctrl+Z`, `Ctrl+R`, `Ctrl+Y`, and `Ctrl+Shift+Z` mirror the toolbar.
+- The compact icon toolbar identifies unsaved state and provides Save, Revert, bounded Undo/Redo, Validate, search,
+  and live monitor controls. Delayed tooltips explain every command; `Ctrl+S`, `Ctrl+Z`, `Ctrl+R`, `Ctrl+Y`, and
+  `Ctrl+Shift+Z` mirror the toolbar.
 - The left pane creates, selects, renames, duplicates, and removes action maps and control schemes. Scheme properties
   edit unique binding groups plus required or optional Keyboard, Mouse, and Gamepad families.
 - The center pane shows actions with nested binding/composite rows. It creates ordinary bindings, 1D Axis composites,
@@ -15,6 +16,10 @@ The panel uses a master-detail workflow:
 - The right pane edits map capture policy; Button, Value, and Pass Through action types; Boolean, 1D Axis, and 2D Vector
   values; common control paths; scheme membership; and all built-in interactions and processors. Press, Tap, Hold,
   Multi Tap, Deadzone, Scale, Invert, and Normalize expose their validated parameters directly.
+
+The panes resize with the available dock width. Search is case-insensitive across map, scheme, action, binding, and
+control-path text, keeps a parent visible when one of its children matches, and presents control paths as readable
+device/control pairs while retaining the exact source path in Properties.
 
 Save canonicalizes and validates the entire document, atomically replaces the `.keireinput` source, imports it through
 the same `AssetDatabase` path as `KeireAssetTool`, and requests runtime hot reload. Revert discards the in-memory command
@@ -30,3 +35,62 @@ phase/value plus connected-device and paired-user counts.
 The Project panel advertises `.keireinput` sources as typed input assets and supports asset drag payloads through the
 Kéire UI facade. Switching away from a dirty input document is blocked until it is explicitly saved or reverted, so a
 selection change cannot silently discard authoring work.
+
+## Project Default And Managed Lifecycle
+
+Project Settings has an **Input** section with a typed Input Action Asset picker and an action-map dropdown. The map is
+stored by stable ID, so renaming it does not break startup. A change applies the next time Play starts and is also
+written into packaged runtime manifests.
+
+An asset offers a Unity-style shared context for simple ownership:
+
+```csharp
+[SerializeField] private InputActionAsset _input = null!;
+private InputAction? _interact;
+
+protected override void OnEnable()
+{
+    _interact = _input.FindAction("Player/Interact")
+        ?? throw new InvalidOperationException("Player/Interact is missing.");
+    _interact.performed += OnInteract;
+    _input.Enable();
+}
+
+protected override void OnDisable()
+{
+    if (_interact is not null)
+        _interact.performed -= OnInteract;
+    _input.Disable();
+}
+
+private void OnInteract(InputAction.CallbackContext context) => Debug.Log("Interact");
+```
+
+Use `using InputActionContext context = _input.CreateContext()` when a component needs independent enable state or a
+second local player. Contexts expose `Enable`, `Disable`, `FindActionMap`, `FindAction`, and stable-ID access; maps and
+actions each expose their own `Enable` and `Disable`. `ReadValue<bool>()`, `ReadValue<float>()`, and
+`ReadValue<Vector2>()` read the current immutable frame snapshot. Disposing a context makes all of its maps and actions
+inert and invalid to call. `InputAction.BeginInteractiveRebind` starts rebinding against that same explicit context, so
+local-player contexts do not accidentally modify or listen through the project's shared context.
+
+The **C# Code Generation** section creates a deterministic wrapper in `Assets/Scripts/Generated`. Generated map and
+action properties use stable IDs instead of names and therefore survive authoring renames.
+
+## Direct Polling
+
+Action-independent polling reads the same paired-player snapshot:
+
+```csharp
+if (Input.Keyboard.Current?.wKey.WasPressed == true)
+    Debug.Log("W pressed");
+
+Vector2 lookDelta = Input.Mouse.Current?.delta.ReadValue() ?? Vector2.Zero;
+float throttle = Input.Gamepad.Current?.RightTrigger.ReadValue() ?? 0.0f;
+```
+
+`ButtonControl` exposes `IsPressed`, `WasPressedThisFrame`/`WasPressed`, and
+`WasReleasedThisFrame`/`WasReleased`. Mouse relative delta and scroll reset at the start of each input frame. Direct
+polling respects the editor's active Play session and Game-view routing and is captured in fixed-tick replays.
+
+The older string-based `Input.Button`, `Input.Axis`, and `Input.Axis2D` helpers remain source-compatible but are
+obsolete. New gameplay should use an action asset/context or a direct control.

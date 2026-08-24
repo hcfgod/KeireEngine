@@ -18,6 +18,48 @@ CoreArchiveTargets =
     ProjectConfig.CORE_TARGET .. "Vfx"
 }
 
+local function ConfigureNinjaArchiveReplacement()
+    if _ACTION ~= "ninja" then
+        return
+    end
+
+    local ninja = premake.modules.ninja
+    local ninjaCpp = ninja and ninja.cpp
+    if not ninjaCpp then
+        error("Premake's Ninja C++ generator is unavailable.")
+    end
+
+    premake.override(ninjaCpp, "linkrule", function(base, cfg, toolset)
+        toolset = toolset or ninja.gettoolset(cfg)
+        if toolset == premake.tools.msc then
+            base(cfg, toolset)
+            return
+        end
+
+        -- GNU-family archivers update named members in-place and retain members removed from the current source graph.
+        -- Delete the target immediately before reconstruction so archive membership matches the generated input list.
+        local gettoolname = toolset.gettoolname
+        toolset.gettoolname = function(toolConfig, toolName)
+            local command = gettoolname(toolConfig, toolName)
+            if toolName == "ar" then
+                if cfg.system == "windows" then
+                    return "if exist \"$out\" del /F /Q \"$out\" & if exist \"$out\" exit /B 1 & " .. command
+                end
+                return "rm -f $out && " .. command
+            end
+            return command
+        end
+
+        local succeeded, failure = pcall(base, cfg, toolset)
+        toolset.gettoolname = gettoolname
+        if not succeeded then
+            error(failure, 0)
+        end
+    end)
+end
+
+ConfigureNinjaArchiveReplacement()
+
 VendorIncludeDirs = {
     spdlog = "../Vendor/spdlog/include",
     doctest = "../Vendor/doctest",
@@ -205,7 +247,7 @@ function ApplyCommonProjectSettings(repositoryRoot)
     defines { "KEIRE_STATIC", 'KEIRE_BUILD_CONFIGURATION="%{cfg.buildcfg}"', 'KEIRE_BUILD_ARCHITECTURE="%{cfg.architecture}"' }
 
     targetdir (repositoryRoot .. "/Build/Bin/" .. OutputDir .. "/%{prj.name}")
-    objdir (repositoryRoot .. "/Build/Intermediates/" .. OutputDir .. "/%{prj.name}")
+    objdir (repositoryRoot .. "/Build/Intermediates/" .. IntermediateOutputDir .. "/%{prj.name}")
     debugdir (repositoryRoot)
 
     -- Premake's Ninja backend prefixes a nested project's location twice when it resolves that project's PCH

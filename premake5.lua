@@ -110,6 +110,7 @@ end
 
 local selectedArchitecture = os.targetarch() or os.hostarch()
 SelectedToolset = resolveToolset(_OPTIONS["toolset"] or "default")
+IntermediateOutputDir = OutputDir .. "-" .. SelectedToolset
 AssetToolTarget = ProjectConfig.PROJECT_NAMESPACE .. "AssetTool"
 AssetWorkerTarget = ProjectConfig.PROJECT_NAMESPACE .. "AssetWorker"
 HubWorkerTarget = ProjectConfig.PROJECT_NAMESPACE .. "HubWorker"

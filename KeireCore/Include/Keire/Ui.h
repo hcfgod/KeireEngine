@@ -243,7 +243,12 @@ namespace Keire
         Copy,
         Description,
         ChevronRight,
-        ExpandMore
+        ExpandMore,
+        Save,
+        Undo,
+        Redo,
+        Delete,
+        Check
     };
 
     struct UiOverlayIconButtonSpecification

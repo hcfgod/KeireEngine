@@ -3,6 +3,7 @@
 #include "Keire/Api.h"
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/ECS/Component.h"
+#include "Keire/Input/Input.h"
 #include "Keire/Ref.h"
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/SceneRuntimeWorld.h"
@@ -98,6 +99,27 @@ namespace Keire
         std::string CandidatePath;
         double RemainingSeconds = 0.0;
         std::uint32_t ConflictCount = 0;
+    };
+
+    enum class ManagedInputContextOperation : std::uint8_t
+    {
+        EnableAll,
+        DisableAll,
+        EnableMap,
+        DisableMap,
+        EnableAction,
+        DisableAction
+    };
+
+    struct ManagedInputActionSnapshot
+    {
+        InputActionPhase Phase = InputActionPhase::Disabled;
+        InputValue Value;
+        std::uint64_t Frame = 0;
+        bool Enabled = false;
+        bool Started = false;
+        bool Performed = false;
+        bool Canceled = false;
     };
 
     struct ManagedRaycastQuery
@@ -466,6 +488,38 @@ namespace Keire
         [[nodiscard]] virtual bool SaveManagedInputBindings(std::string_view) noexcept { return false; }
         [[nodiscard]] virtual int LoadManagedInputBindings(std::string_view) noexcept { return -1; }
         [[nodiscard]] virtual bool ClearManagedInputBindings() noexcept { return false; }
+        [[nodiscard]] virtual std::uint64_t CreateManagedInputContext(std::uint64_t, AssetId) noexcept { return 0; }
+        [[nodiscard]] virtual bool ReleaseManagedInputContext(std::uint64_t) noexcept { return false; }
+        virtual void ReleaseManagedInputContexts(std::uint64_t) noexcept {}
+        [[nodiscard]] virtual bool OperateManagedInputContext(std::uint64_t, ManagedInputContextOperation,
+                                                              AssetId) noexcept
+        {
+            return false;
+        }
+        [[nodiscard]] virtual std::uint64_t BeginManagedInputContextRebind(std::uint64_t, AssetId,
+                                                                           ManagedInputRebindOptions) noexcept
+        {
+            return 0;
+        }
+        [[nodiscard]] virtual AssetId FindManagedInputMap(std::uint64_t, std::string_view) noexcept { return {}; }
+        [[nodiscard]] virtual AssetId FindManagedInputAction(std::uint64_t, AssetId, std::string_view) noexcept
+        {
+            return {};
+        }
+        [[nodiscard]] virtual std::optional<ManagedInputActionSnapshot> ManagedInputAction(std::uint64_t,
+                                                                                           AssetId) noexcept
+        {
+            return std::nullopt;
+        }
+        [[nodiscard]] virtual std::optional<InputDeviceId> CurrentManagedInputDevice(InputDeviceType) noexcept
+        {
+            return std::nullopt;
+        }
+        [[nodiscard]] virtual std::optional<InputControlSnapshot> ManagedInputControl(InputDeviceId,
+                                                                                      std::string_view) noexcept
+        {
+            return std::nullopt;
+        }
         [[nodiscard]] virtual std::optional<ManagedRaycastHit> RaycastManaged(const ManagedRaycastQuery&) noexcept
         {
             return std::nullopt;

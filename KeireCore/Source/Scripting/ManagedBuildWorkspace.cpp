@@ -143,7 +143,7 @@ namespace Keire
                                "    <ImplicitUsings>enable</ImplicitUsings>\n    <Nullable>enable</Nullable>\n"
                                "    <Deterministic>true</Deterministic>\n    <DebugType>portable</DebugType>\n"
                                "    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>\n"
-                               "    <WarningsNotAsErrors>$(WarningsNotAsErrors);CS0168;CS0169;CS0219;CS0414"
+                               "    <WarningsNotAsErrors>$(WarningsNotAsErrors);CS0168;CS0169;CS0219;CS0414;CS0618"
                                "</WarningsNotAsErrors>\n"
                                "    <NoWarn>$(NoWarn);CS0649;CS8601;CS8618</NoWarn>\n"
                                "    <AllowUnsafeBlocks>" +

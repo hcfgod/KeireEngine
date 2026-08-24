@@ -8,7 +8,7 @@ local function AddGeneratedContentCommands()
         "powershell -NoProfile -ExecutionPolicy Bypass -File " .. windowsScripts .. "/prepare-generated-content.ps1"
     }
     if _ACTION == "ninja" then
-        local prebuildDirectory = commandRepositoryRoot .. "/Build/Intermediates/" .. OutputDir .. "/" ..
+        local prebuildDirectory = commandRepositoryRoot .. "/Build/Intermediates/" .. IntermediateOutputDir .. "/" ..
                                       CoreGeneratedContentTarget
         table.insert(windowsPrebuildCommands,
                      "powershell -NoProfile -ExecutionPolicy Bypass -File " .. windowsScripts ..

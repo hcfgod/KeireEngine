@@ -140,6 +140,25 @@ namespace KeireRuntime
         [[nodiscard]] bool SaveManagedInputBindings(std::string_view profile) noexcept final;
         [[nodiscard]] int LoadManagedInputBindings(std::string_view profile) noexcept final;
         [[nodiscard]] bool ClearManagedInputBindings() noexcept final;
+        [[nodiscard]] std::uint64_t CreateManagedInputContext(std::uint64_t generation,
+                                                              Keire::AssetId asset) noexcept final;
+        [[nodiscard]] bool ReleaseManagedInputContext(std::uint64_t handle) noexcept final;
+        void ReleaseManagedInputContexts(std::uint64_t generation) noexcept final;
+        [[nodiscard]] bool OperateManagedInputContext(std::uint64_t handle,
+                                                      Keire::ManagedInputContextOperation operation,
+                                                      Keire::AssetId target) noexcept final;
+        [[nodiscard]] std::uint64_t
+        BeginManagedInputContextRebind(std::uint64_t handle, Keire::AssetId binding,
+                                       Keire::ManagedInputRebindOptions options) noexcept final;
+        [[nodiscard]] Keire::AssetId FindManagedInputMap(std::uint64_t handle, std::string_view name) noexcept final;
+        [[nodiscard]] Keire::AssetId FindManagedInputAction(std::uint64_t handle, Keire::AssetId map,
+                                                            std::string_view name) noexcept final;
+        [[nodiscard]] std::optional<Keire::ManagedInputActionSnapshot>
+        ManagedInputAction(std::uint64_t handle, Keire::AssetId action) noexcept final;
+        [[nodiscard]] std::optional<Keire::InputDeviceId>
+        CurrentManagedInputDevice(Keire::InputDeviceType type) noexcept final;
+        [[nodiscard]] std::optional<Keire::InputControlSnapshot>
+        ManagedInputControl(Keire::InputDeviceId device, std::string_view path) noexcept final;
         [[nodiscard]] std::optional<Keire::ManagedRaycastHit>
         CapsuleCastManaged(const Keire::ManagedCapsuleCastQuery& query) noexcept final;
         [[nodiscard]] std::vector<Keire::AssetId>
@@ -150,6 +169,7 @@ namespace KeireRuntime
         Keire::Ref<Keire::SceneRuntimeWorld> m_RuntimeWorld;
         Keire::Detail::ManagedMaterialParameterStore m_MaterialParameters;
         Keire::Detail::ManagedInputOperationStore m_ManagedInputOperations;
+        Keire::Detail::ManagedInputContextStore m_ManagedInputContexts;
         Keire::RenderEnvironmentSettings m_Rendering;
         Keire::Application* m_Application = nullptr;
         Keire::Ref<Keire::SceneRuntimeSession>* m_Runtime = nullptr;

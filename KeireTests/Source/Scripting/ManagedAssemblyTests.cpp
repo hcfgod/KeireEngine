@@ -159,7 +159,7 @@ TEST_CASE("Managed IDE workspace mirrors assembly source roots and references")
             "<DefaultItemExcludes>$(DefaultItemExcludes);Library/**;Logs/**;Temp/**;Build/**</DefaultItemExcludes>") !=
         std::string::npos);
     CHECK(projectText.find(
-              "<WarningsNotAsErrors>$(WarningsNotAsErrors);CS0168;CS0169;CS0219;CS0414</WarningsNotAsErrors>") !=
+              "<WarningsNotAsErrors>$(WarningsNotAsErrors);CS0168;CS0169;CS0219;CS0414;CS0618</WarningsNotAsErrors>") !=
           std::string::npos);
     CHECK(projectText.find("Library/ScriptAssemblies/References/Keire.Managed.dll") != std::string::npos);
     CHECK(std::filesystem::is_regular_file(root / "Library/ScriptAssemblies/References/Keire.Managed.dll"));
@@ -545,8 +545,9 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     const auto build = scripts->StartBuild(std::move(buildRequest));
     REQUIRE(scripts->WaitForBuild(build, std::chrono::seconds(60)));
     const auto buildStatus = scripts->BuildStatus();
-    const auto diagnostic = buildStatus.Diagnostics.empty() ? std::string{} : buildStatus.Diagnostics.front().Message;
-    INFO(diagnostic);
+    const auto buildDiagnostic =
+        buildStatus.Diagnostics.empty() ? std::string{} : buildStatus.Diagnostics.front().Message;
+    INFO(buildDiagnostic);
     REQUIRE(buildStatus.State == Keire::ManagedBuildState::Succeeded);
     const auto assembly = buildStatus.ActiveAssemblyDirectory / "ReloadGameplay.dll";
     REQUIRE(std::filesystem::is_regular_file(assembly));

@@ -205,8 +205,8 @@ coral_nethost_library="$(printf '%s\n' "$coral_metadata" | awk -F= '/^CORAL_NETH
 coral_release_metadata="$(bash "$SCRIPT_DIR/coral.sh" Release 1 "$force")"
 printf '%s\n' "$coral_release_metadata"
 
-bash "$ROOT/Scripts/Unix/ffmpeg.sh" Debug "$base/Release"
-bash "$ROOT/Scripts/Unix/ffmpeg.sh" Release "$base/Release"
+bash "$ROOT/Scripts/Unix/ffmpeg.sh" Debug "$base/Release" "$platform" "$architecture" "$toolset"
+bash "$ROOT/Scripts/Unix/ffmpeg.sh" Release "$base/Release" "$platform" "$architecture" "$toolset"
 
 coral_link="$ROOT/Build/Dependencies/coral-patched"
 nethost_link="$ROOT/Build/Dependencies/coral-nethost"

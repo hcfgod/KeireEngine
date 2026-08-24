@@ -27,7 +27,8 @@ namespace Keire
     {
         using Json = nlohmann::json;
         constexpr std::array<char, 12> ReplayMagic{'K', 'E', 'I', 'R', 'E', 'R', 'P', 'L', 'A', 'Y', '\r', '\n'};
-        constexpr std::uint32_t ReplayVersion = 1;
+        constexpr std::uint32_t ReplayVersion = 2;
+        constexpr std::uint32_t MinimumReplayVersion = 1;
         constexpr std::uint32_t ChunkMetadata = 1;
         constexpr std::uint32_t ChunkInput = 2;
         constexpr std::uint32_t ChunkCheckpoint = 3;
@@ -116,8 +117,9 @@ namespace Keire
                                                          const std::size_t maximumBytes)
         {
             constexpr std::size_t fixedBytes = sizeof(snapshot.Tick) + sizeof(snapshot.InputMapFingerprint) +
-                                               sizeof(std::uint32_t) + Detail::Sha256Digest{}.size();
+                                               sizeof(std::uint32_t) * 2U + Detail::Sha256Digest{}.size();
             if (snapshot.Actions.size() > std::numeric_limits<std::uint32_t>::max() || maximumBytes < fixedBytes ||
+                snapshot.Controls.size() > std::numeric_limits<std::uint32_t>::max() ||
                 snapshot.Actions.size() > (maximumBytes - fixedBytes) / EncodedInputActionBytes)
             {
                 throw std::length_error("Replay input exceeds the configured file-size limit.");
@@ -145,6 +147,23 @@ namespace Keire
                                                              (action.Canceled ? 4U : 0U));
                 AppendUnsigned(result, flags);
             }
+            AppendUnsigned(result, static_cast<std::uint32_t>(snapshot.Controls.size()));
+            for (const auto& control : snapshot.Controls)
+            {
+                if (!control.Device || control.Path.empty() || control.Path.size() > 512U)
+                    throw std::invalid_argument("Replay input control identity is invalid.");
+                RequireAppendCapacity(result,
+                                      sizeof(std::uint32_t) * 4U + sizeof(std::uint8_t) * 2U + control.Path.size(),
+                                      maximumBytes - state.size());
+                AppendUnsigned(result, control.Device.Value());
+                AppendString(result, control.Path);
+                AppendUnsigned(result, static_cast<std::uint8_t>(control.Value.Type));
+                AppendUnsigned(result, std::bit_cast<std::uint32_t>(control.Value.X));
+                AppendUnsigned(result, std::bit_cast<std::uint32_t>(control.Value.Y));
+                AppendUnsigned(result,
+                               static_cast<std::uint8_t>((control.Pressed ? 1U : 0U) | (control.Released ? 2U : 0U)));
+            }
+            RequireAppendCapacity(result, state.size(), maximumBytes);
             AppendBytes(result, state);
             return result;
         }
@@ -155,7 +174,7 @@ namespace Keire
             Detail::Sha256Digest State{};
         };
 
-        [[nodiscard]] DecodedInput DecodeInput(const std::span<const std::byte> bytes)
+        [[nodiscard]] DecodedInput DecodeInput(const std::span<const std::byte> bytes, const std::uint32_t version)
         {
             DecodedInput result;
             std::size_t offset = 0;
@@ -196,6 +215,32 @@ namespace Keire
                 action.Performed = (flags & 2U) != 0;
                 action.Canceled = (flags & 4U) != 0;
                 result.Snapshot.Actions.push_back(action);
+            }
+            if (version >= 2U)
+            {
+                const auto controlCount = ReadUnsigned<std::uint32_t>(bytes, offset);
+                if (controlCount > 65536U)
+                    throw std::runtime_error("Replay input control count exceeds the supported limit.");
+                result.Snapshot.Controls.reserve(controlCount);
+                for (std::uint32_t index = 0; index < controlCount; ++index)
+                {
+                    FixedTickInputControl control;
+                    control.Device = InputDeviceId(ReadUnsigned<std::uint32_t>(bytes, offset));
+                    control.Path = ReadString(bytes, offset);
+                    const auto valueType = ReadUnsigned<std::uint8_t>(bytes, offset);
+                    if (!control.Device || control.Path.empty() || control.Path.size() > 512U ||
+                        valueType > static_cast<std::uint8_t>(InputValueType::Axis2D))
+                        throw std::runtime_error("Replay input control is invalid.");
+                    control.Value.Type = static_cast<InputValueType>(valueType);
+                    control.Value.X = std::bit_cast<float>(ReadUnsigned<std::uint32_t>(bytes, offset));
+                    control.Value.Y = std::bit_cast<float>(ReadUnsigned<std::uint32_t>(bytes, offset));
+                    const auto flags = ReadUnsigned<std::uint8_t>(bytes, offset);
+                    if ((flags & ~std::uint8_t{3}) != 0)
+                        throw std::runtime_error("Replay input control contains unsupported flags.");
+                    control.Pressed = (flags & 1U) != 0;
+                    control.Released = (flags & 2U) != 0;
+                    result.Snapshot.Controls.push_back(std::move(control));
+                }
             }
             if (offset > bytes.size() || result.State.size() != bytes.size() - offset)
                 throw std::runtime_error("Replay input chunk has an invalid state digest.");
@@ -450,7 +495,8 @@ namespace Keire
             {
                 std::size_t bytes = RewindBytes;
                 for (const auto& tick : Ticks)
-                    bytes += tick.Input.Actions.capacity() * sizeof(FixedTickInputAction) + tick.Encoded.capacity() +
+                    bytes += tick.Input.Actions.capacity() * sizeof(FixedTickInputAction) +
+                             tick.Input.Controls.capacity() * sizeof(FixedTickInputControl) + tick.Encoded.capacity() +
                              sizeof(TickRecord);
                 for (const auto& checkpoint : Checkpoints)
                     bytes += checkpoint.Data.capacity() - checkpoint.Data.size() + checkpoint.Stored.capacity();
@@ -502,7 +548,8 @@ namespace Keire
                 !std::ranges::equal(std::as_bytes(std::span(ReplayMagic)), std::span(bytes).first(ReplayMagic.size())))
                 throw std::runtime_error("Replay file has an invalid signature.");
             std::size_t offset = ReplayMagic.size();
-            if (ReadUnsigned<std::uint32_t>(bytes, offset) != ReplayVersion)
+            const auto version = ReadUnsigned<std::uint32_t>(bytes, offset);
+            if (version < MinimumReplayVersion || version > ReplayVersion)
                 throw std::runtime_error("Replay file version is unsupported.");
             bool metadataRead = false;
             bool checkpointRead = false;
@@ -568,7 +615,7 @@ namespace Keire
                 }
                 else if (type == ChunkInput)
                 {
-                    const auto input = DecodeInput(decoded);
+                    const auto input = DecodeInput(decoded, version);
                     if (input.Snapshot.Tick != tick || (!Ticks.empty() && tick <= Ticks.back().Input.Tick))
                         throw std::runtime_error("Replay input ticks are not strictly ordered.");
                     Ticks.push_back({input.Snapshot, input.State, {}});

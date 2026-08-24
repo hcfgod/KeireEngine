@@ -1283,7 +1283,7 @@ namespace Keire::Detail
 
     bool OpenInExternalEditor(const std::filesystem::path& path, const std::filesystem::path& preferredEditor,
                               const std::filesystem::path& workingDirectory, std::string& diagnostic,
-                              const bool reuseManagedSession) noexcept
+                              [[maybe_unused]] const bool reuseManagedSession) noexcept
     {
         try
         {

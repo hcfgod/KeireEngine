@@ -28,6 +28,86 @@ sha256_file() {
 
 load_project_config "$ROOT"
 if [[ $run_fast -eq 1 ]]; then
+ffmpeg_argument_fixture="$(mktemp -d)"
+touch "$ffmpeg_argument_fixture/sentinel"
+ffmpeg_test_platform=Linux
+[[ "$(uname -s)" == Darwin ]] && ffmpeg_test_platform=Mac
+set +e
+ffmpeg_architecture_error="$(bash "$ROOT/Scripts/Unix/ffmpeg.sh" Debug "$ffmpeg_argument_fixture" \
+  "$ffmpeg_test_platform" '../../../escape' gcc 2>&1)"
+ffmpeg_architecture_status=$?
+ffmpeg_toolset_error="$(bash "$ROOT/Scripts/Unix/ffmpeg.sh" Debug "$ffmpeg_argument_fixture" \
+  "$ffmpeg_test_platform" x86_64 '../../../escape' 2>&1)"
+ffmpeg_toolset_status=$?
+set -e
+assert_equal "$ffmpeg_architecture_status" 2 'unsafe Unix FFmpeg architecture rejection status'
+assert_equal "$ffmpeg_toolset_status" 2 'unsafe Unix FFmpeg toolset rejection status'
+[[ "$ffmpeg_architecture_error" == *"Unsupported architecture"* ]] || {
+  printf 'Unix FFmpeg architecture validation did not fail closed: %s\n' "$ffmpeg_architecture_error" >&2
+  exit 1
+}
+[[ "$ffmpeg_toolset_error" == *"Unsupported private FFmpeg toolset"* ]] || {
+  printf 'Unix FFmpeg toolset validation did not fail closed: %s\n' "$ffmpeg_toolset_error" >&2
+  exit 1
+}
+assert_true test -f "$ffmpeg_argument_fixture/sentinel"
+rm -rf "$ffmpeg_argument_fixture"
+generation_inventory_fixture="$(mktemp -d)"
+mkdir -p "$generation_inventory_fixture/FirstParty/Nested" \
+  "$generation_inventory_fixture/FirstParty/Build/Nested" \
+  "$generation_inventory_fixture/.git/Nested" "$generation_inventory_fixture/Build/Nested" \
+  "$generation_inventory_fixture/Library/Nested" "$generation_inventory_fixture/Vendor/Nested" \
+  "$generation_inventory_fixture/Tools/Nested"
+touch "$generation_inventory_fixture/premake5.lua" \
+  "$generation_inventory_fixture/FirstParty/Nested/premake5.lua" \
+  "$generation_inventory_fixture/FirstParty/Build/Nested/premake5.lua" \
+  "$generation_inventory_fixture/.git/Nested/premake5.lua" \
+  "$generation_inventory_fixture/Build/Nested/premake5.lua" \
+  "$generation_inventory_fixture/Library/Nested/premake5.lua" \
+  "$generation_inventory_fixture/Vendor/Nested/premake5.lua" \
+  "$generation_inventory_fixture/Tools/Nested/premake5.lua"
+generation_inventory_actual="$(project_generation_premake_inputs "$generation_inventory_fixture" | LC_ALL=C sort)"
+generation_inventory_expected="$(printf '%s\n' \
+  "$generation_inventory_fixture/FirstParty/Nested/premake5.lua" \
+  "$generation_inventory_fixture/premake5.lua" | LC_ALL=C sort)"
+assert_equal "$generation_inventory_actual" "$generation_inventory_expected" \
+  'pruned Unix project-generation Premake inventory'
+rm -rf "$generation_inventory_fixture"
+binary_output_fixture="$(mktemp -d)"
+binary_output_external="$(mktemp -d)"
+binary_identity_stamp="$binary_output_fixture/generation.stamp"
+mkdir -p "$binary_output_fixture/Build/Bin/Debug-linux-x86_64" \
+  "$binary_output_fixture/Build/Bin/Release-linux-x86_64" \
+  "$binary_output_fixture/Build/Bin/Debug-linux-AARCH64"
+touch "$binary_output_fixture/Build/Bin/Debug-linux-x86_64/sentinel" \
+  "$binary_output_fixture/Build/Bin/Release-linux-x86_64/sentinel" \
+  "$binary_output_fixture/Build/Bin/Debug-linux-AARCH64/sentinel" \
+  "$binary_output_external/sentinel"
+printf 'ninja|x86_64|gcc|off|0|fingerprint\n' > "$binary_identity_stamp"
+invalidate_incompatible_binary_outputs "$binary_output_fixture" linux x86_64 gcc "$binary_identity_stamp"
+assert_true test -f "$binary_output_fixture/Build/Bin/Debug-linux-x86_64/sentinel"
+printf 'ninja|x86_64|clang|off|0|fingerprint\n' > "$binary_identity_stamp"
+invalidate_incompatible_binary_outputs "$binary_output_fixture" linux x86_64 gcc "$binary_identity_stamp"
+assert_false test -e "$binary_output_fixture/Build/Bin/Debug-linux-x86_64"
+assert_false test -e "$binary_output_fixture/Build/Bin/Release-linux-x86_64"
+assert_true test -f "$binary_output_fixture/Build/Bin/Debug-linux-AARCH64/sentinel"
+assert_true test -f "$binary_output_external/sentinel"
+mkdir -p "$binary_output_fixture/Build/Bin/Debug-linux-x86_64"
+touch "$binary_output_fixture/Build/Bin/Debug-linux-x86_64/sentinel"
+rm -f "$binary_identity_stamp"
+invalidate_incompatible_binary_outputs "$binary_output_fixture" linux x86_64 gcc "$binary_identity_stamp"
+assert_false test -e "$binary_output_fixture/Build/Bin/Debug-linux-x86_64"
+ln -s "$binary_output_external" "$binary_output_fixture/Build/Bin/Debug-linux-x86_64"
+printf 'ninja|x86_64|clang|off|0|fingerprint\n' > "$binary_identity_stamp"
+set +e
+invalidate_incompatible_binary_outputs "$binary_output_fixture" linux x86_64 gcc \
+  "$binary_identity_stamp" >/dev/null 2>&1
+binary_reparse_status=$?
+set -e
+assert_equal "$binary_reparse_status" 1 'symbolic generated binary output rejection status'
+assert_true test -f "$binary_output_external/sentinel"
+rm -f "$binary_output_fixture/Build/Bin/Debug-linux-x86_64"
+rm -rf "$binary_output_fixture" "$binary_output_external"
 workspace_lock_fixture="$(mktemp -d)"
 export KEIRE_WORKSPACE_LOCK_TIMEOUT_SECONDS=1
 export KEIRE_WORKSPACE_LOCK_STALE_SECONDS=10
@@ -504,6 +584,18 @@ assert_true grep -F -q 'buildoptions { "-Wno-error=tsan" }' "$ROOT/Scripts/Prema
 assert_true grep -F -q 'DependencyLink(DependencyManifest.AssimpDebugLibrary)' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'DependencyLink(DependencyManifest.SDL3DebugLibrary)' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -q 'project_generation_fingerprint' "$ROOT/Scripts/Linux/generate.sh"
+assert_true grep -F -q 'invalidate_incompatible_binary_outputs "$ROOT" linux' \
+  "$ROOT/Scripts/Linux/generate.sh"
+assert_true grep -F -q 'invalidate_incompatible_binary_outputs "$ROOT" macosx' \
+  "$ROOT/Scripts/Mac/generate.sh"
+assert_true grep -F -q '> "$ROOT/Build/Generated/ninja.stamp"' "$ROOT/Scripts/Linux/generate.sh"
+assert_true grep -F -q '> "$ROOT/Build/Generated/ninja.stamp"' "$ROOT/Scripts/Mac/generate.sh"
+assert_true grep -F -q 'invalidate_incompatible_binary_outputs()' "$ROOT/Scripts/Unix/common.sh"
+assert_true grep -F -q 'rm -rf -- "$resolved_path"' "$ROOT/Scripts/Unix/common.sh"
+assert_true grep -F -q 'project_generation_premake_inputs "$root" | LC_ALL=C sort' \
+  "$ROOT/Scripts/Unix/common.sh"
+assert_true grep -F -q -- '-prune -o -type f -name '\''premake5.lua'\'' -print' \
+  "$ROOT/Scripts/Unix/common.sh"
 assert_true grep -q 'KeireHubRuntime KeireHubTests KeireHubWorker' "$ROOT/Scripts/Unix/common.sh"
 assert_true grep -q 'find "$root/Scripts/Premake" -type f -name '\''\*.lua'\''' "$ROOT/Scripts/Unix/common.sh"
 assert_true grep -F -q 'Scripts/Unix/dependencies.sh Scripts/Windows/dependencies.ps1' "$ROOT/Scripts/Unix/common.sh"
@@ -536,6 +628,10 @@ assert_true grep -F -q 'removebuildoptions { "/MP" }' "$ROOT/KeireCore/premake5.
 assert_false grep -F -q 'buildoptions { "/MP1" }' "$ROOT/KeireCore/premake5.lua"
 assert_true grep -F -q 'CoreArchiveTargets' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'linkgroups "On"' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'premake.override(ninjaCpp, "linkrule"' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'return "rm -f $out && " .. command' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'del /F /Q \"$out\" & if exist \"$out\" exit /B 1' \
+  "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'filter { "action:ninja", "system:linux or macosx" }' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'enablepch "Off"' "$ROOT/Scripts/Premake/Common.lua"
 for core_archive in Assets Build World Rendering Scenes Scripting Ui Vfx; do
@@ -610,6 +706,10 @@ assert_true grep -q 'externalanglebrackets "On"' "$ROOT/Scripts/Premake/Common.l
 assert_true grep -q 'externalwarnings "Off"' "$ROOT/Scripts/Premake/Common.lua"
 assert_false grep -q '"/external:W0"' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'objdir ("../../Build/Intermediates/"' "$ROOT/Scripts/Premake/Managed.lua"
+assert_true grep -F -q 'IntermediateOutputDir = OutputDir .. "-" .. SelectedToolset' "$ROOT/premake5.lua"
+assert_true grep -F -q '/Build/Intermediates/" .. IntermediateOutputDir' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q '/Build/Intermediates/" .. IntermediateOutputDir' "$ROOT/Scripts/Premake/Managed.lua"
+assert_true grep -F -q '/Build/Bin/" .. OutputDir' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -q 'addManagedBuildInput(managedSourceRoot)' "$ROOT/Scripts/Premake/Managed.lua"
 assert_true grep -q 'os.matchdirs' "$ROOT/Scripts/Premake/Managed.lua"
 assert_true grep -q 'buildinputs(managedBuildInputs)' "$ROOT/Scripts/Premake/Managed.lua"
@@ -641,17 +741,50 @@ assert_true grep -F -q 'git -C "$VENDOR_SOURCE" archive --format=tar "$COMMIT"' 
 assert_true grep -F -q -- '--enable-zlib' "$ROOT/Scripts/Unix/ffmpeg.sh"
 assert_true grep -F -q -- '--enable-decoder=exr' "$ROOT/Scripts/Unix/ffmpeg.sh"
 assert_true grep -F -q '#define CONFIG_EXR_DECODER 1' "$ROOT/Scripts/Unix/ffmpeg.sh"
-assert_true grep -F -q 'ffmpeg.sh" Debug "$base/Release"' "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -F -q 'ffmpeg.sh" Debug "$base/Release" "$platform" "$architecture" "$toolset"' \
+  "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -F -q 'ffmpeg-cache/$SYSTEM-$OUTPUT_ARCHITECTURE-$TOOLSET' \
+  "$ROOT/Scripts/Unix/ffmpeg.sh"
+assert_true grep -F -q 'publish_ffmpeg_output()' "$ROOT/Scripts/Unix/ffmpeg.sh"
+assert_true grep -F -q 'require_ffmpeg_output_path "$CACHE_OUTPUT" "$CACHE_BASE"' \
+  "$ROOT/Scripts/Unix/ffmpeg.sh"
+assert_true grep -F -q 'resolved_root="$(cd -P "$ROOT" && pwd -P)"' "$ROOT/Scripts/Unix/ffmpeg.sh"
+assert_true grep -F -q 'prefix=${pcfiledir}/../..' "$ROOT/Scripts/Unix/ffmpeg.sh"
+assert_true grep -F -q 'Adopted private FFmpeg' "$ROOT/Scripts/Unix/ffmpeg.sh"
+assert_true grep -F -q 'valid_ffmpeg_component_artifacts()' "$ROOT/Scripts/Unix/ffmpeg.sh"
+assert_true grep -F -q 'for component in avformat avcodec swresample avutil' \
+  "$ROOT/Scripts/Unix/ffmpeg.sh"
+assert_true grep -F -q 'lib$component.dylib' "$ROOT/Scripts/Unix/ffmpeg.sh"
+assert_true grep -F -q 'lib$component.so' "$ROOT/Scripts/Unix/ffmpeg.sh"
 assert_true grep -F -q 'receiveStatus == AVERROR(EAGAIN)' \
   "$ROOT/KeireAssetWorker/Source/FfmpegTextureImportBackend.cpp"
 assert_true grep -F -q 'frame.format == AV_PIX_FMT_GRAYF16' \
   "$ROOT/KeireAssetWorker/Source/FfmpegTextureImportBackend.cpp"
-assert_true grep -F -q 'bin\avformat.lib' "$ROOT/Scripts/Windows/ffmpeg.ps1"
+assert_true grep -F -q '@("avformat", "avformat-63.dll")' "$ROOT/Scripts/Windows/ffmpeg.ps1"
+assert_true grep -F -q '@("avcodec", "avcodec-63.dll")' "$ROOT/Scripts/Windows/ffmpeg.ps1"
+assert_true grep -F -q '@("swresample", "swresample-7.dll")' "$ROOT/Scripts/Windows/ffmpeg.ps1"
+assert_true grep -F -q '@("avutil", "avutil-61.dll")' "$ROOT/Scripts/Windows/ffmpeg.ps1"
+assert_true grep -F -q '"bin\$($component[0]).lib"' "$ROOT/Scripts/Windows/ffmpeg.ps1"
 assert_false grep -F -q 'lib\avformat.lib' "$ROOT/Scripts/Windows/ffmpeg.ps1"
+assert_true grep -F -q '$Toolset -eq "gcc"' "$ROOT/Scripts/Windows/ffmpeg.ps1"
+assert_true grep -F -q 'do not support the gcc toolset' "$ROOT/Scripts/Windows/ffmpeg.ps1"
+assert_true grep -F -q 'Enter-WindowsToolEnvironment "vs2022" "msc" $Architecture' \
+  "$ROOT/Scripts/Windows/ffmpeg.ps1"
+assert_true grep -F -q 'if (Test-FfmpegOutput $AlternateOutput $AlternateExpected)' \
+  "$ROOT/Scripts/Windows/ffmpeg.ps1"
 assert_true grep -F -q '$AlternateConfiguration = if ($Configuration -eq "Debug")' \
   "$ROOT/Scripts/Windows/ffmpeg.ps1"
 assert_true grep -F -q 'Reused the identical private FFmpeg' "$ROOT/Scripts/Windows/ffmpeg.ps1"
 assert_true grep -F -q '$forceFfmpegSourceBuild = $false' "$ROOT/Scripts/Windows/dependencies.ps1"
+assert_true grep -F -q 'ffmpeg-cache\windows-$OutputArchitecture-msc-producer-$Toolset' \
+  "$ROOT/Scripts/Windows/ffmpeg.ps1"
+assert_true grep -F -q 'function Publish-FfmpegOutput' "$ROOT/Scripts/Windows/ffmpeg.ps1"
+assert_true grep -F -q 'function Assert-FfmpegOutputPath' "$ROOT/Scripts/Windows/ffmpeg.ps1"
+assert_true grep -F -q '[IO.FileAttributes]::ReparsePoint' "$ROOT/Scripts/Windows/ffmpeg.ps1"
+assert_true grep -F -q 'prefix=${pcfiledir}/../..' "$ROOT/Scripts/Windows/ffmpeg.ps1"
+assert_true grep -F -q 'Adopted private FFmpeg' "$ROOT/Scripts/Windows/ffmpeg.ps1"
+assert_true grep -F -q -- '-Architecture $Architecture' "$ROOT/Scripts/Windows/dependencies.ps1"
+assert_true grep -F -q -- '-Toolset $Toolset' "$ROOT/Scripts/Windows/dependencies.ps1"
 assert_true test -z "$(find "$ROOT/KeireCore/Source" "$ROOT/KeireClient/Source" "$ROOT/KeireHub/Source" "$ROOT/KeireTests/Source" "$ROOT/AssetTool/Source" "$ROOT/KeireRuntime/Source" -type f -name '*.h' -print -quit)"
 assert_true test -f "$ROOT/KeireCore/Include/Keire/Assets/Asset.h"
 assert_true test -f "$ROOT/KeireCore/Source/Assets/AssetSystem.cpp"

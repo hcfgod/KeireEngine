@@ -29,7 +29,9 @@ public sealed class Mover : Behaviour
 
     protected override void Update()
     {
-        Vector2 input = Input.Axis2D("Move");
+        Keyboard? keyboard = Input.Keyboard.Current;
+        Vector2 input = new(keyboard?.dKey.IsPressed == true ? 1.0f : keyboard?.aKey.IsPressed == true ? -1.0f : 0.0f,
+                            keyboard?.wKey.IsPressed == true ? 1.0f : keyboard?.sKey.IsPressed == true ? -1.0f : 0.0f);
         Transform.LocalPosition += new Vector3(input.X, 0.0f, input.Y) * (_speed * Time.DeltaTime);
     }
 }

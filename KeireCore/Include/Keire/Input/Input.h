@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -106,6 +107,17 @@ namespace Keire
         bool Paired = false;
     };
 
+    struct InputControlSnapshot
+    {
+        InputDeviceId Device;
+        InputValue Value;
+        std::uint64_t Frame = 0;
+        bool Pressed = false;
+        bool Released = false;
+
+        [[nodiscard]] bool IsPressed(const float threshold = 0.5F) const noexcept { return Value.AsBoolean(threshold); }
+    };
+
     struct InputUserDescriptor
     {
         InputUserId Id;
@@ -164,11 +176,21 @@ namespace Keire
         bool Canceled = false;
     };
 
+    struct FixedTickInputControl
+    {
+        InputDeviceId Device;
+        std::string Path;
+        InputValue Value;
+        bool Pressed = false;
+        bool Released = false;
+    };
+
     struct FixedTickInputSnapshot
     {
         std::uint64_t Tick = 0;
         std::uint64_t InputMapFingerprint = 0;
         std::vector<FixedTickInputAction> Actions;
+        std::vector<FixedTickInputControl> Controls;
     };
 
     struct InputSystemSpecification
@@ -287,13 +309,17 @@ namespace Keire
 
         [[nodiscard]] InputUserId User() const noexcept;
         [[nodiscard]] AssetId Asset() const noexcept;
+        [[nodiscard]] InputActionAssetDefinition Definition() const;
         [[nodiscard]] InputActionHandle FindAction(AssetId id) const noexcept;
         [[nodiscard]] InputActionHandle FindAction(std::string_view map, std::string_view action) const noexcept;
         [[nodiscard]] bool EnableMap(AssetId id);
         [[nodiscard]] bool EnableMap(std::string_view name);
         [[nodiscard]] bool DisableMap(AssetId id);
-        void DisableAll() noexcept;
+        [[nodiscard]] bool EnableAction(AssetId id);
+        [[nodiscard]] bool DisableAction(AssetId id);
+        void DisableAll();
         [[nodiscard]] bool MapEnabled(AssetId id) const noexcept;
+        [[nodiscard]] bool ActionEnabled(AssetId id) const noexcept;
         [[nodiscard]] InputCaptureOverride OverrideUiCapture(AssetId map);
         [[nodiscard]] InputCaptureOverride OverrideUiCapture(std::string_view map);
         [[nodiscard]] InputActionSubscription Subscribe(AssetId action,
@@ -341,6 +367,9 @@ namespace Keire
         InputSystem& operator=(const InputSystem&) = delete;
 
         [[nodiscard]] std::vector<InputDeviceDescriptor> Devices() const;
+        [[nodiscard]] std::optional<InputDeviceId> CurrentDevice(InputDeviceType type) const noexcept;
+        [[nodiscard]] std::optional<InputControlSnapshot> ReadControl(InputDeviceId device,
+                                                                      std::string_view path) const noexcept;
         [[nodiscard]] std::vector<InputUserDescriptor> Users() const;
         [[nodiscard]] InputUserId CreateUser(std::string name = {});
         [[nodiscard]] bool RemoveUser(InputUserId user);

@@ -1,7 +1,9 @@
 #include "KeireClient/EditorWorkspaceLayer.h"
 
 #include "KeireClient/Editor/EditorAssetFileService.h"
+#include "KeireClient/Editor/InputActionsCodeGenerator.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
+#include "KeireInternal/FileSystem.h"
 
 #include <stdexcept>
 #include <utility>
@@ -46,6 +48,23 @@ void EditorWorkspaceLayer::SaveInputActions()
     if (const auto assets = Owner().Assets())
         (void)assets->Reload(m_InputActionsDocument->Asset());
     m_InputActionsPanel->SetMessage("Saved and imported " + record->RelativePath.generic_string() + ".");
+}
+
+std::filesystem::path EditorWorkspaceLayer::GenerateInputActionsWrapper(const std::string_view className,
+                                                                        const std::string_view nameSpace)
+{
+    const auto project = Owner().GetProject();
+    if (!project || !m_InputActionsDocument->Asset())
+        throw std::logic_error("Open an input action asset before generating its C# wrapper.");
+    const auto source =
+        KeireEditor::GenerateInputActionsCSharp(m_InputActionsDocument->Definition(), className, nameSpace);
+    const auto relative =
+        std::filesystem::path("Assets") / "Scripts" / "Generated" / (std::string(className) + ".InputActions.g.cs");
+    const auto destination = project->Root() / relative;
+    std::filesystem::create_directories(destination.parent_path());
+    (void)Keire::Detail::WriteTextFileAtomicallyIfChanged(destination, source);
+    ImportAssets(KeireEditor::AssetOperationPriority::AutomaticRefresh);
+    return relative;
 }
 
 void EditorWorkspaceLayer::RecordInputUndo(const std::string_view name)

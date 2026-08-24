@@ -292,6 +292,7 @@ namespace Keire
         {
             Steps.push_back(ProjectUpgradeService::CreateVersion1To2Step());
             Steps.push_back(ProjectUpgradeService::CreateVersion2To3Step());
+            Steps.push_back(ProjectUpgradeService::CreateVersion3To4Step());
             for (auto& step : additional)
                 Steps.push_back(std::move(step));
             std::ranges::sort(Steps,
@@ -724,6 +725,31 @@ namespace Keire
             if (document.at("schemaVersion").get<std::uint32_t>() != 3 || !document.at("createdAt").is_string() ||
                 !document.at("lastSavedWithEngineVersion").is_string())
                 throw std::runtime_error("v2 to v3 project upgrade did not produce Hub metadata.");
+        };
+        return step;
+    }
+
+    ProjectUpgradeStep ProjectUpgradeService::CreateVersion3To4Step()
+    {
+        ProjectUpgradeStep step;
+        step.Id = "keire.project.v3-to-v4-default-input-map";
+        step.FromSchema = 3;
+        step.ToSchema = 4;
+        step.AffectedPaths = {"ProjectSettings/Project.keireproject"};
+        step.Apply = [](const ProjectUpgradeStepContext& context)
+        {
+            const auto path = MarkerPath(context.StagingRoot);
+            auto document = Json::parse(Detail::ReadTextFile(path, MaximumDescriptorBytes));
+            document["schemaVersion"] = 4;
+            document["defaultInputMap"] = nullptr;
+            Detail::WriteTextFileAtomically(path, document.dump(2) + '\n');
+        };
+        step.Validate = [](const ProjectUpgradeStepContext& context)
+        {
+            const auto document =
+                Json::parse(Detail::ReadTextFile(MarkerPath(context.StagingRoot), MaximumDescriptorBytes));
+            if (document.at("schemaVersion").get<std::uint32_t>() != 4 || !document.contains("defaultInputMap"))
+                throw std::runtime_error("v3 to v4 project upgrade did not produce default input-map metadata.");
         };
         return step;
     }

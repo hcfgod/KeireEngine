@@ -4,9 +4,11 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <functional>
+#include <iomanip>
 #include <ranges>
 #include <sstream>
 #include <stdexcept>
@@ -37,6 +39,33 @@ namespace KeireEditor
             ui.Text(message);
             if (!hint.empty())
                 ui.Text(hint);
+        }
+
+        [[nodiscard]] bool ContainsInsensitive(const std::string_view value, const std::string_view search)
+        {
+            if (search.empty())
+                return true;
+            return std::ranges::search(value, search,
+                                       [](const char left, const char right)
+                                       {
+                                           return std::tolower(static_cast<unsigned char>(left)) ==
+                                                  std::tolower(static_cast<unsigned char>(right));
+                                       })
+                       .begin() != value.end();
+        }
+
+        [[nodiscard]] std::string FriendlyControlPath(const std::string_view path)
+        {
+            if (!path.starts_with('<'))
+                return std::string(path);
+            const auto separator = path.find(">/");
+            if (separator == std::string_view::npos || separator <= 1 || separator + 2 >= path.size())
+                return std::string(path);
+            std::string control(path.substr(separator + 2));
+            std::ranges::replace(control, '/', ' ');
+            if (!control.empty())
+                control.front() = static_cast<char>(std::toupper(static_cast<unsigned char>(control.front())));
+            return std::string(path.substr(1, separator - 1)) + "  ·  " + control;
         }
     } // namespace
 
@@ -120,10 +149,17 @@ namespace KeireEditor
         };
 
         const auto record = database ? database->Find(document.Asset()) : std::nullopt;
-        ui.TextColored(theme.Accent, "INPUT ACTIONS");
-        ui.SameLine();
-        ui.Text(record ? record->RelativePath.generic_string() + (document.Dirty() ? " *" : "") : "Missing asset");
-        ui.Separator();
+        {
+            [[maybe_unused]] auto headingFont = ui.PushFont(Keire::UiFontRole::Heading);
+            ui.Text("Input Actions");
+        }
+        ui.TextColored(theme.MutedText, record ? record->RelativePath.generic_string()
+                                               : "The source asset is missing from the catalog.");
+        if (document.Dirty())
+        {
+            ui.SameLine();
+            ui.TextColored(theme.Warning, "Unsaved changes");
+        }
         if (ui.Shortcut({Keire::UiKey::S, true}) && document.Dirty())
         {
             try
@@ -136,7 +172,16 @@ namespace KeireEditor
                 m_Controller.ReportInputActionsError(m_Message);
             }
         }
-        if (ui.Button("Save"))
+        const auto commandButton = [&](const std::string_view id, const Keire::UiIcon icon,
+                                       const std::string_view tooltip, const bool selected = false)
+        {
+            const bool activated = ui.IconButton(id, icon, selected, {30.0F, 28.0F});
+            if (ui.LastItemState().Hovered)
+                ui.SetTooltip(tooltip, {.Delayed = true});
+            return activated;
+        };
+        ui.Separator();
+        if (commandButton("InputActionsSave", Keire::UiIcon::Save, "Save input actions (Ctrl+S)"))
         {
             try
             {
@@ -149,7 +194,7 @@ namespace KeireEditor
             }
         }
         ui.SameLine();
-        if (ui.Button("Revert"))
+        if (commandButton("InputActionsRevert", Keire::UiIcon::Refresh, "Revert all unsaved changes"))
         {
             try
             {
@@ -164,17 +209,17 @@ namespace KeireEditor
         ui.SameLine();
         if (auto disabled = ui.BeginDisabled(!document.UndoContext() || !document.UndoContext()->CanUndo()); disabled)
         {
-            if (ui.Button("Undo"))
+            if (commandButton("InputActionsUndo", Keire::UiIcon::Undo, "Undo the last edit"))
                 m_Controller.UndoInputActions();
         }
         ui.SameLine();
         if (auto disabled = ui.BeginDisabled(!document.UndoContext() || !document.UndoContext()->CanRedo()); disabled)
         {
-            if (ui.Button("Redo"))
+            if (commandButton("InputActionsRedo", Keire::UiIcon::Redo, "Redo the last edit"))
                 m_Controller.RedoInputActions();
         }
         ui.SameLine();
-        if (ui.Button("Validate"))
+        if (commandButton("InputActionsValidate", Keire::UiIcon::Check, "Validate the complete input asset"))
         {
             try
             {
@@ -188,10 +233,41 @@ namespace KeireEditor
             }
         }
         ui.SameLine();
-        (void)ui.Checkbox("Live Monitor", m_LiveMonitor);
-        (void)ui.InputText("Search", m_Search);
+        if (commandButton("InputActionsLiveMonitor", Keire::UiIcon::View,
+                          m_LiveMonitor ? "Disable live input monitoring" : "Enable live input monitoring",
+                          m_LiveMonitor))
+        {
+            m_LiveMonitor = !m_LiveMonitor;
+        }
+        ui.SameLine();
+        ui.TextColored(theme.MutedText, m_LiveMonitor ? "Live" : "Monitor");
+        ui.SameLine();
+        ui.SetNextItemWidth(std::clamp(ui.ContentAvailable().Width * 0.32F, 180.0F, 360.0F));
+        (void)ui.InputTextWithHint("##InputActionsSearch", "Search maps and actions...", m_Search);
         if (!m_Message.empty())
             ui.TextColored(theme.MutedText, m_Message);
+        if (m_GeneratedClass.empty())
+            m_GeneratedClass = inputDocument.Name.empty() ? "GameInputActions" : inputDocument.Name + "Actions";
+        if (auto codeGeneration = ui.BeginTreeNode("C# Code Generation"); codeGeneration)
+        {
+            ui.TextColored(theme.MutedText,
+                           "Generate a strongly typed wrapper under Assets/Scripts/Generated for this asset.");
+            (void)ui.InputText("Class Name", m_GeneratedClass);
+            (void)ui.InputText("Namespace", m_GeneratedNamespace);
+            if (ui.Button("Generate C# Wrapper"))
+            {
+                try
+                {
+                    const auto path = m_Controller.GenerateInputActionsWrapper(m_GeneratedClass, m_GeneratedNamespace);
+                    m_Message = "Generated " + path.generic_string() + ".";
+                }
+                catch (const std::exception& error)
+                {
+                    m_Message = error.what();
+                    m_Controller.ReportInputActionsError(m_Message);
+                }
+            }
+        }
         ui.Separator();
 
         auto findMap = [&]() -> Keire::InputActionMapDefinition*
@@ -200,15 +276,40 @@ namespace KeireEditor
                 std::ranges::find(inputDocument.ActionMaps, selectedMap, &Keire::InputActionMapDefinition::Id);
             return found == inputDocument.ActionMaps.end() ? nullptr : &*found;
         };
+        const float contentWidth = ui.ContentAvailable().Width;
+        const float navigationWidth = std::clamp(contentWidth * 0.21F, 200.0F, 280.0F);
+        const float inspectorWidth = std::clamp(contentWidth * 0.29F, 280.0F, 420.0F);
+        const float actionWidth = std::max(320.0F, contentWidth - navigationWidth - inspectorWidth - 14.0F);
+        [[maybe_unused]] auto childBackground =
+            ui.PushStyleColor(Keire::UiStyleColorRole::ChildBackground, theme.Panel);
+        [[maybe_unused]] auto childBorder = ui.PushStyleColor(Keire::UiStyleColorRole::Border, theme.Border);
+        [[maybe_unused]] auto childRounding = ui.PushStyleVariable(Keire::UiStyleVariable::ChildRounding, 5.0F);
         auto map = findMap();
-        if (auto maps = ui.BeginChild("InputMaps", {230.0F, 0.0F}, true); maps)
+        if (auto maps = ui.BeginChild("InputMaps", {navigationWidth, 0.0F}, true); maps)
         {
-            ui.TextColored(theme.Accent, "ACTION MAPS");
+            {
+                [[maybe_unused]] auto headingFont = ui.PushFont(Keire::UiFontRole::Heading);
+                ui.Text("Action Maps");
+            }
+            ui.TextColored(theme.MutedText, std::to_string(inputDocument.ActionMaps.size()) + " map(s)");
+            ui.Separator();
+            bool displayedMap = false;
             for (const auto& candidate : inputDocument.ActionMaps)
             {
-                if (!m_Search.empty() && candidate.Name.find(m_Search) == std::string::npos)
+                const bool childMatches = std::ranges::any_of(candidate.Actions, [&](const auto& action)
+                                                              { return ContainsInsensitive(action.Name, m_Search); }) ||
+                                          std::ranges::any_of(candidate.Bindings,
+                                                              [&](const auto& binding)
+                                                              {
+                                                                  return ContainsInsensitive(binding.Name, m_Search) ||
+                                                                         ContainsInsensitive(binding.Path, m_Search);
+                                                              });
+                if (!ContainsInsensitive(candidate.Name, m_Search) && !childMatches)
                     continue;
-                if (ui.Selectable(candidate.Name, candidate.Id == selectedMap))
+                displayedMap = true;
+                const auto label =
+                    candidate.Name + "  (" + std::to_string(candidate.Actions.size()) + ")##" + candidate.Id.ToString();
+                if (ui.Selectable(label, candidate.Id == selectedMap))
                 {
                     selectedMap = candidate.Id;
                     selectedScheme = {};
@@ -216,11 +317,18 @@ namespace KeireEditor
                     selectedBinding = {};
                 }
             }
+            if (!displayedMap)
+                ui.TextColored(theme.MutedText, m_Search.empty() ? "No action maps yet." : "No matching action maps.");
             ui.Separator();
             ui.TextColored(theme.MutedText, "CONTROL SCHEMES");
             for (const auto& scheme : inputDocument.ControlSchemes)
             {
-                if (ui.Selectable(scheme.Name + "  [" + scheme.BindingGroup + "]", scheme.Id == selectedScheme))
+                if (!ContainsInsensitive(scheme.Name, m_Search) && !ContainsInsensitive(scheme.BindingGroup, m_Search))
+                {
+                    continue;
+                }
+                if (ui.Selectable(scheme.Name + "  [" + scheme.BindingGroup + "]##" + scheme.Id.ToString(),
+                                  scheme.Id == selectedScheme))
                 {
                     selectedScheme = scheme.Id;
                     selectedMap = {};
@@ -228,6 +336,7 @@ namespace KeireEditor
                     selectedBinding = {};
                 }
             }
+            ui.Spacing();
             if (ui.Button("+ Map"))
             {
                 m_Controller.RecordInputActionsUndo();
@@ -256,6 +365,7 @@ namespace KeireEditor
                 selectedBinding = {};
                 inputDocument.ControlSchemes.push_back(std::move(added));
             }
+            ui.Separator();
             if (selectedMap && ui.Button("Duplicate Map"))
             {
                 const auto source =
@@ -299,19 +409,39 @@ namespace KeireEditor
         }
         ui.SameLine();
         map = findMap();
-        if (auto actions = ui.BeginChild("InputActions", {430.0F, 0.0F}, true); actions)
+        if (auto actions = ui.BeginChild("InputActions", {actionWidth, 0.0F}, true); actions)
         {
-            ui.TextColored(theme.Accent, map ? map->Name : "ACTIONS");
+            {
+                [[maybe_unused]] auto headingFont = ui.PushFont(Keire::UiFontRole::Heading);
+                ui.Text(map ? map->Name : "Actions");
+            }
+            if (map)
+                ui.TextColored(theme.MutedText, std::to_string(map->Actions.size()) + " action(s), " +
+                                                    std::to_string(map->Bindings.size()) + " binding(s)");
+            ui.Separator();
             if (!map)
-                ui.TextColored(theme.MutedText, "Select or create an action map.");
+                DrawEmptyState(ui, "Build an action set", "Select an action map from the left to begin.",
+                               "Actions describe intent; bindings connect that intent to controls.");
             else
             {
                 if (inputContext)
                     (void)inputContext->EnableMap(map->Id);
                 for (const auto& action : map->Actions)
                 {
+                    const bool bindingMatches = std::ranges::any_of(
+                        map->Bindings,
+                        [&](const auto& binding)
+                        {
+                            return binding.Action == action.Id && (ContainsInsensitive(binding.Name, m_Search) ||
+                                                                   ContainsInsensitive(binding.Path, m_Search));
+                        });
+                    if (!ContainsInsensitive(action.Name, m_Search) && !bindingMatches)
+                        continue;
                     auto actionId = ui.PushId(action.Id.ToString());
-                    if (ui.Selectable(action.Name, action.Id == selectedAction))
+                    const auto actionBindings =
+                        std::ranges::count(map->Bindings, action.Id, &Keire::InputBindingDefinition::Action);
+                    if (ui.Selectable(action.Name + "  (" + std::to_string(actionBindings) + ")",
+                                      action.Id == selectedAction && !selectedBinding))
                     {
                         selectedAction = action.Id;
                         selectedBinding = {};
@@ -320,13 +450,21 @@ namespace KeireEditor
                     {
                         if (binding.Action != action.Id)
                             continue;
+                        if (!m_Search.empty() && !ContainsInsensitive(action.Name, m_Search) &&
+                            !ContainsInsensitive(binding.Name, m_Search) &&
+                            !ContainsInsensitive(binding.Path, m_Search))
+                        {
+                            continue;
+                        }
                         auto bindingId = ui.PushId(binding.Id.ToString());
-                        const auto detail = !binding.Composite.empty() ? std::string("[") + binding.Composite + "]"
-                                            : !binding.CompositePart.empty()
-                                                ? binding.CompositePart + ": " + binding.Path
-                                            : binding.Name.empty() ? binding.Path
-                                                                   : binding.Name + ": " + binding.Path;
-                        const auto label = "   " + detail;
+                        const auto detail =
+                            !binding.Composite.empty()
+                                ? (binding.Composite == "Axis1D" ? "1D Axis Composite" : "2D Vector Composite")
+                            : !binding.CompositePart.empty()
+                                ? binding.CompositePart + "  ·  " + FriendlyControlPath(binding.Path)
+                            : binding.Name.empty() ? FriendlyControlPath(binding.Path)
+                                                   : binding.Name + "  ·  " + FriendlyControlPath(binding.Path);
+                        const auto label = "    " + detail;
                         if (ui.Selectable(label, binding.Id == selectedBinding))
                         {
                             selectedAction = action.Id;
@@ -334,6 +472,8 @@ namespace KeireEditor
                         }
                     }
                 }
+                ui.Spacing();
+                ui.Separator();
                 if (ui.Button("+ Action"))
                 {
                     m_Controller.RecordInputActionsUndo();
@@ -480,7 +620,19 @@ namespace KeireEditor
         map = findMap();
         if (auto properties = ui.BeginChild("InputProperties", {}, true); properties)
         {
-            ui.TextColored(theme.Accent, "PROPERTIES");
+            {
+                [[maybe_unused]] auto headingFont = ui.PushFont(Keire::UiFontRole::Heading);
+                ui.Text("Properties");
+            }
+            if (selectedBinding)
+                ui.TextColored(theme.MutedText, "Binding configuration");
+            else if (selectedAction)
+                ui.TextColored(theme.MutedText, "Action configuration");
+            else if (selectedScheme)
+                ui.TextColored(theme.MutedText, "Control scheme configuration");
+            else if (selectedMap)
+                ui.TextColored(theme.MutedText, "Map configuration");
+            ui.Separator();
             const auto drawBehaviors = [&](const std::string_view heading,
                                            std::vector<Keire::InputBehaviorDefinition>& behaviors,
                                            const bool interactions)
@@ -630,7 +782,7 @@ namespace KeireEditor
                 if (m_BindingGroupDraft.Editing && m_BindingGroupDraft.Value.empty())
                     ui.TextColored(theme.Error, "Binding group cannot be empty. Finish typing to apply.");
                 ui.Separator();
-                ui.TextColored(theme.Accent, "DEVICES");
+                ui.TextColored(theme.Accent, "Devices");
                 for (const std::string_view family : {"Keyboard", "Mouse", "Gamepad"})
                 {
                     auto device = std::ranges::find(scheme->Devices, family, &Keire::InputDeviceRequirement::Device);
@@ -817,8 +969,8 @@ namespace KeireEditor
                         }
                     }
                     if (action->Type != Keire::InputActionType::PassThrough)
-                        drawBehaviors("INTERACTIONS", action->Interactions, true);
-                    drawBehaviors("PROCESSORS", action->Processors, false);
+                        drawBehaviors("Interactions", action->Interactions, true);
+                    drawBehaviors("Processors", action->Processors, false);
                 }
                 if (selectedBinding)
                 {
@@ -906,7 +1058,7 @@ namespace KeireEditor
                                 ui.TextColored(theme.Error, "Control path cannot be empty. Finish typing to apply.");
                         }
                         ui.Separator();
-                        ui.TextColored(theme.Accent, "BINDING GROUPS");
+                        ui.TextColored(theme.Accent, "Binding Groups");
                         for (const auto& scheme : inputDocument.ControlSchemes)
                         {
                             bool included =
@@ -921,9 +1073,9 @@ namespace KeireEditor
                             }
                         }
                         if (action != map->Actions.end() && action->Type != Keire::InputActionType::PassThrough)
-                            drawBehaviors("BINDING INTERACTIONS", binding->Interactions, true);
-                        drawBehaviors("BINDING PROCESSORS", binding->Processors, false);
-                        if (binding->Composite.empty() && !m_Rebind && ui.Button("Listen"))
+                            drawBehaviors("Binding Interactions", binding->Interactions, true);
+                        drawBehaviors("Binding Processors", binding->Processors, false);
+                        if (binding->Composite.empty() && !m_Rebind && ui.Button("Listen for Input"))
                         {
                             try
                             {
@@ -1023,13 +1175,32 @@ namespace KeireEditor
                 if (m_LiveMonitor && inputContext)
                 {
                     ui.Separator();
-                    ui.TextColored(theme.Accent, "LIVE VALUE");
+                    ui.TextColored(theme.Accent, "Live Value");
                     const auto handle = inputContext->FindAction(selectedAction);
                     if (handle)
                     {
                         const auto value = handle.Value();
-                        ui.Text("Phase " + std::to_string(static_cast<int>(handle.Phase())) + "  [" +
-                                std::to_string(value.X) + ", " + std::to_string(value.Y) + "]");
+                        const auto phaseName = [](const Keire::InputActionPhase phase)
+                        {
+                            switch (phase)
+                            {
+                            case Keire::InputActionPhase::Disabled:
+                                return "Disabled";
+                            case Keire::InputActionPhase::Waiting:
+                                return "Waiting";
+                            case Keire::InputActionPhase::Started:
+                                return "Started";
+                            case Keire::InputActionPhase::Performed:
+                                return "Performed";
+                            case Keire::InputActionPhase::Canceled:
+                                return "Canceled";
+                            }
+                            return "Unknown";
+                        };
+                        std::ostringstream formattedValue;
+                        formattedValue << std::fixed << std::setprecision(2) << value.X << ", " << value.Y;
+                        ui.Text("State   " + std::string(phaseName(handle.Phase())));
+                        ui.Text("Value   " + formattedValue.str());
                     }
                     if (const auto input = m_Controller.InputSystem())
                     {
@@ -1053,5 +1224,6 @@ namespace KeireEditor
         m_ActionNameDraft = {};
         m_BindingNameDraft = {};
         m_ControlPathDraft = {};
+        m_GeneratedClass.clear();
     }
 } // namespace KeireEditor

@@ -160,16 +160,22 @@ public readonly struct InputRebindOperation
     public bool Cancel() => IsValid && NativeInput.CancelRebind(_id);
 }
 
-public static class Input
+public static partial class Input
 {
     public static IReadOnlyList<InputDevice> Devices => NativeInput.Devices;
     public static string ControlScheme => NativeInput.ControlScheme;
+    [Obsolete("Use an InputActionAsset, InputActionContext, or direct device controls instead.")]
     public static Vector2 Axis2D(string action) => NativeRuntime.ReadInputAxis2D(action);
+    [Obsolete("Use InputAction.ReadValueAsButton or a ButtonControl instead.")]
     public static bool Held(string action) => (NativeRuntime.ReadInputState(action) & 1) != 0;
+    [Obsolete("Use InputAction.WasPressedThisFrame or a ButtonControl instead.")]
     public static bool Pressed(string action) => (NativeRuntime.ReadInputState(action) & 2) != 0;
+    [Obsolete("Use InputAction.WasReleasedThisFrame or a ButtonControl instead.")]
     public static bool Released(string action) => (NativeRuntime.ReadInputState(action) & 4) != 0;
-    public static bool Button(string action) => Held(action);
-    public static float Axis(string action) => Axis2D(action).X;
+    [Obsolete("Use InputAction.ReadValueAsButton or a ButtonControl instead.")]
+    public static bool Button(string action) => (NativeRuntime.ReadInputState(action) & 1) != 0;
+    [Obsolete("Use InputAction.ReadValue<float> or an AxisControl instead.")]
+    public static float Axis(string action) => NativeRuntime.ReadInputAxis2D(action).X;
 
     public static bool TrySetControlScheme(string scheme, bool locked = true)
     {
@@ -198,6 +204,13 @@ public static class Input
 
     public static InputRebindOperation BeginInteractiveRebind(AssetId binding, InputRebindOptions options)
     {
+        ValidateRebind(binding, options);
+        ulong operation = NativeInput.BeginRebind(binding, options);
+        return operation != 0 ? new InputRebindOperation(operation) : default;
+    }
+
+    internal static void ValidateRebind(AssetId binding, InputRebindOptions options)
+    {
         if (!binding.IsValid)
             throw new ArgumentException("Interactive rebinding requires a valid binding ID.", nameof(binding));
         if (!float.IsFinite(options.MagnitudeThreshold) || options.MagnitudeThreshold <= 0.0f ||
@@ -208,8 +221,6 @@ public static class Input
         if (options.AllowedDevices == InputDeviceMask.None ||
             (options.AllowedDevices & ~InputDeviceMask.All) != InputDeviceMask.None)
             throw new ArgumentOutOfRangeException(nameof(options));
-        ulong operation = NativeInput.BeginRebind(binding, options);
-        return operation != 0 ? new InputRebindOperation(operation) : default;
     }
 
     public static bool SaveBindingOverrides(string profile)

@@ -252,6 +252,7 @@ namespace KeireRuntime
         m_RuntimeWorld.Reset();
         m_MaterialParameters.Close();
         m_ManagedInputOperations.CancelAll();
+        m_ManagedInputContexts.ReleaseAll();
         m_Application = nullptr;
         m_Runtime = nullptr;
         m_Scene = nullptr;
@@ -735,6 +736,76 @@ namespace KeireRuntime
         {
             return false;
         }
+    }
+
+    std::uint64_t ManagedWorldRuntimeServices::CreateManagedInputContext(const std::uint64_t generation,
+                                                                         const Keire::AssetId asset) noexcept
+    {
+        return m_ManagedInputContexts.Create(
+            generation, m_Application ? m_Application->Input() : Keire::Ref<Keire::InputSystem>{}, m_InputUser, asset);
+    }
+
+    bool ManagedWorldRuntimeServices::ReleaseManagedInputContext(const std::uint64_t handle) noexcept
+    {
+        return m_ManagedInputContexts.Release(handle);
+    }
+
+    void ManagedWorldRuntimeServices::ReleaseManagedInputContexts(const std::uint64_t generation) noexcept
+    {
+        m_ManagedInputContexts.ReleaseGeneration(generation);
+    }
+
+    bool ManagedWorldRuntimeServices::OperateManagedInputContext(const std::uint64_t handle,
+                                                                 const Keire::ManagedInputContextOperation operation,
+                                                                 const Keire::AssetId target) noexcept
+    {
+        return m_ManagedInputContexts.Operate(handle, operation, target);
+    }
+
+    std::uint64_t
+    ManagedWorldRuntimeServices::BeginManagedInputContextRebind(const std::uint64_t handle,
+                                                                const Keire::AssetId binding,
+                                                                const Keire::ManagedInputRebindOptions options) noexcept
+    {
+        const auto context = m_ManagedInputContexts.Context(handle);
+        return context ? m_ManagedInputOperations.Begin(m_Application ? m_Application->Input()
+                                                                      : Keire::Ref<Keire::InputSystem>{},
+                                                        context, binding, options)
+                       : 0;
+    }
+
+    Keire::AssetId ManagedWorldRuntimeServices::FindManagedInputMap(const std::uint64_t handle,
+                                                                    const std::string_view name) noexcept
+    {
+        return m_ManagedInputContexts.FindMap(handle, name);
+    }
+
+    Keire::AssetId ManagedWorldRuntimeServices::FindManagedInputAction(const std::uint64_t handle,
+                                                                       const Keire::AssetId map,
+                                                                       const std::string_view name) noexcept
+    {
+        return m_ManagedInputContexts.FindAction(handle, map, name);
+    }
+
+    std::optional<Keire::ManagedInputActionSnapshot>
+    ManagedWorldRuntimeServices::ManagedInputAction(const std::uint64_t handle, const Keire::AssetId action) noexcept
+    {
+        return m_ManagedInputContexts.Action(handle, action);
+    }
+
+    std::optional<Keire::InputDeviceId>
+    ManagedWorldRuntimeServices::CurrentManagedInputDevice(const Keire::InputDeviceType type) noexcept
+    {
+        const auto input = m_Application ? m_Application->Input() : Keire::Ref<Keire::InputSystem>{};
+        return input ? input->CurrentDevice(type) : std::nullopt;
+    }
+
+    std::optional<Keire::InputControlSnapshot>
+    ManagedWorldRuntimeServices::ManagedInputControl(const Keire::InputDeviceId device,
+                                                     const std::string_view path) noexcept
+    {
+        const auto input = m_Application ? m_Application->Input() : Keire::Ref<Keire::InputSystem>{};
+        return input ? input->ReadControl(device, path) : std::nullopt;
     }
 
     std::optional<Keire::ManagedRaycastHit>

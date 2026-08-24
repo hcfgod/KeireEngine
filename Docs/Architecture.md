@@ -993,10 +993,19 @@ gamepads only. Production Windows, Linux, and macOS dependencies enable native j
 and haptic backends; unsupported future ports or custom SDL builds degrade rumble to a rejected operation without
 affecting keyboard or mouse input.
 
+Every managed `InputActionContext` owns an independent native context and is released explicitly or with its managed
+asset generation. Map and action disable operations synchronously publish cancellation before removing enabled state.
+Managed transition callbacks are dispatched at most once per immutable input frame before fixed/update gameplay
+callbacks. Direct controls read the same paired-user snapshots, including held, pressed, and released edges; they do
+not bypass editor Play/Game-view routing. Fixed-tick replay schema 2 records sparse raw controls as well as resolved
+actions so direct polling remains deterministic during playback, while schema 1 recordings remain readable.
+
 `.keireinput` is the first registered typed source importer. It validates bounded versioned JSON and emits deterministic
 canonical bytes into the normal content-addressed cache and cooker. The dockable editor exposes every schema-owned
 action type, value type, control scheme, composite, interaction, and processor while owning only mutable authoring
 documents and uses the public Kéire UI facade. Details live in [Input Actions Editor](InputActionsEditor.md).
+Project descriptor schema 4 stores both the default input asset and stable default map ID. The editor and packaged
+runtime resolve that map at Play startup, falling back to the asset's first map only for an unset legacy selection.
 
 ## Event And Time Runtime
 

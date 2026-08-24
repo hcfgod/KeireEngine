@@ -50,8 +50,10 @@ void EditorWorkspaceLayer::OnDetach() noexcept
         m_ProjectSettingsDocument->Close();
     EndInputTest();
     m_ManagedInputOperations.CancelAll();
+    m_ManagedInputContexts.ReleaseAll();
     m_ManagedInputCaptureOverride.reset();
     m_GameplayInputContext.Reset();
+    m_GameplayInputMap = {};
     m_ManagedCursorLocked = false;
     m_ManagedCursorVisible = true;
     m_GameViewportCaptureSuspended = false;

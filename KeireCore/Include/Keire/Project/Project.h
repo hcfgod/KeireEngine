@@ -16,7 +16,7 @@
 
 namespace Keire
 {
-    inline constexpr std::uint32_t CurrentProjectSchemaVersion = 3;
+    inline constexpr std::uint32_t CurrentProjectSchemaVersion = 4;
 
     enum class ProjectTemplate : std::uint8_t
     {
@@ -94,6 +94,7 @@ namespace Keire
         };
         AssetId StartupScene;
         AssetId DefaultInput;
+        AssetId DefaultInputMap;
         std::vector<RequiredSourceModule> RequiredModules;
         std::string CreatedAt;
         std::string LastSavedWithEngineVersion;

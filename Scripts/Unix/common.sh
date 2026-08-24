@@ -230,6 +230,17 @@ load_project_config() {
     is_semantic_version "$PROJECT_VERSION" || { printf 'PROJECT_VERSION must be a valid Semantic Version 2.0.0 value.\n' >&2; return 1; }
 }
 
+project_generation_premake_inputs() {
+    local root="$1"
+    find "$root" \
+      \( -type d \( \
+        -path "$root/Vendor" -o -path "$root/Tools" \
+        -o -name '.git' -o -name '.vs' -o -name '.ruff_cache' -o -name '.codex-remote-attachments' \
+        -o -name 'Artifacts' -o -name 'Build' -o -name 'Library' -o -name 'Logs' \
+        -o -name 'bin' -o -name 'obj' -o -name 'node_modules' -o -name '__pycache__' \
+      \) -prune \) -o -type f -name 'premake5.lua' -print
+}
+
 project_generation_fingerprint() {
     local root="$1" source_root
     {
@@ -243,7 +254,7 @@ project_generation_fingerprint() {
               -o -name '*.cs' -o -name '*.csproj' \
             \) -not -path '*/bin/*' -not -path '*/obj/*' -print
         done | LC_ALL=C sort
-        find "$root" -type f -name 'premake5.lua' -not -path "$root/Build/*" -not -path "$root/Vendor/*" -not -path "$root/Tools/*" -print | LC_ALL=C sort | while IFS= read -r source_root; do
+        project_generation_premake_inputs "$root" | LC_ALL=C sort | while IFS= read -r source_root; do
             cksum "$source_root"
         done
         find "$root/Scripts/Premake" -type f -name '*.lua' -print | LC_ALL=C sort | while IFS= read -r source_root; do
@@ -814,6 +825,84 @@ premake_architecture() {
 
 architecture_output_name() {
     [[ "$(normalize_architecture "$1")" == ARM64 ]] && printf 'AARCH64' || printf 'x86_64'
+}
+
+remove_generated_binary_directory() {
+    local root="${1:?repository root is required}"
+    local path="${2:?generated binary directory is required}"
+    local resolved_root resolved_base resolved_path component current relative
+    resolved_root="$(cd -P "$root" && pwd -P)" || return 1
+    [[ -d "$root/Build/Bin" && ! -L "$root/Build" && ! -L "$root/Build/Bin" ]] || {
+        printf 'Refusing to remove generated binaries through an invalid or symbolic Build/Bin path: %s.\n' \
+            "$root/Build/Bin" >&2
+        return 1
+    }
+    resolved_base="$(cd -P "$root/Build/Bin" && pwd -P)" || return 1
+    resolved_path="$(cd -P "$path" && pwd -P)" || return 1
+    case "$resolved_base" in
+        "$resolved_root"/*) ;;
+        *) printf 'Refusing to use a generated binary root outside the repository: %s.\n' "$resolved_base" >&2; return 1 ;;
+    esac
+    case "$resolved_path" in
+        "$resolved_base"/*) ;;
+        *) printf 'Refusing to remove generated binaries outside %s: %s.\n' "$resolved_base" "$resolved_path" >&2; return 1 ;;
+    esac
+
+    relative="${path#"$root"/}"
+    current="$root"
+    IFS='/' read -r -a components <<< "$relative"
+    for component in "${components[@]}"; do
+        current="$current/$component"
+        [[ ! -L "$current" ]] || {
+            printf 'Refusing to remove a symbolic generated binary path: %s.\n' "$current" >&2
+            return 1
+        }
+    done
+    rm -rf -- "$resolved_path"
+}
+
+invalidate_incompatible_binary_outputs() {
+    local root="${1:?repository root is required}"
+    local system="${2:?target system is required}"
+    local architecture="${3:?target architecture is required}"
+    local toolset="${4:?toolset is required}"
+    local identity_stamp="${5:?generation identity stamp is required}"
+    local current_architecture prior_line="" prior_generator="" prior_architecture="" prior_toolset=""
+    local prior_cache="" prior_ci="" prior_fingerprint="" prior_extra="" normalized_prior="" configuration target
+    case "$system" in
+        linux|macosx) ;;
+        *) printf 'Unsupported generated binary target system: %s.\n' "$system" >&2; return 1 ;;
+    esac
+    case "$toolset" in
+        gcc|clang) ;;
+        *) printf 'Unsupported generated binary toolset: %s.\n' "$toolset" >&2; return 1 ;;
+    esac
+    current_architecture="$(normalize_architecture "$architecture")" || return 1
+
+    if [[ -f "$identity_stamp" ]]; then
+        prior_line="$(tr -d '\r\n' < "$identity_stamp")"
+        IFS='|' read -r prior_generator prior_architecture prior_toolset prior_cache prior_ci prior_fingerprint \
+            prior_extra <<< "$prior_line"
+        normalized_prior="$(normalize_architecture "$prior_architecture" 2>/dev/null || true)"
+        if [[ -n "$prior_generator" && -n "$prior_fingerprint" && -z "$prior_extra" &&
+              "$normalized_prior" == "$current_architecture" && "$prior_toolset" == "$toolset" ]]; then
+            return 0
+        fi
+    fi
+
+    local output_architecture
+    output_architecture="$(architecture_output_name "$current_architecture")" || return 1
+    local targets=()
+    for configuration in Debug Release Dist DebugASan DebugUBSan DebugTSan Coverage; do
+        target="$root/Build/Bin/$configuration-$system-$output_architecture"
+        [[ -e "$target" || -L "$target" ]] && targets+=("$target")
+    done
+    [[ ${#targets[@]} -gt 0 ]] || return 0
+    printf '==> Removing binaries with unknown or incompatible toolset provenance for %s-%s\n' \
+        "$system" "$output_architecture"
+    for target in "${targets[@]}"; do
+        remove_generated_binary_directory "$root" "$target" || return 1
+    done
 }
 
 find_premake_binary() {

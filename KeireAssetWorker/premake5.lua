@@ -22,7 +22,7 @@ project(AssetWorkerTarget)
     local commandRepositoryRoot = (_ACTION == "ninja" or _ACTION == "gmake") and "." or ".."
     local workerRuntimeDirectory =
         commandRepositoryRoot .. "/Build/Bin/" .. OutputDir .. "/" .. AssetWorkerTarget
-    local workerPrelinkStamp = commandRepositoryRoot .. "/Build/Intermediates/" .. OutputDir .. "/" ..
+    local workerPrelinkStamp = commandRepositoryRoot .. "/Build/Intermediates/" .. IntermediateOutputDir .. "/" ..
                                    AssetWorkerTarget .. "/" .. AssetWorkerTarget .. ".prelinkevents"
     local function CopyWindowsRuntime(source)
         local command = "powershell -NoProfile -ExecutionPolicy Bypass -File " .. commandRepositoryRoot ..

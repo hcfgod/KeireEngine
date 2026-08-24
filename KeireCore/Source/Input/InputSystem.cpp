@@ -70,21 +70,24 @@ namespace Keire
 
         [[nodiscard]] std::string KeyboardPath(const SDL_Scancode scancode)
         {
+            if (scancode >= SDL_SCANCODE_A && scancode <= SDL_SCANCODE_Z)
+                return "<Keyboard>/" + std::string(1, static_cast<char>('a' + scancode - SDL_SCANCODE_A));
+            if (scancode >= SDL_SCANCODE_1 && scancode <= SDL_SCANCODE_9)
+                return "<Keyboard>/digit" + std::to_string(1 + scancode - SDL_SCANCODE_1);
+            if (scancode >= SDL_SCANCODE_F1 && scancode <= SDL_SCANCODE_F12)
+                return "<Keyboard>/f" + std::to_string(1 + scancode - SDL_SCANCODE_F1);
+            if (scancode >= SDL_SCANCODE_F13 && scancode <= SDL_SCANCODE_F24)
+                return "<Keyboard>/f" + std::to_string(13 + scancode - SDL_SCANCODE_F13);
             switch (scancode)
             {
-            case SDL_SCANCODE_W:
-                return "<Keyboard>/w";
-            case SDL_SCANCODE_A:
-                return "<Keyboard>/a";
-            case SDL_SCANCODE_S:
-                return "<Keyboard>/s";
-            case SDL_SCANCODE_D:
-                return "<Keyboard>/d";
+            case SDL_SCANCODE_0:
+                return "<Keyboard>/digit0";
             case SDL_SCANCODE_SPACE:
                 return "<Keyboard>/space";
             case SDL_SCANCODE_RETURN:
-            case SDL_SCANCODE_KP_ENTER:
                 return "<Keyboard>/enter";
+            case SDL_SCANCODE_KP_ENTER:
+                return "<Keyboard>/numpadEnter";
             case SDL_SCANCODE_ESCAPE:
                 return "<Keyboard>/escape";
             case SDL_SCANCODE_UP:
@@ -95,20 +98,95 @@ namespace Keire
                 return "<Keyboard>/leftArrow";
             case SDL_SCANCODE_RIGHT:
                 return "<Keyboard>/rightArrow";
+            case SDL_SCANCODE_TAB:
+                return "<Keyboard>/tab";
+            case SDL_SCANCODE_BACKSPACE:
+                return "<Keyboard>/backspace";
+            case SDL_SCANCODE_CAPSLOCK:
+                return "<Keyboard>/capsLock";
+            case SDL_SCANCODE_LSHIFT:
+                return "<Keyboard>/leftShift";
+            case SDL_SCANCODE_RSHIFT:
+                return "<Keyboard>/rightShift";
+            case SDL_SCANCODE_LCTRL:
+                return "<Keyboard>/leftCtrl";
+            case SDL_SCANCODE_RCTRL:
+                return "<Keyboard>/rightCtrl";
+            case SDL_SCANCODE_LALT:
+                return "<Keyboard>/leftAlt";
+            case SDL_SCANCODE_RALT:
+                return "<Keyboard>/rightAlt";
+            case SDL_SCANCODE_LGUI:
+                return "<Keyboard>/leftMeta";
+            case SDL_SCANCODE_RGUI:
+                return "<Keyboard>/rightMeta";
+            case SDL_SCANCODE_INSERT:
+                return "<Keyboard>/insert";
+            case SDL_SCANCODE_DELETE:
+                return "<Keyboard>/delete";
+            case SDL_SCANCODE_HOME:
+                return "<Keyboard>/home";
+            case SDL_SCANCODE_END:
+                return "<Keyboard>/end";
+            case SDL_SCANCODE_PAGEUP:
+                return "<Keyboard>/pageUp";
+            case SDL_SCANCODE_PAGEDOWN:
+                return "<Keyboard>/pageDown";
+            case SDL_SCANCODE_PRINTSCREEN:
+                return "<Keyboard>/printScreen";
+            case SDL_SCANCODE_SCROLLLOCK:
+                return "<Keyboard>/scrollLock";
+            case SDL_SCANCODE_PAUSE:
+                return "<Keyboard>/pause";
+            case SDL_SCANCODE_MINUS:
+                return "<Keyboard>/minus";
+            case SDL_SCANCODE_EQUALS:
+                return "<Keyboard>/equals";
+            case SDL_SCANCODE_LEFTBRACKET:
+                return "<Keyboard>/leftBracket";
+            case SDL_SCANCODE_RIGHTBRACKET:
+                return "<Keyboard>/rightBracket";
+            case SDL_SCANCODE_BACKSLASH:
+                return "<Keyboard>/backslash";
+            case SDL_SCANCODE_SEMICOLON:
+                return "<Keyboard>/semicolon";
+            case SDL_SCANCODE_APOSTROPHE:
+                return "<Keyboard>/quote";
+            case SDL_SCANCODE_GRAVE:
+                return "<Keyboard>/backquote";
+            case SDL_SCANCODE_COMMA:
+                return "<Keyboard>/comma";
+            case SDL_SCANCODE_PERIOD:
+                return "<Keyboard>/period";
+            case SDL_SCANCODE_SLASH:
+                return "<Keyboard>/slash";
+            case SDL_SCANCODE_NUMLOCKCLEAR:
+                return "<Keyboard>/numLock";
+            case SDL_SCANCODE_KP_0:
+                return "<Keyboard>/numpad0";
+            case SDL_SCANCODE_KP_1:
+            case SDL_SCANCODE_KP_2:
+            case SDL_SCANCODE_KP_3:
+            case SDL_SCANCODE_KP_4:
+            case SDL_SCANCODE_KP_5:
+            case SDL_SCANCODE_KP_6:
+            case SDL_SCANCODE_KP_7:
+            case SDL_SCANCODE_KP_8:
+            case SDL_SCANCODE_KP_9:
+                return "<Keyboard>/numpad" + std::to_string(scancode - SDL_SCANCODE_KP_1 + 1);
+            case SDL_SCANCODE_KP_PLUS:
+                return "<Keyboard>/numpadPlus";
+            case SDL_SCANCODE_KP_MINUS:
+                return "<Keyboard>/numpadMinus";
+            case SDL_SCANCODE_KP_MULTIPLY:
+                return "<Keyboard>/numpadMultiply";
+            case SDL_SCANCODE_KP_DIVIDE:
+                return "<Keyboard>/numpadDivide";
+            case SDL_SCANCODE_KP_DECIMAL:
+                return "<Keyboard>/numpadPeriod";
             default:
-                break;
-            }
-            const char* name = SDL_GetScancodeName(scancode);
-            std::string path = "<Keyboard>/";
-            if (!name || !*name)
                 return {};
-            for (const char character : std::string_view(name))
-            {
-                const auto value = static_cast<unsigned char>(character);
-                if (std::isalnum(value))
-                    path.push_back(static_cast<char>(std::tolower(value)));
             }
-            return path.size() == 11 ? std::string{} : path;
         }
 
         [[nodiscard]] std::string GamepadButtonPath(const SDL_GamepadButton button)
@@ -235,7 +313,7 @@ namespace Keire
             std::uint64_t ContextId = 0;
             InputActionAssetDefinition Definition;
             std::uint64_t AssetRevision = std::numeric_limits<std::uint64_t>::max();
-            std::unordered_set<AssetId> EnabledMaps;
+            std::unordered_set<AssetId> EnabledActions;
             std::unordered_set<AssetId> CaptureBypassMaps;
             std::unordered_map<AssetId, ActionRuntime> Actions;
             std::unordered_map<AssetId, std::string> Overrides;
@@ -338,6 +416,7 @@ namespace Keire
                 DeviceState device;
                 device.Descriptor = {id, type, std::move(name), std::move(hardware), true, false};
                 Devices.emplace(id, std::move(device));
+                LastActiveDevices[static_cast<std::size_t>(type)] = id;
             }
 
             static void ProcessNativeEvent(void* context, const SDL_Event& event) noexcept
@@ -394,6 +473,10 @@ namespace Keire
                         path = "<Mouse>/rightButton";
                     else if (event.button.button == SDL_BUTTON_MIDDLE)
                         path = "<Mouse>/middleButton";
+                    else if (event.button.button == SDL_BUTTON_X1)
+                        path = "<Mouse>/backButton";
+                    else if (event.button.button == SDL_BUTTON_X2)
+                        path = "<Mouse>/forwardButton";
                     if (!path.empty())
                         Queue({InputDeviceId(2), InputDeviceType::Mouse, std::move(path),
                                BooleanInputValue(event.button.down), event.button.timestamp, event.button.down});
@@ -445,6 +528,12 @@ namespace Keire
                 case SDL_EVENT_WINDOW_FOCUS_LOST:
                     for (auto& [id, device] : Devices)
                     {
+                        for (const auto& [path, value] : device.Controls)
+                        {
+                            if (value.Magnitude() >= 0.5F)
+                                Queue({id, device.Descriptor.Type, path, InputValue{value.Type}, event.common.timestamp,
+                                       false});
+                        }
                         device.Controls.clear();
                         PendingDeviceCancellations.push_back(id);
                     }
@@ -679,6 +768,17 @@ namespace Keire
                 Suspended = suspended;
                 DeltaSeconds = delta.Seconds();
                 LastTimestamp += static_cast<std::uint64_t>(std::max(0.0, delta.Seconds()) * 1'000'000'000.0);
+                for (auto& [id, device] : Devices)
+                {
+                    (void)id;
+                    device.PressedControls.clear();
+                    device.ReleasedControls.clear();
+                }
+                if (const auto mouse = Devices.find(InputDeviceId(2)); mouse != Devices.end())
+                {
+                    mouse->second.Controls["<Mouse>/delta"] = VectorInputValue(0.0F, 0.0F);
+                    mouse->second.Controls["<Mouse>/scroll"] = VectorInputValue(0.0F, 0.0F);
+                }
                 for (const auto device : PendingDeviceCancellations)
                     CancelDeviceActions(device);
                 PendingDeviceCancellations.clear();
@@ -686,6 +786,8 @@ namespace Keire
                 {
                     AutoJoin(event);
                     SelectSchemeForInput(event);
+                    if (event.Press || event.Value.Magnitude() >= 0.2F)
+                        LastActiveDevices[static_cast<std::size_t>(event.Type)] = event.Device;
                     auto found = Devices.find(event.Device);
                     if (found != Devices.end())
                     {
@@ -725,14 +827,6 @@ namespace Keire
                 }
                 TickRebind(delta.Seconds());
                 EventsBuffer.clear();
-                Devices.at(InputDeviceId(2)).Controls["<Mouse>/delta"] = VectorInputValue(0.0F, 0.0F);
-                Devices.at(InputDeviceId(2)).Controls["<Mouse>/scroll"] = VectorInputValue(0.0F, 0.0F);
-                for (auto& [id, device] : Devices)
-                {
-                    (void)id;
-                    device.PressedControls.clear();
-                    device.ReleasedControls.clear();
-                }
             }
 
             [[nodiscard]] bool UserOwns(const InputUserId user, const InputDeviceId device) const
@@ -936,9 +1030,9 @@ namespace Keire
             {
                 for (const auto& map : context.Definition.ActionMaps)
                 {
-                    const bool enabled = context.EnabledMaps.contains(map.Id);
                     for (const auto& action : map.Actions)
                     {
+                        const bool enabled = context.EnabledActions.contains(action.Id);
                         auto& runtime = context.Actions[action.Id];
                         if (!enabled)
                         {
@@ -1185,12 +1279,14 @@ namespace Keire
             Ref<EventBus> Events;
             std::thread::id OwnerThread;
             std::unordered_map<InputDeviceId, DeviceState> Devices;
+            std::array<InputDeviceId, 3> LastActiveDevices{};
             std::unordered_map<SDL_JoystickID, InputDeviceId> NativeDevices;
             std::unordered_map<InputUserId, UserState> Users;
             std::unordered_map<InputDeviceId, std::vector<InputUserId>> ReconnectUsers;
             std::vector<RawControlEvent> EventsBuffer;
             std::vector<InputDeviceId> PendingDeviceCancellations;
             std::vector<WeakRef<InputContextState>> Contexts;
+            std::map<std::pair<InputDeviceId, std::string>, InputControlSnapshot> PlaybackControls;
             WeakRef<RebindState> ActiveRebind;
             WindowSystemInternalAccess::EventSinkToken Sink = 0;
             std::uint32_t NextDevice = 1;
@@ -1240,9 +1336,7 @@ namespace Keire
                     next.emplace(action.Id, Actions[action.Id]);
             }
             Actions = std::move(next);
-            std::erase_if(
-                EnabledMaps, [&](const auto id)
-                { return std::ranges::none_of(Definition.ActionMaps, [&](const auto& map) { return map.Id == id; }); });
+            std::erase_if(EnabledActions, [&](const auto id) { return !FindAction(id); });
         }
 
         const InputActionDefinition* InputContextState::FindAction(const AssetId id) const noexcept
@@ -1456,6 +1550,15 @@ namespace Keire
     }
     InputUserId InputActionContext::User() const noexcept { return m_Impl->State->User; }
     AssetId InputActionContext::Asset() const noexcept { return m_Impl->State->AssetIdValue; }
+    InputActionAssetDefinition InputActionContext::Definition() const
+    {
+        const auto runtime = m_Impl->State->Runtime.Lock();
+        if (!runtime)
+            throw std::logic_error("Input context is no longer attached to a runtime.");
+        runtime->RequireOwner("Definition");
+        m_Impl->State->Rebuild();
+        return m_Impl->State->Definition;
+    }
     InputActionHandle InputActionContext::FindAction(const AssetId id) const noexcept
     {
         return m_Impl->State->FindAction(id) ? InputActionHandle(m_Impl->State, id) : InputActionHandle{};
@@ -1476,9 +1579,14 @@ namespace Keire
         if (!runtime)
             throw std::logic_error("Input context is no longer attached to a runtime.");
         runtime->RequireOwner("EnableMap");
-        if (std::ranges::none_of(m_Impl->State->Definition.ActionMaps, [&](const auto& map) { return map.Id == id; }))
+        const auto map = std::ranges::find(m_Impl->State->Definition.ActionMaps, id, &InputActionMapDefinition::Id);
+        if (map == m_Impl->State->Definition.ActionMaps.end())
             return false;
-        m_Impl->State->EnabledMaps.insert(id);
+        for (const auto& action : map->Actions)
+        {
+            m_Impl->State->EnabledActions.insert(action.Id);
+            m_Impl->State->Actions[action.Id].Phase = InputActionPhase::Waiting;
+        }
         return true;
     }
     bool InputActionContext::EnableMap(const std::string_view name)
@@ -1493,12 +1601,72 @@ namespace Keire
         if (!runtime)
             return false;
         runtime->RequireOwner("DisableMap");
-        return m_Impl->State->EnabledMaps.erase(id) > 0;
+        const auto map = std::ranges::find(m_Impl->State->Definition.ActionMaps, id, &InputActionMapDefinition::Id);
+        if (map == m_Impl->State->Definition.ActionMaps.end())
+            return false;
+        bool changed = false;
+        for (const auto& action : map->Actions)
+        {
+            changed |= m_Impl->State->EnabledActions.erase(action.Id) > 0;
+            auto& state = m_Impl->State->Actions[action.Id];
+            if (state.Active)
+                runtime->Emit(*m_Impl->State, state, *map, action, state.ActiveDevice, InputActionPhase::Canceled,
+                              InputValue{action.ValueType});
+            state.Active = false;
+            state.Phase = InputActionPhase::Disabled;
+        }
+        return changed;
     }
-    void InputActionContext::DisableAll() noexcept { m_Impl->State->EnabledMaps.clear(); }
+    bool InputActionContext::EnableAction(const AssetId id)
+    {
+        const auto runtime = m_Impl->State->Runtime.Lock();
+        if (!runtime)
+            throw std::logic_error("Input context is no longer attached to a runtime.");
+        runtime->RequireOwner("EnableAction");
+        if (!m_Impl->State->FindAction(id))
+            return false;
+        m_Impl->State->EnabledActions.insert(id);
+        m_Impl->State->Actions[id].Phase = InputActionPhase::Waiting;
+        return true;
+    }
+    bool InputActionContext::DisableAction(const AssetId id)
+    {
+        const auto runtime = m_Impl->State->Runtime.Lock();
+        if (!runtime)
+            return false;
+        runtime->RequireOwner("DisableAction");
+        for (const auto& map : m_Impl->State->Definition.ActionMaps)
+        {
+            const auto action = std::ranges::find(map.Actions, id, &InputActionDefinition::Id);
+            if (action == map.Actions.end())
+                continue;
+            const bool changed = m_Impl->State->EnabledActions.erase(id) > 0;
+            auto& state = m_Impl->State->Actions[id];
+            if (state.Active)
+                runtime->Emit(*m_Impl->State, state, map, *action, state.ActiveDevice, InputActionPhase::Canceled,
+                              InputValue{action->ValueType});
+            state.Active = false;
+            state.Phase = InputActionPhase::Disabled;
+            return changed;
+        }
+        return false;
+    }
+    void InputActionContext::DisableAll()
+    {
+        std::vector<AssetId> enabled(m_Impl->State->EnabledActions.begin(), m_Impl->State->EnabledActions.end());
+        for (const auto action : enabled)
+            (void)DisableAction(action);
+    }
     bool InputActionContext::MapEnabled(const AssetId id) const noexcept
     {
-        return m_Impl->State->EnabledMaps.contains(id);
+        const auto map = std::ranges::find(m_Impl->State->Definition.ActionMaps, id, &InputActionMapDefinition::Id);
+        return map != m_Impl->State->Definition.ActionMaps.end() &&
+               std::ranges::any_of(map->Actions, [&](const auto& action)
+                                   { return m_Impl->State->EnabledActions.contains(action.Id); });
+    }
+    bool InputActionContext::ActionEnabled(const AssetId id) const noexcept
+    {
+        return m_Impl->State->EnabledActions.contains(id);
     }
     InputCaptureOverride InputActionContext::OverrideUiCapture(const AssetId map)
     {
@@ -1668,6 +1836,42 @@ namespace Keire
         }
         std::ranges::sort(result, {}, &InputDeviceDescriptor::Id);
         return result;
+    }
+    std::optional<InputDeviceId> InputSystem::CurrentDevice(const InputDeviceType type) const noexcept
+    {
+        if (!m_Impl || !m_Impl->State || !m_Impl->State->Open ||
+            std::this_thread::get_id() != m_Impl->State->OwnerThread)
+            return std::nullopt;
+        const auto preferred = m_Impl->State->LastActiveDevices[static_cast<std::size_t>(type)];
+        if (const auto found = m_Impl->State->Devices.find(preferred); found != m_Impl->State->Devices.end() &&
+                                                                       found->second.Descriptor.Connected &&
+                                                                       found->second.Descriptor.Type == type)
+            return preferred;
+        const auto fallback =
+            std::ranges::find_if(m_Impl->State->Devices, [&](const auto& item)
+                                 { return item.second.Descriptor.Connected && item.second.Descriptor.Type == type; });
+        return fallback == m_Impl->State->Devices.end() ? std::nullopt : std::optional(fallback->first);
+    }
+    std::optional<InputControlSnapshot> InputSystem::ReadControl(const InputDeviceId device,
+                                                                 const std::string_view path) const noexcept
+    {
+        if (!m_Impl || !m_Impl->State || !m_Impl->State->Open || !device || path.empty() ||
+            std::this_thread::get_id() != m_Impl->State->OwnerThread)
+            return std::nullopt;
+        if (m_Impl->State->GameplayPlayback)
+        {
+            const auto recorded = m_Impl->State->PlaybackControls.find({device, std::string(path)});
+            if (recorded != m_Impl->State->PlaybackControls.end())
+                return recorded->second;
+            return InputControlSnapshot{device, {}, m_Impl->State->Frame};
+        }
+        const auto found = m_Impl->State->Devices.find(device);
+        if (found == m_Impl->State->Devices.end() || !found->second.Descriptor.Connected)
+            return std::nullopt;
+        const auto control = found->second.Controls.find(std::string(path));
+        return InputControlSnapshot{device, control == found->second.Controls.end() ? InputValue{} : control->second,
+                                    m_Impl->State->Frame, found->second.PressedControls.contains(std::string(path)),
+                                    found->second.ReleasedControls.contains(std::string(path))};
     }
     std::vector<InputUserDescriptor> InputSystem::Users() const
     {
@@ -1893,12 +2097,36 @@ namespace Keire
                 return std::tuple{left.Context, left.ContextAsset, left.Map, left.Action, left.User.Value()} <
                        std::tuple{right.Context, right.ContextAsset, right.Map, right.Action, right.User.Value()};
             });
+        for (const auto& [deviceId, device] : m_Impl->State->Devices)
+        {
+            if (!device.Descriptor.Connected)
+                continue;
+            for (const auto& [path, value] : device.Controls)
+            {
+                const bool pressed = device.PressedControls.contains(path);
+                const bool released = device.ReleasedControls.contains(path);
+                if (value.Magnitude() <= 0.0001F && !pressed && !released)
+                    continue;
+                snapshot.Controls.push_back({deviceId, path, value, pressed, released});
+            }
+        }
+        std::ranges::sort(
+            snapshot.Controls, [](const auto& left, const auto& right)
+            { return std::tuple{left.Device.Value(), left.Path} < std::tuple{right.Device.Value(), right.Path}; });
         return snapshot;
     }
 
     void InputSystem::ApplyFixedTick(const FixedTickInputSnapshot& snapshot)
     {
         m_Impl->State->RequireOwner("ApplyFixedTick");
+        m_Impl->State->PlaybackControls.clear();
+        for (const auto& control : snapshot.Controls)
+        {
+            m_Impl->State->PlaybackControls.emplace(std::pair{control.Device, control.Path},
+                                                    InputControlSnapshot{control.Device, control.Value,
+                                                                         m_Impl->State->Frame, control.Pressed,
+                                                                         control.Released});
+        }
         for (const auto& weak : m_Impl->State->Contexts)
         {
             const auto context = weak.Lock();
@@ -1909,8 +2137,8 @@ namespace Keire
                 for (const auto& definition : map.Actions)
                 {
                     auto& runtime = context->Actions[definition.Id];
-                    runtime.Phase =
-                        context->EnabledMaps.contains(map.Id) ? InputActionPhase::Waiting : InputActionPhase::Disabled;
+                    runtime.Phase = context->EnabledActions.contains(definition.Id) ? InputActionPhase::Waiting
+                                                                                    : InputActionPhase::Disabled;
                     runtime.Value = InputValue{definition.ValueType};
                     runtime.Active = false;
                     runtime.PendingStarted = false;
@@ -1964,6 +2192,8 @@ namespace Keire
     {
         m_Impl->State->RequireOwner("SetGameplayPlayback");
         m_Impl->State->GameplayPlayback = enabled;
+        if (!enabled)
+            m_Impl->State->PlaybackControls.clear();
     }
 
     std::uint64_t InputSystem::Frame() const noexcept { return m_Impl->State->Frame; }

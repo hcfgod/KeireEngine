@@ -1,5 +1,7 @@
 #include "KeireClient/Editor/ThumbnailService.h"
 
+#include "KeireClient/Editor/ThumbnailArtwork.h"
+
 #include "Keire/Audio/AudioAssets.h"
 #include "KeireInternal/FileSystem.h"
 
@@ -76,22 +78,54 @@ namespace KeireEditor
         {
             switch (glyph)
             {
+            case '#':
+                return {0b101, 0b111, 0b101, 0b111, 0b101};
+            case 'B':
+                return {0b110, 0b101, 0b110, 0b101, 0b110};
+            case 'C':
+                return {0b111, 0b100, 0b100, 0b100, 0b111};
+            case 'D':
+                return {0b110, 0b101, 0b101, 0b101, 0b110};
+            case 'E':
+                return {0b111, 0b100, 0b110, 0b100, 0b111};
             case 'F':
                 return {0b111, 0b100, 0b110, 0b100, 0b100};
             case 'G':
                 return {0b111, 0b100, 0b101, 0b101, 0b111};
+            case 'H':
+                return {0b101, 0b101, 0b111, 0b101, 0b101};
             case 'I':
                 return {0b111, 0b010, 0b010, 0b010, 0b111};
+            case 'J':
+                return {0b001, 0b001, 0b001, 0b101, 0b111};
+            case 'K':
+                return {0b101, 0b101, 0b110, 0b101, 0b101};
+            case 'L':
+                return {0b100, 0b100, 0b100, 0b100, 0b111};
             case 'M':
                 return {0b101, 0b111, 0b111, 0b101, 0b101};
             case 'A':
                 return {0b010, 0b101, 0b111, 0b101, 0b101};
             case 'N':
                 return {0b101, 0b111, 0b111, 0b111, 0b101};
+            case 'O':
+                return {0b010, 0b101, 0b101, 0b101, 0b010};
+            case 'P':
+                return {0b110, 0b101, 0b110, 0b100, 0b100};
+            case 'R':
+                return {0b110, 0b101, 0b110, 0b101, 0b101};
+            case 'S':
+                return {0b111, 0b100, 0b111, 0b001, 0b111};
+            case 'T':
+                return {0b111, 0b010, 0b010, 0b010, 0b010};
+            case 'U':
+                return {0b101, 0b101, 0b101, 0b101, 0b111};
             case 'V':
                 return {0b101, 0b101, 0b101, 0b101, 0b010};
             case 'X':
                 return {0b101, 0b101, 0b010, 0b101, 0b101};
+            case 'Y':
+                return {0b101, 0b101, 0b010, 0b010, 0b010};
             default:
                 return {};
             }
@@ -997,7 +1031,11 @@ namespace KeireEditor
         }
         if (type == Keire::AnimationSourceAsset::StaticType() || type == Keire::AnimationClipAsset::StaticType())
             return MakeAnimationPreview({.Missing = missing}, width, height);
-        return MakeIcon(width, height, {40, 44, 52}, {130, 142, 162}, 'X', missing);
+        if (type == Keire::TextAsset::StaticType())
+            return Detail::MakeDocumentThumbnail({.Missing = missing}, width, height);
+        if (type == Keire::ManagedAssemblyAsset::StaticType())
+            return Detail::MakeAssemblyThumbnail({.Missing = missing}, width, height);
+        return Detail::MakeDocumentThumbnail({.Missing = missing}, width, height, "AS");
     }
 
     std::optional<bool> PrepareGeneratedAssetThumbnail(const Keire::Ref<Keire::AssetSystem>& assets,
@@ -1230,12 +1268,6 @@ namespace KeireEditor
                                        Keire::Ref<Keire::JobSystem> jobs)
         : m_Impl(std::make_unique<Impl>(std::move(cacheDirectory), queueCapacity, std::move(jobs)))
     {
-        const auto icon =
-            [](const std::array<std::uint8_t, 3> background, const std::array<std::uint8_t, 3> accent, const char glyph)
-        {
-            return [=](const ThumbnailRequest& request, const auto width, const auto height)
-            { return MakeIcon(width, height, background, accent, glyph, request.Missing); };
-        };
         RegisterProvider(".keirematerial", 6, MakeMaterialPreview);
         RegisterProvider(".keireshadergraph", 2,
                          [](const ThumbnailRequest& request, const auto width, const auto height)
@@ -1272,20 +1304,54 @@ namespace KeireEditor
         RegisterProvider(".ogg", 1, MakeAudioPreview);
         RegisterProvider(".flac", 1, MakeAudioPreview);
         RegisterProvider(".keireanim", 2, MakeAnimationPreview);
-        RegisterProvider(".keireanimgraph", 1, icon({39, 31, 54}, {165, 126, 248}, 'A'));
-        RegisterProvider(".keiremotionprofile", 1, icon({25, 47, 48}, {75, 214, 190}, 'P'));
-        RegisterProvider(".keireavatarmask", 1, icon({46, 37, 44}, {232, 150, 110}, 'A'));
-        RegisterProvider(".keirerig", 1, icon({37, 43, 52}, {121, 187, 238}, 'R'));
-        RegisterProvider(".keirephysicsmaterial", 1, icon({39, 43, 35}, {159, 206, 92}, 'P'));
-        RegisterProvider(".keireasm", 1, icon({36, 39, 52}, {110, 166, 235}, 'C'));
-        RegisterProvider(".cs", 1, icon({33, 45, 57}, {83, 169, 232}, 'C'));
-        RegisterProvider(".keiredata", 1, icon({43, 38, 52}, {191, 128, 224}, 'D'));
-        RegisterProvider(".keirematerialfunction", 1, icon({46, 31, 48}, {213, 94, 199}, 'F'));
-        RegisterProvider(".keireshaderfunction", 1, icon({34, 35, 57}, {105, 151, 255}, 'F'));
-        RegisterProvider(".keiremateriallayer", 1, icon({46, 31, 48}, {213, 94, 199}, 'L'));
-        RegisterProvider(".keirematerialblend", 1, icon({46, 31, 48}, {213, 94, 199}, 'B'));
-        RegisterProvider(".keirematerialcollection", 1, icon({46, 31, 48}, {213, 94, 199}, 'C'));
-        RegisterProvider("*", 2, icon({40, 44, 52}, {130, 142, 162}, 'X'));
+        RegisterProvider(
+            ".keireanimgraph", 2, [](const ThumbnailRequest& request, const auto width, const auto height)
+            { return Detail::MakeNodeGraphThumbnail(request, width, height, {35, 27, 52}, {173, 122, 241}, "AG"); });
+        RegisterProvider(
+            ".keiremotionprofile", 2, [](const ThumbnailRequest& request, const auto width, const auto height)
+            { return Detail::MakeNodeGraphThumbnail(request, width, height, {24, 45, 47}, {67, 211, 180}, "MP"); });
+        RegisterProvider(
+            ".keireavatarmask", 2, [](const ThumbnailRequest& request, const auto width, const auto height)
+            { return Detail::MakeNodeGraphThumbnail(request, width, height, {44, 34, 43}, {230, 144, 105}, "AM"); });
+        RegisterProvider(
+            ".keirerig", 2, [](const ThumbnailRequest& request, const auto width, const auto height)
+            { return Detail::MakeNodeGraphThumbnail(request, width, height, {31, 39, 50}, {107, 181, 235}, "RG"); });
+        RegisterProvider(
+            ".keirephysicsmaterial", 2, [](const ThumbnailRequest& request, const auto width, const auto height)
+            { return Detail::MakeNodeGraphThumbnail(request, width, height, {35, 41, 31}, {151, 204, 83}, "PM"); });
+        RegisterProvider(".keireasm", 3, Detail::MakeAssemblyThumbnail);
+        RegisterProvider(".cs", 2, [](const ThumbnailRequest& request, const auto width, const auto height)
+                         { return Detail::MakeCodeThumbnail(request, width, height); });
+        RegisterProvider(".lua", 1, [](const ThumbnailRequest& request, const auto width, const auto height)
+                         { return Detail::MakeCodeThumbnail(request, width, height, "LU"); });
+        RegisterProvider(".keiredata", 2, Detail::MakeDataThumbnail);
+        RegisterProvider(".json", 1, Detail::MakeDataThumbnail);
+        RegisterProvider(
+            ".keirematerialfunction", 2, [](const ThumbnailRequest& request, const auto width, const auto height)
+            { return Detail::MakeNodeGraphThumbnail(request, width, height, {44, 28, 46}, {211, 87, 197}, "MF"); });
+        RegisterProvider(
+            ".keireshaderfunction", 2, [](const ThumbnailRequest& request, const auto width, const auto height)
+            { return Detail::MakeNodeGraphThumbnail(request, width, height, {29, 31, 54}, {92, 143, 251}, "SF"); });
+        RegisterProvider(
+            ".keiremateriallayer", 2, [](const ThumbnailRequest& request, const auto width, const auto height)
+            { return Detail::MakeNodeGraphThumbnail(request, width, height, {44, 28, 46}, {211, 87, 197}, "ML"); });
+        RegisterProvider(
+            ".keirematerialblend", 2, [](const ThumbnailRequest& request, const auto width, const auto height)
+            { return Detail::MakeNodeGraphThumbnail(request, width, height, {44, 28, 46}, {211, 87, 197}, "MB"); });
+        RegisterProvider(
+            ".keirematerialcollection", 2, [](const ThumbnailRequest& request, const auto width, const auto height)
+            { return Detail::MakeNodeGraphThumbnail(request, width, height, {44, 28, 46}, {211, 87, 197}, "MC"); });
+        for (const std::string extension : {".txt", ".md", ".xml", ".yaml", ".yml", ".csv", ".ini", ".toml"})
+            RegisterProvider(extension, 1, [](const ThumbnailRequest& request, const auto width, const auto height)
+                             { return Detail::MakeDocumentThumbnail(request, width, height); });
+        for (const std::string extension : {".glsl", ".vert", ".frag", ".comp"})
+            RegisterProvider(extension, 1, MakeShaderPreview);
+        RegisterProvider("*", 3,
+                         [](const ThumbnailRequest& request, const auto width, const auto height)
+                         {
+                             return Detail::MakeDocumentThumbnail(
+                                 request, width, height, request.Type == Keire::TextAsset::StaticType() ? "TX" : "AS");
+                         });
     }
 
     ThumbnailService::~ThumbnailService()

@@ -155,6 +155,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] Keire::Ref<Keire::InputSystem> InputSystem() const noexcept override;
     void ActivateInputHistory() noexcept override;
     void SaveInputActionsDocument() override;
+    std::filesystem::path GenerateInputActionsWrapper(std::string_view className, std::string_view nameSpace) override;
     void ReloadInputActionsDocument(Keire::AssetId asset) override;
     void RecordInputActionsUndo(std::string_view name) override;
     void UndoInputActions() override;
@@ -336,6 +337,10 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void ReportRiggingStudioError(std::string message) noexcept override;
     [[nodiscard]] std::span<const Keire::AssetSourceRecord> ProjectSettingsAssetRecords() const noexcept override;
     void RevealProjectSettingsAsset(Keire::AssetId asset) override;
+    [[nodiscard]] std::pair<Keire::AssetId, Keire::AssetId> ProjectDefaultInput() const noexcept override;
+    [[nodiscard]] std::vector<Keire::InputActionMapDefinition>
+    ProjectInputActionMaps(Keire::AssetId asset) const override;
+    void SetProjectDefaultInput(Keire::AssetId asset, Keire::AssetId map) override;
     [[nodiscard]] KeireEditor::ManagedSdkPreference ProjectManagedSdk() const override;
     void SetProjectManagedSdk(KeireEditor::ManagedSdkPreference preference) override;
     void ApplyProjectAuthoringSettings(const Keire::ProjectAuthoringSettings& settings) override;
@@ -580,6 +585,24 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] bool SaveManagedInputBindings(std::string_view profile) noexcept override;
     [[nodiscard]] int LoadManagedInputBindings(std::string_view profile) noexcept override;
     [[nodiscard]] bool ClearManagedInputBindings() noexcept override;
+    [[nodiscard]] std::uint64_t CreateManagedInputContext(std::uint64_t generation,
+                                                          Keire::AssetId asset) noexcept override;
+    [[nodiscard]] bool ReleaseManagedInputContext(std::uint64_t handle) noexcept override;
+    void ReleaseManagedInputContexts(std::uint64_t generation) noexcept override;
+    [[nodiscard]] bool OperateManagedInputContext(std::uint64_t handle, Keire::ManagedInputContextOperation operation,
+                                                  Keire::AssetId target) noexcept override;
+    [[nodiscard]] std::uint64_t
+    BeginManagedInputContextRebind(std::uint64_t handle, Keire::AssetId binding,
+                                   Keire::ManagedInputRebindOptions options) noexcept override;
+    [[nodiscard]] Keire::AssetId FindManagedInputMap(std::uint64_t handle, std::string_view name) noexcept override;
+    [[nodiscard]] Keire::AssetId FindManagedInputAction(std::uint64_t handle, Keire::AssetId map,
+                                                        std::string_view name) noexcept override;
+    [[nodiscard]] std::optional<Keire::ManagedInputActionSnapshot>
+    ManagedInputAction(std::uint64_t handle, Keire::AssetId action) noexcept override;
+    [[nodiscard]] std::optional<Keire::InputDeviceId>
+    CurrentManagedInputDevice(Keire::InputDeviceType type) noexcept override;
+    [[nodiscard]] std::optional<Keire::InputControlSnapshot>
+    ManagedInputControl(Keire::InputDeviceId device, std::string_view path) noexcept override;
     [[nodiscard]] std::optional<Keire::ManagedRaycastHit>
     RaycastManaged(const Keire::ManagedRaycastQuery& query) noexcept override;
     [[nodiscard]] std::optional<Keire::ManagedRaycastHit>
@@ -788,6 +811,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::string m_PlayerSigningEnvironmentText;
     Keire::Ref<Keire::InputActionContext> m_InputContext;
     Keire::Ref<Keire::InputActionContext> m_GameplayInputContext;
+    Keire::AssetId m_GameplayInputMap;
     Keire::Ref<Keire::SceneRuntimeWorld> m_PlayRuntimeWorld;
     struct ManagedSceneOperation final
     {
@@ -797,6 +821,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::vector<ManagedSceneOperation> m_ManagedSceneOperations;
     std::uint64_t m_NextManagedSceneOperation = 1;
     Keire::Detail::ManagedInputOperationStore m_ManagedInputOperations;
+    Keire::Detail::ManagedInputContextStore m_ManagedInputContexts;
     std::optional<Keire::InputCaptureOverride> m_ManagedInputCaptureOverride;
     bool m_ManagedCursorVisible = true;
     bool m_ManagedCursorLocked = false;

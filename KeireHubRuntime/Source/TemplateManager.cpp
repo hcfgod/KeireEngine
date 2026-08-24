@@ -620,7 +620,7 @@ namespace KeireHub
         }
 
         const auto editorVersion = request.EditorVersion.ToString();
-        Detail::Json descriptor{{"schemaVersion", 3},
+        Detail::Json descriptor{{"schemaVersion", 4},
                                 {"id", projectId.Value()},
                                 {"name", request.ProjectName},
                                 {"createdWithEngineVersion", editorVersion},
@@ -630,6 +630,7 @@ namespace KeireHub
                                 {"template", {{"id", plan.Template.Id}, {"version", plan.Template.Version.ToString()}}},
                                 {"startupScene", nullptr},
                                 {"defaultInput", nullptr},
+                                {"defaultInputMap", nullptr},
                                 {"requiredModules", Detail::Json::array()}};
         const auto applyAssetIdentity = [&](const char* configuration, const char* descriptorField) -> HubStatus
         {
@@ -647,6 +648,8 @@ namespace KeireHub
         if (const auto status = applyAssetIdentity("startupScene", "startupScene"); !status)
             return HubResult<TemplateCreationResult>::Failure(status.Error());
         if (const auto status = applyAssetIdentity("defaultInput", "defaultInput"); !status)
+            return HubResult<TemplateCreationResult>::Failure(status.Error());
+        if (const auto status = applyAssetIdentity("defaultInputMap", "defaultInputMap"); !status)
             return HubResult<TemplateCreationResult>::Failure(status.Error());
         if (const auto status =
                 Detail::WriteJsonFileAtomically(staging / "ProjectSettings" / "Project.keireproject", descriptor);

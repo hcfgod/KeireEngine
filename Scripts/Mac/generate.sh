@@ -19,6 +19,9 @@ bash "$ROOT/Scripts/Unix/dependencies.sh" Mac "$ARCHITECTURE" "$TOOLSET" 0
 args=("--file=premake5.lua" "--arch=$(premake_architecture "$ARCHITECTURE")" "--toolset=$TOOLSET")
 [[ $CI -eq 1 ]] && args+=(--ci)
 mkdir -p "$ROOT/Build/Generated"
+identity_generator="$GENERATOR"
+[[ "$GENERATOR" == compilecommands ]] && identity_generator=ninja
+identity_stamp="$ROOT/Build/Generated/$identity_generator.stamp"
 printf '==> Generating %s files for %s with toolset %s\n' "$GENERATOR" "$ARCHITECTURE" "$TOOLSET"
 if [[ "$GENERATOR" == compilecommands ]]; then
     (cd "$ROOT" && "$ROOT/Tools/Mac/premake5" "${args[@]}" ninja)
@@ -33,4 +36,11 @@ if [[ "$GENERATOR" == compilecommands ]]; then
     ninja -C "$ROOT" -f build.ninja -t compdb cxx_clang > "$ROOT/Build/Generated/compile_commands.all.json"
     python3 "$ROOT/Scripts/Unix/filter-compdb.py" "$ROOT/Build/Generated/compile_commands.all.json" "$ROOT/compile_commands.json"
 fi
-printf '%s|%s|%s|%s|%s|%s\n' "$GENERATOR" "$ARCHITECTURE" "$TOOLSET" "$COMPILER_CACHE" "$CI" "$(project_generation_fingerprint "$ROOT")" > "$ROOT/Build/Generated/$GENERATOR.stamp"
+invalidate_incompatible_binary_outputs "$ROOT" macosx "$ARCHITECTURE" "$TOOLSET" "$identity_stamp"
+generation_fingerprint="$(project_generation_fingerprint "$ROOT")"
+printf '%s|%s|%s|%s|%s|%s\n' "$GENERATOR" "$ARCHITECTURE" "$TOOLSET" "$COMPILER_CACHE" "$CI" \
+    "$generation_fingerprint" > "$ROOT/Build/Generated/$GENERATOR.stamp"
+if [[ "$GENERATOR" == compilecommands ]]; then
+    printf 'ninja|%s|%s|%s|%s|%s\n' "$ARCHITECTURE" "$TOOLSET" "$COMPILER_CACHE" "$CI" \
+        "$generation_fingerprint" > "$ROOT/Build/Generated/ninja.stamp"
+fi

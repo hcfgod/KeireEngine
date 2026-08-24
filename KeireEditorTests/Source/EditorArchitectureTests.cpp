@@ -2349,6 +2349,32 @@ TEST_CASE("content previews use immutable loaded assets without blocking shutdow
     CHECK(mixerFallback != vfxFallback);
     CHECK(animationFallback != genericFallback);
 
+    const auto requestArtwork = [&](const std::string_view id, const Keire::AssetTypeId type,
+                                    const std::filesystem::path& path, const std::string_view digest)
+    {
+        const bool queued = thumbnails.Request(
+            {.Asset = Keire::AssetId::Parse(id), .Type = type, .RelativePath = path, .Digest = std::string(digest)});
+        CHECK(queued);
+        return await();
+    };
+    const auto textArtwork = requestArtwork("ed170000-0000-4000-8000-000000000080", Keire::TextAsset::StaticType(),
+                                            "Notes.txt", "text-artwork");
+    const auto extensionlessArtwork =
+        requestArtwork("ed170000-0000-4000-8000-000000000081", Keire::TextAsset::StaticType(), "LICENSE",
+                       "extensionless-text-artwork");
+    const auto scriptArtwork = requestArtwork("ed170000-0000-4000-8000-000000000082", Keire::TextAsset::StaticType(),
+                                              "PlayerController.cs", "script-artwork");
+    const auto assemblyArtwork =
+        requestArtwork("ed170000-0000-4000-8000-000000000083", Keire::ManagedAssemblyAsset::StaticType(),
+                       "Gameplay.keireasm", "assembly-artwork");
+    const auto dataArtwork = requestArtwork("ed170000-0000-4000-8000-000000000084", Keire::TextAsset::StaticType(),
+                                            "Settings.json", "data-artwork");
+    CHECK(textArtwork.Pixels == extensionlessArtwork.Pixels);
+    CHECK(textArtwork.Pixels != scriptArtwork.Pixels);
+    CHECK(scriptArtwork.Pixels != assemblyArtwork.Pixels);
+    CHECK(assemblyArtwork.Pixels != dataArtwork.Pixels);
+    CHECK(dataArtwork.Pixels != textArtwork.Pixels);
+
     const auto animationId = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000078");
     REQUIRE(thumbnails.Request({.Asset = animationId,
                                 .Type = Keire::AnimationSourceAsset::StaticType(),

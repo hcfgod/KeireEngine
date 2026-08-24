@@ -150,6 +150,8 @@ namespace KeireEditor
         [[nodiscard]] virtual Keire::Ref<Keire::InputSystem> InputSystem() const noexcept = 0;
         virtual void ActivateInputHistory() noexcept = 0;
         virtual void SaveInputActionsDocument() = 0;
+        virtual std::filesystem::path GenerateInputActionsWrapper(std::string_view className,
+                                                                  std::string_view nameSpace) = 0;
         virtual void ReloadInputActionsDocument(Keire::AssetId asset) = 0;
         virtual void RecordInputActionsUndo(std::string_view name = "Edit Input Actions") = 0;
         virtual void UndoInputActions() = 0;
@@ -170,6 +172,10 @@ namespace KeireEditor
         [[nodiscard]] virtual std::span<const Keire::AssetSourceRecord>
         ProjectSettingsAssetRecords() const noexcept = 0;
         virtual void RevealProjectSettingsAsset(Keire::AssetId asset) = 0;
+        [[nodiscard]] virtual std::pair<Keire::AssetId, Keire::AssetId> ProjectDefaultInput() const noexcept = 0;
+        [[nodiscard]] virtual std::vector<Keire::InputActionMapDefinition>
+        ProjectInputActionMaps(Keire::AssetId asset) const = 0;
+        virtual void SetProjectDefaultInput(Keire::AssetId asset, Keire::AssetId map) = 0;
         [[nodiscard]] virtual ManagedSdkPreference ProjectManagedSdk() const = 0;
         virtual void SetProjectManagedSdk(ManagedSdkPreference preference) = 0;
         virtual void ApplyProjectAuthoringSettings(const Keire::ProjectAuthoringSettings& settings) = 0;
@@ -356,6 +362,8 @@ namespace KeireEditor
         TextDraft m_ControlPathDraft;
         std::string m_Search;
         std::string m_Message;
+        std::string m_GeneratedClass;
+        std::string m_GeneratedNamespace = "Game";
         bool m_LiveMonitor = false;
     };
 

@@ -343,7 +343,9 @@ reports a stamp mismatch, regenerate with the intended generator, architecture, 
 only when deliberately replacing the previous generated configuration. Forced generation does not invalidate the
 native dependency or FFmpeg caches. Use an explicit forced `bootstrap` only when those pinned third-party outputs
 must be rebuilt. The private FFmpeg configurations use identical optimized runtime flags, so dependency setup compiles
-that source once and publishes the validated result into both configuration roots.
+that source once and publishes the validated result into both configuration roots on Windows. FFmpeg intermediates are
+retained per host platform, architecture, and toolset; changing between Windows, Linux/WSL, or macOS restores the
+matching validated cache into the stable `Build/Dependencies/ffmpeg` consumer roots instead of recompiling it.
 
 ## Common Problems
 

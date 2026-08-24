@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <optional>
 #include <stdexcept>
@@ -124,6 +125,16 @@ namespace Keire
             case UiIcon::ChevronRight:
                 return ">";
             case UiIcon::ExpandMore:
+                return "v";
+            case UiIcon::Save:
+                return "S";
+            case UiIcon::Undo:
+                return "<";
+            case UiIcon::Redo:
+                return ">";
+            case UiIcon::Delete:
+                return "x";
+            case UiIcon::Check:
                 return "v";
             }
             return "?";
@@ -247,7 +258,9 @@ namespace Keire
         [[nodiscard]] bool DrawIconButton(const std::string_view id, const char* glyph, const bool selected,
                                           const UiSize size)
         {
-            const std::string label = std::string(glyph) + "##" + std::string(id);
+            if (ImGui::GetCurrentWindow()->SkipItems)
+                return false;
+            const std::string label = "##" + std::string(id);
             if (selected)
             {
                 const auto accent = ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive);
@@ -256,6 +269,84 @@ namespace Keire
             const bool activated = ImGui::Button(label.c_str(), {size.Width, size.Height});
             if (selected)
                 ImGui::PopStyleColor();
+
+            if (ImGui::IsItemVisible())
+            {
+                const auto minimum = ImGui::GetItemRectMin();
+                const auto maximum = ImGui::GetItemRectMax();
+                const auto textSize = ImGui::CalcTextSize(glyph);
+                const auto textPosition = ImVec2{std::floor(minimum.x + (maximum.x - minimum.x - textSize.x) * 0.5F),
+                                                 std::floor(minimum.y + (maximum.y - minimum.y - textSize.y) * 0.5F)};
+                ImGui::GetWindowDrawList()->AddText(textPosition, ImGui::GetColorU32(ImGuiCol_Text), glyph);
+            }
+            return activated;
+        }
+
+        [[nodiscard]] bool DrawVectorIconButton(const std::string_view id, const UiIcon icon, const bool selected,
+                                                const UiSize size)
+        {
+            if (ImGui::GetCurrentWindow()->SkipItems)
+                return false;
+            const std::string label = "##" + std::string(id);
+            if (selected)
+            {
+                const auto accent = ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive);
+                ImGui::PushStyleColor(ImGuiCol_Button, accent);
+            }
+            const bool activated = ImGui::Button(label.c_str(), {size.Width, size.Height});
+            if (selected)
+                ImGui::PopStyleColor();
+
+            if (!ImGui::IsItemVisible())
+                return activated;
+
+            const auto minimum = ImGui::GetItemRectMin();
+            const auto maximum = ImGui::GetItemRectMax();
+            const ImVec2 center{(minimum.x + maximum.x) * 0.5F, (minimum.y + maximum.y) * 0.5F};
+            const float extent = std::clamp(std::min(maximum.x - minimum.x, maximum.y - minimum.y) * 0.27F, 4.0F, 8.0F);
+            const float stroke = std::clamp(extent * 0.22F, 1.25F, 2.0F);
+            const auto color = ImGui::GetColorU32(ImGuiCol_Text);
+            auto* drawList = ImGui::GetWindowDrawList();
+            switch (icon)
+            {
+            case UiIcon::Save:
+                drawList->AddRect({center.x - extent, center.y - extent}, {center.x + extent, center.y + extent}, color,
+                                  1.5F, 0, stroke);
+                drawList->AddRectFilled({center.x - extent * 0.45F, center.y - extent},
+                                        {center.x + extent * 0.45F, center.y - extent * 0.25F}, color, 0.5F);
+                drawList->AddRect({center.x - extent * 0.48F, center.y + extent * 0.15F},
+                                  {center.x + extent * 0.48F, center.y + extent}, color, 0.75F, 0, stroke);
+                break;
+            case UiIcon::Undo:
+            case UiIcon::Redo:
+            {
+                const float direction = icon == UiIcon::Undo ? -1.0F : 1.0F;
+                drawList->PathArcTo({center.x, center.y + extent * 0.12F}, extent * 0.72F,
+                                    icon == UiIcon::Undo ? -0.35F : 3.49F, icon == UiIcon::Undo ? 3.65F : 6.65F, 16);
+                drawList->PathStroke(color, 0, stroke);
+                const float tipX = center.x + direction * extent * 0.92F;
+                drawList->AddTriangleFilled({tipX, center.y - extent * 0.36F},
+                                            {tipX - direction * extent * 0.72F, center.y - extent * 0.72F},
+                                            {tipX - direction * extent * 0.65F, center.y + extent * 0.02F}, color);
+                break;
+            }
+            case UiIcon::Delete:
+                drawList->AddLine({center.x - extent * 0.75F, center.y - extent * 0.52F},
+                                  {center.x + extent * 0.75F, center.y - extent * 0.52F}, color, stroke);
+                drawList->AddLine({center.x - extent * 0.35F, center.y - extent * 0.86F},
+                                  {center.x + extent * 0.35F, center.y - extent * 0.86F}, color, stroke);
+                drawList->AddRect({center.x - extent * 0.58F, center.y - extent * 0.35F},
+                                  {center.x + extent * 0.58F, center.y + extent * 0.86F}, color, 1.5F, 0, stroke);
+                break;
+            case UiIcon::Check:
+                drawList->AddLine({center.x - extent * 0.82F, center.y},
+                                  {center.x - extent * 0.22F, center.y + extent * 0.62F}, color, stroke);
+                drawList->AddLine({center.x - extent * 0.22F, center.y + extent * 0.62F},
+                                  {center.x + extent * 0.88F, center.y - extent * 0.62F}, color, stroke);
+                break;
+            default:
+                break;
+            }
             return activated;
         }
 
@@ -336,6 +427,9 @@ namespace Keire
 
         if (icon == UiIcon::More)
             return DrawMoreButton(id, selected, size);
+        if (icon == UiIcon::Save || icon == UiIcon::Undo || icon == UiIcon::Redo || icon == UiIcon::Delete ||
+            icon == UiIcon::Check)
+            return DrawVectorIconButton(id, icon, selected, size);
 
         if (const auto symbol = MaterialSymbol(icon))
         {

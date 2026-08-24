@@ -106,6 +106,11 @@ TEST_CASE("replay records fixed input checkpoints and verifies canonical state")
     for (std::uint64_t tick = 1; tick <= 3; ++tick)
     {
         Keire::FixedTickInputSnapshot input{.Tick = tick, .InputMapFingerprint = 77};
+        input.Controls.push_back({Keire::InputDeviceId(1),
+                                  "<Keyboard>/e",
+                                  {Keire::InputValueType::Boolean, tick == 2 ? 1.0F : 0.0F, 0.0F},
+                                  tick == 2,
+                                  tick == 3});
         const auto recorded = recorder->BeginFixedTick(input);
         CHECK(recorded.Tick == tick);
         state = static_cast<int>(tick);
@@ -124,6 +129,11 @@ TEST_CASE("replay records fixed input checkpoints and verifies canonical state")
     {
         const auto input = playback->BeginFixedTick({.Tick = tick, .InputMapFingerprint = 77});
         CHECK(input.Tick == tick);
+        REQUIRE(input.Controls.size() == 1);
+        CHECK(input.Controls.front().Path == "<Keyboard>/e");
+        CHECK(input.Controls.front().Value.AsBoolean() == (tick == 2));
+        CHECK(input.Controls.front().Pressed == (tick == 2));
+        CHECK(input.Controls.front().Released == (tick == 3));
         state = static_cast<int>(tick);
         playback->EndFixedTick(tick);
     }

@@ -167,6 +167,9 @@ namespace Keire
                 descriptor.StartupScene = AssetId::Parse(document["startupScene"].get<std::string>());
             if (document.contains("defaultInput") && !document["defaultInput"].is_null())
                 descriptor.DefaultInput = AssetId::Parse(document["defaultInput"].get<std::string>());
+            if (descriptor.SchemaVersion >= 4 && document.contains("defaultInputMap") &&
+                !document["defaultInputMap"].is_null())
+                descriptor.DefaultInputMap = AssetId::Parse(document["defaultInputMap"].get<std::string>());
             if (descriptor.SchemaVersion >= 2)
             {
                 const auto& modules = document.at("requiredModules");
@@ -245,6 +248,8 @@ namespace Keire
                 descriptor.StartupScene ? Json(descriptor.StartupScene.ToString()) : Json(nullptr);
             document["defaultInput"] =
                 descriptor.DefaultInput ? Json(descriptor.DefaultInput.ToString()) : Json(nullptr);
+            document["defaultInputMap"] =
+                descriptor.DefaultInputMap ? Json(descriptor.DefaultInputMap.ToString()) : Json(nullptr);
             auto requiredModules = descriptor.RequiredModules;
             std::ranges::sort(requiredModules, {}, &RequiredSourceModule::Id);
             if (std::ranges::adjacent_find(requiredModules, {}, &RequiredSourceModule::Id) != requiredModules.end())
@@ -426,9 +431,12 @@ namespace Keire
                 AssetDatabaseSpecification databaseSpecification{.ProjectRoot = root};
                 databaseSpecification.Importers = CreateBuiltinAssetImporters();
                 auto database = CreateRef<AssetDatabase>(std::move(databaseSpecification));
-                const auto inputBytes = InputActionAsset::Encode(InputActionAsset::DefaultDefinition());
+                const auto inputDefinition = InputActionAsset::DefaultDefinition();
+                const auto inputBytes = InputActionAsset::Encode(inputDefinition);
                 descriptor.DefaultInput = database->CreateAsset("Input/DefaultInput.keireinput",
                                                                 CreateInputActionAssetImporter(), inputBytes);
+                if (!inputDefinition.ActionMaps.empty())
+                    descriptor.DefaultInputMap = inputDefinition.ActionMaps.front().Id;
 
                 ManagedAssemblyDefinition gameplayAssembly;
                 gameplayAssembly.Name = "Gameplay";

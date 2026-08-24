@@ -75,6 +75,7 @@ namespace
         Keire::AssetId StartupScene;
         std::vector<Keire::AssetId> BuildScenes;
         Keire::AssetId DefaultInput;
+        Keire::AssetId DefaultInputMap;
         Keire::AssetId DefaultMixer;
         Keire::AudioProjectSettings AudioSettings;
         Keire::RenderEnvironmentSettings Rendering;
@@ -322,6 +323,8 @@ namespace
         }
         if (source.contains("defaultInput") && !source.at("defaultInput").is_null())
             result.DefaultInput = Keire::AssetId::Parse(source.at("defaultInput").get<std::string>());
+        if (source.contains("defaultInputMap") && !source.at("defaultInputMap").is_null())
+            result.DefaultInputMap = Keire::AssetId::Parse(source.at("defaultInputMap").get<std::string>());
         if (source.contains("defaultMixer") && !source.at("defaultMixer").is_null())
             result.DefaultMixer = Keire::AssetId::Parse(source.at("defaultMixer").get<std::string>());
         const auto& rendering = source.at("rendering");
@@ -503,12 +506,13 @@ namespace
     {
       public:
         RuntimeLayer(const Keire::AssetId startupScene, const Keire::AssetId defaultInput,
-                     const Keire::AssetId defaultMixer, const Keire::RenderEnvironmentSettings rendering,
-                     RuntimeCommandLine commandLine, Keire::ReplayFingerprints fingerprints,
-                     std::shared_ptr<RuntimeReplayState> replayState)
+                     const Keire::AssetId defaultInputMap, const Keire::AssetId defaultMixer,
+                     const Keire::RenderEnvironmentSettings rendering, RuntimeCommandLine commandLine,
+                     Keire::ReplayFingerprints fingerprints, std::shared_ptr<RuntimeReplayState> replayState)
             : Layer("Runtime"), ManagedWorldRuntimeServices(false, rendering), m_StartupScene(startupScene),
-              m_DefaultInput(defaultInput), m_DefaultMixer(defaultMixer), m_CommandLine(std::move(commandLine)),
-              m_ReplayFingerprints(std::move(fingerprints)), m_ReplayState(std::move(replayState))
+              m_DefaultInput(defaultInput), m_DefaultInputMap(defaultInputMap), m_DefaultMixer(defaultMixer),
+              m_CommandLine(std::move(commandLine)), m_ReplayFingerprints(std::move(fingerprints)),
+              m_ReplayState(std::move(replayState))
         {
         }
 
@@ -529,17 +533,29 @@ namespace
             m_EventSink = Keire::WindowSystemInternalAccess::AddEventSink(*Owner().Windows(), this, HandleNativeEvent);
             if (const auto scripts = Owner().Scripts())
                 scripts->SetRuntimeServices(this);
-            if (m_DefaultInput)
+            if (const auto input = Owner().Input())
             {
-                if (const auto input = Owner().Input())
+                m_InputUser = input->CreateUser("Player");
+                for (const auto& device : input->Devices())
                 {
-                    m_InputUser = input->CreateUser("Player");
-                    for (const auto& device : input->Devices())
-                    {
-                        if (device.Connected && !input->PairDevice(m_InputUser, device.Id))
-                            throw std::runtime_error("The player could not claim a connected input device.");
-                    }
+                    if (device.Connected && !input->PairDevice(m_InputUser, device.Id))
+                        throw std::runtime_error("The player could not claim a connected input device.");
+                }
+                if (m_DefaultInput)
+                {
                     m_InputContext = input->CreateActionContext(m_DefaultInput, m_InputUser);
+                    if (m_DefaultInputMap)
+                    {
+                        if (!m_InputContext->EnableMap(m_DefaultInputMap))
+                            throw std::runtime_error("The configured default input map is not present in its asset.");
+                    }
+                    else if (!m_InputContext->EnableMap("Player"))
+                    {
+                        const auto definition = m_InputContext->Definition();
+                        if (definition.ActionMaps.empty() ||
+                            !m_InputContext->EnableMap(definition.ActionMaps.front().Id))
+                            throw std::runtime_error("The default input action asset does not contain an action map.");
+                    }
                 }
             }
             BindManagedInput(m_InputContext, m_InputUser);
@@ -1195,6 +1211,7 @@ namespace
 
         Keire::AssetId m_StartupScene;
         Keire::AssetId m_DefaultInput;
+        Keire::AssetId m_DefaultInputMap;
         Keire::AssetId m_DefaultMixer;
         RuntimeCommandLine m_CommandLine;
         Keire::ReplayFingerprints m_ReplayFingerprints;
@@ -1499,9 +1516,9 @@ namespace
                          scripts->RestoreReplayCheckpoint(behaviours);
                      }});
             }
-            (void)PushLayer(std::make_unique<RuntimeLayer>(m_Manifest.StartupScene, m_Manifest.DefaultInput,
-                                                           m_Manifest.DefaultMixer, m_Manifest.Rendering, m_CommandLine,
-                                                           m_ReplayFingerprints, m_ReplayState));
+            (void)PushLayer(std::make_unique<RuntimeLayer>(
+                m_Manifest.StartupScene, m_Manifest.DefaultInput, m_Manifest.DefaultInputMap, m_Manifest.DefaultMixer,
+                m_Manifest.Rendering, m_CommandLine, m_ReplayFingerprints, m_ReplayState));
         }
 
       private:
@@ -1542,7 +1559,7 @@ namespace Keire
         specification.Scenes.Mode = SceneMode::Enabled;
         specification.Render.Mode = RenderMode::Rendered;
         specification.Ui.Mode = UiMode::Disabled;
-        specification.Input.Mode = manifest.DefaultInput ? InputMode::Enabled : InputMode::Disabled;
+        specification.Input.Mode = InputMode::Enabled;
         specification.Input.AutoJoin = false;
         if (manifest.Scripting)
         {

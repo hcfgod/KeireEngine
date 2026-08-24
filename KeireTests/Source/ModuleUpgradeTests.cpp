@@ -181,16 +181,17 @@ TEST_CASE("Project schema upgrades are dry-run first and publish transactionally
     CHECK(Keire::Project::Inspect(root) == Keire::ProjectStatus::UpgradeAvailable);
     Keire::ProjectUpgradeService upgrades(root);
     const auto plan = upgrades.Plan();
-    REQUIRE(plan.Steps.size() == 2);
+    REQUIRE(plan.Steps.size() == 3);
     CHECK(plan.CurrentSchema == 1);
-    CHECK(plan.TargetSchema == 3);
+    CHECK(plan.TargetSchema == 4);
     CHECK(plan.EstimatedBackupBytes == original.size());
     CHECK(Keire::Detail::ReadTextFile(descriptor, std::size_t{1024} * 1024U) == original);
 
     upgrades.Apply(plan);
     CHECK(Keire::Project::Inspect(root) == Keire::ProjectStatus::Ready);
     const auto opened = Keire::Project::Open(root);
-    CHECK(opened->Descriptor().SchemaVersion == 3);
+    CHECK(opened->Descriptor().SchemaVersion == 4);
+    CHECK_FALSE(opened->Descriptor().DefaultInputMap);
     CHECK(opened->Descriptor().RequiredModules.empty());
     CHECK_FALSE(opened->Descriptor().CreatedAt.empty());
     CHECK(opened->Descriptor().LastSavedWithEngineVersion == opened->Descriptor().CreatedWithEngineVersion);

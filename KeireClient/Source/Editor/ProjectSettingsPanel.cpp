@@ -86,6 +86,45 @@ namespace KeireEditor
         if (!m_Error.empty())
             ui.TextColored(theme.Warning, m_Error);
         ui.Spacing();
+        ui.Separator();
+        ui.Text("Input");
+        ui.TextColored(theme.MutedText,
+                       "Choose the action asset and map enabled when Play starts. Changes apply on the next Play.");
+        try
+        {
+            auto [defaultInput, defaultMap] = m_Controller.ProjectDefaultInput();
+            AssetPickerOptions inputOptions;
+            inputOptions.Label = "Default Input Actions";
+            inputOptions.EmptyLabel = "No default input";
+            inputOptions.ExpectedType = Keire::InputActionAsset::StaticType();
+            inputOptions.Reveal = [this](const Keire::AssetId asset)
+            { m_Controller.RevealProjectSettingsAsset(asset); };
+            if (m_AssetPicker->Draw(ui, m_Controller.ProjectSettingsAssetRecords(), defaultInput, inputOptions))
+            {
+                const auto maps = m_Controller.ProjectInputActionMaps(defaultInput);
+                defaultMap = maps.empty() ? Keire::AssetId{} : maps.front().Id;
+                m_Controller.SetProjectDefaultInput(defaultInput, defaultMap);
+            }
+            const auto maps = m_Controller.ProjectInputActionMaps(defaultInput);
+            const auto selected = std::ranges::find(maps, defaultMap, &Keire::InputActionMapDefinition::Id);
+            const auto label = selected != maps.end() ? selected->Name : defaultInput ? "Select a map" : "No map";
+            if (auto combo = ui.BeginCombo("Default Action Map", label); combo)
+            {
+                for (const auto& map : maps)
+                {
+                    if (ui.Selectable(map.Name, map.Id == defaultMap))
+                        m_Controller.SetProjectDefaultInput(defaultInput, map.Id);
+                }
+            }
+            if (defaultInput && maps.empty())
+                ui.TextColored(theme.Warning, "The selected input action asset does not contain an action map.");
+        }
+        catch (const std::exception& error)
+        {
+            m_Error = error.what();
+        }
+        ui.Spacing();
+        ui.Separator();
         ui.Text("Code Editor");
         ui.TextColored(theme.MutedText, "Choose the project-wide editor used for C#, C++, shaders, and text assets.");
         if (!m_EditorsInitialized)

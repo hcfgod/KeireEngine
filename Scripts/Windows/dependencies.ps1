@@ -251,7 +251,8 @@ foreach ($configuration in @("Debug", "Release")) {
 
 $forceFfmpegSourceBuild = $Force
 foreach ($configuration in @("Debug", "Release")) {
-    & (Join-Path $PSScriptRoot "ffmpeg.ps1") -Configuration $configuration -Force:$forceFfmpegSourceBuild
+    & (Join-Path $PSScriptRoot "ffmpeg.ps1") -Configuration $configuration -Architecture $Architecture `
+        -Toolset $Toolset -Force:$forceFfmpegSourceBuild
     # Debug and Release intentionally publish the same optimized FFmpeg binary. Once the first configuration has
     # honored a forced rebuild, allow the second root to reuse that freshly validated result.
     $forceFfmpegSourceBuild = $false

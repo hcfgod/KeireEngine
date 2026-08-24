@@ -413,6 +413,45 @@ void EditorWorkspaceLayer::RevealProjectSettingsAsset(const Keire::AssetId asset
     m_AssetBrowserPanel->Registration().SetVisible(true);
 }
 
+std::pair<Keire::AssetId, Keire::AssetId> EditorWorkspaceLayer::ProjectDefaultInput() const noexcept
+{
+    if (const auto project = Owner().GetProject())
+        return {project->Descriptor().DefaultInput, project->Descriptor().DefaultInputMap};
+    return {};
+}
+
+std::vector<Keire::InputActionMapDefinition>
+EditorWorkspaceLayer::ProjectInputActionMaps(const Keire::AssetId asset) const
+{
+    if (!asset || !m_AssetDatabase)
+        return {};
+    const auto record = m_AssetDatabase->Find(asset);
+    if (!record || record->Type != Keire::InputActionAsset::StaticType())
+        return {};
+    const auto source = m_AssetDatabase->Specification().ProjectRoot /
+                        m_AssetDatabase->Specification().SourceDirectory / record->RelativePath;
+    return Keire::InputActionAsset::Decode(KeireEditor::Detail::ReadBytes(source))->Definition().ActionMaps;
+}
+
+void EditorWorkspaceLayer::SetProjectDefaultInput(const Keire::AssetId asset, const Keire::AssetId map)
+{
+    const auto project = Owner().GetProject();
+    if (!project)
+        throw std::logic_error("No project is open.");
+    if (!asset && map)
+        throw std::invalid_argument("A default input map requires a default input action asset.");
+    if (asset)
+    {
+        const auto maps = ProjectInputActionMaps(asset);
+        if (map && std::ranges::none_of(maps, [map](const auto& value) { return value.Id == map; }))
+            throw std::invalid_argument("The selected default map does not belong to the input action asset.");
+    }
+    auto descriptor = project->Descriptor();
+    descriptor.DefaultInput = asset;
+    descriptor.DefaultInputMap = map;
+    project->Save(std::move(descriptor));
+}
+
 KeireEditor::ManagedSdkPreference EditorWorkspaceLayer::ProjectManagedSdk() const
 {
     const auto scripts = Owner().Scripts();
