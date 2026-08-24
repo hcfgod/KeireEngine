@@ -1,10 +1,10 @@
 {
   "schemaVersion": 2,
   "releaseStatus": {
-    "state": "preparing",
+    "state": "active",
     "version": "0.4.0",
-    "activeCatalogVersion": "0.3.2",
-    "message": "Kéire 0.4.0 is the current release; no signed sequence-15 catalog or matching Hub installers are active. Windows and Linux x86-64 Hub 0.3.2 remain catalog-verified; macOS downloads remain gated."
+    "activeCatalogVersion": "0.4.0",
+    "message": "Kéire 0.4.0 signed downloads are active for Windows and Linux x86-64; macOS downloads remain gated."
   },
   "packages": []
 }

@@ -229,8 +229,14 @@ function validatePreviewMetadata(metadata) {
 
 function validatePreviewReleaseStatus(metadata) {
     const status = metadata?.releaseStatus;
-    return status?.state === "preparing" && semanticVersion(status.version) &&
-        typeof status.message === "string" && status.message.length >= 20 && status.message.length <= 240 ? status : null;
+    if (!semanticVersion(status?.version) || typeof status.message !== "string" ||
+        status.message.length < 20 || status.message.length > 240) {
+        return null;
+    }
+    if (status.state === "preparing") {
+        return status;
+    }
+    return status.state === "active" && status.activeCatalogVersion === status.version ? status : null;
 }
 
 function currentReleaseCandidates(candidates, releaseStatus) {

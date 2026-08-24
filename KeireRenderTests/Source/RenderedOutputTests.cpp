@@ -120,6 +120,7 @@ namespace
     struct MultiSurfaceResults final
     {
         std::array<std::vector<std::uint8_t>, 3> Frames;
+        std::vector<std::uint64_t> MaterialBindingBuilds;
         Keire::RenderStatistics Statistics;
         bool HasStatistics = false;
     };
@@ -127,6 +128,7 @@ namespace
     struct DescriptorRolloverResults final
     {
         std::vector<std::uint8_t> Frame;
+        std::uint64_t MaterialDependencyChecks = 0;
     };
 
     struct VfxChannelSignal final
@@ -140,6 +142,7 @@ namespace
     struct VfxGraphCaptureResults final
     {
         std::vector<std::vector<std::uint8_t>> Frames;
+        std::vector<std::uint32_t> FrameUploadSubmissions;
         Keire::RenderStatistics Statistics;
         bool HasStatistics = false;
     };
@@ -792,6 +795,7 @@ namespace
                 surface.Width = SurfaceSize;
                 surface.Height = SurfaceSize;
                 surface.ClearColor = {0.0F, 0.0F, 0.0F, 1.0F};
+                surface.SampleCount = index == 1U ? Keire::RenderSampleCount::Four : Keire::RenderSampleCount::One;
                 surface.Depth = true;
                 m_Views[index] = Owner().Renderer()->CreateView(surface);
                 Keire::RenderCamera camera;
@@ -818,15 +822,20 @@ namespace
 
         void OnUpdate(const Keire::Time&) override
         {
-            if (m_Submitted)
+            if (m_SubmittedFrames != 0)
             {
                 for (std::size_t index = 0; index < m_Views.size(); ++index)
                 {
                     m_Results->Frames[index] = Keire::RenderSystemInternalAccess::ReadbackRGBA8(
                         *Owner().Renderer(), *m_Views[index]->Surface());
                 }
-                Owner().RequestExit();
-                return;
+                m_Results->MaterialBindingBuilds.push_back(
+                    Keire::RenderSystemInternalAccess::MaterialBindingBuildCount(*Owner().Renderer()));
+                if (m_SubmittedFrames >= 2)
+                {
+                    Owner().RequestExit();
+                    return;
+                }
             }
 
             Keire::RenderEnvironmentSettings environment;
@@ -834,7 +843,7 @@ namespace
             environment.AmbientIntensity = 1.0F;
             for (const auto& view : m_Views)
                 Owner().Renderer()->Submit({m_Scene, view, false, environment});
-            m_Submitted = true;
+            ++m_SubmittedFrames;
         }
 
       private:
@@ -843,7 +852,7 @@ namespace
         std::shared_ptr<MultiSurfaceResults> m_Results;
         Keire::Ref<Keire::Scene> m_Scene;
         std::array<Keire::Ref<Keire::RenderView>, 3> m_Views;
-        bool m_Submitted = false;
+        std::uint32_t m_SubmittedFrames = 0;
     };
 
     class DescriptorRolloverCaptureLayer final : public Keire::Layer
@@ -903,6 +912,8 @@ namespace
             {
                 m_Results->Frame =
                     Keire::RenderSystemInternalAccess::ReadbackRGBA8(*Owner().Renderer(), *m_View->Surface());
+                m_Results->MaterialDependencyChecks =
+                    Keire::RenderSystemInternalAccess::MaterialDependencyCheckCount(*Owner().Renderer());
                 Owner().RequestExit();
                 return;
             }
@@ -1143,6 +1154,7 @@ namespace
             m_Results->Frames.push_back(
                 Keire::RenderSystemInternalAccess::ReadbackRGBA8(*Owner().Renderer(), *m_View->Surface()));
             const auto statistics = Owner().Renderer()->Statistics();
+            m_Results->FrameUploadSubmissions.push_back(statistics.FrameUploadSubmissions);
             m_Results->Statistics.VfxIndirectDraws =
                 std::max(m_Results->Statistics.VfxIndirectDraws, statistics.VfxIndirectDraws);
             m_Results->Statistics.VfxGpuWorlds = std::max(m_Results->Statistics.VfxGpuWorlds, statistics.VfxGpuWorlds);
@@ -2132,6 +2144,8 @@ TEST_CASE("CPU and GPU textured material Sprite plus GPU Mesh VFX outputs surviv
                 greenDominance = std::max(greenDominance, green.Weight - red.Weight);
             }
             CHECK(greenDominance > 10.0F);
+            REQUIRE(!results->FrameUploadSubmissions.empty());
+            CHECK(results->FrameUploadSubmissions.back() == 0);
         }
     }
     SUBCASE("GPU Mesh")
@@ -2290,6 +2304,9 @@ TEST_CASE("independent render surfaces submit in queue order and survive final-f
         CHECK(MeasureCenter(frame).Luminance() > MinimumBehaviorDelta);
     }
     REQUIRE(results->HasStatistics);
+    REQUIRE(results->MaterialBindingBuilds.size() == 2);
+    CHECK(results->MaterialBindingBuilds[0] > 0);
+    CHECK(results->MaterialBindingBuilds[1] == results->MaterialBindingBuilds[0]);
 }
 
 TEST_CASE("large material scenes roll descriptor pressure across ordered command buffers")
@@ -2308,6 +2325,7 @@ TEST_CASE("large material scenes roll descriptor pressure across ordered command
 
     REQUIRE(results->Frame.size() == static_cast<std::size_t>(SurfaceSize * SurfaceSize * 4));
     CHECK(MeasureCenter(results->Frame).Luminance() > MinimumBehaviorDelta);
+    CHECK(results->MaterialDependencyChecks == 1);
 }
 
 TEST_CASE("renderer replaces the deterministic error mesh with an asset-backed indexed mesh")

@@ -185,7 +185,7 @@ function buildReleaseNote(release: ParsedChangelogRelease): ReleaseNote {
         ],
         limitations: [
             `Kéire ${currentVersion} remains a pre-1.0 technology preview rather than a completed AAA production claim.`,
-            `Windows and Linux x86-64 delivery is supported, but ${currentVersion} packages become downloadable only after signed catalog activation; macOS remains gated pending Metal, signing, and notarization validation.`,
+            `Windows and Linux x86-64 ${currentVersion} packages are downloadable through the active signed catalog; macOS remains gated pending Metal, signing, and notarization validation.`,
             `Marketplace, publisher, community, and paid-checkout capabilities remain subject to their explicit feature flags and launch gates; paid checkout is disabled for ${currentVersion}.`,
         ],
     } as const;

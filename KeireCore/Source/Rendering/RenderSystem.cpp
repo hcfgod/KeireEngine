@@ -637,6 +637,11 @@ namespace Keire
         return renderer.m_Impl->State->MaterialBindingBuilds;
     }
 
+    std::uint64_t RenderSystemInternalAccess::MaterialDependencyCheckCount(const RenderSystem& renderer) noexcept
+    {
+        return renderer.m_Impl->State->MaterialDependencyChecks;
+    }
+
     std::uint64_t RenderSystemInternalAccess::SkinningStaticBuildCount(const RenderSystem& renderer) noexcept
     {
         return renderer.m_Impl->State->SkinningStaticBuilds;

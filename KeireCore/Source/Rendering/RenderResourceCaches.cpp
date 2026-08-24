@@ -13,6 +13,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <iterator>
 #include <stdexcept>
 #include <type_traits>
 
@@ -683,11 +684,31 @@ namespace Keire::RenderBackend
     const ResolvedAssetMaterial* RenderSharedState::ResolveAssetMaterial(const AssetId id,
                                                                          const SDL_GPUSampleCount samples)
     {
+        if (const auto cached = MaterialCache.find(id); cached != MaterialCache.end())
+        {
+            const auto binding = std::ranges::find(cached->second.Bindings, samples, &GpuMaterialBindingEntry::Samples);
+            if (binding != cached->second.Bindings.end() && binding->LastDependencyCheckFrame == Statistics.Frame)
+                return binding->Binding.Pipeline ? &binding->Binding : nullptr;
+        }
+
         const auto material = ResolveMaterial(id);
         auto materialEntry = MaterialCache.find(id);
         if (materialEntry == MaterialCache.end())
             return nullptr;
         auto& cache = materialEntry->second;
+        auto binding = std::ranges::find(cache.Bindings, samples, &GpuMaterialBindingEntry::Samples);
+        if (binding == cache.Bindings.end())
+        {
+            cache.Bindings.emplace_back();
+            binding = std::prev(cache.Bindings.end());
+            binding->Samples = samples;
+        }
+        ++MaterialDependencyChecks;
+        const auto finishDependencyCheck = [&](const ResolvedAssetMaterial* result) noexcept
+        {
+            binding->LastDependencyCheckFrame = Statistics.Frame;
+            return result;
+        };
         std::uint64_t stamp = 1469598103934665603ULL;
         stamp = HashDependencyStamp(stamp, cache.LastAttemptedRevision);
         stamp = HashDependencyStamp(stamp, cache.LoadedRevision);
@@ -703,16 +724,16 @@ namespace Keire::RenderBackend
         bool failedDependencyRevision = cache.LoadedRevision != 0 && cache.LastAttemptedRevision > cache.LoadedRevision;
         if (!material || !material->Definition().Shader)
         {
-            cache.LastAttemptedDependencyStamp = stamp;
-            return cache.Binding.Pipeline ? &cache.Binding : nullptr;
+            binding->LastAttemptedDependencyStamp = stamp;
+            return finishDependencyCheck(binding->Binding.Pipeline ? &binding->Binding : nullptr);
         }
         stamp = HashDependencyStamp(stamp, material->Definition().Shader);
         auto* shader = ResolveShader(material->Definition().Shader, samples, material->Definition().Surface,
                                      material->Definition().SchemaVersion >= 2);
         if (!shader)
         {
-            cache.LastAttemptedDependencyStamp = stamp;
-            return cache.Binding.Pipeline ? &cache.Binding : nullptr;
+            binding->LastAttemptedDependencyStamp = stamp;
+            return finishDependencyCheck(binding->Binding.Pipeline ? &binding->Binding : nullptr);
         }
         stamp = HashDependencyStamp(stamp, shader->LastAttemptedRevision);
         stamp = HashDependencyStamp(stamp, shader->LoadedRevision);
@@ -728,8 +749,8 @@ namespace Keire::RenderBackend
                                                    });
         if (pipeline == shader->Pipelines.end())
         {
-            cache.LastAttemptedDependencyStamp = stamp;
-            return cache.Binding.Pipeline ? &cache.Binding : nullptr;
+            binding->LastAttemptedDependencyStamp = stamp;
+            return finishDependencyCheck(binding->Binding.Pipeline ? &binding->Binding : nullptr);
         }
 
         const auto& properties = material->Definition().Properties;
@@ -739,8 +760,8 @@ namespace Keire::RenderBackend
             if (std::ranges::find(shader->LastGood->Definition().Properties, name, &ShaderPropertyDefinition::Name) ==
                 shader->LastGood->Definition().Properties.end())
             {
-                cache.LastAttemptedDependencyStamp = stamp;
-                return cache.Binding.Pipeline ? &cache.Binding : nullptr;
+                binding->LastAttemptedDependencyStamp = stamp;
+                return finishDependencyCheck(binding->Binding.Pipeline ? &binding->Binding : nullptr);
             }
         }
 
@@ -757,8 +778,8 @@ namespace Keire::RenderBackend
                 const auto* selected = std::get_if<AssetId>(&found->second);
                 if (!selected)
                 {
-                    cache.LastAttemptedDependencyStamp = stamp;
-                    return cache.Binding.Pipeline ? &cache.Binding : nullptr;
+                    binding->LastAttemptedDependencyStamp = stamp;
+                    return finishDependencyCheck(binding->Binding.Pipeline ? &binding->Binding : nullptr);
                 }
                 texture = *selected;
             }
@@ -778,11 +799,11 @@ namespace Keire::RenderBackend
                 textureEntry->second.LoadedRevision != 0 &&
                 textureEntry->second.LastAttemptedRevision > textureEntry->second.LoadedRevision;
         }
-        if (stamp == cache.LastAttemptedDependencyStamp)
-            return cache.Binding.Pipeline ? &cache.Binding : nullptr;
-        cache.LastAttemptedDependencyStamp = stamp;
+        if (stamp == binding->LastAttemptedDependencyStamp)
+            return finishDependencyCheck(binding->Binding.Pipeline ? &binding->Binding : nullptr);
+        binding->LastAttemptedDependencyStamp = stamp;
         if (failedDependencyRevision)
-            return cache.Binding.Pipeline ? &cache.Binding : nullptr;
+            return finishDependencyCheck(binding->Binding.Pipeline ? &binding->Binding : nullptr);
 
         try
         {
@@ -846,8 +867,8 @@ namespace Keire::RenderBackend
             }
             if (result.NumericProperties.empty())
                 result.NumericProperties.emplace_back();
-            cache.Binding = std::move(result);
-            cache.LastGoodDependencyStamp = stamp;
+            binding->Binding = std::move(result);
+            binding->LastGoodDependencyStamp = stamp;
             ++MaterialBindingBuilds;
         }
         catch (const std::exception& error)
@@ -855,6 +876,6 @@ namespace Keire::RenderBackend
             KEIRE_CORE_ERROR("Material GPU binding rebuild failed for id={} revision={}: {}", id.ToString(),
                              cache.LoadedRevision, error.what());
         }
-        return cache.Binding.Pipeline ? &cache.Binding : nullptr;
+        return finishDependencyCheck(binding->Binding.Pipeline ? &binding->Binding : nullptr);
     }
 } // namespace Keire::RenderBackend

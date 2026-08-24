@@ -57,8 +57,8 @@ project copy and intentionally stops normal registry updates until reverted.
 ## Publication Status Matters
 
 Local package creation produces an archive; it does not publish, sign, moderate, or activate a Marketplace listing.
-Kéire 0.4.0 identifies this source/release-candidate tree. Catalog sequence 15 and matching 0.4.0 artifacts are not
-active, so do not describe a local build or quarantine package as a downloadable release.
+Kéire 0.4.0 is published through signed catalog sequence 15 for Windows and Linux x86-64. A local build or quarantine
+package is still not a downloadable release unless it is present in that active catalog.
 
 Marketplace installation requires an entitled, compatible, published artifact and the Hub/Editor verification flow.
 Unpublished, withdrawn, revoked, unsigned, incompatible, or unentitled releases remain unavailable.

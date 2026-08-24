@@ -250,9 +250,13 @@ def main() -> int:
     )
     valid_release_status = (
         isinstance(release_status, dict)
-        and release_status.get("state") == "preparing"
+        and release_status.get("state") in {"preparing", "active"}
         and str(release_status.get("version", "")) == project_version
         and 20 <= len(str(release_status.get("message", ""))) <= 240
+        and (
+            release_status.get("state") != "active"
+            or str(release_status.get("activeCatalogVersion", "")) == project_version
+        )
     )
     if previews.get("schemaVersion") != 2 or not isinstance(packages, list):
         raise ValueError(
@@ -260,7 +264,7 @@ def main() -> int:
         )
     if not packages and not valid_release_status:
         raise ValueError(
-            "An empty preview catalog must explain the pending release state."
+            "An empty preview catalog must identify the current release state."
         )
     release_ids = set()
     retained_previews = set()

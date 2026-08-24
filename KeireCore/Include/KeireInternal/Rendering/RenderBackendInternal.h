@@ -323,15 +323,22 @@ namespace Keire::RenderBackend
         bool UsesVertexMaterialParameters = false;
     };
 
+    struct GpuMaterialBindingEntry final
+    {
+        ResolvedAssetMaterial Binding;
+        SDL_GPUSampleCount Samples = SDL_GPU_SAMPLECOUNT_1;
+        std::uint64_t LastAttemptedDependencyStamp = 0;
+        std::uint64_t LastGoodDependencyStamp = 0;
+        std::uint64_t LastDependencyCheckFrame = 0;
+    };
+
     struct GpuMaterialEntry final
     {
         AssetHandle<MaterialAsset> Handle;
         Ref<const MaterialAsset> LastGood;
-        ResolvedAssetMaterial Binding;
+        std::vector<GpuMaterialBindingEntry> Bindings;
         std::uint64_t LoadedRevision = 0;
         std::uint64_t LastAttemptedRevision = 0;
-        std::uint64_t LastAttemptedDependencyStamp = 0;
-        std::uint64_t LastGoodDependencyStamp = 0;
     };
 
     struct GpuMeshEntry final
@@ -1134,6 +1141,18 @@ namespace Keire::RenderBackend
         PreparedSceneDrawList Transparent;
     };
 
+    struct PreparedCpuVfxParticle final
+    {
+        const VfxRenderParticle* Particle = nullptr;
+        std::uint32_t SpriteFirstVertex = 0;
+    };
+
+    struct PreparedCpuVfx final
+    {
+        std::vector<PreparedCpuVfxParticle> Particles;
+        SDL_GPUBuffer* SpriteBuffer = nullptr;
+    };
+
     struct QueuedSceneRequest final
     {
         SceneRenderPacket Packet;
@@ -1207,11 +1226,14 @@ namespace Keire::RenderBackend
         [[nodiscard]] PreparedSceneDrawLists PrepareSceneDrawLists(SDL_GPUCommandBuffer* commands,
                                                                    RenderSurfaceState& surface,
                                                                    const SceneRenderPacket& packet);
+        [[nodiscard]] PreparedCpuVfx PrepareCpuVfxDraws(SDL_GPUCommandBuffer* commands,
+                                                        const SceneRenderPacket& packet);
         void DrawScene(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass, RenderSurfaceState& surface,
                        const SceneRenderPacket& packet, const ShadowFrameData& shadows, SceneDrawPhase phase,
                        const PreparedSceneDrawList& prepared, std::size_t firstBatch, std::size_t batchCount);
         void DrawVfx(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass, RenderSurfaceState& surface,
-                     const SceneRenderPacket& packet, const ShadowFrameData& shadows);
+                     const SceneRenderPacket& packet, const ShadowFrameData& shadows,
+                     const PreparedCpuVfx& preparedCpu);
         [[nodiscard]] ShadowFrameData RecordShadows(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                                     const SceneRenderPacket& packet);
         void RecordSampledDepth(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
@@ -1305,6 +1327,7 @@ namespace Keire::RenderBackend
         std::unordered_map<AssetId, AssetHandle<LightProbeVolumeAsset>> LightProbeVolumeCache;
         std::unordered_map<AssetId, GpuMaterialEntry> MaterialCache;
         std::uint64_t MaterialBindingBuilds = 0;
+        std::uint64_t MaterialDependencyChecks = 0;
         std::unordered_map<AssetId, GpuShaderEntry> ShaderCache;
         std::vector<std::pair<SamplerDescription, SDL_GPUSampler*>> SamplerCache;
         std::vector<RenderPipelineSet> Pipelines;

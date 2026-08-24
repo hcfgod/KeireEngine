@@ -130,6 +130,11 @@ buffers, instance data, light lists, and pipelines without a device-idle wait du
 Backend-only test hooks deterministically exercise device-loss propagation, bounded queue saturation, and
 resize/minimize/restore transitions without exposing fault injection through the supported renderer API.
 
+Material dependencies are validated once per material, frame, and surface sample configuration; all draws in that
+configuration reuse the immutable resolved binding. CPU-simulated VFX billboard and ribbon vertices are prepared before
+the surface render passes and uploaded through the surface command buffer, so steady-state effects do not introduce a
+separate GPU submission.
+
 Scene color is linear RGBA16F. Multisampling resolves in HDR before a fullscreen fitted-ACES pass writes the sRGB
 display surface. The renderer selects D32, D24, then D16 depth and falls back through 4x, 2x, then 1x sampling when a
 requested format is unsupported. A hidden, minimized, zero-sized, or unavailable swapchain skips presentation safely.

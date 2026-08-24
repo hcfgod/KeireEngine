@@ -13,8 +13,8 @@ systems and cooked content selected by a project.
 Kéire is currently **version 0.4.0 and pre-1.0**. Its foundations are production-oriented, but interfaces, content
 formats, and release procedures may still change before the first stable release. The project documents current
 capabilities and remaining production-readiness work directly rather than presenting roadmap work as complete.
-Version 0.4.0 currently identifies the source tree and release candidate. No sequence-15 catalog or matching 0.4.0
-artifacts are active; the immutable 0.3.2 sequence-14 packages remain the latest catalog-verified downloads.
+Version 0.4.0 is published through the immutable, signed sequence-15 catalog. Catalog-verified Hub downloads are
+available for Windows and Linux x86-64; macOS downloads remain gated pending platform and signing validation.
 
 [Website](https://keireengine.duckdns.org/) ·
 [Documentation](https://keireengine.duckdns.org/docs/) ·

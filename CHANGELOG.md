@@ -15,8 +15,15 @@ versions.
   Project Settings now selects the default action asset and stable map used on the next Play and in packaged players;
   fixed-tick replay schema 2 preserves sparse raw-control state while continuing to read schema 1 recordings.
 
+### Changed
+
+- Published Kéire 0.4.0 Windows and Linux x86-64 packages through signed distribution catalog sequence 15 and updated
+  the website's release metadata to expose only those catalog-verified downloads.
+
 ### Fixed
 
+- Removed repeated per-submesh material dependency walks within a rendered frame, and moved CPU VFX billboard/ribbon
+  uploads into each surface command buffer so steady-state effects no longer add a blocking upload submission.
 - Made managed `Vector2`, `Vector3`, `Vector4`, `Quaternion`, and `Color` interpolation deterministic and
   component-only, preventing record-generated `ToString()` from recursively formatting self-typed computed properties
   and overflowing the stack in logs.

@@ -151,6 +151,18 @@ const pendingRelease = {
 };
 assert.equal(validatePreview(pendingRelease).length, 0);
 assert.equal(validateReleaseStatus(pendingRelease).version, "0.3.1");
+const activeRelease = {
+    ...pendingRelease,
+    releaseStatus: {
+        state: "active",
+        version: "0.3.1",
+        activeCatalogVersion: "0.3.1",
+        message: "Kéire Hub 0.3.1 is active in the signed distribution catalog.",
+    },
+};
+assert.equal(validateReleaseStatus(activeRelease).version, "0.3.1");
+assert.equal(validateReleaseStatus({ ...activeRelease, releaseStatus: { ...activeRelease.releaseStatus,
+    activeCatalogVersion: "0.3.0" } }), null);
 assert.equal(validateReleaseStatus({ ...pendingRelease, releaseStatus: { ...pendingRelease.releaseStatus,
     state: "published" } }), null);
 assert.equal(validateReleaseStatus({ ...pendingRelease, releaseStatus: { ...pendingRelease.releaseStatus,

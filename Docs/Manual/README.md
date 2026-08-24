@@ -4,9 +4,9 @@ This manual is for people creating and shipping projects with Kéire 0.4.0. It s
 day-to-day Editor workflow, introduces the supported C# gameplay API, and ends with player and content packages. It is
 deliberately separate from the engine-maintainer material in [Architecture](../Architecture.md).
 
-Kéire 0.4.0 is pre-1.0 source and release-candidate metadata. The guides describe the checked-in product, not a
-published 0.4.0 download: catalog sequence 15 and matching artifacts are not active. Use the Hub's actual installed
-versions and component status when deciding what can be launched or built.
+Kéire 0.4.0 is a pre-1.0 release published through signed catalog sequence 15 for Windows and Linux x86-64. Use the
+Hub's actual installed versions and component status when deciding what can be launched or built; macOS packages
+remain unavailable pending platform and signing validation.
 
 ## Follow The Learning Path
 

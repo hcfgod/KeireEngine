@@ -8,7 +8,9 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <memory>
 #include <stdexcept>
+#include <tuple>
 #include <vector>
 
 namespace
@@ -22,9 +24,126 @@ namespace
 
 namespace Keire::RenderBackend
 {
+    PreparedCpuVfx RenderSharedState::PrepareCpuVfxDraws(SDL_GPUCommandBuffer* commands,
+                                                         const SceneRenderPacket& packet)
+    {
+        const auto particles = packet.Vfx.Particles();
+        if (particles.empty())
+            return {};
+
+        struct PreparedParticle final
+        {
+            const VfxRenderParticle* Particle = nullptr;
+            Vector3 RibbonStart;
+            float Depth = 0.0F;
+        };
+        std::vector<Vector3> ribbonStarts(particles.size());
+        std::vector<std::size_t> ribbonOrder;
+        ribbonOrder.reserve(particles.size());
+        for (std::size_t index = 0; index < particles.size(); ++index)
+        {
+            ribbonStarts[index] = particles[index].Position;
+            if (particles[index].Renderer == VfxRendererType::Ribbon)
+                ribbonOrder.push_back(index);
+        }
+        std::ranges::sort(ribbonOrder,
+                          [&particles](const auto left, const auto right)
+                          {
+                              const auto& leftParticle = particles[left];
+                              const auto& rightParticle = particles[right];
+                              return std::tie(leftParticle.Effect, leftParticle.System, leftParticle.StripId,
+                                              leftParticle.ParticleIndexInStrip) <
+                                     std::tie(rightParticle.Effect, rightParticle.System, rightParticle.StripId,
+                                              rightParticle.ParticleIndexInStrip);
+                          });
+        for (std::size_t index = 1; index < ribbonOrder.size(); ++index)
+        {
+            const auto previousIndex = ribbonOrder[index - 1U];
+            const auto currentIndex = ribbonOrder[index];
+            const auto& previous = particles[previousIndex];
+            const auto& current = particles[currentIndex];
+            if (previous.Effect == current.Effect && previous.System == current.System &&
+                previous.StripId == current.StripId &&
+                current.ParticleIndexInStrip == previous.ParticleIndexInStrip + 1U)
+            {
+                ribbonStarts[currentIndex] = previous.Position;
+            }
+        }
+
+        std::vector<PreparedParticle> particlesByDepth;
+        particlesByDepth.reserve(particles.size());
+        for (std::size_t index = 0; index < particles.size(); ++index)
+        {
+            const auto& particle = particles[index];
+            if (particle.Renderer != VfxRendererType::Mesh)
+            {
+                particlesByDepth.push_back({std::addressof(particle), ribbonStarts[index],
+                                            Math::TransformPoint(packet.Camera.View, particle.Position).Z});
+            }
+        }
+        if (particlesByDepth.empty())
+            return {};
+        std::ranges::stable_sort(particlesByDepth, [](const auto& left, const auto& right)
+                                 { return Detail::TransparentBackToFront(left.Depth, right.Depth); });
+
+        const auto cameraWorld = Math::Inverse(packet.Camera.View);
+        const auto cameraRight = Math::TransformDirection(cameraWorld, {1.0F, 0.0F, 0.0F});
+        const auto cameraUp = Math::TransformDirection(cameraWorld, {0.0F, 1.0F, 0.0F});
+        const auto cameraForward = NormalizeOr(Cross(cameraRight, cameraUp), {0.0F, 0.0F, 1.0F});
+        std::vector<RenderVertex> spriteVertices;
+        spriteVertices.reserve(particlesByDepth.size() * 6U);
+        PreparedCpuVfx result;
+        result.Particles.reserve(particlesByDepth.size());
+        constexpr float degreesToRadians = 0.01745329251994329577F;
+        for (const auto& value : particlesByDepth)
+        {
+            const auto& particle = *value.Particle;
+            const auto firstVertex = static_cast<std::uint32_t>(spriteVertices.size());
+            result.Particles.push_back({value.Particle, firstVertex});
+            constexpr Vector3 white{1.0F, 1.0F, 1.0F};
+            if (particle.Renderer == VfxRendererType::Ribbon)
+            {
+                const auto segment = Subtract(particle.Position, value.RibbonStart);
+                const auto side = Scale(NormalizeOr(Cross(segment, cameraForward), cameraRight), particle.Size * 0.5F);
+                const auto startLeft = Subtract(value.RibbonStart, side);
+                const auto startRight = Add(value.RibbonStart, side);
+                const auto endRight = Add(particle.Position, side);
+                const auto endLeft = Subtract(particle.Position, side);
+                constexpr float mode = 1.0F;
+                spriteVertices.push_back({startLeft, white, {0.0F, 0.0F, mode}});
+                spriteVertices.push_back({startRight, white, {0.0F, 1.0F, mode}});
+                spriteVertices.push_back({endRight, white, {1.0F, 1.0F, mode}});
+                spriteVertices.push_back({startLeft, white, {0.0F, 0.0F, mode}});
+                spriteVertices.push_back({endRight, white, {1.0F, 1.0F, mode}});
+                spriteVertices.push_back({endLeft, white, {1.0F, 0.0F, mode}});
+                continue;
+            }
+            const auto angle = particle.Rotation.Z * degreesToRadians;
+            const auto cosine = std::cos(angle);
+            const auto sine = std::sin(angle);
+            const auto right = Scale(Add(Scale(cameraRight, cosine), Scale(cameraUp, sine)), particle.Size * 0.5F);
+            const auto up = Scale(Add(Scale(cameraUp, cosine), Scale(cameraRight, -sine)), particle.Size * 0.5F);
+            const auto lowerLeft = Subtract(Subtract(particle.Position, right), up);
+            const auto lowerRight = Add(Subtract(particle.Position, up), right);
+            const auto upperRight = Add(Add(particle.Position, right), up);
+            const auto upperLeft = Add(Subtract(particle.Position, right), up);
+            const auto mode = particle.Renderer == VfxRendererType::Volumetric ? 2.0F : 0.0F;
+            spriteVertices.push_back({lowerLeft, white, {0.0F, 0.0F, mode}});
+            spriteVertices.push_back({lowerRight, white, {1.0F, 0.0F, mode}});
+            spriteVertices.push_back({upperRight, white, {1.0F, 1.0F, mode}});
+            spriteVertices.push_back({lowerLeft, white, {0.0F, 0.0F, mode}});
+            spriteVertices.push_back({upperRight, white, {1.0F, 1.0F, mode}});
+            spriteVertices.push_back({upperLeft, white, {0.0F, 1.0F, mode}});
+        }
+
+        result.SpriteBuffer = UploadVertexBuffer(commands, spriteVertices);
+        FrameTransientBuffers.push_back(result.SpriteBuffer);
+        return result;
+    }
+
     void RenderSharedState::DrawVfx(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass,
                                     RenderSurfaceState& surface, const SceneRenderPacket& packet,
-                                    const ShadowFrameData& shadows)
+                                    const ShadowFrameData& shadows, const PreparedCpuVfx& preparedCpu)
     {
         auto& pipelines = PipelinesFor(ToSdlSampleCount(surface.ActualSamples));
         const auto& requestedEnvironment =
@@ -303,120 +422,8 @@ namespace Keire::RenderBackend
             }
         }
 
-        const auto particles = packet.Vfx.Particles();
-        if (particles.empty())
+        if (preparedCpu.Particles.empty() || !preparedCpu.SpriteBuffer || !pipelines.Vfx)
             return;
-        if (!pipelines.Vfx)
-            return;
-
-        struct PreparedParticle final
-        {
-            const VfxRenderParticle* Particle = nullptr;
-            Vector3 RibbonStart;
-            float Depth = 0.0F;
-            std::uint32_t SpriteFirstVertex = 0;
-        };
-        std::vector<Vector3> ribbonStarts(particles.size());
-        std::vector<std::size_t> ribbonOrder;
-        ribbonOrder.reserve(particles.size());
-        for (std::size_t index = 0; index < particles.size(); ++index)
-        {
-            ribbonStarts[index] = particles[index].Position;
-            if (particles[index].Renderer == VfxRendererType::Ribbon)
-                ribbonOrder.push_back(index);
-        }
-        std::ranges::sort(ribbonOrder,
-                          [&particles](const auto left, const auto right)
-                          {
-                              const auto& leftParticle = particles[left];
-                              const auto& rightParticle = particles[right];
-                              return std::tie(leftParticle.Effect, leftParticle.System, leftParticle.StripId,
-                                              leftParticle.ParticleIndexInStrip) <
-                                     std::tie(rightParticle.Effect, rightParticle.System, rightParticle.StripId,
-                                              rightParticle.ParticleIndexInStrip);
-                          });
-        for (std::size_t index = 1; index < ribbonOrder.size(); ++index)
-        {
-            const auto previousIndex = ribbonOrder[index - 1U];
-            const auto currentIndex = ribbonOrder[index];
-            const auto& previous = particles[previousIndex];
-            const auto& current = particles[currentIndex];
-            if (previous.Effect == current.Effect && previous.System == current.System &&
-                previous.StripId == current.StripId &&
-                current.ParticleIndexInStrip == previous.ParticleIndexInStrip + 1U)
-            {
-                ribbonStarts[currentIndex] = previous.Position;
-            }
-        }
-        std::vector<PreparedParticle> prepared;
-        prepared.reserve(particles.size());
-        for (std::size_t index = 0; index < particles.size(); ++index)
-        {
-            const auto& particle = particles[index];
-            if (particle.Renderer != VfxRendererType::Mesh)
-            {
-                prepared.push_back({std::addressof(particle), ribbonStarts[index],
-                                    Math::TransformPoint(packet.Camera.View, particle.Position).Z});
-            }
-        }
-        if (prepared.empty())
-            return;
-        std::ranges::stable_sort(prepared, [](const auto& left, const auto& right)
-                                 { return Detail::TransparentBackToFront(left.Depth, right.Depth); });
-
-        const auto cameraWorld = Math::Inverse(packet.Camera.View);
-        const auto cameraRight = Math::TransformDirection(cameraWorld, {1.0F, 0.0F, 0.0F});
-        const auto cameraUp = Math::TransformDirection(cameraWorld, {0.0F, 1.0F, 0.0F});
-        std::vector<RenderVertex> spriteVertices;
-        spriteVertices.reserve(prepared.size() * 6U);
-        const auto cameraForward = NormalizeOr(Cross(cameraRight, cameraUp), {0.0F, 0.0F, 1.0F});
-        constexpr float degreesToRadians = 0.01745329251994329577F;
-        for (auto& value : prepared)
-        {
-            const auto& particle = *value.Particle;
-            value.SpriteFirstVertex = static_cast<std::uint32_t>(spriteVertices.size());
-            constexpr Vector3 white{1.0F, 1.0F, 1.0F};
-            if (particle.Renderer == VfxRendererType::Ribbon)
-            {
-                const auto segment = Subtract(particle.Position, value.RibbonStart);
-                const auto side = Scale(NormalizeOr(Cross(segment, cameraForward), cameraRight), particle.Size * 0.5F);
-                const auto startLeft = Subtract(value.RibbonStart, side);
-                const auto startRight = Add(value.RibbonStart, side);
-                const auto endRight = Add(particle.Position, side);
-                const auto endLeft = Subtract(particle.Position, side);
-                constexpr float mode = 1.0F;
-                spriteVertices.push_back({startLeft, white, {0.0F, 0.0F, mode}});
-                spriteVertices.push_back({startRight, white, {0.0F, 1.0F, mode}});
-                spriteVertices.push_back({endRight, white, {1.0F, 1.0F, mode}});
-                spriteVertices.push_back({startLeft, white, {0.0F, 0.0F, mode}});
-                spriteVertices.push_back({endRight, white, {1.0F, 1.0F, mode}});
-                spriteVertices.push_back({endLeft, white, {1.0F, 0.0F, mode}});
-                continue;
-            }
-            const auto angle = particle.Rotation.Z * degreesToRadians;
-            const auto cosine = std::cos(angle);
-            const auto sine = std::sin(angle);
-            const auto right = Scale(Add(Scale(cameraRight, cosine), Scale(cameraUp, sine)), particle.Size * 0.5F);
-            const auto up = Scale(Add(Scale(cameraUp, cosine), Scale(cameraRight, -sine)), particle.Size * 0.5F);
-            const auto lowerLeft = Subtract(Subtract(particle.Position, right), up);
-            const auto lowerRight = Add(Subtract(particle.Position, up), right);
-            const auto upperRight = Add(Add(particle.Position, right), up);
-            const auto upperLeft = Add(Subtract(particle.Position, right), up);
-            const auto mode = particle.Renderer == VfxRendererType::Volumetric ? 2.0F : 0.0F;
-            spriteVertices.push_back({lowerLeft, white, {0.0F, 0.0F, mode}});
-            spriteVertices.push_back({lowerRight, white, {1.0F, 0.0F, mode}});
-            spriteVertices.push_back({upperRight, white, {1.0F, 1.0F, mode}});
-            spriteVertices.push_back({lowerLeft, white, {0.0F, 0.0F, mode}});
-            spriteVertices.push_back({upperRight, white, {1.0F, 1.0F, mode}});
-            spriteVertices.push_back({upperLeft, white, {0.0F, 1.0F, mode}});
-        }
-
-        SDL_GPUBuffer* spriteBuffer = nullptr;
-        if (!spriteVertices.empty())
-        {
-            spriteBuffer = UploadVertexBuffer(spriteVertices);
-            FrameTransientBuffers.push_back(spriteBuffer);
-        }
 
         SDL_BindGPUGraphicsPipeline(pass, pipelines.Vfx);
         struct alignas(16) CpuVfxUniforms final
@@ -431,7 +438,7 @@ namespace Keire::RenderBackend
             std::array<float, 4> SurfaceParameters{};
         };
         const auto samples = ToSdlSampleCount(surface.ActualSamples);
-        for (const auto& value : prepared)
+        for (const auto& value : preparedCpu.Particles)
         {
             const auto& particle = *value.Particle;
             if (particle.Size <= 0.0F)
@@ -459,7 +466,7 @@ namespace Keire::RenderBackend
                 {
                     material.SurfaceParameters[0] = particle.Sprite ? 1.0F : 0.0F;
                 }
-                const SDL_GPUBufferBinding vertexBinding{spriteBuffer, 0};
+                const SDL_GPUBufferBinding vertexBinding{preparedCpu.SpriteBuffer, 0};
                 SDL_PushGPUVertexUniformData(commands, 0, &uniforms, sizeof(uniforms));
                 SDL_PushGPUFragmentUniformData(commands, 0, &material, sizeof(material));
                 const auto& texture = particle.Sprite ? ResolveTexture(particle.Sprite) : WhiteTexture;

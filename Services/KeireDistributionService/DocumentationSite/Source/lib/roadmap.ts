@@ -22,7 +22,7 @@ export const roadmapHorizons: readonly RoadmapHorizon[] = [
         id: "now",
         label: "Now",
         timeframe: "Kéire 0.4.0 current release",
-        statement: "Complete release evidence and signed catalog activation for the unified graph and scripting milestone.",
+        statement: "Extend release evidence for the published unified graph and scripting milestone.",
         initiatives: [
             {
                 title: "Unified graph and scripting authoring",

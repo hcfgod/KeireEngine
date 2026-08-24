@@ -664,6 +664,7 @@ namespace Keire::RenderBackend
 
         const auto request = std::ranges::find(Requests, &surface, &QueuedSceneRequest::Surface);
         PreparedSceneDrawLists preparedDraws;
+        PreparedCpuVfx preparedCpuVfx;
         if (request != Requests.end())
         {
             auto started = std::chrono::steady_clock::now();
@@ -672,6 +673,7 @@ namespace Keire::RenderBackend
                 std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
             started = std::chrono::steady_clock::now();
             PrepareGpuVfx(commands, request->Packet.Vfx, surface);
+            preparedCpuVfx = PrepareCpuVfxDraws(commands, request->Packet);
             Statistics.VfxPreparationMilliseconds +=
                 std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
             started = std::chrono::steady_clock::now();
@@ -1018,7 +1020,7 @@ namespace Keire::RenderBackend
                             DrawScene(commands, pass, surface, request->Packet, shadows, SceneDrawPhase::Transparent,
                                       preparedDraws.Transparent, firstBatch, batchCount);
                             if (finalChunk)
-                                DrawVfx(commands, pass, surface, request->Packet, shadows);
+                                DrawVfx(commands, pass, surface, request->Packet, shadows, preparedCpuVfx);
                         }
                         SDL_EndGPURenderPass(pass);
                         ++Statistics.Passes;
