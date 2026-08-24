@@ -8,6 +8,9 @@ versions.
 
 ## Unreleased
 
+- Fixed Linux standalone Hub installer packaging after payload permission normalization by deriving the Hub worker
+  target in the installer process before restoring executable modes.
+
 ### Added
 
 - Added Unity-style managed Input Action Asset contexts with explicit asset/map/action enable lifecycles, typed reads,

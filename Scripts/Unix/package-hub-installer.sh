@@ -18,6 +18,7 @@ INSTALL_OPTIONAL=0
 ALLOW_DIRTY=0
 parse_build_arguments "$@"
 load_project_config "$ROOT"
+hub_worker="${PROJECT_NAMESPACE}HubWorker"
 TOOLSET="$(resolve_unix_toolset "$PLATFORM" "$TOOLSET")"
 macos_deployment_target="$(config_value "$ROOT/Config/Dependencies.lock" MACOS_DEPLOYMENT_TARGET)"
 
