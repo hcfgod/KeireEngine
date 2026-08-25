@@ -6,6 +6,9 @@ namespace Keire.Distribution.Publisher;
 public static class SnapshotPublisher
 {
     private const long MaximumSignaturesBytes = 8 * 1024 * 1024;
+    internal const int MaximumDirectoryMoveAttempts = 8;
+    private const int InitialDirectoryMoveDelayMilliseconds = 10;
+    private const int MaximumDirectoryMoveDelayMilliseconds = 200;
 
     internal static SnapshotIndex Publish(
         string sourceDirectory,
@@ -123,7 +126,7 @@ public static class SnapshotPublisher
                 DistributionJson.Serialize(manifest));
 
             SnapshotIndex index = SnapshotValidator.ValidateSnapshotDirectory(stagingDirectory, snapshotId);
-            Directory.Move(stagingDirectory, finalDirectory);
+            MoveStagingDirectory(stagingDirectory, finalDirectory);
             if (activate)
             {
                 Activate(root, snapshotId);
@@ -161,6 +164,39 @@ public static class SnapshotPublisher
             Path.Combine(root, "snapshots", snapshotId), snapshotId);
         WriteCurrentPointer(root, snapshotId);
         return index;
+    }
+
+    internal static void MoveStagingDirectory(
+        string stagingDirectory,
+        string finalDirectory,
+        Action<string, string> moveDirectory,
+        Action<TimeSpan> delay)
+    {
+        ArgumentNullException.ThrowIfNull(moveDirectory);
+        ArgumentNullException.ThrowIfNull(delay);
+
+        int delayMilliseconds = InitialDirectoryMoveDelayMilliseconds;
+        for (int attempt = 1; attempt <= MaximumDirectoryMoveAttempts; ++attempt)
+        {
+            try
+            {
+                moveDirectory(stagingDirectory, finalDirectory);
+                return;
+            }
+            catch (IOException) when (
+                attempt < MaximumDirectoryMoveAttempts && Directory.Exists(stagingDirectory) &&
+                !Directory.Exists(finalDirectory) && !File.Exists(finalDirectory))
+            {
+                // Filesystem filters can briefly hold newly written snapshot files without delete sharing.
+                delay(TimeSpan.FromMilliseconds(delayMilliseconds));
+                delayMilliseconds = Math.Min(delayMilliseconds * 2, MaximumDirectoryMoveDelayMilliseconds);
+            }
+        }
+    }
+
+    private static void MoveStagingDirectory(string stagingDirectory, string finalDirectory)
+    {
+        MoveStagingDirectory(stagingDirectory, finalDirectory, Directory.Move, Thread.Sleep);
     }
 
     private static DistributionSignaturesManifest LoadSignatures(string source)

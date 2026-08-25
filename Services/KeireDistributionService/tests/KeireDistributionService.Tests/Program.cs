@@ -12,6 +12,7 @@ internal static class Program
         (string Name, Func<Task> Test)[] tests =
         [
             ("publisher and snapshot validation", PublisherAndSnapshotValidationAsync),
+            ("publisher staging move retry", PublisherStagingMoveRetryAsync),
             ("offline Ed25519 exact-byte signing", SigningTests.ExactByteSigningAsync),
             ("signed identity and replay policy", SigningTests.IdentityAndPolicyAsync),
             ("private-key sources and permissions", SigningTests.PrivateKeySourcesAndPermissionsAsync),
@@ -102,6 +103,93 @@ internal static class Program
                         Now = DateTimeOffset.UtcNow,
                     }),
                 "Publisher accepted a package whose filename did not match its digest.");
+            return Task.CompletedTask;
+        }
+        finally
+        {
+            TestDistribution.DeleteTemporaryRoot(root);
+        }
+    }
+
+    private static Task PublisherStagingMoveRetryAsync()
+    {
+        string root = TestDistribution.CreateTemporaryRoot();
+        try
+        {
+            string staging = Path.Combine(root, "staging");
+            string final = Path.Combine(root, "final");
+            Directory.CreateDirectory(staging);
+            File.WriteAllText(Path.Combine(staging, "marker"), "snapshot");
+
+            int attempts = 0;
+            List<TimeSpan> delays = [];
+            SnapshotPublisher.MoveStagingDirectory(
+                staging,
+                final,
+                (source, destination) =>
+                {
+                    ++attempts;
+                    if (attempts < 3)
+                    {
+                        throw new IOException("Simulated transient directory lock.");
+                    }
+
+                    Directory.Move(source, destination);
+                },
+                delays.Add);
+            TestAssert.Equal(3, attempts, "Publisher did not retry a transient staging-directory move failure.");
+            TestAssert.Equal(2, delays.Count, "Publisher did not apply one delay per staging-directory move retry.");
+            TestAssert.Equal(
+                TimeSpan.FromMilliseconds(10),
+                delays[0],
+                "Publisher staging-directory move retry did not use the initial backoff.");
+            TestAssert.Equal(
+                TimeSpan.FromMilliseconds(20),
+                delays[1],
+                "Publisher staging-directory move retry did not increase its backoff.");
+            TestAssert.True(
+                Directory.Exists(final) && !Directory.Exists(staging),
+                "Publisher staging-directory move retry did not complete the atomic rename.");
+
+            string exhaustedStaging = Path.Combine(root, "exhausted-staging");
+            string exhaustedFinal = Path.Combine(root, "exhausted-final");
+            Directory.CreateDirectory(exhaustedStaging);
+            int exhaustedAttempts = 0;
+            TestAssert.Throws<IOException>(
+                () => SnapshotPublisher.MoveStagingDirectory(
+                    exhaustedStaging,
+                    exhaustedFinal,
+                    (_, _) =>
+                    {
+                        ++exhaustedAttempts;
+                        throw new IOException("Simulated persistent directory lock.");
+                    },
+                    _ => { }),
+                "Publisher did not report an exhausted staging-directory move retry.");
+            TestAssert.Equal(
+                SnapshotPublisher.MaximumDirectoryMoveAttempts,
+                exhaustedAttempts,
+                "Publisher staging-directory move retry was not bounded.");
+
+            string collidedStaging = Path.Combine(root, "collided-staging");
+            string collidedFinal = Path.Combine(root, "collided-final");
+            Directory.CreateDirectory(collidedStaging);
+            int collisionAttempts = 0;
+            int collisionDelays = 0;
+            TestAssert.Throws<IOException>(
+                () => SnapshotPublisher.MoveStagingDirectory(
+                    collidedStaging,
+                    collidedFinal,
+                    (_, destination) =>
+                    {
+                        ++collisionAttempts;
+                        Directory.CreateDirectory(destination);
+                        throw new IOException("Simulated immutable snapshot collision.");
+                    },
+                    _ => ++collisionDelays),
+                "Publisher hid an immutable snapshot collision behind its move retry.");
+            TestAssert.Equal(1, collisionAttempts, "Publisher retried after the final snapshot path appeared.");
+            TestAssert.Equal(0, collisionDelays, "Publisher delayed after the final snapshot path appeared.");
             return Task.CompletedTask;
         }
         finally

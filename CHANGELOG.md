@@ -5,8 +5,28 @@ versions.
 
 ## Unreleased
 
+## 0.4.2 - 2026-08-25
+
+### Added
+
+- Added production same-frame GPU occlusion culling with per-surface depth pyramids, conservative compute
+  classification, compacted indexed indirect draws, and deterministic direct-draw fallback.
+- Added source-frame-qualified, camera-local occlusion diagnostics with project mode controls, Scene/Game bounds and
+  HZB status overlays, completed-frame profiler counters, and Render Graph reporting.
+- Added the `GpuOcclusionStress` Sandbox scene and synchronized template payload, with hidden/reveal, presenter,
+  lifecycle, fallback, stress-scene, and Direct3D 12/Vulkan rendered-output verification.
+- Added local on-demand Tracy telemetry in the Profile configuration plus graphics-capture lifecycle metadata, so
+  performance evidence identifies the backend, adapter, build, project, scene, frame, and capture path.
+
+### Changed
+
+- Restricted GPU occlusion eligibility to explicitly safe opaque Shader Graph geometry and retained conservative
+  direct drawing whenever a backend, shader, surface, frame resource, or diagnostic result is unavailable.
+
 ### Fixed
 
+- Retried the Windows distribution publisher's atomic staging-directory rename with bounded backoff when filesystem
+  filters briefly lock newly written snapshot files, without retrying after the immutable destination appears.
 - Resolved cooked AudioClip impulse responses into convolution mixer registrations across headless and device DSP,
   unified graph/mixer effect processing, and replaced the Equalizer gain alias with backward-compatible three-band
   frequency shaping while preserving reverb tails across continuously blended Reverb Zone parameter updates and
@@ -37,27 +57,6 @@ versions.
 - Replaced deprecated `auth.role()` checks in nine live service-only Marketplace RPCs with JWT role claims while
   preserving their explicit execute grants, and added executable password-policy and headless Editor workspace smoke
   coverage to normal test/package paths.
-
-## 0.4.2 - 2026-08-25
-
-### Added
-
-- Added production same-frame GPU occlusion culling with per-surface depth pyramids, conservative compute
-  classification, compacted indexed indirect draws, and deterministic direct-draw fallback.
-- Added source-frame-qualified, camera-local occlusion diagnostics with project mode controls, Scene/Game bounds and
-  HZB status overlays, completed-frame profiler counters, and Render Graph reporting.
-- Added the `GpuOcclusionStress` Sandbox scene and synchronized template payload, with hidden/reveal, presenter,
-  lifecycle, fallback, stress-scene, and Direct3D 12/Vulkan rendered-output verification.
-- Added local on-demand Tracy telemetry in the Profile configuration plus graphics-capture lifecycle metadata, so
-  performance evidence identifies the backend, adapter, build, project, scene, frame, and capture path.
-
-### Changed
-
-- Restricted GPU occlusion eligibility to explicitly safe opaque Shader Graph geometry and retained conservative
-  direct drawing whenever a backend, shader, surface, frame resource, or diagnostic result is unavailable.
-
-### Fixed
-
 - Reported GPU occlusion dispatch and indirect-draw totals from the most recently completed frame instead of exposing
   pre-aggregation zeroes, and now describes Disabled-mode visibility as unavailable instead of perpetually pending.
 - Made Scene and Game viewport occlusion diagnostics camera-local, so editor-camera movement updates its own culled
