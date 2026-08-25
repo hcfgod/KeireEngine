@@ -58,7 +58,8 @@ versions.
   steady-state dynamic-buffer reallocations.
 - Fixed Apple Clang/libc++ portability for filesystem clock values and Portable Custom HLSL numeric parsing, and made
   generated macOS links use native archive paths, complete SDL framework dependencies, an app-local nethost RPATH,
-  and a macOS 12-compatible Hub activation channel.
+  and a macOS 12-compatible Hub activation channel. Managed-client failure reporting no longer restarts logging after
+  application shutdown, avoiding a late async-logger abort when a graphics backend is unavailable.
   The distribution publisher now pins its .NET runtime patch so locked restores remain reproducible across installed
   SDK patch levels.
 - Made managed `Vector2`, `Vector3`, `Vector4`, `Quaternion`, and `Color` interpolation deterministic and

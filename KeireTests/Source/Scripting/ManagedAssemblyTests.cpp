@@ -319,7 +319,8 @@ TEST_CASE("Managed builds publish only successful replacements")
     CHECK(scripts->BuildStatus().State == Keire::ManagedBuildState::Failed);
     CHECK_FALSE(scripts->BuildStatus().Diagnostics.empty());
     CHECK(std::filesystem::is_regular_file(active));
-    CHECK(std::filesystem::last_write_time(active) == successfulWrite);
+    const bool activeWritePreserved = std::filesystem::last_write_time(active) == successfulWrite;
+    CHECK(activeWritePreserved);
     scripts->Close();
     REQUIRE(blocker.Wait(std::chrono::seconds(2)));
     jobs->Close();

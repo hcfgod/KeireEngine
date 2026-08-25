@@ -3,6 +3,7 @@
 #include "Keire/BuildInfo.h"
 #include "Keire/Log.h"
 
+#include "KeireInternal/LogInternal.h"
 #include "KeireInternal/Process.h"
 
 #include <cstdarg>
@@ -104,8 +105,9 @@ namespace
         std::fprintf(stderr, "Client failed: %.*s\n", static_cast<int>(message.size()), message.data());
         try
         {
-            KEIRE_CLIENT_CRITICAL("Client failed: {}", message);
-            Keire::Log::Flush();
+            (void)Keire::Detail::LogInternalAccess::WriteAndFlushIfOpen(
+                Keire::Detail::LogChannel::Client, Keire::LogLevel::Critical,
+                Keire::LogMessage("Client failed: {}", message));
         }
         catch (...)
         {
