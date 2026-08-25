@@ -6,6 +6,7 @@
 #include "KeireClient/Editor/SceneDocument.h"
 #include "KeireClient/Editor/SceneGizmoController.h"
 #include "KeireClient/Editor/ScenePicker.h"
+#include "KeireClient/Editor/SceneViewportLayout.h"
 #include "KeireInternal/EditorCameraController.h"
 
 #include <algorithm>
@@ -144,6 +145,7 @@ void KeireEditor::SceneViewportPanel::Shutdown(const std::filesystem::path& proj
 }
 void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
 {
+    m_ViewportRect = {};
     auto panel = ui.BeginPanel(m_Registration);
     if (!panel)
         return;
@@ -183,6 +185,7 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
     Keire::UiItemState imageState;
     Keire::UiItemRect imageRect;
     Keire::RenderCamera camera;
+    std::optional<SceneViewportCenteredStateLayout> centeredStateLayout;
     const auto renderScene = hasScene ? activeScene : Keire::Ref<Keire::Scene>{};
     if (!hasScene || !m_RenderView)
     {
@@ -193,10 +196,12 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         const std::string_view heading = hasScene ? "Renderer unavailable" : "Drop a Scene here";
         const std::string_view detail = hasScene ? "Scene authoring remains available while rendering is disabled."
                                                  : "Create a scene or drop a .keirescene asset to begin.";
-        const float headingWidth = static_cast<float>(heading.size()) * 7.0F;
-        const float detailWidth = static_cast<float>(detail.size()) * 7.0F;
+        const float headingWidth = ui.MeasureText(heading).Width;
+        const float detailWidth = ui.MeasureText(detail).Width;
         const float centerX = (imageRect.Minimum.X + imageRect.Maximum.X) * 0.5F;
         const float centerY = (imageRect.Minimum.Y + imageRect.Maximum.Y) * 0.5F;
+        centeredStateLayout =
+            CalculateSceneViewportCenteredStateLayout(imageRect, std::max(headingWidth, detailWidth), !hasScene);
         ui.DrawOverlayText({centerX - headingWidth * 0.5F, centerY - 18.0F}, theme.Text, heading);
         ui.DrawOverlayText({centerX - detailWidth * 0.5F, centerY + 6.0F}, theme.MutedText, detail);
     }
@@ -281,20 +286,23 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
     }
     if (!hasScene || !m_RenderView)
     {
-        if (!hasScene)
+        if (!hasScene && centeredStateLayout && centeredStateLayout->ShowActions)
         {
-            const float centerX = (imageRect.Minimum.X + imageRect.Maximum.X) * 0.5F;
-            const float centerY = (imageRect.Minimum.Y + imageRect.Maximum.Y) * 0.5F + 42.0F;
-            if (ui.OverlayIconButton(
-                    "EmptySceneCreate", Keire::UiIcon::Create,
-                    {.Position = {centerX - 36.0F, centerY}, .Size = {32.0F, 28.0F}, .Tooltip = "Create a new scene"}))
+            if (ui.OverlayIconButton("EmptySceneCreate", Keire::UiIcon::Create,
+                                     {.Position = centeredStateLayout->CreateAction,
+                                      .Size = {32.0F, 28.0F},
+                                      .Tooltip = "Create a new scene"}))
                 m_Controller.RequestSceneViewportNewScene();
             if (ui.OverlayIconButton("EmptySceneOpen", Keire::UiIcon::Folder,
-                                     {.Position = {centerX + 4.0F, centerY},
+                                     {.Position = centeredStateLayout->OpenAction,
                                       .Size = {32.0F, 28.0F},
                                       .Tooltip = "Show Scene assets in Project"}))
                 m_Controller.RevealSceneViewportScenes();
         }
+        const auto centeredReservation =
+            centeredStateLayout ? std::optional<Keire::UiItemRect>{centeredStateLayout->Reservation} : std::nullopt;
+        (void)m_Controller.DrawSceneViewportPerformanceOverlay(ui, imageRect, OcclusionDiagnostics(),
+                                                               centeredReservation);
         return;
     }
     const auto occlusionSurfaceState = m_RenderView->Surface()->OcclusionDiagnostics();
@@ -303,20 +311,22 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
     const auto toolbarRect = m_Gizmos->DrawOverlayToolbar(ui, imageRect, occlusionSurfaceState.PyramidMipCount);
     constexpr float overlaySize = 28.0F;
     constexpr float overlayGap = 3.0F;
-    constexpr float overlayPadding = 8.0F;
-    Keire::UiPosition orientationPosition{imageRect.Maximum.X - overlayPadding - overlaySize * 5.0F - overlayGap * 4.0F,
-                                          imageRect.Minimum.Y + overlayPadding};
-    const Keire::UiItemRect orientationRect{
-        orientationPosition, {imageRect.Maximum.X - overlayPadding, orientationPosition.Y + overlaySize}};
-    const auto orientationButton =
-        [&](const std::string_view id, const Keire::UiIcon icon, const std::string_view tooltip)
+    const auto orientationLayout = CalculateSceneViewportRightToolbarLayout(imageRect, toolbarRect);
+    auto orientationPosition = orientationLayout.Rectangle.Minimum;
+    const auto orientationRect = orientationLayout.Rectangle;
+    const auto orientationButton = [&](const std::string_view id, const Keire::UiIcon icon,
+                                       const std::string_view tooltip, const bool selected = false)
     {
-        const bool activated = ui.OverlayIconButton(
-            id, icon, {.Position = orientationPosition, .Size = {overlaySize, overlaySize}, .Tooltip = tooltip});
+        const bool activated = ui.OverlayIconButton(id, icon,
+                                                    {.Position = orientationPosition,
+                                                     .Size = {overlaySize, overlaySize},
+                                                     .Tooltip = tooltip,
+                                                     .Selected = selected});
         orientationPosition.X += overlaySize + overlayGap;
         return activated;
     };
-    if (orientationButton("SceneProjection",
+    if (orientationLayout.ShowProjection &&
+        orientationButton("SceneProjection",
                           m_Camera->State().Projection == Keire::Detail::EditorCameraProjection::Perspective
                               ? Keire::UiIcon::Perspective
                               : Keire::UiIcon::Orthographic,
@@ -325,32 +335,45 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         m_Camera->ToggleProjection();
         m_Camera->MarkDirty();
     }
-    if (orientationButton("SceneAxisX", Keire::UiIcon::AxisX, "Look along the X axis"))
+    if (orientationLayout.ShowAxes && orientationButton("SceneAxisX", Keire::UiIcon::AxisX, "Look along the X axis"))
     {
         m_Camera->Snap(Keire::Detail::EditorCameraAxis::PositiveX);
         m_Camera->MarkDirty();
     }
-    if (orientationButton("SceneAxisY", Keire::UiIcon::AxisY, "Look along the Y axis"))
+    if (orientationLayout.ShowAxes && orientationButton("SceneAxisY", Keire::UiIcon::AxisY, "Look along the Y axis"))
     {
         m_Camera->Snap(Keire::Detail::EditorCameraAxis::PositiveY);
         m_Camera->MarkDirty();
     }
-    if (orientationButton("SceneAxisZ", Keire::UiIcon::AxisZ, "Look along the Z axis"))
+    if (orientationLayout.ShowAxes && orientationButton("SceneAxisZ", Keire::UiIcon::AxisZ, "Look along the Z axis"))
     {
         m_Camera->Snap(Keire::Detail::EditorCameraAxis::PositiveZ);
         m_Camera->MarkDirty();
     }
-    if (orientationButton("SceneCameraPreview", Keire::UiIcon::Camera, "Toggle the main camera preview"))
+    if (orientationLayout.ShowCameraPreview &&
+        orientationButton("SceneCameraPreview", Keire::UiIcon::Camera, "Toggle the main camera preview"))
         m_CameraPreviewVisible = !m_CameraPreviewVisible;
+    if (orientationLayout.ShowOcclusionVisibility &&
+        orientationButton("SceneOcclusionVisibility", Keire::UiIcon::Bug,
+                          occlusionDebugView == Keire::GpuOcclusionDebugView::VisibilityBounds
+                              ? "Hide camera-local GPU visibility bounds"
+                              : "Show camera-local GPU visibility bounds (green visible, red culled)",
+                          occlusionDebugView == Keire::GpuOcclusionDebugView::VisibilityBounds))
+        m_Gizmos->ToggleOcclusionVisibilityDebug();
+    if (orientationLayout.ShowOcclusionMetadata &&
+        orientationButton("SceneOcclusionMetadata", Keire::UiIcon::Information,
+                          "Toggle editor-camera GPU occlusion diagnostics", m_Gizmos->Settings().ShowOcclusionMetadata))
+        m_Gizmos->SetShowOcclusionMetadata(!m_Gizmos->Settings().ShowOcclusionMetadata);
 
     Keire::UiItemRect cameraPreviewRect{};
-    if (m_CameraPreviewVisible && m_CameraPreviewView)
+    const auto cameraPreviewPlacement =
+        m_CameraPreviewVisible && m_CameraPreviewView ? PlaceSceneCameraPreview(imageRect) : std::nullopt;
+    if (cameraPreviewPlacement)
     {
         constexpr float previewAspect = 16.0F / 9.0F;
-        const float previewWidth = std::clamp(imageRect.Size().Width * 0.30F, 160.0F, 320.0F);
-        const float previewHeight = previewWidth / previewAspect;
-        cameraPreviewRect = {{imageRect.Maximum.X - previewWidth - 12.0F, imageRect.Maximum.Y - previewHeight - 34.0F},
-                             {imageRect.Maximum.X - 12.0F, imageRect.Maximum.Y - 34.0F}};
+        cameraPreviewRect = *cameraPreviewPlacement;
+        const float previewWidth = cameraPreviewRect.Size().Width;
+        const float previewHeight = cameraPreviewRect.Size().Height;
         if (const auto sceneCamera = SelectGameCamera(renderScene))
         {
             (void)PrepareRenderSurface(m_CameraPreviewView, {previewWidth, previewHeight},
@@ -380,7 +403,7 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
             ui.DrawImage(m_CameraPreviewView->Surface(), cameraPreviewRect);
             ui.DrawRectangle(cameraPreviewRect, theme.Border, 1.0F, 5.0F);
             ui.DrawOverlayText({cameraPreviewRect.Minimum.X + 8.0F, cameraPreviewRect.Minimum.Y + 6.0F}, theme.Text,
-                               "Main Camera");
+                               "MAIN CAMERA OUTPUT");
         }
         else
         {
@@ -390,50 +413,68 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
                                theme.MutedText, "No active camera");
         }
     }
-    const std::string viewportStatus = std::to_string(activeScene->ObjectCount()) + " objects  |  " +
-                                       (playActive ? "Play  |  Runtime edits are temporary" : "Edit") +
+    const std::string viewportStatus = std::to_string(activeScene->ObjectCount()) + " objects  |  EDITOR CAMERA  |  " +
+                                       (playActive ? "Play (temporary)" : "Edit") +
                                        (document.EditingScene()->Dirty() ? "  |  Unsaved" : "");
     const Keire::UiPosition statusPosition{imageRect.Minimum.X + 12.0F, imageRect.Maximum.Y - 24.0F};
-    ui.DrawFilledRectangle(
-        {{statusPosition.X - 5.0F, statusPosition.Y - 3.0F},
-         {statusPosition.X + static_cast<float>(viewportStatus.size()) * 7.0F + 5.0F, statusPosition.Y + 18.0F}},
-        {0.03F, 0.04F, 0.06F, 0.72F}, 4.0F);
-    ui.DrawOverlayText(statusPosition, theme.MutedText, viewportStatus);
-    if (m_Gizmos->Settings().ShowOcclusionMetadata && imageRect.Size().Width >= 440.0F &&
-        imageRect.Size().Height >= 180.0F)
+    const float statusWidth =
+        std::min(ui.MeasureText(viewportStatus).Width + 10.0F, std::max(0.0F, imageRect.Size().Width - 24.0F));
+    const Keire::UiItemRect statusRect{{statusPosition.X - 5.0F, statusPosition.Y - 3.0F},
+                                       {statusPosition.X - 5.0F + statusWidth, statusPosition.Y + 18.0F}};
+    const bool statusVisible = statusWidth > 0.0F && CanPlaceSceneViewportStatus(imageRect);
+    if (statusVisible)
+    {
+        ui.DrawFilledRectangle(statusRect, {0.03F, 0.04F, 0.06F, 0.72F}, 4.0F);
+        ui.DrawOverlayText(statusPosition, theme.MutedText, viewportStatus, 0.0F, statusRect);
+    }
+    const auto cameraPreviewReservation =
+        cameraPreviewRect.Size().Width > 0.0F && cameraPreviewRect.Size().Height > 0.0F
+            ? std::optional<Keire::UiItemRect>{cameraPreviewRect}
+            : std::nullopt;
+    const auto performanceOverlay = m_Controller.DrawSceneViewportPerformanceOverlay(
+        ui, imageRect, occlusionSurfaceState, cameraPreviewReservation);
+    if (m_Gizmos->Settings().ShowOcclusionMetadata)
     {
         const auto statistics = renderer->Statistics();
         const auto diagnostics = BuildGpuOcclusionSurfaceDiagnostics(occlusionSurfaceState, &statistics);
-        auto diagnosticsTitle = "GPU OCCLUSION / " + std::string(GpuOcclusionDebugViewName(occlusionDebugView));
+        auto diagnosticsTitle =
+            "EDITOR CAMERA GPU OCCLUSION / " + std::string(GpuOcclusionDebugViewName(occlusionDebugView));
         if (occlusionDebugView == Keire::GpuOcclusionDebugView::HierarchicalDepth)
             diagnosticsTitle += " / MIP " + std::to_string(occlusionDebugMip);
-        constexpr float diagnosticsWidth = 416.0F;
-        constexpr float diagnosticsHeight = 94.0F;
-        const float maximumY = m_CameraPreviewVisible && cameraPreviewRect.Size().Height > 0.0F
-                                   ? cameraPreviewRect.Minimum.Y - 8.0F
-                                   : imageRect.Maximum.Y - 8.0F;
-        const Keire::UiItemRect diagnosticsRect{
-            {imageRect.Maximum.X - diagnosticsWidth - 8.0F, maximumY - diagnosticsHeight},
-            {imageRect.Maximum.X - 8.0F, maximumY}};
-        const auto stateColor = diagnostics.Warning                                        ? theme.Warning
-                                : diagnostics.State == GpuOcclusionDiagnosticState::Active ? theme.Success
-                                                                                           : theme.MutedText;
-        ui.DrawFilledRectangle(diagnosticsRect, {0.018F, 0.024F, 0.035F, 0.90F}, 6.0F);
-        ui.DrawRectangle(diagnosticsRect, {stateColor.Red, stateColor.Green, stateColor.Blue, 0.72F}, 1.0F, 6.0F);
-        ui.DrawOverlayText({diagnosticsRect.Minimum.X + 10.0F, diagnosticsRect.Minimum.Y + 7.0F}, stateColor,
-                           diagnosticsTitle, 10.0F, diagnosticsRect);
-        ui.DrawOverlayText({diagnosticsRect.Minimum.X + 10.0F, diagnosticsRect.Minimum.Y + 23.0F}, theme.Text,
-                           diagnostics.Status, 11.0F, diagnosticsRect);
-        ui.DrawOverlayText({diagnosticsRect.Minimum.X + 10.0F, diagnosticsRect.Minimum.Y + 39.0F}, theme.MutedText,
-                           diagnostics.Visibility, 11.0F, diagnosticsRect);
-        ui.DrawOverlayText({diagnosticsRect.Minimum.X + 10.0F, diagnosticsRect.Minimum.Y + 55.0F}, theme.MutedText,
-                           diagnostics.Pyramid, 11.0F, diagnosticsRect);
-        ui.DrawOverlayText({diagnosticsRect.Minimum.X + 10.0F, diagnosticsRect.Minimum.Y + 71.0F}, theme.MutedText,
-                           diagnostics.Readback, 11.0F, diagnosticsRect);
+        const std::string_view diagnosticsLegend =
+            occlusionDebugView == Keire::GpuOcclusionDebugView::VisibilityBounds
+                ? "Green = visible | red = culled for this editor camera"
+                : "Camera-local result | use the bug button to inspect visibility bounds";
+        const float previewMaximumY = m_CameraPreviewVisible && cameraPreviewRect.Size().Height > 0.0F
+                                          ? cameraPreviewRect.Minimum.Y - 8.0F
+                                          : imageRect.Maximum.Y - 8.0F;
+        const float statusMaximumY = statusVisible ? statusRect.Minimum.Y - 8.0F : imageRect.Maximum.Y - 8.0F;
+        const float maximumY = std::min(previewMaximumY, statusMaximumY);
+        if (const auto diagnosticsRect = PlaceSceneOcclusionDiagnostics(imageRect, maximumY, performanceOverlay))
+        {
+            const auto stateColor = diagnostics.Warning                                        ? theme.Warning
+                                    : diagnostics.State == GpuOcclusionDiagnosticState::Active ? theme.Success
+                                                                                               : theme.MutedText;
+            ui.DrawFilledRectangle(*diagnosticsRect, {0.018F, 0.024F, 0.035F, 0.90F}, 6.0F);
+            ui.DrawRectangle(*diagnosticsRect, {stateColor.Red, stateColor.Green, stateColor.Blue, 0.72F}, 1.0F, 6.0F);
+            ui.DrawOverlayText({diagnosticsRect->Minimum.X + 10.0F, diagnosticsRect->Minimum.Y + 7.0F}, stateColor,
+                               diagnosticsTitle, 10.0F, *diagnosticsRect);
+            ui.DrawOverlayText({diagnosticsRect->Minimum.X + 10.0F, diagnosticsRect->Minimum.Y + 23.0F}, theme.Text,
+                               diagnostics.Status, 11.0F, *diagnosticsRect);
+            ui.DrawOverlayText({diagnosticsRect->Minimum.X + 10.0F, diagnosticsRect->Minimum.Y + 39.0F},
+                               theme.MutedText, diagnostics.Visibility, 11.0F, *diagnosticsRect);
+            ui.DrawOverlayText({diagnosticsRect->Minimum.X + 10.0F, diagnosticsRect->Minimum.Y + 55.0F},
+                               theme.MutedText, diagnostics.Pyramid, 11.0F, *diagnosticsRect);
+            ui.DrawOverlayText({diagnosticsRect->Minimum.X + 10.0F, diagnosticsRect->Minimum.Y + 71.0F},
+                               theme.MutedText, diagnostics.Readback, 11.0F, *diagnosticsRect);
+            ui.DrawOverlayText({diagnosticsRect->Minimum.X + 10.0F, diagnosticsRect->Minimum.Y + 87.0F},
+                               theme.MutedText, diagnosticsLegend, 11.0F, *diagnosticsRect);
+        }
     }
-    const bool pointerBlocked = toolbarRect.Contains(ui.PointerState().Position) ||
-                                orientationRect.Contains(ui.PointerState().Position) ||
-                                (m_CameraPreviewVisible && cameraPreviewRect.Contains(ui.PointerState().Position));
+    const bool pointerBlocked =
+        toolbarRect.Contains(ui.PointerState().Position) ||
+        (orientationLayout.ButtonCount > 0U && orientationRect.Contains(ui.PointerState().Position)) ||
+        (m_CameraPreviewVisible && cameraPreviewRect.Contains(ui.PointerState().Position));
     if (renderScene)
     {
         const bool allowManipulation = !m_Controller.SceneViewportPlayReviewActive();

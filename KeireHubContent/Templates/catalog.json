@@ -108,7 +108,7 @@
       "compatibleEditors": ">=0.3.0 <2.0.0",
       "projectSchema": 4,
       "platformTarget": "desktop",
-      "estimatedSizeBytes": 25046899,
+      "estimatedSizeBytes": 25046987,
       "payloadRoot": "Payloads/Sandbox",
       "payloadFiles": [
         {
@@ -509,12 +509,12 @@
         {
           "path": "Assets/Scenes/GpuOcclusionStress.keirescene",
           "sizeBytes": 223229,
-          "sha256": "ed631045524eaf68de50aa58a84e1e7dc7146f58eb5ad4abe52802c53bc92550"
+          "sha256": "a23df0511e5625dff4e46b1c362f376940e511e7ca86a49bb83874aba38d120a"
         },
         {
           "path": "Assets/Scenes/GpuOcclusionStress.keirescene.keiremeta",
-          "sizeBytes": 263,
-          "sha256": "ea3446b185096ef2a7f8da8257ceaa0b555a2b78808d4f73b2223d24258a6216"
+          "sizeBytes": 351,
+          "sha256": "5eac5364e4d34a7ef693cea5f52e5a9e75ea960f99f934e66d74cbb8db6b978d"
         },
         {
           "path": "Assets/Scenes/SampleScene.keirescene",

@@ -882,14 +882,14 @@ TEST_CASE("play change tracker distinguishes mixed values and enforces created-p
         session->RuntimeScene()->FindEntity(original.Id()).GetComponent(CustomComponent::StaticType()));
     REQUIRE(runtimeCustom);
     runtimeCustom->Value = 4.0;
-    tracker.RecordMutation(before, session->RuntimeScene()->Snapshot());
+    tracker.RecordMutation(before, session->RuntimeScene()->Snapshot(), registry);
     runtimeCustom->Value = 6.0;
 
     before = session->RuntimeScene()->Snapshot();
     auto parent = session->RuntimeScene()->CreateEntity("Created Parent");
     auto child = session->RuntimeScene()->CreateEntity("Created Child");
     child.SetParent(parent, false);
-    tracker.RecordMutation(before, session->RuntimeScene()->Snapshot());
+    tracker.RecordMutation(before, session->RuntimeScene()->Snapshot(), registry);
 
     KeireEditor::ScenePlayChangeSet changes(editing, session->RuntimeScene(), tracker);
     const auto all = changes.Changes();
@@ -957,7 +957,7 @@ TEST_CASE("play changes preserve selected unavailable component replacements")
     auto after = before;
     after.Objects.front().Components.back().Data = "{\"value\":2}";
     session->ReplaceRuntime(after);
-    tracker.RecordMutation(before, after);
+    tracker.RecordMutation(before, after, editing->Components());
 
     KeireEditor::ScenePlayChangeSet changes(editing, session->RuntimeScene(), tracker);
     REQUIRE(changes.HasSelectedChanges());

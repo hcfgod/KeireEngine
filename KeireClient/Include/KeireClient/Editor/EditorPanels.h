@@ -4,6 +4,7 @@
 
 #include "Keire/Core.h"
 #include "KeireClient/Editor/ExternalEditorProfiles.h"
+#include "KeireClient/Editor/InspectorTransformUndo.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -65,6 +66,10 @@ namespace KeireEditor
         virtual void RecordSceneViewportUndo(std::string_view name) = 0;
         virtual void SelectSceneViewportEntity(Keire::AssetId entity, bool additive) = 0;
         virtual void SetSceneViewportSelection(std::span<const Keire::EntityId> entities, bool additive) = 0;
+        [[nodiscard]] virtual std::optional<Keire::UiItemRect>
+        DrawSceneViewportPerformanceOverlay(Keire::UiFrame& ui, Keire::UiItemRect viewport,
+                                            std::optional<Keire::GpuOcclusionSurfaceDiagnostics> occlusionSurface,
+                                            std::optional<Keire::UiItemRect> occupied = std::nullopt) = 0;
     };
 
     class IHierarchyController
@@ -114,6 +119,7 @@ namespace KeireEditor
         virtual void ActivateInspectorHistory() noexcept = 0;
         virtual void ActivateInspectorManagedDataHistory() noexcept = 0;
         virtual void RecordInspectorUndo(std::string_view name = "Edit Scene", std::string mergeKey = {}) = 0;
+        virtual void ApplyInspectorTransformEdit(InspectorTransformEdit edit) = 0;
         virtual void NotifyInspectorMaterialAssigned(Keire::AssetId) {}
         virtual void AddScriptToEntity(Keire::EntityId, Keire::AssetId)
         {

@@ -1000,7 +1000,13 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
         m_PlayRuntimeWorld->Process();
         const auto active = m_PlayRuntimeWorld->Session(m_PlayRuntimeWorld->Active());
         if (active && active != m_SceneDocument->PlaySession())
+        {
+            if (m_PlayChangeTracker)
+                m_PlayChangeTracker->BindSession(active);
+            m_PlayEditorTouchedEntities.clear();
+            m_PendingPlayEditorBefore.reset();
             m_SceneDocument->SetPlaySession(active);
+        }
         m_PlayRuntimeWorld->Update(static_cast<float>(time.DeltaTime().Seconds()),
                                    static_cast<float>(time.InterpolationAlpha()));
         const auto sessions = m_PlayRuntimeWorld->Sessions();
@@ -1359,9 +1365,6 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
     {
         Keire::ProfileScope sceneViewport(profiler, Keire::ProfileCategory::User, "Editor UI / Scene viewport");
         m_SceneViewportPanel->Draw(ui);
-        if (!playActive)
-            DrawPerformanceOverlay(ui, m_SceneViewportPanel->ViewportRect(), "SCENE",
-                                   m_SceneViewportPanel->OcclusionDiagnostics());
     }
     {
         Keire::ProfileScope gameViewport(profiler, Keire::ProfileCategory::User, "Editor UI / Game viewport");

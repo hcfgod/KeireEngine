@@ -1,5 +1,7 @@
 #include "KeireClient/Editor/SceneDocument.h"
 
+#include "KeireClient/Editor/InspectorTransformUndo.h"
+
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/ECS/Components/CharacterControllerComponent.h"
 #include "Keire/ECS/Components/ColliderComponent.h"
@@ -17,6 +19,89 @@ namespace KeireEditor
 {
     namespace
     {
+        [[nodiscard]] bool ValidTransformValue(const InspectorTransformProperty property,
+                                               const InspectorTransformValue& value)
+        {
+            switch (property)
+            {
+            case InspectorTransformProperty::Position:
+            case InspectorTransformProperty::Scale:
+                return std::holds_alternative<Keire::Vector3>(value);
+            case InspectorTransformProperty::Rotation:
+                return std::holds_alternative<Keire::Quaternion>(value);
+            }
+            return false;
+        }
+
+        class SceneDocumentEditGeneration final : public Keire::RefCounted
+        {
+        };
+
+        class InspectorTransformUndoCommand final : public Keire::UndoCommand
+        {
+          public:
+            InspectorTransformUndoCommand(const Keire::AssetId scene, const bool playMode, InspectorTransformEdit edit,
+                                          InspectorTransformApply apply, Keire::UndoAvailability available)
+                : m_Scene(scene), m_PlayMode(playMode), m_Entity(edit.Entity), m_Property(edit.Property),
+                  m_Before(std::move(edit.Before)), m_After(std::move(edit.After)), m_Name(std::move(edit.Name)),
+                  m_MergeKey(std::move(edit.MergeKey)), m_Scope(edit.Scope), m_HasScope(static_cast<bool>(edit.Scope)),
+                  m_Apply(std::move(apply)), m_Available(std::move(available))
+            {
+            }
+
+            [[nodiscard]] std::string_view Name() const noexcept override { return m_Name; }
+            [[nodiscard]] std::size_t EstimatedBytes() const noexcept override
+            {
+                return sizeof(*this) + m_Name.size() + m_MergeKey.size();
+            }
+            [[nodiscard]] bool Available() const noexcept override
+            {
+                try
+                {
+                    return !m_Available || m_Available();
+                }
+                catch (...)
+                {
+                    return false;
+                }
+            }
+            void Redo() override { m_Apply(m_Entity, m_Property, m_After); }
+            void Undo() override { m_Apply(m_Entity, m_Property, m_Before); }
+            [[nodiscard]] bool TryMerge(const Keire::UndoCommand& newer) override
+            {
+                const auto* command = dynamic_cast<const InspectorTransformUndoCommand*>(&newer);
+                if (!command || m_MergeKey.empty() || command->m_MergeKey != m_MergeKey ||
+                    command->m_Scene != m_Scene || command->m_PlayMode != m_PlayMode || command->m_Entity != m_Entity ||
+                    command->m_Property != m_Property || command->m_HasScope != m_HasScope)
+                {
+                    return false;
+                }
+                if (m_HasScope)
+                {
+                    const auto scope = m_Scope.Lock();
+                    const auto newerScope = command->m_Scope.Lock();
+                    if (!scope || !newerScope || scope != newerScope)
+                        return false;
+                }
+                m_After = command->m_After;
+                return true;
+            }
+
+          private:
+            Keire::AssetId m_Scene;
+            bool m_PlayMode = false;
+            Keire::EntityId m_Entity;
+            InspectorTransformProperty m_Property = InspectorTransformProperty::Position;
+            InspectorTransformValue m_Before;
+            InspectorTransformValue m_After;
+            std::string m_Name;
+            std::string m_MergeKey;
+            Keire::WeakRef<Keire::RefCounted> m_Scope;
+            bool m_HasScope = false;
+            InspectorTransformApply m_Apply;
+            Keire::UndoAvailability m_Available;
+        };
+
         void FitColliderToBuiltinMesh(const Keire::Ref<Keire::ColliderComponent>& collider,
                                       const Keire::BuiltinMesh mesh, const Keire::AssetId meshAsset)
         {
@@ -74,6 +159,98 @@ namespace KeireEditor
             }
         }
     } // namespace
+
+    Keire::Ref<Keire::RefCounted> InspectorTransformSceneScope::Identity() const noexcept
+    {
+        if (PlayMode)
+            return Keire::Ref<Keire::RefCounted>(PlaySession.Lock());
+        return EditGeneration.Lock();
+    }
+
+    InspectorTransformSceneScope CaptureInspectorTransformSceneScope(const SceneDocument& document)
+    {
+        InspectorTransformSceneScope result{.Asset = document.Asset()};
+        if (const auto session = document.PlaySession())
+        {
+            result.PlayMode = true;
+            result.PlaySession = session;
+        }
+        else
+        {
+            result.EditHistory = document.History();
+            result.EditGeneration = document.EditGeneration();
+        }
+        return result;
+    }
+
+    Keire::Ref<Keire::Scene> ResolveInspectorTransformScene(const SceneDocument& document,
+                                                            const InspectorTransformSceneScope& scope) noexcept
+    {
+        if (document.Asset() != scope.Asset)
+            return {};
+        if (scope.PlayMode)
+        {
+            const auto expectedSession = scope.PlaySession.Lock();
+            if (!expectedSession || document.PlaySession() != expectedSession)
+                return {};
+            return expectedSession->RuntimeScene();
+        }
+        if (document.PlaySession())
+            return {};
+        const auto expectedGeneration = scope.EditGeneration.Lock();
+        if (!expectedGeneration || document.EditGeneration() != expectedGeneration)
+            return {};
+        const auto expectedHistory = scope.EditHistory.Lock();
+        if (expectedHistory ? document.History() != expectedHistory : static_cast<bool>(document.History()))
+            return {};
+        return document.EditingScene();
+    }
+
+    InspectorTransformEdit MakeInspectorTransformEdit(const Keire::EntityId entity,
+                                                      const InspectorTransformProperty property,
+                                                      InspectorTransformValue before, InspectorTransformValue after,
+                                                      const std::uint64_t editSerial)
+    {
+        std::string name;
+        std::string propertyName;
+        switch (property)
+        {
+        case InspectorTransformProperty::Position:
+            name = "Change Position";
+            propertyName = "position";
+            break;
+        case InspectorTransformProperty::Rotation:
+            name = "Change Rotation";
+            propertyName = "rotation";
+            break;
+        case InspectorTransformProperty::Scale:
+            name = "Change Scale";
+            propertyName = "scale";
+            break;
+        }
+        return {.Entity = entity,
+                .Property = property,
+                .Before = std::move(before),
+                .After = std::move(after),
+                .Name = std::move(name),
+                .MergeKey = "transform." + propertyName + "." + entity.ToString() + "." + std::to_string(editSerial)};
+    }
+
+    std::unique_ptr<Keire::UndoCommand>
+    CreateInspectorTransformUndoCommand(const Keire::AssetId scene, const bool playMode, InspectorTransformEdit edit,
+                                        InspectorTransformApply apply, Keire::UndoAvailability available)
+    {
+        if (!edit.Entity)
+            throw std::invalid_argument("A Transform undo edit requires an entity.");
+        if (edit.Name.empty())
+            throw std::invalid_argument("A Transform undo edit requires a name.");
+        if (!ValidTransformValue(edit.Property, edit.Before) || !ValidTransformValue(edit.Property, edit.After))
+            throw std::invalid_argument("A Transform undo edit value does not match its property.");
+        if (!apply)
+            throw std::invalid_argument("A Transform undo edit requires an apply operation.");
+        return std::make_unique<InspectorTransformUndoCommand>(scene, playMode, std::move(edit), std::move(apply),
+                                                               std::move(available));
+    }
 
     Keire::Ref<Keire::Scene> SceneDocument::ActiveScene() const noexcept
     {
@@ -489,6 +666,7 @@ namespace KeireEditor
             throw std::invalid_argument("SceneDocument::Open requires a scene.");
         Close();
         m_Scene = std::move(scene);
+        m_EditGeneration = Keire::CreateRef<SceneDocumentEditGeneration>();
         m_Asset = asset ? asset : m_Scene->Asset();
         m_Source = std::move(source);
         m_Undo = std::move(undo);
@@ -642,6 +820,7 @@ namespace KeireEditor
         if (m_Scene)
             m_Scene->Close();
         m_Scene.Reset();
+        m_EditGeneration.Reset();
         m_Undo.Reset();
         m_Asset = {};
         ClearSelection();

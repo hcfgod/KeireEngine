@@ -114,6 +114,15 @@ namespace KeireEditor
                 m_Settings.OcclusionDebugMip = 0;
         }
         void SetOcclusionDebugMip(std::uint32_t mip) noexcept { m_Settings.OcclusionDebugMip = mip; }
+        void ToggleOcclusionVisibilityDebug() noexcept
+        {
+            m_Settings.OcclusionDebugView =
+                m_Settings.OcclusionDebugView == Keire::GpuOcclusionDebugView::VisibilityBounds
+                    ? Keire::GpuOcclusionDebugView::None
+                    : Keire::GpuOcclusionDebugView::VisibilityBounds;
+            m_Settings.OcclusionDebugMip = 0;
+            m_Settings.ShowOcclusionMetadata = true;
+        }
         void ClampOcclusionDebugMip(std::uint32_t availableMipCount) noexcept
         {
             if (m_Settings.OcclusionDebugView != Keire::GpuOcclusionDebugView::HierarchicalDepth ||

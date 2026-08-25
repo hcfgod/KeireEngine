@@ -18,6 +18,7 @@
 #include "Keire/Vfx/VfxVolumeAsset.h"
 #include "KeireInternal/Rendering/FrameGraphInternal.h"
 #include "KeireInternal/Rendering/RenderShaderDataInternal.h"
+#include "KeireInternal/Rendering/RenderStatisticsInternal.h"
 #include "KeireInternal/Rendering/SpatialLightingInternal.h"
 
 #include <SDL3/SDL.h>
@@ -1441,7 +1442,7 @@ namespace Keire::RenderBackend
         std::condition_variable RenderQueueReady;
         std::condition_variable RenderQueueSpace;
         std::deque<std::function<void()>> RenderQueue;
-        std::deque<float> PreparationSamples;
+        CpuPreparationTracker CpuPreparation;
         std::uint64_t SkinningStaticBuilds = 0;
         std::uint64_t SkinningOutputBuilds = 0;
         std::uint64_t GpuSubmissionSerial = 0;

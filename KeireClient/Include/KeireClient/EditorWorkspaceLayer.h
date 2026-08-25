@@ -185,6 +185,10 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void RecordSceneViewportUndo(std::string_view name) override;
     void SelectSceneViewportEntity(Keire::AssetId entity, bool additive) override;
     void SetSceneViewportSelection(std::span<const Keire::EntityId> entities, bool additive) override;
+    [[nodiscard]] std::optional<Keire::UiItemRect>
+    DrawSceneViewportPerformanceOverlay(Keire::UiFrame& ui, Keire::UiItemRect viewport,
+                                        std::optional<Keire::GpuOcclusionSurfaceDiagnostics> occlusionSurface,
+                                        std::optional<Keire::UiItemRect> occupied = std::nullopt) override;
     void DrawGame(Keire::UiFrame& ui);
     [[nodiscard]] Keire::Ref<Keire::Scene> ActiveHierarchyScene() const noexcept override;
     [[nodiscard]] KeireEditor::SceneDocument& HierarchyDocument() noexcept override;
@@ -203,8 +207,10 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void DrawProfiler(Keire::UiFrame& ui);
     void DrawRenderGraph(Keire::UiFrame& ui);
     void DrawArchitectureDashboard(Keire::UiFrame& ui);
-    void DrawPerformanceOverlay(Keire::UiFrame& ui, Keire::UiItemRect viewport, std::string_view label,
-                                std::optional<Keire::GpuOcclusionSurfaceDiagnostics> occlusionSurface = std::nullopt);
+    [[nodiscard]] std::optional<Keire::UiItemRect>
+    DrawPerformanceOverlay(Keire::UiFrame& ui, Keire::UiItemRect viewport, std::string_view label,
+                           std::optional<Keire::GpuOcclusionSurfaceDiagnostics> occlusionSurface = std::nullopt,
+                           bool reserveToolbar = false, std::optional<Keire::UiItemRect> occupied = std::nullopt);
     void DrawProject(Keire::UiFrame& ui);
     [[nodiscard]] const Keire::UiThemeDefinition& AssetBrowserTheme() const noexcept override;
     [[nodiscard]] Keire::Ref<Keire::AssetDatabase> AssetBrowserDatabase() const noexcept override;
@@ -292,6 +298,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void ActivateInspectorHistory() noexcept override;
     void ActivateInspectorManagedDataHistory() noexcept override;
     void RecordInspectorUndo(std::string_view name, std::string mergeKey = {}) override;
+    void ApplyInspectorTransformEdit(KeireEditor::InspectorTransformEdit edit) override;
     void NotifyInspectorMaterialAssigned(Keire::AssetId material) override;
     void AddScriptToEntity(Keire::EntityId entity, Keire::AssetId script) override;
     void CommitInspectorMaterial() override;

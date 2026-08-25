@@ -210,6 +210,7 @@ namespace Keire::RenderBackend
         FrameActive = true;
         Requests.clear();
         RuntimeUiCommands.clear();
+        CpuPreparation.BeginFrame();
         ++Statistics.Frame;
         Statistics.Passes = 0;
         Statistics.Surfaces = 0;
@@ -502,18 +503,8 @@ namespace Keire::RenderBackend
                 packet.DrawItems.push_back(std::move(*item));
         }
         Requests.push_back({std::move(packet), &surface});
-        Statistics.CpuPreparationMilliseconds =
-            std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - preparationStarted).count();
-        PreparationSamples.push_back(Statistics.CpuPreparationMilliseconds);
-        constexpr std::size_t sampleWindow = 120;
-        if (PreparationSamples.size() > sampleWindow)
-            PreparationSamples.pop_front();
-        std::array<float, sampleWindow> orderedSamples{};
-        std::ranges::copy(PreparationSamples, orderedSamples.begin());
-        std::ranges::sort(orderedSamples.begin(),
-                          orderedSamples.begin() + static_cast<std::ptrdiff_t>(PreparationSamples.size()));
-        const auto percentileIndex = (PreparationSamples.size() * 95U + 99U) / 100U - 1U;
-        Statistics.CpuPreparationP95Milliseconds = orderedSamples[percentileIndex];
+        CpuPreparation.Accumulate(
+            std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - preparationStarted).count());
     }
 
     const GpuMeshResources& RenderSharedState::ResolveMesh(const AssetId id)

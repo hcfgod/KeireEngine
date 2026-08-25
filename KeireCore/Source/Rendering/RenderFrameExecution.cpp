@@ -54,6 +54,9 @@ namespace Keire::RenderBackend
         if (!FrameActive)
             throw std::logic_error("No render frame is active.");
         FrameActive = false;
+        CpuPreparation.EndFrame();
+        Statistics.CpuPreparationMilliseconds = CpuPreparation.CompletedMilliseconds();
+        Statistics.CpuPreparationP95Milliseconds = CpuPreparation.P95Milliseconds();
 
         if (Specification.Mode == RenderMode::Headless)
         {

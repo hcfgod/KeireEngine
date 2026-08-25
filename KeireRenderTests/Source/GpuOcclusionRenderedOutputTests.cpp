@@ -41,6 +41,20 @@ namespace
         return maximum;
     }
 
+    [[nodiscard]] std::size_t RedDominantPixelCount(const std::vector<std::uint8_t>& pixels) noexcept
+    {
+        std::size_t result = 0;
+        for (std::size_t offset = 0; offset + 3U < pixels.size(); offset += 4U)
+        {
+            constexpr std::uint8_t minimumDominance = 32U;
+            const auto red = static_cast<std::uint16_t>(pixels[offset]);
+            const auto green = static_cast<std::uint16_t>(pixels[offset + 1U]);
+            const auto blue = static_cast<std::uint16_t>(pixels[offset + 2U]);
+            result += static_cast<std::size_t>(red > green + minimumDominance && red > blue + minimumDominance);
+        }
+        return result;
+    }
+
     struct MultiSurfaceResults final
     {
         std::array<std::vector<std::uint8_t>, 3> Frames;
@@ -672,6 +686,137 @@ namespace
         bool m_FallbackFirst = false;
         bool m_Submitted = false;
     };
+
+    struct CameraLocalGpuOcclusionResults final
+    {
+        std::array<std::vector<std::uint8_t>, 2> Frames;
+        std::array<Keire::GpuOcclusionSurfaceDiagnostics, 2> Diagnostics;
+        Keire::RenderStatistics Statistics;
+        bool Captured = false;
+        bool TimedOut = false;
+    };
+
+    class CameraLocalGpuOcclusionLayer final : public Keire::Layer
+    {
+      public:
+        CameraLocalGpuOcclusionLayer(const Keire::AssetId mesh, const Keire::AssetId material,
+                                     std::shared_ptr<CameraLocalGpuOcclusionResults> results)
+            : Layer("Camera-local GPU occlusion surfaces"), m_Mesh(mesh), m_Material(material),
+              m_Results(std::move(results))
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            m_Scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                     Keire::SceneAsset::EmptyDefinition("Camera-local GPU occlusion"),
+                                                     Keire::ComponentRegistry::CreateDefault());
+            auto occluder = m_Scene->CreateEntity("Front-camera occluder");
+            const auto occluderRenderer = occluder.AddComponent<Keire::MeshRendererComponent>();
+            occluderRenderer->SetMesh(m_Mesh);
+            occluderRenderer->SetMaterial(m_Material);
+            occluder.GetComponent<Keire::TransformComponent>()->SetLocalScale({4.0F, 4.0F, 0.2F});
+
+            auto target = m_Scene->CreateEntity("Camera-local target");
+            const auto targetRenderer = target.AddComponent<Keire::MeshRendererComponent>();
+            targetRenderer->SetMesh(m_Mesh);
+            targetRenderer->SetMaterial(m_Material);
+            const auto targetTransform = target.GetComponent<Keire::TransformComponent>();
+            targetTransform->SetLocalPosition(TargetPosition);
+            targetTransform->SetLocalScale({0.75F, 0.75F, 0.75F});
+
+            Keire::RenderSurfaceSpecification surface;
+            surface.Width = SurfaceSize;
+            surface.Height = SurfaceSize;
+            surface.ClearColor = {0.0F, 0.0F, 0.0F, 1.0F};
+            surface.SampleCount = Keire::RenderSampleCount::One;
+            surface.Depth = true;
+            for (std::size_t index = 0; index < m_Views.size(); ++index)
+            {
+                surface.Name = index == 0U ? "Front game camera" : "Side observer camera";
+                m_Views[index] = Owner().Renderer()->CreateView(surface);
+                m_Views[index]->Surface()->SetOcclusionDebugView(Keire::GpuOcclusionDebugView::VisibilityBounds);
+            }
+
+            Keire::RenderCamera frontCamera;
+            frontCamera.View = Keire::Math::LookAt({0.0F, 0.0F, 6.0F}, {}, {0.0F, 1.0F, 0.0F});
+            frontCamera.Projection = Keire::Math::Perspective(55.0F, 1.0F, 0.1F, 100.0F);
+            frontCamera.ClearColor = surface.ClearColor;
+            m_Views[0]->SetCamera(frontCamera);
+
+            auto observerCamera = frontCamera;
+            observerCamera.View = Keire::Math::LookAt({8.0F, 0.0F, 5.0F}, TargetPosition, {0.0F, 1.0F, 0.0F});
+            m_Views[1]->SetCamera(observerCamera);
+
+            m_Environment.AmbientColor = {1.0F, 1.0F, 1.0F, 1.0F};
+            m_Environment.AmbientIntensity = 1.0F;
+            m_Environment.SkyVisible = false;
+            m_Environment.GpuOcclusion = Keire::GpuOcclusionMode::Forced;
+        }
+
+        void OnDetach() noexcept override
+        {
+            if (m_Scene)
+                m_Scene->Close();
+            for (auto& view : m_Views)
+                view.Reset();
+            m_Scene.Reset();
+        }
+
+        void OnUpdate(const Keire::Time&) override
+        {
+            if (m_Submitted)
+            {
+                for (std::size_t index = 0; index < m_Views.size(); ++index)
+                {
+                    m_Results->Frames[index] = Keire::RenderSystemInternalAccess::ReadbackRGBA8(
+                        *Owner().Renderer(), *m_Views[index]->Surface());
+                    m_Results->Diagnostics[index] = m_Views[index]->Surface()->OcclusionDiagnostics();
+                }
+                m_Results->Statistics = Owner().Renderer()->Statistics();
+
+                const auto& front = m_Results->Diagnostics[0];
+                const auto& observer = m_Results->Diagnostics[1];
+                const auto active = [](const Keire::GpuOcclusionSurfaceDiagnostics& diagnostics)
+                {
+                    return diagnostics.RequestedMode == Keire::GpuOcclusionMode::Forced &&
+                           diagnostics.EffectiveMode == Keire::GpuOcclusionMode::Forced &&
+                           diagnostics.State == Keire::GpuOcclusionSurfaceState::Active && diagnostics.ReadbackValid;
+                };
+                if (active(front) && active(observer) && front.Culled > 0U && observer.Culled == 0U &&
+                    observer.Visible == observer.Candidates)
+                {
+                    m_Results->Captured = true;
+                    Owner().RequestExit();
+                    return;
+                }
+            }
+
+            if (++m_Frame > MaximumFrames)
+            {
+                m_Results->TimedOut = true;
+                Owner().RequestExit();
+                return;
+            }
+
+            for (const auto& view : m_Views)
+                Owner().Renderer()->Submit({m_Scene, view, false, m_Environment});
+            m_Submitted = true;
+        }
+
+      private:
+        static constexpr Keire::Vector3 TargetPosition{0.0F, 0.0F, -3.0F};
+        static constexpr std::uint32_t MaximumFrames = 180U;
+        Keire::AssetId m_Mesh;
+        Keire::AssetId m_Material;
+        std::shared_ptr<CameraLocalGpuOcclusionResults> m_Results;
+        Keire::Ref<Keire::Scene> m_Scene;
+        std::array<Keire::Ref<Keire::RenderView>, 2> m_Views;
+        Keire::RenderEnvironmentSettings m_Environment;
+        std::uint32_t m_Frame = 0U;
+        bool m_Submitted = false;
+    };
 } // namespace
 
 TEST_CASE("independent render surfaces submit in queue order and survive final-fence retirement")
@@ -700,6 +845,59 @@ TEST_CASE("independent render surfaces submit in queue order and survive final-f
     CHECK(results->OcclusionDiagnostics[2].RequestedMode == Keire::GpuOcclusionMode::Forced);
     CHECK(results->OcclusionDiagnostics[2].State == Keire::GpuOcclusionSurfaceState::Fallback);
     CHECK(results->OcclusionDiagnostics[2].FallbackReason == Keire::GpuOcclusionFallbackReason::LegacyShaderAbi);
+}
+
+TEST_CASE("GPU occlusion decisions remain camera-local across game and observer surfaces")
+{
+    RenderAssetFixture assets(true);
+    const auto results = std::make_shared<CameraLocalGpuOcclusionResults>();
+    auto specification = RenderTestSpecification();
+    specification.Assets.Mode = Keire::AssetMode::Development;
+    specification.Assets.DevelopmentCatalog = assets.Catalog;
+    {
+        Keire::Application application(std::move(specification));
+        (void)application.PushLayer(
+            std::make_unique<CameraLocalGpuOcclusionLayer>(assets.CubeMesh, assets.ShaderGraphMaterial, results));
+        REQUIRE(application.Run() == 0);
+    }
+
+    REQUIRE_FALSE(results->TimedOut);
+    REQUIRE(results->Captured);
+    const auto& front = results->Diagnostics[0];
+    const auto& observer = results->Diagnostics[1];
+    CHECK(front.State == Keire::GpuOcclusionSurfaceState::Active);
+    CHECK(observer.State == Keire::GpuOcclusionSurfaceState::Active);
+    CHECK(front.ReadbackValid);
+    CHECK(observer.ReadbackValid);
+    CHECK(front.SourceFrame != 0U);
+    CHECK(front.SourceFrame == observer.SourceFrame);
+    CHECK(front.Candidates == observer.Candidates);
+    CHECK(front.Candidates == 2U);
+    CHECK(front.Visible == 1U);
+    CHECK(front.Culled == 1U);
+    CHECK(observer.Visible == 2U);
+    CHECK(observer.Culled == 0U);
+    CHECK(front.SafeOccluders == 1U);
+    CHECK(observer.SafeOccluders == 1U);
+
+    const auto& statistics = results->Statistics;
+    CHECK(statistics.GpuOcclusionEnabled);
+    CHECK_FALSE(statistics.GpuOcclusionFallbackActive);
+    CHECK(statistics.GpuOcclusionReadbackValid);
+    CHECK(statistics.GpuOcclusionActiveSurfaces == 2U);
+    CHECK(statistics.GpuOcclusionFallbackSurfaces == 0U);
+    CHECK(statistics.GpuOcclusionPartialFallbackSurfaces == 0U);
+    CHECK(statistics.GpuOcclusionCandidates == front.Candidates + observer.Candidates);
+    CHECK(statistics.GpuOcclusionVisible == front.Visible + observer.Visible);
+    CHECK(statistics.GpuOcclusionCulled == front.Culled + observer.Culled);
+    CHECK(statistics.GpuOcclusionSafeOccluders == front.SafeOccluders + observer.SafeOccluders);
+    CHECK(statistics.GpuOcclusionDispatches > 0U);
+    CHECK(statistics.GpuOcclusionIndirectDraws == 2U);
+
+    for (const auto& frame : results->Frames)
+        REQUIRE(frame.size() == static_cast<std::size_t>(SurfaceSize * SurfaceSize * 4U));
+    CHECK(RedDominantPixelCount(results->Frames[0]) > 0U);
+    CHECK(RedDominantPixelCount(results->Frames[1]) == 0U);
 }
 
 TEST_CASE("same-mode terminal GPU occlusion surfaces reject late active readbacks")

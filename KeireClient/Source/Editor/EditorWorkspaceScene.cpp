@@ -688,6 +688,7 @@ void EditorWorkspaceLayer::BeginPlayMode()
     {
         m_SceneDocument->BeginPlay(std::move(playUndo), Owner().Assets(), Owner().Audio(), Owner().Physics(),
                                    defaultMixer, m_PlayRuntimeWorld);
+        m_PlayChangeTracker->BindSession(m_SceneDocument->PlaySession());
     }
     catch (...)
     {
@@ -952,7 +953,7 @@ void EditorWorkspaceLayer::FinalizePendingPlayEditorMutation()
     if (!m_PendingPlayEditorBefore || !m_PlayChangeTracker || !m_SceneDocument->PlaySession())
         return;
     if (const auto scene = ActiveScene())
-        m_PlayChangeTracker->RecordMutation(*m_PendingPlayEditorBefore, scene->Snapshot());
+        m_PlayChangeTracker->RecordMutation(*m_PendingPlayEditorBefore, scene->Snapshot(), scene->Components());
     m_PendingPlayEditorBefore.reset();
 }
 
@@ -970,7 +971,7 @@ void EditorWorkspaceLayer::UndoSceneEdit()
         const auto before =
             m_SceneDocument->PlaySession() && ActiveScene() ? std::optional(ActiveScene()->Snapshot()) : std::nullopt;
         if (context->Undo() && before && m_PlayChangeTracker && ActiveScene())
-            m_PlayChangeTracker->RecordMutation(*before, ActiveScene()->Snapshot());
+            m_PlayChangeTracker->RecordMutation(*before, ActiveScene()->Snapshot(), ActiveScene()->Components());
     }
 }
 
@@ -982,7 +983,7 @@ void EditorWorkspaceLayer::RedoSceneEdit()
         const auto before =
             m_SceneDocument->PlaySession() && ActiveScene() ? std::optional(ActiveScene()->Snapshot()) : std::nullopt;
         if (context->Redo() && before && m_PlayChangeTracker && ActiveScene())
-            m_PlayChangeTracker->RecordMutation(*before, ActiveScene()->Snapshot());
+            m_PlayChangeTracker->RecordMutation(*before, ActiveScene()->Snapshot(), ActiveScene()->Components());
     }
 }
 
@@ -1000,7 +1001,7 @@ void EditorWorkspaceLayer::ApplyActiveUndo(const bool redo)
         else
             (void)m_ActiveUndoContext->Undo();
         if (before && m_PlayChangeTracker && ActiveScene())
-            m_PlayChangeTracker->RecordMutation(*before, ActiveScene()->Snapshot());
+            m_PlayChangeTracker->RecordMutation(*before, ActiveScene()->Snapshot(), ActiveScene()->Components());
     }
     catch (const std::exception& error)
     {
@@ -1282,6 +1283,19 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
             PersistEditorSessionPreferences();
         ui.SameLine();
         (void)ui.Checkbox("FPS", m_ShowPerformanceOverlay);
+        if (m_GameRenderView && m_GameRenderView->Surface())
+        {
+            const auto surface = m_GameRenderView->Surface();
+            bool visibilityBounds = surface->OcclusionDebugView() == Keire::GpuOcclusionDebugView::VisibilityBounds;
+            ui.SameLine();
+            if (ui.Checkbox("GPU Bounds", visibilityBounds))
+            {
+                surface->SetOcclusionDebugView(visibilityBounds ? Keire::GpuOcclusionDebugView::VisibilityBounds
+                                                                : Keire::GpuOcclusionDebugView::None,
+                                               0U);
+            }
+            ui.SetTooltip("Game-camera GPU visibility: green is visible and red is culled.", {.Delayed = true});
+        }
         const auto scene = RenderedScene(m_SceneDocument->EditingScene(), m_SceneDocument->PlaySession());
         if (!scene)
         {
@@ -1307,7 +1321,7 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         }
 
         ui.TextColored(m_Theme.MutedText,
-                       "Camera: " + selected->Entity.Name() +
+                       "Game camera: " + selected->Entity.Name() + " | GPU visibility is camera-local" +
                            (m_SceneDocument->PlaySession() &&
                                     m_SceneDocument->PlaySession()->State() != Keire::ScenePlayState::Stopped
                                 ? " (Play)"
@@ -1438,13 +1452,10 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
             if (m_GameViewportInputActive)
                 KeireEditor::RouteRuntimeUiKeyboard(ui, playSession->Presentation(), Owner().Windows(), mainWindow);
         }
-        if (playActive)
-        {
-            const auto occlusion = m_GameRenderView && m_GameRenderView->Surface()
-                                       ? std::optional(m_GameRenderView->Surface()->OcclusionDiagnostics())
-                                       : std::nullopt;
-            DrawPerformanceOverlay(ui, imageRect, "GAME", occlusion);
-        }
+        const auto occlusion = m_GameRenderView && m_GameRenderView->Surface()
+                                   ? std::optional(m_GameRenderView->Surface()->OcclusionDiagnostics())
+                                   : std::nullopt;
+        (void)DrawPerformanceOverlay(ui, imageRect, "GAME CAMERA", occlusion);
         return;
     }
     SetGameViewportInputActive(false);

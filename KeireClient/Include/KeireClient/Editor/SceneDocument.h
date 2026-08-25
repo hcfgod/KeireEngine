@@ -37,6 +37,7 @@ namespace KeireEditor
         {
             return m_PlaySession ? m_PlayUndo : m_Undo;
         }
+        [[nodiscard]] Keire::Ref<Keire::RefCounted> EditGeneration() const noexcept { return m_EditGeneration; }
         [[nodiscard]] Keire::AssetId Asset() const noexcept { return m_Asset; }
         [[nodiscard]] Keire::AssetId Selection() const noexcept { return m_Selection; }
         [[nodiscard]] std::span<const Keire::AssetId> Selections() const noexcept { return m_Selections; }
@@ -109,6 +110,7 @@ namespace KeireEditor
 
       private:
         Keire::Ref<Keire::Scene> m_Scene;
+        Keire::Ref<Keire::RefCounted> m_EditGeneration;
         Keire::Ref<Keire::SceneRuntimeSession> m_PlaySession;
         Keire::Ref<Keire::SceneLoadOperation> m_LoadOperation;
         Keire::Ref<Keire::SaveFileDialogOperation> m_SaveDialog;

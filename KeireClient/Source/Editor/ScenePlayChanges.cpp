@@ -1,5 +1,7 @@
 #include "KeireClient/Editor/ScenePlayChanges.h"
 
+#include "KeireInternal/Scenes/SceneSerialization.h"
+
 #include <algorithm>
 #include <cmath>
 #include <map>
@@ -88,6 +90,12 @@ namespace KeireEditor
         {
             return {kind, entity, component, std::move(property)};
         }
+
+        [[nodiscard]] std::string PropertyFingerprint(const std::string_view property,
+                                                      const Keire::ComponentPropertyValue& value)
+        {
+            return Keire::Detail::EncodeComponentPropertyBag({{std::string(property), value}});
+        }
     } // namespace
 
     std::size_t ScenePlayChangePathHash::operator()(const ScenePlayChangePath& path) const noexcept
@@ -100,37 +108,42 @@ namespace KeireEditor
         return combine(result, std::hash<std::string>{}(path.Property));
     }
 
+    void ScenePlayChangeTracker::Record(ScenePlayChangePath path, std::string value)
+    {
+        if (m_NextSequence == std::numeric_limits<std::uint64_t>::max())
+            throw std::overflow_error("The Play change tracker sequence is exhausted.");
+        m_AuthoredValues.insert_or_assign(std::move(path), AuthoredValue{std::move(value), m_NextSequence++});
+    }
+
     void ScenePlayChangeTracker::RecordMutation(const Keire::SceneDefinition& before,
-                                                const Keire::SceneDefinition& after)
+                                                const Keire::SceneDefinition& after,
+                                                const Keire::Ref<Keire::ComponentRegistry>& registry)
     {
         if (before.Name != after.Name)
-            m_AuthoredValues.insert_or_assign(Path(ScenePlayChangeKind::SceneName), after.Name);
+            Record(Path(ScenePlayChangeKind::SceneName), after.Name);
         const auto beforeObjects = IndexObjects(before);
         const auto afterObjects = IndexObjects(after);
         for (const auto& object : before.Objects)
             if (!afterObjects.contains(object.Id))
-                m_AuthoredValues.insert_or_assign(Path(ScenePlayChangeKind::DeleteEntity, object.Id), "Deleted");
+                Record(Path(ScenePlayChangeKind::DeleteEntity, object.Id), "Deleted");
         for (const auto& object : after.Objects)
         {
             const auto beforeFound = beforeObjects.find(object.Id);
             if (beforeFound == beforeObjects.end())
             {
-                m_AuthoredValues.insert_or_assign(Path(ScenePlayChangeKind::CreateEntity, object.Id),
-                                                  ObjectFingerprint(object));
+                Record(Path(ScenePlayChangeKind::CreateEntity, object.Id), ObjectFingerprint(object));
                 continue;
             }
             const auto& previous = *beforeFound->second;
             if (previous.Name != object.Name)
-                m_AuthoredValues.insert_or_assign(Path(ScenePlayChangeKind::EntityName, object.Id), object.Name);
+                Record(Path(ScenePlayChangeKind::EntityName, object.Id), object.Name);
             if (previous.Active != object.Active)
-                m_AuthoredValues.insert_or_assign(Path(ScenePlayChangeKind::EntityActive, object.Id),
-                                                  object.Active ? "true" : "false");
+                Record(Path(ScenePlayChangeKind::EntityActive, object.Id), object.Active ? "true" : "false");
             if (previous.Layer != object.Layer)
-                m_AuthoredValues.insert_or_assign(Path(ScenePlayChangeKind::EntityLayer, object.Id),
-                                                  std::to_string(object.Layer));
+                Record(Path(ScenePlayChangeKind::EntityLayer, object.Id), std::to_string(object.Layer));
             if (previous.Parent != object.Parent)
-                m_AuthoredValues.insert_or_assign(Path(ScenePlayChangeKind::EntityParent, object.Id),
-                                                  object.Parent ? object.Parent.ToString() : "Root");
+                Record(Path(ScenePlayChangeKind::EntityParent, object.Id),
+                       object.Parent ? object.Parent.ToString() : "Root");
 
             std::unordered_map<Keire::ComponentTypeId, const Keire::SceneComponentDefinition*> beforeComponents;
             std::unordered_map<Keire::ComponentTypeId, const Keire::SceneComponentDefinition*> afterComponents;
@@ -140,40 +153,95 @@ namespace KeireEditor
                 afterComponents.emplace(component.Type, &component);
             for (const auto& [type, component] : beforeComponents)
                 if (!afterComponents.contains(type))
-                    m_AuthoredValues.insert_or_assign(Path(ScenePlayChangeKind::RemoveComponent, object.Id, type),
-                                                      "Removed");
+                    Record(Path(ScenePlayChangeKind::RemoveComponent, object.Id, type), "Removed");
             for (const auto& [type, component] : afterComponents)
             {
                 const auto previousComponent = beforeComponents.find(type);
                 if (previousComponent == beforeComponents.end())
                 {
-                    m_AuthoredValues.insert_or_assign(Path(ScenePlayChangeKind::AddComponent, object.Id, type),
-                                                      component->Data);
+                    Record(Path(ScenePlayChangeKind::AddComponent, object.Id, type), component->Data);
                     continue;
                 }
                 if (previousComponent->second->Enabled != component->Enabled)
-                    m_AuthoredValues.insert_or_assign(Path(ScenePlayChangeKind::ComponentEnabled, object.Id, type),
-                                                      component->Enabled ? "true" : "false");
-                if (previousComponent->second->Data != component->Data)
-                    m_AuthoredValues.insert_or_assign(
-                        Path(ScenePlayChangeKind::ComponentProperty, object.Id, type, "*"), component->Data);
+                    Record(Path(ScenePlayChangeKind::ComponentEnabled, object.Id, type),
+                           component->Enabled ? "true" : "false");
+                if (previousComponent->second->Data == component->Data)
+                    continue;
+                const auto registration = registry ? registry->Find(type) : std::nullopt;
+                if (!registration)
+                {
+                    Record(Path(ScenePlayChangeKind::ComponentProperty, object.Id, type, "*"), component->Data);
+                    continue;
+                }
+                const auto previousValues =
+                    Keire::Detail::DecodeComponentPropertyBag(previousComponent->second->Data, *registration);
+                const auto currentValues = Keire::Detail::DecodeComponentPropertyBag(component->Data, *registration);
+                for (const auto& property : registration->Properties)
+                {
+                    const auto previousValue = previousValues.find(property.Key);
+                    const auto currentValue = currentValues.find(property.Key);
+                    if (previousValue == previousValues.end() || currentValue == currentValues.end() ||
+                        previousValue->second == currentValue->second)
+                    {
+                        continue;
+                    }
+                    Record(Path(ScenePlayChangeKind::ComponentProperty, object.Id, type, property.Key),
+                           PropertyFingerprint(property.Key, currentValue->second));
+                }
             }
         }
     }
 
-    void ScenePlayChangeTracker::Clear() noexcept { m_AuthoredValues.clear(); }
+    void ScenePlayChangeTracker::RecordComponentPropertyMutation(const Keire::AssetId entity,
+                                                                 const Keire::ComponentTypeId component,
+                                                                 const std::string_view property,
+                                                                 const Keire::ComponentPropertyValue& value)
+    {
+        if (!entity || !component || property.empty())
+            throw std::invalid_argument("A targeted Play mutation requires an entity, component type, and property.");
+        Record(Path(ScenePlayChangeKind::ComponentProperty, entity, component, std::string(property)),
+               PropertyFingerprint(property, value));
+    }
+
+    void ScenePlayChangeTracker::BindSession(const Keire::Ref<Keire::SceneRuntimeSession>& session) noexcept
+    {
+        if (m_Session.Lock() == session)
+            return;
+        m_Session = session;
+        Clear();
+    }
+
+    void ScenePlayChangeTracker::Clear() noexcept
+    {
+        m_AuthoredValues.clear();
+        m_NextSequence = 1;
+    }
 
     bool ScenePlayChangeTracker::Empty() const noexcept { return m_AuthoredValues.empty(); }
 
     ScenePlayChangeOrigin ScenePlayChangeTracker::Origin(const ScenePlayChangePath& path,
                                                          const std::string_view finalValue) const
     {
+        return Origin(path, finalValue, finalValue);
+    }
+
+    ScenePlayChangeOrigin ScenePlayChangeTracker::Origin(const ScenePlayChangePath& path,
+                                                         const std::string_view finalValue,
+                                                         const std::string_view wildcardFinalValue) const
+    {
         auto found = m_AuthoredValues.find(path);
-        if (found == m_AuthoredValues.end() && path.Kind == ScenePlayChangeKind::ComponentProperty)
-            found = m_AuthoredValues.find(Path(path.Kind, path.Entity, path.Component, "*"));
+        auto wildcard = m_AuthoredValues.end();
+        if (path.Kind == ScenePlayChangeKind::ComponentProperty)
+            wildcard = m_AuthoredValues.find(Path(path.Kind, path.Entity, path.Component, "*"));
+        if (wildcard != m_AuthoredValues.end() &&
+            (found == m_AuthoredValues.end() || wildcard->second.Sequence > found->second.Sequence))
+        {
+            return wildcard->second.Value == wildcardFinalValue ? ScenePlayChangeOrigin::Editor
+                                                                : ScenePlayChangeOrigin::Mixed;
+        }
         if (found == m_AuthoredValues.end())
             return ScenePlayChangeOrigin::Runtime;
-        return found->second == finalValue ? ScenePlayChangeOrigin::Editor : ScenePlayChangeOrigin::Mixed;
+        return found->second.Value == finalValue ? ScenePlayChangeOrigin::Editor : ScenePlayChangeOrigin::Mixed;
     }
 
     class ScenePlayChangeSet::Impl final
@@ -217,11 +285,16 @@ namespace KeireEditor
 
         [[nodiscard]] ScenePlayChangeOrigin Origin(const ScenePlayChangeKind kind, const Keire::AssetId entity,
                                                    const Keire::ComponentTypeId component,
-                                                   const std::string_view property,
-                                                   const std::string_view finalValue) const
+                                                   const std::string_view property, const std::string_view finalValue,
+                                                   const std::string_view wildcardFinalValue = {}) const
         {
             if (Tracker)
+            {
+                if (!wildcardFinalValue.empty())
+                    return Tracker->Origin(Path(kind, entity, component, std::string(property)), finalValue,
+                                           wildcardFinalValue);
                 return Tracker->Origin(Path(kind, entity, component, std::string(property)), finalValue);
+            }
             return EditorTouched.contains(entity) ? ScenePlayChangeOrigin::Editor : ScenePlayChangeOrigin::Runtime;
         }
 
@@ -404,9 +477,10 @@ namespace KeireEditor
                 if (beforeValue == beforeValues.end() || afterValue == afterValues.end() ||
                     beforeValue->second == afterValue->second)
                     continue;
+                const auto propertyFingerprint = PropertyFingerprint(property.Key, afterValue->second);
                 Add({.Kind = ScenePlayChangeKind::ComponentProperty,
                      .Origin = Origin(ScenePlayChangeKind::ComponentProperty, object.Id, afterDefinition.Type,
-                                      property.Key, afterDefinition.Data),
+                                      property.Key, propertyFingerprint, afterDefinition.Data),
                      .Entity = object.Id,
                      .Component = afterDefinition.Type,
                      .Property = property.Key,

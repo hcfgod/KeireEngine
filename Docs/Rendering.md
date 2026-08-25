@@ -148,7 +148,10 @@ Game view, its Scene camera preview, and standalone runtime. Solid Color uses th
 uses the project environment. Scene view retains its independent editor viewpoint but follows the active authored
 Camera's background choice so authoring and Game previews agree. This remains true during Play Mode: hovering Scene
 drives only the editor camera, while the focused and hovered Game view owns managed gameplay input and its authored
-primary camera. Its controls are:
+primary camera. GPU occlusion is likewise camera-local: something hidden from Game may remain visible from an oblique
+Scene camera. The two viewport overlays report their own surface rather than implying global entity visibility. Scene's
+bug button and Game's **GPU Bounds** control expose red/green culling bounds for their respective viewport cameras. Their
+FPS and timing rows remain frame aggregates across every rendered surface. Scene's controls are:
 
 - `F`: frame the selected entity's full imported bounds with visible padding; double-`F` locks the view to it.
 - `Shift+F`: lock or unlock the view pivot to the selected entity.

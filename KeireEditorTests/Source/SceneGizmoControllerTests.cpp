@@ -103,3 +103,30 @@ TEST_CASE("occlusion debug mip selection clamps to live per-surface availability
     controller.SetOcclusionDebugView(Keire::GpuOcclusionDebugView::VisibilityBounds);
     CHECK(controller.Settings().OcclusionDebugMip == 0U);
 }
+
+TEST_CASE("occlusion visibility quick toggle enables camera-local bounds and metadata")
+{
+    KeireEditor::SceneGizmoController controller;
+
+    controller.ToggleOcclusionVisibilityDebug();
+    CHECK(controller.Settings().OcclusionDebugView == Keire::GpuOcclusionDebugView::VisibilityBounds);
+    CHECK(controller.Settings().OcclusionDebugMip == 0U);
+    CHECK(controller.Settings().ShowOcclusionMetadata);
+
+    controller.ToggleOcclusionVisibilityDebug();
+    CHECK(controller.Settings().OcclusionDebugView == Keire::GpuOcclusionDebugView::None);
+    CHECK(controller.Settings().OcclusionDebugMip == 0U);
+    CHECK(controller.Settings().ShowOcclusionMetadata);
+}
+
+TEST_CASE("occlusion visibility quick toggle replaces hierarchical depth without retaining its mip")
+{
+    KeireEditor::SceneGizmoController controller;
+    controller.SetOcclusionDebugView(Keire::GpuOcclusionDebugView::HierarchicalDepth);
+    controller.SetOcclusionDebugMip(7U);
+
+    controller.ToggleOcclusionVisibilityDebug();
+    CHECK(controller.Settings().OcclusionDebugView == Keire::GpuOcclusionDebugView::VisibilityBounds);
+    CHECK(controller.Settings().OcclusionDebugMip == 0U);
+    CHECK(controller.Settings().ShowOcclusionMetadata);
+}

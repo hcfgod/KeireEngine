@@ -743,6 +743,13 @@ structural commands; `InspectorPanel` owns component inspection while its `Asset
 dispatch, diagnostics, naming actions, and material content; and the input-actions, project-settings,
 asset-browser, console, and diagnostics panels own their respective tools. Panels receive document data, frame-value
 snapshots, and named commands through narrow contracts; none retain, friend, or inspect `EditorWorkspaceLayer`.
+Viewport-local overlays are invoked by the owning panel before its RAII scope ends, so backend draw-list ownership cannot
+fall through to an implicit debug window. Scene and Game pass their own camera-local visibility diagnostics into those
+overlays. FPS, profiler categories, dispatch/indirect totals, recording timings, and CPU preparation remain one completed
+renderer-wide frame aggregate shared by both overlays.
+Continuous Inspector Transform drags use compact typed undo commands whose final value is updated as samples merge.
+Play-mode origin tracking records only the edited Transform component, avoiding whole-scene snapshot, JSON encoding,
+and diff work on every pointer sample while preserving Editor versus Mixed change classification.
 `UiPanelRegistration` supplies a common session-local view lock. The UI boundary prevents locked panels from moving,
 resizing, or collapsing, while selection-driven client panels retain only stable entity or asset IDs and validate them
 before each draw.
