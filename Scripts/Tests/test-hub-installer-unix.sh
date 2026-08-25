@@ -13,6 +13,8 @@ grep -Fq 'KEIRE_LINUX_INSTALLER_FORMAT="$LINUX_INSTALLER_FORMAT"' "$launcher"
 grep -q 'Scripts/Unix/package-hub.sh' "$packager"
 grep -q -- '--stage-only' "$packager"
 grep -q 'validate_hub_package_stage' "$packager"
+grep -Fq 'resolve_existing_package_stage "$PLATFORM"' "$packager"
+grep -Fq 'Reusing validated Hub package stage' "$packager"
 if grep -Eq 'Scripts/Unix/package-editor\.sh|validate_editor_package_stage|launch-editor\.sh' "$packager"; then
   printf 'The standalone Unix Hub installer must not stage or launch the editor package.\n' >&2
   exit 1

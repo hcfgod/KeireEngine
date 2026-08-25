@@ -10,6 +10,8 @@ grep -q 'package-installer)' "$launcher"
 grep -Fq '$SCRIPT_DIR/Unix/package-installer.sh' "$launcher"
 grep -q 'Scripts/Unix/package-editor.sh' "$packager"
 grep -q 'validate_editor_package_stage' "$packager"
+grep -Fq 'resolve_existing_package_stage "$PLATFORM"' "$packager"
+grep -Fq 'Reusing validated editor package stage' "$packager"
 grep -q 'hdiutil create' "$packager"
 grep -q 'Applications' "$packager"
 grep -q 'KEIRE_MACOS_SIGNING_IDENTITY' "$packager"
@@ -36,6 +38,26 @@ grep -Fq 'apps/$ARTIFACT_PREFIX-editor.png' "$packager"
 grep -Fq 'StartupWMClass=$CLIENT_TARGET' "$packager"
 grep -Fq 'Depends: libc6, libstdc++6, libgcc-s1, libcurl4t64 | libcurl4' "$packager"
 grep -Fq 'standalone Hub is untouched' "$packager"
+
+source "$ROOT/Scripts/Unix/common.sh"
+stage_fixture="$(mktemp -d)"
+stage_link="${stage_fixture}-link"
+trap 'rm -rf "$stage_fixture"; rm -f "$stage_link"' EXIT
+[[ "$(KEIRE_EXISTING_PACKAGE_STAGE="$stage_fixture" resolve_existing_package_stage Linux)" == "$stage_fixture" ]]
+if KEIRE_EXISTING_PACKAGE_STAGE=relative resolve_existing_package_stage Linux >/dev/null 2>&1; then
+  printf 'The existing package stage must reject relative paths.\n' >&2
+  exit 1
+fi
+if KEIRE_EXISTING_PACKAGE_STAGE="$stage_fixture" resolve_existing_package_stage Mac >/dev/null 2>&1; then
+  printf 'The existing package stage must reject non-Linux installer assembly.\n' >&2
+  exit 1
+fi
+ln -s "$stage_fixture" "$stage_link"
+if KEIRE_EXISTING_PACKAGE_STAGE="$stage_link" resolve_existing_package_stage Linux >/dev/null 2>&1; then
+  printf 'The existing package stage must reject a symbolic-link root.\n' >&2
+  exit 1
+fi
+
 if grep -Fq -- '--force --deep' "$packager"; then
   printf 'The macOS editor installer must sign explicit nested code instead of using --deep.\n' >&2
   exit 1

@@ -632,6 +632,30 @@ validate_editor_package_stage() {
     assert_package_generated_data_free "$stage"
 }
 
+resolve_existing_package_stage() {
+    local platform="$1"
+    local requested="${KEIRE_EXISTING_PACKAGE_STAGE:-}"
+
+    [[ -n "$requested" ]] || {
+      printf 'KEIRE_EXISTING_PACKAGE_STAGE is empty.\n' >&2
+      return 1
+    }
+    [[ "$platform" == Linux ]] || {
+      printf 'KEIRE_EXISTING_PACKAGE_STAGE is supported only for Linux native installer assembly.\n' >&2
+      return 1
+    }
+    [[ "$requested" == /* ]] || {
+      printf 'KEIRE_EXISTING_PACKAGE_STAGE must be an absolute path: %s\n' "$requested" >&2
+      return 1
+    }
+    [[ -d "$requested" && ! -L "$requested" ]] || {
+      printf 'KEIRE_EXISTING_PACKAGE_STAGE must name a concrete package-stage directory: %s\n' "$requested" >&2
+      return 1
+    }
+
+    (cd -P -- "$requested" && pwd)
+}
+
 hub_package_required_paths() {
     local hub="$1" namespace="$2"
     local required=(

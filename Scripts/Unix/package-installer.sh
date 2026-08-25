@@ -27,13 +27,19 @@ common=(--generator "$GENERATOR" --architecture "$ARCHITECTURE" --toolset "$TOOL
 [[ $UPDATE -eq 1 ]] && common+=(--update)
 [[ $FORCE -eq 1 ]] && common+=(--force)
 [[ $ALLOW_DIRTY -eq 1 ]] && common+=(--allow-dirty)
-bash "$ROOT/Scripts/Unix/package-editor.sh" "$PLATFORM" "${common[@]}"
+distribution=""
+if [[ -n "${KEIRE_EXISTING_PACKAGE_STAGE:-}" ]]; then
+    distribution="$(resolve_existing_package_stage "$PLATFORM")"
+    printf '==> Reusing validated editor package stage: %s\n' "$distribution"
+else
+    bash "$ROOT/Scripts/Unix/package-editor.sh" "$PLATFORM" "${common[@]}"
+fi
 [[ "$PLATFORM" == Linux ]] && activate_linux_toolchain "$ROOT" "$TOOLSET"
 
 os_name=linux
 [[ "$PLATFORM" == Mac ]] && os_name=macos
 distribution_name="$ARTIFACT_PREFIX-editor-$os_name-$ARCHITECTURE-Dist"
-distribution="$ROOT/Build/Distributions/$distribution_name"
+distribution="${distribution:-$ROOT/Build/Distributions/$distribution_name}"
 validate_editor_package_stage "$distribution" "$CLIENT_TARGET" "$HUB_TARGET" "$CORE_TARGET" \
   "$PROJECT_NAMESPACE" "$PLATFORM"
 

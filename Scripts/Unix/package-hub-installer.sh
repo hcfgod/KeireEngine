@@ -27,13 +27,19 @@ common=(--generator "$GENERATOR" --architecture "$ARCHITECTURE" --toolset "$TOOL
 [[ $UPDATE -eq 1 ]] && common+=(--update)
 [[ $FORCE -eq 1 ]] && common+=(--force)
 [[ $ALLOW_DIRTY -eq 1 ]] && common+=(--allow-dirty)
-bash "$ROOT/Scripts/Unix/package-hub.sh" "$PLATFORM" "${common[@]}" --stage-only
+distribution=""
+if [[ -n "${KEIRE_EXISTING_PACKAGE_STAGE:-}" ]]; then
+    distribution="$(resolve_existing_package_stage "$PLATFORM")"
+    printf '==> Reusing validated Hub package stage: %s\n' "$distribution"
+else
+    bash "$ROOT/Scripts/Unix/package-hub.sh" "$PLATFORM" "${common[@]}" --stage-only
+fi
 [[ "$PLATFORM" == Linux ]] && activate_linux_toolchain "$ROOT" "$TOOLSET"
 
 os_name=linux
 [[ "$PLATFORM" == Mac ]] && os_name=macos
 distribution_name="$ARTIFACT_PREFIX-hub-$os_name-$ARCHITECTURE-Dist"
-distribution="$ROOT/Build/Distributions/$distribution_name"
+distribution="${distribution:-$ROOT/Build/Distributions/$distribution_name}"
 validate_hub_package_stage "$distribution" "$HUB_TARGET" "$CLIENT_TARGET" "$PROJECT_NAMESPACE" "$PLATFORM"
 
 temporary_root="$(mktemp -d)"
