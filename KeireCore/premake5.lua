@@ -24,7 +24,8 @@ local function AddGeneratedContentCommands()
             "bash " .. unixScripts .. "/build-info.sh",
             "bash " .. unixScripts .. "/builtin-shaders.sh",
             "bash " .. unixScripts .. "/builtin-skinning.sh",
-            "bash " .. unixScripts .. "/builtin-vfx.sh"
+            "bash " .. unixScripts .. "/builtin-vfx.sh",
+            "bash " .. unixScripts .. "/builtin-occlusion.sh"
         }
 
     filter {}
@@ -101,6 +102,11 @@ local function ConfigureCoreArchive(target, pchSource, sourceFiles, macSources, 
             DependencyManifest.CoralInclude,
             DependencyManifest.SDL3Include
         }
+
+        filter "configurations:Profile"
+            externalincludedirs { "../Build/Dependencies/tracy/public" }
+
+        filter {}
 end
 
 project(CoreGeneratedContentTarget)
@@ -159,6 +165,12 @@ removefiles
     "Source/WindowChrome*.cpp"
 }
 links { DearImGuiProject, ZstdProject }
+
+filter "files:Source/Diagnostics/TracyClientIntegration.cpp"
+    enablepch "Off"
+    warnings "Off"
+
+filter {}
 
 ConfigureCoreArchive(ProjectConfig.CORE_TARGET .. "Assets", "Source/Pch/KeireCoreAssetsPch.cpp",
                      {

@@ -343,6 +343,12 @@ namespace Keire::RenderBackend
                         {
                             SDL_BindGPUGraphicsPipeline(pass, composed->Pipeline);
                             SDL_BindGPUVertexStorageBuffers(pass, 0, &emitter.RenderBuffers->Instances, 1);
+                            if (composed->InstanceAddressingAbiVersion == 2U)
+                            {
+                                constexpr std::array<std::uint32_t, 4> instanceParameters{};
+                                SDL_PushGPUVertexUniformData(commands, 2, instanceParameters.data(),
+                                                             sizeof(instanceParameters));
+                            }
                             if (composed->UsesForwardPlus)
                             {
                                 SDL_BindGPUFragmentStorageBuffers(

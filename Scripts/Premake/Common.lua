@@ -157,7 +157,7 @@ function LinkKeireCore()
         }
         LinkDependencies(DependencyManifest.RecastDebugLibraries)
 
-    filter { "configurations:Release or Dist" }
+    filter { "configurations:Release or Profile or Dist" }
         LinkDependencies
         {
             DependencyManifest.AssimpReleaseLibrary,
@@ -175,11 +175,20 @@ function LinkKeireCore()
         links { "crypt32", "winhttp" }
 
     filter "system:linux"
-        links { "curl" }
+        links { "curl", "dl" }
 
     filter "system:macosx"
         links { "Foundation.framework" }
         linkoptions { "-Wl,-rpath,@executable_path" }
+
+    filter { "configurations:Profile", "system:windows" }
+        links { "ws2_32", "dbghelp" }
+
+    filter { "configurations:Profile", "system:linux" }
+        links { "pthread" }
+
+    filter { "configurations:Profile", "system:macosx" }
+        links { "pthread" }
 
     filter {}
 
@@ -252,7 +261,7 @@ function LinkSDL3()
     filter { "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
         LinkDependency(DependencyManifest.SDL3DebugLibrary)
 
-    filter { "configurations:Release or Dist" }
+    filter { "configurations:Release or Profile or Dist" }
         LinkDependency(DependencyManifest.SDL3ReleaseLibrary)
 
     filter {}
@@ -335,7 +344,7 @@ function ApplyCommonProjectSettings(repositoryRoot)
         buildoptions { "-fms-runtime-lib=dll_dbg" }
         linkoptions { "-fms-runtime-lib=dll_dbg" }
 
-    filter { "system:windows", "toolset:clang", "configurations:Release or Dist" }
+    filter { "system:windows", "toolset:clang", "configurations:Release or Profile or Dist" }
         buildoptions { "-fms-runtime-lib=dll" }
         linkoptions { "-fms-runtime-lib=dll" }
 
@@ -357,6 +366,22 @@ function ApplyCommonProjectSettings(repositoryRoot)
         {
             "NDEBUG",
             "KEIRE_COMPILED_LOG_LEVEL=2"
+        }
+
+    filter "configurations:Profile"
+        runtime "Release"
+        optimize "on"
+        symbols "on"
+        defines
+        {
+            "NDEBUG",
+            "KEIRE_COMPILED_LOG_LEVEL=2",
+            "KEIRE_PROFILE_TELEMETRY",
+            "TRACY_ENABLE",
+            "TRACY_ON_DEMAND",
+            "TRACY_NO_BROADCAST",
+            "TRACY_ONLY_LOCALHOST",
+            "TRACY_NO_CRASH_HANDLER"
         }
 
     filter "configurations:Dist"

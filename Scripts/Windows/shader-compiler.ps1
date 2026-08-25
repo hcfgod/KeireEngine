@@ -29,17 +29,11 @@ $publishedRoot = Join-Path $Root "Build\Tools\ShaderCompiler"
 $publishedCompiler = Join-Path $publishedRoot "KeireShaderCompiler.exe"
 $stamp = Join-Path $cacheRoot "keire-shader-compiler.stamp"
 $configureStamp = Join-Path $cacheRoot "keire-shader-compiler.configure"
-$asciiRoot = Join-Path ([IO.Path]::GetTempPath()) "kesc"
-if (Test-Path -LiteralPath $asciiRoot) {
-    $junction = Get-Item -LiteralPath $asciiRoot -Force
-    $target = @($junction.Target)[0]
-    if (-not $target -or [IO.Path]::GetFullPath($target) -ne [IO.Path]::GetFullPath($Root)) {
-        throw "The shader compiler ASCII workspace exists but targets another location: $asciiRoot"
-    }
-}
-else {
-    New-Item -ItemType Junction -Path $asciiRoot -Target $Root | Out-Null
-}
+# Keep the short CMake path, but isolate its junction per checkout so concurrent linked worktrees never target each
+# other's Build and Vendor directories even when TEMP and TMP are shared.
+$asciiRoot = Get-KeireWorkspaceJunctionPath -BasePath ([IO.Path]::GetTempPath()) -Prefix "kesc" `
+    -RepositoryRoot $Root
+Initialize-KeireWorkspaceJunction -Path $asciiRoot -Target $Root | Out-Null
 $cmakeCacheRoot = Join-Path $asciiRoot "Build\Tools\ShaderCompiler\Cache\windows-$OutputArchitecture-$Toolset"
 $cmakeInstallRoot = Join-Path $cmakeCacheRoot "install"
 $cmakeSdlInstall = Join-Path $asciiRoot "Build\Dependencies\windows-$OutputArchitecture-$Toolset\Release\install"
@@ -49,8 +43,13 @@ $compilerIdentity = "MSVC $env:VCToolsVersion WindowsSDK $env:WindowsSDKVersion"
 $key = @($Lock.SDL_SHADERCROSS_COMMIT, $Lock.SDL_SHADERCROSS_DXC_COMMIT,
     $Lock.SDL_SHADERCROSS_SPIRV_CROSS_COMMIT, $Lock.SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT,
     $Lock.SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT, $Lock.SDL_COMMIT, $Architecture, $Toolset,
-    $compilerIdentity, "short-workspace-v1") -join "|"
+    $compilerIdentity, "short-workspace-v2") -join "|"
 
+$cacheItem = Get-Item -LiteralPath $cacheRoot -Force -ErrorAction SilentlyContinue
+if ($cacheItem -and (-not $cacheItem.PSIsContainer -or
+        (($cacheItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0))) {
+    throw "Shader compiler cache is not an ordinary directory: $cacheRoot"
+}
 $valid = -not $Force -and (Test-Path $publishedCompiler) -and (Test-Path $stamp) -and
     ((Get-Content $stamp -Raw).Trim() -eq $key)
 if ($valid) {
@@ -68,7 +67,11 @@ if (Test-Path -LiteralPath $cacheRoot) {
     $configuredKey = if (Test-Path $configureStamp) { (Get-Content $configureStamp -Raw).Trim() } else { "" }
     $mustReplace = $Force -or -not (Test-Path (Join-Path $cacheRoot "CMakeCache.txt")) -or
         -not $configuredKey -or $configuredKey -ne $key
-    if ($mustReplace) { Remove-Item -LiteralPath $cacheRoot -Recurse -Force }
+    if ($mustReplace) {
+        Remove-KeireGeneratedDirectory -RepositoryRoot $Root `
+            -AllowedRoot (Join-Path $Root "Build\Tools\ShaderCompiler\Cache") -Path $cacheRoot `
+            -Description "shader compiler cache"
+    }
 }
 New-Item -ItemType Directory -Force -Path $cacheRoot | Out-Null
 

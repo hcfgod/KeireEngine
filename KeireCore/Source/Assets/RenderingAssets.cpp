@@ -3,6 +3,7 @@
 #include "Keire/Rendering/ShaderGraph.h"
 
 #include "KeireInternal/Assets/AssetInternal.h"
+#include "KeireInternal/Assets/RenderingAssetValidation.h"
 #include "KeireInternal/Assets/ShaderCompilerJobs.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
@@ -14,6 +15,7 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <cstddef>
 #include <cstdlib>
 #include <fstream>
 #include <mutex>
@@ -31,10 +33,6 @@ namespace Keire
     {
         using Json = nlohmann::json;
 
-        constexpr std::size_t MaximumShaderNumericProperties = 64;
-        constexpr std::size_t MaximumShaderTextureProperties = 16;
-        constexpr std::size_t MaximumShaderProperties = MaximumShaderNumericProperties + MaximumShaderTextureProperties;
-        constexpr std::size_t MaximumShaderDependencies = 256;
         constexpr std::size_t MaximumDefines = 128;
         constexpr std::size_t MaximumIncludeRoots = 16;
 
@@ -121,124 +119,6 @@ namespace Keire
             return std::string(reinterpret_cast<const char*>(value.data()), value.size());
         }
 
-        [[nodiscard]] bool ValidIdentifier(const std::string_view value)
-        {
-            if (value.empty() || value.size() > 128 ||
-                !(std::isalpha(static_cast<unsigned char>(value.front())) || value.front() == '_'))
-                return false;
-            return std::ranges::all_of(value.substr(1), [](const unsigned char character)
-                                       { return std::isalnum(character) || character == '_'; });
-        }
-
-        void ValidateDefinition(const ShaderAssetDefinition& definition, const bool requireVariants,
-                                const bool allowMissingVariants = false)
-        {
-            if (definition.SchemaVersion != 1 ||
-                (definition.VertexLayoutVersion < 1 || definition.VertexLayoutVersion > 3) ||
-                definition.Topology > ShaderPrimitiveTopology::PointList || definition.Culling > ShaderCullMode::Back ||
-                (definition.SpatialLightingAbiVersion != 0U && definition.SpatialLightingAbiVersion != 2U) ||
-                definition.UserResourceSlots > 16U || definition.UserReadOnlyBuffers > 8U ||
-                (definition.SpatialLightingAbiVersion == 2U &&
-                 (!definition.UsesImageBasedLighting || definition.VertexLayoutVersion != 3U)) ||
-                definition.Source.empty() || definition.Source.is_absolute() ||
-                definition.Source.lexically_normal().generic_string().starts_with("..") ||
-                !ValidIdentifier(definition.VertexEntry) || !ValidIdentifier(definition.FragmentEntry))
-                throw std::invalid_argument("Shader definition contains an unsupported schema, path, or entry point.");
-            if (definition.Properties.size() > MaximumShaderProperties ||
-                definition.Dependencies.size() > MaximumShaderDependencies ||
-                (!allowMissingVariants && definition.Variants.empty()) ||
-                (requireVariants && definition.Variants.size() != 3))
-                throw std::invalid_argument("Shader definition exceeds a bounded collection or lacks variants.");
-
-            std::set<std::string, std::less<>> propertyNames;
-            std::set<AssetId> propertyIds;
-            std::size_t numericProperties = 0;
-            std::size_t textureProperties = 0;
-            for (const auto& property : definition.Properties)
-            {
-                if (!ValidIdentifier(property.Name) || !propertyNames.insert(property.Name).second ||
-                    property.Type > ShaderPropertyType::Texture2D ||
-                    (property.Id && !propertyIds.insert(property.Id).second))
-                    throw std::invalid_argument(
-                        "Shader property names and types must be unique supported identifiers.");
-                if (property.Type == ShaderPropertyType::Texture2D)
-                {
-                    ++textureProperties;
-                    if (property.TextureSemantic > ShaderTextureSemantic::Roughness)
-                        throw std::invalid_argument("Shader texture property semantic is invalid.");
-                }
-                else
-                {
-                    ++numericProperties;
-                    if (!Math::IsFinite(property.DefaultValue))
-                        throw std::invalid_argument("Shader numeric property defaults must be finite.");
-                    if ((property.Minimum && !std::isfinite(*property.Minimum)) ||
-                        (property.Maximum && !std::isfinite(*property.Maximum)) ||
-                        (property.Step && (!std::isfinite(*property.Step) || *property.Step <= 0.0F)) ||
-                        (property.Minimum && property.Maximum && *property.Minimum > *property.Maximum))
-                        throw std::invalid_argument("Shader numeric property range is invalid.");
-                }
-                if (property.DisplayName.size() > 128 || property.Category.size() > 128)
-                    throw std::invalid_argument("Shader property editor metadata exceeds its limit.");
-            }
-            if (numericProperties > MaximumShaderNumericProperties ||
-                textureProperties > MaximumShaderTextureProperties)
-                throw std::invalid_argument("Shader exceeds the 64 numeric slot or 16 texture slot ABI limit.");
-            constexpr std::size_t portableFragmentSamplerLimit = 16;
-            const auto reservedSamplers = (definition.ReceivesShadows ? 2U : 0U) +
-                                          (definition.UsesImageBasedLighting ? 2U : 0U) +
-                                          (definition.SpatialLightingAbiVersion == 2U ? 5U : 0U);
-            if (textureProperties + definition.UserResourceSlots + reservedSamplers > portableFragmentSamplerLimit)
-                throw std::invalid_argument(
-                    "Shader material textures and fixed lighting resources exceed the portable 16-sampler limit.");
-            if (definition.UserReadOnlyBuffers + (definition.UsesForwardPlus ? 3U : 0U) > 8U)
-                throw std::invalid_argument("Shader read-only buffers exceed the portable eight-buffer limit.");
-            std::set<ShaderBinaryFormat> formats;
-            for (const auto& variant : definition.Variants)
-            {
-                if (variant.Vertex.empty() || variant.Fragment.empty() || !formats.insert(variant.Format).second)
-                    throw std::invalid_argument("Shader variants must be non-empty and have unique formats.");
-            }
-        }
-
-        void ValidateMaterialDefinition(const MaterialAssetDefinition& definition)
-        {
-            if (definition.SchemaVersion < 1 || definition.SchemaVersion > 3 ||
-                definition.Properties.size() > MaximumShaderProperties ||
-                definition.Surface.AlphaMode > MaterialAlphaMode::AlphaHoldout ||
-                !std::isfinite(definition.Surface.AlphaCutoff) || definition.Surface.AlphaCutoff < 0.0F ||
-                definition.Surface.AlphaCutoff > 1.0F || !std::isfinite(definition.EmissiveGIIntensity) ||
-                definition.EmissiveGIIntensity < 0.0F || definition.EmissiveGIIntensity > 100'000.0F)
-                throw std::invalid_argument("Material definition is invalid or exceeds its property limit.");
-            for (const auto& [name, value] : definition.Properties)
-            {
-                if (!ValidIdentifier(name))
-                    throw std::invalid_argument("Material property name is invalid.");
-                std::visit(
-                    [](const auto& typed)
-                    {
-                        using T = std::decay_t<decltype(typed)>;
-                        if constexpr (!std::same_as<T, AssetId>)
-                        {
-                            Vector4 packed;
-                            if constexpr (std::same_as<T, float>)
-                                packed.X = typed;
-                            else if constexpr (std::same_as<T, Vector2>)
-                                packed = {typed.X, typed.Y, 0.0F, 0.0F};
-                            else if constexpr (std::same_as<T, Vector3>)
-                                packed = {typed.X, typed.Y, typed.Z, 0.0F};
-                            else if constexpr (std::same_as<T, Vector4>)
-                                packed = typed;
-                            else
-                                packed = {typed.Red, typed.Green, typed.Blue, typed.Alpha};
-                            if (!Math::IsFinite(packed))
-                                throw std::invalid_argument("Material property value is not finite.");
-                        }
-                    },
-                    value);
-            }
-        }
-
         [[nodiscard]] bool ValidShaderTarget(const std::string_view value)
         {
             return !value.empty() && value.size() <= 64 &&
@@ -253,7 +133,7 @@ namespace Keire
             runtime.ContributeEmissionToGI = definition.ContributeEmissionToGI;
             runtime.EmissiveGIIntensity = definition.EmissiveGIIntensity;
             runtime.Properties = definition.Properties;
-            ValidateMaterialDefinition(runtime);
+            Detail::ValidateMaterialDefinition(runtime);
             if (definition.SchemaVersion != 4 || definition.Shader.Kind > MaterialShaderSourceKind::ShaderGraph ||
                 (definition.Shader.Kind != MaterialShaderSourceKind::ShaderAsset && !definition.Shader.Asset) ||
                 definition.Shader.Keywords.size() > 16 ||
@@ -269,7 +149,8 @@ namespace Keire
             }
             for (const auto& [name, option] : definition.Shader.Keywords)
             {
-                if (!ValidIdentifier(name) || (option != "true" && option != "false" && !ValidIdentifier(option)))
+                if (!Detail::ValidShaderIdentifier(name) ||
+                    (option != "true" && option != "false" && !Detail::ValidShaderIdentifier(option)))
                     throw std::invalid_argument("Material Shader Graph keyword selection is invalid.");
             }
         }
@@ -427,7 +308,7 @@ namespace Keire
                 else
                     definition.Properties.emplace(name, ParseVector(value));
             }
-            ValidateMaterialDefinition(definition);
+            Detail::ValidateMaterialDefinition(definition);
             return definition;
         }
 
@@ -486,6 +367,8 @@ namespace Keire
                     {"usesImageBasedLighting", definition.UsesImageBasedLighting},
                     {"spatialLightingAbiVersion", definition.SpatialLightingAbiVersion},
                     {"usesVertexMaterialParameters", definition.UsesVertexMaterialParameters},
+                    {"instanceAddressingAbiVersion", definition.InstanceAddressingAbiVersion},
+                    {"occlusionSupport", static_cast<std::uint8_t>(definition.OcclusionSupport)},
                     {"userResourceSlots", definition.UserResourceSlots},
                     {"userReadOnlyBuffers", definition.UserReadOnlyBuffers},
                     {"properties", std::move(properties)},
@@ -514,6 +397,10 @@ namespace Keire
             result.UsesImageBasedLighting = source.value("usesImageBasedLighting", false);
             result.SpatialLightingAbiVersion = source.value("spatialLightingAbiVersion", static_cast<std::uint8_t>(0));
             result.UsesVertexMaterialParameters = source.value("usesVertexMaterialParameters", false);
+            result.InstanceAddressingAbiVersion =
+                source.value("instanceAddressingAbiVersion", static_cast<std::uint8_t>(0));
+            result.OcclusionSupport = static_cast<ShaderOcclusionSupport>(
+                source.value("occlusionSupport", static_cast<std::uint8_t>(ShaderOcclusionSupport::None)));
             result.UserResourceSlots = source.value("userResourceSlots", static_cast<std::uint8_t>(0));
             result.UserReadOnlyBuffers = source.value("userReadOnlyBuffers", static_cast<std::uint8_t>(0));
             for (const auto& property : source.at("properties"))
@@ -553,7 +440,7 @@ namespace Keire
                 result.Variants.push_back({static_cast<ShaderBinaryFormat>(variant.at("format").get<std::uint8_t>()),
                                            ToBytes(vertex), ToBytes(fragment)});
             }
-            ValidateDefinition(result, false);
+            Detail::ValidateShaderDefinition(result, false);
             return result;
         }
 
@@ -715,11 +602,13 @@ namespace Keire
                                           (definition.UsesImageBasedLighting ? 2U : 0U) + (spatialLighting ? 5U : 0U);
             const auto expectedFragmentStorageBuffers =
                 (definition.UsesForwardPlus ? 3U : 0U) + definition.UserReadOnlyBuffers;
+            const auto expectedVertexUniformBuffers = 1U + (definition.UsesVertexMaterialParameters ? 1U : 0U) +
+                                                      (definition.InstanceAddressingAbiVersion == 2U ? 1U : 0U);
             if (!noStorageTextures(vertex) || !noStorageTextures(fragment) ||
                 vertex.value("storage_buffers", 0U) != (definition.UsesInstancing ? 1U : 0U) ||
                 fragment.value("storage_buffers", 0U) != expectedFragmentStorageBuffers ||
                 vertex.value("samplers", 0U) != 0 ||
-                vertex.value("uniform_buffers", 0U) != (definition.UsesVertexMaterialParameters ? 2U : 1U) ||
+                vertex.value("uniform_buffers", 0U) != expectedVertexUniformBuffers ||
                 (fragmentUniformBuffers != minimumFragmentUniformBuffers &&
                  fragmentUniformBuffers != expectedFragmentUniformBuffers) ||
                 fragment.value("samplers", 0U) != expectedSamplers)
@@ -751,6 +640,98 @@ namespace Keire
             }
         }
 
+        [[nodiscard]] bool ContainsInstanceAddressingAbiV2Binding(const std::string& source)
+        {
+            static const std::regex bindingPattern(
+                R"(\bcbuffer\s+InstanceAddressingData\s*:\s*register\s*\(\s*b2\s*,\s*space1\s*\)\s*\{[\s\S]*?\buint4\s+InstanceParameters\s*;)");
+            return std::regex_search(source, bindingPattern);
+        }
+
+        [[nodiscard]] bool HasSpirvDescriptorBinding(const std::span<const std::byte> bytes,
+                                                     const std::string_view name, const std::uint32_t descriptorSet,
+                                                     const std::uint32_t binding)
+        {
+            constexpr std::uint32_t SpirvMagic = 0x07230203U;
+            constexpr std::uint16_t OpName = 5U;
+            constexpr std::uint16_t OpDecorate = 71U;
+            constexpr std::uint32_t DecorationBinding = 33U;
+            constexpr std::uint32_t DecorationDescriptorSet = 34U;
+            if (bytes.size() < 5U * sizeof(std::uint32_t) || bytes.size() % sizeof(std::uint32_t) != 0U)
+                return false;
+
+            const auto word = [&bytes](const std::size_t index) noexcept
+            {
+                const auto offset = index * sizeof(std::uint32_t);
+                return std::to_integer<std::uint32_t>(bytes[offset]) |
+                       std::to_integer<std::uint32_t>(bytes[offset + 1U]) << 8U |
+                       std::to_integer<std::uint32_t>(bytes[offset + 2U]) << 16U |
+                       std::to_integer<std::uint32_t>(bytes[offset + 3U]) << 24U;
+            };
+            if (word(0) != SpirvMagic)
+                return false;
+
+            struct Decorations final
+            {
+                std::optional<std::uint32_t> DescriptorSet;
+                std::optional<std::uint32_t> Binding;
+            };
+            std::unordered_map<std::uint32_t, std::string> names;
+            std::unordered_map<std::uint32_t, Decorations> decorations;
+            const auto wordCount = bytes.size() / sizeof(std::uint32_t);
+            for (std::size_t index = 5U; index < wordCount;)
+            {
+                const auto instruction = word(index);
+                const auto instructionWords = static_cast<std::uint16_t>(instruction >> 16U);
+                const auto opcode = static_cast<std::uint16_t>(instruction & 0xffffU);
+                if (instructionWords == 0U || instructionWords > wordCount - index)
+                    return false;
+                if (opcode == OpName && instructionWords >= 3U)
+                {
+                    std::string decoded;
+                    decoded.reserve((instructionWords - 2U) * sizeof(std::uint32_t));
+                    bool terminated = false;
+                    for (std::size_t operand = 2U; operand < instructionWords && !terminated; ++operand)
+                    {
+                        const auto packed = word(index + operand);
+                        for (std::uint32_t byteIndex = 0U; byteIndex < sizeof(std::uint32_t); ++byteIndex)
+                        {
+                            const auto character = static_cast<char>((packed >> (byteIndex * 8U)) & 0xffU);
+                            if (character == '\0')
+                            {
+                                terminated = true;
+                                break;
+                            }
+                            decoded.push_back(character);
+                        }
+                    }
+                    if (!terminated)
+                        return false;
+                    names.insert_or_assign(word(index + 1U), std::move(decoded));
+                }
+                else if (opcode == OpDecorate && instructionWords >= 4U)
+                {
+                    auto& target = decorations[word(index + 1U)];
+                    const auto decoration = word(index + 2U);
+                    if (decoration == DecorationDescriptorSet)
+                        target.DescriptorSet = word(index + 3U);
+                    else if (decoration == DecorationBinding)
+                        target.Binding = word(index + 3U);
+                }
+                index += instructionWords;
+            }
+
+            for (const auto& [id, candidate] : names)
+            {
+                const auto found = decorations.find(id);
+                if (candidate == name && found != decorations.end() && found->second.DescriptorSet == descriptorSet &&
+                    found->second.Binding == binding)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         [[nodiscard]] std::vector<std::filesystem::path> ParseIncludeRoots(const Json& manifest,
                                                                            const AssetImportContext& context)
         {
@@ -778,7 +759,8 @@ namespace Keire
             for (const auto& [name, value] : source.items())
             {
                 const auto text = value.get<std::string>();
-                if (!ValidIdentifier(name) || text.size() > 128 || text.find_first_of("\r\n") != std::string::npos)
+                if (!Detail::ValidShaderIdentifier(name) || text.size() > 128 ||
+                    text.find_first_of("\r\n") != std::string::npos)
                     throw std::invalid_argument("Shader define names or values are invalid.");
                 result.emplace_back(name, text);
             }
@@ -798,7 +780,7 @@ namespace Keire
                 throw std::invalid_argument("Shader include graph contains a cycle at " + comparable + ".");
             if (!visited.insert(comparable).second)
                 return;
-            if (visited.size() > MaximumShaderDependencies)
+            if (visited.size() > Detail::MaximumShaderDependencies)
                 throw std::invalid_argument("Shader include graph exceeds its dependency limit.");
 
             visiting.insert(comparable);
@@ -875,6 +857,10 @@ namespace Keire
             result.SpatialLightingAbiVersion =
                 manifest.value("spatialLightingAbiVersion", static_cast<std::uint8_t>(0));
             result.UsesVertexMaterialParameters = manifest.value("usesVertexMaterialParameters", false);
+            result.InstanceAddressingAbiVersion =
+                manifest.value("instanceAddressingAbiVersion", static_cast<std::uint8_t>(0));
+            result.OcclusionSupport = static_cast<ShaderOcclusionSupport>(
+                manifest.value("occlusionSupport", static_cast<std::uint8_t>(ShaderOcclusionSupport::None)));
             const auto resourceDocument = Json{{"schemaVersion", ShaderGraphResourceContractSchemaVersion},
                                                {"resources", manifest.value("resources", Json::array())}}
                                               .dump();
@@ -892,7 +878,7 @@ namespace Keire
             }
 
             const auto& properties = manifest.value("properties", Json::array());
-            if (!properties.is_array() || properties.size() > MaximumShaderProperties)
+            if (!properties.is_array() || properties.size() > Detail::MaximumShaderProperties)
                 throw std::invalid_argument("Shader properties must be a bounded array.");
             const std::unordered_map<std::string, ShaderPropertyType> types{
                 {"Float", ShaderPropertyType::Scalar},    {"Vector2", ShaderPropertyType::Vector2},
@@ -939,7 +925,7 @@ namespace Keire
                     definition.DefaultValue = ParseVector(property.at("default"));
                 result.Properties.push_back(std::move(definition));
             }
-            ValidateDefinition(result, false, true);
+            Detail::ValidateShaderDefinition(result, false, true);
             return result;
         }
 
@@ -987,7 +973,7 @@ namespace Keire
 
     std::vector<std::byte> ShaderAsset::Encode(const ShaderAssetDefinition& definition)
     {
-        ValidateDefinition(definition, true);
+        Detail::ValidateShaderDefinition(definition, true);
         return ToBytes(Json::to_cbor(EncodeShaderJson(definition)));
     }
 
@@ -1000,7 +986,7 @@ namespace Keire
 
     void MaterialAssetDefinition::SetTexture(std::string name, const AssetId texture)
     {
-        if (!ValidIdentifier(name))
+        if (!Detail::ValidShaderIdentifier(name))
             throw std::invalid_argument("Material texture property name is invalid.");
         Properties.insert_or_assign(std::move(name), texture);
     }
@@ -1092,13 +1078,13 @@ namespace Keire
                 throw std::invalid_argument("Material property type is invalid.");
             }
         }
-        ValidateMaterialDefinition(result);
+        Detail::ValidateMaterialDefinition(result);
         return CreateRef<MaterialAsset>(std::move(result));
     }
 
     std::vector<std::byte> MaterialAsset::Encode(const MaterialAssetDefinition& definition)
     {
-        ValidateMaterialDefinition(definition);
+        Detail::ValidateMaterialDefinition(definition);
         Json properties = Json::object();
         for (const auto& [name, value] : definition.Properties)
         {
@@ -1161,7 +1147,7 @@ namespace Keire
 
     std::vector<std::byte> MaterialAsset::EncodeSource(const MaterialAssetDefinition& definition)
     {
-        ValidateMaterialDefinition(definition);
+        Detail::ValidateMaterialDefinition(definition);
         Json properties = Json::object();
         for (const auto& [name, value] : definition.Properties)
         {
@@ -1244,8 +1230,8 @@ namespace Keire
 
     void ValidateMaterialAgainstShader(const MaterialAssetDefinition& material, const ShaderAssetDefinition& shader)
     {
-        ValidateMaterialDefinition(material);
-        ValidateDefinition(shader, false, true);
+        Detail::ValidateMaterialDefinition(material);
+        Detail::ValidateShaderDefinition(shader, false, true);
         for (const auto& [name, value] : material.Properties)
         {
             const auto found = std::ranges::find(shader.Properties, name, &ShaderPropertyDefinition::Name);
@@ -1325,7 +1311,7 @@ namespace Keire
             throw std::invalid_argument("Shader importer formats must be unique and include SPIR-V reflection data.");
         AssetImporterRegistration result;
         result.Name = "Keire.Shader";
-        result.Version = 2;
+        result.Version = 3;
         result.Type = ShaderAsset::StaticType();
         result.Extensions = {".keireshader"};
         result.ContextualImport =
@@ -1347,16 +1333,24 @@ namespace Keire
 
             TemporaryShaderDirectory temporary;
             const auto stagedRoot = temporary.Path() / "Source";
+            bool hasInstanceAddressingAbiV2Binding = false;
             for (const auto& dependency : definition.Dependencies)
             {
                 const auto destination = stagedRoot / dependency.RelativePath;
                 std::filesystem::create_directories(destination.parent_path());
                 const auto dependencyBytes = context.ReadProjectFile(dependency.RelativePath);
+                if (definition.InstanceAddressingAbiVersion == 2U)
+                    hasInstanceAddressingAbiV2Binding |= ContainsInstanceAddressingAbiV2Binding(Text(dependencyBytes));
                 std::ofstream output(destination, std::ios::binary | std::ios::trunc);
                 if (!output ||
                     (!dependencyBytes.empty() && !output.write(reinterpret_cast<const char*>(dependencyBytes.data()),
                                                                static_cast<std::streamsize>(dependencyBytes.size()))))
                     throw std::runtime_error("Could not stage a shader dependency for compilation.");
+            }
+            if (definition.InstanceAddressingAbiVersion == 2U && !hasInstanceAddressingAbiV2Binding)
+            {
+                throw std::invalid_argument(
+                    "Shader instance-addressing ABI v2 requires uint4 InstanceParameters at vertex b2/space1.");
             }
             const auto source = stagedRoot / definition.Source;
             std::vector<std::filesystem::path> stagedIncludeRoots;
@@ -1381,6 +1375,12 @@ namespace Keire
 
             const auto& spirv =
                 *std::ranges::find(definition.Variants, ShaderBinaryFormat::SpirV, &ShaderVariant::Format);
+            if (definition.InstanceAddressingAbiVersion == 2U &&
+                !HasSpirvDescriptorBinding(spirv.Vertex, "InstanceAddressingData", 1U, 2U))
+            {
+                throw std::invalid_argument(
+                    "Shader instance-addressing ABI v2 requires uint4 InstanceParameters at vertex b2/space1.");
+            }
             const auto vertexSpirv = temporary.Path() / "reflection.vert.spv";
             const auto fragmentSpirv = temporary.Path() / "reflection.frag.spv";
             std::ofstream(vertexSpirv, std::ios::binary)
@@ -1402,7 +1402,7 @@ namespace Keire
             ValidateReflection(Json::parse(Text(ReadFile(vertexReflection, specification.MaximumOutputBytes))),
                                Json::parse(Text(ReadFile(fragmentReflection, specification.MaximumOutputBytes))),
                                definition);
-            ValidateDefinition(definition, specification.Formats.size() == 3);
+            Detail::ValidateShaderDefinition(definition, specification.Formats.size() == 3);
             return {ToBytes(Json::to_cbor(EncodeShaderJson(definition))), definition.Dependencies};
         };
         result.Cook = [](const std::span<const std::byte> bytes, const AssetTargetPlatform requested)

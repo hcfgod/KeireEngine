@@ -3,7 +3,7 @@ param(
     [ValidateSet("menu", "bootstrap", "generate", "build", "test", "run", "clean", "coverage", "package", "package-editor", "package-hub", "package-installer", "package-hub-installer", "doctor", "rename", "vendor-update", "help")]
     [string]$Command = "menu",
     [string]$Generator = "vs2022",
-    [ValidateSet("Debug", "Release", "Dist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage")]
+    [ValidateSet("Debug", "Release", "Profile", "Dist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage")]
     [string]$Configuration = "Debug",
     [string]$Architecture = "",
     [ValidateSet("default", "msc", "gcc", "clang")]
@@ -11,7 +11,7 @@ param(
     [ValidateSet("auto", "off", "sccache")]
     [string]$CompilerCache = "auto",
     [string]$Target = "",
-    [ValidateSet("spdlog", "doctest", "SDL", "json", "imgui", "zstd", "entt", "glm", "SDL_shadercross", "assimp", "stb")]
+    [ValidateSet("spdlog", "doctest", "Tracy", "SDL", "json", "imgui", "zstd", "entt", "glm", "SDL_shadercross", "assimp", "stb")]
     [string]$Dependency = "spdlog",
     [string]$Tag = "",
     [string]$Name = "",
@@ -187,7 +187,7 @@ Commands: bootstrap, generate, build, test, run, clean, coverage, package,
 
 Common options:
   -Generator <vs2026|vs2022|vs2019|ninja|gmake|compilecommands>
-  -Configuration <Debug|Release|Dist|DebugASan|DebugUBSan|DebugTSan|Coverage>
+  -Configuration <Debug|Release|Profile|Dist|DebugASan|DebugUBSan|DebugTSan|Coverage>
   -Architecture <x86_64|ARM64>  -Toolset <default|msc|gcc|clang>
   -CompilerCache <auto|off|sccache> (Ninja builds; auto uses sccache when installed)
   -ProfileBuild (build command only; writes timing data and an MSBuild binary log under Build\Reports)
@@ -216,7 +216,7 @@ function Read-BuildSettings([bool]$IncludeConfiguration) {
     $updateChoice = Read-Setting "Update installed prerequisites (yes, no)" $updateDefault
     $script:Update = $updateChoice -match '^(y|yes)$'
     if ($IncludeConfiguration) {
-        $script:Configuration = Read-Setting "Configuration (Debug, Release, Dist, DebugASan, DebugUBSan, DebugTSan, Coverage)" $Configuration
+        $script:Configuration = Read-Setting "Configuration (Debug, Release, Profile, Dist, DebugASan, DebugUBSan, DebugTSan, Coverage)" $Configuration
     }
 }
 

@@ -2,7 +2,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$Root,
     [Parameter(Mandatory = $true)]
-    [ValidateSet("Debug", "Release", "Dist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage")]
+    [ValidateSet("Debug", "Release", "Profile", "Dist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage")]
     [string]$Configuration,
     [Parameter(Mandatory = $true)][string]$Architecture,
     [Parameter(Mandatory = $true)][string]$Target,
@@ -22,7 +22,7 @@ if (-not (Test-Path -LiteralPath $targetDirectory)) {
     throw "The managed host target directory does not exist: $targetDirectory"
 }
 
-$coralConfiguration = if ($Configuration -in @("Release", "Dist")) { "Release" } else { "Debug" }
+$coralConfiguration = if ($Configuration -in @("Release", "Profile", "Dist")) { "Release" } else { "Debug" }
 $coralDirectory = Join-Path $resolvedRoot "Build\Dependencies\coral-patched\Build\$coralConfiguration"
 $netHost = Join-Path $resolvedRoot "Build\Dependencies\coral-nethost\nethost.dll"
 $managedAssembly = Join-Path $resolvedRoot "Build\Managed\Keire.Managed.dll"

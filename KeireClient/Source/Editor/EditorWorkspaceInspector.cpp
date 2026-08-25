@@ -177,6 +177,72 @@ void EditorWorkspaceLayer::RecordInspectorUndo(const std::string_view name, std:
     RecordSceneUndo(name, std::move(mergeKey));
 }
 
+void EditorWorkspaceLayer::ApplyInspectorTransformEdit(KeireEditor::InspectorTransformEdit edit)
+{
+    const auto sceneScope = KeireEditor::CaptureInspectorTransformSceneScope(*m_SceneDocument);
+    const bool playMode = sceneScope.PlayMode;
+    const auto entity = edit.Entity;
+    const auto property = edit.Property;
+    const auto targetScene = KeireEditor::ResolveInspectorTransformScene(*m_SceneDocument, sceneScope);
+    if (!targetScene)
+        throw std::logic_error("The Transform edit target scene is no longer available.");
+    edit.Scope = sceneScope.Identity();
+    const auto resolveScene = [this, sceneScope]() -> Keire::Ref<Keire::Scene>
+    { return KeireEditor::ResolveInspectorTransformScene(*m_SceneDocument, sceneScope); };
+    const KeireEditor::InspectorTransformApply apply =
+        [resolveScene](const Keire::EntityId target, const KeireEditor::InspectorTransformProperty property,
+                       const KeireEditor::InspectorTransformValue& value)
+    {
+        const auto scene = resolveScene();
+        const auto transform = scene ? scene->FindEntity(target).GetComponent<Keire::TransformComponent>() : nullptr;
+        if (!transform)
+            throw std::logic_error("The Transform undo target is no longer available.");
+        switch (property)
+        {
+        case KeireEditor::InspectorTransformProperty::Position:
+            transform->SetLocalPosition(std::get<Keire::Vector3>(value));
+            break;
+        case KeireEditor::InspectorTransformProperty::Rotation:
+            transform->SetLocalRotation(std::get<Keire::Quaternion>(value));
+            break;
+        case KeireEditor::InspectorTransformProperty::Scale:
+            transform->SetLocalScale(std::get<Keire::Vector3>(value));
+            break;
+        }
+    };
+    const Keire::UndoAvailability available = [resolveScene, entity]
+    {
+        const auto scene = resolveScene();
+        return scene && static_cast<bool>(scene->FindEntity(entity).GetComponent<Keire::TransformComponent>());
+    };
+
+    if (playMode)
+        FinalizePendingPlayEditorMutation();
+    auto command =
+        KeireEditor::CreateInspectorTransformUndoCommand(sceneScope.Asset, playMode, std::move(edit), apply, available);
+    const auto context = m_SceneDocument->History();
+    if (context && context->IsOpen())
+        context->Execute(std::move(command));
+    else
+        command->Redo();
+
+    if (!playMode || !m_PlayChangeTracker)
+        return;
+    const auto scene = resolveScene();
+    const auto transform = scene ? scene->FindEntity(entity).GetComponent<Keire::TransformComponent>() : nullptr;
+    const auto registration = scene ? scene->Components()->Find(Keire::TransformComponent::StaticType()) : std::nullopt;
+    if (transform && registration)
+    {
+        const std::string propertyKey = property == KeireEditor::InspectorTransformProperty::Position   ? "position"
+                                        : property == KeireEditor::InspectorTransformProperty::Rotation ? "rotation"
+                                                                                                        : "scale";
+        const auto values = registration->Serialize(*transform);
+        m_PlayChangeTracker->RecordComponentPropertyMutation(entity.Value(), Keire::TransformComponent::StaticType(),
+                                                             propertyKey, values.at(propertyKey));
+        m_PlayEditorTouchedEntities.insert(entity.Value());
+    }
+}
+
 void EditorWorkspaceLayer::NotifyInspectorMaterialAssigned(const Keire::AssetId material)
 {
     if (!material || !m_AssetDatabase || !m_ShaderGraphDocument->Asset())

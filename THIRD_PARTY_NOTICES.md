@@ -11,6 +11,7 @@ This project uses the following third-party dependencies:
 - spdlog is a private logging backend, copyright Gabi Melman and contributors, under the MIT License. See `Vendor/spdlog/LICENSE`.
 - fmt is bundled privately by spdlog, copyright Victor Zverovich and contributors, under the MIT License. See `Vendor/spdlog/include/spdlog/fmt/bundled/fmt.license.rst`.
 - doctest is a test-only header dependency, copyright Viktor Kirilov and contributors, under the MIT License. See `Vendor/doctest/LICENSE.txt`.
+- Tracy 0.13.1 is a Profile-only CPU telemetry client, copyright Bartosz Taudul, under the BSD 3-Clause License. Its pinned source and license are fetched into `Build/Dependencies/tracy`; it is not part of Release, Dist, or SDK packages.
 - SDL 3 is a statically linked platform dependency, copyright Sam Lantinga and contributors, under the zlib License. See `Vendor/SDL/LICENSE.txt`.
 - JSON for Modern C++ is an implementation-only configuration dependency, copyright Niels Lohmann and contributors, under the MIT License. See `Vendor/json/LICENSE.MIT`.
 - Dear ImGui is a privately compiled UI implementation dependency, copyright Omar Cornut and contributors, under the MIT License. See `Vendor/imgui/LICENSE.txt`.

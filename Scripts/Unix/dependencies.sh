@@ -26,6 +26,15 @@ macos_deployment_target="$(config_value "$ROOT/Config/Dependencies.lock" MACOS_D
   printf 'MACOS_DEPLOYMENT_TARGET must be a pinned major.minor version.\n' >&2
   exit 1
 }
+workspace_lock_acquire "$ROOT" dependencies >&2
+dependencies_workspace_lock_held=1
+cleanup_dependencies_workspace_lock() {
+  if [[ "$dependencies_workspace_lock_held" -eq 1 ]]; then
+    workspace_lock_release >&2 || true
+    dependencies_workspace_lock_held=0
+  fi
+}
+trap cleanup_dependencies_workspace_lock EXIT
 
 locked_source() {
   local name="${1:?dependency name is required}"
@@ -35,31 +44,58 @@ locked_source() {
   local source_path="$cache_root/$name-$commit"
   local temporary_path="$cache_root/$name-$commit.tmp-$$"
 
-  if [[ -d "$source_path/.git" ]]; then
-    local actual
-    actual="$(git -C "$source_path" rev-parse HEAD 2>/dev/null || true)"
-    [[ "$actual" == "$commit" ]] || {
-      printf 'Locked %s source cache is not the expected commit: %s\n' "$name" "$source_path" >&2
-      exit 1
-    }
+  if [[ -e "$source_path" || -L "$source_path" ]]; then
+    locked_git_source_validate "$source_path" "$commit" "$name" || return 1
     printf '%s\n' "$source_path"
     return
   fi
 
-  mkdir -p "$cache_root"
-  case "$temporary_path" in
-    "$cache_root"/*) rm -rf "$temporary_path" ;;
-    *) printf 'Refusing to replace a dependency source outside %s.\n' "$cache_root" >&2; exit 1 ;;
-  esac
-  if ! git clone --quiet --filter=blob:none --no-checkout "$url" "$temporary_path" ||
-     ! git -C "$temporary_path" fetch --quiet --depth 1 origin "$commit" ||
-     ! git -C "$temporary_path" checkout --quiet --detach "$commit"; then
-    case "$temporary_path" in "$cache_root"/*) rm -rf "$temporary_path" ;; esac
-    printf 'Could not prepare locked %s source at %s.\n' "$name" "$commit" >&2
-    exit 1
-  fi
-  mv "$temporary_path" "$source_path"
-  printf '%s\n' "$source_path"
+  mkdir -p "$cache_root" || return 1
+  (
+    set -e
+    local cache_lock_held=0
+    cleanup_locked_source() {
+      if [[ "$cache_lock_held" -eq 1 ]]; then
+        workspace_lock_release >&2 || true
+        cache_lock_held=0
+      fi
+      case "${temporary_path:-}" in "$cache_root"/*) rm -rf "$temporary_path" || true ;; esac
+    }
+    trap cleanup_locked_source EXIT
+    workspace_lock_acquire "$cache_root" "dependency-source-$name-$commit" \
+      ".locks/$name-$commit.lock" >&2 || exit 1
+    cache_lock_held=1
+    # A different worktree can publish the immutable checkout while this process waits for the shared cache lock.
+    if [[ -e "$source_path" || -L "$source_path" ]]; then
+      locked_git_source_validate "$source_path" "$commit" "$name" || exit 1
+      workspace_lock_release >&2
+      cache_lock_held=0
+      printf '%s\n' "$source_path"
+      trap - EXIT
+      exit 0
+    fi
+    case "$temporary_path" in
+      "$cache_root"/*) rm -rf "$temporary_path" ;;
+      *) printf 'Refusing to replace a dependency source outside %s.\n' "$cache_root" >&2; exit 1 ;;
+    esac
+    if ! git clone --quiet --filter=blob:none --no-checkout "$url" "$temporary_path" ||
+       ! git -C "$temporary_path" fetch --quiet --depth 1 origin "$commit" ||
+       ! git -C "$temporary_path" checkout --quiet --detach "$commit" ||
+       ! locked_git_source_validate "$temporary_path" "$commit" "$name"; then
+      printf 'Could not prepare locked %s source at %s.\n' "$name" "$commit" >&2
+      exit 1
+    fi
+    if ! mv "$temporary_path" "$source_path"; then
+      printf 'Could not publish locked %s source at %s.\n' "$name" "$commit" >&2
+      exit 1
+    fi
+    temporary_path=""
+    locked_git_source_validate "$source_path" "$commit" "$name" || exit 1
+    workspace_lock_release >&2
+    cache_lock_held=0
+    printf '%s\n' "$source_path"
+    trap - EXIT
+  )
 }
 
 jolt_source="$(locked_source jolt "$jolt_url" "$jolt_commit")"
@@ -196,14 +232,29 @@ done
 
 bash "$SCRIPT_DIR/shader-compiler.sh" "$platform" "$architecture" "$toolset" "$force"
 
-coral_metadata="$(bash "$SCRIPT_DIR/coral.sh" Debug 1 "$force")"
+coral_metadata="$(bash "$SCRIPT_DIR/coral.sh" Debug 1 "$force" "$platform" "$architecture" "$toolset")"
 printf '%s\n' "$coral_metadata"
 coral_source="$(printf '%s\n' "$coral_metadata" | awk -F= '/^CORAL_SOURCE=/{print substr($0, index($0, "=") + 1)}')"
 coral_commit="$(printf '%s\n' "$coral_metadata" | awk -F= '/^CORAL_COMMIT=/{print $2}')"
 coral_patch_digest="$(printf '%s\n' "$coral_metadata" | awk -F= '/^CORAL_PATCH_DIGEST=/{print $2}')"
+coral_build_variant="$(printf '%s\n' "$coral_metadata" | awk -F= '/^CORAL_BUILD_VARIANT=/{print $2}')"
 coral_nethost_library="$(printf '%s\n' "$coral_metadata" | awk -F= '/^CORAL_NETHOST_LIBRARY=/{print substr($0, index($0, "=") + 1)}')"
-coral_release_metadata="$(bash "$SCRIPT_DIR/coral.sh" Release 1 "$force")"
+coral_nethost_runtime="$(printf '%s\n' "$coral_metadata" | awk -F= '/^CORAL_NETHOST_RUNTIME=/{print substr($0, index($0, "=") + 1)}')"
+coral_dotnet_root="$(printf '%s\n' "$coral_metadata" | awk -F= '/^CORAL_DOTNET_ROOT=/{print substr($0, index($0, "=") + 1)}')"
+coral_release_metadata="$(bash "$SCRIPT_DIR/coral.sh" Release 1 "$force" "$platform" "$architecture" "$toolset")"
 printf '%s\n' "$coral_release_metadata"
+coral_release_source="$(printf '%s\n' "$coral_release_metadata" | awk -F= '/^CORAL_SOURCE=/{print substr($0, index($0, "=") + 1)}')"
+coral_release_variant="$(printf '%s\n' "$coral_release_metadata" | awk -F= '/^CORAL_BUILD_VARIANT=/{print $2}')"
+coral_release_nethost_library="$(printf '%s\n' "$coral_release_metadata" | awk -F= '/^CORAL_NETHOST_LIBRARY=/{print substr($0, index($0, "=") + 1)}')"
+coral_release_nethost_runtime="$(printf '%s\n' "$coral_release_metadata" | awk -F= '/^CORAL_NETHOST_RUNTIME=/{print substr($0, index($0, "=") + 1)}')"
+coral_release_dotnet_root="$(printf '%s\n' "$coral_release_metadata" | awk -F= '/^CORAL_DOTNET_ROOT=/{print substr($0, index($0, "=") + 1)}')"
+[[ "$coral_release_source" == "$coral_source" && "$coral_release_variant" == "$coral_build_variant" &&
+   "$coral_release_nethost_library" == "$coral_nethost_library" &&
+   "$coral_release_nethost_runtime" == "$coral_nethost_runtime" &&
+   "$coral_release_dotnet_root" == "$coral_dotnet_root" ]] || {
+  printf 'Coral Debug and Release metadata must resolve to one checkout-isolated build variant.\n' >&2
+  exit 1
+}
 
 bash "$ROOT/Scripts/Unix/ffmpeg.sh" Debug "$base/Release" "$platform" "$architecture" "$toolset"
 bash "$ROOT/Scripts/Unix/ffmpeg.sh" Release "$base/Release" "$platform" "$architecture" "$toolset"
@@ -214,14 +265,15 @@ dotnet_sdk_link="$ROOT/Build/Dependencies/dotnet-sdk"
 mkdir -p "$ROOT/Build/Dependencies"
 ln -sfn "$coral_source" "$coral_link"
 ln -sfn "$(dirname "$coral_nethost_library")" "$nethost_link"
-dotnet_root="$(dotnet_sdk_root dotnet 10)" || exit 1
+dotnet_root="$coral_dotnet_root"
+[[ -x "$dotnet_root/dotnet" ]] || { printf 'Pinned Coral .NET SDK root is unavailable: %s\n' "$dotnet_root" >&2; exit 1; }
 ln -sfn "$dotnet_root" "$dotnet_sdk_link"
 nethost_name="$(basename "$coral_nethost_library")"
 nethost_runtime_name="$nethost_name"
 if [[ "$platform" == Mac ]]; then
-  nethost_runtime_name=libnethost.dylib
-  [[ -f "$(dirname "$coral_nethost_library")/$nethost_runtime_name" ]] || {
-    printf 'Coral nethost runtime is missing: %s\n' "$(dirname "$coral_nethost_library")/$nethost_runtime_name" >&2
+  nethost_runtime_name="$(basename "$coral_nethost_runtime")"
+  [[ -n "$coral_nethost_runtime" && -f "$coral_nethost_runtime" ]] || {
+    printf 'Coral nethost runtime is missing: %s\n' "$coral_nethost_runtime" >&2
     exit 1
   }
 fi
@@ -288,3 +340,6 @@ DependencyManifest = {
 }
 EOF
 printf '==> Dependency manifest generated\n'
+workspace_lock_release >&2
+dependencies_workspace_lock_held=0
+trap - EXIT

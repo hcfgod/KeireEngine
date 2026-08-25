@@ -54,13 +54,29 @@ namespace KeireEditor
     class ScenePlayChangeTracker final
     {
       public:
-        void RecordMutation(const Keire::SceneDefinition& before, const Keire::SceneDefinition& after);
+        void RecordMutation(const Keire::SceneDefinition& before, const Keire::SceneDefinition& after,
+                            const Keire::Ref<Keire::ComponentRegistry>& registry = {});
+        void RecordComponentPropertyMutation(Keire::AssetId entity, Keire::ComponentTypeId component,
+                                             std::string_view property, const Keire::ComponentPropertyValue& value);
+        void BindSession(const Keire::Ref<Keire::SceneRuntimeSession>& session) noexcept;
         void Clear() noexcept;
         [[nodiscard]] bool Empty() const noexcept;
         [[nodiscard]] ScenePlayChangeOrigin Origin(const ScenePlayChangePath& path, std::string_view finalValue) const;
+        [[nodiscard]] ScenePlayChangeOrigin Origin(const ScenePlayChangePath& path, std::string_view finalValue,
+                                                   std::string_view wildcardFinalValue) const;
 
       private:
-        std::unordered_map<ScenePlayChangePath, std::string, ScenePlayChangePathHash> m_AuthoredValues;
+        struct AuthoredValue final
+        {
+            std::string Value;
+            std::uint64_t Sequence = 0;
+        };
+
+        void Record(ScenePlayChangePath path, std::string value);
+
+        std::unordered_map<ScenePlayChangePath, AuthoredValue, ScenePlayChangePathHash> m_AuthoredValues;
+        Keire::WeakRef<Keire::SceneRuntimeSession> m_Session;
+        std::uint64_t m_NextSequence = 1;
     };
 
     struct ScenePlayChange

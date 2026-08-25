@@ -54,6 +54,130 @@ if ($storePython -and $pythonLauncher -and $storePython.Source -like "*\Microsof
     Assert-Equal ([IO.Path]::GetFileName($python.Executable)) "py.exe" "Microsoft Store Python alias rejection"
 }
 if ($runFast) {
+$workspaceIdentityFixture = Join-Path ([IO.Path]::GetTempPath()) ("keire-workspace-identity-" +
+    [guid]::NewGuid().ToString("N"))
+$firstWorkspace = Join-Path $workspaceIdentityFixture "first"
+$secondWorkspace = Join-Path $workspaceIdentityFixture "second"
+$workspaceJunctions = [Collections.Generic.List[string]]::new()
+try {
+    New-Item -ItemType Directory -Force -Path $firstWorkspace, $secondWorkspace | Out-Null
+    $firstIdentity = Get-KeireWorkspaceIdentity $firstWorkspace
+    $firstAliasIdentity = Get-KeireWorkspaceIdentity ($firstWorkspace.ToUpperInvariant() +
+        [IO.Path]::DirectorySeparatorChar)
+    $secondIdentity = Get-KeireWorkspaceIdentity $secondWorkspace
+    Assert-True ($firstIdentity -match '^[0-9a-f]{16}$') "Windows workspace cache identity format"
+    Assert-Equal $firstAliasIdentity $firstIdentity "Windows workspace cache canonicalization"
+    Assert-True ($secondIdentity -ne $firstIdentity) "Linked-worktree cache identity isolation"
+
+    $coralDotnetRoot = Join-Path $firstWorkspace "dotnet"
+    $coralVariant = Get-KeireCoralBuildVariantKey -Architecture x86_64 `
+        -CompilerIdentity "msc-vs17-vc14.44-sdk10.0.28000.0" -DotnetSdkVersion "10.0.302" `
+        -DotnetRoot $coralDotnetRoot -NetHostIdentity "win-x64|10.0.10|fixture" `
+        -WorkspaceIdentity $firstIdentity
+    $coralVariantAlias = Get-KeireCoralBuildVariantKey -Architecture x86_64 `
+        -CompilerIdentity "msc-vs17-vc14.44-sdk10.0.28000.0" -DotnetSdkVersion "10.0.302" `
+        -DotnetRoot ($coralDotnetRoot.ToUpperInvariant() + [IO.Path]::DirectorySeparatorChar) `
+        -NetHostIdentity "win-x64|10.0.10|fixture" -WorkspaceIdentity $firstIdentity
+    Assert-True ($coralVariant -match '^windows-x86_64-[0-9a-f]{24}$') `
+        "Windows Coral build variant key format"
+    Assert-Equal $coralVariantAlias $coralVariant "Windows Coral SDK-root canonicalization"
+    Assert-True ((Get-KeireCoralBuildVariantKey -Architecture ARM64 `
+                -CompilerIdentity "msc-vs17-vc14.44-sdk10.0.28000.0" -DotnetSdkVersion "10.0.302" `
+                -DotnetRoot $coralDotnetRoot -NetHostIdentity "win-arm64|10.0.10|fixture" `
+                -WorkspaceIdentity $firstIdentity) -ne $coralVariant) "Windows Coral architecture isolation"
+    Assert-True ((Get-KeireCoralBuildVariantKey -Architecture x86_64 `
+                -CompilerIdentity "msc-vs17-vc14.45-sdk10.0.28000.0" -DotnetSdkVersion "10.0.302" `
+                -DotnetRoot $coralDotnetRoot -NetHostIdentity "win-x64|10.0.10|fixture" `
+                -WorkspaceIdentity $firstIdentity) -ne $coralVariant) "Windows Coral compiler isolation"
+    Assert-True ((Get-KeireCoralBuildVariantKey -Architecture x86_64 `
+                -CompilerIdentity "msc-vs17-vc14.44-sdk10.0.28000.0" -DotnetSdkVersion "10.0.303" `
+                -DotnetRoot $coralDotnetRoot -NetHostIdentity "win-x64|10.0.10|fixture" `
+                -WorkspaceIdentity $firstIdentity) -ne $coralVariant) "Windows Coral SDK-version isolation"
+    Assert-True ((Get-KeireCoralBuildVariantKey -Architecture x86_64 `
+                -CompilerIdentity "msc-vs17-vc14.44-sdk10.0.28000.0" -DotnetSdkVersion "10.0.302" `
+                -DotnetRoot (Join-Path $secondWorkspace "dotnet") `
+                -NetHostIdentity "win-x64|10.0.10|fixture" -WorkspaceIdentity $firstIdentity) -ne $coralVariant) `
+        "Windows Coral SDK-installation isolation"
+    Assert-True ((Get-KeireCoralBuildVariantKey -Architecture x86_64 `
+                -CompilerIdentity "msc-vs17-vc14.44-sdk10.0.28000.0" -DotnetSdkVersion "10.0.302" `
+                -DotnetRoot $coralDotnetRoot -NetHostIdentity "win-x64|10.0.11|fixture" `
+                -WorkspaceIdentity $firstIdentity) -ne $coralVariant) "Windows Coral nethost isolation"
+    Assert-True ((Get-KeireCoralBuildVariantKey -Architecture x86_64 `
+                -CompilerIdentity "msc-vs17-vc14.44-sdk10.0.28000.0" -DotnetSdkVersion "10.0.302" `
+                -DotnetRoot $coralDotnetRoot -NetHostIdentity "win-x64|10.0.10|fixture" `
+                -WorkspaceIdentity $secondIdentity) -ne $coralVariant) "Windows Coral worktree isolation"
+    Assert-Throws {
+        Get-KeireCoralBuildVariantKey -Architecture x86_64 -CompilerIdentity "compiler`nspoof" `
+            -DotnetSdkVersion "10.0.302" -DotnetRoot $coralDotnetRoot `
+            -NetHostIdentity "win-x64|10.0.10|fixture" -WorkspaceIdentity $firstIdentity
+    } "Multiline Windows Coral compiler identity rejection"
+    Assert-Throws {
+        Get-KeireCoralBuildVariantKey -Architecture x86_64 -CompilerIdentity "compiler" `
+            -DotnetSdkVersion "10.0-preview" -DotnetRoot $coralDotnetRoot `
+            -NetHostIdentity "win-x64|10.0.10|fixture" -WorkspaceIdentity $firstIdentity
+    } "Non-exact Windows Coral SDK identity rejection"
+
+    $junctionBase = Join-Path $workspaceIdentityFixture "junctions"
+    New-Item -ItemType Directory -Force $junctionBase | Out-Null
+    $legacyJunction = Join-Path $junctionBase "kesc"
+    New-Item -ItemType Junction -Path $legacyJunction -Target $firstWorkspace | Out-Null
+    $workspaceJunctions.Add($legacyJunction)
+    $firstJunction = Get-KeireWorkspaceJunctionPath -BasePath $junctionBase -Prefix "kesc" `
+        -RepositoryRoot $firstWorkspace
+    $secondJunction = Get-KeireWorkspaceJunctionPath -BasePath $junctionBase -Prefix "kesc" `
+        -RepositoryRoot $secondWorkspace
+    Assert-True ($firstJunction -ne $secondJunction) "Distinct workspace junction path selection"
+    Initialize-KeireWorkspaceJunction -Path $firstJunction -Target $firstWorkspace | Out-Null
+    Initialize-KeireWorkspaceJunction -Path $secondJunction -Target $secondWorkspace | Out-Null
+    $workspaceJunctions.Add($firstJunction)
+    $workspaceJunctions.Add($secondJunction)
+    Assert-Equal ([string]((Get-Item -LiteralPath $legacyJunction -Force).Target | Select-Object -First 1)) `
+        $firstWorkspace "Legacy unsuffixed junction preservation"
+
+    $wrongTypeJunction = Get-KeireWorkspaceJunctionPath -BasePath $junctionBase -Prefix "wrong-type" `
+        -RepositoryRoot $firstWorkspace
+    New-Item -ItemType File -Path $wrongTypeJunction | Out-Null
+    Assert-Throws {
+        Initialize-KeireWorkspaceJunction -Path $wrongTypeJunction -Target $firstWorkspace
+    } "Wrong-type workspace junction rejection"
+    Assert-Throws {
+        Initialize-KeireWorkspaceJunction -Path $firstJunction -Target $secondWorkspace
+    } "Workspace identity collision target rejection"
+    Assert-Throws {
+        Get-KeireWorkspaceJunctionPath -BasePath $junctionBase -Prefix "..\escape" `
+            -RepositoryRoot $firstWorkspace
+    } "Unsafe workspace junction prefix rejection"
+}
+finally {
+    foreach ($junction in $workspaceJunctions) {
+        if (Test-Path -LiteralPath $junction) { [IO.Directory]::Delete($junction, $false) }
+    }
+    Remove-Item -LiteralPath $workspaceIdentityFixture -Recurse -Force -ErrorAction SilentlyContinue
+}
+$lockedSourceFixture = Join-Path ([IO.Path]::GetTempPath()) ("keire-locked-source-" +
+    [guid]::NewGuid().ToString("N"))
+try {
+    New-Item -ItemType Directory -Force $lockedSourceFixture | Out-Null
+    & git -C $lockedSourceFixture init --quiet
+    Set-Content -LiteralPath (Join-Path $lockedSourceFixture "source.txt") -Encoding UTF8 -Value "locked"
+    & git -C $lockedSourceFixture add source.txt
+    & git -C $lockedSourceFixture -c user.name=fixture -c user.email=fixture@example.invalid commit --quiet -m fixture
+    if ($LASTEXITCODE -ne 0) { throw "Could not prepare locked-source fixture." }
+    $lockedSourceCommit = ([string](& git -C $lockedSourceFixture rev-parse HEAD)).Trim()
+    Assert-KeireLockedGitSource -Path $lockedSourceFixture -ExpectedCommit $lockedSourceCommit -Name "fixture"
+    Set-Content -LiteralPath (Join-Path $lockedSourceFixture "untracked.txt") -Encoding UTF8 -Value "dirty"
+    Assert-Throws {
+        Assert-KeireLockedGitSource -Path $lockedSourceFixture -ExpectedCommit $lockedSourceCommit -Name "fixture"
+    } "Untracked locked-source cache rejection"
+    Remove-Item -LiteralPath (Join-Path $lockedSourceFixture "untracked.txt")
+    Set-Content -LiteralPath (Join-Path $lockedSourceFixture "source.txt") -Encoding UTF8 -Value "modified"
+    Assert-Throws {
+        Assert-KeireLockedGitSource -Path $lockedSourceFixture -ExpectedCommit $lockedSourceCommit -Name "fixture"
+    } "Modified locked-source cache rejection"
+}
+finally {
+    Remove-Item -LiteralPath $lockedSourceFixture -Recurse -Force -ErrorAction SilentlyContinue
+}
 $powerShellExecutable = (Get-Process -Id $PID).Path
 $savedErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
@@ -68,48 +192,69 @@ $binaryOutputFixture = Join-Path ([IO.Path]::GetTempPath()) ("keire-binary-outpu
 $binaryOutputExternal = Join-Path ([IO.Path]::GetTempPath()) `
     ("keire-binary-output-external-" + [guid]::NewGuid().ToString("N"))
 $binaryOutputJunction = Join-Path $binaryOutputFixture "Build\Bin\Debug-windows-x86_64"
+$intermediateOutput = Join-Path $binaryOutputFixture "Build\Intermediates\Debug-windows-x86_64-msc"
+$otherIntermediateOutput = Join-Path $binaryOutputFixture "Build\Intermediates\Debug-windows-AARCH64-msc"
+$toolchainIdentity = "msc-vs17.0-vc14.44.35207-sdk10.0.28000.0"
+$expectedBinaryIdentity = "ninja|x86_64|msc|off|False|$toolchainIdentity|fingerprint"
 try {
     New-Item -ItemType Directory -Force -Path `
         $binaryOutputJunction, `
         (Join-Path $binaryOutputFixture "Build\Bin\Release-windows-x86_64"), `
         (Join-Path $binaryOutputFixture "Build\Bin\Debug-windows-AARCH64"), `
+        $intermediateOutput, `
+        $otherIntermediateOutput, `
         $binaryOutputExternal | Out-Null
     New-Item -ItemType File -Force -Path `
         (Join-Path $binaryOutputJunction "sentinel"), `
         (Join-Path $binaryOutputFixture "Build\Bin\Release-windows-x86_64\sentinel"), `
         (Join-Path $binaryOutputFixture "Build\Bin\Debug-windows-AARCH64\sentinel"), `
+        (Join-Path $intermediateOutput "sentinel"), `
+        (Join-Path $otherIntermediateOutput "sentinel"), `
         (Join-Path $binaryOutputExternal "sentinel") | Out-Null
     $binaryIdentityStamp = Join-Path $binaryOutputFixture "generation.stamp"
-    Set-Content -LiteralPath $binaryIdentityStamp -Encoding ASCII -Value "ninja|x86_64|msc|off|False|fingerprint"
+    Set-Content -LiteralPath $binaryIdentityStamp -Encoding ASCII `
+        -Value "ninja|x86_64|msc|off|False|$toolchainIdentity|fingerprint"
     Remove-IncompatibleBuildBinaries -Root $binaryOutputFixture -Architecture x86_64 -Toolset msc `
+        -ToolchainIdentity $toolchainIdentity -ExpectedIdentity $expectedBinaryIdentity `
         -IdentityStamp $binaryIdentityStamp
     Assert-True (Test-Path -LiteralPath (Join-Path $binaryOutputJunction "sentinel") -PathType Leaf) `
-        "Same-toolset Windows binary preservation"
-    Set-Content -LiteralPath $binaryIdentityStamp -Encoding ASCII -Value "ninja|x86_64|clang|off|False|fingerprint"
+        "Same-toolchain Windows binary preservation"
+    Assert-True (Test-Path -LiteralPath (Join-Path $intermediateOutput "sentinel") -PathType Leaf) `
+        "Same-toolchain Windows intermediate preservation"
+    Set-Content -LiteralPath $binaryIdentityStamp -Encoding ASCII `
+        -Value "ninja|x86_64|msc|off|False|msc-vs18.0-vc14.51.0-sdk10.0.28000.0|fingerprint"
     Remove-IncompatibleBuildBinaries -Root $binaryOutputFixture -Architecture x86_64 -Toolset msc `
+        -ToolchainIdentity $toolchainIdentity -ExpectedIdentity $expectedBinaryIdentity `
         -IdentityStamp $binaryIdentityStamp
     Assert-True (-not (Test-Path -LiteralPath $binaryOutputJunction)) `
-        "Changed-toolset Windows binary invalidation"
+        "Changed-toolchain Windows binary invalidation"
+    Assert-True (-not (Test-Path -LiteralPath $intermediateOutput)) `
+        "Changed-toolchain Windows intermediate invalidation"
     Assert-True (-not (Test-Path -LiteralPath `
         (Join-Path $binaryOutputFixture "Build\Bin\Release-windows-x86_64"))) `
         "All-configuration Windows binary invalidation"
     Assert-True (Test-Path -LiteralPath `
         (Join-Path $binaryOutputFixture "Build\Bin\Debug-windows-AARCH64\sentinel") -PathType Leaf) `
         "Other-architecture Windows binary preservation"
+    Assert-True (Test-Path -LiteralPath (Join-Path $otherIntermediateOutput "sentinel") -PathType Leaf) `
+        "Other-architecture Windows intermediate preservation"
     Assert-True (Test-Path -LiteralPath (Join-Path $binaryOutputExternal "sentinel") -PathType Leaf) `
         "Outside Windows binary sentinel preservation"
 
     New-Item -ItemType Directory -Force -Path $binaryOutputJunction | Out-Null
     Remove-Item -LiteralPath $binaryIdentityStamp -Force
     Remove-IncompatibleBuildBinaries -Root $binaryOutputFixture -Architecture x86_64 -Toolset msc `
+        -ToolchainIdentity $toolchainIdentity -ExpectedIdentity $expectedBinaryIdentity `
         -IdentityStamp $binaryIdentityStamp
     Assert-True (-not (Test-Path -LiteralPath $binaryOutputJunction)) `
         "Unknown-provenance Windows binary invalidation"
 
     New-Item -ItemType Junction -Path $binaryOutputJunction -Target $binaryOutputExternal | Out-Null
-    Set-Content -LiteralPath $binaryIdentityStamp -Encoding ASCII -Value "ninja|x86_64|clang|off|False|fingerprint"
+    Set-Content -LiteralPath $binaryIdentityStamp -Encoding ASCII `
+        -Value "ninja|x86_64|clang|off|False|clang-fixture|fingerprint"
     Assert-Throws {
         Remove-IncompatibleBuildBinaries -Root $binaryOutputFixture -Architecture x86_64 -Toolset msc `
+            -ToolchainIdentity $toolchainIdentity -ExpectedIdentity $expectedBinaryIdentity `
             -IdentityStamp $binaryIdentityStamp
     } "Reparse-point Windows binary output rejection"
     Assert-True (Test-Path -LiteralPath (Join-Path $binaryOutputExternal "sentinel") -PathType Leaf) `
@@ -122,12 +267,65 @@ finally {
     }
     Remove-Item -LiteralPath $binaryOutputFixture, $binaryOutputExternal -Recurse -Force -ErrorAction SilentlyContinue
 }
+$cacheRemovalFixture = Join-Path ([IO.Path]::GetTempPath()) ("keire-cache-removal-" +
+    [guid]::NewGuid().ToString("N"))
+$cacheRemovalExternal = Join-Path ([IO.Path]::GetTempPath()) ("keire-cache-removal-external-" +
+    [guid]::NewGuid().ToString("N"))
+$cacheRemovalAllowed = Join-Path $cacheRemovalFixture "Build\Tools\ShaderCompiler\Cache"
+$cacheRemovalJunction = Join-Path $cacheRemovalAllowed "windows-x86_64-msc"
+$cacheRemovalNestedJunction = Join-Path $cacheRemovalAllowed "nested\external"
+try {
+    New-Item -ItemType Directory -Force -Path $cacheRemovalAllowed, $cacheRemovalExternal | Out-Null
+    New-Item -ItemType File -Path (Join-Path $cacheRemovalExternal "sentinel") | Out-Null
+    New-Item -ItemType Junction -Path $cacheRemovalJunction -Target $cacheRemovalExternal | Out-Null
+    Assert-Throws {
+        Remove-KeireGeneratedDirectory -RepositoryRoot $cacheRemovalFixture -AllowedRoot $cacheRemovalAllowed `
+            -Path $cacheRemovalJunction -Description "shader compiler cache"
+    } "Reparse-point shader cache removal rejection"
+    Assert-True (Test-Path -LiteralPath (Join-Path $cacheRemovalExternal "sentinel") -PathType Leaf) `
+        "Shader cache reparse target preservation"
+    [IO.Directory]::Delete($cacheRemovalJunction, $false)
+
+    New-Item -ItemType Directory -Force -Path (Split-Path $cacheRemovalNestedJunction) | Out-Null
+    New-Item -ItemType Junction -Path $cacheRemovalNestedJunction -Target $cacheRemovalExternal | Out-Null
+    Assert-Throws {
+        Remove-KeireGeneratedDirectory -RepositoryRoot $cacheRemovalFixture -AllowedRoot $cacheRemovalAllowed `
+            -Path (Split-Path $cacheRemovalNestedJunction) -Description "shader compiler cache"
+    } "Nested reparse-point shader cache removal rejection"
+    Assert-True (Test-Path -LiteralPath (Join-Path $cacheRemovalExternal "sentinel") -PathType Leaf) `
+        "Nested shader cache reparse target preservation"
+
+    $cacheRemovalFile = Join-Path $cacheRemovalAllowed "wrong-type"
+    New-Item -ItemType File -Path $cacheRemovalFile | Out-Null
+    Assert-Throws {
+        Remove-KeireGeneratedDirectory -RepositoryRoot $cacheRemovalFixture -AllowedRoot $cacheRemovalAllowed `
+            -Path $cacheRemovalFile -Description "shader compiler cache"
+    } "Wrong-type shader cache removal rejection"
+    $cacheRemovalDirectory = Join-Path $cacheRemovalAllowed "ordinary"
+    New-Item -ItemType Directory -Path $cacheRemovalDirectory | Out-Null
+    Remove-KeireGeneratedDirectory -RepositoryRoot $cacheRemovalFixture -AllowedRoot $cacheRemovalAllowed `
+        -Path $cacheRemovalDirectory -Description "shader compiler cache"
+    Assert-True (-not (Test-Path -LiteralPath $cacheRemovalDirectory)) "Ordinary shader cache removal"
+}
+finally {
+    foreach ($junctionPath in @($cacheRemovalJunction, $cacheRemovalNestedJunction)) {
+        $junction = Get-Item -LiteralPath $junctionPath -Force -ErrorAction SilentlyContinue
+        if ($junction -and (($junction.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+            [IO.Directory]::Delete($junctionPath, $false)
+        }
+    }
+    Remove-Item -LiteralPath $cacheRemovalFixture, $cacheRemovalExternal -Recurse -Force `
+        -ErrorAction SilentlyContinue
+}
 $workspaceLockFixture = Join-Path ([IO.Path]::GetTempPath()) ("keire-workspace-lock-" + [guid]::NewGuid().ToString("N"))
 $savedWorkspaceLockToken = $env:KEIRE_WORKSPACE_LOCK_TOKEN
 $savedWorkspaceLockTimeout = $env:KEIRE_WORKSPACE_LOCK_TIMEOUT_SECONDS
 $savedWorkspaceLockStale = $env:KEIRE_WORKSPACE_LOCK_STALE_SECONDS
 $savedWorkspaceLockHeartbeat = $env:KEIRE_WORKSPACE_LOCK_HEARTBEAT_SECONDS
 $workspaceLock = $null
+$workspaceLockParentJunction = Join-Path $workspaceLockFixture ".locks"
+$workspaceLockExternal = Join-Path ([IO.Path]::GetTempPath()) ("keire-workspace-lock-external-" +
+    [guid]::NewGuid().ToString("N"))
 try {
     New-Item -ItemType Directory -Force $workspaceLockFixture | Out-Null
     $env:KEIRE_WORKSPACE_LOCK_TIMEOUT_SECONDS = "1"
@@ -162,14 +360,49 @@ try {
     Exit-KeireWorkspaceLock -Lock $workspaceLock
     $workspaceLock = $null
     Assert-True (-not (Test-Path -LiteralPath $stalePath)) "Windows workspace lock release"
+
+    $workspaceLock = Enter-KeireWorkspaceLock -RepositoryRoot $workspaceLockFixture `
+        -CommandName "dependency-source-fixture" -LockRelativePath ".locks\dependency-fixture.lock"
+    Assert-Equal $workspaceLock.Path (Join-Path $workspaceLockFixture ".locks\dependency-fixture.lock") `
+        "Windows shared-cache lock path"
+    $activeToken = $env:KEIRE_WORKSPACE_LOCK_TOKEN
+    $env:KEIRE_WORKSPACE_LOCK_TOKEN = $null
+    Assert-Throws {
+        Enter-KeireWorkspaceLock -RepositoryRoot $workspaceLockFixture `
+            -CommandName "dependency-source-contender" -LockRelativePath ".locks\dependency-fixture.lock"
+    } "Concurrent Windows shared-cache lock timeout"
+    $env:KEIRE_WORKSPACE_LOCK_TOKEN = $activeToken
+    Exit-KeireWorkspaceLock -Lock $workspaceLock
+    $workspaceLock = $null
+    [IO.Directory]::Delete($workspaceLockParentJunction, $false)
+    New-Item -ItemType Directory -Path $workspaceLockExternal | Out-Null
+    New-Item -ItemType File -Path (Join-Path $workspaceLockExternal "sentinel") | Out-Null
+    New-Item -ItemType Junction -Path $workspaceLockParentJunction -Target $workspaceLockExternal | Out-Null
+    Assert-Throws {
+        Enter-KeireWorkspaceLock -RepositoryRoot $workspaceLockFixture -CommandName "redirected" `
+            -LockRelativePath ".locks\redirected.lock"
+    } "Reparse-point Windows shared-cache lock parent rejection"
+    Assert-True (Test-Path -LiteralPath (Join-Path $workspaceLockExternal "sentinel") -PathType Leaf) `
+        "Windows shared-cache lock reparse target preservation"
+    [IO.Directory]::Delete($workspaceLockParentJunction, $false)
+    Assert-Throws {
+        Enter-KeireWorkspaceLock -RepositoryRoot $workspaceLockFixture -CommandName "escape" `
+            -LockRelativePath "..\outside.lock"
+    } "Escaping Windows shared-cache lock path rejection"
 }
 finally {
     if ($workspaceLock) { Exit-KeireWorkspaceLock -Lock $workspaceLock }
+    $workspaceLockParent = Get-Item -LiteralPath $workspaceLockParentJunction -Force -ErrorAction SilentlyContinue
+    if ($workspaceLockParent -and
+        (($workspaceLockParent.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        [IO.Directory]::Delete($workspaceLockParentJunction, $false)
+    }
     $env:KEIRE_WORKSPACE_LOCK_TOKEN = $savedWorkspaceLockToken
     $env:KEIRE_WORKSPACE_LOCK_TIMEOUT_SECONDS = $savedWorkspaceLockTimeout
     $env:KEIRE_WORKSPACE_LOCK_STALE_SECONDS = $savedWorkspaceLockStale
     $env:KEIRE_WORKSPACE_LOCK_HEARTBEAT_SECONDS = $savedWorkspaceLockHeartbeat
     Remove-Item $workspaceLockFixture -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item $workspaceLockExternal -Recurse -Force -ErrorAction SilentlyContinue
 }
 & $python.Executable @($python.PrefixArguments) (Join-Path $PSScriptRoot "check-repository-layout.py")
 if ($LASTEXITCODE -ne 0) { throw "Repository layout checks failed." }
@@ -219,12 +452,16 @@ Assert-True ($generateScript.Contains('"dependencies.ps1"') -and
     "Forced project generation preserves third-party dependency caches"
 Assert-True ($generateScript.Contains('$Generator -eq "compilecommands"') -and
              $generateScript.Contains('(Join-Path $stampDirectory "ninja.stamp")') -and
-             $generateScript.Contains('"ninja|$Architecture|$Toolset|$CompilerCache|$([bool]$CI)|$generationFingerprint"')) `
+             $generateScript.Contains('"ninja|$Architecture|$Toolset|$CompilerCache|$([bool]$CI)|$toolchainIdentity|$generationFingerprint"')) `
     "Compile database generation records the shared Ninja artifact identity"
 Assert-True ($generateScript.Contains('$identityGenerator = if ($Generator -eq "compilecommands") { "ninja" }') -and
+             $generateScript.Contains('Get-WindowsToolchainIdentity') -and
+             $generateScript.Contains('windows-$(Get-ArchitectureOutputName $Architecture)-output.stamp') -and
              $generateScript.Contains('Remove-IncompatibleBuildBinaries') -and
-             $generateScript.Contains('-IdentityStamp $identityStamp')) `
-    "Windows generation invalidates stable outputs with incompatible toolset provenance"
+             $generateScript.Contains('-ToolchainIdentity $toolchainIdentity') -and
+             $generateScript.Contains('-ExpectedIdentity $expectedOutputIdentity') -and
+             $generateScript.Contains('-IdentityStamp $outputIdentityStamp')) `
+    "Windows generation invalidates stable outputs with incompatible compiler provenance"
 $windowsCommonSource = Get-Content (Join-Path $Windows "common.ps1") -Raw
 Assert-True ($windowsCommonSource.Contains('$generationInfrastructureInputs') -and
              $windowsCommonSource.Contains('Scripts\Unix\dependencies.sh') -and
@@ -233,9 +470,13 @@ Assert-True ($windowsCommonSource.Contains('$_.Name -notin @(".git", "Build", "V
              $windowsCommonSource.Contains('Get-ChildItem -LiteralPath $_.FullName -Recurse -Filter "premake5.lua"')) `
     "Windows Premake inventory skips non-source roots before recursive discovery"
 Assert-True ($windowsCommonSource.Contains('function Remove-IncompatibleBuildBinaries') -and
+             $windowsCommonSource.Contains('function Get-WindowsToolchainIdentity') -and
              $windowsCommonSource.Contains('[IO.FileAttributes]::ReparsePoint') -and
-             $windowsCommonSource.Contains('Build\Bin\$_-windows-$outputArchitecture')) `
-    "Windows toolset-output invalidation is contained and rejects reparse points"
+             $windowsCommonSource.Contains('Build\Bin\$_-windows-$outputArchitecture') -and
+             $windowsCommonSource.Contains('$intermediateBase = Join-Path $Root "Build\Intermediates"') -and
+             $windowsCommonSource.Contains('Join-Path $intermediateBase "$_-windows-$outputArchitecture-$Toolset"') -and
+             $windowsCommonSource.Contains('$expectedParts.Count -ne 7')) `
+    "Windows toolchain-output invalidation is contained, complete, and rejects reparse points"
 $windowsCommon = Get-Content (Join-Path $Windows "common.ps1") -Raw
 Assert-True ($windowsCommon.Contains('"KeireHubRuntime"') -and $windowsCommon.Contains('"KeireHubTests"') -and
              $windowsCommon.Contains('"KeireHubWorker"')) "Hub target source-inventory project regeneration"
@@ -300,6 +541,107 @@ Assert-True ($dependencyScript.Contains('$Toolset -eq "msc"') -and
              $dependencyScript.Contains('$sodiumToolsetVersion')) `
     "Toolset-aware Assimp zlib and deterministic libsodium caches"
 $windowsBuildScript = Get-Content (Join-Path $Windows "build.ps1") -Raw
+Assert-True ($windowsBuildScript.Contains('windows-$(Get-ArchitectureOutputName $Architecture)-output.stamp') -and
+             $windowsBuildScript.Contains('function Initialize-KeireGeneratedBuild') -and
+             $windowsBuildScript.Contains('Remove-IncompatibleBuildBinaries') -and
+             $windowsBuildScript.Contains('-ToolchainIdentity $toolchainIdentity') -and
+             $windowsBuildScript.Contains('-ExpectedIdentity $expectedStamp') -and
+             $windowsBuildScript.Contains('-IdentityStamp $outputIdentityStamp')) `
+    "Windows builds enforce canonical shared-output compiler provenance"
+$buildOrderFixture = Join-Path ([IO.Path]::GetTempPath()) ("keire-build-order-" +
+    [guid]::NewGuid().ToString("N"))
+$savedBuildOrderPath = $env:PATH
+try {
+    $fixtureWindows = Join-Path $buildOrderFixture "Scripts\Windows"
+    $fixtureTools = Join-Path $buildOrderFixture "tools"
+    New-Item -ItemType Directory -Force -Path $fixtureWindows, $fixtureTools | Out-Null
+    Copy-Item (Join-Path $Windows "build.ps1") (Join-Path $fixtureWindows "build.ps1")
+    @'
+$ErrorActionPreference = "Stop"
+function Get-ProjectConfig {
+    return [pscustomobject]@{
+        PROJECT_IDENTIFIER = "BuildOrderFixture"
+        PROJECT_NAMESPACE = "Fixture"
+        CLIENT_TARGET = "FixtureClient"
+        HUB_TARGET = "FixtureHub"
+    }
+}
+function Get-NativeArchitecture { return "x86_64" }
+function Normalize-Architecture([string]$Architecture) { return "x86_64" }
+function Resolve-WindowsToolset { return "msc" }
+function Resolve-CompilerCache { return "off" }
+function Get-ArchitectureOutputName { return "x86_64" }
+function Assert-SupportedBuildCombination {}
+function Get-ProjectGenerationFingerprint { return "fixture-fingerprint" }
+function Get-WindowsToolchainIdentity {
+    $root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
+    if (-not (Test-Path -LiteralPath (Join-Path $root "bootstrap.ready") -PathType Leaf)) {
+        throw "Toolchain identity was queried before bootstrap generation."
+    }
+    return "fixture-toolchain"
+}
+function Remove-IncompatibleBuildBinaries {
+    param($Root, $Architecture, $Toolset, $ToolchainIdentity, $ExpectedIdentity, $IdentityStamp)
+    if (-not (Test-Path -LiteralPath (Join-Path $Root "bootstrap.ready") -PathType Leaf) -or
+        $ToolchainIdentity -ne "fixture-toolchain" -or
+        $ExpectedIdentity -ne
+            "ninja|x86_64|msc|off|False|fixture-toolchain|fixture-fingerprint") {
+        throw "Output provenance was evaluated before the generated toolchain became ready."
+    }
+    Set-Content -LiteralPath (Join-Path $Root "provenance.checked") -Encoding ASCII -Value "ready"
+}
+function Enter-WindowsToolEnvironment {
+    $root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
+    if (-not (Test-Path -LiteralPath (Join-Path $root "bootstrap.ready") -PathType Leaf)) {
+        throw "Build environment was entered before bootstrap generation."
+    }
+    return "msc"
+}
+function Get-ManagedHostStagingTargets { return @() }
+'@ | Set-Content (Join-Path $fixtureWindows "common.ps1") -Encoding UTF8
+    @'
+function Enter-GeneratedContentLock {
+    return [Threading.Mutex]::new($false)
+}
+function Exit-GeneratedContentLock {
+    param([Threading.Mutex]$Mutex)
+    $Mutex.Dispose()
+}
+'@ | Set-Content (Join-Path $fixtureWindows "generated-content-cache.ps1") -Encoding UTF8
+    @'
+param(
+    [string]$Generator,
+    [string]$Architecture,
+    [string]$Toolset,
+    [string]$CompilerCache,
+    [switch]$CI,
+    [switch]$Update
+)
+$root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
+New-Item -ItemType Directory -Force -Path (Join-Path $root "Build\Generated") | Out-Null
+Set-Content -LiteralPath (Join-Path $root "bootstrap.ready") -Encoding ASCII -Value "ready"
+Set-Content -LiteralPath (Join-Path $root "build.ninja") -Encoding ASCII -Value "# fixture"
+Set-Content -LiteralPath (Join-Path $root "Build\Generated\ninja.stamp") -Encoding ASCII `
+    -Value "ninja|x86_64|msc|off|False|fixture-toolchain|fixture-fingerprint"
+'@ | Set-Content (Join-Path $fixtureWindows "generate.ps1") -Encoding UTF8
+    "@echo off`r`nexit /b 0`r`n" | Set-Content (Join-Path $fixtureTools "ninja.cmd") -Encoding ASCII
+    $env:PATH = "$fixtureTools;$savedBuildOrderPath"
+    $global:LASTEXITCODE = 0
+    $buildOrderOutput = @(& $powerShellExecutable -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `
+        (Join-Path $fixtureWindows "build.ps1") -Generator ninja -Configuration Debug -Architecture x86_64 `
+        -Toolset msc -CompilerCache off -Target FixtureTarget 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Clean Windows build did not generate/bootstrap before reading toolchain provenance:`n$($buildOrderOutput | Out-String)"
+    }
+    Assert-True (Test-Path -LiteralPath (Join-Path $buildOrderFixture "bootstrap.ready") -PathType Leaf) `
+        "Clean Windows build generation fixture"
+    Assert-True (Test-Path -LiteralPath (Join-Path $buildOrderFixture "provenance.checked") -PathType Leaf) `
+        "Post-generation Windows toolchain provenance fixture"
+}
+finally {
+    $env:PATH = $savedBuildOrderPath
+    Remove-Item -LiteralPath $buildOrderFixture -Recurse -Force -ErrorAction SilentlyContinue
+}
 $hubPremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireHub\premake5.lua") -Raw
 Assert-True ($windowsBuildScript.Contains('$Project.HUB_TARGET') -and
              $windowsBuildScript.Contains('libsodium.dll') -and
@@ -310,9 +652,11 @@ $shaderCompilerScript = Get-Content (Join-Path $Windows "shader-compiler.ps1") -
 Assert-True ($shaderCompilerScript.Contains('$hostToolset = "msc"') -and
              $shaderCompilerScript.Contains('"-DCMAKE_C_COMPILER=cl.exe"') -and
              $shaderCompilerScript.Contains('-not $configuredKey') -and
-             $shaderCompilerScript.Contains('"kesc"') -and
-             $shaderCompilerScript.Contains('"short-workspace-v1"')) `
-    "Windows host shader compiler uses MSVC, a short workspace, and deterministic cache replacement"
+             $shaderCompilerScript.Contains('Get-KeireWorkspaceJunctionPath') -and
+             $shaderCompilerScript.Contains('Initialize-KeireWorkspaceJunction') -and
+             $shaderCompilerScript.Contains('Remove-KeireGeneratedDirectory') -and
+             $shaderCompilerScript.Contains('"short-workspace-v2"')) `
+    "Windows host shader compiler uses MSVC, an isolated short workspace, and safe cache replacement"
 $dependencyBridge = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Dependencies\CMakeLists.txt") -Raw
 Assert-True ($dependencyBridge.Contains('if(APPLE AND TARGET zlibstatic)') -and
              $dependencyBridge.Contains('target_compile_options(zlibstatic PRIVATE -UTARGET_OS_MAC)')) `
@@ -470,6 +814,7 @@ Assert-Equal $lock.ASSIMP_COMMIT "392a658f9c271be965271f45e7521a1b80ea4392" "Ass
 Assert-Equal $lock.STB_COMMIT "2c980bb59875b0d32144a71867fbdebb2f77cd20" "stb lock"
 Assert-Equal $lock.FFMPEG_COMMIT "89153eb701d372f54a5d7d29de5067abc09e11d3" "FFmpeg lock"
 Assert-Equal $lock.LIBSODIUM_COMMIT "77e1ce5d6dee871c49ef211222ba18ef0c486bda" "libsodium lock"
+Assert-Equal $lock.TRACY_COMMIT "05cceee0df3b8d7c6fa87e9638af311dbabc63cb" "Tracy lock"
 $vendorScript = Get-Content (Join-Path $Windows "vendor.ps1") -Raw
 $vendorUpdateScript = Get-Content (Join-Path $Windows "vendor-update.ps1") -Raw
 Assert-True ($vendorScript.Contains('Vendor/imgui') -and $vendorScript.Contains('$Lock.IMGUI_COMMIT')) "Dear ImGui vendor mapping"
@@ -482,8 +827,33 @@ Assert-True ($vendorUpdateScript.Contains('"entt"') -and $vendorUpdateScript.Con
 Assert-True ($vendorScript.Contains('Vendor/SDL_shadercross') -and $vendorScript.Contains('SDL_SHADERCROSS_DXC_COMMIT') -and $vendorScript.Contains('SPIRV-Tools')) "Recursive shader compiler vendor mapping"
 Assert-True ($vendorUpdateScript.Contains('"SDL_shadercross"')) "Shader compiler vendor update support"
 Assert-True ($vendorScript.Contains('Vendor/assimp') -and $vendorScript.Contains('$Lock.ASSIMP_COMMIT') -and $vendorScript.Contains('Vendor/stb') -and $vendorScript.Contains('$Lock.STB_COMMIT')) "Asset importer vendor mappings"
+Assert-True ($vendorScript.Contains('[switch]$IncludeProfileDependencies') -and
+             $vendorScript.Contains('Build/Dependencies/tracy') -and
+             $vendorScript.Contains('$Lock.TRACY_COMMIT') -and
+             $vendorScript.Contains('$managedProfileCheckout') -and
+             $vendorScript.Contains('fetch --no-tags origin $dependency.Commit') -and
+             -not $vendorScript.Contains('Vendor/tracy')) `
+    "Tracy is an opt-in immutable Profile dependency outside Vendor"
+Assert-True ($vendorUpdateScript.Contains('"Tracy"') -and
+             $vendorUpdateScript.Contains('Build\Dependencies\tracy') -and
+             $vendorUpdateScript.Contains('if ($Dependency -eq "Tracy")') -and
+             $vendorUpdateScript.Contains('git add Config/Dependencies.lock') -and
+             $vendorUpdateScript.Contains('git add Vendor/$Dependency Config/Dependencies.lock')) `
+    "Tracy vendor updates are lock-only while submodule updates retain staging guidance"
 $dependencyScript = Get-Content (Join-Path $Windows "dependencies.ps1") -Raw
 Assert-True ($dependencyScript.Contains('$Lock.SDL_COMMIT') -and $dependencyScript.Contains('$compiler') -and $dependencyScript.Contains('keire-dependency.stamp')) "Dependency cache identity inputs"
+Assert-True ($dependencyScript.Contains('Get-KeireWorkspaceJunctionPath') -and
+             $dependencyScript.Contains('Initialize-KeireWorkspaceJunction') -and
+             $shaderCompilerScript.Contains('Get-KeireWorkspaceJunctionPath') -and
+             $shaderCompilerScript.Contains('Initialize-KeireWorkspaceJunction')) `
+    "Checkout-bound Windows dependency junctions use validated distinct workspace identities"
+Assert-True ($dependencyScript.Contains('$sourceLayoutIdentity = "workspace-assimp-v2:$assimpSourceLink"') -and
+             $dependencyScript.Contains('$Lock.LIBSODIUM_COMMIT, $sourceLayoutIdentity, $Architecture')) `
+    "Windows native dependency stamps invalidate the legacy shared Assimp source layout"
+Assert-True ($dependencyScript.Contains('Assert-KeireLockedGitSource') -and
+             $dependencyScript.Contains('Enter-KeireWorkspaceLock') -and
+             $dependencyScript.Contains('-LockRelativePath ".locks\$Name-$Commit.lock"')) `
+    "Windows immutable dependency sources fail closed and serialize first population"
 Assert-True ($dependencyScript.Contains('[string]::IsNullOrWhiteSpace($LinkTarget)') -and
              $dependencyScript.Contains('Dependency junction target is not an existing directory') -and
              $dependencyScript.Contains('Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue') -and
@@ -516,7 +886,7 @@ $unixCoralScript = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Unix\cor
 $unixCommonScript = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Unix\common.sh") -Raw
 Assert-True ($unixCoralScript.Contains('pinned_dotnet_sdk_root "$dotnet_path" "$dotnet_sdk_version"') -and
              $unixCoralScript.Contains('"-DDOTNET_EXE=$dotnet_executable"') -and
-             $unixCoralScript.Contains('dotnet-$dotnet_sdk_version') -and
+             $unixCoralScript.Contains('"$dotnet_sdk_version" "$dotnet_root" "$macos_deployment_target"') -and
              ([regex]::Matches(
                  $unixCoralScript,
                  [regex]::Escape('DOTNET_ROOT="$dotnet_root" PATH="$dotnet_root:$PATH"')).Count -eq 2) -and
@@ -524,13 +894,52 @@ Assert-True ($unixCoralScript.Contains('pinned_dotnet_sdk_root "$dotnet_path" "$
     "Unix Coral overrides stale CMake .NET discovery with the exact pinned SDK"
 Assert-True ($coralScript.Contains('git -C $TemporarySource config core.autocrlf false')) `
     "Coral source cache uses deterministic LF checkouts"
+Assert-True ($coralScript.Contains('Assert-KeireLockedGitSource') -and
+             $coralScript.Contains('-LockRelativePath ".locks\coral-$($Lock.CORAL_COMMIT).lock"') -and
+             $coralScript.Contains('-LockRelativePath ".locks\coral-$CacheKey.lock"') -and
+             $coralScript.Contains('Resolve-KeirePinnedDotnetSdk') -and
+             $coralScript.Contains('Resolve-KeirePinnedNetHost') -and
+             $coralScript.Contains('Get-WindowsToolchainIdentity') -and
+             $coralScript.Contains('Get-KeireCoralBuildVariantKey') -and
+             $coralScript.Contains('$WorkspaceIdentity = Get-KeireWorkspaceIdentity $Root') -and
+             $coralScript.Contains('$ExpectedStamp = "$($Lock.CORAL_COMMIT)|$PatchDigest|$BuildVariant|')) `
+    "Windows Coral source and variant-isolated patched-build caches are validated and serialized"
+Assert-True ($dependencyScript.Contains('-Configuration Debug -Architecture $Architecture') -and
+             $dependencyScript.Contains('-Configuration Release -Architecture $Architecture')) `
+    "Windows dependency bootstrap forwards the selected target architecture to Coral"
+Assert-True ($unixCoralScript.Contains('locked_git_source_validate') -and
+             $unixCoralScript.Contains('".locks/coral-$coral_commit.lock"') -and
+             $unixCoralScript.Contains('".locks/coral-$cache_key.lock"') -and
+             $unixCoralScript.Contains('coral_build_variant_key') -and
+             $unixCoralScript.Contains('workspace_key="$(workspace_identity "$ROOT")"') -and
+             $unixCoralScript.Contains('expected_stamp="$coral_commit|$patch_digest|$variant_key|')) `
+    "Unix Coral source and variant-isolated patched-build caches are validated and serialized"
+Assert-True ($unixCoralScript.Contains('xcrun --sdk macosx --show-sdk-path') -and
+             $unixCoralScript.Contains('xcrun --sdk macosx --show-sdk-version') -and
+             $unixCoralScript.Contains('"-DCMAKE_OSX_SYSROOT=$macos_sdk_path"')) `
+    "macOS Coral cache identity and configuration use the same selected SDK"
 Assert-True ($coralScript.Contains('Get-Command dotnet -CommandType Application') -and
-             $coralScript.Contains('$env:DOTNET_ROOT = Split-Path -Parent $DotnetExecutable') -and
-             $coralScript.Contains('dotnet-$($Lock.DOTNET_SDK_VERSION)')) `
-    "Coral resolves DOTNET_ROOT and keys managed build caches by the pinned SDK"
-Assert-True ($coralScript.Contains('Microsoft.NETCore.App.Host.win-$DotnetHostArchitecture') -and
-             $coralScript.Contains("Where-Object { `$_.Name -match '^10\.' }")) `
-    "Coral selects the native architecture's .NET 10 nethost pack"
+             $coralScript.Contains('$env:DOTNET_ROOT = $DotnetSdk.Root') -and
+             $coralScript.Contains('$selectedVersion -eq $Version') -and
+             $coralScript.Contains('"-DDOTNET_EXE=$DotnetExecutable"')) `
+    "Coral resolves and configures the exact pinned SDK when it is available through PATH"
+Assert-True ($coralScript.Contains('Microsoft.NETCoreSdk.BundledVersions.props') -and
+             $coralScript.Contains('AppHostPackVersion') -and
+             $coralScript.Contains('RuntimeIdentifier = $runtimeIdentifier') -and
+             $coralScript.Contains('Get-FileHash -Algorithm SHA256')) `
+    "Coral selects and identities the pinned SDK's exact native nethost pack"
+Assert-True ($coralScript.Contains('$env:CL') -and $coralScript.Contains('$env:_CL_') -and
+             $coralScript.Contains('$env:LINK') -and $coralScript.Contains('$env:_LINK_') -and
+             $coralScript.Contains('$env:CFLAGS') -and
+             $coralScript.Contains('$env:CXXFLAGS') -and $coralScript.Contains('$env:CPPFLAGS') -and
+             $coralScript.Contains('$env:LDFLAGS') -and $unixCoralScript.Contains('CFLAGS=${CFLAGS-}') -and
+             $unixCoralScript.Contains('CXXFLAGS=${CXXFLAGS-}') -and
+             $unixCoralScript.Contains('CPPFLAGS=${CPPFLAGS-}') -and
+             $unixCoralScript.Contains('LDFLAGS=${LDFLAGS-}')) `
+    "Coral cache identity includes honored native build flags"
+Assert-True ($dependencyScript.Contains('Enter-KeireWorkspaceLock -RepositoryRoot $Root -CommandName "dependencies"') -and
+             $dependencyScript.Contains('Coral Debug and Release metadata must resolve to one checkout-isolated build variant')) `
+    "Windows dependency consumers retain a checkout lock and validate Coral variant coherence"
 $coralPatchPath = "Patches/Coral/0001-keire-net10-nethost-lifetime.patch"
 $coralPatchEol = ([string](& git -C (Get-RepositoryRoot) check-attr eol -- $coralPatchPath)).Trim()
 Assert-Equal $coralPatchEol "$coralPatchPath`: eol: lf" "Coral patch LF checkout policy"
@@ -554,6 +963,11 @@ Assert-True ($premakePolicy.Contains('local function LinkCoralNetHost()') -and
              $premakePolicy.Contains('LinkDependency(DependencyManifest.CoralNetHostRuntime)') -and
              $premakePolicy.Contains('filter { "system:windows or linux" }')) `
     "Premake links macOS against the nethost dylib without changing Windows or Linux native host linkage"
+Assert-True ($premakePolicy.Contains('filter "configurations:Profile"') -and
+             $premakePolicy.Contains('"KEIRE_PROFILE_TELEMETRY"') -and
+             $premakePolicy.Contains('"TRACY_ON_DEMAND"') -and
+             $premakePolicy.Contains('"TRACY_ONLY_LOCALHOST"')) `
+    "Profile builds enable local on-demand Tracy telemetry"
 $unixDependencies = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Unix\dependencies.sh") -Raw
 $windowsDependencies = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Windows\dependencies.ps1") -Raw
 Assert-True ($unixDependencies.Contains('CPP_RTTI_ENABLED=ON') -and
@@ -763,7 +1177,8 @@ $preparedContent = Get-Content (Join-Path $Windows "prepare-generated-content.ps
 Assert-True ($corePremake.Contains('prepare-generated-content.ps1') -and
              -not $windowsBuild.Contains('"build-info.ps1"') -and
              $preparedContent.Contains('"build-info.ps1"') -and
-             $preparedContent.Contains('"builtin-vfx.ps1"')) `
+             $preparedContent.Contains('"builtin-vfx.ps1"') -and
+             $preparedContent.Contains('"builtin-occlusion.ps1"')) `
     "One Core prebuild process owns generated identity and built-in content"
 Assert-True ($corePremake.Contains('pchheader "KeireInternal/KeireCorePch.h"') -and
              $corePremake.Contains('buildoptions { "/FIKeireInternal/KeireCorePch.h" }') -and
@@ -792,6 +1207,7 @@ Assert-True ($editorDevPremake.Contains('ProjectConfig.PROJECT_NAMESPACE .. "Edi
              $windowsRun.Contains('$editorDevTarget')) "Complete editor development aggregate"
 Assert-True ($windowsBuild.Contains('Resolve-CompilerCache') -and
              $windowsBuild.Contains('ProfileBuild') -and
+             $windowsBuild.Contains('    $dependencyConfiguration = if ($Configuration -in @("Release", "Profile", "Dist"))') -and
              $windowsBuild.Contains('/p:PreferredToolArchitecture=x64') -and
              (Test-Path (Join-Path (Get-RepositoryRoot) 'Scripts\patch-ninja-compiler-cache.py'))) `
     "Optional compiler cache, build profiling, and native x64 MSVC host tools"
@@ -835,12 +1251,18 @@ Assert-True ($corePremake.Contains('Source/ECS/Components/CameraComponent.cpp') 
 $generatedContentScript = Get-Content (Join-Path $Windows 'prepare-generated-content.ps1') -Raw
 Assert-True ($corePremake.Contains('prepare-generated-content.ps1') -and
              $generatedContentScript.Contains('builtin-shaders.ps1') -and
+             $generatedContentScript.Contains('builtin-occlusion.ps1') -and
+             (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinOcclusionDepth.hlsl')) -and
+             (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinOcclusionDebugPyramid.hlsl')) -and
+             (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinOcclusionDebugBounds.hlsl')) -and
              (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinUnlit.hlsl'))) `
     "First-party built-in shader generation"
 $renderSource = (Get-ChildItem (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Rendering') -File |
     Where-Object { $_.Name -like 'Render*.cpp' -or $_.Name -like 'Render*.h' } |
     Get-Content -Raw) -join "`n"
-$renderSource += "`n" + (Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Include\KeireInternal\Rendering\RenderBackendInternal.h') -Raw)
+$renderSource += "`n" + ((Get-ChildItem (Join-Path (Get-RepositoryRoot) 'KeireCore\Include\KeireInternal\Rendering') -File |
+    Where-Object { $_.Name -like 'Render*.h' } |
+    Get-Content -Raw) -join "`n")
 Assert-True ($renderSource.Contains('BuiltinUnlitShaders.h') -and $renderSource.Contains('renderer->Tint()') -and -not $renderSource.Contains('Vendor/SDL/test')) "Mesh tint shader ownership and draw wiring"
 $builtinShader = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinUnlit.hlsl') -Raw
 Assert-True ($renderSource.Contains('ResolveLighting') -and $renderSource.Contains('DirectionalLightComponent') -and $renderSource.Contains('AmbientAndExposure') -and $builtinShader.Contains('LightDirection') -and $builtinShader.Contains('worldNormal')) "Directional and ambient light wiring"

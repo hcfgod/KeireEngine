@@ -458,6 +458,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                             ui.TextColored(theme.MutedText, "Required | Local space");
                             ui.Separator();
                             auto position = transform->LocalPosition();
+                            const auto previousPosition = position;
                             const auto currentOrientation = transform->LocalRotation();
                             if (m_RotationTarget != entity.Id().Value() ||
                                 (!m_RotationEditing && !SameRotation(currentOrientation, m_RotationOrientation)))
@@ -506,26 +507,24 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                             const bool validScale = Keire::TransformComponent::IsValidLocalScale(scale);
                             if (positionChanged)
                             {
-                                m_Controller.RecordInspectorUndo("Change Position", "transform.position." +
-                                                                                        entity.Id().ToString() + "." +
-                                                                                        std::to_string(m_EditSerial));
-                                sceneDocument.SetTransform(entity.Id(), {.Position = position});
+                                m_Controller.ApplyInspectorTransformEdit(
+                                    MakeInspectorTransformEdit(entity.Id(), InspectorTransformProperty::Position,
+                                                               previousPosition, position, m_EditSerial));
                             }
                             if (rotationChanged)
                             {
-                                m_Controller.RecordInspectorUndo("Change Rotation", "transform.rotation." +
-                                                                                        entity.Id().ToString() + "." +
-                                                                                        std::to_string(m_EditSerial));
-                                sceneDocument.SetTransform(entity.Id(), {.EulerDegrees = rotation});
+                                const auto orientation = Keire::Math::EulerDegreesToQuaternion(rotation);
+                                m_Controller.ApplyInspectorTransformEdit(
+                                    MakeInspectorTransformEdit(entity.Id(), InspectorTransformProperty::Rotation,
+                                                               currentOrientation, orientation, m_EditSerial));
                                 m_RotationEuler = rotation;
-                                m_RotationOrientation = Keire::Math::EulerDegreesToQuaternion(rotation);
+                                m_RotationOrientation = orientation;
                             }
                             if (scaleChanged && validScale)
                             {
-                                m_Controller.RecordInspectorUndo("Change Scale", "transform.scale." +
-                                                                                     entity.Id().ToString() + "." +
-                                                                                     std::to_string(m_EditSerial));
-                                sceneDocument.SetTransform(entity.Id(), {.Scale = scale});
+                                m_Controller.ApplyInspectorTransformEdit(
+                                    MakeInspectorTransformEdit(entity.Id(), InspectorTransformProperty::Scale,
+                                                               previousScale, scale, m_EditSerial));
                             }
                             if (scaleState.Active && !validScale)
                                 ui.TextColored(

@@ -206,6 +206,36 @@ match. Replaced buffers enter the normal submission-fence retirement queue, and 
 only after renderer shutdown has made GPU access inert. `RenderStatistics` reports dynamic bytes, buffer reallocations,
 and CPU VFX draw batches so a warmed-up scene can distinguish expected payload traffic from resource churn.
 
+GPU occlusion is a same-frame, per-surface extension of the private frame graph. Explicitly safe opaque geometry writes
+the occlusion depth pass, compute reductions build a hierarchical depth pyramid, and conservative bounds classification
+produces compact instance data plus indexed indirect arguments before the main opaque pass. Each dependent reduction is
+recorded with the synchronization required by SDL_GPU; no CPU visibility decision waits for the GPU. Transparent
+geometry never contributes occluder depth, though an eligible depth-tested singleton can be rejected without disturbing
+transparent ordering. Always-visible instances stay in their compacted batch with a force-visible bit. Unsafe deforming
+geometry, legacy instance-addressing shaders, and materials without conservative bounds remain on deterministic direct
+draws; only opaque geometry with matching depth-only behavior may become an occluder. Generated Shader Graph materials
+publish the eligibility metadata only when their vertex and depth behavior satisfies that contract.
+
+`Disabled`, `Automatic`, and `Forced` are persisted in rendering settings. Forced mode bypasses profitability
+thresholds, never safety checks. Allocation, pipeline, backend, content-eligibility, resize, and unavailable-surface
+failures preserve complete direct rendering and publish a typed reason instead of dropping geometry. Every surface owns
+its pyramid, visibility buffers, indirect arguments, readback ring, and value-only `GpuOcclusionSurfaceDiagnostics`;
+resize, minimize, device loss, and close retire those resources through the existing fence lifecycle. Aggregate
+statistics expose current recording work while visibility totals arrive asynchronously with their source frame and age.
+Pending readbacks also carry the surface generation, an internal submission epoch, and requested mode. Resource resets
+and every mode transition advance that epoch, so a late result from a pre-resize frame or a Forced-Disabled-Forced ABA
+sequence cannot revalidate stale visibility counters.
+Execution-produced aggregate counters reset on the render owner immediately before frame execution, not at the earlier
+application `BeginFrame` boundary. Editor UI built between those boundaries therefore observes one coherent finalized
+workload; after execution, profiling and telemetry observe the newly finalized frame.
+The active and terminal-fallback surface counts cover only surfaces submitted in that completed frame; partial-fallback
+surfaces remain active and form a subset of the active count. A completed frame without a request idles that surface,
+invalidates its pending-readback epoch, and prevents old visibility results from repopulating terminal diagnostics.
+The editor's session-transient visualization request is a value-only per-surface contract. The renderer composites
+visibility bounds or a selected hierarchical-depth mip in its overlay pass and keeps the debug texture private; the
+separate metadata overlay reports mode, fallback, mip availability, source frame, and readback age. External GPU capture
+remains the authoritative workflow for inspecting every pyramid resource and synchronization barrier.
+
 ## Fixed-tick replay and deterministic profiles
 
 Gameplay input is latched at fixed-tick boundaries. Digital edges remain pending until a tick consumes them, analog
@@ -713,6 +743,13 @@ structural commands; `InspectorPanel` owns component inspection while its `Asset
 dispatch, diagnostics, naming actions, and material content; and the input-actions, project-settings,
 asset-browser, console, and diagnostics panels own their respective tools. Panels receive document data, frame-value
 snapshots, and named commands through narrow contracts; none retain, friend, or inspect `EditorWorkspaceLayer`.
+Viewport-local overlays are invoked by the owning panel before its RAII scope ends, so backend draw-list ownership cannot
+fall through to an implicit debug window. Scene and Game pass their own camera-local visibility diagnostics into those
+overlays. FPS, profiler categories, dispatch/indirect totals, recording timings, and CPU preparation remain one completed
+renderer-wide frame aggregate shared by both overlays.
+Continuous Inspector Transform drags use compact typed undo commands whose final value is updated as samples merge.
+Play-mode origin tracking records only the edited Transform component, avoiding whole-scene snapshot, JSON encoding,
+and diff work on every pointer sample while preserving Editor versus Mixed change classification.
 `UiPanelRegistration` supplies a common session-local view lock. The UI boundary prevents locked panels from moving,
 resizing, or collapsing, while selection-driven client panels retain only stable entity or asset IDs and validate them
 before each draw.
@@ -1048,6 +1085,15 @@ include/archive paths and platform requirements. SDK packages preserve SDL's off
 `Keire::Core` transitively depends on the private ImGui, Zstd, Assimp, Jolt, Recast/Detour, miniaudio, Coral.Native,
 and nethost libraries
 followed by `SDL3::SDL3-static`. Gameplay middleware headers never cross the supported include tree.
+
+Windows may share immutable locked source downloads across clones and linked worktrees. Checkout-bound aliases cannot
+be shared: the Assimp submodule alias and short shader-compiler source junction include a deterministic identity derived
+from the canonical repository root. This preserves short ASCII build paths while allowing independent worktrees to use
+the same `LOCALAPPDATA`, `TEMP`, and `TMP` values concurrently. Unix dependency and shader-tool paths remain directly
+checkout-local. Shared cache publication is serialized per dependency, and every reuse verifies both the locked commit
+and a clean ordinary checkout. Cache schema changes invalidate stale CMake source paths before reuse, with recursive
+replacement rejecting reparse-point ancestors. Windows generation stamps also include the exact Visual Studio, MSVC,
+and Windows SDK identity so a compiler change invalidates both final binaries and matching intermediate objects.
 
 On Windows, every generated final executable that links KeireCore stages `nethost.dll` beside itself as part of its
 own build rather than relying on a launcher side effect. The editor's generated Visual Studio, Xcode, and Make projects

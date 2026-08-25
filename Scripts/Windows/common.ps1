@@ -1,5 +1,199 @@
 $ErrorActionPreference = "Stop"
 
+function Get-KeireWorkspaceIdentity {
+    param([Parameter(Mandatory = $true)][string]$RepositoryRoot)
+
+    if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
+        throw "RepositoryRoot must not be empty."
+    }
+
+    $separators = [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $canonicalRoot = [IO.Path]::GetFullPath($RepositoryRoot).TrimEnd($separators)
+    if ([string]::IsNullOrWhiteSpace($canonicalRoot)) {
+        throw "RepositoryRoot must resolve to a non-root workspace path."
+    }
+
+    # Windows paths are case-insensitive. Normalize both case and Unicode so aliases of the same checkout produce the
+    # same short identity while independent clones and linked worktrees receive distinct cache junctions.
+    $canonicalRoot = $canonicalRoot.Normalize([Text.NormalizationForm]::FormC).ToUpperInvariant()
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+        $digest = $sha256.ComputeHash([Text.Encoding]::UTF8.GetBytes($canonicalRoot))
+    }
+    finally {
+        $sha256.Dispose()
+    }
+    return ([BitConverter]::ToString($digest).Replace("-", "").ToLowerInvariant().Substring(0, 16))
+}
+
+function Get-KeireCoralBuildVariantKey {
+    param(
+        [Parameter(Mandatory = $true)][string]$Architecture,
+        [Parameter(Mandatory = $true)][string]$CompilerIdentity,
+        [Parameter(Mandatory = $true)][string]$DotnetSdkVersion,
+        [Parameter(Mandatory = $true)][string]$DotnetRoot,
+        [Parameter(Mandatory = $true)][string]$NetHostIdentity,
+        [Parameter(Mandatory = $true)][string]$WorkspaceIdentity
+    )
+
+    $normalizedArchitecture = Normalize-Architecture $Architecture
+    if ([string]::IsNullOrWhiteSpace($CompilerIdentity) -or $CompilerIdentity -match '[\r\n]') {
+        throw "Coral compiler identity must be one non-empty line."
+    }
+    if ($DotnetSdkVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
+        throw "Coral .NET SDK identity must be an exact numeric SDK version."
+    }
+    if ([string]::IsNullOrWhiteSpace($DotnetRoot) -or $DotnetRoot -match '[\r\n]') {
+        throw "Coral .NET SDK root must be one non-empty path."
+    }
+    if ([string]::IsNullOrWhiteSpace($NetHostIdentity) -or $NetHostIdentity -match '[\r\n]') {
+        throw "Coral nethost identity must be one non-empty line."
+    }
+    if ($WorkspaceIdentity -notmatch '^[0-9a-f]{16}$') {
+        throw "Coral workspace identity must be a 16-character lowercase SHA-256 prefix."
+    }
+
+    $separators = [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $canonicalDotnetRoot = [IO.Path]::GetFullPath($DotnetRoot).TrimEnd($separators)
+    $filesystemRoot = [IO.Path]::GetPathRoot($canonicalDotnetRoot).TrimEnd($separators)
+    if ([string]::IsNullOrWhiteSpace($canonicalDotnetRoot) -or
+        [string]::Equals($canonicalDotnetRoot, $filesystemRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Coral .NET SDK root must not resolve to a filesystem root."
+    }
+    $canonicalDotnetRoot = $canonicalDotnetRoot.Normalize([Text.NormalizationForm]::FormC).ToUpperInvariant()
+    $descriptor = "coral-native-windows-v3|$normalizedArchitecture|$CompilerIdentity|$DotnetSdkVersion|" +
+        "$canonicalDotnetRoot|$NetHostIdentity|$WorkspaceIdentity"
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+        $digest = $sha256.ComputeHash([Text.Encoding]::UTF8.GetBytes($descriptor))
+    }
+    finally {
+        $sha256.Dispose()
+    }
+    $shortDigest = [BitConverter]::ToString($digest).Replace("-", "").ToLowerInvariant().Substring(0, 24)
+    return "windows-$(Get-ArchitectureOutputName $normalizedArchitecture)-$shortDigest"
+}
+
+function Get-KeireWorkspaceJunctionPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$BasePath,
+        [Parameter(Mandatory = $true)][string]$Prefix,
+        [Parameter(Mandatory = $true)][string]$RepositoryRoot
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Prefix) -or $Prefix.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0 -or
+        $Prefix.Contains([string][IO.Path]::DirectorySeparatorChar) -or
+        $Prefix.Contains([string][IO.Path]::AltDirectorySeparatorChar)) {
+        throw "Workspace junction prefix must be one safe path component."
+    }
+    return Join-Path $BasePath "$Prefix-$(Get-KeireWorkspaceIdentity $RepositoryRoot)"
+}
+
+function Get-KeireCanonicalDirectoryPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if (-not $item -or -not $item.PSIsContainer) {
+        throw "Workspace junction target is not an existing directory: $Path"
+    }
+    $separators = [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    return $item.FullName.TrimEnd($separators).Normalize([Text.NormalizationForm]::FormC)
+}
+
+function Initialize-KeireWorkspaceJunction {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Target
+    )
+
+    $canonicalTarget = Get-KeireCanonicalDirectoryPath $Target
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if ($item) {
+        $linkTarget = [string]($item.Target | Select-Object -First 1)
+        if (-not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+            [string]::IsNullOrWhiteSpace($linkTarget)) {
+            throw "Workspace junction path exists but is not a directory junction: $Path"
+        }
+        $canonicalLinkTarget = Get-KeireCanonicalDirectoryPath $linkTarget
+        # Ordinal comparison deliberately fails closed if two case-sensitive NTFS workspaces hash to one identity.
+        if (-not [string]::Equals($canonicalLinkTarget, $canonicalTarget, [StringComparison]::Ordinal)) {
+            throw "Workspace junction points somewhere unexpected: $Path"
+        }
+        return $item
+    }
+
+    New-Item -ItemType Directory -Force (Split-Path $Path) | Out-Null
+    return New-Item -ItemType Junction -Path $Path -Target $canonicalTarget
+}
+
+function Assert-KeireLockedGitSource {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$ExpectedCommit,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    $gitDirectory = Get-Item -LiteralPath (Join-Path $Path ".git") -Force -ErrorAction SilentlyContinue
+    if (-not $item -or -not $item.PSIsContainer -or
+        ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+        -not $gitDirectory -or -not $gitDirectory.PSIsContainer -or
+        ($gitDirectory.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "Locked $Name source cache is not an ordinary Git checkout: $Path"
+    }
+
+    $actual = ([string](& git -C $Path rev-parse HEAD 2>$null)).Trim()
+    if ($LASTEXITCODE -ne 0 -or $actual -ne $ExpectedCommit) {
+        throw "Locked $Name source cache is not the expected commit: $Path"
+    }
+    $changes = @(& git -C $Path status --porcelain=v1 --untracked-files=all 2>$null)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not validate the locked $Name source cache: $Path"
+    }
+    if ($changes.Count -ne 0) {
+        throw "Locked $Name source cache contains modified or untracked files: $Path"
+    }
+}
+
+function Initialize-KeireOrdinaryChildDirectory {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Description
+    )
+
+    $pathSeparators = [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $resolvedRoot = [IO.Path]::GetFullPath($Root).TrimEnd($pathSeparators)
+    $resolvedPath = [IO.Path]::GetFullPath($Path).TrimEnd($pathSeparators)
+    $separator = [IO.Path]::DirectorySeparatorChar
+    if (-not [string]::Equals($resolvedPath, $resolvedRoot, [StringComparison]::OrdinalIgnoreCase) -and
+        -not $resolvedPath.StartsWith("$resolvedRoot$separator", [StringComparison]::OrdinalIgnoreCase)) {
+        throw "$Description must remain inside $resolvedRoot."
+    }
+    $rootItem = Get-Item -LiteralPath $resolvedRoot -Force -ErrorAction SilentlyContinue
+    if (-not $rootItem -or -not $rootItem.PSIsContainer) {
+        throw "$Description root is not an existing directory: $resolvedRoot."
+    }
+
+    $relativePath = $resolvedPath.Substring($resolvedRoot.Length).TrimStart($pathSeparators)
+    $currentPath = $resolvedRoot
+    foreach ($component in @($relativePath -split '[\\/]' | Where-Object { $_ })) {
+        $currentPath = Join-Path $currentPath $component
+        $item = Get-Item -LiteralPath $currentPath -Force -ErrorAction SilentlyContinue
+        if (-not $item) {
+            try {
+                New-Item -ItemType Directory -Path $currentPath -ErrorAction Stop | Out-Null
+            }
+            catch [IO.IOException] {}
+            $item = Get-Item -LiteralPath $currentPath -Force -ErrorAction SilentlyContinue
+        }
+        if (-not $item -or -not $item.PSIsContainer -or
+            (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+            throw "$Description contains a missing, non-directory, or reparse-point component: $currentPath."
+        }
+    }
+}
+
 function Get-WindowsFfmpegRuntimeContract {
     if (-not (Get-Command Get-KeireFfmpegRuntimeContract -CommandType Function -ErrorAction SilentlyContinue)) {
         . (Join-Path $PSScriptRoot "ffmpeg-runtime-contract.ps1")
@@ -58,7 +252,8 @@ function Remove-KeireStaleWorkspaceLock {
 function Enter-KeireWorkspaceLock {
     param(
         [Parameter(Mandatory = $true)][string]$RepositoryRoot,
-        [Parameter(Mandatory = $true)][string]$CommandName
+        [Parameter(Mandatory = $true)][string]$CommandName,
+        [string]$LockRelativePath = "Tools\.locks\project-command.lock"
     )
 
     $timeoutSeconds = Get-KeireWorkspaceLockSetting "KEIRE_WORKSPACE_LOCK_TIMEOUT_SECONDS" 7200 1
@@ -68,12 +263,31 @@ function Enter-KeireWorkspaceLock {
         throw "KEIRE_WORKSPACE_LOCK_STALE_SECONDS must be more than three heartbeat intervals."
     }
 
-    $lockParent = Join-Path $RepositoryRoot "Tools\.locks"
-    $lockPath = Join-Path $lockParent "project-command.lock"
-    New-Item -ItemType Directory -Force -Path $lockParent | Out-Null
+    $lockComponents = @($LockRelativePath -split '[\\/]')
+    if ([IO.Path]::IsPathRooted($LockRelativePath) -or $lockComponents.Count -eq 0 -or
+        @($lockComponents | Where-Object {
+                [string]::IsNullOrWhiteSpace($_) -or $_ -in @(".", "..") -or
+                $_.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0
+            }).Count -ne 0) {
+        throw "LockRelativePath must remain inside RepositoryRoot."
+    }
+    $pathSeparators = [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $resolvedRoot = [IO.Path]::GetFullPath($RepositoryRoot).TrimEnd($pathSeparators)
+    $lockPath = [IO.Path]::GetFullPath((Join-Path $resolvedRoot $LockRelativePath))
+    if (-not $lockPath.StartsWith("$resolvedRoot$([IO.Path]::DirectorySeparatorChar)",
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw "LockRelativePath must remain inside RepositoryRoot."
+    }
+    $lockParent = Split-Path $lockPath
+    Initialize-KeireOrdinaryChildDirectory -Root $resolvedRoot -Path $lockParent `
+        -Description "Workspace lock parent"
 
     $inheritedToken = [Environment]::GetEnvironmentVariable("KEIRE_WORKSPACE_LOCK_TOKEN")
-    if (Test-Path -LiteralPath $lockPath -PathType Container) {
+    $existingLockItem = Get-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+    if ($existingLockItem -and (($existingLockItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        throw "Workspace lock path must not be a reparse point: '$lockPath'."
+    }
+    if ($existingLockItem -and $existingLockItem.PSIsContainer) {
         $existingOwner = Get-KeireWorkspaceLockOwner -LockPath $lockPath
         if ($inheritedToken -and $existingOwner.token -eq $inheritedToken) {
             return [pscustomobject]@{ Acquired = $false; Path = $lockPath; Token = $inheritedToken; Job = $null; PreviousToken = $inheritedToken }
@@ -91,7 +305,9 @@ function Enter-KeireWorkspaceLock {
         catch [System.IO.IOException] {}
         catch [System.UnauthorizedAccessException] {}
 
-        if (-not (Test-Path -LiteralPath $lockPath -PathType Container)) {
+        $existingLockItem = Get-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+        if (-not $existingLockItem -or -not $existingLockItem.PSIsContainer -or
+            (($existingLockItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
             throw "Workspace lock path is not a directory: '$lockPath'. Remove it manually after confirming no project command is running."
         }
 
@@ -829,40 +1045,61 @@ function Get-ArchitectureOutputName {
     return "x86_64"
 }
 
-function Remove-GeneratedBinaryDirectory {
+function Remove-KeireGeneratedDirectory {
     param(
-        [Parameter(Mandatory = $true)][string]$Root,
-        [Parameter(Mandatory = $true)][string]$Path
+        [Parameter(Mandatory = $true)][string]$RepositoryRoot,
+        [Parameter(Mandatory = $true)][string]$AllowedRoot,
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Description
     )
 
     $pathSeparators = [char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
-    $resolvedRoot = [IO.Path]::GetFullPath($Root).TrimEnd($pathSeparators)
-    $resolvedBase = [IO.Path]::GetFullPath((Join-Path $resolvedRoot "Build\Bin")).TrimEnd($pathSeparators)
+    $resolvedRepository = [IO.Path]::GetFullPath($RepositoryRoot).TrimEnd($pathSeparators)
+    $resolvedAllowed = [IO.Path]::GetFullPath($AllowedRoot).TrimEnd($pathSeparators)
     $resolvedPath = [IO.Path]::GetFullPath($Path).TrimEnd($pathSeparators)
     $separator = [IO.Path]::DirectorySeparatorChar
-    if (-not $resolvedBase.StartsWith("$resolvedRoot$separator", [StringComparison]::OrdinalIgnoreCase)) {
-        throw "Refusing to use a generated binary root outside the repository: $resolvedBase."
-    }
-    if (-not $resolvedPath.StartsWith("$resolvedBase$separator", [StringComparison]::OrdinalIgnoreCase)) {
-        throw "Refusing to remove generated binaries outside $resolvedBase`: $resolvedPath."
+    if (-not $resolvedAllowed.StartsWith("$resolvedRepository$separator", [StringComparison]::OrdinalIgnoreCase) -or
+        -not $resolvedPath.StartsWith("$resolvedAllowed$separator", [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to remove $Description outside $resolvedAllowed`: $resolvedPath."
     }
 
-    $relativePath = $resolvedPath.Substring($resolvedRoot.Length).TrimStart($pathSeparators)
-    $currentPath = $resolvedRoot
+    $relativePath = $resolvedPath.Substring($resolvedRepository.Length).TrimStart($pathSeparators)
+    $currentPath = $resolvedRepository
     foreach ($component in @($relativePath -split '[\\/]' | Where-Object { $_ })) {
         $currentPath = Join-Path $currentPath $component
         $item = Get-Item -LiteralPath $currentPath -Force -ErrorAction SilentlyContinue
         if ($item -and (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
-            throw "Refusing to remove a reparse-point generated binary path: $currentPath."
+            throw "Refusing to remove a reparse-point $Description path: $currentPath."
         }
     }
 
     $target = Get-Item -LiteralPath $resolvedPath -Force -ErrorAction SilentlyContinue
     if (-not $target) { return }
     if (-not $target.PSIsContainer) {
-        throw "Generated binary output is not a directory: $resolvedPath."
+        throw "$Description is not a directory: $resolvedPath."
+    }
+    $directories = [Collections.Generic.Stack[string]]::new()
+    $directories.Push($resolvedPath)
+    while ($directories.Count -gt 0) {
+        $directory = $directories.Pop()
+        foreach ($child in Get-ChildItem -LiteralPath $directory -Force -ErrorAction Stop) {
+            if (($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "Refusing to remove $Description containing a reparse point: $($child.FullName)."
+            }
+            if ($child.PSIsContainer) { $directories.Push($child.FullName) }
+        }
     }
     Remove-Item -LiteralPath $resolvedPath -Recurse -Force
+}
+
+function Remove-GeneratedBinaryDirectory {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    Remove-KeireGeneratedDirectory -RepositoryRoot $Root -AllowedRoot (Join-Path $Root "Build\Bin") `
+        -Path $Path -Description "generated binary output"
 }
 
 function Remove-IncompatibleBuildBinaries {
@@ -870,34 +1107,39 @@ function Remove-IncompatibleBuildBinaries {
         [Parameter(Mandatory = $true)][string]$Root,
         [Parameter(Mandatory = $true)][string]$Architecture,
         [Parameter(Mandatory = $true)][ValidateSet("msc", "gcc", "clang")][string]$Toolset,
+        [Parameter(Mandatory = $true)][string]$ToolchainIdentity,
+        [Parameter(Mandatory = $true)][string]$ExpectedIdentity,
         [Parameter(Mandatory = $true)][string]$IdentityStamp
     )
 
     $normalizedArchitecture = Normalize-Architecture $Architecture
+    $expectedParts = $ExpectedIdentity -split '\|'
+    if ($expectedParts.Count -ne 7 -or $expectedParts[2] -ne $Toolset -or
+        $expectedParts[5] -ne $ToolchainIdentity) {
+        throw "Expected Windows output identity is malformed or inconsistent with the selected toolchain."
+    }
     $preserveOutputs = $false
     if (Test-Path -LiteralPath $IdentityStamp -PathType Leaf) {
-        $parts = (Get-Content -LiteralPath $IdentityStamp -Raw).Trim() -split '\|'
-        if ($parts.Count -eq 6 -and -not [string]::IsNullOrWhiteSpace($parts[0]) -and
-            -not [string]::IsNullOrWhiteSpace($parts[5])) {
-            try {
-                $priorArchitecture = Normalize-Architecture $parts[1]
-                $preserveOutputs = $priorArchitecture -eq $normalizedArchitecture -and $parts[2] -eq $Toolset
-            }
-            catch {
-                $preserveOutputs = $false
-            }
-        }
+        $preserveOutputs = (Get-Content -LiteralPath $IdentityStamp -Raw).Trim() -eq $ExpectedIdentity
     }
     if ($preserveOutputs) { return }
 
     $outputArchitecture = Get-ArchitectureOutputName $normalizedArchitecture
-    $targets = @("Debug", "Release", "Dist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage") |
+    $targets = @("Debug", "Release", "Profile", "Dist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage") |
         ForEach-Object { Join-Path $Root "Build\Bin\$_-windows-$outputArchitecture" } |
         Where-Object { Get-Item -LiteralPath $_ -Force -ErrorAction SilentlyContinue }
-    if ($targets.Count -eq 0) { return }
-    Write-Host "==> Removing binaries with unknown or incompatible toolset provenance for windows-$outputArchitecture"
+    $intermediateBase = Join-Path $Root "Build\Intermediates"
+    $intermediateTargets = @("Debug", "Release", "Profile", "Dist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage") |
+        ForEach-Object { Join-Path $intermediateBase "$_-windows-$outputArchitecture-$Toolset" } |
+        Where-Object { Get-Item -LiteralPath $_ -Force -ErrorAction SilentlyContinue }
+    if ($targets.Count -eq 0 -and $intermediateTargets.Count -eq 0) { return }
+    Write-Host "==> Removing outputs with unknown or incompatible toolchain provenance for windows-$outputArchitecture"
     foreach ($target in $targets) {
         Remove-GeneratedBinaryDirectory -Root $Root -Path $target
+    }
+    foreach ($target in $intermediateTargets) {
+        Remove-KeireGeneratedDirectory -RepositoryRoot $Root -AllowedRoot $intermediateBase -Path $target `
+            -Description "generated intermediate output"
     }
 }
 
@@ -1096,6 +1338,41 @@ function Enter-WindowsToolEnvironment {
         "gcc" { Add-MSYS2ToPath | Out-Null }
     }
     return $resolved
+}
+
+function Get-WindowsToolchainIdentity {
+    param(
+        [Parameter(Mandatory = $true)][string]$Generator,
+        [Parameter(Mandatory = $true)][ValidateSet("msc", "gcc", "clang")][string]$Toolset,
+        [Parameter(Mandatory = $true)][string]$Architecture
+    )
+
+    Enter-WindowsToolEnvironment $Generator $Toolset $Architecture | Out-Null
+    if ($Toolset -eq "msc") {
+        $versionSeparators = [char[]]@('\', '/')
+        $visualStudio = ([string]$env:VisualStudioVersion).Trim().TrimEnd($versionSeparators)
+        $vcTools = ([string]$env:VCToolsVersion).Trim().TrimEnd($versionSeparators)
+        $windowsSdk = ([string]$env:WindowsSDKVersion).Trim().TrimEnd($versionSeparators)
+        foreach ($value in @($visualStudio, $vcTools, $windowsSdk)) {
+            if ([string]::IsNullOrWhiteSpace($value) -or $value -notmatch '^[0-9A-Za-z._-]+$') {
+                throw "The active MSVC toolchain does not expose a stable version identity."
+            }
+        }
+        return "msc-vs$visualStudio-vc$vcTools-sdk$windowsSdk"
+    }
+
+    $compilerName = if ($Toolset -eq "clang") { "clang++" } else { "g++" }
+    $compiler = Get-Command $compilerName -CommandType Application -ErrorAction Stop
+    $description = "$($compiler.Source)|$((& $compiler.Source --version | Select-Object -First 1))"
+    if ($LASTEXITCODE -ne 0) { throw "Could not identify the active $Toolset toolchain." }
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+        $digest = $sha256.ComputeHash([Text.Encoding]::UTF8.GetBytes($description))
+    }
+    finally {
+        $sha256.Dispose()
+    }
+    return "$Toolset-$([BitConverter]::ToString($digest).Replace('-', '').ToLowerInvariant().Substring(0, 16))"
 }
 
 function Get-ManagedHostStagingTargets {

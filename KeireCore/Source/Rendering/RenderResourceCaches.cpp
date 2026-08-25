@@ -44,7 +44,8 @@ namespace Keire::RenderBackend
         if (!Device)
             return;
 
-        const auto releaseFrontFrame = [this]()
+        const auto liveSurfaces = LiveSurfaces();
+        const auto releaseFrontFrame = [this, &liveSurfaces]()
         {
             auto frame = std::move(InFlight.front());
             InFlight.pop_front();
@@ -53,6 +54,68 @@ namespace Keire::RenderBackend
             Statistics.GpuCompletionLatencyMilliseconds = completionLatency;
             if (frame.IncludesGpuVfx)
                 Statistics.VfxGpuCompletionLatencyMilliseconds = completionLatency;
+            for (const auto& pending : frame.GpuOcclusionReadbacks)
+            {
+                const auto surface = std::ranges::find(liveSurfaces, pending.SurfaceId,
+                                                       [](const auto& candidate) { return candidate->Id; });
+                if (surface == liveSurfaces.end())
+                    continue;
+                if (!CanPublishGpuOcclusionReadback(**surface, pending))
+                    continue;
+                auto& diagnostics = (*surface)->GpuOcclusionDiagnostics;
+                auto* mapped = SDL_MapGPUTransferBuffer(Device, pending.Transfer, false);
+                if (!mapped)
+                {
+                    (void)PublishGpuOcclusionReadbackValidationFailure(**surface, pending.RequestedMode);
+                    (*surface)->GpuOcclusionAutomaticActive = false;
+                    (*surface)->GpuOcclusionAutomaticQualifyingFrames = 0;
+                    (*surface)->GpuOcclusionAutomaticCooldownFrames = 60U;
+                    (*surface)->GpuOcclusionValidationCooldown = true;
+                    KEIRE_CORE_WARN("GPU occlusion status readback failed for surface '{}': {}",
+                                    (*surface)->Specification.Name, LastSdlError());
+                    continue;
+                }
+                GpuOcclusionStatus status{};
+                std::memcpy(&status, mapped, sizeof(status));
+                SDL_UnmapGPUTransferBuffer(Device, pending.Transfer);
+                if (status.ErrorFlags != 0U || status.Visible > pending.Candidates)
+                {
+                    (void)PublishGpuOcclusionReadbackValidationFailure(**surface, pending.RequestedMode);
+                    (*surface)->GpuOcclusionAutomaticActive = false;
+                    (*surface)->GpuOcclusionAutomaticQualifyingFrames = 0;
+                    (*surface)->GpuOcclusionAutomaticCooldownFrames = 60U;
+                    (*surface)->GpuOcclusionValidationCooldown = true;
+                    KEIRE_CORE_WARN("GPU occlusion status was invalid for surface '{}' (flags={}, visible={}, "
+                                    "candidates={}).",
+                                    (*surface)->Specification.Name, status.ErrorFlags, status.Visible,
+                                    pending.Candidates);
+                    continue;
+                }
+
+                diagnostics.SourceFrame = pending.SourceFrame;
+                const auto age = Statistics.Frame >= pending.SourceFrame ? Statistics.Frame - pending.SourceFrame : 0U;
+                diagnostics.ReadbackAge = age > std::numeric_limits<std::uint32_t>::max()
+                                              ? std::numeric_limits<std::uint32_t>::max()
+                                              : static_cast<std::uint32_t>(age);
+                diagnostics.Candidates = pending.Candidates;
+                diagnostics.Visible = status.Visible;
+                diagnostics.Culled = pending.Candidates - status.Visible;
+                diagnostics.SafeOccluders = pending.SafeOccluders;
+                diagnostics.PyramidMipCount = pending.PyramidMipCount;
+                diagnostics.ReadbackValid = true;
+                (*surface)->GpuOcclusionLatestCandidateTriangles = pending.CandidateTriangles;
+                (*surface)->GpuOcclusionLatestVisibleTriangles =
+                    static_cast<std::uint64_t>(status.VisibleTriangleHigh) << 32U | status.VisibleTriangleLow;
+
+                const auto minimumUsefulCull = std::max(16U, pending.Candidates / 50U);
+                if (diagnostics.RequestedMode == GpuOcclusionMode::Automatic && diagnostics.Culled < minimumUsefulCull)
+                {
+                    (*surface)->GpuOcclusionAutomaticActive = false;
+                    (*surface)->GpuOcclusionAutomaticQualifyingFrames = 0;
+                    (*surface)->GpuOcclusionAutomaticCooldownFrames = 60U;
+                    (*surface)->GpuOcclusionValidationCooldown = false;
+                }
+            }
             std::uint64_t retiredMeshBytes = 0;
             for (const auto& retired : frame.RetiredMeshes)
                 retiredMeshBytes += retired.EstimatedBytes;
@@ -83,11 +146,13 @@ namespace Keire::RenderBackend
             Statistics.FenceRetiredBytes -= std::min(Statistics.FenceRetiredBytes, frame.RetiredBytes);
             SDL_ReleaseGPUFence(Device, frame.Fence);
         };
-
         while (!InFlight.empty() && SDL_QueryGPUFence(Device, InFlight.front().Fence))
             releaseFrontFrame();
         if (InFlight.size() < Specification.MaximumFramesInFlight)
+        {
+            PublishGpuOcclusionReadbackStatistics();
             return;
+        }
 
         SDL_GPUFence* fence = InFlight.front().Fence;
         const auto waitStart = std::chrono::steady_clock::now();
@@ -101,6 +166,40 @@ namespace Keire::RenderBackend
         releaseFrontFrame();
         while (!InFlight.empty() && SDL_QueryGPUFence(Device, InFlight.front().Fence))
             releaseFrontFrame();
+        PublishGpuOcclusionReadbackStatistics();
+    }
+
+    void RenderSharedState::PublishGpuOcclusionReadbackStatistics()
+    {
+        Statistics.GpuOcclusionCandidates = 0;
+        Statistics.GpuOcclusionVisible = 0;
+        Statistics.GpuOcclusionCulled = 0;
+        Statistics.GpuOcclusionCandidateTriangles = 0;
+        Statistics.GpuOcclusionCulledTriangles = 0;
+        Statistics.GpuOcclusionReadbackAge = 0;
+        Statistics.GpuOcclusionReadbackValid = false;
+        for (const auto& surface : LiveSurfaces())
+        {
+            auto& diagnostics = surface->GpuOcclusionDiagnostics;
+            if (diagnostics.State != GpuOcclusionSurfaceState::Active || !diagnostics.ReadbackValid)
+                continue;
+            const auto age =
+                Statistics.Frame >= diagnostics.SourceFrame ? Statistics.Frame - diagnostics.SourceFrame : 0U;
+            diagnostics.ReadbackAge = age > std::numeric_limits<std::uint32_t>::max()
+                                          ? std::numeric_limits<std::uint32_t>::max()
+                                          : static_cast<std::uint32_t>(age);
+            Statistics.GpuOcclusionCandidates += diagnostics.Candidates;
+            Statistics.GpuOcclusionVisible += diagnostics.Visible;
+            Statistics.GpuOcclusionCulled += diagnostics.Culled;
+            Statistics.GpuOcclusionCandidateTriangles += surface->GpuOcclusionLatestCandidateTriangles;
+            Statistics.GpuOcclusionCulledTriangles +=
+                surface->GpuOcclusionLatestCandidateTriangles -
+                std::min(surface->GpuOcclusionLatestCandidateTriangles, surface->GpuOcclusionLatestVisibleTriangles);
+            Statistics.GpuOcclusionReadbackAge = std::max(Statistics.GpuOcclusionReadbackAge, diagnostics.ReadbackAge);
+            Statistics.GpuOcclusionReadbackValid = true;
+        }
+        if (!Statistics.GpuOcclusionReadbackValid)
+            Statistics.GpuOcclusionReadbackAge = std::numeric_limits<std::uint32_t>::max();
     }
 
     void RenderSharedState::BeginFrame()
@@ -111,6 +210,7 @@ namespace Keire::RenderBackend
         FrameActive = true;
         Requests.clear();
         RuntimeUiCommands.clear();
+        CpuPreparation.BeginFrame();
         ++Statistics.Frame;
         Statistics.Passes = 0;
         Statistics.Surfaces = 0;
@@ -152,6 +252,13 @@ namespace Keire::RenderBackend
         Statistics.DynamicUploadBytes = 0;
         Statistics.DepthTriangles = 0;
         Statistics.ShadowTriangles = 0;
+        Statistics.GpuOcclusionCandidates = 0;
+        Statistics.GpuOcclusionVisible = 0;
+        Statistics.GpuOcclusionCulled = 0;
+        Statistics.GpuOcclusionReadbackAge = std::numeric_limits<std::uint32_t>::max();
+        Statistics.GpuOcclusionCandidateTriangles = 0;
+        Statistics.GpuOcclusionCulledTriangles = 0;
+        Statistics.GpuOcclusionReadbackValid = false;
         CollectCompletedFrames();
         const auto vfxRetirementAge = static_cast<std::uint64_t>(Specification.MaximumFramesInFlight) + 2U;
         for (auto iterator = GpuVfxWorlds.begin(); iterator != GpuVfxWorlds.end();)
@@ -201,6 +308,9 @@ namespace Keire::RenderBackend
             surface->FrameClearColor = surface->Specification.ClearColor;
             EnsureSurface(*surface);
         }
+        // EnsureSurface can invalidate a completed readback during resize or resource recovery. Keep the frame
+        // aggregate consistent with the per-surface state exposed to diagnostics during this frame.
+        PublishGpuOcclusionReadbackStatistics();
     }
 
     void RenderSharedState::CancelFrame() noexcept
@@ -300,6 +410,24 @@ namespace Keire::RenderBackend
         }
         Statistics.DroppedVfxParticles += request.Vfx.DroppedParticles();
 
+        if (surface.GpuOcclusionSubmittedMode != request.Environment.GpuOcclusion)
+        {
+            surface.GpuOcclusionSubmittedMode = request.Environment.GpuOcclusion;
+            surface.GpuOcclusionSubmissionEpoch =
+                surface.GpuOcclusionSubmissionEpoch == std::numeric_limits<std::uint64_t>::max()
+                    ? 1U
+                    : surface.GpuOcclusionSubmissionEpoch + 1U;
+            surface.GpuOcclusionDiagnostics = {};
+            surface.GpuOcclusionDiagnostics.RequestedMode = request.Environment.GpuOcclusion;
+            surface.GpuOcclusionAutomaticActive = false;
+            surface.GpuOcclusionAutomaticQualifyingFrames = 0;
+            surface.GpuOcclusionAutomaticMinimumFrames = 0;
+            surface.GpuOcclusionAutomaticCooldownFrames = 0;
+            surface.GpuOcclusionValidationCooldown = false;
+            surface.GpuOcclusionValidationFallbackEventPending = false;
+            surface.GpuOcclusionLatestCandidateTriangles = 0;
+            surface.GpuOcclusionLatestVisibleTriangles = 0;
+        }
         surface.Submitted = true;
         surface.FrameClearColor = camera.ClearColor;
         SceneRenderPacket packet;
@@ -375,18 +503,8 @@ namespace Keire::RenderBackend
                 packet.DrawItems.push_back(std::move(*item));
         }
         Requests.push_back({std::move(packet), &surface});
-        Statistics.CpuPreparationMilliseconds =
-            std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - preparationStarted).count();
-        PreparationSamples.push_back(Statistics.CpuPreparationMilliseconds);
-        constexpr std::size_t sampleWindow = 120;
-        if (PreparationSamples.size() > sampleWindow)
-            PreparationSamples.pop_front();
-        std::array<float, sampleWindow> orderedSamples{};
-        std::ranges::copy(PreparationSamples, orderedSamples.begin());
-        std::ranges::sort(orderedSamples.begin(),
-                          orderedSamples.begin() + static_cast<std::ptrdiff_t>(PreparationSamples.size()));
-        const auto percentileIndex = (PreparationSamples.size() * 95U + 99U) / 100U - 1U;
-        Statistics.CpuPreparationP95Milliseconds = orderedSamples[percentileIndex];
+        CpuPreparation.Accumulate(
+            std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - preparationStarted).count());
     }
 
     const GpuMeshResources& RenderSharedState::ResolveMesh(const AssetId id)
@@ -832,12 +950,19 @@ namespace Keire::RenderBackend
             ResolvedAssetMaterial result;
             result.Pipeline = pipeline->Handle;
             result.Surface = surface;
-            result.ReceivesShadows = shader->LastGood->Definition().ReceivesShadows;
-            result.UsesForwardPlus = shader->LastGood->Definition().UsesForwardPlus;
-            result.UsesInstancing = shader->LastGood->Definition().UsesInstancing;
-            result.UsesImageBasedLighting = shader->LastGood->Definition().UsesImageBasedLighting;
-            result.UsesSpatialLighting = shader->LastGood->Definition().SpatialLightingAbiVersion == 2U;
-            result.UsesVertexMaterialParameters = shader->LastGood->Definition().UsesVertexMaterialParameters;
+            const auto& definition = shader->LastGood->Definition();
+            result.Topology = definition.Topology;
+            result.Culling = definition.Culling;
+            result.OcclusionSupport = definition.OcclusionSupport;
+            result.ReceivesShadows = definition.ReceivesShadows;
+            result.DepthTest = definition.DepthTest;
+            result.DepthWrite = definition.DepthWrite;
+            result.UsesForwardPlus = definition.UsesForwardPlus;
+            result.UsesInstancing = definition.UsesInstancing;
+            result.UsesImageBasedLighting = definition.UsesImageBasedLighting;
+            result.UsesSpatialLighting = definition.SpatialLightingAbiVersion == 2U;
+            result.UsesVertexMaterialParameters = definition.UsesVertexMaterialParameters;
+            result.InstanceAddressingAbiVersion = definition.InstanceAddressingAbiVersion;
             for (const auto& property : shader->LastGood->Definition().Properties)
             {
                 const auto found = properties.find(property.Name);

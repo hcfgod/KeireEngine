@@ -2,9 +2,13 @@
 
 Kéire pins Coral at `d53b2685725f7535bc4d1deaa8a22bf16d112fe2`. Runtime integration must apply the
 numbered patches in this directory in order and fail if a patch no longer applies cleanly. Use
-`Scripts/Windows/coral.ps1` or `Scripts/Unix/coral.sh`; both create a commit-and-patch-digest-keyed copy outside
-`Vendor`. Passing the build option also validates that a .NET 10 SDK is installed and builds the native and managed
-host outputs.
+`Scripts/Windows/coral.ps1` or `Scripts/Unix/coral.sh`; both create an immutable-source copy and a separate patched
+build cache outside `Vendor`. The build-cache identity includes the upstream commit, patch digest, physical workspace,
+target platform and architecture, compiler/toolchain identity, honored native build flags, exact pinned .NET SDK
+installation, and the selected native host-pack files and hashes. macOS additionally includes its SDK and
+deployment-target identity. Passing the build option builds the native and managed host outputs with that selected
+toolchain and SDK. The workspace component keeps linked worktrees from sharing mutable native build directories while
+the locked upstream source cache remains reusable.
 
 The patch boundary is deliberately outside `Vendor`: Coral remains an immutable upstream input, while Kéire owns the
 following portability and lifetime changes until they can be accepted upstream:
@@ -30,5 +34,6 @@ following portability and lifetime changes until they can be accepted upstream:
     failure status local to the calling thread and synchronizing debug GC-handle diagnostics;
 14. keep Windows, Linux, and macOS x64/ARM64 code paths buildable.
 
-Do not modify a downloaded Coral tree in place. The dependency bootstrap must copy it into a commit-keyed build cache,
-apply this patch set there, and record both the upstream commit and patch-set digest in the dependency manifest.
+Do not modify a downloaded Coral tree in place. The dependency bootstrap must copy it into a variant-keyed build
+cache, apply this patch set there, and record the upstream commit, patch-set digest, and build-variant identity in the
+cache stamp and dependency manifest.

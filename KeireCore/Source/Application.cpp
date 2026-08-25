@@ -7,6 +7,7 @@
 #include "Keire/Scenes/PrefabAsset.h"
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
 
+#include "KeireInternal/Diagnostics/TelemetryInternal.h"
 #include "KeireInternal/RenderInternal.h"
 #include "KeireInternal/UiInternal.h"
 
@@ -113,6 +114,8 @@ namespace Keire
         {
             throw std::logic_error("Application::Run may be called exactly once.");
         }
+
+        Internal::TelemetrySetThreadName("Application owner");
 
         const auto requestedExitCode = m_Impl->ExitCode.load(std::memory_order_acquire);
         if (requestedExitCode != Impl::NoExitRequested)
@@ -380,6 +383,7 @@ namespace Keire
             auto previousFrame = std::chrono::steady_clock::now();
             while (!ExitRequested() && m_Impl->PrimaryWindow->IsOpen())
             {
+                KEIRE_TELEMETRY_ZONE_SCOPED("Application frame");
                 m_Impl->MemoryService->ResetFrameArena();
                 const auto frameStart = std::chrono::steady_clock::now();
                 const bool suspended =
@@ -546,6 +550,20 @@ namespace Keire
                     }
                 }
 
+                if (m_Impl->Renderer)
+                {
+                    const auto statistics = m_Impl->Renderer->Statistics();
+                    Internal::TelemetryPlot("GPU occlusion candidates",
+                                            static_cast<double>(statistics.GpuOcclusionCandidates));
+                    Internal::TelemetryPlot("GPU occlusion visible",
+                                            static_cast<double>(statistics.GpuOcclusionVisible));
+                    Internal::TelemetryPlot("GPU occlusion culled", static_cast<double>(statistics.GpuOcclusionCulled));
+                    Internal::TelemetryPlot("GPU occlusion recording (ms)",
+                                            static_cast<double>(statistics.GpuOcclusionDepthPassMilliseconds +
+                                                                statistics.GpuOcclusionPyramidRecordingMilliseconds +
+                                                                statistics.GpuOcclusionCullingRecordingMilliseconds));
+                }
+
                 if (m_Impl->ProfilerService)
                 {
                     m_Impl->ProfilerService->SetCounter(ProfileCategory::Application, "Frame",
@@ -690,6 +708,29 @@ namespace Keire
                                                                 statistics.GpuFrameMilliseconds);
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Renderer latency (ms)",
                                                             statistics.RendererLatencyMilliseconds);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "GPU occlusion candidates",
+                                                            static_cast<double>(statistics.GpuOcclusionCandidates));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "GPU occlusion visible",
+                                                            static_cast<double>(statistics.GpuOcclusionVisible));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "GPU occlusion culled",
+                                                            static_cast<double>(statistics.GpuOcclusionCulled));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "GPU occlusion dispatches",
+                                                            static_cast<double>(statistics.GpuOcclusionDispatches));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "GPU occlusion indirect draws",
+                                                            static_cast<double>(statistics.GpuOcclusionIndirectDraws));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "GPU occlusion active surfaces",
+                                                            static_cast<double>(statistics.GpuOcclusionActiveSurfaces));
+                        m_Impl->ProfilerService->SetCounter(
+                            ProfileCategory::Rendering, "GPU occlusion fallback surfaces",
+                            static_cast<double>(statistics.GpuOcclusionFallbackSurfaces));
+                        m_Impl->ProfilerService->SetCounter(
+                            ProfileCategory::Rendering, "GPU occlusion partial fallback surfaces",
+                            static_cast<double>(statistics.GpuOcclusionPartialFallbackSurfaces));
+                        m_Impl->ProfilerService->SetCounter(
+                            ProfileCategory::Rendering, "GPU occlusion recording (ms)",
+                            static_cast<double>(statistics.GpuOcclusionDepthPassMilliseconds +
+                                                statistics.GpuOcclusionPyramidRecordingMilliseconds +
+                                                statistics.GpuOcclusionCullingRecordingMilliseconds));
                     }
                     if (m_Impl->Assets)
                     {
@@ -794,6 +835,7 @@ namespace Keire
 
                 if (ExitRequested())
                 {
+                    Internal::TelemetryFrameMark();
                     break;
                 }
 
@@ -805,6 +847,7 @@ namespace Keire
                     std::this_thread::sleep_until(
                         frameStart + std::chrono::duration_cast<std::chrono::steady_clock::duration>(frameDuration));
                 }
+                Internal::TelemetryFrameMark();
             }
         }
         catch (...)

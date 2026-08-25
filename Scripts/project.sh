@@ -161,7 +161,7 @@ Commands: bootstrap, generate, build, test, run, clean, coverage, package,
 
 Common options:
   --generator <ninja|gmake|xcode4|compilecommands>
-  --configuration <Debug|Release|Dist|DebugASan|DebugUBSan|DebugTSan|Coverage>
+  --configuration <Debug|Release|Profile|Dist|DebugASan|DebugUBSan|DebugTSan|Coverage>
   --architecture <x86_64|ARM64> --toolset <default|gcc|clang>
   --compiler-cache <auto|off|sccache> (Ninja builds; auto uses sccache when installed)
   --profile-build (build command only; writes timing data under Build/Reports)
@@ -206,7 +206,7 @@ show_menu() {
             7) CONFIGURATION="$(normalize_configuration "$(read_setting 'Package configuration (Release, Dist)' Release)")"; run_command package || printf '\nCommand failed.\n' >&2 ;;
             12) run_command doctor || printf '\nCommand failed.\n' >&2 ;;
             13) CLEAN_SCOPE="$(read_setting 'Clean scope (full, build, generated)' "$CLEAN_SCOPE")"; run_command clean || printf '\nCommand failed.\n' >&2 ;;
-            14) DEPENDENCY="$(read_setting 'Dependency (spdlog, doctest, SDL, json, imgui, zstd, entt, glm)' "$DEPENDENCY")"; TAG="$(read_setting 'Tag' "$TAG")"; run_command vendor-update || printf '\nCommand failed.\n' >&2 ;;
+            14) DEPENDENCY="$(read_setting 'Dependency (spdlog, doctest, Tracy, SDL, json, imgui, zstd, entt, glm)' "$DEPENDENCY")"; TAG="$(read_setting 'Tag' "$TAG")"; run_command vendor-update || printf '\nCommand failed.\n' >&2 ;;
             15) NAME="$(read_setting 'PascalCase identifier' "$NAME")"; DISPLAY_NAME="$(read_setting 'Display name' "$NAME")"; REPOSITORY="$(read_setting 'Repository (owner/name, optional)' "$REPOSITORY")"; run_command rename || printf '\nCommand failed.\n' >&2 ;;
             16) return ;;
             *) printf 'Invalid menu choice.\n' >&2 ;;

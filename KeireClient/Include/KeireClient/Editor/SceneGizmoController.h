@@ -4,6 +4,7 @@
 
 #include "Keire/Core.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -63,6 +64,9 @@ namespace KeireEditor
         bool ShowLightDirections = true;
         bool ShowPhysicsGizmos = true;
         bool EditColliders = false;
+        Keire::GpuOcclusionDebugView OcclusionDebugView = Keire::GpuOcclusionDebugView::None;
+        std::uint32_t OcclusionDebugMip = 0;
+        bool ShowOcclusionMetadata = false;
     };
 
     struct SceneGizmoResult
@@ -86,7 +90,8 @@ namespace KeireEditor
 
         using BeginUndo = std::function<void(std::string_view)>;
 
-        [[nodiscard]] Keire::UiItemRect DrawOverlayToolbar(Keire::UiFrame& ui, Keire::UiItemRect viewport);
+        [[nodiscard]] Keire::UiItemRect DrawOverlayToolbar(Keire::UiFrame& ui, Keire::UiItemRect viewport,
+                                                           std::uint32_t occlusionPyramidMipCount = 0);
         [[nodiscard]] SceneGizmoResult UpdateAndDraw(Keire::UiFrame& ui, const Keire::Ref<Keire::Scene>& scene,
                                                      Keire::EntityId selected, const Keire::RenderCamera& camera,
                                                      Keire::UiItemRect viewport, bool allowManipulation,
@@ -102,6 +107,31 @@ namespace KeireEditor
         void SetShowLightDirections(bool enabled) noexcept { m_Settings.ShowLightDirections = enabled; }
         void SetShowPhysicsGizmos(bool enabled) noexcept { m_Settings.ShowPhysicsGizmos = enabled; }
         void SetColliderEditing(bool enabled) noexcept { m_Settings.EditColliders = enabled; }
+        void SetOcclusionDebugView(Keire::GpuOcclusionDebugView view) noexcept
+        {
+            m_Settings.OcclusionDebugView = view;
+            if (view != Keire::GpuOcclusionDebugView::HierarchicalDepth)
+                m_Settings.OcclusionDebugMip = 0;
+        }
+        void SetOcclusionDebugMip(std::uint32_t mip) noexcept { m_Settings.OcclusionDebugMip = mip; }
+        void ToggleOcclusionVisibilityDebug() noexcept
+        {
+            m_Settings.OcclusionDebugView =
+                m_Settings.OcclusionDebugView == Keire::GpuOcclusionDebugView::VisibilityBounds
+                    ? Keire::GpuOcclusionDebugView::None
+                    : Keire::GpuOcclusionDebugView::VisibilityBounds;
+            m_Settings.OcclusionDebugMip = 0;
+            m_Settings.ShowOcclusionMetadata = true;
+        }
+        void ClampOcclusionDebugMip(std::uint32_t availableMipCount) noexcept
+        {
+            if (m_Settings.OcclusionDebugView != Keire::GpuOcclusionDebugView::HierarchicalDepth ||
+                availableMipCount == 0U)
+                m_Settings.OcclusionDebugMip = 0;
+            else
+                m_Settings.OcclusionDebugMip = std::min(m_Settings.OcclusionDebugMip, availableMipCount - 1U);
+        }
+        void SetShowOcclusionMetadata(bool enabled) noexcept { m_Settings.ShowOcclusionMetadata = enabled; }
 
         [[nodiscard]] SceneTool ActiveTool() const noexcept { return m_Tool; }
         [[nodiscard]] const SceneToolSettings& Settings() const noexcept { return m_Settings; }

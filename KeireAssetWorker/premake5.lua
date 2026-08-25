@@ -54,23 +54,23 @@ project(AssetWorkerTarget)
     end
 
     if os.isdir(ffmpegRelease .. "/include") then
-        filter { "configurations:Release or Dist" }
+        filter { "configurations:Release or Profile or Dist" }
             defines { "KEIRE_HAS_FFMPEG=1" }
             externalincludedirs { ffmpegRelease .. "/include" }
             libdirs { GeneratorRootPath(ffmpegRelease .. "/lib") }
             links { "avformat", "avcodec", "swresample", "avutil" }
 
-        filter { "system:windows", "configurations:Release or Dist" }
+        filter { "system:windows", "configurations:Release or Profile or Dist" }
             libdirs { GeneratorRootPath(ffmpegRelease .. "/bin") }
 
-        filter { "system:linux", "configurations:Release or Dist" }
+        filter { "system:linux", "configurations:Release or Profile or Dist" }
             linkoptions { "-Wl,-rpath,'$$ORIGIN'" }
             prelinkcommands
             {
                 CopyUnixRuntime(commandRepositoryRoot .. "/Build/Dependencies/ffmpeg/Release/install/lib")
             }
 
-        filter { "system:macosx", "configurations:Release or Dist" }
+        filter { "system:macosx", "configurations:Release or Profile or Dist" }
             linkoptions { "-Wl,-rpath,@loader_path" }
             prelinkcommands
             {

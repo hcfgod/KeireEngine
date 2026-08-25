@@ -28,9 +28,34 @@ namespace Keire
             return valid(color.Red) && valid(color.Green) && valid(color.Blue) && valid(color.Alpha);
         }
 
+        [[nodiscard]] std::string_view GpuOcclusionModeName(const GpuOcclusionMode mode)
+        {
+            switch (mode)
+            {
+            case GpuOcclusionMode::Disabled:
+                return "disabled";
+            case GpuOcclusionMode::Automatic:
+                return "automatic";
+            case GpuOcclusionMode::Forced:
+                return "forced";
+            }
+            throw std::invalid_argument("GPU occlusion mode is unsupported.");
+        }
+
+        [[nodiscard]] GpuOcclusionMode ParseGpuOcclusionMode(const std::string_view value)
+        {
+            if (value == "disabled")
+                return GpuOcclusionMode::Disabled;
+            if (value == "automatic")
+                return GpuOcclusionMode::Automatic;
+            if (value == "forced")
+                return GpuOcclusionMode::Forced;
+            throw std::runtime_error("Rendering gpuOcclusion mode is unsupported.");
+        }
+
         void Validate(const RenderEnvironmentSettings& settings)
         {
-            if (settings.SchemaVersion != 1 && settings.SchemaVersion != 2)
+            if (settings.SchemaVersion != 3)
                 throw std::invalid_argument("Rendering project settings use an unsupported schema version.");
             if (!ValidColor(settings.AmbientColor))
                 throw std::invalid_argument("Ambient color channels must be finite values in 0..1.");
@@ -54,6 +79,7 @@ namespace Keire
                 !std::isfinite(settings.DirectionalShadowSplitLambda) || settings.DirectionalShadowSplitLambda < 0.0F ||
                 settings.DirectionalShadowSplitLambda > 1.0F)
                 throw std::invalid_argument("Directional shadow settings are outside supported production limits.");
+            (void)GpuOcclusionModeName(settings.GpuOcclusion);
         }
     } // namespace
 
@@ -64,8 +90,10 @@ namespace Keire
             return {};
 
         const auto document = Json::parse(Detail::ReadTextFile(path, MaximumSettingsBytes));
+        const auto sourceSchemaVersion = document.at("schemaVersion").get<std::uint32_t>();
+        if (sourceSchemaVersion < 1U || sourceSchemaVersion > 3U)
+            throw std::runtime_error("Rendering project settings use an unsupported schema version.");
         RenderEnvironmentSettings result;
-        result.SchemaVersion = document.at("schemaVersion").get<std::uint32_t>();
         const auto& ambient = document.at("ambientColor");
         if (!ambient.is_array() || ambient.size() != 4)
             throw std::runtime_error("Rendering ambientColor must contain four channels.");
@@ -73,7 +101,7 @@ namespace Keire
                                ambient.at(3).get<float>()};
         result.AmbientIntensity = document.at("ambientIntensity").get<float>();
         result.Exposure = document.at("exposure").get<float>();
-        if (result.SchemaVersion >= 2)
+        if (sourceSchemaVersion >= 2U)
         {
             const auto environment = document.value("environment", std::string{});
             result.Environment = environment.empty() ? AssetId{} : AssetId::Parse(environment);
@@ -86,6 +114,8 @@ namespace Keire
             result.DirectionalShadowResolution = document.value("directionalShadowResolution", 2048U);
             result.DirectionalShadowSplitLambda = document.value("directionalShadowSplitLambda", 0.65F);
         }
+        if (sourceSchemaVersion >= 3U)
+            result.GpuOcclusion = ParseGpuOcclusionMode(document.at("gpuOcclusion").get<std::string>());
         Validate(result);
         return result;
     }
@@ -115,6 +145,7 @@ namespace Keire
             document["directionalShadowResolution"] = settings.DirectionalShadowResolution;
             document["directionalShadowSplitLambda"] = settings.DirectionalShadowSplitLambda;
         }
+        document["gpuOcclusion"] = GpuOcclusionModeName(settings.GpuOcclusion);
         Detail::WriteTextFileAtomically(SettingsPath(projectRoot), document.dump(2) + '\n');
     }
 } // namespace Keire

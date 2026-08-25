@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param()
+param([switch]$IncludeProfileDependencies)
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "common.ps1")
@@ -18,6 +18,14 @@ $Dependencies = @(
     @{ Name = "assimp"; Path = "Vendor/assimp"; Url = $Lock.ASSIMP_URL; Commit = $Lock.ASSIMP_COMMIT },
     @{ Name = "stb"; Path = "Vendor/stb"; Url = $Lock.STB_URL; Commit = $Lock.STB_COMMIT }
 )
+if ($IncludeProfileDependencies) {
+    $Dependencies += @{
+        Name = "Tracy"
+        Path = "Build/Dependencies/tracy"
+        Url = $Lock.TRACY_URL
+        Commit = $Lock.TRACY_COMMIT
+    }
+}
 
 function Invoke-Git([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments) {
     & git @Arguments
@@ -48,7 +56,8 @@ foreach ($dependency in $Dependencies) {
     }
 
     $actualCommit = (& git -C $directory rev-parse HEAD).Trim()
-    if ($actualCommit -ne $dependency.Commit -and $indexEntry.StartsWith("160000 ")) {
+    $managedProfileCheckout = $dependency.Path -eq "Build/Dependencies/tracy"
+    if ($actualCommit -ne $dependency.Commit -and ($indexEntry.StartsWith("160000 ") -or $managedProfileCheckout)) {
         Write-Host "==> Restoring $($dependency.Name) working tree to committed hash $($dependency.Commit)"
         & git -C $directory cat-file -e "$($dependency.Commit)^{commit}" 2>$null
         if ($LASTEXITCODE -ne 0) { Invoke-Git -C $directory fetch --no-tags origin $dependency.Commit }
@@ -129,6 +138,16 @@ foreach ($file in @("Vendor\assimp\CMakeLists.txt", "Vendor\assimp\LICENSE", "Ve
                     "Vendor\stb\stb_image.h")) {
     if (-not (Test-Path -LiteralPath (Join-Path $Root $file) -PathType Leaf)) {
         throw "Renderable asset dependency integration is incomplete: $file"
+    }
+}
+
+if ($IncludeProfileDependencies) {
+    foreach ($file in @("Build\Dependencies\tracy\public\TracyClient.cpp",
+                        "Build\Dependencies\tracy\public\tracy\Tracy.hpp",
+                        "Build\Dependencies\tracy\LICENSE")) {
+        if (-not (Test-Path -LiteralPath (Join-Path $Root $file) -PathType Leaf)) {
+            throw "Tracy Profile integration is incomplete: $file"
+        }
     }
 }
 

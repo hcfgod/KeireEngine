@@ -2,6 +2,7 @@
 #include "KeireInternal/Assets/TextureImportBackend.h"
 #include "KeireInternal/EditorCameraController.h"
 #include "KeireInternal/RenderInternal.h"
+#include "KeireInternal/Rendering/RenderStatisticsInternal.h"
 #include "KeireTests/TestSupport.h"
 
 #include <doctest/doctest.h>
@@ -99,6 +100,54 @@ TEST_CASE("built-in shader resource counts match each stage")
 {
     CHECK(Keire::Detail::BuiltinShaderUniformBufferCount(true) == 1);
     CHECK(Keire::Detail::BuiltinShaderUniformBufferCount(false) == 2);
+}
+
+TEST_CASE("render CPU preparation timing aggregates every surface submitted in a frame")
+{
+    Keire::RenderBackend::CpuPreparationTracker tracker;
+    tracker.BeginFrame();
+
+    tracker.Accumulate(1.25F);
+    tracker.Accumulate(2.5F);
+    tracker.Accumulate(0.75F);
+
+    CHECK(tracker.CurrentMilliseconds() == doctest::Approx(4.5F));
+}
+
+TEST_CASE("render CPU preparation timing resets at the next frame boundary")
+{
+    Keire::RenderBackend::CpuPreparationTracker tracker;
+    tracker.BeginFrame();
+    tracker.Accumulate(4.0F);
+    tracker.EndFrame();
+
+    CHECK(tracker.CompletedMilliseconds() == doctest::Approx(4.0F));
+    CHECK(tracker.P95Milliseconds() == doctest::Approx(4.0F));
+
+    tracker.BeginFrame();
+
+    CHECK(tracker.CurrentMilliseconds() == doctest::Approx(0.0F));
+    CHECK(tracker.P95Milliseconds() == doctest::Approx(4.0F));
+
+    tracker.Accumulate(1.5F);
+    CHECK(tracker.CurrentMilliseconds() == doctest::Approx(1.5F));
+    CHECK(tracker.CompletedMilliseconds() == doctest::Approx(4.0F));
+    CHECK(tracker.P95Milliseconds() == doctest::Approx(4.0F));
+}
+
+TEST_CASE("render CPU preparation publishes only complete frame aggregates")
+{
+    Keire::RenderBackend::CpuPreparationTracker tracker;
+    tracker.BeginFrame();
+
+    tracker.Accumulate(1.25F);
+    CHECK(tracker.CompletedMilliseconds() == doctest::Approx(0.0F));
+    tracker.Accumulate(2.5F);
+    CHECK(tracker.CompletedMilliseconds() == doctest::Approx(0.0F));
+
+    tracker.EndFrame();
+    CHECK(tracker.CompletedMilliseconds() == doctest::Approx(3.75F));
+    CHECK(tracker.P95Milliseconds() == doctest::Approx(3.75F));
 }
 
 TEST_CASE("editor camera navigation matches scene-view gesture semantics")

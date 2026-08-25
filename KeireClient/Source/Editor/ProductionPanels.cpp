@@ -2,6 +2,8 @@
 
 #include "KeireClient/Editor/AssetOperationService.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
+#include "KeireClient/Editor/EditorPanels.h"
+#include "KeireClient/Editor/GpuOcclusionDiagnostics.h"
 #include "KeireClient/Editor/PlayerBuildService.h"
 #include "KeireClient/Editor/PrefabAuthoring.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
@@ -1141,6 +1143,16 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
                 ui.Text("Visibility   " + std::to_string(statistics.VisibleSubmeshes) + " visible / " +
                         std::to_string(statistics.CulledSubmeshes) + " culled / " +
                         std::to_string(statistics.InstanceBatches) + " batches");
+                const auto occlusion = KeireEditor::BuildGpuOcclusionDiagnostics(renderer->Capabilities(), statistics);
+                ui.TextColored(occlusion.Warning ? m_Theme.Warning
+                               : occlusion.State == KeireEditor::GpuOcclusionDiagnosticState::Active
+                                   ? m_Theme.Success
+                                   : m_Theme.MutedText,
+                               occlusion.Status);
+                ui.Text("GPU visibility " + occlusion.Visibility);
+                ui.Text("HZB workload   " + occlusion.Pyramid);
+                ui.Text("Readback       " + occlusion.Readback);
+                ui.Text(occlusion.Recording);
                 ui.Text("Frame graph  " + std::to_string(statistics.ExecutedFrameGraphPasses) + " / " +
                         std::to_string(statistics.PlannedFrameGraphPasses) + " passes / " +
                         std::to_string(statistics.FrameGraphTransitions) + " transitions");
@@ -1364,86 +1376,6 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
                 if (ui.Selectable(presentation.ThreadLines[index]))
                     Owner().Windows()->SetClipboardText(presentation.ThreadLines[index]);
             }
-        }
-    }
-}
-
-void EditorWorkspaceLayer::DrawRenderGraph(Keire::UiFrame& ui)
-{
-    if (auto panel = ui.BeginPanel(m_RenderGraph); panel)
-    {
-        const auto renderer = Owner().Renderer();
-        if (!renderer || !renderer->IsOpen())
-        {
-            DrawEmptyState(ui, "Render graph unavailable", "Enable the renderer to inspect its compiled graph.",
-                           "The panel captures immutable data from the renderer's compiled frame graph.");
-            return;
-        }
-
-        const auto snapshot = renderer->CaptureFrameGraph();
-        ui.Text("Passes: " + std::to_string(snapshot.Passes.size()) +
-                " | Resources: " + std::to_string(snapshot.Resources.size()));
-        ui.Text("Transient: " + std::to_string(snapshot.ActiveTransientBytes) +
-                " bytes | Unaliased: " + std::to_string(snapshot.TheoreticalUnaliasedBytes) +
-                " | Saved: " + std::to_string(snapshot.SavedAliasingBytes));
-        ui.Text("Fence-retired: " + std::to_string(snapshot.FenceRetiredBytes) + " bytes");
-
-        if (ui.Button("Export JSON"))
-        {
-            try
-            {
-                const auto root = Owner().GetProject() ? Owner().GetProject()->Root() : std::filesystem::path(".");
-                Keire::ExportFrameGraphJson(snapshot, root / "Library" / "Diagnostics" / "render-graph.json");
-                m_RenderGraphStatus = "Exported Library/Diagnostics/render-graph.json";
-            }
-            catch (const std::exception& error)
-            {
-                ReportError("Render Graph", error.what());
-            }
-        }
-        ui.SameLine();
-        if (ui.Button("Export DOT"))
-        {
-            try
-            {
-                const auto root = Owner().GetProject() ? Owner().GetProject()->Root() : std::filesystem::path(".");
-                Keire::ExportFrameGraphDot(snapshot, root / "Library" / "Diagnostics" / "render-graph.dot");
-                m_RenderGraphStatus = "Exported Library/Diagnostics/render-graph.dot";
-            }
-            catch (const std::exception& error)
-            {
-                ReportError("Render Graph", error.what());
-            }
-        }
-
-        if (!m_RenderGraphStatus.empty())
-            ui.Text(m_RenderGraphStatus);
-
-        ui.Separator();
-        ui.Text("DETERMINISTIC PASS ORDER");
-        for (const auto& pass : snapshot.Passes)
-        {
-            ui.Text(std::to_string(pass.Order) + ". " + pass.Name +
-                    "  [transitions: " + std::to_string(pass.Transitions.size()) + "]");
-        }
-
-        ui.Separator();
-        ui.Text("RESOURCE LIFETIMES AND ALIAS SLOTS");
-        const auto passCount = std::max<std::size_t>(1, snapshot.Passes.size());
-        for (const auto& resource : snapshot.Resources)
-        {
-            const auto label =
-                resource.Name +
-                (resource.Imported ? " [imported]"
-                                   : " [transient slot " + std::to_string(resource.PhysicalAliasSlot) + "]") +
-                "  " + std::to_string(resource.EstimatedBytes) + " bytes";
-            ui.Text(label);
-            const auto span = resource.Used ? resource.LastPass - resource.FirstPass + 1U : 0U;
-            const auto fraction = static_cast<float>(span) / static_cast<float>(passCount);
-            const auto interval = resource.Used
-                                      ? std::to_string(resource.FirstPass) + ".." + std::to_string(resource.LastPass)
-                                      : std::string("unused");
-            ui.ProgressBar(fraction, {0.0F, 12.0F}, interval);
         }
     }
 }

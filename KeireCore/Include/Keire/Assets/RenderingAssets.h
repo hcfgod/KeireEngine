@@ -39,6 +39,25 @@ namespace Keire
         Back
     };
 
+    enum class ShaderOcclusionSupport : std::uint8_t
+    {
+        None = 0,
+        ConservativeBounds = 1U << 0U,
+        DepthOnlyGeometryMatch = 1U << 1U
+    };
+
+    [[nodiscard]] constexpr ShaderOcclusionSupport operator|(const ShaderOcclusionSupport left,
+                                                             const ShaderOcclusionSupport right) noexcept
+    {
+        return static_cast<ShaderOcclusionSupport>(static_cast<std::uint8_t>(left) | static_cast<std::uint8_t>(right));
+    }
+
+    [[nodiscard]] constexpr bool HasShaderOcclusionSupport(const ShaderOcclusionSupport value,
+                                                           const ShaderOcclusionSupport flag) noexcept
+    {
+        return (static_cast<std::uint8_t>(value) & static_cast<std::uint8_t>(flag)) != 0U;
+    }
+
     enum class ShaderPropertyType : std::uint8_t
     {
         Scalar,
@@ -146,6 +165,10 @@ namespace Keire
         /// Additional graph-authored combined texture/sampler slots and fragment read-only buffers.
         std::uint8_t UserResourceSlots = 0;
         std::uint8_t UserReadOnlyBuffers = 0;
+        /// Version 2 reads an explicit instance-buffer base from vertex uniform b2/space1. Zero is legacy addressing.
+        std::uint8_t InstanceAddressingAbiVersion = 0;
+        /// Missing metadata fails closed; only explicitly compatible shaders may enter GPU occlusion paths.
+        ShaderOcclusionSupport OcclusionSupport = ShaderOcclusionSupport::None;
     };
 
     class KEIRE_API ShaderAsset final : public Asset

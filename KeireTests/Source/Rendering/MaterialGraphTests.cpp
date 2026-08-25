@@ -616,6 +616,7 @@ TEST_CASE("Material Graph baking resolves an exact Shader Graph variant and publ
     CHECK(std::get<float>(material.Properties.at("Roughness")) == doctest::Approx(0.45F));
 
     const auto importer = Keire::CreateMaterialGraphAssetImporter();
+    CHECK(importer.Version == 6);
     const auto materialId = Keire::AssetId::Parse("a4000000-0000-4000-8000-000000000001");
     const auto variantOwner = Keire::AssetId::Parse("a4500000-0000-4000-8000-000000000001");
     auto shaderGraph = Keire::CreateDefaultShaderGraph();

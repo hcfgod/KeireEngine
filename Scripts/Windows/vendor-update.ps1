@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory=$true)]
-    [ValidateSet("spdlog", "doctest", "SDL", "json", "imgui", "zstd", "entt", "glm", "SDL_shadercross", "assimp", "stb")]
+    [ValidateSet("spdlog", "doctest", "Tracy", "SDL", "json", "imgui", "zstd", "entt", "glm", "SDL_shadercross", "assimp", "stb")]
     [string]$Dependency,
     [Parameter(Mandatory=$true)]
     [string]$Tag
@@ -11,7 +11,12 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "common.ps1")
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $LockPath = Join-Path $Root "Config\Dependencies.lock"
-$directory = Join-Path $Root "Vendor\$Dependency"
+$directory = if ($Dependency -eq "Tracy") {
+    Join-Path $Root "Build\Dependencies\tracy"
+}
+else {
+    Join-Path $Root "Vendor\$Dependency"
+}
 if (-not (Test-Path $directory)) { throw "Vendor/$Dependency is not initialized. Run bootstrap first." }
 
 & git -C $directory fetch --tags --force
@@ -29,4 +34,9 @@ $lines = Get-Content -LiteralPath $LockPath | ForEach-Object {
 
 Write-Host "==> $Dependency now points to $Tag ($commit)"
 Write-Host "Review the dependency and lock change, then run:"
-Write-Host "  git add Vendor/$Dependency Config/Dependencies.lock"
+if ($Dependency -eq "Tracy") {
+    Write-Host "  git add Config/Dependencies.lock"
+}
+else {
+    Write-Host "  git add Vendor/$Dependency Config/Dependencies.lock"
+}

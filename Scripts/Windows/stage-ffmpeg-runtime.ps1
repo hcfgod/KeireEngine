@@ -2,7 +2,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$Root,
     [Parameter(Mandatory = $true)]
-    [ValidateSet("Debug", "Release", "Dist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage")]
+    [ValidateSet("Debug", "Release", "Profile", "Dist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage")]
     [string]$Configuration,
     [Parameter(Mandatory = $true)][string]$Architecture,
     [Parameter(Mandatory = $true)][ValidateSet("msc", "clang", "gcc")][string]$Toolset,
@@ -17,7 +17,7 @@ $ErrorActionPreference = "Stop"
 $resolvedRoot = [IO.Path]::GetFullPath($Root)
 $normalizedArchitecture = Normalize-Architecture $Architecture
 $outputArchitecture = Get-ArchitectureOutputName $normalizedArchitecture
-$dependencyConfiguration = if ($Configuration -in @("Release", "Dist")) { "Release" } else { "Debug" }
+$dependencyConfiguration = if ($Configuration -in @("Release", "Profile", "Dist")) { "Release" } else { "Debug" }
 if ($ProjectNamespace -notmatch '^[A-Za-z][A-Za-z0-9_]*$') {
     throw "The project namespace is invalid for FFmpeg runtime staging: $ProjectNamespace"
 }

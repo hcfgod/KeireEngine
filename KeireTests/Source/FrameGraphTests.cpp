@@ -94,24 +94,43 @@ TEST_CASE("frame graph rejects reads before transient production and ambiguous f
 TEST_CASE("static scene frame graph declares the complete production pass sequence")
 {
     const auto scene = Keire::RenderBackend::BuildStaticSceneFrameGraph();
-    REQUIRE(scene.Compiled.Order.size() == 11);
-    REQUIRE(scene.Compiled.Diagnostics.size() == 11);
+    REQUIRE(scene.Compiled.Order.size() == 14);
+    REQUIRE(scene.Compiled.Diagnostics.size() == 14);
     CHECK(scene.Compiled.Diagnostics.front() == "0: Resource uploads");
     CHECK(scene.Compiled.Diagnostics[1] == "1: Directional shadow maps");
     CHECK(scene.Compiled.Diagnostics[2] == "2: Forward+ light culling");
-    CHECK(scene.Compiled.Diagnostics[3] == "3: Opaque and mask");
-    CHECK(scene.Compiled.Diagnostics[4] == "4: Sampled scene depth");
-    CHECK(scene.Compiled.Diagnostics[6] == "6: Transparency");
-    CHECK(scene.Compiled.Diagnostics[7] == "7: ACES tone map");
-    CHECK(scene.Compiled.Diagnostics.back() == "10: Presentation");
+    CHECK(scene.Compiled.Diagnostics[3] == "3: Occlusion depth");
+    CHECK(scene.Compiled.Diagnostics[4] == "4: Occlusion depth pyramid");
+    CHECK(scene.Compiled.Diagnostics[5] == "5: GPU occlusion culling");
+    CHECK(scene.Compiled.Diagnostics[6] == "6: Opaque and mask");
+    CHECK(scene.Compiled.Diagnostics[7] == "7: Sampled scene depth");
+    CHECK(scene.Compiled.Diagnostics[9] == "9: Transparency");
+    CHECK(scene.Compiled.Diagnostics[10] == "10: ACES tone map");
+    CHECK(scene.Compiled.Diagnostics.back() == "13: Presentation");
     REQUIRE(scene.HdrScene);
     REQUIRE(scene.SampledDepth);
+    REQUIRE(scene.GpuOcclusionDepth);
+    REQUIRE(scene.GpuOcclusionPyramid);
+    REQUIRE(scene.GpuOcclusionIndirectArguments);
     REQUIRE(scene.ResolveDepth);
     REQUIRE(scene.Transparency);
+    const auto& occlusionPyramidPass = scene.Graph.Passes()[scene.GpuOcclusionPyramidPass.Value];
+    CHECK(std::ranges::find(occlusionPyramidPass.Reads, scene.GpuOcclusionDepth) != occlusionPyramidPass.Reads.end());
+    CHECK(std::ranges::find(occlusionPyramidPass.Writes, scene.GpuOcclusionPyramid) !=
+          occlusionPyramidPass.Writes.end());
+    const auto& occlusionCullingPass = scene.Graph.Passes()[scene.GpuOcclusionCullingPass.Value];
+    CHECK(std::ranges::find(occlusionCullingPass.Reads, scene.GpuOcclusionPyramid) != occlusionCullingPass.Reads.end());
+    CHECK(std::ranges::find(occlusionCullingPass.Writes, scene.GpuOcclusionIndirectArguments) !=
+          occlusionCullingPass.Writes.end());
+    const auto& opaquePass = scene.Graph.Passes()[scene.Opaque.Value];
+    CHECK(std::ranges::find(opaquePass.Reads, scene.GpuOcclusionIndirectArguments) != opaquePass.Reads.end());
     const auto& depthPass = scene.Graph.Passes()[scene.ResolveDepth.Value];
     CHECK(std::ranges::find(depthPass.Writes, scene.SampledDepth) != depthPass.Writes.end());
     const auto& transparencyPass = scene.Graph.Passes()[scene.Transparency.Value];
     CHECK(std::ranges::find(transparencyPass.Reads, scene.SampledDepth) != transparencyPass.Reads.end());
+    const auto& overlayPass = scene.Graph.Passes()[scene.Overlays.Value];
+    CHECK(std::ranges::find(overlayPass.Reads, scene.GpuOcclusionPyramid) != overlayPass.Reads.end());
+    CHECK(std::ranges::find(overlayPass.Reads, scene.GpuOcclusionIndirectArguments) != overlayPass.Reads.end());
     REQUIRE(scene.Compiled.TransientAllocations.size() == 1);
     const auto hdrAllocation = scene.Compiled.PhysicalResources[scene.HdrScene.Value];
     REQUIRE(hdrAllocation < scene.Compiled.TransientAllocations.size());

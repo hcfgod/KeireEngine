@@ -12,6 +12,7 @@ build_started="$SECONDS"
 build_succeeded=0
 parse_build_arguments "$@"
 load_project_config "$ROOT"
+[[ "$CONFIGURATION" == Profile ]] && bash "$ROOT/Scripts/Unix/vendor.sh" --include-profile-dependencies
 TOOLSET="$(resolve_unix_toolset Linux "$TOOLSET")"
 COMPILER_CACHE="$(resolve_compiler_cache "$GENERATOR" "$COMPILER_CACHE")"
 write_build_profile() {
@@ -57,7 +58,7 @@ runtime_staging_target="$TARGET"
 if [[ "$GENERATOR" == ninja && ( "$runtime_staging_target" == "$HUB_TARGET" || "$runtime_staging_target" == "$CLIENT_TARGET" ) ]]; then
     output_architecture="$(architecture_output_name "$ARCHITECTURE")"
     dependency_configuration=Debug
-    [[ "$CONFIGURATION" == Release || "$CONFIGURATION" == Dist ]] && dependency_configuration=Release
+    [[ "$CONFIGURATION" == Release || "$CONFIGURATION" == Profile || "$CONFIGURATION" == Dist ]] && dependency_configuration=Release
     sodium_runtime="$ROOT/Build/Dependencies/linux-$output_architecture-$TOOLSET/$dependency_configuration/install/lib/libsodium.so"
     target_directory="$ROOT/Build/Bin/$CONFIGURATION-linux-$output_architecture/$runtime_staging_target"
     [[ -f "$sodium_runtime" ]] || {

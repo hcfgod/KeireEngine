@@ -73,6 +73,17 @@ namespace Keire
         const auto owner = m_Impl->State->Owner.lock();
         return owner && owner->Open && m_Impl->State->Resources.SampledDepth;
     }
+    GpuOcclusionSurfaceDiagnostics RenderSurface::OcclusionDiagnostics() const noexcept
+    {
+        return m_Impl->State->GpuOcclusionDiagnostics;
+    }
+
+    GpuOcclusionDebugView RenderSurface::OcclusionDebugView() const noexcept
+    {
+        return m_Impl->State->GpuOcclusionDebugMode;
+    }
+
+    std::uint32_t RenderSurface::OcclusionDebugMip() const noexcept { return m_Impl->State->GpuOcclusionDebugMipLevel; }
 
     void RenderSurface::RequestSize(const std::uint32_t width, const std::uint32_t height)
     {
@@ -100,6 +111,20 @@ namespace Keire
             owner->RequireOwner("RenderSurface::SetClearColor");
             m_Impl->State->Specification.ClearColor = color;
         }
+    }
+
+    void RenderSurface::SetOcclusionDebugView(const GpuOcclusionDebugView view, const std::uint32_t mip)
+    {
+        if (view > GpuOcclusionDebugView::HierarchicalDepth)
+            throw std::invalid_argument("RenderSurface GPU occlusion debug view is invalid.");
+        const auto owner = m_Impl->State->Owner.lock();
+        if (!owner)
+            return;
+        owner->RequireOwner("RenderSurface::SetOcclusionDebugView");
+        m_Impl->State->GpuOcclusionDebugMode = view;
+        const auto mipCount = m_Impl->State->GpuOcclusionDiagnostics.PyramidMipCount;
+        m_Impl->State->GpuOcclusionDebugMipLevel =
+            view == GpuOcclusionDebugView::HierarchicalDepth && mipCount != 0U ? std::min(mip, mipCount - 1U) : 0U;
     }
 
     class RenderView::Impl final
@@ -201,7 +226,8 @@ namespace Keire
                 .TexturedSpritePackets = false,
                 .DynamicMeshPackets = rendered,
                 .SampledResolvedDepth = rendered && m_Impl->State->ShadowDepthFormat != SDL_GPU_TEXTUREFORMAT_INVALID,
-                .GpuDepthCollision = false};
+                .GpuDepthCollision = false,
+                .GpuOcclusionCulling = rendered && m_Impl->State->GpuOcclusionCapability};
     }
     RenderStatistics RenderSystem::Statistics() const noexcept
     {
