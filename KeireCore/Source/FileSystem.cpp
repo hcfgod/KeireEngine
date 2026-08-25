@@ -723,7 +723,8 @@ namespace Keire::Detail
             std::uint64_t remaining = size;
             while (remaining != 0)
             {
-                const auto count = static_cast<std::size_t>((std::min)(remaining, buffer.size()));
+                const auto count =
+                    static_cast<std::size_t>((std::min)(remaining, static_cast<std::uint64_t>(buffer.size())));
                 const auto chunk = std::span(buffer).first(count);
                 reader(chunk);
                 std::size_t offset = 0;
