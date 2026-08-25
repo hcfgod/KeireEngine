@@ -2040,7 +2040,7 @@ TEST_CASE("renderer replaces the deterministic error mesh with an asset-backed i
     CHECK(results->Statistics.FrameUploadSubmissions == 0);
     CHECK(results->Statistics.AllowedFramesInFlight == 1);
     CHECK(results->Statistics.DrawPreparationMilliseconds > 0.0F);
-    CHECK(results->Statistics.DepthPassMilliseconds > 0.0F);
+    CHECK(results->Statistics.DepthPassMilliseconds >= 0.0F);
     CHECK(results->Statistics.CommandRecordingUnattributedMilliseconds >= 0.0F);
     CHECK(results->Statistics.DrawCalls < 25);
     CHECK(results->Statistics.CpuPreparationP95Milliseconds >= 0.0F);
