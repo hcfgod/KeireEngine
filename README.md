@@ -58,8 +58,7 @@ Kéire already includes substantial, integrated engine and authoring foundations
   persistent collapsible parent/child source groups, receipts, rollback, and recovery.
 - SDL3 multi-window and SDL_GPU rendering, Scene and Game views, cameras, picking, separate Shader and Material Graphs,
   Direct Materials, inherited and dynamic Material Instances, reusable material/shader functions and layers,
-  Material Parameter Collections, tagged custom-shader materials, LODs, same-frame GPU occlusion with deterministic
-  direct-draw fallback and per-surface diagnostics, spatial lighting data, animation,
+  Material Parameter Collections, tagged custom-shader materials, LODs, spatial lighting data, animation,
   importer-independent semantic auto-rigging, target-driven arm IK, bilateral foot grounding, zero-clip procedural
   humanoid locomotion, presentation interpolation, VFX authoring, and performance gates.
 - Input actions and rebinding, physics, navigation, configurable mono/stereo/5.1/7.1 audio output, typed live Mix

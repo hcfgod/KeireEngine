@@ -8,13 +8,6 @@ versions.
 
 ## Unreleased
 
-### Added
-
-- Added production same-frame GPU occlusion culling for explicitly safe opaque Shader Graph geometry, with per-surface
-  depth pyramids, conservative compute classification, compacted indexed indirect draws, deterministic direct-draw
-  fallback, asynchronous source-frame-qualified diagnostics, project mode controls, editor bounds/HZB status overlays,
-  profiler and Render Graph reporting, and focused presenter, lifecycle, fallback, and rendered-output verification.
-
 ## 0.4.1 - 2026-08-24
 
 - Fixed Linux standalone Hub installer packaging after payload permission normalization by deriving the Hub worker
