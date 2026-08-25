@@ -17,6 +17,7 @@
 #include "Keire/Ui/RuntimeUi.h"
 #include "Keire/Vfx/VfxVolumeAsset.h"
 #include "KeireInternal/Rendering/FrameGraphInternal.h"
+#include "KeireInternal/Rendering/GpuOcclusionPolicyInternal.h"
 #include "KeireInternal/Rendering/RenderShaderDataInternal.h"
 #include "KeireInternal/Rendering/RenderStatisticsInternal.h"
 #include "KeireInternal/Rendering/SpatialLightingInternal.h"
@@ -267,6 +268,7 @@ namespace Keire::RenderBackend
         Matrix4 SampledDepthInverseViewProjection;
         bool SampledDepthValid = false;
         GpuOcclusionSurfaceDiagnostics GpuOcclusionDiagnostics;
+        GpuOcclusionPolicy::AllocationRetryState GpuOcclusionAllocationRetry;
         GpuOcclusionMode GpuOcclusionSubmittedMode = GpuOcclusionMode::Automatic;
         std::uint64_t GpuOcclusionSubmissionEpoch = 1;
         GpuOcclusionDebugView GpuOcclusionDebugMode = GpuOcclusionDebugView::None;

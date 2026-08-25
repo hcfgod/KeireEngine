@@ -327,28 +327,41 @@ namespace Keire::RenderBackend
                     return 512;
                 }
             };
-            std::vector<Detail::ShadowAtlasRequest> requests;
-            std::size_t requestedSpots = 0;
-            std::size_t requestedPoints = 0;
             const auto lightCount = std::min(packet.LocalLights.size(), MaximumShaderLocalLights);
+            std::vector<Detail::LocalShadowCandidate> candidates;
+            candidates.reserve(lightCount);
             for (std::size_t lightIndex = 0; lightIndex < lightCount; ++lightIndex)
             {
                 const auto& light = packet.LocalLights[lightIndex];
                 if (light.Shadows == ShadowQuality::Disabled)
                     continue;
-                const auto importance = static_cast<std::int32_t>(std::clamp(
-                    light.ColorAndIntensity.Alpha * 100.0F, 0.0F, static_cast<float>(std::numeric_limits<int>::max())));
-                if (light.Type == SceneLocalLightType::Spot && requestedSpots < MaximumShadowedSpotLights)
+                constexpr auto maximumImportance = std::numeric_limits<std::int32_t>::max();
+                const auto scaledImportance = std::max(0.0F, light.ColorAndIntensity.Alpha * 100.0F);
+                const auto importance = scaledImportance >= static_cast<float>(maximumImportance)
+                                            ? maximumImportance
+                                            : static_cast<std::int32_t>(scaledImportance);
+                const auto type = light.Type == SceneLocalLightType::Spot ? Detail::LocalShadowCandidateType::Spot
+                                                                          : Detail::LocalShadowCandidateType::Point;
+                candidates.push_back({light.Entity.Value(), lightIndex, type, importance});
+            }
+            const auto selectedLights =
+                Detail::SelectLocalShadowCandidates(candidates, MaximumShadowedSpotLights, MaximumShadowedPointLights);
+            std::vector<Detail::ShadowAtlasRequest> requests;
+            requests.reserve(MaximumShadowedSpotLights + MaximumShadowedPointLights * 6U);
+            for (const auto& selected : selectedLights)
+            {
+                const auto& light = packet.LocalLights[selected.LightIndex];
+                if (selected.Type == Detail::LocalShadowCandidateType::Spot)
                 {
-                    requests.push_back({{light.Entity.Value(), 0}, resolution(light.ShadowResolution), importance});
-                    ++requestedSpots;
+                    requests.push_back({{selected.Light, 0}, resolution(light.ShadowResolution), selected.Importance});
                 }
-                else if (light.Type == SceneLocalLightType::Point && requestedPoints < MaximumShadowedPointLights)
+                else
                 {
                     for (std::uint8_t face = 0; face < 6U; ++face)
+                    {
                         requests.push_back(
-                            {{light.Entity.Value(), face}, resolution(light.ShadowResolution), importance});
-                    ++requestedPoints;
+                            {{selected.Light, face}, resolution(light.ShadowResolution), selected.Importance, true});
+                    }
                 }
             }
             const auto allocations = surface.ShadowAtlas.Allocate(requests);
@@ -382,13 +395,17 @@ namespace Keire::RenderBackend
             SDL_BindGPUGraphicsPipeline(localPass, ShadowPipeline);
             const auto drawAtlasTile = [&](const Matrix4& matrix, const Detail::ShadowAtlasAllocation& allocation)
             {
-                const SDL_GPUViewport viewport{static_cast<float>(allocation.X),
-                                               static_cast<float>(allocation.Y),
-                                               static_cast<float>(allocation.Size),
-                                               static_cast<float>(allocation.Size),
+                const auto innerX = static_cast<std::uint16_t>(allocation.X + Detail::ShadowAtlasGuardTexels);
+                const auto innerY = static_cast<std::uint16_t>(allocation.Y + Detail::ShadowAtlasGuardTexels);
+                const auto innerSize =
+                    static_cast<std::uint16_t>(allocation.Size - Detail::ShadowAtlasGuardTexels * 2U);
+                const SDL_GPUViewport viewport{static_cast<float>(innerX),
+                                               static_cast<float>(innerY),
+                                               static_cast<float>(innerSize),
+                                               static_cast<float>(innerSize),
                                                0.0F,
                                                1.0F};
-                const SDL_Rect scissor{allocation.X, allocation.Y, allocation.Size, allocation.Size};
+                const SDL_Rect scissor{innerX, innerY, innerSize, innerSize};
                 SDL_SetGPUViewport(localPass, &viewport);
                 SDL_SetGPUScissor(localPass, &scissor);
                 drawScene(localPass, matrix);
@@ -402,12 +419,10 @@ namespace Keire::RenderBackend
             constexpr std::array<Vector3, 6> pointUps{Vector3{0.0F, 1.0F, 0.0F},  Vector3{0.0F, 1.0F, 0.0F},
                                                       Vector3{0.0F, 0.0F, -1.0F}, Vector3{0.0F, 0.0F, 1.0F},
                                                       Vector3{0.0F, 1.0F, 0.0F},  Vector3{0.0F, 1.0F, 0.0F}};
-            for (std::size_t lightIndex = 0; lightIndex < lightCount; ++lightIndex)
+            for (const auto& selected : selectedLights)
             {
-                const auto& light = packet.LocalLights[lightIndex];
-                if (light.Shadows == ShadowQuality::Disabled)
-                    continue;
-                if (light.Type == SceneLocalLightType::Spot && spotCount < MaximumShadowedSpotLights)
+                const auto& light = packet.LocalLights[selected.LightIndex];
+                if (selected.Type == Detail::LocalShadowCandidateType::Spot)
                 {
                     const auto* allocation = findAllocation(light.Entity, 0);
                     if (!allocation)
@@ -423,11 +438,12 @@ namespace Keire::RenderBackend
                         std::clamp(outerAngle * 2.0F * radiansToDegrees, 1.01F, 178.0F), 1.0F, 0.05F, light.Range);
                     const auto lightMatrix = Math::Multiply(projection, view);
                     result.Local.Matrices[spotCount] = atlasMatrix(lightMatrix, *allocation);
-                    result.LocalLayers[lightIndex] = static_cast<float>(spotCount);
+                    result.Local.SampleBounds[spotCount] = allocation->SampleBounds;
+                    result.LocalLayers[selected.LightIndex] = static_cast<float>(spotCount);
                     drawAtlasTile(lightMatrix, *allocation);
                     ++spotCount;
                 }
-                else if (light.Type == SceneLocalLightType::Point && pointCount < MaximumShadowedPointLights)
+                else
                 {
                     const auto baseLayer = static_cast<std::uint32_t>(MaximumShadowedSpotLights + pointCount * 6U);
                     std::array<const Detail::ShadowAtlasAllocation*, 6> faceAllocations{};
@@ -442,7 +458,7 @@ namespace Keire::RenderBackend
                         ++pointCount;
                         continue;
                     }
-                    result.LocalLayers[lightIndex] = static_cast<float>(baseLayer);
+                    result.LocalLayers[selected.LightIndex] = static_cast<float>(baseLayer);
                     const auto projection = Math::Perspective(90.0F, 1.0F, 0.05F, light.Range);
                     for (std::uint32_t face = 0; face < 6; ++face)
                     {
@@ -450,6 +466,7 @@ namespace Keire::RenderBackend
                             Math::LookAt(light.Position, Add(light.Position, pointDirections[face]), pointUps[face]);
                         const auto lightMatrix = Math::Multiply(projection, view);
                         result.Local.Matrices[baseLayer + face] = atlasMatrix(lightMatrix, *faceAllocations[face]);
+                        result.Local.SampleBounds[baseLayer + face] = faceAllocations[face]->SampleBounds;
                         drawAtlasTile(lightMatrix, *faceAllocations[face]);
                     }
                     ++pointCount;

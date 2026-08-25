@@ -26,6 +26,18 @@ namespace KeireHub
             return currentVersion && targetVersion && targetVersion.Value() > currentVersion.Value();
         }
 
+        [[nodiscard]] bool IsValidPlatformSignaturePolicy(const HubUpdatePlatformSignaturePolicy policy) noexcept
+        {
+            switch (policy)
+            {
+            case HubUpdatePlatformSignaturePolicy::NotRequired:
+            case HubUpdatePlatformSignaturePolicy::ValidateIfPresent:
+            case HubUpdatePlatformSignaturePolicy::Required:
+                return true;
+            }
+            return false;
+        }
+
 #if defined(__linux__)
         [[nodiscard]] std::string_view LinuxOsRelease() noexcept
         {
@@ -83,7 +95,8 @@ namespace KeireHub
                 request.Platform != HubUpdateManager::HostPlatformIdentity() ||
                 request.Architecture != HubUpdateManager::HostArchitectureIdentity() ||
                 !Detail::IsDistributionKeyId(request.SignatureKeyId) || request.CatalogSequence == 0 ||
-                request.CurrentProcessId == 0 || request.StartedUnixSeconds == 0)
+                request.CurrentProcessId == 0 || request.StartedUnixSeconds == 0 ||
+                !IsValidPlatformSignaturePolicy(request.PlatformSignaturePolicy))
             {
                 return HubStatus::Failure(
                     {.Code = HubErrorCode::InvalidArgument,
@@ -159,7 +172,8 @@ namespace KeireHub
         }
         if (const auto validation = ValidateRequest(request); !validation)
             return validation;
-        if (!launcher || (request.RequirePlatformSignature && !signatureVerifier))
+        if (!launcher ||
+            (request.PlatformSignaturePolicy != HubUpdatePlatformSignaturePolicy::NotRequired && !signatureVerifier))
         {
             return HubStatus::Failure({.Code = HubErrorCode::InvalidArgument,
                                        .Message = "The Hub update cannot be handed to a trusted native installer.",
@@ -176,10 +190,19 @@ namespace KeireHub
                                        .Retryable = true,
                                        .AffectedItem = request.PackageId});
         }
-        if (request.RequirePlatformSignature)
+        if (request.PlatformSignaturePolicy != HubUpdatePlatformSignaturePolicy::NotRequired)
         {
-            if (const auto status = signatureVerifier(request.InstallerPath); !status)
-                return status;
+            auto signature = signatureVerifier(request.InstallerPath);
+            if (!signature)
+                return HubStatus::Failure(signature.Error());
+            if (request.PlatformSignaturePolicy == HubUpdatePlatformSignaturePolicy::Required &&
+                signature.Value() != HubUpdatePlatformSignatureState::Valid)
+            {
+                return HubStatus::Failure(
+                    {.Code = HubErrorCode::CatalogSignatureInvalid,
+                     .Message = "The Hub installer does not carry the required platform publisher signature.",
+                     .AffectedItem = request.InstallerPath.filename().string()});
+            }
         }
 
         const Detail::Json resumeToken{{"schemaVersion", CurrentResumeSchemaVersion},

@@ -173,81 +173,6 @@ namespace Keire::RenderBackend
                 throw;
             }
 
-            SDL_GPUShader* debugPyramidVertex = nullptr;
-            SDL_GPUShader* debugPyramidFragment = nullptr;
-            SDL_GPUShader* debugBoundsVertex = nullptr;
-            SDL_GPUShader* debugBoundsFragment = nullptr;
-            try
-            {
-                debugPyramidVertex =
-                    createGraphicsShader(OcclusionShader::DebugPyramidVertex, "VSDebugPyramid", true, 0U, 0U, 0U);
-                debugPyramidFragment =
-                    createGraphicsShader(OcclusionShader::DebugPyramidFragment, "PSDebugPyramid", false, 0U, 0U, 1U);
-                debugBoundsVertex =
-                    createGraphicsShader(OcclusionShader::DebugBoundsVertex, "VSDebugBounds", true, 3U, 1U, 0U);
-                debugBoundsFragment =
-                    createGraphicsShader(OcclusionShader::DebugBoundsFragment, "PSDebugBounds", false, 0U, 0U, 0U);
-
-                SDL_GPUColorTargetDescription pyramidColor{};
-                pyramidColor.format = ColorFormat;
-                SDL_GPUGraphicsPipelineCreateInfo pyramid{};
-                pyramid.vertex_shader = debugPyramidVertex;
-                pyramid.fragment_shader = debugPyramidFragment;
-                pyramid.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
-                pyramid.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-                pyramid.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
-                pyramid.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
-                pyramid.target_info.color_target_descriptions = &pyramidColor;
-                pyramid.target_info.num_color_targets = 1;
-                GpuOcclusionDebugPyramidPipeline = SDL_CreateGPUGraphicsPipeline(Device, &pyramid);
-                if (!GpuOcclusionDebugPyramidPipeline)
-                {
-                    throw std::runtime_error("SDL_CreateGPUGraphicsPipeline(GPU occlusion HZB debug) failed: " +
-                                             LastSdlError());
-                }
-
-                SDL_GPUColorTargetDescription boundsColor{};
-                boundsColor.format = ColorFormat;
-                boundsColor.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
-                boundsColor.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-                boundsColor.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
-                boundsColor.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
-                boundsColor.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-                boundsColor.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
-                boundsColor.blend_state.enable_blend = true;
-                SDL_GPUGraphicsPipelineCreateInfo bounds{};
-                bounds.vertex_shader = debugBoundsVertex;
-                bounds.fragment_shader = debugBoundsFragment;
-                bounds.primitive_type = SDL_GPU_PRIMITIVETYPE_LINELIST;
-                bounds.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-                bounds.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
-                bounds.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
-                bounds.target_info.color_target_descriptions = &boundsColor;
-                bounds.target_info.num_color_targets = 1;
-                GpuOcclusionDebugBoundsPipeline = SDL_CreateGPUGraphicsPipeline(Device, &bounds);
-                if (!GpuOcclusionDebugBoundsPipeline)
-                {
-                    throw std::runtime_error("SDL_CreateGPUGraphicsPipeline(GPU occlusion bounds debug) failed: " +
-                                             LastSdlError());
-                }
-            }
-            catch (...)
-            {
-                if (debugBoundsFragment)
-                    SDL_ReleaseGPUShader(Device, debugBoundsFragment);
-                if (debugBoundsVertex)
-                    SDL_ReleaseGPUShader(Device, debugBoundsVertex);
-                if (debugPyramidFragment)
-                    SDL_ReleaseGPUShader(Device, debugPyramidFragment);
-                if (debugPyramidVertex)
-                    SDL_ReleaseGPUShader(Device, debugPyramidVertex);
-                throw;
-            }
-            SDL_ReleaseGPUShader(Device, debugBoundsFragment);
-            SDL_ReleaseGPUShader(Device, debugBoundsVertex);
-            SDL_ReleaseGPUShader(Device, debugPyramidFragment);
-            SDL_ReleaseGPUShader(Device, debugPyramidVertex);
-
             const auto createCompute = [this, format](const OcclusionShader shader, const char* entrypoint,
                                                       const std::uint32_t threadsX, const std::uint32_t threadsY,
                                                       const std::uint32_t samplers, const std::uint32_t readBuffers,
@@ -297,6 +222,104 @@ namespace Keire::RenderBackend
             GpuOcclusionSampler = SDL_CreateGPUSampler(Device, &sampler);
             if (!GpuOcclusionSampler)
                 throw std::runtime_error("SDL_CreateGPUSampler(GPU occlusion) failed: " + LastSdlError());
+
+            SDL_GPUShader* debugPyramidVertex = nullptr;
+            SDL_GPUShader* debugPyramidFragment = nullptr;
+            (void)GpuOcclusionPolicy::TryCreateOptionalVisualization(
+                [&]
+                {
+                    debugPyramidVertex =
+                        createGraphicsShader(OcclusionShader::DebugPyramidVertex, "VSDebugPyramid", true, 0U, 0U, 0U);
+                    debugPyramidFragment = createGraphicsShader(OcclusionShader::DebugPyramidFragment, "PSDebugPyramid",
+                                                                false, 0U, 0U, 1U);
+
+                    SDL_GPUColorTargetDescription pyramidColor{};
+                    pyramidColor.format = ColorFormat;
+                    SDL_GPUGraphicsPipelineCreateInfo pyramid{};
+                    pyramid.vertex_shader = debugPyramidVertex;
+                    pyramid.fragment_shader = debugPyramidFragment;
+                    pyramid.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+                    pyramid.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+                    pyramid.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+                    pyramid.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
+                    pyramid.target_info.color_target_descriptions = &pyramidColor;
+                    pyramid.target_info.num_color_targets = 1;
+                    GpuOcclusionDebugPyramidPipeline = SDL_CreateGPUGraphicsPipeline(Device, &pyramid);
+                    if (!GpuOcclusionDebugPyramidPipeline)
+                    {
+                        throw std::runtime_error("SDL_CreateGPUGraphicsPipeline(GPU occlusion HZB debug) failed: " +
+                                                 LastSdlError());
+                    }
+                },
+                [&](const std::exception& error)
+                {
+                    if (GpuOcclusionDebugPyramidPipeline)
+                        SDL_ReleaseGPUGraphicsPipeline(Device, GpuOcclusionDebugPyramidPipeline);
+                    GpuOcclusionDebugPyramidPipeline = nullptr;
+                    if (debugPyramidFragment)
+                        SDL_ReleaseGPUShader(Device, std::exchange(debugPyramidFragment, nullptr));
+                    if (debugPyramidVertex)
+                        SDL_ReleaseGPUShader(Device, std::exchange(debugPyramidVertex, nullptr));
+                    KEIRE_CORE_WARN("GPU occlusion HZB visualization is unavailable; core culling remains enabled: {}",
+                                    error.what());
+                });
+            if (debugPyramidFragment)
+                SDL_ReleaseGPUShader(Device, debugPyramidFragment);
+            if (debugPyramidVertex)
+                SDL_ReleaseGPUShader(Device, debugPyramidVertex);
+
+            SDL_GPUShader* debugBoundsVertex = nullptr;
+            SDL_GPUShader* debugBoundsFragment = nullptr;
+            (void)GpuOcclusionPolicy::TryCreateOptionalVisualization(
+                [&]
+                {
+                    debugBoundsVertex =
+                        createGraphicsShader(OcclusionShader::DebugBoundsVertex, "VSDebugBounds", true, 3U, 1U, 0U);
+                    debugBoundsFragment =
+                        createGraphicsShader(OcclusionShader::DebugBoundsFragment, "PSDebugBounds", false, 0U, 0U, 0U);
+
+                    SDL_GPUColorTargetDescription boundsColor{};
+                    boundsColor.format = ColorFormat;
+                    boundsColor.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+                    boundsColor.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+                    boundsColor.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+                    boundsColor.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+                    boundsColor.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+                    boundsColor.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+                    boundsColor.blend_state.enable_blend = true;
+                    SDL_GPUGraphicsPipelineCreateInfo bounds{};
+                    bounds.vertex_shader = debugBoundsVertex;
+                    bounds.fragment_shader = debugBoundsFragment;
+                    bounds.primitive_type = SDL_GPU_PRIMITIVETYPE_LINELIST;
+                    bounds.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+                    bounds.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+                    bounds.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
+                    bounds.target_info.color_target_descriptions = &boundsColor;
+                    bounds.target_info.num_color_targets = 1;
+                    GpuOcclusionDebugBoundsPipeline = SDL_CreateGPUGraphicsPipeline(Device, &bounds);
+                    if (!GpuOcclusionDebugBoundsPipeline)
+                    {
+                        throw std::runtime_error("SDL_CreateGPUGraphicsPipeline(GPU occlusion bounds debug) failed: " +
+                                                 LastSdlError());
+                    }
+                },
+                [&](const std::exception& error)
+                {
+                    if (GpuOcclusionDebugBoundsPipeline)
+                        SDL_ReleaseGPUGraphicsPipeline(Device, GpuOcclusionDebugBoundsPipeline);
+                    GpuOcclusionDebugBoundsPipeline = nullptr;
+                    if (debugBoundsFragment)
+                        SDL_ReleaseGPUShader(Device, std::exchange(debugBoundsFragment, nullptr));
+                    if (debugBoundsVertex)
+                        SDL_ReleaseGPUShader(Device, std::exchange(debugBoundsVertex, nullptr));
+                    KEIRE_CORE_WARN(
+                        "GPU occlusion bounds visualization is unavailable; core culling remains enabled: {}",
+                        error.what());
+                });
+            if (debugBoundsFragment)
+                SDL_ReleaseGPUShader(Device, debugBoundsFragment);
+            if (debugBoundsVertex)
+                SDL_ReleaseGPUShader(Device, debugBoundsVertex);
             return true;
         }
         catch (const std::exception& error)

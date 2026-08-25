@@ -85,6 +85,9 @@ Complete the gates in this order. If a gate fails, keep its feature flag disable
 
 1. **Identity hardening**
    - Enable Supabase leaked-password protection.
+   - Keep local `auth.email.secure_password_change` enabled. In the hosted project, enable and verify both **Secure
+     password change** and **Require current password when updating**; acceptance-test ordinary, recovery, and enrolled-
+     MFA sessions because hosted Auth settings govern direct `/auth/v1/user` requests outside the website routes.
    - Configure custom SMTP and validate verification, recovery, rate limits, and deliverability.
    - Create the GitHub OAuth application, configure its secret outside the repository, enable explicit identity linking,
      and test duplicate-email recovery.

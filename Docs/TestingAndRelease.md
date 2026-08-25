@@ -414,13 +414,18 @@ and must not be committed.
 Only publish a Hub installer catalog record when its package key, channel, platform, architecture, native format, and
 disclosed trust level exactly match the catalog endpoint and download surface. The Ed25519 catalog signature and bound
 SHA-256 authenticate an artifact but do not replace Authenticode, RPM GPG signing, or Apple notarization. A
-catalog-verified unsigned Windows preview remains manual-download-only because Windows automatic update handoff
-requires Authenticode. The macOS drag-to-Applications DMG remains a
+catalog-verified Windows installer is rehashed and inspected before automatic handoff. A genuinely absent
+Authenticode signature is accepted only under the disclosed preview policy; a present invalid, revoked, or untrusted
+signature fails closed. Existing 0.4.1 Hubs still carry the older unconditional policy, so crossing that boundary
+requires either an Authenticode-signed bridge/target installer or a documented one-time manual install. The macOS
+drag-to-Applications DMG remains a
 manual install: the Hub reveals the verified artifact and does not exit as though mounting it had replaced the app. The
 in-Hub flow downloads through the persistent task worker, verifies the catalog size and SHA-256, and waits for a second
 explicit install action only where a transactional native handoff exists. The Windows NSIS update mode accepts only the
 Hub-generated install root, resume token, and process-wait arguments, waits for that process to close, and verifies the
-registered root and ownership marker before changing files. Run `Scripts/Tests/test-hub-installer-windows.ps1` after
+registered root and ownership marker. Both update and overwrite paths extract and validate a staged payload first,
+journal the owned component swap, retain a rollback backup until commit, recover interrupted transactions, and preserve
+unknown top-level entries outside installer-owned directories. Run `Scripts/Tests/test-hub-installer-windows.ps1` after
 modifying this contract.
 
 ### Development preview retention

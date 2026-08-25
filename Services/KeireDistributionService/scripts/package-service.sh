@@ -31,6 +31,7 @@ else
 fi
 
 ASTRO_TELEMETRY_DISABLED=1 "$npm_command" --prefix "$documentation_site" ci
+ASTRO_TELEMETRY_DISABLED=1 "$npm_command" --prefix "$documentation_site" test
 ASTRO_TELEMETRY_DISABLED=1 "$npm_command" --prefix "$documentation_site" run build
 
 mkdir -p -- "$output_root"

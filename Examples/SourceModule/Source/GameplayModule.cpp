@@ -11,7 +11,8 @@ namespace
                     .DisplayName = "Example Gameplay",
                     .Version = {1, 0, 0},
                     .SimulationAffecting = true,
-                    .DeterministicReplay = true};
+                    .DeterministicReplay = true,
+                    .ReplayState = Keire::ModuleReplayState::Stateless};
         }
 
         void Register(Keire::ModuleRegistrationContext& context) override

@@ -116,7 +116,7 @@ TEST_CASE("Shader Graph source and cooked assets preserve stable graph identity"
 
     const auto importer = Keire::CreateShaderGraphAssetImporter();
     CHECK(importer.Name == "Keire.ShaderGraph");
-    CHECK(importer.Version == 17);
+    CHECK(importer.Version == 18);
     CHECK(importer.Extensions == std::vector<std::string>{".keireshadergraph"});
 }
 
@@ -173,7 +173,7 @@ TEST_CASE("Shader Graph v2 catalogs stable node identities and migrates v1 sourc
 TEST_CASE("Shader Graph compatibility versions are explicit and future sources fail recoverably")
 {
     CHECK(Keire::ShaderGraphSourceSchemaVersion == 4);
-    CHECK(Keire::ShaderGraphGeneratedShaderVersion == 4);
+    CHECK(Keire::ShaderGraphGeneratedShaderVersion == 5);
     CHECK(Keire::ShaderGraphVertexLayoutVersion == 3);
 
     const auto graph = Keire::CreateDefaultShaderGraph();
@@ -188,7 +188,7 @@ TEST_CASE("Shader Graph compatibility versions are explicit and future sources f
     CHECK(manifest.at("vertexLayoutVersion") == Keire::ShaderGraphVertexLayoutVersion);
     CHECK(manifest.at("instanceAddressingAbiVersion") == 2U);
     CHECK(manifest.at("occlusionSupport") == 3U);
-    CHECK(variant.Hlsl.find("Generator version 4, source schema 4") != std::string::npos);
+    CHECK(variant.Hlsl.find("Generator version 5, source schema 4") != std::string::npos);
     CHECK(variant.Hlsl.find("cbuffer InstanceAddressingData : register(b2, space1)") != std::string::npos);
     CHECK(variant.Hlsl.find("uint4 InstanceParameters;") != std::string::npos);
     CHECK(variant.Hlsl.find("Instances[InstanceParameters.x + instanceId]") != std::string::npos);
@@ -395,6 +395,13 @@ TEST_CASE("Shader Graph generated HLSL compiles through the production shader im
               "StructuredBuffer<uint4> ForwardPlusLightIndices : register(t7, space2)") != std::string::npos);
     CHECK(compilation.Variants.front().Hlsl.find("register(t16, space2)") == std::string::npos);
     CHECK(compilation.Variants.front().Hlsl.find("EvaluateDirectionalShadow") != std::string::npos);
+    const auto localParameters = compilation.Variants.front().Hlsl.find("float4 LocalShadowParameters[62]");
+    const auto localSampleBounds = compilation.Variants.front().Hlsl.find("float4 LocalShadowSampleBounds[20]");
+    REQUIRE(localParameters != std::string::npos);
+    REQUIRE(localSampleBounds != std::string::npos);
+    CHECK(localParameters < localSampleBounds);
+    CHECK(compilation.Variants.front().Hlsl.find("clamp(unclampedUv, sampleBounds.xy, sampleBounds.zw)") !=
+          std::string::npos);
     CHECK(compilation.Variants.front().Hlsl.find("EvaluateDiffuseEnvironment") != std::string::npos);
     CHECK(compilation.Variants.front().Manifest.find("\"usesVertexMaterialParameters\": true") != std::string::npos);
     CHECK(compilation.Variants.front().Hlsl.find("cbuffer VertexMaterialData : register(b1, space1)") !=

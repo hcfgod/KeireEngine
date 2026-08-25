@@ -7,8 +7,11 @@
 #include <nlohmann/json.hpp>
 
 #include <array>
+#include <cstddef>
 #include <filesystem>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -50,6 +53,43 @@ namespace
         Keire::ModuleDescriptor m_Descriptor;
         std::vector<std::string>* m_Lifecycle = nullptr;
         bool m_FailRegistration = false;
+    };
+
+    class ReplayModule final : public Keire::EngineModule
+    {
+      public:
+        ReplayModule(Keire::ModuleDescriptor descriptor, const std::optional<bool> serializerDeterministic = {},
+                     std::string serializerId = {})
+            : m_Descriptor(std::move(descriptor)), m_SerializerDeterministic(serializerDeterministic),
+              m_SerializerId(std::move(serializerId))
+        {
+        }
+
+        [[nodiscard]] Keire::ModuleDescriptor Descriptor() const override { return m_Descriptor; }
+
+        void Register(Keire::ModuleRegistrationContext& context) override
+        {
+            if (!m_SerializerDeterministic)
+                return;
+            context.RegisterReplaySerializer(
+                {.Id = m_SerializerId.empty() ? "module." + m_Descriptor.Id : m_SerializerId,
+                 .Version = 1,
+                 .Deterministic = *m_SerializerDeterministic,
+                 .Capture = [this] { return std::vector{static_cast<std::byte>(m_State)}; },
+                 .Restore =
+                     [this](const std::span<const std::byte> state)
+                 {
+                     if (state.size() != 1)
+                         throw std::runtime_error("Replay module test state is invalid.");
+                     m_State = std::to_integer<unsigned char>(state.front());
+                 }});
+        }
+
+      private:
+        Keire::ModuleDescriptor m_Descriptor;
+        std::optional<bool> m_SerializerDeterministic;
+        std::string m_SerializerId;
+        unsigned char m_State = 7;
     };
 
     struct TemporaryDirectory final
@@ -145,6 +185,57 @@ TEST_CASE("Source modules reject cycles and discard failed registration")
     CHECK_THROWS_WITH_AS(Keire::CreateRef<Keire::ModuleRegistry>(Keire::ModuleRegistrySpecification{
                              {Keire::CreateRef<TestModule>(failing, nullptr, true)}}),
                          "registration failed", std::runtime_error);
+}
+
+TEST_CASE("Simulation-affecting source modules declare and capture their replay state explicitly")
+{
+    Keire::ModuleDescriptor descriptor{.Id = "sample.replay",
+                                       .DisplayName = "Replay",
+                                       .Version = {1, 0, 0},
+                                       .SimulationAffecting = true,
+                                       .DeterministicReplay = true};
+    CHECK_THROWS_WITH_AS(
+        Keire::CreateRef<Keire::ModuleRegistry>(
+            Keire::ModuleRegistrySpecification{{Keire::CreateRef<ReplayModule>(descriptor)}}),
+        "Simulation-affecting source module sample.replay must declare whether its replay state is stateless or "
+        "stateful.",
+        std::invalid_argument);
+
+    descriptor.ReplayState = Keire::ModuleReplayState::Stateful;
+    CHECK_THROWS_WITH_AS(Keire::CreateRef<Keire::ModuleRegistry>(
+                             Keire::ModuleRegistrySpecification{{Keire::CreateRef<ReplayModule>(descriptor)}}),
+                         "Stateful source module sample.replay must register replay serializer module.sample.replay.",
+                         std::invalid_argument);
+    const Keire::ModuleDescriptor spoofingDescriptor{
+        .Id = "sample.spoofer", .DisplayName = "Spoofer", .Version = {1, 0, 0}};
+    CHECK_THROWS_WITH_AS(
+        Keire::CreateRef<Keire::ModuleRegistry>(Keire::ModuleRegistrySpecification{
+            {Keire::CreateRef<ReplayModule>(descriptor),
+             Keire::CreateRef<ReplayModule>(spoofingDescriptor, true, "module.sample.replay")}}),
+        "Stateful source module sample.replay must register its own replay serializer module.sample.replay.",
+        std::invalid_argument);
+    CHECK_THROWS_WITH_AS(Keire::CreateRef<Keire::ModuleRegistry>(
+                             Keire::ModuleRegistrySpecification{{Keire::CreateRef<ReplayModule>(descriptor, false)}}),
+                         "Stateful source module sample.replay has an invalid or inconsistent replay serializer.",
+                         std::invalid_argument);
+
+    const auto stateful = Keire::CreateRef<Keire::ModuleRegistry>(
+        Keire::ModuleRegistrySpecification{{Keire::CreateRef<ReplayModule>(descriptor, true)}});
+    const auto statefulSerializers = stateful->ReplaySerializers();
+    REQUIRE(statefulSerializers.size() == 1);
+    CHECK(statefulSerializers.front().Id == "module.sample.replay");
+    CHECK(statefulSerializers.front().Capture() == std::vector{std::byte{7}});
+    CHECK_NOTHROW(statefulSerializers.front().Restore(std::array{std::byte{9}}));
+    CHECK(statefulSerializers.front().Capture() == std::vector{std::byte{9}});
+
+    descriptor.ReplayState = Keire::ModuleReplayState::Stateless;
+    const auto stateless = Keire::CreateRef<Keire::ModuleRegistry>(
+        Keire::ModuleRegistrySpecification{{Keire::CreateRef<ReplayModule>(descriptor)}});
+    const auto statelessSerializers = stateless->ReplaySerializers();
+    REQUIRE(statelessSerializers.size() == 1);
+    CHECK(statelessSerializers.front().Id == "module.sample.replay");
+    CHECK(statelessSerializers.front().Capture().empty());
+    CHECK_THROWS_AS(statelessSerializers.front().Restore(std::array{std::byte{1}}), std::runtime_error);
 }
 
 TEST_CASE("Module semantic-version ranges follow caret compatibility rules without integer wraparound")

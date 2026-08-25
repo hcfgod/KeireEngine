@@ -34,7 +34,8 @@ project(HubTestsTarget)
         "../KeireHub/Source/HubProjectUpgradeWorkflow.cpp",
         "../KeireHub/Source/HubRuntimeUiBridge.cpp",
         "../KeireHub/Source/HubTemplateBrowser.cpp",
-        "../KeireHub/Source/HubUpdateHandoffWorkflow.cpp"
+        "../KeireHub/Source/HubUpdateHandoffWorkflow.cpp",
+        "../KeireHub/Source/HubUpdatePlatform.cpp"
     }
 
     includedirs
@@ -74,7 +75,7 @@ project(HubTestsTarget)
     LinkKeireHubNativeHttp()
 
     filter "system:windows"
-        links { "user32" }
+        links { "user32", "Wintrust" }
 
     filter "system:linux"
         links { "dl" }

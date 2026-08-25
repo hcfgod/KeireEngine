@@ -3,6 +3,7 @@
 #include <doctest/doctest.h>
 
 #include <atomic>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -16,9 +17,11 @@ namespace
         {
             Keire::AssetSystemSpecification assetSpecification;
             assetSpecification.Mode = Keire::AssetMode::Development;
+            assetSpecification.Decoders.push_back(Keire::CreateSceneAssetDecoder());
             Assets = Keire::CreateRef<Keire::AssetSystem>(std::move(assetSpecification));
+            Events = Keire::CreateRef<Keire::EventBus>();
             Scenes = Keire::CreateRef<Keire::SceneSystem>(
-                Keire::SceneSystemSpecification{.Mode = Keire::SceneMode::Enabled}, Assets);
+                Keire::SceneSystemSpecification{.Mode = Keire::SceneMode::Enabled}, Assets, Events);
             World = Keire::CreateRef<Keire::SceneRuntimeWorld>(
                 Keire::SceneRuntimeWorldSpecification{.Scenes = Scenes, .Assets = Assets});
         }
@@ -28,6 +31,7 @@ namespace
             World->Close();
             Scenes->Close();
             Assets->Close();
+            Events->Close();
         }
 
         [[nodiscard]] Keire::Ref<Keire::SceneRuntimeSession>
@@ -50,6 +54,7 @@ namespace
         }
 
         Keire::Ref<Keire::AssetSystem> Assets;
+        Keire::Ref<Keire::EventBus> Events;
         Keire::Ref<Keire::SceneSystem> Scenes;
         Keire::Ref<Keire::SceneRuntimeWorld> World;
     };
@@ -157,4 +162,71 @@ TEST_CASE("Scene runtime world rejects invalid lifecycle and cross-thread mutati
     CHECK_FALSE(fixture.World->IsOpen());
     CHECK_FALSE(fixture.World->Active());
     CHECK_THROWS_AS((void)fixture.World->SetActive(first), std::logic_error);
+}
+
+TEST_CASE("Scene load polling and cancellation are thread-safe while scene service state stays owner-thread-affine")
+{
+    RuntimeWorldFixture fixture;
+    const auto missing = Keire::AssetId::Generate();
+    const auto operation = fixture.Scenes->Load(missing);
+    int serviceRejections = 0;
+    bool observedOpen = false;
+    bool observedOperation = false;
+
+    std::thread worker(
+        [&]
+        {
+            observedOpen = fixture.Scenes->IsOpen();
+            observedOperation = operation->Asset() == missing && operation->Mode() == Keire::SceneLoadMode::Single &&
+                                operation->State() == Keire::SceneLoadState::Queued &&
+                                operation->Diagnostic().Message.empty() && !operation->Result();
+            operation->Cancel();
+            const auto expectOwnerRejection = [&](auto&& action)
+            {
+                try
+                {
+                    action();
+                }
+                catch (const std::logic_error&)
+                {
+                    ++serviceRejections;
+                }
+            };
+            expectOwnerRejection([&] { (void)fixture.Scenes->Load(Keire::AssetId::Generate()); });
+            expectOwnerRejection([&] { (void)fixture.Scenes->Unload(missing); });
+            expectOwnerRejection([&] { (void)fixture.Scenes->SetActive(missing); });
+            expectOwnerRejection([&] { (void)fixture.Scenes->Active(); });
+            expectOwnerRejection([&] { (void)fixture.Scenes->Find(missing); });
+            expectOwnerRejection([&] { (void)fixture.Scenes->LoadedScenes(); });
+            expectOwnerRejection([&] { (void)fixture.Scenes->Components(); });
+            expectOwnerRejection([&] { fixture.Scenes->Close(); });
+        });
+    worker.join();
+
+    CHECK(observedOpen);
+    CHECK(observedOperation);
+    CHECK(serviceRejections == 8);
+    CHECK(operation->State() == Keire::SceneLoadState::Cancelled);
+    CHECK(fixture.Scenes->IsOpen());
+    CHECK_FALSE(fixture.Scenes->Active());
+    CHECK_FALSE(fixture.Scenes->Find(missing));
+    CHECK(fixture.Scenes->LoadedScenes().empty());
+    CHECK(fixture.Scenes->Components());
+
+    fixture.Scenes->Close();
+    std::atomic_bool closedServiceRejectedWorker = false;
+    std::thread closedWorker(
+        [&]
+        {
+            try
+            {
+                fixture.Scenes->Close();
+            }
+            catch (const std::logic_error&)
+            {
+                closedServiceRejectedWorker = true;
+            }
+        });
+    closedWorker.join();
+    CHECK(closedServiceRejectedWorker.load());
 }

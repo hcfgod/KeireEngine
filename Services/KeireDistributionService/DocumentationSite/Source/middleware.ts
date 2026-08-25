@@ -1,7 +1,7 @@
 import { createServerClient, parseCookieHeader } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { defineMiddleware } from "astro:middleware";
-import { getAssuranceState } from "./lib/auth";
+import { getAssuranceState, isPasswordRecoveryRequestAllowed, isPasswordRecoverySession, passwordRecoveryPath } from "./lib/auth";
 import { runtimeEnvironment } from "./lib/runtime-env";
 
 const mutationMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -54,7 +54,12 @@ function jwtStringClaim(token: string, claim: string): string | null {
 export const onRequest = defineMiddleware(async (context, next) => {
     const authResponseHeaders = new Headers();
     context.locals.correlationId = crypto.randomUUID();
-    context.locals.assurance = { currentLevel: null, nextLevel: null };
+    context.locals.assurance = {
+        available: false,
+        currentLevel: null,
+        nextLevel: null,
+        currentAuthenticationMethods: [],
+    };
     context.locals.user = null;
     if (context.request.method === "HEAD" && context.url.pathname.replace(/\/+$/, "") === "/health") {
         return new Response(null, {
@@ -83,6 +88,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
         });
     }
     const bearerToken = bearerMatch?.[1] ?? null;
+    const normalizedPath = context.url.pathname.length > 1
+        ? context.url.pathname.replace(/\/+$/, "")
+        : context.url.pathname;
     context.locals.supabase = supabaseUrl && publishableKey && bearerToken
         ? createClient(supabaseUrl, publishableKey, {
             auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
@@ -135,11 +143,50 @@ export const onRequest = defineMiddleware(async (context, next) => {
         if (context.locals.user) {
             context.locals.assurance = await getAssuranceState(context.locals.supabase, bearerToken ?? undefined);
         }
+        if (context.locals.user && !context.locals.assurance.available) {
+            const response = new Response(JSON.stringify({
+                error: {
+                    code: "account.assurance_unavailable",
+                    message: "The session assurance level could not be verified. Try again.",
+                    correlationId: context.locals.correlationId,
+                },
+            }), {
+                status: 503,
+                headers: {
+                    "content-type": "application/json; charset=utf-8",
+                    "cache-control": "private, no-store",
+                    "vary": "Authorization, Cookie",
+                    "x-correlation-id": context.locals.correlationId,
+                    "x-content-type-options": "nosniff",
+                },
+            });
+            for (const [name, value] of authResponseHeaders) response.headers.set(name, value);
+            return response;
+        }
+        if (context.locals.user && isPasswordRecoverySession(context.locals.assurance) &&
+            !isPasswordRecoveryRequestAllowed(context.locals.assurance, normalizedPath)) {
+            const navigationalRequest = context.request.method === "GET" || context.request.method === "HEAD";
+            const response = navigationalRequest
+                ? new Response(null, { status: 303, headers: { location: passwordRecoveryPath } })
+                : new Response(JSON.stringify({
+                    error: {
+                        code: "account.password_recovery_restricted",
+                        message: "Finish password recovery or sign out before continuing.",
+                        correlationId: context.locals.correlationId,
+                    },
+                }), {
+                    status: 403,
+                    headers: { "content-type": "application/json; charset=utf-8" },
+                });
+            response.headers.set("cache-control", "private, no-store");
+            response.headers.set("vary", "Authorization, Cookie");
+            response.headers.set("x-correlation-id", context.locals.correlationId);
+            response.headers.set("x-content-type-options", "nosniff");
+            for (const [name, value] of authResponseHeaders) response.headers.set(name, value);
+            return response;
+        }
         const oauthClientId = bearerToken ? jwtStringClaim(bearerToken, "client_id") : null;
         const oauthSessionId = bearerToken ? jwtStringClaim(bearerToken, "session_id") : null;
-        const normalizedPath = context.url.pathname.length > 1
-            ? context.url.pathname.replace(/\/+$/, "")
-            : context.url.pathname;
         const isDeviceRegistration = context.request.method === "POST" &&
             normalizedPath === "/marketplace/v1/sessions";
         if (context.locals.user && oauthClientId && !isDeviceRegistration) {

@@ -1,6 +1,9 @@
 #include "Keire/Scenes/SceneSystem.h"
 
 #include <algorithm>
+#include <atomic>
+#include <cstddef>
+#include <mutex>
 #include <optional>
 #include <ranges>
 #include <stdexcept>
@@ -13,39 +16,122 @@ namespace Keire
     {
       public:
         Impl(const AssetId value, const SceneLoadMode mode, AssetHandle<SceneAsset> asset)
-            : OwnerThread(std::this_thread::get_id()), AssetIdValue(value), LoadMode(mode),
-              AssetHandleValue(std::move(asset))
+            : AssetIdValue(value), LoadMode(mode), AssetHandleValue(std::move(asset))
         {
         }
 
-        std::thread::id OwnerThread;
+        [[nodiscard]] SceneLoadState State() const
+        {
+            std::scoped_lock lock(Mutex);
+            return LoadState;
+        }
+
+        [[nodiscard]] AssetDiagnostic Diagnostic() const
+        {
+            std::scoped_lock lock(Mutex);
+            return Failure;
+        }
+
+        [[nodiscard]] Ref<Scene> Result() const
+        {
+            std::scoped_lock lock(Mutex);
+            return LoadedScene;
+        }
+
+        [[nodiscard]] bool BeginAdvance()
+        {
+            std::scoped_lock lock(Mutex);
+            if (LoadState == SceneLoadState::Cancelled || LoadState == SceneLoadState::Failed ||
+                LoadState == SceneLoadState::Ready || CommitStarted)
+                return false;
+            if (LoadState == SceneLoadState::Queued)
+                LoadState = SceneLoadState::Loading;
+            return true;
+        }
+
+        [[nodiscard]] bool BeginCommit()
+        {
+            std::scoped_lock lock(Mutex);
+            if (LoadState != SceneLoadState::Loading)
+                return false;
+            CommitStarted = true;
+            return true;
+        }
+
+        [[nodiscard]] bool Fail(AssetDiagnostic diagnostic)
+        {
+            std::scoped_lock lock(Mutex);
+            if (LoadState == SceneLoadState::Cancelled)
+                return false;
+            Failure = std::move(diagnostic);
+            LoadState = SceneLoadState::Failed;
+            CommitStarted = false;
+            return true;
+        }
+
+        void MarkAssetCancelled(AssetDiagnostic diagnostic)
+        {
+            std::scoped_lock lock(Mutex);
+            if (LoadState == SceneLoadState::Cancelled)
+                return;
+            Failure = std::move(diagnostic);
+            LoadState = SceneLoadState::Cancelled;
+            CommitStarted = false;
+        }
+
+        [[nodiscard]] bool Complete(Ref<Scene> scene)
+        {
+            std::scoped_lock lock(Mutex);
+            if (LoadState != SceneLoadState::Loading)
+                return false;
+            LoadedScene = std::move(scene);
+            LoadState = SceneLoadState::Ready;
+            CommitStarted = false;
+            return true;
+        }
+
+        void Cancel()
+        {
+            std::scoped_lock lock(Mutex);
+            if (!CommitStarted && (LoadState == SceneLoadState::Queued || LoadState == SceneLoadState::Loading))
+                LoadState = SceneLoadState::Cancelled;
+        }
+
+        mutable std::mutex Mutex;
         AssetId AssetIdValue;
         SceneLoadMode LoadMode = SceneLoadMode::Single;
         SceneLoadState LoadState = SceneLoadState::Queued;
         AssetHandle<SceneAsset> AssetHandleValue;
         AssetDiagnostic Failure;
         Ref<Scene> LoadedScene;
+        bool CommitStarted = false;
     };
 
     SceneLoadOperation::SceneLoadOperation(std::unique_ptr<Impl> implementation) : m_Impl(std::move(implementation)) {}
 
-    SceneLoadOperation::~SceneLoadOperation() { Cancel(); }
+    SceneLoadOperation::~SceneLoadOperation()
+    {
+        try
+        {
+            Cancel();
+        }
+        catch (...)
+        {
+            // A load-operation destructor cannot report a synchronization failure.
+        }
+    }
 
     AssetId SceneLoadOperation::Asset() const noexcept { return m_Impl->AssetIdValue; }
 
     SceneLoadMode SceneLoadOperation::Mode() const noexcept { return m_Impl->LoadMode; }
 
-    SceneLoadState SceneLoadOperation::State() const noexcept { return m_Impl->LoadState; }
+    SceneLoadState SceneLoadOperation::State() const { return m_Impl->State(); }
 
-    AssetDiagnostic SceneLoadOperation::Diagnostic() const { return m_Impl->Failure; }
+    AssetDiagnostic SceneLoadOperation::Diagnostic() const { return m_Impl->Diagnostic(); }
 
-    Ref<Scene> SceneLoadOperation::Result() const noexcept { return m_Impl->LoadedScene; }
+    Ref<Scene> SceneLoadOperation::Result() const { return m_Impl->Result(); }
 
-    void SceneLoadOperation::Cancel() noexcept
-    {
-        if (m_Impl && (m_Impl->LoadState == SceneLoadState::Queued || m_Impl->LoadState == SceneLoadState::Loading))
-            m_Impl->LoadState = SceneLoadState::Cancelled;
-    }
+    void SceneLoadOperation::Cancel() { m_Impl->Cancel(); }
 
     class SceneSystem::Impl final
     {
@@ -122,7 +208,7 @@ namespace Keire
         std::optional<AssetId> PendingActive;
         std::vector<Ref<Scene>> Loaded;
         AssetId ActiveId;
-        bool Open = true;
+        std::atomic_bool Open = true;
     };
 
     SceneSystem::SceneSystem(SceneSystemSpecification specification, Ref<AssetSystem> assets, Ref<EventBus> events)
@@ -130,13 +216,13 @@ namespace Keire
     {
     }
 
-    SceneSystem::~SceneSystem() { Close(); }
+    SceneSystem::~SceneSystem() { CloseInternal(); }
 
     Ref<SceneLoadOperation> SceneSystem::Load(const AssetId scene, const SceneLoadMode mode,
                                               const AssetPriority priority)
     {
         m_Impl->RequireOwner("Load");
-        if (!m_Impl->Open)
+        if (!m_Impl->Open.load(std::memory_order_acquire))
             throw std::logic_error("SceneSystem::Load cannot run after Close.");
         if (!scene)
             throw std::invalid_argument("Scene asset ID must not be empty.");
@@ -149,7 +235,7 @@ namespace Keire
     bool SceneSystem::Unload(const AssetId scene)
     {
         m_Impl->RequireOwner("Unload");
-        if (!m_Impl->Open || m_Impl->FindLoaded(scene) == m_Impl->Loaded.end() ||
+        if (!m_Impl->Open.load(std::memory_order_acquire) || m_Impl->FindLoaded(scene) == m_Impl->Loaded.end() ||
             std::ranges::find(m_Impl->PendingUnloads, scene) != m_Impl->PendingUnloads.end())
             return false;
         m_Impl->PendingUnloads.push_back(scene);
@@ -159,23 +245,25 @@ namespace Keire
     bool SceneSystem::SetActive(const AssetId scene)
     {
         m_Impl->RequireOwner("SetActive");
-        if (!m_Impl->Open || m_Impl->FindLoaded(scene) == m_Impl->Loaded.end())
+        if (!m_Impl->Open.load(std::memory_order_acquire) || m_Impl->FindLoaded(scene) == m_Impl->Loaded.end())
             return false;
         m_Impl->PendingActive = scene;
         return true;
     }
 
-    Ref<Scene> SceneSystem::Active() const noexcept
+    Ref<Scene> SceneSystem::Active() const
     {
-        if (!m_Impl->Open)
+        m_Impl->RequireOwner("Active");
+        if (!m_Impl->Open.load(std::memory_order_acquire))
             return {};
         const auto found = m_Impl->FindLoaded(m_Impl->ActiveId);
         return found == m_Impl->Loaded.end() ? Ref<Scene>{} : *found;
     }
 
-    Ref<Scene> SceneSystem::Find(const AssetId scene) const noexcept
+    Ref<Scene> SceneSystem::Find(const AssetId scene) const
     {
-        if (!m_Impl->Open)
+        m_Impl->RequireOwner("Find");
+        if (!m_Impl->Open.load(std::memory_order_acquire))
             return {};
         const auto found = m_Impl->FindLoaded(scene);
         return found == m_Impl->Loaded.end() ? Ref<Scene>{} : *found;
@@ -187,44 +275,60 @@ namespace Keire
         return m_Impl->Loaded;
     }
 
-    Ref<ComponentRegistry> SceneSystem::Components() const noexcept { return m_Impl->Specification.Components; }
+    Ref<ComponentRegistry> SceneSystem::Components() const
+    {
+        m_Impl->RequireOwner("Components");
+        return m_Impl->Specification.Components;
+    }
 
-    bool SceneSystem::IsOpen() const noexcept { return m_Impl->Open; }
+    bool SceneSystem::IsOpen() const noexcept { return m_Impl->Open.load(std::memory_order_acquire); }
 
     void SceneSystem::AdvanceFrame()
     {
         m_Impl->RequireOwner("AdvanceFrame");
-        if (!m_Impl->Open)
+        if (!m_Impl->Open.load(std::memory_order_acquire))
             return;
 
-        for (const auto id : std::exchange(m_Impl->PendingUnloads, {}))
+        const auto pendingUnloadCount = m_Impl->PendingUnloads.size();
+        for (std::size_t index = 0; index < pendingUnloadCount; ++index)
         {
+            if (!m_Impl->Open.load(std::memory_order_acquire) || m_Impl->PendingUnloads.empty())
+                break;
+            const auto id = m_Impl->PendingUnloads.front();
+            m_Impl->PendingUnloads.erase(m_Impl->PendingUnloads.begin());
             const auto found = m_Impl->FindLoaded(id);
             if (found == m_Impl->Loaded.end())
                 continue;
             const bool wasActive = id == m_Impl->ActiveId;
-            (*found)->Close();
+            const auto previousActive = m_Impl->ActiveId;
+            const auto unloadedScene = *found;
+            unloadedScene->Close();
             m_Impl->Loaded.erase(found);
+            const auto nextActive = wasActive && !m_Impl->Loaded.empty() ? m_Impl->Loaded.front()->Asset() : AssetId{};
+            if (wasActive)
+                m_Impl->ActiveId = nextActive;
             m_Impl->Dispatch(SceneUnloadedEvent{id});
             if (wasActive)
-                m_Impl->ChangeActive(m_Impl->Loaded.empty() ? AssetId{} : m_Impl->Loaded.front()->Asset());
+                m_Impl->Dispatch(ActiveSceneChangedEvent{previousActive, nextActive});
         }
 
-        for (const auto& operation : m_Impl->PendingLoads)
+        const auto pendingLoadCount = m_Impl->PendingLoads.size();
+        for (std::size_t index = 0; index < pendingLoadCount; ++index)
         {
+            if (!m_Impl->Open.load(std::memory_order_acquire) || index >= m_Impl->PendingLoads.size())
+                break;
+            const auto operation = m_Impl->PendingLoads[index];
             auto& state = *operation->m_Impl;
-            if (state.LoadState == SceneLoadState::Cancelled)
+            if (!state.BeginAdvance())
                 continue;
-            if (state.LoadState == SceneLoadState::Queued)
-                state.LoadState = SceneLoadState::Loading;
             const auto assetState = state.AssetHandleValue.State();
             if (assetState == AssetState::Failed || assetState == AssetState::Cancelled)
             {
-                state.LoadState =
-                    assetState == AssetState::Cancelled ? SceneLoadState::Cancelled : SceneLoadState::Failed;
-                state.Failure = state.AssetHandleValue.Diagnostic();
-                if (state.LoadState == SceneLoadState::Failed)
-                    m_Impl->Dispatch(SceneLoadFailedEvent{state.AssetIdValue, state.Failure});
+                auto diagnostic = state.AssetHandleValue.Diagnostic();
+                if (assetState == AssetState::Cancelled)
+                    state.MarkAssetCancelled(std::move(diagnostic));
+                else if (state.Fail(diagnostic))
+                    m_Impl->Dispatch(SceneLoadFailedEvent{state.AssetIdValue, std::move(diagnostic)});
                 continue;
             }
             const auto asset = state.AssetHandleValue.TryGetLoaded();
@@ -234,64 +338,97 @@ namespace Keire
             const auto existing = m_Impl->FindLoaded(state.AssetIdValue);
             if (state.LoadMode == SceneLoadMode::Additive && existing != m_Impl->Loaded.end())
             {
-                state.LoadedScene = *existing;
-                state.LoadState = SceneLoadState::Ready;
+                (void)state.Complete(*existing);
                 continue;
             }
             if (state.LoadMode == SceneLoadMode::Additive &&
                 m_Impl->Loaded.size() >= m_Impl->Specification.MaximumLoadedScenes)
             {
-                state.LoadState = SceneLoadState::Failed;
-                state.Failure = {"activate", "Maximum loaded scene capacity was exhausted."};
-                m_Impl->Dispatch(SceneLoadFailedEvent{state.AssetIdValue, state.Failure});
+                AssetDiagnostic diagnostic{"activate", "Maximum loaded scene capacity was exhausted."};
+                if (state.Fail(diagnostic))
+                    m_Impl->Dispatch(SceneLoadFailedEvent{state.AssetIdValue, std::move(diagnostic)});
                 continue;
             }
 
             auto loadedScene =
                 CreateRef<Scene>(state.AssetIdValue, asset->Definition(), m_Impl->Specification.Components);
             loadedScene->MarkSaved();
+            auto committedScenes = state.LoadMode == SceneLoadMode::Single ? std::vector<Ref<Scene>>{} : m_Impl->Loaded;
+            committedScenes.push_back(loadedScene);
+            std::vector<AssetId> unloadedScenes;
             if (state.LoadMode == SceneLoadMode::Single)
             {
-                const auto previousActive = m_Impl->ActiveId;
+                unloadedScenes.reserve(m_Impl->Loaded.size());
                 for (const auto& previous : m_Impl->Loaded)
-                {
-                    const auto previousId = previous->Asset();
-                    previous->Close();
-                    m_Impl->Dispatch(SceneUnloadedEvent{previousId});
-                }
-                m_Impl->Loaded.clear();
-                m_Impl->ActiveId = state.AssetIdValue;
-                if (previousActive != state.AssetIdValue)
-                    m_Impl->Dispatch(ActiveSceneChangedEvent{previousActive, state.AssetIdValue});
+                    unloadedScenes.push_back(previous->Asset());
             }
-            m_Impl->Loaded.push_back(loadedScene);
-            state.LoadedScene = loadedScene;
-            state.LoadState = SceneLoadState::Ready;
+            if (!state.BeginCommit())
+                continue;
+
+            const auto previousActive = m_Impl->ActiveId;
+            if (state.LoadMode == SceneLoadMode::Single)
+            {
+                for (const auto& previous : m_Impl->Loaded)
+                    previous->Close();
+                m_Impl->ActiveId = state.AssetIdValue;
+            }
+            else if (!m_Impl->ActiveId)
+                m_Impl->ActiveId = state.AssetIdValue;
+            m_Impl->Loaded = std::move(committedScenes);
+            if (!state.Complete(loadedScene))
+                throw std::logic_error("Scene load commit lost its claimed operation state.");
+
+            for (const auto unloaded : unloadedScenes)
+                m_Impl->Dispatch(SceneUnloadedEvent{unloaded});
+            if (state.LoadMode == SceneLoadMode::Single && previousActive != state.AssetIdValue)
+                m_Impl->Dispatch(ActiveSceneChangedEvent{previousActive, state.AssetIdValue});
             m_Impl->Dispatch(SceneLoadedEvent{state.AssetIdValue, state.LoadMode});
-            if (!m_Impl->ActiveId)
-                m_Impl->ChangeActive(state.AssetIdValue);
+            if (state.LoadMode == SceneLoadMode::Additive && !previousActive)
+                m_Impl->Dispatch(ActiveSceneChangedEvent{previousActive, state.AssetIdValue});
         }
 
-        std::erase_if(
-            m_Impl->PendingLoads, [](const auto& operation)
-            { return operation->State() != SceneLoadState::Queued && operation->State() != SceneLoadState::Loading; });
+        std::erase_if(m_Impl->PendingLoads,
+                      [](const auto& operation)
+                      {
+                          const auto state = operation->State();
+                          return state != SceneLoadState::Queued && state != SceneLoadState::Loading;
+                      });
         if (m_Impl->PendingActive)
         {
-            if (m_Impl->FindLoaded(*m_Impl->PendingActive) != m_Impl->Loaded.end())
-                m_Impl->ChangeActive(*m_Impl->PendingActive);
-            m_Impl->PendingActive.reset();
+            const auto requested = std::exchange(m_Impl->PendingActive, std::nullopt);
+            if (m_Impl->FindLoaded(*requested) != m_Impl->Loaded.end())
+                m_Impl->ChangeActive(*requested);
         }
     }
 
-    void SceneSystem::Close() noexcept
+    void SceneSystem::Close()
     {
-        if (!m_Impl || !m_Impl->Open)
+        if (!m_Impl)
             return;
-        m_Impl->Open = false;
+        m_Impl->RequireOwner("Close");
+        if (!m_Impl->Open.load(std::memory_order_acquire))
+            return;
+        CloseInternal();
+    }
+
+    void SceneSystem::CloseInternal() noexcept
+    {
+        if (!m_Impl || !m_Impl->Open.exchange(false, std::memory_order_acq_rel))
+            return;
         for (const auto& operation : m_Impl->PendingLoads)
-            operation->Cancel();
+        {
+            try
+            {
+                operation->Cancel();
+            }
+            catch (...)
+            {
+                // Service destruction is noexcept; each remaining operation still gets a cancellation attempt.
+            }
+        }
         m_Impl->PendingLoads.clear();
         m_Impl->PendingUnloads.clear();
+        m_Impl->PendingActive.reset();
         for (const auto& scene : m_Impl->Loaded)
             scene->Close();
         m_Impl->Loaded.clear();

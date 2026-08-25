@@ -1055,6 +1055,8 @@ physics world exists. If no query is available, the effect continues without col
 The GPU implementation supports **GPU Depth** directly. It samples the current scene depth pyramid input, reconstructs
 the hit position and normal from the camera matrices, applies restitution or kill, and uses a bounded swept search to
 avoid obvious tunneling. A missing depth input leaves simulation valid but reports the capability at render time.
+Rendered `RenderSystem` instances advertise `GpuDepthCollision` whenever their sampled scene-depth format is available;
+headless rendering continues to report both capabilities as unavailable.
 **CPU** and **Scene Physics** deliberately remain CPU-required because they invoke the host callback/physics world;
 selecting them for GPU compilation produces a node-linked error instead of a silent approximation.
 

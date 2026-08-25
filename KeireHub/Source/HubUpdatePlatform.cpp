@@ -121,12 +121,14 @@ namespace KeireHub
 #endif
     }
 
-    bool NativeHubUpdateRequiresPlatformSignature() noexcept
+    HubUpdatePlatformSignaturePolicy NativeHubUpdatePlatformSignaturePolicy() noexcept
     {
-#if defined(_WIN32) || defined(__APPLE__)
-        return true;
+#if defined(_WIN32)
+        return HubUpdatePlatformSignaturePolicy::ValidateIfPresent;
+#elif defined(__APPLE__)
+        return HubUpdatePlatformSignaturePolicy::Required;
 #else
-        return false;
+        return HubUpdatePlatformSignaturePolicy::NotRequired;
 #endif
     }
 
@@ -160,7 +162,7 @@ namespace KeireHub
 #endif
     }
 
-    HubStatus VerifyNativeHubInstallerSignature(const std::filesystem::path& installer)
+    HubResult<HubUpdatePlatformSignatureState> VerifyNativeHubInstallerSignature(const std::filesystem::path& installer)
     {
 #if defined(_WIN32)
         WINTRUST_FILE_INFO file{};
@@ -169,37 +171,48 @@ namespace KeireHub
         WINTRUST_DATA trust{};
         trust.cbStruct = sizeof(trust);
         trust.dwUIChoice = WTD_UI_NONE;
-        trust.fdwRevocationChecks = WTD_REVOKE_NONE;
+        trust.fdwRevocationChecks = WTD_REVOKE_WHOLECHAIN;
         trust.dwUnionChoice = WTD_CHOICE_FILE;
         trust.pFile = &file;
         trust.dwStateAction = WTD_STATEACTION_VERIFY;
-        trust.dwProvFlags = WTD_CACHE_ONLY_URL_RETRIEVAL | WTD_REVOCATION_CHECK_NONE;
+        trust.dwProvFlags = WTD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT;
         GUID policy = WINTRUST_ACTION_GENERIC_VERIFY_V2;
+        SetLastError(ERROR_SUCCESS);
         const auto verification = WinVerifyTrust(nullptr, &policy, &trust);
+        const auto verificationDetails = GetLastError();
         trust.dwStateAction = WTD_STATEACTION_CLOSE;
         (void)WinVerifyTrust(nullptr, &policy, &trust);
         if (verification == ERROR_SUCCESS)
-            return HubStatus::Success();
-        return HubStatus::Failure({.Code = HubErrorCode::CatalogSignatureInvalid,
-                                   .Message = "Windows could not verify the Hub installer's publisher signature.",
-                                   .AffectedItem = installer.filename().string(),
-                                   .TechnicalDetails = std::to_string(verification),
-                                   .LogReference = {}});
+            return HubResult<HubUpdatePlatformSignatureState>::Success(HubUpdatePlatformSignatureState::Valid);
+        if (verification == TRUST_E_NOSIGNATURE &&
+            (verificationDetails == static_cast<DWORD>(TRUST_E_NOSIGNATURE) ||
+             verificationDetails == static_cast<DWORD>(TRUST_E_SUBJECT_FORM_UNKNOWN) ||
+             verificationDetails == static_cast<DWORD>(TRUST_E_PROVIDER_UNKNOWN)))
+        {
+            return HubResult<HubUpdatePlatformSignatureState>::Success(HubUpdatePlatformSignatureState::NotPresent);
+        }
+        return HubResult<HubUpdatePlatformSignatureState>::Failure(
+            {.Code = HubErrorCode::CatalogSignatureInvalid,
+             .Message = "Windows found a Hub installer publisher signature that is invalid or untrusted.",
+             .AffectedItem = installer.filename().string(),
+             .TechnicalDetails = std::to_string(verification) + ":" + std::to_string(verificationDetails),
+             .LogReference = {}});
 #elif defined(__APPLE__)
         const std::vector<std::string> arguments{
             "--assess", "--type", "open", "--context", "context:primary-signature", "--verbose=2", installer.string()};
         const auto result =
             Keire::Detail::RunProcess("/usr/sbin/spctl", arguments, installer.parent_path(), std::chrono::seconds(30));
         if (!result.TimedOut && result.ExitCode == 0)
-            return HubStatus::Success();
-        return HubStatus::Failure({.Code = HubErrorCode::CatalogSignatureInvalid,
-                                   .Message = "macOS could not verify the Hub installer signature.",
-                                   .AffectedItem = installer.filename().string(),
-                                   .TechnicalDetails = result.TimedOut ? "spctl timed out" : result.Output,
-                                   .LogReference = {}});
+            return HubResult<HubUpdatePlatformSignatureState>::Success(HubUpdatePlatformSignatureState::Valid);
+        return HubResult<HubUpdatePlatformSignatureState>::Failure(
+            {.Code = HubErrorCode::CatalogSignatureInvalid,
+             .Message = "macOS could not verify the Hub installer signature.",
+             .AffectedItem = installer.filename().string(),
+             .TechnicalDetails = result.TimedOut ? "spctl timed out" : result.Output,
+             .LogReference = {}});
 #else
         (void)installer;
-        return HubStatus::Success();
+        return HubResult<HubUpdatePlatformSignatureState>::Success(HubUpdatePlatformSignatureState::NotPresent);
 #endif
     }
 

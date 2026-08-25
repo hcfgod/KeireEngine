@@ -343,13 +343,7 @@ namespace Keire::RenderBackend
         const auto camera = request.View->Camera();
         if (!Math::IsFinite(camera.View) || !Math::IsFinite(camera.Projection) || !ValidColor(camera.ClearColor))
             throw std::invalid_argument("SceneRenderRequest camera contains invalid values.");
-        if (!ValidColor(request.Environment.AmbientColor) || !std::isfinite(request.Environment.AmbientIntensity) ||
-            request.Environment.AmbientIntensity < 0.0F || request.Environment.AmbientIntensity > 16.0F ||
-            !std::isfinite(request.Environment.Exposure) || request.Environment.Exposure < 0.01F ||
-            request.Environment.Exposure > 16.0F)
-        {
-            throw std::invalid_argument("SceneRenderRequest environment contains invalid values.");
-        }
+        ValidateRenderEnvironmentSettings(request.Environment);
         if (!std::isfinite(request.MaterialTimeSeconds) || request.MaterialTimeSeconds < 0.0F ||
             !std::isfinite(request.MaterialDeltaSeconds) || request.MaterialDeltaSeconds < 0.0F ||
             request.MaterialDeltaSeconds > 1.0F)

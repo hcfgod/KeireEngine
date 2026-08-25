@@ -56,6 +56,39 @@ TEST_CASE("box-projected reflections intersect the oriented local influence box"
     CHECK(direction.X > 0.0F);
 }
 
+TEST_CASE("local shadow candidates apply type limits after deterministic importance ordering")
+{
+    using Keire::Detail::LocalShadowCandidate;
+    using Keire::Detail::LocalShadowCandidateType;
+    const std::array candidates{LocalShadowCandidate{Keire::AssetId::Parse("00000000-0000-4000-8000-000000000001"), 0,
+                                                     LocalShadowCandidateType::Spot, 1},
+                                LocalShadowCandidate{Keire::AssetId::Parse("00000000-0000-4000-8000-000000000002"), 1,
+                                                     LocalShadowCandidateType::Point, 3},
+                                LocalShadowCandidate{Keire::AssetId::Parse("00000000-0000-4000-8000-000000000006"), 5,
+                                                     LocalShadowCandidateType::Point, 10},
+                                LocalShadowCandidate{Keire::AssetId::Parse("00000000-0000-4000-8000-000000000005"), 4,
+                                                     LocalShadowCandidateType::Point, 2},
+                                LocalShadowCandidate{Keire::AssetId::Parse("00000000-0000-4000-8000-000000000004"), 3,
+                                                     LocalShadowCandidateType::Spot, 5},
+                                LocalShadowCandidate{Keire::AssetId::Parse("00000000-0000-4000-8000-000000000003"), 2,
+                                                     LocalShadowCandidateType::Spot, 9}};
+
+    const auto selected = Keire::Detail::SelectLocalShadowCandidates(candidates, 2, 2);
+    REQUIRE(selected.size() == 4);
+    CHECK(selected[0].LightIndex == 5);
+    CHECK(selected[1].LightIndex == 2);
+    CHECK(selected[2].LightIndex == 3);
+    CHECK(selected[3].LightIndex == 1);
+
+    const std::array tied{LocalShadowCandidate{Keire::AssetId::Parse("00000000-0000-4000-8000-000000000009"), 9,
+                                               LocalShadowCandidateType::Spot, 7},
+                          LocalShadowCandidate{Keire::AssetId::Parse("00000000-0000-4000-8000-000000000008"), 8,
+                                               LocalShadowCandidateType::Spot, 7}};
+    const auto tieSelected = Keire::Detail::SelectLocalShadowCandidates(tied, 1, 0);
+    REQUIRE(tieSelected.size() == 1);
+    CHECK(tieSelected.front().LightIndex == 8);
+}
+
 TEST_CASE("shadow atlas allocation is priority ordered, bounded, and temporally stable")
 {
     Keire::Detail::ShadowAtlasAllocator atlas(1024, 256);
@@ -78,6 +111,46 @@ TEST_CASE("shadow atlas allocation is priority ordered, bounded, and temporally 
         CHECK(second[index].X + second[index].Size <= atlas.AtlasSize());
         CHECK(second[index].Y + second[index].Size <= atlas.AtlasSize());
     }
+}
+
+TEST_CASE("shadow atlas transforms reserve a filtered sampling guard inside each tile")
+{
+    Keire::Detail::ShadowAtlasAllocator atlas(1024, 256);
+    const std::array requests{
+        Keire::Detail::ShadowAtlasRequest{{Keire::AssetId::Parse("00000000-0000-4000-8000-000000000001"), 0}, 256, 1},
+        Keire::Detail::ShadowAtlasRequest{{Keire::AssetId::Parse("00000000-0000-4000-8000-000000000002"), 0}, 256, 1}};
+    const auto allocations = atlas.Allocate(requests);
+    REQUIRE(allocations.size() == 2);
+    const auto atlasSize = static_cast<float>(atlas.AtlasSize());
+    const auto guard = static_cast<float>(Keire::Detail::ShadowAtlasGuardTexels);
+    for (const auto& allocation : allocations)
+    {
+        CHECK(allocation.ScaleOffset.X * atlasSize == doctest::Approx(allocation.Size - guard * 2.0F));
+        CHECK(allocation.ScaleOffset.Y * atlasSize == doctest::Approx(allocation.Size - guard * 2.0F));
+        CHECK(allocation.ScaleOffset.Z * atlasSize == doctest::Approx(allocation.X + guard));
+        CHECK(allocation.ScaleOffset.W * atlasSize == doctest::Approx(allocation.Y + guard));
+        CHECK(allocation.SampleBounds.X * atlasSize == doctest::Approx(allocation.X + 0.5F));
+        CHECK(allocation.SampleBounds.Y * atlasSize == doctest::Approx(allocation.Y + 0.5F));
+        CHECK(allocation.SampleBounds.Z * atlasSize == doctest::Approx(allocation.X + allocation.Size - 0.5F));
+        CHECK(allocation.SampleBounds.W * atlasSize == doctest::Approx(allocation.Y + allocation.Size - 0.5F));
+    }
+}
+
+TEST_CASE("shadow atlas allocation commits all point faces or none")
+{
+    Keire::Detail::ShadowAtlasAllocator atlas(512, 256);
+    const auto point = Keire::AssetId::Parse("00000000-0000-4000-8000-000000000001");
+    const auto fallback = Keire::AssetId::Parse("00000000-0000-4000-8000-000000000002");
+    std::vector<Keire::Detail::ShadowAtlasRequest> requests;
+    for (std::uint8_t face = 0; face < 6U; ++face)
+        requests.push_back({{point, face}, 256, 10, true});
+    requests.push_back({{fallback, 0}, 256, 1});
+
+    const auto allocations = atlas.Allocate(requests);
+    REQUIRE(allocations.size() == 1);
+    CHECK(allocations.front().Key.Light == fallback);
+    CHECK(allocations.front().X == 0);
+    CHECK(allocations.front().Y == 0);
 }
 
 TEST_CASE("shadow atlas rejects duplicate stable request keys")

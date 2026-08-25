@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -143,7 +144,7 @@ public static unsafe class Jobs
         }
         catch (Exception exception)
         {
-            state?.RecordInteropFailure(exception);
+            state?.RecordInteropFailure(exception, phase is 1 or 2 or 3);
             return 1;
         }
     }
@@ -166,6 +167,7 @@ internal sealed class ManagedJobState
     internal ulong Id => unchecked((ulong)Volatile.Read(ref _id));
     internal JobStatus Status => (JobStatus)Volatile.Read(ref _status);
     internal Task Completion => _completion.Task;
+    internal bool IsInteropHandleReleased => Volatile.Read(ref _released) != 0;
 
     internal void SetHandle(IntPtr handle) => _handle = handle;
     internal void SetId(ulong id) => Volatile.Write(ref _id, unchecked((long)id));
@@ -174,14 +176,13 @@ internal sealed class ManagedJobState
     {
         if (phase == 4)
         {
-            if (!_cancellation.IsCancellationRequested)
-                _cancellation.Cancel();
+            _ = RequestCancellationWithoutThrowing();
             return 0;
         }
         if (phase == 0)
         {
             if (stopRequested != 0)
-                _cancellation.Cancel();
+                _ = RequestCancellationWithoutThrowing();
             Volatile.Write(ref _status, (int)JobStatus.Running);
             try
             {
@@ -209,8 +210,7 @@ internal sealed class ManagedJobState
             }
             else
             {
-                if (!_cancellation.IsCancellationRequested)
-                    _cancellation.Cancel();
+                _ = RequestCancellationWithoutThrowing();
                 Volatile.Write(ref _status, (int)JobStatus.Cancelled);
                 _completion.TrySetCanceled(_cancellation.Token);
             }
@@ -227,17 +227,35 @@ internal sealed class ManagedJobState
         JobStatus status = Status;
         if (status is JobStatus.Succeeded or JobStatus.Failed or JobStatus.Cancelled)
             return;
-        if (!_cancellation.IsCancellationRequested)
-            _cancellation.Cancel();
+        Exception? cancellationFailure = RequestCancellationWithoutThrowing();
         NativeRuntime.CancelManagedJob(Id);
+        if (cancellationFailure is not null)
+            ExceptionDispatchInfo.Capture(cancellationFailure).Throw();
     }
 
-    internal void RecordInteropFailure(Exception exception)
+    internal void RecordInteropFailure(Exception exception, bool terminal)
     {
         _failure = exception;
+        if (!terminal)
+            return;
         Volatile.Write(ref _status, (int)JobStatus.Failed);
         _completion.TrySetException(exception);
         ReleaseHandle();
+    }
+
+    private Exception? RequestCancellationWithoutThrowing()
+    {
+        if (_cancellation.IsCancellationRequested)
+            return null;
+        try
+        {
+            _cancellation.Cancel();
+            return null;
+        }
+        catch (Exception exception)
+        {
+            return exception;
+        }
     }
 
     internal void ReleaseHandle()

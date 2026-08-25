@@ -94,6 +94,78 @@ namespace
         std::ranges::transform(characters, result.begin(), [](const char value) { return std::byte(value); });
         return result;
     }
+
+    void WriteTestBytes(const std::filesystem::path& path, const std::span<const std::byte> bytes)
+    {
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        if (!output || (!bytes.empty() && !output.write(reinterpret_cast<const char*>(bytes.data()),
+                                                        static_cast<std::streamsize>(bytes.size()))))
+        {
+            throw std::runtime_error("Could not write rendering test bytes.");
+        }
+    }
+
+    [[nodiscard]] std::vector<std::byte> TestPng()
+    {
+        constexpr std::array<unsigned char, 70> source{
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00,
+            0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00,
+            0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0xda, 0x63, 0xfc, 0xcf, 0xc0, 0x50, 0x0f, 0x00, 0x05, 0xfe, 0x02, 0xfe,
+            0xdd, 0xfd, 0x99, 0xe5, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82};
+        std::vector<std::byte> result(source.size());
+        std::ranges::transform(source, result.begin(), [](const unsigned char value) { return std::byte(value); });
+        return result;
+    }
+
+    [[nodiscard]] std::vector<std::byte> TriangleGltfBuffer()
+    {
+        std::vector<std::byte> result;
+        for (const float value : {0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F})
+            AppendFloat(result, value);
+        for (const float value : {0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F})
+            AppendFloat(result, value);
+        for (const float value : {0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 1.0F})
+            AppendFloat(result, value);
+        AppendLittleEndian<std::uint16_t>(result, 0);
+        AppendLittleEndian<std::uint16_t>(result, 1);
+        AppendLittleEndian<std::uint16_t>(result, 2);
+        return result;
+    }
+
+    [[nodiscard]] std::string TriangleGltf(const std::string_view bufferUri, const std::string_view imageUri = {})
+    {
+        std::string result = R"({"asset":{"version":"2.0"},"buffers":[{"uri":")";
+        result += bufferUri;
+        result +=
+            R"(","byteLength":102}],"bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":36},{"buffer":0,"byteOffset":36,"byteLength":36},{"buffer":0,"byteOffset":72,"byteLength":24},{"buffer":0,"byteOffset":96,"byteLength":6}],"accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]},{"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"},{"bufferView":2,"componentType":5126,"count":3,"type":"VEC2"},{"bufferView":3,"componentType":5123,"count":3,"type":"SCALAR"}])";
+        if (!imageUri.empty())
+        {
+            result += R"(,"images":[{"uri":")";
+            result += imageUri;
+            result +=
+                R"("}],"textures":[{"source":0}],"materials":[{"name":"SidecarPaint","pbrMetallicRoughness":{"baseColorTexture":{"index":0}}}])";
+        }
+        result += R"(,"meshes":[{"primitives":[{"attributes":{"POSITION":0,"NORMAL":1,"TEXCOORD_0":2},"indices":3)";
+        if (!imageUri.empty())
+            result += R"(,"material":0)";
+        result += R"(}]}],"nodes":[{"mesh":0}],"scenes":[{"nodes":[0]}],"scene":0})";
+        return result;
+    }
+
+    void WriteImportedMaterialShader(const std::filesystem::path& sourceRoot, const Keire::AssetId shader)
+    {
+        const auto shaderRoot = sourceRoot / "Shaders";
+        std::filesystem::create_directories(shaderRoot);
+        {
+            std::ofstream manifest(shaderRoot / "DefaultUnlit.keireshader");
+            manifest << R"({"properties":[{"name":"Tint"},{"name":"MainTexture"}]})";
+        }
+        {
+            std::ofstream metadata(shaderRoot / "DefaultUnlit.keireshader.keiremeta");
+            metadata << "{\"id\":\"" << shader.ToString() << "\"}";
+        }
+    }
 } // namespace
 
 TEST_CASE("built-in shader resource counts match each stage")
@@ -766,7 +838,7 @@ TEST_CASE("Sandbox pyramid triangle winding agrees with its authored outward nor
 TEST_CASE("model importer exposes explicit animation source routing")
 {
     const auto importer = Keire::CreateMeshAssetImporter();
-    CHECK(importer.Version == 16);
+    CHECK(importer.Version == 17);
     const auto content =
         std::ranges::find(importer.ImportOptions, std::string("contentType"), &Keire::AssetImportOptionDescriptor::Key);
     REQUIRE(content != importer.ImportOptions.end());
@@ -820,6 +892,12 @@ TEST_CASE("animation source import can bake semantic pelvis translation in place
     context.RelativePath = sourcePath.filename();
     context.ImportSettings["contentType"] = std::string("animation");
     context.ImportSettings["animationMotion"] = std::string("inPlace");
+    std::size_t sidecarReads = 0;
+    context.ReadProjectFile = [&sidecarReads](const std::filesystem::path&) -> std::vector<std::byte>
+    {
+        ++sidecarReads;
+        throw std::runtime_error("Data URI import attempted a project-file read.");
+    };
     std::unordered_map<std::string, Keire::AssetId> identities;
     context.ResolveSubAssetId = [&identities](const std::string_view key)
     { return identities.try_emplace(std::string(key), Keire::AssetId::Generate()).first->second; };
@@ -834,6 +912,7 @@ TEST_CASE("animation source import can bake semantic pelvis translation in place
     REQUIRE(clip->Tracks().front().Keys.size() == 2);
     CHECK(clip->Tracks().front().Keys.front().Value.Translation ==
           clip->Tracks().front().Keys.back().Value.Translation);
+    CHECK(sidecarReads == 0);
     CHECK(std::ranges::any_of(output.Diagnostics, [](const auto& diagnostic)
                               { return diagnostic.Message.find("Baked animation") != std::string::npos; }));
 }
@@ -920,6 +999,250 @@ TEST_CASE("glTF import publishes faithful material and embedded texture subasset
     std::ranges::sort(firstIds);
     std::ranges::sort(repeatedIds);
     CHECK(firstIds == repeatedIds);
+}
+
+TEST_CASE("OBJ import resolves MTL and texture sidecars through project IO")
+{
+    TemporaryDirectory directory("ObjSidecarImportTests");
+    const auto sourceRoot = directory.Path / "Assets";
+    const auto modelPath = sourceRoot / "Models/painted.obj";
+    const auto materialPath = sourceRoot / "Models/Materials/Painted.mtl";
+    const auto texturePath = sourceRoot / "Models/Textures/albedo.png";
+    std::filesystem::create_directories(materialPath.parent_path());
+    std::filesystem::create_directories(texturePath.parent_path());
+    const auto shaderId = Keire::AssetId::Parse("02134567-89ab-4cde-8f01-23456789abcd");
+    WriteImportedMaterialShader(sourceRoot, shaderId);
+
+    const std::string obj = "mtllib Materials/Painted.mtl\n"
+                            "o PaintedTriangle\n"
+                            "v 0 0 0\n"
+                            "v 1 0 0\n"
+                            "v 0 1 0\n"
+                            "vt 0 0\n"
+                            "vt 1 0\n"
+                            "vt 0 1\n"
+                            "vn 0 0 1\n"
+                            "usemtl Painted\n"
+                            "f 1/1/1 2/2/1 3/3/1\n";
+    {
+        std::ofstream model(modelPath);
+        model << obj;
+        std::ofstream material(materialPath);
+        material << "newmtl Painted\nKd 0.2 0.4 0.6\nmap_Kd ../Textures/albedo.png\n";
+    }
+    const auto png = TestPng();
+    WriteTestBytes(texturePath, png);
+
+    Keire::AssetImportContext context;
+    context.Asset = Keire::AssetId::Parse("12345678-abcd-4abc-8abc-1234567890ab");
+    context.ProjectRoot = directory.Path;
+    context.SourceRoot = sourceRoot;
+    context.SourcePath = modelPath;
+    context.RelativePath = "Models/painted.obj";
+    std::vector<std::filesystem::path> reads;
+    context.ReadProjectFile = [&directory, &reads](const std::filesystem::path& relative)
+    {
+        reads.push_back(relative.lexically_normal());
+        return ReadTestBytes(directory.Path / relative);
+    };
+    std::unordered_map<std::string, Keire::AssetId> identities;
+    context.ResolveSubAssetId = [&identities](const std::string_view key)
+    { return identities.try_emplace(std::string(key), Keire::AssetId::Generate()).first->second; };
+
+    const auto output =
+        Keire::CreateMeshAssetImporter().ContextualImport(context, std::as_bytes(std::span(obj.data(), obj.size())));
+    const auto mesh = Keire::MeshAsset::Decode(output.Bytes);
+    const auto painted =
+        std::ranges::find(mesh->MaterialSlots(), std::string("Painted"), &Keire::MeshMaterialSlot::Name);
+    REQUIRE(painted != mesh->MaterialSlots().end());
+    REQUIRE(painted->DefaultMaterial);
+    const auto materialOutput =
+        std::ranges::find(output.SubAssets, painted->DefaultMaterial, &Keire::AssetGeneratedSubAsset::Id);
+    REQUIRE(materialOutput != output.SubAssets.end());
+    const auto material = Keire::MaterialAsset::Decode(materialOutput->Bytes);
+    REQUIRE(material->Definition().Shader == shaderId);
+    const auto texture = std::get<Keire::AssetId>(material->Definition().Properties.at("MainTexture"));
+    const auto textureOutput = std::ranges::find(output.SubAssets, texture, &Keire::AssetGeneratedSubAsset::Id);
+    REQUIRE(textureOutput != output.SubAssets.end());
+    CHECK(Keire::Texture2DAsset::Decode(textureOutput->Bytes)->Settings().ColorSpace == Keire::TextureColorSpace::Srgb);
+
+    const std::array expectedDependencies{std::filesystem::path("Assets/Models/Materials/Painted.mtl"),
+                                          std::filesystem::path("Assets/Models/Textures/albedo.png")};
+    CHECK(output.SourceDependencies.size() == expectedDependencies.size());
+    for (const auto& expected : expectedDependencies)
+    {
+        const auto dependency = std::ranges::find(output.SourceDependencies, expected.lexically_normal(),
+                                                  &Keire::AssetSourceDependency::RelativePath);
+        REQUIRE(dependency != output.SourceDependencies.end());
+        CHECK(dependency->Digest.size() == 64);
+        CHECK(std::ranges::count(reads, expected.lexically_normal()) == 1);
+    }
+    CHECK(std::ranges::none_of(output.Diagnostics, [](const Keire::AssetImportDiagnostic& diagnostic)
+                               { return diagnostic.Message.find("not resolved") != std::string::npos; }));
+}
+
+TEST_CASE("glTF import resolves external geometry and URI-encoded texture sidecars")
+{
+    TemporaryDirectory directory("GltfSidecarImportTests");
+    const auto sourceRoot = directory.Path / "Assets";
+    const auto modelPath = sourceRoot / "Models/external.gltf";
+    const auto bufferPath = sourceRoot / "Models/Geometry/triangle.bin";
+    const auto texturePath = sourceRoot / "Models/Textures/albedo color.png";
+    const auto shaderId = Keire::AssetId::Parse("13134567-89ab-4cde-8f01-23456789abcd");
+    WriteImportedMaterialShader(sourceRoot, shaderId);
+    const auto geometry = TriangleGltfBuffer();
+    const auto png = TestPng();
+    const auto gltf = TriangleGltf("Geometry/triangle.bin", "Textures/albedo%20color.png");
+    WriteTestBytes(bufferPath, geometry);
+    WriteTestBytes(texturePath, png);
+    WriteTestBytes(modelPath, std::as_bytes(std::span(gltf.data(), gltf.size())));
+
+    Keire::AssetImportContext context;
+    context.Asset = Keire::AssetId::Parse("22345678-abcd-4abc-8abc-1234567890ab");
+    context.ProjectRoot = directory.Path;
+    context.SourceRoot = sourceRoot;
+    context.SourcePath = modelPath;
+    context.RelativePath = "Models/external.gltf";
+    context.ReadProjectFile = [&directory](const std::filesystem::path& relative)
+    { return ReadTestBytes(directory.Path / relative); };
+    std::unordered_map<std::string, Keire::AssetId> identities;
+    context.ResolveSubAssetId = [&identities](const std::string_view key)
+    { return identities.try_emplace(std::string(key), Keire::AssetId::Generate()).first->second; };
+
+    const auto output =
+        Keire::CreateMeshAssetImporter().ContextualImport(context, std::as_bytes(std::span(gltf.data(), gltf.size())));
+    const auto mesh = Keire::MeshAsset::Decode(output.Bytes);
+    CHECK(mesh->Vertices().size() == 3);
+    CHECK(mesh->Indices().size() == 3);
+    const auto painted =
+        std::ranges::find(mesh->MaterialSlots(), std::string("SidecarPaint"), &Keire::MeshMaterialSlot::Name);
+    REQUIRE(painted != mesh->MaterialSlots().end());
+    REQUIRE(painted->DefaultMaterial);
+    const auto materialOutput =
+        std::ranges::find(output.SubAssets, painted->DefaultMaterial, &Keire::AssetGeneratedSubAsset::Id);
+    REQUIRE(materialOutput != output.SubAssets.end());
+    const auto material = Keire::MaterialAsset::Decode(materialOutput->Bytes);
+    const auto texture = std::get<Keire::AssetId>(material->Definition().Properties.at("MainTexture"));
+    CHECK(std::ranges::any_of(
+        output.SubAssets, [texture](const Keire::AssetGeneratedSubAsset& subAsset)
+        { return subAsset.Id == texture && subAsset.Type == Keire::Texture2DAsset::StaticType(); }));
+
+    const std::array expectedDependencies{std::filesystem::path("Assets/Models/Geometry/triangle.bin"),
+                                          std::filesystem::path("Assets/Models/Textures/albedo color.png")};
+    for (const auto& expected : expectedDependencies)
+    {
+        const auto dependency = std::ranges::find(output.SourceDependencies, expected.lexically_normal(),
+                                                  &Keire::AssetSourceDependency::RelativePath);
+        REQUIRE(dependency != output.SourceDependencies.end());
+        CHECK(dependency->Digest.size() == 64);
+    }
+}
+
+TEST_CASE("model sidecar IO rejects a late external OBJ texture escape")
+{
+    TemporaryDirectory directory("ObjTextureEscapeTests");
+    const auto sourceRoot = directory.Path / "Assets";
+    const auto modelPath = sourceRoot / "Models/painted.obj";
+    const auto materialPath = sourceRoot / "Models/Materials/Painted.mtl";
+    std::filesystem::create_directories(materialPath.parent_path());
+    const auto shaderId = Keire::AssetId::Parse("23134567-89ab-4cde-8f01-23456789abcd");
+    WriteImportedMaterialShader(sourceRoot, shaderId);
+    {
+        std::ofstream material(materialPath);
+        material << "newmtl Painted\nKd 0.2 0.4 0.6\nmap_Kd ../../../outside.png\n";
+    }
+    const std::string obj = "mtllib Materials/Painted.mtl\n"
+                            "o PaintedTriangle\n"
+                            "v 0 0 0\n"
+                            "v 1 0 0\n"
+                            "v 0 1 0\n"
+                            "vt 0 0\n"
+                            "vt 1 0\n"
+                            "vt 0 1\n"
+                            "vn 0 0 1\n"
+                            "usemtl Painted\n"
+                            "f 1/1/1 2/2/1 3/3/1\n";
+
+    Keire::AssetImportContext context;
+    context.Asset = Keire::AssetId::Parse("32345678-abcd-4abc-8abc-1234567890ab");
+    context.ProjectRoot = directory.Path;
+    context.SourceRoot = sourceRoot;
+    context.SourcePath = modelPath;
+    context.RelativePath = "Models/painted.obj";
+    std::vector<std::filesystem::path> reads;
+    context.ReadProjectFile = [&directory, &reads](const std::filesystem::path& relative)
+    {
+        reads.push_back(relative.lexically_normal());
+        return ReadTestBytes(directory.Path / relative);
+    };
+    std::unordered_map<std::string, Keire::AssetId> identities;
+    context.ResolveSubAssetId = [&identities](const std::string_view key)
+    { return identities.try_emplace(std::string(key), Keire::AssetId::Generate()).first->second; };
+
+    CHECK_THROWS_WITH_AS((void)Keire::CreateMeshAssetImporter().ContextualImport(
+                             context, std::as_bytes(std::span(obj.data(), obj.size()))),
+                         doctest::Contains("escapes the project source root"), std::invalid_argument);
+    CHECK(std::ranges::count(reads, std::filesystem::path("Assets/Models/Materials/Painted.mtl")) == 1);
+    CHECK(std::ranges::none_of(reads, [](const std::filesystem::path& path)
+                               { return path.generic_string().find("outside.png") != std::string::npos; }));
+}
+
+TEST_CASE("model sidecar IO rejects escapes and bounds failures without direct filesystem access")
+{
+    TemporaryDirectory directory("ModelSidecarSafetyTests");
+    const auto sourceRoot = directory.Path / "Assets";
+    std::filesystem::create_directories(sourceRoot / "Models");
+    const auto importer = Keire::CreateMeshAssetImporter();
+    const auto geometry = TriangleGltfBuffer();
+
+    Keire::AssetImportContext context;
+    context.ProjectRoot = directory.Path;
+    context.SourceRoot = sourceRoot;
+    context.SourcePath = sourceRoot / "Models/model.gltf";
+    context.RelativePath = "Models/model.gltf";
+
+    SUBCASE("source-root escape")
+    {
+        const auto gltf = TriangleGltf("../../outside.bin");
+        std::vector<std::filesystem::path> reads;
+        context.ReadProjectFile = [&reads](const std::filesystem::path& relative)
+        {
+            reads.push_back(relative.lexically_normal());
+            return std::vector<std::byte>{};
+        };
+        CHECK_THROWS_WITH_AS(
+            (void)importer.ContextualImport(context, std::as_bytes(std::span(gltf.data(), gltf.size()))),
+            doctest::Contains("escapes the project source root"), std::invalid_argument);
+        CHECK(reads.empty());
+    }
+
+    SUBCASE("per-file byte limit")
+    {
+        const auto gltf = TriangleGltf("Geometry/triangle.bin");
+        context.MaximumDependencyBytes = geometry.size() - 1U;
+        std::vector<std::filesystem::path> reads;
+        context.ReadProjectFile = [&geometry, &reads](const std::filesystem::path& relative)
+        {
+            reads.push_back(relative.lexically_normal());
+            return geometry;
+        };
+        CHECK_THROWS_WITH_AS(
+            (void)importer.ContextualImport(context, std::as_bytes(std::span(gltf.data(), gltf.size()))),
+            doctest::Contains("per-file byte limit"), std::invalid_argument);
+        CHECK(!reads.empty());
+        for (const auto& read : reads)
+            CHECK(std::ranges::count(reads, read) == 1);
+    }
+
+    SUBCASE("required sidecar read failure")
+    {
+        const auto gltf = TriangleGltf("Geometry/missing.bin");
+        context.ReadProjectFile = [](const std::filesystem::path&) -> std::vector<std::byte>
+        { throw std::runtime_error("fixture sidecar is missing"); };
+        CHECK_THROWS_WITH_AS(
+            (void)importer.ContextualImport(context, std::as_bytes(std::span(gltf.data(), gltf.size()))),
+            doctest::Contains("fixture sidecar is missing"), std::invalid_argument);
+    }
 }
 
 TEST_CASE("model import can retain material slots without publishing source materials")

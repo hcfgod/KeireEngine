@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <ranges>
@@ -56,6 +57,11 @@ namespace Keire
             for (const auto& value : values)
                 if (!seen.emplace(key(value)).second)
                     throw std::invalid_argument("Duplicate " + std::string(category) + " registration.");
+        }
+
+        [[nodiscard]] std::string ModuleReplaySerializerId(const std::string_view moduleId)
+        {
+            return "module." + std::string(moduleId);
         }
     } // namespace
 
@@ -154,9 +160,11 @@ namespace Keire
         std::vector<AssetImporterRegistration> Importers;
         std::vector<AssetDecoderRegistration> Decoders;
         std::vector<ReplaySerializerRegistration> ReplaySerializers;
+        std::vector<std::string> ReplaySerializerOwners;
         std::vector<DiagnosticDefinition> Diagnostics;
         std::vector<ProjectUpgradeStep> ProjectUpgrades;
         std::vector<ModuleMemoryDomainRegistration> MemoryDomains;
+        std::string CurrentModule;
         bool Open = true;
     };
 
@@ -193,6 +201,7 @@ namespace Keire
         if (!m_Impl->Open)
             throw std::logic_error("Module registration is frozen.");
         m_Impl->ReplaySerializers.push_back(std::move(registration));
+        m_Impl->ReplaySerializerOwners.push_back(m_Impl->CurrentModule);
     }
 
     void ModuleRegistrationContext::RegisterDiagnostic(DiagnosticDefinition definition)
@@ -274,11 +283,16 @@ namespace Keire
             }
 
             auto context = ModuleRegistrationContext(std::make_unique<ModuleRegistrationContext::Impl>());
-            for (const auto& module : OrderedModules)
-                module->Register(context);
+            for (std::size_t index = 0; index < OrderedModules.size(); ++index)
+            {
+                context.m_Impl->CurrentModule = OrderedDescriptors[index].Id;
+                OrderedModules[index]->Register(context);
+            }
+            context.m_Impl->CurrentModule.clear();
             context.m_Impl->Open = false;
             Registrations = std::move(context.m_Impl);
             ValidateRegistrations();
+            CompleteReplayRegistrations();
         }
 
         void ValidateRegistrations() const
@@ -295,6 +309,59 @@ namespace Keire
             RequireUnique(
                 Registrations->ProjectUpgrades, [](const auto& value) { return value.Id; }, "project upgrade");
             RequireUnique(Registrations->MemoryDomains, [](const auto& value) { return value.Name; }, "memory domain");
+        }
+
+        void CompleteReplayRegistrations()
+        {
+            for (const auto& descriptor : OrderedDescriptors)
+            {
+                if (!descriptor.SimulationAffecting)
+                {
+                    if (descriptor.ReplayState != ModuleReplayState::Unspecified)
+                        throw std::invalid_argument("Non-simulation source module " + descriptor.Id +
+                                                    " must not declare replay state.");
+                    continue;
+                }
+                if (descriptor.ReplayState == ModuleReplayState::Unspecified)
+                    throw std::invalid_argument("Simulation-affecting source module " + descriptor.Id +
+                                                " must declare whether its replay state is stateless or stateful.");
+
+                const auto serializerId = ModuleReplaySerializerId(descriptor.Id);
+                const auto serializer = std::ranges::find(Registrations->ReplaySerializers, serializerId,
+                                                          &ReplaySerializerRegistration::Id);
+                const auto serializerIndex =
+                    static_cast<std::size_t>(std::distance(Registrations->ReplaySerializers.begin(), serializer));
+                if (descriptor.ReplayState == ModuleReplayState::Stateless)
+                {
+                    if (serializer != Registrations->ReplaySerializers.end())
+                        throw std::invalid_argument("Stateless source module " + descriptor.Id +
+                                                    " must not register a state serializer.");
+                    Registrations->ReplaySerializers.push_back(
+                        {.Id = serializerId,
+                         .Version = 1,
+                         .Deterministic = descriptor.DeterministicReplay,
+                         .Capture = [] { return std::vector<std::byte>{}; },
+                         .Restore =
+                             [](const std::span<const std::byte> state)
+                         {
+                             if (!state.empty())
+                                 throw std::runtime_error("Stateless source module replay marker is invalid.");
+                         }});
+                    Registrations->ReplaySerializerOwners.push_back(descriptor.Id);
+                    continue;
+                }
+
+                if (serializer == Registrations->ReplaySerializers.end())
+                    throw std::invalid_argument("Stateful source module " + descriptor.Id +
+                                                " must register replay serializer " + serializerId + '.');
+                if (Registrations->ReplaySerializerOwners.at(serializerIndex) != descriptor.Id)
+                    throw std::invalid_argument("Stateful source module " + descriptor.Id +
+                                                " must register its own replay serializer " + serializerId + '.');
+                if (!serializer->Capture || !serializer->Restore || serializer->Version == 0 ||
+                    serializer->Deterministic != descriptor.DeterministicReplay)
+                    throw std::invalid_argument("Stateful source module " + descriptor.Id +
+                                                " has an invalid or inconsistent replay serializer.");
+            }
         }
 
         std::vector<ModuleDescriptor> OrderedDescriptors;

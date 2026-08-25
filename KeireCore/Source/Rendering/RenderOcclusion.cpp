@@ -165,6 +165,7 @@ namespace Keire::RenderBackend
             surface.GpuOcclusionAutomaticCooldownFrames = 0;
             surface.GpuOcclusionValidationCooldown = false;
             surface.GpuOcclusionValidationFallbackEventPending = false;
+            Policy::ResetAllocationRetry(surface.GpuOcclusionAllocationRetry);
             return prepared;
         }
         if (surface.GpuOcclusionValidationCooldown && surface.GpuOcclusionAutomaticCooldownFrames > 0U)
@@ -185,8 +186,47 @@ namespace Keire::RenderBackend
             Statistics.GpuOcclusionFallbacks +=
                 PublishFallback(surface, requested, GpuOcclusionFallbackReason::ResourceAllocationFailed) ? 1U : 0U;
             Statistics.GpuOcclusionFallbackActive = true;
+            surface.GpuOcclusionAutomaticActive = false;
+            surface.GpuOcclusionAutomaticQualifyingFrames = 0U;
+            surface.GpuOcclusionAutomaticMinimumFrames = 0U;
+            Policy::ResetAllocationRetry(surface.GpuOcclusionAllocationRetry);
             return prepared;
         }
+        const auto resourceExtent = Policy::ResolveConservativeResourceExtent(surface.Width, surface.Height);
+        const auto frameSlotCount = static_cast<std::size_t>(Specification.MaximumFramesInFlight);
+        const auto frameIndex = SkinningOutputSlot(ActiveGpuSubmissionSerial, frameSlotCount);
+        const auto textureBytes = Policy::EstimateTextureMemoryBytes(resourceExtent, MaximumGpuOcclusionPyramidLevels,
+                                                                     Specification.MaximumFramesInFlight);
+        if (!textureBytes || !Policy::TextureMemoryWithinBudget(*textureBytes))
+        {
+            const bool transitioned =
+                PublishFallback(surface, requested, GpuOcclusionFallbackReason::ResourceAllocationFailed);
+            Statistics.GpuOcclusionFallbacks += transitioned ? 1U : 0U;
+            Statistics.GpuOcclusionFallbackActive = true;
+            surface.GpuOcclusionAutomaticActive = false;
+            surface.GpuOcclusionAutomaticQualifyingFrames = 0U;
+            surface.GpuOcclusionAutomaticMinimumFrames = 0U;
+            Policy::ResetAllocationRetry(surface.GpuOcclusionAllocationRetry);
+            if (transitioned)
+            {
+                if (textureBytes)
+                {
+                    KEIRE_CORE_WARN(
+                        "GPU occlusion textures for surface '{}' require {} bytes across {} frame slots, exceeding "
+                        "the per-surface budget of {} bytes; retaining direct draws.",
+                        surface.Specification.Name, *textureBytes, Specification.MaximumFramesInFlight,
+                        Policy::MaximumTextureBytesPerSurface);
+                }
+                else
+                {
+                    KEIRE_CORE_WARN(
+                        "GPU occlusion texture accounting overflowed for surface '{}'; retaining direct draws.",
+                        surface.Specification.Name);
+                }
+            }
+            return prepared;
+        }
+        Policy::PrepareAllocationRetryExtent(surface.GpuOcclusionAllocationRetry, resourceExtent);
         if (GpuOcclusionPipelinesAttempted && !GpuOcclusionPipelineFailure.empty())
         {
             Statistics.GpuOcclusionFallbacks +=
@@ -208,7 +248,6 @@ namespace Keire::RenderBackend
             Statistics.GpuOcclusionFallbackActive = true;
             return prepared;
         }
-
         const auto samples = ToSdlSampleCount(surface.ActualSamples);
         std::vector<GpuOcclusionCandidate> candidates;
         std::vector<GpuInstanceUniform> inputInstances;
@@ -304,8 +343,8 @@ namespace Keire::RenderBackend
                 const auto& instanceDraw = draws.Opaque.Draws[drawIndex + instance];
                 const auto clipFromLocal = Math::Multiply(packet.Camera.Projection,
                                                           Math::Multiply(packet.Camera.View, instanceDraw.Item->World));
-                const auto rectangle =
-                    ProjectedBoundsPixels(clipFromLocal, instanceDraw.Submesh.Bounds, surface.Width, surface.Height);
+                const auto rectangle = ProjectedBoundsPixels(clipFromLocal, instanceDraw.Submesh.Bounds,
+                                                             resourceExtent.Width, resourceExtent.Height);
                 const float area = rectangle.Area();
                 const float minimumOccluderPixels = requested == GpuOcclusionMode::Automatic
                                                         ? Policy::AutomaticMinimumOccluderPixels
@@ -323,15 +362,18 @@ namespace Keire::RenderBackend
                 depthTriangles += triangleCount;
                 for (std::uint32_t row = 0; row < Policy::AutomaticCoverageRows; ++row)
                 {
-                    const float cellMinimumY = static_cast<float>(row) * static_cast<float>(surface.Height) /
+                    const float cellMinimumY = static_cast<float>(row) * static_cast<float>(resourceExtent.Height) /
                                                static_cast<float>(Policy::AutomaticCoverageRows);
-                    const float cellMaximumY = static_cast<float>(row + 1U) * static_cast<float>(surface.Height) /
+                    const float cellMaximumY = static_cast<float>(row + 1U) *
+                                               static_cast<float>(resourceExtent.Height) /
                                                static_cast<float>(Policy::AutomaticCoverageRows);
                     for (std::uint32_t column = 0; column < Policy::AutomaticCoverageColumns; ++column)
                     {
-                        const float cellMinimumX = static_cast<float>(column) * static_cast<float>(surface.Width) /
+                        const float cellMinimumX = static_cast<float>(column) *
+                                                   static_cast<float>(resourceExtent.Width) /
                                                    static_cast<float>(Policy::AutomaticCoverageColumns);
-                        const float cellMaximumX = static_cast<float>(column + 1U) * static_cast<float>(surface.Width) /
+                        const float cellMaximumX = static_cast<float>(column + 1U) *
+                                                   static_cast<float>(resourceExtent.Width) /
                                                    static_cast<float>(Policy::AutomaticCoverageColumns);
                         if (rectangle.MinimumX <= cellMinimumX && rectangle.MaximumX >= cellMaximumX &&
                             rectangle.MinimumY <= cellMinimumY && rectangle.MaximumY >= cellMaximumY)
@@ -441,6 +483,20 @@ namespace Keire::RenderBackend
                 occluderCoverageRatio >= Policy::AutomaticMinimumOccluderCoverage &&
                 static_cast<double>(depthTriangles) <=
                     static_cast<double>(prepared.CandidateTriangles) * Policy::AutomaticMaximumDepthCostRatio;
+            if (Policy::AnyAllocationRetryPending(surface.GpuOcclusionAllocationRetry))
+            {
+                if (qualifies && Policy::AllocationRetryPending(surface.GpuOcclusionAllocationRetry, frameIndex))
+                {
+                    (void)Policy::BeginAllocationAttempt(surface.GpuOcclusionAllocationRetry, frameIndex);
+                }
+                surface.GpuOcclusionAutomaticActive = false;
+                surface.GpuOcclusionAutomaticQualifyingFrames = 0U;
+                surface.GpuOcclusionAutomaticMinimumFrames = 0U;
+                Statistics.GpuOcclusionFallbacks +=
+                    PublishFallback(surface, requested, GpuOcclusionFallbackReason::ResourceAllocationFailed) ? 1U : 0U;
+                Statistics.GpuOcclusionFallbackActive = true;
+                return prepared;
+            }
             if (surface.GpuOcclusionAutomaticActive)
             {
                 if (surface.GpuOcclusionAutomaticMinimumFrames > 0)
@@ -474,17 +530,24 @@ namespace Keire::RenderBackend
             }
         }
 
+        if (!Policy::BeginAllocationAttempt(surface.GpuOcclusionAllocationRetry, frameIndex))
+        {
+            Statistics.GpuOcclusionFallbacks +=
+                PublishFallback(surface, requested, GpuOcclusionFallbackReason::ResourceAllocationFailed) ? 1U : 0U;
+            Statistics.GpuOcclusionFallbackActive = true;
+            return prepared;
+        }
+
         try
         {
             if (!commands || Specification.MaximumFramesInFlight == 0)
                 throw std::logic_error("GPU occlusion preparation requires an active rendered frame.");
             auto& frames = surface.Resources.GpuOcclusionFrames;
             frames.resize(Specification.MaximumFramesInFlight);
-            const auto frameIndex = SkinningOutputSlot(ActiveGpuSubmissionSerial, frames.size());
             auto& resources = frames[frameIndex];
 
-            if (!resources.Depth || resources.Pyramid.empty() || resources.Width != surface.Width ||
-                resources.Height != surface.Height)
+            if (!resources.Depth || resources.Pyramid.empty() || resources.Width != resourceExtent.Width ||
+                resources.Height != resourceExtent.Height)
             {
                 GpuOcclusionFrameResources replacement;
                 try
@@ -493,8 +556,8 @@ namespace Keire::RenderBackend
                     depth.type = SDL_GPU_TEXTURETYPE_2D;
                     depth.format = ShadowDepthFormat;
                     depth.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
-                    depth.width = surface.Width;
-                    depth.height = surface.Height;
+                    depth.width = resourceExtent.Width;
+                    depth.height = resourceExtent.Height;
                     depth.layer_count_or_depth = 1;
                     depth.num_levels = 1;
                     depth.sample_count = SDL_GPU_SAMPLECOUNT_1;
@@ -504,10 +567,10 @@ namespace Keire::RenderBackend
                     const auto depthName = "Occlusion depth - " + surface.Specification.Name + " - frame slot " +
                                            std::to_string(frameIndex);
                     SDL_SetGPUTextureName(Device, replacement.Depth, depthName.c_str());
-                    replacement.Width = surface.Width;
-                    replacement.Height = surface.Height;
-                    std::uint32_t levelWidth = (surface.Width + 1U) / 2U;
-                    std::uint32_t levelHeight = (surface.Height + 1U) / 2U;
+                    replacement.Width = resourceExtent.Width;
+                    replacement.Height = resourceExtent.Height;
+                    std::uint32_t levelWidth = (resourceExtent.Width + 1U) / 2U;
+                    std::uint32_t levelHeight = (resourceExtent.Height + 1U) / 2U;
                     while (replacement.Pyramid.size() < MaximumGpuOcclusionPyramidLevels)
                     {
                         SDL_GPUTextureCreateInfo level{};
@@ -697,6 +760,7 @@ namespace Keire::RenderBackend
                 Statistics.GpuOcclusionFallbackActive = true;
                 Statistics.GpuOcclusionFallbacks += partialFallbackTransition ? 1U : 0U;
             }
+            Policy::RegisterAllocationSuccess(surface.GpuOcclusionAllocationRetry, frameIndex);
             return prepared;
         }
         catch (const std::exception& error)
@@ -714,8 +778,17 @@ namespace Keire::RenderBackend
             Statistics.GpuOcclusionFallbacks +=
                 PublishFallback(surface, requested, GpuOcclusionFallbackReason::ResourceAllocationFailed) ? 1U : 0U;
             Statistics.GpuOcclusionFallbackActive = true;
-            KEIRE_CORE_WARN("GPU occlusion resources failed for surface '{}'; retaining direct draws: {}",
-                            surface.Specification.Name, error.what());
+            surface.GpuOcclusionAutomaticActive = false;
+            surface.GpuOcclusionAutomaticQualifyingFrames = 0U;
+            surface.GpuOcclusionAutomaticMinimumFrames = 0U;
+            if (Policy::RegisterAllocationFailure(surface.GpuOcclusionAllocationRetry, frameIndex))
+            {
+                const auto retryFrames = surface.GpuOcclusionAllocationRetry.Slots[frameIndex].FramesRemaining;
+                KEIRE_CORE_WARN(
+                    "GPU occlusion resources failed for surface '{}'; retaining direct draws and retrying after {} "
+                    "qualifying frames: {}",
+                    surface.Specification.Name, retryFrames, error.what());
+            }
             return {};
         }
     }
@@ -854,12 +927,12 @@ namespace Keire::RenderBackend
             SDL_BindGPUComputeStorageBuffers(pass, 0, read.data(), static_cast<std::uint32_t>(read.size()));
             GpuOcclusionClassifyUniforms uniforms{};
             uniforms.ViewProjection = Math::Multiply(packet.Camera.Projection, packet.Camera.View);
-            uniforms.ViewportBiasLevels = {static_cast<float>(surface.Width), static_cast<float>(surface.Height),
+            uniforms.ViewportBiasLevels = {static_cast<float>(resources.Width), static_cast<float>(resources.Height),
                                            OcclusionDepthBias, static_cast<float>(resources.Pyramid.size())};
             uniforms.DispatchCounts = {occlusion.CandidateCount, static_cast<std::uint32_t>(resources.Pyramid.size()),
                                        0U, 0U};
-            std::uint32_t width = (surface.Width + 1U) / 2U;
-            std::uint32_t height = (surface.Height + 1U) / 2U;
+            std::uint32_t width = (resources.Width + 1U) / 2U;
+            std::uint32_t height = (resources.Height + 1U) / 2U;
             for (std::size_t level = 0; level < resources.Pyramid.size(); ++level)
             {
                 uniforms.HierarchySizes[level] = {width, height, 0U, 0U};

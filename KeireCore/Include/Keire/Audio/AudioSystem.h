@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <optional>
 #include <span>
@@ -159,6 +160,8 @@ namespace Keire
         bool Streaming = false;
     };
 
+    using AudioMixerImpulseResponses = std::map<AssetId, std::shared_ptr<const AudioClipData>>;
+
     [[nodiscard]] KEIRE_API std::shared_ptr<const AudioClipData> LoadAudioClipData(const std::filesystem::path& path);
 
     struct AudioVoiceSpecification
@@ -271,9 +274,15 @@ namespace Keire
         [[nodiscard]] bool Seek(AudioVoiceId voice, std::uint64_t frame);
         [[nodiscard]] bool SetVoice(AudioVoiceId voice, AudioPlaybackRequest request);
         void SubmitMixer(AssetId mixer, const AudioMixerDefinition& definition);
+        void SubmitMixer(AssetId mixer, const AudioMixerDefinition& definition,
+                         const AudioMixerImpulseResponses& impulseResponses);
         [[nodiscard]] bool RemoveMixer(AssetId mixer);
         [[nodiscard]] AudioMixerRoutingId RegisterMixer(AssetId mixer, const AudioMixerDefinition& definition);
+        [[nodiscard]] AudioMixerRoutingId RegisterMixer(AssetId mixer, const AudioMixerDefinition& definition,
+                                                        const AudioMixerImpulseResponses& impulseResponses);
         [[nodiscard]] bool UpdateMixer(AudioMixerRoutingId routing, const AudioMixerDefinition& definition);
+        [[nodiscard]] bool UpdateMixer(AudioMixerRoutingId routing, const AudioMixerDefinition& definition,
+                                       const AudioMixerImpulseResponses& impulseResponses);
         [[nodiscard]] bool UnregisterMixer(AudioMixerRoutingId routing);
         [[nodiscard]] std::size_t StopAll(std::string_view bus = {});
         void SetBusGain(std::string bus, float gain);

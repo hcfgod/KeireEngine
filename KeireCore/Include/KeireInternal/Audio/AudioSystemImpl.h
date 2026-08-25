@@ -116,9 +116,27 @@ namespace Keire
         {
             AssetId MasterBus;
             AudioMixerDefinition Definition;
+            AudioMixerImpulseResponses ImpulseResponseAssets;
+            std::map<AssetId, Detail::PreparedAudioImpulseResponse> ImpulseResponses;
+            mutable std::map<AssetId, Detail::AudioEffectProcessor> OfflineEffects;
+            std::size_t ConvolutionChannelFrames = 0;
             std::map<AssetId, float> BusGains;
             std::map<AssetId, std::string> BusNamesById;
             std::map<std::string, AssetId, std::less<>> BusIdsByName;
+
+            void Swap(MixerRoutingSnapshot& other) noexcept
+            {
+                using std::swap;
+                swap(MasterBus, other.MasterBus);
+                swap(Definition, other.Definition);
+                swap(ImpulseResponseAssets, other.ImpulseResponseAssets);
+                swap(ImpulseResponses, other.ImpulseResponses);
+                swap(OfflineEffects, other.OfflineEffects);
+                swap(ConvolutionChannelFrames, other.ConvolutionChannelFrames);
+                swap(BusGains, other.BusGains);
+                swap(BusNamesById, other.BusNamesById);
+                swap(BusIdsByName, other.BusIdsByName);
+            }
         };
 
         struct RegisteredMixer final
@@ -131,14 +149,8 @@ namespace Keire
         {
             ma_node_base Base{};
             AudioGraphNodeType Type = AudioGraphNodeType::Gain;
-            std::uint32_t SampleRate = 48000;
             std::uint32_t Channels = 2;
-            std::array<float, 64> Parameters{};
-            std::size_t ParameterCount = 0;
-            std::array<float, 16> FilterState{};
-            std::vector<float> Delay;
-            std::size_t DelayCursor = 0;
-            double Phase = 0.0;
+            std::unique_ptr<Detail::AudioEffectProcessor> Processor;
             AssetId MeterBus;
             std::atomic<float> MeterPeak{0.0F};
             std::atomic<float> MeterRms{0.0F};
@@ -167,6 +179,9 @@ namespace Keire
             std::vector<std::unique_ptr<NativeEffectNode>> Effects;
             std::vector<std::unique_ptr<NativeDuckingNode>> Ducking;
             std::vector<std::unique_ptr<ma_splitter_node>> Splitters;
+            std::map<AssetId, NativeEffectNode*> EffectControls;
+            std::map<AssetId, NativeEffectNode*> BusFaders;
+            std::map<AssetId, ma_splitter_node*> SendControls;
 
             ~NativeMixerGraph()
             {
@@ -213,6 +228,12 @@ namespace Keire
             bool Paused = false;
             bool Virtualized = false;
             std::unique_ptr<Native> Device;
+        };
+
+        struct PreparedNativeVoiceAttachment final
+        {
+            ma_node* Source = nullptr;
+            ma_node* Destination = nullptr;
         };
 
         explicit Impl(const AudioSystemSpecification specification)
@@ -308,13 +329,13 @@ namespace Keire
                 throw std::logic_error("AudioSystem is closed.");
         }
 
-        [[nodiscard]] static MixerRoutingSnapshot CompileMixer(const AudioMixerDefinition& definition)
+        static void PopulateMixerValues(MixerRoutingSnapshot& result, const AudioMixerDefinition& definition)
         {
-            ValidateAudioMixer(definition);
-
-            MixerRoutingSnapshot result;
             result.MasterBus = definition.MasterBus;
             result.Definition = definition;
+            result.BusGains.clear();
+            result.BusNamesById.clear();
+            result.BusIdsByName.clear();
             std::map<AssetId, const AudioMixerBusDefinition*> buses;
             std::set<AssetId> soloed;
             for (const auto& bus : definition.Buses)
@@ -372,7 +393,290 @@ namespace Keire
                     gain = 0.0;
                 result.BusGains.emplace(id, static_cast<float>(gain));
             }
+        }
+
+        [[nodiscard]] static std::map<AssetId, float> NativeMixerBusFaders(const AudioMixerDefinition& definition)
+        {
+            std::map<AssetId, const AudioMixerBusDefinition*> buses;
+            std::set<AssetId> soloed;
+            for (const auto& bus : definition.Buses)
+            {
+                buses.emplace(bus.Id, &bus);
+                if (bus.Solo)
+                    soloed.insert(bus.Id);
+            }
+            std::set<AssetId> audibleWhenSoloed;
+            for (const auto solo : soloed)
+            {
+                auto current = solo;
+                while (current)
+                {
+                    audibleWhenSoloed.insert(current);
+                    current = buses.at(current)->Parent;
+                }
+            }
+            for (const auto& [id, bus] : buses)
+            {
+                (void)bus;
+                auto current = id;
+                while (current)
+                {
+                    if (soloed.contains(current))
+                    {
+                        audibleWhenSoloed.insert(id);
+                        break;
+                    }
+                    current = buses.at(current)->Parent;
+                }
+            }
+            std::map<AssetId, float> result;
+            for (const auto& bus : definition.Buses)
+                result.emplace(bus.Id,
+                               bus.Mute || (!soloed.empty() && !audibleWhenSoloed.contains(bus.Id)) ? 0.0F : bus.Gain);
             return result;
+        }
+
+        [[nodiscard]] MixerRoutingSnapshot CompileMixer(const AudioMixerDefinition& definition,
+                                                        const AudioMixerImpulseResponses& impulseResponses) const
+        {
+            ValidateAudioMixer(definition);
+
+            MixerRoutingSnapshot result;
+            PopulateMixerValues(result, definition);
+            result.ImpulseResponseAssets = impulseResponses;
+            std::size_t preparedConvolutionChannelFrames = 0;
+            for (const auto& bus : definition.Buses)
+                for (const auto& effect : bus.Effects)
+                {
+                    if (effect.Type != AudioGraphNodeType::ConvolutionReverb ||
+                        result.ImpulseResponses.contains(effect.ImpulseResponse))
+                        continue;
+                    const auto found = impulseResponses.find(effect.ImpulseResponse);
+                    if (found == impulseResponses.end() || !found->second)
+                        throw std::invalid_argument("Audio mixer convolution reverb impulse response is unresolved.");
+                    auto prepared = Detail::PrepareAudioImpulseResponse(*found->second, SampleRate, Channels);
+                    if (prepared.Samples.size() >
+                        Detail::MaximumAudioConvolutionChannelFrames - preparedConvolutionChannelFrames)
+                    {
+                        throw std::invalid_argument(
+                            "Audio mixer impulse responses exceed the aggregate convolution channel-work limit.");
+                    }
+                    preparedConvolutionChannelFrames += prepared.Samples.size();
+                    result.ImpulseResponses.emplace(effect.ImpulseResponse, std::move(prepared));
+                }
+            std::size_t activeConvolutionChannelFrames = 0;
+            for (const auto& bus : definition.Buses)
+                for (const auto& effect : bus.Effects)
+                {
+                    if (effect.Bypassed || effect.Type != AudioGraphNodeType::ConvolutionReverb)
+                        continue;
+                    const auto impulse = result.ImpulseResponses.find(effect.ImpulseResponse);
+                    if (impulse->second.Samples.size() >
+                        Detail::MaximumAudioConvolutionChannelFrames - activeConvolutionChannelFrames)
+                    {
+                        throw std::invalid_argument(
+                            "Audio mixer active convolution effects exceed the aggregate channel-work limit.");
+                    }
+                    activeConvolutionChannelFrames += impulse->second.Samples.size();
+                }
+            result.ConvolutionChannelFrames = activeConvolutionChannelFrames;
+            for (const auto& bus : definition.Buses)
+                for (const auto& effect : bus.Effects)
+                {
+                    if (effect.Bypassed)
+                        continue;
+                    const auto impulse = result.ImpulseResponses.find(effect.ImpulseResponse);
+                    const auto* impulseResponse = impulse == result.ImpulseResponses.end() ? nullptr : &impulse->second;
+                    result.OfflineEffects.emplace(effect.Id,
+                                                  Detail::AudioEffectProcessor(effect.Type, SampleRate, Channels,
+                                                                               effect.Parameters, impulseResponse));
+                }
+            return result;
+        }
+
+        [[nodiscard]] static bool AddConvolutionChannelFrames(std::size_t& total, const std::size_t additional) noexcept
+        {
+            if (total > Detail::MaximumAudioSystemConvolutionChannelFrames ||
+                additional > Detail::MaximumAudioSystemConvolutionChannelFrames - total)
+                return false;
+            total += additional;
+            return true;
+        }
+
+        [[nodiscard]] bool NativeMixerWillExist() const noexcept { return EngineOpen && Mode != AudioMode::Headless; }
+
+        [[nodiscard]] bool MixerSubmissionFitsConvolutionBudget(const AssetId mixer,
+                                                                const std::size_t replacementFrames) const noexcept
+        {
+            std::size_t total = 0;
+            bool replacesStoredMixer = false;
+            for (const auto& [id, stored] : Mixers)
+            {
+                const auto frames = id == mixer ? replacementFrames : stored.ConvolutionChannelFrames;
+                replacesStoredMixer = replacesStoredMixer || id == mixer;
+                if (!AddConvolutionChannelFrames(total, frames))
+                    return false;
+            }
+            if (!replacesStoredMixer && !AddConvolutionChannelFrames(total, replacementFrames))
+                return false;
+            for (const auto& [id, registered] : MixerRoutings)
+            {
+                const bool replaced = registered.Mixer == mixer;
+                const auto frames = replaced ? replacementFrames : registered.Routing.ConvolutionChannelFrames;
+                if (!AddConvolutionChannelFrames(total, frames))
+                    return false;
+                const bool hasNative = replaced ? NativeMixerWillExist() : NativeMixerRoutings.contains(id);
+                if (hasNative && !AddConvolutionChannelFrames(total, frames))
+                    return false;
+            }
+            return true;
+        }
+
+        [[nodiscard]] bool MixerRegistrationFitsConvolutionBudget(const std::size_t additionalFrames) const noexcept
+        {
+            std::size_t total = 0;
+            for (const auto& [id, stored] : Mixers)
+            {
+                (void)id;
+                if (!AddConvolutionChannelFrames(total, stored.ConvolutionChannelFrames))
+                    return false;
+            }
+            for (const auto& [id, registered] : MixerRoutings)
+            {
+                if (!AddConvolutionChannelFrames(total, registered.Routing.ConvolutionChannelFrames))
+                    return false;
+                if (NativeMixerRoutings.contains(id) &&
+                    !AddConvolutionChannelFrames(total, registered.Routing.ConvolutionChannelFrames))
+                    return false;
+            }
+            if (!AddConvolutionChannelFrames(total, additionalFrames))
+                return false;
+            return !NativeMixerWillExist() || AddConvolutionChannelFrames(total, additionalFrames);
+        }
+
+        [[nodiscard]] bool MixerUpdateFitsConvolutionBudget(const AudioMixerRoutingId routing,
+                                                            const std::size_t replacementFrames) const noexcept
+        {
+            std::size_t total = 0;
+            for (const auto& [id, stored] : Mixers)
+            {
+                (void)id;
+                if (!AddConvolutionChannelFrames(total, stored.ConvolutionChannelFrames))
+                    return false;
+            }
+            for (const auto& [id, registered] : MixerRoutings)
+            {
+                const bool replaced = id == routing;
+                const auto frames = replaced ? replacementFrames : registered.Routing.ConvolutionChannelFrames;
+                if (!AddConvolutionChannelFrames(total, frames))
+                    return false;
+                const bool hasNative = replaced ? NativeMixerWillExist() : NativeMixerRoutings.contains(id);
+                if (hasNative && !AddConvolutionChannelFrames(total, frames))
+                    return false;
+            }
+            return true;
+        }
+
+        [[nodiscard]] static bool MixerTopologyIsCompatible(const MixerRoutingSnapshot& current,
+                                                            const AudioMixerDefinition& definition,
+                                                            const AudioMixerImpulseResponses& impulseResponses) noexcept
+        {
+            if (current.Definition.MasterBus != definition.MasterBus ||
+                current.Definition.Buses.size() != definition.Buses.size() ||
+                current.Definition.Ducking != definition.Ducking)
+                return false;
+            for (std::size_t busIndex = 0; busIndex < definition.Buses.size(); ++busIndex)
+            {
+                const auto& previousBus = current.Definition.Buses[busIndex];
+                const auto& replacementBus = definition.Buses[busIndex];
+                if (previousBus.Id != replacementBus.Id || previousBus.Parent != replacementBus.Parent ||
+                    previousBus.Effects.size() != replacementBus.Effects.size() ||
+                    previousBus.Sends.size() != replacementBus.Sends.size())
+                    return false;
+                for (std::size_t effectIndex = 0; effectIndex < replacementBus.Effects.size(); ++effectIndex)
+                {
+                    const auto& previousEffect = previousBus.Effects[effectIndex];
+                    const auto& replacementEffect = replacementBus.Effects[effectIndex];
+                    if (previousEffect.Id != replacementEffect.Id || previousEffect.Type != replacementEffect.Type ||
+                        previousEffect.Bypassed != replacementEffect.Bypassed ||
+                        previousEffect.ImpulseResponse != replacementEffect.ImpulseResponse)
+                        return false;
+                    if (replacementEffect.Type != AudioGraphNodeType::ConvolutionReverb)
+                        continue;
+                    const auto previousImpulse = current.ImpulseResponseAssets.find(replacementEffect.ImpulseResponse);
+                    const auto replacementImpulse = impulseResponses.find(replacementEffect.ImpulseResponse);
+                    if (previousImpulse == current.ImpulseResponseAssets.end() ||
+                        replacementImpulse == impulseResponses.end() ||
+                        previousImpulse->second != replacementImpulse->second)
+                        return false;
+                }
+                for (std::size_t sendIndex = 0; sendIndex < replacementBus.Sends.size(); ++sendIndex)
+                {
+                    const auto& previousSend = previousBus.Sends[sendIndex];
+                    const auto& replacementSend = replacementBus.Sends[sendIndex];
+                    if (previousSend.Id != replacementSend.Id ||
+                        previousSend.DestinationBus != replacementSend.DestinationBus ||
+                        previousSend.Stage != replacementSend.Stage)
+                        return false;
+                }
+            }
+            return true;
+        }
+
+        [[nodiscard]] bool UpdateMixerControls(MixerRoutingSnapshot& current, const AudioMixerDefinition& definition,
+                                               const AudioMixerImpulseResponses& impulseResponses,
+                                               const std::shared_ptr<NativeMixerGraph>& native)
+        {
+            if (!MixerTopologyIsCompatible(current, definition, impulseResponses))
+                return false;
+            MixerRoutingSnapshot values;
+            PopulateMixerValues(values, definition);
+            values.ImpulseResponseAssets = impulseResponses;
+            const auto busFaders = NativeMixerBusFaders(definition);
+            for (const auto& bus : definition.Buses)
+            {
+                for (const auto& effect : bus.Effects)
+                {
+                    if (effect.Bypassed)
+                        continue;
+                    if (!current.OfflineEffects.contains(effect.Id))
+                        return false;
+                    if (native && !native->EffectControls.contains(effect.Id))
+                        return false;
+                }
+                if (native && !native->BusFaders.contains(bus.Id))
+                    return false;
+                for (const auto& send : bus.Sends)
+                    if (native && !native->SendControls.contains(send.Id))
+                        return false;
+            }
+
+            for (const auto& bus : definition.Buses)
+            {
+                for (const auto& effect : bus.Effects)
+                {
+                    if (effect.Bypassed)
+                        continue;
+                    current.OfflineEffects.at(effect.Id).UpdateParameters(effect.Parameters);
+                    if (native)
+                        native->EffectControls.at(effect.Id)->Processor->UpdateParameters(effect.Parameters);
+                }
+                if (native)
+                {
+                    const std::array fader{busFaders.at(bus.Id)};
+                    native->BusFaders.at(bus.Id)->Processor->UpdateParameters(fader);
+                    for (const auto& send : bus.Sends)
+                        (void)ma_node_set_output_bus_volume(native->SendControls.at(send.Id), 1, send.Gain);
+                }
+            }
+
+            current.MasterBus = values.MasterBus;
+            current.Definition = std::move(values.Definition);
+            current.ImpulseResponseAssets = std::move(values.ImpulseResponseAssets);
+            current.BusGains = std::move(values.BusGains);
+            current.BusNamesById = std::move(values.BusNamesById);
+            current.BusIdsByName = std::move(values.BusIdsByName);
+            return true;
         }
 
         static void ProcessNativeEffect(ma_node* base, const float** inputs, ma_uint32* inputFrames, float** outputs,
@@ -381,117 +685,19 @@ namespace Keire
             auto& node = *reinterpret_cast<NativeEffectNode*>(base);
             const auto frames = std::min(*inputFrames, *outputFrames);
             const auto channels = static_cast<std::size_t>(node.Channels);
-            const auto parameter = [&](const std::size_t index, const float fallback)
-            { return index < node.ParameterCount ? node.Parameters[index] : fallback; };
-            const auto cutoffCoefficient = [&](const float cutoff)
-            {
-                constexpr float pi = 3.14159265358979323846F;
-                const auto maximum = static_cast<float>(node.SampleRate) * 0.49F;
-                return std::exp(-2.0F * pi * std::clamp(cutoff, 10.0F, maximum) / static_cast<float>(node.SampleRate));
-            };
+            const auto sampleCount = static_cast<std::size_t>(frames) * channels;
+            node.Processor->Process(std::span<const float>(inputs[0], sampleCount),
+                                    std::span<float>(outputs[0], sampleCount));
             float meterPeak = 0.0F;
             double meterSquareSum = 0.0;
-            for (std::size_t frame = 0; frame < frames; ++frame)
-            {
-                for (std::size_t channel = 0; channel < channels; ++channel)
-                {
-                    const auto index = frame * channels + channel;
-                    const float input = inputs[0][index];
-                    float value = input;
-                    switch (node.Type)
-                    {
-                    case AudioGraphNodeType::Gain:
-                    case AudioGraphNodeType::Equalizer:
-                        value *= parameter(0, 1.0F);
-                        break;
-                    case AudioGraphNodeType::LowPass:
-                    case AudioGraphNodeType::HighPass:
-                    {
-                        const float coefficient = cutoffCoefficient(parameter(0, 1000.0F));
-                        const float low = (1.0F - coefficient) * input + coefficient * node.FilterState[channel];
-                        node.FilterState[channel] = low;
-                        value = node.Type == AudioGraphNodeType::HighPass ? input - low : low;
-                        break;
-                    }
-                    case AudioGraphNodeType::Compressor:
-                    {
-                        const float threshold = std::clamp(parameter(0, 0.5F), 0.001F, 1.0F);
-                        const float ratio = std::clamp(parameter(1, 4.0F), 1.0F, 100.0F);
-                        if (std::abs(value) > threshold)
-                            value = std::copysign(threshold + (std::abs(value) - threshold) / ratio, value);
-                        break;
-                    }
-                    case AudioGraphNodeType::Limiter:
-                    {
-                        const float ceiling = std::clamp(parameter(0, 0.98F), 0.001F, 1.0F);
-                        value = std::clamp(value, -ceiling, ceiling);
-                        break;
-                    }
-                    case AudioGraphNodeType::Gate:
-                        if (std::abs(value) < std::clamp(parameter(0, 0.01F), 0.0F, 1.0F))
-                            value = 0.0F;
-                        break;
-                    case AudioGraphNodeType::Distortion:
-                    {
-                        const float drive = std::clamp(parameter(0, 1.0F), 0.0F, 100.0F);
-                        value = std::tanh(value * drive) / std::tanh(std::max(drive, 1.0F));
-                        break;
-                    }
-                    case AudioGraphNodeType::Delay:
-                    case AudioGraphNodeType::Chorus:
-                    case AudioGraphNodeType::AlgorithmicReverb:
-                    case AudioGraphNodeType::ConvolutionReverb:
-                    {
-                        if (node.Type == AudioGraphNodeType::ConvolutionReverb && node.ParameterCount == 0)
-                            break;
-                        if (!node.Delay.empty())
-                        {
-                            const float milliseconds = node.Type == AudioGraphNodeType::AlgorithmicReverb
-                                                           ? parameter(0, 68.0F)
-                                                           : parameter(0, 80.0F);
-                            const float modulation = node.Type == AudioGraphNodeType::Chorus
-                                                         ? 1.0F + 0.1F * static_cast<float>(std::sin(node.Phase))
-                                                         : 1.0F;
-                            const auto delayFrames = std::clamp<std::size_t>(
-                                static_cast<std::size_t>(milliseconds * static_cast<float>(node.SampleRate) / 1000.0F *
-                                                         modulation),
-                                1, node.Delay.size() / channels - 1U);
-                            const auto delayedFrame = (node.DelayCursor + node.Delay.size() / channels - delayFrames) %
-                                                      (node.Delay.size() / channels);
-                            const float delayed = node.Delay[delayedFrame * channels + channel];
-                            const float feedback = node.Type == AudioGraphNodeType::AlgorithmicReverb
-                                                       ? std::clamp(parameter(1, 0.55F), 0.0F, 0.97F)
-                                                       : std::clamp(parameter(1, 0.25F), 0.0F, 0.99F);
-                            const float wet = node.Type == AudioGraphNodeType::AlgorithmicReverb
-                                                  ? std::clamp(parameter(2, 0.3F), 0.0F, 1.0F)
-                                                  : std::clamp(parameter(2, 0.25F), 0.0F, 1.0F);
-                            node.Delay[node.DelayCursor * channels + channel] = input + delayed * feedback;
-                            value = input * (1.0F - wet) + delayed * wet;
-                        }
-                        break;
-                    }
-                    case AudioGraphNodeType::Meter:
-                    case AudioGraphNodeType::Capture:
-                        break;
-                    case AudioGraphNodeType::Input:
-                    case AudioGraphNodeType::Output:
-                        value = 0.0F;
-                        break;
-                    }
-                    outputs[0][index] = value;
-                    if (node.Type == AudioGraphNodeType::Meter)
-                    {
-                        meterPeak = std::max(meterPeak, std::abs(value));
-                        meterSquareSum += static_cast<double>(value) * value;
-                    }
-                }
-                if (!node.Delay.empty())
-                    node.DelayCursor = (node.DelayCursor + 1U) % (node.Delay.size() / channels);
-                node.Phase += 5.0265482457 / static_cast<double>(node.SampleRate);
-            }
             if (node.Type == AudioGraphNodeType::Meter)
             {
-                const auto sampleCount = static_cast<std::size_t>(frames) * channels;
+                for (std::size_t index = 0; index < sampleCount; ++index)
+                {
+                    const float value = outputs[0][index];
+                    meterPeak = std::max(meterPeak, std::abs(value));
+                    meterSquareSum += static_cast<double>(value) * value;
+                }
                 node.MeterPeak.store(meterPeak, std::memory_order_relaxed);
                 node.MeterRms.store(
                     sampleCount == 0 ? 0.0F
@@ -549,10 +755,12 @@ namespace Keire
             frameCounts.Commit(frames);
         }
 
-        [[nodiscard]] std::shared_ptr<NativeMixerGraph> BuildNativeMixer(const AudioMixerDefinition& definition)
+        [[nodiscard]] std::shared_ptr<NativeMixerGraph> BuildNativeMixer(const MixerRoutingSnapshot& routing)
         {
             if (!EngineOpen || Mode == AudioMode::Headless)
                 return {};
+            const auto& definition = routing.Definition;
+            const auto busFaders = NativeMixerBusFaders(definition);
             static const ma_node_vtable effectVtable{ProcessNativeEffect, nullptr, 1, 1, 0};
             static const ma_node_vtable duckingVtable{ProcessNativeDucking, nullptr, 2, 1, 0};
             auto result = std::make_shared<NativeMixerGraph>();
@@ -566,18 +774,15 @@ namespace Keire
                 result->Groups.emplace(bus.Id, std::move(group));
             }
             const auto makeEffect = [&](const AudioGraphNodeType type, const std::span<const float> parameters,
+                                        const Detail::PreparedAudioImpulseResponse* impulseResponse = nullptr,
                                         const AssetId meterBus = AssetId{})
             {
                 auto node = std::make_unique<NativeEffectNode>();
                 node->Type = type;
-                node->SampleRate = SampleRate;
                 node->Channels = Channels;
                 node->MeterBus = meterBus;
-                node->ParameterCount = std::min(parameters.size(), node->Parameters.size());
-                std::ranges::copy(parameters.first(node->ParameterCount), node->Parameters.begin());
-                if (type == AudioGraphNodeType::Delay || type == AudioGraphNodeType::Chorus ||
-                    type == AudioGraphNodeType::AlgorithmicReverb || type == AudioGraphNodeType::ConvolutionReverb)
-                    node->Delay.resize(static_cast<std::size_t>(SampleRate) * Channels * 2U);
+                node->Processor = std::make_unique<Detail::AudioEffectProcessor>(type, SampleRate, Channels, parameters,
+                                                                                 impulseResponse);
                 const ma_uint32 channels = Channels;
                 auto configuration = ma_node_config_init();
                 configuration.vtable = &effectVtable;
@@ -630,21 +835,6 @@ namespace Keire
                 if (ma_node_attach_output_bus(source, output, destination, input) != MA_SUCCESS)
                     throw std::runtime_error("Audio mixer graph connection failed.");
             };
-            std::set<AssetId> soloed;
-            for (const auto& bus : definition.Buses)
-                if (bus.Solo)
-                    soloed.insert(bus.Id);
-            std::set<AssetId> audibleWhenSoloed;
-            for (const auto solo : soloed)
-            {
-                auto current = solo;
-                while (current)
-                {
-                    audibleWhenSoloed.insert(current);
-                    const auto found = std::ranges::find(definition.Buses, current, &AudioMixerBusDefinition::Id);
-                    current = found == definition.Buses.end() ? AssetId{} : found->Parent;
-                }
-            }
             struct DuckingConnection final
             {
                 AssetId Sidechain;
@@ -654,27 +844,17 @@ namespace Keire
             std::map<AssetId, ma_node*> busOutputs;
             for (const auto& bus : definition.Buses)
             {
-                auto current = bus.Id;
-                while (current)
-                {
-                    if (soloed.contains(current))
-                    {
-                        audibleWhenSoloed.insert(bus.Id);
-                        break;
-                    }
-                    const auto found = std::ranges::find(definition.Buses, current, &AudioMixerBusDefinition::Id);
-                    current = found == definition.Buses.end() ? AssetId{} : found->Parent;
-                }
-            }
-            for (const auto& bus : definition.Buses)
-            {
                 auto* current = reinterpret_cast<ma_node*>(result->Groups.at(bus.Id).get());
                 for (const auto& effect : bus.Effects)
                 {
                     if (effect.Bypassed)
                         continue;
-                    auto* next = makeEffect(effect.Type, effect.Parameters,
+                    const auto impulse = routing.ImpulseResponses.find(effect.ImpulseResponse);
+                    const auto* impulseResponse =
+                        impulse == routing.ImpulseResponses.end() ? nullptr : &impulse->second;
+                    auto* next = makeEffect(effect.Type, effect.Parameters, impulseResponse,
                                             effect.Type == AudioGraphNodeType::Meter ? bus.Id : AssetId{});
+                    result->EffectControls.emplace(effect.Id, result->Effects.back().get());
                     attach(current, 0, next);
                     current = next;
                 }
@@ -683,14 +863,15 @@ namespace Keire
                     if (send.Stage != AudioMixerSendStage::PreFader)
                         continue;
                     auto* splitter = makeSplitter();
+                    result->SendControls.emplace(send.Id, result->Splitters.back().get());
                     attach(current, 0, splitter);
                     attach(splitter, 1, reinterpret_cast<ma_node*>(result->Groups.at(send.DestinationBus).get()));
                     (void)ma_node_set_output_bus_volume(splitter, 1, send.Gain);
                     current = splitter;
                 }
-                const std::array fader{bus.Mute || (!soloed.empty() && !audibleWhenSoloed.contains(bus.Id)) ? 0.0F
-                                                                                                            : bus.Gain};
+                const std::array fader{busFaders.at(bus.Id)};
                 auto* faderNode = makeEffect(AudioGraphNodeType::Gain, fader);
+                result->BusFaders.emplace(bus.Id, result->Effects.back().get());
                 attach(current, 0, faderNode);
                 current = faderNode;
                 for (const auto& ducking : definition.Ducking)
@@ -702,7 +883,7 @@ namespace Keire
                     current = duckingNode;
                     duckingConnections.push_back({ducking.SidechainBus, duckingNode});
                 }
-                auto* meterNode = makeEffect(AudioGraphNodeType::Meter, std::span<const float>{}, bus.Id);
+                auto* meterNode = makeEffect(AudioGraphNodeType::Meter, std::span<const float>{}, nullptr, bus.Id);
                 attach(current, 0, meterNode);
                 current = meterNode;
                 for (const auto& send : bus.Sends)
@@ -710,6 +891,7 @@ namespace Keire
                     if (send.Stage != AudioMixerSendStage::PostFader)
                         continue;
                     auto* splitter = makeSplitter();
+                    result->SendControls.emplace(send.Id, result->Splitters.back().get());
                     attach(current, 0, splitter);
                     attach(splitter, 1, reinterpret_cast<ma_node*>(result->Groups.at(send.DestinationBus).get()));
                     (void)ma_node_set_output_bus_volume(splitter, 1, send.Gain);
@@ -854,6 +1036,32 @@ namespace Keire
             return sourceGain * SpatialDistanceGain(specification);
         }
 
+        [[nodiscard]] static bool PrepareDeviceMixerAttachment(Voice& voice, const MixerRoutingSnapshot& routing,
+                                                               const std::shared_ptr<NativeMixerGraph>& native,
+                                                               PreparedNativeVoiceAttachment& attachment) noexcept
+        {
+            attachment = {};
+            if (!voice.Device || !voice.Device->SoundOpen || !voice.Specification.MixerRouting || !native)
+                return true;
+            auto bus = voice.Specification.BusId;
+            if (!bus || !routing.BusGains.contains(bus))
+            {
+                const auto named = routing.BusIdsByName.find(voice.Specification.Bus);
+                bus = named == routing.BusIdsByName.end() ? routing.MasterBus : named->second;
+            }
+            const auto group = native->Groups.find(bus);
+            if (group == native->Groups.end())
+                return false;
+            auto* source = reinterpret_cast<ma_node*>(&voice.Device->Sound);
+            auto* destination = reinterpret_cast<ma_node*>(group->second.get());
+            if (source == destination || ma_node_get_output_bus_count(source) == 0 ||
+                ma_node_get_input_bus_count(destination) == 0 ||
+                ma_node_get_output_channels(source, 0) != ma_node_get_input_channels(destination, 0))
+                return false;
+            attachment = {.Source = source, .Destination = destination};
+            return true;
+        }
+
         void AttachDeviceMixer(Voice& voice)
         {
             if (!voice.Device || !voice.Device->SoundOpen || !voice.Specification.MixerRouting)
@@ -890,10 +1098,9 @@ namespace Keire
             }
         }
 
-        void UpdateVirtualization()
+        void UpdateVirtualization(std::vector<Voice*>& ranked) noexcept
         {
-            std::vector<Voice*> ranked;
-            ranked.reserve(Voices.size());
+            ranked.clear();
             for (auto& [id, voice] : Voices)
             {
                 (void)id;
@@ -921,6 +1128,13 @@ namespace Keire
                     ma_sound_set_volume(&voice.Device->Sound, gain);
                 }
             }
+        }
+
+        void UpdateVirtualization()
+        {
+            std::vector<Voice*> ranked;
+            ranked.reserve(Voices.size());
+            UpdateVirtualization(ranked);
         }
 
         void ApplyDeviceProperties(Voice& voice)

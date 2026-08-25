@@ -11,6 +11,19 @@
 
 namespace KeireHub
 {
+    enum class HubUpdatePlatformSignaturePolicy
+    {
+        NotRequired,
+        ValidateIfPresent,
+        Required
+    };
+
+    enum class HubUpdatePlatformSignatureState
+    {
+        NotPresent,
+        Valid
+    };
+
     struct HubUpdateRequest final
     {
         std::filesystem::path InstallerPath;
@@ -26,7 +39,7 @@ namespace KeireHub
         std::uint64_t CatalogSequence = 0;
         std::uint64_t CurrentProcessId = 0;
         std::uint64_t StartedUnixSeconds = 0;
-        bool RequirePlatformSignature = false;
+        HubUpdatePlatformSignaturePolicy PlatformSignaturePolicy = HubUpdatePlatformSignaturePolicy::NotRequired;
     };
 
     struct HubUpdateLaunch final
@@ -55,7 +68,8 @@ namespace KeireHub
       public:
         static constexpr std::uint32_t CurrentResumeSchemaVersion = 1;
 
-        using PlatformSignatureVerifier = std::function<HubStatus(const std::filesystem::path&)>;
+        using PlatformSignatureVerifier =
+            std::function<HubResult<HubUpdatePlatformSignatureState>(const std::filesystem::path&)>;
         using InstallerLauncher = std::function<HubStatus(const HubUpdateLaunch&)>;
 
         explicit HubUpdateManager(std::filesystem::path resumeTokenPath);

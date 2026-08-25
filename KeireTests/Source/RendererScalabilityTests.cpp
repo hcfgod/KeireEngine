@@ -1,12 +1,16 @@
+#include "KeireInternal/Rendering/GpuOcclusionPolicyInternal.h"
 #include "KeireInternal/Rendering/InstanceBatchInternal.h"
 #include "KeireInternal/Rendering/MaterialBlendingInternal.h"
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 
 #include <doctest/doctest.h>
 
+#include <array>
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <memory>
+#include <stdexcept>
 #include <vector>
 
 TEST_CASE("ten-thousand compatible objects collapse below the scene draw-call budget")
@@ -126,4 +130,153 @@ TEST_CASE("sampled scene depth is requested only by GPU depth collision operatio
 
     execution->ParticleOperations.back().Setting = static_cast<std::uint32_t>(Keire::VfxCollisionMode::GpuDepth);
     CHECK(Keire::RenderBackend::RequiresGpuDepthCollision(emitters));
+}
+
+TEST_CASE("GPU occlusion keeps conservative full-resolution depth within a per-surface texture budget")
+{
+    namespace Policy = Keire::RenderBackend::GpuOcclusionPolicy;
+
+    CHECK(Policy::ResolveConservativeResourceExtent(1920U, 1080U) == (Policy::ResourceExtent{1920U, 1080U}));
+    CHECK(Policy::ResolveConservativeResourceExtent(3840U, 2160U) == (Policy::ResourceExtent{3840U, 2160U}));
+    CHECK(Policy::ResolveConservativeResourceExtent(2160U, 3840U) == (Policy::ResourceExtent{2160U, 3840U}));
+    CHECK(Policy::ResolveConservativeResourceExtent(16'384U, 16'384U) == (Policy::ResourceExtent{16'384U, 16'384U}));
+    CHECK(Policy::ResolveConservativeResourceExtent(0U, 1080U) == Policy::ResourceExtent{});
+
+    const auto fullResolutionBytes =
+        Policy::EstimateTextureMemoryBytes(Policy::ResolveConservativeResourceExtent(3840U, 2160U),
+                                           Keire::RenderBackend::MaximumGpuOcclusionPyramidLevels, 3U);
+    REQUIRE(fullResolutionBytes.has_value());
+    CHECK(*fullResolutionBytes == 132'711'624ULL);
+    CHECK(*fullResolutionBytes > 126ULL * 1024ULL * 1024ULL);
+    CHECK(*fullResolutionBytes < 127ULL * 1024ULL * 1024ULL);
+    CHECK(Policy::TextureMemoryWithinBudget(*fullResolutionBytes));
+
+    const auto eightFrameSlots =
+        Policy::EstimateTextureMemoryBytes({3840U, 2160U}, Keire::RenderBackend::MaximumGpuOcclusionPyramidLevels, 8U);
+    REQUIRE(eightFrameSlots.has_value());
+    CHECK_FALSE(Policy::TextureMemoryWithinBudget(*eightFrameSlots));
+
+    const auto maximumSurface = Policy::EstimateTextureMemoryBytes(
+        {16'384U, 16'384U}, Keire::RenderBackend::MaximumGpuOcclusionPyramidLevels, 1U);
+    REQUIRE(maximumSurface.has_value());
+    CHECK_FALSE(Policy::TextureMemoryWithinBudget(*maximumSurface));
+
+    const auto exactBudget = Policy::EstimateTextureMemoryBytes({8192U, 8192U}, 0U, 1U);
+    REQUIRE(exactBudget.has_value());
+    CHECK(*exactBudget == Policy::MaximumTextureBytesPerSurface);
+    CHECK(Policy::TextureMemoryWithinBudget(*exactBudget));
+    CHECK_FALSE(Policy::TextureMemoryWithinBudget(*exactBudget + 1U));
+
+    CHECK_FALSE(Policy::EstimateTextureMemoryBytes({0U, 1080U}, 14U, 3U));
+    CHECK_FALSE(Policy::EstimateTextureMemoryBytes({1920U, 1080U}, 14U, 0U));
+    CHECK_FALSE(Policy::EstimateTextureMemoryBytes(
+        {std::numeric_limits<std::uint32_t>::max(), std::numeric_limits<std::uint32_t>::max()}, 14U, 8U));
+}
+
+TEST_CASE("GPU occlusion allocation retry uses bounded backoff and sparse warnings")
+{
+    namespace Policy = Keire::RenderBackend::GpuOcclusionPolicy;
+
+    const Policy::ResourceExtent extent{1920U, 1080U};
+    constexpr std::size_t firstSlot = 0U;
+    constexpr std::size_t secondSlot = 1U;
+
+    SUBCASE("failure delays grow exponentially and cap")
+    {
+        Policy::AllocationRetryState state;
+        Policy::PrepareAllocationRetryExtent(state, extent);
+        REQUIRE(Policy::BeginAllocationAttempt(state, firstSlot));
+        constexpr std::array expectedDelays{
+            1U, 2U, 4U, 8U, 16U, 32U, 64U, Policy::AllocationRetryMaximumFrames, Policy::AllocationRetryMaximumFrames};
+        for (std::size_t failure = 0; failure < expectedDelays.size(); ++failure)
+        {
+            const bool warning = Policy::RegisterAllocationFailure(state, firstSlot);
+            CHECK(state.Slots[firstSlot].FramesRemaining == expectedDelays[failure]);
+            CHECK(warning == (failure == 0U || failure == 7U));
+        }
+    }
+
+    SUBCASE("retry frames elapse before the next attempt")
+    {
+        Policy::AllocationRetryState state;
+        Policy::PrepareAllocationRetryExtent(state, extent);
+        REQUIRE(Policy::BeginAllocationAttempt(state, firstSlot));
+        REQUIRE(Policy::RegisterAllocationFailure(state, firstSlot));
+        CHECK(Policy::AllocationRetryPending(state, firstSlot));
+        CHECK(Policy::AnyAllocationRetryPending(state));
+        CHECK_FALSE(Policy::BeginAllocationAttempt(state, firstSlot));
+        CHECK_FALSE(Policy::AllocationRetryPending(state, firstSlot));
+        CHECK(Policy::BeginAllocationAttempt(state, firstSlot));
+    }
+
+    SUBCASE("success resets only its frame slot and a resize resets all failed slots")
+    {
+        Policy::AllocationRetryState state;
+        Policy::PrepareAllocationRetryExtent(state, extent);
+        REQUIRE(Policy::BeginAllocationAttempt(state, firstSlot));
+        REQUIRE(Policy::BeginAllocationAttempt(state, secondSlot));
+        REQUIRE(Policy::RegisterAllocationFailure(state, firstSlot));
+        REQUIRE(Policy::RegisterAllocationFailure(state, secondSlot));
+        Policy::RegisterAllocationSuccess(state, secondSlot);
+        CHECK(state.Slots[firstSlot].FailureCount == 1U);
+        CHECK(state.Slots[firstSlot].FramesRemaining == 1U);
+        CHECK(state.Slots[secondSlot].FailureCount == 0U);
+        CHECK(state.Slots[secondSlot].FramesRemaining == 0U);
+        CHECK(Policy::AnyAllocationRetryPending(state));
+
+        const Policy::ResourceExtent resizedSurface{3840U, 2160U};
+        Policy::PrepareAllocationRetryExtent(state, resizedSurface);
+        CHECK(state.Extent == resizedSurface);
+        CHECK(state.Slots[firstSlot].FailureCount == 0U);
+        CHECK(state.Slots[firstSlot].FramesRemaining == 0U);
+        CHECK_FALSE(state.Slots[firstSlot].MaximumDelayWarningPublished);
+        CHECK(state.Slots[secondSlot].FailureCount == 0U);
+        CHECK_FALSE(Policy::AnyAllocationRetryPending(state));
+        CHECK(Policy::BeginAllocationAttempt(state, firstSlot));
+    }
+
+    SUBCASE("surface resource reset retries the same extent immediately")
+    {
+        Policy::AllocationRetryState state;
+        Policy::PrepareAllocationRetryExtent(state, extent);
+        REQUIRE(Policy::RegisterAllocationFailure(state, firstSlot));
+        REQUIRE(Policy::RegisterAllocationFailure(state, secondSlot));
+        REQUIRE(Policy::AnyAllocationRetryPending(state));
+
+        Policy::ResetAllocationRetry(state);
+        Policy::PrepareAllocationRetryExtent(state, extent);
+        CHECK_FALSE(Policy::AnyAllocationRetryPending(state));
+        CHECK(Policy::BeginAllocationAttempt(state, firstSlot));
+        CHECK(Policy::BeginAllocationAttempt(state, secondSlot));
+    }
+}
+
+TEST_CASE("optional GPU occlusion visualization failures remain isolated from core setup")
+{
+    namespace Policy = Keire::RenderBackend::GpuOcclusionPolicy;
+
+    bool hzbAllocated = false;
+    std::uint32_t hzbCleanupCount = 0U;
+    const bool hzbCreated = Policy::TryCreateOptionalVisualization(
+        [&]
+        {
+            hzbAllocated = true;
+            throw std::runtime_error("injected optional pipeline failure");
+        },
+        [&](const std::exception&)
+        {
+            hzbAllocated = false;
+            ++hzbCleanupCount;
+        });
+    bool boundsAllocated = false;
+    std::uint32_t boundsCleanupCount = 0U;
+    const bool boundsCreated = Policy::TryCreateOptionalVisualization(
+        [&] { boundsAllocated = true; }, [&](const std::exception&) { ++boundsCleanupCount; });
+
+    CHECK_FALSE(hzbCreated);
+    CHECK_FALSE(hzbAllocated);
+    CHECK(hzbCleanupCount == 1U);
+    CHECK(boundsCreated);
+    CHECK(boundsAllocated);
+    CHECK(boundsCleanupCount == 0U);
 }

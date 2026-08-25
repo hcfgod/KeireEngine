@@ -201,7 +201,12 @@ namespace Keire::RenderBackend
     {
         std::array<Matrix4, LocalShadowLayerCount> Matrices;
         std::array<Vector4, MaximumShaderLocalLights> Parameters;
+        std::array<Vector4, LocalShadowLayerCount> SampleBounds;
     };
+    static_assert(offsetof(AssetLocalShadowUniforms, Parameters) == sizeof(std::array<Matrix4, LocalShadowLayerCount>));
+    static_assert(offsetof(AssetLocalShadowUniforms, SampleBounds) ==
+                  sizeof(std::array<Matrix4, LocalShadowLayerCount>) +
+                      sizeof(std::array<Vector4, MaximumShaderLocalLights>));
 
     struct AssetShadowUniforms final
     {

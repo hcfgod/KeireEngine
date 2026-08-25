@@ -194,12 +194,20 @@ headers.
 
 ## Mesh and texture sources
 
-OBJ, FBX, glTF, and GLB static meshes import through the pinned private Assimp build. Import applies source node
-transforms, triangulates polygonal surfaces, preserves line-list and point-list primitives, deterministically merges
-meshes, rejects animation and skinning, and intentionally ignores source material assignment. The resulting
-`.keiremesh` payload is a versioned Kéire binary containing finite position/normal/UV/color vertices, unsigned 32-bit
-indices, per-submesh primitive topology, and verified bounds. `KeireAssetTool convert-mesh --input <model> [--output
-<asset.keiremesh>]` emits the same format for inspection or source-control workflows.
+OBJ, FBX, glTF, and GLB models import through the pinned private Assimp build. Common model packages may keep OBJ
+material libraries, glTF binary buffers, and external material textures beside the primary source or elsewhere beneath
+the project source root. Assimp reaches those files only through the asset pipeline's confined project-file callback;
+absolute paths, URI schemes, and paths that escape the source root are rejected. Reads retain the pipeline's per-file
+dependency limit (64 MiB by default), plus a 256-file and 1 GiB aggregate import bound. Successful reads publish sorted
+SHA-256 source-dependency records, so changing an MTL, buffer, or extracted texture invalidates the model without
+granting the importer direct filesystem access.
+
+Import applies source node transforms, triangulates polygonal surfaces, preserves line-list and point-list primitives,
+and deterministically merges meshes. Material extraction publishes stable Material and Texture2D subassets when the
+project provides a compatible material shader. The resulting `.keiremesh` payload is a versioned Kéire binary
+containing finite position/normal/UV/color vertices, unsigned 32-bit indices, per-submesh primitive topology, and
+verified bounds. `KeireAssetTool convert-mesh --input <model> [--output <asset.keiremesh>]` emits the same format for
+inspection or source-control workflows and confines sidecar reads beneath the input model's directory.
 
 PNG, JPEG, TGA, BMP, and Radiance HDR sources decode privately through stb_image. OpenEXR decodes to float RGBA through
 the asset worker's private FFmpeg backend, then uses the same normalized color/data/normal/environment semantic path.

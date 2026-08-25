@@ -162,6 +162,7 @@ namespace Keire
         Matrix4 View;
         Matrix4 Projection;
         Color ClearColor{0.08F, 0.09F, 0.11F, 1.0F};
+        // SetCamera requires finite clip planes satisfying 0 < NearPlane < FarPlane <= 10,000,000.
         float NearPlane = 0.1F;
         float FarPlane = 1000.0F;
     };
@@ -231,6 +232,7 @@ namespace Keire
         bool TexturedSpritePackets = false;
         bool DynamicMeshPackets = false;
         bool SampledResolvedDepth = false;
+        // GPU particle simulation can collide with sampled scene depth.
         bool GpuDepthCollision = false;
         bool GpuOcclusionCulling = false;
     };

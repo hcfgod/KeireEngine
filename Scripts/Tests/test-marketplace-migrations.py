@@ -35,6 +35,8 @@ MIGRATIONS = [
     ROOT / "supabase/migrations/20260814034937_marketplace_automatic_publication.sql",
     ROOT / "supabase/migrations/20260814124354_add_marketplace_keyset_indexes.sql",
     ROOT / "supabase/migrations/20260814135718_publisher_named_product_uploads.sql",
+    ROOT
+    / "supabase/migrations/20260825204708_remove_deprecated_marketplace_auth_role_checks.sql",
 ]
 
 
@@ -63,7 +65,135 @@ claim_fix = sources[MIGRATIONS[15].name]
 automatic_publication = sources[MIGRATIONS[16].name]
 keyset_indexes = sources[MIGRATIONS[17].name]
 named_product_uploads = sources[MIGRATIONS[18].name]
+auth_role_cleanup = sources[MIGRATIONS[19].name]
 combined = "\n".join(sources.values())
+
+all_migration_sources = {
+    path.name: path.read_text(encoding="utf-8")
+    for path in sorted((ROOT / "supabase/migrations").glob("*.sql"))
+}
+function_definition_pattern = re.compile(
+    r"(?P<definition>create(?:\s+or\s+replace)?\s+function\s+"
+    r"(?P<name>[a-z0-9_.]+)\s*\(.*?\bas\s+\$\$.*?\$\$;)",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+latest_function_definitions: dict[str, str] = {}
+for migration_source in all_migration_sources.values():
+    for match in function_definition_pattern.finditer(migration_source):
+        latest_function_definitions[match.group("name").lower()] = match.group(
+            "definition"
+        )
+
+expected_historical_auth_role_counts = {
+    "20260812061500_marketplace_storage_and_downloads.sql": 1,
+    "20260812123000_marketplace_edge_transition_boundary.sql": 4,
+    "20260812124500_marketplace_publisher_transition_boundary.sql": 1,
+    "20260812190000_marketplace_validator_leases.sql": 3,
+    "20260813124500_marketplace_signed_download_grants.sql": 1,
+}
+observed_historical_auth_role_counts = {
+    name: len(re.findall(r"\bauth\.role\s*\(", source))
+    for name, source in all_migration_sources.items()
+    if re.search(r"\bauth\.role\s*\(", source)
+}
+require(
+    observed_historical_auth_role_counts == expected_historical_auth_role_counts,
+    "Historical auth.role() migrations changed or a new deprecated role check was added.",
+)
+
+service_role_functions = (
+    (
+        "public.service_create_marketplace_organization",
+        "public.service_create_marketplace_organization(uuid, text, text)",
+    ),
+    (
+        "public.service_claim_free_marketplace_product",
+        "public.service_claim_free_marketplace_product(uuid, uuid, uuid, text, text, text, text)",
+    ),
+    (
+        "public.service_register_marketplace_device_session",
+        "public.service_register_marketplace_device_session(uuid, text, text)",
+    ),
+    (
+        "public.service_issue_marketplace_download_grant",
+        "public.service_issue_marketplace_download_grant(uuid, text, uuid, uuid, uuid)",
+    ),
+    (
+        "public.service_submit_publisher_application",
+        "public.service_submit_publisher_application(uuid, uuid)",
+    ),
+    (
+        "public.service_lease_marketplace_upload",
+        "public.service_lease_marketplace_upload(text, integer)",
+    ),
+    (
+        "public.service_complete_marketplace_validation",
+        "public.service_complete_marketplace_validation(uuid, text, jsonb)",
+    ),
+    (
+        "public.service_renew_marketplace_upload_lease",
+        "public.service_renew_marketplace_upload_lease(uuid, text, integer)",
+    ),
+    (
+        "public.service_issue_marketplace_download_grant_v2",
+        "public.service_issue_marketplace_download_grant_v2(uuid, text, uuid, uuid, uuid)",
+    ),
+)
+jwt_service_role_check = (
+    "coalesce((select auth.jwt() ->> 'role'), '') <> 'service_role'"
+)
+require(
+    not re.search(r"\bauth\.role\s*\(", auth_role_cleanup),
+    "The forward cleanup migration must not use deprecated auth.role().",
+)
+require(
+    auth_role_cleanup.count(jwt_service_role_check) == len(service_role_functions),
+    "Every replaced service adapter must retain the JWT service-role assertion.",
+)
+for function_name, signature in service_role_functions:
+    definition = latest_function_definitions.get(function_name)
+    require(
+        definition is not None,
+        f"Effective function definition is missing: {function_name}.",
+    )
+    require(
+        not re.search(r"\bauth\.role\s*\(", definition),
+        f"Effective function definition still uses deprecated auth.role(): {function_name}.",
+    )
+    require(
+        jwt_service_role_check in definition,
+        f"Effective function definition lost its JWT service-role assertion: {function_name}.",
+    )
+    require(
+        f"create or replace function {function_name}(" in auth_role_cleanup,
+        f"Forward cleanup migration does not replace {function_name}.",
+    )
+    require(
+        re.search(
+            rf"revoke all on function {re.escape(signature)}\s+"
+            r"from public, anon, authenticated;",
+            auth_role_cleanup,
+        ),
+        f"Forward cleanup migration does not revoke public execution for {signature}.",
+    )
+    require(
+        re.search(
+            rf"grant execute on function {re.escape(signature)}\s+to service_role;",
+            auth_role_cleanup,
+        ),
+        f"Forward cleanup migration does not grant only service_role for {signature}.",
+    )
+
+effective_deprecated_functions = sorted(
+    name
+    for name, definition in latest_function_definitions.items()
+    if re.search(r"\bauth\.role\s*\(", definition)
+)
+require(
+    not effective_deprecated_functions,
+    "Effective function definitions retain deprecated auth.role(): "
+    + ", ".join(effective_deprecated_functions),
+)
 
 for keyset_index in (
     "idx_marketplace_products_public_keyset",

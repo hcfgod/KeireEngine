@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security report
-    url: https://github.com/keith/keire/security/advisories/new
+    url: https://github.com/hcfgod/KeireEngine/security/advisories/new
     about: Report vulnerabilities privately.

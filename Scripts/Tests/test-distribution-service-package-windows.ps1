@@ -53,6 +53,7 @@ foreach ($contract in @(
         "start-windows-marketplace-validator-broker.ps1",
         "start-windows-marketplace-publication-signer.ps1",
         "BeautifulMermaid.txt",
+        "Documentation tests failed",
         "Documentation production build failed"
     )) {
     if (-not $packager.Contains($contract)) {
@@ -63,6 +64,9 @@ $unixPackager = Get-Content -LiteralPath `
     (Join-Path $Root "Services\KeireDistributionService\scripts\package-service.sh") -Raw
 if (-not $unixPackager.Contains('install-windows-marketplace-validator-tasks.ps1')) {
     throw "The Unix service packager does not include the Windows validator task installer in Windows packages."
+}
+if (-not $unixPackager.Contains('"$npm_command" --prefix "$documentation_site" test')) {
+    throw "The Unix service packager does not run documentation tests before building."
 }
 $validatorTaskInstaller = Get-Content -LiteralPath `
     (Join-Path $Root "Services\KeireDistributionService\Deployment\install-windows-marketplace-validator-tasks.ps1") -Raw

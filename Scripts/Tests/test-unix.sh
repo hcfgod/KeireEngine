@@ -418,6 +418,8 @@ assert_true grep -Fq 'mkdir -p -- "$package_directory/Web"' \
   "$ROOT/Services/KeireDistributionService/scripts/package-service.sh"
 assert_true grep -Fq '"$npm_command" --prefix "$documentation_site" run build' \
   "$ROOT/Services/KeireDistributionService/scripts/package-service.sh"
+assert_true grep -Fq '"$npm_command" --prefix "$documentation_site" test' \
+  "$ROOT/Services/KeireDistributionService/scripts/package-service.sh"
 assert_true grep -Fq 'cp -R -- "$documentation_output" "$package_directory/Web/"' \
   "$ROOT/Services/KeireDistributionService/scripts/package-service.sh"
 assert_true grep -Fq 'install-web-runtime.sh' \
@@ -1292,6 +1294,12 @@ assert_false grep -E -q 'c506e2a8-62f9-44f0-8831-b66755cc9b9b|070fedd0-9e84-435e
 assert_false grep -R -E '#include[[:space:]]*[<"]imgui|ImGui::|ImGui[A-Z]' "$ROOT/KeireClient"
 assert_false grep -R -E 'SDL3/|nlohmann/json|imgui|entt/|glm/|assimp/|stb_image' "$ROOT/KeireCore/Include/Keire"
 assert_true grep -q 'client_build_args=.*--target.*CLIENT_TARGET' "$ROOT/Scripts/Unix/run-target.sh"
+assert_true grep -F -q 'SDL_VIDEODRIVER=dummy "$client_executable" --smoke-workspace' \
+  "$ROOT/Scripts/Unix/run-target.sh"
+assert_true grep -F -q 'Keire::ApplicationCommandLineOption{"--smoke-workspace"' \
+  "$ROOT/KeireClient/Source/ClientApplication.cpp"
+assert_true grep -F -q 'commandLine.SmokeWorkspace ? UiMode::Headless' \
+  "$ROOT/KeireClient/Source/ClientApplication.cpp"
 assert_true grep -F -q "bash -c 'ulimit -c 0;" "$ROOT/Scripts/Unix/run-target.sh"
 assert_true grep -F -q 'Config/LeakSanitizer.supp' "$ROOT/Scripts/Unix/run-target.sh"
 assert_true grep -F -q 'leak:libcoreclr.so' "$ROOT/Config/LeakSanitizer.supp"

@@ -3,9 +3,10 @@
 Kéire 0.3.1 introduces a project-content package boundary that is separate from Editor and Build Support
 distribution. Asset packages use `.keireassetpackage`; Hub and Editor software continues to use `.keirepackage`.
 
-The public marketplace uses these same archive and project contracts. Browsing and claims happen on the website, Hub
-owns account authorization and private downloads, and project-specific installation or import happens in the Editor.
-Unpublished, withdrawn, revoked, unsigned, incompatible, or unentitled releases never become installable entries.
+The staged, free-only Marketplace uses these same archive and project contracts; it is not yet generally available
+commerce. Browsing and claims happen on the website, Hub owns account authorization and private downloads, and
+project-specific installation or import happens in the Editor. Unpublished, withdrawn, revoked, unsigned, incompatible,
+or unentitled releases never become installable entries.
 
 ## Archive contract
 

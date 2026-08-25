@@ -13,6 +13,13 @@ namespace
 {
     constexpr std::string_view InstallerDigest = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
 
+    [[nodiscard]] KeireHub::HubResult<KeireHub::HubUpdatePlatformSignatureState>
+    ValidPlatformSignature(const std::filesystem::path&)
+    {
+        return KeireHub::HubResult<KeireHub::HubUpdatePlatformSignatureState>::Success(
+            KeireHub::HubUpdatePlatformSignatureState::Valid);
+    }
+
     [[nodiscard]] KeireHub::HubUpdateRequest Request(const KeireHubTests::TemporaryDirectory& temporary)
     {
         const auto cacheRoot = std::filesystem::absolute(temporary.Path() / "Cache");
@@ -33,7 +40,7 @@ namespace
                 .CatalogSequence = 7,
                 .CurrentProcessId = 1234,
                 .StartedUnixSeconds = 100,
-                .RequirePlatformSignature = true};
+                .PlatformSignaturePolicy = KeireHub::HubUpdatePlatformSignaturePolicy::Required};
     }
 
     [[nodiscard]] bool WaitForState(KeireHub::HubUpdateHandoffWorkflow& workflow,
@@ -65,7 +72,8 @@ TEST_CASE("Hub update handoff workflow keeps digest and signature work off the o
             signatureEntered = true;
             while (!releaseSignature)
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            return KeireHub::HubStatus::Success();
+            return KeireHub::HubResult<KeireHub::HubUpdatePlatformSignatureState>::Success(
+                KeireHub::HubUpdatePlatformSignatureState::Valid);
         },
         [](const KeireHub::HubUpdateLaunch&) { return KeireHub::HubStatus::Success(); }));
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
@@ -74,9 +82,9 @@ TEST_CASE("Hub update handoff workflow keeps digest and signature work off the o
     REQUIRE(signatureEntered);
     CHECK(workflow.Snapshot()->State == KeireHub::HubUpdateHandoffState::Verifying);
 
-    const auto duplicate = workflow.Start(
-        manager, Request(temporary), [](const std::filesystem::path&) { return KeireHub::HubStatus::Success(); },
-        [](const KeireHub::HubUpdateLaunch&) { return KeireHub::HubStatus::Success(); });
+    const auto duplicate =
+        workflow.Start(manager, Request(temporary), ValidPlatformSignature,
+                       [](const KeireHub::HubUpdateLaunch&) { return KeireHub::HubStatus::Success(); });
     REQUIRE_FALSE(duplicate);
     CHECK(duplicate.Error().Code == KeireHub::HubErrorCode::InvalidTransition);
 
@@ -90,17 +98,16 @@ TEST_CASE("Hub update handoff workflow publishes sanitized launch failures")
     KeireHubTests::TemporaryDirectory temporary;
     KeireHub::HubUpdateManager manager(temporary.Path() / "Preferences" / "hub-update.json");
     KeireHub::HubUpdateHandoffWorkflow workflow;
-    REQUIRE(workflow.Start(
-        manager, Request(temporary), [](const std::filesystem::path&) { return KeireHub::HubStatus::Success(); },
-        [](const KeireHub::HubUpdateLaunch&)
-        {
-            return KeireHub::HubStatus::Failure({.Code = KeireHub::HubErrorCode::WorkerInterrupted,
-                                                 .Message = "The test installer did not launch.",
-                                                 .Retryable = true,
-                                                 .AffectedItem = {},
-                                                 .TechnicalDetails = "test",
-                                                 .LogReference = {}});
-        }));
+    REQUIRE(workflow.Start(manager, Request(temporary), ValidPlatformSignature,
+                           [](const KeireHub::HubUpdateLaunch&)
+                           {
+                               return KeireHub::HubStatus::Failure({.Code = KeireHub::HubErrorCode::WorkerInterrupted,
+                                                                    .Message = "The test installer did not launch.",
+                                                                    .Retryable = true,
+                                                                    .AffectedItem = {},
+                                                                    .TechnicalDetails = "test",
+                                                                    .LogReference = {}});
+                           }));
     REQUIRE(WaitForState(workflow, KeireHub::HubUpdateHandoffState::Failed));
     REQUIRE(workflow.Snapshot()->Failure);
     CHECK(workflow.Snapshot()->Failure->Message == "The test installer did not launch.");

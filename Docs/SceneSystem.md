@@ -32,9 +32,21 @@ At the next application safe boundary, a successful operation creates the scene,
 the active scene. Single mode replaces all loaded scenes transactionally; additive mode preserves them up to the bounded
 capacity. A failed/cancelled load leaves the active and already-loaded scenes unchanged.
 
+`SceneLoadOperation::State`, `Diagnostic`, `Result`, and `Cancel` are synchronized and may be called from any thread;
+`Asset` and `Mode` are immutable. Cancellation wins while an operation is queued or loading. Once owner-thread scene
+activation has claimed the completed asset, that transaction finishes normally and publishes `Ready`.
+The loaded/active set and operation state commit before lifecycle notifications are dispatched. If an event listener
+throws, `AdvanceFrame` preserves and propagates that exception, but the already-consistent scene transaction is not
+rolled back or exposed as cancellable. Loads and unloads requested by a lifecycle listener join the next safe-boundary
+batch; they do not invalidate the batch being traversed, and unprocessed requests remain queued if a listener throws.
+
 `Unload` and `SetActive` are deferred to the same boundary. Events are `SceneLoadedEvent`, `SceneUnloadedEvent`,
 `SceneLoadFailedEvent`, and `ActiveSceneChangedEvent`. The service closes before Assets and invalidates mutable scenes
 without exposing JSON or backend types.
+
+Except for the thread-safe `IsOpen` query and the load-operation methods above, every `SceneSystem` operation is affine
+to the thread that constructed the service. This includes `Load`, `Unload`, `SetActive`, `Active`, `Find`,
+`LoadedScenes`, `Components`, and `Close`; an off-thread call throws before changing service state.
 
 ## Playable Runtime Worlds
 

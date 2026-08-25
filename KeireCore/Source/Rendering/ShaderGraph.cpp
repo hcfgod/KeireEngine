@@ -1159,6 +1159,7 @@ cbuffer ShadowData : register(b2, space3)
     float4x4 DirectionalShadowMatrices[4];
     float4x4 LocalShadowMatrices[20];
     float4 LocalShadowParameters[62];
+    float4 LocalShadowSampleBounds[20];
 };
 
 cbuffer EnvironmentData : register(b3, space3)
@@ -1562,9 +1563,10 @@ uint ForwardPlusLightIndex(const uint index)
 }
 
 float SampleShadowPcf(Texture2DArray<float> textureValue, SamplerState samplerValue, const float2 uv,
-                      const float layer, const float depth, const float inverseResolution, const bool soft)
+                      const float layer, const float depth, const float inverseResolution, const bool soft,
+                      const float4 sampleBounds, const bool clampSamples)
 {
-    if (any(uv < 0.0F.xx) || any(uv > 1.0F.xx) || depth <= 0.0F || depth >= 1.0F)
+    if (any(uv < sampleBounds.xy) || any(uv > sampleBounds.zw) || depth <= 0.0F || depth >= 1.0F)
         return 1.0F;
     if (!soft)
         return depth <= textureValue.SampleLevel(samplerValue, float3(uv, layer), 0.0F) ? 1.0F : 0.0F;
@@ -1575,13 +1577,15 @@ float SampleShadowPcf(Texture2DArray<float> textureValue, SamplerState samplerVa
         [unroll]
         for (int x = -1; x <= 1; ++x)
         {
-            const float2 sampleUv = uv + float2(x, y) * inverseResolution;
-            if (any(sampleUv < 0.0F.xx) || any(sampleUv > 1.0F.xx))
+            const float2 unclampedUv = uv + float2(x, y) * inverseResolution;
+            if (!clampSamples &&
+                (any(unclampedUv < sampleBounds.xy) || any(unclampedUv > sampleBounds.zw)))
             {
                 visibility += 1.0F;
             }
             else
             {
+                const float2 sampleUv = clamp(unclampedUv, sampleBounds.xy, sampleBounds.zw);
                 const float storedDepth =
                     textureValue.SampleLevel(samplerValue, float3(sampleUv, layer), 0.0F);
                 visibility += depth <= storedDepth ? 1.0F : 0.0F;
@@ -1606,7 +1610,8 @@ float EvaluateDirectionalShadow(const float3 worldPosition, const float viewDept
     const float2 uv = float2(projected.x * 0.5F + 0.5F, -projected.y * 0.5F + 0.5F);
     const float visibility = SampleShadowPcf(DirectionalShadowTexture, DirectionalShadowSampler, uv, cascade,
                                              projected.z - DirectionalShadowParameters.z,
-                                             DirectionalShadowParameters.w, DirectionalShadowParameters.x > 0.0F);
+                                             DirectionalShadowParameters.w, DirectionalShadowParameters.x > 0.0F,
+                                             float4(0.0F, 0.0F, 1.0F, 1.0F), false);
     return lerp(1.0F, visibility, saturate(DirectionalShadowParameters.y));
 }
 
@@ -1657,7 +1662,8 @@ float EvaluateLocalShadow(const uint lightIndex, const float3 worldPosition)
     const float2 uv = float2(projected.x * 0.5F + 0.5F, -projected.y * 0.5F + 0.5F);
     const float visibility = SampleShadowPcf(LocalShadowTexture, LocalShadowSampler, uv, 0.0F,
                                              projected.z - LocalShadowParameters[lightIndex].w, 1.0F / 4096.0F,
-                                             LocalShadowParameters[lightIndex].z > 0.5F);
+                                             LocalShadowParameters[lightIndex].z > 0.5F,
+                                             LocalShadowSampleBounds[matrixIndex], true);
     return lerp(1.0F, visibility, saturate(LocalShadowParameters[lightIndex].y));
 }
 
@@ -3938,7 +3944,7 @@ float4 PSMain(VertexOutput input) : SV_Target0
     {
         AssetImporterRegistration result;
         result.Name = "Keire.ShaderGraph";
-        result.Version = 17;
+        result.Version = 18;
         result.Type = ShaderGraphAsset::StaticType();
         result.Extensions = {".keireshadergraph"};
         result.ContextualImport = [](const AssetImportContext& context, const std::span<const std::byte> bytes)

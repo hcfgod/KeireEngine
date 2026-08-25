@@ -41,6 +41,10 @@ $env:ASTRO_TELEMETRY_DISABLED = '1'
 if ($LASTEXITCODE -ne 0) {
     throw 'Documentation dependency restore failed.'
 }
+& $Npm --prefix $documentationSite test
+if ($LASTEXITCODE -ne 0) {
+    throw 'Documentation tests failed.'
+}
 & $Npm --prefix $documentationSite run build
 if ($LASTEXITCODE -ne 0) {
     throw 'Documentation production build failed.'

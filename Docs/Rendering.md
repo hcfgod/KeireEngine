@@ -5,10 +5,12 @@
 Opaque scene geometry with `Cast Shadows` enabled is submitted to stabilized directional cascade maps and a bounded
 spot/point shadow atlas. Materials whose shader manifest opts into `receivesShadows` sample those maps only when the
 renderer component also has `Receive Shadows` enabled. Directional lights support up to four cascades from the project
-rendering settings. Local-light tile requests are allocated deterministically in a 4,096-pixel atlas from each light's
-resolution hint, stable entity identity, and point-light face. To keep local-light cost bounded, the renderer selects at
-most eight shadowed spot lights and two shadowed point lights; requests that do not fit remain fully lit. Point and spot
-components expose Disabled, Hard, and Soft authoring modes plus strength, bias, and resolution.
+rendering settings. Before applying the local-shadow limits, the renderer ranks every eligible light by intensity with
+stable entity-identity ties, then selects at most eight shadowed spot lights and two shadowed point lights. Their tile
+requests are allocated deterministically in a 4,096-pixel atlas from each light's resolution hint, stable identity, and
+point-light face; requests that do not fit remain fully lit. Every tile reserves a two-texel cleared gutter, and receiver
+sampling is clamped to that tile's texel-center bounds so soft PCF cannot read a neighboring light or point face. Point
+and spot components expose Disabled, Hard, and Soft authoring modes plus strength, bias, and resolution.
 Directional cascade centers snap in the light-space basis to whole shadow texels, and each projection reserves a
 two-texel filter guard band. PCF taps outside a map are treated as lit instead of clamping an edge depth, preventing
 camera or light rotation from exposing rectangular cascade borders.
@@ -153,6 +155,9 @@ Scene camera. The two viewport overlays report their own surface rather than imp
 bug button and Game's **GPU Bounds** control expose red/green culling bounds for their respective viewport cameras. Their
 FPS and timing rows remain frame aggregates across every rendered surface. Scene's controls are:
 
+Raw `RenderView` clients must provide finite camera matrices and color plus clip planes satisfying
+`0 < NearPlane < FarPlane <= 10,000,000`; a rejected update leaves the previous camera intact.
+
 - `F`: frame the selected entity's full imported bounds with visible padding; double-`F` locks the view to it.
 - `Shift+F`: lock or unlock the view pivot to the selected entity.
 - Alt+left drag: orbit.
@@ -234,6 +239,8 @@ Rendering environment values are stored in `ProjectSettings/Rendering.keiresetti
 Settings...** to edit them live. Values update rendering immediately and persist once the active edit finishes; writes
 are schema-validated, atomic, and resilient to transient Windows file sharing. A missing file receives conservative
 defaults, while a malformed file is reported and isolated without preventing the project's asset database from opening.
+Raw scene submission applies the same complete schema, environment-lighting, directional-shadow, and GPU-occlusion
+validation before accepting a request.
 
 When Sky Visible is enabled, the renderer draws a deterministic built-in equirectangular studio sky before scene
 geometry. Assigning a Texture2D environment replaces it using the same project rotation, intensity, and exposure. The

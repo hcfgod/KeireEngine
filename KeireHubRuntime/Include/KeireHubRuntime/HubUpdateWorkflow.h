@@ -52,5 +52,6 @@ namespace KeireHub
     CreateHubUpdateHandoffRequest(const HubUpdateCandidate& candidate, const HubUpdateWorkflowState& state,
                                   const std::filesystem::path& cacheRoot, const std::filesystem::path& installRoot,
                                   std::string currentVersion, std::uint64_t currentProcessId,
-                                  std::uint64_t startedUnixSeconds, bool requirePlatformSignature);
+                                  std::uint64_t startedUnixSeconds,
+                                  HubUpdatePlatformSignaturePolicy platformSignaturePolicy);
 } // namespace KeireHub

@@ -143,6 +143,11 @@ namespace Keire
     {
         if (!Math::IsFinite(camera.View) || !Math::IsFinite(camera.Projection) || !ValidColor(camera.ClearColor))
             throw std::invalid_argument("Render camera contains invalid values.");
+        if (!std::isfinite(camera.NearPlane) || !std::isfinite(camera.FarPlane) || camera.NearPlane <= 0.0F ||
+            camera.FarPlane <= camera.NearPlane || camera.FarPlane > 10'000'000.0F)
+        {
+            throw std::invalid_argument("Render camera clip planes must satisfy 0 < near < far <= 10000000.");
+        }
         m_Impl->Camera = camera;
     }
 
@@ -219,14 +224,15 @@ namespace Keire
     RenderCapabilities RenderSystem::Capabilities() const noexcept
     {
         const bool rendered = m_Impl->State->Specification.Mode == RenderMode::Rendered && m_Impl->State->Device;
+        const bool sampledResolvedDepth = rendered && m_Impl->State->ShadowDepthFormat != SDL_GPU_TEXTUREFORMAT_INVALID;
         return {.CpuVfxSimulation = true,
                 .GpuVfxSimulation = rendered,
                 .TransparentPass = rendered,
                 .DynamicSpritePackets = rendered,
                 .TexturedSpritePackets = false,
                 .DynamicMeshPackets = rendered,
-                .SampledResolvedDepth = rendered && m_Impl->State->ShadowDepthFormat != SDL_GPU_TEXTUREFORMAT_INVALID,
-                .GpuDepthCollision = false,
+                .SampledResolvedDepth = sampledResolvedDepth,
+                .GpuDepthCollision = sampledResolvedDepth,
                 .GpuOcclusionCulling = rendered && m_Impl->State->GpuOcclusionCapability};
     }
     RenderStatistics RenderSystem::Statistics() const noexcept

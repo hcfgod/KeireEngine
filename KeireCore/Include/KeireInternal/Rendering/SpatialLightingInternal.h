@@ -44,6 +44,26 @@ namespace Keire::Detail
     [[nodiscard]] std::optional<Vector3> SampleLightProbeIrradiance(const LightProbeVolumeDefinition& volume,
                                                                     Vector3 localPosition, Vector3 localNormal);
 
+    enum class LocalShadowCandidateType : std::uint8_t
+    {
+        Spot,
+        Point
+    };
+
+    struct LocalShadowCandidate
+    {
+        AssetId Light;
+        std::size_t LightIndex = 0;
+        LocalShadowCandidateType Type = LocalShadowCandidateType::Spot;
+        std::int32_t Importance = 0;
+    };
+
+    [[nodiscard]] std::vector<LocalShadowCandidate>
+    SelectLocalShadowCandidates(std::span<const LocalShadowCandidate> candidates, std::size_t maximumSpotLights,
+                                std::size_t maximumPointLights);
+
+    inline constexpr std::uint16_t ShadowAtlasGuardTexels = 2;
+
     struct ShadowAtlasKey
     {
         AssetId Light;
@@ -57,6 +77,8 @@ namespace Keire::Detail
         ShadowAtlasKey Key;
         std::uint16_t Resolution = 1024;
         std::int32_t Importance = 0;
+        // Requests with the same light commit as one transaction when this is set.
+        bool AtomicWithLight = false;
     };
 
     struct ShadowAtlasKeyHash
@@ -73,7 +95,9 @@ namespace Keire::Detail
         std::uint16_t X = 0;
         std::uint16_t Y = 0;
         std::uint16_t Size = 0;
+        // The transform maps clip space into the guarded interior; bounds clamp filtering to this physical tile.
         Vector4 ScaleOffset;
+        Vector4 SampleBounds;
     };
 
     class ShadowAtlasAllocator final

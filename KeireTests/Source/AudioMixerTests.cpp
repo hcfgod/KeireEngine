@@ -1,5 +1,6 @@
 #include "Keire/Core.h"
 
+#include "KeireInternal/Audio/AudioMixerRuntime.h"
 #include "KeireInternal/Audio/NativeAudioNodeContract.h"
 
 #include <doctest/doctest.h>
@@ -7,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -125,6 +127,38 @@ TEST_CASE("Native multi-input audio nodes preserve the shared frame-count bounda
     CHECK(outputFrames == 48);
 }
 
+TEST_CASE("Native mixer attachment failure rolls earlier voices back before publication")
+{
+    std::array<int, 6> nodes{};
+    const std::array attachments{
+        Keire::Detail::NativeAudioAttachmentTransactionEntry{
+            .Source = &nodes[0], .PreviousDestination = &nodes[2], .Destination = &nodes[4]},
+        Keire::Detail::NativeAudioAttachmentTransactionEntry{
+            .Source = &nodes[1], .PreviousDestination = &nodes[3], .Destination = &nodes[5]},
+    };
+    struct Probe final
+    {
+        std::array<void*, 4> Sources{};
+        std::array<void*, 4> Destinations{};
+        std::size_t Count = 0;
+        void* Failure = nullptr;
+    } probe{.Failure = &nodes[5]};
+    const auto attach = [](void* source, void* destination, void* context) noexcept
+    {
+        auto& state = *static_cast<Probe*>(context);
+        state.Sources[state.Count] = source;
+        state.Destinations[state.Count] = destination;
+        ++state.Count;
+        return destination != state.Failure;
+    };
+
+    CHECK_THROWS_WITH_AS(Keire::Detail::ApplyNativeAudioAttachmentTransaction(attachments, attach, &probe),
+                         "Audio voice could not attach to its mixer bus.", std::runtime_error);
+    REQUIRE(probe.Count == 4);
+    CHECK(probe.Sources == std::array<void*, 4>{&nodes[0], &nodes[1], &nodes[1], &nodes[0]});
+    CHECK(probe.Destinations == std::array<void*, 4>{&nodes[4], &nodes[5], &nodes[3], &nodes[2]});
+}
+
 TEST_CASE("Audio effect descriptors provide stable typed parameters and defaults")
 {
     CHECK(Keire::AudioEffectName(Keire::AudioGraphNodeType::AlgorithmicReverb) == "Algorithmic Reverb");
@@ -140,7 +174,404 @@ TEST_CASE("Audio effect descriptors provide stable typed parameters and defaults
     CHECK(defaults[0] == doctest::Approx(80.0F));
     CHECK(defaults[1] == doctest::Approx(0.25F));
     CHECK(defaults[2] == doctest::Approx(0.25F));
-    CHECK(Keire::AudioEffectParameters(Keire::AudioGraphNodeType::ConvolutionReverb).empty());
+    const auto equalizer = Keire::AudioEffectParameters(Keire::AudioGraphNodeType::Equalizer);
+    REQUIRE(equalizer.size() == 6);
+    CHECK(equalizer[0].Id == "outputGain");
+    CHECK(equalizer[1].Id == "lowGain");
+    CHECK(equalizer[1].Unit == Keire::AudioParameterUnit::Decibels);
+    CHECK(equalizer[4].Id == "lowCrossover");
+    CHECK(equalizer[5].Id == "highCrossover");
+
+    const auto convolution = Keire::AudioEffectParameters(Keire::AudioGraphNodeType::ConvolutionReverb);
+    REQUIRE(convolution.size() == 2);
+    CHECK(convolution[0].Id == "wet");
+    CHECK(convolution[0].DefaultValue == doctest::Approx(1.0F));
+    CHECK(convolution[1].Id == "outputGain");
+}
+
+TEST_CASE("Equalizer is frequency selective while legacy one-parameter output gain remains compatible")
+{
+    const auto render = [](const float frequency, std::vector<float> parameters)
+    {
+        constexpr std::uint32_t sampleRate = 48'000;
+        constexpr std::size_t frames = 12'000;
+        Keire::AudioGraphSnapshot graph;
+        graph.SampleRate = sampleRate;
+        graph.Channels = 1;
+        graph.Output = Keire::AudioGraphNodeId(3);
+        graph.Nodes = {
+            {Keire::AudioGraphNodeId(1), "Input", Keire::AudioGraphNodeType::Input, {}, {}},
+            {Keire::AudioGraphNodeId(2),
+             "Equalizer",
+             Keire::AudioGraphNodeType::Equalizer,
+             {{Keire::AudioGraphNodeId(1), false}},
+             std::move(parameters)},
+            {Keire::AudioGraphNodeId(3),
+             "Output",
+             Keire::AudioGraphNodeType::Output,
+             {{Keire::AudioGraphNodeId(2), false}},
+             {}},
+        };
+        Keire::AudioSystemSpecification specification;
+        specification.Mode = Keire::AudioMode::Headless;
+        auto audio = Keire::CreateRef<Keire::AudioSystem>(specification);
+        audio->SubmitGraph(std::make_shared<const Keire::AudioGraphSnapshot>(std::move(graph)));
+        std::vector<float> input(frames);
+        constexpr float pi = 3.14159265358979323846F;
+        for (std::size_t frame = 0; frame < frames; ++frame)
+            input[frame] = std::sin(2.0F * pi * frequency * static_cast<float>(frame) / sampleRate);
+        const auto rendered = audio->RenderOffline(input, frames);
+        audio->Close();
+        double squareSum = 0.0;
+        constexpr std::size_t settleFrames = 2000;
+        for (std::size_t frame = settleFrames; frame < rendered.size(); ++frame)
+            squareSum += static_cast<double>(rendered[frame]) * rendered[frame];
+        return static_cast<float>(std::sqrt(squareSum / static_cast<double>(rendered.size() - settleFrames)));
+    };
+
+    const auto legacy = render(1000.0F, {0.25F});
+    CHECK(legacy == doctest::Approx(0.25F / std::sqrt(2.0F)).epsilon(0.01));
+    const std::vector<float> shaped{1.0F, 12.0F, 0.0F, -12.0F, 250.0F, 4000.0F};
+    const auto low = render(80.0F, shaped);
+    const auto high = render(10'000.0F, shaped);
+    CHECK(low > high * 4.0F);
+    auto invertedCrossovers = shaped;
+    std::swap(invertedCrossovers[4], invertedCrossovers[5]);
+    CHECK(render(1000.0F, invertedCrossovers) == doctest::Approx(render(1000.0F, shaped)).epsilon(0.001));
+
+    auto definition = Keire::AudioMixerAsset::DefaultDefinition();
+    definition.Buses.front().Effects.push_back(
+        {.Id = Id(299), .Name = "Legacy EQ", .Type = Keire::AudioGraphNodeType::Equalizer, .Parameters = {0.25F}});
+    const auto decoded = Keire::AudioMixerAsset::Decode(Keire::AudioMixerAsset::Encode(definition));
+    REQUIRE(decoded->Definition().Buses.front().Effects.front().Parameters.size() == 1);
+    CHECK(decoded->Definition().Buses.front().Effects.front().Parameters.front() == doctest::Approx(0.25F));
+}
+
+TEST_CASE("Authored convolution impulse responses drive mixer, graph, and streaming DSP output")
+{
+    constexpr auto mixer = Id(280);
+    constexpr auto impulseId = Id(281);
+    auto definition = Keire::AudioMixerAsset::DefaultDefinition();
+    definition.Buses.front().Effects.push_back({.Id = Id(282),
+                                                .Name = "Room",
+                                                .Type = Keire::AudioGraphNodeType::ConvolutionReverb,
+                                                .Parameters = {1.0F, 1.0F},
+                                                .ImpulseResponse = impulseId});
+
+    auto impulse = std::make_shared<Keire::AudioClipData>();
+    impulse->SampleRate = 48'000;
+    impulse->Channels = 1;
+    impulse->Frames = 3;
+    impulse->Samples = {0.5F, 0.25F, -0.125F};
+    const Keire::AudioMixerImpulseResponses responses{{impulseId, impulse}};
+
+    Keire::AudioSystemSpecification specification;
+    specification.Mode = Keire::AudioMode::Headless;
+    auto audio = Keire::CreateRef<Keire::AudioSystem>(specification);
+    CHECK_THROWS_WITH_AS(audio->SubmitMixer(mixer, definition),
+                         "Audio mixer convolution reverb impulse response is unresolved.", std::invalid_argument);
+    CHECK_NOTHROW(audio->SubmitMixer(mixer, definition, responses));
+
+    auto source = std::make_shared<Keire::AudioClipData>();
+    source->SampleRate = 48'000;
+    source->Channels = 1;
+    source->Frames = 5;
+    source->Samples = {1.0F, 0.0F, 0.0F, 0.0F, 0.0F};
+    Keire::AudioPlaybackRequest request;
+    request.Clip = source;
+    request.Mixer = mixer;
+    request.BusId = definition.MasterBus;
+    request.Spatial = false;
+    REQUIRE(audio->Play(std::move(request)));
+    const auto mixed = audio->RenderVoicesOffline(5);
+    REQUIRE(mixed.size() == 10);
+    for (std::size_t channel = 0; channel < 2; ++channel)
+    {
+        CHECK(mixed[channel] == doctest::Approx(0.5F));
+        CHECK(mixed[2 + channel] == doctest::Approx(0.25F));
+        CHECK(mixed[4 + channel] == doctest::Approx(-0.125F));
+        CHECK(mixed[6 + channel] == doctest::Approx(0.0F));
+    }
+    CHECK_NOTHROW(audio->SubmitMixer(mixer, definition));
+
+    Keire::AudioGraphSnapshot graph;
+    graph.Output = Keire::AudioGraphNodeId(3);
+    graph.Channels = 1;
+    graph.Nodes = {
+        {Keire::AudioGraphNodeId(1), "Input", Keire::AudioGraphNodeType::Input, {}, {}},
+        {Keire::AudioGraphNodeId(2),
+         "Convolution",
+         Keire::AudioGraphNodeType::ConvolutionReverb,
+         {{Keire::AudioGraphNodeId(1), false}},
+         {0.5F, 0.25F, -0.125F}},
+        {Keire::AudioGraphNodeId(3),
+         "Output",
+         Keire::AudioGraphNodeType::Output,
+         {{Keire::AudioGraphNodeId(2), false}},
+         {}},
+    };
+    audio->SubmitGraph(std::make_shared<const Keire::AudioGraphSnapshot>(std::move(graph)));
+    const std::array graphInput{1.0F, 0.0F, 0.0F, 0.0F};
+    const auto graphed = audio->RenderOffline(graphInput, graphInput.size());
+    CHECK(graphed == std::vector<float>{0.5F, 0.25F, -0.125F, 0.0F});
+
+    Keire::AudioGraphSnapshot cappedGraph;
+    cappedGraph.Revision = 2;
+    cappedGraph.Output = Keire::AudioGraphNodeId(3);
+    cappedGraph.Channels = 1;
+    std::vector<float> legacyTaps(257, 0.0F);
+    legacyTaps[0] = 0.5F;
+    legacyTaps[255] = 0.25F;
+    legacyTaps[256] = 4.0F;
+    cappedGraph.Nodes = {
+        {Keire::AudioGraphNodeId(1), "Input", Keire::AudioGraphNodeType::Input, {}, {}},
+        {Keire::AudioGraphNodeId(2),
+         "Capped convolution",
+         Keire::AudioGraphNodeType::ConvolutionReverb,
+         {{Keire::AudioGraphNodeId(1), false}},
+         std::move(legacyTaps)},
+        {Keire::AudioGraphNodeId(3),
+         "Output",
+         Keire::AudioGraphNodeType::Output,
+         {{Keire::AudioGraphNodeId(2), false}},
+         {}},
+    };
+    audio->SubmitGraph(std::make_shared<const Keire::AudioGraphSnapshot>(std::move(cappedGraph)));
+    std::vector<float> cappedInput(1281, 0.0F);
+    cappedInput.front() = 1.0F;
+    const auto capped = audio->RenderOffline(cappedInput, cappedInput.size());
+    CHECK(capped[1024] == doctest::Approx(0.5F).epsilon(0.001));
+    CHECK(capped[1279] == doctest::Approx(0.25F).epsilon(0.001));
+    CHECK(capped[1280] == doctest::Approx(0.0F).epsilon(0.001));
+
+    const auto prepared = Keire::Detail::PrepareAudioImpulseResponse(*impulse, 48'000, 1);
+    Keire::Detail::AudioEffectProcessor processor(Keire::AudioGraphNodeType::ConvolutionReverb, 48'000, 1,
+                                                  std::array{1.0F, 1.0F}, &prepared);
+    std::array firstBlock{1.0F};
+    processor.Process(firstBlock);
+    CHECK(firstBlock.front() == doctest::Approx(0.5F));
+    std::array secondBlock{0.0F, 0.0F};
+    processor.Process(secondBlock);
+    CHECK(secondBlock[0] == doctest::Approx(0.25F));
+    CHECK(secondBlock[1] == doctest::Approx(-0.125F));
+
+    auto partitionedImpulse = std::make_shared<Keire::AudioClipData>();
+    partitionedImpulse->SampleRate = 48'000;
+    partitionedImpulse->Channels = 1;
+    partitionedImpulse->Frames = 129;
+    partitionedImpulse->Samples.assign(129, 0.0F);
+    partitionedImpulse->Samples[0] = 0.5F;
+    partitionedImpulse->Samples[128] = 0.25F;
+    const auto partitionedPrepared = Keire::Detail::PrepareAudioImpulseResponse(*partitionedImpulse, 48'000, 1);
+    Keire::Detail::AudioEffectProcessor partitioned(Keire::AudioGraphNodeType::ConvolutionReverb, 48'000, 1,
+                                                    std::array{1.0F, 1.0F}, &partitionedPrepared);
+    std::vector<float> partitionedInPlace(1153, 0.0F);
+    partitionedInPlace.front() = 1.0F;
+    partitioned.Process(partitionedInPlace);
+    CHECK(std::ranges::all_of(partitionedInPlace.begin(), partitionedInPlace.begin() + 1024,
+                              [](const float sample) { return std::abs(sample) < 0.0001F; }));
+    CHECK(partitionedInPlace[1024] == doctest::Approx(0.5F).epsilon(0.001));
+    CHECK(partitionedInPlace[1152] == doctest::Approx(0.25F).epsilon(0.001));
+
+    Keire::Detail::AudioEffectProcessor livePartitioned(Keire::AudioGraphNodeType::ConvolutionReverb, 48'000, 1,
+                                                        std::array{1.0F, 1.0F}, &partitionedPrepared);
+    std::vector<float> liveFirstBlock(800, 0.0F);
+    liveFirstBlock.front() = 1.0F;
+    livePartitioned.Process(liveFirstBlock);
+    CHECK(std::ranges::all_of(liveFirstBlock, [](const float sample) { return std::abs(sample) < 0.0001F; }));
+    livePartitioned.UpdateParameters(std::array{0.75F, 1.0F});
+    std::vector<float> liveSecondBlock(353, 0.0F);
+    livePartitioned.Process(liveSecondBlock);
+    CHECK(liveSecondBlock[224] == doctest::Approx(0.375F).epsilon(0.001));
+    CHECK(liveSecondBlock[352] == doctest::Approx(0.1875F).epsilon(0.001));
+
+    const Keire::Detail::PreparedAudioImpulseResponse deltaImpulse{.Channels = 1, .Samples = {1.0F}};
+    Keire::Detail::AudioEffectProcessor mailbox(Keire::AudioGraphNodeType::ConvolutionReverb, 48'000, 1,
+                                                std::array{0.5F, 0.0F}, &deltaImpulse);
+    std::atomic<bool> startMailboxUpdates = false;
+    std::atomic<bool> mailboxUpdatesComplete = false;
+    std::thread mailboxWriter(
+        [&]
+        {
+            while (!startMailboxUpdates.load(std::memory_order_acquire))
+                std::this_thread::yield();
+            for (std::size_t revision = 0; revision < 200'000; ++revision)
+            {
+                if (revision % 2U == 0)
+                    mailbox.UpdateParameters(std::array{0.5F, 0.0F});
+                else
+                    mailbox.UpdateParameters(std::array{1.0F, 2.0F});
+            }
+            mailboxUpdatesComplete.store(true, std::memory_order_release);
+        });
+    startMailboxUpdates.store(true, std::memory_order_release);
+    bool mailboxOutputValid = true;
+    for (std::size_t block = 0; block < 10'000 || !mailboxUpdatesComplete.load(std::memory_order_acquire); ++block)
+    {
+        std::array<float, 16> samples;
+        samples.fill(1.0F);
+        mailbox.Process(samples);
+        mailboxOutputValid =
+            mailboxOutputValid &&
+            std::ranges::all_of(samples, [](const float sample)
+                                { return std::abs(sample - 0.5F) < 0.0001F || std::abs(sample - 2.0F) < 0.0001F; });
+    }
+    mailboxWriter.join();
+    CHECK(mailboxOutputValid);
+
+    auto excessiveImpulse = *impulse;
+    excessiveImpulse.SampleRate = 8000;
+    excessiveImpulse.Frames = 40'001;
+    excessiveImpulse.Samples.assign(static_cast<std::size_t>(excessiveImpulse.Frames), 0.0F);
+    CHECK_THROWS_WITH_AS((void)Keire::Detail::PrepareAudioImpulseResponse(excessiveImpulse, 384'000, 8),
+                         "Audio impulse response exceeds the five-second or channel-work convolution limit.",
+                         std::invalid_argument);
+    std::vector<float> excessiveMono(Keire::Detail::MaximumAudioConvolutionChannelFrames / 16U + 1U, 0.0F);
+    CHECK_THROWS_WITH_AS((void)Keire::Detail::PrepareMonoAudioImpulseResponse(excessiveMono, 16),
+                         "Audio impulse response exceeds the channel-work convolution limit.", std::invalid_argument);
+    Keire::Detail::PreparedAudioImpulseResponse excessivePrepared{.Channels = 1};
+    excessivePrepared.Samples.assign(240'001, 0.0F);
+    CHECK_THROWS_WITH_AS((void)Keire::Detail::AudioEffectProcessor(Keire::AudioGraphNodeType::ConvolutionReverb, 48'000,
+                                                                   1, std::array{1.0F, 1.0F}, &excessivePrepared),
+                         "Audio impulse response exceeds the five-second or channel-work convolution limit.",
+                         std::invalid_argument);
+
+    auto budgetDefinition = Keire::AudioMixerAsset::DefaultDefinition();
+    auto budgetImpulse = std::make_shared<Keire::AudioClipData>();
+    budgetImpulse->SampleRate = 48'000;
+    budgetImpulse->Channels = 1;
+    budgetImpulse->Frames = 240'000;
+    budgetImpulse->Samples.assign(static_cast<std::size_t>(budgetImpulse->Frames), 0.0F);
+    for (std::uint64_t index = 0; index < 9; ++index)
+        budgetDefinition.Buses.front().Effects.push_back({.Id = Id(310 + index),
+                                                          .Name = "Budgeted room " + std::to_string(index),
+                                                          .Type = Keire::AudioGraphNodeType::ConvolutionReverb,
+                                                          .Parameters = {1.0F, 1.0F},
+                                                          .ImpulseResponse = impulseId});
+    CHECK_THROWS_WITH_AS(audio->SubmitMixer(Id(309), budgetDefinition, {{impulseId, budgetImpulse}}),
+                         "Audio mixer active convolution effects exceed the aggregate channel-work limit.",
+                         std::invalid_argument);
+    audio->Close();
+}
+
+TEST_CASE("Headless mixer convolution retains partition state across short zone-style parameter updates")
+{
+    constexpr auto mixer = Id(285);
+    constexpr auto impulseId = Id(286);
+    auto definition = Keire::AudioMixerAsset::DefaultDefinition();
+    definition.Buses.front().Effects.push_back({.Id = Id(287),
+                                                .Name = "Partitioned room",
+                                                .Type = Keire::AudioGraphNodeType::ConvolutionReverb,
+                                                .Parameters = {1.0F, 1.0F},
+                                                .ImpulseResponse = impulseId});
+    auto impulse = std::make_shared<Keire::AudioClipData>();
+    impulse->SampleRate = 48'000;
+    impulse->Channels = 1;
+    impulse->Frames = 129;
+    impulse->Samples.assign(129, 0.0F);
+    impulse->Samples[0] = 0.5F;
+    impulse->Samples[128] = 0.25F;
+
+    Keire::AudioSystemSpecification specification;
+    specification.Mode = Keire::AudioMode::Headless;
+    auto audio = Keire::CreateRef<Keire::AudioSystem>(specification);
+    const Keire::AudioMixerImpulseResponses responses{{impulseId, impulse}};
+    const auto routing = audio->RegisterMixer(mixer, definition, responses);
+    REQUIRE(routing);
+    auto source = std::make_shared<Keire::AudioClipData>();
+    source->SampleRate = 48'000;
+    source->Channels = 1;
+    source->Frames = 2048;
+    source->Samples.assign(2048, 0.0F);
+    source->Samples.front() = 1.0F;
+    Keire::AudioPlaybackRequest request;
+    request.Clip = source;
+    request.Mixer = mixer;
+    request.MixerRouting = routing;
+    request.BusId = definition.MasterBus;
+    request.Spatial = false;
+    REQUIRE(audio->Play(std::move(request)));
+
+    std::vector<float> firstChannel;
+    for (std::size_t block = 0; block < 19; ++block)
+    {
+        definition.Buses.front().Effects.front().Parameters[0] = block % 2U == 0 ? 0.75F : 1.0F;
+        REQUIRE(audio->UpdateMixer(routing, definition, responses));
+        const auto rendered = audio->RenderVoicesOffline(64);
+        REQUIRE(rendered.size() == 128);
+        for (std::size_t frame = 0; frame < 64; ++frame)
+            firstChannel.push_back(rendered[frame * 2U]);
+    }
+    REQUIRE(firstChannel.size() == 1216);
+    CHECK(firstChannel.front() == doctest::Approx(0.25F).epsilon(0.001));
+    CHECK(std::ranges::all_of(firstChannel.begin() + 1, firstChannel.begin() + 1024,
+                              [](const float sample) { return std::abs(sample) < 0.0001F; }));
+    CHECK(firstChannel[1024] == doctest::Approx(0.375F).epsilon(0.001));
+    CHECK(firstChannel[1152] == doctest::Approx(0.1875F).epsilon(0.001));
+    audio->Close();
+}
+
+TEST_CASE("Audio system convolution budget is transactional across stored and registered mixer instances")
+{
+    constexpr auto mixer = Id(330);
+    constexpr auto impulseId = Id(331);
+    auto definition = Keire::AudioMixerAsset::DefaultDefinition();
+    for (std::uint64_t index = 0; index < 128; ++index)
+        definition.Buses.front().Effects.push_back({.Id = Id(340 + index),
+                                                    .Name = "Bounded room " + std::to_string(index),
+                                                    .Type = Keire::AudioGraphNodeType::ConvolutionReverb,
+                                                    .Parameters = {1.0F, 1.0F},
+                                                    .ImpulseResponse = impulseId});
+    auto impulse = std::make_shared<Keire::AudioClipData>();
+    impulse->SampleRate = 48'000;
+    impulse->Channels = 1;
+    impulse->Frames = 128;
+    impulse->Samples.assign(128, 0.0F);
+    impulse->Samples.front() = 1.0F;
+    const Keire::AudioMixerImpulseResponses responses{{impulseId, impulse}};
+
+    Keire::AudioSystemSpecification specification;
+    specification.Mode = Keire::AudioMode::Headless;
+    specification.OutputLayout = Keire::AudioChannelLayout::Surround71;
+    auto audio = Keire::CreateRef<Keire::AudioSystem>(specification);
+    audio->SubmitMixer(mixer, definition, responses);
+    Keire::AudioMixerRoutingId firstRouting;
+    for (std::size_t registration = 0; registration < 63; ++registration)
+    {
+        const auto routing = audio->RegisterMixer(mixer, definition, responses);
+        REQUIRE(routing);
+        if (registration == 0)
+            firstRouting = routing;
+    }
+    auto largerImpulse = std::make_shared<Keire::AudioClipData>(*impulse);
+    largerImpulse->Frames = 129;
+    largerImpulse->Samples.push_back(0.0F);
+    const Keire::AudioMixerImpulseResponses largerResponses{{impulseId, largerImpulse}};
+    CHECK_THROWS_WITH_AS(audio->SubmitMixer(mixer, definition, largerResponses),
+                         "Audio system convolution effects exceed the aggregate channel-work limit.",
+                         std::invalid_argument);
+    REQUIRE(firstRouting);
+    CHECK(audio->UpdateMixer(firstRouting, definition, responses));
+
+    auto source = std::make_shared<Keire::AudioClipData>();
+    source->SampleRate = 48'000;
+    source->Channels = 1;
+    source->Frames = 1;
+    source->Samples = {1.0F};
+    Keire::AudioPlaybackRequest request;
+    request.Clip = source;
+    request.Mixer = mixer;
+    request.MixerRouting = firstRouting;
+    request.BusId = definition.MasterBus;
+    request.Spatial = false;
+    REQUIRE(audio->Play(std::move(request)));
+    const auto rendered = audio->RenderVoicesOffline(1);
+    REQUIRE(rendered.size() == 8);
+    CHECK(rendered[0] == doctest::Approx(0.70710678F));
+    CHECK(rendered[1] == doctest::Approx(0.70710678F));
+    CHECK(std::ranges::all_of(rendered.begin() + 2, rendered.end(),
+                              [](const float sample) { return std::abs(sample) < 0.0001F; }));
+    audio->Close();
 }
 
 TEST_CASE("Audio mixer schema round trips deterministically and stable IDs survive renames")

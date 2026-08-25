@@ -684,6 +684,13 @@ Assert-True ($menuScript.Contains('"package-editor"') -and $menuScript.Contains(
 $testScript = Get-Content (Join-Path $Windows "test.ps1") -Raw
 $coverageScript = Get-Content (Join-Path $Windows "coverage.ps1") -Raw
 Assert-True ($testScript.Contains('-Target $Project.CLIENT_TARGET')) "Complete client compile test gate"
+$workspaceSmokePattern = '(?s)-Target \$Project\.CLIENT_TARGET.*?SDL_VIDEODRIVER = "dummy".*?' +
+    '& \$ClientExe --smoke-workspace'
+Assert-True ($testScript -match $workspaceSmokePattern) "Headless editor workspace smoke follows the client build gate"
+$clientApplicationSource = Get-Content (Join-Path (Get-RepositoryRoot) "KeireClient\Source\ClientApplication.cpp") -Raw
+Assert-True ($clientApplicationSource.Contains('"--smoke-workspace"') -and
+             $clientApplicationSource.Contains('commandLine.SmokeWorkspace ? UiMode::Headless')) `
+    "Production headless editor workspace smoke mode"
 Assert-True ($testScript.Contains('$hubTestsTarget = "$($Project.PROJECT_NAMESPACE)HubTests"') -and
              $testScript.Contains('& $hubTestsExe')) "Private Hub test suite execution"
 Assert-True ($coverageScript.Contains('$target -eq $Project.CLIENT_TARGET') -and

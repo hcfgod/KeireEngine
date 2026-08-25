@@ -101,7 +101,7 @@ evidence remain incomplete.
 | Editor and authoring workflows | 10% | A- | 90/100 | Broad and increasingly polished; accessibility, localization, and content-scale evidence still lag. |
 | Rendering, shaders, materials, and VFX | 12% | A- | 92/100 | Render suites pass and the Showcase optimization is measured; broader native GPU/reference-scene coverage remains open. |
 | Managed gameplay and runtime services | 10% | A | 94/100 | Reload safety, multi-scene worlds, runtime UI, asset residency, and gameplay APIs are substantial. |
-| Hub, distribution, and website | 10% | A | 94/100 | Signed Windows/Linux distribution and a unified validated web platform are live; native signatures remain. |
+| Hub, distribution, and website | 10% | A | 94/100 | Catalog-signed Windows/Linux distribution and a unified validated web platform are live; native signatures remain. |
 | Marketplace and package ecosystem | 8% | B+ | 87/100 | Upload-once validation and automatic metadata signing exist; public launch and legal gates remain closed. |
 | Performance evidence | 8% | A- | 92/100 | Same-workload captures show a 6.18x FPS gain, 95.6% fewer draws, and no steady-state dynamic-buffer reallocations. |
 | Cross-platform release evidence | 8% | B+ | 87/100 | Windows/Linux packages are published and macOS x86-64 source gates pass; Metal hardware, Apple silicon, and ARM64 remain open. |
@@ -145,8 +145,9 @@ The package workflow passed:
 - the complete Client compile gate, SDK consumers, Sandbox cook/runtime smoke, and staged/extracted inventory checks.
 
 The Hub EXE is distributed through the signed catalog and exact SHA-256 identity but is not Authenticode-signed.
-Windows may therefore show an unknown-publisher warning, and automatic Windows update installation remains unavailable
-until native signature verification can succeed.
+Windows may therefore show an unknown-publisher warning. Current source accepts a genuinely absent publisher signature
+under the disclosed catalog-trust policy while rejecting present invalid or untrusted signatures. An already-installed
+0.4.1 Hub still needs an Authenticode-signed bridge/target or a one-time manual update to cross to that fixed policy.
 
 ### Linux 0.3.2 release
 
@@ -217,7 +218,7 @@ and explicit preview/launch labeling. The static migration fallback remains inde
 | Accessibility structure | B+ | 89/100 | Skip links, landmarks, labels, responsive navigation, one primary heading, accessible diagrams, and reduced-motion-aware styling exist. A formal screen-reader/browser matrix remains open. |
 | Metadata, discovery, and sharing | A- | 93/100 | Canonicals, sitemap, RSS, structured data, Open Graph, X cards, Pagefind, and per-page descriptions are present. Production-domain search-console evidence is not retained here. |
 | Security and deployment boundaries | A | 95/100 | Self-hosted CSP-compatible assets, canonical-origin mutations, SSR sessions, forced RLS, private Storage, health contracts, and Caddy isolation are substantial. |
-| Dynamic account and Marketplace workflows | B+ | 88/100 | Identity, MFA, OAuth, publishing, moderation, entitlement, and automatic publication paths exist behind gates; public end-to-end launch acceptance remains incomplete. |
+| Dynamic account and Marketplace workflows | B+ | 88/100 | The website password-replacement route is AMR-bound, MFA-stepped, site-route constrained, and unit-tested, and local Auth enables secure password changes. Supabase recovery tokens remain authenticated sessions whose direct Data API access is governed by RLS; hosted current-password enforcement and broader identity, publishing, moderation, entitlement, and public end-to-end acceptance remain launch gates. |
 | Browser and performance evidence | B- | 82/100 | Build-time route/CSP/link/search validation is strong, but the formal browser, assistive-technology, and branded-domain performance audit is still a launch gate. |
 
 ## System Assessment
@@ -226,7 +227,7 @@ and explicit preview/launch labeling. The static migration fallback remains inde
 | --- | ---: | --- |
 | Application, layers, events, and time | A | Owner-thread rules, deferred mutation, bounded queues, fixed time, exception containment, and shutdown have focused coverage. Continued long-session and platform differential testing remains appropriate. |
 | ECS, scenes, prefabs, and undo | A | Stable identities, multi-scene runtime worlds, scoped queries, persistence, schema migration, Play isolation, nested prefabs, recovery, and transactional undo are mature. Larger collaborative scenes need sustained evidence. |
-| Editor workspace and authoring | A- | Docking, documents, hierarchy/Inspector, asset browsing, targeted imports, previews, graph editors, settings, diagnostics, procedural profiles, and package management are implemented. Full accessibility, localization, and collaborative-depot automation remain incomplete. |
+| Editor workspace and authoring | A- | Docking, documents, hierarchy/Inspector, asset browsing, targeted imports, previews, graph editors, settings, diagnostics, procedural profiles, and package management are implemented. The composition root remains intentionally centralized and needs further decomposition; full accessibility, localization, and collaborative-depot automation remain incomplete. |
 | Rendering | A- | SDL GPU isolation, D3D12/Vulkan formats, HDR/ACES, Forward+, shadows, lighting data, LODs, skinning, graph pipelines, last-good safety, and both rendered-output suites are substantial. Broader native GPU and long-session evidence remains open. |
 | Animation and rigging | B+ | Graph animation, retargeting, semantic rigs, arm/leg IK, procedural humanoid motion, terrain contacts, airborne states, and presentation interpolation are implemented. Procedural motion still needs broader rig/content tuning and long-session visual acceptance. |
 | Shader and material ecosystem | B | Shader/Material Graphs, functions, layers, persistent/dynamic instances, world-scoped collections, and live revisions exist. The 98/145 Complete matrix and 39 Planned rows make a full Unreal-parity claim inaccurate. |

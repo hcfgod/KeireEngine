@@ -1019,6 +1019,10 @@ namespace
                 context.SourceRoot = input.parent_path();
                 context.SourcePath = input;
                 context.RelativePath = input.filename();
+                Keire::Detail::AnchoredFileSystem modelFiles(input.parent_path());
+                context.ReadProjectFile =
+                    [&modelFiles, maximum = context.MaximumDependencyBytes](const std::filesystem::path& relative)
+                { return modelFiles.Read(relative, maximum); };
                 const auto imported = importer.ContextualImport(context, bytes);
                 auto output = commandLine.Output;
                 if (output == std::filesystem::path("Build/Assets"))

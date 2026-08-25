@@ -24,6 +24,7 @@ var tests = new (string Name, Action Run)[]
     ("Managed rendering objects preserve camera lights materials and shader overrides", ManagedRenderingContract),
     ("Managed scene loads and render settings preserve native world transactions", ManagedWorldContract),
     ("Managed jobs execute delegates and publish terminal states", ManagedJobExecutionContract),
+    ("Managed job cancellation remains exception-safe", ManagedJobCancellationExceptionContract),
     ("Managed jobs preserve terminal dependency semantics", ManagedJobDependencyContract),
     ("Application, time, and screen use the native foundation contract", RuntimeFoundationContract),
     ("Player preferences persist typed values atomically", PlayerPreferencesPersistenceContract),
@@ -737,6 +738,55 @@ static void ManagedJobExecutionContract()
     Assert(scopeCancelled.Invoke(3, 0) == 0, "The scope-cancelled job must publish its terminal state.");
 }
 
+static void ManagedJobCancellationExceptionContract()
+{
+    NativeJobFixture.Install();
+    try
+    {
+        CancellationToken managedToken = default;
+        Keire.Job managedCancelled = Keire.Jobs.Submit(context => managedToken = context.CancellationToken);
+        Assert(managedCancelled.Id == NativeJobFixture.LastSubmittedId && NativeJobFixture.Invoke(0, 0) == 0,
+               "The cancellation fixture must submit and enter its running phase through the interop callback.");
+        using (managedToken.Register(() => throw new InvalidOperationException("expected cancellation failure")))
+        {
+            AssertThrows<AggregateException>(() => managedCancelled.Cancel(),
+                "Managed cancellation callback failures must remain observable to the caller.");
+        }
+        Assert(managedToken.IsCancellationRequested && NativeJobFixture.CancelCount == 1 &&
+                   NativeJobFixture.LastCancelledId == managedCancelled.Id &&
+                   !NativeJobFixture.CurrentState!.IsInteropHandleReleased,
+               "Managed cancellation must still request native cancellation when token callbacks throw.");
+        Assert(NativeJobFixture.Invoke(3, 0) == 0 && managedCancelled.Status == Keire.JobStatus.Cancelled,
+               "A callback failure during cancellation must not replace native terminal delivery.");
+        AssertThrows<TaskCanceledException>(() => managedCancelled.Completion.GetAwaiter().GetResult(),
+                                            "The cancelled job must retain its native terminal result.");
+        managedCancelled.Cancel();
+        Assert(NativeJobFixture.CancelCount == 1,
+               "Cancelling a terminal managed job must not issue another native cancellation request.");
+
+        CancellationToken nativeToken = default;
+        Keire.Job nativeCancelled = Keire.Jobs.Submit(context => nativeToken = context.CancellationToken);
+        Assert(NativeJobFixture.Invoke(0, 0) == 0,
+               "The native cancellation fixture must enter its running phase through the interop callback.");
+        using (nativeToken.Register(() => throw new InvalidOperationException("expected native cancellation failure")))
+        {
+            Assert(NativeJobFixture.Invoke(4, 0) == 0 && nativeToken.IsCancellationRequested,
+                   "Native cancellation must contain token callback failures at the interop boundary.");
+        }
+        Assert(!NativeJobFixture.CurrentState!.IsInteropHandleReleased,
+               "A nonterminal native cancellation callback must retain the managed interop handle.");
+        Assert(NativeJobFixture.Invoke(3, 0) == 0 &&
+                   NativeJobFixture.CurrentState.IsInteropHandleReleased &&
+                   nativeCancelled.Status == Keire.JobStatus.Cancelled,
+               "Only native terminal delivery may release the managed interop handle.");
+        NativeJobFixture.CurrentState.ReleaseHandle();
+    }
+    finally
+    {
+        NativeJobFixture.Uninstall();
+    }
+}
+
 static void ManagedJobDependencyContract()
 {
     var activeState = new Keire.ManagedJobState(_ => { });
@@ -1077,6 +1127,67 @@ static void AssertThrows<TException>(Action action, string message)
     }
 
     throw new InvalidOperationException(message);
+}
+
+file static unsafe class NativeJobFixture
+{
+    private static IntPtr s_state;
+    private static IntPtr s_callback;
+    private static ulong s_nextId;
+
+    internal static int CancelCount { get; private set; }
+    internal static ulong LastCancelledId { get; private set; }
+    internal static ulong LastSubmittedId { get; private set; }
+    internal static Keire.ManagedJobState? CurrentState { get; private set; }
+
+    internal static void Install()
+    {
+        s_state = IntPtr.Zero;
+        s_callback = IntPtr.Zero;
+        s_nextId = 44;
+        CancelCount = 0;
+        LastCancelledId = 0;
+        LastSubmittedId = 0;
+        CurrentState = null;
+        Keire.NativeRuntime.SubmitManagedJobIcall = &SubmitManagedJob;
+        Keire.NativeRuntime.CancelManagedJobIcall = &CancelManagedJob;
+    }
+
+    internal static void Uninstall()
+    {
+        CurrentState?.ReleaseHandle();
+        CurrentState = null;
+        s_state = IntPtr.Zero;
+        s_callback = IntPtr.Zero;
+        Keire.NativeRuntime.SubmitManagedJobIcall = null;
+        Keire.NativeRuntime.CancelManagedJobIcall = null;
+    }
+
+    internal static byte Invoke(byte phase, byte stopRequested)
+    {
+        if (s_callback == IntPtr.Zero || s_state == IntPtr.Zero)
+            throw new InvalidOperationException("No managed job callback has been submitted.");
+        var callback = (delegate* unmanaged<IntPtr, byte, byte, byte>)s_callback;
+        return callback(s_state, phase, stopRequested);
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static ulong SubmitManagedJob(ulong* dependencies, int dependencyCount, byte priority, byte jobClass,
+                                          Keire.NativeString name, IntPtr state, IntPtr callback)
+    {
+        s_state = state;
+        s_callback = callback;
+        CurrentState = System.Runtime.InteropServices.GCHandle.FromIntPtr(state).Target as Keire.ManagedJobState;
+        LastSubmittedId = ++s_nextId;
+        return LastSubmittedId;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static void CancelManagedJob(ulong id)
+    {
+        ++CancelCount;
+        LastCancelledId = id;
+    }
 }
 
 file static unsafe class NativeAssetFixture

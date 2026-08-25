@@ -88,6 +88,12 @@ routes = "\n".join(
 )
 
 require(
+    "[auth.email]" in supabase_config
+    and "secure_password_change = true"
+    in supabase_config.split("[auth.email]", 1)[1].split("[", 1)[0],
+    "Local Supabase Auth must require secure password changes.",
+)
+require(
     '"X-Client-Info": "keire-marketplace-edge/0.4.2"' in shared,
     "Marketplace Edge requests must identify the current 0.4.2 source client.",
 )

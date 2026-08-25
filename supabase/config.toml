@@ -1,3 +1,6 @@
+[auth.email]
+secure_password_change = true
+
 [functions.website-contact]
 verify_jwt = false
 

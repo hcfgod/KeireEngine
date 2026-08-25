@@ -28,6 +28,6 @@ namespace Keire::RenderBackend
     };
 
     [[nodiscard]] ForwardPlusTileGrid BuildForwardPlusCpuTiles(std::uint32_t width, std::uint32_t height,
-                                                               const Matrix4& projection,
+                                                               const Matrix4& projection, float nearPlane,
                                                                std::span<const ForwardPlusLightBounds> lights);
 } // namespace Keire::RenderBackend

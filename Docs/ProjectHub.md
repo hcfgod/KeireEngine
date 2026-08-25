@@ -313,11 +313,14 @@ versions, and treats a minimum-version policy without a suitable installer as a 
 Hub-installer records must match the verified catalog's key, channel, platform, and architecture exactly; wildcard or
 cross-endpoint installers fail closed. **Download update** creates a dedicated resumable `HubUpdate` task and publishes
 the native artifact only after its signed-catalog SHA-256 and size match. Download completion does not install anything.
-The separately enabled **Install update…** action rechecks the digest, verifies Authenticode on Windows, writes an
-atomic resume token, and then opens the native installer before the Hub exits normally. Windows NSIS waits for the
-recorded Hub PID and revalidates the registered install root and ownership marker before replacing files. Linux uses an
-explicit `pkexec` handoff to `dpkg` for DEB hosts or `dnf`/`zypper` for RPM hosts when those tools exist; its
-signed-catalog digest remains the package trust boundary.
+The separately enabled **Install update…** action rechecks the digest and inspects Authenticode on Windows. A genuinely
+unsigned installer is accepted only under the current disclosed catalog-trust policy; a present but invalid, revoked,
+or untrusted signature fails closed. The Hub then writes an atomic resume token and opens the native installer before
+exiting normally. Windows NSIS waits for the recorded Hub PID, revalidates the registered install root and ownership
+marker, fully stages the replacement, journals the payload swap, and retains a rollback backup until promotion commits.
+Interrupted replacement is recovered or rolled back before another install begins, and unknown top-level entries
+outside the installer-owned directories are preserved. Linux uses an explicit `pkexec` handoff to `dpkg` for DEB hosts
+or `dnf`/`zypper` for RPM hosts when those tools exist; its signed-catalog digest remains the package trust boundary.
 The macOS drag-to-Applications DMG is revealed for manual installation rather than treated as an automatic replacement.
 If a safe native handoff is unavailable, the Hub offers only to reveal the verified installer. On the next launch the Hub
 removes the token only when the installed semantic version reached or exceeded the target; otherwise it keeps a recovery
@@ -338,7 +341,9 @@ displace the last valid snapshot. `KeireHubPackagePublisher create-editor` conve
 distribution into the generic archive/catalog manifest. `create-hub-installer` creates the corresponding catalog
 manifest only for a clean Hub package and platform-native `.exe`, `.dmg`, `.deb`, or `.rpm`. Catalog signing and
 SHA-256 binding are mandatory. Native signing/notarization remains mandatory for a production platform claim; an
-unsigned preview must be disclosed and may have a narrower installation path. Linux Hub records carry an explicit
+unsigned preview must be disclosed. A Hub already running the older unconditional Authenticode policy cannot be fixed
+retroactively, so the transition from 0.4.1 requires either an Authenticode-signed bridge installer or a documented
+one-time manual install. Linux Hub records carry an explicit
 `packageFormat`. This lets one signed Linux
 catalog retain DEB and RPM artifacts for the same Hub version while each host and the downloads site select the correct
 format. `prepare-distribution-snapshot.py` accepts repeated manifest/artifact pairs, rechecks every length and digest,

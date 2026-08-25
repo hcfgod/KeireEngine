@@ -4,6 +4,8 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <optional>
+#include <ranges>
 #include <stdexcept>
 #include <unordered_set>
 
@@ -236,12 +238,55 @@ namespace Keire::Detail
         return Vector3{std::max(0.0F, result.X), std::max(0.0F, result.Y), std::max(0.0F, result.Z)};
     }
 
+    std::vector<LocalShadowCandidate>
+    SelectLocalShadowCandidates(const std::span<const LocalShadowCandidate> candidates,
+                                const std::size_t maximumSpotLights, const std::size_t maximumPointLights)
+    {
+        std::vector<LocalShadowCandidate> ordered(candidates.begin(), candidates.end());
+        std::ranges::sort(ordered,
+                          [](const LocalShadowCandidate& left, const LocalShadowCandidate& right)
+                          {
+                              if (left.Importance != right.Importance)
+                                  return left.Importance > right.Importance;
+                              if (left.Light != right.Light)
+                                  return left.Light < right.Light;
+                              if (left.Type != right.Type)
+                                  return left.Type < right.Type;
+                              return left.LightIndex < right.LightIndex;
+                          });
+
+        std::vector<LocalShadowCandidate> selected;
+        selected.reserve(std::min(ordered.size(), maximumSpotLights + maximumPointLights));
+        std::size_t spotCount = 0;
+        std::size_t pointCount = 0;
+        for (const auto& candidate : ordered)
+        {
+            if (candidate.Type == LocalShadowCandidateType::Spot)
+            {
+                if (spotCount >= maximumSpotLights)
+                    continue;
+                ++spotCount;
+            }
+            else
+            {
+                if (pointCount >= maximumPointLights)
+                    continue;
+                ++pointCount;
+            }
+            selected.push_back(candidate);
+        }
+        return selected;
+    }
+
     ShadowAtlasAllocator::ShadowAtlasAllocator(const std::uint16_t atlasSize, const std::uint16_t minimumTileSize)
         : m_AtlasSize(atlasSize), m_MinimumTileSize(minimumTileSize)
     {
-        if (atlasSize == 0U || minimumTileSize == 0U || atlasSize % minimumTileSize != 0U ||
+        if (atlasSize == 0U || minimumTileSize <= ShadowAtlasGuardTexels * 2U || atlasSize % minimumTileSize != 0U ||
             (atlasSize & (atlasSize - 1U)) != 0U || (minimumTileSize & (minimumTileSize - 1U)) != 0U)
-            throw std::invalid_argument("Shadow atlas and tile sizes must be compatible powers of two.");
+        {
+            throw std::invalid_argument(
+                "Shadow atlas and tile sizes must be compatible powers of two with room for guard texels.");
+        }
     }
 
     std::span<const ShadowAtlasAllocation>
@@ -259,19 +304,58 @@ namespace Keire::Detail
                 rounded = static_cast<std::uint16_t>(rounded * 2U);
             request.Resolution = rounded;
         }
-        std::ranges::sort(ordered,
-                          [](const ShadowAtlasRequest& left, const ShadowAtlasRequest& right)
+
+        struct RequestGroup final
+        {
+            std::vector<ShadowAtlasRequest> Requests;
+        };
+        std::vector<RequestGroup> groups;
+        groups.reserve(ordered.size());
+        for (const auto& request : ordered)
+        {
+            if (!request.AtomicWithLight)
+            {
+                groups.push_back({{request}});
+                continue;
+            }
+            const auto existing = std::ranges::find_if(groups,
+                                                       [&](const RequestGroup& group)
+                                                       {
+                                                           return group.Requests.front().AtomicWithLight &&
+                                                                  group.Requests.front().Key.Light == request.Key.Light;
+                                                       });
+            if (existing == groups.end())
+            {
+                groups.push_back({{request}});
+                continue;
+            }
+            if (existing->Requests.front().Resolution != request.Resolution ||
+                existing->Requests.front().Importance != request.Importance)
+            {
+                throw std::invalid_argument(
+                    "Atomic shadow atlas requests for one light must have matching resolution and importance.");
+            }
+            existing->Requests.push_back(request);
+        }
+        for (auto& group : groups)
+            std::ranges::sort(group.Requests, {}, &ShadowAtlasRequest::Key);
+        std::ranges::sort(groups,
+                          [](const RequestGroup& left, const RequestGroup& right)
                           {
-                              if (left.Importance != right.Importance)
-                                  return left.Importance > right.Importance;
-                              if (left.Resolution != right.Resolution)
-                                  return left.Resolution > right.Resolution;
-                              return left.Key < right.Key;
+                              const auto& leftRequest = left.Requests.front();
+                              const auto& rightRequest = right.Requests.front();
+                              if (leftRequest.Importance != rightRequest.Importance)
+                                  return leftRequest.Importance > rightRequest.Importance;
+                              if (leftRequest.Resolution != rightRequest.Resolution)
+                                  return leftRequest.Resolution > rightRequest.Resolution;
+                              return leftRequest.Key < rightRequest.Key;
                           });
+
         const auto gridSize = static_cast<std::uint16_t>(m_AtlasSize / m_MinimumTileSize);
         std::vector<bool> occupied(static_cast<std::size_t>(gridSize) * gridSize);
         m_Allocations.clear();
-        for (const auto& request : ordered)
+        const auto tryAllocate = [&](const ShadowAtlasRequest& request,
+                                     std::vector<bool>& candidateOccupied) -> std::optional<ShadowAtlasAllocation>
         {
             const auto tile = static_cast<std::uint16_t>(request.Resolution / m_MinimumTileSize);
             std::uint16_t selectedX = gridSize;
@@ -281,7 +365,7 @@ namespace Keire::Detail
             {
                 const auto x = static_cast<std::uint16_t>(previous->second.X / m_MinimumTileSize);
                 const auto y = static_cast<std::uint16_t>(previous->second.Y / m_MinimumTileSize);
-                if (Fits(occupied, gridSize, x, y, tile))
+                if (Fits(candidateOccupied, gridSize, x, y, tile))
                 {
                     selectedX = x;
                     selectedY = y;
@@ -291,7 +375,7 @@ namespace Keire::Detail
             {
                 for (std::uint16_t x = 0; x + tile <= gridSize; x += tile)
                 {
-                    if (Fits(occupied, gridSize, x, y, tile))
+                    if (Fits(candidateOccupied, gridSize, x, y, tile))
                     {
                         selectedX = x;
                         selectedY = y;
@@ -300,18 +384,44 @@ namespace Keire::Detail
                 }
             }
             if (selectedX == gridSize)
-                continue;
-            Occupy(occupied, gridSize, selectedX, selectedY, tile);
+                return std::nullopt;
+            Occupy(candidateOccupied, gridSize, selectedX, selectedY, tile);
             ShadowAtlasAllocation allocation;
             allocation.Key = request.Key;
             allocation.X = static_cast<std::uint16_t>(selectedX * m_MinimumTileSize);
             allocation.Y = static_cast<std::uint16_t>(selectedY * m_MinimumTileSize);
             allocation.Size = request.Resolution;
             const auto atlasSize = static_cast<float>(m_AtlasSize);
-            const auto scale = static_cast<float>(allocation.Size) / atlasSize;
-            allocation.ScaleOffset = {scale, scale, static_cast<float>(allocation.X) / atlasSize,
-                                      static_cast<float>(allocation.Y) / atlasSize};
-            m_Allocations.push_back(allocation);
+            const auto innerSize = static_cast<float>(allocation.Size - ShadowAtlasGuardTexels * 2U);
+            const auto scale = innerSize / atlasSize;
+            allocation.ScaleOffset = {scale, scale,
+                                      static_cast<float>(allocation.X + ShadowAtlasGuardTexels) / atlasSize,
+                                      static_cast<float>(allocation.Y + ShadowAtlasGuardTexels) / atlasSize};
+            allocation.SampleBounds = {(static_cast<float>(allocation.X) + 0.5F) / atlasSize,
+                                       (static_cast<float>(allocation.Y) + 0.5F) / atlasSize,
+                                       (static_cast<float>(allocation.X + allocation.Size) - 0.5F) / atlasSize,
+                                       (static_cast<float>(allocation.Y + allocation.Size) - 0.5F) / atlasSize};
+            return allocation;
+        };
+        for (const auto& group : groups)
+        {
+            auto candidateOccupied = occupied;
+            std::vector<ShadowAtlasAllocation> candidateAllocations;
+            candidateAllocations.reserve(group.Requests.size());
+            for (const auto& request : group.Requests)
+            {
+                const auto allocation = tryAllocate(request, candidateOccupied);
+                if (!allocation)
+                {
+                    candidateAllocations.clear();
+                    break;
+                }
+                candidateAllocations.push_back(*allocation);
+            }
+            if (candidateAllocations.empty())
+                continue;
+            occupied = std::move(candidateOccupied);
+            m_Allocations.insert(m_Allocations.end(), candidateAllocations.begin(), candidateAllocations.end());
         }
         m_Previous.clear();
         for (const auto& allocation : m_Allocations)

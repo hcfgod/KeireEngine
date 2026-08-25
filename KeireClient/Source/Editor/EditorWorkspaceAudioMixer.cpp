@@ -11,6 +11,23 @@ namespace
 {
     using KeireEditor::Detail::ReadBytes;
     using KeireEditor::Detail::WriteBytesAtomically;
+
+    [[nodiscard]] Keire::AudioMixerImpulseResponses
+    ResolveImpulseResponses(const Keire::Ref<Keire::AssetSystem>& assets, const Keire::AudioMixerDefinition& definition)
+    {
+        Keire::AudioMixerImpulseResponses result;
+        const auto dependencies = Keire::AudioMixerDependencies(definition);
+        if (!dependencies.empty() && !assets)
+            throw std::runtime_error("Asset services are unavailable for Audio Mixer impulse responses.");
+        for (const auto id : dependencies)
+        {
+            const auto loaded = assets->Load<Keire::AudioClipAsset>(id, Keire::AssetPriority::High).TryGetLoaded();
+            if (!loaded)
+                throw std::runtime_error("An Audio Mixer impulse response is still loading.");
+            result.emplace(id, loaded->Clip());
+        }
+        return result;
+    }
 } // namespace
 
 KeireEditor::AudioMixerDocument& EditorWorkspaceLayer::AudioMixerState() noexcept { return *m_AudioMixerDocument; }
@@ -95,10 +112,11 @@ void EditorWorkspaceLayer::StopAudioMixerPreview() noexcept
         const auto& specification = m_AssetDatabase->Specification();
         const auto source = specification.ProjectRoot / specification.SourceDirectory / record->RelativePath;
         const auto mixer = Keire::AudioMixerAsset::Decode(ReadBytes(source));
-        if (const auto assets = Owner().Assets())
+        const auto assets = Owner().Assets();
+        if (assets)
             (void)assets->PublishDevelopmentAsset(asset, mixer);
         if (const auto audio = Owner().Audio())
-            audio->SubmitMixer(asset, mixer->Definition());
+            audio->SubmitMixer(asset, mixer->Definition(), ResolveImpulseResponses(assets, mixer->Definition()));
     }
     catch (...)
     {
@@ -112,10 +130,11 @@ void EditorWorkspaceLayer::PreviewAudioMixer(const Keire::AssetId asset, const K
 {
     Keire::ValidateAudioMixer(definition);
     const auto mixer = Keire::CreateRef<Keire::AudioMixerAsset>(definition);
-    if (const auto assets = Owner().Assets(); !assets || !assets->PublishDevelopmentAsset(asset, mixer))
+    const auto assets = Owner().Assets();
+    if (!assets || !assets->PublishDevelopmentAsset(asset, mixer))
         throw std::runtime_error("The transient Audio Mixer asset could not be published for live preview.");
     if (const auto audio = Owner().Audio())
-        audio->SubmitMixer(asset, definition);
+        audio->SubmitMixer(asset, definition, ResolveImpulseResponses(assets, definition));
     m_AudioMixerPreviewAsset = asset;
     m_AudioMixerPreviewDiagnostic =
         "Live routing and fader preview is active; headless previews also process effects, sends, ducking, reverb, "

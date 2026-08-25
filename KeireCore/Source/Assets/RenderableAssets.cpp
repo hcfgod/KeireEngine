@@ -2,6 +2,7 @@
 #include "Keire/Animation/RiggingSystem.h"
 #include "Keire/Assets/RenderingAssets.h"
 
+#include "KeireInternal/Assets/AssimpProjectIO.h"
 #include "KeireInternal/Assets/BuiltinMeshes.h"
 #include "KeireInternal/Assets/ImportedMaterialShader.h"
 #include "KeireInternal/Assets/TextureImportBackend.h"
@@ -14,6 +15,7 @@
 #include <assimp/matrix3x3.h>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
+#include <nlohmann/json.hpp>
 #include <stb_image.h>
 
 #include <algorithm>
@@ -978,7 +980,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.Mesh";
-        result.Version = 16;
+        result.Version = 17;
         result.Type = MeshAsset::StaticType();
         result.CompatibleTypes = {AnimationSourceAsset::StaticType()};
         result.Extensions = {".obj", ".fbx", ".gltf", ".glb", ".keiremesh"};
@@ -1013,6 +1015,28 @@ namespace Keire
             }
             Assimp::Importer importer;
             AssetImportOutput output;
+            Detail::AssimpProjectIO* projectIO = nullptr;
+            if (context.ReadProjectFile)
+            {
+                auto handler = std::make_unique<Detail::AssimpProjectIO>(context);
+                projectIO = handler.get();
+                importer.SetIOHandler(handler.release());
+            }
+            const auto throwIfSidecarViolation = [projectIO]
+            {
+                if (projectIO && !projectIO->Violation().empty())
+                    throw std::invalid_argument("Mesh import rejected a model sidecar: " +
+                                                std::string(projectIO->Violation()));
+            };
+            const auto collectSourceDependencies = [&output, projectIO, &throwIfSidecarViolation]
+            {
+                throwIfSidecarViolation();
+                if (projectIO)
+                {
+                    output.SourceDependencies = projectIO->SourceDependencies();
+                    std::ranges::sort(output.SourceDependencies, {}, &AssetSourceDependency::RelativePath);
+                }
+            };
             importer.SetPropertyBool(AI_CONFIG_PP_PTV_KEEP_HIERARCHY, true);
             constexpr unsigned int flags = aiProcess_Triangulate | aiProcess_GenSmoothNormals |
                                            aiProcess_CalcTangentSpace | aiProcess_SortByPType |
@@ -1022,9 +1046,40 @@ namespace Keire
             if (!extension.empty() && extension.front() == '.')
                 extension.erase(extension.begin());
             extension = Lowercase(std::move(extension));
+            if (projectIO && extension == "gltf")
+            {
+                const auto source = std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+                const auto document = nlohmann::json::parse(source, nullptr, false);
+                if (!document.is_discarded())
+                {
+                    for (const std::string_view collection : {"buffers", "images"})
+                    {
+                        const auto entries = document.find(collection);
+                        if (entries == document.end() || !entries->is_array())
+                            continue;
+                        for (const auto& entry : *entries)
+                        {
+                            const auto uri = entry.find("uri");
+                            if (uri == entry.end() || !uri->is_string())
+                                continue;
+                            const auto& reference = uri->get_ref<const std::string&>();
+                            if (Lowercase(reference.substr(0, std::min<std::size_t>(reference.size(), 5U))) == "data:")
+                                continue;
+                            (void)projectIO->ValidateReference(reference);
+                        }
+                    }
+                    throwIfSidecarViolation();
+                }
+            }
             const auto* scene = importer.ReadFileFromMemory(bytes.data(), bytes.size(), flags, extension.c_str());
+            throwIfSidecarViolation();
             if (!scene)
-                throw std::invalid_argument(std::string("Mesh import failed: ") + importer.GetErrorString());
+            {
+                auto diagnostic = std::string("Mesh import failed: ") + importer.GetErrorString();
+                if (projectIO && !projectIO->LastReadFailure().empty())
+                    diagnostic += " " + std::string(projectIO->LastReadFailure());
+                throw std::invalid_argument(std::move(diagnostic));
+            }
             const bool animationSource = contentType == "animation";
             if (animationSource && scene->mNumAnimations == 0)
                 throw std::invalid_argument("Animation Source import found no animation clips in the selected file.");
@@ -1134,22 +1189,42 @@ namespace Keire
                         if (material->GetTexture(type, 0, &path) != aiReturn_SUCCESS)
                             return {};
                         const auto* embedded = scene->GetEmbeddedTexture(path.C_Str());
+                        std::optional<Detail::AssimpProjectFile> external;
                         if (!embedded)
                         {
-                            output.Diagnostics.push_back(
-                                {AssetDiagnosticSeverity::Warning, context.RelativePath, 0, 0,
-                                 "Material '" + materialNames[materialIndex] + "' references external texture '" +
-                                     path.C_Str() +
-                                     "'; import it as a project texture and assign it after extraction."});
-                            return {};
+                            if (projectIO)
+                                external = projectIO->ReadReferencedFile(path.C_Str());
+                            if (!external)
+                            {
+                                throwIfSidecarViolation();
+                                auto diagnostic = "Material '" + materialNames[materialIndex] +
+                                                  "' could not read external texture '" + path.C_Str() + "'.";
+                                if (projectIO && !projectIO->LastReadFailure().empty())
+                                    diagnostic += " " + std::string(projectIO->LastReadFailure());
+                                else if (!projectIO)
+                                    diagnostic += " Project-file access is unavailable.";
+                                output.Diagnostics.push_back({AssetDiagnosticSeverity::Warning, context.RelativePath, 0,
+                                                              0, std::move(diagnostic)});
+                                return {};
+                            }
                         }
-                        const auto textureIterator =
-                            std::find(scene->mTextures, scene->mTextures + scene->mNumTextures, embedded);
-                        if (textureIterator == scene->mTextures + scene->mNumTextures)
-                            throw std::logic_error("Assimp returned an embedded texture outside the imported scene.");
-                        const auto textureIndex = static_cast<std::size_t>(textureIterator - scene->mTextures);
-                        const auto key = "texture/" + std::to_string(textureIndex) + "/" +
-                                         std::to_string(static_cast<unsigned int>(semantic));
+                        std::string key;
+                        if (embedded)
+                        {
+                            const auto textureIterator =
+                                std::find(scene->mTextures, scene->mTextures + scene->mNumTextures, embedded);
+                            if (textureIterator == scene->mTextures + scene->mNumTextures)
+                                throw std::logic_error(
+                                    "Assimp returned an embedded texture outside the imported scene.");
+                            const auto textureIndex = static_cast<std::size_t>(textureIterator - scene->mTextures);
+                            key = "texture/" + std::to_string(textureIndex) + "/" +
+                                  std::to_string(static_cast<unsigned int>(semantic));
+                        }
+                        else
+                        {
+                            key = "texture/external/" + external->RelativePath.generic_string() + "/" +
+                                  std::to_string(static_cast<unsigned int>(semantic));
+                        }
                         if (const auto existing = publishedTextures.find(key); existing != publishedTextures.end())
                             return existing->second;
 
@@ -1157,7 +1232,11 @@ namespace Keire
                         settings.Semantic = semantic;
                         settings.ColorSpace = colorSpace;
                         std::vector<TextureMipLevel> mips;
-                        if (embedded->mHeight == 0)
+                        if (!embedded)
+                        {
+                            mips = ImportTexture(external->Bytes, settings, {});
+                        }
+                        else if (embedded->mHeight == 0)
                         {
                             const auto textureBytes = std::span(reinterpret_cast<const std::byte*>(embedded->pcData),
                                                                 static_cast<std::size_t>(embedded->mWidth));
@@ -1615,6 +1694,7 @@ namespace Keire
                     output.Diagnostics.push_back(
                         {AssetDiagnosticSeverity::Information, context.RelativePath, 0, 0,
                          "Published animation source with stable skeleton, rig, and clip subassets."});
+                    collectSourceDependencies();
                     return output;
                 }
                 skinnedMeshId = context.ResolveSubAssetId("skinned-mesh/default");
@@ -1876,6 +1956,7 @@ namespace Keire
             }
             output.Metadata.LocalBounds = AssetBounds{{bounds.Minimum.X, bounds.Minimum.Y, bounds.Minimum.Z},
                                                       {bounds.Maximum.X, bounds.Maximum.Y, bounds.Maximum.Z}};
+            collectSourceDependencies();
             return output;
         };
         result.ImportOptions = {{"contentType",

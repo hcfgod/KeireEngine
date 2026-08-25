@@ -349,22 +349,6 @@ namespace Keire
                                                             m_Impl->DiagnosticReportService, m_Impl->MemoryService);
             for (auto& serializer : m_Impl->ModuleService->ReplaySerializers())
                 m_Impl->ReplayService->RegisterSerializer(std::move(serializer));
-            for (const auto& module : m_Impl->ModuleService->OrderedCatalog())
-            {
-                if (!module.SimulationAffecting)
-                    continue;
-                m_Impl->ReplayService->RegisterSerializer({.Id = "module." + module.Id,
-                                                           .Version = 1,
-                                                           .Deterministic = module.DeterministicReplay,
-                                                           .Capture = [] { return std::vector<std::byte>{}; },
-                                                           .Restore =
-                                                               [](std::span<const std::byte> state)
-                                                           {
-                                                               if (!state.empty())
-                                                                   throw std::runtime_error(
-                                                                       "Source module replay marker state is invalid.");
-                                                           }});
-            }
             if (m_Impl->Specification.Ui.Mode != UiMode::Disabled)
             {
                 m_Impl->UserInterface = std::make_unique<UiSystem>(m_Impl->Specification.Ui, *m_Impl->Windowing,

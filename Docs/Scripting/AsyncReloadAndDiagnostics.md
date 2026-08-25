@@ -32,7 +32,9 @@ thread-safe computation and I/O, but must return to the Behaviour synchronizatio
 components, windows, or other owner-thread services.
 
 `Job.Completion` preserves the original managed exception, publishes cancellation as a cancelled task, and runs
-continuations asynchronously. `Cancel` requests cooperative cancellation through `JobContext.CancellationToken`.
+continuations asynchronously. `Cancel` requests cooperative cancellation through `JobContext.CancellationToken`. If a
+token registration throws during that request, `Cancel` still reaches the native scheduler before rethrowing the
+registration failure, and `Completion` continues to follow the scheduler's terminal result.
 Successful dependencies are omitted from later native submissions because their ordering constraint is already
 satisfied; live, failed, and cancelled dependencies retain native scheduler semantics. Reload and shutdown cancel and
 drain the managed job scope before retiring the generation. Native scope cancellation is bridged into the token of a

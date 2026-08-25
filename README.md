@@ -282,15 +282,18 @@ Packaging is performed on the target operating system:
 The distribution service uses offline Ed25519 catalog signing, immutable SHA-256 package addressing, transactional
 snapshot activation, ETags, conditional requests, and range requests. Catalog trust authenticates metadata and exact
 artifact bytes; it does not imply Authenticode, RPM GPG, or Apple notarization. A preview artifact without a native
-platform signature must be disclosed as such and cannot use the automatic Windows update handoff. Production release
-claims still require the platform-native signing policy described in the release guide.
+platform signature must be disclosed as such. Windows in-app handoff always rehashes the catalog-bound artifact and
+inspects Authenticode: a genuinely unsigned preview may use the disclosed catalog-trust policy, while a present but
+invalid or untrusted publisher signature fails closed. Production release claims still require the platform-native
+signing policy described in the release guide.
 
 See [Asset Packages](Docs/AssetPackages.md), [Desktop Player Builds](Docs/PlayerBuilds.md),
 [Package Archives](Docs/PackageArchives.md), and
 [Testing and Release](Docs/TestingAndRelease.md) before producing or publishing an artifact.
 
-Marketplace assets follow an explicit ownership boundary: browse and claim on the website, authorize and verify the
-private download in Kéire Hub, then install or import into the open project from the Editor's **Window -> Package
+The Marketplace is a production-oriented, free-only platform in staged rollout, not a generally available commerce
+product. Marketplace assets follow an explicit ownership boundary: browse and claim on the website, authorize and
+verify the private download in Kéire Hub, then install or import into the open project from the Editor's **Window -> Package
 Manager** surface. **Open in Editor** links use the registered `keirehub` protocol, but Hub remains the secure account
 and download bridge. The Editor receives only an atomic token-free catalog/library/cache snapshot with the public
 signed publication proof, independently verifies that proof against the packaged rotating trust bundle, and rechecks

@@ -1,6 +1,7 @@
 import type { APIRoute } from "astro";
 import { requireSupabase } from "../../../lib/api";
 import {
+    accountCallbackDestination,
     getAssuranceState,
     mfaChallengePath,
     oauthFailurePath,
@@ -34,7 +35,9 @@ export const GET: APIRoute = async (context) => {
             return fail("exchange_failed");
         }
         const assurance = await getAssuranceState(supabase);
-        return context.redirect(requiresMfaChallenge(assurance) ? mfaChallengePath(next) : next, 303);
+        if (!assurance.available) throw new Error("Account assurance lookup failed after code exchange.");
+        const destination = accountCallbackDestination(assurance, next);
+        return context.redirect(requiresMfaChallenge(assurance) ? mfaChallengePath(destination) : destination, 303);
     } catch (error) {
         console.error(JSON.stringify({
             level: "error",

@@ -49,6 +49,13 @@ namespace Keire
         ModuleVersionRange Version;
     };
 
+    enum class ModuleReplayState : std::uint8_t
+    {
+        Unspecified,
+        Stateless,
+        Stateful
+    };
+
     struct ModuleDescriptor
     {
         std::string Id;
@@ -57,6 +64,8 @@ namespace Keire
         std::vector<ModuleDependency> Dependencies;
         bool SimulationAffecting = false;
         bool DeterministicReplay = true;
+        // Simulation-affecting modules must choose Stateless or register module.<Id> for Stateful capture/restore.
+        ModuleReplayState ReplayState = ModuleReplayState::Unspecified;
     };
 
     struct ModuleMemoryDomainRegistration

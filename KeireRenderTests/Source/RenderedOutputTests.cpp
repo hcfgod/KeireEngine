@@ -35,6 +35,8 @@ using KeireRenderTests::Detail::RenderAssetFixture;
 
 namespace
 {
+    constexpr std::uint32_t LocalShadowEdgeSurfaceSize = 257;
+
     enum class CaptureKind : std::uint8_t
     {
         AmbientZero,
@@ -1229,6 +1231,125 @@ namespace
         std::uint32_t m_Frame = 0;
     };
 
+    class LocalShadowAtlasEdgeCaptureLayer final : public Keire::Layer
+    {
+      public:
+        LocalShadowAtlasEdgeCaptureLayer(const Keire::AssetId mesh, const Keire::AssetId material,
+                                         std::shared_ptr<CaptureResults> results)
+            : Layer("Local shadow atlas edge capture"), m_Mesh(mesh), m_Material(material),
+              m_Results(std::move(results))
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            m_Scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Parse("711ace00-0000-4000-8000-000000000015"),
+                                                     Keire::SceneAsset::EmptyDefinition("Local shadow atlas edge"),
+                                                     Keire::ComponentRegistry::CreateDefault());
+
+            constexpr Keire::Vector3 receiverPosition{4.008F, 0.0F, -4.0F};
+            auto receiver = m_Scene->CreateEntity("Point face seam receiver");
+            receiver.GetComponent<Keire::TransformComponent>()->SetLocalPosition(receiverPosition);
+            receiver.GetComponent<Keire::TransformComponent>()->SetLocalScale({3.0F, 0.1F, 3.0F});
+            const auto receiverRenderer = receiver.AddComponent<Keire::MeshRendererComponent>();
+            receiverRenderer->SetMesh(m_Mesh);
+            receiverRenderer->SetMaterial(m_Material);
+            receiverRenderer->SetCastShadows(false);
+
+            auto caster = m_Scene->CreateEntity("Opposite point face caster");
+            m_CasterTransform = caster.GetComponent<Keire::TransformComponent>();
+            m_CasterTransform->SetLocalPosition({-2.004F, 1.525F, -2.0F});
+            m_CasterTransform->SetLocalScale({0.8F, 0.8F, 0.8F});
+            m_Caster = caster.AddComponent<Keire::MeshRendererComponent>();
+            m_Caster->SetMesh(m_Mesh);
+            m_Caster->SetMaterial(m_Material);
+            m_Caster->SetReceiveShadows(false);
+            m_Caster->SetCastShadows(false);
+
+            auto pointEntity = m_Scene->CreateEntity("Point face seam light");
+            pointEntity.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, 3.0F, 0.0F});
+            m_Point = pointEntity.AddComponent<Keire::PointLightComponent>();
+            m_Point->SetIntensity(40.0F);
+            m_Point->SetRange(15.0F);
+            m_Point->SetShadowResolution(Keire::ShadowResolutionHint::Low);
+            m_Point->SetShadows(Keire::ShadowQuality::Soft);
+
+            Keire::RenderSurfaceSpecification surface;
+            surface.Name = "Local shadow atlas edge";
+            surface.Width = LocalShadowEdgeSurfaceSize;
+            surface.Height = LocalShadowEdgeSurfaceSize;
+            surface.ClearColor = {0.02F, 0.02F, 0.02F, 1.0F};
+            surface.SampleCount = Keire::RenderSampleCount::One;
+            m_View = Owner().Renderer()->CreateView(surface);
+            Keire::RenderCamera camera;
+            camera.View = Keire::Math::LookAt({receiverPosition.X, 8.0F, receiverPosition.Z},
+                                              {receiverPosition.X, 0.05F, receiverPosition.Z}, {0.0F, 0.0F, -1.0F});
+            camera.Projection = Keire::Math::Perspective(30.0F, 1.0F, 0.1F, 100.0F);
+            camera.FarPlane = 100.0F;
+            camera.ClearColor = surface.ClearColor;
+            m_View->SetCamera(camera);
+        }
+
+        void OnDetach() noexcept override
+        {
+            if (m_Scene)
+                m_Scene->Close();
+            m_Point.Reset();
+            m_Caster.Reset();
+            m_CasterTransform.Reset();
+            m_View.Reset();
+            m_Scene.Reset();
+        }
+
+        void OnUpdate(const Keire::Time&) override
+        {
+            if (m_Frame == 120)
+            {
+                Capture();
+                m_Caster->SetCastShadows(true);
+            }
+            else if (m_Frame == 144)
+            {
+                Capture();
+                m_Results->ShadowDepth.push_back(
+                    Keire::RenderSystemInternalAccess::ReadbackLocalShadow(*Owner().Renderer(), *m_View->Surface(), 0));
+                // Move the caster onto the receiver ray for a positive-control shadow capture.
+                m_CasterTransform->SetLocalPosition({2.004F, 1.525F, -2.0F});
+            }
+            else if (m_Frame == 168)
+            {
+                Capture();
+                Owner().RequestExit();
+                return;
+            }
+
+            Keire::RenderEnvironmentSettings environment;
+            environment.AmbientColor = {0.03F, 0.03F, 0.03F, 1.0F};
+            environment.AmbientIntensity = 0.1F;
+            environment.SkyVisible = false;
+            Owner().Renderer()->Submit({m_Scene, m_View, false, environment});
+            ++m_Frame;
+        }
+
+      private:
+        void Capture()
+        {
+            m_Results->Frames.push_back(
+                Keire::RenderSystemInternalAccess::ReadbackRGBA8(*Owner().Renderer(), *m_View->Surface()));
+        }
+
+        Keire::AssetId m_Mesh;
+        Keire::AssetId m_Material;
+        std::shared_ptr<CaptureResults> m_Results;
+        Keire::Ref<Keire::Scene> m_Scene;
+        Keire::Ref<Keire::RenderView> m_View;
+        Keire::Ref<Keire::PointLightComponent> m_Point;
+        Keire::Ref<Keire::MeshRendererComponent> m_Caster;
+        Keire::Ref<Keire::TransformComponent> m_CasterTransform;
+        std::uint32_t m_Frame = 0;
+    };
+
     struct ReloadCaptureResults final
     {
         std::vector<std::uint8_t> Green;
@@ -2060,6 +2181,60 @@ TEST_CASE("point and spot shadow maps occlude a separate receiving mesh")
     CHECK(std::abs(unshadowed.Blue - spotWithoutCaster.Blue) <= ColorTolerance);
     CHECK(MaximumDarkening(results->Frames[1], results->Frames[2]) >= MinimumShadowDelta);
     CHECK(MaximumDarkening(results->Frames[3], results->Frames[4]) >= MinimumShadowDelta);
+}
+
+TEST_CASE("soft point-shadow PCF does not bleed between adjacent atlas faces")
+{
+    RenderAssetFixture assets;
+    const auto results = std::make_shared<CaptureResults>();
+    auto specification = RenderTestSpecification();
+    specification.Assets.Mode = Keire::AssetMode::Development;
+    specification.Assets.DevelopmentCatalog = assets.Catalog;
+    {
+        Keire::Application application(std::move(specification));
+        (void)application.PushLayer(
+            std::make_unique<LocalShadowAtlasEdgeCaptureLayer>(assets.CubeMesh, assets.Material, results));
+        REQUIRE(application.Run() == 0);
+    }
+
+    REQUIRE(results->Frames.size() == 3);
+    constexpr auto expectedBytes =
+        static_cast<std::size_t>(LocalShadowEdgeSurfaceSize) * LocalShadowEdgeSurfaceSize * 4U;
+    for (const auto& frame : results->Frames)
+        REQUIRE(frame.size() == expectedBytes);
+
+    const auto centerLuminance = [](const std::vector<std::uint8_t>& pixels)
+    {
+        constexpr auto center = LocalShadowEdgeSurfaceSize / 2U;
+        const auto offset = (static_cast<std::size_t>(center) * LocalShadowEdgeSurfaceSize + center) * 4U;
+        return (0.2126F * static_cast<float>(pixels[offset]) + 0.7152F * static_cast<float>(pixels[offset + 1]) +
+                0.0722F * static_cast<float>(pixels[offset + 2])) /
+               255.0F;
+    };
+    const auto unoccluded = centerLuminance(results->Frames[0]);
+    const auto adjacentFaceCaster = centerLuminance(results->Frames[1]);
+    const auto inFrontCaster = centerLuminance(results->Frames[2]);
+    CHECK(unoccluded > MinimumBehaviorDelta);
+    CHECK(unoccluded - adjacentFaceCaster <= 0.01F);
+    CHECK(unoccluded > inFrontCaster + MinimumShadowDelta);
+
+    REQUIRE(results->ShadowDepth.size() == 1);
+    const auto& atlas = results->ShadowDepth.front();
+    constexpr auto atlasSize = Keire::RenderBackend::LocalShadowResolution;
+    REQUIRE(atlas.size() == static_cast<std::size_t>(atlasSize) * atlasSize);
+    constexpr std::uint32_t faceSize = 256;
+    constexpr auto guard = static_cast<std::uint32_t>(Keire::Detail::ShadowAtlasGuardTexels);
+    bool adjacentFaceContainsCaster = false;
+    bool adjacentFaceGuardIsClear = true;
+    for (std::uint32_t y = guard; y < faceSize - guard; ++y)
+    {
+        for (std::uint32_t x = faceSize + guard; x < faceSize + guard + 8U; ++x)
+            adjacentFaceContainsCaster |= atlas[static_cast<std::size_t>(y) * atlasSize + x] < 0.999F;
+        for (std::uint32_t x = faceSize; x < faceSize + guard; ++x)
+            adjacentFaceGuardIsClear &= atlas[static_cast<std::size_t>(y) * atlasSize + x] == doctest::Approx(1.0F);
+    }
+    CHECK(adjacentFaceContainsCaster);
+    CHECK(adjacentFaceGuardIsClear);
 }
 
 TEST_CASE("PBR material semantics produce stable behavioral pixel deltas")

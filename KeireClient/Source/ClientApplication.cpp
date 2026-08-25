@@ -21,6 +21,7 @@ namespace
         Keire::ApplicationCommandLineOption{"--config <path>", "Load a specific client configuration file."},
         Keire::ApplicationCommandLineOption{"--project <path>", "Open a Kéire editor project."},
         Keire::ApplicationCommandLineOption{"--smoke-window", "Create a window, pump several iterations, and exit."},
+        Keire::ApplicationCommandLineOption{"--smoke-workspace", "Compose the editor workspace headlessly and exit."},
         Keire::ApplicationCommandLineOption{"--smoke-ui", "Render several UI frames and exit."},
         Keire::ApplicationCommandLineOption{"--smoke-project", "Open a project, render several frames, and exit."},
         Keire::ApplicationCommandLineOption{"--smoke-play", "Open the startup scene, enter Play, and exit."},
@@ -101,6 +102,7 @@ namespace
         std::filesystem::path ProjectPath;
         bool ConfigurationExplicit = false;
         bool SmokeWindow = false;
+        bool SmokeWorkspace = false;
         bool SmokeUi = false;
         bool SmokeProject = false;
         bool SmokePlay = false;
@@ -116,6 +118,10 @@ namespace
             if (argument == "--smoke-window")
             {
                 result.SmokeWindow = true;
+            }
+            else if (argument == "--smoke-workspace")
+            {
+                result.SmokeWorkspace = true;
             }
             else if (argument == "--smoke-ui")
             {
@@ -148,11 +154,12 @@ namespace
                                               std::string(arguments.Executable()) + " --help' for usage.");
             }
         }
-        const auto smokeModes = static_cast<unsigned>(result.SmokeWindow) + static_cast<unsigned>(result.SmokeUi) +
+        const auto smokeModes = static_cast<unsigned>(result.SmokeWindow) +
+                                static_cast<unsigned>(result.SmokeWorkspace) + static_cast<unsigned>(result.SmokeUi) +
                                 static_cast<unsigned>(result.SmokeProject) + static_cast<unsigned>(result.SmokePlay);
         if (smokeModes > 1)
             throw Keire::CommandLineError("Smoke modes are mutually exclusive.");
-        if (!result.SmokeWindow && !result.SmokeUi && result.ProjectPath.empty())
+        if (!result.SmokeWindow && !result.SmokeWorkspace && !result.SmokeUi && result.ProjectPath.empty())
             throw Keire::CommandLineError("KeireClient requires --project <path>; launch the Kéire Project Hub.");
         return result;
     }
@@ -327,12 +334,13 @@ namespace
     class ClientApplication final : public Keire::Application
     {
       public:
-        ClientApplication(Keire::ApplicationSpecification specification, const bool smokeWindow, const bool smokeUi,
-                          const bool smokeProject, const bool smokePlay, std::filesystem::path windowPlacementPath,
+        ClientApplication(Keire::ApplicationSpecification specification, const bool smokeWindow,
+                          const bool smokeWorkspace, const bool smokeUi, const bool smokeProject, const bool smokePlay,
+                          std::filesystem::path windowPlacementPath,
                           std::optional<KeireEditor::EditorWindowPlacement> windowPlacement,
                           std::filesystem::path executablePath)
-            : Application(std::move(specification)), m_SmokeWindow(smokeWindow), m_SmokeUi(smokeUi),
-              m_SmokeProject(smokeProject), m_SmokePlay(smokePlay),
+            : Application(std::move(specification)), m_SmokeWindow(smokeWindow), m_SmokeWorkspace(smokeWorkspace),
+              m_SmokeUi(smokeUi), m_SmokeProject(smokeProject), m_SmokePlay(smokePlay),
               m_WindowPlacementPath(std::move(windowPlacementPath)), m_WindowPlacement(windowPlacement),
               m_ExecutablePath(std::move(executablePath))
         {
@@ -353,13 +361,14 @@ namespace
                     (void)Layers().PushLayer(
                         std::make_unique<EditorWindowPlacementLayer>(m_WindowPlacementPath, m_WindowPlacement));
                 (void)Layers().PushOverlay(std::make_unique<EditorWorkspaceLayer>(
-                    m_SmokeUi || m_SmokeProject || m_SmokePlay, m_SmokeProject || m_SmokePlay, m_SmokePlay,
-                    m_ExecutablePath));
+                    m_SmokeWorkspace || m_SmokeUi || m_SmokeProject || m_SmokePlay, m_SmokeProject || m_SmokePlay,
+                    m_SmokePlay, m_ExecutablePath));
             }
         }
 
       private:
         bool m_SmokeWindow = false;
+        bool m_SmokeWorkspace = false;
         bool m_SmokeUi = false;
         bool m_SmokeProject = false;
         bool m_SmokePlay = false;
@@ -373,13 +382,15 @@ namespace Keire
 {
     ApplicationCommandLineDescription GetApplicationCommandLineDescription() noexcept
     {
-        return {"--project <path> [--config <path>] [--smoke-window | --smoke-ui | --smoke-project | --smoke-play]",
+        return {"--project <path> [--config <path>] [--smoke-window | --smoke-workspace | --smoke-ui | "
+                "--smoke-project | --smoke-play]",
                 ClientCommandLineOptions};
     }
 
     std::unique_ptr<Application> CreateApplication(const ApplicationCommandLineArguments& arguments)
     {
         const auto commandLine = ParseCommandLine(arguments);
+        const bool smokeWithoutProject = commandLine.SmokeWindow || commandLine.SmokeWorkspace || commandLine.SmokeUi;
         ApplicationSpecification specification;
         specification.Modules.Modules = KeireProjectModules::CreateSourceModules();
 #if defined(_WIN32) && defined(KEIRE_DISTRIBUTION)
@@ -406,25 +417,25 @@ namespace Keire
                                       {UiFontRole::Icons, fontRoot / "MaterialSymbolsRounded-Subset.ttf", 20.0F}};
         }
 
-        specification.TargetFrameRate = commandLine.SmokeWindow ? 240 : commandLine.SmokePlay ? 120 : 0;
-        specification.Ui.Mode = commandLine.SmokeWindow ? UiMode::Disabled : UiMode::Rendered;
+        specification.TargetFrameRate = commandLine.SmokeWindow || commandLine.SmokeWorkspace ? 240
+                                        : commandLine.SmokePlay                               ? 120
+                                                                                              : 0;
+        specification.Ui.Mode = commandLine.SmokeWindow      ? UiMode::Disabled
+                                : commandLine.SmokeWorkspace ? UiMode::Headless
+                                                             : UiMode::Rendered;
         specification.Ui.PresentMode = UiPresentMode::Mailbox;
         specification.Ui.Workspace.Enabled = !commandLine.SmokeWindow;
-        specification.Ui.Workspace.Ephemeral = commandLine.SmokeUi;
+        specification.Ui.Workspace.Ephemeral = commandLine.SmokeWorkspace || commandLine.SmokeUi;
         specification.Ui.Workspace.BuildFactoryLayout = BuildEditorLayout;
-        specification.Assets.Mode =
-            commandLine.SmokeWindow || commandLine.SmokeUi ? AssetMode::Disabled : AssetMode::Development;
-        specification.Projects.Mode =
-            commandLine.SmokeWindow || commandLine.SmokeUi ? ProjectMode::Disabled : ProjectMode::Editor;
+        specification.Assets.Mode = smokeWithoutProject ? AssetMode::Disabled : AssetMode::Development;
+        specification.Projects.Mode = smokeWithoutProject ? ProjectMode::Disabled : ProjectMode::Editor;
         specification.Projects.Root = commandLine.ProjectPath;
-        specification.Scenes.Mode =
-            commandLine.SmokeWindow || commandLine.SmokeUi ? SceneMode::Disabled : SceneMode::Enabled;
-        specification.Input.Mode =
-            commandLine.SmokeWindow || commandLine.SmokeUi ? InputMode::Disabled : InputMode::Enabled;
+        specification.Scenes.Mode = smokeWithoutProject ? SceneMode::Disabled : SceneMode::Enabled;
+        specification.Input.Mode = smokeWithoutProject ? InputMode::Disabled : InputMode::Enabled;
         // The editor creates and owns one explicit input user. Automatic joining can consume the fixed keyboard and
         // mouse devices before that user is paired, leaving Play Mode with a valid action context that always reads 0.
         specification.Input.AutoJoin = false;
-        if (!commandLine.SmokeWindow && !commandLine.SmokeUi)
+        if (!smokeWithoutProject)
         {
             specification.Profiling.Mode = ProfilerMode::Enabled;
             specification.Scripting.Mode = ScriptMode::Enabled;
@@ -454,7 +465,7 @@ namespace Keire
         }
         std::filesystem::path windowPlacementPath;
         std::optional<KeireEditor::EditorWindowPlacement> windowPlacement;
-        if (!commandLine.SmokeWindow && !commandLine.SmokeUi && !commandLine.SmokeProject && !commandLine.SmokePlay)
+        if (!smokeWithoutProject && !commandLine.SmokeProject && !commandLine.SmokePlay)
         {
             windowPlacementPath = std::filesystem::absolute(commandLine.ProjectPath) / "Library" / "UserSettings" /
                                   "Workspace" / "editor-window.state";
@@ -463,7 +474,8 @@ namespace Keire
                 KeireEditor::PrepareEditorWindow(*windowPlacement, specification.MainWindow);
         }
         return std::make_unique<ClientApplication>(
-            std::move(specification), commandLine.SmokeWindow, commandLine.SmokeUi, commandLine.SmokeProject,
-            commandLine.SmokePlay, std::move(windowPlacementPath), windowPlacement, commandLine.ExecutablePath);
+            std::move(specification), commandLine.SmokeWindow, commandLine.SmokeWorkspace, commandLine.SmokeUi,
+            commandLine.SmokeProject, commandLine.SmokePlay, std::move(windowPlacementPath), windowPlacement,
+            commandLine.ExecutablePath);
     }
 } // namespace Keire

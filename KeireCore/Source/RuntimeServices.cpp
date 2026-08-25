@@ -32,6 +32,15 @@ namespace Keire
     using Detail::ValidateVoiceSpecification;
     using Detail::VectorLength;
 
+    namespace
+    {
+        [[nodiscard]] bool AttachNativeAudioNode(void* source, void* destination, void*) noexcept
+        {
+            return ma_node_attach_output_bus(reinterpret_cast<ma_node*>(source), 0,
+                                             reinterpret_cast<ma_node*>(destination), 0) == MA_SUCCESS;
+        }
+    } // namespace
+
     std::uint32_t AudioChannelCount(const AudioChannelLayout layout) noexcept
     {
         switch (layout)
@@ -290,130 +299,24 @@ namespace Keire
                 for (std::size_t index = 0; index < result.size(); ++index)
                     result[index] += source[index];
             }
-            if (node.Type == AudioGraphNodeType::Gain)
+            if (node.Type != AudioGraphNodeType::Output)
             {
-                const auto gain = node.Parameters.empty() ? 1.0F : node.Parameters.front();
-                for (auto& sample : result)
-                    sample *= gain;
-            }
-            else if (node.Type == AudioGraphNodeType::LowPass || node.Type == AudioGraphNodeType::HighPass)
-            {
-                const auto cutoff = std::clamp(node.Parameters.empty() ? 1'000.0F : node.Parameters.front(), 10.0F,
-                                               static_cast<float>(graph->SampleRate) * 0.49F);
-                std::vector<float> filtered(sampleCount);
-                if (node.Type == AudioGraphNodeType::LowPass)
+                auto impulseResponse = Detail::PreparedAudioImpulseResponse{};
+                const Detail::PreparedAudioImpulseResponse* impulse = nullptr;
+                if (node.Type == AudioGraphNodeType::ConvolutionReverb && !node.Parameters.empty())
                 {
-                    auto config = ma_lpf_config_init(ma_format_f32, graph->Channels, graph->SampleRate, cutoff, 2);
-                    ma_lpf filter{};
-                    if (ma_lpf_init(&config, nullptr, &filter) != MA_SUCCESS)
-                        throw std::runtime_error("miniaudio low-pass initialization failed.");
-                    const auto status = ma_lpf_process_pcm_frames(&filter, filtered.data(), result.data(), frameCount);
-                    ma_lpf_uninit(&filter, nullptr);
-                    if (status != MA_SUCCESS)
-                        throw std::runtime_error("miniaudio low-pass processing failed.");
+                    constexpr std::size_t maximumLegacyConvolutionTaps = 256;
+                    const auto taps = std::span<const float>(node.Parameters)
+                                          .first(std::min(node.Parameters.size(), maximumLegacyConvolutionTaps));
+                    impulseResponse = Detail::PrepareMonoAudioImpulseResponse(taps, graph->Channels);
+                    impulse = &impulseResponse;
                 }
-                else
-                {
-                    auto config = ma_hpf_config_init(ma_format_f32, graph->Channels, graph->SampleRate, cutoff, 2);
-                    ma_hpf filter{};
-                    if (ma_hpf_init(&config, nullptr, &filter) != MA_SUCCESS)
-                        throw std::runtime_error("miniaudio high-pass initialization failed.");
-                    const auto status = ma_hpf_process_pcm_frames(&filter, filtered.data(), result.data(), frameCount);
-                    ma_hpf_uninit(&filter, nullptr);
-                    if (status != MA_SUCCESS)
-                        throw std::runtime_error("miniaudio high-pass processing failed.");
-                }
-                result = std::move(filtered);
-            }
-            else if (node.Type == AudioGraphNodeType::Equalizer)
-            {
-                const auto gain = node.Parameters.empty() ? 1.0F : node.Parameters.front();
-                for (auto& sample : result)
-                    sample *= gain;
-            }
-            else if (node.Type == AudioGraphNodeType::Compressor)
-            {
-                const auto threshold = std::clamp(node.Parameters.empty() ? 0.5F : node.Parameters[0], 0.001F, 1.0F);
-                const auto ratio = std::clamp(node.Parameters.size() > 1 ? node.Parameters[1] : 4.0F, 1.0F, 100.0F);
-                for (auto& sample : result)
-                {
-                    const auto magnitude = std::abs(sample);
-                    if (magnitude > threshold)
-                        sample = std::copysign(threshold + (magnitude - threshold) / ratio, sample);
-                }
-            }
-            else if (node.Type == AudioGraphNodeType::Limiter)
-            {
-                const auto ceiling = std::clamp(node.Parameters.empty() ? 0.98F : node.Parameters[0], 0.001F, 1.0F);
-                for (auto& sample : result)
-                    sample = std::clamp(sample, -ceiling, ceiling);
-            }
-            else if (node.Type == AudioGraphNodeType::Gate)
-            {
-                const auto threshold = std::clamp(node.Parameters.empty() ? 0.01F : node.Parameters[0], 0.0F, 1.0F);
-                for (auto& sample : result)
-                    if (std::abs(sample) < threshold)
-                        sample = 0.0F;
-            }
-            else if (node.Type == AudioGraphNodeType::Distortion)
-            {
-                const auto drive = std::clamp(node.Parameters.empty() ? 1.0F : node.Parameters[0], 0.0F, 100.0F);
-                const auto normalization = std::tanh(std::max(drive, 1.0F));
-                for (auto& sample : result)
-                    sample = std::tanh(sample * drive) / normalization;
-            }
-            else if (node.Type == AudioGraphNodeType::Delay || node.Type == AudioGraphNodeType::Chorus)
-            {
-                const auto delayMilliseconds =
-                    std::clamp(node.Parameters.empty() ? 80.0F : node.Parameters[0], 1.0F, 2000.0F);
-                const auto feedback = std::clamp(node.Parameters.size() > 1 ? node.Parameters[1] : 0.25F, 0.0F, 0.99F);
-                const auto wet = std::clamp(node.Parameters.size() > 2 ? node.Parameters[2] : 0.25F, 0.0F, 1.0F);
-                const auto baseDelayFrames =
-                    static_cast<std::size_t>(delayMilliseconds * static_cast<float>(graph->SampleRate) / 1000.0F);
-                auto delayed = result;
-                for (std::uint64_t frame = 0; frame < frameCount; ++frame)
-                {
-                    auto delayFrames = baseDelayFrames;
-                    if (node.Type == AudioGraphNodeType::Chorus)
-                    {
-                        const auto phase = static_cast<float>(frame) / static_cast<float>(graph->SampleRate);
-                        const auto modulation = 1.0F + 0.1F * std::sin(phase * 2.0F * 3.14159265F * 0.8F);
-                        delayFrames = static_cast<std::size_t>(static_cast<float>(delayFrames) * modulation);
-                    }
-                    if (frame < delayFrames)
-                        continue;
-                    for (std::uint32_t channel = 0; channel < graph->Channels; ++channel)
-                    {
-                        const auto index = static_cast<std::size_t>(frame) * graph->Channels + channel;
-                        const auto delayedIndex =
-                            static_cast<std::size_t>(frame - delayFrames) * graph->Channels + channel;
-                        const auto echo = delayed[delayedIndex];
-                        delayed[index] = result[index] * (1.0F - wet) + echo * wet * (1.0F + feedback);
-                    }
-                }
-                result = std::move(delayed);
-            }
-            else if (node.Type == AudioGraphNodeType::AlgorithmicReverb)
-            {
-                Detail::ApplyAlgorithmicReverb(result, graph->SampleRate, graph->Channels, node.Parameters);
-            }
-            else if (node.Type == AudioGraphNodeType::ConvolutionReverb)
-            {
-                const auto impulseCount = std::min<std::size_t>(node.Parameters.size(), 256);
-                if (impulseCount != 0)
-                {
-                    auto convolved = result;
-                    for (std::uint64_t frame = 0; frame < frameCount; ++frame)
-                        for (std::uint32_t channel = 0; channel < graph->Channels; ++channel)
-                        {
-                            float sample = 0.0F;
-                            for (std::size_t tap = 0; tap < impulseCount && tap <= frame; ++tap)
-                                sample += result[(static_cast<std::size_t>(frame) - tap) * graph->Channels + channel] *
-                                          node.Parameters[tap];
-                            convolved[static_cast<std::size_t>(frame) * graph->Channels + channel] = sample;
-                        }
-                    result = std::move(convolved);
-                }
+                const auto parameters = node.Type == AudioGraphNodeType::ConvolutionReverb
+                                            ? std::span<const float>{}
+                                            : std::span<const float>(node.Parameters);
+                Detail::AudioEffectProcessor processor(node.Type, graph->SampleRate, graph->Channels, parameters,
+                                                       impulse);
+                processor.Process(result);
             }
             return result;
         };
@@ -563,33 +466,114 @@ namespace Keire
     void AudioSystem::SubmitMixer(const AssetId mixer, const AudioMixerDefinition& definition)
     {
         m_Impl->RequireOwner("SubmitMixer");
+        AudioMixerImpulseResponses impulseResponses;
+        {
+            std::scoped_lock lock(m_Impl->Mutex);
+            if (const auto existing = m_Impl->Mixers.find(mixer); existing != m_Impl->Mixers.end())
+                impulseResponses = existing->second.ImpulseResponseAssets;
+            else
+                for (const auto& [id, registered] : m_Impl->MixerRoutings)
+                {
+                    (void)id;
+                    if (registered.Mixer == mixer)
+                    {
+                        impulseResponses = registered.Routing.ImpulseResponseAssets;
+                        break;
+                    }
+                }
+        }
+        SubmitMixer(mixer, definition, impulseResponses);
+    }
+
+    void AudioSystem::SubmitMixer(const AssetId mixer, const AudioMixerDefinition& definition,
+                                  const AudioMixerImpulseResponses& impulseResponses)
+    {
+        m_Impl->RequireOwner("SubmitMixer");
         if (!mixer)
             throw std::invalid_argument("Audio mixer asset ID is empty.");
-        auto routing = AudioSystem::Impl::CompileMixer(definition);
-        std::scoped_lock lock(m_Impl->Mutex);
-        m_Impl->Mixers.insert_or_assign(mixer, routing);
-        for (auto& [id, registered] : m_Impl->MixerRoutings)
+        auto routing = m_Impl->CompileMixer(definition, impulseResponses);
+        std::vector<AudioMixerRoutingId> registrations;
         {
-            if (registered.Mixer == mixer)
+            std::scoped_lock lock(m_Impl->Mutex);
+            if (!m_Impl->MixerSubmissionFitsConvolutionBudget(mixer, routing.ConvolutionChannelFrames))
+                throw std::invalid_argument(
+                    "Audio system convolution effects exceed the aggregate channel-work limit.");
+            registrations.reserve(m_Impl->MixerRoutings.size());
+            for (const auto& [id, registered] : m_Impl->MixerRoutings)
+                if (registered.Mixer == mixer)
+                    registrations.push_back(id);
+        }
+
+        std::map<AssetId, AudioSystem::Impl::MixerRoutingSnapshot> stagedMixer;
+        stagedMixer.emplace(mixer, routing);
+        std::map<AudioMixerRoutingId, AudioSystem::Impl::MixerRoutingSnapshot> stagedRoutings;
+        std::map<AudioMixerRoutingId, std::shared_ptr<AudioSystem::Impl::NativeMixerGraph>> stagedNative;
+        for (const auto id : registrations)
+        {
+            stagedRoutings.emplace(id, routing);
+            stagedNative.emplace(id, m_Impl->BuildNativeMixer(routing));
+        }
+
+        std::scoped_lock lock(m_Impl->Mutex);
+        if (!m_Impl->MixerSubmissionFitsConvolutionBudget(mixer, routing.ConvolutionChannelFrames))
+            throw std::invalid_argument("Audio system convolution effects exceed the aggregate channel-work limit.");
+        std::vector<Detail::NativeAudioAttachmentTransactionEntry> voiceAttachments;
+        voiceAttachments.reserve(m_Impl->Voices.size());
+        std::vector<AudioSystem::Impl::Voice*> virtualizationRanking;
+        virtualizationRanking.reserve(m_Impl->Voices.size());
+        for (const auto id : registrations)
+        {
+            const auto registered = m_Impl->MixerRoutings.find(id);
+            if (registered == m_Impl->MixerRoutings.end() || registered->second.Mixer != mixer)
+                throw std::logic_error("Audio mixer registrations changed during a mixer submission.");
+            const auto currentNative = m_Impl->NativeMixerRoutings.find(id);
+            if ((currentNative != m_Impl->NativeMixerRoutings.end()) != static_cast<bool>(stagedNative.at(id)))
+                throw std::logic_error("Audio mixer native routing availability changed during a mixer submission.");
+            if (!stagedNative.at(id))
+                continue;
+            const auto& previousRouting = registered->second.Routing;
+            const auto& replacementRouting = stagedRoutings.at(id);
+            for (auto& [voiceId, voice] : m_Impl->Voices)
             {
-                registered.Routing = routing;
-                const auto previous = m_Impl->NativeMixerRoutings.find(id);
-                const auto previousNative = previous == m_Impl->NativeMixerRoutings.end() ? nullptr : previous->second;
-                const auto replacementNative = m_Impl->BuildNativeMixer(definition);
-                if (replacementNative)
-                    m_Impl->NativeMixerRoutings.insert_or_assign(id, replacementNative);
-                else
-                    m_Impl->NativeMixerRoutings.erase(id);
-                for (auto& [voiceId, voice] : m_Impl->Voices)
-                {
-                    (void)voiceId;
-                    if (voice.Specification.MixerRouting == id)
-                        m_Impl->AttachDeviceMixer(voice);
-                }
-                (void)previousNative;
+                (void)voiceId;
+                if (voice.Specification.MixerRouting != id || !voice.Device || !voice.Device->SoundOpen)
+                    continue;
+                AudioSystem::Impl::PreparedNativeVoiceAttachment previousAttachment;
+                AudioSystem::Impl::PreparedNativeVoiceAttachment replacementAttachment;
+                if (!m_Impl->PrepareDeviceMixerAttachment(voice, previousRouting, currentNative->second,
+                                                          previousAttachment) ||
+                    !m_Impl->PrepareDeviceMixerAttachment(voice, replacementRouting, stagedNative.at(id),
+                                                          replacementAttachment) ||
+                    previousAttachment.Source != replacementAttachment.Source)
+                    throw std::runtime_error("Audio voice could not attach to its mixer bus.");
+                if (replacementAttachment.Source)
+                    voiceAttachments.push_back({.Source = replacementAttachment.Source,
+                                                .PreviousDestination = previousAttachment.Destination,
+                                                .Destination = replacementAttachment.Destination});
             }
         }
-        m_Impl->UpdateVirtualization();
+
+        Detail::ApplyNativeAudioAttachmentTransaction(voiceAttachments, AttachNativeAudioNode);
+
+        const auto stored = m_Impl->Mixers.find(mixer);
+        if (stored == m_Impl->Mixers.end())
+        {
+            const auto inserted = m_Impl->Mixers.insert(stagedMixer.extract(mixer));
+            if (!inserted.inserted)
+                throw std::logic_error("Audio mixer staging could not publish its mixer definition.");
+        }
+        else
+        {
+            stored->second.Swap(stagedMixer.at(mixer));
+        }
+        for (const auto id : registrations)
+        {
+            m_Impl->MixerRoutings.find(id)->second.Routing.Swap(stagedRoutings.find(id)->second);
+            const auto currentNative = m_Impl->NativeMixerRoutings.find(id);
+            if (currentNative != m_Impl->NativeMixerRoutings.end())
+                currentNative->second.swap(stagedNative.find(id)->second);
+        }
+        m_Impl->UpdateVirtualization(virtualizationRanking);
     }
 
     bool AudioSystem::RemoveMixer(const AssetId mixer)
@@ -606,19 +590,46 @@ namespace Keire
 
     AudioMixerRoutingId AudioSystem::RegisterMixer(const AssetId mixer, const AudioMixerDefinition& definition)
     {
+        return RegisterMixer(mixer, definition, {});
+    }
+
+    AudioMixerRoutingId AudioSystem::RegisterMixer(const AssetId mixer, const AudioMixerDefinition& definition,
+                                                   const AudioMixerImpulseResponses& impulseResponses)
+    {
         m_Impl->RequireOwner("RegisterMixer");
         if (!mixer)
             throw std::invalid_argument("Audio mixer asset ID is empty.");
-        auto routing = AudioSystem::Impl::CompileMixer(definition);
-        auto native = m_Impl->BuildNativeMixer(definition);
+        auto routing = m_Impl->CompileMixer(definition, impulseResponses);
+        {
+            std::scoped_lock lock(m_Impl->Mutex);
+            if (!m_Impl->MixerRegistrationFitsConvolutionBudget(routing.ConvolutionChannelFrames))
+                throw std::invalid_argument(
+                    "Audio system convolution effects exceed the aggregate channel-work limit.");
+        }
+        auto native = m_Impl->BuildNativeMixer(routing);
         std::scoped_lock lock(m_Impl->Mutex);
+        if (!m_Impl->MixerRegistrationFitsConvolutionBudget(routing.ConvolutionChannelFrames))
+            throw std::invalid_argument("Audio system convolution effects exceed the aggregate channel-work limit.");
         auto id = AudioMixerRoutingId(m_Impl->NextMixerRouting++);
-        while (!id || m_Impl->MixerRoutings.contains(id))
+        while (!id || m_Impl->MixerRoutings.contains(id) || m_Impl->NativeMixerRoutings.contains(id))
             id = AudioMixerRoutingId(m_Impl->NextMixerRouting++);
-        m_Impl->MixerRoutings.emplace(
-            id, AudioSystem::Impl::RegisteredMixer{.Mixer = mixer, .Routing = std::move(routing)});
+        std::map<AudioMixerRoutingId, AudioSystem::Impl::RegisteredMixer> stagedRouting;
+        stagedRouting.emplace(id, AudioSystem::Impl::RegisteredMixer{.Mixer = mixer, .Routing = std::move(routing)});
+        std::map<AudioMixerRoutingId, std::shared_ptr<AudioSystem::Impl::NativeMixerGraph>> stagedNative;
         if (native)
-            m_Impl->NativeMixerRoutings.emplace(id, std::move(native));
+            stagedNative.emplace(id, std::move(native));
+        const auto insertedRouting = m_Impl->MixerRoutings.insert(stagedRouting.extract(id));
+        if (!insertedRouting.inserted)
+            throw std::logic_error("Audio mixer registration staging could not publish its routing.");
+        if (!stagedNative.empty())
+        {
+            const auto insertedNative = m_Impl->NativeMixerRoutings.insert(stagedNative.extract(id));
+            if (!insertedNative.inserted)
+            {
+                m_Impl->MixerRoutings.erase(id);
+                throw std::logic_error("Audio mixer registration staging could not publish its native routing.");
+            }
+        }
         return id;
     }
 
@@ -627,27 +638,86 @@ namespace Keire
         m_Impl->RequireOwner("UpdateMixer");
         if (!routing)
             return false;
-        auto replacement = AudioSystem::Impl::CompileMixer(definition);
-        auto native = m_Impl->BuildNativeMixer(definition);
+        AudioMixerImpulseResponses impulseResponses;
+        {
+            std::scoped_lock lock(m_Impl->Mutex);
+            const auto found = m_Impl->MixerRoutings.find(routing);
+            if (found == m_Impl->MixerRoutings.end())
+                return false;
+            impulseResponses = found->second.Routing.ImpulseResponseAssets;
+        }
+        return UpdateMixer(routing, definition, impulseResponses);
+    }
+
+    bool AudioSystem::UpdateMixer(const AudioMixerRoutingId routing, const AudioMixerDefinition& definition,
+                                  const AudioMixerImpulseResponses& impulseResponses)
+    {
+        m_Impl->RequireOwner("UpdateMixer");
+        if (!routing)
+            return false;
+        ValidateAudioMixer(definition);
+        {
+            std::scoped_lock lock(m_Impl->Mutex);
+            const auto found = m_Impl->MixerRoutings.find(routing);
+            if (found == m_Impl->MixerRoutings.end())
+                return false;
+            std::vector<AudioSystem::Impl::Voice*> virtualizationRanking;
+            virtualizationRanking.reserve(m_Impl->Voices.size());
+            const auto native = m_Impl->NativeMixerRoutings.find(routing);
+            const auto nativeGraph = native == m_Impl->NativeMixerRoutings.end() ? nullptr : native->second;
+            if ((m_Impl->Mode == AudioMode::Headless || nativeGraph) &&
+                m_Impl->UpdateMixerControls(found->second.Routing, definition, impulseResponses, nativeGraph))
+            {
+                m_Impl->UpdateVirtualization(virtualizationRanking);
+                return true;
+            }
+        }
+        auto replacement = m_Impl->CompileMixer(definition, impulseResponses);
+        {
+            std::scoped_lock lock(m_Impl->Mutex);
+            if (!m_Impl->MixerRoutings.contains(routing))
+                return false;
+            if (!m_Impl->MixerUpdateFitsConvolutionBudget(routing, replacement.ConvolutionChannelFrames))
+                throw std::invalid_argument(
+                    "Audio system convolution effects exceed the aggregate channel-work limit.");
+        }
+        auto native = m_Impl->BuildNativeMixer(replacement);
         std::scoped_lock lock(m_Impl->Mutex);
         const auto found = m_Impl->MixerRoutings.find(routing);
         if (found == m_Impl->MixerRoutings.end())
             return false;
-        found->second.Routing = std::move(replacement);
+        if (!m_Impl->MixerUpdateFitsConvolutionBudget(routing, replacement.ConvolutionChannelFrames))
+            throw std::invalid_argument("Audio system convolution effects exceed the aggregate channel-work limit.");
         const auto previous = m_Impl->NativeMixerRoutings.find(routing);
-        const auto previousNative = previous == m_Impl->NativeMixerRoutings.end() ? nullptr : previous->second;
-        if (native)
-            m_Impl->NativeMixerRoutings.insert_or_assign(routing, std::move(native));
-        else
-            m_Impl->NativeMixerRoutings.erase(routing);
+        if ((previous != m_Impl->NativeMixerRoutings.end()) != static_cast<bool>(native))
+            throw std::logic_error("Audio mixer native routing availability changed during a mixer update.");
+        std::vector<Detail::NativeAudioAttachmentTransactionEntry> voiceAttachments;
+        voiceAttachments.reserve(m_Impl->Voices.size());
+        std::vector<AudioSystem::Impl::Voice*> virtualizationRanking;
+        virtualizationRanking.reserve(m_Impl->Voices.size());
         for (auto& [id, voice] : m_Impl->Voices)
         {
             (void)id;
-            if (voice.Specification.MixerRouting == routing)
-                m_Impl->AttachDeviceMixer(voice);
+            if (voice.Specification.MixerRouting != routing)
+                continue;
+            AudioSystem::Impl::PreparedNativeVoiceAttachment previousAttachment;
+            AudioSystem::Impl::PreparedNativeVoiceAttachment replacementAttachment;
+            const auto previousNative = previous == m_Impl->NativeMixerRoutings.end() ? nullptr : previous->second;
+            if (!m_Impl->PrepareDeviceMixerAttachment(voice, found->second.Routing, previousNative,
+                                                      previousAttachment) ||
+                !m_Impl->PrepareDeviceMixerAttachment(voice, replacement, native, replacementAttachment) ||
+                previousAttachment.Source != replacementAttachment.Source)
+                throw std::runtime_error("Audio voice could not attach to its mixer bus.");
+            if (replacementAttachment.Source)
+                voiceAttachments.push_back({.Source = replacementAttachment.Source,
+                                            .PreviousDestination = previousAttachment.Destination,
+                                            .Destination = replacementAttachment.Destination});
         }
-        (void)previousNative;
-        m_Impl->UpdateVirtualization();
+        Detail::ApplyNativeAudioAttachmentTransaction(voiceAttachments, AttachNativeAudioNode);
+        found->second.Routing.Swap(replacement);
+        if (previous != m_Impl->NativeMixerRoutings.end())
+            previous->second.swap(native);
+        m_Impl->UpdateVirtualization(virtualizationRanking);
         return true;
     }
 
@@ -999,8 +1069,8 @@ namespace Keire
         std::uint64_t droppedMeterReadings = 0;
         for (auto& [routing, inputs] : mixerInputs)
         {
-            auto mixed = Detail::ProcessAudioMixer(routing->Definition, std::move(inputs), m_Impl->SampleRate,
-                                                   m_Impl->Channels, m_Impl->MaximumMeterReadings);
+            auto mixed = Detail::ProcessAudioMixer(routing->Definition, std::move(inputs), routing->OfflineEffects,
+                                                   m_Impl->SampleRate, m_Impl->Channels, m_Impl->MaximumMeterReadings);
             for (std::size_t index = 0; index < output.size(); ++index)
                 output[index] += mixed.Output[index];
             droppedMeterReadings += mixed.DroppedMeterReadings;

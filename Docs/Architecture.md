@@ -222,6 +222,17 @@ failures preserve complete direct rendering and publish a typed reason instead o
 its pyramid, visibility buffers, indirect arguments, readback ring, and value-only `GpuOcclusionSurfaceDiagnostics`;
 resize, minimize, device loss, and close retire those resources through the existing fence lifecycle. Aggregate
 statistics expose current recording work while visibility totals arrive asynchronously with their source frame and age.
+Occlusion depth remains presentation-resolution because directly rasterizing occluders at a lower resolution can close
+pixel-sized gaps and produce false occlusion. The separate R32 hierarchy begins at half resolution; at 3840x2160, with
+a 32-bit depth format, it and the depth texture consume about 42 MiB per frame slot (about 127 MiB for three slots),
+within a 256 MiB per-surface texture budget. Checked admission accounts for the full depth hierarchy and configured
+frames in flight before any texture allocation; over-budget or arithmetic-overflowing configurations retain direct
+draws with a typed resource fallback, so the admitted 16,384-pixel dimension cannot trigger multi-gigabyte attempts.
+Persistent allocation failure uses independent capped exponential backoff per frame slot and sparse warnings while
+retaining direct draws; resize, minimize/restore, and other surface-resource resets retry immediately.
+Automatic mode remains inactive without advancing activation hysteresis while any slot is in allocation backoff. HZB
+and bounds visualization pipelines are optional, independently released on failure, and cannot disable the core depth,
+reduction, classification, scan, or scatter pipelines.
 Pending readbacks also carry the surface generation, an internal submission epoch, and requested mode. Resource resets
 and every mode transition advance that epoch, so a late result from a pre-resize frame or a Forced-Disabled-Forced ABA
 sequence cannot revalidate stale visibility counters.
@@ -289,6 +300,11 @@ diagnostics, upgrade steps, and memory domains through one transactional registr
 stops modules in reverse order. The same static source-module pack links into editor/client, runtime, AssetTool, and the
 asset worker. Its ordered catalog is embedded in cooked manifests and replay fingerprints. There is deliberately no
 `LoadLibrary`, `dlopen`, runtime unloading, or public binary plugin ABI.
+Simulation-affecting modules must explicitly declare their replay state as stateless or stateful. The registry creates
+an empty identity marker only for a declared stateless module; a stateful module must register `module.<module-id>` with
+real capture/restore callbacks whose determinism matches its descriptor during that module's own registration callback.
+Registration provenance prevents one module from supplying another module's checkpoint contract. This prevents strict
+replay certification from silently substituting an empty checkpoint for unregistered module state.
 The editor composes built-in asset importers with the registry's ordered module importers before constructing its asset
 database; existing duplicate-name and duplicate-extension validation rejects collisions. Caret version ranges follow
 SemVer's pre-1.0 compatibility rules and reject an unrepresentable overflowing exclusive bound.
@@ -503,6 +519,12 @@ Asset import output may declare an effective primary type, but only from the imp
 The database validates that declaration before atomically publishing metadata, catalog records, dependencies, generated
 subassets, and cache entries. Animation-only model containers use this path to become `AnimationSourceAsset` records
 without mesh validation while retaining the parent asset ID and stable generated clip IDs.
+
+Assimp receives primary model bytes from memory and a private `IOSystem` adapter for ordinary sidecars. The adapter
+normalizes model-relative URI paths, confines them beneath the source root, and delegates every successful read to the
+asset context's bounded project-file callback. Assimp never owns a native file handle or project root. Cached MTL,
+buffer, and external texture bytes remain import-local; their SHA-256 records cross back only as source dependencies,
+while Assimp stream and texture types remain below `KeireInternal`.
 
 Native WAV, Ogg Vorbis, FLAC, and MP3 probing remains on miniaudio's in-process fast path. Broad media conversion is
 keyed by source digest, stream selection, importer version, and codec configuration, and cached worker output is
@@ -1441,7 +1463,10 @@ immutable compiled routing snapshots behind generation-safe registrations. Each 
 registrations when a mixer is no longer referenced or the presentation clears, so multiple presentations cannot
 invalidate one another or reuse stale project state. A valid stable bus ID wins over the compatibility name and
 applies its authored fader, mute, solo, and parent hierarchy to existing and new voices; invalid replacement leaves
-the last snapshot active. Headless rendering executes ordered effects, sends, parent routing, ducking, and bounded
+the last snapshot active. Convolution dependencies are held through revisioned `AudioClipAsset` handles, converted to
+the mix sample rate and channel layout before registration, and retained as immutable PCM by both headless and native
+effect graphs. Initial low-level convolution registration supplies an explicit `AudioMixerImpulseResponses` map;
+definition-only updates reuse the prior binding. Headless rendering executes ordered effects, sends, parent routing, ducking, and bounded
 automatic meters. Reverb Zones select against the primary listener, blend one priority-resolved mixer snapshot and
 send scale, and restore the immutable source definition after exit. Legacy string gain and stop controls forward
 through the currently resolved authored bus name, while voice diagnostics report the resolved mixer, bus ID, and
@@ -1451,8 +1476,15 @@ Reverb Zones scale return sends when a conventional effect-return bus exists and
 direct-insert reverbs, preventing a return from being attenuated twice. The editor's typed `AudioMixerDocument` publishes
 transient live routing/fader previews. Its Mix Console exposes per-bus peak meters, dB faders, mute, solo, output
 routes, ordered effect racks, sends, snapshots, and sidechain ducking without exposing stable IDs as the normal
-authoring path. Effect names commit at the end of a text edit so the surrounding tree remains stable. Decoded
-convolution IR binding remains an explicit later phase.
+authoring path. Effect names commit at the end of a text edit so the surrounding tree remains stable. Mixer, graph,
+and device execution share one stateful effect processor so Equalizer bands and convolution tails cannot drift between
+the three paths. Equalizer coefficients and dB gains are compiled before processing, with inverted crossovers normalized
+to low-to-high order. Convolution uses a 128-frame bounded direct path for short responses and allocation-free uniform
+FFT partitions for longer responses; five-second, per-effect, aggregate mixer, and audio-system channel-work limits
+reject content that exceeds the callback and memory budgets. Compatible mixer revisions preserve processor state by stable effect ID;
+the owner publishes parameters through a bounded atomic mailbox while the native callback remains the sole writer of
+DSP history. Stable native fader and send controls update in place. Topology, bypass, ducking, or immutable IR identity
+changes rebuild the graph and intentionally reset its state.
 
 Project authoring-settings schema 2 owns the desktop mix sample rate, callback period, mono/stereo/5.1/7.1 output
 layout, audible and virtual voice budgets, and an optional editor playback-device identity. The editor falls back to

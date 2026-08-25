@@ -48,6 +48,7 @@ namespace
         surface.GpuOcclusionLatestVisibleTriangles = 0;
         surface.GpuOcclusionAutomaticActive = false;
         surface.GpuOcclusionDebugMipLevel = 0;
+        Keire::RenderBackend::GpuOcclusionPolicy::ResetAllocationRetry(surface.GpuOcclusionAllocationRetry);
     }
 
     [[nodiscard]] Keire::Ref<Keire::Texture2DAsset> CreateDefaultSky()

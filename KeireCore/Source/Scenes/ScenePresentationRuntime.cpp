@@ -16,6 +16,7 @@
 #include <exception>
 #include <limits>
 #include <map>
+#include <optional>
 #include <ranges>
 #include <set>
 #include <stdexcept>
@@ -49,6 +50,8 @@ namespace Keire
         struct AudioMixerState final
         {
             AssetHandle<AudioMixerAsset> Handle;
+            std::map<AssetId, AssetHandle<AudioClipAsset>> ImpulseHandles;
+            std::map<AssetId, std::uint64_t> ImpulseRevisions;
             AudioMixerRoutingId Routing;
             std::uint64_t Revision = 0;
             AssetId AppliedSnapshot;
@@ -61,6 +64,36 @@ namespace Keire
         {
             if (!Assets)
                 throw std::invalid_argument("ScenePresentationRuntime requires asset services.");
+        }
+
+        [[nodiscard]] std::optional<AudioMixerImpulseResponses>
+        ResolveImpulseResponses(AudioMixerState& state, const AudioMixerDefinition& definition)
+        {
+            const auto dependencies = AudioMixerDependencies(definition);
+            std::erase_if(state.ImpulseHandles, [&dependencies](const auto& entry)
+                          { return !std::ranges::binary_search(dependencies, entry.first); });
+            for (const auto dependency : dependencies)
+                if (!state.ImpulseHandles.contains(dependency))
+                    state.ImpulseHandles.emplace(dependency,
+                                                 Assets->Load<AudioClipAsset>(dependency, AssetPriority::High));
+
+            AudioMixerImpulseResponses result;
+            for (auto& [id, handle] : state.ImpulseHandles)
+            {
+                const auto loaded = handle.TryGetLoaded();
+                if (!loaded)
+                    return std::nullopt;
+                result.emplace(id, loaded->Clip());
+            }
+            return result;
+        }
+
+        [[nodiscard]] static std::map<AssetId, std::uint64_t> ImpulseResponseRevisions(const AudioMixerState& state)
+        {
+            std::map<AssetId, std::uint64_t> result;
+            for (const auto& [id, handle] : state.ImpulseHandles)
+                result.emplace(id, handle.Revision());
+            return result;
         }
 
         [[nodiscard]] RuntimeUiElementId EnsureUiNode(const Entity& entity, const RuntimeUiElementId parent)
@@ -529,17 +562,23 @@ namespace Keire
             const auto loaded = state.Handle.TryGetLoaded();
             if (!loaded)
                 return {};
+            const auto impulseResponses = ResolveImpulseResponses(state, loaded->Definition());
+            if (!impulseResponses)
+                return {};
             const auto revision = state.Handle.Revision();
+            const auto impulseRevisions = ImpulseResponseRevisions(state);
             if (!state.Routing)
             {
-                state.Routing = Audio->RegisterMixer(mixer, loaded->Definition());
+                state.Routing = Audio->RegisterMixer(mixer, loaded->Definition(), *impulseResponses);
                 state.Revision = revision;
+                state.ImpulseRevisions = impulseRevisions;
             }
-            else if (state.Revision != revision)
+            else if (state.Revision != revision || state.ImpulseRevisions != impulseRevisions)
             {
-                if (!Audio->UpdateMixer(state.Routing, loaded->Definition()))
-                    state.Routing = Audio->RegisterMixer(mixer, loaded->Definition());
+                if (!Audio->UpdateMixer(state.Routing, loaded->Definition(), *impulseResponses))
+                    state.Routing = Audio->RegisterMixer(mixer, loaded->Definition(), *impulseResponses);
                 state.Revision = revision;
+                state.ImpulseRevisions = impulseRevisions;
                 state.AppliedSnapshot = {};
                 state.AppliedWeight = -1.0F;
                 state.AppliedReverbSend = -1.0F;
@@ -602,15 +641,19 @@ namespace Keire
                             effect.Parameters[2] *= zone.ReverbSend() * weight;
                         }
                         else
-                            for (auto& tap : effect.Parameters)
-                                tap *= zone.ReverbSend() * weight;
+                        {
+                            if (effect.Parameters.empty())
+                                effect.Parameters.push_back(1.0F);
+                            effect.Parameters[0] *= zone.ReverbSend() * weight;
+                        }
                     }
                 }
                 for (auto& bus : definition.Buses)
                     for (auto& send : bus.Sends)
                         if (reverbBuses.contains(send.DestinationBus))
                             send.Gain *= zone.ReverbSend() * weight;
-                if (!Audio->UpdateMixer(routing, definition))
+                const auto impulseResponses = ResolveImpulseResponses(state, definition);
+                if (!impulseResponses || !Audio->UpdateMixer(routing, definition, *impulseResponses))
                     return false;
             }
             catch (const std::exception&)
@@ -630,7 +673,8 @@ namespace Keire
                 if (activeMixers.contains(mixer) || state.AppliedWeight < 0.0F)
                     continue;
                 if (const auto loaded = state.Handle.TryGetLoaded(); loaded && state.Routing)
-                    (void)Audio->UpdateMixer(state.Routing, loaded->Definition());
+                    if (const auto impulseResponses = ResolveImpulseResponses(state, loaded->Definition()))
+                        (void)Audio->UpdateMixer(state.Routing, loaded->Definition(), *impulseResponses);
                 state.AppliedSnapshot = {};
                 state.AppliedWeight = -1.0F;
                 state.AppliedReverbSend = -1.0F;

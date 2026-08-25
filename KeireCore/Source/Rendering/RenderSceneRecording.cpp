@@ -781,6 +781,7 @@ namespace Keire::RenderBackend
                             hashValue(value);
                         for (const auto value : request->Packet.Camera.Projection.Elements)
                             hashValue(value);
+                        hashValue(request->Packet.Camera.NearPlane);
                         for (const auto& light : request->Packet.LocalLights)
                         {
                             hashValue(light.Position.X);
@@ -821,7 +822,8 @@ namespace Keire::RenderBackend
                     {
                         if (hasLocalLights)
                             return BuildForwardPlusCpuTiles(surface.Width, surface.Height,
-                                                            request->Packet.Camera.Projection, localLightBounds);
+                                                            request->Packet.Camera.Projection,
+                                                            request->Packet.Camera.NearPlane, localLightBounds);
                         ForwardPlusTileGrid empty;
                         empty.Columns = 1;
                         empty.Rows = 1;

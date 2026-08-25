@@ -71,10 +71,11 @@ namespace Keire
         ~SceneLoadOperation() override;
         [[nodiscard]] AssetId Asset() const noexcept;
         [[nodiscard]] SceneLoadMode Mode() const noexcept;
-        [[nodiscard]] SceneLoadState State() const noexcept;
+        // Polling and cancellation are synchronized so producers may observe or cancel from worker threads.
+        [[nodiscard]] SceneLoadState State() const;
         [[nodiscard]] AssetDiagnostic Diagnostic() const;
-        [[nodiscard]] Ref<Scene> Result() const noexcept;
-        void Cancel() noexcept;
+        [[nodiscard]] Ref<Scene> Result() const;
+        void Cancel();
 
       private:
         friend class SceneSystem;
@@ -92,21 +93,23 @@ namespace Keire
         SceneSystem(const SceneSystem&) = delete;
         SceneSystem& operator=(const SceneSystem&) = delete;
 
+        // All operations below except IsOpen are affine to the construction thread.
         [[nodiscard]] Ref<SceneLoadOperation> Load(AssetId scene, SceneLoadMode mode = SceneLoadMode::Single,
                                                    AssetPriority priority = AssetPriority::High);
         [[nodiscard]] bool Unload(AssetId scene);
         [[nodiscard]] bool SetActive(AssetId scene);
-        [[nodiscard]] Ref<Scene> Active() const noexcept;
-        [[nodiscard]] Ref<Scene> Find(AssetId scene) const noexcept;
+        [[nodiscard]] Ref<Scene> Active() const;
+        [[nodiscard]] Ref<Scene> Find(AssetId scene) const;
         [[nodiscard]] std::vector<Ref<Scene>> LoadedScenes() const;
-        [[nodiscard]] Ref<ComponentRegistry> Components() const noexcept;
+        [[nodiscard]] Ref<ComponentRegistry> Components() const;
         [[nodiscard]] bool IsOpen() const noexcept;
-        void Close() noexcept;
+        void Close();
 
       private:
         friend class Application;
         class Impl;
         void AdvanceFrame();
+        void CloseInternal() noexcept;
         std::unique_ptr<Impl> m_Impl;
     };
 } // namespace Keire

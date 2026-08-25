@@ -416,7 +416,13 @@ namespace Keire
         static constexpr std::array HighPass{
             AudioEffectParameterDescriptor{"cutoff", "Cutoff", Unit::Hertz, 1000.0F, 10.0F, 20000.0F, 10.0F}};
         static constexpr std::array Equalizer{
-            AudioEffectParameterDescriptor{"outputGain", "Output Gain", Unit::LinearGain, 1.0F, 0.0F, 16.0F, 0.01F}};
+            AudioEffectParameterDescriptor{"outputGain", "Output Gain", Unit::LinearGain, 1.0F, 0.0F, 16.0F, 0.01F},
+            AudioEffectParameterDescriptor{"lowGain", "Low Gain", Unit::Decibels, 0.0F, -24.0F, 24.0F, 0.1F},
+            AudioEffectParameterDescriptor{"midGain", "Mid Gain", Unit::Decibels, 0.0F, -24.0F, 24.0F, 0.1F},
+            AudioEffectParameterDescriptor{"highGain", "High Gain", Unit::Decibels, 0.0F, -24.0F, 24.0F, 0.1F},
+            AudioEffectParameterDescriptor{"lowCrossover", "Low Crossover", Unit::Hertz, 250.0F, 20.0F, 2000.0F, 10.0F},
+            AudioEffectParameterDescriptor{"highCrossover", "High Crossover", Unit::Hertz, 4000.0F, 1000.0F, 20000.0F,
+                                           10.0F}};
         static constexpr std::array Compressor{
             AudioEffectParameterDescriptor{"threshold", "Threshold", Unit::Normalized, 0.5F, 0.001F, 1.0F, 0.01F},
             AudioEffectParameterDescriptor{"ratio", "Ratio", Unit::Ratio, 4.0F, 1.0F, 100.0F, 0.1F}};
@@ -438,6 +444,9 @@ namespace Keire
             AudioEffectParameterDescriptor{"roomTime", "Room Time", Unit::Milliseconds, 68.0F, 5.0F, 500.0F, 1.0F},
             AudioEffectParameterDescriptor{"decay", "Decay", Unit::Normalized, 0.55F, 0.0F, 0.97F, 0.01F},
             AudioEffectParameterDescriptor{"wet", "Wet Mix", Unit::Percent, 0.3F, 0.0F, 1.0F, 0.01F}};
+        static constexpr std::array ConvolutionReverb{
+            AudioEffectParameterDescriptor{"wet", "Wet Mix", Unit::Percent, 1.0F, 0.0F, 1.0F, 0.01F},
+            AudioEffectParameterDescriptor{"outputGain", "Output Gain", Unit::LinearGain, 1.0F, 0.0F, 16.0F, 0.01F}};
         static constexpr std::array<AudioEffectParameterDescriptor, 0> None{};
 
         switch (type)
@@ -464,8 +473,9 @@ namespace Keire
             return Distortion;
         case AudioGraphNodeType::AlgorithmicReverb:
             return AlgorithmicReverb;
-        case AudioGraphNodeType::Input:
         case AudioGraphNodeType::ConvolutionReverb:
+            return ConvolutionReverb;
+        case AudioGraphNodeType::Input:
         case AudioGraphNodeType::Meter:
         case AudioGraphNodeType::Capture:
         case AudioGraphNodeType::Output:

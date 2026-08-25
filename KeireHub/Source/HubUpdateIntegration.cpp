@@ -81,7 +81,7 @@ namespace KeireHub
         case HubUpdateDownloadState::Downloading:
         case HubUpdateDownloadState::Verifying:
             update.DownloadActive = true;
-            update.ActionMessage = "The signed Hub installer is being downloaded and verified.";
+            update.ActionMessage = "The catalog-verified Hub installer is being downloaded and verified.";
             break;
         case HubUpdateDownloadState::Paused:
             update.DownloadActive = true;
@@ -110,7 +110,7 @@ namespace KeireHub
         {
             update.ReadyToInstall = false;
             update.ActionMessage = handoffState == HubUpdateHandoffState::Verifying
-                                       ? "Rechecking the installer and its platform signature before handoff."
+                                       ? "Rechecking the installer digest and native trust policy before handoff."
                                        : "The native installer is open and the Hub is closing.";
         }
     }
@@ -150,7 +150,7 @@ namespace KeireHub
             candidate.Value(), state.Value(), settings.CacheRoot,
             std::filesystem::absolute(hubExecutable).lexically_normal().parent_path().parent_path(),
             std::string(currentVersion), HubCurrentProcessId(), nowUnixSeconds,
-            NativeHubUpdateRequiresPlatformSignature());
+            NativeHubUpdatePlatformSignaturePolicy());
     }
 
     HubStatus StartAvailableHubUpdateHandoff(const HubDistributionWorkflowSnapshot& distribution,

@@ -5,6 +5,39 @@ versions.
 
 ## Unreleased
 
+### Fixed
+
+- Resolved cooked AudioClip impulse responses into convolution mixer registrations across headless and device DSP,
+  unified graph/mixer effect processing, and replaced the Equalizer gain alias with backward-compatible three-band
+  frequency shaping while preserving reverb tails across continuously blended Reverb Zone parameter updates and
+  bounding prepared and aggregate convolution processor work.
+- Routed OBJ material libraries and glTF buffers plus external model textures through confined, bounded project-file
+  reads, and now tracks every resolved model sidecar as a source dependency for deterministic reimport.
+- Required simulation-affecting source modules to declare stateless or stateful replay support, and required stateful
+  modules to register their own real canonical checkpoint serializer before strict replay can start.
+- Synchronized scene-load polling and cancellation across threads, and enforced owner-thread affinity for scene-system
+  state queries and shutdown without allowing rejected calls to mutate the service; lifecycle-listener failures now
+  propagate only after the replacement transaction reaches a consistent terminal state.
+- Made managed job cancellation request the native scheduler even when a `CancellationToken` registration throws, and
+  retained each managed interop handle until native terminal delivery.
+- Prevented soft local-shadow PCF from sampling neighboring atlas tiles or point-light faces, made point-face allocation
+  atomic, applied spot/point shadow limits after deterministic intensity ranking, and versioned generated shaders while
+  preserving the existing local-shadow constant-buffer prefix.
+- Enforced complete render-environment and camera clip-plane validation at public submission boundaries, and advertised
+  rendered GPU depth collision whenever its sampled scene-depth dependency is available.
+- Kept core GPU occlusion active when optional visualization pipelines fail, bounded persistent allocation retries per
+  frame slot, and preserved presentation-resolution depth behind checked per-surface texture-memory admission so
+  reduced-resolution rasterization cannot cause false occlusion or oversized surfaces trigger multi-gigabyte attempts.
+- Allowed catalog-verified unsigned Windows Hub installers through the disclosed preview trust policy while rejecting
+  any present invalid or untrusted Authenticode signature, and made overwrite/update installation stage, journal,
+  rollback, and recover the owned payload without deleting unknown top-level files outside installer-owned directories.
+- Restricted the website password-replacement route to recovery-authenticated sessions, required enrolled MFA,
+  constrained the site's recovery navigation until completion, enabled local secure-password-change enforcement,
+  sanitized expected Auth errors, and closed the recovery session after success.
+- Replaced deprecated `auth.role()` checks in nine live service-only Marketplace RPCs with JWT role claims while
+  preserving their explicit execute grants, and added executable password-policy and headless Editor workspace smoke
+  coverage to normal test/package paths.
+
 ## 0.4.2 - 2026-08-25
 
 ### Added

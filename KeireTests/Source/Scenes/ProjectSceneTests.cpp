@@ -8,12 +8,15 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <ranges>
+#include <span>
+#include <stdexcept>
 #include <string_view>
 #include <thread>
 #include <utility>
@@ -171,6 +174,371 @@ namespace
 
       private:
         std::shared_ptr<SceneProbe> m_Probe;
+    };
+
+    enum class SceneCommitProbeMode : std::uint8_t
+    {
+        ThrowOnUnloaded,
+        ThrowOnDeferredUnload,
+        ThrowOnActiveChanged,
+        CancelOnLoaded
+    };
+
+    struct SceneCommitProbe final
+    {
+        Keire::AssetId First;
+        Keire::AssetId Second;
+        SceneCommitProbeMode Mode = SceneCommitProbeMode::ThrowOnUnloaded;
+        bool ListenerObservedCommittedState = false;
+        bool WorkerObservedReady = false;
+        bool Completed = false;
+        bool UnexpectedTerminalState = false;
+        bool TimedOut = false;
+    };
+
+    class SceneCommitProbeLayer final : public Keire::Layer
+    {
+      public:
+        explicit SceneCommitProbeLayer(std::shared_ptr<SceneCommitProbe> probe)
+            : Keire::Layer("SceneCommitProbe"), m_Probe(std::move(probe))
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            Listen<Keire::SceneUnloadedEvent>(
+                [this](const Keire::SceneUnloadedEvent& event)
+                {
+                    if (m_Probe->Mode == SceneCommitProbeMode::ThrowOnDeferredUnload && event.Scene == m_Probe->First)
+                    {
+                        return ObserveDeferredUnloadAndThrow();
+                    }
+                    if (m_Probe->Mode == SceneCommitProbeMode::ThrowOnUnloaded && event.Scene == m_Probe->First)
+                        return ObserveCommitAndThrow();
+                    return Keire::EventFlow::Continue;
+                });
+            Listen<Keire::ActiveSceneChangedEvent>(
+                [this](const Keire::ActiveSceneChangedEvent& event)
+                {
+                    if (m_Probe->Mode == SceneCommitProbeMode::ThrowOnActiveChanged && event.Current == m_Probe->Second)
+                    {
+                        return ObserveCommitAndThrow();
+                    }
+                    return Keire::EventFlow::Continue;
+                });
+            Listen<Keire::SceneLoadedEvent>(
+                [this](const Keire::SceneLoadedEvent& event)
+                {
+                    if (m_Probe->Mode != SceneCommitProbeMode::CancelOnLoaded || event.Scene != m_Probe->Second)
+                        return Keire::EventFlow::Continue;
+                    std::thread worker(
+                        [this]
+                        {
+                            m_Second->Cancel();
+                            m_Probe->WorkerObservedReady = m_Second->State() == Keire::SceneLoadState::Ready;
+                        });
+                    worker.join();
+                    return Keire::EventFlow::Continue;
+                });
+            m_First = Owner().Scenes()->Load(m_Probe->First);
+        }
+
+        void OnUpdate(const Keire::Time&) override
+        {
+            if (++m_Frames > 2048)
+            {
+                m_Probe->TimedOut = true;
+                Owner().RequestExit(1);
+                return;
+            }
+            const auto unexpectedlyTerminal = [](const Keire::Ref<Keire::SceneLoadOperation>& operation)
+            {
+                return operation && (operation->State() == Keire::SceneLoadState::Failed ||
+                                     operation->State() == Keire::SceneLoadState::Cancelled);
+            };
+            if (unexpectedlyTerminal(m_First) || unexpectedlyTerminal(m_Second))
+            {
+                m_Probe->UnexpectedTerminalState = true;
+                Owner().RequestExit(2);
+                return;
+            }
+            if (!m_Second && m_First->State() == Keire::SceneLoadState::Ready)
+            {
+                m_FirstScene = m_First->Result();
+                const auto mode = m_Probe->Mode == SceneCommitProbeMode::ThrowOnDeferredUnload
+                                      ? Keire::SceneLoadMode::Additive
+                                      : Keire::SceneLoadMode::Single;
+                m_Second = Owner().Scenes()->Load(m_Probe->Second, mode);
+                return;
+            }
+            if (m_Second && m_Second->State() == Keire::SceneLoadState::Ready)
+            {
+                if (m_Probe->Mode == SceneCommitProbeMode::ThrowOnDeferredUnload)
+                {
+                    if (!m_UnloadQueued)
+                    {
+                        m_UnloadQueued = Owner().Scenes()->Unload(m_Probe->First);
+                    }
+                    return;
+                }
+                const auto loaded = Owner().Scenes()->LoadedScenes();
+                m_Probe->Completed = m_Probe->WorkerObservedReady && m_Second->Result() && loaded.size() == 1 &&
+                                     loaded.front() == m_Second->Result() &&
+                                     Owner().Scenes()->Active() == m_Second->Result();
+                Owner().RequestExit();
+            }
+        }
+
+      private:
+        [[noreturn]] Keire::EventFlow ObserveCommitAndThrow()
+        {
+            const auto loaded = Owner().Scenes()->LoadedScenes();
+            m_Probe->ListenerObservedCommittedState =
+                m_Second && m_Second->State() == Keire::SceneLoadState::Ready && m_Second->Result() &&
+                loaded.size() == 1 && loaded.front() == m_Second->Result() &&
+                Owner().Scenes()->Active() == m_Second->Result() && m_FirstScene && !m_FirstScene->IsOpen();
+            throw std::runtime_error("expected scene lifecycle listener failure");
+        }
+
+        [[noreturn]] Keire::EventFlow ObserveDeferredUnloadAndThrow()
+        {
+            const auto loaded = Owner().Scenes()->LoadedScenes();
+            m_Probe->ListenerObservedCommittedState =
+                m_UnloadQueued && m_First && m_First->State() == Keire::SceneLoadState::Ready && m_FirstScene &&
+                !m_FirstScene->IsOpen() && m_Second && m_Second->State() == Keire::SceneLoadState::Ready &&
+                m_Second->Result() && loaded.size() == 1 && loaded.front() == m_Second->Result() &&
+                Owner().Scenes()->Active() == m_Second->Result();
+            throw std::runtime_error("expected scene lifecycle listener failure");
+        }
+
+        std::shared_ptr<SceneCommitProbe> m_Probe;
+        Keire::Ref<Keire::SceneLoadOperation> m_First;
+        Keire::Ref<Keire::SceneLoadOperation> m_Second;
+        Keire::Ref<Keire::Scene> m_FirstScene;
+        std::size_t m_Frames = 0;
+        bool m_UnloadQueued = false;
+    };
+
+    class SceneCommitProbeApplication final : public Keire::Application
+    {
+      public:
+        SceneCommitProbeApplication(Keire::ApplicationSpecification specification,
+                                    std::shared_ptr<SceneCommitProbe> probe)
+            : Keire::Application(std::move(specification)), m_Probe(std::move(probe))
+        {
+        }
+
+      protected:
+        void OnInitialize() override { (void)PushLayer(std::make_unique<SceneCommitProbeLayer>(m_Probe)); }
+
+      private:
+        std::shared_ptr<SceneCommitProbe> m_Probe;
+    };
+
+    struct SceneReentrancyProbe final
+    {
+        Keire::AssetId First;
+        Keire::AssetId Second;
+        Keire::AssetId Third;
+        bool LoadsQueuedDuringCallback = false;
+        bool UnloadQueuedDuringCallback = false;
+        bool UnloadListenerObservedCommittedState = false;
+        bool ReentrantUnloadWasDeferred = false;
+        bool Completed = false;
+        bool UnexpectedTerminalState = false;
+        bool TimedOut = false;
+    };
+
+    class SceneReentrancyProbeLayer final : public Keire::Layer
+    {
+      public:
+        explicit SceneReentrancyProbeLayer(std::shared_ptr<SceneReentrancyProbe> probe)
+            : Keire::Layer("SceneReentrancyProbe"), m_Probe(std::move(probe))
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            Listen<Keire::SceneLoadedEvent>(
+                [this](const Keire::SceneLoadedEvent& event)
+                {
+                    if (event.Scene != m_Probe->First || m_Second)
+                        return Keire::EventFlow::Continue;
+                    m_Second = Owner().Scenes()->Load(m_Probe->Second, Keire::SceneLoadMode::Additive);
+                    m_Third = Owner().Scenes()->Load(m_Probe->Third, Keire::SceneLoadMode::Additive);
+                    m_Probe->LoadsQueuedDuringCallback = m_Second->State() == Keire::SceneLoadState::Queued &&
+                                                         m_Third->State() == Keire::SceneLoadState::Queued &&
+                                                         Owner().Scenes()->LoadedScenes().size() == 1;
+                    return Keire::EventFlow::Continue;
+                });
+            Listen<Keire::SceneUnloadedEvent>(
+                [this](const Keire::SceneUnloadedEvent& event)
+                {
+                    if (event.Scene != m_Probe->First)
+                        return Keire::EventFlow::Continue;
+                    const auto active = Owner().Scenes()->Active();
+                    m_Probe->UnloadListenerObservedCommittedState =
+                        active && active->Asset() == m_Probe->Second && !Owner().Scenes()->Find(m_Probe->First);
+                    m_Probe->UnloadQueuedDuringCallback = Owner().Scenes()->Unload(m_Probe->Second);
+                    return Keire::EventFlow::Continue;
+                });
+            m_First = Owner().Scenes()->Load(m_Probe->First);
+        }
+
+        void OnUpdate(const Keire::Time&) override
+        {
+            if (++m_Frames > 2048)
+            {
+                m_Probe->TimedOut = true;
+                Owner().RequestExit(1);
+                return;
+            }
+            const auto unexpectedlyTerminal = [](const Keire::Ref<Keire::SceneLoadOperation>& operation)
+            {
+                return operation && (operation->State() == Keire::SceneLoadState::Failed ||
+                                     operation->State() == Keire::SceneLoadState::Cancelled);
+            };
+            if (unexpectedlyTerminal(m_First) || unexpectedlyTerminal(m_Second) || unexpectedlyTerminal(m_Third))
+            {
+                m_Probe->UnexpectedTerminalState = true;
+                Owner().RequestExit(2);
+                return;
+            }
+            if (!m_FirstUnloadQueued && m_Second && m_Third && m_Second->State() == Keire::SceneLoadState::Ready &&
+                m_Third->State() == Keire::SceneLoadState::Ready)
+            {
+                const auto loaded = Owner().Scenes()->LoadedScenes();
+                if (loaded.size() == 3)
+                    m_FirstUnloadQueued = Owner().Scenes()->Unload(m_Probe->First);
+                return;
+            }
+            if (!m_FirstUnloadQueued || !m_Probe->UnloadQueuedDuringCallback)
+                return;
+            if (!Owner().Scenes()->Find(m_Probe->First) && Owner().Scenes()->Find(m_Probe->Second))
+            {
+                m_Probe->ReentrantUnloadWasDeferred = true;
+                return;
+            }
+            if (!Owner().Scenes()->Find(m_Probe->First) && !Owner().Scenes()->Find(m_Probe->Second))
+            {
+                const auto active = Owner().Scenes()->Active();
+                m_Probe->Completed =
+                    active && active->Asset() == m_Probe->Third && Owner().Scenes()->LoadedScenes().size() == 1;
+                Owner().RequestExit(m_Probe->Completed ? 0 : 3);
+            }
+        }
+
+      private:
+        std::shared_ptr<SceneReentrancyProbe> m_Probe;
+        Keire::Ref<Keire::SceneLoadOperation> m_First;
+        Keire::Ref<Keire::SceneLoadOperation> m_Second;
+        Keire::Ref<Keire::SceneLoadOperation> m_Third;
+        std::size_t m_Frames = 0;
+        bool m_FirstUnloadQueued = false;
+    };
+
+    class SceneReentrancyProbeApplication final : public Keire::Application
+    {
+      public:
+        SceneReentrancyProbeApplication(Keire::ApplicationSpecification specification,
+                                        std::shared_ptr<SceneReentrancyProbe> probe)
+            : Keire::Application(std::move(specification)), m_Probe(std::move(probe))
+        {
+        }
+
+      protected:
+        void OnInitialize() override { (void)PushLayer(std::make_unique<SceneReentrancyProbeLayer>(m_Probe)); }
+
+      private:
+        std::shared_ptr<SceneReentrancyProbe> m_Probe;
+    };
+
+    struct SceneLoadingCancellationProbe final
+    {
+        Keire::AssetId Scene;
+        std::shared_ptr<std::atomic_bool> ReleaseDecoder;
+        bool ObservedLoading = false;
+        bool WorkerObservedCancelled = false;
+        bool NoSceneWasCommitted = false;
+        bool UnexpectedTerminalState = false;
+        bool TimedOut = false;
+    };
+
+    class SceneLoadingCancellationProbeLayer final : public Keire::Layer
+    {
+      public:
+        explicit SceneLoadingCancellationProbeLayer(std::shared_ptr<SceneLoadingCancellationProbe> probe)
+            : Keire::Layer("SceneLoadingCancellationProbe"), m_Probe(std::move(probe))
+        {
+        }
+
+      protected:
+        void OnAttach() override { m_Operation = Owner().Scenes()->Load(m_Probe->Scene); }
+
+        void OnDetach() noexcept override { ReleaseDecoder(); }
+
+        void OnUpdate(const Keire::Time&) override
+        {
+            if (++m_Frames > 2048)
+            {
+                m_Probe->TimedOut = true;
+                ReleaseDecoder();
+                Owner().RequestExit(1);
+                return;
+            }
+            const auto state = m_Operation->State();
+            if (state == Keire::SceneLoadState::Loading)
+            {
+                m_Probe->ObservedLoading = true;
+                std::thread worker(
+                    [this]
+                    {
+                        m_Operation->Cancel();
+                        m_Probe->WorkerObservedCancelled = m_Operation->State() == Keire::SceneLoadState::Cancelled;
+                    });
+                worker.join();
+                ReleaseDecoder();
+                m_Probe->NoSceneWasCommitted = !Owner().Scenes()->Active() && Owner().Scenes()->LoadedScenes().empty();
+                Owner().RequestExit(m_Probe->WorkerObservedCancelled && m_Probe->NoSceneWasCommitted ? 0 : 2);
+                return;
+            }
+            if (state == Keire::SceneLoadState::Ready || state == Keire::SceneLoadState::Failed ||
+                state == Keire::SceneLoadState::Cancelled)
+            {
+                m_Probe->UnexpectedTerminalState = true;
+                ReleaseDecoder();
+                Owner().RequestExit(3);
+            }
+        }
+
+      private:
+        void ReleaseDecoder() const noexcept
+        {
+            m_Probe->ReleaseDecoder->store(true, std::memory_order_release);
+            m_Probe->ReleaseDecoder->notify_all();
+        }
+
+        std::shared_ptr<SceneLoadingCancellationProbe> m_Probe;
+        Keire::Ref<Keire::SceneLoadOperation> m_Operation;
+        std::size_t m_Frames = 0;
+    };
+
+    class SceneLoadingCancellationProbeApplication final : public Keire::Application
+    {
+      public:
+        SceneLoadingCancellationProbeApplication(Keire::ApplicationSpecification specification,
+                                                 std::shared_ptr<SceneLoadingCancellationProbe> probe)
+            : Keire::Application(std::move(specification)), m_Probe(std::move(probe))
+        {
+        }
+
+      protected:
+        void OnInitialize() override { (void)PushLayer(std::make_unique<SceneLoadingCancellationProbeLayer>(m_Probe)); }
+
+      private:
+        std::shared_ptr<SceneLoadingCancellationProbe> m_Probe;
     };
 
     struct RuntimeWorldProbe final
@@ -808,6 +1176,141 @@ TEST_CASE("Application scene system activates single and additive scene loads at
     CHECK(probe->ActiveChanged);
     CHECK(probe->FailedLoadPreservedActive);
     CHECK(probe->ActiveChangeEvents == 2);
+}
+
+TEST_CASE("Scene load commits remain terminal when lifecycle listeners throw or cancel")
+{
+    UseDummyVideoDriver();
+    TemporaryDirectory directory("SceneCommitTests");
+    std::filesystem::create_directories(directory.Path / "Assets");
+    Keire::AssetDatabaseSpecification databaseSpecification{.ProjectRoot = directory.Path};
+    databaseSpecification.Importers.push_back(Keire::CreateSceneAssetImporter());
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
+    const auto first = database->CreateAsset("First.keirescene", Keire::CreateSceneAssetImporter(),
+                                             Keire::SceneAsset::Encode(Keire::SceneAsset::EmptyDefinition("First")));
+    const auto second = database->CreateAsset("Second.keirescene", Keire::CreateSceneAssetImporter(),
+                                              Keire::SceneAsset::Encode(Keire::SceneAsset::EmptyDefinition("Second")));
+    const auto catalog = database->ImportAll().CatalogPath;
+
+    SceneCommitProbeMode mode = SceneCommitProbeMode::ThrowOnUnloaded;
+    SUBCASE("unloaded listener throws") { mode = SceneCommitProbeMode::ThrowOnUnloaded; }
+    SUBCASE("deferred-unload listener throws after active state commits")
+    {
+        mode = SceneCommitProbeMode::ThrowOnDeferredUnload;
+    }
+    SUBCASE("active-scene listener throws") { mode = SceneCommitProbeMode::ThrowOnActiveChanged; }
+    SUBCASE("loaded listener cancels from a worker") { mode = SceneCommitProbeMode::CancelOnLoaded; }
+
+    Keire::ApplicationSpecification specification;
+    specification.MainWindow.Visible = false;
+    specification.Assets.Mode = Keire::AssetMode::Development;
+    specification.Assets.DevelopmentCatalog = catalog;
+    specification.Scenes.Mode = Keire::SceneMode::Enabled;
+    specification.Ui.Mode = Keire::UiMode::Disabled;
+    specification.ManageLogging = false;
+    specification.TargetFrameRate = 240;
+    auto probe = std::make_shared<SceneCommitProbe>();
+    probe->First = first;
+    probe->Second = second;
+    probe->Mode = mode;
+    SceneCommitProbeApplication application(std::move(specification), probe);
+
+    if (mode == SceneCommitProbeMode::CancelOnLoaded)
+    {
+        CHECK(application.Run() == 0);
+        CHECK(probe->WorkerObservedReady);
+        CHECK(probe->Completed);
+    }
+    else
+    {
+        CHECK_THROWS_WITH_AS((void)application.Run(), "expected scene lifecycle listener failure", std::runtime_error);
+        CHECK(probe->ListenerObservedCommittedState);
+    }
+    CHECK_FALSE(probe->UnexpectedTerminalState);
+    CHECK_FALSE(probe->TimedOut);
+}
+
+TEST_CASE("Scene lifecycle listeners may queue loads and unloads without invalidating frame traversal")
+{
+    UseDummyVideoDriver();
+    TemporaryDirectory directory("SceneReentrancyTests");
+    std::filesystem::create_directories(directory.Path / "Assets");
+    Keire::AssetDatabaseSpecification databaseSpecification{.ProjectRoot = directory.Path};
+    databaseSpecification.Importers.push_back(Keire::CreateSceneAssetImporter());
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
+    const auto first = database->CreateAsset("First.keirescene", Keire::CreateSceneAssetImporter(),
+                                             Keire::SceneAsset::Encode(Keire::SceneAsset::EmptyDefinition("First")));
+    const auto second = database->CreateAsset("Second.keirescene", Keire::CreateSceneAssetImporter(),
+                                              Keire::SceneAsset::Encode(Keire::SceneAsset::EmptyDefinition("Second")));
+    const auto third = database->CreateAsset("Third.keirescene", Keire::CreateSceneAssetImporter(),
+                                             Keire::SceneAsset::Encode(Keire::SceneAsset::EmptyDefinition("Third")));
+    const auto catalog = database->ImportAll().CatalogPath;
+
+    Keire::ApplicationSpecification specification;
+    specification.MainWindow.Visible = false;
+    specification.Assets.Mode = Keire::AssetMode::Development;
+    specification.Assets.DevelopmentCatalog = catalog;
+    specification.Scenes.Mode = Keire::SceneMode::Enabled;
+    specification.Ui.Mode = Keire::UiMode::Disabled;
+    specification.ManageLogging = false;
+    specification.TargetFrameRate = 240;
+    auto probe = std::make_shared<SceneReentrancyProbe>();
+    probe->First = first;
+    probe->Second = second;
+    probe->Third = third;
+    SceneReentrancyProbeApplication application(std::move(specification), probe);
+
+    CHECK(application.Run() == 0);
+    CHECK(probe->LoadsQueuedDuringCallback);
+    CHECK(probe->UnloadQueuedDuringCallback);
+    CHECK(probe->UnloadListenerObservedCommittedState);
+    CHECK(probe->ReentrantUnloadWasDeferred);
+    CHECK(probe->Completed);
+    CHECK_FALSE(probe->UnexpectedTerminalState);
+    CHECK_FALSE(probe->TimedOut);
+}
+
+TEST_CASE("Worker cancellation wins while a scene load is still decoding")
+{
+    UseDummyVideoDriver();
+    TemporaryDirectory directory("SceneLoadingCancellationTests");
+    std::filesystem::create_directories(directory.Path / "Assets");
+    Keire::AssetDatabaseSpecification databaseSpecification{.ProjectRoot = directory.Path};
+    databaseSpecification.Importers.push_back(Keire::CreateSceneAssetImporter());
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
+    const auto scene = database->CreateAsset("Delayed.keirescene", Keire::CreateSceneAssetImporter(),
+                                             Keire::SceneAsset::Encode(Keire::SceneAsset::EmptyDefinition("Delayed")));
+    const auto catalog = database->ImportAll().CatalogPath;
+
+    auto releaseDecoder = std::make_shared<std::atomic_bool>(false);
+    auto decoder = Keire::CreateSceneAssetDecoder();
+    const auto decode = decoder.Decode;
+    decoder.Decode = [releaseDecoder, decode](const std::span<const std::byte> bytes)
+    {
+        releaseDecoder->wait(false, std::memory_order_acquire);
+        return decode(bytes);
+    };
+
+    Keire::ApplicationSpecification specification;
+    specification.MainWindow.Visible = false;
+    specification.Assets.Mode = Keire::AssetMode::Development;
+    specification.Assets.DevelopmentCatalog = catalog;
+    specification.Assets.Decoders.push_back(std::move(decoder));
+    specification.Scenes.Mode = Keire::SceneMode::Enabled;
+    specification.Ui.Mode = Keire::UiMode::Disabled;
+    specification.ManageLogging = false;
+    specification.TargetFrameRate = 240;
+    auto probe = std::make_shared<SceneLoadingCancellationProbe>();
+    probe->Scene = scene;
+    probe->ReleaseDecoder = releaseDecoder;
+    SceneLoadingCancellationProbeApplication application(std::move(specification), probe);
+
+    CHECK(application.Run() == 0);
+    CHECK(probe->ObservedLoading);
+    CHECK(probe->WorkerObservedCancelled);
+    CHECK(probe->NoSceneWasCommitted);
+    CHECK_FALSE(probe->UnexpectedTerminalState);
+    CHECK_FALSE(probe->TimedOut);
 }
 
 TEST_CASE("Runtime scene activation failure preserves the previous playable scene transactionally")

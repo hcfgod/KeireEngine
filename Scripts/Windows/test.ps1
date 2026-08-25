@@ -21,6 +21,7 @@ $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else
 $Toolset = Resolve-WindowsToolset $Generator $Toolset
 $outputArchitecture = Get-ArchitectureOutputName $Architecture
 $TestsExe = Join-Path $Root "Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.TESTS_TARGET)\$($Project.TESTS_TARGET).exe"
+$ClientExe = Join-Path $Root "Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CLIENT_TARGET)\$($Project.CLIENT_TARGET).exe"
 
 & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration `
     -Architecture $Architecture -Toolset $Toolset -Target $Project.TESTS_TARGET -CI:$CI -Update:$Update -Generate:$Generate
@@ -108,6 +109,26 @@ if ($exitCode -eq 0) {
     & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration `
         -Architecture $Architecture -Toolset $Toolset -Target $Project.CLIENT_TARGET -CI:$CI -Update:$Update `
         -Generate:$Generate
+    if (-not (Test-Path $ClientExe)) { throw "KeireClient executable was not found: $ClientExe" }
+
+    $workspaceOriginalPath = $env:PATH
+    $previousVideoDriver = $env:SDL_VIDEODRIVER
+    Push-Location $Root
+    try {
+        if ($Configuration -eq "DebugASan" -and $usesMSVC) {
+            $env:PATH = "$runtimeDirectory;$env:PATH"
+        }
+        Write-Host "==> Running headless editor workspace smoke"
+        $env:SDL_VIDEODRIVER = "dummy"
+        & $ClientExe --smoke-workspace
+        if ($LASTEXITCODE -ne 0) { throw "Editor workspace smoke failed with exit code $LASTEXITCODE." }
+    }
+    finally {
+        $env:PATH = $workspaceOriginalPath
+        if ($null -eq $previousVideoDriver) { Remove-Item Env:SDL_VIDEODRIVER -ErrorAction SilentlyContinue }
+        else { $env:SDL_VIDEODRIVER = $previousVideoDriver }
+        Pop-Location
+    }
 }
 
 if ($exitCode -eq 0 -and $Configuration -in @("Debug", "Release")) {

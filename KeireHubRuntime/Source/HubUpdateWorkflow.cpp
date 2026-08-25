@@ -242,7 +242,8 @@ namespace KeireHub
     CreateHubUpdateHandoffRequest(const HubUpdateCandidate& candidate, const HubUpdateWorkflowState& state,
                                   const std::filesystem::path& cacheRoot, const std::filesystem::path& installRoot,
                                   std::string currentVersion, const std::uint64_t currentProcessId,
-                                  const std::uint64_t startedUnixSeconds, const bool requirePlatformSignature)
+                                  const std::uint64_t startedUnixSeconds,
+                                  const HubUpdatePlatformSignaturePolicy platformSignaturePolicy)
     {
         if (const auto status = ValidateHubUpdateCandidateForHost(candidate); !status)
             return HubResult<HubUpdateRequest>::Failure(status.Error());
@@ -268,6 +269,6 @@ namespace KeireHub
                                                      .CatalogSequence = candidate.CatalogIdentity.Sequence,
                                                      .CurrentProcessId = currentProcessId,
                                                      .StartedUnixSeconds = startedUnixSeconds,
-                                                     .RequirePlatformSignature = requirePlatformSignature});
+                                                     .PlatformSignaturePolicy = platformSignaturePolicy});
     }
 } // namespace KeireHub

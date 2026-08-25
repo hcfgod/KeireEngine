@@ -491,14 +491,37 @@ TEST_CASE("scene presentation treats automatic and manual audio playback as edge
 {
     TemporaryPresentationProject project;
     project.Write("OneShot.testaudio", "test");
+    project.Write("Impulse.testaudio", "impulse");
     const Keire::AssetId masterBus(0x50524553454e5441ULL, 1);
     const Keire::AssetId effectsBus(0x50524553454e5441ULL, 2);
     const Keire::AssetId reverbSnapshot(0x50524553454e5441ULL, 3);
+    const Keire::AssetId impulseResponse(0x50524553454e5441ULL, 4);
+    project.Write("Impulse.testaudio.keiremeta", std::string("{\n") +
+                                                     "  \"schemaVersion\": 1,\n"
+                                                     "  \"id\": \"" +
+                                                     impulseResponse.ToString() +
+                                                     "\",\n"
+                                                     "  \"type\": \"" +
+                                                     Keire::AudioClipAsset::StaticType().ToString() +
+                                                     "\",\n"
+                                                     "  \"importer\": \"Test.AudioClip\",\n"
+                                                     "  \"importerVersion\": 1,\n"
+                                                     "  \"dependencies\": [],\n"
+                                                     "  \"subAssets\": [],\n"
+                                                     "  \"importSettings\": {}\n"
+                                                     "}\n");
     Keire::AudioMixerDefinition mixerDefinition{
         .MasterBus = masterBus,
         .Buses =
             {
-                {.Id = masterBus, .Name = "Master", .Gain = 1.0F},
+                {.Id = masterBus,
+                 .Name = "Master",
+                 .Gain = 1.0F,
+                 .Effects = {{.Id = Keire::AssetId(0x50524553454e5441ULL, 5),
+                              .Name = "Runtime impulse",
+                              .Type = Keire::AudioGraphNodeType::ConvolutionReverb,
+                              .Parameters = {1.0F, 1.0F},
+                              .ImpulseResponse = impulseResponse}}},
                 {.Id = effectsBus, .Name = "Effects", .Parent = masterBus, .Gain = 0.5F},
             },
         .Snapshots =
@@ -516,12 +539,15 @@ TEST_CASE("scene presentation treats automatic and manual audio playback as edge
     importer.Name = "Test.AudioClip";
     importer.Type = Keire::AudioClipAsset::StaticType();
     importer.Extensions = {".testaudio"};
-    importer.Import = [](const std::span<const std::byte>)
+    importer.Import = [](const std::span<const std::byte> source)
     {
         Keire::AudioClipData clip;
         clip.SampleRate = 48'000;
         clip.Channels = 1;
-        clip.Samples.assign(64, 0.25F);
+        if (!source.empty() && source.front() == std::byte{'i'})
+            clip.Samples = {1.0F};
+        else
+            clip.Samples.assign(64, 0.25F);
         return Keire::AudioClipAsset::Encode(clip);
     };
     Keire::AssetDatabaseSpecification databaseSpecification;
@@ -531,8 +557,11 @@ TEST_CASE("scene presentation treats automatic and manual audio playback as edge
     auto database = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
     const auto imported = database->ImportAll();
     const auto record = database->Find("OneShot.testaudio");
+    const auto impulseRecord = database->Find("Impulse.testaudio");
     const auto mixerRecord = database->Find("Runtime.keiremixer");
     REQUIRE(record);
+    REQUIRE(impulseRecord);
+    CHECK(impulseRecord->Id == impulseResponse);
     REQUIRE(mixerRecord);
 
     Keire::AssetSystemSpecification assetSpecification;

@@ -84,6 +84,10 @@ if [[ "$MODE" == test ]]; then
     [[ $UPDATE -eq 1 ]] && client_build_args+=(--update)
     [[ $FORCE -eq 1 ]] && client_build_args+=(--force)
     bash "$ROOT/Scripts/$PLATFORM/build.sh" "${client_build_args[@]}"
+    client_executable="$ROOT/Build/Bin/$CONFIGURATION-$system-$(architecture_output_name "$ARCHITECTURE")/$CLIENT_TARGET/$CLIENT_TARGET"
+    [[ -x "$client_executable" ]] || { printf 'Client executable not found: %s\n' "$client_executable" >&2; exit 1; }
+    printf '==> Running headless editor workspace smoke\n'
+    (cd "$ROOT" && SDL_VIDEODRIVER=dummy "$client_executable" --smoke-workspace)
 fi
 if [[ "$MODE" == test && "$CONFIGURATION" =~ ^(Debug|Release)$ ]]; then
     printf '==> Running managed production API tests\n'

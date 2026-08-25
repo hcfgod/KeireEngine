@@ -146,12 +146,13 @@ TEST_CASE("Hub update workflow exposes only matching verified completion records
     CHECK(ready.Value().State == HubUpdateDownloadState::Ready);
     CHECK(ready.Value().VerifiedInstallerPath == installerPath);
 
-    auto request = CreateHubUpdateHandoffRequest(candidate, ready.Value(), cacheRoot, temporary.Path() / "InstalledHub",
-                                                 "1.0.0", 1234, 100, true);
+    auto request =
+        CreateHubUpdateHandoffRequest(candidate, ready.Value(), cacheRoot, temporary.Path() / "InstalledHub", "1.0.0",
+                                      1234, 100, HubUpdatePlatformSignaturePolicy::ValidateIfPresent);
     REQUIRE(request);
     CHECK(request.Value().InstallerPath == installerPath);
     CHECK(request.Value().CatalogSequence == 7);
-    CHECK(request.Value().RequirePlatformSignature);
+    CHECK(request.Value().PlatformSignaturePolicy == HubUpdatePlatformSignaturePolicy::ValidateIfPresent);
 
     auto forgedDownloads = *snapshot.VerifiedDownloads;
     forgedDownloads.front().Sha256 = KeireHubTests::Digest('f');
