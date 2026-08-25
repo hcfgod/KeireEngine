@@ -26,7 +26,7 @@ versions.
 
 ### Changed
 
-- Published Kéire 0.4.0 Windows and Linux x86-64 packages through signed distribution catalog sequence 15 and updated
+- Published Kéire 0.4.1 Windows and Linux x86-64 packages through signed distribution catalog sequence 16 and updated
   the website's release metadata to expose only those catalog-verified downloads.
 - Linux native installer assembly can reuse an explicit, absolute `KEIRE_EXISTING_PACKAGE_STAGE` after performing the
   same package-stage validation, allowing compatibility-baseline binaries to be wrapped by another distribution's
